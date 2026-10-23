@@ -1255,10 +1255,16 @@ _STACKING_GATES: tuple[GateMapping, ...] = gate_mappings_from_sources(STACKING_G
 # The stacking numbers the stored summary never held: the noise measured in
 # empty sky, the effective frame count and time, the frame weights and the
 # night shares all come from the stack's pixels and membership, not from the
-# summary.
+# summary. The expected noise, the stack's sky levels and the master flat's
+# noise come from stored frame measurements, the camera profile and the
+# stack's pixels. The brightest star's peak values of an exposure group sit in
+# newer summaries, but their rows are judged when they are recorded (assumed
+# for an estimate inside the checked range, not measured beyond it, assumed
+# for a datasheet ceiling), and a backfill that copied the numbers could not
+# make that judgment, so they are not backfilled either.
 _STACKING_NOT_HELD: tuple[str, ...] = (
-    "stacking.empty_aperture_noise_adu",
-    "stacking.noise_reference_flux_adu",
+    "stacking.empty_aperture_noise_stack_unit",
+    "stacking.noise_reference_flux_stack_unit",
     "stacking.empty_aperture_noise_normalized",
     "stacking.effective_frame_count",
     "stacking.effective_time_s",
@@ -1268,6 +1274,22 @@ _STACKING_NOT_HELD: tuple[str, ...] = (
     "stacking.noise_difference_without_night",
     "stacking.subset_expected_noise_ratio",
     "stacking.effective_time_read_noise_s",
+    "stacking.expected_sky_noise_stack_unit",
+    "stacking.expected_read_noise_stack_unit",
+    "stacking.expected_empty_aperture_noise_stack_unit",
+    "stacking.expected_noise_aperture_area_px",
+    "stacking.expected_noise_scale_stack_unit_per_adu",
+    "stacking.expected_sky_level_stack_unit",
+    "stacking.stack_sky_level_stack_unit",
+    "stacking.flat_noise_after_smoothing_fraction",
+    "stacking.flat_noise_in_aperture_stack_unit",
+    "stacking.group_brightest_star_peak_fraction",
+    "stacking.group_brightest_star_peak_above_sky_adu",
+    "stacking.group_raw_sky_level_adu",
+    "stacking.group_clip_ceiling_adu",
+    "stacking.group_linearity_limit_adu",
+    "stacking.group_peak_estimated_frame_count",
+    "stacking.group_clipped_frame_count",
 )
 
 _ASTROMETRY_VALUES: tuple[ValueMapping, ...] = (

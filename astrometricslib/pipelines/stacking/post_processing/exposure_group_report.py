@@ -15,6 +15,7 @@ stage can put them straight into the quality summary.
 import json
 import logging
 import os
+from dataclasses import asdict, dataclass
 from typing import Any
 
 import numpy as np
@@ -25,6 +26,7 @@ from astrometricslib.models.quality.gate_result import GateResult, failed_gate, 
 from astrometricslib.pipelines.stacking.post_processing.exposure_saturation import (
     DEFAULT_STAR_FWHM_PIXELS,
     FrameSaturation,
+    checked_estimate_range,
     group_is_saturated,
     measure_frame_saturation,
     recommend_stack_exposure_seconds,
@@ -101,6 +103,196 @@ def measure_group_saturation(
     return measurements
 
 
+@dataclass(frozen=True)
+class GroupPeak:
+    """How close the brightest star of an exposure group is to the ceiling.
+
+    This replaces the single exposure the stage used to recommend (decision 18
+    of the quality-metrics plan: the library measures and never advises). It
+    states what was seen at the exposure that was used. A reader who wants to
+    know what another exposure would do can scale the peak, which grows in
+    proportion to the exposure. The field names are those of
+    `ExposureGroupSummary`, so `build_group_summary` puts them straight into
+    the group's entry.
+
+    Parameters
+    ----------
+    brightest_star_peak_fraction : `float` or `None`
+        The median, over the sampled frames that gave a peak, of the star's
+        peak above the sky divided by the room between the sky and the
+        ceiling. 1 means the peak reaches the ceiling. A value above 1 comes
+        from a clipped star whose peak was estimated.
+    brightest_star_peak_above_sky_adu : `float` or `None`
+        The median of those peaks, in ADU.
+    peak_sky_adu : `float` or `None`
+        The median sky level of those frames, in ADU.
+    peak_clip_ceiling_adu : `float` or `None`
+        The median ceiling of those frames, in ADU: the camera profile's clip
+        ceiling for a frame whose star is not clipped, and the highest value
+        the frame itself reached for a clipped one.
+    peak_linearity_limit_adu : `float` or `None`
+        The camera profile's photometric linearity limit, or `None` when the
+        profile has none (or could not be read).
+    peak_frames_with_peak : `int`
+        How many sampled frames gave a peak.
+    peak_frames_estimated : `int`
+        How many of those peaks were estimated from the wings of a clipped
+        star instead of measured.
+    peak_frames_clipped : `int`
+        How many sampled frames had a clipped star, whether or not its peak
+        could be estimated.
+    peak_frames_sampled : `int`
+        How many frames were read.
+    peak_frames_on_profile_ceiling : `int`
+        How many of the frames that gave a peak took their ceiling from the
+        camera profile (their star is not clipped). The others reached the
+        ceiling themselves.
+    peak_largest_estimate_to_room_ratio : `float` or `None`
+        The largest peak-to-room ratio among the estimated peaks, which says
+        how far beyond the ceiling the farthest estimate reaches. `None` when
+        no peak was estimated.
+    peak_clip_ceiling_provenance : `str` or `None`
+        How the camera profile's clip ceiling was obtained (``measured``,
+        ``datasheet`` or ``assumed``), or `None` when the profile could not be
+        read.
+    peak_linearity_limit_provenance : `str` or `None`
+        The same for the linearity limit; `None` when there is no limit.
+    peak_checked_range_room_multiples : `float`
+        The largest estimated peak, in multiples of the room, whose growth
+        with the exposure was checked for the group's camera (see
+        `exposure_saturation.checked_estimate_range`). 0 when the camera has
+        no checked range or its profile could not be read.
+    """
+
+    brightest_star_peak_fraction: float | None
+    brightest_star_peak_above_sky_adu: float | None
+    peak_sky_adu: float | None
+    peak_clip_ceiling_adu: float | None
+    peak_linearity_limit_adu: float | None
+    peak_frames_with_peak: int
+    peak_frames_estimated: int
+    peak_frames_clipped: int
+    peak_frames_sampled: int
+    peak_frames_on_profile_ceiling: int = 0
+    peak_largest_estimate_to_room_ratio: float | None = None
+    peak_clip_ceiling_provenance: str | None = None
+    peak_linearity_limit_provenance: str | None = None
+    peak_checked_range_room_multiples: float = 0.0
+
+
+def summarize_group_peak(
+    saturation: list[FrameSaturation],
+    linearity_limit_adu: float | None = None,
+    clip_ceiling_provenance: str | None = None,
+    linearity_limit_provenance: str | None = None,
+    checked_range_room_multiples: float = 0.0,
+) -> GroupPeak:
+    """Summarize the brightest star's peak over the sampled frames of a group.
+
+    Parameters
+    ----------
+    saturation : `list` [`FrameSaturation`]
+        The sampled frames' saturation (see `measure_group_saturation`).
+    linearity_limit_adu : `float`, optional
+        The camera profile's photometric linearity limit, passed on.
+    clip_ceiling_provenance : `str`, optional
+        How the profile's clip ceiling was obtained, passed on.
+    linearity_limit_provenance : `str`, optional
+        How the profile's linearity limit was obtained, passed on.
+    checked_range_room_multiples : `float`, optional
+        The largest checked estimate size for the camera, passed on.
+
+    Returns
+    -------
+    peak : `GroupPeak`
+        The medians over the frames that gave a peak above the sky and a
+        ceiling above the sky. The numbers are `None` when no frame did.
+    """
+    clipped = sum(frame.saturated for frame in saturation)
+    usable = [
+        frame
+        for frame in saturation
+        if frame.peak_above_sky_adu and frame.peak_above_sky_adu > 0 and frame.ceiling_adu > frame.sky_adu
+    ]
+    if not usable:
+        return GroupPeak(
+            None,
+            None,
+            None,
+            None,
+            linearity_limit_adu,
+            0,
+            0,
+            clipped,
+            len(saturation),
+            peak_clip_ceiling_provenance=clip_ceiling_provenance,
+            peak_linearity_limit_provenance=linearity_limit_provenance,
+            peak_checked_range_room_multiples=checked_range_room_multiples,
+        )
+    fractions = [frame.peak_above_sky_adu / (frame.ceiling_adu - frame.sky_adu) for frame in usable]
+    estimated_fractions = [
+        fraction for fraction, frame in zip(fractions, usable, strict=True) if frame.peak_is_estimated
+    ]
+    return GroupPeak(
+        brightest_star_peak_fraction=float(np.median(fractions)),
+        brightest_star_peak_above_sky_adu=float(np.median([frame.peak_above_sky_adu for frame in usable])),
+        peak_sky_adu=float(np.median([frame.sky_adu for frame in usable])),
+        peak_clip_ceiling_adu=float(np.median([frame.ceiling_adu for frame in usable])),
+        peak_linearity_limit_adu=linearity_limit_adu,
+        peak_frames_with_peak=len(usable),
+        peak_frames_estimated=len(estimated_fractions),
+        peak_frames_clipped=clipped,
+        peak_frames_sampled=len(saturation),
+        peak_frames_on_profile_ceiling=sum(not frame.saturated for frame in usable),
+        peak_largest_estimate_to_room_ratio=float(max(estimated_fractions)) if estimated_fractions else None,
+        peak_clip_ceiling_provenance=clip_ceiling_provenance,
+        peak_linearity_limit_provenance=linearity_limit_provenance,
+        peak_checked_range_room_multiples=checked_range_room_multiples,
+    )
+
+
+def group_peak_fields(frames: list[Any], saturation: list[FrameSaturation]) -> dict[str, Any]:
+    """Build the peak fields of one exposure group's entry.
+
+    The camera profile is looked up for the linearity limit and for how the
+    profile's numbers were obtained. A profile that cannot be read gives no
+    limit and no provenance (the rows built from them are then not measured),
+    is logged, and never stops the stack.
+
+    Parameters
+    ----------
+    frames : `list`
+        The group's frame records (or dictionaries of them). The first one's
+        camera gives the profile.
+    saturation : `list` [`FrameSaturation`]
+        The sampled frames' saturation.
+
+    Returns
+    -------
+    fields : `dict`
+        The fields of `GroupPeak`, as plain numbers and text.
+    """
+    limit = None
+    limit_provenance = None
+    ceiling_provenance = None
+    checked_range = 0.0
+    if frames:
+        try:
+            profile = resolve_camera_profile(_attribute(frames[0], "camera"))
+            ceiling_provenance = profile.clip_ceiling_adu.provenance.kind.value
+            checked_range = checked_estimate_range(profile.camera_name)
+            if profile.photometric_linearity_limit_adu is not None:
+                limit = float(profile.photometric_linearity_limit_adu.value)
+                limit_provenance = profile.photometric_linearity_limit_adu.provenance.kind.value
+        except Exception:  # a by-product: no profile error may stop a stack
+            logger.exception("The camera profile of an exposure group could not be read for its peak values")
+            limit = limit_provenance = ceiling_provenance = None
+            checked_range = 0.0
+    return asdict(
+        summarize_group_peak(saturation, limit, ceiling_provenance, limit_provenance, checked_range)
+    )
+
+
 def build_group_summary(
     exposure_seconds: float,
     frames: list[Any],
@@ -175,6 +367,7 @@ def build_group_summary(
         "alignment_shift_pixels": alignment_shift_pixels,
         **gain_fields,
         "left_out_reason": left_out_reason,
+        **group_peak_fields(frames, saturation),
     }
 
 

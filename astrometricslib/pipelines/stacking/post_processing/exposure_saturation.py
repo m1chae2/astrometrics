@@ -22,6 +22,8 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.ndimage import binary_dilation, label, minimum_filter
 
+from astrometricslib.foundation.camera_names import normalize_camera_name
+
 # A star counts as saturated when at least this many connected pixels sit at
 # the frame's ceiling. Single pixels at the ceiling are common and are not
 # stars: a Nikon D5300 frame had 188 to 481 isolated ones, hot pixels. The
@@ -76,6 +78,66 @@ DEFAULT_STAR_FWHM_PIXELS = 3.0
 # hundred times (M 42 and NGC 7023 on the D5300). 100 separates the two sets;
 # it rests on those nine comparisons.
 MAXIMUM_RELIABLE_PEAK_TO_ROOM_RATIO = 100.0
+
+# What the quality rows state about an estimated peak (register entry STK-41).
+# Two exposure lengths of one field were compared, star by star: the peak of
+# the same star should grow in proportion to the exposure. The check counts a
+# pair as good when the ratio of the two estimated peaks is within this
+# fraction of the exposure ratio (the criterion of the earlier nine
+# comparisons, 2026-09-21; the same star's unclipped peaks at two exposures
+# differ by a median of 14% and a 90th percentile of 38% because of seeing,
+# pixel phase and transparency, so 66% leaves room for that and little more).
+CHECKED_ESTIMATE_ERROR_FRACTION = 0.66
+
+# The share of cases within that fraction, over the ZWO ASI 533MM Pro cases
+# below the range that follows (1,009 star pairs from 10 targets, 2026-10-23).
+CHECKED_ESTIMATE_SHARE_WITHIN_ERROR = 0.97
+
+# The same cases measured against the truth: a star unclipped at the shorter
+# exposure has a measured peak, which times the exposure ratio is what the
+# clipped star's peak should be. For the ZWO ASI 533MM Pro below 80 times the
+# room (156 star pairs, 7 targets, mostly 1 to 5 times) the estimate divided
+# by that peak had a median of 0.48 and a 10th to 90th percentile range of
+# 0.22 to 2.7: the estimate is typically half the peak, and uncertain by a
+# factor of 2 to 5 either way.
+CHECKED_ESTIMATE_AGAINST_MEASURED_RATIOS = (0.22, 0.48, 2.7)
+
+# The largest peak-to-room ratio of an estimate that was checked, for each
+# camera, by the camera profile's name with case, spaces and punctuation
+# ignored (so "ZWO ASI 533MM Pro" and "ZWO ASI533MM Pro" are one camera). The
+# rule: every bin of estimate size
+# up to the range has at least 90% of its cases (and a 90th percentile of the
+# error) within `CHECKED_ESTIMATE_ERROR_FRACTION`, with at least 4 targets in
+# the top bin. ASI533MM Pro: bins up to 63 times the room hold 90% to 100%
+# (50 to 263 cases each), 63 to 80 times holds 96% (23 cases, 4 targets), and
+# 80 to 100 times holds 83% with a 90th percentile error of 1.5. The D5300
+# fails at its first populated bin (57% at 2 to 5 times) and stays at 62% to
+# 80% in every bin from 5 to 1,000 times, so no range is stated for it, and an
+# estimate for any camera not listed is beyond the checked range.
+CHECKED_ESTIMATE_RANGE_ROOM_MULTIPLES_BY_CAMERA: dict[str, float] = {
+    normalize_camera_name("ZWO ASI 533MM Pro"): 80.0
+}
+
+
+def checked_estimate_range(camera_name: str | None) -> float:
+    """Give the largest checked size of a peak estimate for a camera.
+
+    Parameters
+    ----------
+    camera_name : `str` or `None`
+        The camera profile's name, in any spelling.
+
+    Returns
+    -------
+    room_multiples : `float`
+        The largest estimate, in multiples of the room between the sky and the
+        ceiling, whose growth with the exposure was checked. 0 when the camera
+        has no checked range (so any estimate is beyond it).
+    """
+    if not camera_name:
+        return 0.0
+    return CHECKED_ESTIMATE_RANGE_ROOM_MULTIPLES_BY_CAMERA.get(normalize_camera_name(camera_name), 0.0)
+
 
 # How far outside the clipped core (in pixels) the pixels used for the
 # estimate lie, and how wide that band is.

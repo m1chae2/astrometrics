@@ -27,7 +27,16 @@ from astrometricslib.models.target import FrameRecord
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
 from astrometricslib.pipelines.stacking.frame_measurement_run import quarantine_measurements_for_frame
 from astrometricslib.pipelines.stacking.metrics import GATE_METRIC_BY_NAME
+from astrometricslib.pipelines.stacking.post_processing.expected_noise import (
+    ExpectedNoise,
+    ExpectedNoiseOutcome,
+)
+from astrometricslib.pipelines.stacking.post_processing.flat_noise_contribution import (
+    FlatNoiseContribution,
+    FlatNoiseOutcome,
+)
 from astrometricslib.pipelines.stacking.post_processing.record_quality import stacking_measurements
+from astrometricslib.pipelines.stacking.post_processing.record_science import StackScience
 from astrometricslib.pipelines.stacking.post_processing.stack_membership import (
     StackMember,
     StackMembership,
@@ -68,6 +77,34 @@ def fixture_noise_outcome() -> StackNoiseOutcome:
     )
 
 
+def fixture_science() -> StackScience:
+    """Give the expected noise, flat noise and sky level, all filled.
+
+    Returns
+    -------
+    science : `StackScience`
+        An expected noise with its parts, a flat contribution and a sky level.
+        The star peaks are not here: they sit on the exposure groups of
+        `fixture_summary` (the second has a clipped star whose peak is
+        estimated).
+    """
+    return StackScience(
+        expected_noise=ExpectedNoiseOutcome(
+            ExpectedNoise(
+                sky_noise=0.0001,
+                read_noise=0.00005,
+                total_noise=0.000112,
+                aperture_area_px=59.4,
+                stack_units_per_adu=1.0 / 65535.0,
+                frame_count=2,
+                predicted_sky_level=0.006,
+            )
+        ),
+        flat_noise=FlatNoiseOutcome(FlatNoiseContribution(0.004, 0.00003, 0.006)),
+        stack_sky_level=0.006,
+    )
+
+
 def fixture_summary() -> StackQualitySummary:
     """Build a finished stack summary with every number and gate filled.
 
@@ -83,6 +120,18 @@ def fixture_summary() -> StackQualitySummary:
             framesStacked=10,
             darkApplied=True,
             stackPath="/stacks/lights/M 99/M99_Stacked.fits",
+            brightestStarPeakFraction=0.4,
+            brightestStarPeakAboveSkyAdu=24000.0,
+            peakSkyAdu=500.0,
+            peakClipCeilingAdu=65532.0,
+            peakLinearityLimitAdu=60000.0,
+            peakFramesWithPeak=3,
+            peakFramesClipped=0,
+            peakFramesSampled=3,
+            peakFramesOnProfileCeiling=3,
+            peakCheckedRangeRoomMultiples=80.0,
+            peakClipCeilingProvenance="measured",
+            peakLinearityLimitProvenance="measured",
         ),
         ExposureGroupSummary(
             exposureSeconds=120.0,
@@ -94,6 +143,19 @@ def fixture_summary() -> StackQualitySummary:
             gainMidRange=2.0,
             gainBrightEndRatio=2.02,
             gainDisagreement=0.01,
+            brightestStarPeakFraction=1.3,
+            brightestStarPeakAboveSkyAdu=84000.0,
+            peakSkyAdu=900.0,
+            peakClipCeilingAdu=65532.0,
+            peakLinearityLimitAdu=60000.0,
+            peakFramesWithPeak=3,
+            peakFramesEstimated=3,
+            peakFramesClipped=3,
+            peakFramesSampled=3,
+            peakLargestEstimateToRoomRatio=1.4,
+            peakCheckedRangeRoomMultiples=80.0,
+            peakClipCeilingProvenance="measured",
+            peakLinearityLimitProvenance="measured",
         ),
     ]
     metrics = StackingPipelineQualityMetrics(
@@ -159,7 +221,12 @@ def stacking_emitted_measurements() -> list[QualityMeasurement]:
     """
     context = PipelineRunContext("M 99", "stacking", "1.3.0", "job-1", "job-1", FIXTURE_TIME)
     measurements = stacking_measurements(
-        fixture_summary(), context, "M99_Stacked.fits", fixture_noise_outcome(), fixture_membership()
+        fixture_summary(),
+        context,
+        "M99_Stacked.fits",
+        fixture_noise_outcome(),
+        fixture_membership(),
+        science=fixture_science(),
     )
     frame = FrameRecord(path="/frames/lights/M 99/Scope/Cam/a.fits", camera="Cam", exposure="60")
     measurements.extend(

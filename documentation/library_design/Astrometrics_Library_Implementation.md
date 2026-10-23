@@ -78,8 +78,8 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 - **Frame measurement (§2.1).** `ProcessingPipelines.record_frame_measurements` (`frame_measurement_run.py`) measures each light frame with `measure_frame`.
 - **Input screening (§3.4.1).** `pre_processing/frame_quarantine.py`, `frame_homogeneity.py`, `background_homogeneity.py`, `camera_selection.py`, `assess_input_quality.py`.
 - **Output checks (§3.4.2).** `post_processing/assess_output_quality.py`, `stack_quality.py`, `exposure_group_report.py`, `stack_quality_report.py`.
-- **Stack measurements (§3.4.2).** `stage._record_stack_quality` calls `post_processing/record_quality.py` (`record_stacking_quality`), which stores the summary, 16 gates, the stack noise and the frame weights. <!-- impl: astrometricslib.pipelines.stacking.post_processing.record_quality.record_stacking_quality -->
-- **Stack noise and weights (§3.4.2).** `post_processing/stack_noise.py` (`measure_stack_noise`) and `stack_membership.py` (`wfwhm_weights`). Evidence: [STK-36](validation/stacking.md#stk-36), [STK-07](validation/stacking.md#stk-07).
+- **Stack measurements (§3.4.2).** `stage._record_stack_quality` calls `post_processing/record_quality.py` (`record_stacking_quality`), which stores the summary, gates, noise and weights. <!-- impl: astrometricslib.pipelines.stacking.post_processing.record_quality.record_stacking_quality -->
+- **Stack noise and weights (§3.4.2).** `post_processing/stack_noise.py`, `stack_membership.py`, `expected_noise.py`, `flat_noise_contribution.py`, `record_science.py`. Evidence: [STK-36](validation/stacking.md#stk-36), [STK-07](validation/stacking.md#stk-07), [STK-38](validation/stacking.md#stk-38), [STK-39](validation/stacking.md#stk-39), [STK-40](validation/stacking.md#stk-40), [STK-41](validation/stacking.md#stk-41).
 - **Subset stacks (§3.4.2).** `subset_noise_run.py` and `subset_stack.stack_frame_subset` stack parts of the library stack into `_subsets/`. Evidence: [STK-36](validation/stacking.md#stk-36), [STK-37](validation/stacking.md#stk-37).
 
 ### 4.2 Astrometry (Architecture §4)

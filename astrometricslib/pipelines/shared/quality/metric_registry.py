@@ -33,6 +33,8 @@ KNOWN_UNITS: frozenset[str] = frozenset({
     "e-/s/px",
     "mag",
     "angstrom",
+    "stack_unit",
+    "stack_unit/adu",
     "",
 })
 

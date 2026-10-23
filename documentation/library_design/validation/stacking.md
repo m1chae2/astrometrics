@@ -1358,7 +1358,7 @@ Every Python example assumes the library is installed and configured with your o
 
   The run also showed that Ekos writes `CRVAL1` and `CRVAL2` equal to the commanded pointing and no plate-solve card, so the frame headers do not say where the stars are. The headers of that night disagree with each other by up to 82 px (frame header predictions differ by 27 px and 82 px; the stars moved by -7 to +6 px in Siril's output). Because of this every stack, with a header solution or without, is moved onto the stored reference stars by a shift before it is measured (`_move_guess_onto_reference_stars`), and the shift, the number of stars that agreed and their leftover position error are written in the reason of the noise rows. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise._move_guess_onto_reference_stars --> The frame's star list for the coordinate check must also keep saturated stars, since the averaged stack keeps them (on this stack 0 of 10 stars matched before that was fixed).
 - **Verdict:** Not judged.
-- **Limits:** One target, one night, one camera. The 500 px search radius comes from this one night. The subsets share frames with the full stack, so their agreement with 1/sqrt(n) is not an independent test of the noise estimate. A translation is applied; a rotation is only estimated, and a stack rotated by more than 0.1 degree is refused (a design estimate, never met on real data). The flux scale and the large reference aperture have been run on this one target only. Definition versions (2026-10-23): `stacking.empty_aperture_noise_adu`, `stacking.noise_reference_flux_adu`, `stacking.empty_aperture_noise_normalized` and `stacking.noise_without_night` are at definition version 2: the uncertainty is now 1.1664 × spread / √n, apertures are at least 24 px apart, and the reference flux is measured in a large aperture, scaled by each star's ratio to the first stack, with saturation tested against the camera profile. Rows of version 1 (scratch copies only) are not comparable. Readers can leave subset stacks out with `quality.query(library_only=True)` or pick one with `variant=`.
+- **Limits:** One target, one night, one camera. The 500 px search radius comes from this one night. The subsets share frames with the full stack, so their agreement with 1/sqrt(n) is not an independent test of the noise estimate. A translation is applied; a rotation is only estimated, and a stack rotated by more than 0.1 degree is refused (a design estimate, never met on real data). The flux scale and the large reference aperture have been run on this one target only. Definition versions (2026-10-23): `stacking.empty_aperture_noise_stack_unit`, `stacking.noise_reference_flux_stack_unit`, `stacking.empty_aperture_noise_normalized` and `stacking.noise_without_night` are at definition version 2: the uncertainty is now 1.1664 × spread / √n, apertures are at least 24 px apart, and the reference flux is measured in a large aperture, scaled by each star's ratio to the first stack, with saturation tested against the camera profile. Rows of version 1 (scratch copies only) are not comparable. Readers can leave subset stacks out with `quality.query(library_only=True)` or pick one with `variant=`.
 - **To tune for your setup:** If the check of the reference stars fails on your stacks, raise `SEED_SEARCH_RADIUS_PX` to the largest disagreement between your frame headers and the stars. More apertures make the noise estimate steadier.
 - **Regenerate with:** The call in the procedure.
 - **Guarded by tests:** `astrometricslib/pipelines/stacking/test/test_stack_noise.py` recovers a known white noise within its stated uncertainty on a synthetic stack. The real-data run has no test.
@@ -1398,6 +1398,296 @@ Every Python example assumes the library is installed and configured with your o
 - **Regenerate with:** The call in the procedure.
 - **Guarded by tests:** `astrometricslib/pipelines/stacking/test/test_subset_noise_run.py`.
 - **Raw record:** None kept.
+
+### STK-38
+
+**The noise a stack's frames predict in an empty aperture**
+
+- **Claim:** The noise in an empty aperture that the sky's light and the camera's read noise give, worked out from each frame's sky, read noise, gain and weight, is the part of the measured noise that averaging frames removes. A measured noise above it is expected, because some things repeat in every frame and so do not average away: faint stars and nebulosity, fixed patterns, and the noise of the master calibration frames.
+- **Settings it supports:**
+  - code constant `STACK_UNITS_PER_ADU` = 1/65535 in `pipelines/stacking/post_processing/expected_noise.py`, which is `1 / FULL_SCALE_COUNTS` of the exposure-group combine, so the two cannot drift. Relation: derived from this entry. Siril divides every integer frame by 65535, a 14-bit raw frame included (stored without scaling up), and a frame stored as floating-point numbers would break the scale; nothing checks for one. The frames' own sky and the stack's median agree to 0.1% on the stack below. <!-- impl: astrometricslib.pipelines.stacking.post_processing.expected_noise.STACK_UNITS_PER_ADU -->
+  - the aperture multiplier `effective_aperture_area_px` (about 59 px: about 46 for the squared overlaps of the circle and about 13 for the median of the sky ring, which assumes Gaussian noise in the ring). Relation: sanity check only. It is arithmetic on the aperture shape, and one simulation recovers a known noise within 2%. <!-- impl: astrometricslib.pipelines.stacking.post_processing.expected_noise.effective_aperture_area_px -->
+- **Status:** Partly measured. A simulated stack of known gain, read noise, sky and weights is recovered to within 2%. On the real M 57 stack the model reproduces the stack's sky level. The difference of two half stacks, which cancels what the halves share, is 1.2 times the prediction (about 12% error), and the difference of two neighboring single frames is 1.1 times it. The measured noise of a stack is 2.6 to 3.9 times the prediction, so about nine tenths of its variance is shared structure, not noise that more frames would remove. The hypothesis that this structure is faint stars and nebulosity is consistent with the numbers but was not tested.
+- **Data you need:** A target with a stack of at least 20 light frames of one setting, the frame measurement job run on those frames (it stores the sky of each frame), and the camera profile entry for the setting (gain and read noise).
+- **Procedure:**
+  1. Run the frame measurement job, then stack the target. The stacking stage stores the expected noise next to the measured noise, and the sky level the frames predict next to the stack's own median.
+  2. Read both for the stack and for the subsets of the growth job.
+  3. Divide the measured noise by the expected noise, and look at how the ratio changes with the frame count.
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  astro.processing.record_frame_measurements("M 57")
+  astro.processing.stack("M 57", force=True)
+  astro.processing.measure_noise_growth("M 57")
+  for name in (
+      "stacking.empty_aperture_noise_stack_unit",
+      "stacking.expected_sky_noise_stack_unit",
+      "stacking.expected_read_noise_stack_unit",
+      "stacking.expected_empty_aperture_noise_stack_unit",
+      "stacking.expected_sky_level_stack_unit",
+      "stacking.stack_sky_level_stack_unit",
+  ):
+      for row in astro.quality.query(metric=name, target_id="M 57"):
+          print(name, row.subject.subject_id, row.value, row.status)
+  ```
+
+  `expected_stack_noise` <!-- impl: astrometricslib.pipelines.stacking.post_processing.expected_noise.expected_stack_noise --> combines the frames; `compute_expected_noise` <!-- impl: astrometricslib.pipelines.stacking.post_processing.record_science.compute_expected_noise --> reads each frame's stored sky and the camera profile.
+
+  To repeat the two tests of the gap, use the scripts of the run (scratch copies only): `make_halves.py` stacks the odd and even frames with the library stack's registration reference frame in both halves, without trimming, using `run_stack` <!-- impl: astrometricslib.pipelines.stacking.stack_runner.run_stack -->, and `analyse_halves.py` puts the target's stored apertures on the halves and on their difference with `stack_noise._sums_at` and compares them with `compute_expected_noise` of each half. `single_frame_noise.py` applies `signed_aperture_sum` <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.signed_aperture_sum --> to raw frames at the stored aperture positions, moved by Siril's registration shift of the frame.
+- **Acceptance criterion:** Not recorded (set after the causes of the gap are separated).
+- **What to look at:** The sky part and the read part of the expected noise (the read part is about a fifth of the sky part here), and the ratio of the measured noise to the expected total. A ratio near 1 means the model explains the stack. A ratio far above 1 that stays when frames are added means structure that repeats from frame to frame. The row for a stack made with a measured gain and sky is a model prediction from measured inputs, not a measurement of the stack.
+- **Our result:** M 57, night of 2026-10-03, ZWO ASI 533MM Pro (gain 0.783 e-/ADU, read noise 3.8 e-, both measured), 60 s frames, 61 frames in the library stack. Run on 2026-10-23 on scratch copies; the light frames were not changed. Noise values are in the stack's units (one ADU is 1/65535).
+
+  | Stack | Frames | Effective frames | Measured noise | Expected sky part | Expected read part | Expected total | Measured / expected |
+  | --- | --- | --- | --- | --- | --- | --- | --- |
+  | Subset | 15 | 8.4 | 2.44e-3 (2.8e-4) | 9.26e-4 | 1.97e-4 | 9.47e-4 | 2.6 |
+  | Subset | 30 | 18.6 | 1.78e-3 (2.1e-4) | 6.22e-4 | 1.32e-4 | 6.36e-4 | 2.8 |
+  | Subset | 45 | 29.3 | 1.85e-3 (2.2e-4) | 4.96e-4 | 1.05e-4 | 5.07e-4 | 3.6 |
+  | Library stack | 61 | 40.8 | 1.66e-3 (1.9e-4) | 4.21e-4 | 8.9e-5 | 4.30e-4 | 3.9 |
+
+  The unit check: the weighted mean of the frames' sky above the bias is 411.8 ADU; the median of the stack is 0.006278, which is 411.4 ADU at 1/65535. Every stack now stores both skies, so the check repeats on the subsets: the sky the frames predict against the stack's median is 0.006239 against 0.006253 (15 frames), 0.006273 against 0.006279 (30) and 0.006289 against 0.006277 (45), within 0.2%, and 0.006284 against 0.006278 for the library stack. The expected noise falls as one over the square root of the effective frame count (a factor 2.2 from 15 to 61 frames).
+
+  The table cannot be read as a growth curve. The raw measured noises are not on one flux scale: the subsets' reference stars have zero points of 0.81, 0.90 and 1.02 against the library stack ([STK-36](#stk-36)). STK-36 divides by the reference flux, and that normalized noise follows one over the square root of the frame count to within 5% (one point 15% high, within one combined sigma). Divided by the zero points, the raw noises are 3.0e-3, 2.0e-3, 1.8e-3 and 1.7e-3, which fall by a factor 1.8 from 15 to 61 frames, against 2.0 for the frame count and 2.2 for the effective frame count. That is no clear floor. The subsets are also nested (the 15 frames are in every later subset), so the four points are not independent, and a fit of a floor and a scale to them (an earlier version found 1.4e-3 and 2.1) is an indication of nothing. The raw subset ratios above carry up to 20% from the flux scale.
+
+  A fixed pattern from the calibration frames cannot make a floor of that size. A floor of 91 ADU in an aperture sum, if it came from independent pixels, needs about 12 ADU per pixel (3% of the 411 ADU sky). The master flat adds 0.5 ADU per pixel (0.119% of the sky, [STK-39](#stk-39)), and the master bias or dark of N frames adds about 4.8 / sqrt(N) ADU per pixel (the read noise of one frame in ADU). Faint stars and nebulosity in the apertures are the likelier cause of any floor.
+
+  The half-stack difference. The 61 frames, in time order, went alternately to two halves, and the frame the library stack was registered to (`M_57_Light_Luminance_050.fits`) went into both, so both halves were registered to the same frame and their pixels line up without resampling (no trim; a phase correlation of the two stacks finds a shift of 0.00 px in both axes at 1/100 px resolution). The halves share that one frame. It is the sharpest frame, so it has the largest star-width weight in both halves, and its common part takes 22% from the sum of the two expected variances; the model removes it (if it did not, the measured difference would be 1.06 times the prediction). Half A had the 31 frames of even place and the shared frame (32 stacked) and half B the 30 of odd place, which include it (30 stacked); each was weighted by Siril's star-width weights, rebuilt for the model. The target's 100 stored apertures were put on the halves as a normal stack is measured, and on the difference A minus B.
+
+  | | Measured noise (error 12%) | Expected | Measured / expected |
+  | --- | --- | --- | --- |
+  | Half A | 2.31e-3 | 6.38e-4 | 3.6 |
+  | Half B | 1.78e-3 | 6.36e-4 | 2.8 |
+  | Difference A - B | 9.53e-4 | 7.98e-4 (root sum of squares, less the shared frame) | 1.19 |
+
+  The sums of the two halves over the same apertures are strongly alike: the rank correlation is 0.88, and over the 82 apertures within 5 robust sigma of the median the correlation is 0.90, with a shared part of 146 ADU against 155 and 151 ADU in the halves. The distribution of the halves' sums has a long upper tail (skewness 8; 18 of the 100 apertures lie more than 5 robust sigma from the median in at least one half; the largest sum is 26,000 ADU, a star too faint to be left out when the apertures were chosen), which a symmetric pattern from a flat or a dark would not give and faint stars or nebulosity would. The difference has a tail too (skewness 3.9), so some of that structure changes between the halves (seeing, the dither). With only 100 apertures the measured ratio is 1.19 plus or minus 0.14.
+
+  The single-frame test. Five raw frames spread through the night (time order 0, 15, 30, 45 and 60) were measured in the same apertures, moved by Siril's registration shift of each frame. Raw, dark-subtracted (the median of the library's 30 darks of 60 s) and dark-subtracted and flat-fielded (the mean of the library's 30 L flats less the median of 20 bias frames): the first leaves in everything (bias level, dark current, hot pixels, the flat pattern), the second leaves in the flat pattern and the third leaves in what dividing by this master flat does not remove. The noise of the pixels themselves, from differences of neighbors, is 1.08 times the model's (25.2 against 23.3 ADU on a typical frame). The empty-aperture noise of a single frame is 1.2 to 1.9 times the model (median 1.7 over all 61 frames dark-subtracted, 16th to 84th percentile 1.4 to 1.9), and the three versions agree within 20%. The same measurement on the difference of two neighboring frames that lie within 0.1 px of each other (four pairs, each root-two larger by the model) gives 1.38, 1.14, 1.07 and 0.79 times the model, median 1.11. A single frame's gap to the model is therefore the same structure that the halves share, not noise of the individual frame. The number of pairs is small and each has an error of 12%.
+- **Verdict:** Not judged.
+- **Limits:** One target, one night, one camera, one Galactic field. The model leaves out Siril's normalization of each frame, debayering of color stacks, the noise of the master dark, bias and flat, fixed patterns, the data that pixel rejection removes and faint stars in the apertures. It treats the pixels of an aperture as independent and assumes the stack is the weighted mean with the reported weights. A stack combined from several exposure groups gets no expected noise (the combine divides each group by its exposure, which the weights leave out), a spectral stack gets none, and a stack whose member list is uncertain gets an assumed one. A stack whose weights Siril does not report (noise or star-count weighting) has none. The expected rows are assumed when the gain in the camera profile or the sky is not measured. No uncertainty is reported, because the errors of the gain and the sky are not propagated. The unit scale is checked by the stored pair of sky levels on every stack, but was compared on this one stack only.
+- **To tune for your setup:** Run the frame measurement job first. Add your camera's gain and read noise at your setting with `CalibrationCatalog.measure_sensor_noise`. To see how much of your stack's noise is shared structure, stack two disjoint halves of your frames on one registration reference and compare their difference with the prediction.
+- **Regenerate with:** The call in the procedure.
+- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/post_processing/test_expected_noise.py` recovers a known noise from a simulated stack within 8% (it came out 2% low) and checks every missing-input path; `test_record_science.py` checks the join with the stored sky rows and the camera profile with a fake store, the multiple-exposure, spectral and uncertain-member cases and the failure paths.
+- **Raw record:** None kept; the rows were stored in the quality store of the run. The scripts and their output are in the session's scratch folder (`science/half_stack/` and `science/single_frame/`).
+
+### STK-39
+
+**The noise the master flat adds to a stack**
+
+- **Claim:** The master flat's noise, blurred by the width the stage applies, adds a fixed pattern to an aperture sum that this module can work out from the flat's frame count, its noise before the blur, the blur width and the stack's sky level, in the same units as the stack's measured noise.
+- **Settings it supports:** None. The figures are derived and the blur width limits are the design estimates STK-D06.
+- **Status:** Partly measured. The blur factor matches the Gaussian formula and a simulated field. The aperture figure matches a simulation to within 11% (the sky ring, which the figure leaves out). On the real stack the figure is small, but the master flat itself was not measured; its noise is derived from the flat assessment.
+- **Data you need:** A stack calibrated with flats, with its flat assessment stored (the frame count, the noise and the blur width), and the stack file for its sky level.
+- **Procedure:**
+  1. Stack the target (the stage stores the flat's noise next to the stack's noise).
+  2. Read the flat's noise in the aperture, and the stack's noise.
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  for name in (
+      "stacking.flat_frame_count",
+      "stacking.flat_noise_fraction",
+      "stacking.flat_smoothing_sigma_px",
+      "stacking.flat_noise_after_smoothing_fraction",
+      "stacking.stack_sky_level_stack_unit",
+      "stacking.flat_noise_in_aperture_stack_unit",
+      "stacking.empty_aperture_noise_stack_unit",
+  ):
+      for row in astro.quality.query(metric=name, target_id="M 57", library_only=True):
+          print(name, row.value)
+  ```
+
+  `flat_noise_contribution` <!-- impl: astrometricslib.pipelines.stacking.post_processing.flat_noise_contribution.flat_noise_contribution --> turns the stored facts into the two noise values. `assess_flats` <!-- impl: astrometricslib.pipelines.stacking.pre_processing.flat_calibration.assess_flats --> gives the facts.
+- **Acceptance criterion:** Not recorded.
+- **What to look at:** The flat's noise in the aperture next to the stack's measured noise and next to the expected noise ([STK-38](#stk-38)). A flat whose figure is a large share of the stack's noise is limiting the stack, and more flat frames or a wider blur would help.
+- **Our result:** M 57 library stack, 2026-10-23: 30 flat frames, noise of the average 0.119% of the flat's level before any blur (below the 0.5% limit, so no blur: the figure after the blur is the same, 0.119%), stack sky level 0.006278 (411 ADU). The flat adds 5.1e-5 to an aperture sum. The stack's measured noise is 1.66e-3 and the expected noise 4.3e-4. So the flat is 3.1% of the measured noise and 12% of the expected noise, and adds about 0.1% to the measured variance. In simulation, the blur factor for a blur width of 2 px is 0.141, which equals 1 / (2 × width × sqrt(pi)) to 0.003%; the aperture figure for a flat noise of 2% on a sky of 0.006 is 8.1e-4 against 9.1e-4 simulated without a blur and 6.5e-4 against 6.9e-4 simulated with a 1.5 px blur.
+- **Verdict:** Not judged.
+- **Limits:** The master flat is not kept by the stacking step, so its noise after the blur is derived (the assessment's noise times the blur factor), not measured on the master. The figure takes the whole pattern to stay (no dithering) and leaves out the sky ring, which in simulation put the sum 7% to 11% above it. The flat assessment's noise rests on the first two flat frames and on a cap of 32 frames averaged. One stack and one flat set were run.
+- **To tune for your setup:** Take more flat frames if the figure is more than a few percent of your stack's noise.
+- **Regenerate with:** The call in the procedure.
+- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/post_processing/test_flat_noise_contribution.py`.
+- **Raw record:** None kept.
+
+### STK-40
+
+**The brightest star's peak against the ceiling, for each exposure group**
+
+- **Claim:** At the exposure that was used, the brightest star's peak above the sky, divided by the room between the sky and the ceiling, says how close the exposure came to clipping. A value below 1 is a measured peak. A clipped star's peak is estimated from the pixels around its core: it says that the star clipped, and its size is stated only inside the range that [STK-41](#stk-41) checked.
+- **Settings it supports:**
+  - code constants `CHECKED_ESTIMATE_RANGE_ROOM_MULTIPLES_BY_CAMERA`, `CHECKED_ESTIMATE_ERROR_FRACTION`, `CHECKED_ESTIMATE_SHARE_WITHIN_ERROR` and `CHECKED_ESTIMATE_AGAINST_MEASURED_RATIOS` in `pipelines/stacking/post_processing/exposure_saturation.py`. Relation: derived from [STK-41](#stk-41). <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_saturation.CHECKED_ESTIMATE_RANGE_ROOM_MULTIPLES_BY_CAMERA --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_saturation.CHECKED_ESTIMATE_ERROR_FRACTION --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_saturation.CHECKED_ESTIMATE_SHARE_WITHIN_ERROR --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_saturation.CHECKED_ESTIMATE_AGAINST_MEASURED_RATIOS -->
+  - code constant `MAXIMUM_RELIABLE_PEAK_TO_ROOM_RATIO` = 100 in the same file, which stops a frame's estimate from being used at all beyond 100 times the room. Relation: sanity check only. [STK-41](#stk-41) finds the proportionality of estimates holding to 80 times the room on the ASI533MM Pro, so 100 is a little lenient, and it holds nowhere on the D5300. It is not changed here, because the old recommended exposure uses it. <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_saturation.MAXIMUM_RELIABLE_PEAK_TO_ROOM_RATIO -->
+- **Status:** Partly measured. An unclipped frame gives a measured peak. A clipped frame gives an estimate. Inside the range checked for the camera it is stored as assumed, with the error of the check in the reason. Beyond that range (and for any camera with no range) the fraction and the peak are stored as not measured, with the size of the estimate, and only the count of clipped frames is stored.
+- **Data you need:** A stack with the raw frames still on disk, and a camera profile that gives the clip ceiling.
+- **Procedure:**
+  1. Stack the target. The stage reads up to three raw frames of each exposure group and stores the peak values on the group's entry of the summary, and the rows from it on the group's stack.
+  2. Read the fraction and its parts.
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  for name in (
+      "stacking.group_brightest_star_peak_fraction",
+      "stacking.group_brightest_star_peak_above_sky_adu",
+      "stacking.group_raw_sky_level_adu",
+      "stacking.group_clip_ceiling_adu",
+      "stacking.group_linearity_limit_adu",
+      "stacking.group_peak_estimated_frame_count",
+      "stacking.group_clipped_frame_count",
+  ):
+      for row in astro.quality.query(metric=name, target_id="M 57", library_only=True):
+          print(name, row.value, row.status, row.sample_count, row.reason)
+  ```
+
+  `summarize_group_peak` <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_group_report.summarize_group_peak --> takes the median over the sampled frames of what `measure_frame_saturation` <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_saturation.measure_frame_saturation --> finds.
+- **Acceptance criterion:** Not recorded.
+- **What to look at:** The count of clipped frames first (it is stored whatever the estimate), then the fraction, whether it is assumed or not measured, the number of frames behind it, and the ceiling. The photometric linearity limit (60,000 ADU for the ASI533MM Pro) is stored beside the clip ceiling (65,532 ADU), so a reader can see that a peak between them is not clipped but is no longer linear. A ceiling or limit from a datasheet or a generic profile is stored as assumed.
+- **Our result:** M 57 library stack, 2026-10-23, the 60 s group (61 frames). Three frames were read; the brightest star was clipped in all three. The sky was 800 to 840 ADU, the ceiling 65,532 ADU (the frames' own highest value), and the estimated peaks above the sky were 4.5e6, 5.3e6 and 6.5e6 ADU, which is 70, 82 and 100 times the room. The group's fraction is the median, 82. That is beyond the 80 times that [STK-41](#stk-41) checked on the ASI533MM Pro, so the fraction and the peak are stored as not measured, and only "clipped in 3 of 3 frames" is firm. The estimate depends strongly on the star width it is given. These frames carry no measured star width (`measured_fwhm_px` is empty), so the default of 3.0 px was used. The registration width of the same frames has a median of 2.47 px (x direction), and at that width the estimate is above 100 times the room and is refused; at 3.5 px it is 33 to 47 times. The old recommended exposure is not computed or stored here.
+- **Verdict:** Not judged.
+- **Limits:** The estimate assumes a Moffat profile of the frame's star width with beta 3, and the width is the measured one when the frame has it, otherwise the default 3.0 px, which is wider than the 1.9 to 2.3 px of good nights. The unclipped peak of a star that is sampled by about two pixels depends on where the star falls on the pixel grid: the same star's unclipped peak at two exposures differs by a median of 14% and a 90th percentile of 38% ([STK-41](#stk-41)), so a measured peak is good to about that. Three frames per group are sampled, so a star that clips in one frame only is seen through the median. The ceiling of a clipped frame is its own highest value, which equals the profile's ceiling only when the sensor clips there. A frame that gave no peak is left out of the median, and the count says how many remain. The raw frames of the D5300 are a Bayer mosaic read as one image.
+- **To tune for your setup:** Check that your camera profile has the right clip ceiling and linearity limit, and the measured star width. To check the estimate on your camera, take the same field at two exposure lengths and compare the peaks as [STK-41](#stk-41) does.
+- **Regenerate with:** The call in the procedure.
+- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/post_processing/test_group_peak.py` and `test_record_science.py`.
+- **Raw record:** None kept.
+
+### STK-41
+
+**Does an estimated peak of a clipped star grow with the exposure?**
+
+- **Claim:** The peak of a clipped star, estimated from the pixels around its clipped core, grows in proportion to the exposure within 66% of the exposure ratio in at least 90% of the cases, on the ASI533MM Pro up to 80 times the room between the sky and the ceiling. It does not hold on the D5300. Proportional growth does not make the estimate right: against an unclipped star of the same field at a shorter exposure, the ASI533MM Pro's estimates are typically half the true peak and off by a factor of 2 to 5 either way, and larger ones are several times too high.
+- **Settings it supports:**
+  - code constant `CHECKED_ESTIMATE_RANGE_ROOM_MULTIPLES_BY_CAMERA` = 80 for the ASI533MM Pro (none for any other camera) in `pipelines/stacking/post_processing/exposure_saturation.py`. Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_saturation.CHECKED_ESTIMATE_RANGE_ROOM_MULTIPLES_BY_CAMERA -->
+  - code constants `CHECKED_ESTIMATE_ERROR_FRACTION` = 0.66, `CHECKED_ESTIMATE_SHARE_WITHIN_ERROR` = 0.97 and `CHECKED_ESTIMATE_AGAINST_MEASURED_RATIOS` = (0.22, 0.48, 2.7) in the same file. Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_saturation.CHECKED_ESTIMATE_ERROR_FRACTION --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_saturation.CHECKED_ESTIMATE_SHARE_WITHIN_ERROR --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_saturation.CHECKED_ESTIMATE_AGAINST_MEASURED_RATIOS -->
+  - code constant `MAXIMUM_RELIABLE_PEAK_TO_ROOM_RATIO` = 100 in the same file. Relation: sanity check only. It was set from nine comparisons that were recorded only in a code comment; this entry replaces them. The new data put the limit of proportional growth on the ASI533MM Pro near 80, and show no limit on the D5300. The constant is not changed. <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_saturation.MAXIMUM_RELIABLE_PEAK_TO_ROOM_RATIO -->
+- **Status:** Partly measured. 35 target and camera groups with two or more exposure lengths were read, and 27 gave star pairs. The ASI533MM Pro result rests on 13 targets (10 below 80 times the room), the D5300 result on 14. Nothing is held out by night or field; the nights differ, but the same fields enter every bin.
+- **Data you need:** Light frames of one field at two or more exposure lengths (the same camera and optic), with the raw files on disk.
+- **Procedure:**
+  1. For every target and camera, read up to three frames at each exposure length (spread through the group, as `measure_group_saturation` does).
+  2. In each frame list the 25 brightest stars: a clipped star (4 or more connected pixels at the frame's highest value) gets the library's wing estimate of its peak (`_estimated_peak_from_wings`), an unclipped star its measured peak (the highest pixel whose four neighbors are 20% of the way up). A peak at the ceiling or above the linearity limit is not used as a measured peak.
+  3. Match the stars of a shorter and a longer frame by the pixel shift (or a 180 degree flip) that most of them agree on, and keep a star only if it lies within 2 px of where that transform puts it and its peak in the shorter frame is at least 300 ADU.
+  4. For each matched star compute the error ``E = (peak_long / peak_short) / (t_long / t_short) - 1``. Bin it by the size of the longer frame's estimate in room multiples.
+
+  The scripts are in the session's scratch folder (`science/peak_recheck/`): `survey.py`, `recheck.py` and `analyse.py`. Repeat with `python recheck.py` (about 25 minutes), then `python analyse.py --markdown`. The library calls are `exposure_saturation.measure_frame_saturation` <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_saturation.measure_frame_saturation --> and its helpers.
+- **Acceptance criterion:** A bin of estimate sizes is supported when at least 90% of its cases (and its 90th percentile error) are within 66% of the exposure ratio, for every bin up to it, with at least 4 targets in the top bin. The 66% is the criterion of the earlier nine comparisons.
+- **What to look at:** The estimated-to-estimated table (proportionality) and the measured-to-estimated table (the estimate against a measured peak). The first can hide a bias that is the same at both exposures (a wrong star width, a wrong profile); only the second shows it.
+- **Our result:** 2026-10-23, frames on disk, read only; 121 exposure pairs (ratio of at least 1.4) in 35 groups gave 879 frame combinations, of which 457 found no consistent shift (the field moved between nights, or too few stars). 71 exposure pairs gave 3,368 usable star pairs (2,688 estimated to estimated, 212 measured to estimated, 467 measured to measured). The star width given to the estimate was the default 3.0 px for every frame, because no frame carries a measured width.
+
+  Proportionality, estimated to estimated (cases / targets, median error, share within 66%):
+
+  | Estimate size (x room) | ASI533MM Pro | D5300 |
+  | --- | --- | --- |
+  | 1 to 2 | 94 / 5, -0.41, 95% | 1 / 1 |
+  | 2 to 5 | 263 / 7, -0.18, 98% | 51 / 5, -0.63, 57% |
+  | 5 to 10 | 252 / 9, -0.18, 98% | 219 / 8, -0.35, 74% |
+  | 10 to 20 | 235 / 9, -0.09, 97% | 347 / 9, -0.11, 76% |
+  | 20 to 40 | 92 / 7, -0.07, 90% | 290 / 10, +0.20, 70% |
+  | 40 to 63 | 50 / 5, -0.05, 100% | 130 / 10, +0.22, 65% |
+  | 63 to 80 | 23 / 4, +0.07, 96% | 81 / 9, +0.25, 79% |
+  | 80 to 100 | 30 / 5, +0.14, 83% (90th percentile 1.5) | 61 / 10, +0.34, 62% |
+  | 100 to 200 | 62 / 5, +0.45, 61% | 139 / 10, +0.07, 80% |
+  | 200 to 1,000 | 58 / 3, +0.64, 53% | 124 / 11, +0.06, 65% |
+  | over 1,000 | 44 / 2, +0.96, 30% | 42 / 6, +0.15, 95% |
+
+  On the ASI533MM Pro every bin up to 80 times the room passes (1,009 cases, 10 targets, 97% within 66%, 90th percentile error 0.50), and 80 to 100 does not, so the range is 80. On the D5300 the first bin with cases already fails and no bin from 2 to 1,000 times passes, so it has no range. The earlier statement of 63 times and "nothing between 63 and 100" is replaced: 63 to 80 passes on 23 cases.
+
+  The estimate against a measured peak, measured to estimated (cases / targets, median error, share within 66%):
+
+  | Estimate size (x room) | ASI533MM Pro | D5300 |
+  | --- | --- | --- |
+  | 0 to 2 | 64 / 5, -0.60, 58% | 1 / 1 |
+  | 2 to 5 | 67 / 5, -0.52, 67% | 12 / 2, +1.40, 33% |
+  | 5 to 10 | 6 / 1, +1.21, 33% | 20 / 2, +3.09, 0% |
+  | 10 to 20 | 10 / 2, -0.03, 0% | 1 / 1, +5.2 |
+  | 20 to 63 | 3 / 2, +2.6 to +4.9 | 11 / 2, +8.60, 0% |
+  | 63 to 200 | 17 / 2, +10.5 to +18, 0% | none |
+
+  Below 80 times the room on the ASI533MM Pro (156 cases, 7 targets: Albireo, Alnath, M 27, M 42, M 81, NGC 2403, NGC 2903, mostly 1 to 5 times) the estimate divided by the measured peak scaled to the longer exposure has a median of 0.48 and a 10th to 90th percentile range of 0.22 to 2.7; the extremes are 0.09 and 13. The cases above 5 times the room are few and come from three targets, so the cases are examples, not an average. The large overestimates are M 42 (the saturated region is the nebula around the Trapezium, not a star on a flat sky) and M 81 from 30 s to 300 s; the Albireo A star from 0.05 s to 30 s is a 5-fold underestimate. They say that the estimate can be wrong by a factor of 2 to 13 at any size. Two unclipped peaks of the same star at two exposures, with nothing clipped (measured to measured, 467 cases), differ by a median of 14% and a 90th percentile of 38%, because the star falls on a different part of the pixel (the seeing of 1.9 to 2.3 px is near the sampling limit), the transparency changes and the focus drifts; that is the noise floor of the whole test.
+
+  Every exposure pair that gave a usable star (71) is in the table below: its brightest star in the longer frames, the median error over the frame pairs and the size of the longer frame's estimate. Fifty pairs gave none: the D5300's NGC 7023 (30 to 300 s) and M 31 (10 to 300 s) pairs, M 42, M 51 and M 81 pairs, IC 1805 (300 to 600 s), the ASI533MM Pro's Albireo pairs from 0.02 s, the Navi pairs from 0.01 s, M 101, M 13 (3.2e-5 s to 30 s) and M 81 pairs 30 s to 60 s and 30 s to 600 s.
+
+| Target | Camera | Short / long (s) | Ratio | Frame pairs | Kind | Median error | Range of error | Long estimate (x room) | Same night |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Albireo | ASI533MM Pro | 0.05 / 0.1 | 2.0 | 5 | M->M 5 | -0.15 | -0.44 to +0.30 | nan | yes |
+| Albireo | ASI533MM Pro | 0.05 / 0.25 | 5.0 | 4 | M->E 3, M->M 1 | -0.86 | -0.91 to -0.13 | 0.6 | yes |
+| Albireo | ASI533MM Pro | 0.05 / 30 | 600.0 | 3 | M->E 3 | -0.82 | -0.86 to -0.77 | 13.0 | yes |
+| Albireo | ASI533MM Pro | 0.1 / 0.25 | 2.5 | 9 | M->M 9 | +0.41 | +0.25 to +0.79 | nan | yes |
+| Albireo | ASI533MM Pro | 0.1 / 30 | 300.0 | 3 | M->E 3 | -0.74 | -0.80 to -0.73 | 13.0 | yes |
+| Albireo | ASI533MM Pro | 0.25 / 30 | 120.0 | 3 | E->E 3 | +0.07 | +0.00 to +0.55 | 77.1 | yes |
+| Alnath | ASI533MM Pro | 2 / 10 | 5.0 | 1 | E->E 1 | +0.42 | +0.42 to +0.42 | 273.9 | yes |
+| Altair | D5300 | 300 / 600 | 2.0 | 1 | E->E 1 | +0.34 | +0.34 to +0.34 | 72295.2 | yes |
+| IC 1396 | D5300 | 120 / 180 | 1.5 | 5 | E->E 5 | -0.24 | -0.54 to +0.50 | 34.8 | yes |
+| M 101 | D5300 | 180 / 300 | 1.7 | 6 | E->E 6 | +0.55 | -0.51 to +2.17 | 255.1 | no |
+| M 106 | D5300 | 120 / 180 | 1.5 | 3 | E->E 3 | +0.19 | +0.01 to +2.40 | 40.8 | yes |
+| M 106 | D5300 | 120 / 300 | 2.5 | 3 | E->E 3 | +0.16 | -0.05 to +0.25 | 179.3 | yes |
+| M 106 | D5300 | 180 / 300 | 1.7 | 1 | E->E 1 | +0.14 | +0.14 to +0.14 | 1060.9 | yes |
+| M 27 | ASI533MM Pro | 30 / 60 | 2.0 | 8 | E->E 8 | +0.96 | +0.45 to +1.64 | 10.1 | no |
+| M 27 | ASI533MM Pro | 30 / 120 | 4.0 | 9 | E->E 9 | +1.04 | -0.26 to +2.03 | 22.6 | yes |
+| M 27 | ASI533MM Pro | 30 / 300 | 10.0 | 3 | E->E 3 | +2.12 | +1.36 to +2.29 | 85.1 | no |
+| M 27 | ASI533MM Pro | 60 / 120 | 2.0 | 8 | E->E 8 | +0.10 | -0.49 to +0.52 | 22.6 | no |
+| M 27 | ASI533MM Pro | 60 / 300 | 5.0 | 3 | E->E 3 | +0.18 | -0.10 to +0.65 | 35.2 | no |
+| M 27 | ASI533MM Pro | 120 / 300 | 2.5 | 3 | E->E 3 | +0.35 | +0.09 to +2.19 | 85.1 | no |
+| M 31 | D5300 | 10 / 20 | 2.0 | 3 | E->E 3 | +0.11 | +0.07 to +0.25 | 14.1 | yes |
+| M 31 | D5300 | 30 / 120 | 4.0 | 2 | M->E 1, E->E 1 | +7.12 | -0.07 to +14.30 | 121.1 | no |
+| M 31 | D5300 | 30 / 180 | 6.0 | 1 | E->E 1 | +0.27 | +0.27 to +0.27 | 425.2 | no |
+| M 31 | D5300 | 30 / 300 | 10.0 | 1 | M->E 1 | -0.33 | -0.33 to -0.33 | 3.7 | no |
+| M 31 | D5300 | 40 / 60 | 1.5 | 9 | E->E 9 | +0.08 | -0.10 to +0.16 | 475.8 | yes |
+| M 31 | D5300 | 40 / 120 | 3.0 | 8 | E->E 8 | -0.37 | -0.68 to +0.71 | 22.4 | no |
+| M 31 | D5300 | 40 / 180 | 4.5 | 3 | E->E 3 | -0.38 | -0.68 to +0.94 | 23.0 | no |
+| M 31 | D5300 | 40 / 300 | 7.5 | 3 | E->E 3 | -0.89 | -0.90 to -0.89 | 220.3 | no |
+| M 31 | D5300 | 60 / 120 | 2.0 | 9 | E->E 9 | -0.64 | -0.77 to -0.35 | 208.3 | no |
+| M 31 | D5300 | 60 / 180 | 3.0 | 3 | E->E 3 | -0.69 | -0.69 to -0.68 | 425.2 | no |
+| M 31 | D5300 | 60 / 300 | 5.0 | 3 | E->E 3 | -0.90 | -0.90 to -0.89 | 220.3 | no |
+| M 31 | D5300 | 120 / 180 | 1.5 | 3 | E->E 3 | +0.05 | -0.27 to +0.36 | 425.2 | yes |
+| M 31 | D5300 | 120 / 300 | 2.5 | 3 | E->E 3 | -0.67 | -0.77 to -0.58 | 220.3 | yes |
+| M 31 | D5300 | 180 / 300 | 1.7 | 1 | E->E 1 | -0.69 | -0.69 to -0.69 | 220.3 | yes |
+| M 42 | D5300 | 30 / 60 | 2.0 | 3 | E->E 3 | +0.10 | +0.06 to +0.27 | 1358.2 | yes |
+| M 42 | D5300 | 30 / 120 | 4.0 | 3 | E->E 3 | +0.55 | +0.52 to +0.60 | 7472.6 | yes |
+| M 42 | ASI533MM Pro | 30 / 300 | 10.0 | 3 | E->E 3 | +0.09 | +0.03 to +0.66 | 14357.4 | yes |
+| M 45 | ASI533MM Pro | 30 / 60 | 2.0 | 1 | E->E 1 | +0.24 | +0.24 to +0.24 | 763.3 | yes |
+| M 45 | ASI533MM Pro | 30 / 300 | 10.0 | 3 | E->E 3 | +1.47 | +1.23 to +2.13 | 7782.6 | yes |
+| M 45 | ASI533MM Pro | 60 / 300 | 5.0 | 3 | E->E 3 | +0.99 | +0.80 to +1.51 | 7782.6 | yes |
+| M 51 | D5300 | 60 / 180 | 3.0 | 8 | E->E 7, E->M 1 | +0.21 | -0.97 to +1.37 | 286.7 | yes |
+| M 57 | ASI533MM Pro | 30 / 60 | 2.0 | 7 | E->E 7 | -0.06 | -0.13 to +0.16 | 80.5 | no |
+| M 81 | ASI533MM Pro | 30 / 300 | 10.0 | 2 | M->E 2 | +4.25 | +3.65 to +4.85 | 41.6 | yes |
+| M 81 | ASI533MM Pro | 60 / 300 | 5.0 | 3 | E->E 3 | -0.28 | -0.37 to -0.20 | 9.3 | no |
+| M 81 | ASI533MM Pro | 60 / 600 | 10.0 | 6 | M->E 2, E->E 4 | -0.30 | -0.50 to -0.17 | 20.0 | no |
+| M 81 | ASI533MM Pro | 300 / 600 | 2.0 | 2 | E->E 2 | +0.10 | +0.04 to +0.16 | 20.1 | yes |
+| NGC 1893 | ASI533MM Pro | 60 / 300 | 5.0 | 9 | E->E 9 | +0.07 | -0.63 to +0.68 | 58.7 | yes |
+| NGC 1893 | ASI533MM Pro | 60 / 600 | 10.0 | 3 | E->E 3 | +0.23 | -0.29 to +0.61 | 139.7 | yes |
+| NGC 1893 | ASI533MM Pro | 300 / 600 | 2.0 | 3 | E->E 3 | +0.15 | -0.04 to +0.43 | 139.7 | yes |
+| NGC 2024 | D5300 | 180 / 300 | 1.7 | 3 | E->E 3 | +0.18 | +0.13 to +0.42 | 7198.0 | yes |
+| NGC 2244 | ASI533MM Pro | 300 / 600 | 2.0 | 6 | E->E 6 | +0.10 | -0.06 to +0.29 | 165.4 | yes |
+| NGC 2403 | ASI533MM Pro | 30 / 60 | 2.0 | 3 | E->E 3 | -0.00 | -0.01 to +0.26 | 4.5 | yes |
+| NGC 2403 | ASI533MM Pro | 30 / 300 | 10.0 | 3 | E->E 3 | +0.44 | +0.09 to +0.45 | 20.9 | yes |
+| NGC 2403 | ASI533MM Pro | 60 / 300 | 5.0 | 9 | E->E 9 | -0.04 | -0.35 to +0.46 | 20.9 | yes |
+| NGC 2903 | ASI533MM Pro | 300 / 600 | 2.0 | 9 | E->E 9 | -0.16 | -0.27 to +0.24 | 55.3 | yes |
+| NGC 4438 | D5300 | 120 / 180 | 1.5 | 6 | E->E 6 | +0.13 | -0.19 to +0.24 | 69.7 | yes |
+| NGC 4438 | D5300 | 120 / 300 | 2.5 | 4 | E->E 4 | +0.14 | -0.05 to +0.35 | 146.8 | no |
+| NGC 4438 | D5300 | 180 / 300 | 1.7 | 6 | E->E 6 | +0.13 | -0.21 to +0.95 | 123.0 | no |
+| NGC 4438 | ASI533MM Pro | 300 / 600 | 2.0 | 3 | E->E 3 | -0.10 | -0.24 to +0.24 | 11.1 | yes |
+| NGC 6823 | D5300 | 300 / 600 | 2.0 | 2 | E->E 2 | +0.19 | -0.12 to +0.49 | 2336.5 | yes |
+| NGC 6888 | D5300 | 60 / 120 | 2.0 | 3 | E->E 3 | -0.42 | -0.46 to +0.55 | 276.7 | yes |
+| NGC 6888 | D5300 | 60 / 180 | 3.0 | 3 | E->E 3 | +0.43 | +0.34 to +2.83 | 1029.4 | yes |
+| NGC 6888 | D5300 | 120 / 180 | 1.5 | 5 | E->E 5 | +0.08 | -0.36 to +1.47 | 1792.4 | yes |
+| NGC 7000 | D5300 | 180 / 300 | 1.7 | 2 | E->E 2 | -0.04 | -0.14 to +0.06 | 623.2 | yes |
+| NGC 7023 | D5300 | 60 / 120 | 2.0 | 3 | E->E 3 | +0.40 | -0.14 to +0.53 | 34.5 | yes |
+| NGC 7023 | D5300 | 60 / 180 | 3.0 | 1 | E->E 1 | +2.40 | +2.40 to +2.40 | 129.9 | yes |
+| NGC 7023 | D5300 | 60 / 300 | 5.0 | 1 | E->E 1 | -0.35 | -0.35 to -0.35 | 40.0 | yes |
+| NGC 7023 | D5300 | 120 / 180 | 1.5 | 3 | E->E 3 | +1.43 | +1.22 to +2.44 | 129.9 | yes |
+| NGC 7023 | D5300 | 120 / 300 | 2.5 | 3 | E->E 3 | -0.54 | -0.58 to -0.35 | 40.0 | yes |
+| NGC 7023 | D5300 | 180 / 300 | 1.7 | 1 | E->E 1 | -0.81 | -0.81 to -0.81 | 40.0 | yes |
+| Navi | ASI533MM Pro | 2 / 3 | 1.5 | 9 | E->E 9 | -0.17 | -0.33 to +0.01 | 180.2 | yes |
+| Vega | D5300 | 1 / 2 | 2.0 | 9 | M->M 8, E->E 1 | +0.10 | -0.16 to +0.34 | 3.0 | yes |
+
+- **Verdict:** Not judged. The numbers set the range of the quality rows (80 times the room on the ASI533MM Pro, none elsewhere); they do not make the estimate accurate.
+- **Limits:** The stars in a pair are the same star only if the match is right; a wrong match shows as a large error, and the 2 px limit removed the worst. Faint companions, nebulosity under a clipped star (M 42, NGC 2024 with estimates of 242,000 times the room) and the Bayer mosaic of the D5300 make the estimate worse in ways this test cannot separate. Nights differ in transparency and focus (28% of the 71 exposure pairs are on different nights; they are marked), and the baseline of 14% is for unclipped stars. The measured-to-estimated cases at more than 5 times the room are few. Every frame used the default star width of 3.0 px; the estimate grows steeply as the assumed width falls (see [STK-40](#stk-40)), and a measured width would change the sizes and probably the range. The check does not test the sample of three frames per group that the quality rows use. It does not check whether the Moffat index of 3 is right.
+- **To tune for your setup:** Run the scripts on your own pairs of exposure lengths. Give the estimate the star width measured in each frame, and re-run to see whether the range moves. A camera that is not listed has no range, so its estimated peaks are stored as not measured.
+- **Regenerate with:** The scripts in the procedure.
+- **Guarded by tests:** `test_group_peak.py` (the range by camera) and `test_record_science.py` (assumed inside the range, not measured beyond it, with its reason). The real-data run has no test.
+- **Raw record:** `science/peak_recheck/pairs.jsonl` in the session's scratch folder holds every matched star pair (5,604 lines); not kept in the repository.
 
 ## Design estimates
 

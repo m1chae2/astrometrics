@@ -26,13 +26,13 @@ from astrometricslib.pipelines.stacking.metrics import (
     GATE_METRIC_BY_NAME,
     STACKING_EFFECTIVE_FRAME_COUNT,
     STACKING_EFFECTIVE_TIME_S,
-    STACKING_EMPTY_APERTURE_NOISE_ADU,
     STACKING_EMPTY_APERTURE_NOISE_NORMALIZED,
+    STACKING_EMPTY_APERTURE_NOISE_STACK_UNIT,
     STACKING_FRAME_WEIGHT,
     STACKING_GATE_NEGATIVE_PIXELS,
     STACKING_GROUP_ALIGNMENT_SHIFT_PX,
     STACKING_NEGATIVE_PIXEL_MAX_FRACTION,
-    STACKING_NOISE_REFERENCE_FLUX_ADU,
+    STACKING_NOISE_REFERENCE_FLUX_STACK_UNIT,
 )
 from astrometricslib.pipelines.stacking.post_processing.record_quality import (
     measure_noise_safely,
@@ -164,8 +164,8 @@ def test_exposure_group_values_sit_on_each_groups_own_stack() -> None:
 def test_noise_rows_carry_their_uncertainty_and_sample_count() -> None:
     """Noise, reference flux and ratio carry their errors."""
     measurements = _measurements()
-    noise = _by_metric(measurements, STACKING_EMPTY_APERTURE_NOISE_ADU)[0]
-    reference = _by_metric(measurements, STACKING_NOISE_REFERENCE_FLUX_ADU)[0]
+    noise = _by_metric(measurements, STACKING_EMPTY_APERTURE_NOISE_STACK_UNIT)[0]
+    reference = _by_metric(measurements, STACKING_NOISE_REFERENCE_FLUX_STACK_UNIT)[0]
     ratio = _by_metric(measurements, STACKING_EMPTY_APERTURE_NOISE_NORMALIZED)[0]
     assert (noise.sample_count, reference.sample_count, ratio.sample_count) == (100, 10, 100)
     assert noise.uncertainty == pytest.approx(0.00014)
@@ -177,8 +177,8 @@ def test_no_solution_gives_three_not_measured_noise_rows_with_the_reason() -> No
     outcome = StackNoiseOutcome(None, NO_WCS_REASON)
     measurements = _measurements(noise=outcome)
     for metric in (
-        STACKING_EMPTY_APERTURE_NOISE_ADU,
-        STACKING_NOISE_REFERENCE_FLUX_ADU,
+        STACKING_EMPTY_APERTURE_NOISE_STACK_UNIT,
+        STACKING_NOISE_REFERENCE_FLUX_STACK_UNIT,
         STACKING_EMPTY_APERTURE_NOISE_NORMALIZED,
     ):
         row = _by_metric(measurements, metric)[0]
@@ -290,4 +290,7 @@ def test_the_stage_stores_the_rows_of_a_stack(tmp_path: Path, monkeypatch: pytes
     assert stored
     assert {row.run_id for row in stored} == {"job-9"}
     # The stack file is missing, so the noise is recorded as not measured.
-    assert _by_metric(stored, STACKING_EMPTY_APERTURE_NOISE_ADU)[0].status is MeasurementStatus.NOT_MEASURED
+    assert (
+        _by_metric(stored, STACKING_EMPTY_APERTURE_NOISE_STACK_UNIT)[0].status
+        is MeasurementStatus.NOT_MEASURED
+    )

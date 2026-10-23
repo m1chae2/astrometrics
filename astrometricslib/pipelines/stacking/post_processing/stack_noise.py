@@ -67,7 +67,7 @@ import logging
 import math
 import os
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 from astropy.io import fits
@@ -101,6 +101,7 @@ __all__ = [
     "reset_apertures",
     "save_noise_sums",
     "signed_aperture_sum",
+    "sky_level_of_plane",
 ]
 
 # The file beside a target's stacks that keeps its sky apertures.
@@ -457,10 +458,17 @@ class StackNoiseOutcome:
         The measurement, or `None` when it could not be made.
     reason : `str`
         Why there is no result. Empty when there is one.
+    stack_sky_level : `float` or `None`
+        The median of the stack's usable pixels, in the stack's units, taken
+        from the plane this measurement already read (see
+        `sky_level_of_plane`).
+        It is set even when there is no noise result. `None` when the plane
+        was not read or has no usable pixel.
     """
 
     result: StackNoiseResult | None
     reason: str = ""
+    stack_sky_level: float | None = None
 
 
 @dataclass(frozen=True)
@@ -647,6 +655,32 @@ def _stack_plane(stack_path: str) -> np.ndarray | None:
     if data is None:
         return None
     return collapse_to_2d(np.asarray(data, dtype=np.float64))
+
+
+def sky_level_of_plane(plane: np.ndarray) -> float | None:
+    """Give the sky level of a stack image: the median of its usable pixels.
+
+    Pixels that are exactly zero (the empty edge of a registered stack) and
+    pixels that are not finite are left out. Stars cover a small share of the
+    stack, so the median is the sky.
+
+    Parameters
+    ----------
+    plane : `numpy.ndarray`
+        The stack as one 2-D image (the noise step reads it once and passes
+        it on).
+
+    Returns
+    -------
+    level : `float` or `None`
+        The median in the stack's own units, or `None` when the image holds no
+        usable pixel or the median is not above zero.
+    """
+    usable = plane[np.isfinite(plane) & (plane != 0)]
+    if usable.size == 0:
+        return None
+    level = float(np.median(usable))
+    return level if level > 0 else None
 
 
 def _celestial_wcs(header: fits.Header) -> WCS | None:
@@ -1358,6 +1392,39 @@ def measure_stack_noise(
     plane = _stack_plane(stack_path)
     if plane is None:
         return StackNoiseOutcome(None, "the stack file holds no pixels")
+    # The plane is read once; the sky level is taken from it here so no later
+    # step has to read the stack again.
+    outcome = _measure_noise_in_plane(plane, stack_path, reference_frame_path, apertures_path, crop_offset)
+    return replace(outcome, stack_sky_level=sky_level_of_plane(plane))
+
+
+def _measure_noise_in_plane(
+    plane: np.ndarray,
+    stack_path: str,
+    reference_frame_path: str | None,
+    apertures_path: str,
+    crop_offset: tuple[int, int],
+) -> StackNoiseOutcome:
+    """Measure a stack's noise in the target's fixed apertures on its plane.
+
+    Parameters
+    ----------
+    plane : `numpy.ndarray`
+        The stack as one 2-D image (see `measure_stack_noise`).
+    stack_path : `str`
+        The finished stack, for its header and name.
+    reference_frame_path : `str` or `None`
+        The registration reference frame.
+    apertures_path : `str`
+        Where the target's apertures are kept.
+    crop_offset : `tuple` [`int`, `int`]
+        The (columns, rows) cut from the stack's left and top edges.
+
+    Returns
+    -------
+    outcome : `StackNoiseOutcome`
+        The measurement, or the reason there is none.
+    """
     stack_header = read_header(stack_path)
     wcs = _celestial_wcs(stack_header)
     wcs_source = "stack header"

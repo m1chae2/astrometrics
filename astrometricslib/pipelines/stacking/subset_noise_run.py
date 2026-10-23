@@ -97,6 +97,12 @@ from astrometricslib.pipelines.stacking.post_processing.record_quality import (
     membership_count_measurements,
     noise_measurements,
 )
+from astrometricslib.pipelines.stacking.post_processing.record_science import (
+    compute_expected_noise,
+    expected_noise_measurements,
+    resolve_stack_sky_level,
+    stack_sky_level_measurements,
+)
 from astrometricslib.pipelines.stacking.post_processing.stack_membership import (
     StackMembership,
     determine_stack_members,
@@ -395,6 +401,9 @@ class LibraryRun:
         The library stack's per-aperture noise sums, the reference flux they
         are read against and the name of the stack that chose the apertures
         (see `stack_noise.load_noise_sums`); `None` when not saved.
+    store : `QualityStore` or `None`
+        The quality store the run read, so later steps (the expected noise of
+        each subset) read from it instead of opening their own.
     """
 
     members: list[FrameRecord]
@@ -404,6 +413,7 @@ class LibraryRun:
     assumed_reason: str = ""
     effective_count: float | None = None
     noise_sums: tuple[np.ndarray, float, str] | None = None
+    store: QualityStore | None = None
 
 
 def read_library_run(target: Target, library_stack_path: str, configuration: Any) -> LibraryRun:
@@ -464,6 +474,7 @@ def read_library_run(target: Target, library_stack_path: str, configuration: Any
             assumed_reason=assumed[0] if assumed else "",
             effective_count=count_row.value,
             noise_sums=sums,
+            store=store,
         )
     members, missing = library_member_frames(target, library_stack_path)
     if missing:
@@ -480,6 +491,7 @@ def read_library_run(target: Target, library_stack_path: str, configuration: Any
         weights_reason=store_reason,
         assumed_reason="the member list is the frames given to the stacker, not the frames Siril kept",
         noise_sums=sums,
+        store=store,
     )
 
 
@@ -785,6 +797,30 @@ def _stack_and_measure(
     if context is not None and subject is not None:
         measurements = noise_measurements(noise, context, subject)
         measurements.extend(membership_count_measurements(membership, membership_reason, context, subject))
+        # The noise the subset's own frames predict, stored beside the noise
+        # that was measured, so the two can be read side by side, and the
+        # stack's sky level for the unit check.
+        measurements.extend(
+            expected_noise_measurements(
+                compute_expected_noise(
+                    membership,
+                    membership_reason,
+                    target.id,
+                    configuration,
+                    store=None if library is None else library.store,
+                    diagnostics=None if outcome is None else outcome.diagnostics,
+                    is_spectral=bool(outcome is not None and outcome.is_spectral),
+                ),
+                context,
+                subject,
+            )
+        )
+        if outcome is not None and outcome.stack_path is not None:
+            measurements.extend(
+                stack_sky_level_measurements(
+                    resolve_stack_sky_level(noise, outcome.stack_path), context, subject
+                )
+            )
         measurements.append(
             expected_ratio_measurement(
                 context, subject, library, result, membership.membership_reason if membership else ""

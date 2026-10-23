@@ -6,7 +6,7 @@ their results in the stack's quality summary. This file does not judge
 anything. It only turns that finished summary into quality measurements and
 stores them next to the summary, which stays as it is.
 
-Four kinds of measurement are made:
+Five kinds of measurement are made:
 
 - The summary's numbers, such as the rejected pixel fraction, the flat noise
   and the star widths, each under a name that says how it was measured.
@@ -14,6 +14,9 @@ Four kinds of measurement are made:
 - The noise of the stack in empty sky, on a flux scale that is the same for
   every stack of the target (see `stack_noise.py`), and the effective frame
   count and time (see `stack_membership.py`).
+- The noise the stack's frames predict, the noise the master flat adds, the
+  stack's sky level and the brightest star's peak of each exposure group (see
+  `record_science.py`), each stored as parts.
 - One weight for each frame that went into the stack.
 
 Nothing here reads the clock: the caller supplies the time. A failure while
@@ -51,8 +54,8 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_EFFECTIVE_FRAME_COUNT,
     STACKING_EFFECTIVE_TIME_READ_NOISE_S,
     STACKING_EFFECTIVE_TIME_S,
-    STACKING_EMPTY_APERTURE_NOISE_ADU,
     STACKING_EMPTY_APERTURE_NOISE_NORMALIZED,
+    STACKING_EMPTY_APERTURE_NOISE_STACK_UNIT,
     STACKING_EXPECTED_STACK_FWHM_PX,
     STACKING_FLAT_FRAME_COUNT,
     STACKING_FLAT_NOISE_FRACTION,
@@ -74,12 +77,17 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_MEDIAN_INPUT_FWHM_PX,
     STACKING_METRICS,
     STACKING_NEGATIVE_PIXEL_MAX_FRACTION,
-    STACKING_NOISE_REFERENCE_FLUX_ADU,
+    STACKING_NOISE_REFERENCE_FLUX_STACK_UNIT,
     STACKING_REGISTRATION_REFERENCE_STAR_COUNT,
     STACKING_REJECTED_PIXEL_FRACTION,
     STACKING_SATURATED_PIXEL_FRACTION,
     STACKING_STACKED_FWHM_PX,
     STACKING_ZERO_PIXEL_FRACTION,
+)
+from astrometricslib.pipelines.stacking.post_processing.record_science import (
+    StackScience,
+    compute_stack_science,
+    science_measurements,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_membership import (
     StackMembership,
@@ -361,14 +369,14 @@ def noise_measurements(
         return [
             build_measurement(_SPEC_BY_NAME[name], None, context, subject, reason=reason)
             for name in (
-                STACKING_EMPTY_APERTURE_NOISE_ADU,
-                STACKING_NOISE_REFERENCE_FLUX_ADU,
+                STACKING_EMPTY_APERTURE_NOISE_STACK_UNIT,
+                STACKING_NOISE_REFERENCE_FLUX_STACK_UNIT,
                 STACKING_EMPTY_APERTURE_NOISE_NORMALIZED,
             )
         ]
     rows = [
         build_measurement(
-            _SPEC_BY_NAME[STACKING_EMPTY_APERTURE_NOISE_ADU],
+            _SPEC_BY_NAME[STACKING_EMPTY_APERTURE_NOISE_STACK_UNIT],
             result.noise_adu,
             context,
             subject,
@@ -376,7 +384,7 @@ def noise_measurements(
             sample_count=result.aperture_count,
         ),
         build_measurement(
-            _SPEC_BY_NAME[STACKING_NOISE_REFERENCE_FLUX_ADU],
+            _SPEC_BY_NAME[STACKING_NOISE_REFERENCE_FLUX_STACK_UNIT],
             result.reference_flux_adu,
             context,
             subject,
@@ -541,6 +549,7 @@ def stacking_measurements(
     noise: StackNoiseOutcome,
     membership: StackMembership | None,
     membership_reason: str = "",
+    science: StackScience | None = None,
 ) -> list[QualityMeasurement]:
     """Build every measurement the stacking stage declares for one stack.
 
@@ -559,13 +568,18 @@ def stacking_measurements(
         worked out.
     membership_reason : `str`, optional
         Why there is no membership.
+    science : `StackScience`, optional
+        The expected noise, the master flat's noise, the stack's sky level and
+        the exposure groups' star peaks (see `record_science.py`). Left out,
+        those values are stored as not measured.
 
     Returns
     -------
     measurements : `list` of `QualityMeasurement`
         One record for each stack-level metric, each exposure group's values,
-        one record for each gate the summary holds, and the weights. A number
-        the summary does not have is ``not_measured`` with a reason.
+        one record for each gate the summary holds, the expected noise, the
+        flat's noise, the star peaks and the weights. A number the summary
+        does not have is ``not_measured`` with a reason.
     """
     stack_subject = context.stack_subject(stack_file_name)
     metrics = summary.stacking_metrics
@@ -614,6 +628,13 @@ def stacking_measurements(
         )
 
     measurements.extend(noise_measurements(noise, context, stack_subject))
+    group_subjects = [
+        exposure_group_subject(context, stack_file_name, group, index)
+        for index, group in enumerate(metrics.exposure_groups)
+    ]
+    measurements.extend(
+        science_measurements(science, context, stack_subject, metrics.exposure_groups, group_subjects)
+    )
     measurements.extend(_membership_measurements(membership, membership_reason, context, stack_subject))
     return measurements
 
@@ -726,8 +747,20 @@ def record_stacking_quality(
             # The library stack's sums, kept for the leave-one-night-out
             # comparison (see `paired_noise_difference`).
             save_noise_sums(stack_path, noise.result)
+        science = compute_stack_science(
+            stack_path,
+            summary.stacking_metrics.flat_noise_fraction,
+            summary.stacking_metrics.flat_smoothing_sigma_px,
+            membership,
+            membership_reason,
+            context.target_id,
+            diagnostics,
+            config,
+            noise=noise,
+            is_spectral=summary.stacking_metrics.is_spectral,
+        )
         measurements = stacking_measurements(
-            summary, context, os.path.basename(stack_path), noise, membership, membership_reason
+            summary, context, os.path.basename(stack_path), noise, membership, membership_reason, science
         )
         return record_run_measurements(measurements, config=config)
     except Exception:  # quality rows must never stop a stack

@@ -1,0 +1,736 @@
+"""Builds measurements of the expected noise, the flat and the star peaks.
+
+Three families of stack values are made here, next to the ones in
+`record_quality.py`. None of them judges anything. Each is stored as parts,
+and no ratio of one to another is stored.
+
+- The noise the stack's frames predict in an empty aperture: the sky (photon)
+  part, the read part, their sum, and the two numbers that turn a pixel's
+  variance into an aperture's noise in the stack's units (see
+  `expected_noise.py`). They are stored on every stack, next to the noise that
+  was measured (see `stack_noise.py`), so the two are read side by side.
+- The noise the master flat adds to the same apertures, with the stack's sky
+  level it is multiplied by (see `flat_noise_contribution.py`).
+- The brightest star's peak against the ceiling for each exposure group (see
+  `exposure_group_report.summarize_group_peak`). The values sit on the
+  group's own entry in the summary (`ExposureGroupSummary`), and the rows are
+  built from that entry. They replace the recommended exposure, which stays in
+  the summary until it is removed.
+
+A value that cannot be worked out is stored as not measured, with the reason.
+Nothing here reads the clock, and a failure never fails the stack.
+
+The expected noise is stored only where the frames' weights and sky describe
+the stack. A stack combined from several exposure lengths divides each group
+by its exposure and rescales it, which the frame weights leave out, so it gets
+no expected noise. A stack whose member list is uncertain gets an assumed one.
+A spectral stack gets none, because its measured noise is not stored either.
+"""
+
+import logging
+from collections.abc import Sequence
+from dataclasses import dataclass, replace
+from typing import Any
+
+from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
+from astrometricslib.drivers.quality_store import QualityStore
+from astrometricslib.models.quality.measurement import (
+    MeasurementStatus,
+    QualityMeasurement,
+    QualitySubject,
+    SubjectLevel,
+)
+from astrometricslib.models.quality.quality_summary import ExposureGroupSummary
+from astrometricslib.pipelines.shared.quality.frame_measurement import (
+    frame_subject_id,
+    look_up_frame_sensor_noise,
+)
+from astrometricslib.pipelines.shared.quality.metrics import FRAME_SKY_RATE_E_PER_S_PER_PX
+from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
+    PipelineRunContext,
+    build_measurement,
+)
+from astrometricslib.pipelines.stacking.metrics import (
+    STACKING_EXPECTED_EMPTY_APERTURE_NOISE_STACK_UNIT,
+    STACKING_EXPECTED_NOISE_APERTURE_AREA_PX,
+    STACKING_EXPECTED_NOISE_SCALE_STACK_UNIT_PER_ADU,
+    STACKING_EXPECTED_READ_NOISE_STACK_UNIT,
+    STACKING_EXPECTED_SKY_LEVEL_STACK_UNIT,
+    STACKING_EXPECTED_SKY_NOISE_STACK_UNIT,
+    STACKING_FLAT_NOISE_AFTER_SMOOTHING_FRACTION,
+    STACKING_FLAT_NOISE_IN_APERTURE_STACK_UNIT,
+    STACKING_GROUP_CLIP_CEILING_ADU,
+    STACKING_GROUP_CLIPPED_FRAME_COUNT,
+    STACKING_GROUP_LINEARITY_LIMIT_ADU,
+    STACKING_GROUP_PEAK_ABOVE_SKY_ADU,
+    STACKING_GROUP_PEAK_ESTIMATED_FRAME_COUNT,
+    STACKING_GROUP_PEAK_FRACTION,
+    STACKING_GROUP_RAW_SKY_LEVEL_ADU,
+    STACKING_METRICS,
+    STACKING_STACK_SKY_LEVEL_STACK_UNIT,
+)
+from astrometricslib.pipelines.stacking.post_processing.expected_noise import (
+    ExpectedNoiseOutcome,
+    expected_stack_noise,
+    gather_frame_noise_inputs,
+    measure_stack_sky_level,
+)
+from astrometricslib.pipelines.stacking.post_processing.exposure_saturation import (
+    CHECKED_ESTIMATE_AGAINST_MEASURED_RATIOS,
+    CHECKED_ESTIMATE_ERROR_FRACTION,
+    CHECKED_ESTIMATE_SHARE_WITHIN_ERROR,
+)
+from astrometricslib.pipelines.stacking.post_processing.flat_noise_contribution import (
+    FlatNoiseOutcome,
+    flat_noise_contribution,
+)
+from astrometricslib.pipelines.stacking.post_processing.stack_membership import (
+    StackMembership,
+    normalized_weights,
+)
+from astrometricslib.pipelines.stacking.post_processing.stack_noise import StackNoiseOutcome
+
+logger = logging.getLogger(__name__)
+
+__all__ = [
+    "StackScience",
+    "compute_expected_noise",
+    "compute_stack_science",
+    "expected_noise_measurements",
+    "flat_noise_measurements",
+    "group_peak_measurements",
+    "resolve_stack_sky_level",
+    "science_measurements",
+    "stack_sky_level_measurements",
+]
+
+_SPEC_BY_NAME = {spec.name: spec for spec in STACKING_METRICS}
+
+_NO_PEAK_REASON = "no sampled frame of the group gave a star peak above the sky"
+_NO_SKY_LEVEL_REASON = (
+    "the stack's sky level was not read (no finite pixel above zero, or the file was unreadable)"
+)
+SPECTRAL_STACK_REASON = (
+    "a spectral stack's measured empty-aperture noise is not stored, so no expected noise is stored beside it"
+)
+MULTIPLE_EXPOSURE_GROUPS_REASON = (
+    "the stack combines several exposure groups, each divided by its exposure and rescaled, which the "
+    "frame weights and the sky model do not describe"
+)
+
+
+@dataclass(frozen=True)
+class StackScience:
+    """What the record step needs for expected noise, flat noise and sky level.
+
+    The star peaks are not here: they sit on each exposure group's entry in
+    the summary (see `ExposureGroupSummary`).
+
+    Parameters
+    ----------
+    expected_noise : `ExpectedNoiseOutcome`
+        The noise the stack's frames predict, or the reason there is none.
+    flat_noise : `FlatNoiseOutcome`
+        The master flat's contribution, or the reason there is none.
+    stack_sky_level : `float` or `None`
+        The stack's sky level, in the stack's units.
+    """
+
+    expected_noise: ExpectedNoiseOutcome
+    flat_noise: FlatNoiseOutcome
+    stack_sky_level: float | None
+
+
+def resolve_stack_sky_level(noise: StackNoiseOutcome | None, stack_path: str) -> float | None:
+    """Give a stack's sky level without reading the stack twice.
+
+    Parameters
+    ----------
+    noise : `StackNoiseOutcome` or `None`
+        The noise step's outcome. Its ``stack_sky_level`` was taken from the
+        plane the step already read.
+    stack_path : `str`
+        The stack file. It is read (sampled) only when the noise step did not
+        read it, for example for a spectral stack.
+
+    Returns
+    -------
+    level : `float` or `None`
+        The sky level in the stack's units, or `None` when it cannot be read.
+        A failure is logged, never raised.
+    """
+    if noise is not None and noise.stack_sky_level is not None:
+        return noise.stack_sky_level
+    try:
+        return measure_stack_sky_level(stack_path)
+    except Exception:  # a by-product again
+        logger.exception("The sky level of the stack %s could not be read", stack_path)
+        return None
+
+
+def compute_expected_noise(
+    membership: StackMembership | None,
+    unavailable_reason: str,
+    target_id: str,
+    configuration: object = None,
+    store: QualityStore | None = None,
+    diagnostics: dict[str, Any] | None = None,
+    is_spectral: bool = False,
+) -> ExpectedNoiseOutcome:
+    """Work out the noise a stack's frames predict, from stored measurements.
+
+    Parameters
+    ----------
+    membership : `StackMembership` or `None`
+        The stack's members and weights, or `None` when they could not be
+        worked out.
+    unavailable_reason : `str`
+        Why there is no membership.
+    target_id : `str`
+        The target.
+    configuration : `AppConfiguration`, optional
+        Where the quality store and the camera profiles live. The
+        process-wide one if omitted.
+    store : `QualityStore`, optional
+        The quality store to read, instead of opening the configured one. A
+        run that already holds a store passes it here.
+    diagnostics : `dict`, optional
+        What the stacking run reported. A stack with an
+        ``"exposure_group_weights"`` entry was combined from several exposure
+        groups and gets no expected noise.
+    is_spectral : `bool`, optional
+        Whether the stack is spectral. Its measured noise is not stored, so no
+        expected noise is stored beside it.
+
+    Returns
+    -------
+    outcome : `ExpectedNoiseOutcome`
+        The expected noise, or the reason there is none (a spectral stack,
+        several exposure groups, no members, unknown weights, a frame with no
+        stored sky measurement, or a setting with no gain and read noise in
+        the camera profile). When the member list is uncertain (Siril stacked
+        fewer frames than there were candidates) the result is marked assumed,
+        with that reason. A failure is returned as a reason, never raised.
+    """
+    if is_spectral:
+        return ExpectedNoiseOutcome(None, SPECTRAL_STACK_REASON)
+    if membership is None or not membership.members:
+        return ExpectedNoiseOutcome(None, unavailable_reason or "the stack has no member frames")
+    if diagnostics and diagnostics.get("exposure_group_weights"):
+        return ExpectedNoiseOutcome(None, MULTIPLE_EXPOSURE_GROUPS_REASON)
+    try:
+        outcome = _expected_noise_from_store(membership, target_id, configuration, store)
+    except Exception as error:  # a by-product: no failure here may fail the stack
+        logger.exception("The expected noise of '%s' could not be worked out", target_id)
+        return ExpectedNoiseOutcome(None, f"the expected noise failed: {type(error).__name__}")
+    if outcome.result is not None and membership.membership_reason:
+        reasons = [
+            reason for reason in (outcome.result.assumed_reason, membership.membership_reason) if reason
+        ]
+        outcome = ExpectedNoiseOutcome(replace(outcome.result, assumed_reason="; ".join(reasons)))
+    return outcome
+
+
+def _expected_noise_from_store(
+    membership: StackMembership, target_id: str, configuration: object, store: QualityStore | None
+) -> ExpectedNoiseOutcome:
+    """Join the members' stored sky measurements with their camera profiles.
+
+    Parameters
+    ----------
+    membership : `StackMembership`
+        The stack's members and weights (it has members).
+    target_id : `str`
+        The target.
+    configuration : `AppConfiguration` or `None`
+        Where the store and the camera profiles live.
+    store : `QualityStore` or `None`
+        The store to read, or `None` to open the configured one.
+
+    Returns
+    -------
+    outcome : `ExpectedNoiseOutcome`
+        The expected noise or the reason there is none.
+    """
+    weights = normalized_weights(membership)
+    members = [member.frame for member in membership.members]
+    try:
+        if store is None:
+            store = QualityStore.from_configuration(configuration)
+        rows = store.query(
+            metric=FRAME_SKY_RATE_E_PER_S_PER_PX, level=SubjectLevel.FRAME, target_id=target_id
+        )
+    except Exception as error:  # reading the store may not fail the stack
+        logger.exception("The stored sky measurements of '%s' could not be read", target_id)
+        return ExpectedNoiseOutcome(
+            None, f"the stored sky measurements could not be read: {type(error).__name__}"
+        )
+    sky_rows = {row.subject.subject_id: row for row in rows if row.subject.channel is None}
+
+    def noise_setting(frame: Any) -> tuple[Any, Any, str]:
+        """Look up the gain and read noise of a frame's setting.
+
+        Parameters
+        ----------
+        frame : `Any`
+            A member frame record.
+
+        Returns
+        -------
+        gain, read_noise, reason : `tuple`
+            See `look_up_frame_sensor_noise`.
+        """
+        return look_up_frame_sensor_noise(resolve_camera_profile(frame.camera, configuration), frame)
+
+    inputs = gather_frame_noise_inputs(
+        members,
+        weights,
+        sky_rows,
+        lambda frame: frame_subject_id(frame.path, target_id),
+        noise_setting,
+        membership.weights_reason,
+    )
+    if isinstance(inputs, ExpectedNoiseOutcome):
+        return inputs
+    return expected_stack_noise(inputs)
+
+
+def compute_stack_science(
+    stack_path: str,
+    summary_flat_noise_fraction: float | None,
+    summary_flat_sigma_px: float | None,
+    membership: StackMembership | None,
+    membership_reason: str,
+    target_id: str,
+    diagnostics: dict[str, Any],
+    configuration: object = None,
+    noise: StackNoiseOutcome | None = None,
+    is_spectral: bool = False,
+) -> StackScience:
+    """Gather the expected noise, flat noise and sky level of a stack.
+
+    Parameters
+    ----------
+    stack_path : `str`
+        The finished stack. It is read only when the noise step did not read
+        it (see `resolve_stack_sky_level`).
+    summary_flat_noise_fraction : `float` or `None`
+        The stack summary's flat noise before any blur.
+    summary_flat_sigma_px : `float` or `None`
+        The stack summary's flat blur width.
+    membership : `StackMembership` or `None`
+        The stack's members and weights.
+    membership_reason : `str`
+        Why there is no membership.
+    target_id : `str`
+        The target.
+    diagnostics : `dict`
+        What the stacking run reported; ``"exposure_group_weights"`` marks a
+        stack combined from several exposure groups.
+    configuration : `AppConfiguration`, optional
+        Where the quality store and the camera profiles live.
+    noise : `StackNoiseOutcome`, optional
+        The noise step's outcome, which holds the sky level it took from the
+        plane it read.
+    is_spectral : `bool`, optional
+        Whether the stack is spectral.
+
+    Returns
+    -------
+    science : `StackScience`
+        The three values. Any failure becomes a reason, never a raised error,
+        and one failure does not drop the others.
+    """
+    expected = compute_expected_noise(
+        membership,
+        membership_reason,
+        target_id,
+        configuration,
+        diagnostics=diagnostics,
+        is_spectral=is_spectral,
+    )
+    sky_level = resolve_stack_sky_level(noise, stack_path)
+    try:
+        flat = flat_noise_contribution(summary_flat_noise_fraction, summary_flat_sigma_px, sky_level)
+    except Exception as error:  # a by-product again
+        logger.exception("The flat noise of the stack %s could not be worked out", stack_path)
+        flat = FlatNoiseOutcome(None, f"the flat's noise failed: {type(error).__name__}")
+    return StackScience(expected, flat, sky_level)
+
+
+def expected_noise_measurements(
+    outcome: ExpectedNoiseOutcome, context: PipelineRunContext, subject: QualitySubject
+) -> list[QualityMeasurement]:
+    """Build the six expected-noise measurements of a stack.
+
+    Parameters
+    ----------
+    outcome : `ExpectedNoiseOutcome`
+        The expected noise or the reason there is none.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    subject : `QualitySubject`
+        The stack.
+
+    Returns
+    -------
+    measurements : `list` of `QualityMeasurement`
+        The sky part, the read part, the total, the aperture's pixel count,
+        the unit scale and the sky level the frames predict. All not
+        measured, with the reason, when there is no result. A result built on
+        a gain or sky that is not measured, or on an uncertain member list,
+        makes every row ``assumed``. A result built only on measured inputs
+        stays ``measured``; the metric's estimator says it is a model
+        prediction from measured inputs (a measured row keeps no reason).
+    """
+    names = (
+        STACKING_EXPECTED_SKY_NOISE_STACK_UNIT,
+        STACKING_EXPECTED_READ_NOISE_STACK_UNIT,
+        STACKING_EXPECTED_EMPTY_APERTURE_NOISE_STACK_UNIT,
+        STACKING_EXPECTED_NOISE_APERTURE_AREA_PX,
+        STACKING_EXPECTED_NOISE_SCALE_STACK_UNIT_PER_ADU,
+        STACKING_EXPECTED_SKY_LEVEL_STACK_UNIT,
+    )
+    result = outcome.result
+    if result is None:
+        reason = outcome.reason or "the expected noise was not worked out"
+        return [
+            build_measurement(_SPEC_BY_NAME[name], None, context, subject, reason=reason) for name in names
+        ]
+    values = (
+        result.sky_noise,
+        result.read_noise,
+        result.total_noise,
+        result.aperture_area_px,
+        result.stack_units_per_adu,
+        result.predicted_sky_level,
+    )
+    status = MeasurementStatus.ASSUMED if result.assumed_reason else MeasurementStatus.MEASURED
+    reason = result.assumed_reason
+    return [
+        build_measurement(
+            _SPEC_BY_NAME[name],
+            value,
+            context,
+            subject,
+            reason=reason,
+            sample_count=result.frame_count,
+            status=status,
+        )
+        for name, value in zip(names, values, strict=True)
+    ]
+
+
+def stack_sky_level_measurements(
+    stack_sky_level: float | None, context: PipelineRunContext, subject: QualitySubject
+) -> list[QualityMeasurement]:
+    """Build the stack's sky level measurement.
+
+    Parameters
+    ----------
+    stack_sky_level : `float` or `None`
+        The stack's sky level, in the stack's units.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    subject : `QualitySubject`
+        The stack (a subset stack too).
+
+    Returns
+    -------
+    measurements : `list` of `QualityMeasurement`
+        One row: the level, or not measured with the reason.
+    """
+    return [
+        build_measurement(
+            _SPEC_BY_NAME[STACKING_STACK_SKY_LEVEL_STACK_UNIT],
+            stack_sky_level,
+            context,
+            subject,
+            reason=_NO_SKY_LEVEL_REASON,
+        )
+    ]
+
+
+def flat_noise_measurements(
+    outcome: FlatNoiseOutcome,
+    stack_sky_level: float | None,
+    context: PipelineRunContext,
+    subject: QualitySubject,
+) -> list[QualityMeasurement]:
+    """Build the stack's sky level and the master flat's two noise values.
+
+    Parameters
+    ----------
+    outcome : `FlatNoiseOutcome`
+        The flat's contribution or the reason there is none.
+    stack_sky_level : `float` or `None`
+        The stack's sky level, in the stack's units.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    subject : `QualitySubject`
+        The stack.
+
+    Returns
+    -------
+    measurements : `list` of `QualityMeasurement`
+        The sky level, the master's noise after any blur, and the noise it
+        adds to an aperture sum.
+    """
+    sky_rows = stack_sky_level_measurements(stack_sky_level, context, subject)
+    result = outcome.result
+    if result is None:
+        reason = outcome.reason or "the master flat's noise was not worked out"
+        return [
+            *sky_rows,
+            *(
+                build_measurement(_SPEC_BY_NAME[name], None, context, subject, reason=reason)
+                for name in (
+                    STACKING_FLAT_NOISE_AFTER_SMOOTHING_FRACTION,
+                    STACKING_FLAT_NOISE_IN_APERTURE_STACK_UNIT,
+                )
+            ),
+        ]
+    return [
+        *sky_rows,
+        build_measurement(
+            _SPEC_BY_NAME[STACKING_FLAT_NOISE_AFTER_SMOOTHING_FRACTION],
+            result.noise_after_smoothing_fraction,
+            context,
+            subject,
+        ),
+        build_measurement(
+            _SPEC_BY_NAME[STACKING_FLAT_NOISE_IN_APERTURE_STACK_UNIT],
+            result.aperture_noise,
+            context,
+            subject,
+        ),
+    ]
+
+
+def _provenance_note(label: str, kind: str | None) -> str:
+    """Say that a camera profile value is not a measured one.
+
+    Parameters
+    ----------
+    label : `str`
+        The value's name, such as ``"clip ceiling"``.
+    kind : `str` or `None`
+        How the profile obtained it (``measured``, ``datasheet``, ``assumed``)
+        or `None` when unknown.
+
+    Returns
+    -------
+    note : `str`
+        A sentence for the row's reason, or an empty string when the value is
+        measured.
+    """
+    if kind == "measured":
+        return ""
+    return f"the camera profile's {label} is {kind or 'of unknown origin'}, not measured"
+
+
+def group_peak_measurements(
+    group: ExposureGroupSummary, context: PipelineRunContext, subject: QualitySubject
+) -> list[QualityMeasurement]:
+    """Build the brightest-star peak measurements of one exposure group.
+
+    Parameters
+    ----------
+    group : `ExposureGroupSummary`
+        The group's entry, which holds the peak values (see
+        `exposure_group_report.GroupPeak`).
+    context : `PipelineRunContext`
+        The run's shared facts.
+    subject : `QualitySubject`
+        The group's stack.
+
+    Returns
+    -------
+    measurements : `list` of `QualityMeasurement`
+        The fraction, the peak, the sky, the clip ceiling, the linearity
+        limit, the count of estimated peaks and the count of clipped frames.
+
+        A peak estimated from the wings of a clipped star is ``assumed``, with
+        the error of the check that backs the estimate in the reason, when the
+        estimate lies within the range the check covered
+        (`checked_estimate_range`, kept on the group). Beyond that range the
+        fraction and the peak are not measured, and the reason gives the size
+        of the estimate. The clip ceiling and the linearity limit are
+        ``assumed`` when the camera profile's number is a datasheet or generic
+        value; the sky and the counts are read as they are.
+    """
+    with_peak = group.peak_frames_with_peak
+    estimated = group.peak_frames_estimated
+    sampled = group.peak_frames_sampled
+    largest_ratio = group.peak_largest_estimate_to_room_ratio
+    checked_range = group.peak_checked_range_room_multiples
+    beyond_range = estimated > 0 and largest_ratio is not None and largest_ratio > checked_range
+    low, middle, high = CHECKED_ESTIMATE_AGAINST_MEASURED_RATIOS
+    estimate_note = (
+        f"{estimated} of {with_peak} sampled frame(s) have a clipped star, whose peak is estimated from the "
+        "pixels around its core with a Moffat profile (beta 3), not measured; estimates up to "
+        f"{checked_range:.0f} times the room were checked: they grew within "
+        f"{CHECKED_ESTIMATE_ERROR_FRACTION:.0%} of the exposure ratio in "
+        f"{CHECKED_ESTIMATE_SHARE_WITHIN_ERROR:.0%} of cases, but against an unclipped star at a shorter "
+        f"exposure they were a median {middle:.2f} ({low:.2f} to {high:.1f}) of its measured peak "
+        "(register entry STK-41)"
+    )
+    beyond_note = (
+        f"estimate beyond the checked range ({0.0 if largest_ratio is None else largest_ratio:.0f} x); "
+        + (
+            f"estimates up to {checked_range:.0f} x were checked for this camera"
+            if checked_range > 0
+            else "no range was checked for this camera"
+        )
+    )
+
+    def row(
+        name: str,
+        value: float | None,
+        reason: str,
+        *,
+        status: MeasurementStatus = MeasurementStatus.MEASURED,
+        sample_count: int | None = None,
+    ) -> QualityMeasurement:
+        """Build one row of the group.
+
+        Parameters
+        ----------
+        name : `str`
+            The metric name.
+        value : `float` or `None`
+            The value, or `None` for not measured.
+        reason : `str`
+            The reason that goes with an assumed or missing value.
+        status : `MeasurementStatus`, optional
+            ``measured`` or ``assumed``.
+        sample_count : `int`, optional
+            How many frames are behind the value.
+
+        Returns
+        -------
+        measurement : `QualityMeasurement`
+            The row.
+        """
+        return build_measurement(
+            _SPEC_BY_NAME[name],
+            value,
+            context,
+            subject,
+            reason=reason,
+            sample_count=sample_count,
+            status=status,
+        )
+
+    rows = []
+    for name, value in (
+        (STACKING_GROUP_PEAK_FRACTION, group.brightest_star_peak_fraction),
+        (STACKING_GROUP_PEAK_ABOVE_SKY_ADU, group.brightest_star_peak_above_sky_adu),
+    ):
+        if beyond_range:
+            rows.append(row(name, None, beyond_note, sample_count=with_peak or None))
+        elif estimated > 0:
+            rows.append(
+                row(
+                    name,
+                    value,
+                    estimate_note,
+                    status=MeasurementStatus.ASSUMED,
+                    sample_count=with_peak or None,
+                )
+            )
+        else:
+            rows.append(row(name, value, _NO_PEAK_REASON, sample_count=with_peak or None))
+    rows.append(
+        row(
+            STACKING_GROUP_RAW_SKY_LEVEL_ADU,
+            group.peak_sky_adu,
+            _NO_PEAK_REASON,
+            sample_count=with_peak or None,
+        )
+    )
+    ceiling_note = (
+        _provenance_note("clip ceiling", group.peak_clip_ceiling_provenance)
+        if group.peak_frames_on_profile_ceiling > 0
+        else ""
+    )
+    rows.append(
+        row(
+            STACKING_GROUP_CLIP_CEILING_ADU,
+            group.peak_clip_ceiling_adu,
+            ceiling_note or _NO_PEAK_REASON,
+            status=MeasurementStatus.ASSUMED if ceiling_note else MeasurementStatus.MEASURED,
+            sample_count=with_peak or None,
+        )
+    )
+    limit_note = _provenance_note("linearity limit", group.peak_linearity_limit_provenance)
+    rows.append(
+        row(
+            STACKING_GROUP_LINEARITY_LIMIT_ADU,
+            group.peak_linearity_limit_adu,
+            limit_note or "the camera profile has no photometric linearity limit, or could not be read",
+            status=MeasurementStatus.ASSUMED if limit_note else MeasurementStatus.MEASURED,
+        )
+    )
+    rows.append(
+        row(
+            STACKING_GROUP_PEAK_ESTIMATED_FRAME_COUNT,
+            float(estimated) if with_peak else None,
+            _NO_PEAK_REASON,
+            sample_count=with_peak or None,
+        )
+    )
+    rows.append(
+        row(
+            STACKING_GROUP_CLIPPED_FRAME_COUNT,
+            float(group.peak_frames_clipped) if sampled else None,
+            "no frame of the group could be read",
+            sample_count=sampled or None,
+        )
+    )
+    return rows
+
+
+def science_measurements(
+    science: StackScience | None,
+    context: PipelineRunContext,
+    stack_subject: QualitySubject,
+    groups: Sequence[ExposureGroupSummary],
+    group_subjects: Sequence[QualitySubject],
+) -> list[QualityMeasurement]:
+    """Build every value of the three families for one stack.
+
+    Parameters
+    ----------
+    science : `StackScience` or `None`
+        What was gathered, or `None` when the caller gathered nothing (every
+        value is then not measured, with the reason).
+    context : `PipelineRunContext`
+        The run's shared facts.
+    stack_subject : `QualitySubject`
+        The combined stack.
+    groups : `Sequence` [`ExposureGroupSummary`]
+        The summary's exposure groups, which hold the peak values.
+    group_subjects : `Sequence` [`QualitySubject`]
+        The subject of each exposure group, in the same order as `groups`.
+
+    Returns
+    -------
+    measurements : `list` of `QualityMeasurement`
+        The expected noise, the sky level and flat noise, and each group's
+        peak values.
+    """
+    if science is None:
+        science = StackScience(
+            ExpectedNoiseOutcome(None, "the caller did not work out the expected noise"),
+            FlatNoiseOutcome(None, "the caller did not work out the flat's noise"),
+            None,
+        )
+    rows = expected_noise_measurements(science.expected_noise, context, stack_subject)
+    rows.extend(flat_noise_measurements(science.flat_noise, science.stack_sky_level, context, stack_subject))
+    # `group_subjects` is built from `groups` in the same order (see
+    # `record_quality.stacking_measurements`); a strict zip makes any drift
+    # fail loudly.
+    for group, subject in zip(groups, group_subjects, strict=True):
+        rows.extend(group_peak_measurements(group, context, subject))
+    return rows

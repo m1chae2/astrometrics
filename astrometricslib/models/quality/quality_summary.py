@@ -82,6 +82,46 @@ class ExposureGroupSummary(BaseModel):
     gain_nonlinear: bool = Field(default=False, alias="gainNonlinear")
     # Why the group is not in the combined image, or `None` if it is.
     left_out_reason: str | None = Field(default=None, alias="leftOutReason")
+    # How close the brightest star is to the camera's ceiling at this exposure
+    # (see `pipelines/stacking/post_processing/exposure_group_report.py`,
+    # `GroupPeak`). The values come from up to 3 raw frames spread through the
+    # group. All are `None` or 0 in a summary saved before they were made.
+    # The median over those frames of the peak above the sky divided by the
+    # room between the sky and the ceiling (1 is the ceiling; no unit).
+    brightest_star_peak_fraction: float | None = Field(default=None, alias="brightestStarPeakFraction")
+    # The median of those peaks, in ADU.
+    brightest_star_peak_above_sky_adu: float | None = Field(
+        default=None, alias="brightestStarPeakAboveSkyAdu"
+    )
+    # The median sky level of the frames that gave a peak, in ADU.
+    peak_sky_adu: float | None = Field(default=None, alias="peakSkyAdu")
+    # The median ceiling those frames were compared with, in ADU.
+    peak_clip_ceiling_adu: float | None = Field(default=None, alias="peakClipCeilingAdu")
+    # The camera profile's photometric linearity limit in ADU, or `None`.
+    peak_linearity_limit_adu: float | None = Field(default=None, alias="peakLinearityLimitAdu")
+    # How many sampled frames gave a peak, how many of those peaks were
+    # estimated from the wings of a clipped star, how many sampled frames had
+    # a clipped star at all, and how many frames were read.
+    peak_frames_with_peak: int = Field(default=0, alias="peakFramesWithPeak")
+    peak_frames_estimated: int = Field(default=0, alias="peakFramesEstimated")
+    peak_frames_clipped: int = Field(default=0, alias="peakFramesClipped")
+    peak_frames_sampled: int = Field(default=0, alias="peakFramesSampled")
+    # How many of the frames that gave a peak took their ceiling from the
+    # camera profile (their star is not clipped).
+    peak_frames_on_profile_ceiling: int = Field(default=0, alias="peakFramesOnProfileCeiling")
+    # The largest peak-to-room ratio among the estimated peaks (no unit), or
+    # `None` when no peak was estimated.
+    peak_largest_estimate_to_room_ratio: float | None = Field(
+        default=None, alias="peakLargestEstimateToRoomRatio"
+    )
+    # How the camera profile's clip ceiling and linearity limit were obtained
+    # ("measured", "datasheet" or "assumed"), or `None` when unknown.
+    peak_clip_ceiling_provenance: str | None = Field(default=None, alias="peakClipCeilingProvenance")
+    peak_linearity_limit_provenance: str | None = Field(default=None, alias="peakLinearityLimitProvenance")
+    # The largest estimated peak, in multiples of the room between the sky and
+    # the ceiling, whose growth with the exposure was checked for this group's
+    # camera (no unit). 0 when the camera has no checked range.
+    peak_checked_range_room_multiples: float = Field(default=0.0, alias="peakCheckedRangeRoomMultiples")
 
 
 class TargetSessionContribution(BaseModel):

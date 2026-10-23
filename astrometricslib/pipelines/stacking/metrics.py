@@ -24,6 +24,10 @@ from astrometricslib.models.quality.metric_spec import (
     MetricSpec,
     UncertaintyKind,
 )
+from astrometricslib.pipelines.stacking.post_processing.exposure_saturation import (
+    CHECKED_ESTIMATE_ERROR_FRACTION,
+    CHECKED_ESTIMATE_RANGE_ROOM_MULTIPLES_BY_CAMERA,
+)
 
 STACKING_REJECTED_PIXEL_FRACTION = "stacking.rejected_pixel_fraction"
 FRAME_QUARANTINE_ROUNDNESS = "frame.quarantine_roundness"
@@ -156,8 +160,8 @@ STACKING_GROUP_ALIGNMENT_SHIFT_PX = "stacking.group_alignment_shift_px"
 STACKING_GROUP_GAIN_MID_RANGE = "stacking.group_gain_mid_range"
 STACKING_GROUP_GAIN_BRIGHT_END_RATIO = "stacking.group_gain_bright_end_ratio"
 STACKING_GROUP_GAIN_DISAGREEMENT = "stacking.group_gain_disagreement_fraction"
-STACKING_EMPTY_APERTURE_NOISE_ADU = "stacking.empty_aperture_noise_adu"
-STACKING_NOISE_REFERENCE_FLUX_ADU = "stacking.noise_reference_flux_adu"
+STACKING_EMPTY_APERTURE_NOISE_STACK_UNIT = "stacking.empty_aperture_noise_stack_unit"
+STACKING_NOISE_REFERENCE_FLUX_STACK_UNIT = "stacking.noise_reference_flux_stack_unit"
 STACKING_EMPTY_APERTURE_NOISE_NORMALIZED = "stacking.empty_aperture_noise_normalized"
 STACKING_EFFECTIVE_FRAME_COUNT = "stacking.effective_frame_count"
 STACKING_EFFECTIVE_TIME_S = "stacking.effective_time_s"
@@ -167,6 +171,25 @@ STACKING_NIGHT_WEIGHT_SHARE = "stacking.night_weight_fraction"
 STACKING_NOISE_WITHOUT_NIGHT = "stacking.noise_without_night"
 STACKING_NOISE_DIFFERENCE_WITHOUT_NIGHT = "stacking.noise_difference_without_night"
 STACKING_SUBSET_EXPECTED_NOISE_RATIO = "stacking.subset_expected_noise_ratio"
+
+# The expected empty-aperture noise and its parts, the stack's sky level, the
+# master flat's noise, and the brightest star's peak of each exposure group.
+STACKING_EXPECTED_SKY_NOISE_STACK_UNIT = "stacking.expected_sky_noise_stack_unit"
+STACKING_EXPECTED_READ_NOISE_STACK_UNIT = "stacking.expected_read_noise_stack_unit"
+STACKING_EXPECTED_EMPTY_APERTURE_NOISE_STACK_UNIT = "stacking.expected_empty_aperture_noise_stack_unit"
+STACKING_EXPECTED_NOISE_APERTURE_AREA_PX = "stacking.expected_noise_aperture_area_px"
+STACKING_EXPECTED_NOISE_SCALE_STACK_UNIT_PER_ADU = "stacking.expected_noise_scale_stack_unit_per_adu"
+STACKING_EXPECTED_SKY_LEVEL_STACK_UNIT = "stacking.expected_sky_level_stack_unit"
+STACKING_STACK_SKY_LEVEL_STACK_UNIT = "stacking.stack_sky_level_stack_unit"
+STACKING_FLAT_NOISE_AFTER_SMOOTHING_FRACTION = "stacking.flat_noise_after_smoothing_fraction"
+STACKING_FLAT_NOISE_IN_APERTURE_STACK_UNIT = "stacking.flat_noise_in_aperture_stack_unit"
+STACKING_GROUP_PEAK_FRACTION = "stacking.group_brightest_star_peak_fraction"
+STACKING_GROUP_PEAK_ABOVE_SKY_ADU = "stacking.group_brightest_star_peak_above_sky_adu"
+STACKING_GROUP_RAW_SKY_LEVEL_ADU = "stacking.group_raw_sky_level_adu"
+STACKING_GROUP_CLIP_CEILING_ADU = "stacking.group_clip_ceiling_adu"
+STACKING_GROUP_LINEARITY_LIMIT_ADU = "stacking.group_linearity_limit_adu"
+STACKING_GROUP_PEAK_ESTIMATED_FRAME_COUNT = "stacking.group_peak_estimated_frame_count"
+STACKING_GROUP_CLIPPED_FRAME_COUNT = "stacking.group_clipped_frame_count"
 
 # The self-checks. The key is the gate's name in the stack summary; the value
 # is the metric that stores it. Each is named ``stacking.gate_<gate name>``.
@@ -217,6 +240,7 @@ def _context_metric(
     uncertainty_method: str = _NO_UNCERTAINTY,
     band: str = _BAND,
     definition_version: int = 1,
+    decisions: tuple[str, ...] = (),
 ) -> MetricSpec:
     """Declare one value that the stacking stage already makes.
 
@@ -253,6 +277,8 @@ def _context_metric(
     definition_version : `int`, optional
         The version of the metric's estimator, sample and constants. Raise it
         when any of them changes (plan section 3.4).
+    decisions : `tuple` [`str`], optional
+        The decisions the value informs (documentation only).
 
     Returns
     -------
@@ -267,6 +293,7 @@ def _context_metric(
         levels=levels,
         better=better,
         meaning=meaning,
+        decisions=decisions,
         estimator=estimator,
         sample_definition=sample_definition,
         band=band,
@@ -612,8 +639,8 @@ _WEIGHT_PURPOSE_REASON = (
 
 _NOISE_AND_WEIGHT_METRICS: tuple[MetricSpec, ...] = (
     _context_metric(
-        STACKING_EMPTY_APERTURE_NOISE_ADU,
-        "adu",
+        STACKING_EMPTY_APERTURE_NOISE_STACK_UNIT,
+        "stack_unit",
         "The noise of the stack in an empty patch of sky, in the stack's own units.",
         (
             "The robust spread of the sky-subtracted sums of the empty apertures: 1.4826 times the "
@@ -631,8 +658,8 @@ _NOISE_AND_WEIGHT_METRICS: tuple[MetricSpec, ...] = (
         definition_version=2,
     ),
     _context_metric(
-        STACKING_NOISE_REFERENCE_FLUX_ADU,
-        "adu",
+        STACKING_NOISE_REFERENCE_FLUX_STACK_UNIT,
+        "stack_unit",
         "The brightness of the fixed reference stars in this stack, in the stack's own units.",
         (
             "The zero point times the median brightness the reference stars had on the stack that chose "
@@ -1029,11 +1056,329 @@ _GATE_METRICS: tuple[MetricSpec, ...] = (
     ),
 )
 
+
+_EXPECTED_NOISE_PURPOSE_REASON = (
+    "A stack whose measured noise sits far above what its frames' light predicts has a cause the "
+    "model leaves out (correlated noise from registration, the master flat, a fixed pattern). "
+    "Reading the measured noise against the expected parts is how a reader finds that out."
+)
+_EXPECTED_NOISE_SAMPLE = (
+    "The member frames of the stack (see `stacking.frame_weight`), each with a stored sky "
+    "measurement from the frame measurement job and a gain and read noise in the camera profile "
+    "for its exact setting. A frame with a missing input is never skipped or replaced: the whole "
+    "stack's expected noise is then not measured, with the reason."
+)
+_EXPECTED_NOISE_MODEL = (
+    "The model: each frame has a sky of S electrons per pixel (the stored sky rate times the "
+    "exposure; the rate includes dark current and amp glow, because no dark is subtracted when it is "
+    "measured), a read noise of R electrons and a gain of g electrons per ADU, so one pixel has a "
+    "variance of (S + R^2) / g^2 ADU squared. The stack is the weighted mean sum(w x) / sum(w) of "
+    "the frames with the weights of `stacking.frame_weight`, so one stack pixel has the variance "
+    "sum(w^2 v) / (sum w)^2. The sky and read parts are summed apart. An aperture sum multiplies "
+    "that variance by `stacking.expected_noise_aperture_area_px` (about 46 px for the squared "
+    "overlaps of the radius 4 px circle plus about 13 px for the variance of the median of the 7 to "
+    "12 px sky ring that is subtracted), and the square root is multiplied by "
+    "`stacking.expected_noise_scale_stack_unit_per_adu` to give the stack's units. Left out: Siril's "
+    "normalization of each frame, the debayering of a color stack (interpolated, correlated pixels, "
+    "planes averaged), the noise of the master dark, bias and flat, fixed patterns, the data thrown "
+    "away by pixel rejection, and faint stars in the apertures; a measured noise above the expected "
+    "one is what these may explain. Registration is not one of the causes: a resampling kernel whose "
+    "weights add to 1 keeps an aperture sum. A stack combined from several exposure lengths, a stack "
+    "whose member list is uncertain, and a stack whose weights are unknown get no value or an assumed "
+    "one (see the reason on the row). A row built only from measured inputs says so: it is a model "
+    "prediction from measured inputs, not a measurement of the stack."
+)
+_NO_PROPAGATED_UNCERTAINTY = (
+    "No uncertainty is reported. The model has no random error of its own; the errors of its inputs "
+    "(the gain, the sky) are not propagated."
+)
+
+_SCIENCE_METRICS: tuple[MetricSpec, ...] = (
+    _context_metric(
+        STACKING_EXPECTED_SKY_NOISE_STACK_UNIT,
+        "stack_unit",
+        "The photon-noise part of the noise the stack's frames predict in an empty aperture.",
+        "The square root of the sky variance part of the model below, in the stack's units. "
+        + _EXPECTED_NOISE_MODEL,
+        _EXPECTED_NOISE_SAMPLE,
+        "pipelines.stacking.post_processing.expected_noise.expected_stack_noise",
+        better=Direction.LOWER,
+        purpose_reason=_EXPECTED_NOISE_PURPOSE_REASON,
+        uncertainty_method=_NO_PROPAGATED_UNCERTAINTY,
+        register_entry="STK-38",
+    ),
+    _context_metric(
+        STACKING_EXPECTED_READ_NOISE_STACK_UNIT,
+        "stack_unit",
+        "The read-noise part of the noise the stack's frames predict in an empty aperture.",
+        "The square root of the read variance part of the model below, in the stack's units. "
+        + _EXPECTED_NOISE_MODEL,
+        _EXPECTED_NOISE_SAMPLE,
+        "pipelines.stacking.post_processing.expected_noise.expected_stack_noise",
+        better=Direction.LOWER,
+        purpose_reason=_EXPECTED_NOISE_PURPOSE_REASON,
+        uncertainty_method=_NO_PROPAGATED_UNCERTAINTY,
+        register_entry="STK-38",
+    ),
+    _context_metric(
+        STACKING_EXPECTED_EMPTY_APERTURE_NOISE_STACK_UNIT,
+        "stack_unit",
+        "The noise the stack's frames predict in an empty aperture, in the units of the measured noise.",
+        "The sky part and the read part added in quadrature. " + _EXPECTED_NOISE_MODEL,
+        _EXPECTED_NOISE_SAMPLE,
+        "pipelines.stacking.post_processing.expected_noise.expected_stack_noise",
+        better=Direction.LOWER,
+        purpose_reason=_EXPECTED_NOISE_PURPOSE_REASON,
+        uncertainty_method=_NO_PROPAGATED_UNCERTAINTY,
+        register_entry="STK-38",
+    ),
+    _context_metric(
+        STACKING_EXPECTED_NOISE_APERTURE_AREA_PX,
+        "px",
+        "How many pixels of variance one aperture sum holds in the expected-noise model.",
+        (
+            "The sum of the squared pixel overlaps of the radius 4 px circle (about 46 px), plus (pi / 2) "
+            "times the squared sum of the overlaps divided by the number of ring pixels (about 13 px), "
+            "averaged over 16 places of the circle's centre inside a pixel: about 59 px for the stack's "
+            "aperture. The pi / 2 assumes Gaussian noise in the ring."
+        ),
+        "The one aperture shape of `stack_noise.py` (radius 4 px, ring 7 to 12 px).",
+        "pipelines.stacking.post_processing.expected_noise.effective_aperture_area_px",
+        purpose_reason=_EXPECTED_NOISE_PURPOSE_REASON,
+        register_entry="STK-38",
+    ),
+    _context_metric(
+        STACKING_EXPECTED_NOISE_SCALE_STACK_UNIT_PER_ADU,
+        "stack_unit/adu",
+        "How many of the stack's units one camera ADU is, in the expected-noise model.",
+        (
+            "1 / 65535 (the full-scale count of the exposure-group combine): Siril divides every integer "
+            "frame by 65535 when it reads it, a 14-bit raw frame included (the Nikon's frames are not "
+            "scaled up first), and writes the stack on that scale. A frame stored as floating-point "
+            "numbers would break the scale, and nothing checks for one. It was checked against the "
+            "stack's own sky level on one stack; every stack now stores both skies (see "
+            "`stacking.expected_sky_level_stack_unit`) so the check can be repeated."
+        ),
+        "One constant for the stack.",
+        "pipelines.stacking.post_processing.expected_noise.expected_stack_noise",
+        purpose_reason=_EXPECTED_NOISE_PURPOSE_REASON,
+        register_entry="STK-38",
+    ),
+    _context_metric(
+        STACKING_EXPECTED_SKY_LEVEL_STACK_UNIT,
+        "stack_unit",
+        "The sky level the stack's frames predict, in the stack's units.",
+        (
+            "The weighted mean, with the weights of `stacking.frame_weight`, of each frame's sky in ADU "
+            "(the stored sky rate times the exposure, divided by the gain) times the unit scale. Read "
+            "next to `stacking.stack_sky_level_stack_unit` it checks the unit scale on every stack."
+        ),
+        _EXPECTED_NOISE_SAMPLE,
+        "pipelines.stacking.post_processing.expected_noise.expected_stack_noise",
+        purpose_reason=(
+            "It is the other half of the unit check: the sky the frames predict against the sky the stack "
+            "shows."
+        ),
+        register_entry="STK-38",
+    ),
+    _context_metric(
+        STACKING_STACK_SKY_LEVEL_STACK_UNIT,
+        "stack_unit",
+        "The stack's own sky level, in the stack's units.",
+        (
+            "The median of the stack's pixels that are finite and not exactly zero (the empty edge of "
+            "a registered stack is zero), in the stack's own units. The stars and nebula cover a small "
+            "share of the stack, so the median is the sky. It is the signal level the master flat's "
+            "noise is multiplied by, and it checks the unit scale against the sky the frames predict."
+        ),
+        "Every finite, nonzero pixel of the stack (a color stack has its channels averaged).",
+        "pipelines.stacking.post_processing.stack_noise.sky_level_of_plane",
+        purpose_reason=(
+            "A part of `stacking.flat_noise_in_aperture_stack_unit` (the flat's noise is multiplied by the "
+            "signal) and of the unit check; no decision uses the level itself."
+        ),
+        register_entry="STK-39",
+    ),
+    _context_metric(
+        STACKING_FLAT_NOISE_AFTER_SMOOTHING_FRACTION,
+        "fraction",
+        "The relative noise of the master flat in use, after any blur (0.005 is 0.5%).",
+        (
+            "The flat assessment's noise of the averaged flat frames before any blur "
+            "(`stacking.flat_noise_fraction`) times the factor by which the Gaussian blur of width "
+            "`stacking.flat_smoothing_sigma_px` lowers white noise: the square root of the sum of the "
+            "squared weights of the sampled, normalized kernel (about 1 / (2 sigma sqrt(pi))). The "
+            "master itself is not kept, so this is derived, not measured on the master."
+        ),
+        "The master flat used for this stack.",
+        "pipelines.stacking.post_processing.flat_noise_contribution.flat_noise_contribution",
+        better=Direction.LOWER,
+        purpose_reason=(
+            "A part of `stacking.flat_noise_in_aperture_stack_unit`, stored so the fraction is never "
+            "hidden behind the aperture figure; the decision reads the aperture figure."
+        ),
+        uncertainty_method=_NO_PROPAGATED_UNCERTAINTY,
+        register_entry="STK-39",
+    ),
+    _context_metric(
+        STACKING_FLAT_NOISE_IN_APERTURE_STACK_UNIT,
+        "stack_unit",
+        "The noise the master flat adds to an empty-aperture sum, in the units of the stack's noise.",
+        (
+            "The stack's sky level times the master's relative noise before the blur times the standard "
+            "deviation of a circle's sum of white noise after the same blur (the circle's overlap weights "
+            "are blurred with the kernel and their squares summed, averaged over 16 places of the "
+            "centre). It is the noise of an aperture sum if the whole pattern stays (no dithering). "
+            "The sky ring that the stack's apertures subtract is left out: in a simulation it put the "
+            "subtracted sum 11% above the figure for a flat that is not blurred and 7% above for a blur of "
+            "1.5 px. A dithered stack averages the pattern, so for it the figure is an upper bound."
+        ),
+        "The master flat used for this stack and the stack's aperture shape (radius 4 px).",
+        "pipelines.stacking.post_processing.flat_noise_contribution.flat_noise_contribution",
+        better=Direction.LOWER,
+        purpose=MetricPurpose.DECISION,
+        purpose_reason=(
+            "Compared with `stacking.empty_aperture_noise_stack_unit` it tells whether more flat frames "
+            "would lower the stack's noise; the comparison itself is a rule outside the library."
+        ),
+        decisions=("take more flat frames",),
+        uncertainty_method=_NO_PROPAGATED_UNCERTAINTY,
+        register_entry="STK-39",
+    ),
+    _context_metric(
+        STACKING_GROUP_PEAK_FRACTION,
+        "fraction",
+        "How close the brightest star's peak is to the ceiling at this exposure (1 is the ceiling).",
+        (
+            "For each sampled raw frame of the group: the brightest star's peak above the sky divided by "
+            "the room between the sky (the frame's median) and the ceiling. The peak is the highest "
+            "pixel whose four neighbors are at least 20% of the way up (so a hot pixel is not a "
+            "star). When the frame is clipped (4 or more connected pixels at its highest value), the "
+            "ceiling is that value and the peak is estimated from the pixels just outside the clipped "
+            "core with a Moffat profile (beta 3). An estimate is checked, for the camera, against two "
+            "exposure lengths of the same field: it is stored as assumed, with the error of that check "
+            "in the reason, when the largest estimate of the group is within the largest size checked for "
+            "the camera ("
+            + ", ".join(
+                f"the ZWO ASI 533MM Pro: {size:.0f} times the room"
+                for size in CHECKED_ESTIMATE_RANGE_ROOM_MULTIPLES_BY_CAMERA.values()
+            )
+            + "; no other camera has a checked range), where the estimated peak grew within "
+            f"{CHECKED_ESTIMATE_ERROR_FRACTION:.0%} of the exposure ratio in at least 90% of the cases; "
+            "beyond it the row is not measured, with the size of the estimate. The group's "
+            "value is the median of the frames' fractions; the range test uses the largest estimate. For "
+            "an unclipped frame the ceiling is the camera profile's clip ceiling."
+        ),
+        "Up to 3 raw frames spread through the group. " + _GROUP_NOTE,
+        "pipelines.stacking.post_processing.exposure_group_report.summarize_group_peak",
+        purpose=MetricPurpose.DECISION,
+        purpose_reason=(
+            "It replaces the recommended exposure: the planner reads how near the ceiling the brightest "
+            "star is at the exposure that was used. The peak grows in proportion to the exposure."
+        ),
+        decisions=("exposure length",),
+        uncertainty_method=(
+            "No uncertainty is reported. The count of frames behind the median is the sample count. "
+            "The error of an estimated peak is stated in the row's reason, from register entry STK-41."
+        ),
+        register_entry="STK-40",
+    ),
+    _context_metric(
+        STACKING_GROUP_PEAK_ABOVE_SKY_ADU,
+        "adu",
+        "The brightest star's peak above the sky in a group's raw frames.",
+        "The median, over the sampled frames, of the peak above the sky (see the fraction's estimator).",
+        "Up to 3 raw frames spread through the group. " + _GROUP_NOTE,
+        "pipelines.stacking.post_processing.exposure_group_report.summarize_group_peak",
+        purpose_reason=(
+            "A part of `stacking.group_brightest_star_peak_fraction`, stored so the fraction is never the "
+            "only number."
+        ),
+        register_entry="STK-40",
+    ),
+    _context_metric(
+        STACKING_GROUP_RAW_SKY_LEVEL_ADU,
+        "adu",
+        "The sky level, in ADU, of a group's raw frames.",
+        "The median, over the sampled frames, of each frame's median pixel value.",
+        "Up to 3 raw frames spread through the group. " + _GROUP_NOTE,
+        "pipelines.stacking.post_processing.exposure_group_report.summarize_group_peak",
+        purpose_reason=(
+            "A part of `stacking.group_brightest_star_peak_fraction`: the room is the ceiling less this."
+        ),
+        register_entry="STK-40",
+    ),
+    _context_metric(
+        STACKING_GROUP_CLIP_CEILING_ADU,
+        "adu",
+        "The ceiling, in ADU, that the brightest star's peak was compared with.",
+        (
+            "The median, over the sampled frames, of the camera profile's clip ceiling (a frame whose "
+            "star is not clipped) or of the highest value the frame itself reached (a clipped frame). "
+            "The row is assumed when a frame took the profile's ceiling and the profile's number is a "
+            "datasheet or generic value, not a measured one."
+        ),
+        "Up to 3 raw frames spread through the group. " + _GROUP_NOTE,
+        "pipelines.stacking.post_processing.exposure_group_report.summarize_group_peak",
+        purpose_reason=(
+            "A part of `stacking.group_brightest_star_peak_fraction`: the ceiling it is taken against."
+        ),
+        register_entry="STK-40",
+    ),
+    _context_metric(
+        STACKING_GROUP_LINEARITY_LIMIT_ADU,
+        "adu",
+        "The value above which the camera stops responding in proportion to the light.",
+        (
+            "The camera profile's photometric linearity limit. Not stored when the profile has none. "
+            "The row is assumed when the profile's number is a datasheet or generic value."
+        ),
+        "One value per camera profile. " + _GROUP_NOTE,
+        "pipelines.stacking.post_processing.exposure_group_report.group_peak_fields",
+        purpose_reason=(
+            "A star whose peak sits above this limit gives a brightness that no longer grows in proportion "
+            "to the light, even though it is not clipped; a reader can compare the peak with it."
+        ),
+        register_entry="STK-40",
+    ),
+    _context_metric(
+        STACKING_GROUP_PEAK_ESTIMATED_FRAME_COUNT,
+        "count",
+        "How many of the sampled frames had a clipped star, whose peak was estimated.",
+        "A count of the frames whose peak came from the wings of a clipped star, not from a pixel.",
+        "Up to 3 raw frames spread through the group. " + _GROUP_NOTE,
+        "pipelines.stacking.post_processing.exposure_group_report.summarize_group_peak",
+        purpose_reason=(
+            "Says how much of `stacking.group_brightest_star_peak_fraction` is an estimate and how much a "
+            "measurement."
+        ),
+        register_entry="STK-40",
+    ),
+    _context_metric(
+        STACKING_GROUP_CLIPPED_FRAME_COUNT,
+        "count",
+        "How many of the sampled frames had a clipped brightest star.",
+        (
+            "A count of the sampled raw frames with at least 4 connected pixels at the frame's highest "
+            "value, whether or not a peak could be estimated for them. The row's sample count is the "
+            "number of frames read."
+        ),
+        "Up to 3 raw frames spread through the group. " + _GROUP_NOTE,
+        "pipelines.stacking.post_processing.exposure_group_report.summarize_group_peak",
+        purpose_reason=(
+            "Stored for every group, even when the peak estimate is not believed, so a reader always "
+            "knows whether the brightest star clipped."
+        ),
+        register_entry="STK-40",
+    ),
+)
+
 STACKING_METRICS: tuple[MetricSpec, ...] = (
     *_DECLARED_BEFORE_PHASE_3,
     *_VALUE_METRICS,
     *_NOISE_AND_WEIGHT_METRICS,
     *_NIGHT_METRICS,
+    *_SCIENCE_METRICS,
     *_GATE_METRICS,
 )
 

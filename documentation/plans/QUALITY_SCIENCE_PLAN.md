@@ -26,6 +26,15 @@ efficiency and the target dataset report need first stay in that plan: the corre
 sky in electrons, sky noise over read noise, gain and read noise for each camera setting, and the
 stack noise in empty apertures and against frame count.
 
+Status on 2026-10-23, batch S1 (branch `94-science-s1-noise`): built and run on the M 57 scratch
+stack. Section 2.3: the noise the stack's frames predict in an empty aperture, stored as a sky part,
+a read part, their sum and the two numbers that convert it to the stack's units (the ratio to the
+measured noise is not stored). Section 2.2: the noise the master flat adds to the same apertures,
+with the stack's sky level, stored beside it. Issue #94's two replacements: the brightest star's
+peak as a fraction of the ceiling for each exposure group, and the flat noise next to the stack
+noise (parts only). `recommended_exposure_seconds` and the flat gate stay until #97. Evidence is in
+`STK-38`, `STK-39` and `STK-40` of the validation register.
+
 The second review of 2026-10-17 moved the observing values (guide error, pointing error, dew,
 Moon and airmass) out of the `astrometricslib` tables into `wayfindinglib` (section 2.5). It added
 the undersampling term, the spectroscopy class gap against SNR, the flat-noise check and the
@@ -258,3 +267,32 @@ The second review board met on 2026-10-17. These are its findings that touched t
 | D4: Asteroid completeness grid and null search deferred. | Architect; user decision | Section 7 |
 
 No findings were rejected.
+
+## Appendix B. Review board changes, batch S1
+
+The board reviewed batch S1 on 2026-10-23, and all three reviewers approved it with changes. The
+user made two decisions the same day. First, the brightest star's estimated peak is stored only
+inside the range that a new two-exposure check supports (`STK-41`), and is not measured above it.
+Second, two noise tests run in S1: single frames against the model, and the difference of two
+half-stacks (`STK-38`).
+
+| Finding | Raised by | Where it landed |
+| :--- | :--- | :--- |
+| The noise floor fitted to four nested, unscaled subsets is not supported; a fixed pattern is far too small to explain it. | Astronomer | `STK-38`, now with the two noise tests |
+| Registration interpolation does not raise the noise of an aperture sum; dark current is already in the sky; normalization and debayering are left out. | Astronomer | `expected_noise.py`, `metrics.py`, `STK-38` |
+| The unit check was done on one stack only. | Astronomer | Every stack stores its predicted and measured sky level |
+| A peak 82 times the room lies beyond the checked range. | Astronomer; user decision | `STK-40`, `STK-41`, `exposure_saturation.py` |
+| Multi-exposure stacks combine groups per second, which the model does not follow. | Engineer | Expected noise not measured for them |
+| An uncertain member list was ignored. | Engineer | Expected noise assumed, with the reason |
+| A camera-profile error or a non-finite blur width could stop a stack or drop its rows. | Engineer | Guards in `exposure_group_report.py` and `record_science.py` |
+| Datasheet ceilings and limits were stored as measured. | Engineer | Provenance passed through |
+| No tests for the joining code. | Engineer | `test_record_science.py`, `test_group_peak.py` |
+| The peak values took a second path beside the group summaries. | Architect | `ExposureGroupSummary` fields |
+| `adu` named two scales. | Architect | Stack-unit metrics renamed to `_stack_unit`, phase 3's included |
+| A fourth copy of the full-scale constant. | Architect, with the engineer | One constant, shared with the group combine |
+| Theory was only in docstrings. | Architect | Architecture paper, section 3.4.2 |
+| Advice ("about 0.6 s") in the register. | Architect | Removed from `STK-40` |
+| Sky level and flat fraction were labelled as decisions. | Architect | Now context |
+
+No findings were rejected. The architect also suggested dropping the stored aperture area and
+linearity limit; both stay, as inputs to the expected noise and the peak.

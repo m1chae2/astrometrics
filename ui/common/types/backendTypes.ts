@@ -1804,6 +1804,20 @@ export interface ExposureGroupSummary {
   gainDisagreement?: number | null;
   gainNonlinear?: boolean;
   leftOutReason?: string | null;
+  brightestStarPeakFraction?: number | null;
+  brightestStarPeakAboveSkyAdu?: number | null;
+  peakSkyAdu?: number | null;
+  peakClipCeilingAdu?: number | null;
+  peakLinearityLimitAdu?: number | null;
+  peakFramesWithPeak?: number;
+  peakFramesEstimated?: number;
+  peakFramesClipped?: number;
+  peakFramesSampled?: number;
+  peakFramesOnProfileCeiling?: number;
+  peakLargestEstimateToRoomRatio?: number | null;
+  peakClipCeilingProvenance?: string | null;
+  peakLinearityLimitProvenance?: string | null;
+  peakCheckedRangeRoomMultiples?: number;
 }
 
 /**

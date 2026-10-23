@@ -368,8 +368,9 @@ def result_content(result: Any) -> list[Any]:
     content : `list`
         Content a tool already built is passed on. A picture (an object with
         ``png_bytes`` and ``description``) and a matplotlib figure become an
-        image and a short text. Anything else becomes indented JSON text, cut
-        at `MAXIMUM_REPLY_BYTES`.
+        image and a short text. Anything else becomes indented JSON text;
+        a reply too long for `MAXIMUM_REPLY_BYTES` is sent without the
+        indentation, and cut only if it is still too long.
     """
     if isinstance(result, list) and result and isinstance(result[0], (TextContent, ImageContent)):
         return result
@@ -383,7 +384,12 @@ def result_content(result: Any) -> list[Any]:
         ]
     if callable(getattr(result, "savefig", None)):
         return _figure_as_image(result)
-    text = json.dumps(_serialize_result(result), indent=2, default=str)
+    serialized = _serialize_result(result)
+    text = json.dumps(serialized, indent=2, default=str)
+    if len(text) > MAXIMUM_REPLY_BYTES:
+        # The indentation alone can be a third of a long list; drop it before
+        # cutting anything.
+        text = json.dumps(serialized, separators=(",", ":"), default=str)
     if len(text) > MAXIMUM_REPLY_BYTES:
         text = text[:MAXIMUM_REPLY_BYTES] + (
             f"\n\n... [Output truncated: payload exceeded {MAXIMUM_REPLY_BYTES} bytes. "

@@ -19,7 +19,7 @@ professional setup. Work the numbers out for this setup before you call somethin
 The configuration is the user's `~/.config/astrometrics/astrometrics.config.toml` (read only; the
 `[Observatory.*]` sections); if it and this list disagree, the configuration wins: say so.
 
-**Site and control.** One fixed site near 45.76 N, 110.74 W (elevation not recorded). Capture runs
+**Site and control.** One fixed site (its coordinates are in the configuration). Capture runs
 in Ekos/KStars on a StellarMate computer through INDI; this app only reads and analyzes (it
 sends no device commands while Ekos runs). The mount model is not recorded. The mount has
 recurring RA/Dec stalls. Ekos writes the commanded pointing, not a plate solve, into each frame's

@@ -17,16 +17,22 @@ import pytest
 from astropy.io import fits
 from astropy.wcs import WCS
 
+from astrometricslib.pipelines.stacking.post_processing import stack_noise
 from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
     APERTURE_FILE_NAME,
+    APERTURE_FILE_VERSION,
     APERTURE_RADIUS_PX,
     APERTURE_SEPARATION_PX,
+    FAINT_SOURCE_CLEARANCE_PX,
     MAD_SIGMA_ERROR_FACTOR,
+    MINIMUM_USABLE_APERTURES,
     NO_WCS_REASON,
     RING_INNER_PX,
     RING_OUTER_PX,
+    faint_source_distance,
     load_apertures,
     measure_stack_noise,
+    place_empty_apertures,
     reset_apertures,
     signed_aperture_sum,
 )
@@ -522,4 +528,146 @@ def test_an_aperture_file_from_the_first_development_version_is_replaced(tmp_pat
     stack = _write(tmp_path / "stack.fits", _sky_image(2.0, seed=1), _sky_header())
     result = measure_stack_noise(stack, None, str(apertures)).result
     assert result is not None and result.apertures_created
-    assert json.loads(apertures.read_text())["version"] == 2
+    assert json.loads(apertures.read_text())["version"] == APERTURE_FILE_VERSION
+
+
+def _faint_field(seed: int, star_count: int, nebula: bool) -> tuple[np.ndarray, np.ndarray]:
+    """Build unit noise, then add faint stars and a nebula to a copy.
+
+    Parameters
+    ----------
+    seed : `int`
+        Seed of the noise and the stars.
+    star_count : `int`
+        How many faint Gaussian stars (width 2.2 px FWHM) to add. Their peaks
+        run from 0.2 to 30 times the noise of one pixel, evenly in the
+        logarithm.
+    nebula : `bool`
+        Whether to add a halo 60 px wide and a few small knots.
+
+    Returns
+    -------
+    noise, image : `numpy.ndarray`
+        The noise alone and the noise plus the sources.
+    """
+    generator = np.random.default_rng(seed)
+    noise = generator.normal(size=(SIZE, SIZE))
+    image = noise.copy()
+    width = 2.2 / 2.3548
+    offsets = np.arange(-10, 11)
+    kernel = np.exp(-(offsets[:, None] ** 2 + offsets[None, :] ** 2) / (2 * width**2))
+    peaks = np.exp(generator.uniform(np.log(0.2), np.log(30.0), star_count))
+    for peak in peaks:
+        row, column = generator.integers(12, SIZE - 12, 2)
+        image[row - 10 : row + 11, column - 10 : column + 11] += peak * kernel
+    if nebula:
+        rows, columns = np.mgrid[0:SIZE, 0:SIZE]
+        image += np.exp(-((rows - 450) ** 2 + (columns - 450) ** 2) / (2 * 60.0**2))
+        for _ in range(6):
+            knot_row, knot_column = generator.uniform(100, SIZE - 100, 2)
+            image += 0.6 * np.exp(-((rows - knot_row) ** 2 + (columns - knot_column) ** 2) / (2 * 6.0**2))
+    return noise, image
+
+
+def _spread_of_sums(plane: np.ndarray, positions: list[tuple[float, float]]) -> float:
+    """Give the robust spread of the aperture sums at the given positions.
+
+    Parameters
+    ----------
+    plane : `numpy.ndarray`
+        The image.
+    positions : `list` [`tuple` [`float`, `float`]]
+        The (row, column) of each aperture.
+
+    Returns
+    -------
+    spread : `float`
+        1.4826 times the median absolute deviation of the sums.
+    """
+    sums = np.array([signed_aperture_sum(plane, column, row) for row, column in positions])
+    return 1.4826 * float(np.median(np.abs(sums - np.median(sums))))
+
+
+def _unselected_spread(noise: np.ndarray) -> float:
+    """Give the noise's own aperture spread at unselected positions.
+
+    Parameters
+    ----------
+    noise : `numpy.ndarray`
+        The noise alone.
+
+    Returns
+    -------
+    spread : `float`
+        The robust spread of 400 sums at random positions.
+    """
+    generator = np.random.default_rng(7)
+    positions = [tuple(generator.uniform(20, SIZE - 20, 2)) for _ in range(400)]
+    return _spread_of_sums(noise, positions)
+
+
+def test_a_faint_source_keeps_the_apertures_away() -> None:
+    """A source far below the star finder's limit still clears its area."""
+    generator = np.random.default_rng(11)
+    image = generator.normal(size=(SIZE, SIZE))
+    rows, columns = np.mgrid[0:SIZE, 0:SIZE]
+    image += 1.5 * np.exp(-((rows - 300) ** 2 + (columns - 600) ** 2) / (2 * 3.0**2))
+    distance = faint_source_distance(image)
+    assert distance[300, 600] == 0
+    positions = place_empty_apertures(image, np.empty((0, 2)))
+    assert len(positions) >= MINIMUM_USABLE_APERTURES
+    nearest = min(math.hypot(row - 300, column - 600) for row, column in positions)
+    assert nearest > FAINT_SOURCE_CLEARANCE_PX
+
+
+def test_the_mask_on_pure_noise_leaves_the_noise_unbiased_within_its_error() -> None:
+    """On noise alone the rule keeps the apertures and does not pull low."""
+    ratios = []
+    for seed in range(8):
+        noise = np.random.default_rng(300 + seed).normal(size=(SIZE, SIZE))
+        positions = place_empty_apertures(noise, np.empty((0, 2)))
+        assert len(positions) >= 90
+        ratios.append(_spread_of_sums(noise, positions) / _unselected_spread(noise))
+    error = float(np.std(ratios)) / math.sqrt(len(ratios))
+    # The measured bias is in validation entry STK-36; the test only guards a
+    # large bias (5% covers the mean's error and the rule's own bias).
+    assert abs(float(np.mean(ratios)) - 1.0) < max(0.05, 3 * error)
+
+
+def test_faint_stars_and_a_nebula_no_longer_inflate_the_noise() -> None:
+    """The new placement recovers the injected noise; the old does not."""
+    old_excess, new_ratios = [], []
+    for seed in range(4):
+        noise, image = _faint_field(500 + seed, star_count=3300, nebula=True)
+        truth = _unselected_spread(noise)
+        # The old rule: no faint-source mask (the finder sees bright stars).
+        generator = np.random.default_rng(5)
+        old_positions = [tuple(generator.uniform(20, SIZE - 20, 2)) for _ in range(300)]
+        old_excess.append(_spread_of_sums(image, old_positions) / truth)
+        new_positions = place_empty_apertures(image, np.empty((0, 2)))
+        assert len(new_positions) >= MINIMUM_USABLE_APERTURES
+        new_ratios.append(_spread_of_sums(image, new_positions) / truth)
+    assert float(np.mean(old_excess)) > 1.15
+    assert abs(float(np.mean(new_ratios)) - 1.0) < 0.15
+
+
+def test_too_few_clean_apertures_is_a_reason_not_a_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A field with no clean sky gives a reason, never the old placement."""
+    monkeypatch.setattr(stack_noise, "faint_source_distance", lambda plane: np.zeros(plane.shape))
+    stack = _write(tmp_path / "stack.fits", _sky_image(2.0, seed=1), _sky_header())
+    outcome = measure_stack_noise(stack, None, str(tmp_path / APERTURE_FILE_NAME))
+    assert outcome.result is None
+    assert "faint sources" in outcome.reason
+    assert not (tmp_path / APERTURE_FILE_NAME).exists()
+
+
+def test_an_aperture_file_of_version_two_is_replaced(tmp_path: Path) -> None:
+    """Apertures placed by stars alone are never reused."""
+    apertures = tmp_path / APERTURE_FILE_NAME
+    apertures.write_text(json.dumps({"version": 2, "sets": {"unspecified": {}}}))
+    stack = _write(tmp_path / "stack.fits", _sky_image(2.0, seed=1), _sky_header())
+    result = measure_stack_noise(stack, None, str(apertures)).result
+    assert result is not None and result.apertures_created
+    assert json.loads(apertures.read_text())["version"] == APERTURE_FILE_VERSION

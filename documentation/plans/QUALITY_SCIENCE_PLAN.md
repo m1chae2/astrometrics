@@ -35,6 +35,13 @@ peak as a fraction of the ceiling for each exposure group, and the flat noise ne
 noise (parts only). `recommended_exposure_seconds` and the flat gate stay until #97. Evidence is in
 `STK-38`, `STK-39` and `STK-40` of the validation register.
 
+Status on 2026-10-23, aperture fix (branch `94-noise-aperture-fix`): the empty noise apertures are
+now placed away from faint sources as well as bright stars, using a mask made from the stack's
+pixels (never from the apertures' sums). On the M 57 library stack the measured noise fell from
+3.8 to 2.2 times the model's, and the ratio of the measured noise to the model is no longer
+dominated by a few faint stars. It does not reach 1: shared structure remains. Numbers are in
+`STK-36` and `STK-38`; `STK-36`'s 5% growth criterion is not met on the new placement.
+
 The second review of 2026-10-17 moved the observing values (guide error, pointing error, dew,
 Moon and airmass) out of the `astrometricslib` tables into `wayfindinglib` (section 2.5). It added
 the undersampling term, the spectroscopy class gap against SNR, the flat-noise check and the

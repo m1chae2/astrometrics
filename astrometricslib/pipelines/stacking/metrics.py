@@ -621,9 +621,14 @@ _NOISE_PURPOSE_REASON = (
 )
 _NOISE_SAMPLE = (
     "Up to 100 circular apertures (radius 4 px) placed once per target at sky positions away from "
-    "every detected star, and reused by every later stack of the target. Apertures that fall off the "
+    "the 400 brightest stars (24 px) and away from faint sources (12 px from any pixel that, after "
+    "removing the large-scale background, stands more than 3.5 robust sigma above zero at a smoothing "
+    "of 1.5, 3 or 6 px; the mask is made from the stack's pixels, never from the apertures' sums). "
+    "The apertures are reused by every later stack of the target. Apertures that fall off the "
     "stack or on empty (zero) edge pixels are dropped. No two apertures are closer than 24 px, so no two "
-    "sky rings share a pixel. A stack needs at least 20 usable apertures. The target keeps one set of "
+    "sky rings share a pixel. A stack needs at least 20 usable apertures; with fewer clean apertures the "
+    "noise is not measured. Sky structure too faint to flag (unresolved stars, a faint halo) stays in the "
+    "apertures. The target keeps one set of "
     "apertures for each camera and optic (see `stack_noise.reset_apertures`)."
 )
 _NOISE_UNCERTAINTY = (
@@ -646,8 +651,10 @@ _NOISE_AND_WEIGHT_METRICS: tuple[MetricSpec, ...] = (
             "The robust spread of the sky-subtracted sums of the empty apertures: 1.4826 times the "
             "median absolute deviation of the sums. Each sum is the aperture's pixel total (pixels "
             "weighted by the exact overlap) minus the median of its sky ring (7 to 12 px) times the "
-            "aperture area. Signed, so the spread is not cut at zero. The stack's pixel scale is "
-            "Siril's, so compare stacks only through the normalized value."
+            "aperture area. Signed, so the spread is not cut at zero. The apertures sit in sky free of "
+            "bright stars and of faint sources found in the stack's pixels (see the sample), so the spread "
+            "is the noise of empty sky plus whatever structure is too faint to flag. The stack's pixel "
+            "scale is Siril's, so compare stacks only through the normalized value."
         ),
         _NOISE_SAMPLE,
         "pipelines.stacking.post_processing.stack_noise.measure_stack_noise",

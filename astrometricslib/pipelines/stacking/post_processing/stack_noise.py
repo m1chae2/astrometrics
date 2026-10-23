@@ -5,12 +5,16 @@ two stacks of the same target, or of the same target before and after more
 frames, three things must be the same:
 
 1. The patches of sky. Each patch is a small circle (an "aperture") with no
-   star in it. Different patches can have different noise (vignetting, a faint
-   nebula), so every stack of a target uses the same patches. The patches are
-   chosen once, stored as sky positions (right ascension and declination, not
-   pixels) in a small file beside the target's stacks, and found again in each
-   later stack through that stack's coordinate solution (WCS). No two patches
-   overlap, so their sky rings share no pixels and the sums are independent.
+   star in it, bright or faint. Bright stars are found by the star finder;
+   faint ones are found by a mask made from the stack's own pixels
+   (`faint_source_distance`) before any patch is drawn, so a patch is never
+   chosen or dropped for how quiet its own sum is. Different patches can have
+   different noise (vignetting, a faint nebula), so every stack of a target
+   uses the same patches. The patches are chosen once, stored as sky positions
+   (right ascension and declination, not pixels) in a small file beside the
+   target's stacks, and found again in each later stack through that stack's
+   coordinate solution (WCS). No two patches overlap, so their sky rings share
+   no pixels and the sums are independent.
 2. The way the noise is measured. Each aperture's value is the sum of its
    pixels minus the sky level taken from a ring around it (the same sum a
    star's brightness uses). The noise is the robust spread of those sums over
@@ -74,6 +78,7 @@ from astropy.io import fits
 from astropy.wcs import WCS
 from astropy.wcs.utils import proj_plane_pixel_scales
 from photutils.aperture import CircularAnnulus, CircularAperture
+from scipy.ndimage import distance_transform_edt, gaussian_filter
 from scipy.spatial import cKDTree
 
 from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
@@ -93,11 +98,13 @@ __all__ = [
     "StackNoiseResult",
     "choose_apertures",
     "choose_apertures_with_reason",
+    "faint_source_distance",
     "load_apertures",
     "load_noise_sums",
     "measure_stack_noise",
     "noise_sums_path",
     "paired_noise_difference",
+    "place_empty_apertures",
     "reset_apertures",
     "save_noise_sums",
     "signed_aperture_sum",
@@ -107,10 +114,13 @@ __all__ = [
 # The file beside a target's stacks that keeps its sky apertures.
 APERTURE_FILE_NAME = "quality_apertures.json"
 
-# The version of the file's layout. Version 2 holds one set of apertures for
-# each camera and optic. The first development version (1) held one set, with
-# no per-star reference brightness, and is replaced when a stack is measured.
-APERTURE_FILE_VERSION = 2
+# The version of the file's layout. Version 3 holds one set of apertures for
+# each camera and optic, placed away from faint sources as well as bright
+# stars (see `FAINT_SOURCE_THRESHOLD_SIGMAS`). Version 2 apertures were placed
+# away from the 400 brightest stars only; faint stars sat in them. Version 1
+# held one set, with no per-star reference brightness. Older files are
+# replaced when a stack is measured, never used.
+APERTURE_FILE_VERSION = 3
 
 # The setup key of a stack whose header names neither camera, telescope nor
 # focal length.
@@ -157,6 +167,31 @@ MINIMUM_USABLE_APERTURES = 20
 # An empty aperture stays this far from every detected star, so a star's wings
 # cannot reach the aperture or its ring: twice the ring's outer radius.
 STAR_CLEARANCE_PX = 2.0 * RING_OUTER_PX
+
+# Faint sources are kept out of the empty apertures by a mask made from the
+# stack itself, before any aperture is drawn (so the rule never looks at an
+# aperture's sum). The stack is high-pass filtered (the Gaussian-smoothed
+# image at this width is taken away, about the ring's outer radius, so a
+# smooth sky gradient or a broad nebula halo is not flagged), then smoothed at
+# each width below (a faint star is the size of the star width, 1 to 2 px; a
+# small galaxy or a knot of nebula is several pixels), and every pixel more
+# than `FAINT_SOURCE_THRESHOLD_SIGMAS` robust sigmas above zero at any width is
+# flagged. The sigma of each width is the median absolute deviation of that
+# smoothed image, which stars cover too little of to move it, and which keeps
+# the correlation of the stacked noise that smoothing does not remove.
+FAINT_SOURCE_HIGH_PASS_SIGMA_PX = 12.0
+FAINT_SOURCE_SMOOTHING_SIGMAS_PX = (1.5, 3.0, 6.0)
+
+# A smoothed pixel is flagged above this many robust sigmas. For pure noise a
+# bell curve passes 3.5 sigma in 2.3e-4 of its pixels, so a few apertures in a
+# hundred lose a position to noise alone; the measured loss in the noise
+# (a downward bias) is in validation entry STK-36. A design choice, checked
+# on a synthetic noise field and on the M 57 stack.
+FAINT_SOURCE_THRESHOLD_SIGMAS = 3.5
+
+# An aperture stays this far from every flagged pixel: the ring's outer radius,
+# so no flagged pixel lies in the aperture or in its sky ring.
+FAINT_SOURCE_CLEARANCE_PX = RING_OUTER_PX
 
 # Two apertures stay at least this far apart: twice the ring's outer radius.
 # Then no two rings share a pixel, so the sky level taken for one aperture
@@ -1046,10 +1081,12 @@ def choose_apertures_with_reason(
     aperture_set : `ApertureSet` or `None`
         The apertures (positions drawn from a generator with a fixed seed, at
         least `APERTURE_SEPARATION_PX` apart, at least `STAR_CLEARANCE_PX`
-        from every detected star, and kept only where `signed_aperture_sum`
-        works) and the brightest `REFERENCE_STAR_COUNT` isolated stars that are
-        not saturated. `None` when fewer than `MINIMUM_USABLE_APERTURES`
-        apertures or `MINIMUM_USABLE_REFERENCE_STARS` stars could be found.
+        from every detected star, at least `FAINT_SOURCE_CLEARANCE_PX` from
+        every faint source found by `faint_source_distance`, and kept only
+        where `signed_aperture_sum` works) and the brightest
+        `REFERENCE_STAR_COUNT` isolated stars that are not saturated. `None`
+        when fewer than `MINIMUM_USABLE_APERTURES` apertures or
+        `MINIMUM_USABLE_REFERENCE_STARS` stars could be found.
     reason : `str`
         Why there is no set. Empty when there is one.
     """
@@ -1062,24 +1099,14 @@ def choose_apertures_with_reason(
     # Every bright star counts for the clearance and the isolation, saturated
     # or not: a saturated star has the widest wings.
     stars = detect_star_centroids(plane, count=DETECTED_STAR_COUNT, skip_saturated=False)
-    star_tree = cKDTree(stars) if len(stars) else None
-    height, width = plane.shape
-    generator = np.random.default_rng(APERTURE_SEED)
-    positions: list[tuple[float, float]] = []
-    for _ in range(40 * NOISE_APERTURE_COUNT):
-        row = generator.uniform(EDGE_MARGIN_PX, height - EDGE_MARGIN_PX)
-        column = generator.uniform(EDGE_MARGIN_PX, width - EDGE_MARGIN_PX)
-        if star_tree is not None and star_tree.query([row, column])[0] <= STAR_CLEARANCE_PX:
-            continue
-        if positions and np.min(np.hypot(*(np.array(positions) - (row, column)).T)) < APERTURE_SEPARATION_PX:
-            continue
-        if signed_aperture_sum(plane, column, row) is None:
-            continue
-        positions.append((row, column))
-        if len(positions) >= NOISE_APERTURE_COUNT:
-            break
+    positions = place_empty_apertures(plane, stars)
     if len(positions) < MINIMUM_USABLE_APERTURES:
-        return None, f"only {len(positions)} empty apertures could be placed on this stack"
+        return None, (
+            f"only {len(positions)} empty apertures could be placed on this stack, away from bright stars "
+            f"and from faint sources ({FAINT_SOURCE_THRESHOLD_SIGMAS} sigma or more above the sky at a "
+            f"smoothing of {FAINT_SOURCE_SMOOTHING_SIGMAS_PX} px); at least "
+            f"{MINIMUM_USABLE_APERTURES} are needed"
+        )
     percentile_screen = None
     if saturation is None:
         percentile_screen = detect_star_centroids(plane, count=DETECTED_STAR_COUNT, skip_saturated=True)
@@ -1123,6 +1150,92 @@ def choose_apertures_with_reason(
         ),
         "",
     )
+
+
+def place_empty_apertures(plane: np.ndarray, stars: np.ndarray) -> list[tuple[float, float]]:
+    """Draw empty-sky aperture positions, away from stars and faint sources.
+
+    Positions are drawn from a generator with a fixed seed. A draw is kept
+    when it is at least `EDGE_MARGIN_PX` from the edge, at least
+    `STAR_CLEARANCE_PX` from every given star, at least
+    `FAINT_SOURCE_CLEARANCE_PX` from every faint source (see
+    `faint_source_distance`), at least `APERTURE_SEPARATION_PX` from every
+    kept position, and where `signed_aperture_sum` works. No test looks at an
+    aperture's sum, so the choice cannot favor quiet apertures.
+
+    Parameters
+    ----------
+    plane : `numpy.ndarray`
+        The stack as a 2-D image.
+    stars : `numpy.ndarray`
+        Star centers, shape ``(n, 2)`` as (row, column).
+
+    Returns
+    -------
+    positions : `list` [`tuple` [`float`, `float`]]
+        The kept (row, column) positions, at most `NOISE_APERTURE_COUNT`.
+    """
+    star_tree = cKDTree(stars) if len(stars) else None
+    source_distance = faint_source_distance(plane)
+    height, width = plane.shape
+    generator = np.random.default_rng(APERTURE_SEED)
+    positions: list[tuple[float, float]] = []
+    for _ in range(40 * NOISE_APERTURE_COUNT):
+        row = generator.uniform(EDGE_MARGIN_PX, height - EDGE_MARGIN_PX)
+        column = generator.uniform(EDGE_MARGIN_PX, width - EDGE_MARGIN_PX)
+        if star_tree is not None and star_tree.query([row, column])[0] <= STAR_CLEARANCE_PX:
+            continue
+        if source_distance[round(row), round(column)] <= FAINT_SOURCE_CLEARANCE_PX:
+            continue
+        if positions and np.min(np.hypot(*(np.array(positions) - (row, column)).T)) < APERTURE_SEPARATION_PX:
+            continue
+        if signed_aperture_sum(plane, column, row) is None:
+            continue
+        positions.append((row, column))
+        if len(positions) >= NOISE_APERTURE_COUNT:
+            break
+    return positions
+
+
+def faint_source_distance(plane: np.ndarray) -> np.ndarray:
+    """Give each pixel's distance to the nearest faint source in a stack.
+
+    The rule uses only the stack's pixels, never an aperture's sum, so it
+    cannot choose apertures by how quiet they turned out to be. The stack's
+    large-scale background is taken away (a Gaussian of
+    `FAINT_SOURCE_HIGH_PASS_SIGMA_PX`), the result is smoothed at each of
+    `FAINT_SOURCE_SMOOTHING_SIGMAS_PX`, and a pixel is flagged when any
+    smoothed value lies more than `FAINT_SOURCE_THRESHOLD_SIGMAS` robust
+    sigmas above zero. Empty edge pixels (exactly zero or not finite) are
+    filled with the stack's median first, so the edge does not look like a
+    source.
+
+    Parameters
+    ----------
+    plane : `numpy.ndarray`
+        The stack as a 2-D image.
+
+    Returns
+    -------
+    distance : `numpy.ndarray`
+        For every pixel, the distance in pixels to the nearest flagged pixel.
+        Infinite when nothing is flagged.
+    """
+    image = np.asarray(plane, dtype=np.float64)
+    usable = np.isfinite(image) & (image != 0)
+    if not usable.any():
+        return np.zeros(image.shape)
+    filled = np.where(usable, image, float(np.median(image[usable])))
+    flat = filled - gaussian_filter(filled, FAINT_SOURCE_HIGH_PASS_SIGMA_PX)
+    flagged = np.zeros(image.shape, dtype=bool)
+    for width in FAINT_SOURCE_SMOOTHING_SIGMAS_PX:
+        smooth = gaussian_filter(flat, width)
+        sigma = MAD_TO_SIGMA * float(np.median(np.abs(smooth - np.median(smooth))))
+        if sigma > 0:
+            flagged |= smooth > FAINT_SOURCE_THRESHOLD_SIGMAS * sigma
+    if not flagged.any():
+        return np.full(image.shape, np.inf)
+    return distance_transform_edt(~flagged)
 
 
 def _isolated_stars(stars: np.ndarray, clearance: float = STAR_CLEARANCE_PX) -> np.ndarray:

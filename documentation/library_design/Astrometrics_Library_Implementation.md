@@ -99,7 +99,7 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 
 - **Interfaces (§5.1).** `runner.py` (adapter); `batch.py` (per-session runs, cross-session matching, period search).
 - **Aperture photometry (§5.2).** `pre_processing/frame_photometry.py`, `detector_noise.py`, `observation_times.py`.
-- **Comparison stars and light curves (§5.2).** `processing/comparison_ensemble.py`, `variability_analyzer.py`, `variability_indices.py`.
+- **Comparison stars and light curves (§5.2).** `processing/comparison_ensemble.py`, `catalog_zero_point.py`, `variability_analyzer.py`, `variability_indices.py`.
 - **Period search (§5.2).** `processing/periodicity_search.py`, `period_checks.py`, `family_wise_correction.py`.
 - **Checks (§5.4).** `pre_processing/assess_input_quality.py`; `post_processing/record_quality.py`, `variability_skill.py`, `known_variability_labels.py`, `assess_output_quality.py`.
 

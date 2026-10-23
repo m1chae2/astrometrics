@@ -63,6 +63,7 @@ from astrometricslib.pipelines.photometry.metrics import (
     PHOTOMETRY_UNRESOLVED_STAR_COUNT,
     PHOTOMETRY_VARIABLE_CANDIDATE_COUNT,
 )
+from astrometricslib.pipelines.photometry.post_processing.record_zero_point import zero_point_measurements
 from astrometricslib.pipelines.photometry.post_processing.variability_skill import (
     MINIMUM_DISCRIMINATION_AUC,
     MINIMUM_KNOWN_VARIABLES,
@@ -78,6 +79,7 @@ from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import
     ANCHOR_RULE_RANK_BAND,
     CentroidShiftSummary,
 )
+from astrometricslib.pipelines.photometry.processing.catalog_zero_point import SessionZeroPoints
 from astrometricslib.pipelines.photometry.processing.comparison_ensemble import (
     MINIMUM_COMPARISON_STARS,
     ComparisonSetResult,
@@ -837,6 +839,10 @@ class PhotometryRunInputs:
         The median per-point error of the run's light curves, in magnitudes.
     errors_assume_unit_gain : `bool`
         Whether those errors assumed 1 electron per ADU.
+    session_zero_points : `Sequence` [`SessionZeroPoints`]
+        The catalog zero point of every measured frame, for each session.
+        Empty when none was found (for example, a run with no catalog
+        stars), in which case no zero point measurement is stored.
     """
 
     comparison_sets: Sequence[ComparisonSetResult] = field(default_factory=tuple)
@@ -846,6 +852,7 @@ class PhotometryRunInputs:
     noise_model_star_count: int | None = None
     median_flux_error_mag: float | None = None
     errors_assume_unit_gain: bool = False
+    session_zero_points: Sequence[SessionZeroPoints] = field(default_factory=tuple)
 
 
 # The metric that stands for each gate, and how its limit was obtained. The
@@ -1055,7 +1062,8 @@ def photometry_run_measurements(
         no fitted rotation, a count that was not made) is ``not_measured``
         with a reason. The gate metrics carry the gate's outcome and limit.
         The flux-uncertainty value is ``assumed`` when the errors assumed a
-        gain of 1 e-/ADU.
+        gain of 1 e-/ADU. The catalog zero points of the frames and their
+        spread for each session follow (see `zero_point_measurements`).
     """
     subject = context.run_subject()
     measurements: list[QualityMeasurement] = []
@@ -1132,6 +1140,7 @@ def photometry_run_measurements(
             # The gate's own detail names the assumed gain as the source.
             measurement = measurement.model_copy(update={"status": MeasurementStatus.ASSUMED})
         measurements.append(measurement)
+    measurements.extend(zero_point_measurements(inputs.session_zero_points, context))
     return measurements
 
 

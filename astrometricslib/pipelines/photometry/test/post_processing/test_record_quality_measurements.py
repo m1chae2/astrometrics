@@ -29,6 +29,7 @@ from astrometricslib.pipelines.photometry.metrics import (
     PHOTOMETRY_LIGHT_CURVE_SCATTER_RMS_MEDIAN_MAG,
     PHOTOMETRY_METRICS,
     PHOTOMETRY_STARS_PROCESSED,
+    PHOTOMETRY_ZERO_POINT_METRIC_NAMES,
 )
 from astrometricslib.pipelines.photometry.post_processing import record_quality as rq
 from astrometricslib.pipelines.photometry.processing.comparison_ensemble import ComparisonSetResult
@@ -46,14 +47,17 @@ MEASURED_AT = datetime(2026, 10, 22, 22, 0, tzinfo=UTC)
 
 
 def _declared_names() -> set[str]:
-    """Give the name of every metric the photometry pipeline declares.
+    """Give the name of every run-level metric the pipeline declares.
+
+    The zero point metrics are about frames and sessions and are checked in
+    `test_record_zero_point.py`; a run with no zero points emits none.
 
     Returns
     -------
     names : `set` of `str`
-        The declared names.
+        The declared names, less the zero point metrics.
     """
-    return {spec.name for spec in PHOTOMETRY_METRICS}
+    return {spec.name for spec in PHOTOMETRY_METRICS} - PHOTOMETRY_ZERO_POINT_METRIC_NAMES
 
 
 def _context(run_id: str = "job-1") -> PipelineRunContext:
@@ -87,7 +91,7 @@ def _healthy_by_name(**input_changes: object) -> dict:
     """
     from dataclasses import replace
 
-    inputs = replace(photometry_fixture_inputs(), **input_changes)
+    inputs = replace(photometry_fixture_inputs(), session_zero_points=(), **input_changes)
     return {
         measurement.metric: measurement
         for measurement in rq.photometry_run_measurements(
@@ -98,8 +102,11 @@ def _healthy_by_name(**input_changes: object) -> dict:
 
 def test_a_healthy_run_emits_every_declared_metric_once() -> None:
     """One measurement per declared metric, all measured, about the run."""
+    from dataclasses import replace
+
+    inputs = replace(photometry_fixture_inputs(), session_zero_points=())
     measurements = rq.photometry_run_measurements(
-        photometry_fixture_metrics(), photometry_fixture_gates(), photometry_fixture_inputs(), _context()
+        photometry_fixture_metrics(), photometry_fixture_gates(), inputs, _context()
     )
     names = [measurement.metric for measurement in measurements]
 

@@ -652,6 +652,101 @@ print(counts, result.results["photometry"]["crossSessionMatchCount"])
 - **Guarded by tests:** Matching is pinned by `astrometricslib/pipelines/photometry/test/test_merge_errors_and_times.py`.
 - **Raw record:** None kept.
 
+### PHO-15
+
+**Catalog zero point of one frame (M 57, one night)**
+
+- **Claim:** The median offset between the catalog magnitudes and the instrumental magnitudes of a frame's central stars is steady from frame to frame to within about 0.004 mag from the star counts alone, and it falls by the same amount for every star when cloud passes. It is exploratory: the observatory has no night labeled photometric, so no truth exists to check its absolute value, and the zero point carries a color term and an airmass term that are not removed.
+- **Settings it supports:**
+  - code constant `CENTRAL_RADIUS_HALF_DIAGONAL_FRACTION` = 0.5 in `astrometricslib/pipelines/photometry/processing/catalog_zero_point.py`. Relation: sanity check only. The inner stars (radius under 0.2 of the half-diagonal) read 0.06 mag lower than the others, but with 18 stars and 0.17 mag of star-to-star scatter that is within the error, and the corner region was never measured. <!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.CENTRAL_RADIUS_HALF_DIAGONAL_FRACTION -->
+  - code constant `MINIMUM_STARS_FOR_ZERO_POINT` = 10. Relation: sanity check only. The night had 71 to 83 stars per frame. <!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.MINIMUM_STARS_FOR_ZERO_POINT -->
+  - code constant `MINIMUM_SIGNAL_TO_NOISE` = 20. Relation: sanity check only. <!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.MINIMUM_SIGNAL_TO_NOISE -->
+  - the choice not to apply a color term to the stored value. Relation: derived from this entry. In one steady frame a color slope of -0.18 mag per mag of B-V (Theil-Sen confidence interval -0.28 to -0.08) did not shrink the star-to-star scatter (0.189 mag before, 0.191 after) and did not steady the frames (0.0080 mag before, 0.0100 after).
+- **Status:** Partly measured. One target, one camera, one night of 61 frames, 89 central V-band stars. Repeatability was measured in-sample on the frames the cuts were written on, and the absolute value has no truth to check against.
+- **Data you need:** One night of 30 or more light frames of a field with at least 30 catalog stars of one band in the central region, with a plate solution or a catalog identification for the reference frame, from one camera and filter.
+- **Procedure:**
+  1. Run the photometry stage on one night of frames. The record step stores a zero point for every measured frame (before any frame is dropped as an outlier), the color slope and the frame's airmass.
+
+```python
+from datetime import datetime
+
+from astrometricslib import Astrometrics
+from astrometricslib.drivers.quality_store import QualityStore
+
+astrometrics = Astrometrics()
+target = astrometrics.targets.get("M 57")
+night = "2026-10-03"
+frames = [
+    frame
+    for frame in target.frames
+    if frame.role == "LIGHT"
+    and "533" in frame.camera
+    and datetime.fromtimestamp(frame.timestamp - 43200).strftime("%Y-%m-%d") == night
+]
+astrometrics.processing.process_target(
+    "M 57", stages=["photometry"], photometry={"frames": frames}, register_job=False
+)
+rows = QualityStore.from_configuration(astrometrics.config).query(
+    metric="photometry.catalog_zero_point_simbad_v_mag", target_id="M 57"
+)
+print([(row.value, row.uncertainty, row.sample_count) for row in rows])
+```
+<!-- impl: astrometricslib.Astrometrics --> <!-- impl: astrometricslib.drivers.quality_store.QualityStore -->
+
+  1. For repeatability, split the used stars into two random halves, find each half's zero point in every frame with `estimate_frame_zero_point` <!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.estimate_frame_zero_point -->, and take the robust spread of the differences. Repeat for 50 random splits. For the vignetting check, compare each star's median offset over the steady frames with the median of all stars, in bins of distance from the center. The scripts are in the session's scratch folder (`science/s2/`): `run_photometry.py`, `run_dump.py`, `evidence_s2.py`, `color_check.py` and `cross.py`.
+
+- **Acceptance criterion:** Not recorded (set after the result).
+- **What to look at:** The frame zero points in magnitudes (higher is more sensitive; a drop is cloud, haze or dew). Their bootstrap error (the absolute error, which is large because the stars differ from each other), against the split-half difference (the frame-to-frame error, which is small because the same stars are used each time). The correlation with the frame's sky level.
+- **Our result:** 2026-10-23, M 57, night of 2026-10-03, 61 luminance frames (30 s) of the ASI 533MM Pro on the Apertura 75Q, run on a scratch copy of the library with the frames read only. The session used SIMBAD V: 224 stars had a V-band record and 131 a Gaia G record; 89 V stars lay in the central region, all with a B-V color, and 71 to 83 (median 75) passed the cuts in a frame. Code version: the working tree of this change.
+  - Level and spread. The 53 steady frames have a median zero point of 19.62 mag. Eight frames (numbers 011 and 018 to 024) fell as low as 18.79 mag, 0.83 mag below. The sky level of the same frames (`frame.background_level_adu`) was 898 ADU against 800, and the correlation of zero point with sky level over the 61 frames is -0.99 (with the sky rate, -0.99), and with the number of detected regions +0.93. A dimmer star field on a brighter sky is the signature of cloud, so the dip is real cloud and the zero point follows it.
+  - Frame-to-frame repeatability. Two independent halves of the stars differ by a robust sigma of 0.0085 mag, which makes each half good to 0.006 mag and the full set to about 0.004 mag. Two runs of the pipeline on the same frames gave identical zero points (largest difference 0.0 mag in 61 frames).
+  - Absolute error. The stored bootstrap error is 0.022 mag (median over frames). It is larger because the offsets of the stars differ from each other by 0.17 to 0.19 mag (robust sigma), and a different set of stars would move the median by about that over the square root of their number. The B-V color does not explain that scatter (see above), and the rest is catalog and blend error.
+  - Color slope. -0.217 mag per mag of B-V (range over the 61 frames -0.246 to -0.176), stored on every frame.
+  - Vignetting. Medians of the per-star offsets in three bins of distance from the center (0.0 to 0.2, 0.2 to 0.35, 0.35 to 0.5 of the half-diagonal; 18, 35 and 36 stars) are -0.065, +0.025 and -0.032 mag. No trend is resolved at about 0.04 mag. The fitted slope is +0.015 mag per half-diagonal.
+  - Airmass. The steady frames span airmass 1.075 to 1.187. The zero point changes by -0.011 +/- 0.075 mag per airmass over that range, and by +0.0009 mag per hour over the 1.2 hours, so the range is too small to say anything about extinction.
+  - Uncertainty and sample size: 61 frames, one night. Data split: in-sample.
+- **Verdict:** Not judged.
+- **Limits:** One night and one camera. The night was not labeled photometric. Photometry measures raw frames with no flat field, so the value carries whatever vignetting is left in the central region, and the corners are not used. The L filter and the sensor are not a catalog band, so the value depends on star color. No extinction coefficient can be found from this night. The stored error is the error of the absolute zero point, not the frame-to-frame error. The 8 cloud frames are kept, so the cloudy frames of other nights may leave fewer than 10 stars and then have no value. The Gaia G band was not exercised on a real night (M 57 chose V).
+- **To tune for your setup:** Change `CENTRAL_RADIUS_HALF_DIAGONAL_FRACTION` after measuring the offset of the inner and outer stars on frames flat-fielded with your own master flat. Change `MINIMUM_SIGNAL_TO_NOISE` if your faint stars bias the median (compare the median with and without them). Then repeat the procedure above.
+- **Regenerate with:** The procedure above; no script in `astrometricslib/scripts/`.
+- **Guarded by tests:** `astrometricslib/pipelines/photometry/test/processing/test_catalog_zero_point.py` (an injected zero point and an injected cloud are recovered; the band, region and star cuts; the color slope; the airmass stand-in) and `astrometricslib/pipelines/photometry/test/post_processing/test_record_zero_point.py`.
+- **Raw record:** None kept.
+
+### PHO-16
+
+**Spread of a night's frame zero points, and what the extinction needs**
+
+- **Claim:** One number (the robust spread of a session's frame zero points) summarizes how much the transparency wandered on a night: 0.013 mag over the 61 frames of one night of M 57, and 0.010 mag over its 53 steady frames. It is exploratory. It is not a verdict on the night: no night here is labeled photometric, so no spread separates a steady night from a cloudy one, and the data cannot fix an extinction coefficient.
+- **Settings it supports:**
+  - code constant `MINIMUM_FRAMES_FOR_SCATTER` = 10 in `astrometricslib/pipelines/photometry/processing/catalog_zero_point.py`. Relation: sanity check only. With 61 frames the bootstrap error of the spread is 0.0023 mag (18%). <!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.MINIMUM_FRAMES_FOR_SCATTER -->
+- **Status:** Partly measured. One night of 61 frames; the spread has no truth to check against, and the extinction is not estimable.
+- **Data you need:** For the spread, one night of 10 or more frames with frame zero points ([PHO-15](#pho-15)). For an extinction coefficient, at least three nights known to be photometric, each with frames spanning an airmass range of 0.5 or more.
+- **Procedure:**
+  1. Read the stored spread of a run next to its frame zero points.
+
+```python
+from astrometricslib.drivers.quality_store import QualityStore
+from astrometricslib.pipelines.photometry.processing.catalog_zero_point import zero_point_scatter
+
+rows = QualityStore.from_configuration(astrometrics.config).query(
+    metric="photometry.catalog_zero_point_simbad_v_mag", target_id="M 57"
+)
+print(zero_point_scatter([row.value for row in rows if row.value is not None]))
+```
+<!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.zero_point_scatter --> <!-- impl: astrometricslib.drivers.quality_store.QualityStore -->
+
+  1. Regress the steady frames' zero points on their airmass (`photometry.frame_airmass`) and read the slope and its error.
+
+- **Acceptance criterion:** Not recorded (set after the result).
+- **What to look at:** The spread in magnitudes, with its frame count and bootstrap error. The slope of zero point against airmass, with its error, compared with the error.
+- **Our result:** 2026-10-23, the same 61 frames of M 57 as [PHO-15](#pho-15). Spread of all 61 frame zero points: 0.0126 +/- 0.0023 mag; of the 53 steady frames: 0.0099 +/- 0.0017 mag. The eight cloud frames raise the spread by only a quarter because the spread is robust (a standard deviation would have been 0.19 mag). The expected spread from the star counts alone is 0.004 mag, so the steady frames wander by about 0.009 mag beyond measurement noise. The steady frames span airmass 1.075 to 1.187 and give a slope of -0.011 +/- 0.075 mag per airmass; a typical V-band extinction is of order 0.1 to 0.3 mag per airmass, which the error is larger than, so the data cannot see it. Sample size: 61 frames, one night. Data split: in-sample.
+- **Verdict:** Not judged.
+- **Limits:** The spread leaves out frames with no zero point (heavy cloud), so it flatters a night with solid cloud. It treats the frames as independent, which neighboring frames in slow cloud are not, so its error is too small. One night. The extinction needs several photometric nights, which the observatory has not had; the metric's review date is 2027-04-30.
+- **To tune for your setup:** Raise `MINIMUM_FRAMES_FOR_SCATTER` if you want a tighter error on the spread; its error falls about as one over the square root of the frame count.
+- **Regenerate with:** The procedure above; no script in `astrometricslib/scripts/`.
+- **Guarded by tests:** `astrometricslib/pipelines/photometry/test/processing/test_catalog_zero_point.py` (the spread is the robust sigma and ignores a cloudy outlier; too few frames give no spread).
+- **Raw record:** None kept.
+
 ## Design estimates
 
 These tuned values have not been measured. They are reasoned choices.
@@ -681,3 +776,6 @@ These tuned values have not been measured. They are reasoned choices.
 | PHO-D21 | Shuffles when a search is slow | 150 above 400,000 point-periods | `_REDUCED_SHUFFLE_COUNT`, `_SLOW_SEARCH_WORK_LIMIT` in `periodicity_search.py` | A less precise false-alarm probability. | Repeat [PHO-12](#pho-12) at 150 shuffles. |
 | PHO-D22 | Frequency grid cap; refined peaks | 20,000 points; 20 peaks, 3 coarse steps | `_MAXIMUM_SEARCH_GRID_POINTS`, `_CANDIDATE_PEAK_COUNT`, `_REFINE_HALF_WIDTH_COARSE_STEPS` in `periodicity_search.py` | A real period missed on long baselines. | Inject a known period into a long, multi-month light curve and check it is recovered. |
 | PHO-D23 | Hold-out period search: window and step | 25% of the frequency either side; step 1/(5 T) for training span T | `_FREQUENCY_WINDOW`, `_SAMPLES_PER_PEAK` in `processing/period_checks.py` | A period that the other nights would recover is missed, or a wrong peak is accepted as the same period. | Run `holdout_cycle` on a star of known period observed on several nights with the window at 10%, 25% and 50% and the step at 1/(3 T), 1/(5 T) and 1/(10 T), and see where the result stops changing. |
+| PHO-D24 | Catalog zero point: central region; stars needed; signal-to-noise cut | 0.5 of the half-diagonal; 10 stars; 20 | `CENTRAL_RADIUS_HALF_DIAGONAL_FRACTION`, `MINIMUM_STARS_FOR_ZERO_POINT`, `MINIMUM_SIGNAL_TO_NOISE` in `processing/catalog_zero_point.py` | Vignetting leaks into the zero point, or too few stars are left in a thin frame. | Flat-field the frames with the master flat and compare the inner and outer stars ([PHO-15](#pho-15)). |
+| PHO-D25 | Catalog zero point: color slope needs stars; color spread | 20 stars; 0.4 mag | `MINIMUM_STARS_FOR_COLOUR_SLOPE`, `MINIMUM_COLOUR_RANGE_MAG` in `processing/catalog_zero_point.py` | A slope fitted to noise, or a real slope not reported. | Inject a known slope into frames and find the smallest color spread that recovers it. |
+| PHO-D26 | Zero-point spread: frames needed | 10 | `MINIMUM_FRAMES_FOR_SCATTER` in `processing/catalog_zero_point.py` | A spread stored with an error too large to read. | Bootstrap the spread of a steady night at 10, 20 and 40 frames ([PHO-16](#pho-16)). |

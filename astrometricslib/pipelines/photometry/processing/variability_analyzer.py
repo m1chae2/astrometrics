@@ -83,6 +83,10 @@ from astrometricslib.pipelines.photometry.pre_processing.observation_times impor
     barycentric_julian_dates,
     time_basis_for,
 )
+from astrometricslib.pipelines.photometry.processing.catalog_zero_point import (
+    SessionZeroPoints,
+    session_zero_points,
+)
 from astrometricslib.pipelines.photometry.processing.comparison_ensemble import (
     DEFAULT_MAXIMUM_COMPARISON_STARS,
     MINIMUM_COMPARISON_STARS,
@@ -760,6 +764,11 @@ class VariabilityAnalyzer:
         # The airmass slope the optional correction removed, as a fractional
         # change of flux per unit of airmass. `None` when it was not applied.
         self.ensemble_airmass_slope: float | None = None
+        # The catalog zero point of every frame measured by `process()`, taken
+        # from the raw fluxes before any frame is dropped as an outlier. `None`
+        # before `process()` runs or when it measured nothing. The session id
+        # is left empty; the runner fills it in.
+        self.session_zero_points: SessionZeroPoints | None = None
         # The noise model and the thresholds of the last
         # `identify_variable_stars()`. `None` before it runs, and when the
         # field was too small for a noise model.
@@ -1088,7 +1097,36 @@ class VariabilityAnalyzer:
 
             logger.info("Parallel processing complete.")
 
+        self._record_catalog_zero_points(image_paths[0], reference_timestamp, reference_data.shape)
         self._record_barycentric_times(target_position_deg, observer_site)
+
+    def _record_catalog_zero_points(
+        self, reference_path: str, reference_timestamp: datetime, frame_shape: tuple[int, ...]
+    ) -> None:
+        """Find the catalog zero point of every frame measured so far.
+
+        This reads the raw fluxes, so it runs right after the measurement and
+        before the normalization drops any frame. A failure here is logged
+        and leaves `session_zero_points` empty; it never fails the run.
+
+        Parameters
+        ----------
+        reference_path : `str`
+            The path of the reference frame.
+        reference_timestamp : `datetime.datetime`
+            The reference frame's exposure start.
+        frame_shape : `tuple` [`int`, ...]
+            The shape of the reference frame's pixel array,
+            ``(height, width)``.
+        """
+        frame_paths = {**self.timestamp_to_path, reference_timestamp: reference_path}
+        try:
+            self.session_zero_points = session_zero_points(
+                "", self.stellar_objects, frame_paths, (frame_shape[0], frame_shape[1])
+            )
+        except (*DATA_ERRORS, np.linalg.LinAlgError) as zero_point_error:
+            logger.warning("Catalog zero points could not be computed: %s", zero_point_error)
+            self.session_zero_points = None
 
     def centroid_shift_summary(self) -> CentroidShiftSummary | None:
         """Summarize how far star centroids sat from their shifted positions.

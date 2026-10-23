@@ -671,6 +671,13 @@ def select_alignment_anchors(
     return AlignmentAnchors(tuple(band), ANCHOR_RULE_RANK_BAND)
 
 
+# The airmass `compute_frame_airmass` returns when the header gives neither an
+# airmass nor an altitude. It is a stand-in, not a measurement: a real airmass
+# is 1.0 only at the zenith, to within the header's rounding. The quality
+# record reads it as "unknown" (see `processing/catalog_zero_point.py`).
+UNKNOWN_AIRMASS_DEFAULT = 1.0
+
+
 def compute_frame_airmass(header: fits.Header) -> float:
     """Figure out how much atmosphere we are looking through.
 
@@ -680,7 +687,8 @@ def compute_frame_airmass(header: fits.Header) -> float:
     Returns
     -------
     airmass : `float`
-        The airmass value, or 1.0 if we can't figure it out.
+        The airmass value, or `UNKNOWN_AIRMASS_DEFAULT` (1.0) if we can't
+        figure it out.
     """
     for key in ["AIRMASS", "CENTAIRM", "AIRM"]:
         if key in header:
@@ -701,7 +709,7 @@ def compute_frame_airmass(header: fits.Header) -> float:
             except ValueError, TypeError:
                 pass
 
-    return 1.0
+    return UNKNOWN_AIRMASS_DEFAULT
 
 
 # Half-width, in pixels, of the square box used to re-center one star. The

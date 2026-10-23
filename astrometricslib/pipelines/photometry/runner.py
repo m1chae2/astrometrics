@@ -11,6 +11,7 @@ import logging
 import os
 import sqlite3
 import statistics
+from dataclasses import replace
 from typing import Any
 
 from astrometricslib.foundation.errors import AstrometricsError
@@ -216,6 +217,7 @@ def _empty_photometry_result(no_work_reason: str) -> Result:
             "all_frame_ensemble_composition": [],
             "all_comparison_sets": [],
             "all_centroid_shift_summaries": [],
+            "all_session_zero_points": [],
             "session_empty_reasons": [],
             "sessions_missing_wcs": [],
             "cross_session_match_count": 0,
@@ -363,6 +365,9 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         # one frame (see `CentroidShiftSummary`), for the
         # `registration_drift` gate.
         all_centroid_shift_summaries = []
+        # One catalog zero point record per session that has frames (see
+        # `SessionZeroPoints`), stored as measurements next to the summary.
+        all_session_zero_points = []
         session_empty_reasons = []
         # Only session-prefix ids when there's more than one session,
         # so the common single-session target keeps today's plain
@@ -436,6 +441,8 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             centroid_shift_summary = analyzer.centroid_shift_summary()
             if centroid_shift_summary is not None:
                 all_centroid_shift_summaries.append(centroid_shift_summary)
+            if analyzer.session_zero_points is not None:
+                all_session_zero_points.append(replace(analyzer.session_zero_points, session_id=session.id))
 
         # Captured before cross-session merging/re-flagging below so
         # each candidate reflects its own session's local adaptive
@@ -501,6 +508,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 "all_frame_ensemble_composition": all_frame_ensemble_composition,
                 "all_comparison_sets": all_comparison_sets,
                 "all_centroid_shift_summaries": all_centroid_shift_summaries,
+                "all_session_zero_points": all_session_zero_points,
                 "session_empty_reasons": session_empty_reasons,
                 "sessions_missing_wcs": sessions_missing_wcs,
                 "cross_session_match_count": cross_session_match_count,
@@ -673,6 +681,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                     noise_model_star_count=noise_model_star_count,
                     median_flux_error_mag=flux_error_mag,
                     errors_assume_unit_gain=errors_assume_unit_gain,
+                    session_zero_points=payload.get("all_session_zero_points", []),
                 ),
                 measurement_context,
             )

@@ -1386,6 +1386,12 @@ _PHOTOMETRY_NOT_HELD: tuple[str, ...] = (
     "photometry.comparison_scatter_over_predicted_worst",
     "photometry.corner_displacement_p95_worst_px",
     "photometry.centroid_fallback_worst_fraction",
+    "photometry.catalog_zero_point_gaia_g_mag",
+    "photometry.catalog_zero_point_simbad_v_mag",
+    "photometry.catalog_zero_point_color_slope",
+    "photometry.frame_airmass",
+    "photometry.catalog_zero_point_scatter_gaia_g_mag",
+    "photometry.catalog_zero_point_scatter_simbad_v_mag",
 )
 
 _SPECTROSCOPY_VALUES: tuple[ValueMapping, ...] = (

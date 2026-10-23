@@ -172,8 +172,23 @@ Each session picks its own comparison group, so two sessions can disagree about 
 | `betweenSessionAmplitudeMag` | mag | At least 0.02 (design estimate; see [photometry design estimates](../../../../documentation/library_design/validation/photometry.md#design-estimates)) | High: a larger level change between sessions | Between-session flag |
 | `betweenSessionSignificance` | none | Above 3 (design estimate; see [photometry design estimates](../../../../documentation/library_design/validation/photometry.md#design-estimates)) | High: the level change is large next to its expected error | Between-session flag |
 
+## Catalog zero point
+
+*Catalog zero point* ties the camera's counts to the catalog's brightness scale. A star's flux in ADU per second gives it an instrumental magnitude, `-2.5 log10(flux)`. The catalog gives the same star a magnitude `m`. The difference `m + 2.5 log10(flux)` should be the same for every star in a clean frame, and the frame's *zero point* is the median of that difference over its catalog stars. Thin cloud dims every star together, so the zero point of that frame falls.
+
+`catalog_zero_point.py` finds one zero point for every frame of a session. It reads the raw fluxes right after the frames are measured, before the normalization drops any frame, so a cloudy frame gets a low zero point instead of vanishing. These are the rules (all are design estimates; see [PHO-D24](../../../../documentation/library_design/validation/photometry.md#design-estimates)):
+
+- **One catalog band per session.** A star's catalog magnitude is either a SIMBAD V magnitude or a Gaia G magnitude, and the two are different filters. The session uses the band that has more stars in its central region (Gaia G on a tie), and a star from the other band is left out.
+- **Central region only.** Photometry does not flat-field its frames, so vignetting dims stars near the corners. Only stars within half of the half-diagonal of the frame from its center count.
+- **Cuts per frame.** A star counts when its flux is positive, it is not saturated, and its flux is at least 20 times its own error. A frame needs 10 such stars, or it has no zero point.
+- **No airmass term and no color term in the value.** The value is the plain median. When enough V stars have a B-V color, the code also fits the slope of the difference against color and stores it next to the value. Gaia G stars carry no color in this library, so their frames have no slope. The frame's airmass is stored beside the zero point.
+- **Spread over a night.** `zero_point_scatter` gives 1.4826 times the median absolute deviation of a session's frame zero points, with a bootstrap error. It needs 10 frames.
+
+The numbers only measure. They do not say that a night was photometric: that judgment belongs to the observatory side of the project. They are exploratory (partly measured; see [PHO-15](../../../../documentation/library_design/validation/photometry.md#pho-15) and [PHO-16](../../../../documentation/library_design/validation/photometry.md#pho-16)).
+
 ## Files
 
+- `catalog_zero_point.py` finds the catalog zero point of every frame and its spread over a session.
 - `comparison_ensemble.py` chooses the comparison stars and builds the signal.
 - `variability_analyzer.py` applies the signal, drops outlier frames and points, and flags between-session changes.
 - `variability_indices.py` fits the noise model and computes the three indices, the false-alarm probability and the q-value.

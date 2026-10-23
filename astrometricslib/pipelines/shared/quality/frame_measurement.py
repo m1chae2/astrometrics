@@ -897,7 +897,7 @@ def _mean_ellipticity_angle(
     return angle_deg, coherence
 
 
-def _bootstrap_median_error(values: np.ndarray, generator: np.random.Generator) -> float:
+def bootstrap_median_error(values: np.ndarray, generator: np.random.Generator) -> float:
     """Estimate the standard error of a median by resampling.
 
     Parameters
@@ -1277,9 +1277,9 @@ def measure_star_profiles(
     mean_angle, coherence = _mean_ellipticity_angle(first_array, second_array)
     return StarProfileResult(
         width_px=float(np.median(width_array)),
-        width_px_uncertainty=_bootstrap_median_error(width_array, generator),
+        width_px_uncertainty=bootstrap_median_error(width_array, generator),
         elongation=float(np.median(elongation_array)),
-        elongation_uncertainty=_bootstrap_median_error(elongation_array, generator),
+        elongation_uncertainty=bootstrap_median_error(elongation_array, generator),
         angle_deg=mean_angle,
         angle_uncertainty_deg=_bootstrap_angle_error_deg(first_array, second_array, generator),
         angle_coherence=coherence,

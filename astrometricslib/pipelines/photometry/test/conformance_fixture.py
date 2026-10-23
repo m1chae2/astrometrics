@@ -7,7 +7,7 @@ healthy run whose every value is filled, so no metric is left out for being
 missing.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from astrometricslib.models.quality.gate_result import GateResult
 from astrometricslib.models.quality.measurement import QualityMeasurement
@@ -18,6 +18,12 @@ from astrometricslib.pipelines.photometry.post_processing.record_quality import 
     photometry_run_measurements,
 )
 from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import CentroidShiftSummary
+from astrometricslib.pipelines.photometry.processing.catalog_zero_point import (
+    CatalogBand,
+    FrameZeroPoint,
+    FrameZeroPointEstimate,
+    SessionZeroPoints,
+)
 from astrometricslib.pipelines.photometry.processing.comparison_ensemble import ComparisonSetResult
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
 
@@ -45,6 +51,41 @@ FIXTURE_CENTROID_SUMMARIES = (
         fitted_frame_count=39,
     ),
 )
+
+
+def _fixture_session_zero_points(band: CatalogBand, session_id: str) -> SessionZeroPoints:
+    """Build one session of twelve frames with zero points and airmasses.
+
+    Parameters
+    ----------
+    band : `CatalogBand`
+        The catalog band of the session.
+    session_id : `str`
+        The session's id.
+
+    Returns
+    -------
+    session : `SessionZeroPoints`
+        Twelve frames whose zero points wander a little around 21.5 mag.
+    """
+    start = datetime(2026, 10, 3, 4, 0, 0)
+    frames = tuple(
+        FrameZeroPoint(
+            frame_path=f"/library/lights/M 99/Apertura 75Q/M99_{session_id}_{index:03d}.fits",
+            timestamp=start + timedelta(minutes=index),
+            airmass=1.2 + 0.01 * index,
+            estimate=FrameZeroPointEstimate(
+                zero_point_mag=21.5 + 0.01 * ((index % 5) - 2),
+                error_mag=0.004,
+                star_count=60,
+                reason="",
+                color_slope=0.08 if band is CatalogBand.SIMBAD_V else None,
+                color_reason="" if band is CatalogBand.SIMBAD_V else "color term not fitted: no color",
+            ),
+        )
+        for index in range(12)
+    )
+    return SessionZeroPoints(session_id, band, "", frames)
 
 
 def photometry_fixture_metrics() -> PhotometryPipelineQualityMetrics:
@@ -86,6 +127,10 @@ def photometry_fixture_inputs() -> PhotometryRunInputs:
         noise_model_star_count=60,
         median_flux_error_mag=0.02,
         errors_assume_unit_gain=False,
+        session_zero_points=(
+            _fixture_session_zero_points(CatalogBand.GAIA_G, "night-1"),
+            _fixture_session_zero_points(CatalogBand.SIMBAD_V, "night-2"),
+        ),
     )
 
 

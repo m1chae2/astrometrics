@@ -162,6 +162,12 @@ from astrometricslib.models.quality.quality_summary import (
     ExposureGroupSummary,
     TargetSessionContribution,
 )
+from astrometricslib.models.quality.subset_stacks import (
+    NightContribution,
+    NightContributionResult,
+    NoiseGrowthResult,
+    SubsetStackResult,
+)
 from astrometricslib.models.stellar_source import (
     AnalysisResult,
     FileItem,
@@ -446,6 +452,9 @@ __all__ = [
     "MetricSpec",
     "MetricSummary",
     "MovingObjectConfig",
+    "NightContribution",
+    "NightContributionResult",
+    "NoiseGrowthResult",
     "NotFoundError",
     "NumpyEncoder",
     "OverlayStar",
@@ -491,6 +500,7 @@ __all__ = [
     "StorageError",
     "StorageNotMountedError",
     "SubjectLevel",
+    "SubsetStackResult",
     "Target",
     "TargetCatalog",
     "TargetFilesResponse",

@@ -96,7 +96,7 @@ def _service(processing: _Processing, sockets: _Sockets) -> QualityMeasurementSe
 def _wait_until_idle() -> None:
     """Wait for the service's background thread to finish."""
     for thread in threading.enumerate():
-        if thread.name.startswith("quality-measure-"):
+        if thread.name.startswith("quality-"):
             thread.join(timeout=5.0)
 
 
@@ -340,3 +340,134 @@ def test_a_failed_sync_announces_nothing() -> None:
     _run_sync("M 15", _Remote(fail=True), announcer)
 
     assert announcer.calls == []
+
+
+class _SubsetProcessing:
+    """A stand-in processing API for the subset-stack jobs."""
+
+    def __init__(self) -> None:
+        """Start with no calls."""
+        self.growth_calls: list[tuple[str, int, bool]] = []
+        self.night_calls: list[str] = []
+
+    def measure_noise_growth(
+        self, target_id: str, maximum_steps: int = 4, include_night_contributions: bool = False
+    ) -> SimpleNamespace:
+        """Record the call and report two subsets and, if asked, two nights.
+
+        Returns
+        -------
+        result : `SimpleNamespace`
+            The fields of `NoiseGrowthResult` the service reads.
+        """
+        self.growth_calls.append((target_id, maximum_steps, include_night_contributions))
+        nights = (
+            SimpleNamespace(
+                rows_written=4,
+                nights=[SimpleNamespace(night_id="2026-10-02"), SimpleNamespace(night_id="2026-10-03")],
+            )
+            if include_night_contributions
+            else None
+        )
+        return SimpleNamespace(
+            rows_written=10,
+            subsets=[SimpleNamespace(observing_night_ids=["2026-10-01"])],
+            night_contributions=nights,
+        )
+
+    def measure_night_contributions(self, target_id: str) -> SimpleNamespace:
+        """Record the call and report two nights.
+
+        Returns
+        -------
+        result : `SimpleNamespace`
+            The fields of `NightContributionResult` the service reads.
+        """
+        self.night_calls.append(target_id)
+        return SimpleNamespace(
+            rows_written=6,
+            nights=[SimpleNamespace(night_id="2026-10-02"), SimpleNamespace(night_id="2026-10-01")],
+        )
+
+
+def test_the_subset_jobs_are_declared_and_served_by_the_service() -> None:
+    """Both RPCs are declared and map to the service's methods."""
+    for method, handler in (
+        ("processing:measure_noise_growth", "start_noise_growth"),
+        ("processing:measure_night_contributions", "start_night_contributions"),
+    ):
+        assert method in RPC_METHODS
+        assert rpc_registry._handlers[method] == ("quality_measurement_service", handler)
+
+
+def test_the_noise_growth_rpc_starts_the_job_and_announces_its_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The series runs with the given steps and the event lists every night."""
+    processing, sockets = _SubsetProcessing(), _Sockets()
+    service = QualityMeasurementService(SimpleNamespace(processing=processing), sockets)
+    monkeypatch.setattr(container, "quality_measurement_service", service, raising=False)
+
+    reply = asyncio.run(
+        rpc_registry.execute(
+            "processing:measure_noise_growth",
+            {"target_id": "M 13", "maximum_steps": 2, "include_night_contributions": True},
+        )
+    )
+
+    assert reply == {"started": True, "target_id": "M 13"}
+    assert sockets.sent.wait(timeout=5.0)
+    _wait_until_idle()
+    assert processing.growth_calls == [("M 13", 2, True)]
+    assert sockets.events == [
+        (
+            "quality:measured",
+            {
+                "targetId": "M 13",
+                "framesMeasured": 0,
+                "rowsWritten": 14,
+                "observingNightIds": ["2026-10-01", "2026-10-02", "2026-10-03"],
+            },
+        )
+    ]
+
+
+def test_the_night_contribution_rpc_starts_the_job_and_announces_its_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The nights job runs on its own thread and announces what it stored."""
+    processing, sockets = _SubsetProcessing(), _Sockets()
+    service = QualityMeasurementService(SimpleNamespace(processing=processing), sockets)
+    monkeypatch.setattr(container, "quality_measurement_service", service, raising=False)
+
+    reply = asyncio.run(rpc_registry.execute("processing:measure_night_contributions", {"target_id": "M 13"}))
+
+    assert reply == {"started": True, "target_id": "M 13"}
+    assert sockets.sent.wait(timeout=5.0)
+    _wait_until_idle()
+    assert processing.night_calls == ["M 13"]
+    assert sockets.events[0][1]["observingNightIds"] == ["2026-10-01", "2026-10-02"]
+    assert sockets.events[0][1]["rowsWritten"] == 6
+
+
+def test_a_failed_subset_job_is_logged_and_sends_no_event() -> None:
+    """A library error on the thread is caught and nothing is announced."""
+    from astrometricslib import NotFoundError
+
+    processing, sockets = _SubsetProcessing(), _Sockets()
+
+    def fail(target_id: str, **_keywords: Any) -> None:
+        """Raise a not-found error.
+
+        Raises
+        ------
+        NotFoundError
+            Always.
+        """
+        raise NotFoundError("no stack")
+
+    processing.measure_noise_growth = fail
+    service = QualityMeasurementService(SimpleNamespace(processing=processing), sockets)
+
+    assert service.start_noise_growth("M 13")["started"] is True
+    _wait_until_idle()
+
+    assert sockets.events == []

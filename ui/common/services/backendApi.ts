@@ -268,6 +268,9 @@ export interface ActionRegistry {
     // records (with progressCurrent/progressTotal), not the lighter ProcessStatus.
     "processing:active_jobs": { payload: Record<string, never>; response: ProcessingJob[] };
     "processing:record_frame_measurements": { payload: { target_id: string; limit?: number }; response: { started: boolean; target_id: string } };
+    // Stack some of a target's frames apart from its library stack and measure the noise of each result.
+    "processing:measure_noise_growth": { payload: { target_id: string; maximum_steps?: number; include_night_contributions?: boolean }; response: { started: boolean; target_id: string } };
+    "processing:measure_night_contributions": { payload: { target_id: string }; response: { started: boolean; target_id: string } };
     "processing:job_log_tail": { payload: { job_id: string; lines?: number }; response: string[] };
 
     // Quality measurements: the stored ones, and what each metric means.

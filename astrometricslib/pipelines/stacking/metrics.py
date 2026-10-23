@@ -162,6 +162,8 @@ STACKING_EMPTY_APERTURE_NOISE_NORMALIZED = "stacking.empty_aperture_noise_normal
 STACKING_EFFECTIVE_FRAME_COUNT = "stacking.effective_frame_count"
 STACKING_EFFECTIVE_TIME_S = "stacking.effective_time_s"
 STACKING_FRAME_WEIGHT = "stacking.frame_weight"
+STACKING_NIGHT_WEIGHT_SHARE = "stacking.night_weight_share"
+STACKING_NOISE_WITHOUT_NIGHT = "stacking.noise_without_night"
 
 # The self-checks. The key is the gate's name in the stack summary; the value
 # is the metric that stores it. Each is named ``stacking.gate_<gate name>``.
@@ -719,6 +721,57 @@ _NOISE_AND_WEIGHT_METRICS: tuple[MetricSpec, ...] = (
     ),
 )
 
+_NIGHT_PURPOSE_REASON = (
+    "Each night's contribution shows which nights helped a target and which did not (plan decision "
+    "17). Nothing decides from it yet: the forecast check and the planner read it as context."
+)
+_NIGHT_SAMPLE = (
+    "One row for each observing night of the frames in the target's library stack. The subject is "
+    "the leave-one-night-out subset stack (a stack of the library stack's frames without that "
+    "night, kept in the target's `_subsets` folder), and its observing night id names the night "
+    "left out."
+)
+
+_NIGHT_METRICS: tuple[MetricSpec, ...] = (
+    _context_metric(
+        STACKING_NIGHT_WEIGHT_SHARE,
+        "fraction",
+        "The share of the library stack's total frame weight that one observing night supplied.",
+        (
+            "The sum of the night's frame weights divided by the sum of all the stack's frame "
+            "weights. The weights are the `stacking.frame_weight` rows the library stack recorded "
+            "(each relative to the average frame). The shares of all the nights add up to 1. Not "
+            "stored when the stack's weights are unknown, because equal weights are never assumed."
+        ),
+        _NIGHT_SAMPLE,
+        "pipelines.stacking.subset_noise_run.night_weight_shares",
+        better=Direction.NONE,
+        purpose_reason=_NIGHT_PURPOSE_REASON,
+    ),
+    _context_metric(
+        STACKING_NOISE_WITHOUT_NIGHT,
+        "",
+        "The stack's noise, as a fraction of the reference stars' brightness, with one night left out.",
+        (
+            "The normalized empty-aperture noise (see `stacking.empty_aperture_noise_normalized`) of "
+            "a stack of the library stack's frames without the night's frames, measured in the same "
+            "sky apertures as the library stack. Compare it with the library stack's own value: if it "
+            "is lower, the night made the stack noisier. The leave-out stack uses the target's "
+            "normal stacking settings but skips the frame quarantine step, which the library "
+            "stack's own members have already passed."
+        ),
+        _NIGHT_SAMPLE + " Up to 100 empty apertures, as for the stack noise.",
+        "pipelines.stacking.subset_noise_run.run_night_contributions",
+        better=Direction.LOWER,
+        purpose_reason=_NIGHT_PURPOSE_REASON,
+        uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
+        uncertainty_method=(
+            "Statistical, 1 sigma: as for `stacking.empty_aperture_noise_normalized`. The stacker's "
+            "own run-to-run differences are not included."
+        ),
+    ),
+)
+
 _ASSESS = "pipelines.stacking.pre_processing.assess_input_quality.calibration_gates"
 _OUTPUT = "pipelines.stacking.post_processing.assess_output_quality.output_quality_gates"
 _GROUP_GATES = "pipelines.stacking.post_processing.exposure_group_report"
@@ -876,6 +929,7 @@ STACKING_METRICS: tuple[MetricSpec, ...] = (
     *_DECLARED_BEFORE_PHASE_3,
     *_VALUE_METRICS,
     *_NOISE_AND_WEIGHT_METRICS,
+    *_NIGHT_METRICS,
     *_GATE_METRICS,
 )
 

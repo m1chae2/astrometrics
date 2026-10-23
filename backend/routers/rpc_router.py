@@ -153,6 +153,12 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # `quality:measured` event. A write, so the AI's read-only profile
     # withholds it.
     "processing:record_frame_measurements": ("quality_measurement_service", "start_frame_measurements"),
+    # Stack some of a target's frames apart from its library stack, into the
+    # target's `_subsets` folder, and measure the noise of each result. Each
+    # starts a background run and answers at once. Writes (they stack and store
+    # rows), so the AI's read-only profile withholds them.
+    "processing:measure_noise_growth": ("quality_measurement_service", "start_noise_growth"),
+    "processing:measure_night_contributions": ("quality_measurement_service", "start_night_contributions"),
     # Quality measurements. These read the library's quality root directly:
     # `query` reads the stored measurements and `metrics` lists the declared
     # metrics. Neither writes anything.

@@ -5,6 +5,8 @@ pipeline that records measurements to show that its record step emits each
 metric the pipeline declares. This file builds one finished stack summary whose
 every number is filled, with two exposure groups, all sixteen gates, a noise
 measurement and two member frames, and runs the stacking record step on it.
+It adds the two rows of one leave-one-night-out stack, which the subset jobs
+store (`subset_noise_run.py`).
 The two quarantine metrics are frame metrics that the frame measurement run
 (`frame_measurement_run.py`) stores, so the fixture adds the rows it would add.
 """
@@ -20,6 +22,7 @@ from astrometricslib.models.quality.quality_summary import (
     StackQualitySummary,
 )
 from astrometricslib.models.quality.stacking_quality import StackingInputQuality
+from astrometricslib.models.quality.subset_stacks import SubsetStackResult
 from astrometricslib.models.target import FrameRecord
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
 from astrometricslib.pipelines.stacking.frame_measurement_run import quarantine_measurements_for_frame
@@ -33,6 +36,7 @@ from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
     StackNoiseOutcome,
     StackNoiseResult,
 )
+from astrometricslib.pipelines.stacking.subset_noise_run import night_measurements
 
 FIXTURE_TIME = datetime(2026, 10, 22, tzinfo=UTC)
 
@@ -155,6 +159,17 @@ def stacking_emitted_measurements() -> list[QualityMeasurement]:
         fixture_summary(), context, "M99_Stacked.fits", fixture_noise_outcome(), fixture_membership()
     )
     frame = FrameRecord(path="/frames/lights/M 99/Scope/Cam/a.fits", camera="Cam", exposure="60")
+    measurements.extend(
+        night_measurements(
+            context,
+            "M99_L_Stacked.without-2026-10-01",
+            "2026-10-01",
+            0.4,
+            "",
+            SubsetStackResult(targetId="M 99", label="M99_L_Stacked.without-2026-10-01"),
+            fixture_noise_outcome(),
+        )
+    )
     measurements.extend(
         quarantine_measurements_for_frame(
             {"roundness": 0.9, "sky_median_adu": 500.0},

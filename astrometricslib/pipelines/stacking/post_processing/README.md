@@ -69,5 +69,6 @@ Siril warns that PCC and SPCC give an imprecise solution when the image still ho
 - `record_quality.py`: builds the stack's quality measurements from the finished summary and stores them. It judges nothing.
 - `stack_noise.py`: the noise in empty sky, the stored sky apertures and the reference stars.
 - `stack_membership.py`: the frames a stack holds, their weights, and the effective frame count and time.
+- `record_quality.py` also serves the subset jobs: `noise_measurements` and `membership_count_measurements` build the noise and the effective count and time for any stack, and `measure_noise_safely` takes the apertures file to use. `stack_membership.registration_reference_from_diagnostics` names the frame Siril lined the others up with.
 
 For exact behavior, read the code.

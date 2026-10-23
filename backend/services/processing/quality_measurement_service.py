@@ -5,10 +5,15 @@ the numbers in the quality database
 (`astrometrics.processing.record_frame_measurements`). The library also
 guards that work: only one run measures a target at a time, and only one run
 reads frames at a time in the whole process, so this service does not have to.
-It does two small things.
+It does three small things.
 
 - When the app asks for a measurement, it starts the library call on a
   background thread (so the request returns at once) and announces the result.
+- When the app asks for the noise-against-frame-count series or each night's
+  contribution (`astrometrics.processing.measure_noise_growth` and
+  `measure_night_contributions`), it starts that library call the same way.
+  Both stack some of a target's frames into the target's ``_subsets`` folder,
+  never over the library stack, so they take minutes and run only when asked.
 - When a frame sync or an ingestion has already measured the frames it added,
   it announces the summaries of those runs.
 
@@ -20,7 +25,7 @@ from a second look at the database.
 
 import logging
 import threading
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any, Protocol
 
 from astrometricslib import AstrometricsError
@@ -65,7 +70,7 @@ class QualityMeasurementPort(MeasurementAnnouncer, Protocol):
 
 
 class QualityMeasurementService:
-    """Start the frame measurement job and announce what it stored.
+    """Start the quality jobs and announce what they stored.
 
     Parameters
     ----------
@@ -122,6 +127,118 @@ class QualityMeasurementService:
             )
 
         threading.Thread(target=run, name=f"quality-measure-{target_id}", daemon=True).start()
+        return {"started": True, "target_id": target_id}
+
+    def start_noise_growth(
+        self, target_id: str, maximum_steps: int = 4, include_night_contributions: bool = False
+    ) -> dict[str, Any]:
+        """Start the noise-against-frame-count series in the background.
+
+        Parameters
+        ----------
+        target_id : `str`
+            The target whose library stack to take frames from.
+        maximum_steps : `int`, optional
+            The most subset stacks to make. Defaults to 4.
+        include_night_contributions : `bool`, optional
+            Also stack the library stack's frames without each night. Costs
+            one more stack per night.
+
+        Returns
+        -------
+        result : `dict` [`str`, `Any`]
+            ``started`` (always `True`: the thread was started) and
+            ``target_id``. A failure is logged. The rows the run stored are
+            announced as the ``quality:measured`` event.
+        """
+
+        def work() -> tuple[int, list[str]]:
+            """Run the series and count what it stored.
+
+            Returns
+            -------
+            counts : `tuple` [`int`, `list` [`str`]]
+                The rows written and the observing nights they belong to.
+            """
+            result = self._astrometrics.processing.measure_noise_growth(
+                target_id,
+                maximum_steps=maximum_steps,
+                include_night_contributions=include_night_contributions,
+            )
+            rows = result.rows_written
+            nights = {night for subset in result.subsets for night in subset.observing_night_ids}
+            if result.night_contributions is not None:
+                rows += result.night_contributions.rows_written
+                nights.update(entry.night_id for entry in result.night_contributions.nights)
+            return rows, sorted(nights)
+
+        return self._start_subset_job(target_id, "noise-growth", work)
+
+    def start_night_contributions(self, target_id: str) -> dict[str, Any]:
+        """Start each night's contribution measurement in the background.
+
+        Parameters
+        ----------
+        target_id : `str`
+            The target whose library stack to take frames from.
+
+        Returns
+        -------
+        result : `dict` [`str`, `Any`]
+            ``started`` (always `True`: the thread was started) and
+            ``target_id``. A failure is logged. The rows the run stored are
+            announced as the ``quality:measured`` event.
+        """
+
+        def work() -> tuple[int, list[str]]:
+            """Run the night contributions and count what they stored.
+
+            Returns
+            -------
+            counts : `tuple` [`int`, `list` [`str`]]
+                The rows written and the observing nights they belong to.
+            """
+            result = self._astrometrics.processing.measure_night_contributions(target_id)
+            return result.rows_written, sorted(entry.night_id for entry in result.nights)
+
+        return self._start_subset_job(target_id, "night-contributions", work)
+
+    def _start_subset_job(
+        self, target_id: str, name: str, work: Callable[[], tuple[int, list[str]]]
+    ) -> dict[str, Any]:
+        """Run one subset-stack job on a background thread and announce it.
+
+        Parameters
+        ----------
+        target_id : `str`
+            The target.
+        name : `str`
+            A short name for the thread and the log.
+        work : `Callable`
+            Runs the library call and returns the rows written and the
+            observing nights they belong to.
+
+        Returns
+        -------
+        result : `dict` [`str`, `Any`]
+            ``started`` and ``target_id``.
+        """
+
+        def run() -> None:
+            """Run the job; the top of a background thread."""
+            try:
+                rows_written, night_ids = work()
+            except AstrometricsError as error:
+                logger.warning(
+                    "The %s run for %s failed (%s): %s", name, target_id, error.code, error.message
+                )
+                return
+            except Exception:  # the top of a background thread: log it, never lose it
+                logger.exception("The %s run for %s failed", name, target_id)
+                return
+            self._announce(target_id, 0, rows_written, night_ids)
+
+        threading.Thread(target=run, name=f"quality-{name}-{target_id}", daemon=True).start()
         return {"started": True, "target_id": target_id}
 
     def announce_summaries(self, summaries: Iterable[Mapping[str, Any]]) -> None:

@@ -99,6 +99,8 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "exposure_group_subject",
     "measure_noise_safely",
+    "membership_count_measurements",
+    "noise_measurements",
     "record_stacking_quality",
     "stacking_measurements",
 ]
@@ -303,7 +305,7 @@ def _gate_for_measurement(gate: GateResult) -> GateResult:
     )
 
 
-def _noise_measurements(
+def noise_measurements(
     outcome: StackNoiseOutcome, context: PipelineRunContext, subject: QualitySubject
 ) -> list[QualityMeasurement]:
     """Build the three noise measurements of a stack.
@@ -362,6 +364,64 @@ def _noise_measurements(
     ]
 
 
+def membership_count_measurements(
+    membership: StackMembership | None,
+    unavailable_reason: str,
+    context: PipelineRunContext,
+    stack_subject: QualitySubject,
+) -> list[QualityMeasurement]:
+    """Build the effective frame count and effective time of one stack.
+
+    Parameters
+    ----------
+    membership : `StackMembership` or `None`
+        The stack's members, or `None` when they could not be worked out.
+    unavailable_reason : `str`
+        Why there is no membership.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    stack_subject : `QualitySubject`
+        The stack. A subset stack's subject works as well as a library
+        stack's.
+
+    Returns
+    -------
+    measurements : `list` of `QualityMeasurement`
+        The effective frame count, then the effective time. A stack with no
+        members, or with weights that are unknown, gets not-measured records
+        with the reason. A member list that may include frames Siril's
+        filters dropped makes the records ``assumed``.
+    """
+    effective_count_spec = _SPEC_BY_NAME[STACKING_EFFECTIVE_FRAME_COUNT]
+    effective_time_spec = _SPEC_BY_NAME[STACKING_EFFECTIVE_TIME_S]
+    if membership is None or not membership.members:
+        reason = unavailable_reason or "the stack has no member frames"
+        return [
+            build_measurement(effective_count_spec, None, context, stack_subject, reason=reason),
+            build_measurement(effective_time_spec, None, context, stack_subject, reason=reason),
+        ]
+    weights = normalized_weights(membership)
+    exposures = [
+        float(member.frame.exposure) if member.frame.exposure else None for member in membership.members
+    ]
+    count = effective_frame_count(weights)
+    seconds = effective_exposure_seconds(weights, exposures)
+    unknown_reason = membership.weights_reason or "the frames' weights are unknown"
+    status = MeasurementStatus.ASSUMED if membership.membership_reason else MeasurementStatus.MEASURED
+    return [
+        build_measurement(
+            spec,
+            value,
+            context,
+            stack_subject,
+            reason=unknown_reason if value is None else membership.membership_reason,
+            sample_count=len(membership.members),
+            status=status,
+        )
+        for spec, value in ((effective_count_spec, count), (effective_time_spec, seconds))
+    ]
+
+
 def _membership_measurements(
     membership: StackMembership | None,
     unavailable_reason: str,
@@ -389,36 +449,14 @@ def _membership_measurements(
         still records the membership; a member list that may include frames
         Siril's filters dropped makes every row ``assumed``.
     """
-    effective_count_spec = _SPEC_BY_NAME[STACKING_EFFECTIVE_FRAME_COUNT]
-    effective_time_spec = _SPEC_BY_NAME[STACKING_EFFECTIVE_TIME_S]
+    count_rows = membership_count_measurements(membership, unavailable_reason, context, stack_subject)
     if membership is None or not membership.members:
-        reason = unavailable_reason or "the stack has no member frames"
-        return [
-            build_measurement(effective_count_spec, None, context, stack_subject, reason=reason),
-            build_measurement(effective_time_spec, None, context, stack_subject, reason=reason),
-        ]
+        return count_rows
     weights = normalized_weights(membership)
-    exposures = [
-        float(member.frame.exposure) if member.frame.exposure else None for member in membership.members
-    ]
-    count = effective_frame_count(weights)
-    seconds = effective_exposure_seconds(weights, exposures)
     unknown_reason = membership.weights_reason or "the frames' weights are unknown"
     uncertain = bool(membership.membership_reason)
     status = MeasurementStatus.ASSUMED if uncertain else MeasurementStatus.MEASURED
-    rows = []
-    for spec, value in ((effective_count_spec, count), (effective_time_spec, seconds)):
-        rows.append(
-            build_measurement(
-                spec,
-                value,
-                context,
-                stack_subject,
-                reason=unknown_reason if value is None else membership.membership_reason,
-                sample_count=len(membership.members),
-                status=status,
-            )
-        )
+    rows = count_rows
     weight_spec = _SPEC_BY_NAME[STACKING_FRAME_WEIGHT]
     for member, weight in zip(membership.members, weights, strict=True):
         frame = member.frame
@@ -526,7 +564,7 @@ def stacking_measurements(
             )
         )
 
-    measurements.extend(_noise_measurements(noise, context, stack_subject))
+    measurements.extend(noise_measurements(noise, context, stack_subject))
     measurements.extend(_membership_measurements(membership, membership_reason, context, stack_subject))
     return measurements
 
@@ -536,6 +574,7 @@ def measure_noise_safely(
     reference_frame_path: str | None,
     is_spectral: bool,
     crop_offset: tuple[int, int] = (0, 0),
+    apertures_path: str | None = None,
 ) -> StackNoiseOutcome:
     """Measure the stack's empty-aperture noise, never raising.
 
@@ -550,6 +589,11 @@ def measure_noise_safely(
         set a flux scale from, so its noise is not measured.
     crop_offset : `tuple` [`int`, `int`], optional
         The (columns, rows) trimmed from the stack's left and top edges.
+    apertures_path : `str`, optional
+        The target's stored apertures. Left out, they are the file beside the
+        stack. A subset stack is kept in a folder of its own, so its caller
+        passes the file beside the target's library stack, which makes the
+        subset's noise comparable with the library stack's.
 
     Returns
     -------
@@ -559,7 +603,8 @@ def measure_noise_safely(
     """
     if is_spectral:
         return StackNoiseOutcome(None, "a spectral stack has no point sources to set a flux scale from")
-    apertures_path = os.path.join(os.path.dirname(stack_path), APERTURE_FILE_NAME)
+    if apertures_path is None:
+        apertures_path = os.path.join(os.path.dirname(stack_path), APERTURE_FILE_NAME)
     started = time.monotonic()
     try:
         outcome = measure_stack_noise(stack_path, reference_frame_path, apertures_path, crop_offset)

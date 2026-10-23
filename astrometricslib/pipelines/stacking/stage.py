@@ -1151,37 +1151,22 @@ def _update_frame_registration_results(
     identity (no shift of its own) -- and records it onto
     `summary.stacking_metrics`.
     """
+    from astrometricslib.pipelines.stacking.post_processing.stack_membership import (
+        registration_reference_from_diagnostics,
+    )
+
     registration_frames = diagnostics.get("registration_frames", [])
     registration_frame_paths = diagnostics.get("symlinked_light_paths", [])
 
-    # Siril aligns every frame to one reference, so a poor
-    # reference fails the whole stack -- M 42 aborted with "Found
-    # 0 stars in reference" and nothing recorded which frame that
-    # was. The reference is the frame whose transform is the
-    # identity, i.e. the one with no shift of its own.
-    #
-    # Guarded the same way the pairing loop below is, and for
-    # the same reason: a registration_frame_paths/
-    # registration_frames length mismatch means the positional
-    # correspondence between the two lists cannot be trusted, so
-    # indexing into registration_frame_paths here would risk
-    # naming the wrong frame as the reference. Also require
-    # exactly one zero-shift frame -- a legacy `r_` sequence
-    # (already-aligned frames, every one recording an identity
-    # transform; see the preserved-sequence fix elsewhere in
-    # this file) has no single frame identifiable as "the"
-    # reference, and recording the first such frame would be
-    # fabricated rather than measured.
-    zero_shift_indices = [
-        index for index, facts in enumerate(registration_frames) if not facts["dx"] and not facts["dy"]
-    ]
-    reference_lists_align = len(registration_frame_paths) == len(registration_frames)
-    if len(zero_shift_indices) == 1 and reference_lists_align:
-        reference_index = zero_shift_indices[0]
-        summary.stacking_metrics.registration_reference_frame = registration_frame_paths[reference_index]
-        summary.stacking_metrics.registration_reference_star_count = registration_frames[reference_index][
-            "nb_stars"
-        ]
+    # Siril aligns every frame to one reference, so a poor reference fails the
+    # whole stack -- M 42 aborted with "Found 0 stars in reference" and
+    # nothing recorded which frame that was. The reference is the frame whose
+    # transform is the identity; `registration_reference_from_diagnostics`
+    # names it only when it is certain.
+    reference = registration_reference_from_diagnostics(diagnostics)
+    if reference is not None:
+        summary.stacking_metrics.registration_reference_frame = reference[0]
+        summary.stacking_metrics.registration_reference_star_count = reference[1]
 
     if len(registration_frame_paths) == len(registration_frames):
         frame_by_path = {frame.path: frame for frame in target_frames}

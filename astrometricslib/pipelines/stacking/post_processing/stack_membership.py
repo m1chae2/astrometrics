@@ -38,6 +38,7 @@ __all__ = [
     "effective_exposure_seconds",
     "effective_frame_count",
     "normalized_weights",
+    "registration_reference_from_diagnostics",
 ]
 
 
@@ -97,6 +98,41 @@ def _dropped_at_registration(diagnostics: dict[str, Any]) -> set[str]:
     if not paths or len(paths) != len(included):
         return set()
     return {path for path, flag in zip(paths, included, strict=True) if flag is False}
+
+
+def registration_reference_from_diagnostics(diagnostics: dict[str, Any]) -> tuple[str, int | None] | None:
+    """Find the frame Siril lined every other frame up with.
+
+    The reference frame is the one whose transform is the identity (it has no
+    shift of its own). The answer is given only when it is certain: the frame
+    paths and the registration facts must have the same length, so a position
+    in one names the same frame in the other, and exactly one frame must have
+    no shift. A sequence of frames that were already aligned has a zero shift
+    for every frame, so no single frame can be named as "the" reference, and
+    naming the first would be made up.
+
+    Parameters
+    ----------
+    diagnostics : `dict`
+        What the stacking run reported. ``registration_frames`` (one dict per
+        frame with ``dx``, ``dy`` and ``nb_stars``) and
+        ``symlinked_light_paths`` are read.
+
+    Returns
+    -------
+    reference : `tuple` [`str`, `int` or `None`] or `None`
+        The reference frame's path and the number of stars Siril found in it,
+        or `None` when no single frame can be named.
+    """
+    registration_frames = diagnostics.get("registration_frames", [])
+    registration_frame_paths = diagnostics.get("symlinked_light_paths", [])
+    zero_shift_indices = [
+        index for index, facts in enumerate(registration_frames) if not facts["dx"] and not facts["dy"]
+    ]
+    if len(zero_shift_indices) != 1 or len(registration_frame_paths) != len(registration_frames):
+        return None
+    reference_index = zero_shift_indices[0]
+    return registration_frame_paths[reference_index], registration_frames[reference_index]["nb_stars"]
 
 
 def determine_stack_members(

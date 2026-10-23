@@ -14,6 +14,7 @@ They raise an error from `astrometricslib.foundation.errors` when a request
 cannot be met, and return a typed result otherwise.
 """
 
+import os
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime
@@ -32,6 +33,12 @@ from astrometricslib.models.quality.frame_measurement_summary import FrameMeasur
 from astrometricslib.models.quality.quality_reports import (
     StackSummary,
 )
+from astrometricslib.models.quality.quality_summary import STACKING_PIPELINE_VERSION
+from astrometricslib.models.quality.subset_stacks import (
+    NightContributionResult,
+    NoiseGrowthResult,
+    SubsetStackResult,
+)
 from astrometricslib.models.sensor_noise_measurement import SensorNoiseMeasurement
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.api_arguments import (
@@ -45,6 +52,7 @@ from astrometricslib.pipelines.shared.api_arguments import (
     resolve_target,
 )
 from astrometricslib.pipelines.shared.camera_passes import resolve_processing_frames
+from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
 from astrometricslib.pipelines.stacking.calibration_ingest import (
     assess_flat_group,
     build_ingest_report,
@@ -647,6 +655,261 @@ class ProcessingPipelines:
             drivers=self._drivers,
             measured_at=datetime.now(UTC),
             quality_recording=FrameQualityRecording(self._config, self.calibration.library),
+        )
+
+    @background_job("stacking", grace_period_seconds=8.0)
+    def stack_subset(
+        self,
+        target: str | Target,
+        frames: list[FrameRecord],
+        *,
+        label: str,
+        output_folder: str | None = None,
+        register_job: bool = True,
+    ) -> SubsetStackResult:
+        """Stack exactly the given frames into a scratch folder.
+
+        The stack uses the target's normal settings (rejection, weighting,
+        exposure groups and edge trim). It is written to
+        ``<target's stacks folder>/_subsets/<label>/<label>.fits``, or to
+        ``output_folder``, never to the library stack's path. Nothing is
+        assigned on the target and the target is not saved. The frame
+        quarantine step is not run, so give frames the library stack already
+        kept. The stack's noise in the target's stored sky apertures, its
+        effective frame count and its effective time are stored in the quality
+        database at level ``stack``. Delete the ``_subsets`` folder whenever
+        you like; nothing reads it back. A label that is unsafe in a path,
+        fewer than four frames, or frames from more than one camera raise
+        `InvalidArgumentError`.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target the frames belong to.
+        frames : `list` [`FrameRecord`]
+            The frames to stack, at least four, all from one camera.
+        label : `str`
+            Names the subset's folder and file. Letters, digits, dots,
+            underscores and hyphens; it may not start with a dot.
+        output_folder : `str`, optional
+            Write the stack here instead of the default subset folder.
+        register_job : `bool`, optional
+            Record the run in the job list. Defaults to `True`.
+
+        Returns
+        -------
+        result : `SubsetStackResult`
+            The subset stack's path, its frame counts and its noise (or why
+            there is none).
+        """
+        from astrometricslib.pipelines.stacking.subset_noise_run import stack_chosen_subset
+
+        resolved = self._resolve(target)
+        with registered_job(enabled=register_job, job_type="stacking", target_id=resolved.id) as job:
+            context = self._subset_context(resolved, job.job_id)
+            return stack_chosen_subset(
+                resolved,
+                frames,
+                label,
+                self._library_stack_path(resolved, "imaging", must_exist=False),
+                context=context,
+                configuration=self._config,
+                drivers=self._drivers,
+                stacking_slot=self.acquire_stacking_slot,
+                output_folder=output_folder,
+            )
+
+    @background_job("stacking", grace_period_seconds=8.0)
+    def measure_noise_growth(
+        self,
+        target: str | Target,
+        *,
+        maximum_steps: int = 4,
+        include_night_contributions: bool = False,
+        register_job: bool = True,
+    ) -> NoiseGrowthResult:
+        """Stack growing subsets of a target and measure each one's noise.
+
+        The frames of the target's library stack (read from the stack's
+        ``_inputs.json``) are split by observing night. The subsets are the
+        first night, the first two nights, and so on, up to one night fewer
+        than the stack. A stack of one night uses the first quarter, half and
+        three quarters of its frames instead. At most ``maximum_steps``
+        subsets are made, spaced evenly through the possible ones, and a
+        subset with fewer than four frames is left out. The library stack is
+        the last point of the curve and is not stacked again.
+
+        Each subset is stacked into the target's ``_subsets`` folder with the
+        normal settings (without the frame quarantine step). Its noise is
+        measured in the same sky apertures as the library stack, so the
+        numbers compare. The noise, the reference flux, the effective frame
+        count and the effective time are stored at level ``stack``, with the
+        subset's label in the subject. The library stack, its previews and its
+        record are never changed.
+
+        Cost: one stack for each subset, four by default, each with fewer
+        frames than the library stack. Expect the time of about one to three
+        library stacks (a design estimate, not a measurement). The target must
+        already have the noise apertures that its library stack stored, so
+        stack it once first if it was stacked before they were recorded. A
+        target with no stack, or a stack with no ``_inputs.json``, raises
+        `NotFoundError`.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target.
+        maximum_steps : `int`, optional
+            The most subsets to stack. Defaults to 4.
+        include_night_contributions : `bool`, optional
+            Also run `measure_night_contributions` in the same job. Defaults
+            to `False`, because it costs one more stack for every night.
+        register_job : `bool`, optional
+            Record the run in the job list. Defaults to `True`.
+
+        Returns
+        -------
+        result : `NoiseGrowthResult`
+            The subsets, smallest first, with notes about steps left out.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If ``maximum_steps`` is below 1.
+        """
+        from astrometricslib.pipelines.stacking.subset_noise_run import (
+            run_night_contributions,
+            run_noise_growth,
+        )
+
+        if maximum_steps < 1:
+            raise InvalidArgumentError("maximum_steps must be at least 1.")
+        resolved = self._resolve(target)
+        library_stack_path = self._library_stack_path(resolved, "imaging")
+        with registered_job(enabled=register_job, job_type="stacking", target_id=resolved.id) as job:
+            context = self._subset_context(resolved, job.job_id)
+            result = run_noise_growth(
+                resolved,
+                library_stack_path,
+                context=context,
+                configuration=self._config,
+                drivers=self._drivers,
+                stacking_slot=self.acquire_stacking_slot,
+                maximum_steps=maximum_steps,
+            )
+            if include_night_contributions:
+                result.night_contributions = run_night_contributions(
+                    resolved,
+                    library_stack_path,
+                    context=context,
+                    configuration=self._config,
+                    drivers=self._drivers,
+                    stacking_slot=self.acquire_stacking_slot,
+                )
+            return result
+
+    @background_job("stacking", grace_period_seconds=8.0)
+    def measure_night_contributions(
+        self, target: str | Target, *, register_job: bool = True
+    ) -> NightContributionResult:
+        """Measure what each observing night gave to a target's library stack.
+
+        For every night of the stack's frames, the stack's frames without that
+        night are stacked into the target's ``_subsets`` folder, and two
+        numbers are stored at level ``stack`` on that leave-out stack, with the
+        night in the subject's observing night: the night's share of the
+        library stack's total frame weight (``stacking.night_weight_share``)
+        and the noise of the stack without the night
+        (``stacking.noise_without_night``). Compare the second with the
+        library stack's own noise: a lower value means the night made the
+        stack noisier.
+
+        Cost: one stack for every night, each close to the library stack's own
+        cost. It never runs by itself after a stack; call it when you want
+        it, or pass ``include_night_contributions`` to
+        `measure_noise_growth`. A stack of one night has nothing to leave out.
+        A target with no stack, or a stack with no ``_inputs.json``, raises
+        `NotFoundError`.
+        A share is stored as not measured when the stack's weights are unknown
+        (Siril weighted the frames itself).
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target.
+        register_job : `bool`, optional
+            Record the run in the job list. Defaults to `True`.
+
+        Returns
+        -------
+        result : `NightContributionResult`
+            One entry for each night.
+        """
+        from astrometricslib.pipelines.stacking.subset_noise_run import run_night_contributions
+
+        resolved = self._resolve(target)
+        library_stack_path = self._library_stack_path(resolved, "imaging")
+        with registered_job(enabled=register_job, job_type="stacking", target_id=resolved.id) as job:
+            context = self._subset_context(resolved, job.job_id)
+            return run_night_contributions(
+                resolved,
+                library_stack_path,
+                context=context,
+                configuration=self._config,
+                drivers=self._drivers,
+                stacking_slot=self.acquire_stacking_slot,
+            )
+
+    def _library_stack_path(self, target: Target, kind: StackKind, *, must_exist: bool = True) -> str:
+        """Find the path of a target's library stack for the subset jobs.
+
+        Parameters
+        ----------
+        target : `Target`
+            The target.
+        kind : {"imaging", "spectral"}
+            Which stack.
+        must_exist : `bool`, optional
+            Raise when the target has no stack. When `False`, a target
+            without a stack gets the path its stack would have, so a
+            subset can still be stacked beside it.
+
+        Returns
+        -------
+        path : `str`
+            The library stack's path.
+        """
+        from astrometricslib.pipelines.stacking.post_processing.stack_quality_report import stack_path_of
+
+        if must_exist:
+            return stack_path_of(target, kind)
+        stacking = target.spectral_stacking if kind == "spectral" else target.stacking
+        if stacking.stacked_image:
+            return str(stacking.stacked_image)
+        folder = os.path.join(str(self._config.get_stacks_path()), "lights", target.id)
+        return os.path.join(folder, f"{target.id.replace(' ', '_')}_Stacked.fits")
+
+    def _subset_context(self, target: Target, job_id: str | None) -> PipelineRunContext | None:
+        """Make the shared facts of one subset-stack run.
+
+        Parameters
+        ----------
+        target : `Target`
+            The target.
+        job_id : `str` or `None`
+            The run's job id, if it recorded a job.
+
+        Returns
+        -------
+        context : `PipelineRunContext`
+            The context, stamped with the time now (the API layer reads the
+            clock, the pipelines do not).
+        """
+        return PipelineRunContext.from_options(
+            target.id,
+            "stacking",
+            STACKING_PIPELINE_VERSION,
+            {"job_id": job_id, "measured_at": datetime.now(UTC)},
         )
 
     @background_job("preview", grace_period_seconds=20.0)

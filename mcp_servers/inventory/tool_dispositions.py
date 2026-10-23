@@ -540,6 +540,21 @@ DECISIONS = {
         "so it reads the stored numbers with quality_query instead.",
         "change-data",
     ),
+    **dict.fromkeys(
+        (
+            "processing_stack_subset",
+            "processing_measure_noise_growth",
+            "processing_measure_night_contributions",
+        ),
+        ToolDecision(
+            "withhold",
+            "Stacks some of a target's frames into the target's _subsets folder (never over the library "
+            "stack, its previews or its records) and writes the noise of each result into the quality "
+            "database. It costs one stack for each subset, so it takes minutes. The AI is read-only, so "
+            "it reads the stored numbers with quality_query instead.",
+            "change-data",
+        ),
+    ),
     "target_reindex_frames": ToolDecision(
         "withhold",
         "Writes the frame records. A dry_run mode that only reports what would change would let an AI "

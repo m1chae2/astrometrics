@@ -81,6 +81,21 @@ def test_build_measurement_carries_the_spec_and_context_and_never_defaults() -> 
         build_measurement(SPEC, None, context, context.run_subject())
 
 
+def test_a_measured_value_does_not_carry_the_missing_value_reason() -> None:
+    """A present value drops the 'why missing' sentence callers pass."""
+    context = _context()
+    subject = context.run_subject()
+    present = build_measurement(SPEC, 4.0, context, subject, reason="the stage reported no count")
+    missing = build_measurement(SPEC, None, context, subject, reason="the stage reported no count")
+    assumed = build_measurement(
+        SPEC, 4.0, context, subject, reason="from the old summary", status=MeasurementStatus.ASSUMED
+    )
+    assert present.status is MeasurementStatus.MEASURED
+    assert present.reason == ""
+    assert missing.reason == "the stage reported no count"
+    assert assumed.reason == "from the old summary"
+
+
 def test_gate_measurement_keeps_value_outcome_limit_and_reason() -> None:
     """A passed gate gives value, outcome, limit in the unit and detail."""
     context = _context()

@@ -10,6 +10,11 @@ Rules the helpers keep:
 
 - A value that is `None` is never stored as a default. It becomes a
   ``not_measured`` record with a reason.
+- A value that is present never carries the "why there is no value" sentence.
+  Callers pass that sentence for every value because they do not know in
+  advance which values will be missing. `build_measurement` keeps it only for
+  a missing value, for an ``assumed`` value (where it names the source of the
+  assumption) and for a self-check (where it is the check's own detail).
 - A measurement carries the registered ``definition_version`` of its metric,
   so a pipeline never repeats it.
 - Storing is best effort. A storage failure is logged and never stops the
@@ -205,7 +210,11 @@ def build_measurement(
         What the value is about.
     reason : `str`, optional
         Why the value is missing. Required when `value` is `None`; for an
-        ``assumed`` measurement it names the source of the assumption.
+        ``assumed`` measurement it names the source of the assumption. For a
+        ``measured`` value that is not a self-check it is dropped, so a caller
+        may pass the sentence for the missing case without checking the value.
+        A self-check (one with a `check_outcome`) keeps it as the check's
+        detail.
     uncertainty : `float` or `None`, optional
         The value's uncertainty, in the metric's unit.
     sample_count : `int` or `None`, optional
@@ -226,11 +235,14 @@ def build_measurement(
         A measurement with origin ``measured`` and the context's run id, job
         id, pipeline version and time.
     """
+    final_status = MeasurementStatus.NOT_MEASURED if value is None else status
+    if final_status == MeasurementStatus.MEASURED and check_outcome is None:
+        reason = ""
     return QualityMeasurement(
         metric=spec.name,
         definitionVersion=spec.definition_version,
         subject=subject,
-        status=MeasurementStatus.NOT_MEASURED if value is None else status,
+        status=final_status,
         value=value,
         uncertainty=None if value is None else uncertainty,
         sampleCount=sample_count,

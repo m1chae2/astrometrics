@@ -587,7 +587,9 @@ def locate_zero_order(plane: np.ndarray) -> ZeroOrderPosition | None:
     return ZeroOrderPosition(extended[0], extended[1], is_extended_target=True)
 
 
-def detect_star_centroids(plane: np.ndarray, count: int = REFINEMENT_STAR_COUNT) -> np.ndarray:
+def detect_star_centroids(
+    plane: np.ndarray, count: int = REFINEMENT_STAR_COUNT, skip_saturated: bool = True
+) -> np.ndarray:
     """Find the centres of the brightest isolated stars in a stacked image.
 
     Parameters
@@ -596,13 +598,21 @@ def detect_star_centroids(plane: np.ndarray, count: int = REFINEMENT_STAR_COUNT)
         A 2-D stacked image.
     count : `int`, optional
         How many of the brightest stars to return.
+    skip_saturated : `bool`, optional
+        Leave out the stars above `REFINEMENT_SATURATION_FRACTION` of the
+        image's 99.99th percentile. The default is `True`. Set it to `False`
+        to ask whether a star is present at a place: the brightest stars of a
+        single frame are cut by this limit, but the same stars in a stack of
+        many frames are not, so a check that a stack's stars are in a frame
+        must keep them.
 
     Returns
     -------
     centroids : `numpy.ndarray`
         An array of shape ``(n, 2)`` with each star's (row, column), brightest
-        first. Saturated stars, and stars near the frame edge, are left out
-        (see `REFINEMENT_SATURATION_FRACTION` and
+        first. Saturated stars (unless `skip_saturated` is `False`), and stars
+        near the frame edge, are left out (see
+        `REFINEMENT_SATURATION_FRACTION` and
         `REFINEMENT_EDGE_MARGIN_PIXELS`). Empty when no star is found.
     """
     image = np.nan_to_num(np.asarray(plane, dtype=np.float64))
@@ -615,7 +625,7 @@ def detect_star_centroids(plane: np.ndarray, count: int = REFINEMENT_STAR_COUNT)
     is_peak = (
         (maximum_filter(smooth, size=15) == smooth)
         & (smooth > REFINEMENT_DETECTION_SIGMAS * sigma)
-        & (image < REFINEMENT_SATURATION_FRACTION * top)
+        & (image < REFINEMENT_SATURATION_FRACTION * top if skip_saturated else True)
     )
     rows, columns = np.nonzero(is_peak)
     margin = REFINEMENT_EDGE_MARGIN_PIXELS

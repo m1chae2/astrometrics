@@ -12,6 +12,7 @@ from astrometricslib.pipelines.stacking.post_processing.stack_membership import 
     effective_exposure_seconds,
     effective_frame_count,
     normalized_weights,
+    wfwhm_weights,
 )
 from astrometricslib.pipelines.stacking.processing.exposure_groups import merge_registration_sequences
 
@@ -172,3 +173,90 @@ def test_merged_sequence_keeps_the_image_lines_in_group_order(tmp_path: Path) ->
     assert merge_registration_sequences([str(first), str(second)], str(merged))
     assert parse_seq_inclusion(str(merged)) == [True, False]
     assert merged.read_text().count("R0 ") == 2
+
+
+# The weighted star widths (pixels) of the 61 frames of the M 57 stack of the
+# night of 2026-10-03, copied from the `R0` lines of that stack's Siril
+# registration sequence file.
+_M57_WEIGHTED_FWHM_PX = [
+    3.17027, 2.58072, 4.1292, 2.35677, 2.96505, 4.16645, 2.96505, 3.39337, 4.84284, 6.93452, 4.84626,
+    5.26169, 4.9182, 4.05684, 4.57619, 2.53662, 4.87738, 5.57078, 2.5715, 4.80236, 3.25744, 4.15744,
+    3.32299, 3.46115, 3.55113, 4.2603, 3.65225, 3.36534, 4.44963, 5.61601, 4.45397, 6.90815, 2.57225,
+    3.04412, 2.18096, 3.13592, 2.76012, 2.37718, 3.79153, 2.09047, 2.57651, 2.93731, 5.28048, 3.32539,
+    2.57537, 3.00473, 3.08008, 3.78447, 3.74241, 3.73712, 3.70004, 3.62633, 3.79721, 4.94621, 3.68446,
+    3.48391, 3.92725, 4.6504, 3.07033, 3.91401, 4.14655,
+]  # fmt: skip
+
+
+def test_wfwhm_weights_follow_siril_formula_by_hand() -> None:
+    """Widths 2, 4 and 8 px give the weights worked out below."""
+    weights = wfwhm_weights([2.0, 4.0, 8.0])
+    middle = (1 / 16 - 1 / 64) / (1 / 4 - 1 / 64)
+    mean = (1.0 + middle + 0.0) / 3
+    assert weights == pytest.approx([1.0 / mean, middle / mean, 0.0])
+    assert sum(weights) / 3 == pytest.approx(1.0)
+
+
+def test_wfwhm_weights_give_a_frame_without_a_width_weight_zero() -> None:
+    """A frame with no positive width counts for nothing."""
+    weights = wfwhm_weights([2.0, 0.0, 4.0])
+    assert weights[1] == pytest.approx(0.0)
+    assert sum(weights) / 3 == pytest.approx(1.0)
+
+
+def test_wfwhm_weights_of_equal_widths_are_equal() -> None:
+    """The formula divides by zero for equal widths; the weights are equal."""
+    assert wfwhm_weights([3.0, 3.0, 3.0]) == pytest.approx([1.0, 1.0, 1.0])
+
+
+def test_wfwhm_weights_of_the_real_m57_sequence() -> None:
+    """The sharpest frame counts most and the blurriest 0."""
+    weights = wfwhm_weights(_M57_WEIGHTED_FWHM_PX)
+    assert len(weights) == 61
+    assert sum(weights) / 61 == pytest.approx(1.0)
+    assert weights.index(min(weights)) == _M57_WEIGHTED_FWHM_PX.index(max(_M57_WEIGHTED_FWHM_PX))
+    assert min(weights) == pytest.approx(0.0)
+    assert weights.index(max(weights)) == _M57_WEIGHTED_FWHM_PX.index(min(_M57_WEIGHTED_FWHM_PX))
+    assert effective_frame_count(weights) == pytest.approx(40.78, abs=0.01)
+
+
+def test_siril_star_width_weighting_is_rebuilt_from_the_sequence_widths() -> None:
+    """With -weight=wfwhm each weight comes from the sequence widths."""
+    frames = _frames(3)
+    diagnostics = {
+        "symlinked_light_paths": [frame.path for frame in frames],
+        "registration_frames": [{"weighted_fwhm_px": width} for width in (2.0, 4.0, 8.0)],
+    }
+    membership = determine_stack_members(frames, diagnostics, "wfwhm")
+    assert membership.weights_reason == ""
+    assert normalized_weights(membership) == pytest.approx(wfwhm_weights([2.0, 4.0, 8.0]))
+
+
+def test_a_frame_dropped_at_registration_does_not_enter_the_width_weights() -> None:
+    """Siril scales the weights over the stacked frames only."""
+    frames = _frames(3)
+    diagnostics = {
+        "symlinked_light_paths": [frame.path for frame in frames],
+        "registration_included": [True, True, False],
+        "registration_frames": [{"weighted_fwhm_px": width} for width in (2.0, 4.0, 8.0)],
+    }
+    membership = determine_stack_members(frames, diagnostics, "wfwhm")
+    assert normalized_weights(membership) == pytest.approx(wfwhm_weights([2.0, 4.0]))
+
+
+def test_star_width_weights_are_unknown_when_the_sequence_lines_do_not_match() -> None:
+    """Without matching sequence lines the weights stay unknown."""
+    frames = _frames(3)
+    diagnostics = {
+        "symlinked_light_paths": [frame.path for frame in frames],
+        "registration_frames": [{"weighted_fwhm_px": 2.0}],
+    }
+    membership = determine_stack_members(frames, diagnostics, "wfwhm")
+    assert normalized_weights(membership) == [None, None, None]
+    assert "-weight=wfwhm" in membership.weights_reason
+
+
+def test_noise_weights_say_what_is_missing() -> None:
+    """The reason for -weight=noise names the scale Siril does not save."""
+    membership = determine_stack_members(_frames(2), {}, "noise")
+    assert "pscale" in membership.weights_reason

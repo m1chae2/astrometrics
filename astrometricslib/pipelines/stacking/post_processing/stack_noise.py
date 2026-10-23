@@ -31,6 +31,16 @@ shifted by the same offset. The claim is checked, not assumed: the brightest
 stars of the stack must sit where the reference frame shows stars. If they do
 not, no noise is measured.
 
+A frame's own "solution" is only a first guess. The camera software (Ekos)
+writes the position the mount was told to point at, not a plate solution, so
+the sky position of a pixel can be wrong by tens of pixels, and by a different
+amount on every night. The first stack of a target fixes its apertures with
+that guess, and that is consistent within the stack. A later stack with a
+guess like that must first be moved onto the stored apertures: the stored
+reference stars are looked for near where the guess predicts them, the shift
+that most of them agree on is found, and the solution is moved by that shift.
+If fewer than a few stars agree, no noise is measured.
+
 The estimator and the numbers (100 apertures, radius 4 px, 10 reference stars)
 are declared in `pipelines/stacking/metrics.py`.
 """
@@ -119,6 +129,19 @@ MAXIMUM_PIXEL_SCALE_CHANGE = 0.10
 WCS_CHECK_STAR_COUNT = 10
 WCS_CHECK_MINIMUM_MATCHES = 5
 WCS_CHECK_TOLERANCE_PX = 3.0
+
+# Moving a first-guess solution onto the stored apertures. The stored
+# reference stars are searched for within this many pixels of where the guess
+# predicts them. On the M 57 frames of 2026-10-03 the guess was off by up to
+# 82 px between frames of one night; 500 px (about 16 arcmin at 1.9 arcsec per
+# pixel) leaves room for a night-to-night pointing error, and is still small
+# enough that the stars of a field do not line up by chance (4000 star pairs in
+# a window of 1,000,000 square pixels, against a 3 px agreement).
+SEED_SEARCH_RADIUS_PX = 500.0
+
+# Reference stars agree on a shift when their shifts differ by less than this.
+# It is the tolerance of the other star checks in this module.
+SEED_AGREEMENT_PX = WCS_CHECK_TOLERANCE_PX
 
 # A robust standard deviation from the median absolute deviation (MAD) of a
 # bell curve: sigma = 1.4826 MAD.
@@ -372,7 +395,10 @@ def _reference_frame_wcs(
         return None, NO_WCS_REASON
     frame_plane = collapse_to_2d(np.asarray(frame_data, dtype=np.float64))
     stack_stars = detect_star_centroids(stack_plane, count=WCS_CHECK_STAR_COUNT)
-    frame_stars = detect_star_centroids(frame_plane, count=DETECTED_STAR_COUNT)
+    # Saturated stars stay in: the stack's brightest stars are bright in
+    # the single frame too, and the frame's own 99.99th percentile would cut
+    # them.
+    frame_stars = detect_star_centroids(frame_plane, count=DETECTED_STAR_COUNT, skip_saturated=False)
     if len(stack_stars) < WCS_CHECK_MINIMUM_MATCHES or len(frame_stars) == 0:
         return None, "the reference frame's solution could not be checked: too few stars were found"
     # Stack pixel (row, column) is frame pixel (row + rows cut,
@@ -386,6 +412,62 @@ def _reference_frame_wcs(
             "bright stars match), so its coordinate solution does not apply to the stack"
         )
     return shifted, ""
+
+
+def _move_guess_onto_reference_stars(
+    plane: np.ndarray, wcs: WCS, reference_sky: np.ndarray
+) -> tuple[WCS | None, str]:
+    """Shift a first-guess solution so it lands on the stored reference stars.
+
+    Parameters
+    ----------
+    plane : `numpy.ndarray`
+        The stack's image.
+    wcs : `astropy.wcs.WCS`
+        The first-guess solution (it points where the mount was told to).
+    reference_sky : `numpy.ndarray`
+        Shape ``(k, 2)``: right ascension and declination of the stored
+        reference stars, in degrees.
+
+    Returns
+    -------
+    moved : `astropy.wcs.WCS` or `None`
+        The solution shifted so the reference stars sit on stars of the
+        stack, or `None` when too few stars agree.
+    reason : `str`
+        Why there is none. Empty when there is one.
+    """
+    predicted = _sky_to_pixels(wcs, reference_sky)[:, ::-1]
+    detected = detect_star_centroids(plane, count=DETECTED_STAR_COUNT, skip_saturated=False)
+    if len(predicted) == 0 or len(detected) == 0:
+        return None, "the stored reference stars could not be found: no stars were detected"
+    # Every (reference star, detected star) pair suggests a shift. The true
+    # shift is the one many different reference stars suggest together.
+    star_index, detected_index = np.meshgrid(
+        np.arange(len(predicted)), np.arange(len(detected)), indexing="ij"
+    )
+    shifts = detected[detected_index.ravel()] - predicted[star_index.ravel()]
+    owner = star_index.ravel()
+    near = np.hypot(shifts[:, 0], shifts[:, 1]) <= SEED_SEARCH_RADIUS_PX
+    shifts, owner = shifts[near], owner[near]
+    if len(shifts) == 0:
+        return None, "the stored reference stars were not found near where the stack's solution puts them"
+    tree = cKDTree(shifts)
+    neighbors = tree.query_ball_point(shifts, r=SEED_AGREEMENT_PX)
+    distinct_counts = [len(set(owner[members])) for members in neighbors]
+    best = int(np.argmax(distinct_counts))
+    if distinct_counts[best] < MINIMUM_USABLE_REFERENCE_STARS:
+        return None, (
+            f"only {distinct_counts[best]} of {len(predicted)} stored reference stars agree on a shift "
+            "from the stack's first-guess solution, so the stack's sky positions cannot be trusted"
+        )
+    shift_row, shift_column = np.median(shifts[neighbors[best]], axis=0)
+    moved = wcs.deepcopy()
+    # A star predicted at pixel p that is really at p + shift has the sky
+    # position the guess gives for p, so the reference pixel moves by the
+    # shift.
+    moved.wcs.crpix = [wcs.wcs.crpix[0] + shift_column, wcs.wcs.crpix[1] + shift_row]
+    return moved, ""
 
 
 def _pixel_scale_arcsec(wcs: WCS) -> float:
@@ -628,6 +710,12 @@ def measure_stack_noise(
             )
         aperture_set = _store_apertures_once(apertures_path, chosen)
         created = aperture_set is chosen
+    if wcs_source != "stack header" and not created:
+        # The first guess is only good to the pointing error of the mount, and
+        # this stack's apertures were chosen on another stack's guess.
+        wcs, reason = _move_guess_onto_reference_stars(plane, wcs, aperture_set.reference_sky)
+        if wcs is None:
+            return StackNoiseOutcome(None, reason)
     scale = _pixel_scale_arcsec(wcs)
     if (
         abs(scale - aperture_set.pixel_scale_arcsec)

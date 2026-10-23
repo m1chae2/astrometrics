@@ -57,7 +57,12 @@ def _sky_header(scale_arcsec: float = PIXEL_SCALE_ARCSEC) -> fits.Header:
     return header
 
 
-def _sky_image(noise_sigma: float, seed: int, star_amplitude: float = 2000.0) -> np.ndarray:
+def _sky_image(
+    noise_sigma: float,
+    seed: int,
+    star_amplitude: float = 2000.0,
+    star_positions: list[tuple[float, float]] | None = None,
+) -> np.ndarray:
     """Build a flat sky with white noise and bright round stars.
 
     Parameters
@@ -68,19 +73,22 @@ def _sky_image(noise_sigma: float, seed: int, star_amplitude: float = 2000.0) ->
         Seed of the noise.
     star_amplitude : `float`, optional
         The peak of each star above the sky.
+    star_positions : `list` of `tuple`, optional
+        The (column, row) of each star. A regular grid if left out.
 
     Returns
     -------
     image : `numpy.ndarray`
         The image, float32.
     """
+    positions = STAR_POSITIONS if star_positions is None else star_positions
     generator = np.random.default_rng(seed)
     rows, columns = np.mgrid[0:SIZE, 0:SIZE]
     image = SKY_LEVEL + generator.normal(0.0, noise_sigma, (SIZE, SIZE))
     # The amplitudes differ, because the star finder skips stars as bright as
     # the brightest pixels (it takes those for saturated).
-    amplitudes = np.linspace(0.3, 1.0, len(STAR_POSITIONS)) * star_amplitude
-    for (x, y), amplitude in zip(STAR_POSITIONS, amplitudes, strict=True):
+    amplitudes = np.linspace(0.3, 1.0, len(positions)) * star_amplitude
+    for (x, y), amplitude in zip(positions, amplitudes, strict=True):
         image += amplitude * np.exp(-((columns - x) ** 2 + (rows - y) ** 2) / (2 * 2.0**2))
     return image.astype(np.float32)
 
@@ -212,3 +220,76 @@ def test_an_aperture_that_reaches_empty_edge_pixels_is_dropped() -> None:
     image[45:55, 45:55] = 0.0
     assert signed_aperture_sum(image, 50.0, 50.0) is None
     assert signed_aperture_sum(np.full((100, 100), 50.0), 5.0, 50.0) is None
+
+
+def _scattered_stars(seed: int) -> list[tuple[float, float]]:
+    """Draw star positions at random, well inside the image.
+
+    Parameters
+    ----------
+    seed : `int`
+        Seed of the draw.
+
+    Returns
+    -------
+    positions : `list` of `tuple`
+        48 (column, row) positions, 100 px or more from every edge.
+    """
+    generator = np.random.default_rng(seed)
+    return [(float(x), float(y)) for x, y in generator.uniform(100, SIZE - 100, (48, 2))]
+
+
+def test_bright_stars_the_frames_own_percentile_would_cut_still_match(tmp_path: Path) -> None:
+    """The check keeps the frame's brightest stars.
+
+    A stack's 99.99th percentile can be set by a compact bright feature, so its
+    brightest stars are kept. The single frame has no such feature, and its own
+    percentile would cut its brightest stars as saturated. About seven of the
+    stack's ten brightest stars are in that group, so the check needs them.
+    """
+    rows, columns = np.mgrid[0:SIZE, 0:SIZE]
+    feature = 9000.0 * np.exp(-((columns - 450) ** 2 + (rows - 90) ** 2) / (2 * 8.0**2))
+    reference = _write(tmp_path / "reference.fits", _sky_image(2.0, seed=5), _sky_header())
+    stack = _write(tmp_path / "stack.fits", (_sky_image(2.0, seed=6) + feature).astype(np.float32), None)
+    outcome = measure_stack_noise(stack, reference, str(tmp_path / APERTURE_FILE_NAME))
+    assert outcome.result is not None, outcome.reason
+    assert outcome.result.wcs_source == "registration reference frame"
+
+
+def test_a_first_guess_solution_is_moved_onto_the_stored_reference_stars(tmp_path: Path) -> None:
+    """A later stack with a first-guess header moves onto the stored stars.
+
+    The camera software writes the commanded pointing, which is wrong by tens
+    of pixels. The second stack's stars sit 30 rows and 25 columns from where
+    the same header predicts them for the first stack.
+    """
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    # Real stars are not on a grid; on a grid several shifts fit equally well.
+    scattered = _scattered_stars(seed=3)
+    first = _write(tmp_path / "first.fits", _sky_image(2.0, seed=1, star_positions=scattered), _sky_header())
+    first_outcome = measure_stack_noise(first, None, apertures)
+    assert first_outcome.result is not None
+    moved_image = np.roll(_sky_image(2.0, seed=7, star_positions=scattered), shift=(30, -25), axis=(0, 1))
+    reference = _write(tmp_path / "reference.fits", moved_image, _sky_header())
+    stack = _write(tmp_path / "stack.fits", moved_image, None)
+    outcome = measure_stack_noise(stack, reference, apertures)
+    assert outcome.result is not None, outcome.reason
+    assert not outcome.result.apertures_created
+    assert outcome.result.reference_star_count >= 5
+    assert outcome.result.reference_flux_adu == pytest.approx(
+        first_outcome.result.reference_flux_adu, rel=0.1
+    )
+    assert outcome.result.normalized_noise == pytest.approx(first_outcome.result.normalized_noise, rel=0.3)
+
+
+def test_a_first_guess_solution_that_finds_no_stored_stars_is_refused(tmp_path: Path) -> None:
+    """With the stored reference stars missing, nothing is measured."""
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    first = _write(tmp_path / "first.fits", _sky_image(2.0, seed=1), _sky_header())
+    assert measure_stack_noise(first, None, apertures).result is not None
+    other = _sky_image(2.0, seed=8, star_positions=_scattered_stars(seed=4))
+    reference = _write(tmp_path / "reference.fits", other, _sky_header())
+    stack = _write(tmp_path / "stack.fits", other, None)
+    outcome = measure_stack_noise(stack, reference, apertures)
+    assert outcome.result is None
+    assert "agree on a shift" in outcome.reason

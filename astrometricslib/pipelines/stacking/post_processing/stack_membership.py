@@ -15,9 +15,13 @@ knows:
   groups, the combine weights each group by frames x exposure^2 / frame noise^2
   (see `stack_runner._stack_exposure_groups`); a frame's share of that is the
   group weight divided by the group's frame count. When Siril weights the
-  frames itself (``-weight=noise``, ``nbstars`` or ``wfwhm``) it uses numbers
-  it computes inside and does not print, so the weights are unknown. Unknown is
-  reported as unknown. It is never replaced by equal weights.
+  frames itself it computes the weights inside and does not print them.
+  ``-weight=wfwhm`` is rebuilt exactly, because it needs only each frame's
+  weighted star width, which Siril does save in its sequence file (see
+  `wfwhm_weights`). ``-weight=noise`` needs a scale Siril fits during
+  normalization and does not save, and ``nbstars`` is not rebuilt, so their
+  weights are unknown. Unknown is reported as unknown. It is never replaced by
+  equal weights.
 
 The effective frame count and effective time say how much a weighted stack is
 worth in equal frames and equal seconds.
@@ -39,6 +43,7 @@ __all__ = [
     "effective_frame_count",
     "normalized_weights",
     "registration_reference_from_diagnostics",
+    "wfwhm_weights",
 ]
 
 
@@ -135,6 +140,85 @@ def registration_reference_from_diagnostics(diagnostics: dict[str, Any]) -> tupl
     return registration_frame_paths[reference_index], registration_frames[reference_index]["star_count"]
 
 
+def wfwhm_weights(weighted_fwhm_px: Sequence[float]) -> list[float]:
+    """Rebuild Siril's star-width weights (``-weight=wfwhm``) for some frames.
+
+    Siril (``compute_wfwhm_weights`` in ``src/stacking/median_and_mean.c``)
+    gives each stacked image with a positive weighted width ``w`` the weight
+    ``(1/w^2 - 1/w_max^2) / (1/w_min^2 - 1/w_max^2)``, where ``w_min`` and
+    ``w_max`` are the smallest and largest widths of the stacked images. The
+    sharpest frame gets 1 and the blurriest gets 0. An image whose width is not
+    positive gets 0. Each weight is then divided by the mean weight, which is
+    the sum over the number of stacked images (zeros included).
+
+    Parameters
+    ----------
+    weighted_fwhm_px : `Sequence` of `float`
+        The weighted FWHM of each stacked image, in pixels, from Siril's
+        sequence file.
+
+    Returns
+    -------
+    weights : `list` of `float`
+        One weight per image, with mean 1. When all positive widths are equal
+        the formula divides by zero; every image with a positive width then
+        gets the same weight, and an input with no positive width gets all
+        zeros (mean 0, so the caller treats the weights as unknown).
+    """
+    positive = [width for width in weighted_fwhm_px if width > 0]
+    if not positive:
+        return [0.0] * len(weighted_fwhm_px)
+    narrowest, widest = min(positive), max(positive)
+    if widest == narrowest:
+        raw = [1.0 if width > 0 else 0.0 for width in weighted_fwhm_px]
+    else:
+        denominator = 1.0 / narrowest**2 - 1.0 / widest**2
+        raw = [
+            (1.0 / width**2 - 1.0 / widest**2) / denominator if width > 0 else 0.0
+            for width in weighted_fwhm_px
+        ]
+    mean = math.fsum(raw) / len(raw)
+    return [weight / mean for weight in raw] if mean > 0 else [0.0] * len(raw)
+
+
+def _star_width_weights(
+    candidates: Sequence[Any], diagnostics: dict[str, Any]
+) -> tuple[dict[str, float], str]:
+    """Rebuild the star-width weights of the candidate frames.
+
+    Parameters
+    ----------
+    candidates : `Sequence`
+        The frames the stack is thought to hold (they have ``path``).
+    diagnostics : `dict`
+        What the stacking run reported. ``symlinked_light_paths`` and
+        ``registration_frames`` are read; they must have the same length so a
+        position in one names the same frame in the other.
+
+    Returns
+    -------
+    weights : `dict` of `str` to `float`
+        The weight of each candidate by path. Empty when there is a reason.
+    reason : `str`
+        Why the weights could not be rebuilt. Empty when they were.
+    """
+    paths = diagnostics.get("symlinked_light_paths") or []
+    facts = diagnostics.get("registration_frames") or []
+    if not paths or len(paths) != len(facts):
+        return {}, (
+            "Siril weighted the frames by star width (-weight=wfwhm) and the sequence file's lines "
+            "cannot be matched to the frames"
+        )
+    width_by_path = {path: fact.get("weighted_fwhm_px") for path, fact in zip(paths, facts, strict=True)}
+    widths = [width_by_path.get(frame.path) for frame in candidates]
+    if not candidates or any(width is None for width in widths):
+        return {}, "Siril weighted the frames by star width (-weight=wfwhm) and a frame has no recorded width"
+    weights = wfwhm_weights([float(width) for width in widths])
+    if not any(weights):
+        return {}, "Siril weighted the frames by star width (-weight=wfwhm) and no frame has a positive width"
+    return {frame.path: weight for frame, weight in zip(candidates, weights, strict=True)}, ""
+
+
 def determine_stack_members(
     target_frames: Sequence[Any], diagnostics: dict[str, Any], stack_weight: str | None
 ) -> StackMembership:
@@ -191,6 +275,14 @@ def determine_stack_members(
                 count = max(int(group["frame_count"]), 1)
                 for path in group["paths"]:
                     weight_by_path[path] = float(group["weight"]) / count
+    elif stack_weight == "wfwhm":
+        weight_by_path, weights_reason = _star_width_weights(candidates, diagnostics)
+    elif stack_weight == "noise":
+        weights_reason = (
+            "Siril weighted the frames by noise (-weight=noise), 1 / (pscale^2 x bgnoise^2). The "
+            "sequence file does not hold the scale Siril fits (pscale) while normalizing, "
+            "so the weights cannot be rebuilt"
+        )
     elif stack_weight:
         weights_reason = (
             f"Siril weighted the frames itself (-weight={stack_weight}) and does not report the weights"
@@ -198,7 +290,7 @@ def determine_stack_members(
 
     members = []
     for frame in candidates:
-        if group_weights and not weights_reason:
+        if (group_weights or stack_weight == "wfwhm") and not weights_reason:
             raw_weight = weight_by_path.get(frame.path)
         elif weights_reason:
             raw_weight = None

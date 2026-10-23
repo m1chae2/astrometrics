@@ -644,3 +644,17 @@ def test_a_blank_image_and_a_smooth_gradient_have_no_extended_target() -> None:
 def test_an_image_smaller_than_one_block_has_no_extended_target() -> None:
     """A 3 x 3 image is too small to average in blocks."""
     assert find_extended_zero_order_position(np.ones((3, 3), np.float32)) is None
+
+
+def test_a_saturated_star_is_found_only_when_asked_for() -> None:
+    """The percentile cut skips a top star unless saturated stars are kept."""
+    rows, columns = np.mgrid[0:600, 0:600]
+    image = np.full((600, 600), 100.0)
+    for index, (row, column) in enumerate([(150, 150), (150, 450), (450, 150), (450, 450)]):
+        amplitude = 1000.0 * (index + 1)
+        image += amplitude * np.exp(-((rows - row) ** 2 + (columns - column) ** 2) / (2 * 2.0**2))
+    image += np.random.default_rng(1).normal(0.0, 1.0, image.shape)
+    kept = detect_star_centroids(image, count=10, skip_saturated=False)
+    cut = detect_star_centroids(image, count=10)
+    assert len(kept) == 4
+    assert len(cut) < len(kept)

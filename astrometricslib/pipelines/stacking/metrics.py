@@ -664,7 +664,7 @@ _NOISE_AND_WEIGHT_METRICS: tuple[MetricSpec, ...] = (
         (
             "N_eff = (sum of w)^2 / (sum of w^2), where w is each frame's weight (Kish's effective "
             "sample size). It equals the frame count for equal weights. Not stored when the stacker "
-            "chose the weights itself and does not report them."
+            "chose the weights itself and they cannot be rebuilt (noise and star-count weighting)."
         ),
         "The frames that are members of the stack (see `stacking.frame_weight`).",
         "pipelines.stacking.post_processing.stack_membership.effective_frame_count",
@@ -704,9 +704,13 @@ _NOISE_AND_WEIGHT_METRICS: tuple[MetricSpec, ...] = (
             "Equal stacking gives every frame 1. With several exposure groups, a frame's weight is its "
             "group's weight (frames x exposure^2 / frame noise^2) divided by the group's frame count, "
             "so it is proportional to exposure^2 / frame noise^2; the weights are then divided by "
-            "their mean over the members. When Siril weights the frames itself (noise, number of "
-            "stars or width), it does not report the weights: the row is then not measured, but it "
-            "still records that the frame is a member. A frame Siril dropped while registering is "
+            "their mean over the members. With Siril's star-width weighting (`-weight=wfwhm`, set by "
+            "`Processing.Siril.stack_weight`) the weights are rebuilt with Siril's own formula "
+            "from the weighted star width of each stacked frame in the sequence file: "
+            "(1/w^2 - 1/w_max^2) / (1/w_min^2 - 1/w_max^2), so the blurriest frame gets 0, then "
+            "divided by the mean. When Siril weights by noise or by number of stars, it does not "
+            "report the weights and the scale it fits is not saved: the row is then not measured, "
+            "but it still records that the frame is a member. A frame Siril dropped while registering is "
             "not a member and gets no row. When Siril's stack filters dropped frames that cannot be "
             "told apart, every candidate row is marked assumed."
         ),

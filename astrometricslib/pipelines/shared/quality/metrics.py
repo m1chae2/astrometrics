@@ -159,7 +159,7 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         decisions=("frame quarantine", "raw frame check"),
         estimator=(
             "`ndimage.label` count of regions above 40 noise units (`DETECTION_SIGMA`) after "
-            "background removal and a 1.5 px Gaussian smooth, from `_detect_stars`."
+            "background removal and a 1.5 px Gaussian smooth, from `detect_stars`."
         ),
         sample_definition="Every connected bright region in the frame.",
         band="The frame's own filter; a color image is first collapsed to one plane.",
@@ -242,6 +242,7 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
             "Standard deviation of the median over 1000 bootstrap resamples of the stars (fixed seed). "
             "It covers the star-to-star scatter, not a bias of the Moffat model."
         ),
+        register_entry="AST-17",
         purpose=MetricPurpose.CONTEXT,
         purpose_reason=(
             "The width in pixels is stored beside the arcsecond value so a wrong pixel scale can be "
@@ -272,6 +273,7 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         uncertainty_method=(
             "The bootstrap error of the pixel width times the pixel scale. The pixel scale is taken as exact."
         ),
+        register_entry="AST-17",
         purpose=MetricPurpose.DECISION,
         purpose_reason=(
             "The efficiency model's seeing factor and the focus and guiding advice compare star widths "
@@ -298,6 +300,7 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         computed_by="pipelines.shared.quality.frame_measurement.measure_star_profiles",
         uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
         uncertainty_method="Standard deviation of the median over 1000 bootstrap resamples of the stars.",
+        register_entry="AST-17",
         purpose=MetricPurpose.DECISION,
         purpose_reason=(
             "Stars stretched by the mount, the guiding or the optics lose resolution and depth, and the "
@@ -331,6 +334,7 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
             "measurement's reason gives the mean resultant length (0 to 1); a low value means the "
             "stars do not share a direction."
         ),
+        register_entry="AST-17",
         purpose=MetricPurpose.CONTEXT,
         purpose_reason=(
             "The direction of the stretch separates a right-ascension drift from a declination one, "

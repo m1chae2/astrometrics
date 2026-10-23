@@ -130,6 +130,7 @@ from astrometricslib.models.provenance import (
 )
 from astrometricslib.models.quality.capture_setting import CaptureSetting
 from astrometricslib.models.quality.excluded_frames import QuarantinePreview, RestoreReport, SetAsideFrame
+from astrometricslib.models.quality.frame_measurement_summary import FrameMeasurementSummary
 from astrometricslib.models.quality.limit import LimitTier, QualityLimit
 from astrometricslib.models.quality.measurement import (
     MeasurementOrigin,
@@ -424,6 +425,7 @@ __all__ = [
     "FileItem",
     "FilterType",
     "FitsHeaderEntry",
+    "FrameMeasurementSummary",
     "FrameRecord",
     "FrameSelection",
     "GaiaXpDriver",

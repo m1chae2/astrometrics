@@ -6,6 +6,8 @@ and checking the quality of the final stacked images.
 
 import logging
 import os
+import sqlite3
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from astrometricslib.drivers.camera_profile_store import camera_identity
@@ -58,6 +60,7 @@ def stack_frames(
     force: bool = False,
     preview_settings: Any | None = None,
     drivers: Drivers | None = None,
+    measured_at: datetime | None = None,
 ) -> str | None:
     """Run the main stacking process using the ImageProcessing driver.
 
@@ -293,7 +296,11 @@ def stack_frames(
             quarantine_gate,
         )
 
+        frames_checked_by_quarantine = target_frames
         target_frames, quarantine_report = quarantine_bad_frames(target, target_frames)
+        _record_frame_quality(
+            target, target_frames, quarantine_report, frames_checked_by_quarantine, measured_at
+        )
         excluded_frames.extend(
             ExcludedFrame(path=path, reason=reason)
             for path, reason in quarantine_report.reasons_by_path().items()
@@ -551,6 +558,64 @@ def stack_frames(
         )
 
     return stacked_path
+
+
+def _record_frame_quality(
+    target: Target,
+    kept_frames: list[Any],
+    quarantine_report: Any,
+    frames_checked: list[Any],
+    measured_at: datetime | None,
+) -> None:
+    """Store the quarantine step's frame numbers and any missing measurements.
+
+    This never stops a stack. A measurement or storage failure is logged and
+    the stack goes on, because the stack does not depend on these numbers.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target being stacked.
+    kept_frames : `list`
+        The frames that stay in the stack.
+    quarantine_report : `QuarantineReport`
+        What the quarantine step measured and moved.
+    frames_checked : `list`
+        Every frame given to the quarantine step, moved ones included.
+    measured_at : `datetime` or `None`
+        When the stack started, passed in by the caller because pipeline code
+        does not read the clock. Nothing is stored when it is `None`.
+    """
+    from astrometricslib.foundation.config import get_configuration
+    from astrometricslib.pipelines.stacking.frame_measurement_run import record_stage_frame_quality
+
+    if measured_at is None:
+        logger.warning(
+            "No measurement time was given, so frame quality of '%s' is not stored. "
+            "A caller of the stacking stage should pass measured_at.",
+            target.id,
+        )
+        return
+    try:
+        summary = record_stage_frame_quality(
+            target,
+            kept_frames,
+            quarantine_report.measurements,
+            frames_checked,
+            get_configuration(),
+            measured_at,
+        )
+    except (AstrometricsError, sqlite3.Error, *FITS_READ_ERRORS, *DATA_ERRORS) as error:
+        logger.warning("Frame quality measurements of target '%s' were not stored: %s", target.id, error)
+        return
+    if summary.rows_written or summary.frames_failed:
+        logger.info(
+            "Stored %d frame quality row(s) for target '%s' (%d frame(s) measured, %d failed).",
+            summary.rows_written,
+            target.id,
+            summary.frames_measured,
+            summary.frames_failed,
+        )
 
 
 def _record_unchanged_stack(

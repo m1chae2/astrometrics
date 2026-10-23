@@ -531,6 +531,13 @@ DECISIONS = {
         ),
         ToolDecision("withhold", READ_ONLY_NOTE),
     ),
+    "processing_record_frame_measurements": ToolDecision(
+        "withhold",
+        "Measures a target's light frames and writes the numbers into the quality database, and stamps "
+        "each measured frame on the target record. It never changes a frame file. The AI is read-only, "
+        "so it reads the stored numbers with quality_query instead.",
+        "change-data",
+    ),
     "target_reindex_frames": ToolDecision(
         "withhold",
         "Writes the frame records. A dry_run mode that only reports what would change would let an AI "

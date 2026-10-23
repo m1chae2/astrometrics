@@ -148,6 +148,11 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "processing:delete_job": ("job_service", "delete_job"),
     "processing:jobs_for_target": ("job_service", "get_jobs_for_target"),
     "processing:job_log_tail": ("image_processing_service", "fetch_job_log_tail"),
+    # Measures a target's light frames and stores the numbers. Starts a
+    # background run and answers at once; the result arrives as the
+    # `quality:measured` event. A write, so the AI's read-only profile
+    # withholds it.
+    "processing:record_frame_measurements": ("quality_measurement_service", "start_frame_measurements"),
     # Quality measurements. These read the library's quality root directly:
     # `query` reads the stored measurements and `metrics` lists the declared
     # metrics. Neither writes anything.

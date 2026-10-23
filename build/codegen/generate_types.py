@@ -124,7 +124,7 @@ from astrometricslib.models.wavelength_scale import (
     WavelengthZeroPointLine,
     WavelengthZeroPointRecord,
 )
-from backend.public_interface import ROUTES, RPC_METHODS
+from backend.public_interface import ROUTES, RPC_METHODS, UI_EVENTS
 from backend.services.infrastructure.system_status_service import (
     IndiStatus,
     IntrospectionEndpoint,
@@ -332,13 +332,14 @@ def generate_interface(model: type[BaseModel], name: str) -> str:
 
 
 def generate_public_interface() -> str:
-    """Generate the TypeScript list of the backend's methods and routes.
+    """Generate the TypeScript lists of the backend's methods, events, routes.
 
     Returns
     -------
     text : `str`
-        ``RPC_METHODS`` and its ``RpcMethod`` type, then
-        ``BACKEND_ROUTES``, one path per route name.
+        ``RPC_METHODS`` and its ``RpcMethod`` type, then ``UI_EVENTS`` and
+        its ``UiEvent`` type, then ``BACKEND_ROUTES``, one path per route
+        name.
     """
     lines = [
         "/**",
@@ -352,6 +353,21 @@ def generate_public_interface() -> str:
         "",
         "/** The name of one RPC method the backend serves. */",
         "export type RpcMethod = (typeof RPC_METHODS)[number];",
+        "",
+        "/**",
+        " * Every event the backend pushes to the app over the events WebSocket,",
+        " * from backend/public_interface.py.",
+        " */",
+        "export const UI_EVENTS = {",
+    ])
+    for event in UI_EVENTS:
+        lines.append(f"  /** {event.meaning} */")
+        lines.append(f'  "{event.name}": "{event.name}",')
+    lines.extend([
+        "} as const;",
+        "",
+        "/** The name of one event the backend pushes to the app. */",
+        "export type UiEvent = (typeof UI_EVENTS)[keyof typeof UI_EVENTS];",
         "",
         "/**",
         " * The path of every other route the backend serves, by name, from",

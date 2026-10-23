@@ -727,7 +727,7 @@ They read what the last sync copied (decision 16) and do not start a job or a lo
 own.
 
 When the frame measurement job finishes, it raises a declared backend event,
-`quality:measured` with the target id and the night id. It is modeled on the `catalog:changed`
+`quality:measured` with the target id and the observing night ids (`observingNightIds`). It is modeled on the `catalog:changed`
 event in `backend/services/data/stellar_service.py` and declared in
 `backend/public_interface.py`. Today `backend/services/processing/ingestion_service.py` raises no
 event. Writes made from the MCP process do not raise it; the app sees those rows on its next

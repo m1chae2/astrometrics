@@ -67,6 +67,24 @@ A satellite or aircraft streak does not trigger it, because the stacker's pixel 
 - `failed` when a session had too many bad frames to move (the bad frames are still in the stack);
 - `not_checked` when no session had enough readable frames, or when the step is off or the stack is spectral.
 
+**What it stores.** The step measures every frame of a session it can read, not only the frames it moves. The stage stores two of those numbers for every such frame in the quality database, as `frame.quarantine_roundness` and `frame.quarantine_sky_median_adu`, so a frame that was kept can be compared with the frames that were moved. A session too small to judge is not measured. The stage also measures, in full, up to 40 kept frames that have never been measured (see [Frame measurement](#frame-measurement)). A failure to measure or store never stops a stack.
+
+### Frame measurement
+
+**What it does.** `frame_measurement_run.py` measures each light frame once and stores the numbers in the quality database. Each frame is read once and gets one row for each frame metric: the width, elongation and direction of its stars, the sky brightness and noise in electrons, the camera's read noise, the two temperatures and the older metrics. `ProcessingPipelines.record_frame_measurements(target)` runs it as a background job of type `quality`. It never moves or changes a frame file.
+
+**When it runs.** There are three triggers:
+
+- after a frame sync that added frames (wayfindinglib calls the public method, and a failure there never fails the sync). The backend also starts it after an ingestion or a library re-index that added frames;
+- when you or the app call `ProcessingPipelines.record_frame_measurements` (the RPC `processing:record_frame_measurements` starts it in the background);
+- inside the stacking stage, for kept frames never measured, at most 40 per stack (the caller passes the time; pipeline code does not read the clock).
+
+**Which frames it measures.** A frame is measured when its file differs from the size and change time stored on its record (`quality_measured_file_size` and `quality_measured_file_modified_ns`). The stamp is set only after the rows are stored, so a frame that failed is tried again, and a second run over unchanged files measures nothing. Frames are measured four at a time, newest first, and each frame has a time budget of 60 s for its star steps.
+
+**The sky in electrons needs the bias level.** A raw frame does not state its bias level (the constant the camera adds to every pixel). The job reads it from up to five bias frames in the calibration library taken at exactly the frame's gain setting, offset and binning. A setting with no bias frames gets `not_measured` sky rows that say so. A bias frame of a nearby setting is never used.
+
+**What it returns.** A `FrameMeasurementSummary`: frames considered, measured, skipped as unchanged and failed, rows written and seconds. When rows were stored, the backend sends the `quality:measured` event so open screens read the numbers again. The values are in the [Implementation paper](../../../documentation/library_design/Astrometrics_Library_Implementation.md). The star measurements are a design estimate (see [AST-17](../../../documentation/library_design/validation/astrometry.md#ast-17)).
+
 ## Skipping an unchanged stack (step 2)
 
 **What it does.** Stacking a target rebuilds every stack it has: one per filter and one for spectra. Before it stacks, `stack_inputs.py` writes down what the stack is made from:
@@ -337,10 +355,11 @@ The pipeline's per-stage quality metrics are tabled in the stage READMEs: [pre-p
 
 The folders follow the layout in the [pipelines README](../README.md). The [review guide for stacking](../../../documentation/library_design/pipelines/stacking.md) summarizes the pipeline's parameters and their status.
 
-- `metrics.py` declares the quality metrics this pipeline measures (today the share of rejected pixels) for the metric registry. See [shared quality](../shared/quality/README.md).
+- `metrics.py` declares the quality metrics this pipeline measures (the share of rejected pixels, and the quarantine step's star roundness and median pixel value of each frame) for the metric registry. See [shared quality](../shared/quality/README.md).
 - `stack_request.py` is the entry point behind `ProcessingPipelines.stack`. `choose_frames_to_stack` picks the light frames. It never mixes imaging and spectroscopy frames or two cameras. It narrows the choice by filter, file-name range, time window and camera, or takes an exact list. `run_stack` runs `stage.py` on the chosen frames as a tracked job, holds a stacking slot while Siril runs, and saves the target when a stack was made. A request that cannot be met raises an error.
 - `stage.py` is the coordinator. It runs the steps above in order for one target, and the rest of the codebase calls it to stack a target's frames.
 - `calibration_ingest.py` turns a rescan of the calibration library into a report. It compares the library's frame lists from before and after the rescan, lists the groups that gained or lost frames, and measures each new set of flats with the stacker's own flat check (`pre_processing/flat_calibration.py`). `CalibrationCatalog.refresh` and `CalibrationCatalog.assess_flats` call it.
+- `frame_measurement_run.py` is the frame measurement job described above: it picks the frames that need measuring, finds each frame's camera profile, capture setting and bias level, measures four frames at a time with `shared/quality/frame_measurement.py`, stores each frame's rows in one transaction and stamps the frame. `FrameMeasurementSession.measure_and_record` is its one-frame path, and `record_stage_frame_quality` is the stacking stage's entry. It sits here, not under `shared/quality/`, because it passes in the Gaussian star width from the astrometry pipeline.
 - `sensor_noise_run.py` finds the flat and bias frames of one camera setting in the calibration library, loads them, pairs them in file-name order and calls `pre_processing/sensor_noise.py`. With `save=True` it writes a measured result into the camera profile (`save_sensor_setting_noise`). `CalibrationCatalog.measure_sensor_noise` calls it. It sits here, not under `shared/quality/`, because it can write a profile and quality code only reads.
 - `stack_runner.py` runs the stacking engine (steps 3 to 5): exposure groups, registration retries and the final read of the engine's files. The engine is the only code that stacks a batch's pixels. `processing/` combines the group stacks.
 - `pre_processing/` checks and prepares the inputs. It holds the one-camera rule, the gain and background homogeneity checks, the flat-frame check, and the input-quality judgment (`StackingInputQuality`). The one-camera rule (`camera_selection.py`) picks a named camera's frames and refuses a set that still mixes cameras, because frames from two cameras differ in pixel size, gain, noise and calibration frames. See its [README](pre_processing/README.md).

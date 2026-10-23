@@ -7,6 +7,7 @@ captured frames associated with targets.
 
 import logging
 import os
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from astrometricslib import (
@@ -46,8 +47,10 @@ class IngestionService(BaseBackgroundService):
         job_service: JobService | None = None,
         image_processing_service: ImageProcessingService | None = None,
         wayfinder: Wayfinder | None = None,
+        quality_measurement_service: Any = None,
     ) -> None:
         super().__init__(job_service=job_service)
+        self._quality_measurement_service = quality_measurement_service
         self._target_service = target_service
         self._config_service = config_service
         self._calibration_library = calibration_library
@@ -334,6 +337,9 @@ class IngestionService(BaseBackgroundService):
                 self._job_service.update_job(job_id, progress=int(((index + 1) / total) * 100))
 
         report = self._target_service.reindex_library(prune_missing=True, on_progress=report_progress)
+        for change in report.targets:
+            if change.frames_after > change.frames_before:
+                self._start_measurement(job_id, change.target_id)
         self._log(job_id, f"Light frames of {len(report.targets)} target folders indexed and saved.")
 
         # 3. Refresh calibration frames
@@ -359,6 +365,53 @@ class IngestionService(BaseBackgroundService):
 
         self._log(job_id, "Re-index complete.")
         return True
+
+    def _start_measurement(self, job_id: str, target_id: str) -> None:
+        """Start measuring a target's new light frames, in the background.
+
+        The job runs on its own thread and announces ``quality:measured`` when
+        it stores rows. A failure to start it never fails the ingestion.
+
+        Parameters
+        ----------
+        job_id : `str`
+            The ingestion job, for the log line.
+        target_id : `str`
+            The target that gained frames.
+        """
+        if self._quality_measurement_service is None:
+            return
+        try:
+            self._quality_measurement_service.start_frame_measurements(target_id)
+        except Exception:  # starting the measurement must never fail the ingestion: log it
+            logger.exception("Could not start measuring the new frames of %s", target_id)
+            return
+        self._log(job_id, f"Measuring the new frames of {target_id} in the background.")
+
+    def _measure_new_frames(self, job_id: str, target_name: str | None, started_at: datetime) -> None:
+        """Announce what the sync measured, then measure any frame it missed.
+
+        The frame sync measures new frames itself when it adds any. This
+        announces those rows, and starts the job again so a frame whose
+        measurement failed is tried once more (a frame already measured is
+        skipped).
+
+        Parameters
+        ----------
+        job_id : `str`
+            The ingestion job, for the log.
+        target_name : `str` or `None`
+            The target ingested into. Calibration ingestion has none.
+        started_at : `datetime`
+            When the ingestion started, with a time zone.
+        """
+        if not target_name or self._quality_measurement_service is None:
+            return
+        try:
+            self._quality_measurement_service.announce_rows_since(target_name, started_at)
+        except Exception:  # an announcement must never fail the ingestion: log it
+            logger.exception("Could not announce the quality rows of the %s ingestion", target_name)
+        self._start_measurement(job_id, target_name)
 
     def _log(self, job_id: str, message: str) -> None:
         """Show a progress line on the job and write it to the log.
@@ -435,6 +488,7 @@ class IngestionService(BaseBackgroundService):
         ExternalServiceError
             If the remote download fails in any other way.
         """
+        ingestion_started_at = datetime.now(UTC)
         ingest_type = payload.get("type", "local")
         target_name = payload.get("targetName")
         selected_files = payload.get("selectedFiles", None)
@@ -583,6 +637,8 @@ class IngestionService(BaseBackgroundService):
             # as remote downloads.
             self._wayfinder.control.remote.sync_frames(target_name, local_path=source_dir)
             self._log(job_id, "Local frames ingested successfully.")
+
+        self._measure_new_frames(job_id, target_name, ingestion_started_at)
 
         # --- 3. Regeneration ---
         self._log(job_id, "Refreshing Shared State...")

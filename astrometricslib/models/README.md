@@ -6,7 +6,7 @@ Terms are defined in the [glossary](../../documentation/Glossary.md). This docum
 
 ## What each file is for
 
-- `target.py` — `Target` and `FrameRecord`, the records for an astronomical target and its individual raw frames.
+- `target.py` — `Target` and `FrameRecord`, the records for an astronomical target and its individual raw frames. A `FrameRecord` keeps two file stamps: the size and change time at the last header read, and the size and change time at the last quality measurement (`quality_measured_file_size`, `quality_measured_file_modified_ns`). A file that still matches the second stamp is not measured again.
 - `stellar_source.py` — `StellarObject`, one star's record, and its nested per-domain results.
   - **Photometry.** Photometry is brightness measurement. The results hold the star's light curve, its brightness over time, with per-point flux uncertainties and mid-exposure BJD_TDB times. BJD_TDB is a time scale referred to the center of mass of the solar system, so the light-travel time across the Earth's orbit does not shift the times.
   - **Spectroscopy.** The results include a summary from the extractor (the step that cuts the star's spectrum out of the image): how it measured the sky beside the spectrum and how wide a box it summed. They also include the record of the airmass correction. Airmass measures how much atmosphere the light passed through (1 straight overhead). The atmosphere dims blue light more than red, and more so at higher airmass. Pre-processing therefore scales each spectrum to the airmass of the standard star (the reference star of known spectrum that calibrates the instrument) before classification, and the record says whether it did and, if not, why.

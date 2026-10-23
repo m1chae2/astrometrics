@@ -37,6 +37,7 @@ import logging
 import os
 import threading
 import time
+from datetime import datetime
 from typing import Any
 
 from astrometricslib.drivers.driver_set import Drivers
@@ -103,8 +104,21 @@ def compute_stacking_timeout_seconds(frame_count: int) -> int:
     return int(max(STACKING_TIMEOUT_SECONDS, scaled_timeout))
 
 
-def _stack_with_job_tracking(target: Target, frames_to_stack: list[FrameRecord]) -> str | None:
+def _stack_with_job_tracking(
+    target: Target, frames_to_stack: list[FrameRecord], measured_at: datetime | None = None
+) -> str | None:
     """Run Siril stacking, registered as a job the UI can track.
+
+    Parameters
+    ----------
+    target : Target
+        The target being stacked.
+    frames_to_stack : list
+        The frames to combine.
+    measured_at : `datetime`, optional
+        When the run started, with a time zone, for the quality rows the
+        stacking stage stores. The caller supplies it because pipeline code
+        does not read the clock. `None` (for tests only) stores no rows.
 
     Returns
     -------
@@ -122,7 +136,9 @@ def _stack_with_job_tracking(target: Target, frames_to_stack: list[FrameRecord])
 
         from astrometricslib.pipelines.stacking import stage as stacking_tasks
 
-        stacked_path = stacking_tasks.stack_frames(target, frames_to_stack=frames_to_stack, job_id=job.job_id)
+        stacked_path = stacking_tasks.stack_frames(
+            target, frames_to_stack=frames_to_stack, job_id=job.job_id, measured_at=measured_at
+        )
         # Stacking can finish without raising and still produce no
         # image, so the outcome is decided here rather than left to the
         # context manager's "no exception means success" default.
@@ -131,7 +147,10 @@ def _stack_with_job_tracking(target: Target, frames_to_stack: list[FrameRecord])
 
 
 def stack_frames_with_timeout(
-    target: Target, frames_to_stack: list[FrameRecord], timeout_seconds: int | None = None
+    target: Target,
+    frames_to_stack: list[FrameRecord],
+    timeout_seconds: int | None = None,
+    measured_at: datetime | None = None,
 ) -> str | None:
     """Run the image stacker with a time limit so it doesn't freeze forever.
 
@@ -149,6 +168,10 @@ def stack_frames_with_timeout(
     timeout_seconds : int, optional
         The maximum time allowed in seconds. If blank, it calculates
         a budget based on the number of frames.
+    measured_at : `datetime`, optional
+        When the run started, with a time zone, for the quality rows the
+        stacking stage stores. The caller supplies it because pipeline code
+        does not read the clock. `None` (for tests only) stores no rows.
 
     Returns
     -------
@@ -171,7 +194,7 @@ def stack_frames_with_timeout(
 
     def _run_stacking() -> None:
         try:
-            outcome["path"] = _stack_with_job_tracking(target, frames_to_stack)
+            outcome["path"] = _stack_with_job_tracking(target, frames_to_stack, measured_at)
         except Exception as stacking_error:
             # This runs in its own thread, so any error is kept here and
             # raised again in the calling thread below. The traceback is
@@ -443,6 +466,7 @@ def run_full_pipeline(
     *,
     camera_name: str,
     focal_length_mm: float | None = None,
+    measured_at: datetime | None = None,
 ) -> dict[str, str]:
     """Run the complete start-to-finish processing pipeline for a target.
 
@@ -464,6 +488,10 @@ def run_full_pipeline(
     camera_name : str
         The name of the camera to process images for. Any images taken
         by a different camera will be ignored.
+    measured_at : `datetime`, optional
+        When the run started, with a time zone, for the quality rows the
+        stacking stage stores. The caller supplies it because pipeline code
+        does not read the clock. `None` (for tests only) stores no rows.
 
     Returns
     -------
@@ -480,7 +508,7 @@ def run_full_pipeline(
         return {}
 
     standard_frames, spectral_frames = split_standard_and_spectral_frames(target, camera_frames)
-    stack_outputs = _stack_camera_frames(target, camera_name, standard_frames, spectral_frames)
+    stack_outputs = _stack_camera_frames(target, camera_name, standard_frames, spectral_frames, measured_at)
     # The stacking stage moves frames with clouds or trailed stars out of the
     # target (see `stacking/pre_processing/frame_quarantine.py`) and no longer
     # lists them in `target.frames`. The frame lists above were made before
@@ -541,6 +569,7 @@ def _stack_camera_frames(
     camera_name: str,
     standard_frames: list[FrameRecord],
     spectral_frames: list[FrameRecord],
+    measured_at: datetime | None = None,
 ) -> dict[str, str]:
     """Stack a target's standard and/or spectral frames.
 
@@ -579,7 +608,7 @@ def _stack_camera_frames(
         try:
             # Caught broadly and deliberately: this kind's failure, whatever
             # its cause, must not take down the other kind's stack.
-            stacked_path = stack_frames_with_timeout(target, frames)
+            stacked_path = stack_frames_with_timeout(target, frames, measured_at=measured_at)
         except Exception:
             logger.exception("[%s] %s stacking raised an error", target.id, kind.capitalize())
             continue

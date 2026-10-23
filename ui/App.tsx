@@ -1,5 +1,7 @@
 import React, { useState, useEffect, Suspense, Profiler, ProfilerOnRenderCallback } from 'react';
 import { callBackend } from './common/services/backendApi';
+import { isAffectedByMeasurement, QualityMeasuredPayload } from './common/queries/qualityQueryKeys';
+import { UI_EVENTS } from './common/types/backendTypes';
 import { emergencyParkMount } from './common/services/telescope/emergencyPark';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StatusHeader } from './statusHeader/StatusHeader';
@@ -221,6 +223,14 @@ const AppContent: React.FC = () => {
           queryClient.invalidateQueries({ queryKey: ['targetDataAvailability'] });
           queryClient.invalidateQueries({ queryKey: ['spectralClassSummary'] });
           queryClient.invalidateQueries({ queryKey: ['starsBySpectralClass'] });
+        } else if (action === UI_EVENTS['quality:measured']) {
+          // A measurement job stored new quality rows (after a sync, an
+          // ingestion, or when asked for): the stored quality queries for that
+          // target or those nights read again, and so do queries that name
+          // neither.
+          queryClient.invalidateQueries({
+            predicate: (query) => isAffectedByMeasurement(query.queryKey, payload as QualityMeasuredPayload),
+          });
         }
       };
 

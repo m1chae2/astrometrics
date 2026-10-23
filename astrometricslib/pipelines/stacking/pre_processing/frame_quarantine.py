@@ -233,6 +233,11 @@ class QuarantineReport:
     batches_over_cap : `int`
         Batches judged but left alone because more than the allowed share
         looked bad. The bad frames stay in the stack.
+    measurements : `list` [`dict`]
+        What `raw_frame_check.measure_raw_frame` measured for every frame
+        the step could read, whether the frame was moved or kept. A batch
+        too small to judge is not measured, so it adds none. The stacking
+        stage stores these as quality measurements.
     """
 
     moved: list[QuarantineDecision] = field(default_factory=list)
@@ -244,6 +249,7 @@ class QuarantineReport:
     batches_judged: int = 0
     batches_too_small: int = 0
     batches_over_cap: int = 0
+    measurements: list[dict[str, Any]] = field(default_factory=list)
 
     def reasons_by_path(self) -> dict[str, str]:
         """Return the recorded reason for each moved frame.
@@ -449,6 +455,7 @@ def find_frames_to_quarantine(
             continue
         measurements, unreadable = _measure_frames(batch, measure)
         report.unreadable.extend(unreadable)
+        report.measurements.extend(measurements)
         if len(measurements) < MINIMUM_FRAMES_TO_JUDGE:
             report.batches_too_small += 1
             report.notes.append(

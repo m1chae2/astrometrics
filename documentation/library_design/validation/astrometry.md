@@ -754,6 +754,70 @@ print([abs(a - b) / abs(a) for a, b in zip(full, sample)])
 - **Guarded by tests:** `astrometricslib/pipelines/astrometry/test/pre_processing/test_source_detection_background_sample.py` and `astrometricslib/pipelines/astrometry/test/pre_processing/test_fast_background_map.py` check the mechanics, not the values.
 - **Raw record:** None kept.
 
+### AST-17
+
+**Frame star width, elongation and angle from many stars (Moffat fit)**
+
+- **Claim:** The frame measurement recovers the width of known synthetic stars to within 0.5 percent, and their elongation to within 4 percent (low for strongly stretched stars), using a Moffat fit to up to about 196 isolated stars spread over the frame. A frame of trailed stars reads wide and elongated, not sharp.
+- **Settings it supports:**
+  - code constant `FRAME_MEASUREMENT_TIME_BUDGET_SECONDS` = 60 in `pipelines/shared/quality/frame_measurement.py` (changing it means editing the code). Relation: derived from this entry. It is about five times the run time of 11.6 s and 13.5 s measured on two M 13 frames. <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.FRAME_MEASUREMENT_TIME_BUDGET_SECONDS -->
+  - code constants `MOFFAT_GRID_CELL_COUNT` = 196, `MOFFAT_CANDIDATES_PER_CELL` = 3 and `MOFFAT_MINIMUM_STAR_COUNT` = 5 in the same file. Relation: sanity check only. The synthetic runs kept about 150 stars of 300. <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_GRID_CELL_COUNT --> <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_CANDIDATES_PER_CELL --> <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_MINIMUM_STAR_COUNT -->
+  - code constants `MOFFAT_FIT_BOX_HALF_WIDTH_PX` = 10 and `MOFFAT_SUBPIXEL_FACTOR` = 3 in the same file. Relation: sanity check only. Widths from 2 to 6 px came back within 0.5 percent. <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_FIT_BOX_HALF_WIDTH_PX --> <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_SUBPIXEL_FACTOR -->
+  - code constants `MOFFAT_ISOLATION_RADIUS_PX` = 14, `MOFFAT_SATURATION_MARGIN_FRACTION` = 0.9, `MOFFAT_MINIMUM_R_SQUARED` = 0.8 and `MOFFAT_MAXIMUM_CENTER_SHIFT_PX` = 2.5 in the same file. Relation: sanity check only. They are not tested apart from the synthetic runs. <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_ISOLATION_RADIUS_PX --> <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_SATURATION_MARGIN_FRACTION --> <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_MINIMUM_R_SQUARED --> <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_MAXIMUM_CENTER_SHIFT_PX -->
+  - code constants `MOMENT_APERTURE_FWHM_MULTIPLE` = 1.5 and `MOMENT_APERTURE_MINIMUM_RADIUS_PX` = 3 in the same file. Relation: sanity check only. The window biases strongly stretched stars low (4 percent at an elongation of 2.5). <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOMENT_APERTURE_FWHM_MULTIPLE --> <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOMENT_APERTURE_MINIMUM_RADIUS_PX -->
+- **Status:** Design estimate. The fit recovers known widths on synthetic frames. It has not yet been compared with real data.
+- **Data you need:** Light frames of one camera setting with a known gain and read noise in the camera profile, ideally a session with round stars and a session with trailed stars, and bias frames at the same setting in the calibration library (for the sky metrics).
+- **Procedure:**
+  1. Measure the frames with the frame measurement job. It stores the rows and skips a frame it has already measured.
+  2. Read the rows for the Moffat width, the Gaussian width of the brightest stars and the elongation, and compare the two widths frame by frame.
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  summary = astro.processing.record_frame_measurements("M 13", limit=20)
+  print(summary.frames_measured, summary.rows_written, summary.frames_failed)
+  for metric in (
+      "frame.star_width_moffat_px",
+      "frame.star_width_gaussian_brightest_px",
+      "frame.star_elongation",
+  ):
+      for row in astro.quality.query(metric=metric, target_id="M 13"):
+          print(metric, row.subject.subject_id, row.value, row.status.value, row.reason)
+  ```
+
+  `ProcessingPipelines.record_frame_measurements` <!-- impl: astrometricslib.api.processing.ProcessingPipelines.record_frame_measurements --> calls `measure_frame` <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.measure_frame --> for each light frame.
+- **Acceptance criterion:** Not recorded (set after the real-data check).
+- **What to look at:** The Moffat width and the Gaussian width of the brightest stars on round frames (expected to agree within about 10 percent), and on trailed frames the Gaussian width reading sharp (it keeps the narrow axis of a star stretched by more than 1.5) while the Moffat width and the elongation rise.
+- **Our result:** Synthetic runs on 2026-10-22: Moffat stars of known width, stretch and angle, drawn with 5 by 5 sub-sampling on a 1500 by 1500 px frame (300 stars, sky 500 ADU, gain 0.5 e-/ADU, read noise 2 e-, fixed seeds), through `measure_star_profiles`. About 150 stars survived the isolation and fit cuts in each case.
+
+  | True width (px) | beta | True elongation, angle | Width found (px) | Elongation found | Angle found (deg) |
+  | --- | --- | --- | --- | --- | --- |
+  | 3.0 | 3 | 1.0 | 3.013 | 1.017 | not meaningful (coherence 0.04) |
+  | 2.0 | 3 | 1.0 | 2.012 | 1.024 | not meaningful |
+  | 5.0 | 3 | 1.0 | 5.005 | 1.016 | not meaningful |
+  | 6.0 | 3 | 1.0 | 6.012 | 1.020 | not meaningful |
+  | 3.0 | 2 | 1.0 | 3.006 | 1.025 | not meaningful |
+  | 3.0 | 5 | 1.0 | 3.005 | 1.015 | not meaningful |
+  | 3.0 | 3 (faint stars, 94 stars) | 1.0 | 2.998 | 1.054 | not meaningful |
+  | 3.0 | 3 | 1.3 | 3.01 | 1.29 | |
+  | 3.0 | 3 | 1.5, 28.65 | 3.010 | 1.487 | 28.57 |
+  | 3.0 | 3 | 1.6 | 3.01 | 1.58 | |
+  | 3.0 | 3 | 2.0 | 3.01 | 1.96 | |
+  | 3.0 | 3 | 2.2 | 3.01 | 2.15 | |
+  | 3.0 | 3 | 2.5, 57.3 | 3.005 | 2.40 | 57.2 |
+  | 4.0 | 3 | 1.2, 114.6 | 4.00 | 1.196 | 114.6 |
+
+  The shared beta came back within 2 percent of the true value (2.0, 3.05, 5.03). The width is within 0.5 percent of the truth in every case. The elongation of round stars reads 1.02 to 1.05 (noise pushes it above 1), and that of stretched stars reads 1 to 4 percent low because the window cuts the faint ends. The detector of the frame quarantine and the source detector cut stars by roundness, so they lose stretched stars (at an elongation of 1.6 the source detector returned 4 sources where 294 exist); `detect_stars_without_shape_cut` <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.detect_stars_without_shape_cut --> keeps the sharpness window and drops the roundness window, and finds 150 or more stars at every elongation up to 2.5.
+
+  Run time: the full `measure_frame` took 11.6 s (`M_13_Light_Luminance_019`) and 13.5 s (`M_13_Light_Luminance_020`) on 3008 by 3008 px ASI533MM frames, serial, on a 12-core machine, with 179 and 175 stars. The Moffat width read 1.92 and 2.14 px, the Gaussian width of the brightest stars 2.33 and 2.48 px, and the elongation 1.05 and 1.19 (angle 149 and 0.1 degrees, coherence 0.59 and 0.97). These are run-through numbers, not a validation: the gain and read noise used were test values.
+- **Verdict:** Not judged.
+- **Limits:** Synthetic stars only, plus two real frames that were run but not compared. The fit box (21 by 21 px) is validated for widths up to about 7 px; wider stars read a little narrow because the box cuts their wings. The moment window biases elongation low for strongly stretched stars. The pixel scale comes from the frame record and is treated as exact.
+- **To tune for your setup:** If your stars are wider than 7 px, raise `MOFFAT_FIT_BOX_HALF_WIDTH_PX`. If few frames reach 5 stars, lower `MOFFAT_MINIMUM_STAR_COUNT` or raise `MOFFAT_CANDIDATES_PER_CELL`. Re-run the procedure on a round session and a trailed one after any change.
+- **Regenerate with:** The call in the procedure.
+- **Guarded by tests:** `astrometricslib/pipelines/shared/quality/test/test_frame_measurement.py` checks the recovered widths, elongations and angles on synthetic frames, and `astrometricslib/pipelines/stacking/test/test_frame_measurement_run.py` checks the job around it.
+- **Raw record:** None kept.
+
 ## Design estimates
 
 These values have not been measured. Each is a code constant unless the table says otherwise; changing a code constant means editing the code. Paths are relative to `astrometricslib/`.

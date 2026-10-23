@@ -130,7 +130,7 @@ def test_queue_time_does_not_consume_the_stacking_budget(monkeypatch: pytest.Mon
     stack_duration_seconds = 0.6
     reported_lock_wait = 5.0
 
-    def _slow_stack(target, frames_to_stack=None) -> str:  # ruff: ignore[missing-type-function-argument]
+    def _slow_stack(target, frames_to_stack=None, measured_at=None) -> str:  # ruff: ignore[missing-type-function-argument]
         time.sleep(stack_duration_seconds)
         return "/stacked/output.fits"
 
@@ -153,7 +153,7 @@ def test_a_genuinely_hung_stack_is_still_abandoned(monkeypatch: pytest.MonkeyPat
     """Excluding queue time must not disarm hang detection."""
     release_hung_stack = threading.Event()
 
-    def _hung_stack(target, frames_to_stack=None) -> str:  # ruff: ignore[missing-type-function-argument]
+    def _hung_stack(target, frames_to_stack=None, measured_at=None) -> str:  # ruff: ignore[missing-type-function-argument]
         release_hung_stack.wait(30)
         return "/never/reached.fits"
 

@@ -86,6 +86,13 @@
       "interim_block": "",
       "note": "The AI is read-only, so a tool that writes is not offered."
     },
+    "processing_record_frame_measurements": {
+      "tool_class": "change-data",
+      "category": "image-processing",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "Measures a target's light frames and writes the numbers into the quality database, and stamps each measured frame on the target record. It never changes a frame file. The AI is read-only, so it reads the stored numbers with quality_query instead."
+    },
     "processing_remake_preview": {
       "tool_class": "process",
       "category": "image-processing",

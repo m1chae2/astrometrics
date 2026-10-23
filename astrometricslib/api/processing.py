@@ -28,6 +28,7 @@ from astrometricslib.models.calibration_ingest import CalibrationIngestReport, F
 from astrometricslib.models.catalog_queries import CalibrationQueryResult
 from astrometricslib.models.processing_results import PreviewRemakeResult, ProcessTargetResult, StackResult
 from astrometricslib.models.quality.excluded_frames import RestoreReport
+from astrometricslib.models.quality.frame_measurement_summary import FrameMeasurementSummary
 from astrometricslib.models.quality.quality_reports import (
     StackSummary,
 )
@@ -643,6 +644,7 @@ class ProcessingPipelines:
             stacking_slot=self.acquire_stacking_slot,
             save_targets=self._targets.save,
             drivers=self._drivers,
+            measured_at=datetime.now(UTC),
         )
 
     @background_job("preview", grace_period_seconds=20.0)
@@ -871,6 +873,7 @@ class ProcessingPipelines:
                 camera_id=camera_id,
                 focal_length_mm=focal_length_mm,
                 on_item_complete=on_item_complete,
+                measured_at=datetime.now(UTC),
             )
 
         reject_unused_arguments(
@@ -1046,6 +1049,78 @@ class ProcessingPipelines:
 
         check_choice("kind", kind, STACK_KINDS)
         return swap_with_previous_stack(stack_path_of(self._resolve(target), kind))
+
+    @background_job("quality", grace_period_seconds=20.0)
+    def record_frame_measurements(
+        self,
+        target: str | Target,
+        frames: list[FrameRecord] | None = None,
+        limit: int | None = None,
+        register_job: bool = True,
+    ) -> FrameMeasurementSummary:
+        """Measure a target's light frames once and store the numbers.
+
+        Each light frame is read once and measured: the width, elongation
+        and direction of its stars, the sky brightness and noise in
+        electrons, the camera's read noise, the temperatures, and the
+        measurements the library already makes (background level, saturated
+        fraction, Gaussian star width, count of bright regions). The numbers
+        go into the quality database and can be read with
+        ``Astrometrics.quality.query``. A value that cannot be measured is
+        stored as ``not_measured`` with the reason. The sky brightness needs
+        the bias level of the frame's exact camera setting, taken from the
+        calibration library's bias frames; with none at that setting those
+        two metrics are ``not_measured``.
+
+        The frame files are never moved or changed. The target is saved with
+        a stamp on each measured frame (the file size and change time at the
+        measurement). A frame whose file still matches its stamp is skipped,
+        so a second call measures nothing again. A frame that fails is
+        counted and tried again next time; one failure does not stop the
+        others. Each frame takes about 12 s of one core, and four frames are
+        measured at once.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target whose light frames to measure.
+        frames : `list` [`FrameRecord`], optional
+            Only these frames. All of the target's light frames when omitted.
+        limit : `int`, optional
+            Measure at most this many frames, newest first. The rest wait for
+            the next call.
+        register_job : `bool`, optional
+            Record the run in the job list. Defaults to `True`.
+
+        Returns
+        -------
+        summary : `FrameMeasurementSummary`
+            How many frames were measured, skipped because they had not
+            changed, or failed, and how many rows were written.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If ``limit`` is below 1.
+        """
+        from astrometricslib.drivers.quality_store import QualityStore
+        from astrometricslib.pipelines.stacking.frame_measurement_run import (
+            FrameMeasurementSession,
+            record_frame_measurements_for_target,
+        )
+
+        if limit is not None and limit < 1:
+            raise InvalidArgumentError("limit must be at least 1.")
+        resolved = self._resolve(target)
+        with registered_job(enabled=register_job, job_type="quality", target_id=resolved.id):
+            session = FrameMeasurementSession(
+                QualityStore.from_configuration(self._config),
+                self.calibration.library,
+                measured_at=datetime.now(UTC),
+            )
+            return record_frame_measurements_for_target(
+                resolved, session, frames=frames, limit=limit, save_target=self._targets.save
+            )
 
     def restore_excluded_frames(self, target: str | Target, apply: bool = False) -> RestoreReport:
         """List, or move back, the frames the stacker set aside for a target.

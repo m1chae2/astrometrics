@@ -24,6 +24,7 @@ import os
 import shutil
 import sys
 from collections import Counter
+from datetime import UTC, datetime
 from typing import Any
 
 import numpy as np
@@ -218,7 +219,7 @@ def rebuild_target(astrometrics: Astrometrics, name: str, backup_directory: str)
         ):
             if kind_frames:
                 print(f"[{name}] Stacking {len(kind_frames)} frame(s) of {key}")
-                stack_frames_with_timeout(target, kind_frames)
+                stack_frames_with_timeout(target, kind_frames, measured_at=datetime.now(UTC))
     astrometrics.targets.save()
 
 

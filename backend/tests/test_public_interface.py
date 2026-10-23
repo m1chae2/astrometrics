@@ -5,9 +5,12 @@ other route a client may reach. These tests check that:
 
 * the RPC router has a handler for every declared method, and no other;
 * the FastAPI app mounts every declared route, and no other;
-* the app and the Electron shell only use route paths that are declared.
+* the app and the Electron shell only use route paths that are declared;
+* every event the backend code pushes to the app is declared in `UI_EVENTS`,
+  and every declared event is pushed by some code.
 """
 
+import ast
 import re
 from pathlib import Path
 
@@ -16,7 +19,7 @@ from fastapi.routing import APIRoute, APIWebSocketRoute
 from starlette.routing import Mount
 
 from backend.main_backend import app
-from backend.public_interface import ROUTES, RPC_METHODS
+from backend.public_interface import ROUTES, RPC_METHODS, UI_EVENTS
 from backend.routers.rpc_router import rpc_registry
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -161,3 +164,100 @@ def test_the_path_check_refuses_undeclared_paths() -> None:
     assert not _declared_prefix("/api/handoff/state")
     assert _declared_prefix("/figure/12")
     assert _declared_prefix("/static/frames/lights/M31/a.fits")
+
+
+#: The calls that send an event by name. The name is the first argument. The
+#: carrier `dispatch_ui_event` is left out: it only forwards a name it was
+#: given.
+_EVENT_SENDERS = frozenset({"broadcast_ui_event_sync", "_broadcast_event"})
+
+
+def find_sent_events(source: str) -> tuple[set[str], list[int]]:
+    """Find the event names a Python source file sends.
+
+    Parameters
+    ----------
+    source : `str`
+        Python source text.
+
+    Returns
+    -------
+    names : `set` [`str`]
+        Event names given as text to a sending call, or as the ``"action"``
+        of an event dictionary.
+    non_literal_lines : `list` [`int`]
+        The lines of sending calls whose name is not a text literal. The
+        test cannot check those, so it refuses them.
+    """
+    names: set[str] = set()
+    non_literal_lines: list[int] = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Call):
+            function = node.func
+            function_name = function.id if isinstance(function, ast.Name) else getattr(function, "attr", None)
+            if function_name in _EVENT_SENDERS and node.args:
+                first = node.args[0]
+                if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                    names.add(first.value)
+                else:
+                    non_literal_lines.append(node.lineno)
+        elif isinstance(node, ast.Dict):
+            for key, value in zip(node.keys, node.values, strict=True):
+                if (
+                    isinstance(key, ast.Constant)
+                    and key.value == "action"
+                    and isinstance(value, ast.Constant)
+                    and isinstance(value.value, str)
+                ):
+                    names.add(value.value)
+    return names, non_literal_lines
+
+
+def _events_sent_by_the_backend() -> tuple[set[str], list[str]]:
+    """Collect the event names sent anywhere in the backend's own code.
+
+    Returns
+    -------
+    names : `set` [`str`]
+        Every event name found.
+    problems : `list` [`str`]
+        One line for each sending call with a name that is not a literal.
+    """
+    names: set[str] = set()
+    problems: list[str] = []
+    for path in sorted((REPOSITORY_ROOT / "backend").rglob("*.py")):
+        if "tests" in path.parts or "__pycache__" in path.parts:
+            continue
+        found, non_literal_lines = find_sent_events(path.read_text(encoding="utf-8"))
+        names |= found
+        problems.extend(f"{path.relative_to(REPOSITORY_ROOT)}:{line}" for line in non_literal_lines)
+    return names, problems
+
+
+def test_event_names_are_unique_and_described() -> None:
+    """Each declared event has its own name and a meaning."""
+    names = [event.name for event in UI_EVENTS]
+    assert len(set(names)) == len(names)
+    assert all(event.meaning.strip() for event in UI_EVENTS)
+    assert {"catalog:changed", "quality:measured"} <= set(names)
+
+
+def test_every_event_the_backend_sends_is_declared_and_every_declared_event_is_sent() -> None:
+    """The events in the code and in `UI_EVENTS` are the same set."""
+    sent, problems = _events_sent_by_the_backend()
+    declared = {event.name for event in UI_EVENTS}
+    assert not problems, "Send events by a text literal, so they can be checked:\n" + "\n".join(problems)
+    assert sent - declared == set(), f"Sent but not declared in UI_EVENTS: {sorted(sent - declared)}"
+    assert declared - sent == set(), f"Declared but never sent: {sorted(declared - sent)}"
+
+
+def test_the_event_finder_catches_an_undeclared_and_a_computed_name() -> None:
+    """The finder reads literal names and reports a name it cannot read."""
+    names, lines = find_sent_events(
+        "def f(manager, name):\n"
+        "    manager.broadcast_ui_event_sync('made:up', {})\n"
+        "    manager.broadcast_ui_event_sync(name, {})\n"
+        "    return {'type': 'UI_EVENT', 'action': 'other'}\n"
+    )
+    assert names == {"made:up", "other"}
+    assert lines == [3]

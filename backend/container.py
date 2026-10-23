@@ -49,6 +49,7 @@ class Container:
         self.image_service = None
         self.image_processing_service = None
         self.sync_service = None
+        self.quality_measurement_service = None
         self.socket_manager = None
         self.telescope_service = None
         self.notification_service = None
@@ -232,7 +233,14 @@ class Container:
             astrometrics=self.astrometrics,
         )
 
-        self.sync_service = SyncService(observatory_api=self.wayfinder.control)
+        from backend.services.processing.quality_measurement_service import QualityMeasurementService
+
+        self.quality_measurement_service = QualityMeasurementService(
+            astrometrics=self.astrometrics, socket_manager=self.socket_manager
+        )
+        self.sync_service = SyncService(
+            observatory_api=self.wayfinder.control, measurement_announcer=self.quality_measurement_service
+        )
 
         from backend.services.observatory.imaging_service import ImagingService
 
@@ -266,6 +274,7 @@ class Container:
             job_service=self.job_service,
             image_processing_service=self.image_processing_service,
             wayfinder=self.wayfinder,
+            quality_measurement_service=self.quality_measurement_service,
         )
 
         from backend.services.infrastructure.system_status_service import SystemStatusService

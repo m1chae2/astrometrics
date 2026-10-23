@@ -76,7 +76,7 @@ from astrometricslib.pipelines.shared.quality.metrics import (
     FRAME_STAR_WIDTH_MOFFAT_ARCSEC,
     FRAME_STAR_WIDTH_MOFFAT_PX,
 )
-from astrometricslib.pipelines.shared.quality.raw_frame_check import _detect_stars
+from astrometricslib.pipelines.shared.quality.raw_frame_check import detect_stars
 from astrometricslib.pipelines.shared.quality.saturation import compute_saturated_pixel_fraction
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 from astrometricslib.utilities.observing_night import observing_night_id
@@ -185,6 +185,12 @@ BOOTSTRAP_RESAMPLE_COUNT = 1000
 BOOTSTRAP_SEED = 20261022
 
 # The names of the planes of a frame stored as three color planes.
+# What the reason of a pixel metric starts with when the frame could not be
+# read at all. The measurement job tests for it so that an unreadable frame (a
+# network mount that dropped out, a file still being written) is retried on the
+# next run instead of being recorded as measured.
+UNREADABLE_FRAME_REASON_PREFIX = "the frame could not be read"
+
 _COLOR_PLANE_NAMES = {3: ("R", "G", "B")}
 
 _DEFINITION_VERSIONS = {spec.name: spec.definition_version for spec in FRAME_METRICS}
@@ -1172,6 +1178,7 @@ def measure_sky_electrons(
     gain: ProvenancedValue | None,
     exposure_seconds: float | None,
     gain_reason: str,
+    bias_reason: str = "",
 ) -> SkyElectrons:
     """Turn a plane's background into electrons.
 
@@ -1194,6 +1201,9 @@ def measure_sky_electrons(
         The exposure time.
     gain_reason : `str`
         Why the gain is missing, used when it is.
+    bias_reason : `str`, optional
+        Why the bias level is missing, used when it is. A generic sentence is
+        used when this is empty.
 
     Returns
     -------
@@ -1205,7 +1215,8 @@ def measure_sky_electrons(
     if bias_level_adu is None:
         return SkyElectrons(
             background_adu=background_adu,
-            reason=(
+            reason=bias_reason
+            or (
                 "the bias level of this setting in ADU is not known, and the raw frame does not state it "
                 "(the OFFSET card is a camera setting, not a level in ADU)"
             ),
@@ -1382,6 +1393,7 @@ def measure_frame(
     time_budget_seconds: float = FRAME_MEASUREMENT_TIME_BUDGET_SECONDS,
     bias_level_adu: float | None = None,
     measure_gaussian_width: Callable[[np.ndarray], float | None] | None = None,
+    bias_level_reason: str = "",
 ) -> list[QualityMeasurement]:
     """Measure one light frame and return one measurement per frame metric.
 
@@ -1425,6 +1437,10 @@ def measure_frame(
         import it, so the caller passes it in. Without it that metric is
         ``not_measured``. This argument is an addition to the planned
         interface.
+    bias_level_reason : `str`, optional
+        Why `bias_level_adu` is `None` (for example, that the calibration
+        library holds no bias frames at the frame's setting). It becomes the
+        reason of the sky metrics that need the bias level.
 
     Returns
     -------
@@ -1462,7 +1478,7 @@ def measure_frame(
     try:
         planes, collapsed, header = _read_planes(path)
     except FITS_READ_ERRORS as read_error:
-        context.add_not_measured(pixel_metrics, f"the frame could not be read: {read_error}")
+        context.add_not_measured(pixel_metrics, f"{UNREADABLE_FRAME_REASON_PREFIX}: {read_error}")
         context.add(FRAME_READ_NOISE_E, **_read_noise_arguments(read_noise, noise_reason))
         return context.measurements
 
@@ -1478,7 +1494,12 @@ def measure_frame(
     }
     for channel, _plane in planes:
         sky = measure_sky_electrons(
-            plane_backgrounds[channel], bias_level_adu, gain, exposure_seconds, noise_reason
+            plane_backgrounds[channel],
+            bias_level_adu,
+            gain,
+            exposure_seconds,
+            noise_reason,
+            bias_level_reason,
         )
         _emit_sky_measurements(context, sky, read_noise, noise_reason, channel, mosaic_note)
 
@@ -1623,7 +1644,7 @@ def _emit_region_count(context: _Context, collapsed: np.ndarray, stopwatch: _Sto
         context.add(FRAME_DETECTED_REGION_COUNT, reason=stopwatch.reason())
         return
     try:
-        _, region_count, _, _ = _detect_stars(collapsed)
+        _, region_count, _, _ = detect_stars(collapsed)
     except DATA_ERRORS as error:
         context.add(FRAME_DETECTED_REGION_COUNT, reason=f"the bright-region count failed: {error}")
         return

@@ -128,6 +128,8 @@ export interface FrameRecord {
   focuserTemperatureC?: number | null;
   fileSize?: number | null;
   fileModifiedNs?: number | null;
+  qualityMeasuredFileSize?: number | null;
+  qualityMeasuredFileModifiedNs?: number | null;
   measurements?: FrameMeasurements;
 }
 
@@ -2789,6 +2791,7 @@ export const RPC_METHODS = [
   "processing:delete_job",
   "processing:jobs_for_target",
   "processing:job_log_tail",
+  "processing:record_frame_measurements",
   "quality:query",
   "quality:metrics",
   "analysis:analyze_image",
@@ -2857,6 +2860,38 @@ export const RPC_METHODS = [
 
 /** The name of one RPC method the backend serves. */
 export type RpcMethod = (typeof RPC_METHODS)[number];
+
+/**
+ * Every event the backend pushes to the app over the events WebSocket,
+ * from backend/public_interface.py.
+ */
+export const UI_EVENTS = {
+  /** The stellar catalog was written to somewhere, so cached star lists are stale. */
+  "catalog:changed": "catalog:changed",
+  /** A frame measurement job stored new quality rows. The payload is {targetId, framesMeasured, rowsWritten, observingNightIds}. */
+  "quality:measured": "quality:measured",
+  /** The mount, processing jobs or health status changed. */
+  "system_state_update": "system_state_update",
+  /** A backend log line, for the app's log panel. */
+  "log": "log",
+  /** The shared workspace state changed, such as the selected target. */
+  "handoff": "handoff",
+  /** Another client asked the app to switch to a screen. */
+  "navigate-mode": "navigate-mode",
+  /** Another client asked the terminal to show a variable. */
+  "inspect-variable": "inspect-variable",
+  /** A device needs attention; shown on a paired phone. */
+  "device_alert": "device_alert",
+  /** An AI agent ran code in the terminal. */
+  "terminal:agent_exec": "terminal:agent_exec",
+  /** The terminal made a plot to show. */
+  "terminal:plot_generated": "terminal:plot_generated",
+  /** The script editor's text was replaced by another client. */
+  "editor:sync": "editor:sync",
+} as const;
+
+/** The name of one event the backend pushes to the app. */
+export type UiEvent = (typeof UI_EVENTS)[keyof typeof UI_EVENTS];
 
 /**
  * The path of every other route the backend serves, by name, from

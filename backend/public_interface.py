@@ -6,15 +6,18 @@ It has two parts:
 * `RPC_METHODS`, every method the ``/api/rpc`` route answers. The app
   calls them with ``callBackend(method, params)``. The MCP backend server
   and the Electron shell call some of them too.
+* `UI_EVENTS`, every event the backend pushes to the app over the
+  ``/ws/events`` WebSocket, with what each one means.
 * `ROUTES`, the few HTTP and WebSocket routes for what RPC cannot carry:
   the event and terminal WebSockets, the image and FITS file folders, the
   Matplotlib figure pages, and the start-up routes.
 
 The RPC router refuses to register a method that is not in `RPC_METHODS`,
 and a test checks that every declared method has a handler. Another test
-checks that the routes the app mounts are exactly `ROUTES`. The UI's
-generated types (``ui/common/types/backendTypes.ts``) list the same method
-names and route paths, so the app cannot call anything else.
+checks that the routes the app mounts are exactly `ROUTES`, and a third that
+every event the backend sends is in `UI_EVENTS`. The UI's generated types
+(``ui/common/types/backendTypes.ts``) list the same method names, event names
+and route paths, so the app cannot call or wait for anything else.
 """
 
 from dataclasses import dataclass
@@ -119,6 +122,8 @@ RPC_METHODS: tuple[str, ...] = (
     "processing:delete_job",
     "processing:jobs_for_target",
     "processing:job_log_tail",
+    # Measures a target's light frames and stores the numbers (a write).
+    "processing:record_frame_measurements",
     # Quality measurements: the stored ones, and what each metric means.
     # Parameter names are the library's snake_case names (target_id, not
     # targetId); the router drops names it does not know.
@@ -196,6 +201,46 @@ RPC_METHODS: tuple[str, ...] = (
     "sequencer:reorder",
     "sequencer:begin",
     "sequencer:modify",
+)
+
+
+@dataclass(frozen=True)
+class UiEvent:
+    """One event the backend pushes to the app over ``/ws/events``.
+
+    Attributes
+    ----------
+    name : `str`
+        The event's action name, as the app receives it.
+    meaning : `str`
+        What happened, in one sentence.
+    """
+
+    name: str
+    meaning: str
+
+
+#: Every event the backend pushes to the app. The app listens for these by
+#: name (``socketClient.on('action', ...)``). A test checks that every event
+#: the backend code sends is listed here.
+UI_EVENTS: tuple[UiEvent, ...] = (
+    UiEvent(
+        "catalog:changed", "The stellar catalog was written to somewhere, so cached star lists are stale."
+    ),
+    UiEvent(
+        "quality:measured",
+        "A frame measurement job stored new quality rows. The payload is "
+        "{targetId, framesMeasured, rowsWritten, observingNightIds}.",
+    ),
+    UiEvent("system_state_update", "The mount, processing jobs or health status changed."),
+    UiEvent("log", "A backend log line, for the app's log panel."),
+    UiEvent("handoff", "The shared workspace state changed, such as the selected target."),
+    UiEvent("navigate-mode", "Another client asked the app to switch to a screen."),
+    UiEvent("inspect-variable", "Another client asked the terminal to show a variable."),
+    UiEvent("device_alert", "A device needs attention; shown on a paired phone."),
+    UiEvent("terminal:agent_exec", "An AI agent ran code in the terminal."),
+    UiEvent("terminal:plot_generated", "The terminal made a plot to show."),
+    UiEvent("editor:sync", "The script editor's text was replaced by another client."),
 )
 
 #: The kinds of route: a plain HTTP route, a WebSocket, or a folder of files.

@@ -83,7 +83,13 @@ class TestProcessSingleTargetWorker:
         assert result["status"] == "success"
         assert result["stack_outputs"] == {"astrometry": "ok"}
         pipeline_mock.assert_called_once_with(
-            target, catalog_access, config, max_workers=2, camera_name="ASI294", focal_length_mm=600.0
+            target,
+            catalog_access,
+            config,
+            max_workers=2,
+            camera_name="ASI294",
+            focal_length_mm=600.0,
+            measured_at=None,
         )
 
     def test_returns_failed_with_the_exception_message_when_the_pipeline_raises(
@@ -212,5 +218,5 @@ class TestProcessTargetsInParallel:
         assert result == "a summary"
         _, kwargs = run_mock.call_args
         assert kwargs["max_workers"] == 2
-        assert kwargs["worker_arguments"] == (3, "ASI294", 600.0)
+        assert kwargs["worker_arguments"] == (3, "ASI294", 600.0, None)
         assert kwargs["niceness"] == 5

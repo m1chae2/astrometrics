@@ -323,8 +323,43 @@ def download_remote_targets(
         # After the copy: the new frames that hold a plate solve give the
         # mount's pointing error, for control.history.query(kind="alignment").
         record_frame_pointing_errors(context, added_paths)
+        if added_paths:
+            record_new_frame_measurements(context, target)
         return True
     return success
+
+
+def record_new_frame_measurements(context: ControlContext, target: Target) -> None:
+    """Measure a target's new frames and store the numbers, after a sync.
+
+    Runs `astrometrics.processing.record_frame_measurements`, which measures
+    each light frame that has not been measured and skips the rest. A failure
+    is logged and never fails the sync: the frames are already in the library
+    and the next run measures them.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the science library (`context.astrometrics`).
+    target : `Target`
+        The target whose frames were just added.
+    """
+    from astrometricslib import get_current_job
+
+    try:
+        summary = context.astrometrics.processing.record_frame_measurements(
+            target, register_job=get_current_job() is None
+        )
+    except Exception:  # a measurement failure must never fail the sync: log it
+        logger.exception("Could not measure the new frames of %s", getattr(target, "id", "?"))
+        return
+    logger.info(
+        "Measured %d new frame(s) of %s (%d row(s) stored, %d failed).",
+        summary.frames_measured,
+        target.id,
+        summary.rows_written,
+        summary.frames_failed,
+    )
 
 
 def matching_remote_folder(context: ControlContext, folder_name: str, folders: list[str]) -> str | None:

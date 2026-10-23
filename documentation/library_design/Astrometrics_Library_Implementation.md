@@ -75,6 +75,7 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 - **Exposure groups and weights (§3.2).** `processing/exposure_groups.py`, `group_alignment.py`, `group_derotation.py`, `star_pattern_candidates.py`, `spectral_frame_alignment.py`; `pre_processing/exposure_weighting.py`.
 - **Sequence and restacks (§3.3).** `pre_processing/stack_inputs.py`; `post_processing/previous_stack.py`, `stack_comparison.py`, `interrupted_jobs.py`.
 - **Previews (§3.3).** `post_processing/stack_preview.py`, `colour_calibration.py`, `starnet_stretch.py`, `sky_level.py`, `star_tone.py`, `bright_object.py`, `stack_crop.py`, `preview_remake.py`.
+- **Frame measurement (§2.1).** `ProcessingPipelines.record_frame_measurements` (`frame_measurement_run.py`) measures each light frame with `measure_frame`.
 - **Input screening (§3.4.1).** `pre_processing/frame_quarantine.py`, `frame_homogeneity.py`, `background_homogeneity.py`, `camera_selection.py`, `assess_input_quality.py`.
 - **Output checks (§3.4.2).** `post_processing/assess_output_quality.py`, `stack_quality.py`, `exposure_group_report.py`, `stack_quality_report.py`.
 
@@ -130,7 +131,7 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 - **Stars.** `star_recording.py`; `catalog_star_identity.py` (position tolerance, name preference, also used by `scripts/merge_duplicate_catalog_stars.py`).
 - **Solving and state.** `session_identification.py`, `analysis_context.py`.
 - **Recording.** `provenance_recording.py`, `applied_camera_profile.py`.
-- **Quality primitives.** `quality/saturation.py`, `quality_metrics.py`, `frame_statistics.py`, `background_measurement.py`, `raw_frame_check.py`.
+- **Quality primitives.** `quality/saturation.py`, `quality_metrics.py`, `frame_statistics.py`, `background_measurement.py`, `raw_frame_check.py`, `frame_measurement.py`.
 
 ### 4.7 Drivers and pixel-level primitives
 
@@ -166,6 +167,7 @@ Tables 4 to 8 list each pipeline's tuned values and the architecture section tha
 | Margin of the low cutoff above the high one | 0.5σ | Partly measured ([STK-08](validation/stacking.md#stk-08)); simulation only | §3.2 |
 | Minimum frames per master calibration frame | 3 | Design estimate ([stacking table](validation/stacking.md#design-estimates)) | §3.2 |
 | Gain and read noise measurement: fewest flat pairs; fewest bias pairs; temperature spread; region | 5; 3; 1 °C; central 1000 by 1000 px | Measured ([STK-35](validation/stacking.md#stk-35)) | §3.2 |
+| Frame measurement: time; fit grid cells | 60 s; 196 | Design estimate ([AST-17](validation/astrometry.md#ast-17)) | §2.1 |
 | Frame screening: session gap | 4 h | Design estimate ([stacking table](validation/stacking.md#design-estimates)) | §3.4.1 |
 | Frame screening: fewest frames to judge | 8 | Partly measured ([STK-01](validation/stacking.md#stk-01)) | §3.4.1 |
 | Clouded frame star count; trailed frame roundness | below 0.5 of session median; below 0.80 and 0.15 under median | Partly measured ([STK-01](validation/stacking.md#stk-01)) | §3.4.1 |
@@ -183,6 +185,30 @@ Tables 4 to 8 list each pipeline's tuned values and the architecture section tha
 | Star sharpness warning ratio (fails above) | 1.2 | Partly measured ([STK-25](validation/stacking.md#stk-25)) | §3.4.2 |
 
 <!-- impl: astrometricslib.utilities.rejection_thresholds.rejection_bounds -->
+<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.FRAME_MEASUREMENT_TIME_BUDGET_SECONDS -->
+<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_GRID_CELL_COUNT -->
+<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_CANDIDATES_PER_CELL -->
+<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_FIT_BOX_HALF_WIDTH_PX -->
+<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_ISOLATION_RADIUS_PX -->
+<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_SATURATION_MARGIN_FRACTION -->
+<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_SUBPIXEL_FACTOR -->
+<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_BETA_MINIMUM -->
+<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_BETA_MAXIMUM -->
+<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_BETA_START -->
+<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_MINIMUM_R_SQUARED -->
+<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_MAXIMUM_CENTER_SHIFT_PX -->
+<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_MINIMUM_FWHM_PX -->
+<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_MAXIMUM_FWHM_PX -->
+<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_MINIMUM_STAR_COUNT -->
+<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOMENT_APERTURE_FWHM_MULTIPLE -->
+<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOMENT_APERTURE_MINIMUM_RADIUS_PX -->
+<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.BOOTSTRAP_RESAMPLE_COUNT -->
+<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.STAR_FINDER_EXPECTED_FWHM_PX -->
+<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.STAR_FINDER_THRESHOLD_SIGMA -->
+<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.STAR_FINDER_BOX_FRACTION -->
+<!-- impl: astrometricslib.pipelines.stacking.frame_measurement_run.MEASUREMENT_WORKER_COUNT -->
+<!-- impl: astrometricslib.pipelines.stacking.frame_measurement_run.BIAS_FRAMES_FOR_LEVEL -->
+<!-- impl: astrometricslib.pipelines.stacking.frame_measurement_run.STACKING_STAGE_MEASUREMENT_LIMIT -->
 <!-- impl: astrometricslib.pipelines.stacking.pre_processing.sensor_noise.MINIMUM_FLAT_PAIRS -->
 <!-- impl: astrometricslib.pipelines.stacking.pre_processing.sensor_noise.MINIMUM_BIAS_PAIRS -->
 <!-- impl: astrometricslib.pipelines.stacking.pre_processing.sensor_noise.MAXIMUM_TEMPERATURE_SPREAD_C -->

@@ -267,6 +267,7 @@ export interface ActionRegistry {
     // Backed by JobService.get_active_jobs(), which returns full ProcessingJob
     // records (with progressCurrent/progressTotal), not the lighter ProcessStatus.
     "processing:active_jobs": { payload: Record<string, never>; response: ProcessingJob[] };
+    "processing:record_frame_measurements": { payload: { target_id: string; limit?: number }; response: { started: boolean; target_id: string } };
     "processing:job_log_tail": { payload: { job_id: string; lines?: number }; response: string[] };
 
     // Quality measurements: the stored ones, and what each metric means.

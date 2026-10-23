@@ -133,6 +133,15 @@ class FrameRecord(BaseModel):
     file_size: int | None = Field(default=None, alias="fileSize")
     file_modified_ns: int | None = Field(default=None, alias="fileModifiedNs")
 
+    # The file size and last-change time the frame had when its quality
+    # measurements were last recorded (`record_frame_measurements`). A frame
+    # whose file still matches these has nothing new to measure. Both are None
+    # for a frame that was never measured; they are kept apart from
+    # `file_size` and `file_modified_ns` because a header re-read and a pixel
+    # measurement happen at different times.
+    quality_measured_file_size: int | None = Field(default=None, alias="qualityMeasuredFileSize")
+    quality_measured_file_modified_ns: int | None = Field(default=None, alias="qualityMeasuredFileModifiedNs")
+
     # Everything our own code calculated from this frame's pixels
     # (background level, registration facts), as opposed to the fields
     # above, which are recorded straight from the camera at capture time.

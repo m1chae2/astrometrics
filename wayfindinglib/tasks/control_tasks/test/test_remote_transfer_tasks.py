@@ -190,6 +190,82 @@ def test_download_remote_targets_downloads_and_reindexes_on_success() -> None:
     assert fake_astrometrics.saved is True
 
 
+def _download_with_one_new_frame(measure: Mock) -> tuple[bool, _FakeAstrometrics]:
+    """Run a local-path ingest in which the classifier adds one frame.
+
+    Parameters
+    ----------
+    measure : `Mock`
+        Stands in for ``astrometrics.processing.record_frame_measurements``.
+
+    Returns
+    -------
+    success : `bool`
+        What `download_remote_targets` returned.
+    fake_astrometrics : `_FakeAstrometrics`
+        The stand-in science library, to check what was called.
+    """
+    fake_astrometrics = _FakeAstrometrics(existing=[_FakeTargetRecord("M 81")])
+    fake_astrometrics.processing = SimpleNamespace(record_frame_measurements=measure)
+    observatory = _FakeObservatory(Mock())
+    observatory.astrometrics = fake_astrometrics
+
+    def classify(scan_list: list[str], target_id: str, config: Any, telescope: str, added: list[str]) -> None:
+        """Pretend one new frame was filed."""
+        added.append("/library/lights/M 81/frame_001.fits")
+
+    with (
+        patch("astrometricslib.get_configuration", return_value=_patched_config()),
+        patch("astrometricslib.classify_and_sort_fits_files", side_effect=classify),
+    ):
+        success = remote_operations.download_remote_targets(
+            observatory, "M 81", local_path="/local/lights/M81"
+        )
+    return success, fake_astrometrics
+
+
+def test_a_sync_that_adds_frames_measures_them_after_saving_the_target() -> None:
+    """The new frames are measured once, by the processing API."""
+    measure = Mock()
+    measure.return_value = SimpleNamespace(frames_measured=1, rows_written=20, frames_failed=0)
+
+    success, fake_astrometrics = _download_with_one_new_frame(measure)
+
+    assert success is True
+    assert fake_astrometrics.saved is True
+    measure.assert_called_once()
+    assert measure.call_args.args[0].id == "M 81"
+    assert measure.call_args.kwargs["register_job"] is True
+
+
+def test_a_failed_measurement_never_fails_the_sync() -> None:
+    """An error in the measurement is logged and the sync still succeeds."""
+    measure = Mock(side_effect=ExternalServiceError("disk went away"))
+
+    success, fake_astrometrics = _download_with_one_new_frame(measure)
+
+    assert success is True
+    assert fake_astrometrics.saved is True
+    measure.assert_called_once()
+
+
+def test_a_sync_that_adds_no_frames_measures_nothing() -> None:
+    """With nothing new, the measurement is not started."""
+    measure = Mock()
+    fake_astrometrics = _FakeAstrometrics(existing=[_FakeTargetRecord("M 81")])
+    fake_astrometrics.processing = SimpleNamespace(record_frame_measurements=measure)
+    observatory = _FakeObservatory(Mock())
+    observatory.astrometrics = fake_astrometrics
+
+    with (
+        patch("astrometricslib.get_configuration", return_value=_patched_config()),
+        patch("astrometricslib.classify_and_sort_fits_files"),
+    ):
+        remote_operations.download_remote_targets(observatory, "M 81", local_path="/local/lights/M81")
+
+    measure.assert_not_called()
+
+
 def test_download_remote_targets_local_path_skips_download() -> None:
     """Verify a local_path ingests without touching the remote driver."""
     fake_astrometrics = _FakeAstrometrics(existing=[_FakeTargetRecord("M 81")])

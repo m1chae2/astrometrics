@@ -16,6 +16,7 @@ connection to the stored catalog. It does not build the public
 import logging
 import traceback
 from collections.abc import Callable
+from datetime import datetime
 
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.utilities import parallel_batch
@@ -27,7 +28,11 @@ logger = logging.getLogger(__name__)
 
 
 def _process_single_target_worker(
-    target_id: str, photometry_workers: int, camera_id: str, focal_length_mm: float | None = None
+    target_id: str,
+    photometry_workers: int,
+    camera_id: str,
+    focal_length_mm: float | None = None,
+    measured_at: datetime | None = None,
 ) -> dict:
     """Run the full pipeline for one target, inside a worker process.
 
@@ -44,6 +49,10 @@ def _process_single_target_worker(
         Only frames taken with this camera are processed.
     focal_length_mm : `float`, optional
         Only frames taken at this focal length are processed.
+    measured_at : `datetime`, optional
+        When the run started, with a time zone, for the quality rows the
+        stacking stage stores. The caller supplies it because pipeline code
+        does not read the clock. `None` (for tests only) stores no rows.
 
     Returns
     -------
@@ -82,6 +91,7 @@ def _process_single_target_worker(
             max_workers=photometry_workers,
             camera_name=camera_id,
             focal_length_mm=focal_length_mm,
+            measured_at=measured_at,
         )
         result["status"] = "success"
     except Exception as processing_error:
@@ -102,6 +112,7 @@ def process_targets_in_parallel(
     camera_id: str,
     focal_length_mm: float | None = None,
     on_item_complete: Callable[[str, dict, int, int], None] | None = None,
+    measured_at: datetime | None = None,
 ) -> parallel_batch.BatchRunSummary:
     """Run the full pipeline for each target, several at the same time.
 
@@ -118,6 +129,10 @@ def process_targets_in_parallel(
     on_item_complete : `Callable`, optional
         Called as ``(target_id, result, completed_count, total_count)``
         after each target finishes.
+    measured_at : `datetime`, optional
+        When the run started, with a time zone, for the quality rows the
+        stacking stage stores. The caller supplies it because pipeline code
+        does not read the clock. `None` (for tests only) stores no rows.
 
     Returns
     -------
@@ -128,7 +143,7 @@ def process_targets_in_parallel(
     return parallel_batch.run_parallel_batch(
         target_ids,
         _process_single_target_worker,
-        worker_arguments=(worker_counts.inner_worker_count, camera_id, focal_length_mm),
+        worker_arguments=(worker_counts.inner_worker_count, camera_id, focal_length_mm, measured_at),
         max_workers=worker_counts.outer_worker_count,
         niceness=config.get_worker_niceness(),
         on_item_complete=on_item_complete,

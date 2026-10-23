@@ -10,6 +10,7 @@ it) and passes the log sync on, keeping the reply the app shows.
 
 import logging
 import threading
+from datetime import UTC, datetime
 from typing import Any
 
 from astrometricslib import AstrometricsError
@@ -22,15 +23,20 @@ logger = logging.getLogger(__name__)
 class SyncService:
     """Run frame syncs in the background and pass log syncs on."""
 
-    def __init__(self, observatory_api: ObservatoryControl) -> None:
+    def __init__(self, observatory_api: ObservatoryControl, measurement_announcer: Any = None) -> None:
         """Keep the observatory control.
 
         Parameters
         ----------
         observatory_api : `ObservatoryControl`
             The Wayfinder's `control`, which copies the files.
+        measurement_announcer : `QualityMeasurementService`, optional
+            Told when a frame sync ends, so it can announce the quality rows
+            that the sync's measurement job stored. Nothing is announced
+            without it.
         """
         self._observatory = observatory_api
+        self._measurement_announcer = measurement_announcer
 
     def start_sync(self, object_id: str) -> dict[str, Any]:
         """Start copying one target's (or calibration folder's) new frames.
@@ -48,8 +54,10 @@ class SyncService:
 
         def run() -> None:
             """Copy the frames; the top of a background thread."""
+            started_at = datetime.now(UTC)
             try:
                 self._observatory.remote.sync_frames(object_id)
+                self._announce_measurements(object_id, started_at)
             except AstrometricsError as error:
                 logger.warning("Sync of %s failed (%s): %s", object_id, error.code, error.message)
             except Exception:  # the top of a background thread: log it, never lose it
@@ -59,6 +67,25 @@ class SyncService:
         sync_thread.start()
         thread_management._syncing[object_id] = sync_thread
         return {"started": True, "target_id": object_id}
+
+    def _announce_measurements(self, object_id: str, started_at: datetime) -> None:
+        """Tell the app which quality rows the sync stored.
+
+        A failure here is logged and never changes the sync's result.
+
+        Parameters
+        ----------
+        object_id : `str`
+            The target (or calibration folder) that was synced.
+        started_at : `datetime`
+            When the sync started, with a time zone.
+        """
+        if self._measurement_announcer is None:
+            return
+        try:
+            self._measurement_announcer.announce_rows_since(object_id, started_at)
+        except Exception:  # an announcement must never fail the sync: log it
+            logger.exception("Could not announce the quality rows of the %s sync", object_id)
 
     def get_all_active_syncs(self) -> list[str]:
         """Return the target ids with a sync running.

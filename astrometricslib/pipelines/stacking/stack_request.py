@@ -20,6 +20,7 @@ import os
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Literal
 
 from astrometricslib.drivers.driver_set import Drivers
@@ -168,6 +169,7 @@ def run_stack(
     stacking_slot: Callable[[], AbstractContextManager],
     save_targets: Callable[[], None],
     drivers: Drivers | None = None,
+    measured_at: datetime | None = None,
 ) -> StackResult:
     """Stack the chosen frames, or only report the plan.
 
@@ -197,6 +199,10 @@ def run_stack(
         Saves the target catalog.
     drivers : `Drivers`, optional
         The stacking program to use. Left out, it is Siril.
+    measured_at : `datetime`, optional
+        When the stack started, with a time zone, for the quality rows the
+        stage stores. The API layer supplies it. Left out, the stage stores
+        no frame quality rows.
 
     Returns
     -------
@@ -247,6 +253,7 @@ def run_stack(
             force=force,
             preview_settings=preview_settings,
             drivers=drivers,
+            measured_at=measured_at,
         )
         # Stacking can finish without raising and still make no image, so
         # the outcome is decided here, not left to "no exception means done".

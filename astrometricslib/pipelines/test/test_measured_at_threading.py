@@ -17,6 +17,7 @@ from astrometricslib.drivers.quality_store import QualityStore
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines import target_batch, tasks
 from astrometricslib.pipelines.stacking import stage as stacking_stage
+from astrometricslib.pipelines.stacking.frame_measurement_run import FrameQualityRecording
 from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import QuarantineReport
 from astrometricslib.scripts import rebuild_stacks
 
@@ -40,6 +41,22 @@ def _target(tmp_path: Path) -> Target:
     )
 
 
+def _recording(tmp_path: Path) -> FrameQualityRecording:
+    """Build the recording context a caller of the stage supplies.
+
+    Returns
+    -------
+    recording : `FrameQualityRecording`
+        The test configuration and a library with no bias frames.
+    """
+    from astrometricslib.foundation.config import get_configuration
+
+    library = SimpleNamespace(
+        select_bias_frames=lambda *a, **k: SimpleNamespace(frames=[], flags=[], blocking_flags=[])
+    )
+    return FrameQualityRecording(configuration=get_configuration(), calibration_library=library)
+
+
 def _stack_that_records_quality(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[list[datetime | None], QualityStore]:
@@ -56,14 +73,13 @@ def _stack_that_records_quality(
     from astrometricslib.foundation.config import get_configuration
 
     monkeypatch.setattr(get_configuration(), "get_library_path", lambda: tmp_path)
-    monkeypatch.setattr(
-        "astrometricslib.drivers.calibration_library.CalibrationLibrary",
-        lambda app_config: SimpleNamespace(
-            select_bias_frames=lambda *a, **k: SimpleNamespace(frames=[], flags=[], blocking_flags=[])
-        ),
-    )
 
-    def fake_stack(target: Target, measured_at: datetime | None = None, **_options: object) -> str:
+    def fake_stack(
+        target: Target,
+        measured_at: datetime | None = None,
+        quality_recording: FrameQualityRecording | None = None,
+        **_options: object,
+    ) -> str:
         """Run only the stage's frame quality hook.
 
         Returns
@@ -75,7 +91,9 @@ def _stack_that_records_quality(
         report = QuarantineReport(
             measurements=[{"path": f.path, "roundness": 0.9, "sky_median_adu": 500.0} for f in target.frames]
         )
-        stacking_stage._record_frame_quality(target, [], report, list(target.frames), measured_at)
+        stacking_stage._record_frame_quality(
+            target, [], report, list(target.frames), measured_at, quality_recording
+        )
         return "/fake/stack.fits"
 
     monkeypatch.setattr(stacking_stage, "stack_frames", fake_stack)
@@ -86,7 +104,9 @@ def test_the_full_pipeline_path_stores_frame_quality(tmp_path: Path, monkeypatch
     """`stack_frames_with_timeout` hands the time to the stage."""
     received, store = _stack_that_records_quality(tmp_path, monkeypatch)
 
-    tasks.stack_frames_with_timeout(_target(tmp_path), [], measured_at=MEASURED_AT)
+    tasks.stack_frames_with_timeout(
+        _target(tmp_path), [], measured_at=MEASURED_AT, quality_recording=_recording(tmp_path)
+    )
 
     assert received == [MEASURED_AT]
     assert len(store.query(metric="frame.quarantine_roundness")) == 1
@@ -100,7 +120,10 @@ def test_the_rebuild_script_path_stores_frame_quality(
     target = _target(tmp_path)
     astrometrics = SimpleNamespace(
         targets=SimpleNamespace(get=lambda name: target, save=MagicMock()),
-        config=SimpleNamespace(get_frames_path=lambda: tmp_path),
+        config=SimpleNamespace(get_frames_path=lambda: tmp_path, get_library_path=lambda: tmp_path),
+        processing=SimpleNamespace(
+            calibration=SimpleNamespace(library=_recording(tmp_path).calibration_library)
+        ),
     )
 
     rebuild_stacks.rebuild_target(astrometrics, "M 99", str(tmp_path / "backup"))
@@ -121,10 +144,14 @@ def test_the_batch_worker_passes_the_time_to_the_full_pipeline(monkeypatch: pyte
         "astrometricslib.pipelines.shared.frame_grouping.select_frames_for_camera", lambda target, camera: [1]
     )
     monkeypatch.setattr("astrometricslib.drivers.catalog_access.CatalogAccess", lambda config: object())
+    monkeypatch.setattr(
+        "astrometricslib.drivers.calibration_library.CalibrationLibrary", lambda app_config: "library"
+    )
 
     target_batch._process_single_target_worker("M 99", 2, "Cam", measured_at=MEASURED_AT)
 
     assert pipeline.call_args.kwargs["measured_at"] == MEASURED_AT
+    assert pipeline.call_args.kwargs["quality_recording"].calibration_library == "library"
 
 
 def test_the_batch_entry_sends_the_time_to_every_worker(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -2,13 +2,15 @@
 
 Description: The service starts the library's frame measurement job on a
 thread and sends the ``quality:measured`` event when the job stored rows. The
-sync service asks it to announce the rows of the job that follows a sync.
-The tests use stand-ins for the science library and the socket manager.
+library guards the work (one run per target, one run at a time), so the
+service keeps no guard of its own. The sync service hands it the summaries of
+the runs the sync started, and the event comes from those. The tests use
+stand-ins for the science library and the socket manager.
 """
 
 import asyncio
 import threading
-from datetime import UTC, datetime
+from collections.abc import Iterable, Mapping
 from types import SimpleNamespace
 from typing import Any
 
@@ -39,7 +41,9 @@ class _Sockets:
 class _Processing:
     """A stand-in processing API whose measurement job can be held."""
 
-    def __init__(self, rows_written: int = 12, frames_measured: int = 3) -> None:
+    def __init__(
+        self, rows_written: int = 12, frames_measured: int = 3, already_running: bool = False
+    ) -> None:
         """Set what the job reports.
 
         Parameters
@@ -48,9 +52,12 @@ class _Processing:
             Rows the job reports it stored.
         frames_measured : `int`, optional
             Frames the job reports it measured.
+        already_running : `bool`, optional
+            Whether the library says another run has the target.
         """
         self.rows_written = rows_written
         self.frames_measured = frames_measured
+        self.already_running = already_running
         self.calls: list[tuple[str, int | None]] = []
         self.release = threading.Event()
         self.release.set()
@@ -70,44 +77,27 @@ class _Processing:
             frames_measured=self.frames_measured,
             rows_written=self.rows_written,
             observing_night_ids=["2026-10-13"],
+            already_running=self.already_running,
+            notes=["a measurement run for M 13 is already going"] if self.already_running else [],
         )
 
 
-def _row(subject_id: str, night_id: str | None = "2026-10-13") -> SimpleNamespace:
-    """Build a stand-in stored row.
-
-    Returns
-    -------
-    row : `SimpleNamespace`
-        A row with the subject id the service reads.
-    """
-    return SimpleNamespace(subject=SimpleNamespace(subject_id=subject_id, observing_night_id=night_id))
-
-
-def _service(
-    processing: _Processing, sockets: _Sockets, rows: list | None = None
-) -> QualityMeasurementService:
+def _service(processing: _Processing, sockets: _Sockets) -> QualityMeasurementService:
     """Build the service over stand-in libraries.
 
     Returns
     -------
     service : `QualityMeasurementService`
-        A service whose quality query gives `rows`.
+        A service over the stand-in processing API and socket manager.
     """
-    astrometrics = SimpleNamespace(
-        processing=processing,
-        targets=SimpleNamespace(get=lambda target_id: SimpleNamespace(id="M 13") if target_id else None),
-        quality=SimpleNamespace(query=lambda **arguments: rows if rows is not None else []),
-    )
-    return QualityMeasurementService(astrometrics, sockets)
+    return QualityMeasurementService(SimpleNamespace(processing=processing), sockets)
 
 
-def _wait_until_idle(service: QualityMeasurementService) -> None:
+def _wait_until_idle() -> None:
     """Wait for the service's background thread to finish."""
     for thread in threading.enumerate():
         if thread.name.startswith("quality-measure-"):
             thread.join(timeout=5.0)
-    assert not service._running
 
 
 def test_the_method_is_declared_and_served_by_the_service() -> None:
@@ -131,7 +121,7 @@ def test_the_rpc_starts_the_job_and_the_event_follows(monkeypatch: pytest.Monkey
 
     assert reply == {"started": True, "target_id": "M 13"}
     assert sockets.sent.wait(timeout=5.0)
-    _wait_until_idle(service)
+    _wait_until_idle()
     assert processing.calls == [("M 13", 5)]
     assert sockets.events == [
         (
@@ -147,14 +137,14 @@ def test_a_run_that_stored_nothing_sends_no_event() -> None:
     service = _service(processing, sockets)
 
     service.start_frame_measurements("M 13")
-    _wait_until_idle(service)
+    _wait_until_idle()
 
     assert processing.calls == [("M 13", None)]
     assert sockets.events == []
 
 
-def test_a_second_start_for_the_same_target_is_refused_while_one_runs() -> None:
-    """Only one measurement run per target at a time."""
+def test_the_service_keeps_no_guard_of_its_own_because_the_library_guards() -> None:
+    """Two starts both start a thread; the library picks who measures."""
     processing, sockets = _Processing(), _Sockets()
     processing.release.clear()
     service = _service(processing, sockets)
@@ -162,15 +152,27 @@ def test_a_second_start_for_the_same_target_is_refused_while_one_runs() -> None:
     first = service.start_frame_measurements("M 13")
     second = service.start_frame_measurements("M 13")
     processing.release.set()
-    _wait_until_idle(service)
+    _wait_until_idle()
 
-    assert first["started"] is True
-    assert second == {"started": False, "target_id": "M 13"}
-    assert len(processing.calls) == 1
+    assert first == {"started": True, "target_id": "M 13"}
+    assert second == {"started": True, "target_id": "M 13"}
+    assert len(processing.calls) == 2
+
+
+def test_a_run_the_library_skipped_sends_no_event() -> None:
+    """When another run has the target, nothing is measured or sent."""
+    processing, sockets = _Processing(rows_written=0, frames_measured=0, already_running=True), _Sockets()
+    service = _service(processing, sockets)
+
+    service.start_frame_measurements("M 13")
+    _wait_until_idle()
+
+    assert processing.calls == [("M 13", None)]
+    assert sockets.events == []
 
 
 def test_a_failed_run_is_logged_and_the_target_can_be_started_again() -> None:
-    """A library error does not leave the target stuck as running."""
+    """A library error does not stop a later start."""
     from astrometricslib import StorageError
 
     processing, sockets = _Processing(), _Sockets()
@@ -189,49 +191,63 @@ def test_a_failed_run_is_logged_and_the_target_can_be_started_again() -> None:
     service = _service(processing, sockets)
 
     service.start_frame_measurements("M 13")
-    _wait_until_idle(service)
+    _wait_until_idle()
 
     assert sockets.events == []
     assert service.start_frame_measurements("M 13")["started"] is True
-    _wait_until_idle(service)
+    _wait_until_idle()
 
 
-def test_announcing_after_a_sync_counts_the_rows_and_frames_since_the_start() -> None:
-    """Rows from two frames become one event with both counts."""
+def _summary(target_id: str = "M 13", rows_written: int = 12, frames_measured: int = 3) -> dict[str, Any]:
+    """Build a measurement summary as the frame sync returns it.
+
+    Returns
+    -------
+    summary : `dict` [`str`, `Any`]
+        The plain dict form of a `FrameMeasurementSummary`.
+    """
+    return {
+        "target_id": target_id,
+        "frames_measured": frames_measured,
+        "rows_written": rows_written,
+        "observing_night_ids": ["2026-10-12", "2026-10-13"],
+    }
+
+
+def test_announcing_summaries_sends_one_event_per_summary_that_stored_rows() -> None:
+    """The event carries the run's own counts; an empty run sends nothing."""
     sockets = _Sockets()
-    rows = [_row("M 13/a.fits"), _row("M 13/a.fits", "2026-10-12"), _row("M 13/b.fits")]
-    service = _service(_Processing(), sockets, rows)
+    service = _service(_Processing(), sockets)
 
-    service.announce_rows_since("M 13", datetime(2026, 10, 22, 6, 0, tzinfo=UTC))
+    service.announce_summaries([_summary(), _summary("M 57", rows_written=0, frames_measured=0)])
 
     assert sockets.events == [
         (
             "quality:measured",
             {
                 "targetId": "M 13",
-                "framesMeasured": 2,
-                "rowsWritten": 3,
+                "framesMeasured": 3,
+                "rowsWritten": 12,
                 "observingNightIds": ["2026-10-12", "2026-10-13"],
             },
         )
     ]
 
 
-def test_announcing_with_no_rows_or_an_unknown_target_sends_nothing() -> None:
-    """A calibration folder or an unmeasured sync announces nothing."""
+def test_announcing_nothing_sends_nothing() -> None:
+    """A calibration folder sync returns no summaries and announces nothing."""
     sockets = _Sockets()
-    service = _service(_Processing(), sockets, [])
-    service.announce_rows_since("M 13", datetime(2026, 10, 22, tzinfo=UTC))
-    service.announce_rows_since("", datetime(2026, 10, 22, tzinfo=UTC))
+    _service(_Processing(), sockets).announce_summaries([])
     assert sockets.events == []
 
 
 class _Remote:
     """A stand-in `control.remote` whose frame sync can fail."""
 
-    def __init__(self, fail: bool = False) -> None:
-        """Choose whether the sync raises."""
+    def __init__(self, fail: bool = False, measurements: list | None = None) -> None:
+        """Choose whether the sync raises, and what it returns."""
         self.fail = fail
+        self.measurements = measurements if measurements is not None else []
 
     def sync_frames(self, target: str) -> dict[str, Any]:
         """Finish, or fail.
@@ -239,7 +255,7 @@ class _Remote:
         Returns
         -------
         result : `dict` [`str`, `Any`]
-            A successful sync.
+            A successful sync with the measurement summaries.
 
         Raises
         ------
@@ -248,7 +264,7 @@ class _Remote:
         """
         if self.fail:
             raise OSError("link down")
-        return {"success": True}
+        return {"success": True, "measurements": self.measurements}
 
 
 class _Announcer:
@@ -257,9 +273,9 @@ class _Announcer:
     def __init__(self, fail: bool = False) -> None:
         """Choose whether the announcement raises."""
         self.fail = fail
-        self.calls: list[tuple[str, datetime]] = []
+        self.calls: list[list[dict]] = []
 
-    def announce_rows_since(self, target_id: str, since: datetime) -> None:
+    def announce_summaries(self, summaries: Iterable[Mapping[str, Any]]) -> None:
         """Record the call, or fail.
 
         Raises
@@ -267,7 +283,7 @@ class _Announcer:
         RuntimeError
             When the stand-in was told to fail.
         """
-        self.calls.append((target_id, since))
+        self.calls.append(list(summaries))
         if self.fail:
             raise RuntimeError("socket gone")
 
@@ -289,22 +305,30 @@ def _run_sync(target_id: str, remote: _Remote, announcer: _Announcer) -> None:
     thread_management._syncing[target_id].join(timeout=5.0)
 
 
-def test_a_finished_sync_asks_for_the_announcement_with_its_start_time() -> None:
-    """The sync service passes the target and the moment the sync began."""
+def test_a_finished_sync_announces_the_summaries_the_sync_returned() -> None:
+    """The announcement comes from the sync's own measurement summaries."""
     announcer = _Announcer()
-    before = datetime.now(UTC)
+    summaries = [_summary()]
 
-    _run_sync("M 13", _Remote(), announcer)
+    _run_sync("M 13", _Remote(measurements=summaries), announcer)
 
-    assert [call[0] for call in announcer.calls] == ["M 13"]
-    assert announcer.calls[0][1] >= before
+    assert announcer.calls == [summaries]
+
+
+def test_a_sync_that_measured_nothing_announces_nothing() -> None:
+    """No summaries (a calibration folder, or no new frames) means no call."""
+    announcer = _Announcer()
+
+    _run_sync("Dark", _Remote(), announcer)
+
+    assert announcer.calls == []
 
 
 def test_a_failed_announcement_never_breaks_the_sync() -> None:
     """The announcement error is logged; the sync thread ends normally."""
     announcer = _Announcer(fail=True)
 
-    _run_sync("M 14", _Remote(), announcer)
+    _run_sync("M 14", _Remote(measurements=[_summary("M 14")]), announcer)
 
     assert len(announcer.calls) == 1
 

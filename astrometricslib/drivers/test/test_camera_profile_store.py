@@ -7,6 +7,7 @@ that the shipped config holds exactly the numbers the code used before.
 """
 
 import logging
+import threading
 from pathlib import Path
 
 import pytest
@@ -457,3 +458,111 @@ def test_saving_into_an_old_layout_section_is_refused(
         save_sensor_setting_noise(config, "Test Camera", _entry("0", 0.78, 3.8))
     with pytest.raises(ConfigurationError, match="no camera profile"):
         save_sensor_setting_noise(config, "Missing Camera", _entry("0", 0.78, 3.8))
+
+
+def test_the_spread_pair_values_and_robust_read_noise_survive_a_save(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The extra fields of a measured entry round-trip through the file."""
+    config = _real_config(tmp_path, monkeypatch, write_profile("Test Camera"))
+    entry = SensorSettingNoise(
+        gain_setting="0",
+        offset="10",
+        binning="1x1",
+        gain_e_per_adu=_measured(0.783),
+        read_noise_e=_measured(3.1),
+        gain_spread_e_per_adu=0.0004,
+        pair_gains_e_per_adu=(0.7826, 0.7831, 0.7829),
+        read_noise_adu_robust=3.95,
+        pair_read_noises_adu=(3.97, 4.02),
+    )
+
+    save_sensor_setting_noise(config, "Test Camera", entry)
+
+    reloaded = AppConfiguration()
+    profile = next(p for p in load_camera_profiles(reloaded) if p.camera_name == "Test Camera")
+    saved = profile.sensor_noise_for("0", "10", "1x1")
+    assert saved.gain_spread_e_per_adu == pytest.approx(0.0004)
+    assert saved.pair_gains_e_per_adu == pytest.approx((0.7826, 0.7831, 0.7829))
+    assert saved.read_noise_adu_robust == pytest.approx(3.95)
+    assert saved.pair_read_noises_adu == pytest.approx((3.97, 4.02))
+    assert saved == entry
+
+
+def test_an_entry_without_the_extra_fields_still_loads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An entry saved before these fields existed loads with empty values."""
+    config = _real_config(tmp_path, monkeypatch, write_profile("Test Camera"))
+    save_sensor_setting_noise(config, "Test Camera", _entry("0", 0.78, 3.8))
+
+    profile = next(p for p in load_camera_profiles(AppConfiguration()) if p.camera_name == "Test Camera")
+    saved = profile.sensor_noise_for("0", "10", "1x1")
+
+    assert saved.gain_spread_e_per_adu is None
+    assert saved.pair_gains_e_per_adu == ()
+    assert saved.read_noise_adu_robust is None
+    assert saved.pair_read_noises_adu == ()
+
+
+def test_only_the_newest_config_backups_are_kept(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Older backups beyond the limit are deleted; the newest stay."""
+    monkeypatch.setattr(camera_profile_store, "MAXIMUM_CONFIG_BACKUPS", 2)
+    config = _real_config(tmp_path, monkeypatch, write_profile("Test Camera"))
+
+    backups = [
+        save_sensor_setting_noise(config, "Test Camera", _entry(str(index), 0.78, 3.8)) for index in range(4)
+    ]
+
+    remaining = sorted(path.name for path in tmp_path.glob("*.bak"))
+    assert remaining == sorted(backup.name for backup in backups[-2:])
+
+
+def test_a_failed_write_leaves_the_config_whole_and_no_temporary_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The new text goes to a temporary file first; a failure loses nothing."""
+    config = _real_config(tmp_path, monkeypatch, write_profile("Test Camera"))
+    config_path = Path(config.config_file_path)
+    before = config_path.read_text(encoding="utf-8")
+
+    def fail_halfway(configfile: object) -> None:
+        """Write a few characters and then fail.
+
+        Raises
+        ------
+        OSError
+            Always, as a full disk would.
+        """
+        configfile.write("garbage")
+        raise OSError("disk full")
+
+    monkeypatch.setattr(config.app_config, "write", fail_halfway)
+
+    with pytest.raises(OSError, match="disk full"):
+        save_sensor_setting_noise(config, "Test Camera", _entry("0", 0.78, 3.8))
+
+    assert config_path.read_text(encoding="utf-8") == before
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_two_threads_saving_different_settings_both_keep_their_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The write lock makes each read-modify-write finish before the next."""
+    config = _real_config(tmp_path, monkeypatch, write_profile("Test Camera"))
+    gain_settings = [str(100 * index) for index in range(6)]
+
+    threads = [
+        threading.Thread(
+            target=save_sensor_setting_noise, args=(config, "Test Camera", _entry(gain_setting, 0.78, 3.8))
+        )
+        for gain_setting in gain_settings
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(60)
+
+    profile = next(p for p in load_camera_profiles(AppConfiguration()) if p.camera_name == "Test Camera")
+    assert sorted(entry.gain_setting for entry in profile.sensor_noise) == sorted(gain_settings)

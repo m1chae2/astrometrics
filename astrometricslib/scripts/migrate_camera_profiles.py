@@ -10,8 +10,10 @@ offset 10, 1x1 binning, -10 C.
 
 By default nothing is written: the script prints what it would change. Add
 ``--apply`` to write. The config file is first copied to a timestamped
-``.bak`` file beside it. The script refuses to touch a camera whose section
-already has a ``sensor_noise`` entry.
+``.bak`` file beside it. A camera whose section already has a
+``sensor_noise`` entry and no old values is reported as already migrated and
+nothing changes (exit code 0). The script refuses to touch a section that
+holds both the old values and a ``sensor_noise`` entry.
 
     python -m astrometricslib.scripts.migrate_camera_profiles \
         --camera "ZWO ASI 533MM Pro" --gain 0 --offset 10 --binning 1x1 \
@@ -65,7 +67,8 @@ def main(argv: list[str] | None = None) -> int:
     Returns
     -------
     exit_code : `int`
-        0 on success, 1 when the migration refused to run.
+        0 on success (including a camera that is already migrated, which
+        changes nothing), 1 when the migration refused to run.
     """
     arguments = build_parser().parse_args(argv)
     setting = MigrationSetting(

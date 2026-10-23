@@ -2,45 +2,49 @@
 
 Description: The science library measures a target's light frames and stores
 the numbers in the quality database
-(`astrometrics.processing.record_frame_measurements`). This service starts
-that job on a background thread when the app asks for it, and tells every
-connected app window with the ``quality:measured`` event when new rows were
-stored, so the screens that show quality numbers can read them again.
+(`astrometrics.processing.record_frame_measurements`). The library also
+guards that work: only one run measures a target at a time, and only one run
+reads frames at a time in the whole process, so this service does not have to.
+It does two small things.
 
-The job also runs by itself after a frame sync. That run happens inside the
-library, so the sync service asks this service to announce what it stored
-(`announce_rows_since`).
+- When the app asks for a measurement, it starts the library call on a
+  background thread (so the request returns at once) and announces the result.
+- When a frame sync or an ingestion has already measured the frames it added,
+  it announces the summaries of those runs.
+
+An announcement is the ``quality:measured`` event sent to every connected app
+window, so the screens that show quality numbers can read them again. Every
+announcement comes from the summary of the run that stored the rows, never
+from a second look at the database.
 """
 
 import logging
 import threading
-from datetime import UTC, datetime
-from typing import Any
+from collections.abc import Iterable, Mapping
+from typing import Any, Protocol
 
 from astrometricslib import AstrometricsError
 
 logger = logging.getLogger(__name__)
 
 
-class QualityMeasurementService:
-    """Start the frame measurement job and announce what it stored.
+class MeasurementAnnouncer(Protocol):
+    """The part of the quality measurement service that announces results."""
 
-    Parameters
-    ----------
-    astrometrics : `Astrometrics`
-        The science library, which does the measuring.
-    socket_manager : `SocketManager`, optional
-        Sends events to the app windows. Nothing is announced without it.
-    """
+    def announce_summaries(self, summaries: Iterable[Mapping[str, Any]]) -> None:
+        """Announce the summaries of measurement runs that already finished.
 
-    def __init__(self, astrometrics: Any, socket_manager: Any = None) -> None:
-        self._astrometrics = astrometrics
-        self._socket_manager = socket_manager
-        self._running: set[str] = set()
-        self._lock = threading.Lock()
-        # Runs for different targets take turns: each already measures four
-        # frames at once, so more at the same time would only slow the app.
-        self._run_slot = threading.Lock()
+        Parameters
+        ----------
+        summaries : `Iterable` [`Mapping` [`str`, `Any`]]
+            The summaries as plain dicts (snake_case keys), as the frame sync
+            returns them under ``measurements``.
+        """
+        ...
+
+
+class QualityMeasurementPort(MeasurementAnnouncer, Protocol):
+    """Everything the ingestion needs from the quality measurement service."""
 
     def start_frame_measurements(self, target_id: str, limit: int | None = None) -> dict[str, Any]:
         """Start measuring a target's light frames in the background.
@@ -55,65 +59,92 @@ class QualityMeasurementService:
         Returns
         -------
         result : `dict` [`str`, `Any`]
-            ``started`` (`False` when a run for this target is already
-            going) and ``target_id``. The result of the run arrives as the
-            ``quality:measured`` event.
+            ``started`` and ``target_id``.
         """
-        with self._lock:
-            if target_id in self._running:
-                return {"started": False, "target_id": target_id}
-            self._running.add(target_id)
+        ...
 
-        def run() -> None:
-            """Measure the frames; the top of a background thread."""
-            try:
-                with self._run_slot:
-                    summary = self._astrometrics.processing.record_frame_measurements(target_id, limit=limit)
-                self._announce(
-                    summary.target_id,
-                    summary.frames_measured,
-                    summary.rows_written,
-                    list(summary.observing_night_ids),
-                )
-            except AstrometricsError as error:
-                logger.warning(
-                    "Measuring the frames of %s failed (%s): %s", target_id, error.code, error.message
-                )
-            except Exception:  # the top of a background thread: log it, never lose it
-                logger.exception("Measuring the frames of %s failed", target_id)
-            finally:
-                with self._lock:
-                    self._running.discard(target_id)
 
-        threading.Thread(target=run, name=f"quality-measure-{target_id}", daemon=True).start()
-        return {"started": True, "target_id": target_id}
+class QualityMeasurementService:
+    """Start the frame measurement job and announce what it stored.
 
-    def announce_rows_since(self, target_id: str, since: datetime) -> None:
-        """Announce the frame rows stored for a target since a moment.
+    Parameters
+    ----------
+    astrometrics : `Astrometrics`
+        The science library, which does the measuring and the guarding.
+    socket_manager : `SocketManager`, optional
+        Sends events to the app windows. Nothing is announced without it.
+    """
 
-        The sync service calls this after a frame sync, because the job that
-        the sync starts runs inside the library and returns no summary to the
-        backend.
+    def __init__(self, astrometrics: Any, socket_manager: Any = None) -> None:
+        self._astrometrics = astrometrics
+        self._socket_manager = socket_manager
+
+    def start_frame_measurements(self, target_id: str, limit: int | None = None) -> dict[str, Any]:
+        """Start measuring a target's light frames in the background.
 
         Parameters
         ----------
         target_id : `str`
-            The target that was synced (a calibration folder name stores no
-            rows and announces nothing).
-        since : `datetime`
-            When the sync started, with a time zone.
+            The target whose frames to measure.
+        limit : `int`, optional
+            Measure at most this many frames, newest first.
+
+        Returns
+        -------
+        result : `dict` [`str`, `Any`]
+            ``started`` (always `True`: the thread was started) and
+            ``target_id``. The library decides whether the run goes ahead. If
+            this target is already being measured the run returns at once and
+            measures nothing. The result of a run that measured arrives as the
+            ``quality:measured`` event.
         """
-        target = self._astrometrics.targets.get(target_id)
-        if target is None:
-            return
-        rows = self._astrometrics.quality.query(
-            level="frame", target_id=target.id, since=since.astimezone(UTC), latest_only=False
-        )
-        if rows:
-            night_ids = sorted({
-                row.subject.observing_night_id for row in rows if row.subject.observing_night_id
-            })
-            self._announce(target.id, len({row.subject.subject_id for row in rows}), len(rows), night_ids)
+
+        def run() -> None:
+            """Measure the frames; the top of a background thread."""
+            try:
+                summary = self._astrometrics.processing.record_frame_measurements(target_id, limit=limit)
+            except AstrometricsError as error:
+                logger.warning(
+                    "Measuring the frames of %s failed (%s): %s", target_id, error.code, error.message
+                )
+                return
+            except Exception:  # the top of a background thread: log it, never lose it
+                logger.exception("Measuring the frames of %s failed", target_id)
+                return
+            if summary.already_running:
+                logger.info("Measuring the frames of %s was skipped: %s", target_id, "; ".join(summary.notes))
+                return
+            self._announce(
+                summary.target_id,
+                summary.frames_measured,
+                summary.rows_written,
+                list(summary.observing_night_ids),
+            )
+
+        threading.Thread(target=run, name=f"quality-measure-{target_id}", daemon=True).start()
+        return {"started": True, "target_id": target_id}
+
+    def announce_summaries(self, summaries: Iterable[Mapping[str, Any]]) -> None:
+        """Announce the summaries of measurement runs that already finished.
+
+        A frame sync or an ingestion measures the frames it adds inside the
+        library and returns the summary of each run. Each summary that stored
+        rows is announced; the others (nothing measured, or the run was
+        skipped because another run had the target) send nothing.
+
+        Parameters
+        ----------
+        summaries : `Iterable` [`Mapping` [`str`, `Any`]]
+            The summaries as plain dicts with the keys ``target_id``,
+            ``frames_measured``, ``rows_written`` and ``observing_night_ids``.
+        """
+        for summary in summaries:
+            self._announce(
+                str(summary["target_id"]),
+                int(summary.get("frames_measured", 0)),
+                int(summary.get("rows_written", 0)),
+                list(summary.get("observing_night_ids", [])),
+            )
 
     def _announce(
         self, target_id: str, frames_measured: int, rows_written: int, observing_night_ids: list[str]

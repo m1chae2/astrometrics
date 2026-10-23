@@ -14,6 +14,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from astropy.io import fits
+from astropy.stats import sigma_clipped_stats
 
 from astrometricslib.models.camera_profile import (
     CameraProfile,
@@ -27,8 +28,11 @@ from astrometricslib.models.target import FrameRecord
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_fwhm_from_data
 from astrometricslib.pipelines.shared.quality.frame_measurement import (
     FRAME_MEASUREMENT_TIME_BUDGET_SECONDS,
+    _mean_ellipticity_angle,
+    _Stopwatch,
     frame_subject_id,
     look_up_frame_sensor_noise,
+    measure_clipped_mean_adu,
     measure_frame,
     measure_sky_electrons,
     measure_star_profiles,
@@ -554,7 +558,7 @@ def test_a_spent_time_budget_skips_the_slow_steps_but_keeps_the_quick_ones(round
     ):
         measurement = rows[metric][0]
         assert measurement.status == MeasurementStatus.NOT_MEASURED
-        assert measurement.reason.startswith("time budget of 0 s exceeded after ")
+        assert measurement.reason.startswith("CPU time budget of 0 s exceeded after ")
     assert rows[FRAME_BACKGROUND_LEVEL][0].value is not None
     assert rows[FRAME_SKY_RATE_E_PER_S_PER_PX][0].value is not None
     assert rows[FRAME_SENSOR_TEMPERATURE][0].value == pytest.approx(-10.0)
@@ -567,6 +571,19 @@ def test_without_the_gaussian_function_that_metric_is_not_measured(round_frame_p
     assert measurement.status == MeasurementStatus.NOT_MEASURED
     assert "did not pass" in measurement.reason
     assert rows[FRAME_STAR_WIDTH_MOFFAT_PX][0].value is not None
+
+
+def test_the_time_budget_counts_cpu_time_so_a_waiting_thread_does_not_use_it_up() -> None:
+    """Sleeping adds nothing to the stopwatch; computing does."""
+    stopwatch = _Stopwatch(0.05)
+    time.sleep(0.3)
+    assert not stopwatch.expired()
+    assert stopwatch.elapsed() < 0.05
+    deadline = time.thread_time() + 0.1
+    while time.thread_time() < deadline:
+        pass
+    assert stopwatch.expired()
+    assert stopwatch.reason().startswith("CPU time budget of 0.05 s exceeded after ")
 
 
 def test_the_default_time_budget_is_a_positive_number_of_seconds() -> None:
@@ -612,6 +629,163 @@ def test_a_raw_mosaic_is_measured_as_it_is_and_says_so(tmp_path: Path) -> None:
     assert [row.subject.channel for row in rows[FRAME_STAR_WIDTH_MOFFAT_PX]] == [None]
     assert "mosaic" in rows[FRAME_STAR_WIDTH_MOFFAT_PX][0].reason
     assert "mosaic" in rows[FRAME_SKY_RATE_E_PER_S_PER_PX][0].reason
+
+
+# The color filter pattern of the synthetic mosaics: a red, two green and a
+# blue pixel per 2 x 2 cell, with the different sensitivities of the real
+# filters (red 1.0, green 0.55, blue 0.3).
+BAYER_PATTERN_SENSITIVITY = np.array([[1.0, 0.55], [0.55, 0.3]])
+
+
+def _make_mosaic_pixels(**star_options: object) -> np.ndarray:
+    """Make a raw color mosaic: a frame with the filter pattern on its stars.
+
+    Parameters
+    ----------
+    **star_options : `object`
+        Arguments of `_make_frame_pixels` (star width, stretch and so on).
+
+    Returns
+    -------
+    pixels : `numpy.ndarray`
+        The mosaic, with each pixel scaled by its filter's sensitivity.
+    """
+    pixels = _make_frame_pixels(**star_options)
+    tiled = np.tile(BAYER_PATTERN_SENSITIVITY, (pixels.shape[0] // 2, pixels.shape[1] // 2))
+    return (pixels - BIAS_LEVEL_ADU) * tiled + BIAS_LEVEL_ADU
+
+
+def test_a_raw_mosaic_is_measured_on_super_pixels_and_gives_the_true_width() -> None:
+    """Summed 2 x 2 cells remove the color pattern; the width is in pixels."""
+    mosaic = _make_mosaic_pixels(fwhm_px=4.0)
+
+    binned = measure_star_profiles(mosaic, SATURATION_ADU, bayer_mosaic=True)
+    unbinned = measure_star_profiles(mosaic, SATURATION_ADU, bayer_mosaic=False)
+
+    assert binned.width_px == pytest.approx(4.0, rel=0.05)
+    assert binned.elongation is not None and binned.elongation < 1.08
+    assert binned.star_count >= 20
+    # Without the summing, the pattern ruins the fits: too few stars survive.
+    assert unbinned.width_px is None
+
+
+def test_a_stretched_mosaic_star_keeps_its_direction_on_super_pixels() -> None:
+    """Summing cells keeps the angle, and reads the stretch a little low."""
+    angle_rad = 0.5
+    mosaic = _make_mosaic_pixels(fwhm_px=4.0, elongation=1.5, angle_rad=angle_rad)
+
+    result = measure_star_profiles(mosaic, SATURATION_ADU, bayer_mosaic=True)
+
+    assert result.width_px == pytest.approx(4.0, rel=0.05)
+    assert result.angle_deg == pytest.approx(math.degrees(angle_rad), abs=3.0)
+    # The 2 x 2 sum rounds the star slightly: 1.39 for a true 1.5 at 4 px.
+    assert 1.3 < result.elongation < 1.5
+
+
+def test_the_mosaic_reasons_name_the_super_pixels(tmp_path: Path) -> None:
+    """A BAYERPAT frame says its star shapes use 2 x 2 super-pixels."""
+    target_folder = tmp_path / "lights" / "M 13" / "Scope" / "Camera"
+    target_folder.mkdir(parents=True)
+    path = target_folder / "mosaic_binned.fits"
+    header = fits.Header()
+    header["BAYERPAT"] = "RGGB"
+    fits.PrimaryHDU(data=_make_mosaic_pixels(fwhm_px=4.0).astype(np.float32), header=header).writeto(path)
+
+    rows = _by_metric(_run(str(path)))
+
+    width = rows[FRAME_STAR_WIDTH_MOFFAT_PX][0]
+    assert width.value == pytest.approx(4.0, rel=0.06)
+    assert "2 x 2 super-pixels" in width.reason
+    assert "original pixels" in width.reason
+
+
+def test_the_direction_follows_the_stretched_stars_not_the_round_ones() -> None:
+    """A hundred round stars (noise angles) do not hide ten stretched ones."""
+    generator = np.random.default_rng(3)
+    noise_angle = generator.uniform(0.0, math.pi, 100)
+    round_first = 0.01 * np.cos(2.0 * noise_angle)
+    round_second = 0.01 * np.sin(2.0 * noise_angle)
+    stretch_angle = math.radians(40.0)
+    stretched_first = np.full(10, 0.3 * math.cos(2.0 * stretch_angle))
+    stretched_second = np.full(10, 0.3 * math.sin(2.0 * stretch_angle))
+
+    angle_deg, coherence = _mean_ellipticity_angle(
+        np.concatenate([round_first, stretched_first]), np.concatenate([round_second, stretched_second])
+    )
+
+    assert angle_deg == pytest.approx(40.0, abs=3.0)
+    assert 0.5 < coherence <= 1.0
+
+
+def test_a_field_of_exactly_round_stars_has_no_direction_to_report() -> None:
+    """With no stretch at all the coherence is 0, not a division error."""
+    angle_deg, coherence = _mean_ellipticity_angle(np.zeros(5), np.zeros(5))
+
+    assert 0.0 <= angle_deg < 180.0
+    assert coherence == pytest.approx(0.0)
+
+
+def test_the_star_rows_count_the_sources_each_cut_refused(
+    round_frame_result: dict[str, list[QualityMeasurement]],
+) -> None:
+    """The reason says how many detected sources each cut refused."""
+    reason = round_frame_result[FRAME_STAR_WIDTH_MOFFAT_PX][0].reason
+
+    assert "sources detected; refused:" in reason
+    for cut in ("near the frame edge", "with a neighbor within 14 px", "near saturation", "by the fit"):
+        assert cut in reason
+
+
+def test_a_crowded_field_refuses_sources_for_having_a_neighbor() -> None:
+    """Stars packed closer than 14 px are refused, and the count shows it."""
+    result = measure_star_profiles(_make_frame_pixels(star_count=600, seed=5), SATURATION_ADU)
+
+    assert result.refusals.detected > 200
+    assert result.refusals.near_neighbor > 50
+    assert result.refusals.near_neighbor <= result.refusals.detected
+
+
+def test_the_sky_is_not_quantized_when_the_sensor_stores_steps_of_four() -> None:
+    """A clipped mean varies smoothly; the clipped median jumps in steps."""
+    generator = np.random.default_rng(1)
+    sky_levels = 800.0 + 0.5 * np.arange(8)
+    means = []
+    medians = []
+    for level in sky_levels:
+        electrons = generator.poisson(level * 0.5, (300, 300))
+        # A 14-bit sensor in a 16-bit file: stored values are multiples of 4.
+        stored = 4.0 * np.round(electrons / 0.5 / 4.0)
+        means.append(measure_clipped_mean_adu(stored))
+        medians.append(float(sigma_clipped_stats(stored, sigma=3.0)[1]))
+
+    steps = np.diff(means)
+
+    assert np.all(steps > 0.0)
+    assert np.allclose(steps, 0.5, atol=0.5)
+    assert len({round(value, 2) for value in means}) == len(means)
+    # The median of the same data sits on multiples of 4 and takes few values.
+    assert all(value == pytest.approx(4.0 * round(value / 4.0)) for value in medians)
+    assert len(set(medians)) <= 3
+
+
+def test_the_clipped_mean_ignores_stars_and_hot_pixels() -> None:
+    """Bright outliers are clipped, so they do not raise the level."""
+    plane = np.random.default_rng(2).normal(500.0, 5.0, (200, 200))
+    plane[:3, :3] = 60000.0
+
+    assert measure_clipped_mean_adu(plane) == pytest.approx(500.0, abs=0.5)
+
+
+def test_a_frame_with_no_sensor_temperature_has_an_assumed_sky(round_frame_path: str) -> None:
+    """No CCD-TEMP means no set-point cooling is known; the sky is assumed."""
+    rows = _by_metric(_run(round_frame_path, frame=_frame_record(round_frame_path, sensorTemperatureC=None)))
+
+    for metric in (FRAME_SKY_RATE_E_PER_S_PER_PX, FRAME_SKY_NOISE_E):
+        assert rows[metric][0].status == MeasurementStatus.ASSUMED
+        assert "uncooled" in rows[metric][0].reason
+        assert "dark current" in rows[metric][0].reason
+    # Read noise does not depend on the cooling and stays measured.
+    assert rows[FRAME_READ_NOISE_E][0].status == MeasurementStatus.MEASURED
 
 
 def test_measuring_a_frame_writes_nothing(tmp_path: Path) -> None:
@@ -738,7 +912,6 @@ def test_a_real_golden_frame_runs_and_returns_finite_values() -> None:
             ),
         ),
     )
-    started = time.monotonic()
     measurements = measure_frame(
         str(GOLDEN_FRAME),
         record,
@@ -750,8 +923,12 @@ def test_a_real_golden_frame_runs_and_returns_finite_values() -> None:
         capture_setting_id=None,
         bias_level_adu=100.0,
         measure_gaussian_width=measure_fwhm_from_data,
+        # A generous budget: this test checks the values, not the speed. The
+        # budget's own behavior has its own test, and the speed on real frames
+        # is recorded in the validation register. A tight budget here failed
+        # when the machine was busy with other test runs.
+        time_budget_seconds=600.0,
     )
-    elapsed = time.monotonic() - started
     by_metric = _by_metric(measurements)
     assert set(by_metric) == {spec.name for spec in FRAME_METRICS}
     for rows in by_metric.values():
@@ -759,4 +936,3 @@ def test_a_real_golden_frame_runs_and_returns_finite_values() -> None:
             if measurement.status != MeasurementStatus.NOT_MEASURED:
                 assert measurement.value is not None and math.isfinite(measurement.value)
     assert by_metric[FRAME_STAR_WIDTH_MOFFAT_PX][0].status == MeasurementStatus.MEASURED
-    assert elapsed < FRAME_MEASUREMENT_TIME_BUDGET_SECONDS

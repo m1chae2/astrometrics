@@ -6,7 +6,7 @@ that reading writes nothing, and that ``save`` writes one entry into a
 temporary config.
 """
 
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,7 +18,9 @@ from astrometricslib.api.processing import CalibrationCatalog
 from astrometricslib.drivers import camera_profile_store
 from astrometricslib.drivers.camera_profile_store import load_camera_profiles
 from astrometricslib.foundation.config import AppConfiguration
+from astrometricslib.models.camera_profile import ProvenancedValue, ValueProvenance
 from astrometricslib.models.quality.measurement import MeasurementStatus
+from astrometricslib.pipelines.stacking import sensor_noise_run
 from astrometricslib.pipelines.stacking.sensor_noise_run import measure_sensor_noise_from_library
 
 CAMERA = "Test Camera"
@@ -28,7 +30,12 @@ FRAME_SIDE = 200
 
 
 def write_frame(
-    path: Path, generator: np.random.Generator, is_flat: bool, gain: int = 0, exposure: float = 0.5
+    path: Path,
+    generator: np.random.Generator,
+    is_flat: bool,
+    gain: int = 0,
+    exposure: float = 0.5,
+    taken_after_seconds: float = 0.0,
 ) -> None:
     """Write one synthetic calibration frame with the headers Ekos records.
 
@@ -44,6 +51,8 @@ def write_frame(
         The ``GAIN`` header value.
     exposure : `float`, optional
         The ``EXPTIME`` header value.
+    taken_after_seconds : `float`, optional
+        Seconds after a fixed start time that the ``DATE-OBS`` card records.
     """
     electrons = generator.poisson(8000.0, (FRAME_SIDE, FRAME_SIDE)) if is_flat else 0.0
     data = (
@@ -56,9 +65,26 @@ def write_frame(
     header["OFFSET"] = 10
     header["EXPTIME"] = exposure
     header["CCD-TEMP"] = -10.0
+    header["DATE-OBS"] = (
+        (datetime(2026, 10, 3, 3, 0, 0, tzinfo=UTC) + timedelta(seconds=taken_after_seconds))
+        .replace(tzinfo=None)
+        .isoformat(timespec="milliseconds")
+    )
     header["IMAGETYP"] = "Flat Frame" if is_flat else "Bias Frame"
     path.parent.mkdir(parents=True, exist_ok=True)
     fits.writeto(path, np.round(data).astype(np.uint16), header, overwrite=True)
+
+
+@pytest.fixture(autouse=True)
+def profile_without_linearity_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give every camera a profile with no linearity limit.
+
+    The tests pass a stand-in configuration that cannot be used to look up
+    profiles, and the synthetic flats (about 11,000 ADU) are far below any
+    real limit anyway.
+    """
+    generic = next(p for p in load_camera_profiles() if p.is_generic_fallback)
+    monkeypatch.setattr(sensor_noise_run, "resolve_camera_profile", lambda name, config=None: generic)
 
 
 @pytest.fixture
@@ -73,7 +99,10 @@ def frames_folder(tmp_path: Path) -> Path:
     generator = np.random.default_rng(42)
     for index in range(12):
         write_frame(
-            tmp_path / "frames" / "flats" / "Scope" / CAMERA / "L" / f"flat_{index:02d}.fits", generator, True
+            tmp_path / "frames" / "flats" / "Scope" / CAMERA / "L" / f"flat_{index:02d}.fits",
+            generator,
+            True,
+            taken_after_seconds=10.0 * index,
         )
     for index in range(8):
         write_frame(tmp_path / "frames" / "biases" / CAMERA / f"bias_{index:02d}.fits", generator, False)
@@ -127,7 +156,7 @@ def test_a_setting_with_flats_but_no_biases_is_not_measured(
     generator = np.random.default_rng(7)
     for index in range(12):
         flat_path = frames_folder / "frames" / "flats" / "Scope" / CAMERA / "L" / f"high_{index:02d}.fits"
-        write_frame(flat_path, generator, True, gain=100)
+        write_frame(flat_path, generator, True, gain=100, taken_after_seconds=10.0 * index)
     catalog.refresh("flat")
 
     result = catalog.measure_sensor_noise(CAMERA, gain=100, offset=10, register_job=False)
@@ -143,7 +172,7 @@ def test_mixed_flat_exposures_need_an_exposure_to_choose(
     generator = np.random.default_rng(8)
     for index in range(12):
         flat_path = frames_folder / "frames" / "flats" / "Scope" / CAMERA / "L" / f"long_{index:02d}.fits"
-        write_frame(flat_path, generator, True, exposure=1.0)
+        write_frame(flat_path, generator, True, exposure=1.0, taken_after_seconds=20000.0 + 10.0 * index)
     catalog.refresh("flat")
 
     mixed = catalog.measure_sensor_noise(CAMERA, gain=0, offset=10, register_job=False)
@@ -193,3 +222,44 @@ def test_reading_writes_nothing_and_saving_writes_one_entry(
     assert entry.read_noise_e.value == pytest.approx(saved.read_noise_e)
     assert entry.gain_e_per_adu.provenance.kind == "measured"
     assert "measure_sensor_noise" in entry.gain_e_per_adu.provenance.source
+    # The spread, the gain of each pair and the robust read noise are kept.
+    assert entry.gain_spread_e_per_adu == pytest.approx(saved.gain_spread_e_per_adu)
+    assert list(entry.pair_gains_e_per_adu) == pytest.approx(saved.pair_gains_e_per_adu)
+    assert entry.read_noise_adu_robust == pytest.approx(saved.read_noise_adu_robust)
+    assert list(entry.pair_read_noises_adu) == pytest.approx(saved.pair_read_noises_adu)
+    assert len(entry.pair_gains_e_per_adu) == saved.flat_pair_count
+
+
+def test_flats_without_a_time_cannot_be_paired_and_say_so(
+    catalog: CalibrationCatalog, frames_folder: Path
+) -> None:
+    """Flats with no DATE-OBS are left out and counted, not paired by name."""
+    for path in (frames_folder / "frames" / "flats").rglob("*.fits"):
+        with fits.open(path, mode="update") as hdul:
+            del hdul[0].header["DATE-OBS"]
+    catalog.refresh("flat")
+
+    result = catalog.measure_sensor_noise(CAMERA, gain=0, offset=10, register_job=False)
+
+    assert result.status == MeasurementStatus.NOT_MEASURED
+    assert any("no readable DATE-OBS" in note for note in result.notes)
+
+
+def test_flats_above_the_profile_linearity_limit_are_refused(
+    catalog: CalibrationCatalog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The profile's linearity limit reaches the measurement."""
+    generic = next(p for p in load_camera_profiles() if p.is_generic_fallback)
+    limited = generic.model_copy(
+        update={
+            "photometric_linearity_limit_adu": ProvenancedValue(
+                value=3000.0, provenance=ValueProvenance(kind="datasheet", source="a test")
+            )
+        }
+    )
+    monkeypatch.setattr(sensor_noise_run, "resolve_camera_profile", lambda name, config=None: limited)
+
+    result = catalog.measure_sensor_noise(CAMERA, gain=0, offset=10, register_job=False)
+
+    assert result.status == MeasurementStatus.NOT_MEASURED
+    assert "photometric linearity limit of 3000 ADU" in result.reason

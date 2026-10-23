@@ -10,12 +10,14 @@ it) and passes the log sync on, keeping the reply the app shows.
 
 import logging
 import threading
-from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from astrometricslib import AstrometricsError
 from backend.services.infrastructure import thread_management
 from wayfindinglib import ObservatoryControl
+
+if TYPE_CHECKING:
+    from backend.services.processing.quality_measurement_service import MeasurementAnnouncer
 
 logger = logging.getLogger(__name__)
 
@@ -23,17 +25,18 @@ logger = logging.getLogger(__name__)
 class SyncService:
     """Run frame syncs in the background and pass log syncs on."""
 
-    def __init__(self, observatory_api: ObservatoryControl, measurement_announcer: Any = None) -> None:
+    def __init__(
+        self, observatory_api: ObservatoryControl, measurement_announcer: MeasurementAnnouncer | None = None
+    ) -> None:
         """Keep the observatory control.
 
         Parameters
         ----------
         observatory_api : `ObservatoryControl`
             The Wayfinder's `control`, which copies the files.
-        measurement_announcer : `QualityMeasurementService`, optional
-            Told when a frame sync ends, so it can announce the quality rows
-            that the sync's measurement job stored. Nothing is announced
-            without it.
+        measurement_announcer : `MeasurementAnnouncer`, optional
+            Told what the sync's measurement runs stored, so it can announce
+            the quality rows. Nothing is announced without it.
         """
         self._observatory = observatory_api
         self._measurement_announcer = measurement_announcer
@@ -54,10 +57,9 @@ class SyncService:
 
         def run() -> None:
             """Copy the frames; the top of a background thread."""
-            started_at = datetime.now(UTC)
             try:
-                self._observatory.remote.sync_frames(object_id)
-                self._announce_measurements(object_id, started_at)
+                result = self._observatory.remote.sync_frames(object_id)
+                self._announce_measurements(object_id, result)
             except AstrometricsError as error:
                 logger.warning("Sync of %s failed (%s): %s", object_id, error.code, error.message)
             except Exception:  # the top of a background thread: log it, never lose it
@@ -68,22 +70,25 @@ class SyncService:
         thread_management._syncing[object_id] = sync_thread
         return {"started": True, "target_id": object_id}
 
-    def _announce_measurements(self, object_id: str, started_at: datetime) -> None:
+    def _announce_measurements(self, object_id: str, sync_result: Any) -> None:
         """Tell the app which quality rows the sync stored.
 
-        A failure here is logged and never changes the sync's result.
+        The announcement comes from the summaries of the measurement runs the
+        sync started (the sync's ``measurements``), not from a look at the
+        database. A failure here is logged and never changes the sync's result.
 
         Parameters
         ----------
         object_id : `str`
             The target (or calibration folder) that was synced.
-        started_at : `datetime`
-            When the sync started, with a time zone.
+        sync_result : `Any`
+            What the frame sync returned.
         """
-        if self._measurement_announcer is None:
+        summaries = sync_result.get("measurements") if isinstance(sync_result, dict) else None
+        if self._measurement_announcer is None or not summaries:
             return
         try:
-            self._measurement_announcer.announce_rows_since(object_id, started_at)
+            self._measurement_announcer.announce_summaries(summaries)
         except Exception:  # an announcement must never fail the sync: log it
             logger.exception("Could not announce the quality rows of the %s sync", object_id)
 

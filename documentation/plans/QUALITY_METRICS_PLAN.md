@@ -26,9 +26,10 @@ of truth. Line numbers drift, so this plan names files and functions instead.
 
 ## Status
 
-Status on 2026-10-21: design, target dataset report and order of work agreed after two board
+Status on 2026-10-23: design, target dataset report and order of work agreed after two board
 reviews. Phase 0 is merged (#100, Appendix C). Phase 1 is built and board-reviewed on branch
-`94-phase1-foundations` (Appendix D). Phase 2 is next. Tracked in issue #93.
+`94-phase1-foundations` (Appendix D, PR #103). Phase 2 is built and board-reviewed on branch
+`94-phase2a-sensor-noise` (Appendix E). Phase 3 is in progress. Tracked in issue #93.
 
 A technical review board (an observational astronomer, a software engineer and a technical
 architect) reviewed the plan on 2026-10-17. All three approved it with changes. Appendix A lists
@@ -181,6 +182,11 @@ decisions 16 to 21 with the second.
     checks are `measure_frames`, `measure_stack` and `check_spectral_frames`, beside `query` and
     `metrics`. The MCP tools are `quality_measure_frames`, `quality_measure_stack`,
     `quality_check_spectral_frames`, `quality_query` and `quality_metrics`.
+24. **Frames are measured in worker processes.** Agreed with the user on 2026-10-23, in phase 2:
+    four worker processes started with "spawn", chosen for speed over threads (which the star
+    fitting cannot use in parallel) and over a threads-only default. The cost is memory (about
+    2.7 GB on real data) and one rule for callers: a script that starts the job must keep its
+    top-level code under a `__main__` guard (Appendix E).
 
 ## 3. The shared shape
 
@@ -1411,3 +1417,42 @@ are in 67450677; the user's naming decision is decision 23 (57db826a).
 
 No findings were rejected. The cross-library conformance checks (section 3.7) wait for the phase 4
 rules, because `astrometricslib` tests may not import `wayfindinglib`.
+
+## Appendix E. Review board changes (phase 2)
+
+The board reviewed phase 2 (fb06b954 to 4cf878bf) on 2026-10-22. All three reviewers approved with
+changes. Every critical and major claim was checked against the code, and the starred rows were
+also seen on real data (M 57, night 2026-10-03, 61 frames, run on copies of the configuration and
+database). None of the findings needed a user decision.
+
+| Finding | Raised by | Where it landed |
+| :--- | :--- | :--- |
+| The quality store kept its version in `PRAGMA user_version`, which the real database already set to 2 (*) | Systems engineer, on real data | A `quality_schema_version` table; section 3.5 |
+| The sync, ingestion, RPC and stacking triggers had no shared per-target guard, so two runs could write the same rows | Architect, engineer | One per-target lock in the library; the backend only starts and announces |
+| A sync measured every unmeasured frame of the target, not only the frames it added | Engineer | The sync and ingestion measure only added frames; older frames wait for an explicit run |
+| `quality:measured` had two sources, and one counted other runs' rows | Architect, engineer | The run's own summary is the only source |
+| Frame stamps were saved only at the end, and the save overwrote other changes to the target | Engineer | Stamps saved every 20 frames, merged by frame path |
+| Failures other than four named error types could fail a stack or end a run | Engineer | Every error is caught at the stage boundary and per frame |
+| The sky (clipped median) and the bias (plain mean) used different estimators; the median takes values in 4 ADU steps on the ASI 533 (*) | Astronomer | Both use a 3σ clipped mean; sky metrics at definition version 2 |
+| The sky includes dark current; sky noise is the expected Poisson noise, not measured scatter | Astronomer | Metric texts; a frame with no sensor temperature is stored as ASSUMED |
+| A raw color mosaic biases star moments and angles | Astronomer | Star shapes measured on 2x2 super-pixels |
+| The quarantine roundness uses image x and y widths, so a diagonal trail reads round | Astronomer | Metric text |
+| Elongation is biased above 1 for faint stars; round stars dominated the angle | Astronomer | Metric text with measured values; angle from averaged ellipticity components (version 2) |
+| Trailed frames lose their most trailed stars to the isolation and fit cuts | Astronomer | Refused-candidate counts per cut in each width row's reason |
+| Photon transfer did not check linearity and paired flats by file name across sessions | Astronomer | Flats above the linearity limit refused; pairs matched by observation time within 300 s |
+| STK-35 was labeled Measured without an acceptance criterion | Astronomer | Partly measured, with a 0.5% gain criterion that the data meets |
+| AST-17 expected the two widths to agree within 10% | Astronomer | The synthetic ratio (0.825 to 0.914) and the real M 57 result recorded (*) |
+| Copied star finder, binning normalizer and exact-setting bias lookup | Architect | One of each, in shared code |
+| The stacking stage built its own calibration library on each stack | Architect | The caller passes it in |
+| Configuration writes were not atomic | Engineer | Temporary file and replace, under a lock; at most 10 backups |
+| The 60 s per-frame budget counted wall time, so a busy machine cut short 46 of 61 frames, and those frames were stamped and never retried (*) | Systems engineer, on real data | The budget counts the frame's own CPU time; a frame cut short is not stamped and is retried |
+| Threads gave almost no speed-up, because the fitting holds Python's interpreter lock | Systems engineer, measured | Four worker processes (decision 24) |
+
+Real data after the fixes:
+
+- **Flats paired by time:** they give the same gain and spread as before (0.7823 and 0.7825 e-/ADU, spread 0.0024 and 0.0014), because each flat set came from one session. The spread above the hand value of 0.0004 is still unexplained.
+- **Speed:** with four worker processes, the 61 frames took 345 s (about 5.7 s a frame) and about 2.7 GB of memory, and every metric of every frame was measured. Four threads had taken 654 to 884 s.
+
+No findings were rejected. One minor engineer finding (a header gain fallback could pick up a wrong
+maker value) was checked against sampled ASI 533 and Nikon frames: none carry `EGAIN` or
+`RDNOISE`, so it cannot happen with today's data, and it stays a note.

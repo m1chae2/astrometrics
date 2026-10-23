@@ -38,7 +38,8 @@ _FRAME_ONLY = (SubjectLevel.FRAME,)
 # stored as planes, and on a single plane otherwise.
 _PER_PLANE_BAND = (
     "The frame's own filter. A frame stored as color planes is measured plane by plane, with the plane "
-    "named on the subject. A raw color mosaic is measured as it is, with its color pixels mixed."
+    "named on the subject. A raw color mosaic is measured as it is, with its color pixels mixed; the "
+    "star shape metrics of a mosaic are the exception, see the sample definition."
 )
 
 # How the star metrics choose and fit their stars, shared by the four star
@@ -48,7 +49,15 @@ _MOFFAT_SAMPLE = (
     "detected star of the cell that has no other detected source within 14 px, a whole 21 x 21 px fit "
     "box inside the frame, and no pixel in the box at or above 0.9 of the camera's usable top level). "
     "When a cell's star fails the fit, up to two fainter stars of the cell are tried. No star is "
-    "dropped for being stretched. At least 5 stars are needed."
+    "dropped for being stretched, but the cuts above fall hardest on the most trailed stars (a "
+    "trailed star reaches a neighbor and the saturation margin sooner), so the reason of each row "
+    "states how many detected sources each cut refused (at the frame edge, with a neighbor, near "
+    "saturation, and by the fit). At least 5 stars are needed. On a raw color mosaic every 2 x 2 "
+    "cell (one red, two green and one blue pixel) is first summed into one super-pixel, and the "
+    "stars are found and fitted on those, so the color filter pattern does not bend the second "
+    "moments or the angle; the widths are multiplied by 2 to give original pixels, and the "
+    "elongation and angle need no factor. The sum rounds the stars a little, so a mosaic's "
+    "elongation reads a few percent low (1.39 for a true 1.5 at a width of 4 px)."
 )
 
 FRAME_METRICS: tuple[MetricSpec, ...] = (
@@ -287,13 +296,20 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         checkpoint=Checkpoint.FRAME,
         levels=_FRAME_ONLY,
         better=Direction.LOWER,
-        meaning="How stretched the stars are: the long axis divided by the short axis (1 is round).",
+        meaning=(
+            "How stretched the stars are: the long axis divided by the short axis (1 is round). "
+            "Noise pushes the value of a round star above 1, most for faint stars."
+        ),
         decisions=("guiding", "tracking"),
         estimator=(
             "Median over the stars of the square root of the ratio of the larger to the smaller "
             "eigenvalue of the star's flux-weighted second-moment matrix. The pixels are weighted by "
             "their light above the fitted background, inside an ellipse of 1.5 FWHM along each fitted "
-            "axis (at least 3 px). The ratio is at least 1; noise pushes a round star slightly above 1."
+            "axis (at least 3 px). The ratio is at least 1, so noise can only push it up: the measured "
+            "axis ratio is biased above 1 for faint stars. On synthetic round stars (3 px wide, sky "
+            "noise 29 ADU per pixel) the median reads 1.02 for stars with peaks near 14000 ADU, 1.03 "
+            "near 4000 ADU, and 1.05 for stars with peaks of about 150 to 1400 ADU. Read a value "
+            "within a few hundredths of 1 as round."
         ),
         sample_definition=_MOFFAT_SAMPLE,
         band=_PER_PLANE_BAND,
@@ -304,13 +320,14 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         purpose=MetricPurpose.DECISION,
         purpose_reason=(
             "Stars stretched by the mount, the guiding or the optics lose resolution and depth, and the "
-            "guiding advice reads the stretch. Today's width keeps a stretched star at its narrow axis, "
-            "so only this metric shows the stretch."
+            "guiding advice reads the stretch. The Gaussian width (`frame.star_width_gaussian_brightest_px`) "
+            "falls back to the narrow axis of a stretched star and so hides a trail, and the Moffat width "
+            "widens with it; this metric is the one that shows the stretch itself."
         ),
     ),
     MetricSpec(
         name=FRAME_STAR_ELONGATION_ANGLE_DEG,
-        definition_version=1,
+        definition_version=2,
         unit="deg",
         checkpoint=Checkpoint.FRAME,
         levels=_FRAME_ONLY,
@@ -321,18 +338,22 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         ),
         decisions=("guiding", "tracking"),
         estimator=(
-            "Circular mean of the stars' long-axis angles, where an angle and the same angle plus 180 "
-            "degrees are one direction (the angles are doubled, averaged as unit vectors, and halved). "
-            "Each angle comes from the same second moments as `frame.star_elongation`."
+            "Half the angle of the average ellipticity vector of the stars. Each star gives the two "
+            "components (Ixx - Iyy) / (Ixx + Iyy) and 2 Ixy / (Ixx + Iyy) of its second moments (the "
+            "same moments as `frame.star_elongation`); their lengths grow with the stretch, so a round "
+            "star, whose direction is only noise, counts for little and a stretched one for much. The "
+            "averaged components are not angles, so an angle and the same angle plus 180 degrees are "
+            "one direction by construction. Version 1 averaged the stars' angles with equal weight."
         ),
         sample_definition=_MOFFAT_SAMPLE,
         band=_PER_PLANE_BAND,
         computed_by="pipelines.shared.quality.frame_measurement.measure_star_profiles",
         uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
         uncertainty_method=(
-            "Standard deviation of the circular mean over 1000 bootstrap resamples of the stars. The "
-            "measurement's reason gives the mean resultant length (0 to 1); a low value means the "
-            "stars do not share a direction."
+            "Standard deviation of the direction over 1000 bootstrap resamples of the stars. The "
+            "measurement's reason gives the coherence (0 to 1: the length of the mean ellipticity "
+            "vector divided by the mean ellipticity of the stars); a low value means the stars do not "
+            "share a direction."
         ),
         register_entry="AST-17",
         purpose=MetricPurpose.CONTEXT,
@@ -343,19 +364,30 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
     ),
     MetricSpec(
         name=FRAME_SKY_RATE_E_PER_S_PER_PX,
-        definition_version=1,
+        definition_version=2,
         unit="e-/s/px",
         checkpoint=Checkpoint.FRAME,
         levels=_FRAME_ONLY,
         better=Direction.LOWER,
-        meaning="How bright the sky background is, in electrons per second per pixel.",
+        meaning=(
+            "How bright the sky background is, in electrons per second per pixel. It includes the "
+            "dark current and amp glow (light from the sensor's own electronics), because no dark "
+            "frame is subtracted."
+        ),
         decisions=("efficiency", "exposure length"),
         estimator=(
-            "(sigma-clipped median of the plane, 3 sigma, minus the bias level of the frame's setting) "
-            "times the gain of the frame's setting in electrons per ADU, divided by the exposure time. "
-            "The gain comes from the camera profile entry that matches the frame's gain setting, offset "
-            "and binning exactly. The bias level must be given by the caller: the raw frame holds it "
-            "inside its pixels and does not state it. Stored as assumed when the gain is not measured."
+            "(sigma-clipped mean of the plane, clipped at 3 sigma with astropy's default of up to 5 "
+            "passes, minus the bias level of the frame's setting) times the gain of the frame's setting "
+            "in electrons per ADU, divided by the exposure time. The mean is used, not the median, "
+            "because a 14-bit sensor stores steps of 4 ADU and a median takes only a few values (on 61 "
+            "real frames the clipped median took 13 values). The bias level is found with the same "
+            "estimator, from the bias frames of the exact setting, and the caller passes it: the raw "
+            "frame holds it inside its pixels and does not state it. The gain comes from the camera "
+            "profile entry that matches the frame's gain setting, offset and binning exactly. Stored as "
+            "assumed when the gain is not measured, and when the frame records no sensor temperature "
+            "(no CCD-TEMP card, as for a DSLR): that camera has no set-point cooling, so its dark "
+            "current and amp glow, which are inside the value, are unknown and no dark was subtracted. "
+            "Version 1 used the clipped median."
         ),
         sample_definition="Every pixel of the plane.",
         band=_PER_PLANE_BAND,
@@ -370,20 +402,25 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
     ),
     MetricSpec(
         name=FRAME_SKY_NOISE_E,
-        definition_version=1,
+        definition_version=2,
         unit="e-",
         checkpoint=Checkpoint.FRAME,
         levels=_FRAME_ONLY,
         better=Direction.NONE,
-        meaning="The noise of the sky background in one pixel of one exposure, in electrons.",
+        meaning=(
+            "The expected Poisson (photon counting) noise of the sky background in one pixel of one "
+            "exposure, in electrons. It is computed from the sky level, not measured as the scatter "
+            "of the pixels."
+        ),
         decisions=("exposure length", "noise regime"),
         estimator=(
             "The square root of the sky electrons in one pixel of one exposure (photon counting "
-            "noise): the square root of (background minus bias level, in ADU) times the gain. It does "
-            "not include the read noise, which is stored apart as `frame.read_noise_e`; the ratio of the "
-            "two is never stored."
+            "noise): the square root of (clipped-mean background minus bias level, in ADU) times the "
+            "gain, with the same estimators and the same assumed status as `frame.sky_rate_e_per_s_per_px`. "
+            "It does not include the read noise, which is stored apart as `frame.read_noise_e`, or the "
+            "dark current's own noise; the ratio of the two is never stored."
         ),
-        sample_definition="Every pixel of the plane (through its sigma-clipped median).",
+        sample_definition="Every pixel of the plane (through its sigma-clipped mean).",
         band=_PER_PLANE_BAND,
         computed_by="pipelines.shared.quality.frame_measurement.measure_sky_electrons",
         uncertainty_kind=UncertaintyKind.NONE,

@@ -162,6 +162,7 @@ def download_remote_targets(
     local_path: str | None = None,
     incremental: bool = True,
     prune_missing: bool = False,
+    measurement_summaries: list[Any] | None = None,
 ) -> bool:
     """Download target files into the light frames directory and reindex.
 
@@ -169,7 +170,14 @@ def download_remote_targets(
     the local directory instead -- the unified entry point both remote
     downloads and local ingestion route through. After sorting, the
     pointing error of every new frame that holds a plate solve is
-    recorded as an alignment attempt (`frame_pointing`).
+    recorded as an alignment attempt (`frame_pointing`), and the new frames
+    (only those, not the target's older ones) are measured for the quality
+    database (`record_new_frame_measurements`). The measurement takes about
+    11 s per frame (real data: 61 frames of 3008 by 3008 pixels took about
+    650 s), so this call returns that long after the copy for a big sync. An
+    older, never-measured frame is left to an explicit run of
+    ``astrometrics.processing.record_frame_measurements`` or the backend's
+    re-index.
 
     Parameters
     ----------
@@ -201,6 +209,11 @@ def download_remote_targets(
         from disk. `False` (default) only adds records, so a copy never
         deletes anything; the app's own ingestion prunes in a separate,
         later step.
+    measurement_summaries : `list`, optional
+        When given, the `FrameMeasurementSummary` of the measurement run that
+        this call started is appended to it (nothing is appended when no
+        frame was added or the measurement failed). The caller announces the
+        result from this one source.
 
     Returns
     -------
@@ -324,18 +337,25 @@ def download_remote_targets(
         # mount's pointing error, for control.history.query(kind="alignment").
         record_frame_pointing_errors(context, added_paths)
         if added_paths:
-            record_new_frame_measurements(context, target)
+            summary = record_new_frame_measurements(context, target, added_paths)
+            if summary is not None and measurement_summaries is not None:
+                measurement_summaries.append(summary)
         return True
     return success
 
 
-def record_new_frame_measurements(context: ControlContext, target: Target) -> None:
-    """Measure a target's new frames and store the numbers, after a sync.
+def record_new_frame_measurements(
+    context: ControlContext, target: Target, added_paths: list[str]
+) -> Any | None:
+    """Measure the frames a sync just added and store the numbers.
 
-    Runs `astrometrics.processing.record_frame_measurements`, which measures
-    each light frame that has not been measured and skips the rest. A failure
-    is logged and never fails the sync: the frames are already in the library
-    and the next run measures them.
+    Runs `astrometrics.processing.record_frame_measurements` on the frames
+    that were added (matched to the target's records by path), not on the
+    whole target. A frame whose file still matches its measurement stamp is
+    skipped. The run is guarded in the library: if the target is already
+    being measured, the call returns at once with a summary that says so. A
+    failure of any kind is logged and never fails the sync: the frames are
+    already in the library and an explicit run measures them later.
 
     Parameters
     ----------
@@ -343,16 +363,28 @@ def record_new_frame_measurements(context: ControlContext, target: Target) -> No
         Supplies the science library (`context.astrometrics`).
     target : `Target`
         The target whose frames were just added.
+    added_paths : `list` [`str`]
+        The paths of the frames the sync filed into the library.
+
+    Returns
+    -------
+    summary : `FrameMeasurementSummary` or `None`
+        What the measurement run did, or `None` if it failed.
     """
     from astrometricslib import get_current_job
 
+    added = {os.path.normpath(path) for path in added_paths}
+    added_frames = [frame for frame in target.frames if os.path.normpath(frame.path) in added]
     try:
         summary = context.astrometrics.processing.record_frame_measurements(
-            target, register_job=get_current_job() is None
+            target, frames=added_frames, register_job=get_current_job() is None
         )
     except Exception:  # a measurement failure must never fail the sync: log it
         logger.exception("Could not measure the new frames of %s", getattr(target, "id", "?"))
-        return
+        return None
+    if summary.already_running:
+        logger.info("The new frames of %s were not measured now: %s", target.id, "; ".join(summary.notes))
+        return summary
     logger.info(
         "Measured %d new frame(s) of %s (%d row(s) stored, %d failed).",
         summary.frames_measured,
@@ -360,6 +392,7 @@ def record_new_frame_measurements(context: ControlContext, target: Target) -> No
         summary.rows_written,
         summary.frames_failed,
     )
+    return summary
 
 
 def matching_remote_folder(context: ControlContext, folder_name: str, folders: list[str]) -> str | None:
@@ -550,7 +583,9 @@ def sync_target_frames(context: ControlContext, target_id: str, dry_run: bool = 
     -------
     result : `dict` [`str`, `Any`]
         The plan from `plan_target_download` plus ``dry_run``, and for a
-        real run ``success`` and ``transferred``.
+        real run ``success``, ``transferred`` and ``measurements`` (a list of
+        the measurement run's summary as a plain dict, empty when no frame
+        was added; the backend announces the quality event from it).
 
     Notes
     -----
@@ -565,7 +600,13 @@ def sync_target_frames(context: ControlContext, target_id: str, dry_run: bool = 
     if dry_run:
         return result
     if plan["to_transfer"] == 0:
-        return {**result, "success": True, "transferred": 0, "message": "Nothing new to transfer."}
+        return {
+            **result,
+            "success": True,
+            "transferred": 0,
+            "measurements": [],
+            "message": "Nothing new to transfer.",
+        }
     require_mounted_storage(os.path.join(str(get_configuration().get_frames_path()), "lights"))
     from astrometricslib import get_current_job
 
@@ -573,6 +614,7 @@ def sync_target_frames(context: ControlContext, target_id: str, dry_run: bool = 
     if job is not None:
         job.info(f"Transferring {plan['to_transfer']} of {plan['remote_files']} frame(s) of {target_id}.")
     folder = os.path.join(str(get_configuration().get_frames_path()), "lights", plan["remote_folder"])
+    measurement_summaries: list[Any] = []
     with report_download_progress(folder, plan["to_transfer"]):
         success = download_remote_targets(
             context,
@@ -580,10 +622,16 @@ def sync_target_frames(context: ControlContext, target_id: str, dry_run: bool = 
             incremental=True,
             prune_missing=False,
             log_callback=job.info if job is not None else None,
+            measurement_summaries=measurement_summaries,
         )
     if job is not None:
         job.info("Transfer finished." if success else "Transfer failed.")
-    return {**result, "success": bool(success), "transferred": plan["to_transfer"] if success else 0}
+    return {
+        **result,
+        "success": bool(success),
+        "transferred": plan["to_transfer"] if success else 0,
+        "measurements": [summary.model_dump(mode="json") for summary in measurement_summaries],
+    }
 
 
 def plan_log_sync(context: ControlContext, destination_dir: str) -> dict[str, Any]:
@@ -981,7 +1029,10 @@ def sync_all_remote_folders(
         downloaded successfully. ``"failed"`` is a `list` of
         ``(folder_name, error_message)`` tuples. ``"job_id"`` is the
         registered `ProcessingJob` id, or `None` if `register_job` was
-        `False` or registration failed.
+        `False` or registration failed. ``"measurements"`` is a `list` of
+        the frame measurement run summaries (plain dicts), one per target
+        that gained frames; the backend announces the quality event from
+        them.
     """
     import os
     import uuid
@@ -998,6 +1049,7 @@ def sync_all_remote_folders(
 
     job_store = None
     job_id = None
+    measurement_summaries: list[Any] = []
 
     # Attaching and detaching this job's log handlers is shared with
     # astrometricslib rather than written out again here, because every
@@ -1103,7 +1155,9 @@ def sync_all_remote_folders(
         for target_id in target_ids_to_sync:
             log(f"Syncing target '{target_id}'...")
             try:
-                if download_remote_targets(context, target_id, log_callback=log_callback):
+                if download_remote_targets(
+                    context, target_id, log_callback=log_callback, measurement_summaries=measurement_summaries
+                ):
                     succeeded.append(target_id)
                 else:
                     failed.append((target_id, "Download reported failure (no remote frames found?)."))
@@ -1117,4 +1171,9 @@ def sync_all_remote_folders(
     finally:
         log_capture.close()
 
-    return {"succeeded": succeeded, "failed": failed, "job_id": job_id}
+    return {
+        "succeeded": succeeded,
+        "failed": failed,
+        "job_id": job_id,
+        "measurements": [summary.model_dump(mode="json") for summary in measurement_summaries],
+    }

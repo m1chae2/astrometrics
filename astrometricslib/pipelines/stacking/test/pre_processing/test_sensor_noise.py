@@ -6,6 +6,7 @@ the gain, and Gaussian read noise (in ADU) is added. The measurement should
 give those numbers back.
 """
 
+from dataclasses import replace
 from datetime import date
 
 import numpy as np
@@ -13,10 +14,12 @@ import pytest
 
 from astrometricslib.models.quality.measurement import MeasurementStatus
 from astrometricslib.pipelines.stacking.pre_processing.sensor_noise import (
+    MAXIMUM_PAIR_GAP_SECONDS,
     MINIMUM_BIAS_PAIRS,
     MINIMUM_FLAT_PAIRS,
     CalibrationFrame,
     measure_sensor_noise,
+    pair_by_observation_time,
     pair_consecutive,
 )
 
@@ -256,3 +259,117 @@ def test_the_result_is_dumped_with_camel_case_keys() -> None:
     assert dumped["readNoiseAdu"] == result.read_noise_adu
     assert dumped["flatPairCount"] == result.flat_pair_count
     assert "gain_e_per_adu" not in dumped
+
+
+def _two_sessions(seed: int) -> tuple[list[CalibrationFrame], list[CalibrationFrame]]:
+    """Make flats from two sessions with different sensitivity patterns.
+
+    Session A has 5 frames, session B 6, hours apart. B's pattern differs
+    from A's (a gradient across the frame, as a moved lamp or a changed
+    focus would leave), so a difference of an A frame and a B frame holds
+    that pattern, not just noise.
+
+    Returns
+    -------
+    flats : `tuple` [`list`, `list`]
+        The flats of session A and of session B, each stamped with a time.
+    """
+    generator = np.random.default_rng(seed)
+    gradient = np.linspace(0.7, 1.3, FRAME_SHAPE[1])[None, :]
+    session_a = [
+        replace(make_frame(generator, FLAT_SIGNAL_ELECTRONS), observed_at=1_000_000.0 + 10.0 * index)
+        for index in range(5)
+    ]
+    session_b = [
+        replace(
+            make_frame(generator, FLAT_SIGNAL_ELECTRONS),
+            pixels=BIAS_LEVEL_ADU
+            + (make_frame(generator, FLAT_SIGNAL_ELECTRONS).pixels - BIAS_LEVEL_ADU) * gradient,
+            observed_at=1_020_000.0 + 10.0 * index,
+        )
+        for index in range(6)
+    ]
+    return session_a, session_b
+
+
+def test_flats_are_paired_inside_a_session_never_across_two() -> None:
+    """The odd frame of session A is left out, not paired with one of B."""
+    session_a, session_b = _two_sessions(seed=12)
+
+    pairing = pair_by_observation_time([*session_b, *session_a])
+
+    assert len(pairing.pairs) == 5
+    assert pairing.unpaired_count == 1
+    assert pairing.undated_count == 0
+    for first, second in pairing.pairs:
+        assert abs(second.observed_at - first.observed_at) <= MAXIMUM_PAIR_GAP_SECONDS
+        first_in_a = any(first is frame for frame in session_a)
+        second_in_a = any(second is frame for frame in session_a)
+        assert first_in_a == second_in_a
+
+
+def test_pairing_by_session_keeps_the_gain_spread_small_where_name_order_inflates_it() -> None:
+    """A pair across sessions reads a wrong gain; pairing by time avoids it."""
+    session_a, session_b = _two_sessions(seed=13)
+    flats = [*session_a, *session_b]
+    biases = pair_consecutive([make_frame(np.random.default_rng(99 + i), 0.0) for i in range(10)])
+
+    by_time = measure_sensor_noise(pair_by_observation_time(flats).pairs, biases, measured_on=MEASURED_ON)
+    by_order = measure_sensor_noise(pair_consecutive(flats), biases, measured_on=MEASURED_ON)
+
+    assert by_time.status == MeasurementStatus.MEASURED
+    assert by_order.status == MeasurementStatus.MEASURED
+    assert by_time.gain_spread_e_per_adu < 0.03 * TRUE_GAIN_E_PER_ADU
+    assert by_order.gain_spread_e_per_adu > 5.0 * by_time.gain_spread_e_per_adu
+
+
+def test_frames_with_no_time_cannot_be_paired_and_are_counted() -> None:
+    """A frame with no DATE-OBS is left out and counted, not paired by name."""
+    session_a, _ = _two_sessions(seed=14)
+    undated = [replace(frame, observed_at=None) for frame in session_a[:2]]
+
+    pairing = pair_by_observation_time([*undated, *session_a[2:]])
+
+    assert pairing.undated_count == 2
+    assert len(pairing.pairs) == 1
+    assert pairing.unpaired_count == 1
+
+
+def test_flats_above_the_linearity_limit_are_refused() -> None:
+    """Flats near 11,000 ADU against a limit of 5,000 ADU are not measured."""
+    flat_pairs, bias_pairs = make_pairs(seed=15)
+
+    result = measure_sensor_noise(flat_pairs, bias_pairs, measured_on=MEASURED_ON, linearity_limit_adu=5000.0)
+
+    assert result.status == MeasurementStatus.NOT_MEASURED
+    assert "photometric linearity limit of 5000 ADU" in result.reason
+    assert result.gain_e_per_adu is None
+
+
+def test_a_limit_above_the_flats_changes_nothing() -> None:
+    """With the flats below the limit the result is the same as no limit."""
+    flat_pairs, bias_pairs = make_pairs(seed=16)
+
+    limited = measure_sensor_noise(
+        flat_pairs, bias_pairs, measured_on=MEASURED_ON, linearity_limit_adu=60000.0
+    )
+    free = measure_sensor_noise(flat_pairs, bias_pairs, measured_on=MEASURED_ON)
+
+    assert limited.gain_e_per_adu == pytest.approx(free.gain_e_per_adu)
+    assert limited.notes == []
+
+
+def test_only_the_bright_pairs_are_left_out_when_enough_remain() -> None:
+    """Pairs above the limit are dropped and noted; the rest are used."""
+    generator = np.random.default_rng(17)
+    dim = [make_frame(generator, FLAT_SIGNAL_ELECTRONS) for _ in range(16)]
+    bright = [make_frame(generator, 3.0 * FLAT_SIGNAL_ELECTRONS) for _ in range(4)]
+    biases = pair_consecutive([make_frame(generator, 0.0) for _ in range(10)])
+
+    result = measure_sensor_noise(
+        pair_consecutive([*dim, *bright]), biases, measured_on=MEASURED_ON, linearity_limit_adu=20000.0
+    )
+
+    assert result.status == MeasurementStatus.MEASURED
+    assert result.flat_pair_count == 8
+    assert "2 flat pair(s) were left out" in result.notes[0]

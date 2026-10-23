@@ -25,7 +25,7 @@ This measurement is shared. Astrometry is not the only pipeline that uses it.
 
 ## Files
 
-- `source_detection.py`: star detection and duplicate removal.
+- `source_detection.py`: star detection and duplicate removal. It estimates the background, then calls the star finder core shared with the frame measurement (`../../shared/star_finding.py`) with the roundness range (-0.6, 0.6).
 - `fwhm.py`: the sharpness measurement and the blob width.
 
 Photometry, asteroid detection and spectroscopy also need to find stars in an image, for their own reasons, without matching those stars to a catalog. Because detection is useful on its own, it is a reusable step that the other pipelines import from here. It lives in this folder, not in `pipelines/shared/`, although the [shared README](../../shared/README.md) says code that more than one pipeline uses belongs there.

@@ -39,7 +39,8 @@ def captured_siril_script(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Ca
     -------
     run_process_target : `callable`
         Called with ``is_spectral``, ``filter_wfwhm``, ``filter_round``
-        and, optionally, ``spectral_star_detection``; returns the list
+        and, optionally, ``spectral_star_detection`` and
+        ``reference_frame_path``; returns the list
         of Siril commands `process_target` would have sent.
     """
     sent_commands: list[str] = []
@@ -67,6 +68,11 @@ def captured_siril_script(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Ca
         # these tests would be asserting against an unfiltered run.
         for frame_index in range(20):
             (target_folder / "lights" / f"light_source_{frame_index:05d}.fits").touch()
+            # The real build records each linked frame's original path, in
+            # the order of the sequence.
+            self.last_run_diagnostics.setdefault("symlinked_light_paths", []).append(
+                f"/frames/f{frame_index:02d}.fits"
+            )
         # One dark, so the lights are calibrated and the registered
         # sequence is named for the calibrated frames (pp_light_source)
         # exactly as it is in a real run.
@@ -97,6 +103,7 @@ def captured_siril_script(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Ca
         filter_wfwhm: str | None,
         filter_round: str | None,
         spectral_star_detection: str = "standard",
+        reference_frame_path: str | None = None,
     ) -> list[str]:
         mock_config = MagicMock()
         mock_config.get_siril_executable.return_value = "siril"
@@ -123,6 +130,7 @@ def captured_siril_script(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Ca
             filter_wfwhm=filter_wfwhm,
             filter_round=filter_round,
             spectral_star_detection=spectral_star_detection,
+            reference_frame_path=reference_frame_path,
         )
         logging.getLogger("siril_FilterPlacement").handlers.clear()
         return list(sent_commands)
@@ -238,3 +246,27 @@ def test_no_filter_options_when_none_configured(captured_siril_script: Callable[
 
     assert _find_command(commands, "seqapplyreg") == "seqapplyreg pp_light_source"
     assert "-filter-" not in _find_command(commands, "stack r_")
+
+
+def test_a_named_reference_frame_is_set_before_the_two_pass_registration(
+    captured_siril_script: Callable[..., Any],
+) -> None:
+    """The named reference is sent as ``setref`` (counted from 1)."""
+    commands = captured_siril_script(
+        is_spectral=False, filter_wfwhm=None, filter_round=None, reference_frame_path="/frames/f06.fits"
+    )
+
+    assert _find_command(commands, "setref") == "setref pp_light_source 7"
+    assert commands.index("setref pp_light_source 7") < commands.index("register pp_light_source -2pass")
+
+
+def test_no_reference_is_set_unless_one_is_named_and_present(
+    captured_siril_script: Callable[..., Any],
+) -> None:
+    """Siril chooses its own reference when none is named or it is absent."""
+    unnamed = captured_siril_script(is_spectral=False, filter_wfwhm=None, filter_round=None)
+    assert not [command for command in unnamed if command.startswith("setref")]
+    absent = captured_siril_script(
+        is_spectral=False, filter_wfwhm=None, filter_round=None, reference_frame_path="/frames/other.fits"
+    )
+    assert not [command for command in absent if command.startswith("setref")]

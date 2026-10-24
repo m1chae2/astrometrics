@@ -71,6 +71,25 @@ master flat's random noise and do not identify one cause. For a deep stack of a 
 half-stack difference, not the empty-aperture noise, may be the honest noise measure; this is open.
 Numbers are in `STK-36` and `STK-38`.
 
+Status on 2026-10-23, half-stack difference noise (same branch, user decision to add it to the
+aperture change): a background job (`measure_half_difference_noise`, never in the stack's own
+process) stacks two disjoint halves of the library stack's frames that alternate in time, with the
+library stack's registration reference frame in both, and stores the noise of their difference in
+the target's empty apertures beside the empty-aperture noise, never replacing it. It stores nine
+rows on the library stack (the difference in stack units and normalized with the reference flux it
+divides by, each half's effective frame count, the shared frame's weight share in each half, the
+variance factor, and a second factor with each frame's modeled noise, from which the library
+stack's own random noise follows; those estimates are returned, not stored). The registration
+reference is handed to the stacker for both halves, the growth job runs the measurement by
+default, and nothing starts it after a stack. An injection of the implied-noise formulas on frames
+of unequal noise and weight recovers the truth to 1.1% (equal-noise factor) and 0.5% (modeled
+noise). The grid injection recovers a known
+noise within 12% on average (inside the derived 13.5% bound) where the plain noise reads up to 8.5
+times too high. On M 57 the
+implied random noise is 1.32 times the model's and the empty-aperture noise is 1.88 times that, so
+about half of it is shared structure. The measurement takes the time of one library stack. Numbers
+are in `STK-42`.
+
 The second review of 2026-10-17 moved the observing values (guide error, pointing error, dew,
 Moon and airmass) out of the `astrometricslib` tables into `wayfindinglib` (section 2.5). It added
 the undersampling term, the spectroscopy class gap against SNR, the flat-noise check and the
@@ -353,6 +372,32 @@ systems engineer settled every finding; the user reviews those choices in the pu
 
 No findings were rejected. The night's spread now lives only in the library helper, so `PHO-16`
 is evidence for that helper, not for a stored metric.
+
+## Appendix D. Review board changes, aperture fix and half-stack difference
+
+The board reviewed the aperture fix and, later, the half-stack difference noise on 2026-10-23. All
+three reviewers approved both with changes. The user decided to fix the faint stars in the empty
+apertures within issue #94, and to add the half-stack difference noise in the same pull request.
+The systems engineer settled the findings; the user reviews those choices in the pull request.
+
+| Finding | Raised by | Where it landed |
+| :--- | :--- | :--- |
+| The noise metrics kept their definition version although the sample changed. | Architect, engineer | Definition version 3 |
+| The mask's depth depends on which stack defined the apertures. | Astronomer | Each set records its depth; a library stack twice as deep chooses a new set with a new identity |
+| A subset run could choose the target's apertures; stale sums could pair with another set. | Engineer | Subsets never choose; sets and sums carry an identity that comparisons check |
+| The bias check was not run where most of the field is masked. | Astronomer | Injected fields with 75 to 96% excluded (`STK-36`) |
+| The 5% growth criterion cannot be decided at a 12% error. | Astronomer | "Not tested at the required precision", plus a paired test (`STK-36`) |
+| What the remaining excess is. | Astronomer | Four separating tests; no single cause identified (`STK-38`) |
+| The mask's scale included empty borders; the clearance lookup was loose; memory. | Engineer, astronomer | Usable pixels only, 13 px clearance, float32 |
+| The half-stack difference never ran by itself and could not be started from the app. | Engineer, architect | Runs inside the noise-growth job by default; wired into the app |
+| A half could pick its own registration reference and be refused. | Engineer | The library reference is given to Siril |
+| The normalized difference had no stored denominator. | Architect | Its reference flux is stored |
+| The implied-noise formula was not tested with a shared frame and unequal weights. | Astronomer | Injection test; a second form from the per-frame noise model is stored beside it (`STK-42`) |
+| The acceptance bound was set after the first run. | Astronomer | Derived from the stated errors (`STK-42`) |
+| Uncovered pixels inside an aperture read low. | Astronomer | Such apertures are dropped |
+
+Deferred: moving aperture placement and difference measurement out of `stack_noise.py` into their
+own modules (the file is about 2,400 lines). No findings were rejected.
 
 ## Appendix E. Review board changes, batch S3
 

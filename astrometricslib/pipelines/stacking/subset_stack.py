@@ -187,6 +187,8 @@ def stack_frame_subset(
     drivers: Drivers | None = None,
     job_id: str | None = None,
     log_file: str | None = None,
+    trim_edges: bool = True,
+    reference_frame_path: str | None = None,
 ) -> SubsetStackOutcome:
     """Stack the given frames into ``output_path`` and change nothing else.
 
@@ -215,6 +217,16 @@ def stack_frame_subset(
         The tracked job this stack runs under, for the stacker's progress.
     log_file : `str`, optional
         Where to write Siril's log.
+    trim_edges : `bool`, optional
+        Whether to trim the noisy edges when the setting asks for it. Left
+        `True`, the subset is trimmed like the library stack. Two stacks
+        that will be subtracted (the half stacks of the half-difference
+        noise) pass `False`, so both keep the pixel grid of the registration
+        reference frame and their pixels line up.
+    reference_frame_path : `str`, optional
+        The frame the others are lined up with. Left `None`, the stacker
+        chooses its own. The half-difference noise passes the library
+        stack's reference, so a half cannot choose another one.
 
     Returns
     -------
@@ -258,8 +270,11 @@ def stack_frame_subset(
         is_spectral,
         job_id=job_id,
         stack_weight=stack_weight,
+        **({} if reference_frame_path is None else {"reference_frame_path": reference_frame_path}),
     )
-    crop_offset = trim_noisy_stack_edges(stacked_path, configuration, is_spectral=is_spectral)
+    crop_offset = (
+        trim_noisy_stack_edges(stacked_path, configuration, is_spectral=is_spectral) if trim_edges else (0, 0)
+    )
     reference = registration_reference_from_diagnostics(diagnostics) if stacked_path else None
     return SubsetStackOutcome(
         stack_path=stacked_path,

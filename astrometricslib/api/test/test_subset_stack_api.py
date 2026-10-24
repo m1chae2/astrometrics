@@ -1,13 +1,15 @@
 """Purpose: Tests for the subset-stack methods of `ProcessingPipelines`.
 
-Description: `stack_subset`, `measure_noise_growth` and
-`measure_night_contributions` are thin: they resolve the target, find its
+Description: `stack_subset`, `measure_noise_growth`,
+`measure_night_contributions` and `measure_half_difference_noise` are thin:
+they resolve the target, find its
 library stack, record a job and hand the work to
 `pipelines/stacking/subset_noise_run.py` with a measurement time from the
 clock. The science is tested there. These tests check the wiring with the
 pipeline functions replaced: the job is recorded, the time has a time zone and
-the job id, the night contributions run only when asked, and a target with no
-stack is refused.
+the job id, the night contributions run only when asked, the half-difference
+noise runs inside the growth job unless turned off and also as its own job
+(with or without a job record), and a target with no stack is refused.
 """
 
 from collections.abc import Iterator
@@ -23,6 +25,7 @@ from astrometricslib.foundation import config as config_loader
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.models.quality.subset_stacks import (
+    HalfDifferenceNoiseResult,
     NightContributionResult,
     NoiseGrowthResult,
     SubsetStackResult,
@@ -134,6 +137,13 @@ def test_the_growth_job_records_a_job_and_runs_the_nights_only_when_asked(
 
     monkeypatch.setattr(subset_noise_run, "run_noise_growth", growth)
     monkeypatch.setattr(subset_noise_run, "run_night_contributions", nights)
+    monkeypatch.setattr(
+        subset_noise_run,
+        "run_half_difference_noise",
+        lambda target, stack_path, **keywords: HalfDifferenceNoiseResult(
+            targetId=target.id, libraryStackPath=stack_path
+        ),
+    )
     pipelines = _pipelines()
 
     result = pipelines.measure_noise_growth(_target(), maximum_steps=3)
@@ -151,6 +161,88 @@ def test_the_growth_job_records_a_job_and_runs_the_nights_only_when_asked(
     result = pipelines.measure_noise_growth(_target(), include_night_contributions=True)
     assert result.night_contributions is not None
     assert seen["nights"] == 1
+
+
+def test_the_growth_job_runs_the_half_difference_unless_turned_off(
+    isolated_job_logging: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The half difference is on by default, can be off, keeps the series."""
+    calls: list[dict[str, Any]] = []
+
+    def half(target: Target, stack_path: str, **keywords: Any) -> HalfDifferenceNoiseResult:
+        """Record the call.
+
+        Returns
+        -------
+        result : `HalfDifferenceNoiseResult`
+            An empty result.
+        """
+        calls.append(keywords)
+        return HalfDifferenceNoiseResult(targetId=target.id, libraryStackPath=stack_path)
+
+    monkeypatch.setattr(
+        subset_noise_run,
+        "run_noise_growth",
+        lambda target, stack_path, **keywords: NoiseGrowthResult(
+            targetId=target.id, libraryStackPath=stack_path
+        ),
+    )
+    monkeypatch.setattr(subset_noise_run, "run_half_difference_noise", half)
+    pipelines = _pipelines()
+
+    assert pipelines.measure_noise_growth(_target()).half_difference is not None
+    assert len(calls) == 1
+    assert pipelines.measure_noise_growth(_target(), include_half_difference=False).half_difference is None
+    assert len(calls) == 1
+
+    def fail(target: Target, stack_path: str, **keywords: Any) -> HalfDifferenceNoiseResult:
+        """Raise an error.
+
+        Raises
+        ------
+        RuntimeError
+            Always.
+        """
+        raise RuntimeError("Siril stopped")
+
+    monkeypatch.setattr(subset_noise_run, "run_half_difference_noise", fail)
+    result = pipelines.measure_noise_growth(_target())
+    assert result.half_difference is None
+    assert any("half-difference noise was not measured" in note for note in result.notes)
+
+
+def test_the_half_difference_job_runs_with_and_without_a_job_record(
+    isolated_job_logging: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The standalone job passes the library stack, a context and keep flag."""
+    seen: list[dict[str, Any]] = []
+
+    def half(target: Target, stack_path: str, **keywords: Any) -> HalfDifferenceNoiseResult:
+        """Record the call.
+
+        Returns
+        -------
+        result : `HalfDifferenceNoiseResult`
+            An empty result.
+        """
+        seen.append({"stack_path": stack_path, **keywords})
+        return HalfDifferenceNoiseResult(targetId=target.id, libraryStackPath=stack_path)
+
+    monkeypatch.setattr(subset_noise_run, "run_half_difference_noise", half)
+    pipelines = _pipelines()
+
+    result = pipelines.measure_half_difference_noise(_target(), keep_halves=True)
+    assert result.library_stack_path == LIBRARY_STACK
+    assert seen[0]["keep_halves"] is True
+    jobs = _read_jobs(isolated_job_logging, "SubsetTarget")
+    assert [job.status for job in jobs] == ["completed"]
+    assert seen[0]["context"].job_id == jobs[0].id
+
+    pipelines.measure_half_difference_noise(_target(), register_job=False)
+    assert seen[1]["keep_halves"] is False
+    assert len(_read_jobs(isolated_job_logging, "SubsetTarget")) == 1
+    with pytest.raises(NotFoundError):
+        pipelines.measure_half_difference_noise(Target(id="BareTarget", frames=[]))
 
 
 def test_the_night_job_runs_the_night_function(

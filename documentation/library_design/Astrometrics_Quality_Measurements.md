@@ -114,7 +114,15 @@ For independent frames, the noise of a stack falls as one over the square root o
 
 ### 4.5 The difference of two half stacks
 
-Splitting a stack's frames into two halves and subtracting one stack from the other cancels everything the halves share: the stars, the nebulosity and the flat's pattern. What remains is the noise that averaging does remove. Comparing it with the prediction of Section 4.1 would isolate the unmodeled part of the noise from the fixed part. The library does not yet compute this difference. It has been done by hand, once, for the evidence in the register, and this section is where its theory belongs when it is built.
+The empty-aperture noise of Section 4.2 mixes two parts: random noise that more frames average away, and structure that repeats in every frame and does not average away. Subtracting one stack from another separates them. The frames are split into two disjoint halves, which alternate in time so that slow changes in sky and seeing fall on both. Both halves are stacked on one registration reference, and that reference frame is shared by both halves. The grid is therefore the same, and the two stacks can be subtracted pixel by pixel.
+
+The difference cancels everything the frames share: the sky structure, the faint sources, the nebula, and the flat's pattern. It keeps the random noise. It also keeps noise that is correlated between neighboring pixels by the registration, because each frame is resampled on its own. The difference is measured in the same empty circles as the stack's noise. A frame that sits in both halves, the reference, appears in both stacks and cancels in the difference. This lowers the difference's variance below the sum of the two halves' variances, and the calculation must account for it.
+
+If every frame has the same noise, the random noise of the full stack follows from the difference. The variance of the difference is the frame variance times a factor that depends only on the weights, so dividing by that factor gives the frame variance, and the full stack's variance follows from the full stack's weights. A second form lets each frame have its own noise from the model of Section 4.1, and takes the ratio of the measured difference to the difference the model predicts. This checks whether unequal frame noise explains an excess.
+
+The difference is stored beside the empty-aperture noise and never replaces it. Comparing the implied random noise with the prediction of Section 4.1 shows how much of the excess is random, and comparing it with the empty-aperture noise shows how much is shared structure. A stack does not start this measurement. A caller, the job that tests how the noise falls with frame count, runs it on a stack that already exists. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.measure_difference_noise --> <!-- impl: astrometricslib.pipelines.stacking.subset_noise_run.run_half_difference_noise -->
+
+The measurement needs enough frames in each half for pixel rejection to work. It assumes the halves are matched in sky and seeing, which the alternation makes likely but does not guarantee. Its evidence is [STK-42](validation/stacking.md#stk-42).
 
 ## 5. Frame geometry and exposure
 
@@ -186,7 +194,7 @@ The measurement does not say whether a night was photometric, and it does not su
 The evidence for each measurement is in the validation register. The register labels each entry *measured*, *partly measured* or *design estimate* (see the architecture paper, Section 8).
 
 - Gain and read noise (Section 3): (partly measured; see [STK-35](validation/stacking.md#stk-35)).
-- Predicted and measured stack noise, and the empty-aperture mask (Sections 4.1, 4.2 and 4.4): (partly measured; see [STK-36](validation/stacking.md#stk-36)) and (partly measured; see [STK-38](validation/stacking.md#stk-38)). The contribution of each night: (design estimate; see [STK-37](validation/stacking.md#stk-37)).
+- Predicted and measured stack noise, and the empty-aperture mask (Sections 4.1, 4.2 and 4.4): (partly measured; see [STK-36](validation/stacking.md#stk-36)) and (partly measured; see [STK-38](validation/stacking.md#stk-38)). The contribution of each night: (design estimate; see [STK-37](validation/stacking.md#stk-37)). The difference of two half stacks (Section 4.5): (partly measured; see [STK-42](validation/stacking.md#stk-42)).
 - The master flat's pattern in an aperture (Section 4.3): (partly measured; see [STK-39](validation/stacking.md#stk-39)).
 - Star width and elongation (Section 5.1): (design estimate; see [AST-17](validation/astrometry.md#ast-17)). The pixel term and the widths across the field (Sections 5.1 and 5.2): (design estimate; see [AST-18](validation/astrometry.md#ast-18)).
 - Field rotation (Section 5.3): (partly measured; see [STK-43](validation/stacking.md#stk-43)).

@@ -46,6 +46,22 @@ frames itself), the share is stored as not measured with that reason. Equal
 weights are never assumed. A share built from assumed weights is stored as
 assumed.
 
+The noise of the difference of two halves (`run_half_difference_noise`). The
+library stack's frames are put in order of capture time and split into two
+disjoint halves, the 1st, 3rd, 5th, ... frame and the 2nd, 4th, 6th, ... frame,
+so both halves span the whole night. The library stack's registration
+reference frame goes into both halves, so that Siril lines both up with it and
+their pixels coincide. The two half stacks are subtracted, and the noise of
+the difference is measured in the same empty apertures as the library stack's
+noise. The difference cancels what the frames share (sky structure, faint
+stars, nebula) and keeps the random noise, so it is stored beside the
+empty-aperture noise and never replaces it. The rows sit on the library
+stack's own subject, with the reference flux the normalized value divides by
+and the shared frame's two weight shares. The two half stacks are deleted after
+the measurement. It costs two stacks of half the frames each. The growth job
+(`run_noise_growth`) can run it too, in the same lock; no job starts by
+itself after a stack.
+
 A storage failure is logged and never fails a subset. Nothing here reads the
 clock: the caller supplies the measurement time.
 """
@@ -53,6 +69,7 @@ clock: the caller supplies the measurement time.
 import logging
 import math
 import os
+import shutil
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
@@ -72,12 +89,14 @@ from astrometricslib.models.quality.measurement import (
     SubjectLevel,
 )
 from astrometricslib.models.quality.subset_stacks import (
+    HalfDifferenceNoiseResult,
     NightContribution,
     NightContributionResult,
     NoiseGrowthResult,
     SubsetStackResult,
 )
 from astrometricslib.models.target import FrameRecord, Target
+from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
     PipelineRunContext,
     build_measurement,
@@ -86,12 +105,22 @@ from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
 from astrometricslib.pipelines.stacking.metrics import (
     STACKING_EFFECTIVE_FRAME_COUNT,
     STACKING_FRAME_WEIGHT,
+    STACKING_HALF_DIFFERENCE_EVEN_EFFECTIVE_FRAME_COUNT,
+    STACKING_HALF_DIFFERENCE_MODEL_VARIANCE_RATIO,
+    STACKING_HALF_DIFFERENCE_NOISE_NORMALIZED,
+    STACKING_HALF_DIFFERENCE_NOISE_STACK_UNIT,
+    STACKING_HALF_DIFFERENCE_ODD_EFFECTIVE_FRAME_COUNT,
+    STACKING_HALF_DIFFERENCE_REFERENCE_FLUX_STACK_UNIT,
+    STACKING_HALF_DIFFERENCE_SHARED_EVEN_WEIGHT_FRACTION,
+    STACKING_HALF_DIFFERENCE_SHARED_ODD_WEIGHT_FRACTION,
+    STACKING_HALF_DIFFERENCE_VARIANCE_FACTOR,
     STACKING_METRICS,
     STACKING_NIGHT_WEIGHT_SHARE,
     STACKING_NOISE_DIFFERENCE_WITHOUT_NIGHT,
     STACKING_NOISE_WITHOUT_NIGHT,
     STACKING_SUBSET_EXPECTED_NOISE_RATIO,
 )
+from astrometricslib.pipelines.stacking.post_processing.expected_noise import ExpectedNoiseOutcome
 from astrometricslib.pipelines.stacking.post_processing.record_quality import (
     measure_noise_safely,
     membership_count_measurements,
@@ -100,6 +129,7 @@ from astrometricslib.pipelines.stacking.post_processing.record_quality import (
 from astrometricslib.pipelines.stacking.post_processing.record_science import (
     compute_expected_noise,
     expected_noise_measurements,
+    frame_noise_inputs_from_store,
     resolve_stack_sky_level,
     stack_sky_level_measurements,
 )
@@ -115,6 +145,7 @@ from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
     StackNoiseOutcome,
     load_apertures_with_reason,
     load_noise_sums,
+    measure_difference_noise,
     paired_noise_difference,
 )
 from astrometricslib.pipelines.stacking.pre_processing.stack_inputs import read_stack_inputs
@@ -132,18 +163,27 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "DEFAULT_GROWTH_STEPS",
+    "HALF_DIFFERENCE_MINIMUM_FRAMES_PER_HALF",
     "GrowthStep",
+    "HalfSplit",
     "LibraryRun",
+    "difference_variance_factor",
     "expected_noise_ratio",
     "expected_ratio_measurement",
     "frames_by_night",
+    "full_stack_noise_equivalent",
+    "full_stack_noise_equivalent_from_model",
+    "half_difference_measurements",
     "library_member_frames",
+    "model_variance_ratio",
     "night_measurements",
     "night_weight_shares",
     "plan_growth_steps",
     "read_library_run",
+    "run_half_difference_noise",
     "run_night_contributions",
     "run_noise_growth",
+    "split_into_halves",
     "stack_chosen_subset",
 ]
 
@@ -154,6 +194,15 @@ _SPEC_BY_NAME = {spec.name: spec for spec in STACKING_METRICS}
 # falls like 1 / sqrt(frames) or has flattened, and each point costs one stack.
 # A design choice; no data set decided it.
 DEFAULT_GROWTH_STEPS = 4
+
+# The fewest frames in each half of the half-difference noise, counting the
+# registration reference frame that both halves hold. Sigma-clipping rejection
+# needs at least `MINIMUM_SUBSET_FRAMES` (4) frames to leave a spread to judge
+# by. With 8 or more, the one shared frame is at most an eighth of either
+# half's weight when the weights are equal, a small effect that
+# `full_stack_noise_equivalent` takes into account. A design choice; no data
+# set decided it.
+HALF_DIFFERENCE_MINIMUM_FRAMES_PER_HALF = 8
 
 # The parts of one night's frames, in time order, used when a target has a
 # single night: a quarter, a half and three quarters.
@@ -405,6 +454,10 @@ class LibraryRun:
     store : `QualityStore` or `None`
         The quality store the run read, so later steps (the expected noise of
         each subset) read from it instead of opening their own.
+    weight_by_path : `dict` [`str`, `float`] or `None`
+        The library stack's weight of each member frame by frame path, in the
+        stack's own scale. `None` when the run stored no frame weights or any
+        weight is unknown.
     """
 
     members: list[FrameRecord]
@@ -415,6 +468,7 @@ class LibraryRun:
     effective_count: float | None = None
     noise_sums: tuple[np.ndarray, float, str] | None = None
     store: QualityStore | None = None
+    weight_by_path: dict[str, float] | None = None
 
 
 def read_library_run(target: Target, library_stack_path: str, configuration: Any) -> LibraryRun:
@@ -468,6 +522,12 @@ def read_library_run(target: Target, library_stack_path: str, configuration: Any
         ]
         if count_row.status == MeasurementStatus.ASSUMED and count_row.reason:
             assumed.append(count_row.reason)
+        known = {
+            by_subject[row.subject.subject_id].path: row.value
+            for row in weight_rows
+            if row.subject.subject_id in by_subject and row.value is not None
+        }
+        all_known = len(known) == len(members) and len(members) > 0
         return LibraryRun(
             members=members,
             notes=notes,
@@ -476,6 +536,7 @@ def read_library_run(target: Target, library_stack_path: str, configuration: Any
             effective_count=count_row.value,
             noise_sums=sums,
             store=store,
+            weight_by_path=known if all_known else None,
         )
     members, missing = library_member_frames(target, library_stack_path)
     if missing:
@@ -1282,3 +1343,821 @@ def stack_chosen_subset(
             stacking_slot=stacking_slot,
             output_folder=output_folder,
         )
+
+
+@dataclass(frozen=True)
+class HalfSplit:
+    """Two disjoint halves of a stack's frames and the frame both share.
+
+    Parameters
+    ----------
+    odd : `tuple` [`FrameRecord`, ...]
+        The 1st, 3rd, 5th, ... frame by capture time, and the shared frame
+        when it is not one of them. In time order.
+    even : `tuple` [`FrameRecord`, ...]
+        The 2nd, 4th, 6th, ... frame, and the shared frame when it is not one
+        of them.
+    shared_path : `str`
+        The path of the one frame that is in both halves.
+    left_out : `int`
+        How many frames had no timestamp and so were left out of both halves.
+    """
+
+    odd: tuple[FrameRecord, ...]
+    even: tuple[FrameRecord, ...]
+    shared_path: str
+    left_out: int = 0
+
+
+def split_into_halves(frames: Sequence[FrameRecord], shared_path: str) -> HalfSplit:
+    """Split frames into two disjoint halves that alternate in time.
+
+    The frames are put in order of capture time (ties broken by path). The
+    1st, 3rd, 5th, ... go in the odd half and the 2nd, 4th, 6th, ... in the
+    even half, so both halves span the whole night and a slow change in the
+    sky or the seeing falls on both. With an odd number of frames the odd
+    half has one more. The shared frame is then put in the half that lacks
+    it, so it is in both. A frame with no timestamp cannot be placed in time
+    and is left out of both halves.
+
+    Parameters
+    ----------
+    frames : `Sequence` [`FrameRecord`]
+        The frames of the library stack.
+    shared_path : `str`
+        The path of the frame to put in both halves: the registration
+        reference frame of the library stack.
+
+    Returns
+    -------
+    split : `HalfSplit`
+        The two halves, each in time order.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If the shared frame is not among the dated frames.
+    """
+    dated = sorted(
+        (frame for frame in frames if frame.timestamp is not None),
+        key=lambda frame: (frame.timestamp or 0.0, frame.path),
+    )
+    shared = next((frame for frame in dated if frame.path == shared_path), None)
+    if shared is None:
+        raise InvalidArgumentError(
+            f"The shared frame {shared_path!r} is not among the stack's frames that have a timestamp."
+        )
+    odd = dated[0::2]
+    even = dated[1::2]
+    if shared not in odd:
+        odd = sorted([*odd, shared], key=lambda frame: (frame.timestamp or 0.0, frame.path))
+    if shared not in even:
+        even = sorted([*even, shared], key=lambda frame: (frame.timestamp or 0.0, frame.path))
+    return HalfSplit(
+        odd=tuple(odd), even=tuple(even), shared_path=shared_path, left_out=len(frames) - len(dated)
+    )
+
+
+def difference_variance_factor(
+    odd_shares: dict[str, float] | None, even_shares: dict[str, float] | None
+) -> float | None:
+    """Give the variance of the halves' difference in one frame's variances.
+
+    If every frame had the same noise sigma, a half with weight shares ``a``
+    (adding up to 1 over its frames) would have the variance
+    ``sigma^2 x sum(a^2)``, and the difference of the odd half (shares ``a``)
+    and the even half (shares ``b``) would have ``sigma^2 x F``, with
+    ``F = sum((a - b)^2)`` over all the frames of both halves. A frame in one
+    half only has 0 in the other. A frame in both (the registration reference
+    frame) lowers F by twice the product of its two shares, because its noise
+    cancels in the difference.
+
+    Parameters
+    ----------
+    odd_shares : `dict` [`str`, `float`] or `None`
+        The odd half's weight share of each frame by path, or `None` when its
+        weights are unknown.
+    even_shares : `dict` [`str`, `float`] or `None`
+        The even half's weight shares.
+
+    Returns
+    -------
+    factor : `float` or `None`
+        F, or `None` when a half's weights are unknown or F is not positive.
+    """
+    if odd_shares is None or even_shares is None:
+        return None
+    paths = set(odd_shares) | set(even_shares)
+    factor = math.fsum((odd_shares.get(path, 0.0) - even_shares.get(path, 0.0)) ** 2 for path in paths)
+    return factor if factor > 0 else None
+
+
+def full_stack_noise_equivalent(
+    difference_noise: float,
+    library_effective_count: float | None,
+    odd_shares: dict[str, float] | None,
+    even_shares: dict[str, float] | None,
+) -> float | None:
+    """Estimate the library stack's random noise from the halves' difference.
+
+    If every frame had the same noise sigma, a stack with weight shares ``s``
+    (adding up to 1 over its frames) would have the variance
+    ``sigma^2 x sum(s^2)``. The odd half has shares ``a``, the even half
+    ``b``, and the library stack has ``sum(s^2) = 1 / N_eff,library`` (Kish's
+    effective frame count). The difference of the halves has the variance
+    ``sigma^2 x sum((a - b)^2)`` over all the frames of both halves (a frame
+    in one half only has 0 in the other). So the library stack's random noise
+    is the difference times ``1 / sqrt(N_eff,library x sum((a - b)^2))``. For
+    two disjoint halves of N equal frames this is the difference divided by
+    2. Frames differ in noise (the sky changes, the star-width weights are not
+    noise weights), so this is an estimate and not an exact value.
+
+    Parameters
+    ----------
+    difference_noise : `float`
+        The noise of the difference, in any unit.
+    library_effective_count : `float` or `None`
+        The library stack's effective frame count.
+    odd_shares : `dict` [`str`, `float`] or `None`
+        The odd half's weight share of each frame by path, adding up to 1, or
+        `None` when its weights are unknown.
+    even_shares : `dict` [`str`, `float`] or `None`
+        The even half's weight shares.
+
+    Returns
+    -------
+    noise : `float` or `None`
+        The estimate in the unit of ``difference_noise``, or `None` when a
+        weight or the effective count is unknown.
+    """
+    if library_effective_count is None or library_effective_count <= 0:
+        return None
+    variance_factor = difference_variance_factor(odd_shares, even_shares)
+    if variance_factor is None:
+        return None
+    return difference_noise / math.sqrt(library_effective_count * variance_factor)
+
+
+def full_stack_noise_equivalent_from_model(difference_noise: float, ratio: float | None) -> float | None:
+    """Estimate the library stack's noise with per-frame model variances.
+
+    Parameters
+    ----------
+    difference_noise : `float`
+        The noise of the difference, in any unit.
+    ratio : `float` or `None`
+        The difference's variance in units of the library stack's variance
+        (see `model_variance_ratio`).
+
+    Returns
+    -------
+    noise : `float` or `None`
+        ``difference_noise / sqrt(ratio)``, in the unit of
+        ``difference_noise``, or `None` when the ratio is unknown or not
+        positive.
+    """
+    if ratio is None or ratio <= 0:
+        return None
+    return difference_noise / math.sqrt(ratio)
+
+
+def model_variance_ratio(
+    odd_shares: dict[str, float] | None,
+    even_shares: dict[str, float] | None,
+    library_shares: dict[str, float] | None,
+    frame_variances: dict[str, float],
+) -> float | None:
+    """Give the difference's variance in units of the library stack's variance.
+
+    Each frame ``i`` has its own noise variance ``v_i`` (from its sky and the
+    camera's read noise). With the weight shares ``a`` (odd half), ``b``
+    (even half) and ``s`` (library stack), all adding up to 1 over their
+    frames, the difference of the halves has the variance
+    ``sum((a_i - b_i)^2 v_i)`` and the library stack ``sum(s_i^2 v_i)``. A
+    frame missing from a set has share 0 in it. The ratio is the first
+    divided by the second. The library stack's noise is the difference's
+    noise divided by the square root of the ratio. When every ``v_i`` is the
+    same, the ratio is ``N_eff,library x F``, the number
+    `full_stack_noise_equivalent` divides by.
+
+    Parameters
+    ----------
+    odd_shares, even_shares : `dict` [`str`, `float`] or `None`
+        The halves' weight shares by frame path.
+    library_shares : `dict` [`str`, `float`] or `None`
+        The library stack's weight shares by frame path.
+    frame_variances : `dict` [`str`, `float`]
+        Each frame's noise variance by path, in one unit.
+
+    Returns
+    -------
+    ratio : `float` or `None`
+        The ratio, or `None` when a set of shares is unknown, a frame has no
+        variance, or a variance sum is not positive.
+    """
+    if odd_shares is None or even_shares is None or library_shares is None:
+        return None
+    paths = set(odd_shares) | set(even_shares) | set(library_shares)
+    if any(path not in frame_variances for path in paths):
+        return None
+    difference_variance = math.fsum(
+        (odd_shares.get(path, 0.0) - even_shares.get(path, 0.0)) ** 2 * frame_variances[path]
+        for path in paths
+    )
+    library_variance = math.fsum(library_shares.get(path, 0.0) ** 2 * frame_variances[path] for path in paths)
+    if difference_variance <= 0 or library_variance <= 0:
+        return None
+    return difference_variance / library_variance
+
+
+def _normalized_shares(weights: dict[str, float] | None) -> dict[str, float] | None:
+    """Scale a dictionary of weights so they add up to 1.
+
+    Parameters
+    ----------
+    weights : `dict` [`str`, `float`] or `None`
+        Weights by frame path.
+
+    Returns
+    -------
+    shares : `dict` [`str`, `float`] or `None`
+        The shares, or `None` when there are no weights or they add up to
+        nothing.
+    """
+    if not weights:
+        return None
+    total = math.fsum(weights.values())
+    if total <= 0:
+        return None
+    return {path: weight / total for path, weight in weights.items()}
+
+
+def _model_ratio_for_library(
+    library: LibraryRun,
+    target_id: str,
+    configuration: Any,
+    odd_shares: dict[str, float] | None,
+    even_shares: dict[str, float] | None,
+) -> tuple[float | None, str]:
+    """Work out `model_variance_ratio` from stored sky rates and profiles.
+
+    Parameters
+    ----------
+    library : `LibraryRun`
+        What the library stack stored (members, weights, the store).
+    target_id : `str`
+        The target.
+    configuration : `AppConfiguration`
+        Where the camera profiles live.
+    odd_shares, even_shares : `dict` [`str`, `float`] or `None`
+        The halves' weight shares by frame path.
+
+    Returns
+    -------
+    ratio, reason : `tuple` [`float` or `None`, `str`]
+        The ratio, or `None` and why there is none.
+    """
+    library_shares = _normalized_shares(library.weight_by_path)
+    if library_shares is None:
+        return None, library.weights_reason or "the library stack's frame weights are unknown"
+    if odd_shares is None or even_shares is None:
+        return None, "a half's weights are unknown"
+    inputs = frame_noise_inputs_from_store(
+        library.members, [1.0] * len(library.members), target_id, configuration, library.store
+    )
+    if isinstance(inputs, ExpectedNoiseOutcome):
+        return None, inputs.reason
+    variances = {
+        frame.path: (item.sky_electrons + item.read_noise_electrons**2) / item.gain_electrons_per_adu**2
+        for frame, item in zip(library.members, inputs, strict=True)
+    }
+    ratio = model_variance_ratio(odd_shares, even_shares, library_shares, variances)
+    if ratio is None:
+        return None, "a frame of the halves or the library stack has no modeled noise, or a variance is zero"
+    return ratio, ""
+
+
+def _weight_shares(membership: StackMembership | None) -> dict[str, float] | None:
+    """Give each member's share of a stack's total weight.
+
+    Parameters
+    ----------
+    membership : `StackMembership` or `None`
+        The stack's members, or `None`.
+
+    Returns
+    -------
+    shares : `dict` [`str`, `float`] or `None`
+        The weight share of each member frame by path, adding up to 1, or
+        `None` when there are no members or any weight is unknown.
+    """
+    if membership is None or not membership.members:
+        return None
+    weights = normalized_weights(membership)
+    if any(weight is None for weight in weights):
+        return None
+    total = math.fsum(weight for weight in weights if weight is not None)
+    if total <= 0:
+        return None
+    return {
+        member.frame.path: weight / total
+        for member, weight in zip(membership.members, weights, strict=True)
+        if weight is not None
+    }
+
+
+def half_difference_measurements(
+    context: PipelineRunContext,
+    subject: QualitySubject,
+    noise: StackNoiseOutcome | None,
+    reason: str,
+    note: str,
+    counts: tuple[float | None, float | None],
+    counts_reason: str,
+    variance_factor: float | None = None,
+    shared_fractions: tuple[float | None, float | None] = (None, None),
+    model_ratio: float | None = None,
+    model_ratio_reason: str = "",
+) -> list[QualityMeasurement]:
+    """Build the nine half-difference rows of the library stack.
+
+    Parameters
+    ----------
+    context : `PipelineRunContext`
+        The run's shared facts.
+    subject : `QualitySubject`
+        The library stack.
+    noise : `StackNoiseOutcome` or `None`
+        The noise of the difference, or `None` when no difference was made.
+    reason : `str`
+        Why there is no noise value. Used when ``noise`` holds no result.
+    note : `str`
+        What was done, kept on each measured row.
+    counts : `tuple` [`float` or `None`, `float` or `None`]
+        The odd and even halves' effective frame counts.
+    counts_reason : `str`
+        Why a count is missing, when one is.
+    variance_factor : `float`, optional
+        The difference's variance in units of one frame's variance (see
+        `difference_variance_factor`).
+    shared_fractions : `tuple` [`float` or `None`, `float` or `None`], optional
+        The shared frame's share of the odd and of the even half's weight.
+    model_ratio : `float`, optional
+        The difference's variance in units of the library stack's variance,
+        with each frame's own modeled noise (see `model_variance_ratio`).
+    model_ratio_reason : `str`, optional
+        Why there is no ``model_ratio``.
+
+    Returns
+    -------
+    rows : `list` [`QualityMeasurement`]
+        The noise in stack units, the normalized noise, the reference flux it
+        is divided by, the two halves' effective frame counts, the variance
+        factor, the model variance ratio and the shared frame's two weight
+        shares. Each is not measured, with the reason, when its value is
+        missing.
+    """
+    result = noise.result if noise is not None else None
+    missing = reason or (noise.reason if noise is not None else "") or "the difference was not measured"
+    if result is None:
+        noise_rows = [
+            build_measurement(_SPEC_BY_NAME[name], None, context, subject, reason=missing)
+            for name in (
+                STACKING_HALF_DIFFERENCE_NOISE_STACK_UNIT,
+                STACKING_HALF_DIFFERENCE_NOISE_NORMALIZED,
+                STACKING_HALF_DIFFERENCE_REFERENCE_FLUX_STACK_UNIT,
+            )
+        ]
+    else:
+        noise_rows = [
+            build_measurement(
+                _SPEC_BY_NAME[STACKING_HALF_DIFFERENCE_NOISE_STACK_UNIT],
+                result.noise_adu,
+                context,
+                subject,
+                uncertainty=result.noise_uncertainty_adu,
+                sample_count=result.aperture_count,
+            ),
+            build_measurement(
+                _SPEC_BY_NAME[STACKING_HALF_DIFFERENCE_NOISE_NORMALIZED],
+                result.normalized_noise,
+                context,
+                subject,
+                uncertainty=result.normalized_uncertainty,
+                sample_count=result.aperture_count,
+            ),
+            build_measurement(
+                _SPEC_BY_NAME[STACKING_HALF_DIFFERENCE_REFERENCE_FLUX_STACK_UNIT],
+                result.reference_flux_adu,
+                context,
+                subject,
+                uncertainty=result.reference_uncertainty_adu,
+                sample_count=result.reference_star_count,
+            ),
+        ]
+        kept_note = " ".join(
+            part for part in (note, result.position_note, result.aperture_definition_note) if part
+        )
+        if kept_note:
+            noise_rows = [row.model_copy(update={"reason": kept_note}) for row in noise_rows]
+    count_rows = [
+        build_measurement(
+            _SPEC_BY_NAME[name],
+            value,
+            context,
+            subject,
+            reason=counts_reason or missing or "the half's effective frame count is unknown",
+        )
+        for name, value in zip(
+            (
+                STACKING_HALF_DIFFERENCE_ODD_EFFECTIVE_FRAME_COUNT,
+                STACKING_HALF_DIFFERENCE_EVEN_EFFECTIVE_FRAME_COUNT,
+            ),
+            counts,
+            strict=True,
+        )
+    ]
+    factor_row = build_measurement(
+        _SPEC_BY_NAME[STACKING_HALF_DIFFERENCE_VARIANCE_FACTOR],
+        variance_factor,
+        context,
+        subject,
+        reason=counts_reason or missing or "the halves' weights are unknown",
+    )
+    model_row = build_measurement(
+        _SPEC_BY_NAME[STACKING_HALF_DIFFERENCE_MODEL_VARIANCE_RATIO],
+        model_ratio,
+        context,
+        subject,
+        reason=model_ratio_reason or missing or "the modeled noise of the frames is unknown",
+    )
+    share_rows = [
+        build_measurement(
+            _SPEC_BY_NAME[name],
+            value,
+            context,
+            subject,
+            reason=counts_reason
+            or (reason if result is None else "the shared frame is not among the frames the half stacked"),
+        )
+        for name, value in zip(
+            (
+                STACKING_HALF_DIFFERENCE_SHARED_ODD_WEIGHT_FRACTION,
+                STACKING_HALF_DIFFERENCE_SHARED_EVEN_WEIGHT_FRACTION,
+            ),
+            shared_fractions,
+            strict=True,
+        )
+    ]
+    return [*noise_rows, *count_rows, factor_row, model_row, *share_rows]
+
+
+def _delete_half_folder(library_stack_path: str, label: str) -> None:
+    """Delete a half stack's folder from ``_subsets``.
+
+    Parameters
+    ----------
+    library_stack_path : `str`
+        The library stack. Only a folder inside its ``_subsets`` folder is
+        ever deleted.
+    label : `str`
+        The half's label, which names its folder.
+    """
+    check_subset_label(label)
+    folder = os.path.join(os.path.dirname(library_stack_path), SUBSET_FOLDER_NAME, label)
+    try:
+        shutil.rmtree(folder, ignore_errors=False)
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        logger.warning("The half stack folder %s could not be deleted: %s", folder, error)
+
+
+def run_half_difference_noise(
+    target: Target,
+    library_stack_path: str,
+    *,
+    context: PipelineRunContext | None,
+    configuration: Any,
+    drivers: Drivers | None,
+    stacking_slot: Callable[[], AbstractContextManager],
+    keep_halves: bool = False,
+) -> HalfDifferenceNoiseResult:
+    """Measure the noise of the difference of two halves of the library stack.
+
+    The frames of the library stack are split into two disjoint halves that
+    alternate in time (`split_into_halves`), with the library stack's
+    registration reference frame in both. Each half is stacked into the
+    target's ``_subsets`` folder with the library stack's weighting and
+    rejection, without the edge trim and the frame quarantine. The noise of
+    the difference of the two stacks is measured in the target's stored empty
+    apertures (`stack_noise.measure_difference_noise`), and nine rows are
+    stored on the library stack's own subject: the difference noise in stack
+    units and normalized, the reference flux the normalized value divides by,
+    each half's effective frame count, the variance factor, the variance
+    ratio with each frame's modeled noise, and the two shares the shared
+    frame has in the halves' weights (so the factor can be split back). The
+    registration reference is handed to the stacker for both halves, so a
+    half cannot choose its own; a half that reports another reference is
+    still refused. The halves are deleted afterwards unless ``keep_halves``
+    is set. Neither this job nor the growth job starts by itself after a
+    stack.
+
+    Nothing is measured, and each row says why, when: the stack is
+    spectral; the library stack has no recorded registration reference frame
+    or noise sums; the apertures are missing or of another identity than the
+    library stack's; a half would have fewer than
+    `HALF_DIFFERENCE_MINIMUM_FRAMES_PER_HALF` frames; Siril fails; or the
+    halves were lined up with different reference frames. No other number is
+    put in the place of a missing one.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target. It is only read.
+    library_stack_path : `str`
+        The library stack whose frames to split.
+    context : `PipelineRunContext` or `None`
+        The run's shared facts, or `None` to store nothing.
+    configuration : `AppConfiguration`
+        The settings.
+    drivers : `Drivers`, optional
+        The stacking program.
+    stacking_slot : `Callable`
+        Gives the context manager that holds a stacking slot.
+    keep_halves : `bool`, optional
+        Keep the two half stacks in ``_subsets`` after the measurement.
+
+    Returns
+    -------
+    result : `HalfDifferenceNoiseResult`
+        The numbers, or the reason there are none.
+    """
+    with subset_job_guard(target.id):
+        return _run_half_difference_noise(
+            target,
+            library_stack_path,
+            context=context,
+            configuration=configuration,
+            drivers=drivers,
+            stacking_slot=stacking_slot,
+            keep_halves=keep_halves,
+        )
+
+
+def _run_half_difference_noise(
+    target: Target,
+    library_stack_path: str,
+    *,
+    context: PipelineRunContext | None,
+    configuration: Any,
+    drivers: Drivers | None,
+    stacking_slot: Callable[[], AbstractContextManager],
+    keep_halves: bool,
+) -> HalfDifferenceNoiseResult:
+    """Do the work of `run_half_difference_noise` while the guard is held.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target. It is only read.
+    library_stack_path : `str`
+        The library stack whose frames to split.
+    context : `PipelineRunContext` or `None`
+        The run's shared facts, or `None` to store nothing.
+    configuration : `AppConfiguration`
+        The settings.
+    drivers : `Drivers`, optional
+        The stacking program.
+    stacking_slot : `Callable`
+        Gives the context manager that holds a stacking slot.
+    keep_halves : `bool`
+        Keep the two half stacks after the measurement.
+
+    Returns
+    -------
+    result : `HalfDifferenceNoiseResult`
+        The numbers, or the reason there are none.
+    """
+    result = HalfDifferenceNoiseResult(targetId=target.id, libraryStackPath=library_stack_path)
+    subject = context.stack_subject(os.path.basename(library_stack_path)) if context is not None else None
+
+    def finish(
+        reason: str,
+        noise: StackNoiseOutcome | None = None,
+        note: str = "",
+        counts: tuple[float | None, float | None] = (None, None),
+        counts_reason: str = "",
+        variance_factor: float | None = None,
+        shared_fractions: tuple[float | None, float | None] = (None, None),
+        model_ratio: float | None = None,
+        model_ratio_reason: str = "",
+    ) -> HalfDifferenceNoiseResult:
+        """Store the nine rows and give back the result.
+
+        Parameters
+        ----------
+        reason : `str`
+            Why there is no noise value. Empty when there is one.
+        noise : `StackNoiseOutcome`, optional
+            The noise of the difference.
+        note : `str`, optional
+            What was done, kept on each measured row.
+        counts : `tuple`, optional
+            The halves' effective frame counts.
+        counts_reason : `str`, optional
+            Why a count is missing.
+        variance_factor : `float`, optional
+            The difference's variance factor.
+        shared_fractions : `tuple`, optional
+            The shared frame's share of each half's weight.
+        model_ratio : `float`, optional
+            The difference's variance in the library stack's variance, with
+            each frame's modeled noise.
+        model_ratio_reason : `str`, optional
+            Why there is no ``model_ratio``.
+
+        Returns
+        -------
+        result : `HalfDifferenceNoiseResult`
+            The finished result.
+        """
+        result.reason = reason
+        if context is not None and subject is not None:
+            rows = half_difference_measurements(
+                context,
+                subject,
+                noise,
+                reason,
+                note,
+                counts,
+                counts_reason,
+                variance_factor,
+                shared_fractions,
+                model_ratio,
+                model_ratio_reason,
+            )
+            result.rows_written = record_run_measurements(rows, config=configuration)
+        return result
+
+    library = read_library_run(target, library_stack_path, configuration)
+    result.notes.extend(library.notes)
+    if any(frame_is_spectral(frame) for frame in library.members):
+        return finish("the half-difference noise is measured for imaging stacks only")
+    if library.noise_sums is None:
+        return finish(
+            "the library stack's per-aperture noise sums were not saved, so the apertures it was measured "
+            "in cannot be checked; stack the target again"
+        )
+    summary = getattr(target.stacking, "quality_summary", None)
+    reference_path = getattr(getattr(summary, "stacking_metrics", None), "registration_reference_frame", None)
+    if not reference_path:
+        return finish(
+            "the library stack's registration reference frame is not recorded, so the two halves cannot "
+            "be lined up on one reference; stack the target again"
+        )
+    try:
+        split = split_into_halves(library.members, reference_path)
+    except InvalidArgumentError as error:
+        return finish(error.message)
+    result.shared_frame = split.shared_path
+    result.odd_half_frames = len(split.odd)
+    result.even_half_frames = len(split.even)
+    if split.left_out:
+        result.notes.append(f"{split.left_out} frame(s) have no timestamp and were left out of both halves.")
+    smaller = min(len(split.odd), len(split.even))
+    if smaller < HALF_DIFFERENCE_MINIMUM_FRAMES_PER_HALF:
+        return finish(
+            f"a half would have {smaller} frames, fewer than the {HALF_DIFFERENCE_MINIMUM_FRAMES_PER_HALF} "
+            "the half-difference noise needs"
+        )
+    library_folder = os.path.dirname(library_stack_path)
+    apertures_path = os.path.join(library_folder, APERTURE_FILE_NAME)
+    stored_apertures, apertures_reason = load_apertures_with_reason(apertures_path)
+    if stored_apertures is None:
+        return finish(apertures_reason)
+
+    stem = os.path.splitext(os.path.basename(library_stack_path))[0]
+    stacked: dict[str, Any] = {}
+    labels = {"odd": f"{stem}.half-odd", "even": f"{stem}.half-even"}
+    try:
+        for index, (name, half_frames) in enumerate((("odd", split.odd), ("even", split.even))):
+            _report(int(40 * index), f"Stacking the {name} half ({len(half_frames)} frames)")
+            output_path = subset_output_path(library_folder, labels[name], None)
+            try:
+                with stacking_slot():
+                    stacked[name] = stack_frame_subset(
+                        target.id,
+                        list(half_frames),
+                        output_path,
+                        configuration=configuration,
+                        drivers=drivers,
+                        job_id=None if context is None else context.job_id,
+                        trim_edges=False,
+                        reference_frame_path=split.shared_path,
+                    )
+            except Exception as error:
+                logger.exception("The %s half stack of %s failed", name, target.id)
+                return finish(f"the stacker failed on the {name} half ({type(error).__name__}: {error})")
+            if stacked[name].stack_path is None:
+                return finish(f"the stacker made no stack from the {name} half")
+        references = {name: outcome.registration_reference_frame for name, outcome in stacked.items()}
+        if references["odd"] is None or references["even"] is None:
+            return finish(
+                "the halves cannot be registered on one reference: Siril's reference frame is unknown"
+            )
+        if not (references["odd"] == references["even"] == split.shared_path):
+            return finish(
+                "the halves cannot be registered on one reference: they were lined up with "
+                f"{os.path.basename(references['odd'])} and {os.path.basename(references['even'])}, "
+                f"not both with the library stack's reference {os.path.basename(split.shared_path)}"
+            )
+        _report(80, "Measuring the noise of the difference")
+        try:
+            noise = measure_difference_noise(
+                stacked["odd"].stack_path, stacked["even"].stack_path, split.shared_path, apertures_path
+            )
+        except Exception as error:  # a measurement failure is stored as a reason, never raised
+            logger.exception("The noise of the half difference of %s could not be measured", target.id)
+            return finish(f"the difference could not be measured ({type(error).__name__}: {error})")
+        if noise.result is None:
+            return finish(noise.reason or "the difference was not measured")
+        if not library.noise_sums[2] or library.noise_sums[2] != noise.result.aperture_identity:
+            return finish(
+                "the library stack was measured in other apertures than the halves "
+                f"(identities {library.noise_sums[2] or 'unknown'} and {noise.result.aperture_identity}); "
+                "stack the target again so the library stack is measured in the current apertures"
+            )
+        memberships: dict[str, StackMembership | None] = {}
+        counts_reason = ""
+        for name, half_frames in (("odd", split.odd), ("even", split.even)):
+            try:
+                memberships[name] = determine_stack_members(
+                    half_frames, stacked[name].diagnostics, stacked[name].stack_weight
+                )
+            except Exception as error:  # a by-product: its failure must not lose the noise
+                logger.exception("The member frames of the %s half stack could not be worked out", name)
+                memberships[name] = None
+                counts_reason = f"the member frames could not be worked out: {type(error).__name__}"
+        shares = {name: _weight_shares(memberships[name]) for name in ("odd", "even")}
+        counts = tuple(
+            effective_frame_count(list(shares[name].values())) if shares[name] is not None else None
+            for name in ("odd", "even")
+        )
+        if not counts_reason and any(count is None for count in counts):
+            counts_reason = next(
+                (
+                    memberships[name].membership_reason
+                    for name in ("odd", "even")
+                    if memberships[name] is not None and memberships[name].membership_reason
+                ),
+                "the half's weights are unknown (Siril weighted the frames itself)",
+            )
+        note = (
+            f"The odd half holds {len(split.odd)} frames and the even half {len(split.even)}; both hold "
+            f"{os.path.basename(split.shared_path)}, the library stack's registration reference frame."
+        )
+        result.odd_half_effective_frame_count, result.even_half_effective_frame_count = counts
+        result.difference_noise_stack_unit = noise.result.noise_adu
+        result.difference_noise_normalized = noise.result.normalized_noise
+        result.difference_noise_normalized_uncertainty = noise.result.normalized_uncertainty
+        result.reference_flux_stack_unit = noise.result.reference_flux_adu
+        result.aperture_count = noise.result.aperture_count
+        variance_factor = difference_variance_factor(shares["odd"], shares["even"])
+        result.variance_factor = variance_factor
+        equivalent = full_stack_noise_equivalent(
+            noise.result.normalized_noise, library.effective_count, shares["odd"], shares["even"]
+        )
+        result.full_stack_equivalent_normalized = equivalent
+        shared_fractions = tuple(
+            shares[name].get(split.shared_path) if shares[name] is not None else None
+            for name in ("odd", "even")
+        )
+        result.shared_frame_odd_weight_fraction, result.shared_frame_even_weight_fraction = shared_fractions
+        try:
+            model_ratio, model_ratio_reason = _model_ratio_for_library(
+                library, target.id, configuration, shares["odd"], shares["even"]
+            )
+        except Exception as error:  # a by-product: its failure must not lose the noise
+            logger.exception("The modeled variance ratio of %s could not be worked out", target.id)
+            model_ratio, model_ratio_reason = None, f"the modeled noise failed: {type(error).__name__}"
+        result.model_variance_ratio = model_ratio
+        result.full_stack_equivalent_model_normalized = full_stack_noise_equivalent_from_model(
+            noise.result.normalized_noise, model_ratio
+        )
+        result.notes.append(note)
+        return finish(
+            "",
+            noise,
+            note,
+            counts,
+            counts_reason,
+            variance_factor,
+            shared_fractions,
+            model_ratio,
+            model_ratio_reason,
+        )
+    finally:
+        if not keep_halves:
+            for label in labels.values():
+                _delete_half_folder(library_stack_path, label)

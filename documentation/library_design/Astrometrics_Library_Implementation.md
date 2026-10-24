@@ -4,15 +4,15 @@
 
 ## Abstract
 
-This paper maps the design in `Astrometrics_Library_Architecture.md` to the Python source in `astrometricslib/`. It names the layers and the rule that keeps them apart, the model classes, the modules of each of the five pipelines, and the scripts and tests that check them. It lists each pipeline's tuned values with a status label and a link to the register entry that holds the evidence.
+This paper maps the design in `Astrometrics_Library_Architecture.md` to the Python source in `astrometricslib/`. It names the layers and the rule that keeps them apart, the model classes, the modules of each of the five pipelines, and the scripts and tests that check them. It lists each pipeline's tuned values with a status label and a link to its evidence.
 
 The [glossary](../Glossary.md) defines the terms, and this document defines each at first use.
 
 ## 1. Scope
 
-**Statement of need.** This paper indexes the theory to the code. Theory is in [Astrometrics_Library_Architecture.md](./Astrometrics_Library_Architecture.md), with the quality measurements in [Astrometrics_Quality_Measurements.md](./Astrometrics_Quality_Measurements.md) (Quality §n). Evidence is in the validation register, [validation/index.md](./validation/index.md). Module paths are relative to `astrometricslib/`. Stage detail is in the [review guides](./pipelines/index.md) and the READMEs.
+**Statement of need.** Theory is in [Astrometrics_Library_Architecture.md](./Astrometrics_Library_Architecture.md), with the quality measurements in [Astrometrics_Quality_Measurements.md](./Astrometrics_Quality_Measurements.md) (Quality §n). Evidence is in the validation register, [validation/index.md](./validation/index.md). Module paths are relative to `astrometricslib/`. Stage detail is in the [review guides](./pipelines/index.md).
 
-The one supported entry point is the package root (`from astrometricslib import Astrometrics`). It re-exports the `api/` facade, the driver interfaces (Section 4.7), the job framework (Section 4.9) and the error types. The package builds on Astropy [1]. `wayfindinglib`, the backend and the MCP servers [2] use the library. Section 5 lists each pipeline's settings.
+The one supported entry point is the package root (`from astrometricslib import Astrometrics`), which re-exports the `api/` facade, the driver interfaces (Section 4.7), the job framework (Section 4.9) and the error types. The package builds on Astropy [1]. `wayfindinglib`, the backend and the MCP servers [2] use the library.
 
 ## 2. Package layering
 
@@ -76,12 +76,12 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 - **Sequence and restacks (§3.3).** `pre_processing/stack_inputs.py`; `post_processing/previous_stack.py`, `stack_comparison.py`, `interrupted_jobs.py`.
 - **Previews (§3.3).** `post_processing/stack_preview.py`, `colour_calibration.py`, `starnet_stretch.py`, `sky_level.py`, `star_tone.py`, `bright_object.py`, `stack_crop.py`, `preview_remake.py`.
 - **Frame measurement (Quality §5.1).** `ProcessingPipelines.record_frame_measurements` (`frame_measurement_run.py`) measures each light frame. Evidence: [AST-17](validation/astrometry.md#ast-17), [AST-18](validation/astrometry.md#ast-18).
-- **Frame geometry (Quality §5.3).** `post_processing/field_rotation.py` (`field_rotation_measurements`) stores frame rotations. `shared/registration_record.py` keeps `<stack>_registration_frames.json` for the astrometry pipeline (§4.2). Evidence: [STK-43](validation/stacking.md#stk-43).
+- **Frame geometry (Quality §5.3).** `post_processing/field_rotation.py` (`field_rotation_measurements`) stores frame rotations. `shared/registration_record.py` keeps `<stack>_registration_frames.json` for astrometry (§4.2). Evidence: [STK-43](validation/stacking.md#stk-43).
 - **Input screening (§3.4.1).** `pre_processing/frame_quarantine.py`, `frame_homogeneity.py`, `background_homogeneity.py`, `camera_selection.py`, `assess_input_quality.py`.
 - **Output checks (§3.4.2).** `post_processing/assess_output_quality.py`, `stack_quality.py`, `exposure_group_report.py`, `stack_quality_report.py`.
-- **Stack measurements (Quality §4).** `stage._record_stack_quality` calls `record_stacking_quality` (`post_processing/record_quality.py`), which stores the summary, gates, noise, weights. <!-- impl: astrometricslib.pipelines.stacking.post_processing.record_quality.record_stacking_quality -->
-- **Stack noise and weights (Quality §4).** `post_processing/stack_noise.py`, `stack_membership.py`, `expected_noise.py`, `flat_noise_contribution.py`, `record_science.py`. Evidence: [STK-36](validation/stacking.md#stk-36), [STK-07](validation/stacking.md#stk-07), [STK-38](validation/stacking.md#stk-38), [STK-39](validation/stacking.md#stk-39), [STK-40](validation/stacking.md#stk-40), [STK-41](validation/stacking.md#stk-41).
+- **Stack measurements (Quality §4).** `stage._record_stack_quality` calls `record_stacking_quality` (`post_processing/record_quality.py`), which stores the summary, gates, noise, weights. <!-- impl: astrometricslib.pipelines.stacking.post_processing.record_quality.record_stacking_quality --> The noise and weights come from `post_processing/stack_noise.py`, `stack_membership.py`, `expected_noise.py`, `flat_noise_contribution.py`, `record_science.py`. Evidence: [STK-36](validation/stacking.md#stk-36), [STK-07](validation/stacking.md#stk-07), [STK-38](validation/stacking.md#stk-38), [STK-39](validation/stacking.md#stk-39), [STK-40](validation/stacking.md#stk-40), [STK-41](validation/stacking.md#stk-41).
 - **Subset stacks (Quality §4).** `subset_noise_run.py`, `subset_stack.stack_frame_subset`. Evidence: [STK-37](validation/stacking.md#stk-37).
+- **Half-difference noise (Quality §4.5).** Job `measure_half_difference_noise` runs `subset_noise_run.run_half_difference_noise`, which calls `stack_noise.measure_difference_noise` and stores nine `stacking.half_difference_*` metrics. Each half needs `HALF_DIFFERENCE_MINIMUM_FRAMES_PER_HALF` frames. Evidence: [STK-42](validation/stacking.md#stk-42).
 
 ### 4.2 Astrometry (Architecture §4)
 
@@ -159,7 +159,7 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 
 ## 5. Tuned parameters and validation status
 
-Tables 4 to 8 list each pipeline's tuned values and the architecture section that explains it. Each status label (*Measured*, *Partly measured*, *Design estimate*; defined in the [register](./validation/index.md#3-status-labels)) links to its evidence entry or design-estimate table. A hidden link after each table names the code that holds each value, and a test checks it.
+Tables 4 to 8 list each pipeline's tuned values and the section that explains it. Each status label (*Measured*, *Partly measured*, *Design estimate*; defined in the [register](./validation/index.md#3-status-labels)) links to its evidence. A hidden link after each table names the code holding each value; a test checks it.
 
 ### 5.1 Stacking settings
 
@@ -179,7 +179,7 @@ Tables 4 to 8 list each pipeline's tuned values and the architecture section tha
 | Roundness drop, color camera | at least 0.20 under median | Measured ([STK-02](validation/stacking.md#stk-02)) | §3.4.1 |
 | Largest share of a session moved aside | 25% | Partly measured ([STK-03](validation/stacking.md#stk-03)) | §3.4.1 |
 | Dark temperature slot width | 3 °C | Partly measured ([STK-06](validation/stacking.md#stk-06)) | §3.2 |
-| Minimum frames kept after quality filtering | 5 | Partly measured ([STK-10](validation/stacking.md#stk-10)) | §3.3 (Architecture Table 3, step 3) and §3.4.1 |
+| Minimum frames kept after quality filtering | 5 | Partly measured ([STK-10](validation/stacking.md#stk-10)) | §3.3 (Table 3, step 3) and §3.4.1 |
 | Brightness scale: fewest shared stars before pixel fallback | 16 | Measured ([STK-19](validation/stacking.md#stk-19)) | §3.2 |
 | Pixel fallback: percentile range; bright-end fraction | 20th to 80th; 1% | Design estimate ([stacking table](validation/stacking.md#design-estimates)) | §3.2 |
 | Linearity tolerance between exposure groups | 5% | Partly measured ([STK-20](validation/stacking.md#stk-20)) | §3.2 |
@@ -189,6 +189,7 @@ Tables 4 to 8 list each pipeline's tuned values and the architecture section tha
 | Rejected pixel share that flags a stack | 15% | Partly measured ([STK-24](validation/stacking.md#stk-24)) | §3.4.2 |
 | Star sharpness warning ratio (fails above) | 1.2 | Partly measured ([STK-25](validation/stacking.md#stk-25)) | §3.4.2 |
 | Noise apertures off faint sources: threshold; smoothing widths; high-pass; clearance; fewest clean apertures; file version | 3.5σ; 1.5, 3, 6 px; 12 px; 13 px; 20; 3 | Partly measured ([STK-36](validation/stacking.md#stk-36)) | Quality §4.2 |
+| Half-difference noise: fewest frames per half | 8 | Design estimate (STK-D25) | Quality §4.5 |
 
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.FAINT_SOURCE_THRESHOLD_SIGMAS -->
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.FAINT_SOURCE_SMOOTHING_SIGMAS_PX -->
@@ -196,6 +197,7 @@ Tables 4 to 8 list each pipeline's tuned values and the architecture section tha
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.FAINT_SOURCE_CLEARANCE_PX -->
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.MINIMUM_USABLE_APERTURES -->
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.APERTURE_FILE_VERSION -->
+<!-- impl: astrometricslib.pipelines.stacking.subset_noise_run.HALF_DIFFERENCE_MINIMUM_FRAMES_PER_HALF -->
 <!-- impl: astrometricslib.utilities.rejection_thresholds.rejection_bounds -->
 <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.FRAME_MEASUREMENT_TIME_BUDGET_SECONDS -->
 <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_GRID_CELL_COUNT -->
@@ -427,7 +429,7 @@ This section maps behaviors the [validation sessions](./validation/index.md#6-va
 
 ## Appendix A. Ratchets and import contracts
 
-A ratchet is a test whose list of known exceptions may only shrink. `test_no_new_upward_imports` in `astrometricslib/test/test_layer_boundaries.py` reads every import in production files, including those inside functions, and fails on a new upward one. Table 9 lists its rules.
+A ratchet is a test whose exception list may only shrink. `test_no_new_upward_imports` in `astrometricslib/test/test_layer_boundaries.py` reads every production import, even inside functions, and fails on a new upward one. Table 9 lists its rules.
 
 **Table 9.** Layer rules enforced by the ratchet test.
 
@@ -441,7 +443,7 @@ A ratchet is a test whose list of known exceptions may only shrink. `test_no_new
 
 Not checked: `visualization/`, `api/`, the package root, tests, and imports within one layer.
 
-The same file holds three more shrink-only ratchets (a stale entry also fails):
+The file holds three more ratchets (a stale entry fails):
 
 - **Raw FITS access** (`KNOWN_FITS_ACCESS_SITES`). New code reads FITS through `drivers/fits_access.py` or `drivers/image.py`, which apply the HDU0/HDU1 rule.
 - **Wall clock** (`KNOWN_WALL_CLOCK_SITES`). Nothing under `pipelines/` calls `datetime.now()` or `datetime.utcnow()`. A frame's time comes from its header.

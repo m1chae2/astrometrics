@@ -163,6 +163,7 @@ from astrometricslib.models.quality.quality_summary import (
     TargetSessionContribution,
 )
 from astrometricslib.models.quality.subset_stacks import (
+    HalfDifferenceNoiseResult,
     NightContribution,
     NightContributionResult,
     NoiseGrowthResult,
@@ -438,6 +439,7 @@ __all__ = [
     "GaiaXpDriver",
     "GenerationDescription",
     "GroupedFrameStat",
+    "HalfDifferenceNoiseResult",
     "HardwareError",
     "ImageProcessing",
     "InputQualityReport",

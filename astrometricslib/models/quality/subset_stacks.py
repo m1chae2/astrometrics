@@ -1,6 +1,6 @@
 """What the subset-stack jobs report.
 
-Two jobs stack some of a target's frames, apart from the library stack, and
+Four jobs stack some of a target's frames, apart from the library stack, and
 measure the noise of each result:
 
 - `ProcessingPipelines.stack_subset` stacks exactly the frames it is given and
@@ -9,6 +9,9 @@ measure the noise of each result:
   first part of one night) and returns a `NoiseGrowthResult`.
 - `ProcessingPipelines.measure_night_contributions` stacks the library stack's
   frames without one night at a time and returns a `NightContributionResult`.
+- `ProcessingPipelines.measure_half_difference_noise` stacks two disjoint
+  halves of the library stack's frames, subtracts them, and returns a
+  `HalfDifferenceNoiseResult`.
 
 The measurements themselves go to the quality database. These records report
 what was done, so a caller can tell a step that was skipped from one that
@@ -129,6 +132,105 @@ class NightContributionResult(BaseModel):
     rows_written: int = Field(default=0, alias="rowsWritten")
 
 
+class HalfDifferenceNoiseResult(BaseModel):
+    """What the half-stack difference job did and measured.
+
+    The job stacks two disjoint halves of the library stack's frames, takes
+    their difference, and measures its noise in the target's sky apertures.
+
+    Attributes
+    ----------
+    target_id : `str`
+        The target.
+    library_stack_path : `str`
+        The library stack whose frames were split.
+    odd_half_frames : `int`
+        Frames given to the stacker for the odd half (the 1st, 3rd, ... frame
+        by capture time, plus the shared frame when it is an even one).
+    even_half_frames : `int`
+        Frames given for the even half (the 2nd, 4th, ... frame, plus the
+        shared frame when it is an odd one).
+    shared_frame : `str` or `None`
+        The frame in both halves: the library stack's registration reference
+        frame. `None` when no split was made.
+    odd_half_effective_frame_count : `float` or `None`
+        The odd half's weighted frame count (`None` when its weights are
+        unknown).
+    even_half_effective_frame_count : `float` or `None`
+        The even half's weighted frame count.
+    difference_noise_stack_unit : `float` or `None`
+        The noise of the difference in the stack's own units, or `None`.
+    difference_noise_normalized : `float` or `None`
+        The same as a fraction of the reference stars' brightness.
+    difference_noise_normalized_uncertainty : `float` or `None`
+        Its 1-sigma uncertainty.
+    reference_flux_stack_unit : `float` or `None`
+        The reference stars' brightness the normalized noise divides by, in
+        the stack's units.
+    aperture_count : `int` or `None`
+        The empty apertures behind the noise.
+    variance_factor : `float` or `None`
+        The difference's variance in units of one frame's variance if all
+        frames had the same noise (see
+        `subset_noise_run.difference_variance_factor`), or `None`.
+    shared_frame_odd_weight_fraction : `float` or `None`
+        The shared frame's share of the odd half's weight.
+    shared_frame_even_weight_fraction : `float` or `None`
+        The shared frame's share of the even half's weight.
+    model_variance_ratio : `float` or `None`
+        The difference's variance in units of the library stack's variance,
+        with each frame's own noise from its sky and the camera's read noise
+        (see `subset_noise_run.model_variance_ratio`), or `None`.
+    full_stack_equivalent_normalized : `float` or `None`
+        What the difference says about the library stack's own random noise,
+        as a fraction of the reference stars' brightness, if every frame had
+        the same noise (see `full_stack_noise_equivalent`). Not stored in the
+        database; an estimate. `None` when a weight is unknown.
+    full_stack_equivalent_model_normalized : `float` or `None`
+        The same, with each frame's own modeled noise (the difference divided
+        by the square root of `model_variance_ratio`). `None` when a frame's
+        sky rate is not stored or a weight is unknown.
+    reason : `str`
+        Why there is no measurement. Empty when there is one.
+    notes : `list` [`str`]
+        Plain sentences about what was done.
+    rows_written : `int`
+        New rows stored in the quality database.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    target_id: str = Field(alias="targetId")
+    library_stack_path: str = Field(alias="libraryStackPath")
+    odd_half_frames: int = Field(default=0, alias="oddHalfFrames")
+    even_half_frames: int = Field(default=0, alias="evenHalfFrames")
+    shared_frame: str | None = Field(default=None, alias="sharedFrame")
+    odd_half_effective_frame_count: float | None = Field(default=None, alias="oddHalfEffectiveFrameCount")
+    even_half_effective_frame_count: float | None = Field(default=None, alias="evenHalfEffectiveFrameCount")
+    difference_noise_stack_unit: float | None = Field(default=None, alias="differenceNoiseStackUnit")
+    difference_noise_normalized: float | None = Field(default=None, alias="differenceNoiseNormalized")
+    difference_noise_normalized_uncertainty: float | None = Field(
+        default=None, alias="differenceNoiseNormalizedUncertainty"
+    )
+    reference_flux_stack_unit: float | None = Field(default=None, alias="referenceFluxStackUnit")
+    aperture_count: int | None = Field(default=None, alias="apertureCount")
+    shared_frame_odd_weight_fraction: float | None = Field(default=None, alias="sharedFrameOddWeightFraction")
+    shared_frame_even_weight_fraction: float | None = Field(
+        default=None, alias="sharedFrameEvenWeightFraction"
+    )
+    model_variance_ratio: float | None = Field(default=None, alias="modelVarianceRatio")
+    variance_factor: float | None = Field(default=None, alias="varianceFactor")
+    full_stack_equivalent_normalized: float | None = Field(
+        default=None, alias="fullStackEquivalentNormalized"
+    )
+    full_stack_equivalent_model_normalized: float | None = Field(
+        default=None, alias="fullStackEquivalentModelNormalized"
+    )
+    reason: str = ""
+    notes: list[str] = Field(default_factory=list)
+    rows_written: int = Field(default=0, alias="rowsWritten")
+
+
 class NoiseGrowthResult(BaseModel):
     """What the noise-against-frame-count job did.
 
@@ -142,11 +244,13 @@ class NoiseGrowthResult(BaseModel):
         The subset stacks, smallest first.
     night_contributions : `NightContributionResult` or `None`
         The each-night's-contribution result when it was asked for.
+    half_difference : `HalfDifferenceNoiseResult` or `None`
+        The half-difference noise result when it was asked for.
     notes : `list` [`str`]
         Plain sentences about steps that were not done and why.
     rows_written : `int`
         New rows stored in the quality database by the subset series (the
-        night contributions count their own).
+        night contributions and the half difference count their own).
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -155,5 +259,6 @@ class NoiseGrowthResult(BaseModel):
     library_stack_path: str = Field(alias="libraryStackPath")
     subsets: list[SubsetStackResult] = Field(default_factory=list)
     night_contributions: NightContributionResult | None = Field(default=None, alias="nightContributions")
+    half_difference: HalfDifferenceNoiseResult | None = Field(default=None, alias="halfDifference")
     notes: list[str] = Field(default_factory=list)
     rows_written: int = Field(default=0, alias="rowsWritten")

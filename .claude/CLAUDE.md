@@ -35,6 +35,7 @@ Prefer executing pre-existing lifecycle scripts under `build/linux/` instead of 
 - **Full Application / Electron UI**: `build/linux/run_astrometrics.sh [start|stop|restart|status]`
 - **Builds & Packaging**: `build/linux/build_astrometrics.sh`
 - **Environment Setup**: `build/linux/setup_venv.sh`
+- **Agent checks and real-data runs**: `build/agent_tools/check.sh`, `realrun.sh`, `dbq.sh` (see its README). Targeted tests, lint, docs and golden runs share a limited number of heavy-work slots, and real-data scripts reach only a copy of the library. Leave the full suites to continuous integration.
 
 ## 5. Model Context Protocol (MCP) Tool Integration
 The MCP servers live in `mcp_servers/` (the UI server in `ui/mcp/`). Claude Code has access via the MCP server configuration; each server offers only the tools its `tool_manifest.json` allows for the active profile:

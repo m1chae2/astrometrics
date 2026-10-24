@@ -56,6 +56,7 @@ from wayfindinglib.analytics.result_quality.capture_overheads import estimate_ca
 from wayfindinglib.analytics.result_quality.efficiency import (
     READ_NOISE_METRIC,
     SKY_RATE_METRIC,
+    STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC,
     FrameObservation,
     assess_efficiency,
 )
@@ -88,6 +89,7 @@ from wayfindinglib.analytics.result_quality.report_rules import (
     frames_lost_statements,
     insufficient,
     more_frames_statement,
+    seeing_limit_statements,
     sharpness_statement,
     sky_cost_statements,
     stop_statement,
@@ -1299,6 +1301,12 @@ def build_target_dataset_report(
         )
     )
     statements.extend(sky_cost_statements(summaries))
+    star_width_evidence = {
+        row.subject.subject_id: MeasurementReference(row_id=row.row_id)
+        for row in rows
+        if row.metric == STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC and row.row_id is not None
+    }
+    statements.extend(seeing_limit_statements(observations, goal, context.reference_for, star_width_evidence))
     contexts = butler.get_all("ekos_session_context")
     statements.extend(
         _quality_statements_of_settings(

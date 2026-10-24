@@ -482,14 +482,14 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         statement_kind=StatementKind.CONSTRAINT,
         requires=[MetricRequirement(name=STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC, definition_version=1)],
         limits=[],
-        register_entry="WAY-D12",
+        register_entry="WAY-D68",
         confidence=Confidence.DESIGN_ESTIMATE,
         wording="Seeing limits the detail on this target; more time adds depth, not detail.",
         purpose=(
             "When the star width is already at the seeing limit, only better nights (not more "
             "frames) add detail. No advice follows."
         ),
-        computed_by="efficiency",
+        computed_by="report_rules",
     ),
 )
 

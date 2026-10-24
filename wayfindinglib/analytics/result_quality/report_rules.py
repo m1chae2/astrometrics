@@ -31,17 +31,28 @@ from __future__ import annotations
 import math
 import statistics
 from collections import Counter
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
-from astrometricslib import DEFAULT_DARK_TEMPERATURE_TOLERANCE_C, CaptureSetting, MeasurementReference
+from astrometricslib import (
+    DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+    CaptureSetting,
+    LimitTier,
+    MeasurementReference,
+    QualityLimit,
+)
 from wayfindinglib.analytics.capture_history import normalize_name
 from wayfindinglib.analytics.result_quality.capture_overheads import (
     EXPOSURE_MATCH_SECONDS,
     CaptureOverheads,
     wall_clock_estimate,
 )
-from wayfindinglib.analytics.result_quality.efficiency import CAUSE_SKY, CAUSE_SKY_MOON
+from wayfindinglib.analytics.result_quality.efficiency import (
+    CAUSE_SKY,
+    CAUSE_SKY_MOON,
+    STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC,
+    FrameObservation,
+)
 from wayfindinglib.analytics.result_quality.noise_growth import (
     StackFrame,
     StopSignal,
@@ -51,6 +62,7 @@ from wayfindinglib.analytics.result_quality.noise_growth import (
 )
 from wayfindinglib.analytics.result_quality.rules import rule_by_name
 from wayfindinglib.models.quality.capture_summary import CaptureSettingSummary
+from wayfindinglib.models.quality.efficiency import EfficiencyReference, EfficiencyReferenceKind, ScienceGoal
 from wayfindinglib.models.quality.statements import (
     ExpectedEffect,
     ProposedAction,
@@ -101,6 +113,14 @@ SHARPNESS_MINIMUM_FRAMES = 20
 """Fewest frames of one setting for the trade-off. A subset of 70 percent then
 still holds 14 frames, enough for a median. Design estimate, register row
 WAY-D66."""
+
+SEEING_AT_REFERENCE_TOLERANCE = 0.10
+"""For a point-source goal, ``seeing_limits_resolution`` fires when the median
+star width is within this fraction above the physical reference width (or
+below it). The efficiency of a single frame is known to within about 5 percent
+(the seeing width bias of AST-18), so 10 percent is twice that: closer than
+this, the stars are as sharp as the telescope and a typical sky allow. Design
+estimate, register row WAY-D68."""
 
 CALIBRATION_FLAT_FRAME_TYPE = "flat"
 CALIBRATION_DARK_FRAME_TYPE = "dark"
@@ -392,6 +412,115 @@ def sky_cost_statements(summaries: Sequence[CaptureSettingSummary]) -> list[Targ
                 ),
             )
         )
+    return statements
+
+
+# -----------------------------------------------------------------------------
+# Seeing limits resolution
+# -----------------------------------------------------------------------------
+
+
+def seeing_limit_statements(
+    observations: Iterable[FrameObservation],
+    goal: ScienceGoal,
+    reference_for: Callable[[CaptureSetting], EfficiencyReference | None],
+    star_width_evidence: Mapping[str, MeasurementReference],
+) -> list[TargetStatement]:
+    """Say where seeing, not exposure time, limits the detail.
+
+    This is a constraint: it has no action, because only better nights would
+    help and a night cannot be ordered. It is made for a setting in two cases:
+
+    * The goal is an extended object or a slitless spectrum, where the
+      efficiency model leaves seeing out of the time loss because more time
+      does not repair it, and the median star width is wider than the
+      reference width (the seeing factor would be below 1).
+    * The goal is a point source, and the median star width is within
+      `SEEING_AT_REFERENCE_TOLERANCE` of the physical reference (diffraction
+      plus typical seeing), so only better seeing would sharpen the stars.
+
+    Nothing is emitted when the case cannot be evaluated (another goal, no
+    reference, no star width, or a point-source goal measured against the
+    equipment baseline instead of the physical reference). Not being able to
+    tell is not a finding about the data, so it is not an
+    ``insufficient_data`` statement: the report already says when the
+    reference or the widths are missing, in the efficiency notes.
+
+    Parameters
+    ----------
+    observations : `Iterable` [`FrameObservation`]
+        The frames of the target. Frames the stacker set aside are skipped.
+    goal : `ScienceGoal`
+        The science goal of the target.
+    reference_for : `Callable`
+        Gives the efficiency reference of a capture setting, or ``None``.
+    star_width_evidence : `Mapping` [`str`, `MeasurementReference`]
+        The star-width row of each frame, by frame id.
+
+    Returns
+    -------
+    statements : `list` [`TargetStatement`]
+        One constraint for each setting where seeing limits the detail.
+    """
+    detail_goals = {ScienceGoal.EXTENDED_OBJECT, ScienceGoal.SLITLESS_SPECTRAL_RESOLUTION}
+    point_goals = {ScienceGoal.FAINT_POINT_SOURCE, ScienceGoal.ASTROMETRIC_PRECISION}
+    if goal not in detail_goals | point_goals:
+        return []
+    rule = rule_by_name("seeing_limits_resolution")
+    widths_by_setting: dict[CaptureSetting, list[tuple[str, float]]] = {}
+    for observation in observations:
+        if observation.set_aside_reason is None and observation.star_width_effective_arcsec is not None:
+            widths_by_setting.setdefault(observation.capture_setting, []).append((
+                observation.frame_id,
+                observation.star_width_effective_arcsec,
+            ))
+    statements: list[TargetStatement] = []
+    for setting, widths in widths_by_setting.items():
+        reference = reference_for(setting)
+        reference_width = (
+            None if reference is None else reference.factors.get(STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC)
+        )
+        if reference is None or reference_width is None:
+            continue
+        median_width = statistics.median(width for _frame_id, width in widths)
+        if goal in detail_goals:
+            fires = median_width > reference_width
+        else:
+            fires = reference.kind == EfficiencyReferenceKind.PHYSICAL and median_width <= reference_width * (
+                1.0 + SEEING_AT_REFERENCE_TOLERANCE
+            )
+        if not fires:
+            continue
+        limit = QualityLimit(
+            value=reference_width,
+            unit="arcsec",
+            tier=LimitTier.DESIGN_ESTIMATE,
+            derivation=(
+                f"The {reference.name} reference star width: "
+                + (
+                    "diffraction limit, typical seeing and pixel blur added as squared widths."
+                    if reference.kind == EfficiencyReferenceKind.PHYSICAL
+                    else "the equipment's own good nights (10th percentile of nightly medians)."
+                )
+            ),
+            registerEntry=reference.register_entry,
+        )
+        statement = _from_rule(
+            "seeing_limits_resolution",
+            rule.wording,
+            (
+                f"The median star width is {median_width:.2f} arcsec against a {reference.name} reference "
+                f"of {reference_width:.2f} arcsec"
+                + (
+                    ", and for this goal more exposure time does not repair seeing."
+                    if goal in detail_goals
+                    else ", so the stars are already as sharp as the telescope and a typical sky allow."
+                )
+            ),
+            capture_setting=setting,
+            evidence=[star_width_evidence[f] for f, _w in widths if f in star_width_evidence],
+        )
+        statements.append(statement.model_copy(update={"limits": [limit]}))
     return statements
 
 

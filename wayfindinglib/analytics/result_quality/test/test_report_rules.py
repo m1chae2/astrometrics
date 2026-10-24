@@ -16,7 +16,12 @@ import pytest
 from astrometricslib import CaptureSetting, MeasurementReference
 from wayfindinglib.analytics.result_quality import report_rules as rr
 from wayfindinglib.analytics.result_quality.capture_overheads import CaptureOverheads
-from wayfindinglib.analytics.result_quality.efficiency import CAUSE_SKY, CAUSE_SKY_MOON
+from wayfindinglib.analytics.result_quality.efficiency import (
+    CAUSE_SKY,
+    CAUSE_SKY_MOON,
+    STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC,
+    FrameObservation,
+)
 from wayfindinglib.analytics.result_quality.noise_growth import (
     StackFrame,
     StopSignal,
@@ -30,7 +35,13 @@ from wayfindinglib.analytics.result_quality.starting_point import (
     sky_dominated_exposure_seconds,
 )
 from wayfindinglib.models.quality.capture_summary import CaptureSettingSummary
-from wayfindinglib.models.quality.efficiency import LossAccount, LossShare, ScienceGoal
+from wayfindinglib.models.quality.efficiency import (
+    EfficiencyReference,
+    EfficiencyReferenceKind,
+    LossAccount,
+    LossShare,
+    ScienceGoal,
+)
 from wayfindinglib.models.quality.statements import (
     ActionClass,
     Confidence,
@@ -417,3 +428,113 @@ def test_starting_point_says_what_is_missing_instead_of_inventing_a_number() -> 
     point = build_starting_point(_inputs(read_noise_e=None, read_noise_note="No measured read noise exists."))
     assert point.exposure_seconds is None
     assert "No measured read noise" in point.exposure_reason
+
+
+# -- seeing limits resolution ------------------------------------------------
+
+
+def _width_observations(width_arcsec: float, count: int = 5) -> list[FrameObservation]:
+    """Build kept frames of one setting that share a star width.
+
+    Parameters
+    ----------
+    width_arcsec : `float`
+        The effective star width of every frame, in arcseconds.
+    count : `int`, optional
+        How many frames.
+
+    Returns
+    -------
+    observations : `list` [`FrameObservation`]
+        The frames.
+    """
+    return [
+        FrameObservation(
+            frameId=f"frame-{index}",
+            captureSetting=SETTING,
+            exposureSeconds=60.0,
+            starWidthEffectiveArcsec=width_arcsec,
+        )
+        for index in range(count)
+    ]
+
+
+def _reference(kind: EfficiencyReferenceKind, width_arcsec: float = 2.0) -> EfficiencyReference:
+    """Build a reference with a star width.
+
+    Returns
+    -------
+    reference : `EfficiencyReference`
+        The reference.
+    """
+    return EfficiencyReference(
+        name=kind.value,
+        version=1,
+        kind=kind,
+        factors={STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC: width_arcsec},
+        registerEntry="WAY-D21" if kind == EfficiencyReferenceKind.PHYSICAL else "WAY-D22",
+    )
+
+
+def _evidence(count: int = 5) -> dict[str, MeasurementReference]:
+    """Cite one star-width row for each frame.
+
+    Returns
+    -------
+    evidence : `dict` [`str`, `MeasurementReference`]
+        The references by frame id.
+    """
+    return {f"frame-{index}": MeasurementReference(row_id=index + 1) for index in range(count)}
+
+
+def test_seeing_limit_on_an_extended_object_is_a_constraint_with_no_action() -> None:
+    """Wide stars on an extended object give a constraint."""
+    reference = _reference(EfficiencyReferenceKind.PHYSICAL)
+    statements = rr.seeing_limit_statements(
+        _width_observations(3.0), ScienceGoal.EXTENDED_OBJECT, lambda _setting: reference, _evidence()
+    )
+    assert len(statements) == 1
+    statement = statements[0]
+    assert statement.kind == StatementKind.CONSTRAINT
+    assert statement.proposed_action is None
+    assert statement.action_class is None
+    assert statement.capture_setting == SETTING
+    assert len(statement.evidence) == 5
+    assert statement.limits[0].value == pytest.approx(2.0)
+    assert statement.limits[0].register_entry == "WAY-D21"
+
+
+def test_seeing_limit_is_quiet_for_a_point_source_well_above_the_reference() -> None:
+    """Stars far above the reference leave room to improve: no constraint."""
+    reference = _reference(EfficiencyReferenceKind.PHYSICAL)
+    statements = rr.seeing_limit_statements(
+        _width_observations(3.0), ScienceGoal.FAINT_POINT_SOURCE, lambda _setting: reference, _evidence()
+    )
+    assert statements == []
+
+
+def test_seeing_limit_fires_for_a_point_source_at_the_physical_reference() -> None:
+    """A point source at the physical reference width is limited by seeing."""
+    reference = _reference(EfficiencyReferenceKind.PHYSICAL)
+    statements = rr.seeing_limit_statements(
+        _width_observations(2.1), ScienceGoal.FAINT_POINT_SOURCE, lambda _setting: reference, _evidence()
+    )
+    assert [statement.kind for statement in statements] == [StatementKind.CONSTRAINT]
+
+
+def test_seeing_limit_says_nothing_when_it_cannot_be_evaluated() -> None:
+    """Nothing is said without a reference, widths or a fitting goal."""
+    physical = _reference(EfficiencyReferenceKind.PHYSICAL)
+    baseline = _reference(EfficiencyReferenceKind.BASELINE)
+    kept = _width_observations(2.0)
+    assert rr.seeing_limit_statements(kept, ScienceGoal.EXTENDED_OBJECT, lambda _s: None, _evidence()) == []
+    assert (
+        rr.seeing_limit_statements(
+            _width_observations(2.0)[:0], ScienceGoal.EXTENDED_OBJECT, lambda _s: physical, _evidence()
+        )
+        == []
+    )
+    assert rr.seeing_limit_statements(kept, ScienceGoal.FAINT_POINT_SOURCE, lambda _s: baseline, {}) == []
+    assert (
+        rr.seeing_limit_statements(kept, ScienceGoal.PERIOD_DETECTION, lambda _s: physical, _evidence()) == []
+    )

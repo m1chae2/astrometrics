@@ -7,8 +7,11 @@ frames, three things must be the same:
 1. The patches of sky. Each patch is a small circle (an "aperture") with no
    star in it, bright or faint. Bright stars are found by the star finder;
    faint ones are found by a mask made from the stack's own pixels
-   (`faint_source_distance`) before any patch is drawn, so a patch is never
-   chosen or dropped for how quiet its own sum is. Different patches can have
+   (`faint_source_distance`) before any patch is drawn, so a patch is chosen
+   by a pixel mask made before placement, not by its own sum. The mask is not
+   perfect: a 3.5-sigma noise peak near a patch can exclude it, so the
+   noise is biased low by a small amount that was measured (validation entry
+   STK-36). Different patches can have
    different noise (vignetting, a faint nebula), so every stack of a target
    uses the same patches. The patches are chosen once, stored as sky positions
    (right ascension and declination, not pixels) in a small file beside the
@@ -94,16 +97,23 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "APERTURE_FILE_NAME",
     "ApertureSet",
+    "ApertureSetMismatchError",
+    "FaintSourceAnalysis",
+    "StackDepth",
     "StackNoiseOutcome",
     "StackNoiseResult",
+    "analyze_faint_sources",
     "choose_apertures",
     "choose_apertures_with_reason",
+    "discard_noise_sums",
     "faint_source_distance",
     "load_apertures",
+    "load_apertures_with_reason",
     "load_noise_sums",
     "measure_stack_noise",
     "noise_sums_path",
     "paired_noise_difference",
+    "paired_noise_ratio",
     "place_empty_apertures",
     "reset_apertures",
     "save_noise_sums",
@@ -116,11 +126,28 @@ APERTURE_FILE_NAME = "quality_apertures.json"
 
 # The version of the file's layout. Version 3 holds one set of apertures for
 # each camera and optic, placed away from faint sources as well as bright
-# stars (see `FAINT_SOURCE_THRESHOLD_SIGMAS`). Version 2 apertures were placed
-# away from the 400 brightest stars only; faint stars sat in them. Version 1
-# held one set, with no per-star reference brightness. Older files are
-# replaced when a stack is measured, never used.
+# stars (see `FAINT_SOURCE_THRESHOLD_SIGMAS`), with the depth of the stack that
+# defined it. Version 2 apertures were placed away from the 400 brightest stars
+# only; faint stars sat in them. Version 1 held one set, with no per-star
+# reference brightness. Older files are replaced when a library stack is
+# measured, never used, and a subset stack refuses them with a reason.
 APERTURE_FILE_VERSION = 3
+
+# The reason a subset stack gives when the stored apertures are missing or of
+# an older version: a subset never chooses apertures, so that every subset of a
+# target is read in the apertures its library stack chose.
+OLD_APERTURES_REASON = (
+    f"the target's apertures predate version {APERTURE_FILE_VERSION}; "
+    "stack the target once so its library stack chooses them"
+)
+
+# A stored set is replaced when a library stack has at least this many times
+# the defining stack's effective frame count. Noise falls as 1 over the square
+# root of the frame count, so 2 times the frames is 1.41 times less noise:
+# sources 1.4 times fainter then stand above the noise and the older mask
+# misses them. Smaller factors would change the set too often to compare
+# stacks of a growing target; this is a design choice (see STK-36).
+REPLACEMENT_DEPTH_FACTOR = 2.0
 
 # The setup key of a stack whose header names neither camera, telescope nor
 # focal length.
@@ -177,8 +204,11 @@ STAR_CLEARANCE_PX = 2.0 * RING_OUTER_PX
 # small galaxy or a knot of nebula is several pixels), and every pixel more
 # than `FAINT_SOURCE_THRESHOLD_SIGMAS` robust sigmas above zero at any width is
 # flagged. The sigma of each width is the median absolute deviation of that
-# smoothed image, which stars cover too little of to move it, and which keeps
-# the correlation of the stacked noise that smoothing does not remove.
+# smoothed image over the pixels that hold data (not the empty edge filled
+# with the median, which would pull the scale down), which stars cover too
+# little of to move it, and which keeps the correlation of the stacked noise
+# that smoothing does not remove. A crowded field raises the scale and so the
+# effective threshold (validation entry STK-36 gives the measured rise).
 FAINT_SOURCE_HIGH_PASS_SIGMA_PX = 12.0
 FAINT_SOURCE_SMOOTHING_SIGMAS_PX = (1.5, 3.0, 6.0)
 
@@ -189,9 +219,12 @@ FAINT_SOURCE_SMOOTHING_SIGMAS_PX = (1.5, 3.0, 6.0)
 # on a synthetic noise field and on the M 57 stack.
 FAINT_SOURCE_THRESHOLD_SIGMAS = 3.5
 
-# An aperture stays this far from every flagged pixel: the ring's outer radius,
-# so no flagged pixel lies in the aperture or in its sky ring.
-FAINT_SOURCE_CLEARANCE_PX = RING_OUTER_PX
+# An aperture stays this far from every flagged pixel (measured from the
+# rounded pixel of its center): the ring's outer radius plus 1 px. Rounding the
+# center to a pixel moves it by up to 0.71 px, and the ring reaches the pixels
+# whose centers lie within the outer radius, so 1 px more guarantees that no
+# flagged pixel lies in the aperture or in its sky ring.
+FAINT_SOURCE_CLEARANCE_PX = RING_OUTER_PX + 1.0
 
 # Two apertures stay at least this far apart: twice the ring's outer radius.
 # Then no two rings share a pixel, so the sky level taken for one aperture
@@ -287,6 +320,60 @@ PAIRED_BOOTSTRAP_SEED = 20261024
 NO_WCS_REASON = "no WCS for this stack"
 
 
+class ApertureSetMismatchError(ValueError):
+    """Two noise measurements were made in different sets of apertures."""
+
+
+@dataclass(frozen=True)
+class StackDepth:
+    """How many frames a stack holds, for the rule that replaces old apertures.
+
+    Parameters
+    ----------
+    frame_count : `int`
+        The number of frames in the stack.
+    effective_frame_count : `float`
+        Its effective frame count, (sum of w)^2 / (sum of w^2).
+    """
+
+    frame_count: int
+    effective_frame_count: float
+
+
+def _rounded_or_none(value: float | None) -> float | None:
+    """Round a frame count to 3 decimals, so a file round trip keeps its hash.
+
+    Parameters
+    ----------
+    value : `float` or `None`
+        The effective frame count.
+
+    Returns
+    -------
+    rounded : `float` or `None`
+        The rounded value, or `None`.
+    """
+    return None if value is None else round(float(value), 3)
+
+
+def _optional_number(value: object, kind: type) -> int | float | None:
+    """Turn a stored JSON value into a number, or `None` when it is absent.
+
+    Parameters
+    ----------
+    value : `object`
+        What the file held: a number or `None`.
+    kind : `type`
+        `int` or `float`.
+
+    Returns
+    -------
+    number : `int`, `float` or `None`
+        The converted value.
+    """
+    return None if value is None else kind(value)
+
+
 @dataclass(frozen=True)
 class ApertureSet:
     """The sky positions a target's stack noise is measured at.
@@ -319,6 +406,22 @@ class ApertureSet:
         How saturated stars were kept out when the set was chosen.
     setup_key : `str`
         The camera, telescope and focal length the set belongs to.
+    defining_frame_count : `int` or `None`
+        The number of frames in the stack that chose the set; `None` when the
+        caller did not know it.
+    defining_effective_frame_count : `float` or `None`
+        That stack's effective frame count (Kish's N_eff); `None` when not
+        known. A set with no effective count is never replaced for depth.
+    mask_noise_scales : `tuple` [`float`, ...]
+        The robust noise scale of the faint-source mask at each smoothing of
+        `FAINT_SOURCE_SMOOTHING_SIGMAS_PX`, divided by the median brightness of
+        the reference stars on the defining stack, so it is in the stack's
+        normalized units.
+    flagged_fraction : `float` or `None`
+        The share of the defining stack's pixels the mask flagged.
+    excluded_fraction : `float` or `None`
+        The share within `FAINT_SOURCE_CLEARANCE_PX` of a flagged pixel, where
+        no aperture could be placed.
     """
 
     aperture_sky: np.ndarray
@@ -331,6 +434,63 @@ class ApertureSet:
     reference_fwhm_px: float
     saturation_source: str
     setup_key: str = UNSPECIFIED_SETUP
+    defining_frame_count: int | None = None
+    defining_effective_frame_count: float | None = None
+    mask_noise_scales: tuple[float, ...] = ()
+    flagged_fraction: float | None = None
+    excluded_fraction: float | None = None
+
+    @property
+    def identity(self) -> str:
+        """Give the set's identity: the file version and a hash of the set.
+
+        Two noise measurements may be compared only when they were made in
+        apertures with the same identity. The hash covers the aperture
+        positions rounded to 1e-6 degrees (0.004 arcsec), so it is the same
+        after the positions go through the JSON file and back, and the defining
+        stack's frame counts, so a set chosen again on a deeper stack has a new
+        identity even if the same positions were drawn.
+
+        Returns
+        -------
+        identity : `str`
+            For example ``"v3-1a2b3c4d5e6f"``.
+        """
+        rounded = np.round(np.asarray(self.aperture_sky, dtype="<f8"), 6)
+        depth = f"{self.defining_frame_count}|{_rounded_or_none(self.defining_effective_frame_count)}"
+        digest = hashlib.sha1(rounded.tobytes() + depth.encode("utf-8"), usedforsecurity=False).hexdigest()[
+            :12
+        ]
+        return f"v{APERTURE_FILE_VERSION}-{digest}"
+
+    def describe_definition(self) -> str:
+        """Say which stack defined the set and how deep it was.
+
+        Returns
+        -------
+        sentence : `str`
+            The identity, the frame counts and the mask's flagged share, for
+            the note that goes with every stored noise row.
+        """
+        if self.defining_frame_count is None and self.defining_effective_frame_count is None:
+            depth = "the defining stack's frame count is unknown"
+        else:
+            frames = "unknown" if self.defining_frame_count is None else str(self.defining_frame_count)
+            effective = (
+                "unknown"
+                if self.defining_effective_frame_count is None
+                else f"{self.defining_effective_frame_count:.1f}"
+            )
+            depth = f"defined by a stack of {frames} frames (effective {effective})"
+        share = (
+            ""
+            if self.flagged_fraction is None or self.excluded_fraction is None
+            else (
+                f"; mask flagged {100 * self.flagged_fraction:.0f}% and excluded "
+                f"{100 * self.excluded_fraction:.0f}%"
+            )
+        )
+        return f"Apertures {self.identity}: {depth}{share}."
 
     @property
     def reference_ring_inner_px(self) -> float:
@@ -376,6 +536,12 @@ class ApertureSet:
             "reference_radius_px": self.reference_radius_px,
             "reference_fwhm_px": self.reference_fwhm_px,
             "saturation_source": self.saturation_source,
+            "identity": self.identity,
+            "defining_frame_count": self.defining_frame_count,
+            "defining_effective_frame_count": self.defining_effective_frame_count,
+            "mask_noise_scales_normalized": list(self.mask_noise_scales),
+            "flagged_fraction": self.flagged_fraction,
+            "excluded_fraction": self.excluded_fraction,
         }
 
     @classmethod
@@ -403,6 +569,13 @@ class ApertureSet:
             reference_fwhm_px=float(data["reference_fwhm_px"]),
             saturation_source=str(data["saturation_source"]),
             setup_key=str(data.get("setup_key", UNSPECIFIED_SETUP)),
+            defining_frame_count=_optional_number(data.get("defining_frame_count"), int),
+            defining_effective_frame_count=_optional_number(
+                data.get("defining_effective_frame_count"), float
+            ),
+            mask_noise_scales=tuple(float(value) for value in data.get("mask_noise_scales_normalized", ())),
+            flagged_fraction=_optional_number(data.get("flagged_fraction"), float),
+            excluded_fraction=_optional_number(data.get("excluded_fraction"), float),
         )
 
 
@@ -459,8 +632,14 @@ class StackNoiseResult:
         NaN where the aperture did not fall on this stack. Two stacks measured
         in the same apertures can be compared aperture by aperture.
     aperture_set_origin : `str`
-        The name of the stack that chose the apertures, which says which set
-        `aperture_sums` belongs to.
+        The name of the stack that chose the apertures.
+    aperture_identity : `str`
+        The identity of the set (see `ApertureSet.identity`), which says which
+        set `aperture_sums` belongs to. Two results are compared only when
+        these match.
+    aperture_definition_note : `str`
+        Which stack defined the set and how deep it was (see
+        `ApertureSet.describe_definition`).
     """
 
     noise_adu: float
@@ -481,6 +660,8 @@ class StackNoiseResult:
     saturation_source: str = ""
     aperture_sums: tuple[float, ...] = ()
     aperture_set_origin: str = ""
+    aperture_identity: str = ""
+    aperture_definition_note: str = ""
 
 
 @dataclass(frozen=True)
@@ -1021,6 +1202,7 @@ def choose_apertures(
     created_from: str,
     setup_key: str = UNSPECIFIED_SETUP,
     saturation: _SaturationCheck | None = None,
+    depth: StackDepth | None = None,
 ) -> ApertureSet | None:
     """Choose empty-sky apertures and reference stars on one stack.
 
@@ -1040,13 +1222,16 @@ def choose_apertures(
         Keeps stars that are saturated in the registration reference frame
         out of the reference stars. Left out, the stack's own 99.99th
         percentile screens the brightest stars instead.
+    depth : `StackDepth`, optional
+        The stack's frame counts, kept with the set. A set without them is
+        never replaced for depth.
 
     Returns
     -------
     aperture_set : `ApertureSet` or `None`
         See `choose_apertures_with_reason`.
     """
-    return choose_apertures_with_reason(plane, wcs, wcs_source, created_from, setup_key, saturation)[0]
+    return choose_apertures_with_reason(plane, wcs, wcs_source, created_from, setup_key, saturation, depth)[0]
 
 
 def choose_apertures_with_reason(
@@ -1056,6 +1241,7 @@ def choose_apertures_with_reason(
     created_from: str,
     setup_key: str = UNSPECIFIED_SETUP,
     saturation: _SaturationCheck | None = None,
+    depth: StackDepth | None = None,
 ) -> tuple[ApertureSet | None, str]:
     """Choose empty-sky apertures and reference stars, and say why not if none.
 
@@ -1075,6 +1261,8 @@ def choose_apertures_with_reason(
         Keeps stars that are saturated in the registration reference frame
         out of the reference stars. Left out, the stack's own 99.99th
         percentile screens the brightest stars instead.
+    depth : `StackDepth`, optional
+        The stack's frame counts, kept with the set.
 
     Returns
     -------
@@ -1099,12 +1287,15 @@ def choose_apertures_with_reason(
     # Every bright star counts for the clearance and the isolation, saturated
     # or not: a saturated star has the widest wings.
     stars = detect_star_centroids(plane, count=DETECTED_STAR_COUNT, skip_saturated=False)
-    positions = place_empty_apertures(plane, stars)
+    analysis = analyze_faint_sources(plane)
+    positions = place_empty_apertures(plane, stars, analysis.distance)
     if len(positions) < MINIMUM_USABLE_APERTURES:
         return None, (
             f"only {len(positions)} empty apertures could be placed on this stack, away from bright stars "
             f"and from faint sources ({FAINT_SOURCE_THRESHOLD_SIGMAS} sigma or more above the sky at a "
-            f"smoothing of {FAINT_SOURCE_SMOOTHING_SIGMAS_PX} px); at least "
+            f"smoothing of {FAINT_SOURCE_SMOOTHING_SIGMAS_PX} px); the mask flagged "
+            f"{100 * analysis.flagged_fraction:.0f}% of the image and its clearance excludes "
+            f"{100 * analysis.excluded_fraction:.0f}% of it; at least "
             f"{MINIMUM_USABLE_APERTURES} are needed"
         )
     percentile_screen = None
@@ -1131,6 +1322,8 @@ def choose_apertures_with_reason(
             None,
             f"only {len(reference)} isolated, unsaturated reference stars could be found on this stack",
         )
+    median_baseline = float(np.median(baseline))
+    mask_scales = tuple(scale / median_baseline for scale in analysis.noise_scales)
     return (
         ApertureSet(
             aperture_sky=_pixels_to_sky(wcs, np.array(positions, dtype=float)),
@@ -1147,12 +1340,19 @@ def choose_apertures_with_reason(
                 else "the stack's own 99.99th percentile (no registration reference frame was available)"
             ),
             setup_key=setup_key,
+            defining_frame_count=None if depth is None else depth.frame_count,
+            defining_effective_frame_count=None if depth is None else depth.effective_frame_count,
+            mask_noise_scales=mask_scales,
+            flagged_fraction=analysis.flagged_fraction,
+            excluded_fraction=analysis.excluded_fraction,
         ),
         "",
     )
 
 
-def place_empty_apertures(plane: np.ndarray, stars: np.ndarray) -> list[tuple[float, float]]:
+def place_empty_apertures(
+    plane: np.ndarray, stars: np.ndarray, source_distance: np.ndarray | None = None
+) -> list[tuple[float, float]]:
     """Draw empty-sky aperture positions, away from stars and faint sources.
 
     Positions are drawn from a generator with a fixed seed. A draw is kept
@@ -1169,6 +1369,9 @@ def place_empty_apertures(plane: np.ndarray, stars: np.ndarray) -> list[tuple[fl
         The stack as a 2-D image.
     stars : `numpy.ndarray`
         Star centers, shape ``(n, 2)`` as (row, column).
+    source_distance : `numpy.ndarray`, optional
+        The stack's `faint_source_distance`, when the caller already has it.
+        Found here when left out.
 
     Returns
     -------
@@ -1176,7 +1379,8 @@ def place_empty_apertures(plane: np.ndarray, stars: np.ndarray) -> list[tuple[fl
         The kept (row, column) positions, at most `NOISE_APERTURE_COUNT`.
     """
     star_tree = cKDTree(stars) if len(stars) else None
-    source_distance = faint_source_distance(plane)
+    if source_distance is None:
+        source_distance = faint_source_distance(plane)
     height, width = plane.shape
     generator = np.random.default_rng(APERTURE_SEED)
     positions: list[tuple[float, float]] = []
@@ -1197,18 +1401,98 @@ def place_empty_apertures(plane: np.ndarray, stars: np.ndarray) -> list[tuple[fl
     return positions
 
 
-def faint_source_distance(plane: np.ndarray) -> np.ndarray:
-    """Give each pixel's distance to the nearest faint source in a stack.
+@dataclass(frozen=True)
+class FaintSourceAnalysis:
+    """What the faint-source mask found in one stack.
 
-    The rule uses only the stack's pixels, never an aperture's sum, so it
-    cannot choose apertures by how quiet they turned out to be. The stack's
-    large-scale background is taken away (a Gaussian of
+    Parameters
+    ----------
+    distance : `numpy.ndarray`
+        For every pixel, the distance in pixels to the nearest flagged pixel.
+        Infinite when nothing is flagged; zero everywhere when the
+        stack holds no usable pixel.
+    noise_scales : `tuple` [`float`, ...]
+        The robust noise scale (1.4826 times the median absolute deviation over
+        the pixels that hold data) of the smoothed, background-free image at
+        each of `FAINT_SOURCE_SMOOTHING_SIGMAS_PX`, in the stack's own units.
+    flagged_fraction : `float`
+        The share of all pixels that were flagged.
+    usable_fraction : `float`
+        The share of all pixels that hold data (finite and not exactly zero).
+    excluded_fraction : `float`
+        The share of all pixels within `FAINT_SOURCE_CLEARANCE_PX` of a flagged
+        pixel, where no aperture may be centered. This is the share that limits
+        placement; it is larger than the flagged share.
+    """
+
+    distance: np.ndarray
+    noise_scales: tuple[float, ...]
+    flagged_fraction: float
+    usable_fraction: float
+    excluded_fraction: float = 0.0
+
+
+def analyze_faint_sources(plane: np.ndarray) -> FaintSourceAnalysis:
+    """Find the faint sources of a stack and say how the mask was scaled.
+
+    The rule uses only the stack's pixels, never an aperture's sum. The
+    stack's large-scale background is taken away (a Gaussian of
     `FAINT_SOURCE_HIGH_PASS_SIGMA_PX`), the result is smoothed at each of
     `FAINT_SOURCE_SMOOTHING_SIGMAS_PX`, and a pixel is flagged when any
     smoothed value lies more than `FAINT_SOURCE_THRESHOLD_SIGMAS` robust
     sigmas above zero. Empty edge pixels (exactly zero or not finite) are
     filled with the stack's median first, so the edge does not look like a
-    source.
+    source, and they are left out of each noise scale, so the filled edge does
+    not pull the scale down. The working arrays are 32-bit and freed as soon
+    as they are used, which keeps the peak memory near five copies of the
+    image (see validation entry STK-36).
+
+    Parameters
+    ----------
+    plane : `numpy.ndarray`
+        The stack as a 2-D image.
+
+    Returns
+    -------
+    analysis : `FaintSourceAnalysis`
+        The distance map, the noise scales and the flagged share.
+    """
+    image = np.asarray(plane, dtype=np.float32)
+    usable = np.isfinite(image) & (image != 0)
+    usable_fraction = float(np.count_nonzero(usable)) / usable.size if usable.size else 0.0
+    if not usable.any():
+        return FaintSourceAnalysis(np.zeros(image.shape, dtype=np.float32), (), 0.0, 0.0, 1.0)
+    filled = np.where(usable, image, np.float32(np.median(image[usable])))
+    flat = filled - gaussian_filter(filled, FAINT_SOURCE_HIGH_PASS_SIGMA_PX)
+    del filled
+    flagged = np.zeros(image.shape, dtype=bool)
+    scales: list[float] = []
+    for width in FAINT_SOURCE_SMOOTHING_SIGMAS_PX:
+        smooth = gaussian_filter(flat, width)
+        values = smooth[usable]
+        center = np.median(values)
+        values -= center
+        np.abs(values, out=values)
+        sigma = MAD_TO_SIGMA * float(np.median(values))
+        del values
+        scales.append(sigma)
+        if sigma > 0:
+            flagged |= smooth > FAINT_SOURCE_THRESHOLD_SIGMAS * sigma
+        del smooth
+    del flat
+    flagged_fraction = float(np.count_nonzero(flagged)) / flagged.size
+    if not flagged.any():
+        distance = np.full(image.shape, np.inf, dtype=np.float32)
+    else:
+        distance = distance_transform_edt(~flagged)
+    excluded_fraction = float(np.count_nonzero(distance <= FAINT_SOURCE_CLEARANCE_PX)) / distance.size
+    return FaintSourceAnalysis(distance, tuple(scales), flagged_fraction, usable_fraction, excluded_fraction)
+
+
+def faint_source_distance(plane: np.ndarray) -> np.ndarray:
+    """Give each pixel's distance to the nearest faint source in a stack.
+
+    See `analyze_faint_sources` for the rule.
 
     Parameters
     ----------
@@ -1221,21 +1505,7 @@ def faint_source_distance(plane: np.ndarray) -> np.ndarray:
         For every pixel, the distance in pixels to the nearest flagged pixel.
         Infinite when nothing is flagged.
     """
-    image = np.asarray(plane, dtype=np.float64)
-    usable = np.isfinite(image) & (image != 0)
-    if not usable.any():
-        return np.zeros(image.shape)
-    filled = np.where(usable, image, float(np.median(image[usable])))
-    flat = filled - gaussian_filter(filled, FAINT_SOURCE_HIGH_PASS_SIGMA_PX)
-    flagged = np.zeros(image.shape, dtype=bool)
-    for width in FAINT_SOURCE_SMOOTHING_SIGMAS_PX:
-        smooth = gaussian_filter(flat, width)
-        sigma = MAD_TO_SIGMA * float(np.median(np.abs(smooth - np.median(smooth))))
-        if sigma > 0:
-            flagged |= smooth > FAINT_SOURCE_THRESHOLD_SIGMAS * sigma
-    if not flagged.any():
-        return np.full(image.shape, np.inf)
-    return distance_transform_edt(~flagged)
+    return analyze_faint_sources(plane).distance
 
 
 def _isolated_stars(stars: np.ndarray, clearance: float = STAR_CLEARANCE_PX) -> np.ndarray:
@@ -1362,6 +1632,66 @@ def load_apertures(path: str, setup_key: str | None = None) -> ApertureSet | Non
         return None
 
 
+def load_apertures_with_reason(path: str, setup_key: str | None = None) -> tuple[ApertureSet | None, str]:
+    """Read a target's stored apertures, and say why not when there are none.
+
+    A subset stack uses this: it never chooses apertures, so it must tell a
+    missing file from a file of an older version.
+
+    Parameters
+    ----------
+    path : `str`
+        The ``quality_apertures.json`` file.
+    setup_key : `str`, optional
+        The camera and optic wanted. Left out, the first stored set.
+
+    Returns
+    -------
+    aperture_set : `ApertureSet` or `None`
+        The stored set, or `None`.
+    reason : `str`
+        Why there is no set. Empty when there is one. A missing file, a file
+        of an older version (`OLD_APERTURES_REASON`), a file with no set for
+        this camera and optic, and an unreadable file each have their own
+        sentence.
+    """
+    if not os.path.isfile(path):
+        return None, (
+            "the target has no stored noise apertures; stack the target once so its library stack "
+            "chooses them"
+        )
+    if _stored_file_version(path) != APERTURE_FILE_VERSION:
+        return None, OLD_APERTURES_REASON
+    aperture_set = load_apertures(path, setup_key)
+    if aperture_set is None:
+        return None, (
+            "the target's stored noise apertures hold no usable set for this camera and optic "
+            f"({setup_key}); stack the target once so its library stack chooses one"
+        )
+    return aperture_set, ""
+
+
+def _stored_file_version(path: str) -> int | None:
+    """Read the layout version written in an aperture file.
+
+    Parameters
+    ----------
+    path : `str`
+        The ``quality_apertures.json`` file.
+
+    Returns
+    -------
+    version : `int` or `None`
+        The version, or `None` when the file cannot be read or has none.
+    """
+    try:
+        with open(path, encoding="utf-8") as handle:
+            version = json.load(handle).get("version")
+        return int(version) if version is not None else None
+    except OSError, ValueError, AttributeError, TypeError:
+        return None
+
+
 def _aperture_lock_path(path: str) -> str:
     """Name the lock file that guards one aperture file.
 
@@ -1401,7 +1731,9 @@ def _write_aperture_file(path: str, sets: dict[str, dict]) -> None:
         raise
 
 
-def _store_apertures_once(path: str, aperture_set: ApertureSet) -> ApertureSet:
+def _store_apertures_once(
+    path: str, aperture_set: ApertureSet, replace_identity: str | None = None
+) -> ApertureSet:
     """Save the set unless another run saved one for the same equipment first.
 
     The file is read, changed and replaced while holding a lock, so two
@@ -1414,6 +1746,10 @@ def _store_apertures_once(path: str, aperture_set: ApertureSet) -> ApertureSet:
         The ``quality_apertures.json`` file.
     aperture_set : `ApertureSet`
         The set to save.
+    replace_identity : `str`, optional
+        The identity of the stored set this one replaces (a deeper stack chose
+        a new set). The stored set is replaced only if it still has this
+        identity; if another run replaced it first, that run's set is kept.
 
     Returns
     -------
@@ -1426,7 +1762,9 @@ def _store_apertures_once(path: str, aperture_set: ApertureSet) -> ApertureSet:
         existing = sets.get(aperture_set.setup_key)
         if existing is not None:
             try:
-                return ApertureSet.from_json(existing)
+                stored = ApertureSet.from_json(existing)
+                if replace_identity is None or stored.identity != replace_identity:
+                    return stored
             except ValueError, KeyError, TypeError:
                 logger.warning("A stored set of noise apertures at %s was unreadable and is replaced.", path)
         sets[aperture_set.setup_key] = aperture_set.to_json()
@@ -1476,6 +1814,9 @@ def measure_stack_noise(
     reference_frame_path: str | None,
     apertures_path: str,
     crop_offset: tuple[int, int] = (0, 0),
+    *,
+    may_choose_apertures: bool = True,
+    depth: StackDepth | None = None,
 ) -> StackNoiseOutcome:
     """Measure a stack's noise in the target's fixed empty apertures.
 
@@ -1493,6 +1834,16 @@ def measure_stack_noise(
     crop_offset : `tuple` [`int`, `int`], optional
         The (columns, rows) cut from the stack's left and top edges when its
         edges were trimmed.
+    may_choose_apertures : `bool`, optional
+        True for a library stack, which chooses the target's apertures when
+        there are none and replaces them when it is much deeper (see
+        `REPLACEMENT_DEPTH_FACTOR`). False for a subset stack, which only
+        measures in the apertures a library stack chose and gives a reason
+        when there are none or they are of an older version.
+    depth : `StackDepth`, optional
+        This stack's frame counts. They are kept with a set this stack
+        chooses, and decide whether a stored set is replaced. Without them a
+        stored set is never replaced.
 
     Returns
     -------
@@ -1507,7 +1858,9 @@ def measure_stack_noise(
         return StackNoiseOutcome(None, "the stack file holds no pixels")
     # The plane is read once; the sky level is taken from it here so no later
     # step has to read the stack again.
-    outcome = _measure_noise_in_plane(plane, stack_path, reference_frame_path, apertures_path, crop_offset)
+    outcome = _measure_noise_in_plane(
+        plane, stack_path, reference_frame_path, apertures_path, crop_offset, may_choose_apertures, depth
+    )
     return replace(outcome, stack_sky_level=sky_level_of_plane(plane))
 
 
@@ -1517,6 +1870,8 @@ def _measure_noise_in_plane(
     reference_frame_path: str | None,
     apertures_path: str,
     crop_offset: tuple[int, int],
+    may_choose_apertures: bool,
+    depth: StackDepth | None,
 ) -> StackNoiseOutcome:
     """Measure a stack's noise in the target's fixed apertures on its plane.
 
@@ -1532,6 +1887,10 @@ def _measure_noise_in_plane(
         Where the target's apertures are kept.
     crop_offset : `tuple` [`int`, `int`]
         The (columns, rows) cut from the stack's left and top edges.
+    may_choose_apertures : `bool`
+        See `measure_stack_noise`.
+    depth : `StackDepth` or `None`
+        See `measure_stack_noise`.
 
     Returns
     -------
@@ -1554,14 +1913,37 @@ def _measure_noise_in_plane(
 
     aperture_set = load_apertures(apertures_path, setup_key)
     created = False
+    keep_note = ""
     if aperture_set is None:
+        if not may_choose_apertures:
+            return StackNoiseOutcome(None, load_apertures_with_reason(apertures_path, setup_key)[1])
         chosen, choice_reason = choose_apertures_with_reason(
-            plane, wcs, wcs_source, os.path.basename(stack_path), setup_key, saturation
+            plane, wcs, wcs_source, os.path.basename(stack_path), setup_key, saturation, depth
         )
         if chosen is None:
             return StackNoiseOutcome(None, choice_reason)
         aperture_set = _store_apertures_once(apertures_path, chosen)
         created = aperture_set is chosen
+    elif may_choose_apertures and _is_much_deeper(depth, aperture_set):
+        chosen, choice_reason = choose_apertures_with_reason(
+            plane, wcs, wcs_source, os.path.basename(stack_path), setup_key, saturation, depth
+        )
+        if chosen is None:
+            keep_note = (
+                f"A set from this deeper stack could not be chosen ({choice_reason}); the older set was kept."
+            )
+        else:
+            replaced = aperture_set
+            aperture_set = _store_apertures_once(apertures_path, chosen, replace_identity=replaced.identity)
+            created = aperture_set is chosen
+            if created:
+                logger.info(
+                    "Replaced the noise apertures %s of %s by %s: this stack is at least %.0f times as deep.",
+                    replaced.identity,
+                    apertures_path,
+                    chosen.identity,
+                    REPLACEMENT_DEPTH_FACTOR,
+                )
     scale = _pixel_scale_arcsec(wcs)
     if (
         abs(scale - aperture_set.pixel_scale_arcsec)
@@ -1582,6 +1964,7 @@ def _measure_noise_in_plane(
         if wcs is None:
             return StackNoiseOutcome(None, reason)
         position_note = alignment.describe() if alignment is not None else ""
+    position_note = " ".join(part for part in (position_note, keep_note) if part)
     all_sums = _sums_at(plane, wcs, aperture_set.aperture_sky)
     sums = all_sums[np.isfinite(all_sums)]
     if sums.size < MINIMUM_USABLE_APERTURES:
@@ -1629,11 +2012,35 @@ def _measure_noise_in_plane(
             position_note=position_note,
             aperture_sums=tuple(float(value) for value in all_sums),
             aperture_set_origin=aperture_set.created_from,
+            aperture_identity=aperture_set.identity,
+            aperture_definition_note=aperture_set.describe_definition(),
             saturation_source=aperture_set.saturation_source
             if created
             else (saturation.source if saturation is not None else aperture_set.saturation_source),
         )
     )
+
+
+def _is_much_deeper(depth: StackDepth | None, aperture_set: ApertureSet) -> bool:
+    """Say whether a stack is deep enough to replace a stored set of apertures.
+
+    Parameters
+    ----------
+    depth : `StackDepth` or `None`
+        The stack's frame counts.
+    aperture_set : `ApertureSet`
+        The stored set.
+
+    Returns
+    -------
+    deeper : `bool`
+        True when both effective frame counts are known and the stack's is at
+        least `REPLACEMENT_DEPTH_FACTOR` times the stored set's.
+    """
+    defining = aperture_set.defining_effective_frame_count
+    if depth is None or defining is None or defining <= 0:
+        return False
+    return depth.effective_frame_count >= REPLACEMENT_DEPTH_FACTOR * defining
 
 
 def noise_sums_path(stack_path: str) -> str:
@@ -1668,6 +2075,8 @@ def save_noise_sums(stack_path: str, result: StackNoiseResult) -> None:
     data = {
         "stack": os.path.basename(stack_path),
         "aperture_set_origin": result.aperture_set_origin,
+        "aperture_identity": result.aperture_identity,
+        "aperture_definition_note": result.aperture_definition_note,
         "reference_flux_adu": result.reference_flux_adu,
         "aperture_sums": [value if math.isfinite(value) else None for value in result.aperture_sums],
     }
@@ -1676,6 +2085,25 @@ def save_noise_sums(stack_path: str, result: StackNoiseResult) -> None:
             json.dump(data, handle)
     except OSError as error:
         logger.warning("The per-aperture noise sums of %s could not be saved: %s", stack_path, error)
+
+
+def discard_noise_sums(stack_path: str) -> None:
+    """Delete a stack's saved per-aperture sums, which no longer match it.
+
+    Called when a new measurement of the stack failed, so that a later paired
+    comparison cannot read the sums of an older stack file of the same name.
+
+    Parameters
+    ----------
+    stack_path : `str`
+        The stack.
+    """
+    try:
+        os.unlink(noise_sums_path(stack_path))
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        logger.warning("The stale per-aperture noise sums of %s could not be removed: %s", stack_path, error)
 
 
 def load_noise_sums(stack_path: str) -> tuple[np.ndarray, float, str] | None:
@@ -1690,20 +2118,94 @@ def load_noise_sums(stack_path: str) -> tuple[np.ndarray, float, str] | None:
     -------
     sums : `tuple` or `None`
         The sums (NaN where an aperture was not usable), the reference flux
-        they are read against, and the name of the stack that chose the
-        apertures; or `None` when the file is missing or cannot be read.
+        they are read against, and the identity of the apertures they were
+        measured in (empty for a file saved before identities existed, which
+        never matches); or `None` when the file is missing or cannot be read.
     """
     try:
         with open(noise_sums_path(stack_path), encoding="utf-8") as handle:
             data = json.load(handle)
         sums = np.array([np.nan if value is None else value for value in data["aperture_sums"]], dtype=float)
-        return sums, float(data["reference_flux_adu"]), str(data["aperture_set_origin"])
+        return sums, float(data["reference_flux_adu"]), str(data.get("aperture_identity", ""))
     except OSError, ValueError, KeyError, TypeError:
         return None
 
 
+def _robust_spread(values: np.ndarray) -> np.ndarray:
+    """Give the robust spread of each row of a table of values.
+
+    Parameters
+    ----------
+    values : `numpy.ndarray`
+        Shape ``(rows, n)`` or ``(n,)``.
+
+    Returns
+    -------
+    spreads : `numpy.ndarray`
+        1.4826 times the median absolute deviation of each row.
+    """
+    centers = np.median(values, axis=-1, keepdims=True)
+    return MAD_TO_SIGMA * np.median(np.abs(values - centers), axis=-1)
+
+
+def _different_apertures_message(full_identity: str, other_identity: str) -> str:
+    """Say why two stacks' sums cannot be paired.
+
+    Parameters
+    ----------
+    full_identity, other_identity : `str`
+        The identities of the aperture sets (empty when unknown).
+
+    Returns
+    -------
+    message : `str`
+        A sentence naming both identities.
+    """
+    return (
+        f"the two stacks were measured in different apertures (identities {full_identity or 'unknown'} "
+        f"and {other_identity or 'unknown'}), so their noise cannot be paired"
+    )
+
+
+def _paired_scaled_sums(
+    full_sums: np.ndarray,
+    full_flux: float,
+    other_sums: np.ndarray,
+    other_flux: float,
+) -> tuple[np.ndarray, np.ndarray] | None:
+    """Put two stacks' sums on the common scale where both are usable.
+
+    Parameters
+    ----------
+    full_sums, other_sums : `numpy.ndarray`
+        Each stack's sum at every stored aperture, NaN where it could not be
+        measured.
+    full_flux, other_flux : `float`
+        The reference fluxes that put each stack on the common scale.
+
+    Returns
+    -------
+    scaled : `tuple` or `None`
+        The two scaled arrays, or `None` when the arrays differ in length,
+        fewer than `MINIMUM_USABLE_APERTURES` apertures are usable in both, or
+        a flux is not positive.
+
+    """
+    if full_sums.shape != other_sums.shape or full_flux <= 0 or other_flux <= 0:
+        return None
+    usable = np.isfinite(full_sums) & np.isfinite(other_sums)
+    if int(np.count_nonzero(usable)) < MINIMUM_USABLE_APERTURES:
+        return None
+    return full_sums[usable] / full_flux, other_sums[usable] / other_flux
+
+
 def paired_noise_difference(
-    full_sums: np.ndarray, full_flux: float, other_sums: np.ndarray, other_flux: float
+    full_sums: np.ndarray,
+    full_flux: float,
+    full_identity: str,
+    other_sums: np.ndarray,
+    other_flux: float,
+    other_identity: str,
 ) -> tuple[float, float, int] | None:
     """Compare the noise of two stacks measured in the same apertures.
 
@@ -1720,6 +2222,9 @@ def paired_noise_difference(
         it could not be measured.
     full_flux, other_flux : `float`
         The reference fluxes that put each stack on the common scale.
+    full_identity, other_identity : `str`
+        The identities of the aperture sets (`ApertureSet.identity`) each
+        stack was measured in.
 
     Returns
     -------
@@ -1729,37 +2234,76 @@ def paired_noise_difference(
         apertures usable in both. `None` when the arrays differ in length,
         fewer than `MINIMUM_USABLE_APERTURES` apertures are usable in both, or
         a flux is not positive.
+
+    Raises
+    ------
+    ApertureSetMismatchError
+        If the identities are empty or differ.
     """
-    if full_sums.shape != other_sums.shape or full_flux <= 0 or other_flux <= 0:
+    if not full_identity or full_identity != other_identity:
+        raise ApertureSetMismatchError(_different_apertures_message(full_identity, other_identity))
+    scaled = _paired_scaled_sums(full_sums, full_flux, other_sums, other_flux)
+    if scaled is None:
         return None
-    usable = np.isfinite(full_sums) & np.isfinite(other_sums)
-    if int(np.count_nonzero(usable)) < MINIMUM_USABLE_APERTURES:
-        return None
-    first = full_sums[usable] / full_flux
-    second = other_sums[usable] / other_flux
-
-    def spread(values: np.ndarray) -> np.ndarray:
-        """Give the robust spread of each row of a table of resampled values.
-
-        Parameters
-        ----------
-        values : `numpy.ndarray`
-            Shape ``(rows, n)``.
-
-        Returns
-        -------
-        spreads : `numpy.ndarray`
-            1.4826 times the median absolute deviation of each row.
-        """
-        centers = np.median(values, axis=-1, keepdims=True)
-        return MAD_TO_SIGMA * np.median(np.abs(values - centers), axis=-1)
-
-    difference = float(spread(second) - spread(first))
+    first, second = scaled
+    difference = float(_robust_spread(second) - _robust_spread(first))
     draws = np.random.default_rng(PAIRED_BOOTSTRAP_SEED).integers(
         0, first.size, size=(PAIRED_BOOTSTRAP_COUNT, first.size)
     )
-    error = float(np.std(spread(second[draws]) - spread(first[draws]), ddof=1))
+    error = float(np.std(_robust_spread(second[draws]) - _robust_spread(first[draws]), ddof=1))
     return difference, error, int(first.size)
+
+
+def paired_noise_ratio(
+    full_sums: np.ndarray,
+    full_flux: float,
+    full_identity: str,
+    other_sums: np.ndarray,
+    other_flux: float,
+    other_identity: str,
+) -> tuple[float, float, int] | None:
+    """Give the other stack's noise over the full stack's noise.
+
+    This is the test of the noise forecast: a subset's noise over the library
+    stack's should equal the square root of the ratio of their effective frame
+    counts. The ratio of two spreads that share apertures has a smaller error
+    than the two separate errors give, so the apertures are resampled together
+    as in `paired_noise_difference`. Frames are not resampled, so the error
+    does not include which frames the subset holds.
+
+    Parameters
+    ----------
+    full_sums, other_sums, full_flux, other_flux, full_identity, other_identity
+        As for `paired_noise_difference`.
+
+    Returns
+    -------
+    comparison : `tuple` or `None`
+        The ratio, its bootstrap error, and the number of apertures usable in
+        both; `None` under the same conditions as `paired_noise_difference`.
+
+    Raises
+    ------
+    ApertureSetMismatchError
+        If the identities are empty or differ.
+    """
+    if not full_identity or full_identity != other_identity:
+        raise ApertureSetMismatchError(_different_apertures_message(full_identity, other_identity))
+    scaled = _paired_scaled_sums(full_sums, full_flux, other_sums, other_flux)
+    if scaled is None:
+        return None
+    first, second = scaled
+    first_spread = float(_robust_spread(first))
+    if first_spread <= 0:
+        return None
+    ratio = float(_robust_spread(second)) / first_spread
+    draws = np.random.default_rng(PAIRED_BOOTSTRAP_SEED).integers(
+        0, first.size, size=(PAIRED_BOOTSTRAP_COUNT, first.size)
+    )
+    first_draws = _robust_spread(first[draws])
+    valid = first_draws > 0
+    error = float(np.std(_robust_spread(second[draws])[valid] / first_draws[valid], ddof=1))
+    return ratio, error, int(first.size)
 
 
 def _reference_ratios(

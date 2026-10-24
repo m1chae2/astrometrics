@@ -35,12 +35,19 @@ peak as a fraction of the ceiling for each exposure group, and the flat noise ne
 noise (parts only). `recommended_exposure_seconds` and the flat gate stay until #97. Evidence is in
 `STK-38`, `STK-39` and `STK-40` of the validation register.
 
-Status on 2026-10-23, aperture fix (branch `94-noise-aperture-fix`): the empty noise apertures are
-now placed away from faint sources as well as bright stars, using a mask made from the stack's
-pixels (never from the apertures' sums). On the M 57 library stack the measured noise fell from
-3.8 to 2.2 times the model's, and the ratio of the measured noise to the model is no longer
-dominated by a few faint stars. It does not reach 1: shared structure remains. Numbers are in
-`STK-36` and `STK-38`; `STK-36`'s 5% growth criterion is not met on the new placement.
+Status on 2026-10-23, aperture fix (branch `94-noise-aperture-fix`, board fixes applied): the empty
+noise apertures are now chosen by a pixel mask made from the stack before any aperture is placed
+(away from faint sources as well as bright stars), not by their own sums. On the M 57 library stack
+the measured noise fell from 3.8 to 2.5 times the model's, but it does not reach 1: the mask's scale
+on this stack is 10 to 30 times that of the white-noise model, so the mask finds sources far above
+the noise and not those near it, and shared structure remains. Every set of apertures has an
+identity, a subset stack never chooses one, a library stack with twice the effective frames
+replaces it, and rows of different sets are never compared (definition version 3). `STK-36`'s 5%
+growth criterion is not tested at the required precision (the three M 57 subsets lie 9 to 31% below
+the prediction, each with an error of 14 to 20%). The separating tests of `STK-38` exclude the
+master flat's random noise and do not identify one cause. For a deep stack of a crowded field the
+half-stack difference, not the empty-aperture noise, may be the honest noise measure; this is open.
+Numbers are in `STK-36` and `STK-38`.
 
 The second review of 2026-10-17 moved the observing values (guide error, pointing error, dew,
 Moon and airmass) out of the `astrometricslib` tables into `wayfindinglib` (section 2.5). It added

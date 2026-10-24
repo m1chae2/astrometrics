@@ -1016,3 +1016,40 @@ def test_a_night_share_built_from_assumed_weights_is_assumed(tmp_path: Path) -> 
     assert shares and all(
         row.status == MeasurementStatus.ASSUMED and "filters" in row.reason for row in shares
     )
+
+
+def test_a_version_two_aperture_file_is_refused_by_the_subsets_and_left_alone(tmp_path: Path) -> None:
+    """A subset never chooses apertures; an old file is left alone."""
+    library = _Library(tmp_path, nights=3)
+    apertures = Path(library.stack_path).parent / APERTURE_FILE_NAME
+    body = json.dumps({"version": 2, "sets": {}})
+    apertures.write_text(body, encoding="utf-8")
+    result = _growth(library)
+    assert all(subset.normalized_noise is None for subset in result.subsets)
+    assert all("predate version 3" in subset.noise_reason for subset in result.subsets)
+    assert apertures.read_text(encoding="utf-8") == body
+    rows = _rows(library, STACKING_EMPTY_APERTURE_NOISE_NORMALIZED)
+    assert rows and all("predate version 3" in row.reason for row in rows)
+
+
+def test_sums_saved_in_other_apertures_are_not_paired_with_a_subset(tmp_path: Path) -> None:
+    """The guard compares identities, not names."""
+    from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
+        noise_sums_path,
+        save_noise_sums,
+    )
+
+    library = _Library(tmp_path, nights=3)
+    library.record_library_weights({0: 1.0, 1: 1.0, 2: 1.0})
+    outcome = measure_stack_noise(
+        library.stack_path, None, str(Path(library.stack_path).parent / APERTURE_FILE_NAME)
+    )
+    save_noise_sums(library.stack_path, outcome.result)
+    path = Path(noise_sums_path(library.stack_path))
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["aperture_identity"] = "v3-someotherset"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    _nights(library)
+    rows = _rows(library, STACKING_NOISE_DIFFERENCE_WITHOUT_NIGHT)
+    assert rows and all(row.status == MeasurementStatus.NOT_MEASURED for row in rows)
+    assert all("other apertures" in row.reason and "v3-someotherset" in row.reason for row in rows)

@@ -36,6 +36,7 @@ from astrometricslib.pipelines.stacking.metrics import (
 )
 from astrometricslib.pipelines.stacking.post_processing.record_quality import (
     measure_noise_safely,
+    stack_depth_of,
     stacking_measurements,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_membership import (
@@ -45,6 +46,7 @@ from astrometricslib.pipelines.stacking.post_processing.stack_membership import 
 from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
     NO_WCS_REASON,
     StackNoiseOutcome,
+    StackNoiseResult,
 )
 from astrometricslib.pipelines.stacking.test.conformance_fixture import (
     FIXTURE_TIME,
@@ -185,6 +187,44 @@ def test_no_solution_gives_three_not_measured_noise_rows_with_the_reason() -> No
         assert row.status is MeasurementStatus.NOT_MEASURED
         assert row.reason == NO_WCS_REASON
     assert _by_metric(measurements, STACKING_NEGATIVE_PIXEL_MAX_FRACTION)[0].value is not None
+
+
+def test_a_too_few_apertures_reason_with_the_masked_share_is_in_the_stored_row() -> None:
+    """The stored not-measured row says how much the mask flagged."""
+    reason = (
+        "only 7 empty apertures could be placed on this stack, away from bright stars and from faint "
+        "sources; the mask flagged 31% of the image and its clearance excludes "
+        "76% of it; at least 20 are needed"
+    )
+    measurements = _measurements(noise=StackNoiseOutcome(None, reason))
+    row = _by_metric(measurements, STACKING_EMPTY_APERTURE_NOISE_NORMALIZED)[0]
+    assert row.status is MeasurementStatus.NOT_MEASURED
+    assert "excludes 76% of it" in row.reason
+
+
+def test_measured_noise_rows_name_the_apertures_and_the_depth_that_defined_them() -> None:
+    """Every measured noise row names the set and its defining depth."""
+    base = fixture_noise_outcome().result
+    note = "Apertures v3-abc123: defined by a stack of 61 frames (effective 40.5); mask flagged 3%."
+    outcome = StackNoiseOutcome(StackNoiseResult(**{**base.__dict__, "aperture_definition_note": note}))
+    measurements = _measurements(noise=outcome)
+    for metric in (
+        STACKING_EMPTY_APERTURE_NOISE_STACK_UNIT,
+        STACKING_NOISE_REFERENCE_FLUX_STACK_UNIT,
+        STACKING_EMPTY_APERTURE_NOISE_NORMALIZED,
+    ):
+        assert note in _by_metric(measurements, metric)[0].reason
+
+
+def test_the_depth_of_a_stack_comes_from_its_members_weights() -> None:
+    """Frame count and effective count come from the members."""
+    depth = stack_depth_of(fixture_membership())
+    assert depth is not None and depth.frame_count == 2
+    assert depth.effective_frame_count == pytest.approx(9.0 / 5.0)
+    assert stack_depth_of(None) is None
+    frames = [member.frame for member in fixture_membership().members]
+    unknown = StackMembership(tuple(StackMember(frame, None) for frame in frames), weights_reason="unknown")
+    assert stack_depth_of(unknown) is None
 
 
 def test_a_spectral_stack_gets_no_noise(tmp_path: Path) -> None:

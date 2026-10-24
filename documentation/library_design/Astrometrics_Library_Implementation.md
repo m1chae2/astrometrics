@@ -68,9 +68,9 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 
 *Located in:* `astrometricslib/pipelines/stacking/`
 
-- **Interfaces (§3.1).** `stack_request.py` (`choose_frames_to_stack`, `run_stack`), `stage.py` (`stack_frames`), `stack_runner.py` (engine run, `PIPELINE_STEPS`). Batch dispatch is in `astrometricslib/pipelines/tasks.py` and `target_batch.py`.
+- **Interfaces (§3.1).** `stack_request.py` (`choose_frames_to_stack`, `run_stack`), `stage.py` (`stack_frames`), `stack_runner.py` (`PIPELINE_STEPS`).
 - **Calibration frames (§3.2).** `calibration_ingest.py`, `astrometricslib/drivers/calibration_library.py`, `pre_processing/flat_calibration.py`.
-- **Gain and read noise (§3.2).** `CalibrationCatalog.measure_sensor_noise` (`astrometricslib/api/processing.py`) calls `sensor_noise_run.py`, which finds a setting's flats and bias frames and calls `pre_processing/sensor_noise.py` (`measure_sensor_noise`). With `save=True` it writes the camera profile. The RPC is `calibration:measure_sensor_noise`; the MCP server withholds it. Evidence: [STK-35](validation/stacking.md#stk-35).
+- **Gain and read noise (§3.2).** `CalibrationCatalog.measure_sensor_noise` (`astrometricslib/api/processing.py`) runs `sensor_noise_run.py` and `pre_processing/sensor_noise.py` (`measure_sensor_noise`); `save=True` writes the camera profile. Evidence: [STK-35](validation/stacking.md#stk-35).
 - **Rejection and filtering (§3.2).** `astrometricslib/utilities/rejection_thresholds.py`, `astrometricslib/utilities/stack_filter_floor.py`.
 - **Exposure groups and weights (§3.2).** `processing/exposure_groups.py`, `group_alignment.py`, `group_derotation.py`, `star_pattern_candidates.py`, `spectral_frame_alignment.py`; `pre_processing/exposure_weighting.py`.
 - **Sequence and restacks (§3.3).** `pre_processing/stack_inputs.py`; `post_processing/previous_stack.py`, `stack_comparison.py`, `interrupted_jobs.py`.
@@ -78,9 +78,9 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 - **Frame measurement (§2.1).** `ProcessingPipelines.record_frame_measurements` (`frame_measurement_run.py`) measures each light frame with `measure_frame`.
 - **Input screening (§3.4.1).** `pre_processing/frame_quarantine.py`, `frame_homogeneity.py`, `background_homogeneity.py`, `camera_selection.py`, `assess_input_quality.py`.
 - **Output checks (§3.4.2).** `post_processing/assess_output_quality.py`, `stack_quality.py`, `exposure_group_report.py`, `stack_quality_report.py`.
-- **Stack measurements (§3.4.2).** `stage._record_stack_quality` calls `post_processing/record_quality.py` (`record_stacking_quality`), which stores the summary, gates, noise and weights. <!-- impl: astrometricslib.pipelines.stacking.post_processing.record_quality.record_stacking_quality -->
+- **Stack measurements (§3.4.2).** `post_processing/record_quality.py` (`record_stacking_quality`) stores the summary, gates, noise and weights. <!-- impl: astrometricslib.pipelines.stacking.post_processing.record_quality.record_stacking_quality -->
 - **Stack noise and weights (§3.4.2).** `post_processing/stack_noise.py`, `stack_membership.py`, `expected_noise.py`, `flat_noise_contribution.py`, `record_science.py`. Evidence: [STK-36](validation/stacking.md#stk-36), [STK-07](validation/stacking.md#stk-07), [STK-38](validation/stacking.md#stk-38), [STK-39](validation/stacking.md#stk-39), [STK-40](validation/stacking.md#stk-40), [STK-41](validation/stacking.md#stk-41).
-- **Subset stacks (§3.4.2).** `subset_noise_run.py` and `subset_stack.stack_frame_subset` stack parts of the library stack into `_subsets/`. Evidence: [STK-36](validation/stacking.md#stk-36), [STK-37](validation/stacking.md#stk-37).
+- **Subset stacks (§3.4.2).** `subset_noise_run.py` and `subset_stack.stack_frame_subset` stack parts of the library stack. Evidence: [STK-36](validation/stacking.md#stk-36), [STK-37](validation/stacking.md#stk-37).
 
 ### 4.2 Astrometry (Architecture §4)
 
@@ -187,7 +187,14 @@ Tables 4 to 8 list each pipeline's tuned values and the architecture section tha
 | Share of spectral frames that must register before fallback | 0.9 | Design estimate ([stacking table](validation/stacking.md#design-estimates)); counts in [STK-12](validation/stacking.md#stk-12) | §3.3 |
 | Rejected pixel share that flags a stack | 15% | Partly measured ([STK-24](validation/stacking.md#stk-24)) | §3.4.2 |
 | Star sharpness warning ratio (fails above) | 1.2 | Partly measured ([STK-25](validation/stacking.md#stk-25)) | §3.4.2 |
+| Noise apertures off faint sources: threshold; smoothing widths; high-pass; clearance; fewest clean apertures; file version | 3.5σ; 1.5, 3, 6 px; 12 px; 13 px; 20; 3 | Partly measured ([STK-36](validation/stacking.md#stk-36)) | §3.4.2 |
 
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.FAINT_SOURCE_THRESHOLD_SIGMAS -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.FAINT_SOURCE_SMOOTHING_SIGMAS_PX -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.FAINT_SOURCE_HIGH_PASS_SIGMA_PX -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.FAINT_SOURCE_CLEARANCE_PX -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.MINIMUM_USABLE_APERTURES -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.APERTURE_FILE_VERSION -->
 <!-- impl: astrometricslib.utilities.rejection_thresholds.rejection_bounds -->
 <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.FRAME_MEASUREMENT_TIME_BUDGET_SECONDS -->
 <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_GRID_CELL_COUNT -->

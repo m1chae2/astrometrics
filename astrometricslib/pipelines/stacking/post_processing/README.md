@@ -67,7 +67,7 @@ Siril warns that PCC and SPCC give an imprecise solution when the image still ho
 - `stack_comparison.py`, `stack_quality_report.py`: the comparison and the stack reports.
 - `stack_crop.py`: the noisy-edge trim.
 - `record_quality.py`: builds the stack's quality measurements from the finished summary and stores them. It judges nothing.
-- `stack_noise.py`: the noise in empty sky, the stored sky apertures and the reference stars.
+- `stack_noise.py`: the noise in empty sky, the stored sky apertures and the reference stars. The apertures stay clear of bright stars and of faint sources, which a significance mask of the stack flags (3.5 robust sigma, at three smoothings; partly measured, see [STK-36](../../../../documentation/library_design/validation/stacking.md#stk-36)). Aperture files are version 3, and older files are replaced. With fewer than 20 clean apertures the noise is not measured, and the row says so.
 - `stack_membership.py`: the frames a stack holds, their weights, and the effective frame count and time.
 - `expected_noise.py`: the noise the stack's frames predict in an empty aperture, from each frame's sky, read noise, gain and weight, as a sky part and a read part; and the stack's sky level.
 - `flat_noise_contribution.py`: the noise the master flat adds to the same apertures, from the flat's noise, its blur width and the stack's sky level.

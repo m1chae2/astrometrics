@@ -620,11 +620,17 @@ _NOISE_PURPOSE_REASON = (
     "numbers (the noise, the flux it is divided by, and their ratio) supply."
 )
 _NOISE_SAMPLE = (
-    "Up to 100 circular apertures (radius 4 px) placed once per target at sky positions away from "
-    "the 400 brightest stars (24 px) and away from faint sources (12 px from any pixel that, after "
+    "Up to 100 circular apertures (radius 4 px) placed at sky positions away from "
+    "the 400 brightest stars (24 px) and away from faint sources (13 px from any pixel that, after "
     "removing the large-scale background, stands more than 3.5 robust sigma above zero at a smoothing "
-    "of 1.5, 3 or 6 px; the mask is made from the stack's pixels, never from the apertures' sums). "
-    "The apertures are reused by every later stack of the target. Apertures that fall off the "
+    "of 1.5, 3 or 6 px; the robust sigma is taken over the pixels that hold data). The apertures are "
+    "chosen by this pixel mask, made before they are placed, not by their own sums; its bias, "
+    "measured, is under 1% on noise alone (validation entry STK-36). Only a library stack chooses "
+    "them; a stack with at least twice the effective frame count of the stack that chose the set "
+    "replaces the set by a new one with a new identity, and rows of different sets are never "
+    "compared. Every stored row names the set's identity and the depth of the stack that chose it. "
+    "The apertures are reused by every later stack of the target, and by its subset stacks, which "
+    "never choose any. Apertures that fall off the "
     "stack or on empty (zero) edge pixels are dropped. No two apertures are closer than 24 px, so no two "
     "sky rings share a pixel. A stack needs at least 20 usable apertures; with fewer clean apertures the "
     "noise is not measured. Sky structure too faint to flag (unresolved stars, a faint halo) stays in the "
@@ -662,7 +668,7 @@ _NOISE_AND_WEIGHT_METRICS: tuple[MetricSpec, ...] = (
         purpose_reason=_NOISE_PURPOSE_REASON,
         uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
         uncertainty_method=_NOISE_UNCERTAINTY,
-        definition_version=2,
+        definition_version=3,
     ),
     _context_metric(
         STACKING_NOISE_REFERENCE_FLUX_STACK_UNIT,
@@ -691,7 +697,7 @@ _NOISE_AND_WEIGHT_METRICS: tuple[MetricSpec, ...] = (
             "stack defines the scale. A star that widens past the large aperture would lower its ratio and "
             "widen the scatter; no change in the stars themselves is in the error."
         ),
-        definition_version=2,
+        definition_version=3,
     ),
     _context_metric(
         STACKING_EMPTY_APERTURE_NOISE_NORMALIZED,
@@ -711,7 +717,7 @@ _NOISE_AND_WEIGHT_METRICS: tuple[MetricSpec, ...] = (
             "of the zero point added in quadrature, times the ratio. The scatter of the stars' brightness "
             "ratios is included; any real change in a star's brightness between stacks is not."
         ),
-        definition_version=2,
+        definition_version=3,
     ),
     _context_metric(
         STACKING_EFFECTIVE_FRAME_COUNT,
@@ -856,7 +862,7 @@ _NIGHT_METRICS: tuple[MetricSpec, ...] = (
             "`stacking.noise_difference_without_night`). The stacker's own run-to-run differences are "
             "not included."
         ),
-        definition_version=2,
+        definition_version=3,
     ),
     _context_metric(
         STACKING_NOISE_DIFFERENCE_WITHOUT_NIGHT,
@@ -885,6 +891,7 @@ _NIGHT_METRICS: tuple[MetricSpec, ...] = (
             "stacks share frames and apertures, this is smaller than the two independent errors added in "
             "quadrature. The stacker's run-to-run differences are not included."
         ),
+        definition_version=3,
     ),
     _context_metric(
         STACKING_SUBSET_EXPECTED_NOISE_RATIO,

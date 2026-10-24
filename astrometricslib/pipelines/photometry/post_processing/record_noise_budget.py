@@ -397,7 +397,7 @@ def noise_budget_measurements(
             sample_count=inputs.airmass_frame_count or None,
             status=MeasurementStatus.ASSUMED if scintillation_assumptions else MeasurementStatus.MEASURED,
             provenance=(
-                f"airmass {inputs.airmass:.2f} (median of {inputs.airmass_frame_count} frame headers), "
+                f"airmass from the median of {inputs.airmass_frame_count} frame headers, "
                 f"aperture {inputs.aperture_diameter_mm:.1f} mm"
                 if relative is not None
                 else ""

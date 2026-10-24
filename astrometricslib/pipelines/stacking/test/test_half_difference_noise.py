@@ -47,16 +47,18 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_HALF_DIFFERENCE_SHARED_EVEN_WEIGHT_FRACTION,
     STACKING_HALF_DIFFERENCE_SHARED_ODD_WEIGHT_FRACTION,
     STACKING_HALF_DIFFERENCE_VARIANCE_FACTOR,
+    STACKING_HALF_SHARED_FINE_SCALE_VARIANCE_RATIO,
 )
-from astrometricslib.pipelines.stacking.post_processing.expected_noise import FrameNoiseInput
-from astrometricslib.pipelines.stacking.post_processing.stack_membership import effective_frame_count
-from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
-    APERTURE_FILE_NAME,
+from astrometricslib.pipelines.stacking.post_processing.difference_noise import (
     measure_difference_noise,
-    measure_stack_noise,
     save_noise_sums,
-    signed_aperture_sum,
 )
+from astrometricslib.pipelines.stacking.post_processing.empty_apertures import APERTURE_FILE_NAME
+from astrometricslib.pipelines.stacking.post_processing.expected_noise import FrameNoiseInput
+from astrometricslib.pipelines.stacking.post_processing.half_pattern import PATTERN_ROW_NAMES
+from astrometricslib.pipelines.stacking.post_processing.stack_image import signed_aperture_sum
+from astrometricslib.pipelines.stacking.post_processing.stack_membership import effective_frame_count
+from astrometricslib.pipelines.stacking.post_processing.stack_noise import measure_stack_noise
 from astrometricslib.pipelines.stacking.subset_noise_run import (
     HALF_DIFFERENCE_MINIMUM_FRAMES_PER_HALF,
     difference_variance_factor,
@@ -68,6 +70,7 @@ from astrometricslib.pipelines.stacking.subset_noise_run import (
 )
 from astrometricslib.pipelines.stacking.target_stack_guard import library_stack_guard
 
+PATTERN_METRICS = PATTERN_ROW_NAMES
 NINE_METRICS = (
     STACKING_HALF_DIFFERENCE_NOISE_STACK_UNIT,
     STACKING_HALF_DIFFERENCE_NOISE_NORMALIZED,
@@ -584,11 +587,11 @@ def test_the_difference_recovers_the_injected_noise_where_the_plain_noise_does_n
 
 
 def test_the_rows_sit_on_the_library_stack_beside_its_own_noise(tmp_path: Path) -> None:
-    """Nine stack-level rows are stored on the library stack's subject."""
+    """Seventeen stack-level rows are stored on the library stack's subject."""
     library = _Library(tmp_path)
     library.record_library_count(float(FRAME_COUNT))
     result = library.run()
-    assert result.rows_written == 9
+    assert result.rows_written == 17
     subject_id = f"M 99/{STACK_NAME}"
     for metric in NINE_METRICS:
         rows = library.rows(metric)
@@ -622,6 +625,81 @@ def test_the_rows_sit_on_the_library_stack_beside_its_own_noise(tmp_path: Path) 
     assert library.rows(STACKING_EMPTY_APERTURE_NOISE_NORMALIZED) == []
     odd_count = library.rows(STACKING_HALF_DIFFERENCE_ODD_EFFECTIVE_FRAME_COUNT)[0].value
     assert odd_count == result.odd_half_effective_frame_count == len(library.stacker.calls[0])
+    # The pattern the halves share is stored on the same subject: a value, or
+    # the reason there is none (the test frames carry no registration facts,
+    # so the walking-noise rows have no drift axis).
+    for metric in PATTERN_METRICS:
+        rows = library.rows(metric)
+        assert len(rows) == 1
+        assert rows[0].subject.subject_id == subject_id
+        assert rows[0].status == MeasurementStatus.MEASURED or rows[0].reason
+    assert (
+        library.rows(STACKING_HALF_SHARED_FINE_SCALE_VARIANCE_RATIO)[0].status == MeasurementStatus.MEASURED
+    )
+    assert result.shared_fine_scale_variance_ratio is not None
+
+
+def test_a_failure_building_the_pattern_rows_leaves_the_nine_difference_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pattern rows are a by-product: their error costs only themselves."""
+
+    def explode(*_arguments: object) -> list[object]:
+        """Raise as a broken pattern row builder would.
+
+        Raises
+        ------
+        RuntimeError
+            Always.
+        """
+        raise RuntimeError("broken")
+
+    monkeypatch.setattr(subset_noise_run, "half_pattern_measurements", explode)
+    library = _Library(tmp_path)
+    library.record_library_count(float(FRAME_COUNT))
+    result = library.run()
+    assert result.reason == ""
+    for metric in NINE_METRICS:
+        assert len(library.rows(metric)) == 1
+    assert library.rows(STACKING_HALF_DIFFERENCE_NOISE_STACK_UNIT)[0].status == MeasurementStatus.MEASURED
+    assert library.rows(STACKING_HALF_DIFFERENCE_VARIANCE_FACTOR)[0].status == MeasurementStatus.MEASURED
+    for metric in PATTERN_METRICS:
+        rows = library.rows(metric)
+        assert len(rows) == 1
+        assert rows[0].status == MeasurementStatus.NOT_MEASURED
+        assert "could not be built" in rows[0].reason
+
+
+def test_each_half_is_read_once_as_32_bit_and_shared(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The difference noise and the pattern use the same two planes."""
+    from astrometricslib.pipelines.stacking.post_processing import difference_noise
+
+    reads: list[str] = []
+    types: list[type] = []
+    real = difference_noise.read_stack_plane
+
+    def counting(stack_path: str, dtype: type = np.float64) -> np.ndarray | None:
+        """Read a plane and note the call.
+
+        Returns
+        -------
+        plane : `numpy.ndarray` or `None`
+            What the real reader gives.
+        """
+        reads.append(stack_path)
+        types.append(dtype)
+        return real(stack_path, dtype)
+
+    monkeypatch.setattr(difference_noise, "read_stack_plane", counting)
+    monkeypatch.setattr(subset_noise_run, "read_stack_plane", counting)
+    library = _Library(tmp_path)
+    library.record_library_count(float(FRAME_COUNT))
+    reads.clear()
+    types.clear()
+    assert library.run().reason == ""
+    assert len(reads) == 2
+    assert len(set(reads)) == 2
+    assert types == [np.float32, np.float32]
 
 
 def test_the_halves_stack_the_right_frames_and_are_deleted_afterwards(tmp_path: Path) -> None:

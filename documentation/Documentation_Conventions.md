@@ -89,7 +89,7 @@ H1, a purpose sentence, the glossary line, then one bullet per file or file grou
 
 Papers follow `.claude/skills/documentation-style/SKILL.md`: title, metadata line, Abstract, numbered sections, Acknowledgments, References, Appendices. An architecture paper puts the glossary line under its abstract and points to its notation appendix. The glossary is the site's own page, not part of a paper.
 
-**Length.** An architecture paper has at most 10,000 words, the quality measurements paper at most 6,000, and an implementation paper at most 3,500, not counting references or hidden comments. A journal paper on scientific software runs 5,000 to 10,000 words, and an implementation paper is an index into the code, not a second paper. When a paper reaches its limit, tighten it or move detail to the review guides, the READMEs or the glossary; do not raise the limit. Register files follow the entry template in `library_design/validation/index.md`.
+**Length.** An architecture paper has at most 10,000 words, the quality measurements paper at most 8,000, and an implementation paper at most 4,500, not counting references or hidden comments. A journal paper on scientific software runs 5,000 to 10,000 words, and an implementation paper is an index into the code, not a second paper. When a paper reaches its limit, tighten it or move detail to the review guides, the READMEs or the glossary; do not raise the limit. Register files follow the entry template in `library_design/validation/index.md`.
 
 ### 3.5 Site pages
 

@@ -57,10 +57,13 @@ noise. The difference cancels what the frames share (sky structure, faint
 stars, nebula) and keeps the random noise, so it is stored beside the
 empty-aperture noise and never replaces it. The rows sit on the library
 stack's own subject, with the reference flux the normalized value divides by
-and the shared frame's two weight shares. The two half stacks are deleted after
-the measurement. It costs two stacks of half the frames each. The growth job
-(`run_noise_growth`) can run it too, in the same lock; no job starts by
-itself after a stack.
+and the shared frame's two weight shares. The same two half stacks also give
+what the halves share at the scale of a few pixels and how that differs along
+and across the pointing drift (`half_pattern.measure_half_pattern`, eight more
+rows): the other side of the difference, which keeps what the difference
+cancels. The two half stacks are deleted after the measurement. It costs two
+stacks of half the frames each. The growth job (`run_noise_growth`) can run
+it too, in the same lock; no job starts by itself after a stack.
 
 A storage failure is logged and never fails a subset. Nothing here reads the
 clock: the caller supplies the measurement time.
@@ -102,6 +105,7 @@ from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
     build_measurement,
     record_run_measurements,
 )
+from astrometricslib.pipelines.shared.registration_record import build_registration_record
 from astrometricslib.pipelines.stacking.metrics import (
     STACKING_EFFECTIVE_FRAME_COUNT,
     STACKING_FRAME_WEIGHT,
@@ -120,7 +124,22 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_NOISE_WITHOUT_NIGHT,
     STACKING_SUBSET_EXPECTED_NOISE_RATIO,
 )
+from astrometricslib.pipelines.stacking.post_processing.difference_noise import (
+    load_noise_sums,
+    measure_difference_noise,
+    paired_noise_difference,
+)
+from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
+    APERTURE_FILE_NAME,
+    load_apertures_with_reason,
+)
 from astrometricslib.pipelines.stacking.post_processing.expected_noise import ExpectedNoiseOutcome
+from astrometricslib.pipelines.stacking.post_processing.half_pattern import (
+    PATTERN_ROW_NAMES,
+    HalfPatternOutcome,
+    half_pattern_measurements,
+    measure_half_pattern,
+)
 from astrometricslib.pipelines.stacking.post_processing.record_quality import (
     measure_noise_safely,
     membership_count_measurements,
@@ -133,6 +152,8 @@ from astrometricslib.pipelines.stacking.post_processing.record_science import (
     resolve_stack_sky_level,
     stack_sky_level_measurements,
 )
+from astrometricslib.pipelines.stacking.post_processing.registration_shifts import drift_of_runs
+from astrometricslib.pipelines.stacking.post_processing.stack_image import read_stack_plane
 from astrometricslib.pipelines.stacking.post_processing.stack_membership import (
     StackMembership,
     determine_stack_members,
@@ -140,14 +161,7 @@ from astrometricslib.pipelines.stacking.post_processing.stack_membership import 
     effective_frame_count,
     normalized_weights,
 )
-from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
-    APERTURE_FILE_NAME,
-    StackNoiseOutcome,
-    load_apertures_with_reason,
-    load_noise_sums,
-    measure_difference_noise,
-    paired_noise_difference,
-)
+from astrometricslib.pipelines.stacking.post_processing.stack_noise import StackNoiseOutcome
 from astrometricslib.pipelines.stacking.pre_processing.stack_inputs import read_stack_inputs
 from astrometricslib.pipelines.stacking.subset_stack import (
     MINIMUM_SUBSET_FRAMES,
@@ -450,7 +464,8 @@ class LibraryRun:
     noise_sums : `tuple` or `None`
         The library stack's per-aperture noise sums, the reference flux they
         are read against and the identity of the apertures they were
-        measured in (see `stack_noise.load_noise_sums`); `None` when not saved.
+        measured in (see `difference_noise.load_noise_sums`); `None` when not
+        saved.
     store : `QualityStore` or `None`
         The quality store the run read, so later steps (the expected noise of
         each subset) read from it instead of opening their own.
@@ -1678,8 +1693,9 @@ def half_difference_measurements(
     shared_fractions: tuple[float | None, float | None] = (None, None),
     model_ratio: float | None = None,
     model_ratio_reason: str = "",
+    pattern: HalfPatternOutcome | None = None,
 ) -> list[QualityMeasurement]:
-    """Build the nine half-difference rows of the library stack.
+    """Build the half-difference rows of the library stack.
 
     Parameters
     ----------
@@ -1707,6 +1723,10 @@ def half_difference_measurements(
         with each frame's own modeled noise (see `model_variance_ratio`).
     model_ratio_reason : `str`, optional
         Why there is no ``model_ratio``.
+    pattern : `HalfPatternOutcome`, optional
+        What the two halves share at a few pixels (see
+        `half_pattern.measure_half_pattern`). Left out, its eight rows are
+        not measured, with the reason of the difference.
 
     Returns
     -------
@@ -1714,8 +1734,8 @@ def half_difference_measurements(
         The noise in stack units, the normalized noise, the reference flux it
         is divided by, the two halves' effective frame counts, the variance
         factor, the model variance ratio and the shared frame's two weight
-        shares. Each is not measured, with the reason, when its value is
-        missing.
+        shares, then the eight pattern rows. Each is not measured, with the
+        reason, when its value is missing.
     """
     result = noise.result if noise is not None else None
     missing = reason or (noise.reason if noise is not None else "") or "the difference was not measured"
@@ -1809,7 +1829,110 @@ def half_difference_measurements(
             strict=True,
         )
     ]
-    return [*noise_rows, *count_rows, factor_row, model_row, *share_rows]
+    pattern_rows = _pattern_rows_safely(
+        context, subject, pattern, missing if result is None else "the pattern was not measured", note
+    )
+    return [*noise_rows, *count_rows, factor_row, model_row, *share_rows, *pattern_rows]
+
+
+def _pattern_rows_safely(
+    context: PipelineRunContext,
+    subject: QualitySubject,
+    pattern: HalfPatternOutcome | None,
+    reason: str,
+    note: str,
+) -> list[QualityMeasurement]:
+    """Build the half-stack pattern rows, never raising.
+
+    The pattern rows are a by-product of the half-stack difference: an error
+    in building them must not lose the nine rows of the difference itself.
+
+    Parameters
+    ----------
+    context : `PipelineRunContext`
+        The run's shared facts.
+    subject : `QualitySubject`
+        The library stack.
+    pattern : `HalfPatternOutcome` or `None`
+        What the pattern measurement gave, or `None` when it was not tried.
+    reason : `str`
+        Why there is no pattern, when there is none.
+    note : `str`
+        What was done, kept on each measured row.
+
+    Returns
+    -------
+    rows : `list` of `QualityMeasurement`
+        The pattern rows, or one not-measured row for each pattern metric with
+        the reason that the rows could not be built.
+    """
+    try:
+        return half_pattern_measurements(context, subject, pattern, reason, note)
+    except Exception as error:  # a by-product: its failure must not lose the noise rows
+        logger.exception("The shared fine-scale structure rows of the half stacks could not be built")
+        failed = f"the pattern rows could not be built ({type(error).__name__})"
+        return [
+            build_measurement(_SPEC_BY_NAME[name], None, context, subject, reason=failed)
+            for name in PATTERN_ROW_NAMES
+        ]
+
+
+def _half_pattern_safely(
+    odd_stack: Any,
+    even_stack: Any,
+    odd_plane: np.ndarray | None,
+    even_plane: np.ndarray | None,
+    library: LibraryRun,
+    variance_factor: float | None,
+    shared_fractions: tuple[float | None, float | None],
+) -> HalfPatternOutcome:
+    """Measure what the two half stacks share, never raising.
+
+    The drift of the frames comes from the registration results of the two
+    half-stack runs, which share one reference frame, and the capture times
+    of the library stack's frames.
+
+    Parameters
+    ----------
+    odd_stack, even_stack : `Any`
+        The two half-stack outcomes (their diagnostics).
+    odd_plane, even_plane : `numpy.ndarray` or `None`
+        The two half stacks' images, read once by the caller and shared with
+        the difference noise, or `None` when a file held no pixels.
+    library : `LibraryRun`
+        The library stack's frames and effective frame count.
+    variance_factor : `float` or `None`
+        The difference's variance factor.
+    shared_fractions : `tuple` [`float` or `None`, `float` or `None`]
+        The shared frame's weight shares in the two halves.
+
+    Returns
+    -------
+    outcome : `HalfPatternOutcome`
+        The numbers, or the reason there are none. A failure to read the
+        stacks or to measure is returned as a reason.
+    """
+    try:
+        if odd_plane is None or even_plane is None:
+            return HalfPatternOutcome(None, "a half stack file holds no pixels")
+        drift = drift_of_runs(
+            [build_registration_record(stack.diagnostics, (0, 0), None) for stack in (odd_stack, even_stack)],
+            {frame.path: frame.timestamp for frame in library.members},
+            (odd_plane.shape[1], odd_plane.shape[0]),
+        )
+        return measure_half_pattern(
+            odd_plane,
+            even_plane,
+            variance_factor=variance_factor,
+            shared_fractions=shared_fractions,
+            effective_count=library.effective_count,
+            drift_axis_deg=drift.direction_deg,
+            drift_extent_px=drift.extent_px,
+            drift_reason=drift.direction_reason,
+        )
+    except Exception as error:  # a by-product: its failure must not lose the noise
+        logger.exception("The shared fine-scale structure of the half stacks could not be measured")
+        return HalfPatternOutcome(None, f"the measurement failed: {type(error).__name__}")
 
 
 def _delete_half_folder(library_stack_path: str, label: str) -> None:
@@ -1851,7 +1974,7 @@ def run_half_difference_noise(
     target's ``_subsets`` folder with the library stack's weighting and
     rejection, without the edge trim and the frame quarantine. The noise of
     the difference of the two stacks is measured in the target's stored empty
-    apertures (`stack_noise.measure_difference_noise`), and nine rows are
+    apertures (`difference_noise.measure_difference_noise`), and the rows are
     stored on the library stack's own subject: the difference noise in stack
     units and normalized, the reference flux the normalized value divides by,
     each half's effective frame count, the variance factor, the variance
@@ -1952,8 +2075,9 @@ def _run_half_difference_noise(
         shared_fractions: tuple[float | None, float | None] = (None, None),
         model_ratio: float | None = None,
         model_ratio_reason: str = "",
+        pattern: HalfPatternOutcome | None = None,
     ) -> HalfDifferenceNoiseResult:
-        """Store the nine rows and give back the result.
+        """Store the rows and give back the result.
 
         Parameters
         ----------
@@ -1976,6 +2100,8 @@ def _run_half_difference_noise(
             each frame's modeled noise.
         model_ratio_reason : `str`, optional
             Why there is no ``model_ratio``.
+        pattern : `HalfPatternOutcome`, optional
+            What the halves share at a few pixels.
 
         Returns
         -------
@@ -1996,6 +2122,7 @@ def _run_half_difference_noise(
                 shared_fractions,
                 model_ratio,
                 model_ratio_reason,
+                pattern,
             )
             result.rows_written = record_run_measurements(rows, config=configuration)
         return result
@@ -2074,8 +2201,17 @@ def _run_half_difference_noise(
             )
         _report(80, "Measuring the noise of the difference")
         try:
+            # Each half is read once, as 32-bit, and shared by the difference
+            # noise and the pattern measurement.
+            odd_plane = read_stack_plane(stacked["odd"].stack_path, np.float32)
+            even_plane = read_stack_plane(stacked["even"].stack_path, np.float32)
             noise = measure_difference_noise(
-                stacked["odd"].stack_path, stacked["even"].stack_path, split.shared_path, apertures_path
+                stacked["odd"].stack_path,
+                stacked["even"].stack_path,
+                split.shared_path,
+                apertures_path,
+                first_plane=odd_plane,
+                second_plane=even_plane,
             )
         except Exception as error:  # a measurement failure is stored as a reason, never raised
             logger.exception("The noise of the half difference of %s could not be measured", target.id)
@@ -2146,6 +2282,20 @@ def _run_half_difference_noise(
             noise.result.normalized_noise, model_ratio
         )
         result.notes.append(note)
+        pattern = _half_pattern_safely(
+            stacked["odd"],
+            stacked["even"],
+            odd_plane,
+            even_plane,
+            library,
+            variance_factor,
+            shared_fractions,
+        )
+        del odd_plane, even_plane
+        if pattern.result is not None:
+            result.shared_fine_scale_variance_ratio = pattern.result.variance_ratio
+            result.walking_noise_correlation_excess = pattern.result.excess
+            result.walking_noise_correlation_excess_error = pattern.result.excess_error
         return finish(
             "",
             noise,
@@ -2156,6 +2306,7 @@ def _run_half_difference_noise(
             shared_fractions,
             model_ratio,
             model_ratio_reason,
+            pattern,
         )
     finally:
         if not keep_halves:

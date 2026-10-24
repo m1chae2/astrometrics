@@ -189,6 +189,7 @@ def _count_metric(
     *,
     better: Direction = Direction.NONE,
     computed_by: str = _ADAPTER_CLASS,
+    register_entry: str | None = None,
 ) -> MetricSpec:
     """Declare one per-run count of the photometry pipeline.
 
@@ -208,6 +209,8 @@ def _count_metric(
         Which direction is better. Most counts have none.
     computed_by : `str`, optional
         Dotted path of the code that counts it.
+    register_entry : `str` or `None`, optional
+        The validation register entry that backs the count, if one does.
 
     Returns
     -------
@@ -228,6 +231,7 @@ def _count_metric(
         computed_by=computed_by,
         uncertainty_kind=UncertaintyKind.NONE,
         uncertainty_method=_NO_UNCERTAINTY,
+        register_entry=register_entry,
         purpose=MetricPurpose.CONTEXT,
         purpose_reason=purpose_reason,
     )
@@ -893,6 +897,7 @@ PHOTOMETRY_METRICS: tuple[MetricSpec, ...] = (
         "The stars of the run.",
         "A thin sample makes the noise model unreliable, and the scatter-population check reads it.",
         better=Direction.HIGHER,
+        register_entry="PHO-17",
     ),
     _measurement_metric(
         PHOTOMETRY_LIGHT_CURVE_SCATTER_RMS_MEDIAN_MAG,

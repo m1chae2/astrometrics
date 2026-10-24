@@ -1280,6 +1280,30 @@ Phases 2 and 3 can run at the same time once phase 1 is done. Phase 5 can start 
 phase 1. The Observation Execution phase of `UI_DISPLAY_PLAN.md` waits for phases 2 and 4, and its
 Observation Planner phase waits for phase 4 (section 8).
 
+### 9.1 How issues #95 to #97 are run (lessons of #94, 2026-10-24)
+
+Issue #94 took about three days and sixteen pull requests. Most of the lost time was rework, not
+measurement. The next issues are run this way:
+
+1. **The board reviews the brief before anything is built.** Most #94 findings were design faults
+   that a build then had to undo: a stored airmass and night spread against decision 18, a stored
+   ratio, a metric that could not see what it claimed (camera rotation behind window dust). Each
+   batch's brief gets a short board review first; the board on the finished code then checks the
+   build only.
+2. **One branch per issue phase.** Parallel work goes to separate files of one branch, not to a
+   stack of branches; #94's stacked branches needed six merges and an agent each time to resolve
+   the papers, the register and the plans. Each finished phase is one pull request.
+3. **Papers once per phase.** The batch agents write code, tests and register entries; the papers
+   and READMEs are written once at the end of the phase, not by every batch.
+4. **Continuous integration runs the full suites.** Locally only the targeted tests, the golden
+   suite and the documentation checks run while building; the pull request's CI is the full gate.
+5. **Shared tools and two heavy-work slots.** Agents run tests and real-data scripts only through
+   `build/agent_tools/` (`check.sh`, `realrun.sh`, `dbq.sh`), which share a lock with two slots so
+   memory stays safe, and real-data scripts reach only copies.
+6. **Decisions do not stall the work.** A choice with a clear recommendation is settled by the
+   systems engineer and listed in the pull request for the user to review; a reversal of an earlier
+   user decision, a scope change or a write to real data still waits for the user.
+
 ## 10. Documentation
 
 - `Astrometrics_Library_Architecture.md` gains a section on quality measurement: the measurement

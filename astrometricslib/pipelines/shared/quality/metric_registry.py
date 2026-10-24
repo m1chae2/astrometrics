@@ -26,6 +26,7 @@ from astrometricslib.pipelines.shared.quality.metrics import FRAME_METRICS
 KNOWN_UNITS: frozenset[str] = frozenset({
     "adu",
     "px",
+    "px/h",
     "arcsec",
     "arcsec/px",
     "fraction",
@@ -38,6 +39,7 @@ KNOWN_UNITS: frozenset[str] = frozenset({
     "mag",
     "angstrom",
     "stack_unit",
+    "stack_unit^2",
     "stack_unit/adu",
     "1/d",
     "",

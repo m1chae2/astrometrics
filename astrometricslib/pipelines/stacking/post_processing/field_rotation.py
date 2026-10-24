@@ -63,12 +63,10 @@ from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
     PipelineRunContext,
     build_measurement,
 )
+from astrometricslib.pipelines.shared.registration_record import RegistrationRecord, is_already_registered
 from astrometricslib.pipelines.stacking.metrics import (
     STACKING_FRAME_REGISTRATION_ROTATION_DEG,
     STACKING_METRICS,
-)
-from astrometricslib.pipelines.stacking.post_processing.stack_membership import (
-    registration_reference_from_diagnostics,
 )
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
@@ -82,6 +80,10 @@ SPECTRAL_REASON = "a spectral stack is registered by shift only, so no rotation 
 UNMATCHED_REASON = (
     "Siril's registration results could not be matched to the frames (their lists differ in length), "
     "so no frame's rotation can be named"
+)
+MULTI_GROUP_REASON = (
+    "the stack joins several exposure groups, each lined up by Siril on a reference of its own, so no one "
+    "list of transforms belongs to the stack"
 )
 ALREADY_REGISTERED_REASON = (
     "every frame of the sequence has the identity transform, so the frames were registered before "
@@ -160,29 +162,14 @@ def image_parity_text(stack_path: str) -> str:
     return "+1" if determinant > 0.0 else "-1"
 
 
-def _is_identity(homography: Sequence[float]) -> bool:
-    """Say whether one frame's transform is the identity (no shift, no turn).
-
-    Parameters
-    ----------
-    homography : `Sequence` [`float`]
-        The nine numbers of the transform.
-
-    Returns
-    -------
-    is_identity : `bool`
-        `True` when the shift and the rotation are exactly zero.
-    """
-    return not homography[2] and not homography[5] and not (homography[3] - homography[1])
-
-
 def field_rotation_measurements(
     target_frames: Sequence[Any],
-    diagnostics: dict[str, Any],
+    record: RegistrationRecord | None,
     context: PipelineRunContext,
     *,
     is_spectral: bool,
     stack_path: str = "",
+    missing_reason: str = UNMATCHED_REASON,
 ) -> list[QualityMeasurement]:
     """Build the rotation row of each frame of a stacking run.
 
@@ -190,11 +177,9 @@ def field_rotation_measurements(
     ----------
     target_frames : `Sequence`
         The frames given to the stacking program (frame records).
-    diagnostics : `dict`
-        What the stacking run reported. ``symlinked_light_paths`` (the frame
-        paths in Siril's order), ``registration_frames`` (one dict per frame
-        with its ``homography``) and ``registration_included`` (one flag per
-        frame) are read.
+    record : `RegistrationRecord` or `None`
+        Siril's registration of the run (see `build_registration_record`), or
+        `None` when it could not be matched to the frames.
     context : `PipelineRunContext`
         The run's shared facts.
     is_spectral : `bool`
@@ -202,6 +187,8 @@ def field_rotation_measurements(
     stack_path : `str`, optional
         The finished stack, whose header gives the image parity. Left out, the
         parity is "unknown".
+    missing_reason : `str`, optional
+        The reason given to every frame when ``record`` is `None`.
 
     Returns
     -------
@@ -216,23 +203,24 @@ def field_rotation_measurements(
     """
     if is_spectral:
         return [_missing(frame, context, SPECTRAL_REASON) for frame in target_frames]
-    paths = diagnostics.get("symlinked_light_paths") or []
-    registration_frames = diagnostics.get("registration_frames") or []
-    included = diagnostics.get("registration_included") or []
-    if not registration_frames or len(paths) != len(registration_frames):
-        return [_missing(frame, context, UNMATCHED_REASON) for frame in target_frames]
-    flags = list(included) if len(included) == len(paths) else [True] * len(paths)
-    homographies = [facts["homography"] for facts in registration_frames]
-    already_registered = len(homographies) > 1 and all(_is_identity(h) for h in homographies)
-    reference = registration_reference_from_diagnostics(diagnostics)
-    reference_text = "not identified with certainty" if reference is None else os.path.basename(reference[0])
+    if record is None:
+        return [_missing(frame, context, missing_reason) for frame in target_frames]
+    already_registered = is_already_registered(record)
+    reference_text = (
+        "not identified with certainty"
+        if record.reference_frame is None
+        else os.path.basename(record.reference_frame)
+    )
     parity = image_parity_text(stack_path) if stack_path else PARITY_UNKNOWN
     provenance = (
         f"polar-decomposition angle of Siril's transform onto the reference frame {reference_text}; "
         f"image parity (sign of det(CD) of the stack's plate solution): {parity}"
     )
     entry_by_path = {
-        path: (homography, flag) for path, homography, flag in zip(paths, homographies, flags, strict=True)
+        path: (homography, flag)
+        for path, homography, flag in zip(
+            record.light_paths, record.homographies, record.included, strict=True
+        )
     }
     rows: list[QualityMeasurement] = []
     for frame in target_frames:

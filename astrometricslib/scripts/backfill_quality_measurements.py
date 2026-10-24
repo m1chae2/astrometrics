@@ -1277,6 +1277,14 @@ _STACKING_GATES: tuple[GateMapping, ...] = gate_mappings_from_sources(STACKING_G
 # rotation comes from Siril's registration table, which a stored summary does
 # not hold. The flat-to-light match is measured on the raw flat and light
 # frames, which a summary does not hold.
+# rotation and the step and drift of the pointing come from Siril's
+# registration table, which a stored summary does not hold. A stack made since
+# batch S3 keeps that table beside it, in `<stack>_registration_frames.json`
+# (`registration_record.py`), but filling these rows from it is not done
+# here: the rows would need a stacking run to belong to, which a backfill does
+# not invent, and a stack made before S3 has no such file. The next stacking
+# run stores them.
+# The pattern the two half stacks share comes from the half stacks themselves.
 _STACKING_NOT_HELD: tuple[str, ...] = (
     "stacking.empty_aperture_noise_stack_unit",
     "stacking.noise_reference_flux_stack_unit",
@@ -1325,6 +1333,22 @@ _STACKING_NOT_HELD: tuple[str, ...] = (
     "stacking.flat_light_best_rotation_deg",
     "stacking.flat_light_displaced_correlation_std",
     "stacking.light_dust_split_half_correlation",
+    "stacking.registration_step_median_px",
+    "stacking.registration_step_mad_px",
+    "stacking.registration_step_jump_count",
+    "stacking.registration_step_degenerate_count",
+    "stacking.registration_step_after_drift_median_px",
+    "stacking.registration_drift_rate_px_per_hour",
+    "stacking.registration_drift_direction_deg",
+    "stacking.registration_drift_extent_px",
+    "stacking.half_shared_fine_scale_rms_stack_unit",
+    "stacking.half_shared_fine_scale_variance_ratio",
+    "stacking.half_shared_fine_scale_covariance_stack_unit_squared",
+    "stacking.half_fine_scale_difference_variance_stack_unit_squared",
+    "stacking.half_shared_fine_scale_reference_correction_stack_unit_squared",
+    "stacking.walking_noise_along_drift_correlation",
+    "stacking.walking_noise_across_drift_correlation",
+    "stacking.walking_noise_correlation_excess",
 )
 
 # The astrometry metrics a stored summary cannot give. The share of the

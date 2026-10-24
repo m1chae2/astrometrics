@@ -952,7 +952,11 @@ def _record_with_captured_rows(
     monkeypatch.setattr(record_quality, "determine_stack_members", lambda *_: None)
     monkeypatch.setattr(record_quality, "compute_stack_science", lambda *_a, **_k: None)
     monkeypatch.setattr(record_quality, "stacking_measurements", lambda *_: [])
-    monkeypatch.setattr(record_quality, "frame_geometry_measurements", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        record_quality,
+        "frame_geometry_measurements",
+        lambda *_a, **_k: record_quality.FrameGeometryRows(rotation=[], pointing=[]),
+    )
     monkeypatch.setattr(record_quality, "record_run_measurements", capture)
     monkeypatch.setattr(record_quality, "flat_match_rows", flat_rows_function)
     record_quality.record_stacking_quality(
@@ -1026,7 +1030,8 @@ def test_a_match_step_that_raises_leaves_the_other_rows_stored_and_stores_no_mat
         raise RuntimeError("broken")
 
     calls = _record_with_captured_rows(monkeypatch, explode, {"flat_frame_paths": flats})
-    assert len(calls) == 2
+    # The stack rows, then the rotation and pointing calls; no match call.
+    assert len(calls) == 3
     match_names = {
         spec.name
         for spec in stacking_metrics.STACKING_METRICS

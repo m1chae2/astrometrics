@@ -44,6 +44,7 @@ REGISTER_ENTRY_HEADING = re.compile(r"^### ([A-Z]{3}-\d{2,3})\s*$", re.MULTILINE
 UNIT_NAME_ENDING: dict[str, str] = {
     "adu": "_adu",
     "px": "_px",
+    "px/h": "_px_per_hour",
     "arcsec": "_arcsec",
     "arcsec/px": "_arcsec_per_pixel",
     "fraction": "_fraction",
@@ -56,6 +57,7 @@ UNIT_NAME_ENDING: dict[str, str] = {
     "mag": "_mag",
     "angstrom": "_angstrom",
     "stack_unit": "_stack_unit",
+    "stack_unit^2": "_stack_unit_squared",
     "stack_unit/adu": "_stack_unit_per_adu",
     "1/d": "_per_day",
 }

@@ -26,6 +26,7 @@ from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
 from astrometricslib.pipelines.shared.quality.record_measurements import (
     check_measurement_against_registry,
 )
+from astrometricslib.pipelines.shared.registration_record import RegistrationRecord, build_registration_record
 from astrometricslib.pipelines.stacking import metrics as stacking_metrics
 from astrometricslib.pipelines.stacking.metrics import STACKING_FRAME_REGISTRATION_ROTATION_DEG
 from astrometricslib.pipelines.stacking.post_processing import record_quality
@@ -34,8 +35,22 @@ from astrometricslib.pipelines.stacking.post_processing.field_rotation import (
     image_parity_text,
     rotation_from_homography,
 )
+from astrometricslib.pipelines.stacking.post_processing.record_quality import FrameGeometryRows
+from astrometricslib.pipelines.stacking.post_processing.stack_membership import (
+    registration_reference_from_diagnostics,
+)
 from astrometricslib.pipelines.stacking.test.conformance_fixture import fixture_summary
 
+POINTING_METRICS = (
+    stacking_metrics.STACKING_REGISTRATION_STEP_MEDIAN_PX,
+    stacking_metrics.STACKING_REGISTRATION_STEP_MAD_PX,
+    stacking_metrics.STACKING_REGISTRATION_STEP_JUMP_COUNT,
+    stacking_metrics.STACKING_REGISTRATION_STEP_DEGENERATE_COUNT,
+    stacking_metrics.STACKING_REGISTRATION_STEP_AFTER_DRIFT_MEDIAN_PX,
+    stacking_metrics.STACKING_REGISTRATION_DRIFT_RATE_PX_PER_HOUR,
+    stacking_metrics.STACKING_REGISTRATION_DRIFT_DIRECTION_DEG,
+    stacking_metrics.STACKING_REGISTRATION_DRIFT_EXTENT_PX,
+)
 CONTEXT = PipelineRunContext(
     "M 99", "stacking", "1.3.0", "job-1", "job-1", datetime(2026, 10, 23, tzinfo=UTC)
 )
@@ -108,11 +123,35 @@ def _diagnostics(frames: list[SimpleNamespace], homographies: list[list[float]])
     }
 
 
+def _record_of(diagnostics: dict, *, is_spectral: bool = False) -> RegistrationRecord | None:
+    """Read a run's registration results into the record the steps take.
+
+    Parameters
+    ----------
+    diagnostics : `dict`
+        What the stacking run reported.
+    is_spectral : `bool`, optional
+        Whether the stack is spectral.
+
+    Returns
+    -------
+    record : `RegistrationRecord` or `None`
+        The record, with the frame whose transform is the identity as the
+        reference; `None` when the lists differ in length.
+    """
+    reference = registration_reference_from_diagnostics(diagnostics)
+    return build_registration_record(
+        diagnostics, (0, 0), None if reference is None else reference[0], is_spectral=is_spectral
+    )
+
+
 def test_each_frame_gets_its_rotation_in_its_own_subject() -> None:
     """A frame's row holds the angle and the id of the frame's weight."""
     frames = _frames(3)
     homographies = [_turned(0.004), IDENTITY, _turned(-0.006)]
-    rows = field_rotation_measurements(frames, _diagnostics(frames, homographies), CONTEXT, is_spectral=False)
+    rows = field_rotation_measurements(
+        frames, _record_of(_diagnostics(frames, homographies)), CONTEXT, is_spectral=False
+    )
     assert [row.value for row in rows] == pytest.approx([0.004, 0.0, -0.006])
     assert rows[0].subject.subject_id == "M 99/Scope/Cam/f000.fits"
     assert rows[0].subject.observing_night_id is not None
@@ -125,7 +164,9 @@ def test_a_measured_row_names_the_reference_frame_and_the_parity() -> None:
     """The reason of a measured row says which frame was the reference."""
     frames = _frames(3)
     homographies = [_turned(0.004), IDENTITY, _turned(-0.006)]
-    rows = field_rotation_measurements(frames, _diagnostics(frames, homographies), CONTEXT, is_spectral=False)
+    rows = field_rotation_measurements(
+        frames, _record_of(_diagnostics(frames, homographies)), CONTEXT, is_spectral=False
+    )
     assert "reference frame f001.fits" in rows[0].reason
     assert "parity (sign of det(CD) of the stack's plate solution): unknown" in rows[0].reason
 
@@ -153,7 +194,7 @@ def test_the_parity_is_the_sign_of_the_cd_determinant_of_the_stack_header(tmp_pa
     frames = _frames(2)
     rows = field_rotation_measurements(
         frames,
-        _diagnostics(frames, [IDENTITY, _turned(0.01)]),
+        _record_of(_diagnostics(frames, [IDENTITY, _turned(0.01)])),
         CONTEXT,
         is_spectral=False,
         stack_path=str(normal),
@@ -186,7 +227,10 @@ def test_a_transform_that_mirrors_the_image_has_no_angle() -> None:
     assert rotation_from_homography(mirror) is None
     frames = _frames(3)
     rows = field_rotation_measurements(
-        frames, _diagnostics(frames, [IDENTITY, mirror, _turned(0.01)]), CONTEXT, is_spectral=False
+        frames,
+        _record_of(_diagnostics(frames, [IDENTITY, mirror, _turned(0.01)])),
+        CONTEXT,
+        is_spectral=False,
     )
     assert rows[1].status == MeasurementStatus.NOT_MEASURED
     assert "reverses the image" in rows[1].reason
@@ -207,7 +251,10 @@ def test_a_spectral_stack_has_no_rotation() -> None:
     """A shift-only registration gives not-measured rows with the reason."""
     frames = _frames(2)
     rows = field_rotation_measurements(
-        frames, _diagnostics(frames, [IDENTITY, _turned(0.0, 2.0)]), CONTEXT, is_spectral=True
+        frames,
+        _record_of(_diagnostics(frames, [IDENTITY, _turned(0.0, 2.0)]), is_spectral=True),
+        CONTEXT,
+        is_spectral=True,
     )
     assert all(row.status == MeasurementStatus.NOT_MEASURED for row in rows)
     assert all("shift only" in row.reason for row in rows)
@@ -217,7 +264,7 @@ def test_a_sequence_of_identity_transforms_is_not_measured() -> None:
     """Frames registered before Siril read them show only meaningless zeros."""
     frames = _frames(3)
     rows = field_rotation_measurements(
-        frames, _diagnostics(frames, [IDENTITY] * 3), CONTEXT, is_spectral=False
+        frames, _record_of(_diagnostics(frames, [IDENTITY] * 3)), CONTEXT, is_spectral=False
     )
     assert all(row.status == MeasurementStatus.NOT_MEASURED for row in rows)
     assert all("identity" in row.reason for row in rows)
@@ -228,7 +275,7 @@ def test_a_frame_siril_dropped_is_not_measured_but_the_others_are() -> None:
     frames = _frames(3)
     diagnostics = _diagnostics(frames, [_turned(0.004), IDENTITY, _turned(-0.006)])
     diagnostics["registration_included"] = [True, False, True]
-    rows = field_rotation_measurements(frames, diagnostics, CONTEXT, is_spectral=False)
+    rows = field_rotation_measurements(frames, _record_of(diagnostics), CONTEXT, is_spectral=False)
     assert [row.status for row in rows] == [
         MeasurementStatus.MEASURED,
         MeasurementStatus.NOT_MEASURED,
@@ -240,7 +287,7 @@ def test_a_frame_missing_from_sirils_table_gets_a_not_measured_row() -> None:
     """A frame Siril was never given is not silently left out."""
     frames = _frames(4)
     diagnostics = _diagnostics(frames[:3], [_turned(0.004), IDENTITY, _turned(-0.006)])
-    rows = field_rotation_measurements(frames, diagnostics, CONTEXT, is_spectral=False)
+    rows = field_rotation_measurements(frames, _record_of(diagnostics), CONTEXT, is_spectral=False)
     assert len(rows) == 4
     assert rows[3].subject.subject_id == "M 99/Scope/Cam/f003.fits"
     assert rows[3].status == MeasurementStatus.NOT_MEASURED
@@ -252,7 +299,8 @@ def test_registration_results_that_do_not_match_the_frames_give_no_angle() -> No
     frames = _frames(3)
     diagnostics = _diagnostics(frames[:2], [_turned(0.004), IDENTITY])
     diagnostics["symlinked_light_paths"] = [frame.path for frame in frames]
-    rows = field_rotation_measurements(frames, diagnostics, CONTEXT, is_spectral=False)
+    assert _record_of(diagnostics) is None
+    rows = field_rotation_measurements(frames, None, CONTEXT, is_spectral=False)
     assert len(rows) == 3
     assert all("could not be matched" in row.reason for row in rows)
 
@@ -339,11 +387,15 @@ def test_the_record_step_stores_the_stack_rows_and_the_rotation_of_every_frame(
     rows = store.query(target_id="M 99", latest_only=False)
     rotation_rows = [row for row in rows if row.metric == STACKING_FRAME_REGISTRATION_ROTATION_DEG]
 
-    assert new_count == 4
+    # One stack row, one rotation row for each of three frames, and the eight
+    # pointing rows of the stack (three frames give no step, so they say why).
+    assert new_count == 12
     assert {row.metric for row in rows} == {
         "stacking.zero_pixel_fraction",
         STACKING_FRAME_REGISTRATION_ROTATION_DEG,
+        *POINTING_METRICS,
     }
+    assert all(row.reason for row in rows if row.metric in POINTING_METRICS)
     assert sorted(row.subject.subject_id for row in rotation_rows) == sorted(
         frame_subject_id(frame.path, "M 99") for frame in frames
     )
@@ -355,7 +407,9 @@ def test_a_bad_geometry_row_leaves_the_stack_rows_stored(
     """A geometry row the registry refuses cannot undo the stack's rows."""
     store = _use_temporary_store(tmp_path, monkeypatch)
     bad = _stack_row().model_copy(update={"metric": "stacking.not_a_declared_metric"})
-    monkeypatch.setattr(record_quality, "frame_geometry_measurements", lambda *_: [bad])
+    monkeypatch.setattr(
+        record_quality, "frame_geometry_measurements", lambda *_: FrameGeometryRows([bad], [])
+    )
     new_count, _ = _record(tmp_path, monkeypatch)
     rows = store.query(target_id="M 99", latest_only=False)
 
@@ -388,10 +442,133 @@ def test_a_geometry_step_that_raises_leaves_the_stack_rows_stored(
     ]
 
 
+def _boom(*_arguments: object, **_keywords: object) -> list[QualityMeasurement]:
+    """Raise as a broken row builder would.
+
+    Raises
+    ------
+    RuntimeError
+        Always.
+    """
+    raise RuntimeError("broken")
+
+
+def test_pointing_rows_that_cannot_be_built_leave_the_rotation_rows_stored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An error in the pointing step costs only the pointing rows."""
+    store = _use_temporary_store(tmp_path, monkeypatch)
+    monkeypatch.setattr(record_quality, "pointing_measurements", _boom)
+    new_count, _ = _record(tmp_path, monkeypatch)
+    metrics = {row.metric for row in store.query(target_id="M 99", latest_only=False)}
+
+    assert new_count == 4
+    assert metrics == {"stacking.zero_pixel_fraction", STACKING_FRAME_REGISTRATION_ROTATION_DEG}
+
+
+def test_pointing_rows_the_registry_refuses_leave_the_rotation_rows_stored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pointing rows are stored in a call of their own."""
+    store = _use_temporary_store(tmp_path, monkeypatch)
+    bad = _stack_row().model_copy(update={"metric": "stacking.not_a_declared_metric"})
+    monkeypatch.setattr(record_quality, "pointing_measurements", lambda *_, **__: [bad])
+    new_count, _ = _record(tmp_path, monkeypatch)
+    metrics = {row.metric for row in store.query(target_id="M 99", latest_only=False)}
+
+    assert new_count == 4
+    assert metrics == {"stacking.zero_pixel_fraction", STACKING_FRAME_REGISTRATION_ROTATION_DEG}
+
+
+def test_rotation_rows_that_cannot_be_built_leave_the_pointing_rows_stored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An error in the rotation step costs only the rotation rows."""
+    store = _use_temporary_store(tmp_path, monkeypatch)
+    monkeypatch.setattr(record_quality, "field_rotation_measurements", _boom)
+    new_count, _ = _record(tmp_path, monkeypatch)
+    metrics = {row.metric for row in store.query(target_id="M 99", latest_only=False)}
+
+    assert new_count == 9
+    assert metrics == {"stacking.zero_pixel_fraction", *POINTING_METRICS}
+
+
+def test_a_stack_of_several_exposure_groups_gets_its_own_reason() -> None:
+    """Both row groups say the stack joins groups, not that lists differ."""
+    frames = _frames(3)
+    diagnostics = _diagnostics(frames, [_turned(0.004), IDENTITY, _turned(-0.006)])
+    diagnostics["exposure_groups"] = [{"exposure_seconds": 30.0}, {"exposure_seconds": 60.0}]
+    rows = record_quality.frame_geometry_measurements(
+        fixture_summary(), CONTEXT, frames, diagnostics, "M99_Stacked.fits"
+    )
+
+    assert len(rows.rotation) == 3
+    assert len(rows.pointing) == 8
+    assert all(row.status == MeasurementStatus.NOT_MEASURED for row in [*rows.rotation, *rows.pointing])
+    assert all("several exposure groups" in row.reason for row in [*rows.rotation, *rows.pointing])
+    assert not any("could not be matched" in row.reason for row in [*rows.rotation, *rows.pointing])
+
+
+def test_the_registration_is_read_into_one_record_for_both_row_groups(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`frame_geometry_measurements` builds the record once and hands it on."""
+    frames = _frames(3)
+    diagnostics = _diagnostics(frames, [_turned(0.004), IDENTITY, _turned(-0.006)])
+    built: list[RegistrationRecord | None] = []
+    real_build = record_quality.build_registration_record
+
+    def counting_build(*arguments: object, **keywords: object) -> RegistrationRecord | None:
+        """Build a record and note it.
+
+        Returns
+        -------
+        record : `RegistrationRecord` or `None`
+            What the real builder gives.
+        """
+        built.append(real_build(*arguments, **keywords))
+        return built[-1]
+
+    seen: list[object] = []
+    real_rotation = record_quality.field_rotation_measurements
+    real_pointing = record_quality.pointing_measurements
+
+    def spy_rotation(target_frames: object, record: object, *arguments: object, **keywords: object) -> list:
+        """Note the record the rotation step was given.
+
+        Returns
+        -------
+        rows : `list`
+            What the real step gives.
+        """
+        seen.append(record)
+        return real_rotation(target_frames, record, *arguments, **keywords)
+
+    def spy_pointing(target_frames: object, record: object, *arguments: object, **keywords: object) -> list:
+        """Note the record the pointing step was given.
+
+        Returns
+        -------
+        rows : `list`
+            What the real step gives.
+        """
+        seen.append(record)
+        return real_pointing(target_frames, record, *arguments, **keywords)
+
+    monkeypatch.setattr(record_quality, "build_registration_record", counting_build)
+    monkeypatch.setattr(record_quality, "field_rotation_measurements", spy_rotation)
+    monkeypatch.setattr(record_quality, "pointing_measurements", spy_pointing)
+    record_quality.frame_geometry_measurements(fixture_summary(), CONTEXT, frames, diagnostics, "S.fits")
+
+    assert len(built) == 1
+    assert seen[0] is built[0]
+    assert seen[1] is built[0]
+
+
 def test_the_rotation_row_uses_the_one_frame_subject_builder() -> None:
     """The rotation row's subject is the one `frame_subject` builds."""
     frame = _frames(1)[0]
     rows = field_rotation_measurements(
-        [frame], _diagnostics([frame], [_turned(0.004)]), CONTEXT, is_spectral=False
+        [frame], _record_of(_diagnostics([frame], [_turned(0.004)])), CONTEXT, is_spectral=False
     )
     assert rows[0].subject == frame_subject(frame.path, "M 99", frame.timestamp)

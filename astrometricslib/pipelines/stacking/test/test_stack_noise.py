@@ -18,37 +18,43 @@ import pytest
 from astropy.io import fits
 from astropy.wcs import WCS
 
-from astrometricslib.pipelines.stacking.post_processing import stack_noise
-from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
+from astrometricslib.pipelines.stacking.post_processing import empty_apertures
+from astrometricslib.pipelines.stacking.post_processing.difference_noise import (
+    discard_noise_sums,
+    load_noise_sums,
+    noise_sums_path,
+    paired_noise_difference,
+    paired_noise_ratio,
+    save_noise_sums,
+)
+from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
     APERTURE_FILE_NAME,
     APERTURE_FILE_VERSION,
-    APERTURE_RADIUS_PX,
     APERTURE_SEPARATION_PX,
     FAINT_SOURCE_CLEARANCE_PX,
-    MAD_SIGMA_ERROR_FACTOR,
     MINIMUM_USABLE_APERTURES,
-    NO_WCS_REASON,
     OLD_APERTURES_REASON,
     REPLACEMENT_DEPTH_FACTOR,
-    RING_INNER_PX,
-    RING_OUTER_PX,
     ApertureSetMismatchError,
     FaintSourceAnalysis,
     StackDepth,
     analyze_faint_sources,
-    discard_noise_sums,
     faint_source_distance,
     load_apertures,
     load_apertures_with_reason,
-    load_noise_sums,
-    measure_stack_noise,
-    noise_sums_path,
-    paired_noise_difference,
-    paired_noise_ratio,
     place_empty_apertures,
     reset_apertures,
-    save_noise_sums,
+)
+from astrometricslib.pipelines.stacking.post_processing.stack_image import (
+    APERTURE_RADIUS_PX,
+    MAD_SIGMA_ERROR_FACTOR,
+    RING_INNER_PX,
+    RING_OUTER_PX,
     signed_aperture_sum,
+)
+from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
+    NO_WCS_REASON,
+    measure_stack_noise,
 )
 
 SIZE = 900
@@ -672,7 +678,7 @@ def test_too_few_clean_apertures_is_a_reason_not_a_fallback(
 ) -> None:
     """A field with no clean sky gives a reason, never the old placement."""
     monkeypatch.setattr(
-        stack_noise,
+        empty_apertures,
         "analyze_faint_sources",
         lambda plane: FaintSourceAnalysis(np.zeros(plane.shape), (1.0, 1.0, 1.0), 0.3, 1.0, 0.8),
     )

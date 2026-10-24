@@ -221,6 +221,34 @@ STACKING_FLAT_LIGHT_BEST_SHIFT_Y_PX = "stacking.flat_light_best_shift_y_px"
 STACKING_FLAT_LIGHT_BEST_ROTATION_DEG = "stacking.flat_light_best_rotation_deg"
 STACKING_FLAT_LIGHT_DISPLACED_CORRELATION_STD = "stacking.flat_light_displaced_correlation_std"
 STACKING_LIGHT_DUST_SPLIT_HALF_CORRELATION = "stacking.light_dust_split_half_correlation"
+# How far the pointing stepped between exposures and how it drifted (per stack,
+# from Siril's registration of the run).
+STACKING_REGISTRATION_STEP_MEDIAN_PX = "stacking.registration_step_median_px"
+STACKING_REGISTRATION_STEP_MAD_PX = "stacking.registration_step_mad_px"
+STACKING_REGISTRATION_STEP_JUMP_COUNT = "stacking.registration_step_jump_count"
+STACKING_REGISTRATION_STEP_DEGENERATE_COUNT = "stacking.registration_step_degenerate_count"
+STACKING_REGISTRATION_STEP_AFTER_DRIFT_MEDIAN_PX = "stacking.registration_step_after_drift_median_px"
+STACKING_REGISTRATION_DRIFT_RATE_PX_PER_HOUR = "stacking.registration_drift_rate_px_per_hour"
+STACKING_REGISTRATION_DRIFT_DIRECTION_DEG = "stacking.registration_drift_direction_deg"
+STACKING_REGISTRATION_DRIFT_EXTENT_PX = "stacking.registration_drift_extent_px"
+
+# What the two half stacks share at the scale of a few pixels, and how that
+# differs along and across the drift (per library stack, from the half-stack
+# difference job).
+STACKING_HALF_SHARED_FINE_SCALE_RMS_STACK_UNIT = "stacking.half_shared_fine_scale_rms_stack_unit"
+STACKING_HALF_SHARED_FINE_SCALE_VARIANCE_RATIO = "stacking.half_shared_fine_scale_variance_ratio"
+STACKING_HALF_SHARED_FINE_SCALE_COVARIANCE_STACK_UNIT_SQUARED = (
+    "stacking.half_shared_fine_scale_covariance_stack_unit_squared"
+)
+STACKING_HALF_FINE_SCALE_DIFFERENCE_VARIANCE_STACK_UNIT_SQUARED = (
+    "stacking.half_fine_scale_difference_variance_stack_unit_squared"
+)
+STACKING_HALF_SHARED_FINE_SCALE_REFERENCE_CORRECTION_STACK_UNIT_SQUARED = (
+    "stacking.half_shared_fine_scale_reference_correction_stack_unit_squared"
+)
+STACKING_WALKING_NOISE_ALONG_CORRELATION = "stacking.walking_noise_along_drift_correlation"
+STACKING_WALKING_NOISE_ACROSS_CORRELATION = "stacking.walking_noise_across_drift_correlation"
+STACKING_WALKING_NOISE_CORRELATION_EXCESS = "stacking.walking_noise_correlation_excess"
 
 # The self-checks. The key is the gate's name in the stack summary; the value
 # is the metric that stores it. Each is named ``stacking.gate_<gate name>``.
@@ -272,6 +300,8 @@ def _context_metric(
     band: str = _BAND,
     definition_version: int = 1,
     decisions: tuple[str, ...] = (),
+    exploratory_question: str = "",
+    review_date: datetime.date | None = None,
 ) -> MetricSpec:
     """Declare one value that the stacking stage already makes.
 
@@ -310,6 +340,12 @@ def _context_metric(
         when any of them changes (plan section 3.4).
     decisions : `tuple` [`str`], optional
         The decisions the value informs (documentation only).
+    exploratory_question : `str`, optional
+        The question an exploratory value answers. Needed for the
+        exploratory purpose.
+    review_date : `datetime.date` or `None`, optional
+        When an exploratory value must be promoted or removed. Needed for
+        the exploratory purpose.
 
     Returns
     -------
@@ -334,6 +370,8 @@ def _context_metric(
         register_entry=register_entry,
         purpose=purpose,
         purpose_reason=purpose_reason,
+        exploratory_question=exploratory_question,
+        review_date=review_date,
     )
 
 
@@ -666,7 +704,7 @@ _NOISE_SAMPLE = (
     "sky rings share a pixel. A stack needs at least 20 usable apertures; with fewer clean apertures the "
     "noise is not measured. Sky structure too faint to flag (unresolved stars, a faint halo) stays in the "
     "apertures. The target keeps one set of "
-    "apertures for each camera and optic (see `stack_noise.reset_apertures`)."
+    "apertures for each camera and optic (see `empty_apertures.reset_apertures`)."
 )
 _NOISE_UNCERTAINTY = (
     "Statistical, 1 sigma: 1.1664 times the spread divided by sqrt(n) for n usable apertures. This is the "
@@ -699,6 +737,7 @@ _NOISE_AND_WEIGHT_METRICS: tuple[MetricSpec, ...] = (
         purpose_reason=_NOISE_PURPOSE_REASON,
         uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
         uncertainty_method=_NOISE_UNCERTAINTY,
+        register_entry="STK-36",
         definition_version=3,
     ),
     _context_metric(
@@ -728,6 +767,7 @@ _NOISE_AND_WEIGHT_METRICS: tuple[MetricSpec, ...] = (
             "stack defines the scale. A star that widens past the large aperture would lower its ratio and "
             "widen the scatter; no change in the stars themselves is in the error."
         ),
+        register_entry="STK-36",
         definition_version=3,
     ),
     _context_metric(
@@ -748,6 +788,7 @@ _NOISE_AND_WEIGHT_METRICS: tuple[MetricSpec, ...] = (
             "of the zero point added in quadrature, times the ratio. The scatter of the stars' brightness "
             "ratios is included; any real change in a star's brightness between stacks is not."
         ),
+        register_entry="STK-36",
         definition_version=3,
     ),
     _context_metric(
@@ -850,6 +891,13 @@ _NIGHT_SAMPLE = (
     "left out."
 )
 
+_NIGHT_REVIEW_DATE = datetime.date(2027, 4, 30)
+_NIGHT_QUESTION = (
+    "Does leaving one observing night out of a real target's library stack change the stack's noise "
+    "by the amount that the night's share of the summed frame weights predicts? The register entry is "
+    "a design estimate, because leaving a night out has been run on synthetic frames only."
+)
+
 _NIGHT_METRICS: tuple[MetricSpec, ...] = (
     _context_metric(
         STACKING_NIGHT_WEIGHT_SHARE,
@@ -866,7 +914,10 @@ _NIGHT_METRICS: tuple[MetricSpec, ...] = (
         _NIGHT_SAMPLE,
         "pipelines.stacking.subset_noise_run.night_weight_shares",
         better=Direction.NONE,
-        purpose_reason=_NIGHT_PURPOSE_REASON,
+        register_entry="STK-37",
+        purpose=MetricPurpose.EXPLORATORY,
+        exploratory_question=_NIGHT_QUESTION,
+        review_date=_NIGHT_REVIEW_DATE,
     ),
     _context_metric(
         STACKING_NOISE_WITHOUT_NIGHT,
@@ -884,7 +935,10 @@ _NIGHT_METRICS: tuple[MetricSpec, ...] = (
         _NIGHT_SAMPLE + " Up to 100 empty apertures, as for the stack noise.",
         "pipelines.stacking.subset_noise_run.run_night_contributions",
         better=Direction.LOWER,
-        purpose_reason=_NIGHT_PURPOSE_REASON,
+        register_entry="STK-37",
+        purpose=MetricPurpose.EXPLORATORY,
+        exploratory_question=_NIGHT_QUESTION,
+        review_date=_NIGHT_REVIEW_DATE,
         uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
         uncertainty_method=(
             "Statistical, 1 sigma: as for `stacking.empty_aperture_noise_normalized`. This is the "
@@ -911,9 +965,12 @@ _NIGHT_METRICS: tuple[MetricSpec, ...] = (
             "or belongs to other apertures."
         ),
         _NIGHT_SAMPLE + " Only the apertures usable on both stacks.",
-        "pipelines.stacking.post_processing.stack_noise.paired_noise_difference",
+        "pipelines.stacking.post_processing.difference_noise.paired_noise_difference",
         better=Direction.NONE,
-        purpose_reason=_NIGHT_PURPOSE_REASON,
+        register_entry="STK-37",
+        purpose=MetricPurpose.EXPLORATORY,
+        exploratory_question=_NIGHT_QUESTION,
+        review_date=_NIGHT_REVIEW_DATE,
         uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
         uncertainty_method=(
             "Statistical, 1 sigma, paired: the apertures are resampled with replacement 1000 times (a fixed "
@@ -944,6 +1001,7 @@ _NIGHT_METRICS: tuple[MetricSpec, ...] = (
         "One row for each subset stack (a growth step or a leave-one-night-out stack).",
         "pipelines.stacking.subset_noise_run.expected_noise_ratio",
         better=Direction.NONE,
+        register_entry="STK-36",
         purpose_reason=_NIGHT_PURPOSE_REASON,
     ),
 )
@@ -1003,7 +1061,7 @@ _HALF_DIFFERENCE_METRICS: tuple[MetricSpec, ...] = (
             "and every part of it is stored."
         ),
         _HALF_DIFFERENCE_SAMPLE,
-        "pipelines.stacking.post_processing.stack_noise.measure_difference_noise",
+        "pipelines.stacking.post_processing.difference_noise.measure_difference_noise",
         better=Direction.LOWER,
         purpose_reason=_HALF_DIFFERENCE_PURPOSE_REASON,
         uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
@@ -1024,7 +1082,7 @@ _HALF_DIFFERENCE_METRICS: tuple[MetricSpec, ...] = (
             + _HALF_DIFFERENCE_CANCELS
         ),
         _HALF_DIFFERENCE_SAMPLE,
-        "pipelines.stacking.post_processing.stack_noise.measure_difference_noise",
+        "pipelines.stacking.post_processing.difference_noise.measure_difference_noise",
         better=Direction.LOWER,
         purpose_reason=_HALF_DIFFERENCE_PURPOSE_REASON,
         uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
@@ -1070,7 +1128,7 @@ _HALF_DIFFERENCE_METRICS: tuple[MetricSpec, ...] = (
             "halves on the library stack's scale."
         ),
         "The fixed reference stars of the target that fall on the odd half stack and are not saturated.",
-        "pipelines.stacking.post_processing.stack_noise.measure_difference_noise",
+        "pipelines.stacking.post_processing.difference_noise.measure_difference_noise",
         better=Direction.NONE,
         purpose_reason=_HALF_DIFFERENCE_PURPOSE_REASON,
         uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
@@ -1405,7 +1463,7 @@ _SCIENCE_METRICS: tuple[MetricSpec, ...] = (
             "averaged over 16 places of the circle's centre inside a pixel: about 59 px for the stack's "
             "aperture. The pi / 2 assumes Gaussian noise in the ring."
         ),
-        "The one aperture shape of `stack_noise.py` (radius 4 px, ring 7 to 12 px).",
+        "The one aperture shape of `stack_image.py` (radius 4 px, ring 7 to 12 px).",
         "pipelines.stacking.post_processing.expected_noise.effective_aperture_area_px",
         purpose_reason=_EXPECTED_NOISE_PURPOSE_REASON,
         register_entry="STK-38",
@@ -1455,7 +1513,7 @@ _SCIENCE_METRICS: tuple[MetricSpec, ...] = (
             "noise is multiplied by, and it checks the unit scale against the sky the frames predict."
         ),
         "Every finite, nonzero pixel of the stack (a color stack has its channels averaged).",
-        "pipelines.stacking.post_processing.stack_noise.sky_level_of_plane",
+        "pipelines.stacking.post_processing.stack_image.sky_level_of_plane",
         purpose_reason=(
             "A part of `stacking.flat_noise_in_aperture_stack_unit` (the flat's noise is multiplied by the "
             "signal) and of the unit check; no decision uses the level itself."
@@ -1932,6 +1990,402 @@ _FLAT_MATCH_METRICS: tuple[MetricSpec, ...] = (
     ),
 )
 
+_SHIFT_SAMPLE = (
+    "The frames Siril registered, put in order of capture time (the frame header's DATE-OBS, DATE when "
+    "there is none). Each frame's pointing is where Siril's transform puts the middle of the image, "
+    "compared with the registration reference frame, in pixels; a frame without a capture time, and a "
+    "frame Siril dropped, are left out. A stack whose frames were already registered (every transform is "
+    "the identity) is not measured, and neither is a stack that joins several exposure groups (each "
+    "group has its own reference). Siril registers a spectral stack by shift only; its shifts are "
+    "used the same way."
+)
+_SHIFT_PURPOSE_REASON = (
+    "It tells a reader whether the run was dithered, which decides how far a pattern fixed on the "
+    "sensor averages out in the stack. No decision uses it directly."
+)
+_SHIFT_SUSPECT = (
+    "The step rows are not measured when more than 10% of the pairs of one night have a step longer than "
+    "50 px, or when more than half of the frames have exactly the identity transform: the transforms "
+    "of such a run (some DSLR groups) are not pointings."
+)
+_DITHER_CAVEAT = (
+    "A median step of 0.3 to 0.6 pixel is a slow drift plus the noise of the fit and does not show that "
+    "the run was dithered (`stacking.registration_step_after_drift_median_px` takes the drift out). "
+    "The measurement is a distance moved, whatever moved it. The number of pairs is the sample count "
+    "of the row."
+)
+
+_SHIFT_METRICS: tuple[MetricSpec, ...] = (
+    _context_metric(
+        STACKING_REGISTRATION_STEP_MEDIAN_PX,
+        "px",
+        "The median distance the pointing moved between two exposures taken one after the other.",
+        (
+            "For each pair of neighboring exposures of one observing night, the distance between their "
+            "pointings, sqrt(dx^2 + dy^2) in pixels; the median over the pairs used. A pair across two "
+            "observing nights is left out. A pair whose step is longer than 50 px is left out and counted "
+            "(`stacking.registration_step_degenerate_count`): the stored shifts of some DSLR groups are "
+            "thousands of pixels and are not pointing. At least 5 pairs are needed. "
+            + _SHIFT_SUSPECT
+            + " "
+            + _DITHER_CAVEAT
+        ),
+        _SHIFT_SAMPLE,
+        "pipelines.stacking.post_processing.registration_shifts.step_summary",
+        register_entry="STK-44",
+        purpose_reason=_SHIFT_PURPOSE_REASON,
+        uncertainty_kind=UncertaintyKind.NONE,
+        uncertainty_method=(
+            "No uncertainty is reported. The spread of the steps is stored beside it "
+            "(`stacking.registration_step_mad_px`)."
+        ),
+    ),
+    _context_metric(
+        STACKING_REGISTRATION_STEP_MAD_PX,
+        "px",
+        "How much the steps between neighboring exposures vary: the median absolute deviation.",
+        (
+            "The median of the absolute differences between each used step and the median step "
+            "(`stacking.registration_step_median_px`). It is not scaled to a standard deviation. A random "
+            "dither has a wide spread and a pure drift has a narrow one. A dither that happens every few "
+            "exposures changes fewer than half of the steps and leaves this value small; "
+            "`stacking.registration_step_jump_count` counts those steps."
+        ),
+        _SHIFT_SAMPLE,
+        "pipelines.stacking.post_processing.registration_shifts.step_summary",
+        register_entry="STK-44",
+        purpose_reason=_SHIFT_PURPOSE_REASON,
+    ),
+    _context_metric(
+        STACKING_REGISTRATION_STEP_JUMP_COUNT,
+        "count",
+        "How many steps between neighboring exposures were far larger than the usual step: the dithers.",
+        (
+            "The number of used steps larger than the median step plus 5 robust standard deviations of the "
+            "steps (1.4826 times the median absolute deviation, but not less than 0.1 px, so a pure drift "
+            "with a spread near zero does not count every step above its median). It is the row to read "
+            "for a run that dithers once every N exposures: the median step stays at the drift step and "
+            "the median absolute deviation stays small, while this count is the number of dithers (plus "
+            "any re-center or guiding upset) and the number of used pairs (the row's sample count) "
+            "divided by it is about N. For steps of independent jitter alone the threshold is about 5.5 "
+            "standard deviations of one coordinate; a simulation of 200 runs of 60 frames of jitter "
+            "alone gave 2 false jumps in 11,800 steps (about one run in a hundred, because the spread "
+            "is estimated from the run's own steps). At least 5 pairs are needed. " + _SHIFT_SUSPECT
+        ),
+        _SHIFT_SAMPLE,
+        "pipelines.stacking.post_processing.registration_shifts.step_summary",
+        register_entry="STK-44",
+        purpose_reason=_SHIFT_PURPOSE_REASON,
+    ),
+    _context_metric(
+        STACKING_REGISTRATION_STEP_DEGENERATE_COUNT,
+        "count",
+        "How many pairs of neighboring exposures had a step too long to be a dither and were left out.",
+        (
+            "The number of pairs of one night whose step was longer than 50 px. The limit sits between "
+            "the largest real dither or drift step found in the stored shifts (a few pixels) and the "
+            "5,000 to 7,400 px 'shifts' of DSLR groups (STK-44). Pairs across two observing nights are "
+            "not counted here. When this count is more than 10% of the pairs of one night, the step "
+            "rows are not measured."
+        ),
+        _SHIFT_SAMPLE,
+        "pipelines.stacking.post_processing.registration_shifts.step_summary",
+        register_entry="STK-44",
+        purpose_reason=_SHIFT_PURPOSE_REASON,
+    ),
+    _context_metric(
+        STACKING_REGISTRATION_STEP_AFTER_DRIFT_MEDIAN_PX,
+        "px",
+        "The median step between neighboring exposures after each night's steady drift is taken out.",
+        (
+            "For each observing night with at least 5 registered frames, a straight line of the pointing "
+            "against time is fitted to each coordinate (frames more than 50 px off the line are dropped "
+            "and the line is fitted again). The step is the distance between the neighboring frames' "
+            "residuals from the line; the median over all pairs of all such nights, at least 5 pairs. "
+            "Only the dither and the noise of Siril's fit are left. For an undithered run it is the "
+            "fit noise times about 1.4. " + _SHIFT_SUSPECT
+        ),
+        _SHIFT_SAMPLE,
+        "pipelines.stacking.post_processing.registration_shifts.step_summary",
+        register_entry="STK-44",
+        purpose_reason=_SHIFT_PURPOSE_REASON,
+    ),
+    _context_metric(
+        STACKING_REGISTRATION_DRIFT_RATE_PX_PER_HOUR,
+        "px/h",
+        "How fast the pointing walks through a night, in pixels per hour.",
+        (
+            "For each observing night with at least 5 registered frames, the length of the slope of a "
+            "straight line fitted to the pointing against time (the two coordinates fitted apart; frames "
+            "more than 50 px off the line are dropped and the line is fitted again). The mean of the "
+            "nights' lengths, weighted by the number of frames in each fit. A drift lost in the "
+            "scatter of the fit still has a length, which the noise makes positive: the length of a "
+            "slope with errors s in both coordinates averages 1.25 s when the true drift is zero. So "
+            "the rate is biased upward when it is not several times its error, and the row says so in "
+            "its reason."
+        ),
+        _SHIFT_SAMPLE,
+        "pipelines.stacking.post_processing.registration_shifts.drift_summary",
+        register_entry="STK-44",
+        purpose_reason=_SHIFT_PURPOSE_REASON,
+        uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
+        uncertainty_method=(
+            "Statistical, 1 sigma: for each night, the standard error of the slope of each coordinate "
+            "(from the scatter about the line and the spread of the frame times), combined along the "
+            "drift; the nights' errors are added in quadrature with their frame-count weights. The "
+            "straight-line model itself is not tested, and the error does not remove the upward bias "
+            "of a length near zero."
+        ),
+    ),
+    _context_metric(
+        STACKING_REGISTRATION_DRIFT_DIRECTION_DEG,
+        "deg",
+        "The direction along which the pointing walks through a night, as an axis in the array.",
+        (
+            "The angle of the drift axis from the column axis toward the row axis (rows counted downward "
+            "in the array), from 0 up to but not including 180 degrees, because the sign of a drift does "
+            "not matter for the smear it makes. Each night whose drift is at least 3 times the "
+            "standard error of its slope gives an axis; the nights' axes are averaged at twice their "
+            "angle, weighted by frame count. Not measured when no night drifts by 3 standard errors "
+            "(the axis would be set by noise) or when the nights' axes agree less than 0.5."
+        ),
+        _SHIFT_SAMPLE,
+        "pipelines.stacking.post_processing.registration_shifts.drift_summary",
+        register_entry="STK-44",
+        purpose_reason=_SHIFT_PURPOSE_REASON,
+    ),
+    _context_metric(
+        STACKING_REGISTRATION_DRIFT_EXTENT_PX,
+        "px",
+        "How far the pointing ranges along the drift axis within a night.",
+        (
+            "For the nights that give the drift axis, the largest minus the smallest pointing projected "
+            "onto the axis; the largest over those nights. It includes a dither, which widens the "
+            "range. A pattern fixed on the sensor is smeared over about this length in the stack."
+        ),
+        _SHIFT_SAMPLE,
+        "pipelines.stacking.post_processing.registration_shifts.drift_summary",
+        register_entry="STK-44",
+        purpose_reason=_SHIFT_PURPOSE_REASON,
+    ),
+)
+
+_PATTERN_REVIEW_DATE = datetime.date(2027, 4, 30)
+
+_PATTERN_SAMPLE = (
+    "The library stack's two half stacks (the job of `stacking.half_difference_noise_stack_unit`: the frames "
+    "in capture-time order, alternately in each half, the registration reference frame in both). Used "
+    "are the pixels at least 10 px from every faint source the stack's faint-source mask flags, and at "
+    "least 9 px from the empty edge, in tiles of 64 x 64 px; at least 100,000 pixels and 30 tiles. A half "
+    "pair whose weights are unknown is not measured."
+)
+_PATTERN_ESTIMATOR = (
+    "Each half is put through a Gaussian high-pass filter (sigma 3 px). The covariance c of the two "
+    "residual images over the used pixels is the variance of what the halves share at the scale of a "
+    "few pixels, because the random noise of different exposures is independent. The registration "
+    "reference frame is in both halves, and its random noise is shared too; it is taken out as "
+    "sigma_f^2 x a x b, where a and b are its weight shares in the halves and sigma_f^2 is one "
+    "frame's variance, the variance D of the difference of the residuals divided by the variance factor "
+    "F (`stacking.half_difference_variance_factor`, which assumes equal frame noise). That correction "
+    "is a model, not a measurement: the reference is the frame with the heaviest weight, so its noise "
+    "is the least likely to equal the average frame's. The three parts are stored beside the result "
+    "(`stacking.half_shared_fine_scale_covariance_stack_unit_squared`, "
+    "`stacking.half_fine_scale_difference_variance_stack_unit_squared` and "
+    "`stacking.half_shared_fine_scale_reference_correction_stack_unit_squared`). What the halves share "
+    "is the part of any fixed pattern (a defect or flat-field grain that calibration left) that stays "
+    "coherent in both halves, plus any sky structure at this scale that the faint-source mask did not "
+    "flag (very faint stars, fine nebula). The halves alternate in time, so a pointing "
+    "that is held for several exposures (a drift, or a dither made every N exposures) gives frames to both "
+    "halves and a fixed pattern lands alike in both and is shared; only a dither that gives every exposure "
+    "its own pointing makes the halves sample different pointings and share less. So the value is not "
+    "a measurement of the sensor pattern. A sensor pattern is smeared along the pointing drift and "
+    "sky structure is not: the walking-noise rows tell them apart."
+)
+_PATTERN_UNCERTAINTY = (
+    "Statistical, 1 sigma: the standard deviation over 400 bootstrap resamples of the 64 x 64 px tiles "
+    "(a fixed seed). Neighboring tiles are treated as independent, which is nearly right for a "
+    "pattern a few pixels wide and understates the error for a smear longer than a tile. The choice "
+    "of which frames fall in which half, the assumption of equal frame noise, and the uncertainty of "
+    "the variance factor F and of the library stack's effective frame count N_eff (which set the "
+    "reference-frame correction and the ratio's denominator) are not included."
+)
+_PATTERN_QUESTION = (
+    "How much of the fine-scale structure that two halves of a stack share is a pattern fixed on the "
+    "sensor, and how much is faint sky? Does the sensor part grow when the run is not dithered? The "
+    "walking-noise rows (a smear along the drift) are the check, and the register entry STK-45 "
+    "says how large a smeared pattern they could see (it is far above the grain a flat is expected "
+    "to leave)."
+)
+
+
+def _pattern_metric(
+    name: str,
+    unit: str,
+    meaning: str,
+    estimator: str,
+    *,
+    uncertainty: bool = True,
+    question: str = _PATTERN_QUESTION,
+) -> MetricSpec:
+    """Declare one value of the half-stack pattern measurement.
+
+    Parameters
+    ----------
+    name : `str`
+        The metric name.
+    unit : `str`
+        The unit.
+    meaning : `str`
+        One line in plain words.
+    estimator : `str`
+        How the value is found.
+    uncertainty : `bool`, optional
+        Whether the value has the bootstrap uncertainty.
+    question : `str`, optional
+        The question the exploratory metric answers.
+
+    Returns
+    -------
+    spec : `MetricSpec`
+        An exploratory declaration for the half-stack difference job.
+    """
+    return MetricSpec(
+        name=name,
+        definition_version=1,
+        unit=unit,
+        checkpoint=Checkpoint.STACKING,
+        levels=_STACK_ONLY,
+        better=Direction.NONE,
+        meaning=meaning,
+        decisions=(),
+        estimator=estimator,
+        sample_definition=_PATTERN_SAMPLE,
+        band=_BAND,
+        computed_by="pipelines.stacking.post_processing.half_pattern.measure_half_pattern",
+        uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA if uncertainty else UncertaintyKind.NONE,
+        uncertainty_method=_PATTERN_UNCERTAINTY if uncertainty else _NO_UNCERTAINTY,
+        register_entry="STK-45",
+        purpose=MetricPurpose.EXPLORATORY,
+        exploratory_question=question,
+        review_date=_PATTERN_REVIEW_DATE,
+    )
+
+
+_PATTERN_METRICS: tuple[MetricSpec, ...] = (
+    _pattern_metric(
+        STACKING_HALF_SHARED_FINE_SCALE_RMS_STACK_UNIT,
+        "stack_unit",
+        (
+            "The size, per pixel, of the fine-scale structure that the two half stacks share: the part of "
+            "any fixed sensor pattern that stays coherent in both halves, plus faint sky."
+        ),
+        (
+            "The square root of the shared variance of the two halves' high-pass residuals. "
+            + _PATTERN_ESTIMATOR
+            + " Not measured when the shared variance is not above zero: the value would be the root of "
+            "a negative number, and the ratio row keeps the sign."
+        ),
+    ),
+    _pattern_metric(
+        STACKING_HALF_SHARED_FINE_SCALE_VARIANCE_RATIO,
+        "",
+        (
+            "The variance of the structure the half stacks share at a few pixels, as a multiple of the "
+            "library stack's random variance."
+        ),
+        (
+            "The shared variance (see `stacking.half_shared_fine_scale_rms_stack_unit`) divided by the "
+            "random variance of the whole library stack at the same scale. The latter is the variance of the "
+            "difference of the residuals, divided by the variance factor of the difference "
+            "(`stacking.half_difference_variance_factor`) and by the library stack's effective frame "
+            "count (`stacking.effective_frame_count`), so the ratio is (c - sigma_f^2 a b) / "
+            "(D / (F x N_eff)) from the stored parts. It may be below zero, within its error. The "
+            "reference-frame correction is N_eff x a x b in ratio units, a fifth of the uncorrected "
+            "value on the one stack checked (STK-45). " + _PATTERN_ESTIMATOR
+        ),
+    ),
+    _pattern_metric(
+        STACKING_HALF_SHARED_FINE_SCALE_COVARIANCE_STACK_UNIT_SQUARED,
+        "stack_unit^2",
+        "The covariance of the two half stacks' fine-scale residuals, before the reference frame's noise "
+        "is taken out.",
+        (
+            "The mean over the used pixels of odd x even, after each half is high-pass filtered and its "
+            "mean taken out: c in the ratio's formula. It includes the random noise of the registration "
+            "reference frame, which both halves hold. Stored so the ratio can be rebuilt and the size "
+            "of the correction seen. " + _PATTERN_ESTIMATOR
+        ),
+    ),
+    _pattern_metric(
+        STACKING_HALF_FINE_SCALE_DIFFERENCE_VARIANCE_STACK_UNIT_SQUARED,
+        "stack_unit^2",
+        "The variance of the difference of the two half stacks' fine-scale residuals.",
+        (
+            "The mean over the used pixels of (odd - even)^2 after the high-pass filter: D in the ratio's "
+            "formula. Divided by the variance factor F it is one frame's variance at this scale "
+            "(sigma_f^2), and divided again by the effective frame count it is the random variance of "
+            "the library stack, the ratio's denominator. It holds the random noise of both halves and "
+            "none of what they share. " + _PATTERN_ESTIMATOR
+        ),
+    ),
+    _pattern_metric(
+        STACKING_HALF_SHARED_FINE_SCALE_REFERENCE_CORRECTION_STACK_UNIT_SQUARED,
+        "stack_unit^2",
+        "The part of the covariance that is the random noise of the shared registration reference frame.",
+        (
+            "sigma_f^2 x a x b, with sigma_f^2 = D / F and a and b the reference frame's weight shares in "
+            "the odd and even halves "
+            "(`stacking.half_difference_shared_frame_odd_weight_fraction` and the even one). It is "
+            "subtracted from the covariance. It assumes every frame has the noise of the average "
+            "frame, which is a model and not a measurement, and the reference is the sharpest frame, "
+            "the one with the heaviest weight. " + _PATTERN_ESTIMATOR
+        ),
+    ),
+    _pattern_metric(
+        STACKING_WALKING_NOISE_ALONG_CORRELATION,
+        "",
+        "The correlation of the two half stacks' fine-scale residuals at a lag of 6 px along the drift.",
+        (
+            "The mean of odd x even residual products over pixel pairs 6 px apart along the drift axis "
+            "(`stacking.registration_drift_direction_deg`), in both directions, divided by the geometric "
+            "mean of the halves' variances. Moving the second half by a fractional lag uses bilinear "
+            "interpolation, and a pair counts only when all four interpolation neighbors are in the "
+            "sample. A pattern smeared along the drift keeps its correlation at this lag; sky "
+            "structure does not depend on the direction. The smear's signal at the lag falls as "
+            "(1 - lag / extent) of the pointing range along the drift, so a short range sees "
+            "less of it. The reference frame's shared noise is not taken "
+            "out, because at 6 px it is correlated only through the filter and the interpolation. "
+            "Not measured when the drift axis is unknown, or when the pointings cover less than 12 px "
+            "along it (twice the lag): a smear cannot reach the lag."
+        ),
+    ),
+    _pattern_metric(
+        STACKING_WALKING_NOISE_ACROSS_CORRELATION,
+        "",
+        "The same correlation at a lag of 6 px across the drift.",
+        (
+            "As `stacking.walking_noise_along_drift_correlation`, with the lag turned a quarter circle, "
+            "across the drift axis."
+        ),
+    ),
+    _pattern_metric(
+        STACKING_WALKING_NOISE_CORRELATION_EXCESS,
+        "",
+        (
+            "How much more the halves' fine-scale residuals correlate along the drift than across it: "
+            "the smear of a sensor pattern."
+        ),
+        (
+            "The along-drift correlation minus the across-drift correlation, both at 6 px. A positive "
+            "excess beyond its error is a pattern smeared by the drift (walking noise) or stars "
+            "elongated along the drift (a trail in the sky structure that moves with the pointing); zero "
+            "means the shared structure is the same in both directions, as sky structure is. Both "
+            "correlations are normalized with the same variances, so their difference is not changed "
+            "by the shared reference frame's noise or by the choice of the filter width to first order."
+        ),
+    ),
+)
+
 STACKING_METRICS: tuple[MetricSpec, ...] = (
     *_DECLARED_BEFORE_PHASE_3,
     *_VALUE_METRICS,
@@ -1941,6 +2395,8 @@ STACKING_METRICS: tuple[MetricSpec, ...] = (
     *_SCIENCE_METRICS,
     *_FRAME_SHAPE_METRICS,
     *_FLAT_MATCH_METRICS,
+    *_SHIFT_METRICS,
+    *_PATTERN_METRICS,
     *_GATE_METRICS,
 )
 

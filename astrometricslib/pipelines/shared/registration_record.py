@@ -25,6 +25,7 @@ and the stack is stacked again to write one.
 import json
 import logging
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -34,6 +35,7 @@ __all__ = [
     "REGISTRATION_RECORD_SUFFIX",
     "RegistrationRecord",
     "build_registration_record",
+    "is_already_registered",
     "read_registration_record",
     "registration_record_path",
     "write_registration_record",
@@ -45,6 +47,9 @@ REGISTRATION_RECORD_SUFFIX = "_registration_frames.json"
 # Raise this when the layout of the record changes, so an old reader refuses a
 # newer file and a newer reader refuses an older one.
 REGISTRATION_RECORD_VERSION = 1
+
+# A transform is a 3 x 3 matrix written as nine numbers.
+HOMOGRAPHY_LENGTH = 9
 
 
 @dataclass(frozen=True)
@@ -82,6 +87,44 @@ class RegistrationRecord:
     crop_offset: tuple[int, int]
     reference_frame: str | None
     is_spectral: bool = False
+
+
+def _is_identity(homography: Sequence[float]) -> bool:
+    """Say whether one frame's transform is the identity (no shift, no turn).
+
+    Parameters
+    ----------
+    homography : `Sequence` [`float`]
+        The nine numbers of the transform.
+
+    Returns
+    -------
+    is_identity : `bool`
+        `True` when the shift and the rotation are exactly zero.
+    """
+    return not homography[2] and not homography[5] and not (homography[3] - homography[1])
+
+
+def is_already_registered(record: RegistrationRecord) -> bool:
+    """Say whether the frames were registered before Siril read them.
+
+    Frames that were lined up before Siril read them all get the identity
+    transform, so the shifts and angles it reports say nothing about the
+    pointing. A single frame cannot be told apart from a reference frame, so
+    only a sequence of two or more is judged.
+
+    Parameters
+    ----------
+    record : `RegistrationRecord`
+        The stack's registration.
+
+    Returns
+    -------
+    already_registered : `bool`
+        `True` when there are two or more frames and every transform is the
+        identity.
+    """
+    return len(record.homographies) > 1 and all(_is_identity(h) for h in record.homographies)
 
 
 def registration_record_path(stack_path: str) -> str:
@@ -127,12 +170,15 @@ def build_registration_record(
     -------
     record : `RegistrationRecord` or `None`
         `None` when the frame list and the registration table are missing or
-        differ in length, because then a position cannot name a frame. A
-        missing list of inclusion flags means every frame was included.
+        differ in length, because then a position cannot name a frame, or when
+        a frame's transform is missing or is not nine numbers. A missing list
+        of inclusion flags means every frame was included.
     """
     paths = diagnostics.get("symlinked_light_paths") or []
     registration_frames = diagnostics.get("registration_frames") or []
     if not paths or len(paths) != len(registration_frames):
+        return None
+    if any(len(facts.get("homography") or []) != HOMOGRAPHY_LENGTH for facts in registration_frames):
         return None
     flags = diagnostics.get("registration_included") or []
     included = tuple(bool(flag) for flag in flags) if len(flags) == len(paths) else (True,) * len(paths)
@@ -207,7 +253,9 @@ def read_registration_record(stack_path: str) -> RegistrationRecord | None:
     except (OSError, ValueError, KeyError, IndexError, TypeError) as error:
         logger.debug("No usable registration record at %s: %s", path, error)
         return None
-    if not (len(paths) == len(homographies) == len(included)) or any(len(h) != 9 for h in homographies):
+    if not (len(paths) == len(homographies) == len(included)) or any(
+        len(h) != HOMOGRAPHY_LENGTH for h in homographies
+    ):
         return None
     return RegistrationRecord(
         paths, homographies, included, crop_offset, None if reference is None else str(reference), is_spectral

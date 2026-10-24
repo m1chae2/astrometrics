@@ -39,7 +39,7 @@ Status on 2026-10-23, batch S3 (branch `94-science-s3-shape`): built and run on 
 stack and frames, then changed after the change control board's review. Section 2.1: the effective
 star width (model-derived, a new uncertainty kind, with its bias stated), the star width in the
 center and the four corners with counts and errors (exploratory; the 16 stars of a region are the
-same in every frame of an undithered night, so a second field or night is needed before any tilt
+same in every frame of the night (the pointing was dithered every 10 frames by about 1.7 px or more and otherwise drifted about 13 px an hour, so the same stars stay in view), so a second field or night is needed before any tilt
 reading), and the rotation of each frame about the registration reference from the polar
 decomposition of Siril's transform (exploratory, no conversion to a polar-alignment error). The
 target's clipped and nonlinear pixels are measured by the astrometry pipeline (checkpoint
@@ -89,6 +89,29 @@ times too high. On M 57 the
 implied random noise is 1.32 times the model's and the empty-aperture noise is 1.88 times that, so
 about half of it is shared structure. The measurement takes the time of one library stack. Numbers
 are in `STK-42`.
+
+Status on 2026-10-24, batch S4 (branch `94-science-s4-dither`, after the board's fixes): built and run on stored shifts and on scratch half stacks. Section 2.2 "Fixed pattern left after calibration" and section 2.3 "Walking
+noise" are measured from the two half stacks of the half-stack difference job, not from calibrated
+frames (the stacker keeps none). The difference cancels what the halves share and keeps the random
+noise; the new rows keep the other side: the variance the halves share at a few pixels (a
+high-pass of 3 px, in sky clear of flagged sources, with the reference frame's own noise taken out),
+beside the library stack's random variance, with the three parts of that ratio stored, and the halves'
+correlation at a 6 px lag along the drift minus the same across it. The shared variance is the part of
+any fixed pattern that stays coherent in both halves plus faint sky, not a bound on the sensor
+pattern; only the along-minus-across excess points to the sensor, and stars elongated along the drift
+add to it. On M 57 the halves share 1.84 (+- 0.33) times the stack's random variance (the
+reference-frame correction, a model, is 0.47 of it, 20% of the uncorrected value) and the excess is
+-0.0006 (+- 0.0015). The supported statement is that M 57's halves hold no white, pixel-scale pattern
+moving with the pointing at about half the stack's random variance or more; the grain a flat is
+expected to leave (a ratio of about 0.02) is 25 times below that, so the null result was expected.
+The registration step rows (`stacking.registration_step_*`) and the drift rows are stored with the
+stack's other rows from one reading of Siril's registration. The median step does not see a dither
+made every N exposures: M 57, M 52 and NGC 7331 were dithered every 10 exposures with medians of
+0.3 to 0.5 px, which the jump count and the exposure gaps show. Steps are not measured for a run
+whose transforms are not pointings (more than 10% degenerate pairs, or mostly identity
+transforms) or for a stack of several exposure groups. No dithered and undithered run of one
+field exist on one night, so the effect of dithering is not measured. Evidence is in `STK-44` and
+`STK-45`.
 
 Status on 2026-10-24, batch S5 (branch `94-science-s5-outcomes`): built and run on the scratch copy.
 Section 2.4: the astrometry pipeline stores what noise alone should leave of the Gaia residual, as
@@ -168,7 +191,7 @@ section 2 backs.
 | Metric (section) | Backs |
 | :--- | :--- |
 | Catalog zero point (2.1) | UC1 transparency in the loss account; UC6 tonight's sky model |
-| Zero-point scatter within a night (2.1) | UC15 "Is tonight photometric?" |
+| Zero-point scatter within a night (2.1; computed by `wayfindinglib` when read, not stored) | UC15 "Is tonight photometric?" |
 | Effective star width (2.1) | UC1 and UC6 seeing factor of efficiency |
 | Target clipped (2.1) | UC2 overexposed setting |
 | Center-to-corner star width (2.1) | UC10 tilt |
@@ -198,7 +221,7 @@ in section 2.4, the later items of section 6 and the deferred items of section 7
 | Metric | Definition | Decision it informs | Depends on | Data |
 | :--- | :--- | :--- | :--- | :--- |
 | Catalog zero point | Instrumental magnitudes of matched stars against Gaia G, or Gaia-XP magnitudes synthesized in the frame's filter, with a fitted color term. Corrected for airmass with a fitted extinction coefficient. | Transparency, cloud | Plate solution; Gaia access | A few photometric nights to fit the extinction coefficient |
-| Zero-point scatter within a night | Robust spread of the airmass-corrected zero point across the night's frames | Whether the night suits photometry. This backs the use case "Is tonight photometric?" (UC15 in `QUALITY_USE_CASES.md`). | Catalog zero point | None |
+| Zero-point scatter within a night | Robust spread of the airmass-corrected zero point across the night's frames. `wayfindinglib` computes it when it is read, from the stored zero points (decision 18 of `QUALITY_METRICS_PLAN.md`), with the library helper `zero_point_scatter` (PHO-16). Nothing stores it. | Whether the night suits photometry. This backs the use case "Is tonight photometric?" (UC15 in `QUALITY_USE_CASES.md`). | Catalog zero point | None |
 | Effective star width | The star width with the pixel's own blur added: FWHM_eff² = FWHM² + c·p², with p the pixel size and c = 2 ln 2 / 3 = 0.4621 from theory (decision of 2026-10-23, not fitted). Efficiency's seeing factor uses it, and the physical reference states the pixel scale. | Undersampling; seeing loss | The corrected star width; plate scale | None |
 | Background gradient | Size and direction of a fitted plane or low-order surface across the background, with stars masked | Moon, horizon or a light source; flats | None | None |
 | Target clipped | Whether pixels of the target itself reach the saturation level, with the target located through the WCS | Exposure too long for the target | Plate solution; camera saturation level | None |
@@ -245,7 +268,7 @@ The metrics below build on them.
 | Photometry | Period sensitivity | The window function of the observing times, and the periods it cannot separate | Which nights to add to break an alias | None |
 | Photometry | Target amplitude, with its source | The amplitude the photometry finish line is measured against. It names its source: the target's own light curve once its phase coverage is enough, otherwise the catalog amplitude (VSX), labeled as a catalog value. | When the light curve is good enough | None |
 | Spectroscopy | SNR per resolution element | SNR at the classifying lines, the element taken from the measured line spread in Å | Exposure needed for a subtype | None |
-| Spectroscopy | Class gap against SNR | The spectral-class gap reached at each SNR, calibrated by degrading high-SNR spectra with added noise (injection). When even the high-SNR spectra do not separate the classes, the outcome is "not reachable at this resolution". | Exposure needed for a subtype, or stop | High-SNR spectra of classified stars |
+| Spectroscopy | Class gap against SNR | The spectral-class gap reached at each SNR, calibrated by degrading high-SNR spectra with added noise (injection). When even the high-SNR spectra do not separate the classes, the outcome is "not reachable at this resolution". Built as a calibration table with its lookup (`SPE-30`), not a per-run metric: a per-run value read from it would be the exposure advice that `wayfindinglib` owns (decision 18), and the table showed the limit is the classifier, not noise ("confidence-limited"). | Exposure needed for a subtype, or stop | High-SNR spectra of classified stars |
 | Spectroscopy | Contamination and second order | Overlap of neighboring spectra, and of the second order for a slitless grating | Rotate the camera | None |
 | Asteroid detection | Position uncertainty with timing | The detection's position error combined with the timing error times the motion rate | Whether to report to the MPC (section 6) | Timing accuracy of the capture computer's clock |
 | Asteroid detection | Arc length | Time between the first and last detection | Observe again soon to link the object | None |
@@ -438,8 +461,9 @@ The systems engineer settled the findings; the user reviews those choices in the
 | The acceptance bound was set after the first run. | Astronomer | Derived from the stated errors (`STK-42`) |
 | Uncovered pixels inside an aperture read low. | Astronomer | Such apertures are dropped |
 
-Deferred: moving aperture placement and difference measurement out of `stack_noise.py` into their
-own modules (the file is about 2,400 lines). No findings were rejected.
+Deferred, then done as the issue's last step: aperture placement, the stack-image helpers and the
+difference measurement moved out of `stack_noise.py` into `empty_apertures.py`, `stack_image.py` and
+`difference_noise.py`, with no change of behavior. No findings were rejected.
 
 ## Appendix E. Review board changes, batch S3
 
@@ -454,12 +478,32 @@ systems engineer settled every finding; the user reviews those choices in the pu
 | One bad geometry row would drop every row of the stack. | Engineer | Rotation rows have their own record call |
 | Wrong reason on the nonlinear rows. | All three | Fixed and tested |
 | Rotation rows lacked the reference frame, the image parity and the frame-time convention; values compare only within one run. | Astronomer, architect | Recorded in the row; polar decomposition for the angle (`STK-43`) |
-| The corner widths come from the same 16 stars in every undithered frame. | Astronomer | Leave-one-star-out check added (`AST-18`); a second field or night is needed before any tilt reading |
+| The corner widths come from the same 16 stars in every frame (the M 57 night was dithered every 10 frames, which moves the stars by a few pixels but does not change which stars they are). | Astronomer | Leave-one-star-out check added (`AST-18`); a second field or night is needed before any tilt reading |
 | A fourth clip-level rule, a duplicate subject builder, counts stored beside fractions. | Architect | One shared level helper and subject builder; fractions only |
 | Frames beyond the read cap or missing from Siril's list got no rows. | Engineer | Not-measured rows with reasons |
 
 No findings were rejected. The real M 57 target record was corrected in the user's database on
 2026-10-23 with the user's approval, after a backup.
+
+## Appendix F. Review board changes, batch S4
+
+The board reviewed batch S4 on 2026-10-24, and all three reviewers approved it with changes. The
+systems engineer settled every finding under the user's instruction to finish the issue without
+stopping; the user reviews those choices in the pull request.
+
+| Finding | Raised by | Where it landed |
+| :--- | :--- | :--- |
+| A fourth reader of Siril's registration data. | Architect | One registration record read once; rotation and pointing rows from it |
+| A pointing failure dropped the rotation rows; a pattern failure could drop the noise rows. | Engineer | Separate record calls and safe wrappers, each tested |
+| "Dither step" names a cause the value does not show; a duplicate count row. | Architect | `registration_step_*`; the count is the median row's sample count |
+| A median step misses dithers every N frames. | Astronomer | A jump count; it found the M 57 night of 2026-10-03 dithered every 10 frames (`STK-44`) |
+| Nikon groups with unexplained jumps were stored as measured. | Engineer | Not measured above 10% degenerate pairs or 50% identity frames |
+| The shared-variance ratio's parts were not stored. | Astronomer | The covariance, the fine-scale difference variance and the reference correction stored (`STK-45`) |
+| The reference-frame correction is not small; the walking test cannot see the expected flat grain; "upper limit" holds only coherently. | Astronomer | Stated in `STK-45`; the "80% sky" claim dropped |
+| Memory and time were not measured. | Engineer | float32 planes read once: 0.6 GB for 3008 x 3008, 1.3 GB for a Nikon RGB stack (`STK-45`) |
+
+No findings were rejected. The M 57 night is dithered every 10 frames, so earlier register text that
+calls it undithered is corrected in the issue's final cleanup.
 
 ## Appendix G. Review board changes, batch S5
 

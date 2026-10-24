@@ -190,6 +190,15 @@ class HalfDifferenceNoiseResult(BaseModel):
         The same, with each frame's own modeled noise (the difference divided
         by the square root of `model_variance_ratio`). `None` when a frame's
         sky rate is not stored or a weight is unknown.
+    shared_fine_scale_variance_ratio : `float` or `None`
+        The variance the two halves share at a few pixels, as a multiple of the
+        library stack's random variance (an upper limit of the sensor pattern;
+        see `half_pattern.measure_half_pattern`), or `None`.
+    walking_noise_correlation_excess : `float` or `None`
+        The halves' correlation at a 6 px lag along the drift minus the same
+        across it, or `None`.
+    walking_noise_correlation_excess_error : `float` or `None`
+        Its bootstrap standard deviation.
     reason : `str`
         Why there is no measurement. Empty when there is one.
     notes : `list` [`str`]
@@ -225,6 +234,13 @@ class HalfDifferenceNoiseResult(BaseModel):
     )
     full_stack_equivalent_model_normalized: float | None = Field(
         default=None, alias="fullStackEquivalentModelNormalized"
+    )
+    shared_fine_scale_variance_ratio: float | None = Field(default=None, alias="sharedFineScaleVarianceRatio")
+    walking_noise_correlation_excess: float | None = Field(
+        default=None, alias="walkingNoiseCorrelationExcess"
+    )
+    walking_noise_correlation_excess_error: float | None = Field(
+        default=None, alias="walkingNoiseCorrelationExcessError"
     )
     reason: str = ""
     notes: list[str] = Field(default_factory=list)

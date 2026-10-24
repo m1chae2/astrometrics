@@ -28,7 +28,7 @@ import math
 import os
 import time
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, NamedTuple
 
 from astrometricslib.drivers.calibration_library import BIAS_FRAME_PATHS_KEY, FLAT_FRAME_PATHS_KEY
 from astrometricslib.models.quality.gate_result import GateResult
@@ -48,6 +48,7 @@ from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
     gate_measurement,
     record_run_measurements,
 )
+from astrometricslib.pipelines.shared.registration_record import build_registration_record
 from astrometricslib.pipelines.stacking.metrics import (
     GATE_METRIC_BY_NAME,
     STACKING_DURATION_S,
@@ -84,13 +85,26 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_STACKED_FWHM_PX,
     STACKING_ZERO_PIXEL_FRACTION,
 )
-from astrometricslib.pipelines.stacking.post_processing.field_rotation import field_rotation_measurements
+from astrometricslib.pipelines.stacking.post_processing.difference_noise import (
+    discard_noise_sums,
+    save_noise_sums,
+)
+from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
+    APERTURE_FILE_NAME,
+    StackDepth,
+)
+from astrometricslib.pipelines.stacking.post_processing.field_rotation import (
+    MULTI_GROUP_REASON,
+    UNMATCHED_REASON,
+    field_rotation_measurements,
+)
 from astrometricslib.pipelines.stacking.post_processing.flat_match import flat_match_rows
 from astrometricslib.pipelines.stacking.post_processing.record_science import (
     StackScience,
     compute_stack_science,
     science_measurements,
 )
+from astrometricslib.pipelines.stacking.post_processing.registration_shifts import pointing_measurements
 from astrometricslib.pipelines.stacking.post_processing.stack_membership import (
     StackMembership,
     determine_stack_members,
@@ -98,21 +112,19 @@ from astrometricslib.pipelines.stacking.post_processing.stack_membership import 
     effective_frame_count,
     effective_read_noise_time_seconds,
     normalized_weights,
+    registration_reference_from_diagnostics,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
-    APERTURE_FILE_NAME,
     NO_WCS_REASON,
-    StackDepth,
     StackNoiseOutcome,
-    discard_noise_sums,
     measure_stack_noise,
-    save_noise_sums,
 )
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "GATE_LIMIT_SOURCES",
+    "FrameGeometryRows",
     "exposure_group_subject",
     "frame_geometry_measurements",
     "gate_for_measurement",
@@ -642,14 +654,33 @@ def stacking_measurements(
     return measurements
 
 
+class FrameGeometryRows(NamedTuple):
+    """The geometry rows of a stack, in the two groups that are stored apart.
+
+    Attributes
+    ----------
+    rotation : `list` of `QualityMeasurement`
+        The rotation of each frame about the registration reference.
+    pointing : `list` of `QualityMeasurement`
+        The eight step and drift rows of the stack.
+    """
+
+    rotation: list[QualityMeasurement]
+    pointing: list[QualityMeasurement]
+
+
 def frame_geometry_measurements(
     summary: StackQualitySummary,
     context: PipelineRunContext,
     target_frames: Sequence[Any],
     diagnostics: dict[str, Any],
     stack_path: str,
-) -> list[QualityMeasurement]:
-    """Build the per-frame geometry rows of a stack (each frame's rotation).
+) -> FrameGeometryRows:
+    """Build the geometry rows of a stack (rotation and pointing).
+
+    Siril's registration is read once into a `RegistrationRecord`, and both
+    groups of rows are built from it. A failure while building one group is
+    logged and leaves that group empty, so it cannot take the other with it.
 
     Parameters
     ----------
@@ -666,16 +697,42 @@ def frame_geometry_measurements(
 
     Returns
     -------
-    measurements : `list` of `QualityMeasurement`
-        The rotation of each frame about the registration reference.
+    rows : `FrameGeometryRows`
+        The rotation of each frame about the registration reference, and the
+        eight step and drift rows of the stack. A stack that joins several
+        exposure groups has no one registration, and its rows say so.
     """
-    return field_rotation_measurements(
-        target_frames,
-        diagnostics,
-        context,
-        is_spectral=summary.stacking_metrics.is_spectral,
-        stack_path=stack_path,
-    )
+    group_count = len(diagnostics.get("exposure_groups") or [])
+    missing_reason = MULTI_GROUP_REASON if group_count > 1 else UNMATCHED_REASON
+    record = None
+    if group_count <= 1:
+        reference = registration_reference_from_diagnostics(diagnostics)
+        record = build_registration_record(
+            diagnostics,
+            (0, 0),
+            None if reference is None else reference[0],
+            is_spectral=summary.stacking_metrics.is_spectral,
+        )
+    rotation: list[QualityMeasurement] = []
+    pointing: list[QualityMeasurement] = []
+    try:
+        rotation = field_rotation_measurements(
+            target_frames,
+            record,
+            context,
+            is_spectral=summary.stacking_metrics.is_spectral,
+            stack_path=stack_path,
+            missing_reason=missing_reason,
+        )
+    except Exception:  # a by-product of the stack: the pointing rows still go in
+        logger.exception("The frame rotation rows of the stack %s could not be built", stack_path)
+    try:
+        pointing = pointing_measurements(
+            target_frames, record, context, os.path.basename(stack_path), missing_reason=missing_reason
+        )
+    except Exception:  # a by-product of the stack: the rotation rows still go in
+        logger.exception("The pointing rows of the stack %s could not be built", stack_path)
+    return FrameGeometryRows(rotation, pointing)
 
 
 def measure_noise_safely(
@@ -820,7 +877,8 @@ def record_stacking_quality(
             membership_reason = f"the member frames could not be worked out: {type(error).__name__}"
         # The members are worked out first: their effective frame count says
         # how deep this stack is, which decides whether the stored apertures
-        # are kept or replaced (see `stack_noise.REPLACEMENT_DEPTH_FACTOR`).
+        # are kept or replaced (see
+        # `empty_apertures.REPLACEMENT_DEPTH_FACTOR`).
         noise = measure_noise_safely(
             stack_path,
             summary.stacking_metrics.registration_reference_frame,
@@ -855,13 +913,20 @@ def record_stacking_quality(
     except Exception:  # quality rows must never stop a stack
         logger.exception("The quality measurements of the stack %s were not stored", stack_path)
         return 0
-    # The frames' geometry rows go in their own call, after the stack rows, so
-    # a failure while building or storing them cannot undo the rows above.
+    # The frames' rotation rows and the stack's pointing rows each go in their
+    # own call, after the stack rows, so a failure while building or storing
+    # one group cannot undo the rows above or the other group.
     try:
         geometry = frame_geometry_measurements(summary, context, target_frames, diagnostics, stack_path)
-        new_count += record_run_measurements(geometry, config=config)
     except Exception:  # a by-product of the stack: no failure here may fail it
-        logger.exception("The frame geometry rows of the stack %s were not stored", stack_path)
+        logger.exception("The frame geometry rows of the stack %s were not built", stack_path)
+        geometry = None
+    if geometry is not None:
+        for name, rows in (("rotation", geometry.rotation), ("pointing", geometry.pointing)):
+            try:
+                new_count += record_run_measurements(rows, config=config)
+            except Exception:  # a by-product of the stack: no failure here may fail it
+                logger.exception("The frame %s rows of the stack %s were not stored", name, stack_path)
     # The flat-to-light match reads raw frames, so it too goes in its own call.
     # It samples only the frames that went into the stack.
     try:

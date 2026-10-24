@@ -124,3 +124,19 @@
     opacity: 0.6;
   }
 }
+
+/* A small button for in-panel actions (moved from the Observation Manager styles). */
+.btn--tiny {
+    padding: 2px 8px;
+    font-size: 10px;
+    border-radius: 2px;
+    height: 18px;
+    line-height: 1;
+    width: auto;
+    min-width: 0;
+}
+
+/* A button that fills the width of its container. */
+.btn--full-width {
+    width: 100%;
+}

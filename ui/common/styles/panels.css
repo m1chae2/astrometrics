@@ -700,3 +700,12 @@
     justify-content: flex-end;
     margin-top: auto;
 }
+
+/* The text of an empty table or list (moved from the Observation Manager styles). */
+.no-data {
+    color: var(--text-muted);
+    font-style: italic;
+    text-align: center;
+    padding: 12px;
+    font-size: 13px;
+}

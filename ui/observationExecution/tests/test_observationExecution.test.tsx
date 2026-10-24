@@ -271,7 +271,7 @@ describe('candidates', () => {
         const list = await screen.findByRole('region', { name: 'Imaging candidates' });
         await user.click(within(list).getByRole('button', { name: 'Open in Planner: M 82' }));
         expect(navigateMock).toHaveBeenCalledWith(
-            expect.objectContaining({ action: 'openInPlanner', payload: { targetId: 'M 82' }, targetDisplay: 'Observation Manager' }),
+            expect.objectContaining({ action: 'openInPlanner', payload: { targetId: 'M 82' }, targetDisplay: 'Observation Planner' }),
         );
     });
 

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAstrometrics } from '../../common/context/AstrometricsContext';
 import { emitToast } from '../../common/utils/emitToast';
+import { normalizeAppMode } from '../../common/utils/normalizeAppMode';
 
 export interface StatusTelemetry {
     altitude: string;
@@ -28,7 +29,7 @@ export const useStatusData = () => {
 
     const [selectedMode, setSelectedMode] = useState<string>(() => {
         try {
-            return window.localStorage.getItem('appMode') || 'Image Viewer';
+            return normalizeAppMode(window.localStorage.getItem('appMode') || 'Image Viewer');
         } catch {
             return 'Image Viewer';
         }
@@ -41,7 +42,7 @@ export const useStatusData = () => {
     useEffect(() => {
         const handleModeChange = (event: Event) => {
             const nextMode = (event as CustomEvent<string>).detail;
-            if (nextMode) setSelectedMode(nextMode);
+            if (nextMode) setSelectedMode(normalizeAppMode(nextMode));
         };
         window.addEventListener('astrometrics:modeChange', handleModeChange);
         return () => window.removeEventListener('astrometrics:modeChange', handleModeChange);

@@ -26,8 +26,8 @@ export const SEND_TO_PLAN_AVAILABLE = false;
 /** The visible reason shown while Send to plan is not available. */
 export const SEND_TO_PLAN_UNAVAILABLE_TEXT = 'Send to plan arrives with the library plan update';
 
-/** The mode name of the planner. Change to "Observation Planner" when it is renamed. */
-export const OBSERVATION_PLANNER_MODE = 'Observation Manager';
+/** The mode name of the Observation Planner. */
+export const OBSERVATION_PLANNER_MODE = 'Observation Planner';
 
 /** The result of one Send to plan. */
 export type SendToPlanOutcome =

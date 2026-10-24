@@ -4,7 +4,7 @@
  */
 import React, { useState } from 'react';
 import { SequenceObject } from './hooks/useExecutionQueue';
-import { ImagingCard } from '../observationManager/ImagingCard';
+import { ImagingCard } from './ImagingCard';
 import { SectionPanel } from '../common/components/SectionPanel';
 import { beginImagingSession } from '../common/services/sequencerService';
 import '../common/styles/panels.css';

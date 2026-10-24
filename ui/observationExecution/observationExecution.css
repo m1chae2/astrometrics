@@ -12,19 +12,9 @@
 .live-verdict__line { display: flex; gap: 8px; align-items: center; user-select: text; }
 .live-verdict__chip, .live-verdict__alerts { margin-top: 4px; display: flex; gap: 10px; align-items: center; }
 .live-verdict__details { margin-top: 6px; font-size: var(--section-label-size); user-select: text; }
-.candidate-list { margin-bottom: 10px; }
-.candidate-list h4 { margin: 4px 0; }
-.candidate-list__gain, .candidates__times { margin: 2px 0 6px; color: var(--text-dim); font-size: var(--section-label-size); }
-.candidate-list__items, .night-targets, .target-changes { list-style: none; margin: 0 0 6px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.night-targets, .target-changes { list-style: none; margin: 0 0 6px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .target-changes { list-style: decimal inside; }
-.candidate, .night-target { border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 8px; background: var(--grey-medium); user-select: text; }
-.candidate[data-status='stopped'] { opacity: 0.8; border-style: dashed; }
-.candidate[data-status='new'] { border-left: 4px solid var(--accent-blue); }
-.candidate__head, .night-target__head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.candidate__status { display: inline-flex; gap: 4px; align-items: center; font-weight: 600; }
-.candidate__reason { margin: 4px 0; color: var(--text-dim); font-size: var(--section-label-size); }
-.candidate__buttons { display: flex; gap: 6px; margin-top: 4px; }
-.candidates__notes { margin: 6px 0 0; padding-left: 18px; font-size: var(--section-label-size); color: var(--text-dim); }
+.night-target { border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 8px; background: var(--grey-medium); user-select: text; }
 .frame-list__scroll { max-height: 260px; overflow: auto; }
 .frame-list { width: 100%; border-collapse: collapse; font-size: var(--section-label-size); }
 .frame-list th, .frame-list td { text-align: left; padding: 3px 8px; border-bottom: 1px solid var(--border-color); }
@@ -41,3 +31,4 @@
 .guiding-tab__plot { height: 280px; }
 .test-frame { display: flex; flex-direction: column; gap: 6px; }
 .observation-execution button:disabled, .observation-execution input:disabled, .observation-execution select:disabled { opacity: 0.5; cursor: not-allowed; }
+.night-target__head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }

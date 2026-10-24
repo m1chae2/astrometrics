@@ -15,7 +15,7 @@ import { emitToast } from './emitToast';
 export interface NavigationIntent<T = any> {
   /**
    * The destination workspace/display mode name
-   * (e.g., 'Image Processing', 'Astronomy Manager', 'Planetarium', 'Observatory Manager', 'Observation Manager').
+   * (e.g., 'Image Processing', 'Astronomy Manager', 'Planetarium', 'Observatory Manager', 'Observation Planner').
    */
   targetDisplay: string;
 

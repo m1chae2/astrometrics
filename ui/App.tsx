@@ -11,11 +11,11 @@ import { HandoffProvider } from './common/context/HandoffContext';
 import { PlanningTimeProvider } from './common/context/PlanningTimeContext';
 import { CurrentTargetAnnouncer } from './common/components/CurrentTargetAnnouncer';
 import { handlePlanChanged, PLAN_UPDATED_FROM_ANOTHER_WINDOW, PlanChangedPayload } from './common/utils/planChanged';
-import { PlanningProvider } from './observationManager/context/PlanningContext';
 import { TerminalProvider } from './statusHeader/context/TerminalContext';
 import { RemoteStatusProvider } from './common/context/RemoteStatusContext';
 import { AstrometricsProvider, useAstrometrics } from './common/context/AstrometricsContext';
 import { DISPLAY_DEFINITIONS, isDisplayEnabled } from './common/constants/displayFlags';
+import { normalizeAppMode } from './common/utils/normalizeAppMode';
 import './App.css';
 
 // Single shared cache for all shared-resource queries (see ui/common/queries/),
@@ -49,9 +49,9 @@ const ObservatoryManager = React.lazy(() =>
     default: m.ObservatoryManager,
   }))
 );
-const ObservationManager = React.lazy(() =>
-  import('./observationManager/ObservationManager').then((m) => ({
-    default: m.ObservationManager,
+const ObservationPlanner = React.lazy(() =>
+  import('./observationPlanner/ObservationPlanner').then((m) => ({
+    default: m.ObservationPlanner,
   }))
 );
 const ObservationExecution = React.lazy(() =>
@@ -117,16 +117,10 @@ const MODE_PANELS: { mode: string; id: string; Component: React.ComponentType }[
   { mode: 'Planetarium', id: 'PlanetariumDisplay', Component: PlanetariumDisplay },
   { mode: 'Image Processing', id: 'ImageProcessingDisplay', Component: ImageProcessingDisplay },
   { mode: 'Observatory Manager', id: 'ObservatoryManager', Component: ObservatoryManager },
-  { mode: 'Observation Manager', id: 'ObservationManager', Component: ObservationManager },
+  { mode: 'Observation Planner', id: 'ObservationPlanner', Component: ObservationPlanner },
   { mode: 'Observation Execution', id: 'ObservationExecution', Component: ObservationExecution },
   { mode: 'Command Console', id: 'CommandConsole', Component: CommandConsole },
 ];
-
-const normalizeAppMode = (m: string): string => {
-  if (m === 'Astronomy Display') return 'Astronomy Manager';
-  if (m === 'Image Processing Display') return 'Image Processing';
-  return m;
-};
 
 /**
  * Internal layout wrapper that handles dynamic mode switching,
@@ -383,9 +377,7 @@ export const App: React.FC = () => {
           <HandoffProvider>
             <TargetProvider>
               <PlanningTimeProvider>
-                <PlanningProvider>
-                  <AppContent />
-                </PlanningProvider>
+                <AppContent />
               </PlanningTimeProvider>
             </TargetProvider>
           </HandoffProvider>

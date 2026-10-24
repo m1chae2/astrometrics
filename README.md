@@ -35,7 +35,7 @@ The desktop application provides 6 primary display workspaces:
 - **Astronomy Manager**: Measure star brightness over time (photometry), search for exoplanet transits, and extract and calibrate 1D star spectra.
 - **Planetarium**: Explore an interactive 3D sky map, view camera field-of-view outlines, and command telescope slews to target objects.
 - **Observatory Manager**: Monitor and control telescope mounts, focusers, filter wheels, autoguiders, and weather safety sensors.
-- **Observation Manager**: Plan exposure sequences, check target visibility across the night, author mosaic grids, and run automated imaging queues.
+- **Observation Planner**: Plan the night: see the quality of a target's data, the altitude chart and tonight's candidates, and keep the stored night plan with its checklist and Ekos summary.
 
 ---
 

@@ -18,6 +18,9 @@ import { AlignmentPointCard } from './components/AlignmentPointCard';
 import { PlanetariumToolbar } from './components/PlanetariumToolbar';
 import { PlanetariumContextMenu } from './components/PlanetariumContextMenu';
 import { PlanetariumDateTimeModal } from './components/PlanetariumDateTimeModal';
+import { FramingPanel } from './components/FramingPanel';
+import type { FramingPanelCorners } from './layers/FramingOverlay';
+import { clearShowOnSkyRequest, getShowOnSkyRequest, subscribeToShowOnSky } from './showOnSky/showOnSkyStore';
 import { usePlanningTime } from '../common/context/PlanningTimeContext';
 import { useConstellationLines } from './hooks/useConstellationLines';
 import { useObserverLocation } from './hooks/useObserverLocation';
@@ -101,6 +104,8 @@ export const PlanetariumDisplay: React.FC = () => {
 
   const [viewerCenter, setViewerCenter] = useState<{ ra: number; dec: number } | null>(null);
   const [currentFOV, setCurrentFOV] = useState<number>(90.0);
+  // Corners of the framing panels the sky map outlines (set by the framing panel).
+  const [framingPanels, setFramingPanels] = useState<FramingPanelCorners[]>([]);
 
   // Date and Time controls. The time is the shared planning time: picking a
   // date here fixes it for every planning display, and it follows changes made
@@ -334,6 +339,21 @@ export const PlanetariumDisplay: React.FC = () => {
     // already declares it.
   }, [libraryTargets, targetList.targets, targetList.stars, setSelectedTargetId, setPendingTarget]);
 
+  // Consumes a "Show on sky" request (from a quality statement in another
+  // display). The store keeps a request that arrived before this display
+  // mounted. The request waits until the target lists have loaded, then
+  // centers and selects the target like a pick from the list. The sky already
+  // follows the shared planning time, so the target is shown at that time.
+  const [showOnSkyRequest, setShowOnSkyRequest] = useState(getShowOnSkyRequest);
+  useEffect(() => subscribeToShowOnSky(setShowOnSkyRequest), []);
+  const targetListsLoaded = libraryTargets.length > 0 || targetList.targets.length > 0;
+  useEffect(() => {
+    if (!showOnSkyRequest || !targetListsLoaded) return;
+    handleSelectObject(showOnSkyRequest.targetId);
+    setScopedTarget(showOnSkyRequest.targetId);
+    clearShowOnSkyRequest();
+  }, [showOnSkyRequest, targetListsLoaded, handleSelectObject]);
+
   /**
    * Centers the sky map on and selects a star handed off from Astronomy
    * Manager's "Locate in Planetarium" action.
@@ -460,6 +480,13 @@ export const PlanetariumDisplay: React.FC = () => {
   // the same class letter used to select the class's browsing list -- a
   // star the map already fetched for this viewport but that isn't
   // catalogued in that class is hidden rather than refetched.
+  // The center of the framing grid: the picked object, else the chosen target.
+  const framingCenter = useMemo(() => {
+    if (selectedSource) return { ra: selectedSource.ra, dec: selectedSource.dec };
+    if (selectedTarget) return { ra: selectedTarget.ra, dec: selectedTarget.dec };
+    return null;
+  }, [selectedSource, selectedTarget]);
+
   const visibleStars = useMemo(() => {
     if (!activeSpectralClass) return stars;
     return stars.filter((star) => spectralClassLetter(star.spectralType) === activeSpectralClass);
@@ -612,6 +639,13 @@ export const PlanetariumDisplay: React.FC = () => {
         onCenterChange={handleCenterChange}
         sensorFovWidthDeg={equipmentConfig?.fovWidthDeg}
         sensorFovHeightDeg={equipmentConfig?.fovHeightDeg}
+        framingPanels={framingPanels}
+      />
+
+      <FramingPanel
+        targetName={selectedSource?.name ?? selectedTarget?.commonName ?? selectedTarget?.id ?? null}
+        center={framingCenter}
+        onFramingPanelsChange={setFramingPanels}
       />
 
       <DeepCatalogPrompt status={deepCatalogStatus} />

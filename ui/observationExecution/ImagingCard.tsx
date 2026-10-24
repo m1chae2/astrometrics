@@ -1,7 +1,14 @@
+/**
+ * @fileoverview One card of the execution queue: a planned sequence with its
+ * target, its total exposure time and execution time, and buttons to edit or
+ * remove it. Expanding the card lists its exposure items.
+ */
+
 import React, { useState } from 'react';
-import { SequenceObject } from '../observationExecution/hooks/useExecutionQueue';
+import { SequenceObject } from './hooks/useExecutionQueue';
 import { ConfirmDialog } from '../common/components/ConfirmDialog';
 
+/** The props of one imaging card. */
 interface Props extends React.HTMLAttributes<HTMLDivElement> {
     sequence: SequenceObject;
     isExpanded: boolean;
@@ -10,6 +17,11 @@ interface Props extends React.HTMLAttributes<HTMLDivElement> {
     onEdit: () => void;
 }
 
+/**
+ * One queued sequence as a card.
+ * @param props The sequence, whether it is expanded and its callbacks.
+ * @return The card.
+ */
 export const ImagingCard: React.FC<Props> = ({ sequence, isExpanded, onToggle, onRemove, onEdit, ...divProps }) => {
     const [showConfirm, setShowConfirm] = useState(false);
 

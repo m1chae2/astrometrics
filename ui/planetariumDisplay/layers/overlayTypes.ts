@@ -4,6 +4,7 @@
  */
 
 import { PlanetariumSource, PlanetariumTarget, ConstellationLineSegment } from '../../common/types/planetariumTypes';
+import type { FramingPanelCorners } from './FramingOverlay';
 import { AlignmentTargetSession, PolarAlignmentStatus, TrackingRiskMap } from '../../common/types/backendTypes';
 
 /**
@@ -57,6 +58,8 @@ export interface ProjectionContext {
   showTrackingRisk?: boolean;
   /** The backend's tracking-risk grid over hour angle and declination. */
   trackingRisk?: TrackingRiskMap | null;
+  /** Framing panels to outline, as corners in RA and Dec degrees. */
+  framingPanels?: FramingPanelCorners[];
 }
 
 /**

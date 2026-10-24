@@ -3,7 +3,7 @@
  * biases, flats) via JSON-RPC.
  *
  * Used by both Image Processing (manual refresh after a stacking/ingest job,
- * via `reloadKey`) and Observation Manager's calibration panel (which also
+ * via `reloadKey`) and the Observatory Manager's calibration panel (which also
  * wants to poll, via `pollIntervalMs`) — previously each display had its own
  * separate copy of this fetch, one of them polling the same backend action
  * independently of the other.

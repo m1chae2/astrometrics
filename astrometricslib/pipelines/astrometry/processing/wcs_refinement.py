@@ -93,6 +93,11 @@ class WcsRefinement:
     shift_arcsec : `float` or `None`
         The largest move of the 5 by 5 grid of image points between the two
         solutions. `None` when no fit was made.
+    fit_star_indices : `tuple` [`int`, ...]
+        The indices (into the `pixel_positions` given) of the stars the final
+        fit used. Empty when no fit was made. The expected residual
+        (`post_processing/expected_residual.py`) is found over these same
+        stars, so it can be compared with the RMS values above.
     """
 
     wcs: WCS
@@ -102,6 +107,7 @@ class WcsRefinement:
     rms_before_arcsec: float | None = None
     rms_after_arcsec: float | None = None
     shift_arcsec: float | None = None
+    fit_star_indices: tuple[int, ...] = ()
 
 
 def _separations_arcsec(
@@ -267,6 +273,7 @@ def refine_wcs_with_gaia(
         rms_before_arcsec=rms_before,
         rms_after_arcsec=rms_after,
         shift_arcsec=shift,
+        fit_star_indices=tuple(int(index) for index in used),
     )
     if shift > MAXIMUM_SHIFT_ARCSEC:
         outcome.reason = f"the fit moved the field by {shift:.1f} arcsec, more than {MAXIMUM_SHIFT_ARCSEC:g}"

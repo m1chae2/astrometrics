@@ -55,12 +55,25 @@ The stage records these values for each star. A large margin means the CV-cutoff
 
 The margin is `(CV - cutoff) / MAD`, where the MAD is the field's median absolute deviation of the CV, never taken below 0.0001.
 
+## Science outcome records
+
+Three steps store the numbers of `processing/noise_budget.py`, `observing_window.py` and `target_amplitude.py` as quality measurements. A value that cannot be found is stored as "not measured" with its reason, never as a default.
+
+| Step | Stores | Unit | High or low means | Read by |
+| --- | --- | --- | --- | --- |
+| `record_noise_budget.py` | `photometry.model_noise_*_at_mag*_mag`, `photometry.model_noise_scintillation_mag` | mag | High: that source limits a star of that magnitude | People comparing a run's scatter with its floor (partly measured; see [PHO-17](../../../../documentation/library_design/validation/photometry.md#pho-17)) |
+| `record_period_sensitivity.py` | `photometry.window_alias_<rank>_frequency_per_day`, `photometry.window_alias_<rank>_power_fraction` | cycles per day, fraction | Power near 1: the run cannot separate periods that differ by that frequency | People planning more nights (partly measured; see [PHO-18](../../../../documentation/library_design/validation/photometry.md#pho-18)) |
+| `record_target_amplitude.py` | `photometry.target_light_curve_amplitude_mag`, `photometry.target_phase_coverage_fraction`, `photometry.target_catalog_amplitude_mag` | mag, fraction, mag | A light-curve value far below the catalog value: a partly covered cycle, smoothing or another band | People judging whether the light curve shows the known change (design estimate; see [PHO-19](../../../../documentation/library_design/validation/photometry.md#pho-19)) |
+
+Scintillation is stored for a site at sea level unless the configuration holds the site height. The steps never say whether a value is good enough.
+
 ## Files
 
 - `assess_output_quality.py` builds the per-star confidence record described above (`assess_output_quality`).
 - `known_variability_labels.py` labels each variable candidate with whether SIMBAD, Gaia DR3 or VSX already list it as variable (`label_known_variability`). SIMBAD is a general star database, Gaia DR3 is the third data release of the Gaia satellite survey, and VSX is the International Variable Star Index. The file also splits stars into listed and unlisted groups for the AUC check (`is_listed_as_variable`, `split_scores_by_catalog_status`). A candidate whose catalogs were never asked is labeled `unknown`, not "not listed".
 - `variability_skill.py` measures whether the variability score can see cataloged variables, and the smallest amplitude the candidate rule can flag.
 - `record_quality.py` builds the run's gate record (`photometry_run_gates`): one `passed`, `failed` or `not_checked` result per gate. It also turns the run's counts, measurements and gates into quality measurements (`photometry_run_measurements`) and stores them (`record_photometry_quality`). A gate's stored number always means one thing: the comparison-ensemble gate stores the size of the smallest set and the registration gate stores the largest global drift, and the scatter ratio, the corner displacement and the fallback share have metrics of their own. `GATE_LIMIT_SOURCES` says, for each gate, which metric stands for it and how its limit was obtained: the gates that need a time, a plate solve or a session are geometry, and every other limit is a design estimate stored with its register row (PHO-D06, PHO-D09, PHO-D13 to PHO-D16). The history fill reads that table and `gate_for_measurement`. A failure while building or storing the rows is logged and never fails the run, and a NaN is stored as not measured.
+- `record_noise_budget.py`, `record_period_sensitivity.py` and `record_target_amplitude.py` store the science outcome records above.
 - `record_zero_point.py` turns the catalog zero points of a run (from `processing/catalog_zero_point.py`) into quality measurements, one set per frame: the zero point in the session's band (`photometry.catalog_zero_point_gaia_g_mag` or `..._simbad_v_mag`, with the frame-to-frame precision as its uncertainty), the star-sample error of its absolute level in the same band (`..._star_sample_error_gaia_g_mag` or `..._simbad_v_mag`), and, for SIMBAD V sessions, the color slope (`photometry.catalog_zero_point_color_slope`). It stores neither airmass nor a night spread. The observatory side computes those on read. A value that could not be found is a `not_measured` row with its reason, and rows from an assumed gain are marked assumed. `record_quality.py` calls it. (partly measured; see [PHO-15](../../../../documentation/library_design/validation/photometry.md#pho-15).)
 
 For exact behavior, read the code.

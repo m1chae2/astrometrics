@@ -57,6 +57,7 @@ UNIT_NAME_ENDING: dict[str, str] = {
     "angstrom": "_angstrom",
     "stack_unit": "_stack_unit",
     "stack_unit/adu": "_stack_unit_per_adu",
+    "1/d": "_per_day",
 }
 # Names that are allowed to break the unit-ending rule, each with the reason.
 # Keep this list short. A gate's metric (``<pipeline>.gate_<name>``) carries

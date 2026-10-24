@@ -1,0 +1,350 @@
+{
+  "description": "Class gap against signal-to-noise: high-signal-to-noise spectra of classified stars degraded with white noise and classified again with classify_spectral_type. See validation register entry SPE-30.",
+  "created": "2026-10-23",
+  "camera": "ZWO ASI 533MM Pro",
+  "definition_version": 1,
+  "ambiguous_rms_gap": 0.02,
+  "reached_share": 0.5,
+  "minimum_native_snr": 30.0,
+  "snr_estimator": "spectrum_signal.estimate_spectrum_signal_to_noise",
+  "interval_percentiles": [
+    16,
+    84
+  ],
+  "draws_per_spectrum": 5,
+  "field_bootstrap_count": 400,
+  "seed": 20261024,
+  "spectrum_count": 53,
+  "fields": [
+    "Albireo",
+    "Alcor",
+    "Aldebaran",
+    "Alhena",
+    "Alnath",
+    "Deneb",
+    "M 13",
+    "M 27",
+    "M 57",
+    "Mirach",
+    "Mirfak",
+    "Navi",
+    "Schedar",
+    "Sirius",
+    "Vega"
+  ],
+  "native": {
+    "snr": null,
+    "spectrum_count": 53,
+    "field_count": 15,
+    "median_gap_to_next_class": 0.03024783905057924,
+    "median_gap_to_second_best": 0.008326579270773099,
+    "gap_to_next_class_low": 0.026635189203376278,
+    "gap_to_next_class_high": 0.04243806919347111,
+    "class_separated_share": 0.6862745098039216,
+    "subtype_separated_share": 0.1568627450980392,
+    "class_agreement_share": 0.6666666666666666,
+    "median_steps_from_catalog": 3.0,
+    "leave_one_field_out_range": [
+      0.027751083930159917,
+      0.037178221265036615
+    ],
+    "undegraded_class_agreement_share": null,
+    "share_intervals": {
+      "class_separated_share": [
+        0.6222222222222222,
+        0.7358909853249476
+      ],
+      "subtype_separated_share": [
+        0.11287211740041929,
+        0.1935483870967742
+      ],
+      "class_agreement_share": [
+        0.5925925925925926,
+        0.7358490566037735
+      ],
+      "undegraded_class_agreement_share": null
+    }
+  },
+  "native_agreement_by_field": {
+    "Albireo": {
+      "count": 6.0,
+      "class_agreement_share": 0.5
+    },
+    "Alcor": {
+      "count": 1.0,
+      "class_agreement_share": 1.0
+    },
+    "Aldebaran": {
+      "count": 1.0,
+      "class_agreement_share": 1.0
+    },
+    "Alhena": {
+      "count": 1.0,
+      "class_agreement_share": 0.0
+    },
+    "Alnath": {
+      "count": 1.0,
+      "class_agreement_share": 0.0
+    },
+    "Deneb": {
+      "count": 2.0,
+      "class_agreement_share": 1.0
+    },
+    "M 13": {
+      "count": 7.0,
+      "class_agreement_share": 0.8571428571428571
+    },
+    "M 27": {
+      "count": 7.0,
+      "class_agreement_share": 0.8571428571428571
+    },
+    "M 57": {
+      "count": 2.0,
+      "class_agreement_share": 0.5
+    },
+    "Mirach": {
+      "count": 8.0,
+      "class_agreement_share": 0.5
+    },
+    "Mirfak": {
+      "count": 1.0,
+      "class_agreement_share": 1.0
+    },
+    "Navi": {
+      "count": 6.0,
+      "class_agreement_share": 0.25
+    },
+    "Schedar": {
+      "count": 6.0,
+      "class_agreement_share": 0.8333333333333334
+    },
+    "Sirius": {
+      "count": 1.0,
+      "class_agreement_share": 0.0
+    },
+    "Vega": {
+      "count": 3.0,
+      "class_agreement_share": 1.0
+    }
+  },
+  "rows": [
+    {
+      "snr": 3.0,
+      "spectrum_count": 265,
+      "field_count": 15,
+      "median_gap_to_next_class": 0.008859355071357239,
+      "median_gap_to_second_best": 0.0017565023683840386,
+      "gap_to_next_class_low": 0.00750190006141821,
+      "gap_to_next_class_high": 0.009844268141626561,
+      "class_separated_share": 0.17142857142857143,
+      "subtype_separated_share": 0.0,
+      "class_agreement_share": 0.5428571428571428,
+      "median_steps_from_catalog": 5.0,
+      "leave_one_field_out_range": [
+        0.007946941238684668,
+        0.009152534306445526
+      ],
+      "undegraded_class_agreement_share": 0.65,
+      "share_intervals": {
+        "class_separated_share": [
+          0.11363636363636363,
+          0.22998047703930055
+        ],
+        "subtype_separated_share": [
+          0.0,
+          0.0
+        ],
+        "class_agreement_share": [
+          0.46153846153846156,
+          0.615824720959074
+        ],
+        "undegraded_class_agreement_share": [
+          0.5582517006802721,
+          0.7267622041420118
+        ]
+      }
+    },
+    {
+      "snr": 5.0,
+      "spectrum_count": 265,
+      "field_count": 15,
+      "median_gap_to_next_class": 0.009802286939027793,
+      "median_gap_to_second_best": 0.0020068556975749163,
+      "gap_to_next_class_low": 0.008033996006064746,
+      "gap_to_next_class_high": 0.011399771907729428,
+      "class_separated_share": 0.22709163346613545,
+      "subtype_separated_share": 0.0,
+      "class_agreement_share": 0.6294820717131474,
+      "median_steps_from_catalog": 3.0,
+      "leave_one_field_out_range": [
+        0.00923559339399943,
+        0.010268116132334276
+      ],
+      "undegraded_class_agreement_share": 0.8406374501992032,
+      "share_intervals": {
+        "class_separated_share": [
+          0.1549027498323273,
+          0.28632044261118067
+        ],
+        "subtype_separated_share": [
+          0.0,
+          0.0
+        ],
+        "class_agreement_share": [
+          0.5678703703703704,
+          0.6980689175078315
+        ],
+        "undegraded_class_agreement_share": [
+          0.7856198347107438,
+          0.8832985921458907
+        ]
+      }
+    },
+    {
+      "snr": 8.0,
+      "spectrum_count": 265,
+      "field_count": 15,
+      "median_gap_to_next_class": 0.014822610491122934,
+      "median_gap_to_second_best": 0.0038008233966823346,
+      "gap_to_next_class_low": 0.013227987903832561,
+      "gap_to_next_class_high": 0.01665489664015829,
+      "class_separated_share": 0.34901960784313724,
+      "subtype_separated_share": 0.0,
+      "class_agreement_share": 0.6784313725490196,
+      "median_steps_from_catalog": 2.0,
+      "leave_one_field_out_range": [
+        0.01363377333864113,
+        0.015309596937487069
+      ],
+      "undegraded_class_agreement_share": 0.9411764705882353,
+      "share_intervals": {
+        "class_separated_share": [
+          0.27165957446808514,
+          0.4196447552447552
+        ],
+        "subtype_separated_share": [
+          0.0,
+          0.0
+        ],
+        "class_agreement_share": [
+          0.6110175438596491,
+          0.7459059561128526
+        ],
+        "undegraded_class_agreement_share": [
+          0.9211866028708134,
+          0.9583584905660377
+        ]
+      }
+    },
+    {
+      "snr": 12.0,
+      "spectrum_count": 265,
+      "field_count": 15,
+      "median_gap_to_next_class": 0.018596422913048388,
+      "median_gap_to_second_best": 0.004042455557179914,
+      "gap_to_next_class_low": 0.01656412647867952,
+      "gap_to_next_class_high": 0.02193954284957495,
+      "class_separated_share": 0.4627450980392157,
+      "subtype_separated_share": 0.0,
+      "class_agreement_share": 0.6823529411764706,
+      "median_steps_from_catalog": 2.5,
+      "leave_one_field_out_range": [
+        0.01754994757486425,
+        0.019525186026922714
+      ],
+      "undegraded_class_agreement_share": 0.9490196078431372,
+      "share_intervals": {
+        "class_separated_share": [
+          0.38655438596491226,
+          0.5201684210526315
+        ],
+        "subtype_separated_share": [
+          0.0,
+          0.0
+        ],
+        "class_agreement_share": [
+          0.6127678424938474,
+          0.7447179487179487
+        ],
+        "undegraded_class_agreement_share": [
+          0.923020979020979,
+          0.9686274509803922
+        ]
+      }
+    },
+    {
+      "snr": 20.0,
+      "spectrum_count": 265,
+      "field_count": 15,
+      "median_gap_to_next_class": 0.024822186133225538,
+      "median_gap_to_second_best": 0.005466931571993253,
+      "gap_to_next_class_low": 0.021119397830195057,
+      "gap_to_next_class_high": 0.03139228942983009,
+      "class_separated_share": 0.596078431372549,
+      "subtype_separated_share": 0.043137254901960784,
+      "class_agreement_share": 0.6784313725490196,
+      "median_steps_from_catalog": 2.0,
+      "leave_one_field_out_range": [
+        0.022286558155814998,
+        0.027256092210260388
+      ],
+      "undegraded_class_agreement_share": 0.984313725490196,
+      "share_intervals": {
+        "class_separated_share": [
+          0.5287111111111111,
+          0.6709178519593614
+        ],
+        "subtype_separated_share": [
+          0.030413702239789196,
+          0.05210105263157892
+        ],
+        "class_agreement_share": [
+          0.6121318681318682,
+          0.7464
+        ],
+        "undegraded_class_agreement_share": [
+          0.975,
+          0.9930018148820327
+        ]
+      }
+    },
+    {
+      "snr": 30.0,
+      "spectrum_count": 265,
+      "field_count": 15,
+      "median_gap_to_next_class": 0.02803703625126755,
+      "median_gap_to_second_best": 0.007395205575603747,
+      "gap_to_next_class_low": 0.023721543953520476,
+      "gap_to_next_class_high": 0.03776052071175229,
+      "class_separated_share": 0.6431372549019608,
+      "subtype_separated_share": 0.12156862745098039,
+      "class_agreement_share": 0.6784313725490196,
+      "median_steps_from_catalog": 3.0,
+      "leave_one_field_out_range": [
+        0.025732346758145175,
+        0.033615012679326414
+      ],
+      "undegraded_class_agreement_share": 0.9882352941176471,
+      "share_intervals": {
+        "class_separated_share": [
+          0.5679084668192219,
+          0.7059734345351044
+        ],
+        "subtype_separated_share": [
+          0.07672349272349273,
+          0.15937777777777776
+        ],
+        "class_agreement_share": [
+          0.6148148148148148,
+          0.7449278996865204
+        ],
+        "undegraded_class_agreement_share": [
+          0.9769230769230769,
+          1.0
+        ]
+      }
+    }
+  ],
+  "class_reachable_snr": 20.0,
+  "subtype_reachable_snr": "confidence-limited at this resolution"
+}

@@ -228,6 +228,11 @@ class SourceDetector:
         """
         self.fwhm = fwhm
         self.threshold_sigma = threshold_sigma
+        # The background noise (standard deviation of the sky pixels) of the
+        # picture the last `detect` call searched, in the picture's units, or
+        # `None` before any call. The expected position error of a star needs
+        # it: a star's peak over this noise is its signal-to-noise ratio.
+        self.last_background_noise: float | None = None
 
     def detect(
         self, data: np.ndarray, mask: np.ndarray | None = None, with_radius: bool = True
@@ -304,6 +309,8 @@ class SourceDetector:
             logger.debug(
                 "Source detection: global background, mean=%.2f, median=%.2f, std=%.2f", mean, median, std
             )
+
+        self.last_background_noise = float(std)
 
         # 2. Find the sources. roundness_range is tightened from
         # DAOStarFinder's full (-1.0, 1.0) default to reject elongated

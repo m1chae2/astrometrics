@@ -18,6 +18,9 @@ from astrometricslib.models.quality.quality_summary import (
     AstrometryQualitySummary,
 )
 from astrometricslib.models.target import Target
+from astrometricslib.pipelines.astrometry.post_processing.expected_residual import (
+    record_expected_residual_quality,
+)
 from astrometricslib.pipelines.astrometry.post_processing.record_quality import (
     PLATE_SOLVE_GATE_NAME,
     astrometry_run_gates,
@@ -405,6 +408,17 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
                 measurement_context,
                 Path(image_path).name if image_path else None,
             )
+            # What noise alone should leave of the Gaia residual, stored beside
+            # the measured one, on the same stack and over the same stars.
+            if image_path:
+                record_expected_residual_quality(
+                    getattr(result.context, "gaia_fit_peak_over_noise", ()),
+                    getattr(result.context, "gaia_fit_signal_reason", "no Gaia fit was made"),
+                    summary.astrometry_metrics.star_fwhm_px,
+                    summary.astrometry_metrics.plate_scale_arcsec_per_pixel,
+                    measurement_context,
+                    Path(image_path).name,
+                )
             # The share of the target's own pixels that are clipped in each
             # frame of the stack. It needs this run's own plate solution (not
             # the header's) and the registration record the stacking run wrote.

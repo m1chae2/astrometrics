@@ -68,11 +68,17 @@ from astrometricslib.pipelines.spectroscopy.processing.spectral_classifier impor
 from astrometricslib.pipelines.spectroscopy.processing.spectral_feature_detector import (
     measure_local_dip_depth,
 )
+from astrometricslib.pipelines.spectroscopy.processing.spectrum_signal import (
+    estimate_spectrum_signal_to_noise,
+)
 
 __all__ = [
     "LINE_INDICES",
+    "LOCAL_HALF_WIDTH_ELEMENTS",
     "LineIndex",
     "classify_by_line_indices",
+    "line_core_window",
+    "line_window_signal_to_noise",
     "measure_line_indices",
     "reference_index_table",
 ]
@@ -126,6 +132,13 @@ CORE_RESOLUTION_FRACTION = 0.5
 # from the cool side.
 MINIMUM_INDEX_COUNT = 3
 
+# The stretch around a line whose scatter gives its signal-to-noise reaches
+# this many resolution elements to each side. The scatter estimate needs at
+# least 8 elements (`spectrum_signal`); 6 on each side gives about 12 after
+# the atmospheric bands are left out, close to that minimum so the stretch
+# stays local to the line. Chosen by judgement; not tuned.
+LOCAL_HALF_WIDTH_ELEMENTS = 6.0
+
 # The reference tables already built, by blur. The key is the resolution
 # element rounded to a whole Angstrom, or the profile's wavelengths and
 # values when a profile is used.
@@ -154,6 +167,129 @@ def _resolution_at(
     if profile is None:
         return resolution_element_angstrom
     return float(profile.at(np.array([wavelength_angstrom]))[0])
+
+
+def _core_half_width(
+    line: LineIndex, resolution_element_angstrom: float, resolution_profile: ResolutionProfile | None
+) -> float:
+    """Give the half-width of the core averaged to get one index.
+
+    Parameters
+    ----------
+    line : `LineIndex`
+        The line or band.
+    resolution_element_angstrom : `float`
+        The instrument's resolution element, in Angstroms, used where there
+        is no `resolution_profile`.
+    resolution_profile : `ResolutionProfile` or `None`
+        The resolution element along the spectrum.
+
+    Returns
+    -------
+    half_width : `float`
+        The listed half-width, widened to `CORE_RESOLUTION_FRACTION` of the
+        resolution element for a line (not a band) when that is more.
+    """
+    resolution = _resolution_at(line.center_angstrom, resolution_element_angstrom, resolution_profile)
+    half_width = line.half_width_angstrom
+    if line.widens_with_resolution:
+        half_width = max(half_width, CORE_RESOLUTION_FRACTION * resolution)
+    return half_width
+
+
+def line_core_window(
+    line: LineIndex, resolution_element_angstrom: float, resolution_profile: ResolutionProfile | None = None
+) -> tuple[float, float]:
+    """Give the wavelengths averaged to get the depth of one index.
+
+    Parameters
+    ----------
+    line : `LineIndex`
+        The line or band.
+    resolution_element_angstrom : `float`
+        The instrument's resolution element, in Angstroms, used where there
+        is no `resolution_profile`.
+    resolution_profile : `ResolutionProfile`, optional
+        The resolution element along the spectrum.
+
+    Returns
+    -------
+    low, high : `tuple` [`float`, `float`]
+        The core's edges, in Angstroms. A line core is widened to half the
+        resolution element on each side when that is more than the listed
+        half-width; a band core keeps its listed width.
+    """
+    half_width = _core_half_width(line, resolution_element_angstrom, resolution_profile)
+    return line.center_angstrom - half_width, line.center_angstrom + half_width
+
+
+def line_window_signal_to_noise(
+    wavelength_angstrom: np.ndarray,
+    intensity: np.ndarray,
+    errors: np.ndarray,
+    resolution_element_angstrom: float = FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
+    resolution_profile: ResolutionProfile | None = None,
+) -> float | None:
+    """Find the signal-to-noise per resolution element at the lines.
+
+    This is on the **scatter scale**, the same scale as
+    `estimate_spectrum_signal_to_noise` and the class-gap table: the noise is
+    the scatter the spectrum shows between neighbouring resolution elements,
+    not the error the extractor reported for each sample. The extractor's
+    per-sample errors read about five times higher in signal-to-noise on the
+    stored spectra (SPE-09), because neighbouring samples are not
+    independent.
+
+    For each index of `LINE_INDICES` whose core can be measured (it does not
+    touch an atmospheric absorption band), take the samples within
+    `LOCAL_HALF_WIDTH_ELEMENTS` resolution elements of the line's centre,
+    leave out the samples inside the atmospheric bands, and read
+    `estimate_spectrum_signal_to_noise` on that stretch. The result is the
+    median of those per-line values. The stretch is wider than the core
+    because the scatter needs several elements to measure.
+
+    Parameters
+    ----------
+    wavelength_angstrom : `np.ndarray`
+        The sample wavelengths, in Angstroms.
+    intensity : `np.ndarray`
+        The brightness of each sample.
+    errors : `np.ndarray`
+        The 1-sigma error of each sample, in the units of `intensity`. It
+        only decides which samples are usable (finite and above zero); the
+        noise comes from the scatter.
+    resolution_element_angstrom : `float`, optional
+        The width of one resolution element, in Angstroms, used where there is
+        no `resolution_profile`.
+    resolution_profile : `ResolutionProfile`, optional
+        How the width changes along the spectrum. Pass the measured line
+        spread here to use it.
+
+    Returns
+    -------
+    signal_to_noise : `float` or `None`
+        The median over the measurable lines of the scatter-scale
+        signal-to-noise of the stretch around the line. `None` when no line
+        has a stretch long enough to measure.
+    """
+    wavelength = np.asarray(wavelength_angstrom, dtype=float)
+    values = np.asarray(intensity, dtype=float)
+    sigma = np.asarray(errors, dtype=float)
+    usable = np.isfinite(wavelength) & np.isfinite(values) & np.isfinite(sigma) & (sigma > 0)
+    for _name, band_low, band_high in ATMOSPHERIC_BANDS_ANGSTROM:
+        usable &= ~((wavelength >= band_low) & (wavelength <= band_high))
+    per_line: list[float] = []
+    for line in LINE_INDICES:
+        low, high = line_core_window(line, resolution_element_angstrom, resolution_profile)
+        if any(start <= high and end >= low for _name, start, end in ATMOSPHERIC_BANDS_ANGSTROM):
+            continue
+        resolution = _resolution_at(line.center_angstrom, resolution_element_angstrom, resolution_profile)
+        reach = LOCAL_HALF_WIDTH_ELEMENTS * resolution
+        nearby = usable & (np.abs(wavelength - line.center_angstrom) <= reach)
+        reading = estimate_spectrum_signal_to_noise(wavelength[nearby], values[nearby], resolution)
+        if reading is not None and np.isfinite(reading):
+            per_line.append(float(reading))
+    return float(np.median(per_line)) if per_line else None
 
 
 def measure_line_indices(
@@ -210,9 +346,7 @@ def measure_line_indices(
     indices: dict[str, float | None] = {}
     for line in LINE_INDICES:
         resolution = _resolution_at(line.center_angstrom, resolution_element_angstrom, resolution_profile)
-        half_width = line.half_width_angstrom
-        if line.widens_with_resolution:
-            half_width = max(half_width, CORE_RESOLUTION_FRACTION * resolution)
+        half_width = _core_half_width(line, resolution_element_angstrom, resolution_profile)
         core_low, core_high = line.center_angstrom - half_width, line.center_angstrom + half_width
         core_is_blocked = any(low <= core_high and high >= core_low for low, high in left_out_windows)
         indices[line.name] = (

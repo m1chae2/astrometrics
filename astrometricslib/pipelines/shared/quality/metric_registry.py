@@ -19,6 +19,10 @@ from astrometricslib.models.quality.metric_spec import MetricSpec
 from astrometricslib.pipelines.shared.quality.metrics import FRAME_METRICS
 
 # The units that a metric declaration may use. "" is a unitless ratio.
+# Convention for rates: the unit is written "1/d" (per day) and the metric
+# name ends in "_per_day" (for example
+# ``photometry.window_alias_1_frequency_per_day``); the name spells the unit
+# out and the declaration uses the short form.
 KNOWN_UNITS: frozenset[str] = frozenset({
     "adu",
     "px",
@@ -35,6 +39,7 @@ KNOWN_UNITS: frozenset[str] = frozenset({
     "angstrom",
     "stack_unit",
     "stack_unit/adu",
+    "1/d",
     "",
 })
 

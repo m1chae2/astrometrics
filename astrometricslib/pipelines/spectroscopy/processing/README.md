@@ -156,6 +156,12 @@ The processing flags are `unclassified`, `emission_line_source`, `second_order_r
 
 The `processing_quality` run gate counts the spectra in which any of these metrics fails. The [pipeline README](../README.md) describes the checkpoint record and the run-level summary.
 
+## Signal-to-noise at the classifying lines, and the class gap
+
+**At the lines.** A subtype rests on a few lines and bands, so a whole-spectrum signal-to-noise says little about it. `line_window_signal_to_noise` in `spectral_line_indices.py` takes the signal-to-noise of the brightness summed over one resolution element (the width the instrument cannot resolve below) at each sample inside the core of each line index (H-beta, H-alpha, Mg b, Na D and the two TiO bands). It keeps the median per line, skips a line whose core touches an atmospheric band, and returns the median over the lines. It uses the measured line spread when there is one. The pipeline stores it as `snr_at_classifying_lines` in checkpoint 1. For each line it takes the stretch within 6 resolution elements of the line (`LOCAL_HALF_WIDTH_ELEMENTS`), leaves out the atmospheric bands, and reads `estimate_spectrum_signal_to_noise` on it. That puts the value on the scatter scale, the same scale as the class-gap table. The extractor's per-sample variance would read about five times higher. Higher means the lines are better measured (partly measured; see [SPE-30](../../../../documentation/library_design/validation/spectroscopy.md#spe-30)).
+
+**Class gap against signal-to-noise.** `class_gap_calibration.py` degrades stored spectra of high signal-to-noise with white noise, classifies each copy with `classify_spectral_type`, and records the gap to the next class and to the second-best reference at each signal-to-noise. `class_gap_table` makes the table, `class_gap_for_snr` reads the stored one (`data/class_gap_against_snr_zwo_asi_533mm_pro.json`, one file for each camera; it returns `None` and a reason when the camera, definition version, ambiguity threshold or estimator does not match, or the file does not read), and `scripts/calibrate_class_gap_against_snr.py` rebuilds it. A level is reached where at least half of the cases (`REACHED_SHARE`) have a gap of at least `AMBIGUOUS_RMS_GAP` at that value and every higher one, on the grid 3, 5, 8, 12, 20 and 30 (`DEFAULT_SNR_GRID`; design estimate; see [SPE-D25](../../../../documentation/library_design/validation/spectroscopy.md#design-estimates)). When no value passes, the verdict is `CONFIDENCE_LIMITED`, "confidence-limited at this resolution": the classifier's own gap stays under the limit, which says nothing about whether the classes can be told apart. Each row also carries the share of copies that keep the spectrum's own undegraded class, and 16 to 84 percent intervals. The uncertainty comes from resampling star fields, not spectra. The noise is white, so the table says what noise alone does (partly measured; see [SPE-30](../../../../documentation/library_design/validation/spectroscopy.md#spe-30)).
+
 ## Files
 
 - `spectrum_analysis.py` holds `analyze_spectrum`, which runs steps 1 to 7.
@@ -164,7 +170,8 @@ The `processing_quality` run gate counts the spectra in which any of these metri
 - `spectral_feature_detector.py` tests named absorption features.
 - `star_reddening.py` and `interstellar_extinction.py` look up and remove interstellar reddening.
 - `spectral_classifier.py` compares the spectrum with the reference spectra.
-- `spectral_line_indices.py` estimates the type from six line depths.
+- `spectral_line_indices.py` estimates the type from six line depths and gives the signal-to-noise at those lines.
+- `class_gap_calibration.py` builds and reads the class-gap table.
 - `equivalent_width.py` measures equivalent widths and their errors.
 - `synthetic_colour.py` measures the spectrum's own B-V color.
 - `second_order_risk.py` flags possible second-order contamination.

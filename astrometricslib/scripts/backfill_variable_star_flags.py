@@ -7,7 +7,12 @@ marks stars Gaia's own analysis found variable. This script asks both, through
 CDS XMatch, and stores the answers on each star (``vsx_variability_type`` and
 ``gaia_variable_flag``). Together with SIMBAD they let the library say
 "not listed as variable in SIMBAD, Gaia DR3 or VSX", and pick out stars a
-catalog positively calls constant.
+catalog positively calls constant. For a star VSX lists as a typed variable it
+also stores the brightness range and period VSX gives
+(``vsx_bright_magnitude``, ``vsx_faint_magnitude``, ``vsx_amplitude_mag``,
+``vsx_period_days`` and ``vsx_magnitude_band``), which the photometry run reads
+as the catalog amplitude of its target. Stars saved before these were kept
+get them with ``--refresh-vsx-ranges``.
 
 A star is matched by its position, within 3 arcseconds (see
 `pipelines/shared/variable_star_catalogs.py` for the rules). A star with no
@@ -24,7 +29,7 @@ Check first, then apply::
 ``--apply`` copies the catalog database to a timestamped ``.bak`` file before
 writing anything, then saves after every request, so an interrupted run keeps
 what it had done. A star that already has both answers is skipped. Only the
-two flag fields of each star are changed.
+catalog-flag and VSX-range fields of each star are changed.
 """
 
 import argparse
@@ -49,10 +54,12 @@ from astrometricslib.pipelines.shared.star_kinds import StarKind, kind_of_star_i
 from astrometricslib.pipelines.shared.variable_star_catalogs import (
     GAIA_CATALOG,
     VSX_CATALOG,
+    VsxEntry,
     XMatchQuery,
     build_position_table,
     gaia_flags_from_matches,
     run_crossmatch,
+    vsx_entries_from_matches,
     vsx_types_from_matches,
 )
 
@@ -100,7 +107,7 @@ class FlagReport:
     saved: int = 0
 
 
-def needs_lookup(star: StellarObject, include_position_only: bool) -> bool:
+def needs_lookup(star: StellarObject, include_position_only: bool, refresh_vsx_ranges: bool = False) -> bool:
     """Say whether a star should be looked up.
 
     Parameters
@@ -109,14 +116,25 @@ def needs_lookup(star: StellarObject, include_position_only: bool) -> bool:
         The star.
     include_position_only : `bool`
         Whether stars known only by position are looked up too.
+    refresh_vsx_ranges : `bool`, optional
+        Whether a star that VSX lists as a typed variable, and that was saved
+        before VSX ranges were kept (`vsx_range_checked` is false), is looked
+        up again to get them. A star whose VSX entry has no range is asked
+        once, then marked, and not asked again.
 
     Returns
     -------
     needed : `bool`
         True if the star has a usable position, is lookable by the options,
-        and is missing either answer.
+        and is missing either answer (or, with `refresh_vsx_ranges`, its
+        VSX range).
     """
-    if star.gaia_variable_flag and star.vsx_variability_type:
+    lacks_range = (
+        refresh_vsx_ranges
+        and classify_vsx_type(star.vsx_variability_type) is KnownVariability.KNOWN_VARIABLE
+        and not star.vsx_range_checked
+    )
+    if star.gaia_variable_flag and star.vsx_variability_type and not lacks_range:
         return False
     if stored_position_degrees(star) is None:
         return False
@@ -142,7 +160,7 @@ def star_magnitude(star: StellarObject) -> float | None:
 
 def look_up_stars(
     xmatch_query: XMatchQuery, stars: Sequence[StellarObject]
-) -> tuple[dict[str, str], dict[str, str]]:
+) -> tuple[dict[str, str], dict[str, str], dict[str, VsxEntry | None]]:
     """Ask VSX and Gaia about a batch of stars.
 
     Parameters
@@ -154,8 +172,9 @@ def look_up_stars(
 
     Returns
     -------
-    vsx_types, gaia_flags : `tuple` [`dict`, `dict`]
-        Each star's VSX type and Gaia flag, by id.
+    vsx_types, gaia_flags, vsx_entries : `tuple` [`dict`, `dict`, `dict`]
+        Each star's VSX type, Gaia flag and VSX brightness range and period
+        (`None` when VSX lists no typed variable there), by id.
     """
     positions = []
     for star in stars:
@@ -164,14 +183,16 @@ def look_up_stars(
             positions.append((star.id, position[0], position[1]))
     table = build_position_table(positions)
     ids = [row[0] for row in positions]
-    vsx = vsx_types_from_matches(ids, run_crossmatch(xmatch_query, table, VSX_CATALOG))
+    vsx_matches = run_crossmatch(xmatch_query, table, VSX_CATALOG)
+    vsx = vsx_types_from_matches(ids, vsx_matches)
+    vsx_entries = vsx_entries_from_matches(ids, vsx_matches)
     magnitudes = {star.id: star_magnitude(star) for star in stars}
     gaia = gaia_flags_from_matches(ids, run_crossmatch(xmatch_query, table, GAIA_CATALOG), magnitudes)
-    return vsx, gaia
+    return vsx, gaia, vsx_entries
 
 
 def copy_flags(existing: StellarObject | None, updated: StellarObject) -> StellarObject:
-    """Merge rule for saving: change only the two catalog-flag fields.
+    """Merge rule for saving: change only the flag and VSX-range fields.
 
     Parameters
     ----------
@@ -188,6 +209,12 @@ def copy_flags(existing: StellarObject | None, updated: StellarObject) -> Stella
     if existing is None:
         return updated
     existing.vsx_variability_type = updated.vsx_variability_type
+    existing.vsx_bright_magnitude = updated.vsx_bright_magnitude
+    existing.vsx_faint_magnitude = updated.vsx_faint_magnitude
+    existing.vsx_amplitude_mag = updated.vsx_amplitude_mag
+    existing.vsx_period_days = updated.vsx_period_days
+    existing.vsx_magnitude_band = updated.vsx_magnitude_band
+    existing.vsx_range_checked = updated.vsx_range_checked
     existing.gaia_variable_flag = updated.gaia_variable_flag
     return existing
 
@@ -200,6 +227,7 @@ def run_backfill(
     limit: int | None = None,
     include_position_only: bool = False,
     only_with_photometry: bool = False,
+    refresh_vsx_ranges: bool = False,
     apply: bool = False,
     pause_seconds: float = 0.0,
     make_backup: Callable[[], Any] | None = None,
@@ -223,6 +251,9 @@ def run_backfill(
         Only the stars that have a light curve. Together with
         `include_position_only` this labels the stars the variability cutoff
         is checked on without looking up the far more numerous others.
+    refresh_vsx_ranges : `bool`, optional
+        Also look up again the stars VSX lists as variable that have no
+        brightness range or period saved yet (see `needs_lookup`).
     apply : `bool`, optional
         Save the results. Without it nothing is written.
     pause_seconds : `float`, optional
@@ -279,7 +310,7 @@ def run_backfill(
             del pending[:BATCH_SIZE]
             report.candidates += len(batch)
             try:
-                vsx, gaia = look_up_stars(xmatch_query, batch)
+                vsx, gaia, vsx_entries = look_up_stars(xmatch_query, batch)
             except ExternalServiceError, OSError, ValueError, RuntimeError:
                 logging.getLogger(__name__).exception("Cross-match request failed")
                 report.failed_requests += 1
@@ -293,6 +324,13 @@ def run_backfill(
             consecutive_failures = 0
             for star in batch:
                 star.vsx_variability_type = vsx[star.id]
+                entry = vsx_entries.get(star.id)
+                star.vsx_bright_magnitude = None if entry is None else entry.bright_magnitude
+                star.vsx_faint_magnitude = None if entry is None else entry.faint_magnitude
+                star.vsx_amplitude_mag = None if entry is None else entry.amplitude_mag
+                star.vsx_period_days = None if entry is None else entry.period_days
+                star.vsx_magnitude_band = "" if entry is None else entry.band
+                star.vsx_range_checked = True
                 star.gaia_variable_flag = gaia[star.id]
                 report.vsx[classify_vsx_type(star.vsx_variability_type)] += 1
                 report.gaia_flags[star.gaia_variable_flag] += 1
@@ -318,7 +356,7 @@ def run_backfill(
 
     for start in range(0, len(ids), 5000):
         for star in catalog_access.get_by_ids("stellar_catalog", ids[start : start + 5000]):
-            if needs_lookup(star, include_position_only):
+            if needs_lookup(star, include_position_only, refresh_vsx_ranges):
                 if limit is not None and report.candidates + len(pending) >= limit:
                     break
                 pending.append(star)
@@ -401,6 +439,11 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         help="Only stars that have a light curve (the ones the variability cutoff check uses).",
     )
     parser.add_argument(
+        "--refresh-vsx-ranges",
+        action="store_true",
+        help="Look up again the stars VSX lists as variable but that have no brightness range saved yet.",
+    )
+    parser.add_argument(
         "--pause-seconds",
         type=float,
         default=DEFAULT_PAUSE_SECONDS,
@@ -436,6 +479,7 @@ def main(argv: list[str] | None = None) -> int:
             limit=arguments.limit,
             include_position_only=arguments.include_position_only,
             only_with_photometry=arguments.only_with_photometry,
+            refresh_vsx_ranges=arguments.refresh_vsx_ranges,
             apply=arguments.apply,
             pause_seconds=arguments.pause_seconds,
             make_backup=lambda: backup_catalog_database(astrometrics.config),

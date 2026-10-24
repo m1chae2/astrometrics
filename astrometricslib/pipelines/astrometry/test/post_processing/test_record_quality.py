@@ -279,6 +279,9 @@ MEASURED_AT = datetime(2026, 10, 22, tzinfo=UTC)
 _FRAME_TARGET_METRICS = {
     ASTROMETRY_FRAME_TARGET_CLIPPED_FRACTION,
     ASTROMETRY_FRAME_TARGET_NONLINEAR_FRACTION,
+    # The expected residual also has its own record step, tested in
+    # test_expected_residual.py.
+    *(spec.name for spec in ASTROMETRY_METRICS if spec.name.startswith("astrometry.expected_")),
 }
 
 
@@ -447,7 +450,11 @@ def test_validate_output_records_the_run_and_a_storage_failure_does_not_fail_it(
     rows = store.query(target_id=Target(id="Test Target").id, latest_only=False)
 
     assert summary.gates
-    assert {row.metric for row in rows} == _declared_names()
+    # The run also stores the expected-residual rows (its own record step).
+    expected_residual_names = {
+        spec.name for spec in ASTROMETRY_METRICS if spec.name.startswith("astrometry.expected_")
+    }
+    assert {row.metric for row in rows} == _declared_names() | expected_residual_names
     stack_subjects = {row.subject.subject_id for row in rows if row.subject.level is SubjectLevel.STACK}
     assert stack_subjects == {"Test Target/Test Target_Stacked.fits"}
 

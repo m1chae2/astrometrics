@@ -38,6 +38,7 @@ from astrometricslib.pipelines.spectroscopy.processing.spectral_classifier impor
 from astrometricslib.pipelines.spectroscopy.processing.spectral_line_indices import (
     LINE_INDICES,
     classify_by_line_indices,
+    line_window_signal_to_noise,
     measure_line_indices,
     reference_index_table,
 )
@@ -298,3 +299,34 @@ def test_a_spectrum_with_too_few_measurable_indices_is_not_classified(
     result = classify_by_line_indices(wavelength[blue], flux[blue], resolution_profile=line_spread)
 
     assert result is None
+
+
+def test_the_line_signal_to_noise_is_read_from_the_scatter_not_the_reported_errors() -> None:
+    """Verify the line signal-to-noise follows the spectrum's own scatter.
+
+    A flat continuum of 1000 with white noise of 100 per 10 A sample, in
+    50 A resolution elements of five samples, scatters by 100 / sqrt(5) per
+    element, so the signal-to-noise per element is about 22. The reported
+    errors are set five times too small; a reading from them would be five
+    times too high (about 112), a reading from the scatter stays near 22.
+    """
+    rng = np.random.default_rng(7)
+    wavelength = np.arange(4000.0, 7500.0, 10.0)
+    intensity = 1000.0 + rng.normal(0.0, 100.0, wavelength.size)
+    errors = np.full(wavelength.size, 20.0)
+
+    reading = line_window_signal_to_noise(wavelength, intensity, errors, resolution_element_angstrom=50.0)
+
+    assert reading is not None
+    assert reading == pytest.approx(1000.0 / (100.0 / np.sqrt(5.0)), rel=0.35)
+
+
+def test_the_line_signal_to_noise_is_none_when_no_line_has_a_stretch_to_measure() -> None:
+    """Verify a spectrum with no usable samples near the lines gives None."""
+    wavelength = np.arange(4000.0, 7500.0, 10.0)
+
+    reading = line_window_signal_to_noise(
+        wavelength, np.full(wavelength.size, np.nan), np.full(wavelength.size, 1.0), 50.0
+    )
+
+    assert reading is None

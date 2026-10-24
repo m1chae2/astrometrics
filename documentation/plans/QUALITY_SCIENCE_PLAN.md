@@ -90,6 +90,26 @@ implied random noise is 1.32 times the model's and the empty-aperture noise is 1
 about half of it is shared structure. The measurement takes the time of one library stack. Numbers
 are in `STK-42`.
 
+Status on 2026-10-24, batch S5 (branch `94-science-s5-outcomes`): built and run on the scratch copy.
+Section 2.4: the astrometry pipeline stores what noise alone should leave of the Gaia residual, as
+parts on the stack: centroid noise (the Cramér-Rao bound over the Gaia fit's stars; the star finder
+scatters 1.04 to 1.27 times it on injected stars), the pixel phase (a table found by injection) and the
+Gaia epoch error (declared and never measured: the cache holds no Gaia error columns). On the M 57
+stack the parts add to 0.115 arcsec against a measured 0.200 (the centroid part is a lower bound, and the stack's correlated noise lowers the per-pixel sky sigma it uses, so the remainder called "not noise" is provisional). The photometry run stores the noise by
+source for stars of G 10, 12 and 14 (photon, sky and read from the saved flux errors, exactly; the
+model matches the scatter of M 57's stars of G 11 to 13 within 8 percent; the brightest stars scatter
+more, mostly the 9 at the clip, and 1.3 to 1.4 times the model below it), scintillation (Young's
+formula, with the header airmass and the optic's aperture; assumed at sea level and the literature
+coefficient, with no bound claimed), the three strongest alias peaks
+of the frame times (nothing for a single night), and the target's amplitude from its folded light
+curve or, separately, from the VSX catalog (the VSX range, period and band are now kept by the backfill
+crossmatch). Only a target that is a single star by its name gets an amplitude, and its star is found
+by catalog name. No stored run had a covered cycle of a target star with a period. Spectroscopy stores
+the signal-to-noise at the line-index cores as a checkpoint-1 roll-up, and a calibration script
+degrades 53 high-signal-to-noise spectra of 15 fields: the class gap reaches the ambiguity limit of
+0.02 in half of the cases from a signal-to-noise of 20, and the subtype is confidence-limited at this
+resolution. The line signal-to-noise is on the same scatter scale as the table. Evidence is in `AST-21`, `PHO-17` to `PHO-19` and `SPE-30` of the validation register.
+
 The second review of 2026-10-17 moved the observing values (guide error, pointing error, dew,
 Moon and airmass) out of the `astrometricslib` tables into `wayfindinglib` (section 2.5). It added
 the undersampling term, the spectroscopy class gap against SNR, the flat-noise check and the
@@ -138,7 +158,7 @@ section 2 backs.
 | Each night's contribution (2.3) | UC2 which frames to leave out |
 | Walking noise (2.3) | UC7 dither advice |
 | Astrometry expected residual (2.4) | UC5 trusting a result |
-| Photometry noise model, scintillation share, target amplitude (2.4) | UC5 trusting a result |
+| Photometry noise model, target amplitude (2.4) | UC5 trusting a result |
 | Photometry period sensitivity (2.4) | UC7 period alias recommendation |
 | Spectroscopy SNR per resolution element, class gap against SNR (2.4) | UC5 trusting a result; spectroscopy finish line |
 
@@ -199,7 +219,7 @@ The metrics below build on them.
 | Astrometry | Residual pattern | The fit residuals binned across the field | Distortion model | None |
 | Astrometry | Plate scale ratio | Measured plate scale over the configured plate scale | Camera spacing changed | None |
 | Photometry | Noise model, stored separately | Photon, sky, read and scintillation noise against magnitude. Scintillation from Young's formula with the usual empirical correction, labeled model-derived. | Systematic floor, flats, comparison stars | None |
-| Photometry | Scintillation share | Scintillation's share of the bright-star noise | Longer exposures or defocus for bright targets | None |
+| Photometry | Scintillation share | Dropped in S5: a stored ratio that leans to advice (decisions 2 and 18). The parts are stored; a reader takes the ratio. | None | None |
 | Photometry | Period sensitivity | The window function of the observing times, and the periods it cannot separate | Which nights to add to break an alias | None |
 | Photometry | Target amplitude, with its source | The amplitude the photometry finish line is measured against. It names its source: the target's own light curve once its phase coverage is enough, otherwise the catalog amplitude (VSX), labeled as a catalog value. | When the light curve is good enough | None |
 | Spectroscopy | SNR per resolution element | SNR at the classifying lines, the element taken from the measured line spread in Å | Exposure needed for a subtype | None |
@@ -418,3 +438,26 @@ systems engineer settled every finding; the user reviews those choices in the pu
 
 No findings were rejected. The real M 57 target record was corrected in the user's database on
 2026-10-23 with the user's approval, after a backup.
+
+## Appendix G. Review board changes, batch S5
+
+The board reviewed batch S5 on 2026-10-23, and all three reviewers approved it with changes. The
+systems engineer settled every finding under the user's instruction of that evening to finish the
+issue without stopping; the user reviews those choices in the pull request. (Appendix F is kept for
+batch S4.)
+
+| Finding | Raised by | Where it landed |
+| :--- | :--- | :--- |
+| Register entries still held unfilled placeholders. | Astronomer | Filled from the real-data runs (`PHO-17` to `PHO-19`, `SPE-30`) |
+| The scintillation share is a stored ratio and leaned toward advice. | Architect | Removed; the parts stay |
+| "Sea level is an upper bound" is wrong for scintillation. | Astronomer | Assumed, no bound claimed; the real site height and measured coefficients stated (`PHO-17`) |
+| The bright-star excess had no candidate named. | Astronomer | Split by peak level: the excess is mostly stars at the clip; unsaturated stars remain 1.3 to 1.4 times the model (`PHO-17`) |
+| The line signal-to-noise was on a scale about five times the class-gap table's. | Astronomer | Moved to the scatter scale |
+| The class-gap table measured the classifier's confidence, not noise. | Astronomer | Own-class agreement and intervals added; verdict "confidence-limited"; table keyed to the camera and versioned (`SPE-30`) |
+| A cluster or galaxy target got a random nearby star. | Astronomer | Only single-star targets, found by catalog name |
+| Stars saved before S5 got a false "no range" reason. | Engineer | A range-checked marker; the refresh keys on it |
+| The alias check did not share the window function as claimed. | Architect | One shared function |
+| Unguarded steps could fail a run. | Engineer | Guarded with logs |
+| The centroid term is a lower bound; correlated stack noise. | Astronomer | Labelled; the remainder called provisional (`AST-21`) |
+
+No findings were rejected.

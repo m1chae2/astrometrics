@@ -4,9 +4,10 @@ The conformance test (`pipelines/test/test_metric_conformance.py`) needs every
 pipeline that records measurements to show that its record step emits each
 metric the pipeline declares. This file runs the astrometry record step on one
 solved run whose every value is filled, so no metric is left out for being
-missing. The target-clipping rows come from their own step
-(`target_clipping_measurements`), which the fixture runs on two small frames
-and a small stack written to a temporary folder.
+missing. The expected-residual rows come from their own step
+(`expected_residual_measurements`), run on four stars. The target-clipping rows
+come from their own step (`target_clipping_measurements`), which the fixture
+runs on two small frames and a small stack written to a temporary folder.
 """
 
 import tempfile
@@ -21,6 +22,10 @@ from astropy.wcs import WCS
 from astrometricslib.models.quality.gate_result import GateResult, passed_gate
 from astrometricslib.models.quality.measurement import QualityMeasurement
 from astrometricslib.models.quality.quality_summary import AstrometryPipelineQualityMetrics
+from astrometricslib.pipelines.astrometry.post_processing.expected_residual import (
+    expected_residual,
+    expected_residual_measurements,
+)
 from astrometricslib.pipelines.astrometry.post_processing.record_quality import (
     PLATE_SOLVE_GATE_NAME,
     astrometry_run_gates,
@@ -141,4 +146,11 @@ def astrometry_emitted_measurements() -> list[QualityMeasurement]:
     return [
         *astrometry_run_measurements(metrics, gates, context, "M99_Stacked.fits"),
         *fixture_target_clipping_rows(context),
+        *expected_residual_measurements(
+            expected_residual(
+                [12.0, 20.0, 35.0, 60.0], "", metrics.star_fwhm_px, metrics.plate_scale_arcsec_per_pixel
+            ),
+            context,
+            "M99_Stacked.fits",
+        ),
     ]

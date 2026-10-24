@@ -941,6 +941,46 @@ print([abs(a - b) / abs(a) for a, b in zip(full, sample)])
 - **Guarded by tests:** `astrometricslib/pipelines/astrometry/test/post_processing/test_target_clipping.py` checks the transform, the counts in the disc, the source check on noise and on a star, the crop offset, the assumed and not-measured cases, the cap, the time limit and the shared frame subject; `test_runner_target_clipping.py` checks that the runner hands over the target's position from before the run and this run's own solution; `astrometricslib/pipelines/shared/test/test_registration_record.py` checks the record.
 - **Raw record:** None kept.
 
+### AST-21
+
+**Expected position residual: centroid noise, pixel phase and the Gaia epoch gap**
+
+- **Claim:** After the Gaia refit, part of the distance between a star and its Gaia position is noise the star finder cannot avoid. The centroid part is the Cramér-Rao bound for a Gaussian star, `sqrt(2/pi) n / A` pixels along each axis for a peak `A` over a sky noise `n`, which equals `sqrt(2) FWHM / (2.355 SNR)`. On noisy injected stars the project's star finder scatters 1.04 to 1.27 times that bound at peak over noise 8 to 60 (widths 2, 3 and 4 px), so the bound is a floor about 20 percent low. The pixel-phase part is a table found by injection: 0.092, 0.050, 0.033, 0.027, 0.026, 0.022, 0.014 and 0.008 px per axis at widths 1.5, 1.75, 2, 2.25, 2.5, 3, 4 and 5 px. The Gaia epoch part is never measured, because the cached Gaia stars hold no error columns. On the M 57 stack the Gaia refit RMS is 0.200 arcsec over 8,115 stars, and the two parts add in quadrature to 0.115 arcsec (centroid noise 0.090, pixel phase 0.071), so noise alone explains about a third of the squared residual; the rest, 0.163 arcsec in quadrature, is not noise the model knows. The centroid part is a lower bound (the Cramér-Rao limit), and the stack's noise is correlated, which lowers the per-pixel sky noise the bound uses, so the "not noise" remainder is provisional.
+- **Settings it supports:**
+  - code constant `CRAMER_RAO_PEAK_FACTOR` = sqrt(2/pi) in `astrometricslib/pipelines/astrometry/post_processing/expected_residual.py`. Relation: confirmed by this entry (a theory value; the injection puts the finder at 1.04 to 1.27 times it). <!-- impl: astrometricslib.pipelines.astrometry.post_processing.expected_residual.CRAMER_RAO_PEAK_FACTOR -->
+  - code table `PIXEL_PHASE_RMS_PX_BY_FWHM_PX` in the same file. Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.astrometry.post_processing.expected_residual.PIXEL_PHASE_RMS_PX_BY_FWHM_PX -->
+- **Status:** Partly measured. The bound and the table were checked on injected stars only (a Gaussian star, white noise, a star finder kernel matched to the star). On real data there is one stack (M 57), so the comparison with the measured residual has no replicate.
+- **Data you need:** For the injection, nothing. For the comparison with the measured residual, a solved stack with at least 40 Gaia-matched stars.
+- **Procedure:**
+  1. Inject pixel-integrated Gaussian stars at random positions, with and without noise, and find them with `find_sources_above_background`. <!-- impl: astrometricslib.pipelines.shared.star_finding.find_sources_above_background -->
+  2. Compare the scatter of the found centroids with `centroid_error_per_axis_px` <!-- impl: astrometricslib.pipelines.astrometry.post_processing.expected_residual.centroid_error_per_axis_px --> after removing the pixel-phase part in quadrature.
+  3. Run the astrometry stage on a stack and read the four `astrometry.expected_*` rows beside `astrometry.gaia_fit_rms_arcsec`.
+
+```python
+from astrometricslib import Astrometrics
+
+astrometrics = Astrometrics()
+astrometrics.processing.process_target("M 57", stages=["astrometry"], register_job=False)
+for metric in (
+    "astrometry.gaia_fit_rms_arcsec",
+    "astrometry.expected_centroid_noise_rms_arcsec",
+    "astrometry.expected_pixel_phase_rms_arcsec",
+    "astrometry.expected_gaia_epoch_error_rms_arcsec",
+):
+    for row in astrometrics.quality.query(metric=metric, target_id="M 57"):
+        print(metric, row.status, row.value, row.reason)
+```
+
+- **Acceptance criterion:** Not recorded (set after the result).
+- **What to look at:** The measured Gaia RMS against the quadrature sum of the two parts. A measured value several times larger is distortion, tilt or a bad match, not noise. The Gaia epoch part is missing, so the sum is a lower bound.
+- **Our result:** 2026-10-23, injection (`science/s5/pixel_phase.py` and `science/s5/centroid_noise.py` in the session's scratch folder). Pixel phase, noise-free, 800 stars per width, rms per axis (x, y): 1.5 px 0.090, 0.094; 1.75 px 0.049, 0.051; 2 px 0.033, 0.034; 2.25 px 0.027, 0.028; 2.5 px 0.026, 0.026; 3 px 0.022, 0.021; 4 px 0.014, 0.015; 5 px 0.009, 0.008; the means were within 0.006 px of zero. Noisy stars, rms centroid error with the pixel part removed, over the bound (ratio): width 2 px, peak over noise 8, 15, 30, 60: 1.14, 1.09, 1.04, 1.08; width 3 px: 1.20, 1.17, 1.10, 1.09; width 4 px: 1.27, 1.26, 1.26, 1.19. At peak over noise 120 the pixel part dominates and the ratio is not meaningful. Real stack: the M 57 library stack of the scratch copy (star width 2.44 px, 1.9185 arcsec per pixel), rerun on 2026-10-24 with the table that includes 1.75 and 2.25 px (`science/s5/run_astrometry_stage.py`): Gaia refit RMS 0.1998 arcsec before 0.2530, 8,115 stars; expected centroid noise 0.0905 arcsec over the same stars; expected pixel phase 0.0713 arcsec; the Gaia epoch part not measured. Quadrature sum of the two parts 0.115 arcsec, 0.58 of the measured RMS (0.33 of its square). Sample: 8,115 stars; one stack.
+- **Verdict:** Not judged.
+- **Limits:** A Gaussian star and white noise; real stars have wings, a field varies in width, and the stack's noise is correlated (see STK-38), which lowers the per-pixel sky sigma and makes the noise term too small, so the part of the residual called "not noise" is provisional. The centroid part is a lower bound by construction (the Cramér-Rao limit). The noise is the sky's only, so a star bright enough for its own photon noise to matter is placed worse than the bound. Faint stars use the star finder's peak, which is biased up by noise. The pixel-phase table was found with a finder kernel equal to the star width. One-shot-color frames are searched on a binned copy and get no value. The Gaia epoch part is never measured.
+- **To tune for your setup:** Rebuild the pixel-phase table with `science/s5/pixel_phase.py` if the star finder or its kernel changes. Nothing else needs tuning.
+- **Regenerate with:** The scripts named above, run through the session's real-run wrapper; no script in `astrometricslib/scripts/`.
+- **Guarded by tests:** `astrometricslib/pipelines/astrometry/test/post_processing/test_expected_residual.py` (the bound by hand, the finder against the bound on noisy stars, the table against the finder on noise-free stars, missing inputs, the rows), `astrometricslib/pipelines/astrometry/test/processing/test_wcs_refinement.py` (the fit's stars and their peak over noise) and `astrometricslib/pipelines/astrometry/test/pre_processing/test_background_noise_report.py`.
+- **Raw record:** None kept.
+
 ## Design estimates
 
 These values have not been measured. Each is a code constant unless the table says otherwise; changing a code constant means editing the code. Paths are relative to `astrometricslib/`.

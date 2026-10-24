@@ -5,6 +5,7 @@ of stars, and returns the final, cleaned-up color data (spectra) for each star.
 """
 
 import logging
+from dataclasses import replace
 from typing import Any
 
 import numpy as np
@@ -106,6 +107,9 @@ from astrometricslib.pipelines.spectroscopy.processing.assess_processing_quality
 )
 from astrometricslib.pipelines.spectroscopy.processing.second_order_risk import (
     compute_second_order_blue_to_red_ratio,
+)
+from astrometricslib.pipelines.spectroscopy.processing.spectral_line_indices import (
+    line_window_signal_to_noise,
 )
 from astrometricslib.pipelines.spectroscopy.processing.spectrum_analysis import (
     EXTENDED_TARGET_SPECTRAL_TYPE,
@@ -1520,6 +1524,24 @@ class SpectroscopyPipeline:
             if best_available_errors is not None
             else None
         )
+        if noise_summary is not None:
+            # The signal-to-noise where the classifying lines are measured,
+            # with the measured line spread when there is one (else the stored
+            # one).
+            # A failure here leaves the number out (None) and never fails
+            # the spectrum: it is a reported number with no limit.
+            try:
+                snr_at_lines = line_window_signal_to_noise(
+                    np.array(wavelengths_angstrom),
+                    np.array(best_available_intensity),
+                    best_available_errors,
+                    analysis.resolution_element_angstrom,
+                    to_resolution_profile(measured_line_spread) or self.line_spread_profile,
+                )
+            except (AttributeError, *DATA_ERRORS):
+                logger.exception("The signal-to-noise at the classifying lines could not be computed")
+                snr_at_lines = None
+            noise_summary = replace(noise_summary, snr_at_classifying_lines=snr_at_lines)
         second_order_blue_to_red_ratio = compute_second_order_blue_to_red_ratio(
             np.array(wavelengths_angstrom), np.array(intensities)
         ).tolist()

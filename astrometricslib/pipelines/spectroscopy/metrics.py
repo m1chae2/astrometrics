@@ -398,6 +398,20 @@ _STAGE_ROWS: tuple[_StageRow, ...] = (
     ),
     (
         "pre_processing",
+        "snr_at_classifying_lines",
+        "",
+        Direction.HIGHER,
+        "The spectrum's signal-to-noise ratio per resolution element at the classifying lines.",
+        "Median over the line-index cores that can be measured (H-beta, H-alpha, Mg b, Na D and the two TiO "
+        "bands, those clear of the atmospheric bands) of the signal-to-noise per resolution element of the "
+        "stretch within 6 resolution elements of the line, on the scatter scale: the median element over "
+        "the robust scatter of the second difference of the elements, the same estimator as the class-gap "
+        "table (not the extractor's per-sample errors, which read about five times higher), using the "
+        "measured line spread.",
+        "SPE-30",
+    ),
+    (
+        "pre_processing",
         "fraction_samples_snr_below_5",
         "fraction",
         Direction.LOWER,

@@ -54,4 +54,9 @@ class AnalysisContext:
     # solution), or `None`. Typed `Any` because this shared module does not
     # import from one pipeline.
     wcs_refinement: Any = None
+    # The peak over the background noise of each star the Gaia refit used, in
+    # the order the fit used them, from which the expected position error is
+    # found. Empty when there is none; `gaia_fit_signal_reason` says why.
+    gaia_fit_peak_over_noise: tuple[float, ...] = ()
+    gaia_fit_signal_reason: str = "no Gaia fit was made"
     astrometry_flags: list[str] = field(default_factory=list)

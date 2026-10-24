@@ -189,6 +189,16 @@ The value has no airmass, color or aperture-correction term. The aperture is a f
 
 The helper `zero_point_scatter` gives 1.4826 times the median absolute deviation of a session's frame zero points, with a bootstrap error. It needs 10 frames (`MINIMUM_FRAMES_FOR_SCATTER`; design estimate, see [PHO-D26 in the photometry design estimates](../../../../documentation/library_design/validation/photometry.md#design-estimates); partly measured, see [PHO-16](../../../../documentation/library_design/validation/photometry.md#pho-16)). The pipeline does not store the spread or the airmass. The observatory side computes them when it reads the zero points. The numbers only measure. They do not say that a night was photometric.
 
+## Noise model, schedule and target amplitude
+
+Three modules turn a run's inputs into numbers that a reader can compare with the light curves. The `post_processing/` steps store them (see that folder's README). None of them judges the result.
+
+**Noise by source** (`noise_budget.py`). For a star of a stated catalog magnitude (G 10, 12 and 14, `NOISE_MODEL_MAGNITUDES` in `../metrics.py`), the module gives the noise of one measurement from photon counting, the sky, the camera's read-out and scintillation (the twinkling of starlight in the air). The first three are the terms of the CCD equation that the aperture photometry already uses, so the sky term is recovered exactly from the saved flux errors. Scintillation uses Young's formula with a coefficient of 0.09, an airmass power of 1.75 and a scale height of 8000 m (`YOUNG_COEFFICIENT`, `YOUNG_AIRMASS_POWER`, `SCINTILLATION_SCALE_HEIGHT_M`; design estimate; see [PHO-D27](../../../../documentation/library_design/validation/photometry.md#design-estimates)). It needs the airmass from the frame headers and the telescope aperture. A site of unknown height is treated as sea level, which gives the largest value. The metrics are `photometry.model_noise_{photon,sky,read}_at_mag{10,12,14}_mag` (the noise of one measurement, in magnitudes) and `photometry.model_noise_scintillation_mag`. Lower means a quieter measurement. The model has been compared with the light curves of one night only (partly measured; see [PHO-17](../../../../documentation/library_design/validation/photometry.md#pho-17)).
+
+**Window function of the frame times** (`observing_window.py`). Observing at the same hours each night makes a period and its echo one cycle per day away look alike. `strongest_window_peaks` finds the three strongest peaks of the schedule's window function (`ALIAS_PEAK_COUNT`, below 2 cycles per day, `MAXIMUM_ALIAS_FREQUENCY_PER_DAY`; design estimate; see [PHO-D29](../../../../documentation/library_design/validation/photometry.md#design-estimates)). Each peak is stored as `photometry.window_alias_<rank>_frequency_per_day` and `photometry.window_alias_<rank>_power_fraction` (0 to 1; near 1 means the run cannot separate periods that differ by that frequency). It uses the same function as the alias check in `period_checks.py`. A run of one night stores "not measured" with the reason (partly measured; see [PHO-18](../../../../documentation/library_design/validation/photometry.md#pho-18)).
+
+**Target amplitude** (`target_amplitude.py`). `folded_amplitude` folds the target star's light curve on a period, cuts it into 10 phase bins, and returns the range of the bin medians. It needs at least 3 points in each of at least 80% of the bins (`PHASE_BIN_COUNT`, `MINIMUM_POINTS_PER_BIN`, `MINIMUM_FILLED_BIN_FRACTION`), so a partly covered cycle gives no value. Only a target whose name reads as a single star gets an amplitude; any other target is stored as not measured. The target star is the identified star that carries the target's catalog name (`find_star_named` in `../batch.py`). Its distance from the target must be within 30 arcsec (`MAXIMUM_TARGET_DISTANCE_ARCSEC`); a farther star is a cross-check failure and the match is refused. The metrics are `photometry.target_light_curve_amplitude_mag`, `photometry.target_phase_coverage_fraction` and `photometry.target_catalog_amplitude_mag`, the VSX catalog range with its band, kept apart from the light-curve value. A catalog value is often old and for another band. The fold has been tested on injected light curves only (design estimate; see [PHO-19](../../../../documentation/library_design/validation/photometry.md#pho-19)).
+
 ## Files
 
 - `catalog_zero_point.py` finds the differential catalog zero point of every frame, with a helper for a session's spread.
@@ -198,5 +208,8 @@ The helper `zero_point_scatter` gives 1.4826 times the median absolute deviation
 - `periodicity_search.py` runs the cycle and dip searches.
 - `period_checks.py` runs the held-out and alias checks.
 - `family_wise_correction.py` adjusts the false-alarm probability for every search made on the target.
+- `noise_budget.py` gives the photon, sky, read and scintillation noise of a measurement.
+- `observing_window.py` finds the strongest alias peaks of a run's observing times.
+- `target_amplitude.py` folds the target's light curve and finds its amplitude.
 
 For exact behavior, read the code.

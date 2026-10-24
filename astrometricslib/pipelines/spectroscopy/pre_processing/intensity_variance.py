@@ -532,11 +532,21 @@ class SpectrumNoiseSummary:
         the post-hoc estimate from `estimate_spectrum_signal_to_noise`. `None`
         when either is missing or the post-hoc estimate is not a positive
         finite number.
+    snr_at_classifying_lines : `float` or `None`
+        The signal-to-noise per element around the lines the line-index
+        estimate reads, using the measured line spread. Unlike the two
+        numbers above, it is on the scatter scale (the spectrum's own scatter
+        between neighbouring elements), not the scale of the extractor's
+        per-sample errors; see
+        `spectral_line_indices.line_window_signal_to_noise`. It is filled in
+        by the pipeline after `summarize_spectrum_noise`, which does not know
+        the lines, and is `None` until then.
     """
 
     median_snr_per_resolution_element: float | None
     fraction_samples_snr_below_5: float | None
     snr_estimate_ratio: float | None
+    snr_at_classifying_lines: float | None = None
 
 
 def resolution_element_signal_to_noise(

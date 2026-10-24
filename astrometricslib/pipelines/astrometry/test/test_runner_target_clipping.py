@@ -22,7 +22,7 @@ from astrometricslib.pipelines.pipeline_base import PipelineRequest
 MEASURED_AT = datetime(2026, 10, 23, tzinfo=UTC)
 
 
-def test_the_target_position_is_taken_before_the_backfill_can_change_it(
+def test_the_target_position_is_taken_before_the_fill_can_change_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A target with no position gets (None, None), not the image center."""
@@ -44,14 +44,14 @@ def test_the_target_position_is_taken_before_the_backfill_can_change_it(
             """
             return context
 
-    def fill_from_solve(target: Target, _context: object) -> None:
-        """Write the image center on the target, as the real backfill does."""
+    def fill_from_solve(target: Target, _context: object, _drivers: object = None) -> None:
+        """Write the image center on the target, as the fallback does."""
         target.ra = "18 53 35.08"
         target.dec = "33 01 45.0"
 
     monkeypatch.setattr(astrometry_pipeline, "AstrometryPipeline", FakePipeline)
     monkeypatch.setattr(runner, "_drop_unresolved_stars", lambda stars, **_: (stars, None))
-    monkeypatch.setattr(runner, "_backfill_target_ra_dec_from_wcs", fill_from_solve)
+    monkeypatch.setattr(runner, "_fill_target_position", fill_from_solve)
     monkeypatch.setattr(runner, "_write_solved_wcs_to_fits_header", lambda *_: None)
     monkeypatch.setattr(runner, "record_pipeline_stars", lambda stars, **_: (stars, None))
     monkeypatch.setattr(star_identifier, "get_gaia_query_statistics", lambda: {})

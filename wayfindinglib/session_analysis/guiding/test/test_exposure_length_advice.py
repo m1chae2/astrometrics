@@ -2,16 +2,16 @@
 
 Description: Verifies that advice appears only when the longest exposure in use
 rarely had clean guiding, names the main cause and the length that would have
-worked, and has lower confidence when the guide signal was poor.
+worked, and is tentative (a design estimate) because it rests on a proxy.
 """
 
 from typing import Any
 
+from wayfindinglib.models.quality.statements import Confidence
 from wayfindinglib.models.session.session_quality import (
     ExposureFeasibility,
     GuidingInputQuality,
     GuidingPerformance,
-    RecommendationKind,
 )
 from wayfindinglib.session_analysis.guiding.post_processing.recommend_for_guiding import recommend_for_guiding
 
@@ -23,7 +23,7 @@ def _advice(
 
     Returns
     -------
-    recommendation : `Recommendation` or `None`
+    recommendation : `TargetStatement` or `None`
         The exposure-length advice, if any was given.
     """
     input_quality = GuidingInputQuality(has_enough_samples=True, limits_equipment_match="exact", **quality)
@@ -31,7 +31,7 @@ def _advice(
         exposure_feasibility=feasibility, longest_reliable_exposure_seconds=reliable
     )
     found = recommend_for_guiding(input_quality, performance, make_envelope())
-    return next((r for r in found if r.kind == RecommendationKind.EXPOSURE_LENGTH_LIMITED), None)
+    return next((r for r in found if r.rule == "exposure_length_limited"), None)
 
 
 def _result(length: float, clean: float, lost: float = 0.0, jump: float = 0.0, wobble: float = 0.0) -> Any:
@@ -62,7 +62,8 @@ def test_advice_names_the_main_cause_and_the_length_that_would_work(make_envelop
     assert "300 s" in recommendation.message
     assert "the guide star was lost" in recommendation.message
     assert "60 s" in recommendation.message
-    assert recommendation.confidence == "medium"
+    assert recommendation.confidence == Confidence.DESIGN_ESTIMATE
+    assert {limit.register_entry for limit in recommendation.limits} >= {"WAY-D46", "WAY-41"}
 
 
 def test_advice_says_when_no_length_would_work(make_envelope: Any) -> None:
@@ -83,8 +84,8 @@ def test_no_advice_without_a_measurement(make_envelope: Any) -> None:
     assert _advice([], None, make_envelope) is None
 
 
-def test_poor_guide_signal_lowers_the_confidence(make_envelope: Any) -> None:
-    """Verify the numbers of a bad measurement are not trusted fully."""
+def test_advice_from_the_guide_log_is_tentative_even_with_a_poor_signal(make_envelope: Any) -> None:
+    """Verify the advice stays a design estimate when the signal is poor."""
     recommendation = _advice(
         [_result(300, 0.0, jump=1.0)],
         None,
@@ -94,4 +95,4 @@ def test_poor_guide_signal_lowers_the_confidence(make_envelope: Any) -> None:
         snr_limit=100.0,
     )
 
-    assert recommendation.confidence == "low"
+    assert recommendation.confidence == Confidence.DESIGN_ESTIMATE

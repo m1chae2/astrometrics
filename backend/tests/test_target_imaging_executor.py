@@ -34,7 +34,8 @@ def executor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TargetImagingEx
     config.update_config({"Wayfinding Library": {"path": str(tmp_path / "wayfinding_library")}})
     targets = {"M 81": Target(id="M 81", ra="09:55:33", dec="+69:03:55")}
     astrometrics = SimpleNamespace(
-        targets=SimpleNamespace(get=lambda target_id, refresh=False: targets.get(target_id))
+        targets=SimpleNamespace(get=lambda target_id, refresh=False: targets.get(target_id)),
+        quality=SimpleNamespace(capture_settings=lambda ids=None: {}),
     )
     telescope = Telescope(id="t1", name="Scope", focal_length_mm=450.0, focal_ratio=6.0)
     catalog = SimpleNamespace(
@@ -124,3 +125,36 @@ def test_begin_runs_the_session_queue_on_a_thread(executor: TargetImagingExecuto
     executor._thread.join(timeout=5.0)
 
     assert executor.runs == [executor._session_id]
+
+
+def test_every_queue_edit_announces_plan_changed(executor: TargetImagingExecutor) -> None:
+    """Add, reorder, modify and remove each send the plan:changed event."""
+    from types import SimpleNamespace as _Namespace
+
+    from backend.services.observatory.plan_service import PlanService
+
+    events: list[tuple[str, dict[str, Any]]] = []
+    sockets = _Namespace(
+        broadcast_ui_event_sync=lambda action, payload=None: events.append((action, payload or {}))
+    )
+    executor._plan_service = PlanService(executor._wayfinder, sockets)
+
+    executor.enqueue_sequence(_sequence(1), {"mode": "soonest"})
+    executor.enqueue_sequence(_sequence(2), {"mode": "soonest"})
+    first, second = (item["id"] for item in executor.get_queue())
+    assert [name for name, _ in events] == ["plan:changed", "plan:changed"]
+    assert events[0][1]["changed"] == ["queue_added"]
+    events.clear()
+
+    executor.reorder([second])
+    assert [payload["changed"] for _, payload in events] == [["queue_reordered"]]
+    events.clear()
+
+    executor.modify_queue_item(second, _sequence(5))
+    assert [name for name, _ in events] == ["plan:changed", "plan:changed"]
+    events.clear()
+
+    executor.remove_from_queue(first)
+    assert [payload["changed"] for _, payload in events] == [["queue_removed"]]
+    revisions = {payload["revision"] for _, payload in events}
+    assert revisions and all(isinstance(revision, int) for revision in revisions)

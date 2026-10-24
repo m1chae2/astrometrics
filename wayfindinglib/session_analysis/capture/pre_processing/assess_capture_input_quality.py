@@ -28,12 +28,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from astrometricslib import DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
+from wayfindinglib.analytics.capture_history import capture_kind
 from wayfindinglib.analytics.performance_envelope import MINIMUM_FRAMES_PER_NIGHT
 from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
 from wayfindinglib.models.session.capture_frame import CaptureFrame
 from wayfindinglib.models.session.capture_quality import CaptureInputQuality
 from wayfindinglib.models.session.ekos_session import EkosCapture
-from wayfindinglib.tasks.control_tasks.capture_analysis_tasks import capture_kind
 
 MATCH_WINDOW_SECONDS = 30.0
 """Farthest apart an Ekos exposure and a frame may start and still match.
@@ -129,8 +129,8 @@ def _limit(envelope: PerformanceEnvelope | None, name: str, limits_equipment_mat
 def _missing_measurements(frames: Sequence[CaptureFrame]) -> dict[str, int]:
     """Count the frames that lack each measurement later steps use.
 
-    Star width and roundness are not counted: the science library measures
-    them only for frames it stacked, so most frames lack them by design.
+    Star width and roundness are not counted: the frame measurement job may
+    find too few stars in a frame, so some frames lack them by design.
 
     Returns
     -------

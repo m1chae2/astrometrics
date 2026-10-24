@@ -21,7 +21,7 @@
       "category": "app",
       "disposition": "withhold",
       "interim_block": "",
-      "note": "Reaches every backend method, including all the ones above."
+      "note": "Reaches every backend method, including all the ones above and the night plan writes (plan:edit, plan:tick_checklist_item)."
     },
     "backend_health_check": {
       "tool_class": "observe",

@@ -212,7 +212,7 @@ class ObservationExecution:
             The aborted, recorded session.
         """
         aborted = abort_session(self._session(session), reason, now or datetime.now(UTC))
-        self._butler.put(aborted, "observation_session", {"session_id": aborted.id})
+        self._butler.put_session_from_execution(aborted)
         return aborted
 
     # -- Meridian flip -------------------------------------------------------

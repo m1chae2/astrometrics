@@ -13,12 +13,12 @@ from typing import Any, cast
 
 from pydantic import BaseModel
 
+from wayfindinglib.models.quality.statements import StatementKind
 from wayfindinglib.models.session.guiding_run import GuidingRunSummary
 from wayfindinglib.models.session.session_quality import (
     GuidingInputQuality,
     GuidingPerformance,
     GuidingSessionAnalysis,
-    RecommendationSeverity,
 )
 from wayfindinglib.session_analysis.guiding.post_processing.recommend_for_guiding import recommend_for_guiding
 from wayfindinglib.session_analysis.guiding.pre_processing.assess_guiding_input_quality import (
@@ -145,7 +145,7 @@ class GuidingSessionPipeline(SessionAnalysisPipeline):
             request.logged_guide_scale,
             request.configured_guide_scale,
         )
-        warnings = [r for r in recommendations if r.severity == RecommendationSeverity.WARNING]
+        warnings = [r for r in recommendations if r.kind == StatementKind.WARNING]
         resolved: dict[str, Any] = {"limits_equipment_match": request.limits_equipment_match}
         if request.envelope is not None:
             resolved["blur_tolerance_fraction"] = request.envelope.blur_tolerance_fraction
@@ -155,7 +155,7 @@ class GuidingSessionPipeline(SessionAnalysisPipeline):
             session_id=request.session_id,
             equipment_fingerprint=request.equipment_fingerprint,
             flagged=bool(warnings),
-            flag_reasons=[warning.kind.value for warning in warnings],
+            flag_reasons=[warning.rule for warning in warnings],
             resolved_parameters=resolved,
             input_quality=input_quality,
             performance=performance,

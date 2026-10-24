@@ -6,11 +6,11 @@ Each analysis follows the same three stages the science library's pipelines use.
 
 1. **Pre-processing** asks whether the data is good. It reports problems in how the data was gathered, before anyone interprets the numbers.
 2. **Processing** measures what the data shows.
-3. **Post-processing** turns the measurements into recommendations. Each recommendation names the evidence behind it and the limit it was compared with.
+3. **Post-processing** turns the measurements into statements (`TargetStatement`, the shape the target report uses). Each statement cites the stored measurements it rests on (`evidence`), lists any other numbers (`values`), names the limits it was compared with (`limits`), and carries a confidence taken from the validation register (WAY-45 guiding, WAY-46 capture, WAY-47 sky).
 
 ## Where the limits come from
 
-Every limit comes from the equipment in use, not from a number typed into the code. `wayfindinglib/analytics/performance_envelope.py` works the limits out from the telescope, cameras, guide scope, the star width the equipment's own frames show, and the equipment's earlier nights. When the equipment changes, the limits change with it, and the new equipment starts with no history. A limit without enough data behind it reports no value, and the check that needs it gives no verdict.
+Every limit comes from the equipment in use, not from a number typed into the code. `wayfindinglib/analytics/performance_envelope.py` works the limits out from the telescope, cameras, guide scope, the star width the equipment's own frames show (the stored `frame.star_width_moffat_arcsec` measurement), and the equipment's earlier nights. `analytics/envelope_assembly.py` gathers those inputs, so Planning reads the same limits. Each limit is a `QualityLimit` that names its register entry. When the equipment changes, the limits change with it, and the new equipment starts with no history. A limit without enough data behind it reports no value, and the check that needs it gives no verdict.
 
 A night is judged only against the equipment's **earlier** nights. A history that contained the night itself, or later nights, would let a bad night raise the limit it is compared with.
 
@@ -25,7 +25,7 @@ Nothing the analysis produces is stored. A stored recommendation would go stale 
 - `sky/` — the sky-position analysis across every night: is some part of the sky measurably worse, and which parts has no night reached. See `sky/README.md`.
 - `live_status.py` — judges the session in progress from the live Ekos files. See "Live status" below.
 - `recurring_issues.py` — lists the findings that repeat across nights, from the guiding and capture analyses.
-- `capture/` — the capture analysis: completeness, clipping, star quality. It reuses the science library's frame measurements and saturation verdicts. See `capture/README.md`.
+- `capture/` — the capture analysis: completeness, clipping, star quality. It reads the frames' stored quality measurements and no verdict from the science library. See `capture/README.md`.
 
 ## Live status
 
@@ -41,6 +41,6 @@ It reports:
 
 Every limit comes from the session's own data and is checked against the 2026-10-02 session, as the comments beside each constant record.
 
-Gathering one night's data from storage is not done here. `wayfindinglib/tasks/control_tasks/session_analysis_tasks.py` (guiding) and `capture_analysis_tasks.py` (capture) do it. `wayfindinglib/tasks/control_tasks/night_analysis.py` runs the analyses, and `control.history.query(kind="guiding")` and `query(kind="capture")` are the entry points. This keeps every stage a pure function of its input.
+Gathering one night's data from storage is not done here. `wayfindinglib/tasks/control_tasks/session_analysis_tasks.py` (guiding) and `wayfindinglib/analytics/capture_history.py` (capture) do it. `wayfindinglib/tasks/control_tasks/night_analysis.py` runs the analyses, and `control.history.query(kind="guiding")` and `query(kind="capture")` are the entry points. This keeps every stage a pure function of its input.
 
 For exact behavior, read the code. The code is the source of truth.

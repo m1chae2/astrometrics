@@ -115,7 +115,9 @@ DECISIONS = {
     # ---- Withheld: code runners and the whole-app channel ----
     "electron_run_python": ToolDecision("withhold", "Runs AI-written Python inside the backend."),
     "backend_call_rpc": ToolDecision(
-        "withhold", "Reaches every backend method, including all the ones above."
+        "withhold",
+        "Reaches every backend method, including all the ones above and the night plan writes "
+        "(plan:edit, plan:tick_checklist_item).",
     ),
     "terminal_inspect_api": ToolDecision("withhold", "Builds Python code from its argument. Console only."),
     "terminal_get_workspace": ToolDecision("withhold", "Console only. Has no use without the code runner."),
@@ -343,7 +345,10 @@ DECISIONS = {
         "caller-given blocked ranges, meridian crossing, Sun and Moon. Reads nothing stored.",
     ),
     "planning_get_advisory": ToolDecision(
-        "keep", "Built 2026-10-06. Quality or calibration advice, worked out on demand. Saves nothing."
+        "keep",
+        "Built 2026-10-06; widened 2026-10-24. The target dataset report (quality), tonight's ranking, "
+        "the trust "
+        "in one star result, or the calibration inventory, worked out on demand. Saves nothing.",
     ),
     "planning_get_plan": ToolDecision(
         "keep", "Built 2026-10-06. Reads a recorded session or the session list."
@@ -366,8 +371,9 @@ DECISIONS = {
     # ---- Keep ----
     "observatory_history_query": ToolDecision(
         "keep",
-        "Built 2026-10-03. Reads the recorded nights and calculates the analyses, in replies under 30,000 "
-        "characters. The recorded-data tables are read through the butler, which creates a missing table.",
+        "Built 2026-10-03. Reads the recorded nights and calculates the analyses, in replies under 40,000 "
+        "characters. The recorded-data tables are read through the butler, which creates a missing table. "
+        "Kind night_quality needs session_id (the night) and returns a typed review.",
     ),
     "jobs_query": ToolDecision(
         "keep",
@@ -379,6 +385,20 @@ DECISIONS = {
         "Built 2026-10-21. Reads the quality measurements that earlier runs stored (the latest for each "
         "subject and metric, or every row). Writes nothing and creates no table.",
     ),
+    "quality_capture_settings": ToolDecision(
+        "keep",
+        "Built 2026-10-24. Reads the camera, telescope, filter, exposure, gain setting, offset and binning "
+        "that stored quality measurements point at, by capture setting id. Writes nothing and creates "
+        "no table.",
+        tool_class="observe",
+    ),
+    "quality_set_aside_frames": ToolDecision(
+        "keep",
+        "Built 2026-10-24. Lists the frames lying in a target's _excluded folders with the kind and "
+        "reason, and says whether the reason came from a stored quality row, the folder's manifest file, "
+        "or nothing but the folder. Moves nothing and writes nothing.",
+        tool_class="observe",
+    ),
     "quality_metrics": ToolDecision(
         "keep",
         "Built 2026-10-21. Lists the declared quality metrics (or one, given its name, or those of one "
@@ -388,6 +408,16 @@ DECISIONS = {
     ),
     "observatory_mount_abort_motion": ToolDecision(
         "drop", "Commands the mount, so it is dropped with the other hardware tools."
+    ),
+    "observatory_mount_cancel_centering": ToolDecision(
+        "drop",
+        "Stops a centering run by aborting the mount, so it is dropped with the other hardware tools.",
+        "safe-stop",
+    ),
+    "observatory_guiding_stop_loop": ToolDecision(
+        "drop",
+        "Ends the guide loop through a stop event MCP cannot send. Dropped with the other hardware tools.",
+        "safe-stop",
     ),
     "observatory_safety_execute_safe_state": ToolDecision(
         "drop", "Commands the mount and enclosure, so it is dropped with the other hardware tools."
@@ -530,6 +560,7 @@ DECISIONS = {
             "planning_create_mosaic",
             "planning_create_plan",
             "planning_edit_queue",
+            "planning_tick_checklist_item",
         ),
         ToolDecision("withhold", READ_ONLY_NOTE),
     ),

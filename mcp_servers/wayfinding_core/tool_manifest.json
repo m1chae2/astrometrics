@@ -219,6 +219,13 @@
       "interim_block": "",
       "note": "Reads the saved guider calibration, the mount's periodic error model and the guide plate scale (no device needed), and with include=['live'] the guiding going on now and its RMS error."
     },
+    "observatory_guiding_stop_loop": {
+      "tool_class": "safe-stop",
+      "category": "observatory-control",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Ends the guide loop through a stop event MCP cannot send. Dropped with the other hardware tools."
+    },
     "observatory_history_frame_guiding": {
       "tool_class": "compute",
       "category": "observatory-status",
@@ -245,7 +252,7 @@
       "category": "observatory-status",
       "disposition": "keep",
       "interim_block": "",
-      "note": "Built 2026-10-03. Reads the recorded nights and calculates the analyses, in replies under 30,000 characters. The recorded-data tables are read through the butler, which creates a missing table."
+      "note": "Built 2026-10-03. Reads the recorded nights and calculates the analyses, in replies under 40,000 characters. The recorded-data tables are read through the butler, which creates a missing table. Kind night_quality needs session_id (the night) and returns a typed review."
     },
     "observatory_history_save_ekos_session_context": {
       "tool_class": "change-data",
@@ -302,6 +309,13 @@
       "disposition": "drop",
       "interim_block": "",
       "note": "Commands the mount, so it is dropped with the other hardware tools."
+    },
+    "observatory_mount_cancel_centering": {
+      "tool_class": "safe-stop",
+      "category": "observatory-control",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Stops a centering run by aborting the mount, so it is dropped with the other hardware tools."
     },
     "observatory_mount_compute_pointing_correction": {
       "tool_class": "compute",
@@ -525,7 +539,7 @@
       "category": "planning-sessions",
       "disposition": "keep",
       "interim_block": "",
-      "note": "Built 2026-10-06. Quality or calibration advice, worked out on demand. Saves nothing."
+      "note": "Built 2026-10-06; widened 2026-10-24. The target dataset report (quality), tonight's ranking, the trust in one star result, or the calibration inventory, worked out on demand. Saves nothing."
     },
     "planning_get_constellation_lines": {
       "tool_class": "observe",
@@ -596,6 +610,13 @@
       "disposition": "keep",
       "interim_block": "Returns the whole target record, frames and all, which overflows the reply. Use planning_lookup_coordinates, which returns the position.",
       "note": "Looks up an object's position by name. Unknown names go to SIMBAD over the network."
+    },
+    "planning_tick_checklist_item": {
+      "tool_class": "change-data",
+      "category": "planning-sessions",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "The AI is read-only, so a tool that writes is not offered."
     }
   }
 }

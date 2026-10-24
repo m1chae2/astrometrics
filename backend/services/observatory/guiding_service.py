@@ -89,8 +89,13 @@ class GuidingService:
         stopped : `bool`
             `True` once guiding has stopped (including if it was not
             running).
+
+        Notes
+        -----
+        In monitor mode the library raises `PermissionDeniedError` (issue
+        #95, decision U4); this service lets the error through.
         """
-        self._stop.set()
+        self._observatory.guiding.stop_loop(self._stop)
         if self._thread is not None and self._thread.is_alive():
             self._thread.join(timeout=5.0)
         logger.info("Stopped guiding loop")

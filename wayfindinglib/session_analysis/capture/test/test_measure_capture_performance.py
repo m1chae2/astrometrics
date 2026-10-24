@@ -1,15 +1,19 @@
 """Purpose: Unit tests for capture processing.
 
 Description: Verifies the three measurements: clipping per target and
-exposure length (the science library's verdict wins, frame counts are the
-fallback), star quality against the equipment's limits, and efficiency.
+exposure length (decided by the frames' stored saturated-pixel measurements),
+star quality against the equipment's limits, and efficiency.
 """
 
 from typing import Any
 
 import pytest
 
-from wayfindinglib.models.session.capture_frame import StackSaturationVerdict
+from wayfindinglib.analytics.capture_history import (
+    SATURATED_FRACTION_METRIC,
+    STAR_ELONGATION_METRIC,
+    STAR_WIDTH_METRIC,
+)
 from wayfindinglib.session_analysis.capture.processing.measure_capture_performance import (
     measure_capture_performance,
     measure_clipping,
@@ -34,54 +38,41 @@ def test_a_group_clips_when_half_its_frames_hold_a_saturated_star(make_frame: An
         make_frame(index + 3, exposure_seconds=1.0, saturated_pixel_fraction=0.0) for index in range(3)
     ]
 
-    (group,) = measure_clipping(frames, [], SENSOR_PIXELS)
+    (group,) = measure_clipping(frames, SENSOR_PIXELS)
 
     assert group.frames == 6
     assert group.clipped_frames == 3
     assert group.is_clipped
-    assert group.basis == "frame_pixel_count"
 
 
 def test_a_lone_hot_pixel_is_not_a_clipped_star(make_frame: Any) -> None:
     """Verify fewer saturated pixels than the smallest star do not count."""
     frames = [make_frame(index, saturated_pixel_fraction=_HOT_PIXEL) for index in range(6)]
 
-    (group,) = measure_clipping(frames, [], SENSOR_PIXELS)
+    (group,) = measure_clipping(frames, SENSOR_PIXELS)
 
     assert group.clipped_frames == 0
     assert not group.is_clipped
 
 
-def test_the_science_librarys_verdict_overrides_the_frame_count(make_frame: Any) -> None:
-    """Verify a stacked target's verdict is used, with its recommendation."""
-    frames = [make_frame(index, saturated_pixel_fraction=0.0) for index in range(6)]
-    verdict = StackSaturationVerdict(
-        target_id="Target",
-        is_spectral=False,
-        exposure_seconds=30.0,
-        saturated=True,
-        recommended_exposure_seconds=12.5,
-    )
+def test_a_stacking_summary_verdict_is_not_an_input(make_frame: Any) -> None:
+    """Verify clipping is decided by the frames alone, with their rows cited.
 
-    (group,) = measure_clipping(frames, [verdict], SENSOR_PIXELS)
+    The stacking summary's verdict used to override the frame counts (and
+    pass on its exposure estimate). It is no longer read: a group of unclipped
+    frames is not clipped, and its evidence is the stored rows of its frames.
+    """
+    frames = [
+        make_frame(
+            index, saturated_pixel_fraction=0.0, measurement_rows={SATURATED_FRACTION_METRIC: 100 + index}
+        )
+        for index in range(6)
+    ]
 
-    assert group.is_clipped
-    assert group.clipped_frames == 0
-    assert group.basis == "science_stack"
-    assert group.science_recommended_exposure_seconds == pytest.approx(12.5)
-
-
-def test_a_verdict_for_another_stack_kind_does_not_apply(make_frame: Any) -> None:
-    """Verify an imaging verdict is not used for spectroscopy frames."""
-    frames = [make_frame(index, is_spectral=True, saturated_pixel_fraction=0.0) for index in range(6)]
-    verdict = StackSaturationVerdict(
-        target_id="Target", is_spectral=False, exposure_seconds=30.0, saturated=True
-    )
-
-    (group,) = measure_clipping(frames, [verdict], SENSOR_PIXELS)
+    (group,) = measure_clipping(frames, SENSOR_PIXELS)
 
     assert not group.is_clipped
-    assert group.basis == "frame_pixel_count"
+    assert [reference.row_id for reference in group.evidence] == [100, 101, 102, 103, 104, 105]
 
 
 def test_exposure_lengths_that_differ_by_rounding_form_one_group(make_frame: Any) -> None:
@@ -91,7 +82,7 @@ def test_exposure_lengths_that_differ_by_rounding_form_one_group(make_frame: Any
         make_frame(1, exposure_seconds=0.010000000000000002),
     ]
 
-    groups = measure_clipping(frames, [], SENSOR_PIXELS)
+    groups = measure_clipping(frames, SENSOR_PIXELS)
 
     assert len(groups) == 1
     assert groups[0].frames == 2
@@ -102,16 +93,16 @@ def test_binned_frames_have_fewer_pixels(make_frame: Any) -> None:
     fraction = 20 / (SENSOR_PIXELS / 4)
     frames = [make_frame(index, binning=2, saturated_pixel_fraction=fraction) for index in range(4)]
 
-    (group,) = measure_clipping(frames, [], SENSOR_PIXELS)
+    (group,) = measure_clipping(frames, SENSOR_PIXELS)
 
     assert group.clipped_frames == 4
 
 
-def test_without_a_sensor_size_only_the_science_verdict_remains(make_frame: Any) -> None:
+def test_without_a_sensor_size_nothing_is_judged(make_frame: Any) -> None:
     """Verify frame counts are skipped when they cannot be made into counts."""
     frames = [make_frame(index, saturated_pixel_fraction=_CLIPPED) for index in range(4)]
 
-    assert measure_clipping(frames, [], None) == []
+    assert measure_clipping(frames, None) == []
 
 
 def test_groups_are_kept_per_target_and_exposure(make_frame: Any) -> None:
@@ -122,7 +113,7 @@ def test_groups_are_kept_per_target_and_exposure(make_frame: Any) -> None:
         make_frame(2, target_id="B", exposure_seconds=1.0),
     ]
 
-    groups = measure_clipping(frames, [], SENSOR_PIXELS)
+    groups = measure_clipping(frames, SENSOR_PIXELS)
 
     assert [(g.target_id, g.exposure_seconds) for g in groups] == [("A", 1.0), ("A", 2.0), ("B", 1.0)]
 
@@ -173,6 +164,29 @@ def test_star_quality_carries_the_earlier_nights_limits(make_frame: Any, make_en
     assert quality.roundness_limit < 0.86
 
 
+def test_star_evidence_lists_the_most_extreme_frames_first(make_frame: Any, make_envelope: Any) -> None:
+    """Verify evidence starts with the widest and the least round star."""
+    widths = [5.0, 9.0, 5.2, 7.0, 5.1, 5.3, 5.0, 5.2, 5.1, 5.0, 5.4, 5.2]
+    roundness = [0.9, 0.5, 0.88, 0.7, 0.9, 0.89, 0.9, 0.88, 0.9, 0.9, 0.87, 0.9]
+    frames = [
+        make_frame(
+            index,
+            star_width_arcsec=widths[index],
+            roundness=roundness[index],
+            measurement_rows={STAR_WIDTH_METRIC: 100 + index, STAR_ELONGATION_METRIC: 200 + index},
+        )
+        for index in range(12)
+    ]
+
+    quality = measure_star_quality(frames, make_envelope(), "exact")
+
+    width_rows = [reference.row_id for reference in quality.width_evidence]
+    roundness_rows = [reference.row_id for reference in quality.roundness_evidence]
+    assert width_rows[:2] == [101, 103]
+    assert roundness_rows[:2] == [201, 203]
+    assert sorted(width_rows) == [100 + index for index in range(12)]
+
+
 def test_no_limits_apply_to_other_equipment(make_frame: Any, make_envelope: Any) -> None:
     """Verify a night of other equipment is measured but not judged."""
     frames = [make_frame(index) for index in range(12)]
@@ -211,7 +225,7 @@ def test_the_three_measurements_come_together(make_frame: Any, make_envelope: An
     """Verify the result holds clipping, star quality and efficiency."""
     frames = [make_frame(index) for index in range(12)]
 
-    performance = measure_capture_performance(frames, [], SENSOR_PIXELS, make_envelope(), "exact")
+    performance = measure_capture_performance(frames, SENSOR_PIXELS, make_envelope(), "exact")
 
     assert len(performance.clipping) == 1
     assert performance.star_quality.frames == 12

@@ -210,6 +210,30 @@ class MountControl(ControlChild):
 
         return hardware_operations.abort_motion(self._context)
 
+    def cancel_centering(self, run_is_active: bool) -> bool:
+        """Stop a centering run (``slew(center=True)``) the app started.
+
+        Monitor mode refuses this too, whether or not a run is going.
+
+        Parameters
+        ----------
+        run_is_active : `bool`
+            Whether the caller has a centering run going.
+
+        Returns
+        -------
+        cancelled : `bool`
+            `True` if the run was stopped, `False` if none was running.
+
+        Notes
+        -----
+        Raises `PermissionDeniedError` unless `MOUNT_CONTROL` is
+        `AUTHORITATIVE`.
+        """
+        from wayfindinglib.tasks.control_tasks import hardware_operations
+
+        return hardware_operations.cancel_centering(self._context, run_is_active)
+
     def set_slew_rate(self, rate_index: int) -> bool:
         """Choose the mount's slew rate.
 

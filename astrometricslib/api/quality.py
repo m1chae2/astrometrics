@@ -19,7 +19,8 @@ from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.jobs.runner import background_job, registered_job
-from astrometricslib.models.quality.excluded_frames import QuarantinePreview
+from astrometricslib.models.quality.capture_setting import CaptureSetting
+from astrometricslib.models.quality.excluded_frames import QuarantinePreview, SetAsideFrameRecord
 from astrometricslib.models.quality.measurement import QualityMeasurement, SubjectLevel
 from astrometricslib.models.quality.metric_spec import Checkpoint, MetricSpec, MetricSummary
 from astrometricslib.models.quality.quality_reports import (
@@ -205,6 +206,30 @@ class QualityRecords:
             variant=variant,
             library_only=library_only,
         )
+
+    def capture_settings(self, ids: list[int] | None = None) -> dict[int, CaptureSetting]:
+        """Read the capture settings that stored measurements point at.
+
+        A stored measurement carries only a ``capture_setting_id``. This
+        turns those ids into the camera, telescope, filter, exposure, gain
+        setting, offset and binning, in one read. Nothing is measured or
+        written, and a library with no quality database gives an empty
+        dictionary without creating one.
+
+        Parameters
+        ----------
+        ids : `list` [`int`], optional
+            Only these ids. Leave it out to read every stored setting.
+            An id that is not stored is left out of the result.
+
+        Returns
+        -------
+        settings : `dict` [`int`, `CaptureSetting`]
+            The settings, keyed by their id.
+        """
+        from astrometricslib.drivers.quality_store import QualityStore, quality_database_path
+
+        return QualityStore(quality_database_path(self._config)).get_capture_settings(ids)
 
     def metrics(
         self,
@@ -436,6 +461,57 @@ class QualityRecords:
 
                 report.excluded = list_set_aside_frames(str(self._config.get_frames_path()), resolved.id)
             return report
+
+    def set_aside_frames(self, target: str | Target) -> list[SetAsideFrameRecord]:
+        """List the frames in a target's `_excluded` folders, with reasons.
+
+        The stacker moves frames with clouds or trailed stars into an
+        `_excluded` folder and stores the move with the frame's quality rows.
+        This lists every frame in those folders. For each one the reason comes
+        from the stored rows if they carry the action taken, else from the
+        folder's `excluded_frames.json` file (frames set aside before the rows
+        carried the action), else it is empty. ``reason_source`` says which.
+
+        Nothing is moved, measured or written, and a library with no quality
+        database gives the folder-based answer without creating one.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target, or its id or name.
+
+        Returns
+        -------
+        frames : `list` [`SetAsideFrameRecord`]
+            One entry per frame file in an `_excluded` folder. Empty when none.
+
+        """
+        from astrometricslib.pipelines.stacking.metrics import (
+            FRAME_QUARANTINE_ROUNDNESS,
+            FRAME_QUARANTINE_SKY_MEDIAN,
+        )
+        from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import target_folder_names
+        from astrometricslib.pipelines.stacking.pre_processing.set_aside_listing import (
+            build_set_aside_records,
+            find_excluded_folders,
+        )
+
+        resolved = resolve_target(self._targets, target)
+        folders = find_excluded_folders(str(self._config.get_frames_path()), target_folder_names(resolved.id))
+        if not folders:
+            return []
+        rows = [
+            row
+            for metric in (FRAME_QUARANTINE_ROUNDNESS, FRAME_QUARANTINE_SKY_MEDIAN)
+            for row in self.query(metric=metric, target_id=resolved.id, latest_only=True)
+        ]
+        setting_ids = sorted({
+            row.subject.capture_setting_id for row in rows if row.subject.capture_setting_id is not None
+        })
+        settings = self.capture_settings(setting_ids) if setting_ids else {}
+        return build_set_aside_records(
+            resolved.id, folders, rows, {key: value.exposure_seconds for key, value in settings.items()}
+        )
 
     @background_job("diagnostics", grace_period_seconds=20.0)
     def check_spectral_frames(

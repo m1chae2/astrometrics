@@ -296,4 +296,4 @@ def test_frame_quality_can_include_the_frames_already_set_aside(
 
 def test_target_folder_names_cover_the_spellings_a_folder_may_have() -> None:
     """A folder named with underscores or no spaces still matches."""
-    assert frame_quarantine._target_folder_names("M 52") == ["M 52", "M_52", "M52"]
+    assert frame_quarantine.target_folder_names("M 52") == ["M 52", "M_52", "M52"]

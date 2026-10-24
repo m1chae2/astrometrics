@@ -160,5 +160,5 @@ def reconcile_session(
     butler.put(stats, "calibration_stats", {"camera_id": stats.camera_id})
 
     attach_target_session_ids(session, astrometrics)
-    butler.put(session, "observation_session", {"session_id": session.id})
+    butler.put_session_from_execution(session)
     return session

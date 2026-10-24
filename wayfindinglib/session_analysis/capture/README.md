@@ -14,8 +14,8 @@ This folder judges one observing night of captured frames. The camera takes the 
 
 The capture analysis does not measure pixels. It reads what `astrometricslib` already recorded.
 
-- **Per-frame measurements** on each frame record: the saturated-pixel fraction, background level, star width and roundness from registration, sensor temperature, and pointing.
-- **Saturation verdicts** from each target's stacking summary. The science library checks on the pixels whether a star clips at each exposure length. The capture analysis uses that verdict whenever the target has been stacked, and quotes the library's recommended exposure. Frame counts decide only when no verdict exists. On this observatory's 69 exposure groups with both, the two agreed on 67. The two that differed are Moon frames, where an extended bright disc, not a star, reaches the ceiling.
+- **Per-frame measurements** stored by the frame measurement job and read with `astrometrics.quality.query`: the saturated-pixel fraction, background level, Moffat star width, and star elongation (roundness is its inverse). Each metric is pinned to one definition version; a row of another version counts as missing. The frame record still gives sensor temperature and pointing.
+- **No stacking verdict.** Whether a star clips is decided here, from each frame's stored saturated-pixel measurement. The stacking summary's saturation verdict and recommended exposure are not read (an earlier check found the two agreed on 67 of 69 exposure groups; the Moon frames differed). The exposure advice is a rule in the quality rule table.
 - **Definitions** exported from the science library: the smallest saturated blob that counts as a star (4 pixels), the share of frames that makes an exposure length count as clipped (half), and how far a dark frame's temperature may differ from a light's (3 degrees Celsius).
 - **Spectral or imaging** from `frame_is_spectral`, and the camera profiles, to match frames to the equipment.
 

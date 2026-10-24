@@ -1,6 +1,6 @@
 # Wayfinding library architecture
 
-*Version 3.1 · 2026-10-15 · Status: current*
+*Version 3.2 · 2026-10-24 · Status: current*
 
 ## Abstract
 
@@ -14,7 +14,7 @@ Terms are defined in the [glossary](../Glossary.md). This document also defines 
 
 **Approach.** This architecture separates the three jobs so each can be built, used and checked alone. Planning and control are peers: an operator can plan a night without commanding any hardware, and the observatory can protect itself with no plan in existence. Execution sits above both.
 
-**Scope.** This paper explains what each part does and why, and the idea behind each setting, not its value. The [Wayfinding library implementation](./Wayfinding_Library_Implementation.md) paper names the code and lists the settings. The library has no validation register yet, so this paper makes no claim that a setting has been measured.
+**Scope.** This paper explains what each part does and why, and the idea behind each setting, not its value. The [Wayfinding library implementation](./Wayfinding_Library_Implementation.md) paper names the code and lists the settings. The evidence for each setting is in the validation register, not here.
 
 ### 1.1 Related work
 
@@ -43,7 +43,7 @@ flowchart TB
         DEV["Device summary state"]
     end
     subgraph PLAN["Observation planning"]
-        SCHED["Scheduling & quality advisory"]
+        SCHED["Scheduling, ranking & target dataset report"]
     end
     subgraph FOUND["Foundation"]
         MODELS["Domain models"]
@@ -218,7 +218,7 @@ The observation session is the one object with shared ownership. Planning writes
 
 - **Configuration, not telemetry.** A running session never writes equipment, enclosure, site, calibration or policy records.
 - **One source of site position for planning.** Planning and the live-status tools read the site's position from the site settings, never from a device.
-- **Session field ownership.** Only planning writes the queue and its placement diagnostics. Only execution writes statuses, outcomes, divergence and fault records, and telemetry.
+- **Session field ownership.** Only planning writes the queue and its placement diagnostics. Only execution writes statuses, outcomes, divergence and fault records, and telemetry. Execution saves its copy of the session by merging, not by overwriting. At each save it reads the stored session again, in the same database transaction as the write, and keeps what Planning wrote: the checklist, the framing, the revision, and any queue entry added, removed, reordered or edited since Execution loaded the session. Execution's own fields (statuses, outcomes, telemetry, divergence and fault records) come from its copy. An entry Planning removed stays if Execution has already started it. Execution never changes the revision.
 - **Template and instance separation.** A package is a reusable template. A queue entry is a frozen copy with every value needed to run it, so editing the template cannot change what a session recorded.
 - **Live target resolution.** A package names its target by identifier only. The position is read when the package is placed.
 - **Reference-only science link.** A session refers to its science-side target session by identifier only. The reference may be empty and is attached after the fact.
@@ -259,11 +259,11 @@ A silent drop is not useful, so the operator is told *why* a package did not fit
 <!-- impl: wayfindinglib.models.session.observation_session.InfeasibilityReasonCode -->
 <!-- impl: wayfindinglib.models.session.observation_session.InfeasibilityReason -->
 
-Archive-derived advice informs authoring and placement without dictating them. An operator may opt a package in to a bounded priority boost drawn from the target quality advisory. The boost only raises priority, for a flagged quality condition or a notable science outcome. It changes the order only when two packages could start together, because priority is the tie-breaker. The amount is recorded on the queue entry. The calibration advisory shows what the inventory already holds and never changes placement.
+Archive-derived advice informs authoring and placement without dictating them. An operator may opt a package in to a bounded priority boost drawn from the target dataset report. The boost only raises priority, when the report has one or more warnings that need attention or a notable science outcome (a confirmed asteroid candidate or a variable star candidate). It changes the order only when two packages could start together, because priority is the tie-breaker. The amount is recorded on the queue entry. The calibration advisory shows what the inventory already holds and never changes placement.
 
-<!-- impl: wayfindinglib.models.planning.quality_advisory.TargetQualityAdvisory -->
+<!-- impl: wayfindinglib.models.planning.target_report.TargetDatasetReport -->
 <!-- impl: wayfindinglib.models.equipment_and_site.calibration.CalibrationAdvisory -->
-<!-- impl: wayfindinglib.tasks.planning_tasks.quality_advisory_tasks.build_target_quality_advisory -->
+<!-- impl: wayfindinglib.tasks.planning_tasks.target_report_tasks.build_target_dataset_report -->
 <!-- impl: wayfindinglib.tasks.planning_tasks.calibration_advisory_tasks.build_calibration_advisory -->
 
 An operator may also build or edit a queue by hand. Both paths write the same structure. Planning also answers visibility questions that place nothing.
@@ -705,6 +705,11 @@ Four rules keep the analysis honest.
 - **Asymmetric enclosure hysteresis.** Closure is immediate. Reopening needs a settling period of safe readings.
 - **Estimates are not measurements.** Analysis reads only samples measured from a real star.
 - **Limits follow the equipment.** No limit is stored. Changing the equipment changes the limit.
+- **Advice names its evidence and its class.** Every statement cites its measurements, and none advises new hardware (Section 6.11).
+
+### 6.11 Judging quality and recommending the next observation
+
+Planning and control share one way to judge stored measurements and to recommend the next observation. The science library measures and gives no advice. This library compares measurements with limits that follow the equipment, and it states each result with its evidence, its class of action and a confidence taken from the validation register. It never advises new hardware, and it stores no judgment. The theory is in the companion paper [Wayfinding quality judgment](./Wayfinding_Quality_Judgment.md).
 
 ## 7. Verification
 
@@ -752,14 +757,14 @@ Several parts of the architecture are units that take their hardware steps from 
 - **Observer position.** Control reads the position from the mount first and falls back to the settings, so the single-source rule of Section 3.3 holds for planning only.
 - **Device summary state.** The library does not yet read the raw signals for every device role, and the queue passes no device states to execution.
 - **Own guide loop and protocols.** This system's own guide loop runs only against a simulated guider, and only INDI implements the hardware interfaces.
-- **Advice.** The variable-star count in the target quality advisory is always zero, because the star catalog cannot yet list a target's stars cheaply.
+- **Advice.** The variable-star count in the target dataset report comes from the stored photometry measurements, so it is zero for a target that no photometry run has measured.
 - **Equipment-derived limits.** A new setup gets numbers without verdicts until its history builds. The periodic-error model assumes a single sinusoid.
 
 ## 9. Conclusion
 
 This paper presented a three-function architecture for operating a single-observer observatory unattended and for replacing the current third-party control software in stages. Control and planning are independent peers, with execution built on both and required by neither. Safety sits in control, where it works with no plan and no session. A per-capability delegation model moves six capabilities through the phases of Table 1 on recorded evidence until the incumbent is removed. Planning places packages with one stated rule and names a reason for every package that does not fit. Control derives its limits from the equipment in use, judges each night only against earlier nights, and treats missing safety information as unsafe.
 
-The main limits are in Section 8. Future work follows from them: closed-loop re-placement, wiring the flip, recovery and safe-state sequences into the queue, connecting the watchdog, a validation register for the library's settings, and the first measured spread of divergence sizes from the shadow phase.
+The main limits are in Section 8. Future work follows from them: closed-loop re-placement, wiring the flip, recovery and safe-state sequences into the queue, connecting the watchdog, and the first measured spread of divergence sizes from the shadow phase.
 
 ## Acknowledgments
 

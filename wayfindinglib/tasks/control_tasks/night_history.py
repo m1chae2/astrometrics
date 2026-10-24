@@ -21,9 +21,13 @@ Nothing here writes. For exact behavior, read the code.
 from __future__ import annotations
 
 import json
+from datetime import date
 from typing import TYPE_CHECKING, Any
 
 from astrometricslib import ConfigurationError, ConflictError, InvalidArgumentError, NotFoundError
+from wayfindinglib.analytics import capture_history
+from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
+from wayfindinglib.models.session.night_list import NightListEntry
 from wayfindinglib.tasks.control_tasks import night_analysis
 
 if TYPE_CHECKING:
@@ -52,6 +56,16 @@ KIND_ARGUMENTS = {
     "alignment": ("session_id",),
 }
 """The optional arguments each kind uses. Any other one is refused."""
+
+TYPED_KIND_ARGUMENTS = {
+    "nights": (),
+    "target_changes": ("session_id",),
+    "night_quality": ("session_id",),
+}
+"""The kinds that answer with a typed list instead of a dictionary, and the
+optional arguments each uses. `HistoryControl.query` answers these itself
+(see `refuse_unused_arguments`). They are kept apart from ``KINDS`` because
+their replies are lists of models, which `fit_to_budget` does not shrink."""
 
 EKOS_SECTIONS = (
     "captures",
@@ -315,6 +329,103 @@ def ekos_sections(context: Any, include: list[str], limit: int) -> dict[str, Any
     return answer
 
 
+def refuse_unused_arguments(
+    kind: str,
+    used: tuple[str, ...],
+    session_id: str | None = None,
+    ekos_file_id: str | None = None,
+    include: list[str] | None = None,
+) -> None:
+    """Refuse an optional argument that a kind of question does not use.
+
+    Parameters
+    ----------
+    kind : `str`
+        The kind of question, for the message.
+    used : `tuple` [`str`, ...]
+        The optional arguments the kind uses.
+    session_id, ekos_file_id, include
+        The caller's optional arguments. An empty one counts as not given.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If an argument is given that `kind` does not use.
+    """
+    given = {"session_id": session_id, "ekos_file_id": ekos_file_id, "include": include}
+    unused = [name for name, value in given.items() if value and name not in used]
+    if unused:
+        raise InvalidArgumentError(
+            f"kind={kind!r} does not use {', '.join(unused)}. It uses: "
+            f"{', '.join(used) or 'no optional arguments'}."
+        )
+
+
+def clamp_limit(limit: int) -> int:
+    """Bring a caller's `limit` into the range of 1 to ``MAXIMUM_LIMIT``.
+
+    Parameters
+    ----------
+    limit : `int`
+        The caller's value.
+
+    Returns
+    -------
+    limit : `int`
+        The value, held between 1 and ``MAXIMUM_LIMIT``.
+    """
+    return max(1, min(int(limit), MAXIMUM_LIMIT))
+
+
+def build_night_list(context: ControlContext, limit: int = DEFAULT_LIMIT) -> list[NightListEntry]:
+    """List the recorded observing nights and what data each has.
+
+    A night is listed if it has light frames from the active equipment, an
+    Ekos session record or a guiding run. With no telescope and camera
+    active, the frame columns are empty and the other two sources still
+    list their nights.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the recorded Ekos sessions, guiding runs and the science
+        library's frame records.
+    limit : `int`, optional
+        How many of the most recent nights to list.
+
+    Returns
+    -------
+    nights : `list` [`NightListEntry`]
+        One entry per night, oldest first.
+    """
+    ekos_records, guiding_runs = night_analysis.recorded_sessions(context)
+    catalog = get_equipment_catalog(context.config)
+    telescope, camera = catalog.active_telescope(), catalog.active_camera()
+    frames_by_night: dict[str, list[Any]] = {}
+    if telescope is not None and camera is not None:
+        frames = night_analysis.capture_library(context, telescope.name, camera.name, {})
+        frames_by_night = capture_history.frames_by_night(frames)
+    ekos_nights = {record.session_id for record in ekos_records}
+    guiding_nights = {run.session_id for run in guiding_runs}
+    nights = sorted(set(frames_by_night) | ekos_nights | guiding_nights)[-clamp_limit(limit) :]
+    entries = []
+    for night in nights:
+        night_frames = frames_by_night.get(night, [])
+        entries.append(
+            NightListEntry(
+                night_id=night,
+                night_date=date.fromisoformat(night),
+                targets_imaged=sorted({frame.target_id for frame in night_frames}),
+                frame_count=len(night_frames),
+                has_frame_data=bool(night_frames),
+                has_guiding_data=night in guiding_nights,
+                has_sky_data=any(frame.background_adu is not None for frame in night_frames),
+                has_ekos_record=night in ekos_nights,
+            )
+        )
+    return entries
+
+
 def build_night_history(
     context: ControlContext,
     kind: str,
@@ -367,14 +478,8 @@ def build_night_history(
     """
     if kind not in KINDS:
         raise InvalidArgumentError(f"kind must be one of: {', '.join(KINDS)}.")
-    given = {"session_id": session_id, "ekos_file_id": ekos_file_id, "include": include}
-    unused = [name for name, value in given.items() if value and name not in KIND_ARGUMENTS[kind]]
-    if unused:
-        raise InvalidArgumentError(
-            f"kind={kind!r} does not use {', '.join(unused)}. It uses: "
-            f"{', '.join(KIND_ARGUMENTS[kind]) or 'no optional arguments'}."
-        )
-    limit = max(1, min(int(limit), MAXIMUM_LIMIT))
+    refuse_unused_arguments(kind, KIND_ARGUMENTS[kind], session_id, ekos_file_id, include)
+    limit = clamp_limit(limit)
     reply = _answer(context, kind, session_id, ekos_file_id, include, limit)
     return fit_to_budget(reply)
 

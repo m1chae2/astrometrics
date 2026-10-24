@@ -23,6 +23,9 @@ from astrometricslib import (
 from wayfindinglib.api.control.context import ControlChild
 from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
 from wayfindinglib.models.session.ekos_session import EkosSessionContext
+from wayfindinglib.models.session.live_session_status import LiveSessionStatus
+from wayfindinglib.models.session.night_list import NightListEntry, TargetChange
+from wayfindinglib.models.session.night_quality import NightQuality
 
 __all__ = ["HistoryControl"]
 
@@ -35,8 +38,19 @@ HistoryKind = Literal[
     "guiding_runs",
     "pointing_model",
     "alignment",
+    "nights",
+    "target_changes",
+    "night_quality",
 ]
 """The kinds of question `HistoryControl.query` answers."""
+
+TYPED_KINDS = ("nights", "target_changes", "night_quality")
+"""The kinds that answer with a typed list of models, not a dictionary.
+
+`HistoryControl._answer_typed` serves them. A new typed night read (for
+example ``"night_quality"``) is added in two places: here, and as a new
+``case`` in `_answer_typed`, with its arguments in
+`night_history.TYPED_KIND_ARGUMENTS`."""
 
 FRAME_GUIDING_SECTIONS = ("quality",)
 """Optional sections `HistoryControl.frame_guiding` can add."""
@@ -54,12 +68,13 @@ class HistoryControl(ControlChild):
         include: list[str] | None = None,
         limit: int = 10,
         register_job: bool = True,
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | list[NightListEntry] | list[TargetChange] | NightQuality:
         """Analyse or list past observing nights, in replies of bounded size.
 
-        One front door for the observatory's history. It only reads. The
-        reply is measured and shrunk if needed, so it never exceeds
-        40,000 characters of JSON.
+        One front door for the observatory's history. It only reads. A
+        dictionary reply is measured and shrunk if needed, so it never
+        exceeds 40,000 characters of JSON. The kinds in `TYPED_KINDS`
+        answer with a list of typed models, each bounded by `limit`.
 
         Parameters
         ----------
@@ -74,12 +89,19 @@ class HistoryControl(ControlChild):
             night's mean pointing and tracking jitter, or, with
             `session_id`, one night's attempts and the same attempts
             grouped into one `AlignmentTargetSession` per target, with
-            jitter and drift rates).
+            jitter and drift rates), ``"nights"`` (a typed list of the
+            recorded nights and what data each has), or
+            ``"target_changes"`` (a typed list of the slews that moved the
+            mount to a new place in the sky, each matched to the nearest
+            library target), or ``"night_quality"`` (needs `session_id`: a
+            typed review of one night, with where each target's time went,
+            its warnings and a guiding summary).
         session_id : `str`, optional
             An observing night, named for the local date on which it began,
             for example ``"2026-09-24"``. Used by ``capture``,
             ``guiding``, ``ekos_sessions``, ``guiding_runs``,
-            ``pointing_model`` and ``alignment``.
+            ``pointing_model``, ``alignment``, ``target_changes`` and
+            ``night_quality`` (which requires it).
         ekos_file_id : `str`, optional
             One Ekos session's id. Used only by ``ekos_sessions``.
         include : `list` [`str`], optional
@@ -90,17 +112,21 @@ class HistoryControl(ControlChild):
             only by ``ekos_sessions`` with `ekos_file_id`. Without it, only
             an overview comes back.
         limit : `int`, optional
-            How many of the most recent nights, runs or sessions to cover,
-            and how many items of each Ekos section. From 1 to 50.
+            How many of the most recent nights, runs, sessions or target
+            changes to cover, and how many items of each Ekos section. From
+            1 to 50.
         register_job : `bool`, optional
             Record the analysis as a job in the job history, with its log.
             Defaults to `True`.
 
         Returns
         -------
-        reply : `dict` [`str`, `Any`]
-            The answer. If it had to be cut to fit, ``truncated`` is true.
-            An unknown `kind`, or an argument that `kind` does not use, is
+        reply : `dict` [`str`, `Any`] or `list`
+            The answer: a dictionary, or for ``nights`` a list of
+            `NightListEntry`, for ``target_changes`` a list of
+            `TargetChange` and for ``night_quality`` a `NightQuality`. If a
+            dictionary had to be cut to fit, ``truncated`` is true. An
+            unknown `kind`, or an argument that `kind` does not use, is
             refused with `InvalidArgumentError`. A night or Ekos session
             with nothing recorded raises `NotFoundError`.
         """
@@ -111,9 +137,56 @@ class HistoryControl(ControlChild):
             job_type="diagnostics",
             target_id=kind,
         ):
+            if kind in TYPED_KINDS:
+                return self._answer_typed(kind, session_id, ekos_file_id, include, limit)
             return night_history.build_night_history(
                 self._context, kind, session_id, ekos_file_id, include, limit
             )
+
+    def _answer_typed(
+        self,
+        kind: str,
+        session_id: str | None,
+        ekos_file_id: str | None,
+        include: list[str] | None,
+        limit: int,
+    ) -> list[NightListEntry] | list[TargetChange] | NightQuality:
+        """Answer a question whose reply is a typed model.
+
+        Parameters
+        ----------
+        kind : `str`
+            One of `TYPED_KINDS`.
+        session_id, ekos_file_id, include, limit
+            As in `query`.
+
+        Returns
+        -------
+        reply : `list` or `NightQuality`
+            The typed reply for `kind`.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If an argument is given that `kind` does not use, or
+            ``night_quality`` is asked without a night.
+        """
+        from wayfindinglib.tasks.control_tasks import night_history, night_quality_task, target_changes
+
+        night_history.refuse_unused_arguments(
+            kind, night_history.TYPED_KIND_ARGUMENTS[kind], session_id, ekos_file_id, include
+        )
+        limit = night_history.clamp_limit(limit)
+        match kind:
+            case "nights":
+                return night_history.build_night_list(self._context, limit)
+            case "target_changes":
+                return target_changes.find_target_changes(self._context, session_id, limit)
+            case "night_quality":
+                if session_id is None:
+                    raise InvalidArgumentError("kind 'night_quality' needs session_id, the night to review.")
+                return night_quality_task.build_night_quality(self._context, session_id)
+        raise InvalidArgumentError(f"kind {kind!r} is not a typed kind.")
 
     def get_live_session_status(
         self,
@@ -122,7 +195,7 @@ class HistoryControl(ControlChild):
         destination_dir: str | None = None,
         include: list[str] | None = None,
         limit: int = 10,
-    ) -> dict[str, Any]:
+    ) -> LiveSessionStatus:
         """Report how the current observing session is going, right now.
 
         Reads the observatory computer's latest Ekos analyze log and KStars
@@ -155,8 +228,10 @@ class HistoryControl(ControlChild):
 
         Returns
         -------
-        status : `dict`
-            See `LiveSessionStatus`.
+        status : `LiveSessionStatus`
+            Kept under 30,000 characters of JSON: if the exposures,
+            excursions, dithers or detail sections would be longer, the
+            oldest items are dropped and a line in ``unavailable`` says so.
 
         Raises
         ------
@@ -164,7 +239,6 @@ class HistoryControl(ControlChild):
             If no readable Ekos analyze log exists.
         """
         from wayfindinglib.tasks.control_tasks import live_session_status_task
-        from wayfindinglib.tasks.control_tasks.night_history import fit_to_budget
 
         if destination_dir is None:
             destination_dir = self._context.ekos_log_directory()
@@ -181,7 +255,7 @@ class HistoryControl(ControlChild):
                 f"No readable Ekos analyze log found in {destination_dir}.",
                 details={"destination_dir": destination_dir},
             )
-        return fit_to_budget(status.model_dump(mode="json"))
+        return live_session_status_task.fit_status_to_budget(status)
 
     def frame_guiding(
         self,

@@ -19,6 +19,7 @@ section 9.1.
 | `check.sh <checkout> docs` | The documentation tests, then `build/documentation/lint_docs.sh` |
 | `check.sh <checkout> golden` | The M 13 golden suite |
 | `realrun.sh <checkout> <script.py> [args]` | Runs a real-data script against the copy config only |
+| `repoint_copy_paths.py <copy_config>` | Rewrites stored real paths inside a copy database so they point into the copy |
 | `dbq.sh "<select ...>"` | Read-only SQL on the copy database |
 
 `<checkout>` is the folder name of a checkout that sits beside this one, such as `astrometrics` or
@@ -43,3 +44,18 @@ prints a line and starts as soon as a slot frees.
 `realrun.sh` refuses to run when the copy config's library or stacks folder points anywhere else,
 so a mistaken config cannot write to the real library. Light frames may still be read from their
 real location; scripts must not write there.
+
+### Stored paths in the copy database
+
+A copied database still holds the absolute paths of the real library (stack images, `inputs.json`,
+subset folders) inside each target record. A script run on such a copy would write into the real
+stacks folder. Before it runs a script, `realrun.sh` calls `copy_path_guard.py`, which opens the
+copy's `astrometrics.db` (target records, in the library `path`) and `wayfinding.db` (every table, in `[Wayfinding Library] path`, or the `wayfinding` folder of the data folder when that is unset) read-only and tests
+every stored string that is an absolute path. It refuses to run, and lists the targets, when a
+path lies outside `ASTROMETRICS_SCRATCH`. The one exception is the copy config's `frames_path`,
+which may stay at its real read-only place.
+
+To fix a fresh copy, run `ASTROMETRICS_SCRATCH=... build/agent_tools/repoint_copy_paths.py
+<copy_config>`. It rewrites paths that contain a `/lights/` folder to the copy's stacks folder, and
+paths under the real data folder to the copy library folder. It edits only databases inside
+`ASTROMETRICS_SCRATCH` and refuses otherwise. Tests are in `backend/tests/test_copy_path_guard.py`.

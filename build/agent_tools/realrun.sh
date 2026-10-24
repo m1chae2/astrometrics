@@ -6,7 +6,8 @@
 # `if __name__ == "__main__":` guard (the frame job's worker processes need it). It runs with
 # ASTROMETRICS_CONFIG_PATH set to ASTROMETRICS_COPY_CONFIG and PYTHONPATH set to the checkout, in
 # a heavy-work slot. The run is refused when the copy config's library or stacks folder lies
-# outside ASTROMETRICS_SCRATCH, so a mistaken config cannot reach the real library.
+# outside ASTROMETRICS_SCRATCH, or when the copy databases store absolute paths outside it (other
+# than under frames_path), so a mistaken copy cannot reach the real library.
 #
 # Required environment variables:
 #   ASTROMETRICS_SCRATCH       the folder that holds the copies and the scripts
@@ -25,5 +26,8 @@ for key in path stacks_path; do
   value=$(grep -m1 "^$key = " "$CONFIG" | cut -d'"' -f2)
   case "$value" in "$SCRATCH"/*) ;; *) echo "the copy config's $key is not in $SCRATCH: $value" >&2; exit 2 ;; esac
 done
+
+# The copy database must not store paths to the real stacks or data folders (frames may stay).
+ASTROMETRICS_SCRATCH="$SCRATCH" "$PY/python" "$TOOLS/copy_path_guard.py" check "$CONFIG" || exit 2
 
 ASTROMETRICS_CONFIG_PATH="$CONFIG" PYTHONPATH="$WT" heavy "$PY/python" "$script" "$@"

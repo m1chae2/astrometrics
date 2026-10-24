@@ -128,3 +128,29 @@ def test_an_unknown_section_is_refused_before_any_file_is_read(tmp_path: Path) -
     """A made-up section name raises an error that lists the real ones."""
     with pytest.raises(InvalidArgumentError, match="autofocus_runs"):
         task.get_live_session_status(None, str(tmp_path), refresh=False, include=["bogus"])
+
+
+def test_a_long_status_is_cut_to_its_newest_items_and_says_so(tmp_path: Path) -> None:
+    """Over the budget, the oldest items go and `unavailable` names the cut."""
+    _populate(tmp_path)
+    status = task.get_live_session_status(None, str(tmp_path), refresh=False)
+    assert status is not None
+    template = status.exposures[0]
+    status.exposures = [template.model_copy(update={"frame_name": f"T_{n:04d}.fits"}) for n in range(400)]
+
+    fitted = task.fit_status_to_budget(status, budget=20_000)
+
+    assert len(status.model_dump_json(indent=2)) <= 20_000
+    assert fitted.exposures[-1].frame_name == "T_0399.fits"
+    assert 0 < len(fitted.exposures) < 400
+    assert any(line.startswith("exposures: only the newest") for line in fitted.unavailable)
+
+
+def test_a_short_status_is_left_alone(tmp_path: Path) -> None:
+    """Under the budget nothing is cut."""
+    _populate(tmp_path)
+    status = task.get_live_session_status(None, str(tmp_path), refresh=False)
+    assert status is not None
+    before = status.model_dump()
+
+    assert task.fit_status_to_budget(status).model_dump() == before

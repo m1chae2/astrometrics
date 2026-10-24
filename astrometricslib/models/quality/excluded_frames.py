@@ -9,6 +9,9 @@ frames back:
 - `QuarantinePreview` says what the check would move, without moving it.
   `QualityRecords.measure_frames(kind="quarantine_preview")` returns it.
 - `RestoreReport` says what a restore listed or moved back.
+- `SetAsideFrameRecord` is one line of `QualityRecords.set_aside_frames`: a
+  frame lying in an `_excluded` folder, with the reason and where the reason
+  came from.
 """
 
 from typing import Literal
@@ -80,3 +83,43 @@ class RestoreReport(BaseModel):
     frames: list[SetAsideFrame] = Field(default_factory=list)
     # How many of them were moved back. Zero unless `applied`.
     restored_count: int = Field(default=0, alias="restoredCount")
+
+
+class SetAsideFrameRecord(BaseModel):
+    """One frame that lies in a target's `_excluded` folder.
+
+    The listing is read-only. Where the reason is known, it comes from the
+    first source that has it: the stored quality rows of the frame (which
+    carry the action taken), then the folder's `excluded_frames.json` file.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    # The frame's file name in the `_excluded` folder.
+    file: str
+    # The frame's path now.
+    path: str
+    # The id the frame's quality rows use: the target, then the frame's place
+    # in the library before it was moved. `None` when the original place is
+    # unknown (no manifest entry), in which case no stored row can be matched.
+    subject_id: str | None = Field(default=None, alias="subjectId")
+    # Where the frame lay before it was moved, when known.
+    original_path: str | None = Field(default=None, alias="originalPath")
+    # "clouded", "trailed" or `None` when no source names a kind.
+    kind: str | None = None
+    # One sentence saying what was measured. Empty when no source has it.
+    reason: str = ""
+    # Where the kind and reason came from: "stored_row" (a quality row with
+    # the action taken), "manifest" (only the folder's `excluded_frames.json`)
+    # or "folder_only" (the frame lies in the folder and nothing records why).
+    reason_source: Literal["stored_row", "manifest", "folder_only"] = Field(alias="reasonSource")
+    # The `action_taken` text of the stored row, when there is one.
+    action_taken: str | None = Field(default=None, alias="actionTaken")
+    # Exposure of one frame in seconds: from the stored capture setting, else
+    # from the file header. `None` if neither could be read.
+    exposure_seconds: float | None = Field(default=None, alias="exposureSeconds")
+    # The capture setting row of the frame's stored rows, when there is one.
+    capture_setting_id: int | None = Field(default=None, alias="captureSettingId")
+    # When the frame was moved (UTC, ISO 8601), from the manifest; else the
+    # time of the stored row.
+    moved_at: str | None = Field(default=None, alias="movedAt")

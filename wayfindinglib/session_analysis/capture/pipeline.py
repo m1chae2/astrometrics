@@ -18,14 +18,14 @@ from astrometricslib import (
     SATURATED_BLOB_MINIMUM_PIXELS,
     SATURATED_FRAME_FRACTION,
 )
-from wayfindinglib.models.session.capture_frame import CaptureFrame, StackSaturationVerdict
+from wayfindinglib.models.quality.statements import StatementKind
+from wayfindinglib.models.session.capture_frame import CaptureFrame
 from wayfindinglib.models.session.capture_quality import (
     CaptureInputQuality,
     CapturePerformance,
     CaptureSessionAnalysis,
 )
 from wayfindinglib.models.session.ekos_session import EkosCapture
-from wayfindinglib.models.session.session_quality import RecommendationSeverity
 from wayfindinglib.session_analysis.capture.post_processing.recommend_for_capture import recommend_for_capture
 from wayfindinglib.session_analysis.capture.pre_processing.assess_capture_input_quality import (
     assess_capture_input_quality,
@@ -63,8 +63,6 @@ class CaptureAnalysisRequest(SessionAnalysisRequest):
         How many exposures Ekos cancelled that night.
     has_ekos_record : `bool`
         Whether any Ekos session record exists for the night.
-    stack_saturation : `list` [`StackSaturationVerdict`]
-        The science library's saturation verdicts for stacked exposures.
     sensor_pixel_count : `int` or `None`
         Pixels on the camera's sensor with no binning.
     """
@@ -73,7 +71,6 @@ class CaptureAnalysisRequest(SessionAnalysisRequest):
     captures: list[EkosCapture] = field(default_factory=list)
     aborted_captures: int = 0
     has_ekos_record: bool = False
-    stack_saturation: list[StackSaturationVerdict] = field(default_factory=list)
     sensor_pixel_count: int | None = None
 
 
@@ -120,7 +117,6 @@ class CaptureSessionPipeline(SessionAnalysisPipeline):
         """
         result.performance = measure_capture_performance(
             request.frames,
-            request.stack_saturation,
             request.sensor_pixel_count,
             request.envelope,
             request.limits_equipment_match,
@@ -140,8 +136,8 @@ class CaptureSessionPipeline(SessionAnalysisPipeline):
         """
         input_quality: CaptureInputQuality = result.input_quality
         performance: CapturePerformance = result.performance or CapturePerformance()
-        recommendations = recommend_for_capture(input_quality, performance)
-        warnings = [r for r in recommendations if r.severity == RecommendationSeverity.WARNING]
+        recommendations = recommend_for_capture(input_quality, performance, request.envelope)
+        warnings = [r for r in recommendations if r.kind == StatementKind.WARNING]
         resolved: dict[str, Any] = {
             "limits_equipment_match": request.limits_equipment_match,
             "saturated_star_minimum_pixels": SATURATED_BLOB_MINIMUM_PIXELS,
@@ -155,7 +151,7 @@ class CaptureSessionPipeline(SessionAnalysisPipeline):
             session_id=request.session_id,
             equipment_fingerprint=request.equipment_fingerprint,
             flagged=bool(warnings),
-            flag_reasons=[warning.kind.value for warning in warnings],
+            flag_reasons=[warning.rule for warning in warnings],
             resolved_parameters=resolved,
             input_quality=input_quality,
             performance=performance,

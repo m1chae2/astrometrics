@@ -1110,64 +1110,6 @@ export interface MountPointingModel {
 }
 
 /**
- * How a limit was obtained, from most to least direct.
- *
- * `GEOMETRY` limits follow from the equipment's dimensions or from
- * physics alone. `SENSOR_PROFILE` limits come from the camera's stored
- * profile. `PHYSICAL_BUDGET` limits are the amount of an error the
- * equipment's own measured image quality can absorb. `OWN_BASELINE` limits
- * come from how this same equipment has behaved in the past.
- */
-export enum ThresholdTier {
-  GEOMETRY = "geometry",
-  SENSOR_PROFILE = "sensor_profile",
-  PHYSICAL_BUDGET = "physical_budget",
-  OWN_BASELINE = "own_baseline"
-}
-
-/**
- * Whether a limit could be worked out.
- */
-export enum ThresholdStatus {
-  DERIVED = "derived",
-  INSUFFICIENT_DATA = "insufficient_data"
-}
-
-/**
- * One limit, with the record of how it was obtained.
- *
- * Attributes
- * ----------
- * name : `str`
- * The limit's name.
- * value : `float` or `None`
- * The limit. `None` when `status` is `INSUFFICIENT_DATA`.
- * unit : `str`
- * Unit of `value`, for example ``"arcsec"``.
- * tier : `ThresholdTier`
- * How the limit was obtained.
- * status : `ThresholdStatus`
- * Whether it could be worked out.
- * derivation : `str`
- * Plain-language statement of how the value follows from the inputs,
- * or, for a limit with insufficient data, what is missing.
- * inputs : `dict` [`str`, `float` or `str` or `None`]
- * The numbers the value was worked out from, so anyone can redo it.
- * sample_count : `int` or `None`
- * How many measurements a measured input rests on, if any.
- */
-export interface PerformanceThreshold {
-  name: string;
-  value?: number | null;
-  unit: string;
-  tier: ThresholdTier;
-  status: ThresholdStatus;
-  derivation: string;
-  inputs?: Record<string, number | string | null>;
-  sampleCount?: number | null;
-}
-
-/**
  * How risky each part of the sky is for the mount's tracking.
  *
  * A grid of scores from 0 (safe) to 1 (likely to trail) over hour angle
@@ -1228,8 +1170,12 @@ export interface TrackingRiskMap {
  * The one policy choice behind the physical-budget limits: the most
  * that guiding error and trailing may widen a star image, as a
  * fraction of its width.
- * thresholds : `dict` [`str`, `PerformanceThreshold`]
- * Every limit, by name.
+ * thresholds : `dict` [`str`, `QualityLimit`]
+ * Every limit, by name. A limit whose value is `None` could not be
+ * worked out; its derivation says why.
+ * limit_inputs : `dict` [`str`, `dict` [`str`, `float` or `str` or `None`]]
+ * For each limit, by name, the numbers it was worked out from, so
+ * anyone can redo it. `QualityLimit` has no place for them.
  * tracking_risk : `TrackingRiskMap` or `None`
  * How risky each part of the sky is for tracking with this
  * equipment. Filled in by `control.history.get_performance_envelope`;
@@ -1238,7 +1184,8 @@ export interface TrackingRiskMap {
 export interface PerformanceEnvelope {
   equipmentFingerprint: string;
   blurToleranceFraction: number;
-  thresholds?: Record<string, PerformanceThreshold>;
+  thresholds?: Record<string, QualityLimit>;
+  limitInputs?: Record<string, Record<string, number | string | null>>;
   trackingRisk?: TrackingRiskMap | null;
 }
 
@@ -1580,6 +1527,8 @@ export interface MosaicPanel {
   dec_deg: number;
   /** Short panel name such as "P1_2" (row 1, column 2). */
   panel_id: string;
+  /** How far the camera is turned, in degrees east of north (the way Ekos and KStars give it). 0 puts the grid rows along declination and the columns along right ascension. */
+  rotation_deg?: number;
 }
 
 /**
@@ -2776,6 +2725,1343 @@ export interface SensorNoiseMeasurement {
 }
 
 /**
+ * One observing night's full record: plan, placement, and outcome.
+ */
+export interface ObservationSession {
+  id: string;
+  nightDate: string;
+  status?: SessionStatus;
+  statusDetail?: string;
+  siteProfileId: string;
+  telescopeId: string;
+  cameraId: string;
+  queue?: QueuedObservationPackage[];
+  unplacedPackageDiagnostics?: InfeasibilityReason[];
+  divergenceRecords?: DivergenceRecord[];
+  faultRecords?: FaultRecord[];
+  meridianFlips?: MeridianFlipOutcome[];
+  targetSessionIds?: string[];
+  guidingSamples?: GuidingSample[];
+  weatherSamples?: WeatherSample[];
+  createdAt?: string;
+  closedAt?: string | null;
+  checklist?: ChecklistItem[];
+  framing?: Framing | null;
+  /** Counts the plan writes. Starts at 0. */
+  revision?: number;
+}
+
+/**
+ * What a plan write returns: the new revision and what changed.
+ *
+ * The backend sends the plan-changed event from this record.
+ */
+export interface PlanChange {
+  sessionId: string;
+  previousRevision: number;
+  /** The revision now stored. */
+  revision: number;
+  changes?: PlanChangeItem[];
+  /** Notes on accepted capture settings, such as 'setting not measured'. */
+  settingNotes?: string[];
+  /** The session as now stored. */
+  session: ObservationSession;
+}
+
+/**
+ * One thing a plan write changed.
+ */
+export interface PlanChangeItem {
+  /** What changed, such as queue_added or checklist_ticked. */
+  kind: string;
+  detail?: string;
+  entryId?: string | null;
+}
+
+/**
+ * One fix the user means to try, kept with the night plan.
+ *
+ * The rule name and capture setting say what the fix is about. Ticking
+ * the item records when the user did it. Whether a ticked item comes back
+ * is never stored: the library works that out from the measurements taken
+ * since the tick.
+ */
+export interface ChecklistItem {
+  itemId?: string;
+  /** The name of the quality rule that raised the item. */
+  rule: string;
+  /** The capture setting the item is about. */
+  captureSetting?: CaptureSetting | null;
+  createdAt?: string;
+  /** When the user last ticked the item. None: not ticked. */
+  tickedAt?: string | null;
+  /** Every time the item was ticked, oldest first. The last one equals `ticked_at`. */
+  tickHistory?: string[];
+  note?: string;
+}
+
+/**
+ * Where the camera points and how it is turned, with any mosaic panels.
+ *
+ * The rotation is in degrees east of north, the way Ekos and KStars give
+ * it. The first version shows the numbers only.
+ */
+export interface Framing {
+  centerRaDeg: number;
+  centerDecDeg: number;
+  rotationDeg?: number;
+  panels?: MosaicPanel[];
+}
+
+/**
+ * One requested exposure -- science or calibration -- within a package.
+ */
+export interface ExposureRequest {
+  frameType: FrameType;
+  filter?: FilterType;
+  exposureSec: number;
+  count: number;
+  delaySec?: number;
+  /** The camera's gain setting (a unitless index, not electrons per ADU). None: not set. */
+  gainSetting?: number | null;
+  /** The constant the camera adds to every pixel. None: not set. */
+  offset?: number | null;
+  /** The binning factor (1 means no binning). None: not set. */
+  binning?: number | null;
+}
+
+/**
+ * The night plan as rows for the Ekos Capture module.
+ */
+export interface SequenceSummary {
+  sessionId: string;
+  /** The plan revision the rows were built from. */
+  revision: number;
+  rows?: SequenceRow[];
+  ditherRows?: SequenceDitherRow[];
+}
+
+/**
+ * One statement about the data of a target.
+ *
+ * Parameters
+ * ----------
+ * rule : `str`
+ * The name of the rule that produced it.
+ * kind : `StatementKind`
+ * Warning, recommendation, constraint or insufficient data.
+ * severity : `Severity` or `None`
+ * How much attention it needs. Required for a warning.
+ * action_class : `ActionClass` or `None`
+ * The kind of change it asks for. Required for a warning or a
+ * recommendation, and ``None`` otherwise.
+ * capture_setting : `CaptureSetting` or `None`
+ * The capture setting it is about, when it is about one.
+ * message : `str`
+ * One plain sentence.
+ * reason : `str`
+ * Why. For ``insufficient_data``, what is missing and how to get it.
+ * proposed_action : `ProposedAction` or `None`
+ * The values proposed. ``None`` for a constraint or missing data.
+ * expected_effect : `ExpectedEffect` or `None`
+ * What the action is expected to do.
+ * evidence : `list` [`MeasurementReference`]
+ * The exact measurements used.
+ * evidence_omitted_count : `int`
+ * How many references were left out of ``evidence`` to keep a long
+ * reply short. Zero when none were left out.
+ * limits : `list` [`QualityLimit`]
+ * The limits they were compared with.
+ * values : `dict` [`str`, `float` or `str` or `None`]
+ * Numbers the statement rests on that are not rows of the measurement
+ * store, such as guide-log values and counts. They stay readable by
+ * machines so a reader need not parse the message. The keys are plain
+ * names. Empty when every number is cited as evidence.
+ * confidence : `Confidence`
+ * How well the rule is backed.
+ * checklist_return : `ChecklistReturn` or `None`
+ * Set when a ticked checklist item came back.
+ */
+export interface TargetStatement {
+  rule: string;
+  kind: StatementKind;
+  severity?: Severity | null;
+  actionClass?: ActionClass | null;
+  captureSetting?: CaptureSetting | null;
+  message: string;
+  reason?: string;
+  proposedAction?: ProposedAction | null;
+  expectedEffect?: ExpectedEffect | null;
+  evidence?: MeasurementReference[];
+  evidenceOmittedCount?: number;
+  limits?: QualityLimit[];
+  values?: Record<string, number | string | null>;
+  confidence: Confidence;
+  checklistReturn?: ChecklistReturn | null;
+}
+
+/**
+ * The count and worst severity of the warnings of a target or night.
+ *
+ * Parameters
+ * ----------
+ * warning_count : `int`
+ * How many warnings there are.
+ * worst_severity : `Severity` or `None`
+ * The most severe of them. ``None`` exactly when there are none.
+ */
+export interface NeedsAttention {
+  warningCount: number;
+  worstSeverity?: Severity | null;
+}
+
+/**
+ * What the library says about one target's data.
+ *
+ * Parameters
+ * ----------
+ * target_id : `str`
+ * The target.
+ * capture_settings : `list` [`CaptureSettingSummary`]
+ * One summary for each capture setting.
+ * statements : `list` [`TargetStatement`]
+ * The statements, already in priority order.
+ * needs_attention : `NeedsAttention`
+ * The count and worst severity of the warnings.
+ * starting_point : `StartingPoint` or `None`
+ * A first setting, for a target with no frames.
+ * notes : `list` [`str`]
+ * Remarks on how the report was made: which efficiency reference each
+ * setting uses (and the other one), where the observing site came from,
+ * and whether the set-aside frames are recorded.
+ * forecast_checks : `list` [`ForecastCheck`]
+ * How earlier forecasts compare with what was measured.
+ * science_outcomes : `ScienceOutcomeSummary`
+ * Science results already made from the target's data.
+ * context : `list` [`ContextReading`]
+ * The newest value of each context metric the target has, for each
+ * capture setting. Empty when the report would not fit the reply
+ * budget; see ``context_omitted_reason``.
+ * context_omitted_reason : `str` or `None`
+ * Why ``context`` was left empty. ``None`` when it was not.
+ * generated_at : `datetime`
+ * When the report was computed.
+ */
+export interface TargetDatasetReport {
+  targetId: string;
+  captureSettings?: CaptureSettingSummary[];
+  statements?: TargetStatement[];
+  needsAttention: NeedsAttention;
+  startingPoint?: StartingPoint | null;
+  notes?: string[];
+  forecastChecks?: ForecastCheck[];
+  scienceOutcomes?: ScienceOutcomeSummary;
+  context?: ContextReading[];
+  contextOmittedReason?: string | null;
+  generatedAt?: string;
+}
+
+/**
+ * What to image at a chosen time, ranked by the gain from one clock hour.
+ *
+ * Parameters
+ * ----------
+ * at : `datetime`
+ * The planning time the ranking is for.
+ * generated_at : `datetime`
+ * When the ranking was computed.
+ * lists : `list` [`RankedList`]
+ * One list for each use that has candidates.
+ * sky : `TonightSkyModel`
+ * The sky model the gains assume.
+ * notes : `list` [`str`]
+ * Remarks for the whole ranking, such as a thin dataset leading a list,
+ * targets that were not visible, or kinds of target that are never
+ * ranked.
+ */
+export interface TonightRanking {
+  at: string;
+  generatedAt?: string;
+  lists?: RankedList[];
+  sky: TonightSkyModel;
+  notes?: string[];
+}
+
+/**
+ * The quality of one observing night.
+ *
+ * Parameters
+ * ----------
+ * night_id : `str`
+ * The night, named for the local date on which it began.
+ * targets : `list` [`NightTargetQuality`]
+ * Each target imaged that night, those that need attention first.
+ * needs_attention : `NeedsAttention`
+ * The count and worst severity of the warnings of every target.
+ * guiding : `GuidingNightSummary`
+ * The guiding summary.
+ * night_statements : `list` [`TargetStatement`]
+ * Statements about the whole night that belong to no one target, such
+ * as the focus drift (one focuser serves every target), in priority
+ * order. They count in `needs_attention`.
+ * focus_drift : `NightFocusDrift` or `None`
+ * How star width changed with focuser temperature over the night's
+ * luminance frames, with the refocus interval. ``None`` when the night
+ * has no frames to fit; `notes` says why.
+ * polar_alignment : `NightPolarAlignment` or `None`
+ * The polar-alignment error that the field rotation shows. Always
+ * labeled exploratory: no rule uses it. ``None`` when there is no
+ * rotation data.
+ * notes : `list` [`str`]
+ * Remarks for the whole night, such as set-aside frames that are not
+ * recorded per frame.
+ * generated_at : `datetime`
+ * When the review was worked out.
+ */
+export interface NightQuality {
+  nightId: string;
+  targets?: NightTargetQuality[];
+  needsAttention: NeedsAttention;
+  guiding: GuidingNightSummary;
+  nightStatements?: TargetStatement[];
+  focusDrift?: NightFocusDrift | null;
+  polarAlignment?: NightPolarAlignment | null;
+  notes?: string[];
+  generatedAt?: string;
+}
+
+/**
+ * One observation session's overall lifecycle state.
+ *
+ * `SUSPENDED` means an unsafe verdict halted advancement without ending
+ * the night, since conditions may clear.
+ */
+export enum SessionStatus {
+  PLANNED = "PLANNED",
+  RUNNING = "RUNNING",
+  SUSPENDED = "SUSPENDED",
+  COMPLETED = "COMPLETED",
+  ABORTED = "ABORTED"
+}
+
+/**
+ * One placed, self-contained package instance within a session's queue.
+ */
+export interface QueuedObservationPackage {
+  id: string;
+  observationPackageId: string;
+  targetId: string;
+  exposureRequests?: ExposureRequest[];
+  ditherConfig?: DitherConfig | null;
+  minimumAltitudeDeg?: number | null;
+  priority?: number;
+  appliedPriorityBoost?: number;
+  startTimeMode: StartTimeMode;
+  requestedStartTime?: string | null;
+  computedStartTime?: string | null;
+  computedEndTime?: string | null;
+  actualStartTime?: string | null;
+  actualEndTime?: string | null;
+  framesCaptured?: number;
+  status?: QueueEntryStatus;
+  statusDetail?: string;
+}
+
+/**
+ * One specific, non-boolean reason a package could not be placed.
+ */
+export interface InfeasibilityReason {
+  observationPackageId: string;
+  reasonCode: InfeasibilityReasonCode;
+  detail?: string;
+}
+
+/**
+ * One comparison between a computed action and the delegated system.
+ */
+export interface DivergenceRecord {
+  id: string;
+  observationSessionId: string;
+  queuedObservationPackageId?: string | null;
+  capability: ObservatoryCapability;
+  comparisonInputId: string;
+  observedAt?: string;
+  intendedValue: number;
+  observedValue: number;
+  /** Signed: intended minus observed, so systematic bias is distinguishable from symmetric noise. */
+  divergenceMagnitude: number;
+  divergenceUnit: string;
+  /** The tolerance this comparison was evaluated against, so a later aggregate report can recompute e.g. 'within half tolerance' without re-deriving a value this record already used. */
+  tolerance: number;
+  withinTolerance: boolean;
+  /** For PLATE_SOLVE_ALIGNMENT comparisons only: whether the underlying PointingCorrection converged within its iteration limit. None for every other capability, and for alignment comparisons recorded before this field existed. */
+  converged?: boolean | null;
+  detail?: string;
+}
+
+/**
+ * One device fault, its bounded recovery attempts, and its outcome.
+ */
+export interface FaultRecord {
+  id: string;
+  deviceId: string;
+  faultedState: DeviceSummaryState;
+  faultDetail?: string;
+  attempts?: RecoveryAttempt[];
+  recovered?: boolean;
+  escalatedToSafeState?: boolean;
+}
+
+/**
+ * The outcome of one meridian-flip sequence for one queue entry.
+ */
+export interface MeridianFlipOutcome {
+  id: string;
+  queuedObservationPackageId: string;
+  triggeredAt?: string;
+  hourAngleAtTriggerDeg: number;
+  flipCompleted?: boolean;
+  realignAttempts?: number;
+  residualPointingErrorArcsec?: number | null;
+  guideReacquireAttempts?: number;
+  resumed?: boolean;
+  failureDetail?: string | null;
+}
+
+/**
+ * The role of a requested exposure within an observation package.
+ */
+export enum FrameType {
+  LIGHT = "LIGHT",
+  DARK = "DARK",
+  FLAT = "FLAT",
+  BIAS = "BIAS"
+}
+
+/**
+ * One capture job of the plan, with its fields in Ekos order.
+ */
+export interface SequenceRow {
+  /** The queue entry the job comes from. */
+  entryId: string;
+  targetId: string;
+  /** LIGHT, DARK, FLAT or BIAS. */
+  frameType: string;
+  fields?: SequenceField[];
+}
+
+/**
+ * The dithering of one queue entry, as the two Ekos settings it needs.
+ */
+export interface SequenceDitherRow {
+  entryId: string;
+  sizePixels: number;
+  sizeEkosScreen?: string;
+  everyNFrames: number;
+  frequencyEkosScreen?: string;
+}
+
+/**
+ * What a statement is.
+ *
+ * `WARNING` is about data already taken. `RECOMMENDATION` is about the
+ * next session. `CONSTRAINT` states a limit of the equipment and gives no
+ * advice. `INSUFFICIENT_DATA` says what is missing and how to get it.
+ */
+export enum StatementKind {
+  WARNING = "warning",
+  RECOMMENDATION = "recommendation",
+  CONSTRAINT = "constraint",
+  INSUFFICIENT_DATA = "insufficient_data"
+}
+
+/**
+ * How much attention a warning needs.
+ *
+ * `INFO` states a finding with nothing to do. `ADVICE` suggests a change
+ * that would improve results. `WARNING` names a problem that makes the
+ * data unreliable or the equipment misconfigured. The per-night analyses
+ * use the same scale for their statements.
+ */
+export enum Severity {
+  INFO = "info",
+  ADVICE = "advice",
+  WARNING = "warning"
+}
+
+/**
+ * The kind of change a warning or recommendation asks for.
+ *
+ * There is no hardware class: the library never advises a purchase.
+ */
+export enum ActionClass {
+  CAPTURE_SETTINGS = "capture_settings",
+  SCHEDULING = "scheduling",
+  CALIBRATION = "calibration",
+  DATA_SELECTION = "data_selection",
+  SESSION_PROCEDURE = "session_procedure",
+  ADJUSTMENT = "adjustment"
+}
+
+/**
+ * The typed values a recommendation proposes.
+ *
+ * At least one field must be set. Each value must be one the equipment
+ * allows; the code that builds the statement checks that, not this model.
+ *
+ * Parameters
+ * ----------
+ * exposure_seconds : `float` or `None`
+ * Exposure time of one frame, in seconds.
+ * frame_count : `int` or `None`
+ * How many frames to take.
+ * gain_setting : `int` or `None`
+ * The camera's gain setting.
+ * offset : `int` or `None`
+ * The camera's offset.
+ * binning : `int` or `None`
+ * The binning factor.
+ * filter_name : `str` or `None`
+ * The filter to use.
+ * dither_every_frames : `int` or `None`
+ * Dither after this many frames.
+ * refocus_every_degc : `float` or `None`
+ * Refocus after the focuser temperature changes by this many degrees
+ * Celsius.
+ * window_start : `datetime` or `None`
+ * Start of a good observing window.
+ * window_end : `datetime` or `None`
+ * End of a good observing window.
+ * calibration_frame_type : `str` or `None`
+ * ``"dark"``, ``"flat"`` or ``"bias"`` for a calibration action.
+ * note : `str` or `None`
+ * A short plain-language detail that fits no other field.
+ */
+export interface ProposedAction {
+  exposureSeconds?: number | null;
+  frameCount?: number | null;
+  gainSetting?: number | null;
+  offset?: number | null;
+  binning?: number | null;
+  filterName?: string | null;
+  ditherEveryFrames?: number | null;
+  refocusEveryDegc?: number | null;
+  windowStart?: string | null;
+  windowEnd?: string | null;
+  calibrationFrameType?: string | null;
+  note?: string | null;
+}
+
+/**
+ * What a proposed action is expected to do.
+ *
+ * Parameters
+ * ----------
+ * noise_change_fraction : `float` or `None`
+ * Expected change in stack noise as a fraction. A fall of 29% is -0.29.
+ * efficiency_change : `float` or `None`
+ * Expected change in efficiency (a number from 0 to 1).
+ * effective_time_added_seconds : `float` or `None`
+ * Effective exposure time the action adds, in seconds.
+ * wall_clock_seconds : `float` or `None`
+ * Time on the clock the action takes, with downloads, dithers and
+ * autofocus, in seconds.
+ * description : `str`
+ * The effect in one plain sentence.
+ */
+export interface ExpectedEffect {
+  noiseChangeFraction?: number | null;
+  efficiencyChange?: number | null;
+  effectiveTimeAddedSeconds?: number | null;
+  wallClockSeconds?: number | null;
+  description: string;
+}
+
+/**
+ * How well a rule is backed, in the validation register's status labels.
+ *
+ * A design estimate is shown to the user as tentative.
+ */
+export enum Confidence {
+  MEASURED = "measured",
+  PARTLY_MEASURED = "partly_measured",
+  DESIGN_ESTIMATE = "design_estimate"
+}
+
+/**
+ * Says that a ticked checklist item has come back.
+ *
+ * Parameters
+ * ----------
+ * item_id : `str`
+ * The checklist item that was ticked.
+ * ticked_at : `datetime`
+ * When the user ticked it.
+ * reason : `str`
+ * Why it came back, such as "stars still 28% wider on Oct 15".
+ */
+export interface ChecklistReturn {
+  itemId: string;
+  tickedAt: string;
+  reason: string;
+}
+
+/**
+ * What was taken with one capture setting.
+ *
+ * Parameters
+ * ----------
+ * capture_setting : `CaptureSetting`
+ * The setting.
+ * frames_taken : `int`
+ * How many frames were taken.
+ * nights : `int`
+ * On how many nights.
+ * frames_set_aside : `int`
+ * How many frames were set aside (for example, clouded or trailed).
+ * captured_seconds : `float`
+ * Exposure time captured, in seconds.
+ * weight_effective_seconds : `float` or `None`
+ * The weighted effective time the stacker reports, in seconds.
+ * ``None`` when no stack has been made.
+ * efficiency_effective_seconds : `float` or `None`
+ * Efficiency times the captured time, in seconds. ``None`` when
+ * efficiency cannot be found.
+ * loss_account : `LossAccount` or `None`
+ * Where the time went. ``None`` when it cannot be built.
+ * science_goal : `ScienceGoal` or `None`
+ * The goal this setting's efficiency is judged for (user decision U2,
+ * 2026-10-24: the goal is chosen for each capture setting). ``None``
+ * when the summary was built without one.
+ */
+export interface CaptureSettingSummary {
+  captureSetting: CaptureSetting;
+  framesTaken: number;
+  nights: number;
+  framesSetAside: number;
+  capturedSeconds: number;
+  weightEffectiveSeconds?: number | null;
+  efficiencyEffectiveSeconds?: number | null;
+  lossAccount?: LossAccount | null;
+  scienceGoal?: ScienceGoal | null;
+}
+
+/**
+ * A first capture setting for a target with no frames yet.
+ *
+ * It is always a starting point, never a result.
+ *
+ * Parameters
+ * ----------
+ * capture_setting : `CaptureSetting` or `None`
+ * The setting the numbers are for, when it is known.
+ * exposure_seconds : `float` or `None`
+ * Exposure long enough that sky noise dominates read noise, in
+ * seconds. ``None`` when it cannot be computed.
+ * exposure_reason : `str`
+ * How it was found, or why it was not computed.
+ * clipping_cap_seconds : `float` or `None`
+ * The longest exposure that keeps the target and bright stars from
+ * clipping, in seconds. ``None`` is "not computed".
+ * clipping_cap_reason : `str`
+ * How it was found, or why it was not computed.
+ * confidence : `Confidence`
+ * How well the method is backed.
+ */
+export interface StartingPoint {
+  captureSetting?: CaptureSetting | null;
+  exposureSeconds?: number | null;
+  exposureReason: string;
+  clippingCapSeconds?: number | null;
+  clippingCapReason: string;
+  confidence: Confidence;
+}
+
+/**
+ * One check of a forecast against the stack that followed it.
+ *
+ * Parameters
+ * ----------
+ * stack_run_id : `str` or `None`
+ * The stack run the measured change comes from.
+ * forecast_when_planned : `ForecastedChange`
+ * The forecast made when the session was planned.
+ * forecast_given_frames_taken : `ForecastedChange`
+ * The forecast again, using the frames actually taken.
+ * measured : `ForecastedChange`
+ * The change that was measured.
+ * weighting_mode : `str`
+ * The frame weighting the stack run used, such as ``"equal"``.
+ * paired : `bool`
+ * Whether the tolerance is paired (the two stacks measured in the same
+ * apertures) or unpaired.
+ * outcome : `ForecastOutcome`
+ * Whether the gain arrived as forecast.
+ * reason : `str`
+ * Why it fell short or could not be checked. Required unless the gain
+ * arrived as forecast.
+ * evidence : `list` [`MeasurementReference`]
+ * The measurements the check used.
+ */
+export interface ForecastCheck {
+  stackRunId?: string | null;
+  forecastWhenPlanned: ForecastedChange;
+  forecastGivenFramesTaken: ForecastedChange;
+  measured: ForecastedChange;
+  weightingMode: string;
+  paired: boolean;
+  outcome: ForecastOutcome;
+  reason?: string;
+  evidence?: MeasurementReference[];
+}
+
+/**
+ * Notable science results already made from a target's data.
+ *
+ * Planning uses these to raise the priority of a target whose data has
+ * already produced something worth following up.
+ *
+ * Parameters
+ * ----------
+ * variable_star_candidate_count : `int`
+ * Variable star candidates the photometry run found. Read from the
+ * stored measurement ``photometry.variable_candidate_count``.
+ * asteroid_candidate_count : `int`
+ * Asteroid candidates the detection run found.
+ * confirmed_asteroid_candidate_count : `int`
+ * Asteroid candidates that match a known orbit.
+ * flagged_pipelines : `list` [`str`]
+ * Names of the pipelines whose own quality summary is flagged.
+ */
+export interface ScienceOutcomeSummary {
+  variableStarCandidateCount?: number;
+  asteroidCandidateCount?: number;
+  confirmedAsteroidCandidateCount?: number;
+  flaggedPipelines?: string[];
+}
+
+/**
+ * One context measurement of the target, shown beside the statements.
+ *
+ * A context metric explains other results (the sensor temperature, how a
+ * stack was made, how many stars a solve matched). It drives no rule, so
+ * the report shows it here instead.
+ *
+ * Parameters
+ * ----------
+ * metric : `str`
+ * The registered metric name.
+ * level : `str`
+ * ``"frame"``, ``"stack"`` or ``"run"``.
+ * value : `float` or `None`
+ * The value of the newest row of this metric for the capture setting.
+ * ``None`` when that row was not measured.
+ * unit : `str`
+ * The unit of the metric.
+ * capture_setting_id : `int` or `None`
+ * The capture setting the value belongs to. ``None`` when the rows
+ * belong to no single setting.
+ * row_count : `int`
+ * How many stored rows of this metric and setting there are.
+ * row_id : `int`
+ * The row the value comes from, so the reading is also a reference.
+ */
+export interface ContextReading {
+  metric: string;
+  level: string;
+  value?: number | null;
+  unit?: string;
+  captureSettingId?: number | null;
+  rowCount?: number;
+  rowId?: number | null;
+}
+
+/**
+ * The ranked candidates of one use.
+ *
+ * Parameters
+ * ----------
+ * use : `RankedUse`
+ * The use.
+ * gain_description : `str`
+ * What the gain means for this list, in one sentence.
+ * candidates : `list` [`RankedCandidate`]
+ * Ranked targets first (best first), then stopped ones at zero, then new
+ * targets and those with no forecast, which are not ranked.
+ */
+export interface RankedList {
+  use: RankedUse;
+  gainDescription: string;
+  candidates?: RankedCandidate[];
+}
+
+/**
+ * The sky the ranking assumed, labeled as a model.
+ *
+ * Parameters
+ * ----------
+ * at : `datetime`
+ * The time the sky is for.
+ * moon_altitude_deg : `float` or `None`
+ * The Moon's altitude at the site, in degrees (negative is below the
+ * horizon). ``None`` when it could not be worked out.
+ * moon_illumination_fraction : `float` or `None`
+ * The lit fraction of the Moon's disc, from 0 to 1.
+ * settings : `list` [`SkySettingSummary`]
+ * The models that were fitted, one for each equipment setting.
+ * unavailable : `list` [`str`]
+ * One sentence for each equipment setting that has no model, with the
+ * reason. A target of such a setting is ranked from its own frames' sky
+ * and says so.
+ * model_derived : `bool`
+ * Always true: the values come from a model, not a measurement.
+ * extinction_note : `str`
+ * Says that atmospheric extinction is not modeled separately.
+ * confidence : `Confidence`
+ * Always ``design_estimate`` (shown as tentative).
+ * register_entry : `str`
+ * The validation register entry behind the model.
+ */
+export interface TonightSkyModel {
+  at: string;
+  moonAltitudeDeg?: number | null;
+  moonIlluminationFraction?: number | null;
+  settings?: SkySettingSummary[];
+  unavailable?: string[];
+  modelDerived?: boolean;
+  extinctionNote?: string;
+  confidence?: Confidence;
+  registerEntry?: string;
+}
+
+/**
+ * What one target's frames of a night were worth.
+ *
+ * Parameters
+ * ----------
+ * target_id : `str`
+ * The target.
+ * goal : `ScienceGoal`
+ * The goal that holds most of the target's captured time. The goal is
+ * chosen for each capture setting (decision U2), so when the settings
+ * differ, each ``capture_settings`` entry states its own goal.
+ * frames_taken : `int`
+ * Frames of the night, kept and set aside.
+ * frames_set_aside : `int`
+ * Frames the stacker set aside.
+ * captured_seconds : `float`
+ * Exposure time of all frames taken, in seconds.
+ * efficiency_effective_seconds : `float` or `None`
+ * The effective time of the kept frames, in seconds. ``None`` when no
+ * frame could be assessed.
+ * capture_settings : `list` [`CaptureSettingSummary`]
+ * One summary for each capture setting used that night.
+ * loss_account : `LossAccount` or `None`
+ * Where the night's time went. ``None`` when no reference was
+ * available; `notes` says why.
+ * statements : `list` [`TargetStatement`]
+ * Warnings and notes from the night's measurements, in priority order.
+ * needs_attention : `NeedsAttention`
+ * The count and worst severity of the warnings.
+ * notes : `list` [`str`]
+ * Remarks, such as a setting with no reference or frames that could not
+ * be assessed.
+ */
+export interface NightTargetQuality {
+  targetId: string;
+  goal: ScienceGoal;
+  framesTaken: number;
+  framesSetAside: number;
+  capturedSeconds: number;
+  efficiencyEffectiveSeconds?: number | null;
+  captureSettings?: CaptureSettingSummary[];
+  lossAccount?: LossAccount | null;
+  statements?: TargetStatement[];
+  needsAttention: NeedsAttention;
+  notes?: string[];
+}
+
+/**
+ * How the night's guiding went, in a few numbers.
+ *
+ * Parameters
+ * ----------
+ * available : `bool`
+ * Whether the night has guiding data to summarize.
+ * reason : `str`
+ * Why it is not available. Empty when it is.
+ * flagged : `bool` or `None`
+ * True when the guiding analysis raised a warning.
+ * flag_reasons : `list` [`str`]
+ * The kinds of those warnings.
+ * rms_per_axis_arcsec : `float` or `None`
+ * The robust guiding error per axis, in arcseconds.
+ * expected_star_widening_fraction : `float` or `None`
+ * How much that error widens a star, as a fraction of its width.
+ * lost_fraction : `float` or `None`
+ * The share of guide frames lost.
+ * excursion_count : `int` or `None`
+ * Samples with an error far beyond the limit.
+ * runs : `list` [`GuidingRunPerformance`]
+ * The guiding runs of the night, with the error of each, so the stretches
+ * where guiding failed can be seen.
+ */
+export interface GuidingNightSummary {
+  available: boolean;
+  reason?: string;
+  flagged?: boolean | null;
+  flagReasons?: string[];
+  rmsPerAxisArcsec?: number | null;
+  expectedStarWideningFraction?: number | null;
+  lostFraction?: number | null;
+  excursionCount?: number | null;
+  runs?: GuidingRunPerformance[];
+}
+
+/**
+ * How star width followed the focuser temperature over a night.
+ *
+ * This is the plain form of the focus drift fit (`fit_focus_drift`), kept
+ * here so the model layer imports no analytics code.
+ *
+ * Parameters
+ * ----------
+ * status : `str`
+ * ``"drift_found"``, ``"no_drift_detected"`` or ``"insufficient_data"``.
+ * reason : `str`
+ * Why, in one sentence.
+ * slope_px_per_degc, slope_error_px_per_degc : `float` or `None`
+ * Pixels of width added per degree Celsius once the star is well out of
+ * focus, and its error (see `FocusDriftResult` for how the fit finds it).
+ * best_focus_width_px : `float` or `None`
+ * The star width at best focus, in pixels.
+ * allowed_width_increase_fraction : `float`
+ * How much widening the rule accepts before a refocus.
+ * refocus_interval_degc, interval_tolerance_degc : `float` or `None`
+ * Refocus after this much temperature change, and its tolerance.
+ * interval_resolvable : `bool` or `None`
+ * Whether one frame's width error is small enough to see the limit.
+ * frames_used, segments_used : `int`
+ * Frames and autofocus segments in the fit.
+ * temperature_change_degc : `float` or `None`
+ * The temperature range the fit covers.
+ * evidence : `list` [`MeasurementReference`]
+ * The rows the fit used.
+ */
+export interface NightFocusDrift {
+  status: string;
+  reason: string;
+  slopePxPerDegc?: number | null;
+  slopeErrorPxPerDegc?: number | null;
+  bestFocusWidthPx?: number | null;
+  allowedWidthIncreaseFraction?: number | null;
+  refocusIntervalDegc?: number | null;
+  intervalToleranceDegc?: number | null;
+  intervalResolvable?: boolean | null;
+  framesUsed?: number;
+  segmentsUsed?: number;
+  temperatureChangeDegc?: number | null;
+  evidence?: MeasurementReference[];
+}
+
+/**
+ * The polar-alignment error that the field rotation of a night shows.
+ *
+ * This is the plain form of `PolarAlignmentEstimate`. It is exploratory:
+ * its input metric is exploratory and no rule uses it.
+ *
+ * Parameters
+ * ----------
+ * exploratory : `bool`
+ * Always true.
+ * kind : `str`
+ * ``"fit"``, ``"lower_bound"`` or ``"insufficient_data"``.
+ * total_error_arcmin : `float` or `None`
+ * The angle between the mount's polar axis and the pole, in arcminutes
+ * (the least it can be, for a lower bound).
+ * altitude_error_arcmin, azimuth_error_arcmin : `float` or `None`
+ * The two parts, only for a fit.
+ * uncertainty_arcmin : `float` or `None`
+ * One standard error of the total, only for a fit.
+ * hour_angle_span_deg : `float` or `None`
+ * The widest hour-angle span of any guiding run.
+ * sample_count : `int`
+ * Frames used.
+ * reason : `str`
+ * Why the kind is what it is.
+ */
+export interface NightPolarAlignment {
+  exploratory?: boolean;
+  kind: string;
+  totalErrorArcmin?: number | null;
+  altitudeErrorArcmin?: number | null;
+  azimuthErrorArcmin?: number | null;
+  uncertaintyArcmin?: number | null;
+  hourAngleSpanDeg?: number | null;
+  sampleCount?: number;
+  reason: string;
+}
+
+/**
+ * A package-level dithering cadence, applied across a package's run.
+ */
+export interface DitherConfig {
+  enabled?: boolean;
+  everyNFrames?: number;
+  pixels?: number;
+}
+
+/**
+ * A package placement request's starting disposition.
+ */
+export enum StartTimeMode {
+  SOONEST = "SOONEST",
+  FIXED = "FIXED"
+}
+
+/**
+ * One queue entry's execution status.
+ *
+ * No `INFEASIBLE` value -- unplaced packages never enter the queue.
+ */
+export enum QueueEntryStatus {
+  PENDING = "PENDING",
+  RUNNING = "RUNNING",
+  COMPLETED = "COMPLETED",
+  FAILED = "FAILED",
+  SKIPPED = "SKIPPED"
+}
+
+/**
+ * A closed, named reason an observation package could not be placed.
+ *
+ * A closed enumeration, not free text, so a client can branch on the reason
+ * and a test can assert one specific diagnosis rather than "some
+ * failure."
+ */
+export enum InfeasibilityReasonCode {
+  NEVER_CLEARS_ALTITUDE = "NEVER_CLEARS_ALTITUDE",
+  BLOCKED_BY_AVOIDANCE_ZONE = "BLOCKED_BY_AVOIDANCE_ZONE",
+  WINDOW_TOO_SHORT = "WINDOW_TOO_SHORT",
+  NIGHT_FULLY_COMMITTED = "NIGHT_FULLY_COMMITTED",
+  FIXED_TIME_CONFLICT = "FIXED_TIME_CONFLICT"
+}
+
+/**
+ * One hardware-facing capability whose delegation state is tracked.
+ *
+ * Corresponds one-to-one with the functional modules of the incumbent
+ * software this architecture is designed to replace
+ * (`Wayfinding_Library_Architecture.md` Section 2.3).
+ */
+export enum ObservatoryCapability {
+  MOUNT_CONTROL = "MOUNT_CONTROL",
+  PLATE_SOLVE_ALIGNMENT = "PLATE_SOLVE_ALIGNMENT",
+  AUTOGUIDING = "AUTOGUIDING",
+  AUTOFOCUS = "AUTOFOCUS",
+  CAPTURE_ORCHESTRATION = "CAPTURE_ORCHESTRATION",
+  OBSERVATORY_SAFETY = "OBSERVATORY_SAFETY"
+}
+
+/**
+ * A device's lifecycle state, published in one uniform vocabulary.
+ *
+ * `FAULT` is what gives Observation Execution something to recover
+ * from, and what gives an operator a place to see that a device has
+ * reported a specific failure rather than merely gone quiet.
+ */
+export enum DeviceSummaryState {
+  OFFLINE = "OFFLINE",
+  STANDBY = "STANDBY",
+  DISABLED = "DISABLED",
+  ENABLED = "ENABLED",
+  FAULT = "FAULT"
+}
+
+/**
+ * One attempt to return a faulted device to standby and re-enable it.
+ */
+export interface RecoveryAttempt {
+  attemptedAt?: string;
+  outcome: DeviceSummaryState;
+  detail?: string;
+}
+
+/**
+ * One value of a capture job and the Ekos screen it goes on.
+ */
+export interface SequenceField {
+  /** The field, one of `CAPTURE_FIELD_ORDER`. */
+  name: string;
+  /** The value to enter. None: leave the camera's own value. */
+  value?: string | number | null;
+  /** Where to enter the value in Ekos. */
+  ekosScreen: string;
+}
+
+/**
+ * Where the time of a night or a target went.
+ *
+ * Two parts are kept apart and never added into one number without saying
+ * so: the frames set aside, and the efficiency deficit of the frames kept.
+ *
+ * Parameters
+ * ----------
+ * goal : `ScienceGoal`
+ * The science goal the account is stated for.
+ * reference_name : `str`
+ * The name of the reference efficiency is measured against.
+ * set_aside_seconds : `float`
+ * Total exposure time of the frames set aside, in seconds.
+ * set_aside : `list` [`LossShare`]
+ * The same time split by the reason frames were set aside.
+ * kept_frame_deficit : `list` [`LossShare`]
+ * Captured minus effective time of the kept frames, split by cause.
+ * cause_unknown_seconds : `float` or `None`
+ * The part of the deficit that no listed cause explains. ``None``
+ * means "not measured": it exists only where efficiency is measured
+ * independently of the causes.
+ * cause_unknown_reason : `str`
+ * Why the part is unknown, or why it was not measured.
+ * transparency_included : `bool`
+ * Whether cloud and haze are part of the account.
+ * transparency_reason : `str`
+ * Why transparency is or is not included.
+ */
+export interface LossAccount {
+  goal: ScienceGoal;
+  referenceName: string;
+  setAsideSeconds: number;
+  setAside?: LossShare[];
+  keptFrameDeficit?: LossShare[];
+  causeUnknownSeconds?: number | null;
+  causeUnknownReason: string;
+  transparencyIncluded: boolean;
+  transparencyReason: string;
+}
+
+/**
+ * What the data is for. Efficiency depends on the goal.
+ */
+export enum ScienceGoal {
+  FAINT_POINT_SOURCE = "faint_point_source",
+  ASTROMETRIC_PRECISION = "astrometric_precision",
+  EXTENDED_OBJECT = "extended_object",
+  BRIGHT_STAR_PHOTOMETRY = "bright_star_photometry",
+  SLITLESS_SPECTRAL_RESOLUTION = "slitless_spectral_resolution",
+  PERIOD_DETECTION = "period_detection"
+}
+
+/**
+ * One predicted or measured change in stack noise, with its tolerance.
+ *
+ * Parameters
+ * ----------
+ * noise_change_fraction : `float` or `None`
+ * The change in noise as a fraction. A fall of 29% is -0.29.
+ * ``None`` when it could not be found.
+ * tolerance : `float` or `None`
+ * How far the number may be off and still agree, as a fraction. It
+ * comes from the uncertainty of the aperture noise.
+ */
+export interface ForecastedChange {
+  noiseChangeFraction?: number | null;
+  tolerance?: number | null;
+}
+
+/**
+ * How a forecast compares with what happened.
+ */
+export enum ForecastOutcome {
+  AS_FORECAST = "as_forecast",
+  SHORT_KNOWN_REASON = "short_known_reason",
+  SHORT_UNKNOWN_REASON = "short_unknown_reason",
+  NOT_CHECKABLE = "not_checkable"
+}
+
+/**
+ * What a target is observed for. Each use has its own ranked list.
+ */
+export enum RankedUse {
+  IMAGING = "imaging",
+  PHOTOMETRY = "photometry",
+  SPECTROSCOPY = "spectroscopy"
+}
+
+/**
+ * One target in a ranked list.
+ *
+ * Parameters
+ * ----------
+ * target_id : `str`
+ * The target.
+ * use : `RankedUse`
+ * The list it belongs to.
+ * status : `CandidateStatus`
+ * Ranked, stopped, new or no forecast.
+ * rank : `int` or `None`
+ * Its place in the list, starting at 1. ``None`` for a new target or one
+ * with no forecast, because those are not ranked.
+ * gain_per_hour_fraction : `float` or `None`
+ * How much one clock hour of exposures cuts the stack's noise, as a
+ * fraction (0.18 is a fall of 18%). 0 for a stopped target. ``None``
+ * when it could not be found.
+ * altitude_deg : `float` or `None`
+ * The target's altitude at the planning time, in degrees.
+ * capture_setting : `CaptureSetting` or `None`
+ * The setting the forecast assumes (the one most used so far).
+ * frames_in_hour : `int` or `None`
+ * How many frames of that setting fit in one clock hour.
+ * exposure_seconds : `float` or `None`
+ * The exposure of one of those frames, in seconds.
+ * overhead_fraction : `float` or `None`
+ * Downloads, dithers and autofocus over exposure time (0.2 means the
+ * hour holds 20% less exposure than the clock says).
+ * effective_hours_so_far : `float` or `None`
+ * Exposure time of the frames already taken, in hours.
+ * sky_rate_e_per_s_per_px : `float` or `None`
+ * The sky rate the forecast assumed for tonight.
+ * sky_source : `str`
+ * ``"model"`` when the rate came from the sky model, ``"history"`` when
+ * it was the target's own past frames, or ``"none"``.
+ * thin_dataset : `bool`
+ * True when the target has little data, so a large gain per hour is
+ * partly just a short history.
+ * reason : `str`
+ * Why a target is stopped, new or without a forecast, or a remark on a
+ * ranked one. Empty when there is nothing to add.
+ * confidence : `Confidence`
+ * Always ``design_estimate`` today.
+ * register_entry : `str`
+ * The validation register entry behind the ranking.
+ * evidence : `list` [`MeasurementReference`]
+ * The stored rows the forecast rests on.
+ */
+export interface RankedCandidate {
+  targetId: string;
+  use: RankedUse;
+  status: CandidateStatus;
+  rank?: number | null;
+  gainPerHourFraction?: number | null;
+  altitudeDeg?: number | null;
+  captureSetting?: CaptureSetting | null;
+  framesInHour?: number | null;
+  exposureSeconds?: number | null;
+  overheadFraction?: number | null;
+  effectiveHoursSoFar?: number | null;
+  skyRateEPerSPerPx?: number | null;
+  skySource?: string;
+  thinDataset?: boolean;
+  reason?: string;
+  confidence?: Confidence;
+  registerEntry?: string;
+  evidence?: MeasurementReference[];
+}
+
+/**
+ * How well the sky model is known for one equipment setting.
+ *
+ * Parameters
+ * ----------
+ * setting_key : `str`
+ * The equipment the model was fitted for (camera, telescope, filter,
+ * gain setting, offset and binning).
+ * nights_used : `int`
+ * Nights of the user's own frames behind the fit.
+ * frames_used : `int`
+ * Frames behind the fit.
+ * held_out_relative_error : `float`
+ * The error to expect on a new night, as a fraction of the sky rate.
+ * moon_fitted : `bool`
+ * Whether enough moonlit nights existed to fit the Moon.
+ */
+export interface SkySettingSummary {
+  settingKey: string;
+  nightsUsed: number;
+  framesUsed: number;
+  heldOutRelativeError: number;
+  moonFitted: boolean;
+}
+
+/**
+ * Processing: the guiding error of one run.
+ *
+ * Attributes
+ * ----------
+ * run_id : `str`
+ * The run's identifier.
+ * started_at : `float`
+ * When the run began, in seconds since the Unix epoch.
+ * duration_seconds : `float` or `None`
+ * Length of the run.
+ * samples : `int`
+ * Samples in the run that were not excursions.
+ * rms_per_axis_arcsec : `float` or `None`
+ * Robust guiding error per axis, in arcseconds.
+ * lost_fraction : `float` or `None`
+ * Share of the run's frames that were lost.
+ * net_dec_correction_arcsec_per_minute : `float` or `None`
+ * The run's net Dec correction rate (see `GuidingPerformance`).
+ * altitude_degrees : `float` or `None`
+ * Altitude when the run began.
+ * azimuth_degrees : `float` or `None`
+ * Azimuth when the run began.
+ * declination_degrees : `float` or `None`
+ * Declination when the run began.
+ * pier_side : `str` or `None`
+ * Side of the pier the telescope was on.
+ */
+export interface GuidingRunPerformance {
+  runId: string;
+  startedAt: number;
+  durationSeconds?: number | null;
+  samples?: number;
+  rmsPerAxisArcsec?: number | null;
+  lostFraction?: number | null;
+  netDecCorrectionArcsecPerMinute?: number | null;
+  altitudeDegrees?: number | null;
+  azimuthDegrees?: number | null;
+  declinationDegrees?: number | null;
+  pierSide?: string | null;
+}
+
+/**
+ * The time lost to one cause.
+ *
+ * Parameters
+ * ----------
+ * cause : `str`
+ * The cause, or for a frame set aside, the reason it was set aside.
+ * seconds : `float`
+ * Time lost, in seconds.
+ * recoverable_with_time : `bool`
+ * Whether more exposure time repairs this loss.
+ * model_derived : `bool`
+ * Whether the share comes from a model instead of a measurement.
+ */
+export interface LossShare {
+  cause: string;
+  seconds: number;
+  recoverableWithTime: boolean;
+  modelDerived: boolean;
+}
+
+/**
+ * What the ranking could do with a target.
+ *
+ * `RANKED` has a gain and a rank. `STOPPED` is ranked at zero because its
+ * noise has stopped falling. `NEW` has no data yet and is not ranked.
+ * `NO_FORECAST` has data, but something needed for the forecast is missing,
+ * and the reason says what.
+ */
+export enum CandidateStatus {
+  RANKED = "ranked",
+  STOPPED = "stopped",
+  NEW = "new",
+  NO_FORECAST = "no_forecast"
+}
+
+/**
  * Every RPC method the backend serves, from backend/public_interface.py.
  */
 export const RPC_METHODS = [
@@ -2926,6 +4212,9 @@ export const RPC_METHODS = [
   "execution:abort_session",
   "execution:reconcile_session",
   "execution:record_divergence",
+  "plan:get",
+  "plan:edit",
+  "plan:tick_checklist_item",
   "sequencer:get_queue",
   "sequencer:create_plan",
   "sequencer:add",
@@ -2947,6 +4236,8 @@ export const UI_EVENTS = {
   "catalog:changed": "catalog:changed",
   /** A frame measurement job stored new quality rows. The payload is {targetId, framesMeasured, rowsWritten, observingNightIds}. */
   "quality:measured": "quality:measured",
+  /** A write changed the night plan. The payload is {sessionId, revision, changed}, where revision is the plan revision now stored and changed lists the kind of each change. */
+  "plan:changed": "plan:changed",
   /** The mount, processing jobs or health status changed. */
   "system_state_update": "system_state_update",
   /** A backend log line, for the app's log panel. */

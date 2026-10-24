@@ -138,14 +138,15 @@ from backend.services.infrastructure.system_status_service import (
 from wayfindinglib.drivers.indi_interface import TelescopeStatus
 from wayfindinglib.models.equipment_and_site.performance_envelope import (
     PerformanceEnvelope,
-    PerformanceThreshold,
-    ThresholdStatus,
-    ThresholdTier,
     TrackingRiskMap,
 )
 from wayfindinglib.models.planning.mosaic import MosaicPanel
+from wayfindinglib.models.planning.observation_package import ExposureRequest
 from wayfindinglib.models.planning.sequence_plan import SequenceItem, SequencePlan
+from wayfindinglib.models.planning.sequence_summary import SequenceSummary
 from wayfindinglib.models.planning.sky_source import SkySource
+from wayfindinglib.models.planning.target_report import TargetDatasetReport
+from wayfindinglib.models.planning.tonight_ranking import TonightRanking
 from wayfindinglib.models.planning.visibility import (
     MeridianCrossing,
     MeridianStatus,
@@ -155,7 +156,16 @@ from wayfindinglib.models.planning.visibility import (
     VisibilitySample,
     VisibilitySpan,
 )
-from wayfindinglib.models.session.observation_session import WeatherSample
+from wayfindinglib.models.quality.statements import NeedsAttention, TargetStatement
+from wayfindinglib.models.session.night_quality import NightQuality
+from wayfindinglib.models.session.observation_session import (
+    ChecklistItem,
+    Framing,
+    ObservationSession,
+    PlanChange,
+    PlanChangeItem,
+    WeatherSample,
+)
 from wayfindinglib.models.session.telemetry import (
     AlignmentAttempt,
     AlignmentSessionSummary,
@@ -332,6 +342,66 @@ def generate_interface(model: type[BaseModel], name: str) -> str:
     return "\n".join(lines)
 
 
+def referenced_types(py_type: Any) -> list[type]:
+    """List the enums and models a type annotation names, at any depth.
+
+    Parameters
+    ----------
+    py_type : `Any`
+        A type annotation, such as ``list[ChecklistItem] | None``.
+
+    Returns
+    -------
+    found : `list` [`type`]
+        Every `Enum` and pydantic `BaseModel` class inside the annotation.
+    """
+    if isinstance(py_type, type) and (issubclass(py_type, Enum) or issubclass(py_type, BaseModel)):
+        return [py_type]
+    found: list[type] = []
+    for argument in get_args(py_type):
+        found.extend(referenced_types(argument))
+    return found
+
+
+def generate_closure(roots: list[type], already_named: set[str]) -> list[str]:
+    """Write the roots and the models and enums they use.
+
+    The night plan and the target report hold many nested models. Listing each
+    by hand would go stale, so this follows the field types instead.
+
+    Parameters
+    ----------
+    roots : `list` [`type`]
+        The models the app reads directly.
+    already_named : `set` [`str`]
+        Names written elsewhere in the file. They are not written again, and
+        their fields are not followed.
+
+    Returns
+    -------
+    blocks : `list` [`str`]
+        One TypeScript block per new enum or interface, roots first.
+    """
+    blocks: list[str] = []
+    seen = set(already_named)
+    pending = list(roots)
+    while pending:
+        current = pending.pop(0)
+        if current.__name__ in seen:
+            continue
+        seen.add(current.__name__)
+        if issubclass(current, Enum):
+            blocks.append(generate_enum(current, current.__name__))
+            continue
+        blocks.append(generate_interface(current, current.__name__))
+        hints = get_type_hints(current, include_extras=True)
+        for field_name in current.model_fields:
+            pending.extend(referenced_types(hints[field_name]))
+        for computed_info in current.model_computed_fields.values():
+            pending.extend(referenced_types(computed_info.return_type))
+    return blocks
+
+
 def generate_public_interface() -> str:
     """Generate the TypeScript lists of the backend's methods, events, routes.
 
@@ -454,9 +524,6 @@ def render_types() -> str:
         generate_interface(AlignmentTrackPoint, "AlignmentTrackPoint"),
         generate_interface(AlignmentTargetSession, "AlignmentTargetSession"),
         generate_interface(MountPointingModel, "MountPointingModel"),
-        generate_enum(ThresholdTier, "ThresholdTier"),
-        generate_enum(ThresholdStatus, "ThresholdStatus"),
-        generate_interface(PerformanceThreshold, "PerformanceThreshold"),
         generate_interface(TrackingRiskMap, "TrackingRiskMap"),
         generate_interface(PerformanceEnvelope, "PerformanceEnvelope"),
         generate_interface(GuidingSpectrumPeak, "GuidingSpectrumPeak"),
@@ -533,8 +600,31 @@ def render_types() -> str:
         generate_interface(MetricSpec, "MetricSpec"),
         generate_interface(MetricSummary, "MetricSummary"),
         generate_interface(SensorNoiseMeasurement, "SensorNoiseMeasurement"),
-        generate_public_interface(),
     ]
+
+    # The night plan, its change record, the sequence summary and the target
+    # dataset report, with every model and enum they hold (#95).
+    written = {block.split("export ", 1)[1].split(" ", 2)[1].split("{")[0] for block in interfaces}
+    interfaces.extend(
+        generate_closure(
+            [
+                ObservationSession,
+                PlanChange,
+                PlanChangeItem,
+                ChecklistItem,
+                Framing,
+                ExposureRequest,
+                SequenceSummary,
+                TargetStatement,
+                NeedsAttention,
+                TargetDatasetReport,
+                TonightRanking,
+                NightQuality,
+            ],
+            written,
+        )
+    )
+    interfaces.append(generate_public_interface())
 
     content = header + "\n" + "\n\n".join(interfaces) + "\n"
 

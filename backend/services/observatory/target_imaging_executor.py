@@ -10,6 +10,8 @@ slews to the entry's target and captures its exposures.
 
 This service keeps only the session's id, the thread, and the change of
 shape between the session's entries and the sequences the app shows.
+Every queue edit goes through the plan service, so each one sends the
+``plan:changed`` event and other open windows read the plan again.
 """
 
 import logging
@@ -19,6 +21,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from astrometricslib import observing_night_id
+from backend.services.observatory.plan_service import PlanService
 from wayfindinglib import ObservationSession, QueueRequest, StartTimeMode, Wayfinder
 
 logger = logging.getLogger(__name__)
@@ -31,15 +34,20 @@ Finished entries leave the queue, as they always have."""
 class TargetImagingExecutor:
     """Keep the sequencer's session and run its queue on a thread."""
 
-    def __init__(self, wayfinder: Wayfinder) -> None:
+    def __init__(self, wayfinder: Wayfinder, plan_service: PlanService | None = None) -> None:
         """Keep the Wayfinder whose planning and execution do the work.
 
         Parameters
         ----------
         wayfinder : `Wayfinder`
             The shared Wayfinder.
+        plan_service : `PlanService`, optional
+            Makes each queue edit and sends the ``plan:changed`` event. With
+            none, a plan service with no event sender is used, so edits work
+            but nothing is announced.
         """
         self._wayfinder = wayfinder
+        self._plan_service = plan_service or PlanService(wayfinder=wayfinder)
         self._session_id: str | None = None
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -111,8 +119,10 @@ class TargetImagingExecutor:
         package = planning.create_plan(
             "package", target=sequence["target_name"], plan_items=sequence["items"]
         )
-        session = planning.edit_queue(self._session().id, add=[self._request(package.id, timing)])
-        return session.queue[-1].id
+        change = self._plan_service.edit_plan(
+            self._session().id, add=[self._request(package.id, timing).model_dump(mode="json")]
+        )
+        return change.session.queue[-1].id
 
     def enqueue_sequence(self, sequence: dict[str, Any], timing: dict[str, Any]) -> dict[str, str]:
         """Add one sequence to the queue.
@@ -143,7 +153,7 @@ class TargetImagingExecutor:
         """
         if sequence_id not in {entry.id for entry in self._session().queue}:
             return False
-        self._wayfinder.planning.edit_queue(self._session_id, remove=[sequence_id])
+        self._plan_service.edit_plan(self._session_id, remove=[sequence_id])
         return True
 
     def modify_queue_item(self, sequence_id: str, sequence: dict[str, Any]) -> bool:
@@ -167,7 +177,7 @@ class TargetImagingExecutor:
         )
         new_id = self._queue_sequence(sequence, timing)
         order = [new_id if entry_id == sequence_id else entry_id for entry_id in ids]
-        self._wayfinder.planning.edit_queue(self._session_id, remove=[sequence_id], order=order)
+        self._plan_service.edit_plan(self._session_id, remove=[sequence_id], order=order)
         return True
 
     def reorder(self, sequence_ids: list[str]) -> bool:
@@ -183,7 +193,7 @@ class TargetImagingExecutor:
         current = [entry.id for entry in self._session().queue]
         named = [entry_id for entry_id in sequence_ids if entry_id in current]
         order = named + [entry_id for entry_id in current if entry_id not in named]
-        self._wayfinder.planning.edit_queue(self._session_id, order=order)
+        self._plan_service.edit_plan(self._session_id, order=order)
         return True
 
     def create_plan(self, target_name: str, items: list[dict[str, Any]]) -> Any:

@@ -81,7 +81,7 @@ def camera(control: ObservatoryControl, monkeypatch: pytest.MonkeyPatch) -> _Sim
     )
     monkeypatch.setattr(hardware_operations, "guide_image", lambda context: simulated.image())
     monkeypatch.setattr(
-        "wayfindinglib.tasks.control_tasks.performance_envelope_tasks.sensor_limits_for_camera",
+        "wayfindinglib.analytics.envelope_assembly.sensor_limits_for_camera",
         lambda name, config=None: SensorLimits("Guider", 65532.0, "test", 65000.0, "test", False),
     )
     monkeypatch.setattr(

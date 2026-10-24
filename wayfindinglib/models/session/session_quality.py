@@ -8,8 +8,9 @@ pipelines use:
   trustworthy the night's records are and lists problems in how the data was
   gathered.
 * Processing measures what the night's data shows, such as the guiding error.
-* Post-processing turns those measurements into recommendations, each tied to
-  the evidence and the equipment-derived limit it rests on.
+* Post-processing turns those measurements into statements (`TargetStatement`,
+  the one advice shape the target report uses too), each tied to the evidence
+  and the equipment-derived limit it rests on.
 
 Every result is computed on demand from stored samples and the equipment's
 current limits, and none is stored. A stored recommendation would go stale as
@@ -17,82 +18,14 @@ soon as the equipment, and so every limit, changed.
 """
 
 from datetime import UTC, datetime
-from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from wayfindinglib.models.quality.statements import TargetStatement
+
 GUIDING_ANALYSIS_VERSION = "1.0.0"
 """Bumped whenever the guiding analysis changes what it measures or reports."""
-
-
-class RecommendationSeverity(StrEnum):
-    """How much attention a recommendation needs.
-
-    `INFO` states a finding with nothing to do. `ADVICE` suggests a change
-    that would improve results. `WARNING` names a problem that makes the
-    night's data unreliable or the equipment misconfigured.
-    """
-
-    INFO = "info"
-    ADVICE = "advice"
-    WARNING = "warning"
-
-
-class RecommendationKind(StrEnum):
-    """What a recommendation is about."""
-
-    INSUFFICIENT_DATA = "insufficient_data"
-    RECALIBRATE_GUIDER = "recalibrate_guider"
-    CHECK_GUIDE_SIGNAL = "check_guide_signal"
-    UPDATE_GUIDE_OPTICS_CONFIGURATION = "update_guide_optics_configuration"
-    GUIDING_ABOVE_LIMIT = "guiding_above_limit"
-    GUIDING_WITHIN_LIMIT = "guiding_within_limit"
-    CAPTURES_NOT_IN_LIBRARY = "captures_not_in_library"
-    FRAMES_MISSING_MEASUREMENTS = "frames_missing_measurements"
-    FREQUENT_ABORTED_CAPTURES = "frequent_aborted_captures"
-    SENSOR_TEMPERATURE_DRIFT = "sensor_temperature_drift"
-    SPECTRAL_STAR_CLIPPED = "spectral_star_clipped"
-    STAR_WIDTH_ABOVE_BASELINE = "star_width_above_baseline"
-    STARS_ELONGATED = "stars_elongated"
-    CAPTURE_WITHIN_LIMITS = "capture_within_limits"
-    SKY_REGION_POOR = "sky_region_poor"
-    MINIMUM_ALTITUDE_SUGGESTED = "minimum_altitude_suggested"
-    SKY_COVERAGE_GAP = "sky_coverage_gap"
-    SKY_WITHIN_LIMITS = "sky_within_limits"
-    RECURRING_ISSUE = "recurring_issue"
-    EXPOSURE_LENGTH_LIMITED = "exposure_length_limited"
-
-
-class Recommendation(BaseModel):
-    """One thing the analysis recommends, with the reasons for it.
-
-    Attributes
-    ----------
-    kind : `RecommendationKind`
-        What the recommendation is about.
-    severity : `RecommendationSeverity`
-        How much attention it needs.
-    message : `str`
-        What was found and what to do, in plain language.
-    evidence : `dict` [`str`, `float` or `str` or `None`]
-        The measured values the recommendation rests on.
-    compared_to : `dict` [`str`, `float` or `str` or `None`]
-        The equipment-derived limits the evidence was compared with.
-    confidence : `str`
-        ``"high"``, ``"medium"`` or ``"low"``: how far the evidence alone
-        supports the conclusion. A recommendation that depends on a proxy,
-        or on limits from different equipment, is never ``"high"``.
-    """
-
-    model_config = ConfigDict(populate_by_name=True)
-
-    kind: RecommendationKind
-    severity: RecommendationSeverity
-    message: str
-    evidence: dict[str, float | str | None] = Field(default_factory=dict)
-    compared_to: dict[str, float | str | None] = Field(default_factory=dict, alias="comparedTo")
-    confidence: str
 
 
 class GuidingInputQuality(BaseModel):
@@ -349,9 +282,9 @@ class GuidingSessionAnalysis(BaseModel):
     equipment_fingerprint : `str`
         The equipment the limits were worked out for.
     flagged : `bool`
-        `True` if any recommendation is a warning.
+        `True` if any statement is a warning.
     flag_reasons : `list` [`str`]
-        The kinds of the warnings.
+        The rule names of the warnings.
     resolved_parameters : `dict` [`str`, `float` or `str` or `None`]
         The limits this analysis used, so a result can be traced to the
         numbers behind it.
@@ -359,7 +292,7 @@ class GuidingSessionAnalysis(BaseModel):
         Pre-processing: is the data good?
     performance : `GuidingPerformance`
         Processing: what does it show?
-    recommendations : `list` [`Recommendation`]
+    recommendations : `list` [`TargetStatement`]
         Post-processing: what to do about it.
     created_at : `datetime`
         When the analysis was run.
@@ -376,5 +309,5 @@ class GuidingSessionAnalysis(BaseModel):
     resolved_parameters: dict[str, Any] = Field(default_factory=dict, alias="resolvedParameters")
     input_quality: GuidingInputQuality = Field(alias="inputQuality")
     performance: GuidingPerformance
-    recommendations: list[Recommendation] = Field(default_factory=list)
+    recommendations: list[TargetStatement] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), alias="createdAt")

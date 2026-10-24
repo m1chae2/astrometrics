@@ -103,6 +103,10 @@ class ObservationSessionRecorder:
     def save_checkpoint(self, session: ObservationSession) -> None:
         """Record the session recorded so far.
 
+        The save keeps what Planning changed in the stored plan since this
+        session was loaded (checklist, framing, queue edits and revision),
+        through `DiskButler.put_session_from_execution`.
+
         Parameters
         ----------
         session : `ObservationSession`
@@ -110,7 +114,7 @@ class ObservationSessionRecorder:
             (not just at the end) so a crash mid-night doesn't lose the
             whole recording.
         """
-        self._butler.put(session, "observation_session", {"session_id": session.id})
+        self._butler.put_session_from_execution(session)
 
     def run(self, session_id: str, stop_event: Any | None = None) -> ObservationSession:
         """Run the recording loop for one observing night.

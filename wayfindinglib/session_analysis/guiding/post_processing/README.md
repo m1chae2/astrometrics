@@ -1,13 +1,13 @@
 # Post-processing: what should change?
 
-`recommend_for_guiding.py` reads the pre-processing verdicts and the processing measurements and says what, if anything, to change. The result is a list of `Recommendation` records, most serious first.
+`recommend_for_guiding.py` reads the pre-processing verdicts and the processing measurements and says what, if anything, to change. The result is a list of `TargetStatement` records, most serious first. This is the same shape the target report uses. Each one is built from its row of the session rule table (`analytics/result_quality/session_rules.py`).
 
-Each recommendation has:
+Each statement has:
 
-- a **kind** and a **severity**: `info` (a finding, nothing to do), `advice` (a change that would improve results) or `warning` (the night's data is unreliable or the equipment is misconfigured);
+- a **rule** name, a **kind** (`warning`, `recommendation`, `constraint` or `insufficient_data`), an **action class** (for a warning or recommendation), and a **severity**: `info` (a finding, nothing to do), `advice` (a change that would improve results) or `warning` (the night's data is unreliable or the equipment is misconfigured). A night that is within its limits is a `constraint` of `info` severity;
 - a plain-language **message**;
-- the **evidence** it rests on and the **limit** it was compared with, so a reader can check it;
-- a **confidence**: `high`, `medium` or `low`. It is `medium` when the limits come from equipment that only partly matches the night's. It is `low` for a guiding-error conclusion when the guide signal was poor, because then the error numbers describe a bad measurement, not the mount.
+- the **evidence** (references to stored measurement rows), the other **values** it rests on (numbers from the guide log that are not rows of the store), and the **limits** it was compared with (each a `QualityLimit` with its tier and derivation), so a reader can check it;
+- a **confidence**: `measured`, `partly_measured` or `design_estimate`, the status of the register entry behind the guiding rules (WAY-45). It steps down one label when the limits come from equipment that only partly matches the night's, when the guide signal was poor, or when the advice rests on a proxy such as the guide log.
 
 ## Rules
 
@@ -17,9 +17,9 @@ Applied in this order:
 2. A calibration that measured an impossible mount speed: warn, and advise recalibrating under a clear sky with a bright, well-focused guide star.
 3. A weak or dim guide star, many lost frames, or frequent excursions: warn, and list which checks failed. For a dim star the message says how many times fainter it was than usual and how much of that a shorter guide cycle could explain. The message names the usual causes (guide camera exposure or gain too low, poor guide focus, dew or haze, cloud, a dim guide star) and says the logs cannot tell which applies.
 4. Guide optics in the log that differ from the configuration: warn, and advise updating the configuration.
-5. Guiding error against the acceptable guiding error: advice if it is above (with the star widening it causes), information if it is within.
+5. Guiding error against the acceptable guiding error: advice if it is above (with the star widening it causes). A night within the limit makes no statement.
 6. The longest exposure length in use against the exposure-length view: advice if fewer than half of the exposures of that length would have had clean guiding. The message names the main cause, the share of windows it spoiled, and the longest length that would have worked. Confidence is `medium`, or `low` when the guide signal was poor.
 
-The summary's `flagged` field is true when any recommendation is a warning, and `flagReasons` lists their kinds.
+The summary's `flagged` field is true when any recommendation is a warning, and `flagReasons` lists their rule names.
 
 For exact behavior, read the code. The code is the source of truth.

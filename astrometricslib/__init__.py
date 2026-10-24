@@ -128,8 +128,13 @@ from astrometricslib.models.provenance import (
     WasConfiguredBy,
     WasGeneratedBy,
 )
-from astrometricslib.models.quality.capture_setting import CaptureSetting
-from astrometricslib.models.quality.excluded_frames import QuarantinePreview, RestoreReport, SetAsideFrame
+from astrometricslib.models.quality.capture_setting import UNKNOWN_CAPTURE_SETTING_CAMERA, CaptureSetting
+from astrometricslib.models.quality.excluded_frames import (
+    QuarantinePreview,
+    RestoreReport,
+    SetAsideFrame,
+    SetAsideFrameRecord,
+)
 from astrometricslib.models.quality.frame_measurement_summary import FrameMeasurementSummary
 from astrometricslib.models.quality.limit import LimitTier, QualityLimit
 from astrometricslib.models.quality.measurement import (
@@ -170,6 +175,8 @@ from astrometricslib.models.quality.subset_stacks import (
     SubsetStackResult,
 )
 from astrometricslib.models.stellar_source import (
+    AMBIGUOUS_RMS_GAP,
+    NO_GOOD_MATCH_RMS,
     AnalysisResult,
     FileItem,
     GroupedFrameStat,
@@ -216,12 +223,23 @@ if TYPE_CHECKING:
         resolve_target,
         to_epoch_seconds,
     )
+    from astrometricslib.pipelines.shared.quality.frame_measurement import (
+        PIXEL_BLUR_FWHM_SQUARED_FACTOR,
+        frame_subject_id,
+    )
     from astrometricslib.pipelines.shared.quality.frame_selection import (
         FrameSelection,
         parse_iso_time,
         select_library_frames,
     )
     from astrometricslib.pipelines.shared.stack_preview_path import preview_path_for
+    from astrometricslib.pipelines.stacking.post_processing.stack_membership import wfwhm_weights
+    from astrometricslib.pipelines.stacking.pre_processing.exposure_weighting import (
+        MINIMUM_PENALTY_TO_WEIGHT,
+        NOISE_WEIGHT_MODE,
+        choose_stack_weight,
+        equal_weight_noise_penalty,
+    )
 
 # A library only writes log messages. A program decides where they go, by
 # calling `configure_logging`. The null handler stops Python from printing a
@@ -244,6 +262,13 @@ _DEFERRED_EXPORTS = {
     "Jobs": "astrometricslib.api.jobs",
     "FrameSelection": "astrometricslib.pipelines.shared.quality.frame_selection",
     "parse_iso_time": "astrometricslib.pipelines.shared.quality.frame_selection",
+    "frame_subject_id": "astrometricslib.pipelines.shared.quality.frame_measurement",
+    "PIXEL_BLUR_FWHM_SQUARED_FACTOR": "astrometricslib.pipelines.shared.quality.frame_measurement",
+    "MINIMUM_PENALTY_TO_WEIGHT": "astrometricslib.pipelines.stacking.pre_processing.exposure_weighting",
+    "NOISE_WEIGHT_MODE": "astrometricslib.pipelines.stacking.pre_processing.exposure_weighting",
+    "choose_stack_weight": "astrometricslib.pipelines.stacking.pre_processing.exposure_weighting",
+    "equal_weight_noise_penalty": "astrometricslib.pipelines.stacking.pre_processing.exposure_weighting",
+    "wfwhm_weights": "astrometricslib.pipelines.stacking.post_processing.stack_membership",
     "check_choice": "astrometricslib.pipelines.shared.api_arguments",
     "check_include": "astrometricslib.pipelines.shared.api_arguments",
     "reject_unused_arguments": "astrometricslib.pipelines.shared.api_arguments",
@@ -386,13 +411,19 @@ class Astrometrics:
 
 
 __all__ = [
+    "AMBIGUOUS_RMS_GAP",
     "DATA_ERRORS",
     "DEFAULT_DARK_TEMPERATURE_TOLERANCE_C",
     "FITS_READ_ERRORS",
+    "MINIMUM_PENALTY_TO_WEIGHT",
+    "NOISE_WEIGHT_MODE",
+    "NO_GOOD_MATCH_RMS",
     "ONLINE_QUERY_ERRORS",
+    "PIXEL_BLUR_FWHM_SQUARED_FACTOR",
     "RPC_CODES",
     "SATURATED_BLOB_MINIMUM_PIXELS",
     "SATURATED_FRAME_FRACTION",
+    "UNKNOWN_CAPTURE_SETTING_CAMERA",
     "AbstractButler",
     "AbstractCatalogAccess",
     "Activity",
@@ -486,6 +517,7 @@ __all__ = [
     "RenderedImage",
     "RestoreReport",
     "SetAsideFrame",
+    "SetAsideFrameRecord",
     "SimbadDriver",
     "SpectralFrameCheckReport",
     "SpectroscopyResult",
@@ -527,16 +559,19 @@ __all__ = [
     "capture_job_logs",
     "check_choice",
     "check_include",
+    "choose_stack_weight",
     "classify_and_sort_fits_files",
     "close_interrupted_jobs",
     "configure_logging",
     "configure_offline_iers",
     "connect_db",
     "derive_target_sessions",
+    "equal_weight_noise_penalty",
     "error_from_info",
     "export_target_lineage_as_prov_xml",
     "file_lock",
     "frame_is_spectral",
+    "frame_subject_id",
     "get_configuration",
     "get_current_job",
     "get_log_context",
@@ -562,4 +597,5 @@ __all__ = [
     "to_epoch_seconds",
     "to_error_info",
     "warm_earth_orientation_data",
+    "wfwhm_weights",
 ]

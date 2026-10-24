@@ -14,10 +14,10 @@ describe a bad measurement, not the mount, so its runs are left out.
 
 from collections.abc import Iterable, Sequence
 
+from wayfindinglib.analytics.capture_history import night_of, usable_star_frames
 from wayfindinglib.models.session.capture_frame import CaptureFrame
 from wayfindinglib.models.session.session_quality import GuidingSessionAnalysis
 from wayfindinglib.models.session.sky_quality import SkySample
-from wayfindinglib.tasks.control_tasks.capture_analysis_tasks import night_of, usable_star_frames
 
 
 def _has_position(altitude: float | None, azimuth: float | None, pier_side: str | None) -> bool:

@@ -5,6 +5,8 @@ observation planning and observatory control. Like the Astrometrics library's
 architecture paper, it names no code and states no tuned values; hidden
 ``<!-- impl: -->`` comments may name code because they do not render.
 ``Wayfinding_Library_Implementation.md`` carries the code names and settings.
+``Wayfinding_Quality_Judgment.md`` is a companion theory paper on judging
+quality; it follows the same rules.
 The rules and their helpers are shared with
 ``astrometricslib/test/test_documentation_rules.py`` so both libraries follow
 ``documentation/Documentation_Conventions.md`` in the same way.
@@ -19,6 +21,7 @@ from astrometricslib.test.test_architecture_doc_claims import IMPL_COMMENT, _res
 from astrometricslib.test.test_documentation_rules import (
     ARCHITECTURE_WORD_LIMIT,
     IMPLEMENTATION_WORD_LIMIT,
+    WAYFINDING_QUALITY_JUDGMENT_WORD_LIMIT,
     assert_names_no_code,
     assert_states_no_tuned_values,
     assert_within_word_limit,
@@ -27,6 +30,7 @@ from astrometricslib.test.test_documentation_rules import (
 DESIGN_DIR = Path(__file__).resolve().parents[2] / "documentation" / "library_design"
 ARCHITECTURE = DESIGN_DIR / "Wayfinding_Library_Architecture.md"
 IMPLEMENTATION = DESIGN_DIR / "Wayfinding_Library_Implementation.md"
+QUALITY_JUDGMENT = DESIGN_DIR / "Wayfinding_Quality_Judgment.md"
 VERSION_LINE = re.compile(r"^\*Version [^*]*\*$", re.MULTILINE)
 
 
@@ -40,7 +44,19 @@ def test_architecture_states_no_tuned_values() -> None:
     assert_states_no_tuned_values(ARCHITECTURE)
 
 
-@pytest.mark.parametrize("paper", [ARCHITECTURE, IMPLEMENTATION], ids=lambda path: path.stem)
+def test_quality_judgment_names_no_code() -> None:
+    """The judgment paper shows no code name."""
+    assert_names_no_code(QUALITY_JUDGMENT)
+
+
+def test_quality_judgment_states_no_tuned_values() -> None:
+    """The judgment paper states no tuned value."""
+    assert_states_no_tuned_values(QUALITY_JUDGMENT)
+
+
+@pytest.mark.parametrize(
+    "paper", [ARCHITECTURE, IMPLEMENTATION, QUALITY_JUDGMENT], ids=lambda path: path.stem
+)
 def test_every_impl_link_names_code_that_exists(paper: Path) -> None:
     """Each hidden ``impl`` link in a Wayfinding paper imports and resolves."""
     names = IMPL_COMMENT.findall(paper.read_text(encoding="utf-8"))
@@ -52,7 +68,9 @@ def test_every_impl_link_names_code_that_exists(paper: Path) -> None:
     )
 
 
-@pytest.mark.parametrize("paper", [ARCHITECTURE, IMPLEMENTATION], ids=lambda path: path.stem)
+@pytest.mark.parametrize(
+    "paper", [ARCHITECTURE, IMPLEMENTATION, QUALITY_JUDGMENT], ids=lambda path: path.stem
+)
 def test_paper_has_the_paper_layout(paper: Path) -> None:
     """Each paper has a version line, an abstract and a references section."""
     text = paper.read_text(encoding="utf-8")
@@ -63,7 +81,11 @@ def test_paper_has_the_paper_layout(paper: Path) -> None:
 
 @pytest.mark.parametrize(
     ("paper", "limit"),
-    [(ARCHITECTURE, ARCHITECTURE_WORD_LIMIT), (IMPLEMENTATION, IMPLEMENTATION_WORD_LIMIT)],
+    [
+        (ARCHITECTURE, ARCHITECTURE_WORD_LIMIT),
+        (IMPLEMENTATION, IMPLEMENTATION_WORD_LIMIT),
+        (QUALITY_JUDGMENT, WAYFINDING_QUALITY_JUDGMENT_WORD_LIMIT),
+    ],
     ids=lambda value: value.stem if isinstance(value, Path) else str(value),
 )
 def test_papers_stay_within_their_length(paper: Path, limit: int) -> None:

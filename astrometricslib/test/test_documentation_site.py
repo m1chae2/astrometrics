@@ -50,6 +50,7 @@ LLMS_REQUIRED = (
     "documentation/library_design/Astrometrics_Quality_Measurements.md",
     "documentation/library_design/Wayfinding_Library_Architecture.md",
     "documentation/library_design/Wayfinding_Library_Implementation.md",
+    "documentation/library_design/Wayfinding_Quality_Judgment.md",
     "documentation/library_design/validation/index.md",
 )
 

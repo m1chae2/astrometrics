@@ -10,7 +10,6 @@ from typing import Any
 
 import pytest
 
-from wayfindinglib.models.session.session_quality import RecommendationKind
 from wayfindinglib.session_analysis.guiding.pipeline import (
     GuidingAnalysisRequest,
     GuidingSessionPipeline,
@@ -49,7 +48,7 @@ def test_a_good_night_is_not_flagged(make_samples: Any, make_run: Any, make_enve
     assert analysis.flag_reasons == []
     assert analysis.input_quality.has_enough_samples is True
     assert analysis.performance.rms_per_axis_arcsec == pytest.approx(0.8, rel=0.1)
-    assert RecommendationKind.GUIDING_WITHIN_LIMIT in [r.kind for r in analysis.recommendations]
+    assert analysis.recommendations == []
 
 
 def test_a_bad_night_is_flagged_with_the_reasons(
@@ -63,8 +62,8 @@ def test_a_bad_night_is_flagged_with_the_reasons(
     )
 
     assert analysis.flagged is True
-    assert RecommendationKind.RECALIBRATE_GUIDER.value in analysis.flag_reasons
-    assert RecommendationKind.CHECK_GUIDE_SIGNAL.value in analysis.flag_reasons
+    assert "recalibrate_guider" in analysis.flag_reasons
+    assert "check_guide_signal" in analysis.flag_reasons
 
 
 def test_too_little_data_skips_processing_but_still_gives_a_summary(
@@ -77,7 +76,7 @@ def test_too_little_data_skips_processing_but_still_gives_a_summary(
 
     assert analysis.input_quality.has_enough_samples is False
     assert analysis.performance.rms_per_axis_arcsec is None
-    assert [r.kind for r in analysis.recommendations] == [RecommendationKind.INSUFFICIENT_DATA]
+    assert [r.rule for r in analysis.recommendations] == ["guiding_insufficient_data"]
     assert analysis.flagged is False
 
 

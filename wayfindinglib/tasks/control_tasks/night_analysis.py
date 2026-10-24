@@ -15,17 +15,16 @@ library's frame records are read once and shared through a
 
 from __future__ import annotations
 
-import logging
-import sqlite3
-import statistics
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib import FITS_READ_ERRORS, AstrometricsError, ConfigurationError
+from wayfindinglib.analytics import capture_history
+from wayfindinglib.analytics.envelope_assembly import assemble_performance_envelope, read_capture_frames
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
 
 if TYPE_CHECKING:
     from wayfindinglib.api.control.context import ControlContext
     from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
+    from wayfindinglib.models.session.capture_frame import CaptureFrame
     from wayfindinglib.models.session.capture_quality import CaptureSessionAnalysis
     from wayfindinglib.models.session.ekos_session import EkosSessionContext
     from wayfindinglib.models.session.guiding_run import GuidingRunSummary
@@ -33,16 +32,14 @@ if TYPE_CHECKING:
     from wayfindinglib.models.session.session_quality import GuidingSessionAnalysis
     from wayfindinglib.models.session.sky_quality import SkyAnalysis
 
-logger = logging.getLogger(__name__)
-
 LibraryCache = dict[tuple[str, str, str], Any]
 """Frame records read once and shared by every night of one call."""
 
 
 def capture_library(
     context: ControlContext, telescope_name: str, camera_name: str, library_cache: LibraryCache
-) -> tuple[list[Any], list[Any]]:
-    """Read the equipment's light frames and stack verdicts once.
+) -> list[CaptureFrame]:
+    """Read the equipment's light frames once.
 
     Parameters
     ----------
@@ -58,26 +55,14 @@ def capture_library(
     Returns
     -------
     frames : `list` [`CaptureFrame`]
-        The equipment's light frames, oldest first. Empty if the frame
-        library could not be read.
-    verdicts : `list` [`StackSaturationVerdict`]
-        The science library's saturation verdicts for stacked exposures.
+        The equipment's light frames, oldest first, with their stored
+        measurements. Empty if the frame library could not be read.
     """
-    from wayfindinglib.tasks.control_tasks import capture_analysis_tasks
-
     key = ("library", telescope_name, camera_name)
     if key not in library_cache:
-        try:
-            astrometrics = context.astrometrics
-            library_cache[key] = (
-                capture_analysis_tasks.collect_capture_frames(
-                    astrometrics, telescope_name, camera_name, context.config
-                ),
-                capture_analysis_tasks.collect_stack_saturation_verdicts(astrometrics),
-            )
-        except (AstrometricsError, sqlite3.Error, *FITS_READ_ERRORS) as error:
-            logger.warning("Could not read this equipment's frames from the frame library: %s", error)
-            library_cache[key] = ([], [])
+        library_cache[key] = read_capture_frames(
+            context.astrometrics, telescope_name, camera_name, context.config
+        )
     return library_cache[key]
 
 
@@ -109,6 +94,11 @@ def performance_envelope(
 ) -> PerformanceEnvelope | None:
     """Work out the performance limits of the active equipment.
 
+    The work is done in Foundation by `assemble_performance_envelope`, so
+    Planning reads the same limits. This function only supplies what the
+    Control context holds: the configuration, the butler, the record store
+    and the frame read shared between nights.
+
     Parameters
     ----------
     context : `ControlContext`
@@ -130,103 +120,21 @@ def performance_envelope(
     envelope : `PerformanceEnvelope` or `None`
         The limits, or `None` if no telescope and camera are active.
     """
-    from wayfindinglib.analytics.performance_envelope import (
-        DEFAULT_BLUR_TOLERANCE_FRACTION,
-        MINIMUM_GUIDE_CYCLES_PER_EXPOSURE,
-        derive_performance_envelope,
-    )
-    from wayfindinglib.models.equipment_and_site.equipment import EquipmentConfiguration
-    from wayfindinglib.models.equipment_and_site.equipment_fingerprint import build_equipment_fingerprint
-    from wayfindinglib.tasks.control_tasks import capture_analysis_tasks, performance_envelope_tasks
-
     catalog = get_equipment_catalog(context.config)
     telescope, camera = catalog.active_telescope(), catalog.active_camera()
     if telescope is None or camera is None:
         return None
-    guide_scope, guide_camera = catalog.active_guide_scope(), catalog.active_guide_camera()
-    equipment = EquipmentConfiguration(telescope=telescope, camera=camera)
-    guide_scale = equipment.guider_plate_scale_arcsec_per_px(guide_scope, guide_camera)
-    guide_focal_length = guide_scope.focal_length_mm if guide_scope else telescope.focal_length_mm
-    fingerprint = build_equipment_fingerprint(telescope.name, camera.name, guide_focal_length, guide_scale)
-    records = context.records
-
-    # The guide cycle is a property of the equipment, not of one night,
-    # so it is read from every recorded night. The baseline limits use
-    # only the nights before `before_night`.
-    every_night = performance_envelope_tasks.collect_baseline_values(records, contexts, fingerprint, runs)
-    baseline_values = (
-        every_night
-        if before_night is None
-        else performance_envelope_tasks.collect_baseline_values(
-            records, contexts, fingerprint, runs, before_night
-        )
+    return assemble_performance_envelope(
+        config=context.config,
+        butler=context.butler,
+        astrometrics=context.astrometrics,
+        blur_tolerance_fraction=blur_tolerance_fraction,
+        before_night=before_night,
+        contexts=contexts,
+        runs=runs,
+        capture_frames=capture_library(context, telescope.name, camera.name, library_cache),
+        records=context.records,
     )
-
-    # Only frames long enough for guiding error to show in them say how
-    # sharp this equipment's images are. "Long enough" is a few cycles
-    # of the equipment's own guider, known only once it has guided.
-    measured_image_quality = None
-    cadences = every_night["guide_cadence_seconds"]
-    guide_cadence = statistics.median(cadences) if cadences else None
-    capture_frames, _ = capture_library(context, telescope.name, camera.name, library_cache)
-    if guide_cadence is not None:
-        measured_image_quality = performance_envelope_tasks.image_quality_from_frames(
-            capture_frames, MINIMUM_GUIDE_CYCLES_PER_EXPOSURE * guide_cadence
-        )
-    baseline_values = {
-        **baseline_values,
-        **capture_analysis_tasks.collect_capture_baseline_values(
-            capture_frames,
-            contexts,
-            None if guide_cadence is None else MINIMUM_GUIDE_CYCLES_PER_EXPOSURE * guide_cadence,
-            before_night,
-        ),
-    }
-
-    try:
-        sensor_limits = performance_envelope_tasks.sensor_limits_for_camera(camera.name, context.config)
-    except ConfigurationError as error:
-        logger.warning("No usable camera profiles, so no saturation limits: %s", error)
-        sensor_limits = None
-
-    def derive(values: dict[str, Any]) -> PerformanceEnvelope:
-        """Derive the envelope from one set of baseline values.
-
-        Returns
-        -------
-        envelope : `PerformanceEnvelope`
-            The limits.
-        """
-        return derive_performance_envelope(
-            equipment,
-            guide_scope,
-            guide_camera,
-            fingerprint,
-            sensor_limits=sensor_limits,
-            measured_image_quality=measured_image_quality,
-            baseline_values=values,
-            guide_cadence_seconds=guide_cadence,
-            blur_tolerance_fraction=(
-                DEFAULT_BLUR_TOLERANCE_FRACTION
-                if blur_tolerance_fraction is None
-                else blur_tolerance_fraction
-            ),
-        )
-
-    # The excursion limit depends on the measured star width, and each
-    # earlier night's share of excursions depends on that limit, so the
-    # envelope is derived twice: once to learn the limit, once with the
-    # nights' shares included.
-    envelope = derive(baseline_values)
-    excursion_limit = envelope.value("guide_excursion_limit")
-    if excursion_limit is not None:
-        baseline_values["guide_excursion_fraction"] = (
-            performance_envelope_tasks.collect_excursion_fraction_baseline(
-                records, contexts, fingerprint, excursion_limit, before_night
-            )
-        )
-        envelope = derive(baseline_values)
-    return envelope
 
 
 def _exposure_lengths_in_use(
@@ -240,15 +148,13 @@ def _exposure_lengths_in_use(
         The lengths, shortest first. Empty if no equipment is active, the
         equipment has not guided yet, or no length has enough frames.
     """
-    from wayfindinglib.tasks.control_tasks import capture_analysis_tasks
-
     minimum = envelope.value("minimum_star_measurement_exposure") if envelope else None
     catalog = get_equipment_catalog(context.config)
     telescope, camera = catalog.active_telescope(), catalog.active_camera()
     if minimum is None or telescope is None or camera is None:
         return []
-    frames, _ = capture_library(context, telescope.name, camera.name, library_cache)
-    return capture_analysis_tasks.exposure_lengths_in_use(frames, minimum)
+    frames = capture_library(context, telescope.name, camera.name, library_cache)
+    return capture_history.exposure_lengths_in_use(frames, minimum)
 
 
 def guiding_night_analysis(
@@ -336,7 +242,7 @@ def guiding_night_summaries(
     summaries : `list` [`dict`]
         One row per night, oldest first: whether it was flagged and why,
         its samples, the share of lost frames, the guide signal, the
-        guiding error, and the kinds of its recommendations.
+        guiding error, and the rule names of its statements.
     """
     contexts, runs = recorded_sessions(context)
     library_cache: LibraryCache = {}
@@ -354,7 +260,7 @@ def guiding_night_summaries(
             "lostFraction": analysis.input_quality.lost_fraction,
             "medianSnr": analysis.input_quality.median_snr,
             "rmsPerAxisArcsec": analysis.performance.rms_per_axis_arcsec,
-            "recommendations": [r.kind.value for r in analysis.recommendations],
+            "recommendations": [r.rule for r in analysis.recommendations],
         })
     return rows
 
@@ -396,7 +302,6 @@ def capture_night_analysis(
         CaptureAnalysisRequest,
         analyze_capture_session_request,
     )
-    from wayfindinglib.tasks.control_tasks import capture_analysis_tasks
 
     if contexts is None or runs is None:
         contexts, runs = recorded_sessions(context)
@@ -405,9 +310,9 @@ def capture_night_analysis(
     telescope, camera = catalog.active_telescope(), catalog.active_camera()
     if telescope is None or camera is None:
         return None
-    frames, verdicts = capture_library(context, telescope.name, camera.name, library_cache)
-    night_frames = capture_analysis_tasks.frames_by_night(frames).get(session_id, [])
-    captures, aborted, has_record = capture_analysis_tasks.night_captures(contexts, session_id)
+    frames = capture_library(context, telescope.name, camera.name, library_cache)
+    night_frames = capture_history.frames_by_night(frames).get(session_id, [])
+    captures, aborted, has_record = capture_history.night_captures(contexts, session_id)
     if not (night_frames or has_record):
         return None
     envelope = performance_envelope(context, None, session_id, contexts, runs, library_cache)
@@ -420,7 +325,6 @@ def capture_night_analysis(
         captures=captures,
         aborted_captures=aborted,
         has_ekos_record=has_record,
-        stack_saturation=verdicts,
         sensor_pixel_count=camera.sensor_width_px * camera.sensor_height_px,
     )
     return analyze_capture_session_request(request)
@@ -443,18 +347,16 @@ def capture_night_summaries(
     summaries : `list` [`dict`]
         One row per night, oldest first: whether it was flagged and why,
         its light frames, Ekos exposures with no frame, the median star
-        width, and the kinds of its recommendations.
+        width, and the rule names of its statements.
     """
-    from wayfindinglib.tasks.control_tasks import capture_analysis_tasks
-
     contexts, runs = recorded_sessions(context)
     library_cache: LibraryCache = {}
     catalog = get_equipment_catalog(context.config)
     telescope, camera = catalog.active_telescope(), catalog.active_camera()
     if telescope is None or camera is None:
         return []
-    frames, _ = capture_library(context, telescope.name, camera.name, library_cache)
-    nights = set(capture_analysis_tasks.frames_by_night(frames)) | {
+    frames = capture_library(context, telescope.name, camera.name, library_cache)
+    nights = set(capture_history.frames_by_night(frames)) | {
         record.session_id for record in contexts if record.captures
     }
     rows = []
@@ -470,7 +372,7 @@ def capture_night_summaries(
             "capturesWithoutFrame": analysis.input_quality.captures_without_frame,
             "medianStarWidthArcsec": analysis.performance.star_quality.median_star_width_arcsec,
             "dutyCycle": analysis.performance.efficiency.duty_cycle,
-            "recommendations": [r.kind.value for r in analysis.recommendations],
+            "recommendations": [r.rule for r in analysis.recommendations],
         })
     return rows
 
@@ -504,7 +406,7 @@ def sky_coverage_analysis(context: ControlContext) -> SkyAnalysis | None:
     contexts, runs = recorded_sessions(context)
     library_cache: LibraryCache = {}
     envelope = performance_envelope(context, None, None, contexts, runs, library_cache)
-    frames, _ = capture_library(context, telescope.name, camera.name, library_cache)
+    frames = capture_library(context, telescope.name, camera.name, library_cache)
     frame_samples, frames_without_position = sky_analysis_tasks.sky_samples_from_frames(
         frames, envelope.value("minimum_star_measurement_exposure") if envelope else None
     )
@@ -554,7 +456,6 @@ def recurring_issues(context: ControlContext, latest_nights: int | None = None) 
         Each recurring finding with its nights, most frequent first.
     """
     from wayfindinglib.session_analysis.recurring_issues import find_recurring_issues
-    from wayfindinglib.tasks.control_tasks import capture_analysis_tasks
 
     contexts, runs = recorded_sessions(context)
     library_cache: LibraryCache = {}
@@ -562,8 +463,8 @@ def recurring_issues(context: ControlContext, latest_nights: int | None = None) 
     telescope, camera = catalog.active_telescope(), catalog.active_camera()
     capture_nights: set[str] = {record.session_id for record in contexts if record.captures}
     if telescope is not None and camera is not None:
-        frames, _ = capture_library(context, telescope.name, camera.name, library_cache)
-        capture_nights |= set(capture_analysis_tasks.frames_by_night(frames))
+        frames = capture_library(context, telescope.name, camera.name, library_cache)
+        capture_nights |= set(capture_history.frames_by_night(frames))
     per_night: list[tuple[str, str, list[Any]]] = []
     recent = slice(-latest_nights if latest_nights else None, None)
     for night in sorted({run.session_id for run in runs})[recent]:

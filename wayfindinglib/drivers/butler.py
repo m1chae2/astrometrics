@@ -20,10 +20,12 @@ the same ``wayfinding.db`` file. `DiskButler.control_records` gives the
 """
 
 import configparser
+import json
+import sqlite3
 from pathlib import Path
 from typing import Any
 
-from astrometricslib import AbstractButler, DatasetSpec, InvalidArgumentError
+from astrometricslib import AbstractButler, DatasetSpec, InvalidArgumentError, connect_db, safe_json_dumps
 from astrometricslib import Butler as _GenericButler
 from wayfindinglib.drivers.control_record_store import ControlRecordStore
 from wayfindinglib.models.equipment_and_site.calibration import CalibrationStats
@@ -39,7 +41,11 @@ from wayfindinglib.models.session.divergence import DivergenceRecord
 from wayfindinglib.models.session.ekos_session import EkosSessionContext
 from wayfindinglib.models.session.guide_star_loss import GuideStarLossEvent
 from wayfindinglib.models.session.guiding_run import GuidingRunSummary
-from wayfindinglib.models.session.observation_session import ObservationSession
+from wayfindinglib.models.session.observation_session import (
+    ObservationSession,
+    QueuedObservationPackage,
+    QueueEntryStatus,
+)
 from wayfindinglib.models.session.telemetry import GuidingSpectrumAnalysis
 
 _DATASET_TYPES: dict[str, tuple[str, type]] = {
@@ -69,6 +75,77 @@ holds the calibration inventory of one camera
 _ID_FIELD_FOR: dict[str, str] = {"calibration_stats": "camera_id"}
 """Overrides the primary-key field name for dataset types whose natural
 key is not `id` -- everything else defaults to `id`."""
+
+
+_EXECUTION_OWNED_ENTRY_FIELDS = frozenset({
+    "status",
+    "status_detail",
+    "actual_start_time",
+    "actual_end_time",
+    "frames_captured",
+})
+"""Queue entry fields that only Execution writes. Planning owns every other
+entry field (see `Wayfinding_Library_Architecture.md` Section 3.3)."""
+
+_PLANNING_OWNED_SESSION_FIELDS = (
+    "night_date",
+    "site_profile_id",
+    "telescope_id",
+    "camera_id",
+    "unplaced_package_diagnostics",
+    "checklist",
+    "framing",
+)
+"""Session fields that only Planning writes (besides the queue and the
+revision, which `_merge_planning_fields` handles on its own)."""
+
+
+def _merge_planning_fields(session: ObservationSession, stored: ObservationSession) -> None:
+    """Copy what Planning changed since `session` was loaded into `session`.
+
+    The session object is changed in place, because Execution keeps using
+    the same object after a save. Execution's own fields (status,
+    outcomes, telemetry, faults) stay as they are in `session`.
+
+    The merge rules are:
+
+    * The fields in `_PLANNING_OWNED_SESSION_FIELDS` come from `stored`.
+    * The revision is the larger of the two, so it never goes backwards.
+    * An entry still in both queues keeps the execution fields of `session`
+      and takes every other field from `stored`.
+    * An entry only in `stored` was added by Planning after the load. It is
+      appended.
+    * An entry only in `session` was removed by Planning. It is dropped when
+      it has not started. If it has started, it stays, so its record is not
+      lost.
+    * The queue order is the stored order. Kept entries that Planning had
+      dropped follow at the end.
+
+    Parameters
+    ----------
+    session : `ObservationSession`
+        The session Execution wants to save. Changed in place.
+    stored : `ObservationSession`
+        The session as it is stored right now.
+    """
+    for field_name in _PLANNING_OWNED_SESSION_FIELDS:
+        setattr(session, field_name, getattr(stored, field_name))
+    session.revision = max(session.revision, stored.revision)
+
+    local_by_id = {entry.id: entry for entry in session.queue}
+    merged: list[QueuedObservationPackage] = []
+    for stored_entry in stored.queue:
+        local_entry = local_by_id.pop(stored_entry.id, None)
+        if local_entry is None:
+            merged.append(stored_entry)
+            continue
+        for field_name in QueuedObservationPackage.model_fields:
+            if field_name not in _EXECUTION_OWNED_ENTRY_FIELDS:
+                setattr(local_entry, field_name, getattr(stored_entry, field_name))
+        merged.append(local_entry)
+    # Entries Planning removed: keep only those Execution has started.
+    merged.extend(entry for entry in local_by_id.values() if entry.status != QueueEntryStatus.PENDING)
+    session.queue[:] = merged
 
 
 def _wayfinding_library_path(app_config: Any) -> Path:
@@ -267,3 +344,112 @@ class DiskButler(AbstractButler):
         if dataset_type not in _DATASET_TYPES:
             raise InvalidArgumentError(f"Unknown dataset type: {dataset_type}")
         return self.get(dataset_type, selector) is not None
+
+    def put_session_if_revision(self, session: ObservationSession, expected_revision: int) -> bool:
+        """Write a night plan only if it has not changed since it was read.
+
+        The check and the write are one SQLite ``UPDATE`` statement, so they
+        happen together: a second writer that read the same revision finds
+        the revision already moved and writes nothing. The stored revision
+        is read from the record's own JSON. A record stored before plans had
+        a revision counts as revision 0.
+
+        Parameters
+        ----------
+        session : `ObservationSession`
+            The session to store, already carrying its new revision.
+        expected_revision : `int`
+            The revision the caller read. The write happens only if the
+            stored revision is still this one.
+
+        Returns
+        -------
+        written : `bool`
+            `True` when the session was stored. `False` when the stored
+            revision was no longer `expected_revision`, or no such session is
+            stored. Nothing is changed in that case.
+
+        Raises
+        ------
+        sqlite3.OperationalError
+            For a database error other than a missing table, such as a locked
+            file.
+        """
+        # Reading first makes sure the table exists.
+        self._generic.get("observation_session", {"id": session.id})
+        payload = safe_json_dumps(session.model_dump(mode="json", by_alias=True))
+        connection = connect_db(str(self.library_path / "wayfinding.db"))
+        try:
+            cursor = connection.execute(
+                "UPDATE wayfinding_observation_sessions SET data_json = ? WHERE id = ? "
+                "AND COALESCE(json_extract(data_json, '$.revision'), 0) = ?",
+                (payload, session.id, expected_revision),
+            )
+            connection.commit()
+            return cursor.rowcount == 1
+        except sqlite3.OperationalError as error:
+            if "no such table" in str(error):
+                # No sessions table yet, so no such session is stored.
+                return False
+            # A locked or broken database is a real failure; do not hide it.
+            raise
+        finally:
+            connection.close()
+
+    def put_session_from_execution(self, session: ObservationSession) -> ObservationSession:
+        """Save a session for Execution without erasing what Planning wrote.
+
+        Execution holds its own copy of the session while it runs. Planning
+        can change the stored copy at the same time (tick a checklist item,
+        add or reorder queue entries, set the framing). A plain `put` would
+        write Execution's old copy over those changes. This method does not.
+        In one database transaction it reads the stored session, copies the
+        Planning-owned fields from it into `session` (see
+        `_merge_planning_fields`), and writes the result. The transaction
+        holds the database write lock from the read to the write, so a
+        Planning write cannot slip in between.
+
+        This method never changes the revision. Only Planning edits count
+        as plan edits.
+
+        Parameters
+        ----------
+        session : `ObservationSession`
+            The session Execution wants to save. It is updated in place with
+            the Planning-owned fields that are stored, so later saves
+            from the same object keep them.
+
+        Returns
+        -------
+        session : `ObservationSession`
+            The same object, now merged and saved. When no copy is stored
+            yet, it is saved as it is.
+        """
+        connection = connect_db(str(self.library_path / "wayfinding.db"))
+        try:
+            # The same table the generic butler keeps. Created here because a
+            # first save may come before any other write.
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS wayfinding_observation_sessions "
+                "(id TEXT PRIMARY KEY, data_json TEXT)"
+            )
+            connection.commit()
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT data_json FROM wayfinding_observation_sessions WHERE id = ?", (session.id,)
+            ).fetchone()
+            if row is not None:
+                stored = ObservationSession.model_validate(json.loads(row["data_json"]))
+                _merge_planning_fields(session, stored)
+            payload = safe_json_dumps(session.model_dump(mode="json", by_alias=True))
+            connection.execute(
+                "INSERT OR REPLACE INTO wayfinding_observation_sessions (id, data_json) VALUES (?, ?)",
+                (session.id, payload),
+            )
+            connection.commit()
+        except BaseException:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+        return session

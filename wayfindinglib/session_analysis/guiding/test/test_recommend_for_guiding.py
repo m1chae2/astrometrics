@@ -9,12 +9,8 @@ from typing import Any
 
 import pytest
 
-from wayfindinglib.models.session.session_quality import (
-    GuidingInputQuality,
-    GuidingPerformance,
-    RecommendationKind,
-    RecommendationSeverity,
-)
+from wayfindinglib.models.quality.statements import Confidence, Severity
+from wayfindinglib.models.session.session_quality import GuidingInputQuality, GuidingPerformance
 from wayfindinglib.session_analysis.guiding.post_processing.recommend_for_guiding import recommend_for_guiding
 
 
@@ -38,15 +34,15 @@ def _quality(**overrides: Any) -> GuidingInputQuality:
     return GuidingInputQuality(**values)
 
 
-def _kinds(recommendations: Any) -> list[RecommendationKind]:
-    """List the kinds of a set of recommendations.
+def _kinds(recommendations: Any) -> list[str]:
+    """List the rule names of a set of statements.
 
     Returns
     -------
-    kinds : `list` [`RecommendationKind`]
+    rule names : `list` [`str`]
         The kinds, in order.
     """
-    return [recommendation.kind for recommendation in recommendations]
+    return [recommendation.rule for recommendation in recommendations]
 
 
 def test_a_night_with_too_little_data_gets_only_that_statement(make_envelope: Any) -> None:
@@ -55,23 +51,15 @@ def test_a_night_with_too_little_data_gets_only_that_statement(make_envelope: An
 
     recommendations = recommend_for_guiding(quality, GuidingPerformance(), make_envelope())
 
-    assert _kinds(recommendations) == [RecommendationKind.INSUFFICIENT_DATA]
-    assert recommendations[0].evidence["samples"] == pytest.approx(37.0)
+    assert _kinds(recommendations) == ["guiding_insufficient_data"]
+    assert recommendations[0].values["samples"] == pytest.approx(37.0)
 
 
-def test_good_guiding_is_reported_as_within_the_limit(make_envelope: Any) -> None:
-    """Verify a good night gets an information-level statement."""
-    envelope = make_envelope()
+def test_good_guiding_makes_no_statement(make_envelope: Any) -> None:
+    """Verify a night within the limit says nothing."""
     performance = GuidingPerformance(rms_per_axis_arcsec=0.8, expected_star_widening_fraction=0.03)
 
-    recommendations = recommend_for_guiding(_quality(), performance, envelope)
-
-    assert _kinds(recommendations) == [RecommendationKind.GUIDING_WITHIN_LIMIT]
-    assert recommendations[0].severity == RecommendationSeverity.INFO
-    assert recommendations[0].confidence == "high"
-    assert recommendations[0].compared_to["guiding_rms_limit"] == pytest.approx(
-        envelope.value("guiding_rms_limit")
-    )
+    assert recommend_for_guiding(_quality(), performance, make_envelope()) == []
 
 
 def test_guiding_above_the_limit_gets_advice_and_names_the_widening(make_envelope: Any) -> None:
@@ -81,8 +69,8 @@ def test_guiding_above_the_limit_gets_advice_and_names_the_widening(make_envelop
     recommendations = recommend_for_guiding(_quality(), performance, make_envelope())
 
     (recommendation,) = recommendations
-    assert recommendation.kind == RecommendationKind.GUIDING_ABOVE_LIMIT
-    assert recommendation.severity == RecommendationSeverity.ADVICE
+    assert recommendation.rule == "guiding_above_limit"
+    assert recommendation.severity == Severity.ADVICE
     assert "42%" in recommendation.message
 
 
@@ -92,8 +80,8 @@ def test_an_impossible_calibration_is_a_warning(make_envelope: Any) -> None:
 
     recommendations = recommend_for_guiding(quality, GuidingPerformance(), make_envelope())
 
-    assert recommendations[0].kind == RecommendationKind.RECALIBRATE_GUIDER
-    assert recommendations[0].severity == RecommendationSeverity.WARNING
+    assert recommendations[0].rule == "recalibrate_guider"
+    assert recommendations[0].severity == Severity.WARNING
     assert "446.0" in recommendations[0].message
 
 
@@ -111,8 +99,8 @@ def test_a_weak_lossy_night_is_a_warning_that_lists_what_failed(make_envelope: A
     recommendations = recommend_for_guiding(quality, GuidingPerformance(), make_envelope())
 
     (recommendation,) = recommendations
-    assert recommendation.kind == RecommendationKind.CHECK_GUIDE_SIGNAL
-    assert recommendation.severity == RecommendationSeverity.WARNING
+    assert recommendation.rule == "check_guide_signal"
+    assert recommendation.severity == Severity.WARNING
     assert "SNR 45" in recommendation.message
     assert "9.0%" in recommendation.message
     assert "cannot say why" in recommendation.message
@@ -130,31 +118,33 @@ def test_a_guide_optics_mismatch_is_a_warning(make_envelope: Any) -> None:
         configured_guide_scale=1.91,
     )
 
-    assert recommendations[0].kind == RecommendationKind.UPDATE_GUIDE_OPTICS_CONFIGURATION
-    assert recommendations[0].evidence["logged_guide_scale_arcsec_per_px"] == pytest.approx(6.39)
-    assert recommendations[0].compared_to["configured_guide_scale_arcsec_per_px"] == pytest.approx(1.91)
+    assert recommendations[0].rule == "update_guide_optics_configuration"
+    assert recommendations[0].values["logged_guide_scale_arcsec_per_px"] == pytest.approx(6.39)
+    assert recommendations[0].values["configured_guide_scale_arcsec_per_px"] == pytest.approx(1.91)
 
 
-def test_error_numbers_from_a_poor_measurement_get_low_confidence(make_envelope: Any) -> None:
+def test_error_numbers_from_a_poor_measurement_are_stepped_down(make_envelope: Any) -> None:
     """Verify guiding error is not trusted when the guide signal was bad."""
     quality = _quality(has_low_signal=True, median_snr=40.0, snr_limit=26.0)
     performance = GuidingPerformance(rms_per_axis_arcsec=2.5)
 
     recommendations = recommend_for_guiding(quality, performance, make_envelope())
 
-    guiding = next(r for r in recommendations if r.kind == RecommendationKind.GUIDING_ABOVE_LIMIT)
-    assert guiding.confidence == "low"
+    guiding = next(r for r in recommendations if r.rule == "guiding_above_limit")
+    # The rule is "partly measured"; a poor signal steps it down one label.
+    assert guiding.confidence == Confidence.DESIGN_ESTIMATE
 
 
-def test_limits_from_partly_matching_equipment_get_medium_confidence(make_envelope: Any) -> None:
-    """Verify a guide-optics-only match is never high confidence."""
+def test_limits_from_partly_matching_equipment_are_stepped_down(make_envelope: Any) -> None:
+    """Verify a guide-optics-only match steps the confidence down one label."""
     quality = _quality(limits_equipment_match="guide_optics_only")
 
     recommendations = recommend_for_guiding(
-        quality, GuidingPerformance(rms_per_axis_arcsec=0.8), make_envelope(), []
+        quality, GuidingPerformance(rms_per_axis_arcsec=2.5), make_envelope(), []
     )
 
-    assert recommendations[0].confidence == "medium"
+    assert recommendations[0].rule == "guiding_above_limit"
+    assert recommendations[0].confidence == Confidence.DESIGN_ESTIMATE
 
 
 def test_no_judgement_of_guiding_error_when_no_limits_apply(make_envelope: Any) -> None:
@@ -179,7 +169,7 @@ def test_no_polar_alignment_claim_is_ever_made(make_envelope: Any) -> None:
 
     recommendations = recommend_for_guiding(_quality(), performance, make_envelope())
 
-    assert not any("polar" in r.kind.value or "polar" in r.message.lower() for r in recommendations)
+    assert not any("polar" in r.rule or "polar" in r.message.lower() for r in recommendations)
 
 
 def test_recommendations_are_ordered_most_serious_first(make_envelope: Any) -> None:
@@ -191,7 +181,7 @@ def test_recommendations_are_ordered_most_serious_first(make_envelope: Any) -> N
 
     severities = [recommendation.severity for recommendation in recommendations]
     assert severities == sorted(severities, key=lambda s: {"warning": 0, "advice": 1, "info": 2}[s.value])
-    assert severities[0] == RecommendationSeverity.WARNING
+    assert severities[0] == Severity.WARNING
 
 
 def test_a_dim_star_says_how_much_fainter_and_whether_a_shorter_exposure_explains_it() -> None:
@@ -206,12 +196,12 @@ def test_a_dim_star_says_how_much_fainter_and_whether_a_shorter_exposure_explain
     )
 
     recommendations = recommend_for_guiding(quality, GuidingPerformance(), None)
-    (warning,) = [r for r in recommendations if r.kind == RecommendationKind.CHECK_GUIDE_SIGNAL]
+    (warning,) = [r for r in recommendations if r.rule == "check_guide_signal"]
 
     assert "50 times fainter" in warning.message
     assert "explains at most a factor of 1.0" in warning.message
-    assert warning.severity == RecommendationSeverity.WARNING
-    assert warning.evidence["median_star_mass"] == pytest.approx(4000.0)
+    assert warning.severity == Severity.WARNING
+    assert warning.values["median_star_mass"] == pytest.approx(4000.0)
 
 
 def test_a_shorter_guide_cycle_is_credited_with_its_share_of_the_drop() -> None:
@@ -228,7 +218,7 @@ def test_a_shorter_guide_cycle_is_credited_with_its_share_of_the_drop() -> None:
     (warning,) = [
         r
         for r in recommend_for_guiding(quality, GuidingPerformance(), None)
-        if r.kind == RecommendationKind.CHECK_GUIDE_SIGNAL
+        if r.rule == "check_guide_signal"
     ]
 
     assert "explains at most a factor of 2.0" in warning.message

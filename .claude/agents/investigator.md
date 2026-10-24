@@ -8,11 +8,13 @@ tools:
   - mcp__astrometricslib-core__processing_remake_preview
   - mcp__astrometricslib-core__processing_stack
   - mcp__astrometricslib-core__processing_stack_summary
+  - mcp__astrometricslib-core__quality_capture_settings
   - mcp__astrometricslib-core__quality_check_spectral_frames
   - mcp__astrometricslib-core__quality_measure_frames
   - mcp__astrometricslib-core__quality_measure_stack
   - mcp__astrometricslib-core__quality_metrics
   - mcp__astrometricslib-core__quality_query
+  - mcp__astrometricslib-core__quality_set_aside_frames
   - mcp__astrometricslib-core__star_get
   - mcp__astrometricslib-core__star_query
   - mcp__astrometricslib-core__target_get_frame

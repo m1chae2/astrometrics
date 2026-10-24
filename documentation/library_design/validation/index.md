@@ -23,6 +23,7 @@ Each pipeline has its own file, and each entry has an ID made of the pipeline's 
 | [photometry.md](photometry.md) | `PHO` | Photometry and variable stars |
 | [spectroscopy.md](spectroscopy.md) | `SPE` | Slitless spectroscopy |
 | [asteroid_detection.md](asteroid_detection.md) | `MOV` | Moving-object (asteroid) detection |
+| [wayfinding.md](wayfinding.md) | `WAY` | Quality statements, efficiency and forecasts in `wayfindinglib` |
 
 Every entry has the same fields, in this order:
 
@@ -116,6 +117,7 @@ Table 3 lists what each register file covers.
 | Photometry | [photometry.md](photometry.md) | The comparison ensemble, the error model and camera noise, frame alignment, the variability indices and cutoffs, the period search and cross-session matching |
 | Spectroscopy | [spectroscopy.md](spectroscopy.md) | Sky subtraction, the reading box, resolution and errors, wavelength calibration, the instrument response, classification limits and the Gaia XP comparison |
 | Moving objects | [asteroid_detection.md](asteroid_detection.md) | Recovery of injected movers, false tracks, real fields far from the ecliptic, the pointing correction and the chaining step |
+| Quality statements | [wayfinding.md](wayfinding.md) | The statement and confidence vocabulary, and the design estimates behind the efficiency reference |
 
 ### 6.2 The first validation campaign
 
@@ -164,4 +166,5 @@ astrometry
 photometry
 spectroscopy
 asteroid_detection
+wayfinding
 ```

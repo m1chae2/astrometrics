@@ -7,7 +7,7 @@ at the equipment or the routine, which is where a change helps.
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from wayfindinglib.models.session.session_quality import RecommendationKind, RecommendationSeverity
+from wayfindinglib.models.quality.statements import Severity
 
 
 class RecurringIssue(BaseModel):
@@ -17,9 +17,10 @@ class RecurringIssue(BaseModel):
     ----------
     pipeline : `str`
         The analysis that reports it, ``"guiding"`` or ``"capture"``.
-    kind : `RecommendationKind`
-        What the finding is about.
-    worst_severity : `RecommendationSeverity`
+    rule : `str`
+        The name of the rule that makes the finding (a row of the session
+        rule table).
+    worst_severity : `Severity`
         The most serious severity it had on any night.
     nights : `list` [`str`]
         The nights it was reported on, oldest first.
@@ -34,8 +35,8 @@ class RecurringIssue(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     pipeline: str
-    kind: RecommendationKind
-    worst_severity: RecommendationSeverity = Field(alias="worstSeverity")
+    rule: str
+    worst_severity: Severity = Field(alias="worstSeverity")
     nights: list[str]
     nights_analysed: int = Field(alias="nightsAnalysed")
     share: float

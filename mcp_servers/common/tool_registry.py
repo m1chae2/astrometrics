@@ -40,6 +40,7 @@ from astrometricslib import (
 )
 from mcp_servers.common.profile import current_profile, find_withheld_tools, load_manifest, refusal_message
 from mcp_servers.common.tool_errors import ToolErrorContent, error_content
+from wayfindinglib import fit_reply_to_budget
 
 logger = logging.getLogger(__name__)
 
@@ -370,8 +371,11 @@ def result_content(result: Any) -> list[Any]:
         ``png_bytes`` and ``description``) and a matplotlib figure become an
         image and a short text. Anything else becomes indented JSON text;
         a reply too long for `MAXIMUM_REPLY_BYTES` is sent without the
-        indentation. A list still too long keeps as many whole items as fit
-        (see `_whole_items_that_fit`); anything else is cut.
+        indentation. A target report, a ranking or a night review is first
+        shortened by `wayfindinglib.fit_reply_to_budget` (whole references or
+        candidates, never part of a statement). A list still too long keeps as
+        many whole items as fit (see `_whole_items_that_fit`); anything else is
+        cut.
     """
     if isinstance(result, list) and result and isinstance(result[0], (TextContent, ImageContent)):
         return result
@@ -385,7 +389,12 @@ def result_content(result: Any) -> list[Any]:
         ]
     if callable(getattr(result, "savefig", None)):
         return _figure_as_image(result)
-    serialized = _serialize_result(result)
+    # The library replies in full to every caller. A target report, tonight's
+    # ranking or a night review is shortened here, before the character cut
+    # below, so what is cut is whole references and candidates (the most
+    # extreme evidence of each statement is kept) and the reply stays valid
+    # JSON. Any other result passes through unchanged.
+    serialized = _serialize_result(fit_reply_to_budget(result))
     text = json.dumps(serialized, indent=2, default=str)
     if len(text) > MAXIMUM_REPLY_BYTES:
         # The indentation alone can be a third of a long list; drop it before

@@ -75,3 +75,48 @@ def test_filter_matching_for_flats(isolated_butler: DiskButler) -> None:
 
     advisory = build_calibration_advisory(isolated_butler, "c1", FrameType.FLAT, filter=FilterType.Ha)
     assert advisory.existing_count == 5
+
+
+def test_gain_offset_binning_and_temperature_narrow_the_match(isolated_butler: DiskButler) -> None:
+    """Entries with a different setting are not counted; unstated ones are."""
+    stats = CalibrationStats(
+        camera_id="c1",
+        darks=[
+            CalibrationEntry(
+                camera_id="c1",
+                frame_type=FrameType.DARK,
+                exposure_sec=60.0,
+                gain_setting=100,
+                offset=50,
+                binning=1,
+                sensor_temperature_c=-10.0,
+                count=20,
+            ),
+            CalibrationEntry(
+                camera_id="c1", frame_type=FrameType.DARK, exposure_sec=60.0, gain_setting=200, count=5
+            ),
+            CalibrationEntry(camera_id="c1", frame_type=FrameType.DARK, exposure_sec=60.0, count=3),
+        ],
+    )
+    isolated_butler.put(stats, "calibration_stats", {"camera_id": "c1"})
+
+    def count(**keywords: float) -> int:
+        """Count the darks of 60 s that match the given settings.
+
+        Returns
+        -------
+        count : `int`
+            The matching frame count.
+        """
+        return build_calibration_advisory(
+            isolated_butler, "c1", FrameType.DARK, exposure_seconds=60.0, **keywords
+        ).existing_count
+
+    assert count() == 28
+    # The 200-gain entry differs; the entry with no settings still counts.
+    assert count(gain_setting=100) == 23
+    assert count(gain_setting=100, offset=10) == 3
+    assert count(gain_setting=100, binning=2) == 3
+    # 2 degrees away is inside the 3 degree tolerance; 8 is not.
+    assert count(gain_setting=100, sensor_temperature_c=-8.0) == 23
+    assert count(gain_setting=100, sensor_temperature_c=-2.0) == 3

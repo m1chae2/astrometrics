@@ -62,12 +62,12 @@ def library(control: ObservatoryControl, monkeypatch: pytest.MonkeyPatch) -> Lib
     Returns
     -------
     library : `Library`
-        Fill its `frames` and `verdicts` before analysing a night.
+        Fill its `frames` before analysing a night.
     """
     synthetic = Library()
     monkeypatch.setattr(
         night_analysis,
         "capture_library",
-        lambda context, telescope_name, camera_name, cache: (synthetic.frames, synthetic.verdicts),
+        lambda context, telescope_name, camera_name, cache: synthetic.frames,
     )
     return synthetic

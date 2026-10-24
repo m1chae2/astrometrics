@@ -1,7 +1,8 @@
 """Purpose: Unit tests for gathering performance-envelope inputs.
 
 Description: Verifies how the envelope's inputs are read: the camera's
-stored profile, the star width measured from the equipment's own frames
+stored profile, the star width taken from the stored measurements of the
+equipment's own frames
 (including which frames are left out and why), and the per-session
 baseline collected only from sessions of the same equipment. The baseline
 tests use a real `ControlRecordStore` on a temporary database.
@@ -12,17 +13,18 @@ from pathlib import Path
 import pytest
 
 from astrometricslib import AppConfiguration, observing_night_id
-from wayfindinglib.analytics.performance_envelope import MeasuredImageQuality
-from wayfindinglib.drivers.control_record_store import ControlRecordStore
-from wayfindinglib.models.session.ekos_session import EkosSessionContext, SessionEquipmentAttribution
-from wayfindinglib.models.session.guiding_run import GuidingRunSummary
-from wayfindinglib.tasks.control_tasks.performance_envelope_tasks import (
-    MINIMUM_SAMPLES_PER_SESSION,
+from wayfindinglib.analytics.capture_history import STAR_WIDTH_METRIC
+from wayfindinglib.analytics.envelope_assembly import (
     collect_baseline_values,
     collect_excursion_fraction_baseline,
     measure_image_quality,
     sensor_limits_for_camera,
 )
+from wayfindinglib.analytics.performance_envelope import MINIMUM_SAMPLES_PER_SESSION, MeasuredImageQuality
+from wayfindinglib.analytics.test.frame_measurement_helpers import FakeAstrometrics
+from wayfindinglib.drivers.control_record_store import ControlRecordStore
+from wayfindinglib.models.session.ekos_session import EkosSessionContext, SessionEquipmentAttribution
+from wayfindinglib.models.session.guiding_run import GuidingRunSummary
 
 
 @pytest.fixture
@@ -46,15 +48,8 @@ def camera_profile_config(
     return AppConfiguration()
 
 
-class _Measurements:
-    """A minimal frame-measurements record."""
-
-    def __init__(self, registration_fwhm_x_px: float | None) -> None:
-        """Store the measurements a capture frame reads."""
-        self.registration_fwhm_x_px = registration_fwhm_x_px
-        self.saturated_pixel_fraction = None
-        self.background_level = None
-        self.registration_roundness = None
+_frame_counter = {"next": 0}
+"""Gives each fake frame its own path, since stored rows are joined by path."""
 
 
 class _Frame:
@@ -65,13 +60,14 @@ class _Frame:
         camera: str = "ZWO ASI 533MM Pro",
         telescope: str = "Apertura 75Q",
         exposure: float = 60.0,
-        fwhm_px: float | None = 3.0,
-        pixel_scale: float = 2.0,
+        width_arcsec: float | None = 6.0,
         role: str = "LIGHT",
         filter_name: str = "Luminance",
     ) -> None:
         """Store the fields a capture frame reads."""
-        self.path = "frame.fits"
+        _frame_counter["next"] += 1
+        self.path = f"/lib/lights/Target/x/frame_{_frame_counter['next']}.fits"
+        self.stored_width_arcsec = width_arcsec
         self.timestamp = 1_700_000_000.0
         self.sensor_temperature_c = None
         self.altitude_degrees = None
@@ -81,37 +77,25 @@ class _Frame:
         self.camera = camera
         self.telescope = telescope
         self.exposure = exposure
-        self.pixel_scale_arcsec = pixel_scale
+        self.pixel_scale_arcsec = 2.0
         self.role = role
         self.filter = filter_name
-        self.measurements = _Measurements(fwhm_px)
 
 
-class _Astrometrics:
-    """A minimal science-library interface holding one target of frames."""
+def _fake_astrometrics(frames: list[_Frame]) -> FakeAstrometrics:
+    """Build a science-library stand-in whose frames have stored star widths.
 
-    def __init__(self, frames: list[_Frame]) -> None:
-        """Hold the frames behind a `targets.list()` call."""
-        target = type("Target", (), {"frames": frames, "id": "Target"})()
-
-        class _Targets:
-            """Stand-in for the target catalog."""
-
-            @staticmethod
-            def list() -> list:
-                """Return the one target.
-
-                Returns
-                -------
-                targets : `list`
-                    The single target.
-                """
-                return [target]
-
-        self.targets = _Targets()
+    Returns
+    -------
+    astrometrics : `FakeAstrometrics`
+        Holds the frames and a stored star-width row for each with a width.
+    """
+    return FakeAstrometrics(
+        frames, {frame.path: {STAR_WIDTH_METRIC: frame.stored_width_arcsec} for frame in frames}
+    )
 
 
-def _measure(astrometrics: _Astrometrics, config: AppConfiguration) -> MeasuredImageQuality | None:
+def _measure(astrometrics: FakeAstrometrics, config: AppConfiguration) -> MeasuredImageQuality | None:
     """Measure star width for this observatory's rig with a 10 second cut.
 
     Returns
@@ -122,17 +106,17 @@ def _measure(astrometrics: _Astrometrics, config: AppConfiguration) -> MeasuredI
     return measure_image_quality(astrometrics, "Apertura 75Q", "ZWO ASI 533MM Pro", 10.0, config)
 
 
-def test_star_width_is_the_median_converted_with_each_frames_own_plate_scale(
+def test_star_width_is_the_median_of_the_stored_widths(
     camera_profile_config: AppConfiguration,
 ) -> None:
-    """Verify width in pixels x plate scale, then the median."""
-    frames = [_Frame(fwhm_px=3.0, pixel_scale=2.0), _Frame(fwhm_px=2.0, pixel_scale=2.0), _Frame(fwhm_px=4.0)]
+    """Verify the star width is the median of the stored arcsecond widths."""
+    frames = [_Frame(width_arcsec=6.0), _Frame(width_arcsec=4.0), _Frame(width_arcsec=8.0)]
 
-    quality = _measure(_Astrometrics(frames), camera_profile_config)
+    quality = _measure(_fake_astrometrics(frames), camera_profile_config)
 
     assert quality.fwhm_arcsec == pytest.approx(6.0)
     assert quality.sample_count == 3
-    assert quality.minimum_exposure_seconds == pytest.approx(10.0, camera_profile_config)
+    assert quality.minimum_exposure_seconds == pytest.approx(10.0)
 
 
 def test_short_exposures_are_left_out(camera_profile_config: AppConfiguration) -> None:
@@ -143,11 +127,11 @@ def test_short_exposures_are_left_out(camera_profile_config: AppConfiguration) -
     median star width from 5.6 to 8.0 arcseconds, which loosened every
     guiding limit.
     """
-    long_frames = [_Frame(fwhm_px=3.0, exposure=60.0) for _ in range(5)]
-    short_saturated_frames = [_Frame(fwhm_px=8.0, exposure=2.0) for _ in range(20)]
+    long_frames = [_Frame(width_arcsec=6.0, exposure=60.0) for _ in range(5)]
+    short_saturated_frames = [_Frame(width_arcsec=16.0, exposure=2.0) for _ in range(20)]
 
     quality = measure_image_quality(
-        _Astrometrics(long_frames + short_saturated_frames),
+        _fake_astrometrics(long_frames + short_saturated_frames),
         "Apertura 75Q",
         "ZWO ASI 533MM Pro",
         10.0,
@@ -161,21 +145,21 @@ def test_short_exposures_are_left_out(camera_profile_config: AppConfiguration) -
 def test_frames_of_other_equipment_are_left_out(camera_profile_config: AppConfiguration) -> None:
     """Verify only this telescope and camera's frames are measured."""
     frames = [
-        _Frame(fwhm_px=3.0),
-        _Frame(fwhm_px=20.0, camera="Nikon DSLR DSC D5300"),
-        _Frame(fwhm_px=20.0, telescope="Nikkor 300mm"),
+        _Frame(width_arcsec=6.0),
+        _Frame(width_arcsec=40.0, camera="Nikon DSLR DSC D5300"),
+        _Frame(width_arcsec=40.0, telescope="Nikkor 300mm"),
     ]
 
-    quality = _measure(_Astrometrics(frames), camera_profile_config)
+    quality = _measure(_fake_astrometrics(frames), camera_profile_config)
 
     assert quality.sample_count == 1
 
 
 def test_a_cameras_other_spellings_are_accepted(camera_profile_config: AppConfiguration) -> None:
     """Verify the FITS-header spelling matches the library one."""
-    frames = [_Frame(camera="ZWO CCD ASI533MM Pro", fwhm_px=3.0)]
+    frames = [_Frame(camera="ZWO CCD ASI533MM Pro", width_arcsec=6.0)]
 
-    quality = _measure(_Astrometrics(frames), camera_profile_config)
+    quality = _measure(_fake_astrometrics(frames), camera_profile_config)
 
     assert quality is not None
     assert quality.sample_count == 1
@@ -184,28 +168,28 @@ def test_a_cameras_other_spellings_are_accepted(camera_profile_config: AppConfig
 def test_spectroscopy_and_calibration_frames_are_left_out(camera_profile_config: AppConfiguration) -> None:
     """Verify dispersed stars and non-light frames are not measured."""
     frames = [
-        _Frame(fwhm_px=3.0),
-        _Frame(fwhm_px=30.0, filter_name="Star Analyzer 200"),
-        _Frame(fwhm_px=30.0, role="DARK"),
+        _Frame(width_arcsec=6.0),
+        _Frame(width_arcsec=60.0, filter_name="Star Analyzer 200"),
+        _Frame(width_arcsec=60.0, role="DARK"),
     ]
 
-    quality = _measure(_Astrometrics(frames), camera_profile_config)
+    quality = _measure(_fake_astrometrics(frames), camera_profile_config)
 
     assert quality.sample_count == 1
 
 
 def test_frames_with_no_measured_width_are_left_out(camera_profile_config: AppConfiguration) -> None:
     """Verify an unmeasured frame is skipped, not counted as zero."""
-    frames = [_Frame(fwhm_px=3.0), _Frame(fwhm_px=None)]
+    frames = [_Frame(width_arcsec=6.0), _Frame(width_arcsec=None)]
 
-    quality = _measure(_Astrometrics(frames), camera_profile_config)
+    quality = _measure(_fake_astrometrics(frames), camera_profile_config)
 
     assert quality.sample_count == 1
 
 
 def test_no_matching_frames_gives_none(camera_profile_config: AppConfiguration) -> None:
     """Verify equipment with no frames has no measured star width."""
-    assert _measure(_Astrometrics([]), camera_profile_config) is None
+    assert _measure(_fake_astrometrics([]), camera_profile_config) is None
 
 
 def test_sensor_limits_come_from_the_camera_profile(camera_profile_config: AppConfiguration) -> None:

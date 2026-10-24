@@ -9,6 +9,9 @@ Description: The library's documentation is split by purpose:
 - ``Astrometrics_Quality_Measurements.md`` explains the theory of the quality
   measurements, the numbers the library derives from data. It follows the same
   rules as the architecture paper.
+- ``Wayfinding_Quality_Judgment.md`` explains the theory of how the Wayfinding
+  library judges quality and recommends the next observation. It follows the
+  same rules as the architecture paper.
 - ``Astrometrics_Library_Implementation.md`` carries the code names and the
   tuned values.
 - ``documentation/library_design/validation/`` (the validation register)
@@ -30,6 +33,7 @@ DESIGN_DIR = REPO_ROOT / "documentation" / "library_design"
 ARCHITECTURE = DESIGN_DIR / "Astrometrics_Library_Architecture.md"
 IMPLEMENTATION = DESIGN_DIR / "Astrometrics_Library_Implementation.md"
 QUALITY_MEASUREMENTS = DESIGN_DIR / "Astrometrics_Quality_Measurements.md"
+WAYFINDING_QUALITY_JUDGMENT = DESIGN_DIR / "Wayfinding_Quality_Judgment.md"
 # Length limits for the papers (documentation/Documentation_Conventions.md,
 # Section 3.4). A journal paper on scientific software runs 5,000 to 10,000
 # words; the implementation paper is an index into the code, not a second
@@ -37,6 +41,7 @@ QUALITY_MEASUREMENTS = DESIGN_DIR / "Astrometrics_Quality_Measurements.md"
 ARCHITECTURE_WORD_LIMIT = 10_000
 IMPLEMENTATION_WORD_LIMIT = 4_500
 QUALITY_MEASUREMENTS_WORD_LIMIT = 8_000
+WAYFINDING_QUALITY_JUDGMENT_WORD_LIMIT = 5_500
 
 # Numbers with units that are physics, definitions or worked illustrations, not
 # tuned settings. Adding a value here asserts that it is not a tuned setting;
@@ -178,7 +183,7 @@ def _method_documents() -> list[Path]:
         path for path in (REPO_ROOT / "astrometricslib").rglob("README.md") if "data" not in path.parts
     ]
     guides = sorted((DESIGN_DIR / "pipelines").glob("*.md"))
-    return sorted(readmes) + guides + [ARCHITECTURE, QUALITY_MEASUREMENTS]
+    return sorted(readmes) + guides + [ARCHITECTURE, QUALITY_MEASUREMENTS, WAYFINDING_QUALITY_JUDGMENT]
 
 
 def _implementation_paper_name(paper: Path) -> str:
@@ -197,6 +202,8 @@ def _implementation_paper_name(paper: Path) -> str:
     """
     if paper.name == QUALITY_MEASUREMENTS.name:
         return IMPLEMENTATION.name
+    if paper.name == WAYFINDING_QUALITY_JUDGMENT.name:
+        return "Wayfinding_Library_Implementation.md"
     return paper.name.replace("Architecture", "Implementation")
 
 
@@ -313,6 +320,16 @@ def test_quality_measurements_states_no_tuned_values() -> None:
     assert_states_no_tuned_values(QUALITY_MEASUREMENTS)
 
 
+def test_wayfinding_quality_judgment_names_no_code() -> None:
+    """The judgment paper shows no code name."""
+    assert_names_no_code(WAYFINDING_QUALITY_JUDGMENT)
+
+
+def test_wayfinding_quality_judgment_states_no_tuned_values() -> None:
+    """The judgment paper states no tuned value."""
+    assert_states_no_tuned_values(WAYFINDING_QUALITY_JUDGMENT)
+
+
 def test_validation_evidence_lives_in_the_register() -> None:
     """Method documents carry no measurement records; the register does."""
     problems = []
@@ -336,6 +353,7 @@ def test_validation_evidence_lives_in_the_register() -> None:
         (ARCHITECTURE, ARCHITECTURE_WORD_LIMIT),
         (IMPLEMENTATION, IMPLEMENTATION_WORD_LIMIT),
         (QUALITY_MEASUREMENTS, QUALITY_MEASUREMENTS_WORD_LIMIT),
+        (WAYFINDING_QUALITY_JUDGMENT, WAYFINDING_QUALITY_JUDGMENT_WORD_LIMIT),
     ],
     ids=lambda value: value.stem if isinstance(value, Path) else str(value),
 )

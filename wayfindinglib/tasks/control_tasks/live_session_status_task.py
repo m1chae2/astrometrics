@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from astrometricslib import InvalidArgumentError
 from wayfindinglib.drivers.ekos.analyze_log_parser import parse_ekos_analyze_log
@@ -140,4 +140,69 @@ def get_live_session_status(
         sections = ekos_sections(context, include, max(1, min(int(limit), MAXIMUM_LIMIT)))
         sections.pop("overview", None)
         status.details = sections
+    return status
+
+
+MAXIMUM_STATUS_CHARACTERS = 30_000
+"""Largest live status, measured as indented JSON. A caller that relays the
+status as text may cut it at 40,000 characters, in the middle of the data.
+Same budget as `night_history.MAXIMUM_REPLY_CHARACTERS`."""
+
+
+def _status_size(status: LiveSessionStatus) -> int:
+    """Measure a status as the number of characters of its JSON.
+
+    Parameters
+    ----------
+    status : `LiveSessionStatus`
+        The status.
+
+    Returns
+    -------
+    size : `int`
+        Its length in characters as indented JSON.
+    """
+    return len(status.model_dump_json(indent=2))
+
+
+def fit_status_to_budget(
+    status: LiveSessionStatus, budget: int = MAXIMUM_STATUS_CHARACTERS
+) -> LiveSessionStatus:
+    """Make a status fit under a size limit by dropping its oldest items.
+
+    The lists of exposures, excursions and dithers, and every list in a
+    ``details`` section, run oldest first. While the status is too long,
+    the longest of them is cut to its newest half. Each cut adds a line to
+    ``unavailable`` so the reader knows the list is partial.
+
+    Parameters
+    ----------
+    status : `LiveSessionStatus`
+        The status. It is changed in place.
+    budget : `int`, optional
+        Largest allowed size in characters of indented JSON.
+
+    Returns
+    -------
+    status : `LiveSessionStatus`
+        The same status, now within the budget, or with every list cut to
+        one item if even that is too long.
+    """
+    while _status_size(status) > budget:
+        candidates: list[tuple[int, str, list[Any]]] = [
+            (len(getattr(status, name)), name, getattr(status, name))
+            for name in ("exposures", "excursions", "dithers")
+        ]
+        for section, value in status.details.items():
+            if isinstance(value, dict) and isinstance(value.get("items"), list):
+                candidates.append((len(value["items"]), f"details.{section}", value["items"]))
+        length, name, items = max(candidates, key=lambda candidate: candidate[0], default=(0, "", []))
+        if length <= 1:
+            break
+        kept = items[length // 2 :]
+        items[:] = kept
+        for value in status.details.values():
+            if isinstance(value, dict) and value.get("items") is items:
+                value["shown"] = len(kept)
+        status.unavailable.append(f"{name}: only the newest {len(kept)} of {length} items are shown.")
     return status

@@ -41,6 +41,12 @@ A second board (the same three roles plus a user-experience reviewer) reviewed t
 `QUALITY_USE_CASES.md`, `QUALITY_SCIENCE_PLAN.md` and `UI_DISPLAY_PLAN.md` together later on
 2026-10-17. All four approved with changes. Decisions 16 to 21 and Appendix B record the outcome.
 
+Phase 4 (issue #95, `wayfindinglib` judges quality and recommends) is built on branch
+`95-wayfindinglib-quality`, pull request #128 (draft). Two boards have reviewed it: one on the
+batch briefs before the build, one on the finished code, both on 2026-10-24. Decisions 27 to 46
+and Appendix G record the outcome. The real-data checks (on a copy of the database) and the
+papers are still in progress.
+
 ## 1. Findings from the survey
 
 Quality data is written in many shapes and places today.
@@ -73,6 +79,9 @@ renamed or dropped, as the `residual_*` counts were, nothing fails.
 
 Agreed with the user on 2026-10-17. Decisions 1 to 15 came with the first board review and
 decisions 16 to 21 with the second.
+Decisions 22 to 26 came during phases 0 to 3. Decisions 27 to 46 came with phase 4 (issue #95) on
+2026-10-24. Each of those says whether the user agreed to it or the systems engineer settled it
+and listed it in pull request #128 for review.
 
 1. **`astrometricslib` measures; it does not interpret.** It determines quality metrics.
    `wayfindinglib` or the user decides what they mean. Three kinds of existing code are treated
@@ -199,6 +208,138 @@ decisions 16 to 21 with the second.
     measured, matching the validation register's "Design estimate" status. Such limits were filed as
     `physical_budget`, which overstated them; `physical_budget` now means a limit derived from
     physics only.
+
+27. **The shared quality shapes live in `wayfindinglib/models/quality/`.** Settled by the systems
+    engineer on 2026-10-24 and listed in pull request #128 for review. The statement, rule,
+    efficiency and summary shapes sit in Foundation so that Control and Planning share one quality
+    vocabulary. The reason is ownership, not layering. `TargetDatasetReport` stays in
+    `models/planning/target_report.py`.
+28. **The physical efficiency reference is diffraction plus optional site seeing.** Settled by the
+    systems engineer on 2026-10-24 and listed in pull request #128 for review. The reference
+    combines the diffraction limit of the aperture (a focal ratio of 0 counts as missing) with
+    `SiteProfile.typical_seeing_fwhm_arcsec` when the user sets it. When seeing is unset, the
+    reference says seeing is "not included" and does not use diffraction and pixel blur alone as if
+    they were the whole story. Sky brightness and transparency are also "not included", because no
+    zero point that is not exploratory exists yet. No value is invented. It lives in
+    `analytics/result_quality/efficiency.py`.
+29. **The equipment baseline is keyed on the setup and uses per-night medians.** Settled by the
+    systems engineer on 2026-10-24 and listed in pull request #128 for review. The key is camera,
+    telescope, filter, gain setting, offset and binning, not exposure length. The reference is the
+    10th percentile of per-night medians of effective star width and of sky rate. It needs at least
+    three nights (a design estimate); with fewer, the answer is "no baseline yet". The night under
+    review is left out of its own baseline. The report shows both references where both exist.
+30. **`plan:changed` is declared in #95, with backend plan read, edit and tick methods.** Agreed
+    with the user on 2026-10-24. The event is declared in `backend/public_interface.py`. Minimal
+    backend RPC methods read the night plan, edit its queue and tick a checklist item, and they
+    announce the event through the plan service (the `sequencer:add`, `remove`, `reorder` and
+    `modify` methods too). A malformed `ticked_at` is an `invalid_argument` error. Plan writes in
+    the library return a typed change record. A write that changes nothing does not raise the
+    revision or send the event.
+31. **Allowed capture values come from the camera profile; an unmeasured camera is accepted with a
+    note.** Agreed with the user on 2026-10-24. Allowed gain, offset and binning are the settings
+    the camera profile has measured (`"1x1"` becomes 1). For a camera with no measured setting (the
+    generic fallback profile, the Nikon) or an unmeasured filter, a request is accepted and marked
+    "setting not measured". It is never rejected. Filters come from the equipment catalog; if it
+    lists none, from the filters seen on that camera's library frames. It lives in
+    `analytics/result_quality/allowed_capture_values.py`, with one camera-name matcher.
+32. **The science goal is chosen per capture setting.** Settled on 2026-10-24 (S6), then changed
+    by the user the same day. A setting whose filter is the spectroscopy filter (the grating) gets
+    the slitless spectral goal. An imaging setting gets the extended object goal for Messier, NGC
+    and IC catalog types and the faint point source goal otherwise. Photometry results keep the
+    bright-star photometry goal. Tonight's ranking lists a target in every use list its settings
+    belong to, and each capture setting summary and statement names its goal. Slitless spectra are
+    in the group of goals with no time factors, so source-limited spectra are not charged read-noise
+    loss. It lives in `analytics/result_quality/science_goal.py`.
+33. **The night plan is the extended `ObservationSession`.** Agreed with the user on 2026-10-24.
+    No new plan shape exists. `ObservationSession` (Butler type `observation_session`) gains
+    `checklist`, `framing` and `revision`, and `ExposureRequest` gains optional `gain_setting`,
+    `offset` and `binning`. Dithering stays `DitherConfig`. The plan is read with `get_plan`,
+    edited with `edit_queue(..., expected_revision=...)` and ticked with `tick_checklist_item`.
+    `SequenceSummary` is derived from the session. Execution's saves merge the fields that Planning
+    owns (checklist, framing, revision and queue entries added since the load) inside the
+    Butler's disk store, in one transaction, so a running recorder cannot overwrite a plan edit.
+    `create_plan(kind="sequence")` is left as it is (noted for #97).
+34. **Night reads are `HistoryKind` values of `control.history.query`.** Settled by the systems
+    engineer on 2026-10-24 and listed in pull request #128 for review. The kinds are
+    `night_quality`, `nights` and `target_changes`, each with a typed model. Control is at its
+    member limit of 70, so it gets no new methods.
+35. **Monitor mode blocks all motion, capture and stop commands.** Agreed with the user on
+    2026-10-24. While delegated, every motion and capture command stays refused (the 15 guarded
+    operations, including `abort_motion`), and so do `guiding:stop` and `telescope:alignment_stop`.
+    Device settings (`set_device_property`, `telescope:set_indi_property`) and the app's own INDI
+    connect and disconnect stay allowed. A test classifies every key of the RPC handler table as
+    read, allowed or command-tested, and fails on an unclassified method. Another test asserts that
+    no guarded command reaches the driver through the library, the backend or MCP.
+36. **There is one advice shape: `TargetStatement`.** Agreed with the user on 2026-10-24.
+    `Severity` lives in `models/quality`. The night analysis `Recommendation`, `RecommendationKind`
+    and `RecommendationSeverity` are removed; each former kind is a `QualityRule` row in
+    `session_rules.py` with its action class, register entry and confidence. Plan 3.3's
+    `QualityJudgment` is not built: `get_advisory(kind="result")` returns `list[TargetStatement]`.
+    The "within limits" notes of the guiding, capture and sky analyses are removed, because a
+    constraint means a limit that only new hardware could fix (section 6.3), and no warning
+    already means "within limits".
+37. **Exploratory metrics never drive a rule.** Settled by the systems engineer on 2026-10-24 and
+    listed in pull request #128 for review. This is section 6.7 enforced. The zero point and the
+    field rotation are exploratory, so transparency is "not included" and the polar alignment error
+    is an observing value labeled exploratory, with no advice rule. The polar alignment estimate
+    fits the guided field rotation rate, which grows as 1 over the cosine of the declination, and
+    reports the lower bound. A conformance test, with a static check of the modules named in
+    `computed_by`, enforces the rule.
+38. **A rule pins the definition version of each metric it reads.** Settled by the systems
+    engineer on 2026-10-24 and listed in pull request #128 for review. Rows of another definition
+    are not used; the statement becomes `insufficient_data` and asks for a remeasure. The
+    conformance test fails when the registry's version moves past a pinned one.
+39. **The performance envelope and the capture overheads are built in Foundation.** Settled by
+    the systems engineer on 2026-10-24 and listed in pull request #128 for review. Planning cannot
+    reach Control, so `analytics/performance_envelope.py` assembles the envelope from
+    Foundation-readable inputs. The capture overheads (download, dither settle, autofocus) are
+    computed in `capture_overheads.py` from the stored `EkosSessionContext` records. The report and
+    the ranking use the same cadence defaults.
+40. **Noise growth is built once, and "take N more" waits for an agreed forecast check.** Settled
+    on 2026-10-24 (S15); the gate was agreed with the user the same day. The forward-model
+    forecast, "take N more" and the stop signal are built once in
+    `analytics/result_quality/noise_growth.py`. The forecast uses the weights the stack run
+    recorded; only the planned forecast uses a stand-in width. "Take N more" stays a design
+    estimate (STK-36: M 57 subsets came out 9 to 31% below the prediction). For each target it is
+    hidden until one of that target's forecast checks has the outcome `as_forecast`. Until then the
+    report shows an `insufficient_data` statement that says what is missing: one forecast check
+    that agreed. The tests that decide a check are one-sided at two standard errors (false alarm
+    about 2.3%), and the errors are unpaired, which is conservative.
+41. **There is one sky model, with the Krisciunas and Schaefer Moon term.** Settled by the systems
+    engineer on 2026-10-24 and listed in pull request #128 for review. It is fitted to the user's
+    own `frame.sky_rate_e_per_s_per_px` against Moon geometry and airmass. The Moon term uses the
+    published phase function of the phase angle and the Moon's own extinction. The Moon share, the
+    starting point and tonight's ranking all use this model. Extinction stays a design estimate (no
+    photometric night; site elevation 0), and the model has no twilight term. Held-out error is the
+    per-night median. It lives in `analytics/result_quality/sky_model.py`.
+42. **The guiding limits exposure is built; the best window is deferred.** Agreed with the user on
+    2026-10-24. A Foundation function finds, for each capture setting, the fraction of frames whose
+    guide RMS during the exposure keeps the star width within budget, and the longest exposure that
+    keeps a stated fraction. The rule fires when the longest used exposure keeps less than that
+    fraction ("at 120 s only 40% of frames stay sharp; at 60 s, 85%"). The target fraction is a
+    design estimate. It lives in `analytics/result_quality/guiding_exposure.py`. The best window
+    (section 6.6) stays deferred.
+43. **A trimmed reply keeps the most extreme evidence, and trimming happens at the MCP layer.**
+    Agreed with the user on 2026-10-24, reversing a code board deferral (the board had left
+    trimming in the library). The library returns full reports to every caller. Each statement
+    sorts its evidence with the most extreme first (the distance beyond the limit, in limit
+    units; ties go to the newest). The MCP tool registry trims replies to the reply budget,
+    measured with its own serializer plus 10% headroom, before its existing character cut. The
+    helper is `fit_statements_to_reply`.
+44. **`astrometricslib` exports the constants `wayfindinglib` used to copy.** Agreed with the user
+    on 2026-10-24, reversing a code board deferral. The stacker's weighting choice and
+    `MINIMUM_PENALTY_TO_WEIGHT`, the `wfwhm` weight function, the pixel blur factor, the
+    spectroscopy poor-match and ambiguity limits and the unknown-setting camera name are public
+    names of `astrometricslib`. The copies and their parity tests in `wayfindinglib` are deleted.
+45. **The quarantine records frames it sets aside as actions.** Settled by the systems engineer on
+    2026-10-24 and listed in pull request #128 for review. This applies decision 1. #94's
+    quarantine moved frames to `_excluded` without writing `action_taken`, so the loss account
+    could read zero set-aside time. Now the frame's `frame.quarantine_*` rows carry `action_taken`
+    with the move and the reason. A read-only public listing shows frames set aside before the fix,
+    with the reason and whether it came from a stored row or only from the folder. The loss account
+    reads that listing and the stored rows; it does not walk the frames folder itself.
+46. **Phase 4 is one pull request.** Agreed with the user on 2026-10-24. Section 9 allowed two
+    pull requests for phase 4. The user asked for one, so it is pull request #128.
 
 ## 3. The shared shape
 
@@ -1260,6 +1401,12 @@ the affected READMEs updated. Each phase is one pull request.
    attribution is checked on nights with a known cause (section 4.1), and a real target's report
    gives a "take N more" recommendation whose forecast is checked by replaying its recorded
    nights (section 6.5).
+
+   As built (2026-10-24, decisions 27 to 46): phase 4 is one pull request, not two (decision 46).
+   The stored night plan is the extended `ObservationSession`, not a new shape (decision 33). The
+   night review is the `night_quality` kind of `control.history.query` (decision 34). The shared
+   shapes are typed models in `models/quality` (decision 27). Advice is one `TargetStatement`
+   shape, so `Recommendation` is gone (decision 36).
 5. **New metrics.** Built under `QUALITY_SCIENCE_PLAN.md`, in its own order, once phase 1 exists.
    This plan only provides the shape they fill.
 6. **Verdicts and gates, one pipeline at a time.** Photometry goes first, because its labels and
@@ -1548,3 +1695,103 @@ Deferred:
 - making `stack_subset` private (kept public for phase 4's add-a-night check).
 
 No findings were rejected.
+
+## Appendix G. Review board changes (phase 4, issue #95)
+
+Two boards reviewed phase 4 on 2026-10-24. The first reviewed the batch briefs before anything was
+built (an observational astronomer, a software engineer and a technical architect); all three
+approved with changes, and every critical claim was confirmed against the code. The second
+reviewed the finished code; all three approved with changes again, and the systems engineer
+checked the main claims against the code (polar factor, Moon term, weighting default, science goal
+mismatch, the tonight write, uncalled focus and polar code, Execution's plain put). Three fix
+agents then worked on separate files. After the code board the user answered seven review items;
+the answers are decisions 40, 32, 42, 35, 43 and 44, and the plan to delete the real-data copy.
+
+### G.1 Brief board
+
+| Finding | Raised by | Where it landed |
+| :--- | :--- | :--- |
+| A new night plan shape duplicated `ObservationSession` | Architect | Decision 33 |
+| Planning cannot reach the envelope or the overheads | Architect | Decision 39 |
+| The noise floor was built twice | Architect | Decision 40 (built once) |
+| MCP dispositions would collide in shared files | Architect | Fragments, merged by integration agents (section 9.1) |
+| Rules had no definition versions | Architect | Decision 38 |
+| Two statement shapes | Architect | Decision 36 |
+| Allowed capture values sat in the wrong layer | Architect | Moved to the analytics module, decision 31 |
+| The guide join was duplicated | Architect | One moved join in batch 2 |
+| Register IDs would clash between batches | Architect | ID blocks per batch |
+| Minor: computed fields, atomic revision, reason for the models' home, focal ratio 0, context metric shown test, one `needs_attention`, `TargetChange.source` | Architect | Folded into the briefs; decisions 27, 28 |
+| `wfwhm` weights were ignored in the forecast | Astronomer | Decision 40 (forward model, recorded weights) |
+| The loss split by cause was circular, and factors could exceed 1 | Astronomer | Factors capped at 1; `cause_unknown` only where efficiency is measured independently |
+| The zero point is exploratory | Astronomer | Decision 37 |
+| Dark sky cannot be computed | Astronomer | Decision 28 |
+| Noise regime differs per camera; source-limited; the Nikon is unknown | Astronomer | `NoiseRegime` gained source_limited and unknown |
+| One sky model | Astronomer | Decision 41 |
+| The paired error is not reachable | Astronomer | Unpaired error, stated (decision 40) |
+| The floor fit had too few degrees of freedom | Astronomer | Fit alpha and b; at least 3 steps |
+| STK-36 spread is 9 to 31% | Astronomer | Kept a design estimate (decision 40) |
+| Focus must use FWHM squared, split at autofocus, with airmass | Astronomer | Focus drift module (batch 1) |
+| Polar alignment needs a two-component fit | Astronomer | Polar module; later corrected (G.2) |
+| Preconditions and targets for the real-data batch | Astronomer | Batch 7 brief |
+| Baseline keys and per-night medians | Astronomer | Decision 29 |
+| Minor: astrometric exponent, AST-18, clipping cap, goal from object type, two effective-time names | Astronomer | Folded into batches 0 and 2; decision 32 |
+| The Control member limit of 70 | Engineer | Decision 34 |
+| Shared-file writers would collide | Engineer | Fragments and integration agents |
+| The register tests need entries and citations | Engineer | Batch 0 |
+| `capture_settings` needs an MCP tool and a public surface entry | Engineer | Batch 0 |
+| Monitor mode left device settings and INDI connect unguarded | Engineer | User decision, decision 35 |
+| Exploratory metrics could drive rules | Engineer | Decision 37 |
+| Calibration matching should use `processing.calibration.query` | Engineer | Batch 2 brief |
+| Profile strings and unprofiled cameras | Engineer | Decision 31 |
+| The result source for the report | Engineer | Batch 6b item 3 |
+| Gaps in batches 3 and 6a | Engineer | Briefs extended |
+| `wayfinding.db` must be in the real-data copies | Engineer | Batch 7 brief |
+| `plan:changed` was undeclared | User | Decision 30 |
+
+Rejected:
+
+- Split phase 4 into two pull requests. The user asked for one pull request (decision 46).
+
+### G.2 Code board
+
+| Finding | Raised by | Where it landed |
+| :--- | :--- | :--- |
+| Polar error used the wrong declination factor (the rate grows as 1 over cosine) | Astronomer | Fit design and lower bound corrected; decision 37 |
+| The Moon term used a made-up phase law and the Sun-style airmass | Astronomer | Decision 41 |
+| "Given frames taken" guessed the weighting mode though weights were recorded | Astronomer | Decision 40 |
+| Weighting mode default `None` reached real callers | Astronomer | The configured mode is an argument |
+| The floor fit was not normalized per run | Astronomer | Normalized by the noise reference flux |
+| Slitless spectra were charged read-noise loss | Astronomer | Decision 32 |
+| The one-sided test and its false alarm were worded as two-sided | Astronomer | Wording fixed (decision 40) |
+| Focus drift bootstrap ignored segments; the slope is of the squared width | Astronomer | Block bootstrap by segment; docstring |
+| The seeing constraint fired without the baseline spread | Astronomer | Fires only beyond the 1-sigma spread of baseline nights |
+| Efficiency with unset seeing used diffraction and blur alone | Astronomer | Decision 28 |
+| Starting point did not depend on goal; clip wording | Astronomer | Setting chosen by goal; limits read from the profile |
+| Divide by zero when sky and read noise are both zero | Engineer | Guarded |
+| The report, ranking and night review built their inputs three ways | Architect | One Foundation input builder |
+| Science goal was computed in several places | Architect | One goal function (decision 32) |
+| `rank_tonight` wrote the site table | Architect, Engineer | Read-only site; test that the table stays empty |
+| The reviewed night was in its own baseline | Astronomer | Decision 29 |
+| Aperture came from the active telescope, not the setting's | Astronomer | Taken from the capture setting |
+| Focus drift and polar alignment were never called | Architect, Engineer | Wired into the night review |
+| Set-aside frames were found by walking the frames tree | Engineer | Decision 45 |
+| `_schedule_session` built one report per package | Engineer | One per target |
+| Allowed-value logic sat in the facade | Architect, Engineer | Decision 31 |
+| Reply budget used two serializers | Engineer | One helper; later moved (decision 43) |
+| "Take N more" wall clock left out dithers and autofocus | Architect | Cadence from `capture_overheads.py` |
+| Execution's session writes overwrote plan edits | Engineer, Architect | Decision 33 |
+| `put_session_if_revision` swallowed any `OperationalError`; no-op edits bumped the revision | Engineer | Only the missing-table case is caught; decision 30 |
+| Sequencer RPC methods sent no `plan:changed`; `ticked_at` was unchecked | Engineer, Architect | Decision 30 |
+| The monitor-mode RPC test did not cover every method | Engineer | Decision 35 |
+| Rule conformance walked two tables; WAY-D12 backed no rule | Architect, Engineer | One `ALL_RULES` registry; WAY-D12 removed |
+| A shim module and a re-export were left behind | Architect | Deleted |
+| The region bootstrap test could not fail; the time zone fixture leaked | Engineer | Seeded jitter case; `monkeypatch` fixture |
+| Seven new lint suppressions | Engineer | Rules satisfied and suppressions removed |
+| Copied `astrometricslib` constants | Architect | Deferred by the board, then done by the user's choice (decision 44) |
+| Reply trimming in the library | Architect | Deferred by the board, then moved by the user's choice (decision 43) |
+| `Recommendation` duplicates `TargetStatement` | Architect | Deferred by the board, then merged by the user's choice (decision 36) |
+| Set-aside time could read zero silently | Systems engineer | Decision 45 |
+| "Within limits" notes were constraint statements | Systems engineer | Removed (decision 36) |
+
+Rejected: none of the code board's findings were rejected. Three follow-ups the board had left
+for later issues (#96, #97) were pulled into this pull request by the user.

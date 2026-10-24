@@ -721,6 +721,7 @@ def _record_frame_quality(
             frames_checked,
             quality_recording,
             measured_at,
+            actions_by_path=quarantine_report.actions_by_path(),
         )
     except Exception:  # frame quality is a by-product: no failure here may fail the stack
         logger.exception("Frame quality measurements of target '%s' were not stored", target.id)

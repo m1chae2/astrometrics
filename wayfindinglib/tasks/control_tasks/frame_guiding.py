@@ -16,10 +16,14 @@ from __future__ import annotations
 import os
 import statistics
 from datetime import UTC, datetime
-from itertools import pairwise
 from typing import TYPE_CHECKING, Any
 
 from astrometricslib import FrameSelection, NotFoundError, select_library_frames
+from wayfindinglib.analytics.result_quality.guiding_join import (
+    FrameWindow,
+    guiding_read_range,
+    join_frames_to_guiding,
+)
 
 if TYPE_CHECKING:
     from wayfindinglib.api.control.context import ControlContext
@@ -66,40 +70,6 @@ def _iso(seconds: float) -> str:
         The time, to the second.
     """
     return datetime.fromtimestamp(seconds, tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def _window_statistics(samples: list[dict[str, Any]], exposure_seconds: float) -> dict[str, Any]:
-    """Summarise the guide error of the samples inside one window.
-
-    Parameters
-    ----------
-    samples : `list` [`dict`]
-        The guiding rows inside the window, in time order. ``dra`` and
-        ``ddec`` are arcseconds.
-    exposure_seconds : `float`
-        The window length, used to say how much of it the samples cover.
-
-    Returns
-    -------
-    summary : `dict` [`str`, `Any`]
-        The sample count, the coverage, and the RMS and peak error.
-    """
-    if not samples:
-        return {"guide_samples": 0}
-    ra_errors = [float(row["dra"]) for row in samples]
-    dec_errors = [float(row["ddec"]) for row in samples]
-    total_errors = [(ra**2 + dec**2) ** 0.5 for ra, dec in zip(ra_errors, dec_errors, strict=True)]
-    gaps = [later["timestamp"] - earlier["timestamp"] for earlier, later in pairwise(samples)]
-    cadence = statistics.median(gaps) if gaps else None
-    coverage = min(1.0, len(samples) * cadence / exposure_seconds) if cadence and exposure_seconds else None
-    return {
-        "guide_samples": len(samples),
-        "coverage_fraction": round(coverage, 2) if coverage is not None else None,
-        "rms_ra_arcsec": round((sum(value**2 for value in ra_errors) / len(ra_errors)) ** 0.5, 2),
-        "rms_dec_arcsec": round((sum(value**2 for value in dec_errors) / len(dec_errors)) ** 0.5, 2),
-        "rms_total_arcsec": round((sum(value**2 for value in total_errors) / len(total_errors)) ** 0.5, 2),
-        "peak_total_arcsec": round(max(total_errors), 2),
-    }
 
 
 def _add_image_quality(
@@ -212,18 +182,23 @@ def link_frames_to_guiding(
         except ValueError:
             exposure_seconds = 0.0
         windows.append((frame, frame.timestamp, frame.timestamp + exposure_seconds, exposure_seconds))
-    first_start = min(window[1] for window in windows)
-    last_end = max(window[2] for window in windows)
+    frame_windows = [
+        FrameWindow(
+            frame_id=os.path.basename(frame.path),
+            start_epoch_seconds=start,
+            exposure_seconds=exposure_seconds,
+        )
+        for frame, start, _end, exposure_seconds in windows
+    ]
+    read_start, read_end = guiding_read_range(frame_windows) or (0.0, 0.0)
     rows = context.records.get_guiding_samples(
-        start_time=first_start - 5.0, limit=500_000, sources=[GUIDE_LOG_SOURCE]
+        start_time=read_start, limit=500_000, sources=[GUIDE_LOG_SOURCE]
     )
-    rows = sorted(
-        (row for row in rows if row["timestamp"] <= last_end + 5.0), key=lambda row: row["timestamp"]
-    )
+    rows = [row for row in rows if row["timestamp"] <= read_end]
+    joined = join_frames_to_guiding(frame_windows, rows)
 
     frames = []
-    for frame, start, end, exposure_seconds in windows:
-        inside = [row for row in rows if start <= row["timestamp"] < end]
+    for (frame, start, end, exposure_seconds), statistics_for_frame in zip(windows, joined, strict=True):
         frames.append({
             "file": os.path.basename(frame.path),
             "filter": str(getattr(frame.filter, "value", frame.filter)),
@@ -231,7 +206,7 @@ def link_frames_to_guiding(
             "starts_at": _iso(start),
             "ends_at": _iso(end),
             "pier_side": frame.pier_side,
-            **_window_statistics(inside, exposure_seconds),
+            **statistics_for_frame,
         })
 
     quality_note = None

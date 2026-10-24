@@ -39,6 +39,7 @@ DESIGN_DIR = REPO_ROOT / "documentation" / "library_design"
 ARCHITECTURE = DESIGN_DIR / "Astrometrics_Library_Architecture.md"
 IMPLEMENTATION = DESIGN_DIR / "Astrometrics_Library_Implementation.md"
 QUALITY_MEASUREMENTS = DESIGN_DIR / "Astrometrics_Quality_Measurements.md"
+WAYFINDING_QUALITY_JUDGMENT = DESIGN_DIR / "Wayfinding_Quality_Judgment.md"
 REGISTER_DIR = DESIGN_DIR / "validation"
 
 GLOSSARY_SENTENCE = "This document also defines each term the first time it appears."
@@ -158,6 +159,7 @@ def _documentation_files() -> list[Path]:
     files.update((docs / "how_to").glob("*.md"))
     files.update(DESIGN_DIR.glob("Astrometrics_Library_*.md"))
     files.add(QUALITY_MEASUREMENTS)
+    files.add(WAYFINDING_QUALITY_JUDGMENT)
     files.update((DESIGN_DIR / "pipelines").glob("*.md"))
     files.update(REGISTER_DIR.glob("*.md"))
     return sorted(files)
@@ -453,7 +455,7 @@ def test_numbered_equations_have_a_drawable_shape(path: Path) -> None:
 
 @pytest.mark.parametrize(
     "path",
-    sorted([*DESIGN_DIR.glob("*_Library_*.md"), QUALITY_MEASUREMENTS]),
+    sorted([*DESIGN_DIR.glob("*_Library_*.md"), QUALITY_MEASUREMENTS, WAYFINDING_QUALITY_JUDGMENT]),
     ids=lambda path: path.name,
 )
 def test_paper_equation_numbers_run_in_order(path: Path) -> None:

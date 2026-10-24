@@ -183,6 +183,55 @@ MEASUREMENT_THREADS = 4
 """Frames measured at once. A frame takes about a second to measure."""
 
 
+SET_ASIDE_ACTION_PREFIX = "frame moved to _excluded/"
+"""Start of the ``action_taken`` text of a set-aside frame's rows.
+
+The folder name is `QUARANTINE_FOLDER_NAME`. A reader finds the rows of
+set-aside frames by this prefix (see `parse_set_aside_action`).
+"""
+
+
+def set_aside_action_text(kind: str, reason: str) -> str:
+    """Write the ``action_taken`` sentence for a frame that was set aside.
+
+    Parameters
+    ----------
+    kind : `str`
+        ``"clouded"`` or ``"trailed"``.
+    reason : `str`
+        The one sentence saying what was measured.
+
+    Returns
+    -------
+    text : `str`
+        ``"frame moved to _excluded/: <kind> (<reason>)"``.
+    """
+    return f"{SET_ASIDE_ACTION_PREFIX}: {kind} ({reason})"
+
+
+def parse_set_aside_action(action_taken: str | None) -> tuple[str, str] | None:
+    """Read the kind and reason back out of a stored ``action_taken`` text.
+
+    Parameters
+    ----------
+    action_taken : `str` or `None`
+        The stored text of a measurement row.
+
+    Returns
+    -------
+    parsed : `tuple` [`str`, `str`] or `None`
+        The kind and the reason, or `None` when the text is not a set-aside
+        action.
+    """
+    if not action_taken or not action_taken.startswith(f"{SET_ASIDE_ACTION_PREFIX}: "):
+        return None
+    remainder = action_taken[len(SET_ASIDE_ACTION_PREFIX) + 2 :]
+    kind, separator, reason_part = remainder.partition(" (")
+    if not separator:
+        return remainder, ""
+    return kind, reason_part[:-1] if reason_part.endswith(")") else reason_part
+
+
 @dataclass(frozen=True)
 class QuarantineDecision:
     """One frame this step judged unfit to stack.
@@ -250,6 +299,20 @@ class QuarantineReport:
     batches_too_small: int = 0
     batches_over_cap: int = 0
     measurements: list[dict[str, Any]] = field(default_factory=list)
+
+    def actions_by_path(self) -> dict[str, str]:
+        """Return the action text of each moved frame, for its stored rows.
+
+        Returns
+        -------
+        actions : `dict` [`str`, `str`]
+            Original frame path mapped to the sentence stored as the
+            ``action_taken`` of the frame's quarantine measurements. See
+            `set_aside_action_text`.
+        """
+        return {
+            decision.path: set_aside_action_text(decision.kind, decision.reason) for decision in self.moved
+        }
 
     def reasons_by_path(self) -> dict[str, str]:
         """Return the recorded reason for each moved frame.
@@ -802,7 +865,7 @@ def quarantine_preview_report(target: Target, limit: int) -> QuarantinePreview:
     )
 
 
-def _target_folder_names(target_id: str) -> list[str]:
+def target_folder_names(target_id: str) -> list[str]:
     """List the folder names a target's lights may be stored under.
 
     Returns
@@ -838,7 +901,7 @@ def find_quarantine_folders(frames_path: str, target_id: str) -> list[str]:
         folder that hold a manifest.
     """
     folders = []
-    for name in _target_folder_names(target_id):
+    for name in target_folder_names(target_id):
         root = os.path.join(frames_path, "lights", name)
         if not os.path.isdir(root):
             continue

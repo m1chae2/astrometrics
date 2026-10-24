@@ -380,6 +380,35 @@ def test_abort_motion_delegates_to_mount_driver(mocker: MockerFixture) -> None:
     assert manager.motion_stop.is_set(), "abort must also stop a centering loop"
 
 
+def test_cancel_centering_aborts_only_a_running_run_and_only_with_authority(mocker: MockerFixture) -> None:
+    """A stop needs MOUNT_CONTROL even with no run; with a run it aborts."""
+    mount_driver = mocker.Mock()
+    mount_driver.abort_motion = mocker.AsyncMock(return_value=True)
+    manager = _FakeManager(mount_driver=mount_driver)
+
+    assert ops.cancel_centering(manager, run_is_active=False) is False
+    mount_driver.abort_motion.assert_not_called()
+    assert ops.cancel_centering(manager, run_is_active=True) is True
+    mount_driver.abort_motion.assert_called_once()
+
+    delegated = _FakeManager(mount_driver=mount_driver, policy=_authoritative_policy())
+    for run_is_active in (True, False):
+        with pytest.raises(PermissionDeniedError):
+            ops.cancel_centering(delegated, run_is_active=run_is_active)
+    assert not delegated.motion_stop.is_set()
+
+
+def test_stop_guide_loop_sets_the_event_only_with_authority() -> None:
+    """Monitor mode leaves the guide loop's stop event unset."""
+    stop = threading.Event()
+    with pytest.raises(PermissionDeniedError):
+        ops.stop_guide_loop(_FakeManager(policy=_authoritative_policy()), stop)
+    assert not stop.is_set()
+
+    ops.stop_guide_loop(_FakeManager(), stop)
+    assert stop.is_set()
+
+
 def test_pulse_delegates_to_mount_driver(mocker: MockerFixture) -> None:
     """Verify pulse delegates to the mount driver."""
     mount_driver = mocker.Mock()

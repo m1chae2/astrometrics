@@ -10,6 +10,7 @@ what it stamps, and what it does when one frame fails.
 import os
 import threading
 import time
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -542,6 +543,28 @@ def _pipelines(tmp_path: Path, biases: list[str]) -> tuple[ProcessingPipelines, 
     return pipelines, catalog_access
 
 
+@pytest.fixture
+def mountain_time() -> Iterator[None]:
+    """Pin the process time zone to the observatory's, then restore it.
+
+    The observing night is named in local time, so a test that expects a
+    night name needs the same zone on every machine. A private monkeypatch
+    context sets ``TZ`` and puts the old value back when it closes; the C
+    library then reads the restored value with a second `time.tzset` call.
+
+    Yields
+    ------
+    None
+        Control to the test, with the zone set to Mountain time.
+    """
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("TZ", "America/Denver")
+        time.tzset()
+        yield
+    time.tzset()
+
+
+@pytest.mark.usefixtures("mountain_time")
 def test_the_processing_api_runs_the_job_and_checks_the_limit(
     target: Target, tmp_path: Path, biases: list[str]
 ) -> None:

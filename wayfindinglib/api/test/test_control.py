@@ -337,7 +337,7 @@ def test_the_envelope_is_honest_about_data_a_new_setup_does_not_have_yet(
 
     for name in ("guiding_rms_limit", "trailing_limit", "guide_snr_low_limit", "guiding_rms_high_limit"):
         assert envelope.value(name) is None
-        assert envelope.thresholds[name].status.value == "insufficient_data"
+        assert envelope.thresholds[name].value is None
     assert envelope.tracking_risk.measured_target_count == 0
     assert len(envelope.tracking_risk.scores) == len(envelope.tracking_risk.dec_deg)
 

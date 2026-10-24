@@ -990,6 +990,7 @@ _NIGHT_METRICS: tuple[MetricSpec, ...] = (
         "One row for each subset stack (a growth step or a leave-one-night-out stack).",
         "pipelines.stacking.subset_noise_run.expected_noise_ratio",
         better=Direction.NONE,
+        register_entry="STK-36",
         purpose_reason=_NIGHT_PURPOSE_REASON,
     ),
 )

@@ -145,3 +145,34 @@ export function useNavigationTarget(
     return () => window.removeEventListener('astrometrics:navigationIntent', handleIntent);
   }, [display, elementId, onIntent]);
 }
+
+/**
+ * What the `showFrames` action carries to the Image Viewer: the quality rows a
+ * statement cites as evidence, and the words of that statement.
+ */
+export interface ShowFramesPayload {
+  /** Row ids in the quality table, in the order the statement lists them. */
+  rowIds: number[];
+  /** The target the statement is about. */
+  targetId: string;
+  /** The statement's own text, shown in the Image Viewer banner. */
+  statementText: string;
+}
+
+/**
+ * Asks the Image Viewer to list the quality rows a statement cites.
+ *
+ * Reuses an open Image Viewer window when there is one; otherwise this window
+ * switches to the Image Viewer.
+ *
+ * @param payload The cited row ids, target and statement text.
+ * @returns Result object indicating whether another window handled it.
+ */
+export function showFrames(payload: ShowFramesPayload): Promise<{ handledRemotely: boolean }> {
+  return navigateToElement<ShowFramesPayload>({
+    targetDisplay: 'Image Viewer',
+    targetElement: 'citedFrames',
+    action: 'showFrames',
+    payload,
+  });
+}

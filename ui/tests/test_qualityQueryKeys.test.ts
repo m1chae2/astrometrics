@@ -3,7 +3,13 @@
  */
 import { QueryClient } from '@tanstack/react-query';
 import { describe, expect, it } from 'vitest';
-import { isAffectedByMeasurement, QUALITY_QUERY_KEY_PREFIX, qualityQueryKeys } from '../common/queries/qualityQueryKeys';
+import {
+    isAffectedByMeasurement,
+    PLAN_QUERY_KEY_PREFIX,
+    planQueryKeys,
+    QUALITY_QUERY_KEY_PREFIX,
+    qualityQueryKeys,
+} from '../common/queries/qualityQueryKeys';
 import { UI_EVENTS } from '../common/types/backendTypes';
 
 describe('qualityQueryKeys', () => {
@@ -42,5 +48,36 @@ describe('qualityQueryKeys', () => {
 
     it('names the event the backend sends when rows were stored', () => {
         expect(UI_EVENTS['quality:measured']).toBe('quality:measured');
+    });
+});
+
+describe('advisory, history and plan key builders', () => {
+    const payload = { targetId: 'M 13', observingNightIds: ['2026-10-13'] };
+
+    it('refreshes target keys only for the measured target', () => {
+        expect(isAffectedByMeasurement(qualityQueryKeys.targetReport('M 13'), payload)).toBe(true);
+        expect(isAffectedByMeasurement(qualityQueryKeys.targetReport('M 57'), payload)).toBe(false);
+        expect(isAffectedByMeasurement(qualityQueryKeys.resultStatements('M 13', 'star-1'), payload)).toBe(true);
+        expect(isAffectedByMeasurement(qualityQueryKeys.resultStatements('M 57', 'star-1'), payload)).toBe(false);
+    });
+
+    it('refreshes night keys only for the measured nights', () => {
+        expect(isAffectedByMeasurement(qualityQueryKeys.nightQuality('2026-10-13'), payload)).toBe(true);
+        expect(isAffectedByMeasurement(qualityQueryKeys.nightQuality('2026-10-01'), payload)).toBe(false);
+        expect(isAffectedByMeasurement(qualityQueryKeys.targetChanges('2026-10-01'), payload)).toBe(false);
+        expect(isAffectedByMeasurement(qualityQueryKeys.targetChanges(), payload)).toBe(true);
+        expect(isAffectedByMeasurement(qualityQueryKeys.nights(), payload)).toBe(true);
+        expect(isAffectedByMeasurement(qualityQueryKeys.liveSessionStatus(), payload)).toBe(true);
+    });
+
+    it('keeps the tonight ranking and plan reads out of the measurement refresh', () => {
+        expect(isAffectedByMeasurement(qualityQueryKeys.tonightRanking(null), payload)).toBe(false);
+        expect(isAffectedByMeasurement(planQueryKeys.list(), payload)).toBe(false);
+        expect(qualityQueryKeys.tonightRanking('2026-10-24T22:00:00-06:00')).not.toEqual(qualityQueryKeys.tonightRanking(null));
+    });
+
+    it('starts every plan key with the plan prefix', () => {
+        expect(planQueryKeys.list().slice(0, 1)).toEqual([...PLAN_QUERY_KEY_PREFIX]);
+        expect(planQueryKeys.session('night-1').slice(0, 1)).toEqual([...PLAN_QUERY_KEY_PREFIX]);
     });
 });

@@ -13,6 +13,7 @@ import { useRemoteStatusContext } from '../common/context/RemoteStatusContext';
 import { useTargetImage } from './hooks/useTargetImage';
 import { GenericDisplayLayout } from '../common/components/GenericDisplayLayout';
 import { useReportModeReady } from '../common/utils/appBootReadiness';
+import { CitedFramesPanel } from './citedFrames/CitedFramesPanel';
 import './imageViewerDisplay.css';
 
 /**
@@ -132,6 +133,7 @@ export const ImageViewerDisplay: React.FC = () => {
 
   return (
     <>
+      <CitedFramesPanel />
       <GenericDisplayLayout
         className="target-display-container"
         leftPanel={leftPanel}

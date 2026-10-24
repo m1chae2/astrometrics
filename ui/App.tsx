@@ -7,6 +7,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StatusHeader } from './statusHeader/StatusHeader';
 import { TitleBar } from './titleBar/TitleBar';
 import { TargetProvider, DeferWhileHidden } from './common/context/TargetContext';
+import { HandoffProvider } from './common/context/HandoffContext';
+import { PlanningTimeProvider } from './common/context/PlanningTimeContext';
+import { CurrentTargetAnnouncer } from './common/components/CurrentTargetAnnouncer';
+import { handlePlanChanged, PLAN_UPDATED_FROM_ANOTHER_WINDOW, PlanChangedPayload } from './common/utils/planChanged';
 import { PlanningProvider } from './observationManager/context/PlanningContext';
 import { TerminalProvider } from './statusHeader/context/TerminalContext';
 import { RemoteStatusProvider } from './common/context/RemoteStatusContext';
@@ -151,6 +155,7 @@ const AppContent: React.FC = () => {
   });
 
   const { config } = useAstrometrics();
+  const [planNotice, setPlanNotice] = useState<string>('');
 
   // Tracks every mode that's been mounted (and thus stays mounted, hidden via
   // CSS, rather than remounting from scratch when revisited). The main
@@ -189,6 +194,7 @@ const AppContent: React.FC = () => {
   useEffect(() => {
     // Track the socket action handler so we can remove the exact same reference on cleanup.
     let removeSocketAction: (() => void) | null = null;
+    let planNoticeTimer: ReturnType<typeof setTimeout> | null = null;
 
     // 1. Initialize Remote Logging
     import('./common/utils/remoteLogger').then(({ setupGlobalErrorListener }) => {
@@ -202,15 +208,15 @@ const AppContent: React.FC = () => {
       const handleAction = (action: string, payload: any) => {
         if (action === 'navigate') {
           if (payload.mode) {
-            setMode(payload.mode);
-            window.dispatchEvent(new CustomEvent('astrometrics:modeChange', { detail: payload.mode }));
+            const navigateMode = normalizeAppMode(payload.mode);
+            setMode(navigateMode);
+            window.dispatchEvent(new CustomEvent('astrometrics:modeChange', { detail: navigateMode }));
           }
         } else if (action === 'handoff') {
-          // Sync domain state (e.g. active target selection) across clients without
-          // forcefully overriding individual window layouts or display modes.
-          if (payload.selected_target) {
-            window.dispatchEvent(new CustomEvent('astrometrics:targetSelected', { detail: payload.selected_target }));
-          }
+          // The shared target and planning time are adopted by HandoffProvider,
+          // TargetProvider and PlanningTimeProvider from this same event. Nothing
+          // else is needed here, and no window event is sent, so a received
+          // target is never published back.
         } else if (action === 'log') {
           window.dispatchEvent(new CustomEvent('astrometrics:log', { detail: payload }));
         } else if (action === 'refresh') {
@@ -223,6 +229,13 @@ const AppContent: React.FC = () => {
           queryClient.invalidateQueries({ queryKey: ['targetDataAvailability'] });
           queryClient.invalidateQueries({ queryKey: ['spectralClassSummary'] });
           queryClient.invalidateQueries({ queryKey: ['starsBySpectralClass'] });
+        } else if (action === UI_EVENTS['plan:changed']) {
+          // A plan write happened (maybe in another window): read the plans again.
+          if (handlePlanChanged(queryClient, payload as PlanChangedPayload)) {
+            setPlanNotice(PLAN_UPDATED_FROM_ANOTHER_WINDOW);
+            if (planNoticeTimer) clearTimeout(planNoticeTimer);
+            planNoticeTimer = setTimeout(() => setPlanNotice(''), 5000);
+          }
         } else if (action === UI_EVENTS['quality:measured']) {
           // A measurement job stored new quality rows (after a sync, an
           // ingestion, or when asked for): the stored quality queries for that
@@ -292,6 +305,7 @@ const AppContent: React.FC = () => {
     window.addEventListener('emergency-park-mount', onEmergencyPark);
 
     return () => {
+      if (planNoticeTimer) clearTimeout(planNoticeTimer);
       removeSocketAction?.();
       removeNavMode?.();
       removeRemoteAction?.();
@@ -313,6 +327,15 @@ const AppContent: React.FC = () => {
   return (
     <div className="app">
       <TitleBar />
+      <CurrentTargetAnnouncer />
+      <div
+        aria-live="polite"
+        role="status"
+        data-testid="plan-notice"
+        style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap' }}
+      >
+        {planNotice}
+      </div>
       <TerminalProvider>
         <Profiler id="StatusHeader" onRender={onRenderProfile}>
           <StatusHeader />
@@ -351,11 +374,15 @@ export const App: React.FC = () => {
     <QueryClientProvider client={queryClient}>
       <AstrometricsProvider>
         <RemoteStatusProvider>
-          <TargetProvider>
-            <PlanningProvider>
-              <AppContent />
-            </PlanningProvider>
-          </TargetProvider>
+          <HandoffProvider>
+            <TargetProvider>
+              <PlanningTimeProvider>
+                <PlanningProvider>
+                  <AppContent />
+                </PlanningProvider>
+              </PlanningTimeProvider>
+            </TargetProvider>
+          </HandoffProvider>
         </RemoteStatusProvider>
       </AstrometricsProvider>
     </QueryClientProvider>

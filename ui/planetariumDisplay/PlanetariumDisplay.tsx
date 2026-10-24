@@ -18,6 +18,7 @@ import { AlignmentPointCard } from './components/AlignmentPointCard';
 import { PlanetariumToolbar } from './components/PlanetariumToolbar';
 import { PlanetariumContextMenu } from './components/PlanetariumContextMenu';
 import { PlanetariumDateTimeModal } from './components/PlanetariumDateTimeModal';
+import { usePlanningTime } from '../common/context/PlanningTimeContext';
 import { useConstellationLines } from './hooks/useConstellationLines';
 import { useObserverLocation } from './hooks/useObserverLocation';
 import { useOverlayToggles } from './hooks/useOverlayToggles';
@@ -102,13 +103,18 @@ export const PlanetariumDisplay: React.FC = () => {
   const [viewerCenter, setViewerCenter] = useState<{ ra: number; dec: number } | null>(null);
   const [currentFOV, setCurrentFOV] = useState<number>(90.0);
 
-  // Date and Time controls
-  const [currentDate, setCurrentDate] = useState<Date>(new Date());
+  // Date and Time controls. The time is the shared planning time: picking a
+  // date here fixes it for every planning display, and it follows changes made
+  // elsewhere. Playback (the play button and slider on the sky map) is a local
+  // animation on top of it and is never published.
   const [isTimeModalOpen, setIsTimeModalOpen] = useState<boolean>(false);
-  // When true, the sky follows the system clock. Nothing ticks in React state
-  // for this: a tick re-rendered this whole display (and restarted the sky
-  // map's render loop) every second. The sky map reads the clock itself.
-  const [isLiveTime, setIsLiveTime] = useState<boolean>(true);
+  const { planningTime, setPlanningTime, returnToNow } = usePlanningTime();
+  // When the planning time is Now, the sky follows the system clock. Nothing
+  // ticks in React state for this: a tick re-rendered this whole display (and
+  // restarted the sky map's render loop) every second. The sky map reads the
+  // clock itself.
+  const isLiveTime = planningTime === null;
+  const currentDate = useMemo(() => (planningTime === null ? new Date() : new Date(planningTime)), [planningTime]);
 
   // The date the time dialog starts from: now (when it opens) in live mode.
   const dialogDate = useMemo(
@@ -118,14 +124,12 @@ export const PlanetariumDisplay: React.FC = () => {
   );
 
   const handleDateChange = useCallback((date: Date) => {
-    setIsLiveTime(false);
-    setCurrentDate(date);
-  }, []);
+    setPlanningTime(date);
+  }, [setPlanningTime]);
 
   const handleResetToNow = useCallback(() => {
-    setIsLiveTime(true);
-    setCurrentDate(new Date());
-  }, []);
+    returnToNow();
+  }, [returnToNow]);
 
   // Center RA/Dec parsed cleanly to numbers (degrees)
   const raValue = useMemo(() => safeParse(viewerCenter?.ra), [viewerCenter?.ra]);
@@ -415,15 +419,15 @@ export const PlanetariumDisplay: React.FC = () => {
       setSelectedTargetId(source.id);
       setPendingTarget(source.id);
       if (source.type === 'alignment' && source.alignmentAttempt?.timestamp) {
-        setIsLiveTime(false);
-        // source.alignmentAttempt.timestamp is in unix epoch seconds
-        setCurrentDate(new Date(source.alignmentAttempt.timestamp * 1000));
+        // source.alignmentAttempt.timestamp is in unix epoch seconds. Showing the
+        // sky at that moment sets the shared planning time.
+        setPlanningTime(new Date(source.alignmentAttempt.timestamp * 1000));
       }
     } else {
       setSelectedTargetId('');
       setPendingTarget('');
     }
-  }, [setSelectedTargetId, setPendingTarget, setIsLiveTime, setCurrentDate]);
+  }, [setSelectedTargetId, setPendingTarget, setPlanningTime]);
 
   /**
    * Throttled callback invoked by CelestialSkyMap when the viewport center moves.

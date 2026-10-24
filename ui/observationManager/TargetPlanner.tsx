@@ -11,7 +11,7 @@ import { TargetDetails } from './TargetDetails';
 import { DitherSettings } from './DitherSettings';
 import { MosaicPlanner } from './MosaicPlanner';
 import { CalibrationPanel } from './CalibrationPanel';
-import { LastImageViewer } from './LastImageViewer';
+import { DataQualityPanel } from '../common/components/quality/DataQualityPanel';
 import { usePlanningContext, PlanItem } from './context/PlanningContext';
 import { SectionPanel } from '../common/components/SectionPanel';
 import { captureTestFrame } from '../common/services/imaging/captureService';
@@ -214,7 +214,7 @@ export const TargetPlanner: React.FC<TargetPlannerProps> = ({
                             </div>
                         </div>
                     </SectionPanel>
-                    <LastImageViewer />
+                    <DataQualityPanel targetId={selectedTargetId} />
                 </div>
             </div>
         </div >

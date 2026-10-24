@@ -7,6 +7,9 @@
  * prefix refreshes them all. `App.tsx` makes that call when the backend sends
  * the `quality:measured` event, which means a measurement job stored new rows.
  * `isAffectedByMeasurement` narrows that to the queries the new rows can change.
+ * Every key that depends on a target or a night carries an object with
+ * `target_id` and/or `observing_night_id` as its third item. The tonight
+ * ranking and the plan reads have their own prefixes.
  */
 
 /** The start of every quality query key. */
@@ -42,6 +45,12 @@ export function isAffectedByMeasurement(queryKey: readonly unknown[], payload: Q
     return true;
 }
 
+/** The start of the tonight ranking's key. It is apart from the quality prefix because a measurement does not refresh it. */
+export const TONIGHT_RANKING_QUERY_KEY_PREFIX = ['qualityTonight'] as const;
+
+/** The start of every night plan query key. `plan:changed` refreshes them all. */
+export const PLAN_QUERY_KEY_PREFIX = ['plan'] as const;
+
 /** Builders for the keys of each quality RPC. */
 export const qualityQueryKeys = {
     /**
@@ -57,4 +66,79 @@ export const qualityQueryKeys = {
      * @return The key, which starts with the quality prefix.
      */
     metrics: (name?: string) => [...QUALITY_QUERY_KEY_PREFIX, 'metrics', name ?? null] as const,
+
+    /**
+     * The key of an `advisory:target_report` call.
+     * @param targetId The target the report is about.
+     * @return The key, with `target_id` so a measurement of that target refreshes it.
+     */
+    targetReport: (targetId: string) =>
+        [...QUALITY_QUERY_KEY_PREFIX, 'advisory-target-report', { target_id: targetId }] as const,
+
+    /**
+     * The key of an `advisory:tonight` call.
+     * @param planningTime The planning time (ISO 8601 text), or `null` for Now.
+     * @return The key. It does not start with the quality prefix: the ranking is
+     *     refetched when the planning time changes or on "Refresh", not by `quality:measured`.
+     */
+    tonightRanking: (planningTime: string | null) =>
+        [...TONIGHT_RANKING_QUERY_KEY_PREFIX, { at: planningTime }] as const,
+
+    /**
+     * The key of an `advisory:result` call.
+     * @param targetId The target the result belongs to.
+     * @param objectId The star or object the result is about.
+     * @return The key, with `target_id`.
+     */
+    resultStatements: (targetId: string, objectId: string) =>
+        [...QUALITY_QUERY_KEY_PREFIX, 'advisory-result', { target_id: targetId, object_id: objectId }] as const,
+
+    /**
+     * The key of a `history:nights` call.
+     * @param limit The most nights to list, or nothing for the default.
+     * @return The key. It names no night, so every measurement refreshes it.
+     */
+    nights: (limit?: number) => [...QUALITY_QUERY_KEY_PREFIX, 'history-nights', { limit: limit ?? null }] as const,
+
+    /**
+     * The key of a `history:night_quality` call.
+     * @param observingNightId The night, which is also the call's `session_id`.
+     * @return The key, with `observing_night_id`.
+     */
+    nightQuality: (observingNightId: string) =>
+        [...QUALITY_QUERY_KEY_PREFIX, 'history-night-quality', { observing_night_id: observingNightId }] as const,
+
+    /**
+     * The key of a `history:target_changes` call.
+     * @param observingNightId The night to list, or nothing for the library's choice.
+     * @return The key, with `observing_night_id` when a night is given.
+     */
+    targetChanges: (observingNightId?: string) =>
+        [
+            ...QUALITY_QUERY_KEY_PREFIX,
+            'history-target-changes',
+            observingNightId ? { observing_night_id: observingNightId } : {},
+        ] as const,
+
+    /**
+     * The key of a `history:live_session_status` call.
+     * @return The key. It names no target or night, so every measurement refreshes it.
+     */
+    liveSessionStatus: () => [...QUALITY_QUERY_KEY_PREFIX, 'history-live-status', {}] as const,
+};
+
+/** Builders for the keys of the night plan reads. */
+export const planQueryKeys = {
+    /**
+     * The key of a `plan:get` call that lists every plan.
+     * @return The key, which starts with the plan prefix.
+     */
+    list: () => [...PLAN_QUERY_KEY_PREFIX, 'list'] as const,
+
+    /**
+     * The key of a `plan:get` call for one plan.
+     * @param sessionId The plan's session id.
+     * @return The key, which starts with the plan prefix.
+     */
+    session: (sessionId: string) => [...PLAN_QUERY_KEY_PREFIX, 'session', { session_id: sessionId }] as const,
 };

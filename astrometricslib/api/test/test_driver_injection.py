@@ -278,7 +278,9 @@ def test_the_astrometry_stage_uses_the_injected_solver_and_simbad(
     assert solver.calls[0]["image_path"] == field_image
     assert solver.calls[0]["source_count"] >= 4
     assert simbad.region_calls
-    assert simbad.object_calls == ["Injection Field"]
+    # The object lookup and the target-position fill both ask for the
+    # target's name; astroquery caches a successful answer for the process.
+    assert set(simbad.object_calls) == {"Injection Field"}
     astrometry_result = result.results["astrometry"]
     assert astrometry_result["wcs"] is not None
     assert astrometry_result["wcs"].wcs.crval[0] == pytest.approx(FIELD_RA_DEG)

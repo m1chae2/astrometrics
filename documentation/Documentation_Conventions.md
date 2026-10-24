@@ -14,6 +14,7 @@ Each kind of content has one home, so a fact is written once.
 | --- | --- | --- |
 | Theory: what each step does and why, and its equations | `library_design/<Library>_Library_Architecture.md` (Astrometrics and Wayfinding) | Anyone learning the methods |
 | Theory of the quality measurements, the numbers the Astrometrics library derives from data | `library_design/Astrometrics_Quality_Measurements.md` | Anyone learning how the numbers are measured |
+| Theory of how the Wayfinding library judges quality and recommends the next observation | `library_design/Wayfinding_Quality_Judgment.md` | Anyone learning how quality is judged |
 | Definitions of terms, for the whole site | `Glossary.md` | Everyone |
 | Code names, tuned values and their status | `library_design/<Library>_Library_Implementation.md` | Developers and reviewers |
 | Evidence: data sets, dates, results, and the library calls to repeat each check | `library_design/validation/` (the validation register) | Reviewers and anyone tuning the tool |

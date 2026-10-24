@@ -95,7 +95,7 @@ def test_a_night_with_too_little_history_gets_numbers_but_no_verdict(
     assert analysis.performance.star_quality.median_star_width_arcsec == pytest.approx(12.0)
     assert analysis.performance.star_quality.star_width_limit_arcsec is None
     assert not analysis.flagged
-    assert "insufficient_data" in [r.kind.value for r in analysis.recommendations]
+    assert "capture_insufficient_data" in [r.rule for r in analysis.recommendations]
 
 
 def test_exposures_ekos_finished_that_are_not_in_the_library_are_reported(
@@ -110,7 +110,7 @@ def test_exposures_ekos_finished_that_are_not_in_the_library_are_reported(
 
     assert analysis.input_quality.ekos_light_captures == 41
     assert analysis.input_quality.captures_without_frame == 11
-    assert "captures_not_in_library" in [r.kind.value for r in analysis.recommendations]
+    assert "captures_not_in_library" in [r.rule for r in analysis.recommendations]
 
 
 def test_a_clipped_spectral_star_is_found_from_the_frames_alone(
@@ -129,7 +129,7 @@ def test_a_clipped_spectral_star_is_found_from_the_frames_alone(
 
     analysis = night_analysis.capture_night_analysis(control._context, night)
 
-    (recommendation,) = [r for r in analysis.recommendations if r.kind.value == "spectral_star_clipped"]
+    (recommendation,) = [r for r in analysis.recommendations if r.rule == "spectral_star_clipped"]
     assert recommendation.confidence.value == "partly_measured"
     assert "stacking" not in recommendation.message
 

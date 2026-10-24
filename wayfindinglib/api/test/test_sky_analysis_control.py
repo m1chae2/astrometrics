@@ -59,7 +59,7 @@ def test_no_nights_gives_an_analysis_that_says_there_is_too_little(
     analysis = night_analysis.sky_coverage_analysis(control._context)
 
     assert analysis.input_quality.nights == 0
-    assert [r.kind.value for r in analysis.recommendations] == ["insufficient_data"]
+    assert [r.rule for r in analysis.recommendations] == ["sky_insufficient_data"]
 
 
 def test_a_low_altitude_effect_across_nights_is_found(control: ObservatoryControl, library: Library) -> None:
@@ -69,7 +69,7 @@ def test_a_low_altitude_effect_across_nights_is_found(control: ObservatoryContro
         _add_night(library, day, low_factor=1.3)
 
     analysis = night_analysis.sky_coverage_analysis(control._context)
-    kinds = {r.kind.value for r in analysis.recommendations}
+    kinds = {r.rule for r in analysis.recommendations}
 
     assert analysis.input_quality.nights == 8
     assert analysis.session_id.count("..") == 1
@@ -85,7 +85,7 @@ def test_a_uniform_history_finds_no_poor_region(control: ObservatoryControl, lib
 
     analysis = night_analysis.sky_coverage_analysis(control._context)
 
-    assert "sky_region_poor" not in {r.kind.value for r in analysis.recommendations}
+    assert "sky_region_poor" not in {r.rule for r in analysis.recommendations}
 
 
 def test_a_problem_on_several_nights_is_reported_as_recurring(
@@ -99,7 +99,7 @@ def test_a_problem_on_several_nights_is_reported_as_recurring(
 
     issues = night_analysis.recurring_issues(control._context)
 
-    weak = next(issue for issue in issues if issue.kind.value == "check_guide_signal")
+    weak = next(issue for issue in issues if issue.rule == "check_guide_signal")
     assert weak.pipeline == "guiding"
     assert len(weak.nights) == 3
     assert weak.share == pytest.approx(3 / 9)

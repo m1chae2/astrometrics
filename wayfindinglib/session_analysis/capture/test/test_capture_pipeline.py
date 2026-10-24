@@ -53,7 +53,7 @@ def test_a_good_night_is_not_flagged(make_frame: Any, make_capture: Any, make_en
     assert analysis.flag_reasons == []
     assert analysis.pipeline_name == "capture"
     assert analysis.performance.star_quality.median_star_width_arcsec == pytest.approx(5.5)
-    assert [r.kind.value for r in analysis.recommendations] == ["capture_within_limits"]
+    assert analysis.recommendations == []
 
 
 def test_soft_stars_flag_the_night_with_the_limit_behind_it(
@@ -84,7 +84,7 @@ def test_a_download_gap_and_a_clipped_star_are_both_reported(
 
     analysis = analyze_capture_session_request(_request(make_envelope, frames, captures))
 
-    kinds = {recommendation.kind.value for recommendation in analysis.recommendations}
+    kinds = {recommendation.rule for recommendation in analysis.recommendations}
     assert {"captures_not_in_library", "spectral_star_clipped"} <= kinds
     assert analysis.input_quality.captures_without_frame == 5
 
@@ -98,7 +98,7 @@ def test_a_night_with_too_few_frames_skips_processing(make_frame: Any, make_enve
 
     assert not result.has_work
     assert analysis.performance.clipping == []
-    assert [r.kind.value for r in analysis.recommendations] == ["insufficient_data"]
+    assert [r.rule for r in analysis.recommendations] == ["capture_insufficient_data"]
 
 
 def test_the_summary_records_the_definitions_it_used(

@@ -65,6 +65,7 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
+from astrometricslib import NOISE_WEIGHT_MODE, choose_stack_weight, wfwhm_weights
 from wayfindinglib.models.quality.statements import Confidence
 
 _MODEL_CONFIG = ConfigDict(populate_by_name=True, alias_generator=to_camel)
@@ -73,15 +74,6 @@ NOISE_GROWTH_ENTRY = "WAY-21"
 """Register entry behind the forward model and the floor fit."""
 TAKE_MORE_ENTRY = "WAY-D30"
 """Register row behind "take N more" (a design estimate, see STK-36)."""
-
-MINIMUM_PENALTY_TO_WEIGHT = 1.05
-"""The stacker weights by noise when equal weights would leave the stack at
-least
-this much noisier (a factor of 1.05 is 5 percent). This copies
-`MINIMUM_PENALTY_TO_WEIGHT` of
-``astrometricslib/pipelines/stacking/pre_processing/exposure_weighting.py``,
-which wayfindinglib may not import. A test compares the two values. Register
-row WAY-D31."""
 
 WEIGHT_MATCH_TOLERANCE = 0.05
 """A recorded weight matches a mode's predicted weight when they agree within
@@ -202,7 +194,7 @@ def predict_weighting_mode(
 ) -> WeightingMode:
     """Predict the mode the stacker will use for a future stack.
 
-    This follows ``choose_stack_weight`` of the stacker: a configured mode
+    This calls ``choose_stack_weight`` of the stacker: a configured mode
     wins; with none, the stacker weights by noise when equal weights would
     leave the stack at least 5 percent noisier
     (``sqrt(mean(1/t) * mean(t)) >= 1.05``).
@@ -222,16 +214,12 @@ def predict_weighting_mode(
         ``noise``, ``wfwhm`` or ``equal``; ``unknown`` for a configured mode
         the forward model does not know (such as star count).
     """
-    if configured_weight or is_spectral:
-        mapping = {"noise": WeightingMode.NOISE, "wfwhm": WeightingMode.WFWHM}
-        if not configured_weight:
-            return WeightingMode.EQUAL
-        return mapping.get(configured_weight, WeightingMode.UNKNOWN)
-    times = np.asarray([t for t in exposure_seconds if t and t > 0], dtype=float)
-    if times.size == 0:
+    chosen = choose_stack_weight(list(exposure_seconds), configured_weight, is_spectral=is_spectral)
+    if chosen is None:
         return WeightingMode.EQUAL
-    penalty = math.sqrt(float(np.mean(1.0 / times) * np.mean(times)))
-    return WeightingMode.NOISE if penalty >= MINIMUM_PENALTY_TO_WEIGHT else WeightingMode.EQUAL
+    if chosen == NOISE_WEIGHT_MODE:
+        return WeightingMode.NOISE
+    return {"wfwhm": WeightingMode.WFWHM}.get(chosen, WeightingMode.UNKNOWN)
 
 
 def frame_weights(frames: Sequence[StackFrame], mode: WeightingMode) -> list[float] | None:
@@ -247,7 +235,8 @@ def frame_weights(frames: Sequence[StackFrame], mode: WeightingMode) -> list[flo
     Returns
     -------
     weights : `list` [`float`] or `None`
-        One weight per frame, not normalized. ``None`` for the ``unknown``
+        One weight per frame (the ``wfwhm`` weights have mean 1, the others
+        are not scaled). ``None`` for the ``unknown``
         mode, for ``wfwhm`` when a frame has no star width, and for ``noise``
         when a frame has no sky and no read noise (its variance is 0, so its
         inverse is undefined).
@@ -262,13 +251,7 @@ def frame_weights(frames: Sequence[StackFrame], mode: WeightingMode) -> list[flo
         widths = [frame.star_width for frame in frames]
         if any(width is None for width in widths) or not widths:
             return None
-        inverse_squares = [1.0 / float(width) ** 2 for width in widths if width is not None]
-        largest_inverse = max(inverse_squares)
-        smallest_inverse = min(inverse_squares)
-        span = largest_inverse - smallest_inverse
-        if span <= 0.0:
-            return [1.0] * len(frames)
-        return [(value - smallest_inverse) / span for value in inverse_squares]
+        return wfwhm_weights([float(width) for width in widths if width is not None])
     return None
 
 

@@ -25,7 +25,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from astrometricslib import MeasurementReference
-from wayfindinglib.models.session.session_quality import Recommendation
+from wayfindinglib.models.quality.statements import TargetStatement
 
 CAPTURE_ANALYSIS_VERSION = "1.0.0"
 """Bumped whenever the capture analysis changes what it measures or reports."""
@@ -260,9 +260,9 @@ class CaptureSessionAnalysis(BaseModel):
     equipment_fingerprint : `str`
         The equipment the limits were worked out for.
     flagged : `bool`
-        `True` if any recommendation is a warning.
+        `True` if any statement is a warning.
     flag_reasons : `list` [`str`]
-        The kinds of the warnings.
+        The rule names of the warnings.
     resolved_parameters : `dict` [`str`, `Any`]
         The limits and definitions this analysis used, so a result can be
         traced to the numbers behind it.
@@ -270,7 +270,7 @@ class CaptureSessionAnalysis(BaseModel):
         Pre-processing: is the data good?
     performance : `CapturePerformance`
         Processing: what does it show?
-    recommendations : `list` [`Recommendation`]
+    recommendations : `list` [`TargetStatement`]
         Post-processing: what to do about it.
     created_at : `datetime`
         When the analysis was run.
@@ -287,5 +287,5 @@ class CaptureSessionAnalysis(BaseModel):
     resolved_parameters: dict[str, Any] = Field(default_factory=dict, alias="resolvedParameters")
     input_quality: CaptureInputQuality = Field(alias="inputQuality")
     performance: CapturePerformance
-    recommendations: list[Recommendation] = Field(default_factory=list)
+    recommendations: list[TargetStatement] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), alias="createdAt")

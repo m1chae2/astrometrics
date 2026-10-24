@@ -54,6 +54,9 @@ KNOWN_COMPUTING_MODULES = {
     "focus_drift": "batch 1",
     "target_report_tasks": "batch 6a",
     "report_rules": "batch 6a",
+    "recommend_for_guiding": "issue 95 wave D1",
+    "recommend_for_capture": "issue 95 wave D1",
+    "recommend_for_sky": "issue 95 wave D1",
 }
 
 # The items of the decision catalog (plan section 6.6) and the rule or
@@ -206,6 +209,13 @@ def test_no_requirement_is_an_exploratory_metric(registry: dict[str, MetricSpec]
             )
 
 
+MISSING_DATA_ROWS = frozenset({"efficiency_reference_missing"})
+"""Rows of the report table that are ``insufficient_data`` by design. The
+judge makes the missing-data statement of every other rule from that rule's own
+row. A setting with no efficiency reference has no rule of its own to speak
+for it, so it has this row (register row WAY-D81)."""
+
+
 def test_action_classes_fit_the_statement_kind() -> None:
     """Warnings and recommendations name a class; the others name none."""
     for rule in ALL_RULES:
@@ -213,7 +223,7 @@ def test_action_classes_fit_the_statement_kind() -> None:
             assert rule.action_class in set(ActionClass), rule.name
         else:
             assert rule.action_class is None, rule.name
-        if rule in RESULT_QUALITY_RULES:
+        if rule in RESULT_QUALITY_RULES and rule.name not in MISSING_DATA_ROWS:
             assert rule.statement_kind != StatementKind.INSUFFICIENT_DATA, "missing data is made by the judge"
 
 

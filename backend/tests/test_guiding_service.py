@@ -10,7 +10,9 @@ import threading
 from types import SimpleNamespace
 from typing import Any
 
-from astrometricslib import ConflictError
+import pytest
+
+from astrometricslib import ConflictError, PermissionDeniedError
 from backend.services.observatory.guiding_service import GuidingService
 from wayfindinglib import LiveGuidingStatus
 
@@ -18,10 +20,11 @@ from wayfindinglib import LiveGuidingStatus
 class _Guiding:
     """A stand-in `control.guiding` whose loop runs until stopped."""
 
-    def __init__(self, refuse: bool = False) -> None:
-        """Start idle; with `refuse`, the loop refuses to start."""
+    def __init__(self, refuse: bool = False, monitor_mode: bool = False) -> None:
+        """Start idle; `refuse` blocks a start, `monitor_mode` a stop."""
         self.running = False
         self.refuse = refuse
+        self.monitor_mode = monitor_mode
         self.arguments: dict[str, Any] = {}
 
     def run_loop(self, stop: threading.Event, exposure_seconds: float | None, gain: float | None) -> None:
@@ -39,6 +42,18 @@ class _Guiding:
         stop.wait(timeout=5.0)
         self.running = False
 
+    def stop_loop(self, stop: threading.Event) -> None:
+        """End the loop, as the library does, unless in monitor mode.
+
+        Raises
+        ------
+        PermissionDeniedError
+            In monitor mode.
+        """
+        if self.monitor_mode:
+            raise PermissionDeniedError("monitor mode")
+        stop.set()
+
     def status(self, include: list[str]) -> SimpleNamespace:
         """Report whether the loop runs.
 
@@ -48,6 +63,15 @@ class _Guiding:
             With a ``live`` section.
         """
         return SimpleNamespace(live=LiveGuidingStatus(is_guiding=self.running))
+
+
+def test_stop_passes_on_the_librarys_refusal_in_monitor_mode() -> None:
+    """Decision U4 lives in the library; the service lets its error through."""
+    guiding = _Guiding(monitor_mode=True)
+    service = GuidingService(observatory_api=SimpleNamespace(guiding=guiding))
+
+    with pytest.raises(PermissionDeniedError):
+        service.stop_guiding()
 
 
 def test_start_runs_the_library_loop_and_stop_ends_it() -> None:

@@ -1,6 +1,6 @@
 # Post-processing: what should change?
 
-`recommend_for_sky.py` reads the coverage and the comparisons and says what, if anything, to change about where the telescope observes. The result is a list of `Recommendation` records, most serious first, with the same fields as the guiding recommendations. Confidence is `design_estimate` (WAY-47): the data is observational, and altitude is linked to time of night.
+`recommend_for_sky.py` reads the coverage and the comparisons and says what, if anything, to change about where the telescope observes. The result is a list of `TargetStatement` records, most serious first, with the same fields as the guiding statements. Confidence is `design_estimate` (WAY-47): the data is observational, and altitude is linked to time of night.
 
 ## Rules
 

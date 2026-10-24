@@ -23,7 +23,6 @@ from wayfindinglib.models.quality.statements import (
     StatementKind,
     TargetStatement,
 )
-from wayfindinglib.models.session.session_quality import RecommendationSeverity
 
 
 def _statement(**overrides: object) -> TargetStatement:
@@ -45,10 +44,16 @@ def _statement(**overrides: object) -> TargetStatement:
     return TargetStatement(**fields)
 
 
-def test_recommendation_severity_is_the_shared_severity() -> None:
-    """The per-night severity name is the same class, with the same values."""
-    assert RecommendationSeverity is Severity
+def test_severity_has_the_three_levels() -> None:
+    """The one severity scale has the three levels every analysis uses."""
     assert [member.value for member in Severity] == ["info", "advice", "warning"]
+
+
+def test_values_round_trip_under_their_plain_names() -> None:
+    """Numbers that are not measurement rows stay readable by machines."""
+    statement = _statement(values={"rms_per_axis_arcsec": 1.2, "target": "M 13", "missing": None})
+    reloaded = TargetStatement.model_validate(statement.model_dump(by_alias=True, mode="json"))
+    assert reloaded.values == {"rms_per_axis_arcsec": 1.2, "target": "M 13", "missing": None}
 
 
 def test_a_full_statement_round_trips_through_json() -> None:

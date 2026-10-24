@@ -1,10 +1,10 @@
 # Wayfinding library implementation
 
-*Version 2.1 · 2026-10-15 · Status: current*
+*Version 2.2 · 2026-10-24 · Status: current*
 
 ## Abstract
 
-This paper maps the design in `Wayfinding_Library_Architecture.md` to the Python source in `wayfindinglib/`. It names the layers of the package and the rule that keeps them apart, the model classes that hold each record, and the modules that carry out planning, execution and control. It lists the settings the code uses, with their values. It also names the tests and import contracts that check the structure, and it states which parts of the design have code behind them and which do not yet. The Wayfinding library has no validation register yet, so its settings are design choices that have not been measured.
+This paper maps the design in `Wayfinding_Library_Architecture.md` to the Python source in `wayfindinglib/`. It names the layers of the package and the rule that keeps them apart, the model classes that hold each record, and the modules that carry out planning, execution and control. It lists the settings the code uses, with their values. It also names the tests and import contracts that check the structure, and it states which parts of the design have code behind them and which do not yet. Evidence for the settings is in the validation register, and each setting here carries its register identifier.
 
 Terms are defined in the [glossary](./../Glossary.md). This document also defines each term the first time it appears.
 
@@ -137,8 +137,8 @@ Folder: `tasks/planning_tasks/`. Facade: `ObservationPlanning` in `api/planning.
 
 - **Night window and visibility.** `night_window.py` (`resolve_night_window`), `astronomy/solar_position.py`, `visibility_tasks.py` (`visibility_state_at`, `find_earliest_visible_window`, `ever_visible`), `visibility_report.py`, `visibility_operations.py`.
 - **Placement.** `scheduling.py` (`PlacementRequest`, `place`, `schedule_session`, `_apply_advisory_boost`). Reasons: `InfeasibilityReasonCode`. The boost needs `quality_weighting_enabled`.
-- **Mosaics and advice.** `mosaic_tasks.py`, `*_advisory_tasks.py`.
-- **Plans.** `planning_operations.py` (`create_plan` kinds: `sequence`, `package`, `empty_session`, `scheduled_session`; `get_advisory` kinds: `quality`, `calibration`; `edit_queue`).
+- **Mosaics and advice.** `mosaic_tasks.py` (`calculate_panels` takes `rotation_deg`), `calibration_advisory_tasks.py`. The quality judgments are in Section 6.10.
+- **Plans.** `planning_operations.py` (`create_plan` kinds: `sequence`, `package`, `empty_session`, `scheduled_session`; `get_advisory` kinds: `quality`, `calibration`, `tonight`, `result`; `get_plan`, `edit_queue`, `tick_checklist_item`).
 - **Sky.** `sky_engine.py` (`SkyEngine`), `sky_sources.py`, `drivers/catalog/`, and the `*_operations.py` calculation modules.
 
 <!-- impl: wayfindinglib.tasks.planning_tasks.scheduling.PlacementRequest -->
@@ -355,23 +355,6 @@ All in `tasks/control_tasks/` unless noted.
 <!-- impl: wayfindinglib.tasks.control_tasks.frame_guiding -->
 <!-- impl: wayfindinglib.tasks.control_tasks.alignment_history -->
 
-Planning and Control share one statement vocabulary in `models/quality/statements.py`: `TargetStatement`, with the action classes, severity and confidence. A rule's confidence is the status label of its register entry (partly measured; see [WAY-01](validation/wayfinding.md#way-01)). The physical efficiency reference uses the diffraction limit alone when `SiteProfile.typical_seeing_fwhm_arcsec` is not set (design estimate; WAY-D01).
-
-<!-- impl: wayfindinglib.models.quality.statements.TargetStatement -->
-<!-- impl: wayfindinglib.models.equipment_and_site.site_profile.SiteProfile -->
-
-The result-quality work adds more entries to the validation register. These are short pointers. A full description is still to be written.
-
-- The rule table and its constants are listed in [WAY-05](validation/wayfinding.md#way-05) and WAY-D05 to WAY-D09 (and WAY-D60 to WAY-D68 for the report rules).
-- The efficiency factors, goal exponents and loss split are in [WAY-20](validation/wayfinding.md#way-20), and the noise-growth forward model and noise floor fit are in [WAY-21](validation/wayfinding.md#way-21). Their constants are WAY-D20 to WAY-D34.
-- The performance envelope limits are in [WAY-40](validation/wayfinding.md#way-40), [WAY-41](validation/wayfinding.md#way-41), [WAY-42](validation/wayfinding.md#way-42), [WAY-43](validation/wayfinding.md#way-43) and [WAY-44](validation/wayfinding.md#way-44), and the rules that read the guiding, capture and sky pipelines are in [WAY-45](validation/wayfinding.md#way-45), [WAY-46](validation/wayfinding.md#way-46) and [WAY-47](validation/wayfinding.md#way-47). Their constants are WAY-D40 to WAY-D48.
-- `DiskButler.put_session_from_execution` <!-- impl: wayfindinglib.drivers.butler.DiskButler.put_session_from_execution --> is the one write Execution uses: the recorder's checkpoint, the imaging queue's checkpoint, post-session reconciliation and `abort_session`. A plan edit that changes nothing stores nothing, keeps the revision and sends no `plan:changed` event. The sequencer methods `sequencer:add`, `sequencer:remove`, `sequencer:reorder` and `sequencer:modify` edit the queue through the plan service, so each one sends `plan:changed` like `plan:edit`. `performance_envelope_tasks.py` no longer re-exports `sensor_limits_for_camera`; callers import it from `wayfindinglib.analytics.envelope_assembly`.
-- The stored night plan, allowed capture values, sequence summary, mosaic rotation and checklist are in [WAY-50](validation/wayfinding.md#way-50), [WAY-51](validation/wayfinding.md#way-51), [WAY-52](validation/wayfinding.md#way-52), [WAY-53](validation/wayfinding.md#way-53) and [WAY-54](validation/wayfinding.md#way-54), with constants WAY-D50 to WAY-D54.
-- Target-change detection is in [WAY-55](validation/wayfinding.md#way-55), the monitor-mode guarantee is in [WAY-56](validation/wayfinding.md#way-56), and the night list is in [WAY-57](validation/wayfinding.md#way-57). Their constants are WAY-D55 to WAY-D58.
-- The target dataset report (its joins, rules and the size limit of its reply) is in [WAY-60](validation/wayfinding.md#way-60), with constants WAY-D60, WAY-D61, WAY-D62, WAY-D63, WAY-D64, WAY-D65, WAY-D66, WAY-D67, WAY-D68, WAY-D69 and WAY-D77.
-- The forecast check is in [WAY-70](validation/wayfinding.md#way-70) and WAY-D70. Tonight's sky model is in [WAY-71](validation/wayfinding.md#way-71), and tonight's ranking is in [WAY-72](validation/wayfinding.md#way-72) with WAY-D71 and WAY-D72.
-- The trust statements for one star's result are in [WAY-73](validation/wayfinding.md#way-73) with WAY-D73. The night review is in [WAY-74](validation/wayfinding.md#way-74) with WAY-D74, WAY-D75 and WAY-D76.
-
 **Table 10.** Settings of the performance envelope and the session-quality analyses. The Basis column gives an observation or reason, where there is one.
 
 | Setting | Value | Where | Basis |
@@ -407,6 +390,83 @@ The result-quality work adds more entries to the validation register. These are 
 | Priors: west of the meridian; near the pole; near the horizon | up to 0.10 by hour angle 75°; up to 0.08 above declination 75°; up to 0.40 at the horizon, 1 below it, from altitude 20° | East-heavy balance lets gears float; the declination bearing can stick; air blurs stars. |
 | Jitter that is safe; that trails | below 0.75 pixel; above 1.25 pixels | Scatter of a target's repeated plate solves against pixel scale. |
 | Spread of a target's pull; solves at full weight; largest measured share | 25°, Gaussian; 30; 85% | |
+
+### 6.10 Quality judgment and advice (Quality Judgment paper)
+
+The theory is in [Wayfinding quality judgment](Wayfinding_Quality_Judgment.md) (Architecture Section 6.11 gives its scope). Planning and Control share the vocabulary in `models/quality/`. The judging code is in `analytics/result_quality/` (Foundation, so both can call it) and is described in its README. The entry points are `get_advisory` (kinds `quality`, `tonight`, `result`, `calibration`) and `control.history.query` (kinds `night_quality`, `nights`, `target_changes`). A rule's confidence is the status label of its register entry (partly measured; see [WAY-01](validation/wayfinding.md#way-01)).
+
+**Table 12.** Where each part of the judgment lives. Paths are relative to `wayfindinglib/`. Register entries hold the evidence, and WAY-D rows hold the settings of Table 13.
+
+| Part | Code | Register |
+| --- | --- | --- |
+| Statement, kinds, action classes, confidence | `TargetStatement`, `StatementKind`, `ActionClass`, `Confidence` (`models/quality/statements.py`) | [WAY-01](validation/wayfinding.md#way-01) |
+| Rule tables and conformance | `QualityRule`; `RESULT_QUALITY_RULES`, `STAR_RESULT_RULES`, `SESSION_RULES`, joined as `ALL_RULES` (`all_rules.py`); `judge_results`, `needs_attention`; `wayfindinglib/test/test_quality_rule_conformance.py` | [WAY-05](validation/wayfinding.md#way-05); WAY-D05, WAY-D06, WAY-D07, WAY-D08, WAY-D09, WAY-D10, WAY-D11 |
+| Per-night rules | `session_rules.py`; guiding, capture and sky pipelines of Section 6.9 | [WAY-45](validation/wayfinding.md#way-45), [WAY-46](validation/wayfinding.md#way-46), [WAY-47](validation/wayfinding.md#way-47); WAY-D45, WAY-D46, WAY-D47, WAY-D48 |
+| Envelope limits the rules read | `envelope_assembly.assemble_performance_envelope`, `performance_envelope.py` (Section 6.8) | [WAY-40](validation/wayfinding.md#way-40), [WAY-41](validation/wayfinding.md#way-41), [WAY-42](validation/wayfinding.md#way-42), [WAY-43](validation/wayfinding.md#way-43), [WAY-44](validation/wayfinding.md#way-44); WAY-D40, WAY-D41, WAY-D42, WAY-D43, WAY-D44 |
+| Efficiency, goal, references | `physical_reference`, `baseline_reference`, `noise_regime`, `assess_efficiency` (`efficiency.py`); `science_goal_for_setting` (`science_goal.py`); `observing_values.py` | [WAY-20](validation/wayfinding.md#way-20); WAY-D01, WAY-D20, WAY-D21, WAY-D22, WAY-D23, WAY-D24, WAY-D25, WAY-D26, WAY-D27, WAY-D28, WAY-D74 |
+| Loss account and night review | `loss_account`, `capture_setting_summaries`, `night_summary`, `target_summary` (`aggregates.py`); `set_aside_reasons` (`library_inputs.py`, reads `Astrometrics.quality.set_aside_frames`); `build_night_quality` (`night_quality_task.py`) | [WAY-74](validation/wayfinding.md#way-74); WAY-D75, WAY-D76 |
+| Noise growth and the stop signal | `forecast_stack_noise`, `frames_to_cut_noise`, `fit_noise_floor`, `stop_signal` (`noise_growth.py`) | [WAY-21](validation/wayfinding.md#way-21); WAY-D30, WAY-D31, WAY-D32, WAY-D34 |
+| Forecast check | `forecast_check` (`forecast.py`) | [WAY-70](validation/wayfinding.md#way-70); WAY-D70 |
+| Target dataset report | `build_target_dataset_report` (`target_report_tasks.py`), `target_report_inputs.py`, `report_rules.py`, `starting_point.py`; `TargetDatasetReport` (`models/planning/target_report.py`) | [WAY-60](validation/wayfinding.md#way-60); WAY-D60, WAY-D61, WAY-D62, WAY-D63, WAY-D64, WAY-D65, WAY-D66, WAY-D67, WAY-D68, WAY-D69 |
+| One star's result | `judge_star_result` (`result_judgment_tasks.py`), `star_result_rules.py` | [WAY-73](validation/wayfinding.md#way-73); WAY-D73 |
+| Sky model, overheads, tonight's ranking | `fit_sky_model` (`sky_model.py`), `estimate_capture_overheads` (`capture_overheads.py`), `rank_tonight`, `score_candidate` (`tonight_ranking_tasks.py`) | [WAY-71](validation/wayfinding.md#way-71), [WAY-72](validation/wayfinding.md#way-72); WAY-D29, WAY-D33, WAY-D71, WAY-D72 |
+| Night plan | `ObservationSession` fields `checklist`, `framing`, `revision`; `PlanChange`, `PlanRevisionConflictError`; `night_plan_tasks.py`; `AllowedCaptureValues`; `SequenceSummary` | [WAY-50](validation/wayfinding.md#way-50), [WAY-51](validation/wayfinding.md#way-51), [WAY-52](validation/wayfinding.md#way-52), [WAY-53](validation/wayfinding.md#way-53), [WAY-54](validation/wayfinding.md#way-54); WAY-D50, WAY-D51, WAY-D52, WAY-D53, WAY-D54 |
+| Night list and target changes | `build_night_list`, `build_night_history` (`night_history.py`); `find_target_changes` (`target_changes.py`) | [WAY-55](validation/wayfinding.md#way-55), [WAY-57](validation/wayfinding.md#way-57); WAY-D55, WAY-D56, WAY-D57 |
+| Monitor mode | `ALLOWED_IN_MONITOR_MODE` and the three `test_monitor_mode_*` tests; guards in `hardware_operations.py` | [WAY-56](validation/wayfinding.md#way-56) |
+| Reply size | `reply_budget.py`; the MCP tool registry trims replies; `fit_status_to_budget` for the live status | WAY-D58, WAY-D77 |
+
+<!-- impl: wayfindinglib.models.quality.statements.TargetStatement -->
+<!-- impl: wayfindinglib.models.quality.rule.QualityRule -->
+<!-- impl: wayfindinglib.analytics.result_quality.all_rules.ALL_RULES -->
+<!-- impl: wayfindinglib.analytics.result_quality.judge_results.judge_results -->
+<!-- impl: wayfindinglib.analytics.result_quality.efficiency.assess_efficiency -->
+<!-- impl: wayfindinglib.analytics.result_quality.science_goal.science_goal_for_setting -->
+<!-- impl: wayfindinglib.analytics.result_quality.aggregates.loss_account -->
+<!-- impl: wayfindinglib.analytics.result_quality.noise_growth.stop_signal -->
+<!-- impl: wayfindinglib.analytics.result_quality.forecast.forecast_check -->
+<!-- impl: wayfindinglib.analytics.result_quality.sky_model.fit_sky_model -->
+<!-- impl: wayfindinglib.analytics.result_quality.capture_overheads.estimate_capture_overheads -->
+<!-- impl: wayfindinglib.analytics.result_quality.library_inputs.set_aside_reasons -->
+<!-- impl: wayfindinglib.analytics.result_quality.starting_point.build_starting_point -->
+<!-- impl: wayfindinglib.analytics.envelope_assembly.assemble_performance_envelope -->
+<!-- impl: wayfindinglib.tasks.planning_tasks.target_report_tasks.build_target_dataset_report -->
+<!-- impl: wayfindinglib.tasks.planning_tasks.tonight_ranking_tasks.rank_tonight -->
+<!-- impl: wayfindinglib.tasks.planning_tasks.result_judgment_tasks.judge_star_result -->
+<!-- impl: wayfindinglib.tasks.planning_tasks.night_plan_tasks.store_session_change -->
+<!-- impl: wayfindinglib.tasks.control_tasks.night_quality_task.build_night_quality -->
+<!-- impl: wayfindinglib.tasks.control_tasks.night_history.build_night_list -->
+<!-- impl: wayfindinglib.tasks.control_tasks.target_changes.find_target_changes -->
+<!-- impl: wayfindinglib.models.session.observation_session.PlanChange -->
+<!-- impl: wayfindinglib.models.session.observation_session.PlanRevisionConflictError -->
+<!-- impl: wayfindinglib.models.planning.target_report.TargetDatasetReport -->
+<!-- impl: wayfindinglib.models.planning.tonight_ranking.TonightRanking -->
+<!-- impl: wayfindinglib.models.session.night_quality.NightQuality -->
+<!-- impl: wayfindinglib.models.session.night_list.NightListEntry -->
+<!-- impl: wayfindinglib.analytics.result_quality.allowed_capture_values.AllowedCaptureValues -->
+<!-- impl: wayfindinglib.models.planning.sequence_summary.SequenceSummary -->
+<!-- impl: wayfindinglib.analytics.result_quality.reply_budget.reply_budget -->
+<!-- impl: wayfindinglib.models.equipment_and_site.site_profile.SiteProfile -->
+
+Without `SiteProfile.typical_seeing_fwhm_arcsec`, the physical reference uses the diffraction limit alone (design estimate; WAY-D01). `DiskButler.put_session_from_execution` <!-- impl: wayfindinglib.drivers.butler.DiskButler.put_session_from_execution --> is the one write Execution uses. It merges the fields Planning owns inside one transaction, so a plan edit survives a checkpoint. A plan edit that changes nothing stores nothing, keeps the revision and sends no `plan:changed` event. The `sequencer:add`, `remove`, `reorder` and `modify` methods edit the queue through the plan service and send the same event.
+
+**Table 13.** Main settings of the quality judgment. Each row's register identifier gives its status and a way to measure it.
+
+| Setting | Value | Where | Register |
+| --- | --- | --- | --- |
+| Diffraction limit | 550 nm; 1.029 λ/D | `REFERENCE_WAVELENGTH_NM`, `AIRY_FWHM_FACTOR` | WAY-D20 |
+| Equipment baseline | 10th percentile of nightly medians; 3 nights | `BASELINE_PERCENTILE`, `MINIMUM_NIGHTS_FOR_BASELINE` | WAY-D22 |
+| Noise regimes | sky variance 9 × read-noise variance; source variance 1 × sky | `SKY_LIMITED_VARIANCE_RATIO`, `SOURCE_LIMITED_VARIANCE_RATIO` | WAY-D24 |
+| Sky model | 5 nights, 20 frames; Moon term from 2 moonlit nights | `MINIMUM_NIGHTS_FOR_SKY_MODEL`, `MINIMUM_FRAMES_FOR_SKY_MODEL`, `MINIMUM_MOON_NIGHTS` | WAY-D29 |
+| "Take N more" | noise to 0.707 of today's | `TARGET_NOISE_RATIO` | WAY-D30 |
+| Floor and stop signal | 2 standard errors, one-sided; stop under a 10% cut from doubling | `FLOOR_SIGMAS`, `MINIMUM_GAIN_FRACTION` | WAY-D32 |
+| Capture overheads | download 5 s, dither settle 20 s, autofocus 120 s | `DEFAULT_DOWNLOAD_SECONDS`, `DEFAULT_DITHER_SETTLE_SECONDS`, `DEFAULT_AUTOFOCUS_SECONDS` | WAY-D33 |
+| Forecast agreement | 2 standard errors | `AGREEMENT_TOLERANCES` | WAY-D70 |
+| Clock hour of the ranking | dither every 3 frames; 1 autofocus run; thin under 2 h | `DITHER_EVERY_FRAMES`, `AUTOFOCUS_RUNS_PER_HOUR`, `THIN_DATASET_SECONDS` | WAY-D71 |
+| Frames lost warning | 5% of a setting's frames | `FRAME_LOSS_WARNING_FRACTION` | WAY-D60 |
+| Report "take N more" | 10 frames at least; exposure rounded up to 10 s | `MINIMUM_FRAMES_FOR_FORECAST`, `EXPOSURE_ROUNDING_SECONDS` | WAY-D61 |
+| Sky cost; altitude cost | 10% of captured time; cuts 30°, 40°, 50°, 15% | `SKY_COST_MINIMUM_SHARE`, `ALTITUDE_CUTS_DEG`, `ALTITUDE_MINIMUM_RELATIVE_LOSS` | WAY-D64, WAY-D65 |
+| Sharpness trade-off | keep 70%; at least 5% narrower; 20 frames | `SHARPNESS_KEEP_FRACTION`, `SHARPNESS_MINIMUM_GAIN`, `SHARPNESS_MINIMUM_FRAMES` | WAY-D66 |
+| Reply limit | 40,000 characters, 10% headroom | `MAXIMUM_REPLY_CHARACTERS`, `REPLY_HEADROOM_FRACTION` | WAY-D77 |
 
 ## 7. Verification (Architecture Section 7)
 

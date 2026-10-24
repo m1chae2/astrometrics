@@ -18,6 +18,8 @@ through the backend (`backend/tests/test_monitor_mode_rpc.py`) and the
 MCP tools (`mcp_servers/wayfinding_core/test/test_monitor_mode_tools.py`).
 """
 
+import threading
+
 import pytest
 
 from astrometricslib import AppConfiguration, PermissionDeniedError
@@ -47,7 +49,8 @@ def test_the_manifest_lists_commands_and_each_refused_one_has_sample_arguments()
     missing = [
         name
         for name in names
-        if name != "observatory_guiding_run_loop" and name not in support.SAMPLE_ARGUMENTS
+        if name not in ("observatory_guiding_run_loop", "observatory_guiding_stop_loop")
+        and name not in support.SAMPLE_ARGUMENTS
     ]
     assert missing == [], f"Add sample arguments to monitor_mode_support.SAMPLE_ARGUMENTS for: {missing}"
 
@@ -150,3 +153,21 @@ def test_caller_supplied_steps_list_matches_the_manifest() -> None:
     systems engineer (issue #95, batch 5).
     """
     assert support.CALLER_SUPPLIED_STEP_TOOLS <= set(support.command_tool_names())
+
+
+def test_the_two_stops_are_refused_in_monitor_mode_and_change_nothing(wayfinder: Wayfinder) -> None:
+    """Decision U4: stopping a guide loop or a centering run is refused too.
+
+    The guide loop's stop event stays unset and no driver command is sent,
+    whether or not a centering run is going.
+    """
+    stop = threading.Event()
+    with pytest.raises(PermissionDeniedError):
+        wayfinder.control.guiding.stop_loop(stop)
+    assert not stop.is_set()
+
+    for run_is_active in (True, False):
+        with pytest.raises(PermissionDeniedError):
+            wayfinder.control.mount.cancel_centering(run_is_active)
+    assert not wayfinder.control._context.motion_stop.is_set()
+    assert wayfinder.recording.commands_sent() == []

@@ -5,10 +5,11 @@ Description: `Wayfinder` composes the library's three sub-APIs:
 observe) and `execution` (run and recover an observing session).
 `control` has seven children named by topic, such as `control.mount`
 and `control.history`. The package root also offers the models those
-sub-APIs take and return, the one pure function callers need
-(`group_alignment_attempts`), and the library's own error class. The error
-categories themselves (`NotFoundError`, `InvalidArgumentError` and the
-rest) come from `astrometricslib`.
+sub-APIs take and return, the pure functions callers need
+(`group_alignment_attempts`, and `fit_reply_to_budget`, which the MCP tools
+use to shorten a long quality reply), and the library's own error class.
+The error categories themselves (`NotFoundError`,
+`InvalidArgumentError` and the rest) come from `astrometricslib`.
 
 Every name below except `Wayfinder` is loaded on first use (module
 `__getattr__`, PEP 562) from one lookup table. Importing a submodule
@@ -40,6 +41,7 @@ configure_offline_iers()
 if TYPE_CHECKING:
     from astrometricslib import AppConfiguration, Astrometrics
     from wayfindinglib.analytics.alignment_sessions import group_alignment_attempts
+    from wayfindinglib.analytics.result_quality.reply_budget import fit_reply_to_budget
     from wayfindinglib.api.control import ObservatoryControl
     from wayfindinglib.api.execution import ObservationExecution
     from wayfindinglib.api.planning import ObservationPlanning
@@ -177,6 +179,8 @@ _LAZY_EXPORTS = {
     "EquipmentConfiguration": "wayfindinglib.models.equipment_and_site.equipment",
     # Groups plate solves into one `AlignmentTargetSession` per target.
     "group_alignment_attempts": "wayfindinglib.analytics.alignment_sessions",
+    # Shortens a quality reply for the MCP tools; the library replies in full.
+    "fit_reply_to_budget": "wayfindinglib.analytics.result_quality.reply_budget",
     # The library's own error class. The categories come from astrometricslib.
     "DelegationPolicyValidationError": "wayfindinglib.data_access.delegation_policy_reader",
 }

@@ -10,7 +10,7 @@ import pytest
 
 from astrometricslib import LimitTier, MeasurementReference, QualityLimit
 from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
-from wayfindinglib.models.quality.statements import Confidence
+from wayfindinglib.models.quality.statements import Confidence, Severity
 from wayfindinglib.models.session.capture_quality import (
     CaptureEfficiency,
     CaptureInputQuality,
@@ -18,7 +18,6 @@ from wayfindinglib.models.session.capture_quality import (
     ExposureClipping,
     StarQuality,
 )
-from wayfindinglib.models.session.session_quality import RecommendationKind, RecommendationSeverity
 from wayfindinglib.session_analysis.capture.post_processing.recommend_for_capture import recommend_for_capture
 
 
@@ -108,15 +107,15 @@ def _performance(clipping: list[ExposureClipping] | None = None, **star: object)
     )
 
 
-def _kinds(recommendations: list) -> list[RecommendationKind]:
+def _kinds(recommendations: list) -> list[str]:
     """List the kinds of a set of recommendations.
 
     Returns
     -------
-    kinds : `list` [`RecommendationKind`]
+    kinds : `list` [`str`]
         The kinds, in order.
     """
-    return [recommendation.kind for recommendation in recommendations]
+    return [recommendation.rule for recommendation in recommendations]
 
 
 def test_too_few_frames_says_so_and_stops() -> None:
@@ -125,15 +124,15 @@ def test_too_few_frames_says_so_and_stops() -> None:
 
     recommendations = recommend_for_capture(quality, _performance())
 
-    assert _kinds(recommendations) == [RecommendationKind.INSUFFICIENT_DATA]
-    assert recommendations[0].severity == RecommendationSeverity.INFO
+    assert _kinds(recommendations) == ["capture_insufficient_data"]
+    assert recommendations[0].severity == Severity.INFO
 
 
 def test_an_ordinary_night_is_within_limits() -> None:
-    """Verify a night with no findings says it was within limits."""
+    """Verify a night with no findings makes no statement."""
     recommendations = recommend_for_capture(_input(), _performance(median_star_width_arcsec=None))
 
-    assert _kinds(recommendations) == [RecommendationKind.CAPTURE_WITHIN_LIMITS]
+    assert _kinds(recommendations) == []
 
 
 def test_exposures_missing_from_the_library_are_advised() -> None:
@@ -143,7 +142,7 @@ def test_exposures_missing_from_the_library_are_advised() -> None:
     )
 
     (recommendation,) = recommendations
-    assert recommendation.kind == RecommendationKind.CAPTURES_NOT_IN_LIBRARY
+    assert recommendation.rule == "captures_not_in_library"
     assert recommendation.values["captures_without_frame"] == pytest.approx(7.0)
     assert recommendation.confidence == Confidence.PARTLY_MEASURED
 
@@ -154,7 +153,7 @@ def test_unclassified_captures_are_mentioned_but_not_counted_as_missing() -> Non
         _input(captures_without_frame=0, captures_without_frame_of_unknown_kind=40), _performance()
     )
 
-    assert _kinds(recommendations) == [RecommendationKind.CAPTURE_WITHIN_LIMITS]
+    assert _kinds(recommendations) == []
 
 
 def test_missing_measurements_are_named() -> None:
@@ -165,7 +164,7 @@ def test_missing_measurements_are_named() -> None:
     )
 
     (recommendation,) = recommendations
-    assert recommendation.kind == RecommendationKind.FRAMES_MISSING_MEASUREMENTS
+    assert recommendation.rule == "frames_missing_measurements"
     assert "pixel_scale_arcsec (3 frames)" in recommendation.message
 
 
@@ -183,8 +182,8 @@ def test_frequent_aborts_are_advised_with_the_limit() -> None:
     )
 
     (recommendation,) = recommendations
-    assert recommendation.kind == RecommendationKind.FREQUENT_ABORTED_CAPTURES
-    (limit,) = recommendation.compared_to
+    assert recommendation.rule == "frequent_aborted_captures"
+    (limit,) = recommendation.limits
     assert limit.value == pytest.approx(0.05)
     assert limit.register_entry == "WAY-42"
 
@@ -201,8 +200,8 @@ def test_temperature_spread_is_information_only() -> None:
     )
 
     (recommendation,) = recommendations
-    assert recommendation.kind == RecommendationKind.SENSOR_TEMPERATURE_DRIFT
-    assert recommendation.severity == RecommendationSeverity.INFO
+    assert recommendation.rule == "sensor_temperature_drift"
+    assert recommendation.severity == Severity.INFO
 
 
 def test_a_spectral_star_clipped_at_every_length_asks_for_a_shorter_exposure() -> None:
@@ -211,7 +210,7 @@ def test_a_spectral_star_clipped_at_every_length_asks_for_a_shorter_exposure() -
 
     (recommendation,) = recommend_for_capture(_input(), performance)
 
-    assert recommendation.kind == RecommendationKind.SPECTRAL_STAR_CLIPPED
+    assert recommendation.rule == "spectral_star_clipped"
     assert "every exposure length" in recommendation.message
     assert "1 s" in recommendation.message
     assert recommendation.confidence == Confidence.PARTLY_MEASURED
@@ -255,14 +254,14 @@ def test_imaging_frames_are_never_advised_against_clipping() -> None:
     """Verify bright stars clipping in an imaging field is not a finding."""
     performance = _performance([_group(spectral=False, exposure=300.0)])
 
-    assert _kinds(recommend_for_capture(_input(), performance)) == [RecommendationKind.CAPTURE_WITHIN_LIMITS]
+    assert _kinds(recommend_for_capture(_input(), performance)) == []
 
 
 def test_a_spectral_target_that_never_clipped_gets_no_advice() -> None:
     """Verify an unclipped target is left alone."""
     performance = _performance([_group(clipped=False)])
 
-    assert _kinds(recommend_for_capture(_input(), performance)) == [RecommendationKind.CAPTURE_WITHIN_LIMITS]
+    assert _kinds(recommend_for_capture(_input(), performance)) == []
 
 
 def test_each_clipped_target_gets_its_own_recommendation() -> None:
@@ -288,10 +287,10 @@ def test_wide_stars_are_a_warning_against_earlier_nights() -> None:
         _input(), performance, _envelope(night_star_width_high_limit=7.0)
     )
 
-    assert recommendation.kind == RecommendationKind.STAR_WIDTH_ABOVE_BASELINE
-    assert recommendation.severity == RecommendationSeverity.WARNING
+    assert recommendation.rule == "star_width_above_baseline"
+    assert recommendation.severity == Severity.WARNING
     assert [reference.row_id for reference in recommendation.evidence] == [5, 6]
-    (limit,) = recommendation.compared_to
+    (limit,) = recommendation.limits
     assert limit.value == pytest.approx(7.0)
     # Judged against the night's own history, so stepped down one label.
     assert recommendation.confidence == Confidence.DESIGN_ESTIMATE
@@ -309,8 +308,8 @@ def test_elongated_stars_are_a_warning_against_earlier_nights() -> None:
 
     (recommendation,) = recommend_for_capture(_input(), performance)
 
-    assert recommendation.kind == RecommendationKind.STARS_ELONGATED
-    assert recommendation.severity == RecommendationSeverity.WARNING
+    assert recommendation.rule == "stars_elongated"
+    assert recommendation.severity == Severity.WARNING
 
 
 def test_stars_within_the_limits_raise_nothing() -> None:
@@ -323,7 +322,7 @@ def test_stars_within_the_limits_raise_nothing() -> None:
         roundness_limit=0.75,
     )
 
-    assert _kinds(recommend_for_capture(_input(), performance)) == [RecommendationKind.CAPTURE_WITHIN_LIMITS]
+    assert _kinds(recommend_for_capture(_input(), performance)) == []
 
 
 def test_star_width_without_a_baseline_is_stated_not_judged() -> None:
@@ -332,8 +331,8 @@ def test_star_width_without_a_baseline_is_stated_not_judged() -> None:
 
     (recommendation,) = recommend_for_capture(_input(), performance)
 
-    assert recommendation.kind == RecommendationKind.INSUFFICIENT_DATA
-    assert recommendation.severity == RecommendationSeverity.INFO
+    assert recommendation.rule == "capture_insufficient_data"
+    assert recommendation.severity == Severity.INFO
 
 
 def test_recommendations_are_ordered_most_serious_first() -> None:
@@ -353,9 +352,9 @@ def test_recommendations_are_ordered_most_serious_first() -> None:
     severities = [r.severity for r in recommend_for_capture(quality, performance)]
 
     assert severities == [
-        RecommendationSeverity.WARNING,
-        RecommendationSeverity.ADVICE,
-        RecommendationSeverity.INFO,
+        Severity.WARNING,
+        Severity.ADVICE,
+        Severity.INFO,
     ]
 
 

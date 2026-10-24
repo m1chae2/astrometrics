@@ -15,10 +15,9 @@ from typing import Any
 import pytest
 
 from astrometricslib import AppConfiguration, CaptureSetting, FrameRecord, Target
-from wayfindinglib.analytics.result_quality import efficiency, library_inputs
+from wayfindinglib.analytics.result_quality import library_inputs
 from wayfindinglib.analytics.result_quality.efficiency import FrameObservation, baseline_key
 from wayfindinglib.analytics.result_quality.library_inputs import (
-    UNKNOWN_SETTING_CAMERA,
     LibraryInputs,
     dominant_setting,
     frame_times,
@@ -27,7 +26,10 @@ from wayfindinglib.analytics.result_quality.library_inputs import (
     target_direction,
     telescope_of,
 )
-from wayfindinglib.analytics.result_quality.science_goal import science_goal_for_target
+from wayfindinglib.analytics.result_quality.science_goal import (
+    science_goal_for_setting,
+    science_goal_for_target,
+)
 from wayfindinglib.analytics.result_quality.sky_model import SkyModel
 from wayfindinglib.analytics.test.night_quality_helpers import (
     FIRST_NIGHT,
@@ -110,6 +112,48 @@ def test_only_a_row_that_says_excluded_marks_a_frame_set_aside() -> None:
     assert list(reasons.values()) == ["frame moved to _excluded/"]
 
 
+def test_frames_in_an_excluded_folder_are_counted_with_their_manifest_reason() -> None:
+    """A listed frame with a manifest reason and no stored row is set aside."""
+    listed = [
+        SimpleNamespace(
+            subject_id="M 81:a",
+            path="/f/_excluded/a.fits",
+            kind="clouded",
+            reason="few stars",
+            action_taken=None,
+        ),
+        SimpleNamespace(subject_id=None, path="/f/_excluded/b.fits", kind=None, reason="", action_taken=None),
+    ]
+
+    reasons = set_aside_reasons([], listed)
+
+    assert reasons == {
+        "M 81:a": "clouded",
+        "/f/_excluded/b.fits": library_inputs.NO_REASON_RECORDED,
+    }
+
+
+def test_the_inputs_read_the_listing_and_note_a_listing_that_fails() -> None:
+    """The inputs use the library listing, and note one that fails."""
+    listed = [SimpleNamespace(subject_id="T:1", path="/p", kind="trailed", reason="", action_taken=None)]
+    good = SimpleNamespace(quality=SimpleNamespace(set_aside_frames=lambda target_id: listed))
+    assert LibraryInputs(good, None, None).set_aside_reasons("T", []) == {"T:1": "trailed"}
+
+    def fail(target_id: str) -> list[Any]:
+        """Raise like an unreadable folder.
+
+        Raises
+        ------
+        OSError
+            Always.
+        """
+        raise OSError("disk gone")
+
+    broken = LibraryInputs(SimpleNamespace(quality=SimpleNamespace(set_aside_frames=fail)), None, None)
+    assert broken.set_aside_reasons("T", []) == {}
+    assert any("could not be listed" in note for note in broken.notes)
+
+
 def test_the_dominant_setting_holds_the_most_exposure() -> None:
     """The setting with the most exposure time wins."""
     other = SETTING.model_copy(update={"exposure_seconds": 120.0})
@@ -121,11 +165,6 @@ def test_the_dominant_setting_holds_the_most_exposure() -> None:
     assert dominant_setting([]) is None
 
 
-def test_the_unknown_setting_camera_copy_agrees_with_the_efficiency_module() -> None:
-    """The copied constant must not drift from the private original."""
-    assert UNKNOWN_SETTING_CAMERA == efficiency._UNKNOWN_SETTING_CAMERA
-
-
 def test_the_science_goal_follows_the_kind_of_target() -> None:
     """Spectral frames, photometry, galaxies and stars get their own goals."""
     assert science_goal_for_target(Target(id="M 81")) == ScienceGoal.EXTENDED_OBJECT
@@ -133,6 +172,22 @@ def test_the_science_goal_follows_the_kind_of_target() -> None:
     assert science_goal_for_target(Target(id="HD 1")) == ScienceGoal.FAINT_POINT_SOURCE
     spectral = Target(id="Vega", frames=[FrameRecord(path="/a.fits", filter="Star Analyzer 200")])
     assert science_goal_for_target(spectral) == ScienceGoal.SLITLESS_SPECTRAL_RESOLUTION
+
+
+def test_the_science_goal_follows_the_capture_setting() -> None:
+    """Decision U2: a grating setting is spectral; others follow the type."""
+    grating = SETTING.model_copy(update={"filter_name": "Star Analyzer 200"})
+    no_filter = SETTING.model_copy(update={"filter_name": None})
+    spectral_frames = [FrameRecord(path="/a.fits", filter="Star Analyzer 200")]
+
+    assert science_goal_for_setting(Target(id="M 81"), grating) == ScienceGoal.SLITLESS_SPECTRAL_RESOLUTION
+    assert science_goal_for_setting(Target(id="M 81"), SETTING) == ScienceGoal.EXTENDED_OBJECT
+    assert science_goal_for_setting(Target(id="HD 1"), SETTING) == ScienceGoal.FAINT_POINT_SOURCE
+    assert science_goal_for_setting(Target(id="HD 1"), no_filter) == ScienceGoal.FAINT_POINT_SOURCE
+    assert (
+        science_goal_for_setting(Target(id="HD 1"), no_filter, spectral_frames)
+        == ScienceGoal.SLITLESS_SPECTRAL_RESOLUTION
+    )
 
 
 def test_a_model_gives_a_rate_without_the_moon() -> None:
@@ -202,3 +257,43 @@ def test_the_telescope_comes_from_the_capture_setting(
     assert telescope_of(CaptureSetting(camera="C", telescope="large scope"), config) is large
     assert telescope_of(CaptureSetting(camera="C", telescope="Missing"), config) is None
     assert telescope_of(CaptureSetting(camera="C"), config) is None
+
+
+def _located(latitude: float | None, longitude: float | None) -> SimpleNamespace:
+    """Build a stand-in configuration with an ``Observatory.Location``.
+
+    Parameters
+    ----------
+    latitude, longitude : `float` or `None`
+        The configured position; ``None`` leaves the location unset.
+
+    Returns
+    -------
+    config : `types.SimpleNamespace`
+        With the ``app_config.get`` the site reader uses.
+    """
+    values = {"latitude": latitude, "longitude": longitude, "elevation": 1500.0}
+    return SimpleNamespace(
+        app_config=SimpleNamespace(get=lambda section, key, fallback=None: values.get(key, fallback))
+    )
+
+
+def test_the_configured_location_wins_over_a_stored_profile_and_a_note_says_so() -> None:
+    """A stored Denver profile does not shadow the configured site."""
+    denver = SITE.model_copy(update={"latitude_deg": 39.74, "longitude_deg": -104.99, "name": "Stored"})
+    notes: list[str] = []
+
+    site = stored_site(_butler(denver), _located(45.76, -110.74), notes)
+
+    assert (site.latitude_deg, site.longitude_deg, site.elevation_m) == (45.76, -110.74, 1500.0)
+    assert site.name == "Stored"
+    assert any("disagrees" in note for note in notes)
+
+    quiet: list[str] = []
+    stored_site(_butler(denver), _located(39.74, -104.99), quiet)
+    assert quiet == []
+
+
+def test_a_stored_profile_is_used_only_when_the_configuration_has_no_location() -> None:
+    """With no configured location, the stored profile is used as is."""
+    assert stored_site(_butler(SITE), _located(None, None)) == SITE

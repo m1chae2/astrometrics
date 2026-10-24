@@ -7,37 +7,41 @@ and that the most frequent and most serious come first.
 
 import pytest
 
-from wayfindinglib.models.quality.statements import Confidence
-from wayfindinglib.models.session.session_quality import (
-    Recommendation,
-    RecommendationKind,
-    RecommendationSeverity,
+from wayfindinglib.models.quality.statements import (
+    ActionClass,
+    Confidence,
+    Severity,
+    StatementKind,
+    TargetStatement,
 )
 from wayfindinglib.session_analysis.recurring_issues import find_recurring_issues
 
 
-def _finding(
-    kind: RecommendationKind, severity: RecommendationSeverity, message: str = "m"
-) -> Recommendation:
-    """Build a recommendation.
+def _finding(rule: str, severity: Severity, message: str = "m") -> TargetStatement:
+    """Build a statement.
 
     Returns
     -------
-    recommendation : `Recommendation`
-        A recommendation of the given kind and severity.
+    statement : `TargetStatement`
+        A statement of the given rule and severity.
     """
-    return Recommendation(
-        kind=kind, severity=severity, message=message, confidence=Confidence.PARTLY_MEASURED
+    return TargetStatement(
+        rule=rule,
+        kind=StatementKind.RECOMMENDATION,
+        severity=severity,
+        action_class=ActionClass.ADJUSTMENT,
+        message=message,
+        confidence=Confidence.PARTLY_MEASURED,
     )
 
 
 def test_a_finding_on_two_nights_is_recurring() -> None:
     """Verify the nights, the share and the latest message are reported."""
-    weak = RecommendationKind.CHECK_GUIDE_SIGNAL
+    weak = "check_guide_signal"
     nights = [
-        ("guiding", "2026-01-01", [_finding(weak, RecommendationSeverity.ADVICE, "first")]),
+        ("guiding", "2026-01-01", [_finding(weak, Severity.ADVICE, "first")]),
         ("guiding", "2026-01-02", []),
-        ("guiding", "2026-01-03", [_finding(weak, RecommendationSeverity.WARNING, "latest")]),
+        ("guiding", "2026-01-03", [_finding(weak, Severity.WARNING, "latest")]),
     ]
 
     (issue,) = find_recurring_issues(nights)
@@ -45,7 +49,7 @@ def test_a_finding_on_two_nights_is_recurring() -> None:
     assert issue.nights == ["2026-01-01", "2026-01-03"]
     assert issue.nights_analysed == 3
     assert issue.share == pytest.approx(2 / 3)
-    assert issue.worst_severity == RecommendationSeverity.WARNING
+    assert issue.worst_severity == Severity.WARNING
     assert issue.example == "latest"
 
 
@@ -55,7 +59,7 @@ def test_a_finding_on_one_night_is_not_a_pattern() -> None:
         (
             "guiding",
             "2026-01-01",
-            [_finding(RecommendationKind.RECALIBRATE_GUIDER, RecommendationSeverity.WARNING)],
+            [_finding("recalibrate_guider", Severity.WARNING)],
         ),
         ("guiding", "2026-01-02", []),
     ]
@@ -65,7 +69,7 @@ def test_a_finding_on_one_night_is_not_a_pattern() -> None:
 
 def test_information_is_never_a_problem_pattern() -> None:
     """Verify facts stated at information level are skipped."""
-    info = _finding(RecommendationKind.GUIDING_WITHIN_LIMIT, RecommendationSeverity.INFO)
+    info = _finding("sky_coverage_gap", Severity.INFO)
     nights = [("guiding", "2026-01-01", [info]), ("guiding", "2026-01-02", [info])]
 
     assert find_recurring_issues(nights) == []
@@ -73,8 +77,8 @@ def test_information_is_never_a_problem_pattern() -> None:
 
 def test_the_two_analyses_are_counted_separately() -> None:
     """Verify capture nights do not dilute guiding nights, and vice versa."""
-    gap = RecommendationKind.CAPTURES_NOT_IN_LIBRARY
-    advice = RecommendationSeverity.ADVICE
+    gap = "captures_not_in_library"
+    advice = Severity.ADVICE
     nights = [
         ("guiding", "2026-01-01", []),
         ("guiding", "2026-01-02", []),
@@ -91,9 +95,9 @@ def test_the_two_analyses_are_counted_separately() -> None:
 
 def test_the_most_frequent_then_most_serious_come_first() -> None:
     """Verify the ordering puts the pattern that matters most on top."""
-    often = RecommendationKind.CAPTURES_NOT_IN_LIBRARY
-    rarely = RecommendationKind.RECALIBRATE_GUIDER
-    advice, warning = RecommendationSeverity.ADVICE, RecommendationSeverity.WARNING
+    often = "captures_not_in_library"
+    rarely = "recalibrate_guider"
+    advice, warning = Severity.ADVICE, Severity.WARNING
     nights = [
         ("capture", "n1", [_finding(often, advice)]),
         ("capture", "n2", [_finding(often, advice)]),
@@ -103,4 +107,4 @@ def test_the_most_frequent_then_most_serious_come_first() -> None:
 
     issues = find_recurring_issues(nights)
 
-    assert [issue.kind for issue in issues] == [often, rarely]
+    assert [issue.rule for issue in issues] == [often, rarely]

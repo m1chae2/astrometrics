@@ -1,7 +1,9 @@
-"""Purpose: Turn a night's guiding measurements into recommendations.
+"""Purpose: Turn a night's guiding measurements into statements.
 
 Description: Reads the pre-processing verdicts and the processing
-measurements and says what, if anything, to change. Every recommendation
+measurements and says what, if anything, to change. Every statement is a
+`TargetStatement` built from its row of the session rule table
+(`wayfindinglib.analytics.result_quality.session_rules`). Every statement
 carries the evidence it rests on and the equipment-derived limit it was
 compared with, so a reader can check it, and a confidence that says how far
 the evidence alone supports it.
@@ -17,36 +19,30 @@ Rules applied, in order:
 5. Guiding error against the acceptable guiding error.
 6. The longest exposure length in use against how often guiding stayed clean
    for a whole exposure of that length.
-Every recommendation lists the stored limits it was compared with
-(`compared_to`) and the numbers it rests on (`values`). The guiding data comes
+Every statement lists the stored limits it was compared with
+(`limits`) and the numbers it rests on (`values`). The guiding data comes
 from guide logs, not from the measurement store, so `evidence` is empty here.
 Confidence is the register status of the guiding rules (WAY-45), stepped down
 one label when the limits come from equipment that only partly matches the
-night's, when the guide signal was poor, or when the recommendation rests on a
+night's, when the guide signal was poor, or when the statement rests on a
 proxy.
 """
 
 from astrometricslib import QualityLimit
 from wayfindinglib.analytics.performance_envelope import MINIMUM_SAMPLES_PER_SESSION
 from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
-from wayfindinglib.models.quality.statements import Confidence
-from wayfindinglib.models.session.session_quality import (
-    GuidingInputQuality,
-    GuidingPerformance,
-    Recommendation,
-    RecommendationKind,
-    RecommendationSeverity,
-)
+from wayfindinglib.models.quality.statements import Confidence, ProposedAction, TargetStatement
+from wayfindinglib.models.session.session_quality import GuidingInputQuality, GuidingPerformance
 from wayfindinglib.session_analysis.guiding.processing.measure_exposure_feasibility import (
     RELIABLE_CLEAN_FRACTION,
 )
-from wayfindinglib.session_analysis.rule_support import design_limit, envelope_limits, rule_confidence
-
-_SEVERITY_ORDER = {
-    RecommendationSeverity.WARNING: 0,
-    RecommendationSeverity.ADVICE: 1,
-    RecommendationSeverity.INFO: 2,
-}
+from wayfindinglib.session_analysis.rule_support import (
+    design_limit,
+    envelope_limits,
+    rule_confidence,
+    session_statement,
+    sort_by_severity,
+)
 
 
 def _applicable_limit(
@@ -78,23 +74,26 @@ def _limits(
     return envelope_limits(envelope, names, applies=input_quality.limits_equipment_match != "none")
 
 
-def _insufficient_data(input_quality: GuidingInputQuality) -> Recommendation:
+def _insufficient_data(input_quality: GuidingInputQuality) -> TargetStatement:
     """Say that the night has too little data to judge.
 
     Returns
     -------
-    recommendation : `Recommendation`
+    statement : `TargetStatement`
         An information-level statement of the shortfall.
     """
-    return Recommendation(
-        kind=RecommendationKind.INSUFFICIENT_DATA,
-        severity=RecommendationSeverity.INFO,
+    return session_statement(
+        "guiding_insufficient_data",
         message=(
             f"Only {input_quality.samples_analyzed} measured guide samples exist for this night; "
             f"at least {MINIMUM_SAMPLES_PER_SESSION} are needed to judge it."
         ),
+        reason=(
+            "Too few measured guide samples. Guide for at least six minutes with the guide log "
+            "enabled, then sync the logs."
+        ),
         values={"samples": float(input_quality.samples_analyzed)},
-        compared_to=[
+        limits=[
             design_limit(
                 float(MINIMUM_SAMPLES_PER_SESSION),
                 "samples",
@@ -108,26 +107,25 @@ def _insufficient_data(input_quality: GuidingInputQuality) -> Recommendation:
 
 def _recalibrate_guider(
     input_quality: GuidingInputQuality, envelope: PerformanceEnvelope | None
-) -> Recommendation | None:
+) -> TargetStatement | None:
     """Warn when a calibrated mount speed is impossible.
 
     Returns
     -------
-    recommendation : `Recommendation` or `None`
+    statement : `TargetStatement` or `None`
         A warning, or `None` if every calibrated speed was possible.
     """
     if not input_quality.calibration_problems:
         return None
-    return Recommendation(
-        kind=RecommendationKind.RECALIBRATE_GUIDER,
-        severity=RecommendationSeverity.WARNING,
+    return session_statement(
+        "recalibrate_guider",
         message=(
             "The guider's calibration measured a mount speed that cannot be right, so its "
             "corrections were wrong. Recalibrate under a clear sky with a bright, "
             "well-focused guide star. " + " ".join(input_quality.calibration_problems)
         ),
         values={"problem_count": float(len(input_quality.calibration_problems))},
-        compared_to=_limits(envelope, input_quality, "max_credible_guide_speed"),
+        limits=_limits(envelope, input_quality, "max_credible_guide_speed"),
         confidence=rule_confidence("guiding"),
     )
 
@@ -163,12 +161,12 @@ def _dim_star_text(input_quality: GuidingInputQuality) -> str:
 
 def _check_guide_signal(
     input_quality: GuidingInputQuality, envelope: PerformanceEnvelope | None
-) -> Recommendation | None:
+) -> TargetStatement | None:
     """Warn when the guide star was weak, often lost, or often jumped.
 
     Returns
     -------
-    recommendation : `Recommendation` or `None`
+    statement : `TargetStatement` or `None`
         A warning that names which checks failed, or `None` if none did.
     """
     earlier_nights = "the level that 90% of earlier nights stayed under"
@@ -192,9 +190,8 @@ def _check_guide_signal(
         )
     if not failed:
         return None
-    return Recommendation(
-        kind=RecommendationKind.CHECK_GUIDE_SIGNAL,
-        severity=RecommendationSeverity.WARNING,
+    return session_statement(
+        "check_guide_signal",
         message=(
             "The guiding data was gathered poorly: " + "; ".join(failed) + ". The logs cannot say why. "
             "The usual causes are a guide camera exposure, gain or binning set too low, poor guide "
@@ -208,7 +205,7 @@ def _check_guide_signal(
             "excursion_fraction": input_quality.excursion_fraction,
             "typical_star_mass": input_quality.typical_star_mass,
         },
-        compared_to=_limits(
+        limits=_limits(
             envelope,
             input_quality,
             "guide_snr_low_limit",
@@ -222,19 +219,18 @@ def _check_guide_signal(
 
 def _update_guide_optics(
     input_quality: GuidingInputQuality, logged_scale: float | None, configured_scale: float | None
-) -> Recommendation | None:
+) -> TargetStatement | None:
     """Warn when the guide log's optics differ from the configuration.
 
     Returns
     -------
-    recommendation : `Recommendation` or `None`
+    statement : `TargetStatement` or `None`
         A warning, or `None` if the optics agree or cannot be compared.
     """
     if input_quality.guide_scale_matches_configuration is not False:
         return None
-    return Recommendation(
-        kind=RecommendationKind.UPDATE_GUIDE_OPTICS_CONFIGURATION,
-        severity=RecommendationSeverity.WARNING,
+    return session_statement(
+        "update_guide_optics_configuration",
         message=(
             "The guide log's plate scale differs from the configured guide equipment. Update the "
             "configured guide scope or guide camera so the limits and calibration use the real optics."
@@ -268,37 +264,33 @@ def _guiding_against_limit(
     performance: GuidingPerformance,
     envelope: PerformanceEnvelope | None,
     signal_problem: bool,
-) -> Recommendation | None:
+) -> TargetStatement | None:
     """Compare the guiding error with the error this equipment can absorb.
 
     Returns
     -------
-    recommendation : `Recommendation` or `None`
-        Advice if the error is above the limit, otherwise an information
-        statement. `None` if the error or the limit is unknown.
+    statement : `TargetStatement` or `None`
+        Advice if the error is above the limit. `None` if the error is within
+        the limit (no statement means within limits) or if the error or the
+        limit is unknown.
     """
     limit = _applicable_limit(envelope, "guiding_rms_limit", input_quality)
     error = performance.rms_per_axis_arcsec
     if error is None or limit is None:
         return None
-    above = error > limit
+    if error <= limit:
+        return None
     widening = performance.expected_star_widening_fraction
     widening_text = f" That widens a star by about {widening:.0%}." if widening is not None else ""
-    if above:
-        verdict = (
-            f"above the {limit:.2f} arcsec this equipment can absorb.{widening_text} Look at mount "
-            "balance, guide aggressiveness and seeing, and shorten exposures if stars are soft."
-        )
-        kind, severity = RecommendationKind.GUIDING_ABOVE_LIMIT, RecommendationSeverity.ADVICE
-    else:
-        verdict = f"within the {limit:.2f} arcsec this equipment can absorb.{widening_text}"
-        kind, severity = RecommendationKind.GUIDING_WITHIN_LIMIT, RecommendationSeverity.INFO
-    return Recommendation(
-        kind=kind,
-        severity=severity,
+    verdict = (
+        f"above the {limit:.2f} arcsec this equipment can absorb.{widening_text} Look at mount "
+        "balance, guide aggressiveness and seeing, and shorten exposures if stars are soft."
+    )
+    return session_statement(
+        "guiding_above_limit",
         message=f"Guiding error was {error:.2f} arcsec per axis, {verdict}",
         values={"rms_per_axis_arcsec": error, "expected_star_widening_fraction": widening},
-        compared_to=_limits(envelope, input_quality, "guiding_rms_limit"),
+        limits=_limits(envelope, input_quality, "guiding_rms_limit"),
         confidence=_confidence(input_quality, signal_problem),
     )
 
@@ -308,7 +300,7 @@ def _exposure_length_limited(
     performance: GuidingPerformance,
     envelope: PerformanceEnvelope | None,
     signal_problem: bool,
-) -> Recommendation | None:
+) -> TargetStatement | None:
     """Advise when the longest exposure in use rarely had clean guiding.
 
     The longest exposure length in use is compared with how often guiding
@@ -318,7 +310,7 @@ def _exposure_length_limited(
 
     Returns
     -------
-    recommendation : `Recommendation` or `None`
+    statement : `TargetStatement` or `None`
         Advice, or `None` if no exposure length could be measured or at least
         half the exposures of the longest length would have been clean.
     """
@@ -340,9 +332,8 @@ def _exposure_length_limited(
         if reliable is not None
         else "No exposure length in use would have worked for half the exposures."
     )
-    return Recommendation(
-        kind=RecommendationKind.EXPOSURE_LENGTH_LIMITED,
-        severity=RecommendationSeverity.ADVICE,
+    return session_statement(
+        "exposure_length_limited",
         message=(
             f"Only {longest.clean_fraction:.0%} of {longest.exposure_seconds:g} s exposures would have "
             f"had clean guiding for their whole length. The main reason was that {main_cause} "
@@ -356,7 +347,7 @@ def _exposure_length_limited(
             "wobble_fraction": longest.wobble_fraction,
             "windows": float(longest.windows),
         },
-        compared_to=[
+        limits=[
             design_limit(
                 RELIABLE_CLEAN_FRACTION,
                 "fraction",
@@ -365,6 +356,10 @@ def _exposure_length_limited(
             ),
             *_limits(envelope, input_quality, "guiding_rms_limit", "guide_excursion_limit"),
         ],
+        # The longest length that worked is the one value the rule can propose.
+        proposed_action=(
+            ProposedAction(exposure_seconds=reliable) if reliable is not None and reliable > 0 else None
+        ),
         # This rule rests on a proxy (the guide log stands in for the star
         # shape in the frame), so it is always one label lower.
         confidence=rule_confidence("guiding", degraded=True),
@@ -377,7 +372,7 @@ def recommend_for_guiding(
     envelope: PerformanceEnvelope | None,
     logged_guide_scale: float | None = None,
     configured_guide_scale: float | None = None,
-) -> list[Recommendation]:
+) -> list[TargetStatement]:
     """Say what to change, given one night's guiding analysis.
 
     Parameters
@@ -396,7 +391,7 @@ def recommend_for_guiding(
 
     Returns
     -------
-    recommendations : `list` [`Recommendation`]
+    statements : `list` [`TargetStatement`]
         Most serious first. A night with too little data gets only the
         statement that it cannot be judged.
     """
@@ -412,5 +407,5 @@ def recommend_for_guiding(
         _guiding_against_limit(input_quality, performance, envelope, signal_problem),
         _exposure_length_limited(input_quality, performance, envelope, signal_problem),
     ]
-    recommendations = [candidate for candidate in candidates if candidate is not None]
-    return sorted(recommendations, key=lambda item: _SEVERITY_ORDER[item.severity])
+    statements = [candidate for candidate in candidates if candidate is not None]
+    return sort_by_severity(statements)

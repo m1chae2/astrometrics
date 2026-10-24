@@ -9,7 +9,11 @@ from typing import Any
 
 import pytest
 
-from wayfindinglib.analytics.capture_history import SATURATED_FRACTION_METRIC
+from wayfindinglib.analytics.capture_history import (
+    SATURATED_FRACTION_METRIC,
+    STAR_ELONGATION_METRIC,
+    STAR_WIDTH_METRIC,
+)
 from wayfindinglib.session_analysis.capture.processing.measure_capture_performance import (
     measure_capture_performance,
     measure_clipping,
@@ -158,6 +162,29 @@ def test_star_quality_carries_the_earlier_nights_limits(make_frame: Any, make_en
     assert quality.roundness_limit is not None
     assert quality.star_width_limit_arcsec > 5.4
     assert quality.roundness_limit < 0.86
+
+
+def test_star_evidence_lists_the_most_extreme_frames_first(make_frame: Any, make_envelope: Any) -> None:
+    """Verify evidence starts with the widest and the least round star."""
+    widths = [5.0, 9.0, 5.2, 7.0, 5.1, 5.3, 5.0, 5.2, 5.1, 5.0, 5.4, 5.2]
+    roundness = [0.9, 0.5, 0.88, 0.7, 0.9, 0.89, 0.9, 0.88, 0.9, 0.9, 0.87, 0.9]
+    frames = [
+        make_frame(
+            index,
+            star_width_arcsec=widths[index],
+            roundness=roundness[index],
+            measurement_rows={STAR_WIDTH_METRIC: 100 + index, STAR_ELONGATION_METRIC: 200 + index},
+        )
+        for index in range(12)
+    ]
+
+    quality = measure_star_quality(frames, make_envelope(), "exact")
+
+    width_rows = [reference.row_id for reference in quality.width_evidence]
+    roundness_rows = [reference.row_id for reference in quality.roundness_evidence]
+    assert width_rows[:2] == [101, 103]
+    assert roundness_rows[:2] == [201, 203]
+    assert sorted(width_rows) == [100 + index for index in range(12)]
 
 
 def test_no_limits_apply_to_other_equipment(make_frame: Any, make_envelope: Any) -> None:

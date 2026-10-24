@@ -54,6 +54,11 @@ from wayfindinglib.analytics.result_quality.efficiency import (
     STAR_WIDTH_NIGHTLY_SPREAD_KEY,
     FrameObservation,
 )
+from wayfindinglib.analytics.result_quality.guiding_exposure import (
+    STAR_WIDTH_BUDGET_FRACTION,
+    TARGET_SHARP_FRACTION,
+    GuidingExposureOutcome,
+)
 from wayfindinglib.analytics.result_quality.noise_growth import (
     StackFrame,
     StopSignal,
@@ -62,6 +67,7 @@ from wayfindinglib.analytics.result_quality.noise_growth import (
     forecast_stack_noise,
 )
 from wayfindinglib.analytics.result_quality.rules import rule_by_name
+from wayfindinglib.analytics.result_quality.science_goal import GoalSource, goal_of_setting
 from wayfindinglib.models.quality.capture_summary import CaptureSettingSummary
 from wayfindinglib.models.quality.efficiency import EfficiencyReference, EfficiencyReferenceKind, ScienceGoal
 from wayfindinglib.models.quality.statements import (
@@ -423,7 +429,7 @@ def sky_cost_statements(summaries: Sequence[CaptureSettingSummary]) -> list[Targ
 
 def seeing_limit_statements(
     observations: Iterable[FrameObservation],
-    goal: ScienceGoal,
+    goal: GoalSource,
     reference_for: Callable[[CaptureSetting], EfficiencyReference | None],
     star_width_evidence: Mapping[str, MeasurementReference],
 ) -> list[TargetStatement]:
@@ -457,8 +463,9 @@ def seeing_limit_statements(
     ----------
     observations : `Iterable` [`FrameObservation`]
         The frames of the target. Frames the stacker set aside are skipped.
-    goal : `ScienceGoal`
-        The science goal of the target.
+    goal : `ScienceGoal` or `Callable`
+        The science goal, or a function that gives the goal of a capture
+        setting (user decision U2: the goal is chosen for each setting).
     reference_for : `Callable`
         Gives the efficiency reference of a capture setting, or ``None``.
     star_width_evidence : `Mapping` [`str`, `MeasurementReference`]
@@ -471,8 +478,6 @@ def seeing_limit_statements(
     """
     detail_goals = {ScienceGoal.EXTENDED_OBJECT, ScienceGoal.SLITLESS_SPECTRAL_RESOLUTION}
     point_goals = {ScienceGoal.FAINT_POINT_SOURCE, ScienceGoal.ASTROMETRIC_PRECISION}
-    if goal not in detail_goals | point_goals:
-        return []
     rule = rule_by_name("seeing_limits_resolution")
     widths_by_setting: dict[CaptureSetting, list[tuple[str, float]]] = {}
     for observation in observations:
@@ -483,6 +488,9 @@ def seeing_limit_statements(
             ))
     statements: list[TargetStatement] = []
     for setting, widths in widths_by_setting.items():
+        setting_goal = goal_of_setting(goal, setting)
+        if setting_goal not in detail_goals | point_goals:
+            continue
         reference = reference_for(setting)
         reference_width = (
             None if reference is None else reference.factors.get(STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC)
@@ -490,7 +498,7 @@ def seeing_limit_statements(
         if reference is None or reference_width is None:
             continue
         median_width = statistics.median(width for _frame_id, width in widths)
-        if goal in detail_goals:
+        if setting_goal in detail_goals:
             spread = reference.factors.get(STAR_WIDTH_NIGHTLY_SPREAD_KEY)
             margin = spread if spread is not None else reference_width * SEEING_AT_REFERENCE_TOLERANCE
             fires = median_width > reference_width + margin
@@ -522,7 +530,7 @@ def seeing_limit_statements(
                 f"of {reference_width:.2f} arcsec"
                 + (
                     ", and for this goal more exposure time does not repair seeing."
-                    if goal in detail_goals
+                    if setting_goal in detail_goals
                     else ", so the stars are already as sharp as the telescope and a typical sky allow."
                 )
             ),
@@ -531,6 +539,97 @@ def seeing_limit_statements(
         )
         statements.append(statement.model_copy(update={"limits": [limit]}))
     return statements
+
+
+# -----------------------------------------------------------------------------
+# Guiding limits exposure
+# -----------------------------------------------------------------------------
+
+
+def guiding_limits_statements(
+    setting: CaptureSetting,
+    outcome: GuidingExposureOutcome,
+    star_width_evidence: Sequence[MeasurementReference] = (),
+) -> list[TargetStatement]:
+    """Say when the guiding keeps too few frames sharp at the exposure used.
+
+    The user decided on 2026-10-24 (issue #95, decision U3) that this rule is
+    built. It fires when the share of sharp windows at the exposure the
+    setting used is below `TARGET_SHARP_FRACTION`. It proposes the longest
+    exposure whose share reaches the target, when there is one. The numbers
+    come from the guide log, not from measurement rows, so they are in the
+    statement's ``values``.
+
+    Parameters
+    ----------
+    setting : `CaptureSetting`
+        The setting.
+    outcome : `GuidingExposureOutcome`
+        What `assess_guiding_exposure` found.
+    star_width_evidence : `Sequence` [`MeasurementReference`], optional
+        The star-width rows the allowed error was worked out from.
+
+    Returns
+    -------
+    statements : `list` [`TargetStatement`]
+        An ``insufficient_data`` statement when the guide data is missing;
+        one recommendation when the guiding limits the exposure; else none.
+    """
+    result = outcome.result
+    if result is None:
+        return [insufficient("guiding_limits_exposure", outcome.reason, setting)]
+    used = result.used
+    if used.sharp_fraction is None or used.sharp_fraction >= TARGET_SHARP_FRACTION:
+        return []
+    rule = rule_by_name("guiding_limits_exposure")
+    supported = result.supported_exposure_seconds
+    supported_fraction = next(
+        (item.sharp_fraction for item in result.ladder if item.exposure_seconds == supported), None
+    )
+    clause = (
+        f"; at {supported:g} s, {supported_fraction * 100:.0f}%"
+        if supported is not None and supported_fraction is not None
+        else ""
+    )
+    values: dict[str, float | str | None] = {
+        "allowed_guide_rms_arcsec": round(result.allowed_guide_rms_arcsec, 3),
+        "star_width_arcsec": round(result.star_width_arcsec, 3),
+        "target_sharp_fraction": TARGET_SHARP_FRACTION,
+        "frames_sharp_fraction": result.frames_sharp_fraction,
+        "nights": ", ".join(result.nights),
+    }
+    for item in result.ladder:
+        if item.sharp_fraction is not None:
+            values[f"sharp_fraction_at_{item.exposure_seconds:g}s"] = round(item.sharp_fraction, 3)
+    if supported is not None:
+        action = ProposedAction(exposure_seconds=supported)
+        reason_tail = (
+            f" The longest exposure that reaches {TARGET_SHARP_FRACTION * 100:.0f}% is {supported:g} s."
+        )
+    else:
+        action = ProposedAction(
+            note="No tested exposure reaches the target share. Check the guiding record first."
+        )
+        reason_tail = f" No tested exposure reaches {TARGET_SHARP_FRACTION * 100:.0f}%."
+    statement = _from_rule(
+        "guiding_limits_exposure",
+        rule.wording.format(
+            used_text=f"{result.used_exposure_seconds:g} s",
+            used_percent=used.sharp_fraction * 100.0,
+            supported_clause=clause,
+        ),
+        (
+            f"A window of {result.used_exposure_seconds:g} s is sharp when its guide error on the worse "
+            f"axis is at most {result.allowed_guide_rms_arcsec:.2f} arcsec, which widens a "
+            f"{result.star_width_arcsec:.2f} arcsec star by at most {STAR_WIDTH_BUDGET_FRACTION * 100:.0f}%. "
+            f"{used.windows_sharp} of {used.windows_judged} windows on {len(result.nights)} night(s) were."
+            + reason_tail
+        ),
+        capture_setting=setting,
+        evidence=star_width_evidence,
+        proposed_action=action,
+    )
+    return [statement.model_copy(update={"values": values})]
 
 
 # -----------------------------------------------------------------------------

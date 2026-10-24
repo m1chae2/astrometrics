@@ -36,6 +36,8 @@ of the quality code: this module imports the science library from its root.
 from typing import Any
 
 from astrometricslib import (
+    AMBIGUOUS_RMS_GAP,
+    NO_GOOD_MATCH_RMS,
     LimitTier,
     MeasurementReference,
     StarResultReference,
@@ -56,16 +58,6 @@ STAR_RESULT_ENTRY = "WAY-73"
 
 STAR_RESULT_ROW = "WAY-D73"
 """Register row behind the design estimates below."""
-
-POOR_MATCH_RMS = 0.15
-"""The relative RMS above which the closest reference spectrum is a poor
-match. A copy of ``NO_GOOD_MATCH_RMS`` of the spectroscopy pipeline (register
-entry SPE-16), kept so the statement can quote it. A test compares the two."""
-
-AMBIGUOUS_RMS_GAP = 0.02
-"""The gap in relative RMS below which the best reference cannot be told from
-the next one. A copy of ``AMBIGUOUS_RMS_GAP`` of the spectroscopy pipeline
-(register entry SPE-18). A test compares the two."""
 
 MINIMUM_CYCLES_FOR_PERIOD = 2.0
 """The fewest full cycles of a period that the data should cover. One cycle
@@ -90,7 +82,7 @@ NO_STAR_RESULT = "no_star_result"
 
 
 _POOR_MATCH_LIMIT = build_limit(
-    POOR_MATCH_RMS,
+    NO_GOOD_MATCH_RMS,
     "relative RMS",
     LimitTier.VALIDATED_DATASET,
     (
@@ -368,7 +360,7 @@ def judge_spectrum(star_id: str, spectroscopy: Any) -> list[TargetStatement]:
                 SPECTRAL_TYPE_POOR_MATCH,
                 (
                     f"The best reference ({spectral_type}) differs from this spectrum by {rms:.2f} "
-                    f"(relative RMS), above the {POOR_MATCH_RMS:.2f} limit for a good match."
+                    f"(relative RMS), above the {NO_GOOD_MATCH_RMS:.2f} limit for a good match."
                 ),
                 "Do not claim the type: even the closest reference fits badly.",
                 [rms_reference],
@@ -575,9 +567,7 @@ def judge_star_record(
 
 
 __all__ = [
-    "AMBIGUOUS_RMS_GAP",
     "MINIMUM_CYCLES_FOR_PERIOD",
-    "POOR_MATCH_RMS",
     "STAR_RESULT_ENTRY",
     "STAR_RESULT_ROW",
     "STAR_RESULT_RULES",

@@ -6,7 +6,7 @@ Each analysis follows the same three stages the science library's pipelines use.
 
 1. **Pre-processing** asks whether the data is good. It reports problems in how the data was gathered, before anyone interprets the numbers.
 2. **Processing** measures what the data shows.
-3. **Post-processing** turns the measurements into recommendations. Each recommendation cites the stored measurements it rests on (`evidence`), lists any other numbers (`values`), names the limits it was compared with (`comparedTo`), and carries a confidence taken from the validation register (WAY-45 guiding, WAY-46 capture, WAY-47 sky).
+3. **Post-processing** turns the measurements into statements (`TargetStatement`, the shape the target report uses). Each statement cites the stored measurements it rests on (`evidence`), lists any other numbers (`values`), names the limits it was compared with (`limits`), and carries a confidence taken from the validation register (WAY-45 guiding, WAY-46 capture, WAY-47 sky).
 
 ## Where the limits come from
 

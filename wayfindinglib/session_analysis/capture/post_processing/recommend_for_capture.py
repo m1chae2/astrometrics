@@ -1,7 +1,9 @@
-"""Purpose: Turn a night's capture measurements into recommendations.
+"""Purpose: Turn a night's capture measurements into statements.
 
 Description: Reads the pre-processing verdicts and the processing
-measurements and says what, if anything, to change. Every recommendation
+measurements and says what, if anything, to change. Every statement is a
+`TargetStatement` built from its row of the session rule table
+(`wayfindinglib.analytics.result_quality.session_rules`). Every statement
 carries the evidence it rests on and the equipment-derived limit it was
 compared with, so a reader can check it, and a confidence that says how far
 the evidence alone supports it.
@@ -14,7 +16,8 @@ Rules applied, in order:
 4. Sensor temperatures too far apart for one set of dark frames.
 5. A spectroscopy star that clips at the exposure lengths used.
 6. Star width and roundness against this equipment's earlier nights.
-7. If nothing above applied, a statement that the night was within limits.
+7. If nothing above applied, there is no statement. No warning means
+   the night is within limits.
 
 Saturation advice covers spectroscopy only. In a deep imaging field the
 brightest stars clip at any useful exposure, and avoiding that would make the
@@ -29,42 +32,41 @@ references to the exact rows. Counts and values that are not rows go in
 from astrometricslib import DEFAULT_DARK_TEMPERATURE_TOLERANCE_C, SATURATED_BLOB_MINIMUM_PIXELS
 from wayfindinglib.analytics.performance_envelope import MINIMUM_FRAMES_PER_NIGHT
 from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
+from wayfindinglib.models.quality.statements import TargetStatement
 from wayfindinglib.models.session.capture_quality import (
     CaptureInputQuality,
     CapturePerformance,
     ExposureClipping,
 )
-from wayfindinglib.models.session.session_quality import (
-    Recommendation,
-    RecommendationKind,
-    RecommendationSeverity,
+from wayfindinglib.session_analysis.rule_support import (
+    design_limit,
+    envelope_limits,
+    rule_confidence,
+    session_statement,
+    sort_by_severity,
 )
-from wayfindinglib.session_analysis.rule_support import design_limit, envelope_limits, rule_confidence
-
-_SEVERITY_ORDER = {
-    RecommendationSeverity.WARNING: 0,
-    RecommendationSeverity.ADVICE: 1,
-    RecommendationSeverity.INFO: 2,
-}
 
 
-def _insufficient_frames(input_quality: CaptureInputQuality) -> Recommendation:
+def _insufficient_frames(input_quality: CaptureInputQuality) -> TargetStatement:
     """Say that the night has too few frames to judge.
 
     Returns
     -------
-    recommendation : `Recommendation`
+    statement : `TargetStatement`
         An information-level statement of the shortfall.
     """
-    return Recommendation(
-        kind=RecommendationKind.INSUFFICIENT_DATA,
-        severity=RecommendationSeverity.INFO,
+    return session_statement(
+        "capture_insufficient_data",
         message=(
             f"Only {input_quality.light_frames} light frames from this equipment exist for this "
             f"night; at least {MINIMUM_FRAMES_PER_NIGHT} are needed to judge it."
         ),
+        reason=(
+            "Too few light frames from this equipment. Sync the night's frames into the library, "
+            "or image longer, then run the analysis again."
+        ),
         values={"light_frames": float(input_quality.light_frames)},
-        compared_to=[
+        limits=[
             design_limit(
                 float(MINIMUM_FRAMES_PER_NIGHT),
                 "frames",
@@ -76,12 +78,12 @@ def _insufficient_frames(input_quality: CaptureInputQuality) -> Recommendation:
     )
 
 
-def _captures_not_in_library(input_quality: CaptureInputQuality) -> Recommendation | None:
+def _captures_not_in_library(input_quality: CaptureInputQuality) -> TargetStatement | None:
     """Advise when Ekos finished exposures that have no frame in the library.
 
     Returns
     -------
-    recommendation : `Recommendation` or `None`
+    statement : `TargetStatement` or `None`
         Advice to download the missing frames, or `None` if every exposure
         has a frame or there is no Ekos record to compare with.
     """
@@ -94,9 +96,8 @@ def _captures_not_in_library(input_quality: CaptureInputQuality) -> Recommendati
         if unknown_kind
         else ""
     )
-    return Recommendation(
-        kind=RecommendationKind.CAPTURES_NOT_IN_LIBRARY,
-        severity=RecommendationSeverity.ADVICE,
+    return session_statement(
+        "captures_not_in_library",
         message=(
             f"Ekos finished {missing} light exposures this night that have no frame in the library "
             f"({input_quality.light_frames} frames are there). Download or sort the missing frames, "
@@ -108,7 +109,7 @@ def _captures_not_in_library(input_quality: CaptureInputQuality) -> Recommendati
             "ekos_light_captures": float(input_quality.ekos_light_captures or 0),
             "library_frames": float(input_quality.light_frames),
         },
-        compared_to=[
+        limits=[
             design_limit(
                 input_quality.match_window_seconds,
                 "s",
@@ -120,12 +121,12 @@ def _captures_not_in_library(input_quality: CaptureInputQuality) -> Recommendati
     )
 
 
-def _missing_measurements(input_quality: CaptureInputQuality) -> Recommendation | None:
+def _missing_measurements(input_quality: CaptureInputQuality) -> TargetStatement | None:
     """Advise when frames lack measurements later steps need.
 
     Returns
     -------
-    recommendation : `Recommendation` or `None`
+    statement : `TargetStatement` or `None`
         Advice naming each missing measurement, or `None` if none is missing.
     """
     if not input_quality.has_missing_measurements:
@@ -134,9 +135,8 @@ def _missing_measurements(input_quality: CaptureInputQuality) -> Recommendation 
         f"{name} ({count} frames)"
         for name, count in sorted(input_quality.frames_missing_measurements.items())
     )
-    return Recommendation(
-        kind=RecommendationKind.FRAMES_MISSING_MEASUREMENTS,
-        severity=RecommendationSeverity.ADVICE,
+    return session_statement(
+        "frames_missing_measurements",
         message=(
             f"Some frames lack measurements that later steps use: {described}. Re-scan the frames, "
             "and check that the camera writes these fields into the FITS header."
@@ -151,19 +151,18 @@ def _missing_measurements(input_quality: CaptureInputQuality) -> Recommendation 
 
 def _frequent_aborts(
     input_quality: CaptureInputQuality, envelope: PerformanceEnvelope | None
-) -> Recommendation | None:
+) -> TargetStatement | None:
     """Advise when an unusual share of exposures was cancelled.
 
     Returns
     -------
-    recommendation : `Recommendation` or `None`
+    statement : `TargetStatement` or `None`
         Advice, or `None` if the share was not above the limit.
     """
     if not input_quality.has_frequent_aborts:
         return None
-    return Recommendation(
-        kind=RecommendationKind.FREQUENT_ABORTED_CAPTURES,
-        severity=RecommendationSeverity.ADVICE,
+    return session_statement(
+        "frequent_aborted_captures",
         message=(
             f"{input_quality.aborted_captures} exposures were cancelled "
             f"({input_quality.abort_fraction:.0%} of those started), more than 90% of this equipment's "
@@ -174,7 +173,7 @@ def _frequent_aborts(
             "aborted_captures": float(input_quality.aborted_captures or 0),
             "abort_fraction": input_quality.abort_fraction,
         },
-        compared_to=envelope_limits(
+        limits=envelope_limits(
             envelope,
             ("capture_abort_fraction_high_limit",),
             applies=input_quality.limits_equipment_match != "none",
@@ -183,20 +182,19 @@ def _frequent_aborts(
     )
 
 
-def _temperature_spread(input_quality: CaptureInputQuality) -> Recommendation | None:
+def _temperature_spread(input_quality: CaptureInputQuality) -> TargetStatement | None:
     """Note when one set of dark frames cannot suit every frame of the night.
 
     Returns
     -------
-    recommendation : `Recommendation` or `None`
+    statement : `TargetStatement` or `None`
         An information-level note, or `None` if every frame is within the
         dark-temperature tolerance of the night's median.
     """
     if not input_quality.frames_outside_dark_tolerance:
         return None
-    return Recommendation(
-        kind=RecommendationKind.SENSOR_TEMPERATURE_DRIFT,
-        severity=RecommendationSeverity.INFO,
+    return session_statement(
+        "sensor_temperature_drift",
         message=(
             f"{input_quality.frames_outside_dark_tolerance} frames were taken more than "
             f"{input_quality.dark_temperature_tolerance_c:g} C from the night's median sensor "
@@ -208,7 +206,7 @@ def _temperature_spread(input_quality: CaptureInputQuality) -> Recommendation | 
             "frames_outside_tolerance": float(input_quality.frames_outside_dark_tolerance),
             "temperature_spread_c": input_quality.sensor_temperature_spread_c,
         },
-        compared_to=[
+        limits=[
             design_limit(
                 input_quality.dark_temperature_tolerance_c,
                 "degC",
@@ -232,7 +230,7 @@ def _format_exposure(seconds: float) -> str:
     return f"{seconds:.4g} s"
 
 
-def _spectral_star_clipped(performance: CapturePerformance) -> list[Recommendation]:
+def _spectral_star_clipped(performance: CapturePerformance) -> list[TargetStatement]:
     """Advise on each spectroscopy target whose star clipped.
 
     For a target, the exposure lengths that clipped are compared with the
@@ -243,7 +241,7 @@ def _spectral_star_clipped(performance: CapturePerformance) -> list[Recommendati
 
     Returns
     -------
-    recommendations : `list` [`Recommendation`]
+    statements : `list` [`TargetStatement`]
         One per target with at least one clipped exposure length.
     """
     by_target: dict[str, list[ExposureClipping]] = {}
@@ -272,9 +270,8 @@ def _spectral_star_clipped(performance: CapturePerformance) -> list[Recommendati
                 f"{_format_exposure(shortest)}. If that star is the target, try a shorter exposure."
             )
         recommendations.append(
-            Recommendation(
-                kind=RecommendationKind.SPECTRAL_STAR_CLIPPED,
-                severity=RecommendationSeverity.ADVICE,
+            session_statement(
+                "spectral_star_clipped",
                 message=message,
                 evidence=[reference for group in clipped for reference in group.evidence],
                 values={
@@ -284,7 +281,7 @@ def _spectral_star_clipped(performance: CapturePerformance) -> list[Recommendati
                     "frames_at_clipped_lengths": float(frames_clipped),
                     "frames_total": float(frames_total),
                 },
-                compared_to=[
+                limits=[
                     design_limit(
                         float(SATURATED_BLOB_MINIMUM_PIXELS),
                         "px",
@@ -301,12 +298,12 @@ def _spectral_star_clipped(performance: CapturePerformance) -> list[Recommendati
 
 def _star_shape(
     input_quality: CaptureInputQuality, performance: CapturePerformance, envelope: PerformanceEnvelope | None
-) -> list[Recommendation]:
+) -> list[TargetStatement]:
     """Compare the night's star width and roundness with earlier nights.
 
     Returns
     -------
-    recommendations : `list` [`Recommendation`]
+    statements : `list` [`TargetStatement`]
         A warning for each of width and roundness that is outside the limit,
         or a note that no limit exists yet if the night has measurements but
         the equipment has too little history.
@@ -320,13 +317,16 @@ def _star_shape(
         quality.star_width_limit_arcsec is None and quality.roundness_limit is None
     ):
         recommendations.append(
-            Recommendation(
-                kind=RecommendationKind.INSUFFICIENT_DATA,
-                severity=RecommendationSeverity.INFO,
+            session_statement(
+                "capture_insufficient_data",
                 message=(
                     f"The median star width was {quality.median_star_width_arcsec:.1f} arcsec over "
                     f"{quality.frames} frames, but this equipment has too few earlier nights to say "
                     "whether that is usual."
+                ),
+                reason=(
+                    "This equipment has too few earlier nights to set a limit for star width. "
+                    "Image on more nights with it, then the night can be compared."
                 ),
                 evidence=quality.width_evidence,
                 values={"median_star_width_arcsec": quality.median_star_width_arcsec},
@@ -339,9 +339,8 @@ def _star_shape(
         and quality.median_star_width_arcsec > quality.star_width_limit_arcsec
     ):
         recommendations.append(
-            Recommendation(
-                kind=RecommendationKind.STAR_WIDTH_ABOVE_BASELINE,
-                severity=RecommendationSeverity.WARNING,
+            session_statement(
+                "star_width_above_baseline",
                 message=(
                     f"Stars were wider than usual: a median of {quality.median_star_width_arcsec:.1f} "
                     f"arcsec over {quality.frames} frames, above the {quality.star_width_limit_arcsec:.1f} "
@@ -354,7 +353,7 @@ def _star_shape(
                     "median_star_width_arcsec": quality.median_star_width_arcsec,
                     "frames": float(quality.frames),
                 },
-                compared_to=envelope_limits(envelope, ("night_star_width_high_limit",), applies),
+                limits=envelope_limits(envelope, ("night_star_width_high_limit",), applies),
                 confidence=rule_confidence("capture", degraded=True),
             )
         )
@@ -364,9 +363,8 @@ def _star_shape(
         and quality.median_roundness < quality.roundness_limit
     ):
         recommendations.append(
-            Recommendation(
-                kind=RecommendationKind.STARS_ELONGATED,
-                severity=RecommendationSeverity.WARNING,
+            session_statement(
+                "stars_elongated",
                 message=(
                     f"Stars were more elongated than usual: a median roundness of "
                     f"{quality.median_roundness:.2f}, below the {quality.roundness_limit:.2f} that is "
@@ -375,7 +373,7 @@ def _star_shape(
                 ),
                 evidence=quality.roundness_evidence,
                 values={"median_roundness": quality.median_roundness},
-                compared_to=envelope_limits(envelope, ("night_star_roundness_low_limit",), applies),
+                limits=envelope_limits(envelope, ("night_star_roundness_low_limit",), applies),
                 confidence=rule_confidence("capture", degraded=True),
             )
         )
@@ -386,7 +384,7 @@ def recommend_for_capture(
     input_quality: CaptureInputQuality,
     performance: CapturePerformance,
     envelope: PerformanceEnvelope | None = None,
-) -> list[Recommendation]:
+) -> list[TargetStatement]:
     """Recommend what, if anything, to change after a night of capture.
 
     Parameters
@@ -401,7 +399,7 @@ def recommend_for_capture(
 
     Returns
     -------
-    recommendations : `list` [`Recommendation`]
+    statements : `list` [`TargetStatement`]
         Warnings first, then advice, then information.
     """
     if not input_quality.has_enough_frames:
@@ -415,17 +413,4 @@ def recommend_for_capture(
         *_star_shape(input_quality, performance, envelope),
     ]
     recommendations = [item for item in found if item is not None]
-    if not recommendations:
-        recommendations.append(
-            Recommendation(
-                kind=RecommendationKind.CAPTURE_WITHIN_LIMITS,
-                severity=RecommendationSeverity.INFO,
-                message=(
-                    f"All {input_quality.light_frames} light frames are in the library and none of the "
-                    "checks found a problem."
-                ),
-                values={"light_frames": float(input_quality.light_frames)},
-                confidence=rule_confidence("capture", degraded=True),
-            )
-        )
-    return sorted(recommendations, key=lambda recommendation: _SEVERITY_ORDER[recommendation.severity])
+    return sort_by_severity(recommendations)

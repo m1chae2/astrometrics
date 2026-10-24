@@ -108,6 +108,7 @@ class _FakeAstrometrics:
             query=lambda **_arguments: [],
             capture_settings=lambda ids=None: {},
             metrics=lambda **_arguments: [],
+            set_aside_frames=lambda _target_id: [],
         )
         self.stars = SimpleNamespace(get=lambda object_id: None)
         self.processing = SimpleNamespace(

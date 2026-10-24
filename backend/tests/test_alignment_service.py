@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, create_autospec
 
 import pytest
 
-from astrometricslib import InvalidArgumentError
+from astrometricslib import InvalidArgumentError, PermissionDeniedError
 from backend.services.observatory.alignment_service import CENTERING_MAX_ITERATIONS, AlignmentService
 from wayfindinglib import ObservatoryControl
 from wayfindinglib.api.control.history import HistoryControl
@@ -83,7 +83,9 @@ def test_start_then_cancel_alignment_runs_and_stops_the_centering() -> None:
     observatory = _autospec_control()
     released = threading.Event()
     observatory.mount.slew.side_effect = lambda *args, **kwargs: released.wait(timeout=5.0)
-    observatory.mount.abort_motion.side_effect = lambda: released.set()
+    observatory.mount.cancel_centering.side_effect = lambda run_is_active: (
+        (released.set() if run_is_active else None) or run_is_active
+    )
     service = AlignmentService(observatory_api=observatory, records=_Logs())
 
     assert service.start_alignment(target_ra="0h 40m 00s", target_dec="+20d 00m 00s") is True
@@ -102,10 +104,11 @@ def test_start_then_cancel_alignment_runs_and_stops_the_centering() -> None:
 def test_cancel_without_a_run_reports_false() -> None:
     """Cancelling when nothing runs changes nothing."""
     observatory = _autospec_control()
+    observatory.mount.cancel_centering.return_value = False
     service = AlignmentService(observatory_api=observatory)
 
     assert service.cancel_alignment() is False
-    observatory.mount.abort_motion.assert_not_called()
+    observatory.mount.cancel_centering.assert_called_once_with(False)
 
 
 def test_start_alignment_raises_on_unparseable_coordinates() -> None:
@@ -118,3 +121,13 @@ def test_start_alignment_raises_on_unparseable_coordinates() -> None:
 
     assert service.is_active() is False
     observatory.mount.slew.assert_not_called()
+
+
+def test_cancel_passes_on_the_librarys_refusal_in_monitor_mode() -> None:
+    """Decision U4 lives in the library; the service lets its error through."""
+    observatory = _autospec_control()
+    observatory.mount.cancel_centering.side_effect = PermissionDeniedError("monitor mode")
+    service = AlignmentService(observatory_api=observatory)
+
+    with pytest.raises(PermissionDeniedError):
+        service.cancel_alignment()

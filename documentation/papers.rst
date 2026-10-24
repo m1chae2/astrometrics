@@ -20,4 +20,5 @@ Astrometrics papers
    library_design/Astrometrics_Quality_Measurements
    library_design/Astrometrics_Library_Implementation
    library_design/Wayfinding_Library_Architecture
+   library_design/Wayfinding_Quality_Judgment
    library_design/Wayfinding_Library_Implementation

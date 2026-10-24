@@ -212,6 +212,13 @@
       "interim_block": "",
       "note": "Built 2026-10-21. Reads the quality measurements that earlier runs stored (the latest for each subject and metric, or every row). Writes nothing and creates no table."
     },
+    "quality_set_aside_frames": {
+      "tool_class": "observe",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-10-24. Lists the frames lying in a target's _excluded folders with the kind and reason, and says whether the reason came from a stored quality row, the folder's manifest file, or nothing but the folder. Moves nothing and writes nothing."
+    },
     "star_analyze_periodicity": {
       "tool_class": "change-data",
       "category": "stars",

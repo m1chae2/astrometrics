@@ -18,6 +18,7 @@ from astrometricslib import (
     SATURATED_BLOB_MINIMUM_PIXELS,
     SATURATED_FRAME_FRACTION,
 )
+from wayfindinglib.models.quality.statements import StatementKind
 from wayfindinglib.models.session.capture_frame import CaptureFrame
 from wayfindinglib.models.session.capture_quality import (
     CaptureInputQuality,
@@ -25,7 +26,6 @@ from wayfindinglib.models.session.capture_quality import (
     CaptureSessionAnalysis,
 )
 from wayfindinglib.models.session.ekos_session import EkosCapture
-from wayfindinglib.models.session.session_quality import RecommendationSeverity
 from wayfindinglib.session_analysis.capture.post_processing.recommend_for_capture import recommend_for_capture
 from wayfindinglib.session_analysis.capture.pre_processing.assess_capture_input_quality import (
     assess_capture_input_quality,
@@ -137,7 +137,7 @@ class CaptureSessionPipeline(SessionAnalysisPipeline):
         input_quality: CaptureInputQuality = result.input_quality
         performance: CapturePerformance = result.performance or CapturePerformance()
         recommendations = recommend_for_capture(input_quality, performance, request.envelope)
-        warnings = [r for r in recommendations if r.severity == RecommendationSeverity.WARNING]
+        warnings = [r for r in recommendations if r.kind == StatementKind.WARNING]
         resolved: dict[str, Any] = {
             "limits_equipment_match": request.limits_equipment_match,
             "saturated_star_minimum_pixels": SATURATED_BLOB_MINIMUM_PIXELS,
@@ -151,7 +151,7 @@ class CaptureSessionPipeline(SessionAnalysisPipeline):
             session_id=request.session_id,
             equipment_fingerprint=request.equipment_fingerprint,
             flagged=bool(warnings),
-            flag_reasons=[warning.kind.value for warning in warnings],
+            flag_reasons=[warning.rule for warning in warnings],
             resolved_parameters=resolved,
             input_quality=input_quality,
             performance=performance,

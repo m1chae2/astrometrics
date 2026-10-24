@@ -28,7 +28,8 @@ would help, a row makes a ``constraint`` statement and proposes nothing.
 
 Every number below carries the place it comes from. Numbers that are design
 estimates are listed in the validation register (``WAY-D05`` to ``WAY-D09``,
-and ``WAY-D60`` to ``WAY-D68``) with a way to measure them on your own data.
+``WAY-D60`` to ``WAY-D68``, ``WAY-D78`` to ``WAY-D81``) with a way to
+measure them on your own data.
 """
 
 from pydantic import BaseModel, ConfigDict
@@ -528,23 +529,41 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         ),
         computed_by="report_rules",
     ),
+    QualityRule(
+        name="guiding_limits_exposure",
+        statement_kind=StatementKind.RECOMMENDATION,
+        action_class=ActionClass.CAPTURE_SETTINGS,
+        requires=[MetricRequirement(name=STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC, definition_version=1)],
+        limits=[],
+        register_entry="WAY-D79",
+        confidence=Confidence.DESIGN_ESTIMATE,
+        wording=("At {used_text} only {used_percent:.0f}% of frames stay sharp{supported_clause}."),
+        purpose=(
+            "A longer exposure gives the guiding more time to wander. The share of frames whose guide "
+            "error keeps the stars within the width budget falls with the exposure; the rule names the "
+            "longest exposure that keeps enough of them sharp (user decision U3, 2026-10-24)."
+        ),
+        computed_by="report_rules",
+    ),
+    QualityRule(
+        name="efficiency_reference_missing",
+        statement_kind=StatementKind.INSUFFICIENT_DATA,
+        action_class=None,
+        requires=[],
+        limits=[],
+        register_entry="WAY-D81",
+        confidence=Confidence.DESIGN_ESTIMATE,
+        wording="The efficiency of this capture setting cannot be judged: no reference exists for it.",
+        purpose=(
+            "The efficiency rules (sky cost, frames lost in time, the loss account) compare a setting with "
+            "a reference. When no reference can be made for a setting, this rule says so and gives the "
+            "reason, instead of showing a number that rests on nothing."
+        ),
+        computed_by="report_rules",
+    ),
 )
 
 DEFERRED_RULES: tuple[DeferredRule, ...] = (
-    DeferredRule(
-        name="guiding_limits_exposure",
-        catalog_item="Guiding limits exposure",
-        reason=(
-            "The share of frames that stay sharp at each exposure comes from the guiding analysis of "
-            "Control (session_analysis), which Planning may not import. The guide exposure ladder works "
-            "on guide-camera test frames, not on the stored guide logs, so it cannot give an exposure "
-            "limit for a capture setting in the target report."
-        ),
-        unblocked_by=(
-            "A Foundation function that turns the stored guide records into the longest sharp exposure, "
-            "with a register entry."
-        ),
-    ),
     DeferredRule(
         name="best_window",
         catalog_item="Best window",

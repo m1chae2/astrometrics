@@ -14,7 +14,12 @@ import threading
 import time
 from typing import Any
 
-from astrometricslib import InvalidArgumentError, StorageError, TargetCatalog, parse_coordinate_string
+from astrometricslib import (
+    InvalidArgumentError,
+    StorageError,
+    TargetCatalog,
+    parse_coordinate_string,
+)
 from wayfindinglib import (
     AlignmentAttempt,
     ControlRecordStore,
@@ -367,7 +372,7 @@ class AlignmentService:
     def cancel_alignment(self) -> bool:
         """Stop the current centering run.
 
-        Stops the mount through `control.mount.abort_motion`, which also
+        Stops the mount through `control.mount.cancel_centering`, which also
         ends the centering loop before its next step.
 
         Returns
@@ -375,12 +380,17 @@ class AlignmentService:
         cancelled : `bool`
             `True` once the run has been stopped and its thread joined;
             `False` if no run was active.
+
+        Notes
+        -----
+        In monitor mode the library raises `PermissionDeniedError` (issue
+        #95, decision U4); this service lets the error through.
         """
-        if not self.is_active():
+        active = self.is_active()
+        if not self._observatory.mount.cancel_centering(active):
             logger.warning("No alignment in progress")
             return False
-        logger.info("Cancelling alignment")
-        self._observatory.mount.abort_motion()
+        logger.info("Cancelled alignment")
         if self._alignment_thread is not None:
             self._alignment_thread.join(timeout=5.0)
         return True

@@ -116,6 +116,25 @@ class GuidingControl(ControlChild):
 
         live_guiding.run_loop(self._context, stop, exposure_seconds=exposure_seconds, gain=gain)
 
+    def stop_loop(self, stop: threading.Event) -> None:
+        """End the guide loop that `run_loop` runs, by setting its event.
+
+        Monitor mode refuses this too: the event stays unset.
+
+        Parameters
+        ----------
+        stop : `threading.Event`
+            The event the running loop watches.
+
+        Notes
+        -----
+        Raises `PermissionDeniedError` unless `AUTOGUIDING` is
+        `AUTHORITATIVE`.
+        """
+        from wayfindinglib.tasks.control_tasks import hardware_operations
+
+        hardware_operations.stop_guide_loop(self._context, stop)
+
     def pulse(self, direction: str, duration_ms: float) -> bool:
         """Send one guide pulse to the mount.
 

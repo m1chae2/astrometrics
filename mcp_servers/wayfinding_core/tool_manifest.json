@@ -219,6 +219,13 @@
       "interim_block": "",
       "note": "Reads the saved guider calibration, the mount's periodic error model and the guide plate scale (no device needed), and with include=['live'] the guiding going on now and its RMS error."
     },
+    "observatory_guiding_stop_loop": {
+      "tool_class": "safe-stop",
+      "category": "observatory-control",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Ends the guide loop through a stop event MCP cannot send. Dropped with the other hardware tools."
+    },
     "observatory_history_frame_guiding": {
       "tool_class": "compute",
       "category": "observatory-status",
@@ -302,6 +309,13 @@
       "disposition": "drop",
       "interim_block": "",
       "note": "Commands the mount, so it is dropped with the other hardware tools."
+    },
+    "observatory_mount_cancel_centering": {
+      "tool_class": "safe-stop",
+      "category": "observatory-control",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Stops a centering run by aborting the mount, so it is dropped with the other hardware tools."
     },
     "observatory_mount_compute_pointing_correction": {
       "tool_class": "compute",

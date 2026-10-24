@@ -20,13 +20,15 @@ Two kinds of RPC method send commands:
   (``tool_class`` of ``actuate``), so a new one is covered
   automatically;
 * methods that go through a backend service first. They are named in
-  `SERVICE_COMMANDS` below.
+  `SERVICE_COMMANDS` below. This includes the two stop methods
+  (``guiding:stop``, ``telescope:alignment_stop``): the user decided on
+  2026-10-24 (issue #95, decision U4) that monitor mode refuses a stop too.
 
 The allowed methods (``telescope:connect``, ``telescope:set_indi_property``)
 are checked to still work.
 
 Every method in the RPC table must also be named in one of the lists below
-(read-only, local writes, stops, allowed, or command-tested).
+(read-only, local writes, allowed, or command-tested).
 `test_every_rpc_method_is_classified` fails on a method in none of them, so a
 new method cannot join the table without someone saying whether it can send
 a command to a device.
@@ -50,6 +52,8 @@ SERVICE_COMMANDS: dict[str, dict[str, Any]] = {
     "telescope:slew_target": {"target_name": "M 81"},
     "guiding:capture_frame": {"exposure": 1.0},
     "imaging:capture": {"target_id": "M 81", "exposure_seconds": 1.0, "count": 1},
+    "guiding:stop": {},
+    "telescope:alignment_stop": {},
 }
 """RPC methods whose service calls a library command and reports a refusal
 as an error reply. Values are sample parameters."""
@@ -216,11 +220,6 @@ LOCAL_WRITE_METHODS = frozenset({
 or copy files from the telescope computer. None sends a command to a device.
 ``terminal:execute`` runs a user script, and a script reaches hardware only
 through the library calls that the monitor-mode guard already refuses."""
-
-STOP_ONLY_METHODS = frozenset({"guiding:stop", "telescope:alignment_stop"})
-"""RPC methods that end a loop the app started. They move nothing and take no
-exposure; they only stop. They stay allowed so the user can always end a
-run."""
 
 
 def _direct_command_methods() -> dict[str, str]:
@@ -389,7 +388,7 @@ def test_the_named_allowed_rpc_methods_exist_in_the_rpc_table() -> None:
 
 
 def test_every_rpc_method_is_classified() -> None:
-    """Each RPC method is read-only, a local write, a stop, allowed or tested.
+    """Each RPC method is read-only, a local write, allowed or tested.
 
     A method in none of the lists fails here, so nobody can add a method
     that might send a command and leave it out of the monitor-mode proof.
@@ -403,7 +402,6 @@ def test_every_rpc_method_is_classified() -> None:
     buckets = {
         "read only": set(READ_ONLY_METHODS),
         "local write": set(LOCAL_WRITE_METHODS),
-        "stop only": set(STOP_ONLY_METHODS),
         "allowed": set(support.ALLOWED_RPC_IN_MONITOR_MODE),
         "command tested": command_tested,
     }

@@ -10,7 +10,7 @@ stored.
 from pydantic import BaseModel, ConfigDict, Field
 
 from astrometricslib import CaptureSetting
-from wayfindinglib.models.quality.efficiency import LossAccount
+from wayfindinglib.models.quality.efficiency import LossAccount, ScienceGoal
 
 
 class CaptureSettingSummary(BaseModel):
@@ -36,6 +36,10 @@ class CaptureSettingSummary(BaseModel):
         efficiency cannot be found.
     loss_account : `LossAccount` or `None`
         Where the time went. ``None`` when it cannot be built.
+    science_goal : `ScienceGoal` or `None`
+        The goal this setting's efficiency is judged for (user decision U2,
+        2026-10-24: the goal is chosen for each capture setting). ``None``
+        when the summary was built without one.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -50,3 +54,4 @@ class CaptureSettingSummary(BaseModel):
         default=None, ge=0.0, alias="efficiencyEffectiveSeconds"
     )
     loss_account: LossAccount | None = Field(default=None, alias="lossAccount")
+    science_goal: ScienceGoal | None = Field(default=None, alias="scienceGoal")

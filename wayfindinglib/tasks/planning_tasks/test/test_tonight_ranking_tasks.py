@@ -24,6 +24,7 @@ from astrometricslib import (
     QualitySubject,
     SubjectLevel,
     Target,
+    frame_is_spectral,
     frame_subject_id,
 )
 from wayfindinglib.analytics.result_quality import forecast as fc
@@ -51,6 +52,8 @@ SETTING = CaptureSetting(
     offset=10,
     binning=1,
 )
+SPECTRAL_SETTING = SETTING.model_copy(update={"filter_name": "Star Analyzer 200"})
+"""The same camera behind the grating: a spectroscopy setting (id 2)."""
 TONIGHT = datetime(2026, 10, 10, 6, 0, tzinfo=UTC)
 FIRST_NIGHT = datetime(2026, 9, 28, 6, 0, tzinfo=UTC)
 M81 = ("M 81", "09h 55m 33s", "+69° 03′ 55″")
@@ -116,7 +119,7 @@ def _frame_rows(target: Target, sky: float = 0.5, width: float = 3.0) -> list[Qu
             subject_id=frame_subject_id(frame.path, target.id),
             target_id=target.id,
             observing_night_id=datetime.fromtimestamp(frame.timestamp or 0.0, tz=UTC).date().isoformat(),
-            capture_setting_id=1,
+            capture_setting_id=2 if frame_is_spectral(frame) else 1,
         )
         for metric, version, value in (
             (STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC, 1, width),
@@ -209,7 +212,9 @@ class FakeLibrary:
         """
         self.rows = rows
         self.targets = SimpleNamespace(list=lambda: targets)
-        self.quality = SimpleNamespace(query=self._query, capture_settings=lambda ids=None: {1: SETTING})
+        self.quality = SimpleNamespace(
+            query=self._query, capture_settings=lambda ids=None: {1: SETTING, 2: SPECTRAL_SETTING}
+        )
 
     def _query(
         self,
@@ -342,7 +347,7 @@ def test_a_brighter_sky_lowers_the_gain() -> None:
     target = _target(M81, 30, nights=2)
     observations_rows = _frame_rows(target)
     runs = fc.stack_runs_from_measurements(_stack_rows(target, [4.0], [3.0]))
-    observations = frame_observations_from_measurements(observations_rows, {1: SETTING})
+    observations = frame_observations_from_measurements(observations_rows, {1: SETTING, 2: SPECTRAL_SETTING})
     key = baseline_key(SETTING)
 
     def gain(constant: float) -> float:
@@ -444,6 +449,19 @@ def test_lists_are_kept_apart_by_use() -> None:
     assert "spectral" in ranking.lists[1].gain_description
 
 
+def test_a_target_is_listed_for_every_use_its_settings_belong_to() -> None:
+    """Decision U2: a grating setting and an imaging setting give two lists."""
+    mixed = _target(M81, 6)
+    for frame in mixed.frames[:3]:
+        frame.filter = "Star Analyzer 200"
+    rows = _frame_rows(mixed)
+
+    ranking = _rank(FakeLibrary([mixed], rows))
+
+    assert [ranked.use for ranked in ranking.lists] == [RankedUse.IMAGING, RankedUse.SPECTROSCOPY]
+    assert all(ranked.candidates[0].target_id == "M 81" for ranked in ranking.lists)
+
+
 def test_asteroid_searches_are_never_ranked() -> None:
     """A target with asteroid-search results is left out."""
     target = _target(M81, 5)
@@ -474,9 +492,13 @@ def test_a_missing_site_without_a_butler_is_refused() -> None:
         tr.rank_tonight(TONIGHT, astrometrics=_library())
 
 
-def test_a_long_ranking_leaves_out_its_lowest_candidates_to_fit_the_reply_budget() -> None:
-    """120 made-up targets give a ranking that fits, the best kept."""
-    from wayfindinglib.analytics.result_quality.reply_budget import MAXIMUM_REPLY_CHARACTERS, reply_characters
+def test_a_long_ranking_is_full_in_the_library_and_shortened_for_the_mcp_reply() -> None:
+    """With 120 made-up targets, the MCP cut fits the limit, keeps the best."""
+    from wayfindinglib.analytics.result_quality.reply_budget import (
+        MAXIMUM_REPLY_CHARACTERS,
+        fit_reply_to_budget,
+        reply_characters,
+    )
     from wayfindinglib.models.planning.tonight_ranking import RankedCandidate, RankedList, TonightRanking
 
     now = datetime(2026, 10, 10, 6, 0, tzinfo=UTC)
@@ -497,12 +519,13 @@ def test_a_long_ranking_leaves_out_its_lowest_candidates_to_fit_the_reply_budget
         sky=tr.summarize_sky(now.timestamp(), SITE, {}, []),
     )
     assert reply_characters(ranking) > MAXIMUM_REPLY_CHARACTERS
-    fitted = tr.fit_ranking_to_budget(ranking)
+    fitted = fit_reply_to_budget(ranking)
     assert reply_characters(fitted) <= MAXIMUM_REPLY_CHARACTERS
     kept = fitted.lists[0].candidates
     assert [candidate.target_id for candidate in kept] == [c.target_id for c in candidates[: len(kept)]]
     assert any("left out" in note for note in fitted.notes)
-    assert tr.fit_ranking_to_budget(fitted) is fitted
+    assert fit_reply_to_budget(fitted) is fitted
+    assert len(ranking.lists[0].candidates) == 120
 
 
 def test_ranking_never_stores_a_site_and_says_where_its_site_came_from(

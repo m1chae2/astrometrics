@@ -38,11 +38,12 @@ import logging
 import math
 import statistics
 from collections import Counter, defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
 from astrometricslib import (
+    UNKNOWN_CAPTURE_SETTING_CAMERA,
     AstrometricsError,
     CaptureSetting,
     MeasurementReference,
@@ -71,17 +72,22 @@ from wayfindinglib.analytics.result_quality.efficiency import (
     assess_efficiency,
     baseline_key,
 )
+from wayfindinglib.analytics.result_quality.evidence_order import order_statements_evidence
+from wayfindinglib.analytics.result_quality.guiding_exposure import (
+    GuidingExposureOutcome,
+    assess_guiding_exposure,
+    imaging_spans,
+)
+from wayfindinglib.analytics.result_quality.guiding_join import FrameWindow
 from wayfindinglib.analytics.result_quality.judge_results import (
     judge_results,
     needs_attention,
     order_statements,
 )
 from wayfindinglib.analytics.result_quality.library_inputs import (
-    UNKNOWN_SETTING_CAMERA,
     LibraryInputs,
     build_target_observations,
     dominant_setting,
-    set_aside_reasons,
     target_direction,
 )
 from wayfindinglib.analytics.result_quality.noise_growth import (
@@ -90,12 +96,6 @@ from wayfindinglib.analytics.result_quality.noise_growth import (
     WeightingMode,
     frames_to_cut_noise,
     predict_weighting_mode,
-)
-from wayfindinglib.analytics.result_quality.reply_budget import (
-    EVIDENCE_STEPS,
-    fit_reply,
-    limit_statement_evidence,
-    reply_budget,
 )
 from wayfindinglib.analytics.result_quality.report_rules import (
     AltitudeSample,
@@ -107,6 +107,7 @@ from wayfindinglib.analytics.result_quality.report_rules import (
     find_calibration_gaps,
     find_sharpness_tradeoff,
     frames_lost_statements,
+    guiding_limits_statements,
     insufficient,
     more_frames_statement,
     seeing_limit_statements,
@@ -119,7 +120,11 @@ from wayfindinglib.analytics.result_quality.rules import (
     MINIMUM_SKY_TO_READ_NOISE_RATIO,
     STAR_WIDTH_MOFFAT_ARCSEC_METRIC,
 )
-from wayfindinglib.analytics.result_quality.science_goal import science_goal_for_target
+from wayfindinglib.analytics.result_quality.science_goal import (
+    group_by_goal,
+    science_goal_for_setting,
+    science_goal_for_target,
+)
 from wayfindinglib.analytics.result_quality.starting_point import (
     StartingPointInputs,
     build_starting_point,
@@ -128,6 +133,7 @@ from wayfindinglib.analytics.result_quality.starting_point import (
 from wayfindinglib.models.planning.target_report import (
     ContextReading,
     ForecastCheck,
+    ForecastOutcome,
     ScienceOutcomeSummary,
     StartingPoint,
     TargetDatasetReport,
@@ -140,6 +146,7 @@ from wayfindinglib.models.quality.statements import (
     TargetStatement,
 )
 from wayfindinglib.tasks.planning_tasks.target_report_inputs import (
+    FRAME_WEIGHT_METRIC,
     QUARANTINE_METRICS,
     TargetRows,
     assign_stacks_to_settings,
@@ -172,9 +179,15 @@ Design estimate, register row WAY-D67."""
 
 SPECTRUM_RULE_NAME = "spectrum_snr"
 PHOTOMETRY_RULE_NAME = "photometry_precision"
-EFFICIENCY_RULE_NAME = "efficiency_reference"
+EFFICIENCY_RULE_NAME = "efficiency_reference_missing"
+"""The rule that says a capture setting has no efficiency reference (design
+estimate, register row WAY-D81)."""
 CALIBRATION_RULE_NAME = "calibration_gap"
 FRAMES_LOST_RULE_NAME = "frames_lost"
+
+GUIDE_SAMPLE_READ_LIMIT = 200_000
+"""Most guide samples read for one night. A long night holds about 10,000, so
+this never cuts one (the same limit the performance envelope uses)."""
 
 VARIABLE_CANDIDATE_METRIC = "photometry.variable_candidate_count"
 CATALOG_AMPLITUDE_METRIC = "photometry.target_catalog_amplitude_mag"
@@ -353,66 +366,6 @@ def context_readings(
     return readings
 
 
-def fit_report_to_budget(report: TargetDatasetReport, budget: int | None = None) -> TargetDatasetReport:
-    """Shrink the report until its JSON fits the reply budget.
-
-    Two things can go, in this order. First the context section, which is only
-    a convenience: the statements cite the rows they used, so the report
-    says why the section is empty. Then the long evidence lists, cut to
-    ``EVIDENCE_STEPS`` references per statement in turn, each statement
-    counting what it lost. The statements, their order and the counts of the
-    warnings never change.
-
-    Parameters
-    ----------
-    report : `TargetDatasetReport`
-        The finished report.
-    budget : `int`, optional
-        The most characters its JSON may have, measured the way the MCP tool
-        registry measures a reply. `reply_budget` when omitted.
-
-    Returns
-    -------
-    report : `TargetDatasetReport`
-        The same report when it fits. Otherwise a smaller copy; when even the
-        smallest step does not fit, that smallest copy.
-    """
-    limit = reply_budget() if budget is None else budget
-
-    def shrink(current: TargetDatasetReport, round_number: int) -> TargetDatasetReport | None:
-        """Make the report one step smaller.
-
-        Parameters
-        ----------
-        current : `TargetDatasetReport`
-            The report so far.
-        round_number : `int`
-            0 drops the context; later rounds cut the evidence lists.
-
-        Returns
-        -------
-        smaller : `TargetDatasetReport` or `None`
-            The smaller report, or ``None`` when nothing is left to cut.
-        """
-        if round_number == 0:
-            return current.model_copy(
-                update={
-                    "context": [],
-                    "context_omitted_reason": (
-                        "The context readings were left out so the report fits the reply budget of "
-                        f"{limit:,} characters. The statements still cite the rows they used; read "
-                        "any metric with QualityRecords.query."
-                    ),
-                }
-            )
-        if round_number > len(EVIDENCE_STEPS):
-            return None
-        keep = EVIDENCE_STEPS[round_number - 1]
-        return current.model_copy(update={"statements": limit_statement_evidence(current.statements, keep)})
-
-    return fit_reply(report, shrink, limit)
-
-
 def _measured_noise_checks(
     rows: Sequence[QualityMeasurement],
     stack_settings: Mapping[str, int],
@@ -529,7 +482,7 @@ def _set_aside_parts(
     unassigned: Counter = Counter()
     for frame_id, reason in reasons_by_frame.items():
         observation = by_id.get(frame_id)
-        if observation is None or observation.capture_setting.camera == UNKNOWN_SETTING_CAMERA:
+        if observation is None or observation.capture_setting.camera == UNKNOWN_CAPTURE_SETTING_CAMERA:
             unassigned[reason] += 1
             continue
         reasons_by_setting[observation.capture_setting][reason] += 1
@@ -584,6 +537,67 @@ def _stack_frames(
         )
         used.append(observation)
     return frames, used, problems
+
+
+MORE_FRAMES_GATE_REASON = (
+    "The forecast of how much one more hour helps has not been checked on this target yet. Take more "
+    "frames and stack them; then the report compares the forecast with what the stack did, and once "
+    "one check agrees, it will say how many more frames to take."
+)
+"""Why "take N more" is hidden. The user decided on 2026-10-24 (issue #95,
+decision U1) that the number of frames is shown for a target only after one of
+THAT target's forecast checks came out as forecast."""
+
+
+def _forecast_gate_open(forecast_checks: Sequence[ForecastCheck]) -> bool:
+    """Say whether "take N more" may be shown for the target.
+
+    Parameters
+    ----------
+    forecast_checks : `Sequence` [`ForecastCheck`]
+        The target's own forecast checks.
+
+    Returns
+    -------
+    open : `bool`
+        `True` once at least one check has the outcome ``as_forecast``.
+    """
+    return any(check.outcome == ForecastOutcome.AS_FORECAST for check in forecast_checks)
+
+
+def _more_frames_gate_statement(
+    setting: CaptureSetting, forecast_checks: Sequence[ForecastCheck], has_frame_weights: bool = True
+) -> TargetStatement:
+    """Make the statement that stands in for a hidden "take N more".
+
+    Parameters
+    ----------
+    setting : `CaptureSetting`
+        The setting the hidden statement was about.
+    forecast_checks : `Sequence` [`ForecastCheck`]
+        The target's checks, to say what has been tried.
+    has_frame_weights : `bool`, optional
+        Whether the target has any frame-level ``stacking.frame_weight`` rows.
+        Without them (history-fill data) no check can run, and the reason says
+        how to get them.
+
+    Returns
+    -------
+    statement : `TargetStatement`
+        An ``insufficient_data`` statement for the rule ``more_frames``.
+    """
+    if forecast_checks:
+        tried = ", ".join(sorted({check.outcome.value for check in forecast_checks}))
+        history = f" {len(forecast_checks)} check(s) so far came out as: {tried}."
+    else:
+        history = " No stack has followed a forecast yet, so there is no check."
+    if not has_frame_weights:
+        history += (
+            " This target has no frame-level stacking.frame_weight rows (its stored history was filled in "
+            "afterward), so no check can run yet. Restack this target to record frame weights and noise "
+            "apertures."
+        )
+    return insufficient("more_frames", MORE_FRAMES_GATE_REASON + history, setting)
 
 
 def _more_frames_for_setting(
@@ -727,7 +741,7 @@ def _with_full_wall_clock(
 
 def _quality_statements_of_settings(
     target: Target,
-    goal: ScienceGoal,
+    goal_for_setting: Callable[[CaptureSetting], ScienceGoal],
     target_rows: TargetRows,
     observations: Sequence[FrameObservation],
     summaries: Sequence[Any],
@@ -736,6 +750,8 @@ def _quality_statements_of_settings(
     context: LibraryInputs,
     config: Any,
     contexts_for_overheads: Sequence[Any],
+    forecast_checks: Sequence[ForecastCheck] = (),
+    has_frame_weights: bool = True,
 ) -> list[TargetStatement]:
     """Make the statements that are about the target's own stack and frames.
 
@@ -746,8 +762,9 @@ def _quality_statements_of_settings(
     ----------
     target : `Target`
         The target.
-    goal : `ScienceGoal`
-        The target's science goal, for the efficiency of each frame.
+    goal_for_setting : `Callable`
+        Gives the science goal of a capture setting, for the efficiency of
+        its frames.
     target_rows : `TargetRows`
         The target's rows and settings.
     observations : `Sequence` [`FrameObservation`]
@@ -764,6 +781,12 @@ def _quality_statements_of_settings(
         The configuration, for the stacker's weight mode.
     contexts_for_overheads : `Sequence` [`EkosSessionContext`]
         The stored Ekos session records, for the download times.
+    forecast_checks : `Sequence` [`ForecastCheck`], optional
+        The target's own forecast checks. "Take N more" is shown only when one
+        came out as forecast (user decision U1, 2026-10-24).
+    has_frame_weights : `bool`, optional
+        Whether the target has any ``stacking.frame_weight`` rows; when it
+        has none, the "take N more" reason says to restack.
 
     Returns
     -------
@@ -809,11 +832,14 @@ def _quality_statements_of_settings(
             overheads = estimate_capture_overheads(
                 contexts_for_overheads, setting.exposure_seconds, setting.filter_name
             )
-            statements.extend(
-                _more_frames_for_setting(
-                    setting, setting_observations, target_rows.rows, configured_weight, overheads
+            if _forecast_gate_open(forecast_checks):
+                statements.extend(
+                    _more_frames_for_setting(
+                        setting, setting_observations, target_rows.rows, configured_weight, overheads
+                    )
                 )
-            )
+            else:
+                statements.append(_more_frames_gate_statement(setting, forecast_checks, has_frame_weights))
         frames, used, _problems = _stack_frames(setting_observations)
         widths = [_width_row_value(target_rows.rows, observation.frame_id) for observation in used]
         if frames and all(width is not None for width in widths):
@@ -842,7 +868,9 @@ def _quality_statements_of_settings(
         reference = context.reference_for(setting)
         if reference is not None:
             efficiency = assess_efficiency(
-                [o for o in setting_observations if o.set_aside_reason is None], goal, reference
+                [o for o in setting_observations if o.set_aside_reason is None],
+                goal_for_setting(setting),
+                reference,
             )
         if efficiency is not None:
             by_frame_exposure = {o.frame_id: o for o in setting_observations}
@@ -936,14 +964,14 @@ def _calibration_statements(
 
 
 def _natural_goal_statements(
-    goal: ScienceGoal, rows: Sequence[QualityMeasurement], target_has_photometry: bool
+    goals: set[ScienceGoal | None], rows: Sequence[QualityMeasurement], target_has_photometry: bool
 ) -> list[TargetStatement]:
     """Say what is missing for the natural finish lines.
 
     Parameters
     ----------
-    goal : `ScienceGoal`
-        The target's science goal.
+    goals : `set` [`ScienceGoal`]
+        The science goals of the target's capture settings.
     rows : `Sequence` [`QualityMeasurement`]
         The target's stored rows.
     target_has_photometry : `bool`
@@ -957,7 +985,7 @@ def _natural_goal_statements(
     """
     statements: list[TargetStatement] = []
     deferred = {entry.name: entry for entry in DEFERRED_RULES}
-    if goal == ScienceGoal.SLITLESS_SPECTRAL_RESOLUTION:
+    if ScienceGoal.SLITLESS_SPECTRAL_RESOLUTION in goals:
         entry = deferred["spectrum_snr"]
         statements.append(
             _deferred_statement(SPECTRUM_RULE_NAME, f"{entry.reason} To unblock: {entry.unblocked_by}")
@@ -983,6 +1011,127 @@ def _natural_goal_statements(
             )
         statements.append(_deferred_statement(PHOTOMETRY_RULE_NAME, reason))
     return statements
+
+
+def _guiding_exposure_statements(
+    summaries: Sequence[Any],
+    observations: Sequence[FrameObservation],
+    butler: Any,
+    star_width_evidence: Mapping[str, MeasurementReference],
+) -> list[TargetStatement]:
+    """Make the "guiding limits exposure" statement of each capture setting.
+
+    The guide samples are read from the stored control records (Foundation),
+    only for the nights the setting was used.
+
+    Parameters
+    ----------
+    summaries : `Sequence` [`CaptureSettingSummary`]
+        The setting summaries.
+    observations : `Sequence` [`FrameObservation`]
+        The frames.
+    butler : `DiskButler`
+        The storage layer, which holds the guide samples.
+    star_width_evidence : `Mapping` [`str`, `MeasurementReference`]
+        The star-width row of each frame.
+
+    Returns
+    -------
+    statements : `list` [`TargetStatement`]
+        The statements of `guiding_limits_statements`.
+    """
+    from wayfindinglib.models.session.telemetry import MEASURED_GUIDING_SAMPLE_SOURCES
+
+    records = getattr(butler, "control_records", None)
+    sources = [source.value for source in MEASURED_GUIDING_SAMPLE_SOURCES]
+    statements: list[TargetStatement] = []
+    sample_cache: dict[str, list[dict[str, Any]]] = {}
+    for summary in summaries:
+        setting = summary.capture_setting
+        kept = [
+            o
+            for o in observations
+            if o.capture_setting == setting
+            and o.set_aside_reason is None
+            and o.start_epoch_seconds is not None
+            and o.night_id is not None
+        ]
+        windows_by_night: dict[str, list[tuple[float, float]]] = defaultdict(list)
+        for observation in kept:
+            start = float(observation.start_epoch_seconds)
+            windows_by_night[observation.night_id].append((
+                start,
+                start + float(setting.exposure_seconds),
+            ))
+        if records is None or not setting.exposure_seconds:
+            reason = (
+                "The setting has no exposure time."
+                if not setting.exposure_seconds
+                else "No stored guide samples are available to this report."
+            )
+            statements.extend(guiding_limits_statements(setting, GuidingExposureOutcome(reason=reason)))
+            continue
+        spans = {night: imaging_spans(windows) for night, windows in windows_by_night.items()}
+        for night in spans:
+            if night not in sample_cache:
+                sample_cache[night] = records.get_guiding_samples(
+                    session_id=night, limit=GUIDE_SAMPLE_READ_LIMIT, sources=sources
+                )
+        outcome = assess_guiding_exposure(
+            float(setting.exposure_seconds),
+            [o.star_width_effective_arcsec for o in kept if o.star_width_effective_arcsec is not None],
+            spans,
+            {night: sample_cache[night] for night in spans},
+            [
+                FrameWindow(
+                    frame_id=o.frame_id,
+                    start_epoch_seconds=o.start_epoch_seconds,
+                    exposure_seconds=float(setting.exposure_seconds),
+                )
+                for o in kept
+            ],
+        )
+        evidence = [star_width_evidence[o.frame_id] for o in kept if o.frame_id in star_width_evidence]
+        statements.extend(guiding_limits_statements(setting, outcome, evidence))
+    return statements
+
+
+def _state_goals(statements: Sequence[TargetStatement], summaries: Sequence[Any]) -> list[TargetStatement]:
+    """Put the science goal into each statement that is about one setting.
+
+    The user decided on 2026-10-24 (issue #95, decision U2) that each
+    statement states its goal. The goal goes in ``values["science_goal"]``. A
+    statement about the whole target gets it only when every setting has the
+    same goal.
+
+    Parameters
+    ----------
+    statements : `Sequence` [`TargetStatement`]
+        The statements.
+    summaries : `Sequence` [`CaptureSettingSummary`]
+        The setting summaries, which carry the goals.
+
+    Returns
+    -------
+    statements : `list` [`TargetStatement`]
+        Copies with the goal added where it is known.
+    """
+    goal_by_setting = {summary.capture_setting: summary.science_goal for summary in summaries}
+    distinct = {goal for goal in goal_by_setting.values() if goal is not None}
+    result = []
+    for statement in statements:
+        goal = (
+            goal_by_setting.get(statement.capture_setting)
+            if statement.capture_setting is not None
+            else (next(iter(distinct)) if len(distinct) == 1 else None)
+        )
+        if goal is None or "science_goal" in statement.values:
+            result.append(statement)
+        else:
+            result.append(
+                statement.model_copy(update={"values": {**statement.values, "science_goal": goal.value}})
+            )
+    return result
 
 
 def _checklist_returns(
@@ -1354,7 +1503,26 @@ def build_target_dataset_report(
     now = at or datetime.now(UTC)
     target_rows = read_target_rows(astrometrics, target.id)
     rows = target_rows.rows
-    goal = science_goal_for_target(target)
+    # The goal is chosen for each capture setting (user decision U2).
+    lights = [frame for frame in target.frames if str(frame.role).upper().endswith("LIGHT")]
+
+    def goal_for_setting(setting: CaptureSetting) -> ScienceGoal:
+        """Give the science goal of one capture setting of this target.
+
+        Parameters
+        ----------
+        setting : `CaptureSetting`
+            The setting.
+
+        Returns
+        -------
+        goal : `ScienceGoal`
+            Slitless spectral resolution for a grating setting; otherwise by
+            the target's type and results.
+        """
+        return science_goal_for_setting(target, setting, lights)
+
+    target_goal = science_goal_for_target(target)
     context = LibraryInputs(astrometrics, butler, config)
     statements: list[TargetStatement] = []
     notes: list[str] = []
@@ -1377,7 +1545,7 @@ def build_target_dataset_report(
     stack_setting_by_subject = dict(stack_settings)
 
     # Set-aside frames (the rows that say so) and the frames' observations.
-    reasons_by_frame = set_aside_reasons(rows)
+    reasons_by_frame = context.set_aside_reasons(target.id, rows)
     observations = build_target_observations(target, rows, target_rows.settings, reasons_by_frame)
     reasons_by_setting, evidence_by_setting, unassigned = _set_aside_parts(
         reasons_by_frame, observations, rows
@@ -1394,41 +1562,40 @@ def build_target_dataset_report(
             "frames one by one, so the set-aside time may be higher than shown."
         )
 
-    # Summaries.
+    # Summaries, one group of settings for each science goal.
     moonless = context.moonless_sky_rates(observations)
-    summaries = capture_setting_summaries(
-        observations,
-        goal,
-        context.reference_for,
-        weight_effective_seconds_by_setting=_weight_effective_seconds(
-            rows, stack_setting_by_subject, target_rows.settings
-        ),
-        measured_noise_check_by_setting=_measured_noise_checks(
-            rows, stack_setting_by_subject, target_rows.settings
-        ),
-    )
+    weight_seconds = _weight_effective_seconds(rows, stack_setting_by_subject, target_rows.settings)
     checks = _measured_noise_checks(rows, stack_setting_by_subject, target_rows.settings)
-    refreshed = []
-    for summary in summaries:
-        reference = context.reference_for(summary.capture_setting)
-        if reference is None:
-            refreshed.append(summary)
-            continue
-        setting_observations = [o for o in observations if o.capture_setting == summary.capture_setting]
-        result = loss_account(
-            setting_observations,
-            [],
-            goal,
-            lambda _setting, reference=reference: reference,
-            measured_noise_check=checks.get(summary.capture_setting),
-            moonless_sky_rate_by_frame=moonless or None,
+    summaries = []
+    for group_goal, group in group_by_goal(
+        observations, lambda observation: observation.capture_setting, goal_for_setting
+    ).items():
+        group_summaries = capture_setting_summaries(
+            group,
+            group_goal,
+            context.reference_for,
+            weight_effective_seconds_by_setting=weight_seconds,
+            measured_noise_check_by_setting=checks,
         )
-        refreshed.append(
-            summary.model_copy(update={"loss_account": result.account}) if result is not None else summary
-        )
-    summaries = refreshed
+        for summary in group_summaries:
+            reference = context.reference_for(summary.capture_setting)
+            update: dict[str, Any] = {"science_goal": group_goal}
+            if reference is not None:
+                result = loss_account(
+                    [o for o in group if o.capture_setting == summary.capture_setting],
+                    [],
+                    group_goal,
+                    lambda _setting, reference=reference: reference,
+                    measured_noise_check=checks.get(summary.capture_setting),
+                    moonless_sky_rate_by_frame=moonless or None,
+                )
+                if result is not None:
+                    update["loss_account"] = result.account
+            summaries.append(summary.model_copy(update=update))
     notes.extend(
-        context.reference_notes([summary.capture_setting for summary in summaries], observations, goal)
+        context.reference_notes(
+            [summary.capture_setting for summary in summaries], observations, goal_for_setting
+        )
     )
     for note in context.notes:
         if note.startswith("No efficiency reference"):
@@ -1459,12 +1626,21 @@ def build_target_dataset_report(
         for row in rows
         if row.metric == STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC and row.row_id is not None
     }
-    statements.extend(seeing_limit_statements(observations, goal, context.reference_for, star_width_evidence))
+    statements.extend(
+        seeing_limit_statements(observations, goal_for_setting, context.reference_for, star_width_evidence)
+    )
+    statements.extend(_guiding_exposure_statements(summaries, observations, butler, star_width_evidence))
     contexts = butler.get_all("ekos_session_context")
+    # The checks come first: "take N more" waits for one that agreed (U1).
+    forecast_checks: list[ForecastCheck] = (
+        forecast_check(runs, observations, configured_stack_weight=configured_weight)
+        if len(runs) >= 2
+        else []
+    )
     statements.extend(
         _quality_statements_of_settings(
             target,
-            goal,
+            goal_for_setting,
             target_rows,
             observations,
             summaries,
@@ -1473,21 +1649,26 @@ def build_target_dataset_report(
             context,
             config,
             contexts,
+            forecast_checks,
+            has_frame_weights=any(row.metric == FRAME_WEIGHT_METRIC for row in stack_rows),
         )
     )
     statements.extend(_calibration_statements(target, summaries, observations, astrometrics, rows))
     has_photometry = any(row.metric.startswith("photometry.") for row in rows)
-    statements.extend(_natural_goal_statements(goal, rows, has_photometry))
+    goals_in_use = {summary.science_goal for summary in summaries} or {target_goal}
+    statements.extend(_natural_goal_statements(goals_in_use, rows, has_photometry))
     statements = _checklist_returns(statements, sessions_of_target(butler, target.id), rows)
+    statements = _state_goals(statements, summaries)
 
     starting_point = None
     if not observations:
-        starting_point = _starting_point(target, goal, context, config, now)
+        starting_point = _starting_point(target, target_goal, context, config, now)
 
-    forecast_checks: list[ForecastCheck] = (
-        forecast_check(runs, observations, configured_stack_weight=configured_weight)
-        if len(runs) >= 2
-        else []
+    metric_summaries = {summary.name: summary for summary in astrometrics.quality.metrics()}
+    # Each statement lists its most extreme evidence first, so a shortened
+    # reply (the MCP tools shorten it) keeps the references that matter most.
+    statements = order_statements_evidence(
+        statements, [*rows, *stack_rows], {name: summary.unit for name, summary in metric_summaries.items()}
     )
     ordered = order_statements(statements)
     report = TargetDatasetReport(
@@ -1499,14 +1680,10 @@ def build_target_dataset_report(
         notes=notes,
         forecastChecks=forecast_checks,
         scienceOutcomes=_science_outcomes(target, rows),
-        context=context_readings(
-            rows,
-            {summary.name: summary for summary in astrometrics.quality.metrics()},
-            stack_setting_by_subject,
-        ),
+        context=context_readings(rows, metric_summaries, stack_setting_by_subject),
         generatedAt=now,
     )
-    return fit_report_to_budget(report)
+    return report
 
 
-__all__ = ["build_target_dataset_report", "context_readings", "fit_report_to_budget"]
+__all__ = ["build_target_dataset_report", "context_readings"]

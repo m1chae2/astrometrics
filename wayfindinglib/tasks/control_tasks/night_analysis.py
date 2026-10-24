@@ -242,7 +242,7 @@ def guiding_night_summaries(
     summaries : `list` [`dict`]
         One row per night, oldest first: whether it was flagged and why,
         its samples, the share of lost frames, the guide signal, the
-        guiding error, and the kinds of its recommendations.
+        guiding error, and the rule names of its statements.
     """
     contexts, runs = recorded_sessions(context)
     library_cache: LibraryCache = {}
@@ -260,7 +260,7 @@ def guiding_night_summaries(
             "lostFraction": analysis.input_quality.lost_fraction,
             "medianSnr": analysis.input_quality.median_snr,
             "rmsPerAxisArcsec": analysis.performance.rms_per_axis_arcsec,
-            "recommendations": [r.kind.value for r in analysis.recommendations],
+            "recommendations": [r.rule for r in analysis.recommendations],
         })
     return rows
 
@@ -347,7 +347,7 @@ def capture_night_summaries(
     summaries : `list` [`dict`]
         One row per night, oldest first: whether it was flagged and why,
         its light frames, Ekos exposures with no frame, the median star
-        width, and the kinds of its recommendations.
+        width, and the rule names of its statements.
     """
     contexts, runs = recorded_sessions(context)
     library_cache: LibraryCache = {}
@@ -372,7 +372,7 @@ def capture_night_summaries(
             "capturesWithoutFrame": analysis.input_quality.captures_without_frame,
             "medianStarWidthArcsec": analysis.performance.star_quality.median_star_width_arcsec,
             "dutyCycle": analysis.performance.efficiency.duty_cycle,
-            "recommendations": [r.kind.value for r in analysis.recommendations],
+            "recommendations": [r.rule for r in analysis.recommendations],
         })
     return rows
 

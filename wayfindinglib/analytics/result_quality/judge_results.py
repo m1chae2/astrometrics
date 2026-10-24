@@ -36,6 +36,7 @@ from astrometricslib import (
     QualityMeasurement,
     SubjectLevel,
 )
+from wayfindinglib.analytics.result_quality.evidence_order import order_evidence_most_extreme_first
 from wayfindinglib.analytics.result_quality.rules import (
     ELONGATION_METRIC,
     EMPTY_APERTURE_NOISE_METRIC,
@@ -372,6 +373,15 @@ def _statement(
     """
     rule = case.rule
     assumed = _assumed_text(case.readings.values())
+    limits = [*case.limits, *extra_limits]
+    # The rows a reading used, so the evidence can be put most extreme first.
+    rows_by_id = {
+        row.row_id: row
+        for reading in case.readings.values()
+        for row in reading.rows
+        if row.row_id is not None
+    }
+    evidence = order_evidence_most_extreme_first(_evidence(case.readings.values()), limits, rows_by_id)
     return TargetStatement(
         rule=rule.name,
         kind=rule.statement_kind,
@@ -382,8 +392,8 @@ def _statement(
         reason=f"{reason} {assumed}".strip(),
         proposed_action=proposed_action,
         expected_effect=expected_effect,
-        evidence=_evidence(case.readings.values()),
-        limits=[*case.limits, *extra_limits],
+        evidence=evidence,
+        limits=limits,
         confidence=rule.confidence,
     )
 

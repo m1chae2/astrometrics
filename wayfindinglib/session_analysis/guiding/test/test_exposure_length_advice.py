@@ -12,7 +12,6 @@ from wayfindinglib.models.session.session_quality import (
     ExposureFeasibility,
     GuidingInputQuality,
     GuidingPerformance,
-    RecommendationKind,
 )
 from wayfindinglib.session_analysis.guiding.post_processing.recommend_for_guiding import recommend_for_guiding
 
@@ -24,7 +23,7 @@ def _advice(
 
     Returns
     -------
-    recommendation : `Recommendation` or `None`
+    recommendation : `TargetStatement` or `None`
         The exposure-length advice, if any was given.
     """
     input_quality = GuidingInputQuality(has_enough_samples=True, limits_equipment_match="exact", **quality)
@@ -32,7 +31,7 @@ def _advice(
         exposure_feasibility=feasibility, longest_reliable_exposure_seconds=reliable
     )
     found = recommend_for_guiding(input_quality, performance, make_envelope())
-    return next((r for r in found if r.kind == RecommendationKind.EXPOSURE_LENGTH_LIMITED), None)
+    return next((r for r in found if r.rule == "exposure_length_limited"), None)
 
 
 def _result(length: float, clean: float, lost: float = 0.0, jump: float = 0.0, wobble: float = 0.0) -> Any:
@@ -64,7 +63,7 @@ def test_advice_names_the_main_cause_and_the_length_that_would_work(make_envelop
     assert "the guide star was lost" in recommendation.message
     assert "60 s" in recommendation.message
     assert recommendation.confidence == Confidence.DESIGN_ESTIMATE
-    assert {limit.register_entry for limit in recommendation.compared_to} >= {"WAY-D46", "WAY-41"}
+    assert {limit.register_entry for limit in recommendation.limits} >= {"WAY-D46", "WAY-41"}
 
 
 def test_advice_says_when_no_length_would_work(make_envelope: Any) -> None:

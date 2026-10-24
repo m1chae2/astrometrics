@@ -83,8 +83,10 @@ from wayfindinglib.analytics.result_quality.noise_growth import (
     predict_weighting_mode,
 )
 from wayfindinglib.analytics.result_quality.observing_values import sky_geometry
-from wayfindinglib.analytics.result_quality.reply_budget import fit_reply, reply_budget
-from wayfindinglib.analytics.result_quality.science_goal import science_goal_for_target
+from wayfindinglib.analytics.result_quality.science_goal import (
+    science_goal_for_setting,
+    science_goal_for_target,
+)
 from wayfindinglib.analytics.result_quality.sky_model import SkyModel, predict_sky_rate_at
 from wayfindinglib.astronomy.coordinate_transforms import compute_altaz, earth_location
 from wayfindinglib.models.equipment_and_site.equipment import Telescope
@@ -145,9 +147,11 @@ def classify_use(target: Target) -> RankedUse | None:
 
     The list follows the target's science goal (`science_goal_for_target`):
     a spectroscopy goal is the spectroscopy list, a photometry goal the
-    photometry list, and all others the imaging list. Solar-system targets,
-    comets, calibration folders and targets with asteroid-search results are
-    never ranked (``None``).
+    photometry list, and all others the imaging list. This is the rule for
+    a target with no frames; `classify_uses` gives every list a target with
+    frames belongs to (one for each kind of capture setting). Solar-system
+    targets, comets, calibration folders and targets with asteroid-search
+    results are never ranked (``None``).
 
     Parameters
     ----------
@@ -170,6 +174,59 @@ def classify_use(target: Target) -> RankedUse | None:
     if goal in (ScienceGoal.BRIGHT_STAR_PHOTOMETRY, ScienceGoal.PERIOD_DETECTION):
         return RankedUse.PHOTOMETRY
     return RankedUse.IMAGING
+
+
+def _use_of_goal(goal: ScienceGoal) -> RankedUse:
+    """Give the ranked list that a science goal belongs to.
+
+    Parameters
+    ----------
+    goal : `ScienceGoal`
+        The goal.
+
+    Returns
+    -------
+    use : `RankedUse`
+        Spectroscopy for a slitless goal, photometry for bright-star
+        photometry or period detection, imaging for all others.
+    """
+    if goal == ScienceGoal.SLITLESS_SPECTRAL_RESOLUTION:
+        return RankedUse.SPECTROSCOPY
+    if goal in (ScienceGoal.BRIGHT_STAR_PHOTOMETRY, ScienceGoal.PERIOD_DETECTION):
+        return RankedUse.PHOTOMETRY
+    return RankedUse.IMAGING
+
+
+def classify_uses(target: Target, settings: Iterable[CaptureSetting]) -> list[RankedUse] | None:
+    """Say every ranked list a target belongs to, one for each kind of setting.
+
+    The user decided on 2026-10-24 (issue #95, decision U2) that the goal is
+    chosen for each capture setting, and that a target is listed in every use
+    list its settings belong to. A target with a grating setting and an
+    imaging setting is in the spectroscopy list and the imaging list. A
+    target with no known setting follows the target-level rule of
+    `classify_use`.
+
+    Parameters
+    ----------
+    target : `Target`
+        The library target.
+    settings : `Iterable` [`CaptureSetting`]
+        The capture settings its frames were taken with.
+
+    Returns
+    -------
+    uses : `list` [`RankedUse`] or `None`
+        The lists in `RankedUse` order, or ``None`` for a target that is
+        never ranked.
+    """
+    first = classify_use(target)
+    if first is None:
+        return None
+    found = {_use_of_goal(science_goal_for_setting(target, setting)) for setting in settings}
+    if not found:
+        return [first]
+    return [use for use in RankedUse if use in found]
 
 
 def _new_candidate(
@@ -473,66 +530,6 @@ def build_lists(candidates: Iterable[RankedCandidate]) -> tuple[list[RankedList]
     return lists, notes
 
 
-def fit_ranking_to_budget(ranking: TonightRanking, budget: int | None = None) -> TonightRanking:
-    """Leave out the lowest candidates until the ranking fits the reply budget.
-
-    Parameters
-    ----------
-    ranking : `TonightRanking`
-        The finished ranking, with all its notes already in it.
-    budget : `int`, optional
-        The most characters its JSON may have, measured the way the MCP tool
-        registry measures a reply. `reply_budget` when omitted.
-
-    Returns
-    -------
-    ranking : `TonightRanking`
-        The same ranking when it fits. Otherwise a copy that drops the last
-        candidate of the longest list again and again (the unranked, then the
-        stopped, then the lowest gains), with a note for each list that says
-        how many targets were left out. The notes are part of each copy, so
-        the length that is checked includes them.
-    """
-    limit = reply_budget() if budget is None else budget
-    original_counts = {ranked_list.use: len(ranked_list.candidates) for ranked_list in ranking.lists}
-
-    def shrink(current: TonightRanking, _round_number: int) -> TonightRanking | None:
-        """Drop the lowest candidates of the longest list.
-
-        Parameters
-        ----------
-        current : `TonightRanking`
-            The ranking so far.
-        _round_number : `int`
-            Not used.
-
-        Returns
-        -------
-        smaller : `TonightRanking` or `None`
-            The smaller ranking, or ``None`` when every list is empty.
-        """
-        longest = max(current.lists, key=lambda ranked_list: len(ranked_list.candidates), default=None)
-        if longest is None or not longest.candidates:
-            return None
-        # Trim several at a time: the cut is large when the library is large.
-        cut = max(1, len(longest.candidates) // 10)
-        lists = [
-            ranked_list.model_copy(update={"candidates": ranked_list.candidates[:-cut]})
-            if ranked_list.use == longest.use
-            else ranked_list
-            for ranked_list in current.lists
-        ]
-        notes = [
-            f"{original_counts[ranked_list.use] - len(ranked_list.candidates)} {ranked_list.use.value} "
-            f"targets ranked lowest were left out to fit the reply budget of {limit:,} characters."
-            for ranked_list in lists
-            if original_counts[ranked_list.use] > len(ranked_list.candidates)
-        ]
-        return ranking.model_copy(update={"lists": lists, "notes": [*ranking.notes, *notes]})
-
-    return fit_reply(ranking, shrink, limit)
-
-
 def summarize_sky(
     epoch_seconds: float,
     site: SiteProfile,
@@ -716,8 +713,7 @@ def rank_tonight(
     for target in targets:
         if wanted is not None and target.id not in wanted:
             continue
-        use = classify_use(target)
-        if use is None:
+        if classify_use(target) is None:
             skipped[_NEVER_RANKED_TYPES.get(target.object_type.value, "asteroid searches")] += 1
             continue
         direction = target_direction(target)
@@ -735,7 +731,7 @@ def rank_tonight(
             skipped["targets not visible at that time"] += 1
             continue
         frame_rows = astrometrics.quality.query(target_id=target.id, level="frame", library_only=True)
-        observations = build_target_observations(target, frame_rows, capture_settings)
+        all_observations = build_target_observations(target, frame_rows, capture_settings)
         history = [
             *astrometrics.quality.query(
                 target_id=target.id, level="stack", library_only=True, latest_only=False
@@ -748,32 +744,42 @@ def rank_tonight(
                 latest_only=False,
             ),
         ]
-        runs = stack_runs_from_measurements(history)
-        candidates.append(
-            score_candidate(
-                target.id,
-                use,
-                observations,
-                runs,
-                epoch_seconds=epoch_seconds,
-                direction=direction,
-                altitude_deg=float(altitude_deg),
-                site=site_profile,
-                sky_models=models,
-                overheads_for=overheads_for,
-                configured_weight=configured_weight,
+        all_runs = stack_runs_from_measurements(history)
+        # A target in several lists is scored once for each, on the frames of
+        # that use's settings (user decision U2, 2026-10-24).
+        for use in classify_uses(target, {o.capture_setting for o in all_observations}) or []:
+            observations = [
+                o
+                for o in all_observations
+                if _use_of_goal(science_goal_for_setting(target, o.capture_setting)) == use
+            ]
+            frame_ids = {o.frame_id for o in observations}
+            runs = [
+                run for run in all_runs if not run.member_frame_ids or set(run.member_frame_ids) <= frame_ids
+            ]
+            candidates.append(
+                score_candidate(
+                    target.id,
+                    use,
+                    observations,
+                    runs,
+                    epoch_seconds=epoch_seconds,
+                    direction=direction,
+                    altitude_deg=float(altitude_deg),
+                    site=site_profile,
+                    sky_models=models,
+                    overheads_for=overheads_for,
+                    configured_weight=configured_weight,
+                )
             )
-        )
     lists, notes = build_lists(candidates)
     for kind, count in sorted(skipped.items()):
         notes.append(f"{count} {kind} not ranked.")
-    return fit_ranking_to_budget(
-        TonightRanking(
-            at=when,
-            lists=lists,
-            sky=summarize_sky(epoch_seconds, site_profile, models, unavailable),
-            notes=[*inputs.notes, *notes],
-        )
+    return TonightRanking(
+        at=when,
+        lists=lists,
+        sky=summarize_sky(epoch_seconds, site_profile, models, unavailable),
+        notes=[*inputs.notes, *notes],
     )
 
 
@@ -786,6 +792,7 @@ __all__ = [
     "TONIGHT_SKY_ENTRY",
     "build_lists",
     "classify_use",
+    "classify_uses",
     "rank_tonight",
     "score_candidate",
     "summarize_sky",

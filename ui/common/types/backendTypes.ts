@@ -2872,6 +2872,11 @@ export interface SequenceSummary {
  * reply short. Zero when none were left out.
  * limits : `list` [`QualityLimit`]
  * The limits they were compared with.
+ * values : `dict` [`str`, `float` or `str` or `None`]
+ * Numbers the statement rests on that are not rows of the measurement
+ * store, such as guide-log values and counts. They stay readable by
+ * machines so a reader need not parse the message. The keys are plain
+ * names. Empty when every number is cited as evidence.
  * confidence : `Confidence`
  * How well the rule is backed.
  * checklist_return : `ChecklistReturn` or `None`
@@ -2890,6 +2895,7 @@ export interface TargetStatement {
   evidence?: MeasurementReference[];
   evidenceOmittedCount?: number;
   limits?: QualityLimit[];
+  values?: Record<string, number | string | null>;
   confidence: Confidence;
   checklistReturn?: ChecklistReturn | null;
 }
@@ -3174,9 +3180,8 @@ export enum StatementKind {
  *
  * `INFO` states a finding with nothing to do. `ADVICE` suggests a change
  * that would improve results. `WARNING` names a problem that makes the
- * data unreliable or the equipment misconfigured. The values are the ones
- * the per-night analysis already used, and `RecommendationSeverity` is now
- * another name for this class.
+ * data unreliable or the equipment misconfigured. The per-night analyses
+ * use the same scale for their statements.
  */
 export enum Severity {
   INFO = "info",
@@ -3324,6 +3329,10 @@ export interface ChecklistReturn {
  * efficiency cannot be found.
  * loss_account : `LossAccount` or `None`
  * Where the time went. ``None`` when it cannot be built.
+ * science_goal : `ScienceGoal` or `None`
+ * The goal this setting's efficiency is judged for (user decision U2,
+ * 2026-10-24: the goal is chosen for each capture setting). ``None``
+ * when the summary was built without one.
  */
 export interface CaptureSettingSummary {
   captureSetting: CaptureSetting;
@@ -3334,6 +3343,7 @@ export interface CaptureSettingSummary {
   weightEffectiveSeconds?: number | null;
   efficiencyEffectiveSeconds?: number | null;
   lossAccount?: LossAccount | null;
+  scienceGoal?: ScienceGoal | null;
 }
 
 /**
@@ -3532,7 +3542,9 @@ export interface TonightSkyModel {
  * target_id : `str`
  * The target.
  * goal : `ScienceGoal`
- * The goal its efficiency is stated for, read from the target.
+ * The goal that holds most of the target's captured time. The goal is
+ * chosen for each capture setting (decision U2), so when the settings
+ * differ, each ``capture_settings`` entry states its own goal.
  * frames_taken : `int`
  * Frames of the night, kept and set aside.
  * frames_set_aside : `int`
@@ -3829,6 +3841,18 @@ export interface LossAccount {
 }
 
 /**
+ * What the data is for. Efficiency depends on the goal.
+ */
+export enum ScienceGoal {
+  FAINT_POINT_SOURCE = "faint_point_source",
+  ASTROMETRIC_PRECISION = "astrometric_precision",
+  EXTENDED_OBJECT = "extended_object",
+  BRIGHT_STAR_PHOTOMETRY = "bright_star_photometry",
+  SLITLESS_SPECTRAL_RESOLUTION = "slitless_spectral_resolution",
+  PERIOD_DETECTION = "period_detection"
+}
+
+/**
  * One predicted or measured change in stack noise, with its tolerance.
  *
  * Parameters
@@ -3957,18 +3981,6 @@ export interface SkySettingSummary {
   framesUsed: number;
   heldOutRelativeError: number;
   moonFitted: boolean;
-}
-
-/**
- * What the data is for. Efficiency depends on the goal.
- */
-export enum ScienceGoal {
-  FAINT_POINT_SOURCE = "faint_point_source",
-  ASTROMETRIC_PRECISION = "astrometric_precision",
-  EXTENDED_OBJECT = "extended_object",
-  BRIGHT_STAR_PHOTOMETRY = "bright_star_photometry",
-  SLITLESS_SPECTRAL_RESOLUTION = "slitless_spectral_resolution",
-  PERIOD_DETECTION = "period_detection"
 }
 
 /**

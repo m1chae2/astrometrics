@@ -155,7 +155,11 @@ class FakeLibrary:
         """
         self.rows = rows
         self.targets = SimpleNamespace(list=lambda: targets)
-        self.quality = SimpleNamespace(query=self._query, capture_settings=lambda ids=None: {1: SETTING})
+        self.quality = SimpleNamespace(
+            query=self._query,
+            capture_settings=lambda ids=None: {1: SETTING},
+            set_aside_frames=lambda target_id: [],
+        )
 
     def _query(
         self,

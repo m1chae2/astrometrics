@@ -33,8 +33,10 @@ from astrometricslib import (
 )
 from astrometricslib.models.catalog_queries import CalibrationQueryResult
 from astrometricslib.models.target import FrameRecord
-from wayfindinglib.analytics.result_quality.reply_budget import MAXIMUM_REPLY_CHARACTERS
+from wayfindinglib.analytics.result_quality.reply_budget import MAXIMUM_REPLY_CHARACTERS, fit_reply_to_budget
 from wayfindinglib.drivers.butler import DiskButler
+from wayfindinglib.models.planning.target_report import ForecastCheck, ForecastedChange, ForecastOutcome
+from wayfindinglib.models.quality.efficiency import ScienceGoal
 from wayfindinglib.models.quality.statements import ActionClass, Confidence, Severity, StatementKind
 from wayfindinglib.models.session.observation_session import (
     ChecklistItem,
@@ -42,12 +44,8 @@ from wayfindinglib.models.session.observation_session import (
     QueuedObservationPackage,
     StartTimeMode,
 )
-from wayfindinglib.tasks.planning_tasks import target_report_tasks
 from wayfindinglib.tasks.planning_tasks.target_report_inputs import assign_stacks_to_settings
-from wayfindinglib.tasks.planning_tasks.target_report_tasks import (
-    build_target_dataset_report,
-    fit_report_to_budget,
-)
+from wayfindinglib.tasks.planning_tasks.target_report_tasks import build_target_dataset_report
 
 NOW = datetime(2026, 10, 20, 22, 0, tzinfo=UTC)
 SETTING = CaptureSetting(
@@ -80,6 +78,21 @@ class _FakeQuality:
         """
         self._rows = rows
         self._settings = settings
+
+    def set_aside_frames(self, target_id: str) -> list[Any]:
+        """List the frames in the ``_excluded`` folders (none in this fake).
+
+        Parameters
+        ----------
+        target_id : `str`
+            The target.
+
+        Returns
+        -------
+        frames : `list`
+            Always empty.
+        """
+        return []
 
     def query(self, **filters: Any) -> list[QualityMeasurement]:
         """Filter the rows the way the store does.
@@ -387,6 +400,57 @@ def _report(library: _Library, butler: DiskButler) -> Any:
     )
 
 
+def _report_with_forecast_outcome(
+    library: _Library, butler: DiskButler, monkeypatch: pytest.MonkeyPatch, outcome: ForecastOutcome | None
+) -> Any:
+    """Build the report with a made-up forecast check of a given outcome.
+
+    The made-up library cannot produce a real agreeing check, so the check
+    function is replaced.
+
+    Parameters
+    ----------
+    library : `_Library`
+        The library (two stack runs, so a check is attempted).
+    butler : `DiskButler`
+        The storage.
+    monkeypatch : `pytest.MonkeyPatch`
+        Replaces the check function.
+    outcome : `ForecastOutcome` or `None`
+        The outcome of the one check, or `None` for no check at all.
+
+    Returns
+    -------
+    report : `TargetDatasetReport`
+        The report.
+    """
+    from wayfindinglib.analytics.result_quality import forecast
+
+    change = ForecastedChange(noiseChangeFraction=-0.2, tolerance=0.05)
+    checks = (
+        []
+        if outcome is None
+        else [
+            ForecastCheck(
+                stackRunId="r2",
+                forecastWhenPlanned=change,
+                forecastGivenFramesTaken=change,
+                measured=change,
+                weightingMode="equal",
+                paired=True,
+                outcome=outcome,
+                reason="" if outcome == ForecastOutcome.AS_FORECAST else "made up for the test",
+            )
+        ]
+    )
+    monkeypatch.setattr(forecast, "forecast_check", lambda *args, **keywords: checks)
+    return _report(library, butler)
+
+
+TWO_RUNS = [("r1", NOW - timedelta(days=1), 0.0361, 0.030), ("r2", NOW, 0.0283, 0.020)]
+"""Two stack runs, so the report attempts a forecast check."""
+
+
 def _of_rule(report: Any, rule: str) -> list[Any]:
     """Pick the statements of one rule.
 
@@ -484,9 +548,13 @@ def test_a_matching_calibration_library_gives_no_gap(isolated_butler: DiskButler
     assert _of_rule(report, "calibration_gap") == []
 
 
-def test_more_frames_proposes_a_count_and_says_it_is_tentative(isolated_butler: DiskButler) -> None:
-    """With 30 usable frames the report proposes a count of more frames."""
-    report = _report(_Library(), isolated_butler)
+def test_more_frames_proposes_a_count_and_says_it_is_tentative(
+    isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With 30 frames and an agreeing forecast check, a count is proposed."""
+    report = _report_with_forecast_outcome(
+        _Library(runs=TWO_RUNS), isolated_butler, monkeypatch, ForecastOutcome.AS_FORECAST
+    )
     more = _of_rule(report, "more_frames")
     assert len(more) == 1
     assert more[0].kind == StatementKind.RECOMMENDATION
@@ -497,6 +565,119 @@ def test_more_frames_proposes_a_count_and_says_it_is_tentative(isolated_butler: 
     assert more[0].proposed_action.exposure_seconds > 60.0
     assert "limited by read noise" in more[0].reason
     assert more[0].expected_effect.wall_clock_seconds > 0.0
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [None, ForecastOutcome.SHORT_UNKNOWN_REASON, ForecastOutcome.NOT_CHECKABLE],
+)
+def test_take_more_is_hidden_until_a_forecast_check_agreed(
+    isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch, outcome: ForecastOutcome | None
+) -> None:
+    """Decision U1: no agreeing check of this target, no count of frames."""
+    report = _report_with_forecast_outcome(_Library(runs=TWO_RUNS), isolated_butler, monkeypatch, outcome)
+
+    (more,) = _of_rule(report, "more_frames")
+
+    assert more.kind == StatementKind.INSUFFICIENT_DATA
+    assert more.proposed_action is None
+    assert "one check agrees" in more.reason
+    assert "Take more frames and stack them" in more.reason
+
+
+def test_take_more_is_hidden_for_a_target_with_one_stack(isolated_butler: DiskButler) -> None:
+    """A target with a single stack has no check, so the gate is shut."""
+    report = _report(_Library(), isolated_butler)
+
+    (more,) = _of_rule(report, "more_frames")
+
+    assert more.kind == StatementKind.INSUFFICIENT_DATA
+    assert "No stack has followed a forecast yet" in more.reason
+
+
+def test_each_setting_states_its_own_science_goal(isolated_butler: DiskButler) -> None:
+    """Decision U2: a grating setting and an imaging setting have two goals."""
+    library = _Library()
+    grating = SETTING.model_copy(update={"filter_name": "Star Analyzer 200"})
+    for row in library.rows:
+        if row.subject.level == SubjectLevel.FRAME and row.subject.subject_id.endswith((
+            "f020.fits",
+            "f021.fits",
+        )):
+            row.subject.capture_setting_id = 2
+    library.quality = _FakeQuality(library.rows, {1: SETTING, 2: grating})
+
+    report = _report(library, isolated_butler)
+
+    goals = {summary.capture_setting.filter_name: summary.science_goal for summary in report.capture_settings}
+    assert goals["L"] == ScienceGoal.FAINT_POINT_SOURCE
+    assert goals["Star Analyzer 200"] == ScienceGoal.SLITLESS_SPECTRAL_RESOLUTION
+    stated = [s for s in report.statements if s.capture_setting == SETTING and "science_goal" in s.values]
+    assert stated
+    assert all(s.values["science_goal"] == "faint_point_source" for s in stated)
+
+
+def _store_guide_samples(library: _Library, butler: DiskButler, error_arcsec: float) -> None:
+    """Store a guide log that covers every night of the library's frames.
+
+    Parameters
+    ----------
+    library : `_Library`
+        The library whose frames set the nights.
+    butler : `DiskButler`
+        The storage; the samples go into its control records.
+    error_arcsec : `float`
+        The right-ascension error of every sample.
+    """
+    by_night: dict[str, list[float]] = {}
+    for frame in library.target.frames:
+        night = datetime.fromtimestamp(frame.timestamp, UTC).strftime("%Y-%m-%d")
+        by_night.setdefault(night, []).append(frame.timestamp)
+    samples = []
+    for night, starts in by_night.items():
+        for second in range(int(min(starts)) - 10, int(max(starts)) + 70, 2):
+            samples.append({
+                "timestamp": float(second),
+                "dra": error_arcsec,
+                "ddec": 0.0,
+                "session_id": night,
+                "source": "ekos_guide_log",
+            })
+    butler.control_records.record_guiding_samples(samples)
+
+
+def test_loose_guiding_makes_the_guiding_limits_exposure_statement(
+    isolated_butler: DiskButler,
+) -> None:
+    """Decision U3: a guide error too big for the star width is reported."""
+    library = _Library()
+    _store_guide_samples(library, isolated_butler, error_arcsec=2.0)
+
+    report = _report(library, isolated_butler)
+
+    (statement,) = _of_rule(report, "guiding_limits_exposure")
+    assert statement.kind == StatementKind.RECOMMENDATION
+    assert statement.message.startswith("At 60 s only 0% of frames stay sharp")
+    assert statement.values["allowed_guide_rms_arcsec"] > 0.0
+
+
+def test_good_guiding_makes_no_guiding_statement(isolated_butler: DiskButler) -> None:
+    """A quiet guide log keeps the rule silent."""
+    library = _Library()
+    _store_guide_samples(library, isolated_butler, error_arcsec=0.05)
+
+    report = _report(library, isolated_butler)
+
+    assert _of_rule(report, "guiding_limits_exposure") == []
+
+
+def test_no_guide_log_says_what_is_missing(isolated_butler: DiskButler) -> None:
+    """Without guide samples the rule is an insufficient-data statement."""
+    report = _report(_Library(), isolated_butler)
+
+    (statement,) = _of_rule(report, "guiding_limits_exposure")
+    assert statement.kind == StatementKind.INSUFFICIENT_DATA
+    assert "guide samples" in statement.reason
 
 
 def test_missing_data_is_said_not_skipped(isolated_butler: DiskButler) -> None:
@@ -792,34 +973,37 @@ def _busy_library() -> _Library:
     return library
 
 
-def test_a_busy_target_gives_a_report_that_fits_the_mcp_reply_budget(
+def test_a_busy_target_gives_a_full_report_and_the_mcp_reply_fits_the_budget(
     isolated_butler: DiskButler,
 ) -> None:
-    """3 settings, 500 frames and every metric fit the MCP reply limit."""
-    report = _report(_busy_library(), isolated_butler)
+    """The library keeps everything; the MCP shortening fits the limit."""
+    full = _report(_busy_library(), isolated_butler)
+    assert full.context_omitted_reason is None
+    assert all(statement.evidence_omitted_count == 0 for statement in full.statements)
+    report = fit_reply_to_budget(full)
     text = json.dumps(report.model_dump(), separators=(",", ":"), default=str)
     assert len(text) <= MAXIMUM_REPLY_CHARACTERS
+    assert len(report.statements) == len(full.statements)
     assert len(report.capture_settings) == 3
     for reading in report.context:
         assert reading.capture_setting_id is None or reading.capture_setting_id in {1, 2, 3}
 
 
 def test_the_context_section_goes_first_and_then_the_long_evidence_lists(
-    isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch
+    isolated_butler: DiskButler,
 ) -> None:
     """A tight budget drops readings, then evidence, never statements."""
-    monkeypatch.setattr(target_report_tasks, "fit_report_to_budget", lambda report: report)
     library = _busy_library()
     full = _report(library, isolated_butler)
     assert full.context
     assert len(json.dumps(full.model_dump(mode="json"), separators=(",", ":"))) > MAXIMUM_REPLY_CHARACTERS
     without_context = full.model_copy(update={"context": []})
     size_without_context = len(json.dumps(without_context.model_dump(mode="json"), separators=(",", ":")))
-    only_context = fit_report_to_budget(full, budget=size_without_context + 500)
+    only_context = fit_reply_to_budget(full, budget=size_without_context + 500)
     assert only_context.context == []
     assert only_context.context_omitted_reason is not None
     assert only_context.statements == full.statements
-    tight = fit_report_to_budget(full, budget=2_000)
+    tight = fit_reply_to_budget(full, budget=2_000)
     assert [statement.rule for statement in tight.statements] == [s.rule for s in full.statements]
     assert tight.needs_attention == full.needs_attention
     for kept, original in zip(tight.statements, full.statements, strict=True):
@@ -827,7 +1011,9 @@ def test_the_context_section_goes_first_and_then_the_long_evidence_lists(
         assert len(kept.evidence) <= 1
 
 
-def test_take_more_prices_dithers_and_refocusing_like_the_ranking(isolated_butler: DiskButler) -> None:
+def test_take_more_prices_dithers_and_refocusing_like_the_ranking(
+    isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The time of "take N more" counts dithers and autofocus runs."""
     from wayfindinglib.analytics.result_quality.capture_overheads import (
         AUTOFOCUS_RUNS_PER_HOUR,
@@ -836,7 +1022,9 @@ def test_take_more_prices_dithers_and_refocusing_like_the_ranking(isolated_butle
         wall_clock_estimate,
     )
 
-    report = _report(_Library(), isolated_butler)
+    report = _report_with_forecast_outcome(
+        _Library(runs=TWO_RUNS), isolated_butler, monkeypatch, ForecastOutcome.AS_FORECAST
+    )
     (more,) = _of_rule(report, "more_frames")
     action, effect = more.proposed_action, more.expected_effect
     overheads = estimate_capture_overheads([], action.exposure_seconds, SETTING.filter_name)

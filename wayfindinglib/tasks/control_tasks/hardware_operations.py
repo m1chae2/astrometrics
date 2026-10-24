@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import threading
 from collections.abc import Coroutine
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -548,9 +549,61 @@ def abort_motion(context: ControlContext) -> bool:
     success : `bool`
         `True` if the abort command was accepted.
     """
-    context.motion_stop.set()
     _require_authoritative(context, ObservatoryCapability.MOUNT_CONTROL)
+    context.motion_stop.set()
     return _run_sync(context.mount_driver.abort_motion())
+
+
+def cancel_centering(context: ControlContext, run_is_active: bool) -> bool:
+    """Stop a centering run. Requires `MOUNT_CONTROL`, even if none runs.
+
+    Monitor mode refuses a stop too (user decision of 2026-10-24, issue
+    #95, decision U4), so the check comes before anything else, and a
+    refused stop changes nothing.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the mount driver and the policy.
+    run_is_active : `bool`
+        Whether the caller has a centering run going. When `False`, no
+        command is sent.
+
+    Returns
+    -------
+    cancelled : `bool`
+        `True` if the run was stopped, `False` if none was running.
+
+    Notes
+    -----
+    Raises `PermissionDeniedError` unless `MOUNT_CONTROL` is `AUTHORITATIVE`.
+    """
+    _require_authoritative(context, ObservatoryCapability.MOUNT_CONTROL)
+    if not run_is_active:
+        return False
+    return abort_motion(context)
+
+
+def stop_guide_loop(context: ControlContext, stop: threading.Event) -> None:
+    """End this app's guide loop. Requires `AUTOGUIDING`.
+
+    Monitor mode refuses a stop too (user decision of 2026-10-24, issue
+    #95, decision U4), so the loop is left alone unless the capability is
+    `AUTHORITATIVE`.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the policy.
+    stop : `threading.Event`
+        The event the running loop watches. It is set only when allowed.
+
+    Notes
+    -----
+    Raises `PermissionDeniedError` unless `AUTOGUIDING` is `AUTHORITATIVE`.
+    """
+    _require_authoritative(context, ObservatoryCapability.AUTOGUIDING)
+    stop.set()
 
 
 def set_slew_rate(context: ControlContext, rate_index: int) -> bool:

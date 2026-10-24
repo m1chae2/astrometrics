@@ -74,9 +74,8 @@ class Severity(StrEnum):
 
     `INFO` states a finding with nothing to do. `ADVICE` suggests a change
     that would improve results. `WARNING` names a problem that makes the
-    data unreliable or the equipment misconfigured. The values are the ones
-    the per-night analysis already used, and `RecommendationSeverity` is now
-    another name for this class.
+    data unreliable or the equipment misconfigured. The per-night analyses
+    use the same scale for their statements.
     """
 
     INFO = "info"
@@ -237,6 +236,11 @@ class TargetStatement(BaseModel):
         reply short. Zero when none were left out.
     limits : `list` [`QualityLimit`]
         The limits they were compared with.
+    values : `dict` [`str`, `float` or `str` or `None`]
+        Numbers the statement rests on that are not rows of the measurement
+        store, such as guide-log values and counts. They stay readable by
+        machines so a reader need not parse the message. The keys are plain
+        names. Empty when every number is cited as evidence.
     confidence : `Confidence`
         How well the rule is backed.
     checklist_return : `ChecklistReturn` or `None`
@@ -257,6 +261,7 @@ class TargetStatement(BaseModel):
     evidence: list[MeasurementReference] = Field(default_factory=list)
     evidence_omitted_count: int = Field(default=0, ge=0, alias="evidenceOmittedCount")
     limits: list[QualityLimit] = Field(default_factory=list)
+    values: dict[str, float | str | None] = Field(default_factory=dict)
     confidence: Confidence
     checklist_return: ChecklistReturn | None = Field(default=None, alias="checklistReturn")
 

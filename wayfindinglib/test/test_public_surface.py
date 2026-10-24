@@ -82,8 +82,9 @@ EXPECTED_EXPORTS = frozenset({
     "Telescope",
     "VisibilityReport",
     "VisibilitySpan",
-    # The one pure function.
+    # The pure functions.
     "group_alignment_attempts",
+    "fit_reply_to_budget",
     # The library's own error class.
     "DelegationPolicyValidationError",
 })
@@ -160,6 +161,7 @@ CHILDREN = {
         "set_tracking",
         "manual_move",
         "abort_motion",
+        "cancel_centering",
         "set_slew_rate",
         "compute_pointing_correction",
         "run_polar_alignment_assist",
@@ -187,6 +189,7 @@ CHILDREN = {
         "save_spectrum_analysis",
         "save_run",
         "run_loop",
+        "stop_loop",
     },
     "remote": {"list", "check_connection", "frame_status", "sync_frames", "sync_logs"},
     "history": {
@@ -221,8 +224,10 @@ CHILDREN = {
 }
 """Each child of `control` and its public members."""
 
-MAXIMUM_CONTROL_MEMBERS = 70
-"""Most operations `control` and its children may offer together."""
+MAXIMUM_CONTROL_MEMBERS = 72
+"""Most operations `control` and its children may offer together. Raised from
+70 for `guiding.stop_loop` and `mount.cancel_centering` (issue #95, decision
+U4/20): monitor mode refuses a stop, and the guarantee lives in the library."""
 
 
 def _public_names(instance: object) -> set[str]:
@@ -312,7 +317,7 @@ def test_setting_a_driver_on_control_reaches_every_child(control: ObservatoryCon
 
 
 def test_control_stays_under_its_size_limit(control: ObservatoryControl) -> None:
-    """The drivers plus the children's operations number 70 or fewer."""
+    """The drivers plus the children's operations number 72 or fewer."""
     total = len(ROOT_DRIVERS) + sum(len(_public_names(getattr(control, child))) for child in CHILDREN)
     assert total <= MAXIMUM_CONTROL_MEMBERS
 

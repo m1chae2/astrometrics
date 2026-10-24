@@ -33,12 +33,6 @@ by the capture setting (not the telescope that is active now).
 ``reference_for`` gives the baseline when there is one, else the physical
 reference. ``reference_choice`` gives both, so a report can state both. When
 a night is reviewed, that night is left out of its own baseline.
-
-Copies of astrometricslib values
---------------------------------
-``UNKNOWN_SETTING_CAMERA`` is a copy of a private constant of the efficiency
-module. A test checks that the two agree. Exporting it is a later change
-(issue #97).
 """
 
 from __future__ import annotations
@@ -74,6 +68,7 @@ from wayfindinglib.analytics.result_quality.efficiency import (
     physical_reference_for,
 )
 from wayfindinglib.analytics.result_quality.observing_values import sky_geometry
+from wayfindinglib.analytics.result_quality.science_goal import GoalSource, goal_of_setting
 from wayfindinglib.analytics.result_quality.sky_model import (
     SkyModel,
     SkyRateSample,
@@ -84,22 +79,26 @@ from wayfindinglib.data_access.equipment_catalog_reader import list_telescopes
 from wayfindinglib.data_access.site_profile_reader import configured_observer_location, resolve_site_location
 from wayfindinglib.models.equipment_and_site.equipment import Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
-from wayfindinglib.models.quality.efficiency import EfficiencyReference, ScienceGoal
+from wayfindinglib.models.quality.efficiency import EfficiencyReference
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_SITE_PROFILE_ID = "default"
 """The id of the stored default site."""
 
+SITE_AGREEMENT_DEG = 0.01
+"""Two site positions closer than this in latitude and longitude count as the
+same place. 0.01 degree is about 1 km, far finer than anything the sky model
+or the airmass depends on. Design estimate, register row WAY-D82."""
+
+NO_REASON_RECORDED = "set aside, reason not recorded"
+"""The reason given to a frame in an ``_excluded`` folder that no stored row
+and no manifest explains."""
+
 SET_ASIDE_MARKER = "_excluded"
 """Text in a row's ``action_taken`` that says the stacker moved the frame to
 its ``_excluded`` folder (``"frame moved to _excluded/"``). Design estimate,
-register row WAY-D75."""
-
-UNKNOWN_SETTING_CAMERA = "unknown capture setting"
-"""The camera name `frame_observations_from_measurements` gives a frame whose
-rows carry no capture setting. A copy of its private constant; a test checks
-the two agree."""
+register row WAY-D82."""
 
 ReferenceProvider = Callable[[CaptureSetting], EfficiencyReference | None]
 """A function that gives the efficiency reference of a capture setting."""
@@ -211,26 +210,41 @@ def times_and_directions(
     return epochs, directions
 
 
-def set_aside_reasons(rows: Iterable[QualityMeasurement]) -> dict[str, str]:
-    """Find the frames that stored rows say were set aside.
+def set_aside_reasons(
+    rows: Iterable[QualityMeasurement],
+    listed_frames: Iterable[Any] = (),
+) -> dict[str, str]:
+    """Find the frames the stacker set aside, and why.
 
-    The stacker's quarantine step moves a frame to an ``_excluded`` folder and
-    can record that in a row's ``action_taken``. Only that row says a frame was
-    set aside; the quarantine measurements (roundness, sky median) are stored
-    for kept frames too. The row does not say whether the frame was clouded or
-    trailed, so the reason is the row's own words.
+    The stacker's quarantine step moves a frame to an ``_excluded`` folder.
+    Three places can say so, and this reads them in order of trust. The first
+    is the library's own listing of the ``_excluded`` folders
+    (``Astrometrics.quality.set_aside_frames``), which already prefers the
+    stored rows, then the folder's manifest, then the folder alone. The
+    second is a stored row whose ``action_taken`` says the frame was moved.
+    The quarantine measurements (roundness, sky median) are stored for kept
+    frames too, so only that wording marks a frame as set aside.
 
     Parameters
     ----------
     rows : `Iterable` [`QualityMeasurement`]
         Frame-level rows.
+    listed_frames : `Iterable` [`SetAsideFrameRecord`], optional
+        The listing of the target's ``_excluded`` folders. Left out, only the
+        rows are read.
 
     Returns
     -------
     reasons : `dict` [`str`, `str`]
-        The reason by frame subject id.
+        The reason by frame subject id (by file path for a listed frame that
+        has no subject id). The reason is the kind (``clouded`` or
+        ``trailed``) when it is known, else the recorded words, else a
+        statement that no reason was recorded.
     """
     reasons: dict[str, str] = {}
+    for record in listed_frames:
+        key = record.subject_id or record.path
+        reasons.setdefault(key, record.kind or record.reason or record.action_taken or NO_REASON_RECORDED)
     for row in rows:
         if (
             row.subject.level == SubjectLevel.FRAME
@@ -307,33 +321,62 @@ def build_target_observations(
 # -----------------------------------------------------------------------------
 
 
-def stored_site(butler: Any, config: Any) -> SiteProfile:
+def stored_site(butler: Any, config: Any, notes: list[str] | None = None) -> SiteProfile:
     """Read the observing site without storing anything.
+
+    The configured location wins when it is set. A stored default profile
+    is the fallback for a configuration with no location. It once shadowed
+    the configuration (the copy came out Denver while the configuration said
+    45.76 N, -110.74 E), so the configuration is read first now.
 
     Parameters
     ----------
     butler : `DiskButler`
         The storage layer.
     config : `AppConfiguration`
-        The configuration, for the site when none is stored.
+        The configuration, for the site.
+    notes : `list` [`str`], optional
+        Where to add a remark when the stored profile and the configuration
+        disagree.
 
     Returns
     -------
     site : `SiteProfile`
-        The stored default site, else one built in memory from the
-        configuration (and the Denver fallback, with a warning in the log, if
-        the configuration names none).
+        The configured site (keeping the stored profile's name, seeing and
+        avoidance zones when there is one), else the stored default site,
+        else one built from the Denver fallback (with a warning in the log).
     """
     stored = butler.get("site_profile", {"id": DEFAULT_SITE_PROFILE_ID})
-    if stored is not None:
-        return stored
-    location = resolve_site_location(config)
+    configured = configured_observer_location(config)
+    if configured is None:
+        if stored is not None:
+            return stored
+        configured = resolve_site_location(config)
+    elif stored is not None:
+        differs = (
+            abs(stored.latitude_deg - configured["latitude"]) > SITE_AGREEMENT_DEG
+            or abs(stored.longitude_deg - configured["longitude"]) > SITE_AGREEMENT_DEG
+        )
+        if differs and notes is not None:
+            notes.append(
+                f"The stored site profile ({stored.latitude_deg:.2f}, {stored.longitude_deg:.2f}) disagrees "
+                f"with the configured location ({configured['latitude']:.2f}, "
+                f"{configured['longitude']:.2f}). "
+                "The configured location was used."
+            )
+        return stored.model_copy(
+            update={
+                "latitude_deg": configured["latitude"],
+                "longitude_deg": configured["longitude"],
+                "elevation_m": configured["elevation"],
+            }
+        )
     return SiteProfile(
         id=DEFAULT_SITE_PROFILE_ID,
         name="Default Site",
-        latitude_deg=location["latitude"],
-        longitude_deg=location["longitude"],
-        elevation_m=location["elevation"],
+        latitude_deg=configured["latitude"],
+        longitude_deg=configured["longitude"],
+        elevation_m=configured["elevation"],
     )
 
 
@@ -449,7 +492,7 @@ class LibraryInputs:
             The site. When none is stored, the note says where it came from.
         """
         if self._site is None:
-            self._site = stored_site(self.butler, self.config)
+            self._site = stored_site(self.butler, self.config, self.notes)
             if self.butler.get("site_profile", {"id": DEFAULT_SITE_PROFILE_ID}) is None:
                 source = (
                     "the configuration"
@@ -461,6 +504,30 @@ class LibraryInputs:
                     "Altitudes, airmass and the Moon's place depend on it."
                 )
         return self._site
+
+    def set_aside_reasons(self, target_id: str, rows: Iterable[QualityMeasurement]) -> dict[str, str]:
+        """Find a target's set-aside frames, from the listing and the rows.
+
+        Parameters
+        ----------
+        target_id : `str`
+            The target.
+        rows : `Iterable` [`QualityMeasurement`]
+            The target's frame rows.
+
+        Returns
+        -------
+        reasons : `dict` [`str`, `str`]
+            The reason by frame subject id (see `set_aside_reasons`). A
+            listing that cannot be read leaves a note and falls back to the
+            rows.
+        """
+        try:
+            listed = self.astrometrics.quality.set_aside_frames(target_id)
+        except (AstrometricsError, OSError, sqlite3.Error) as error:
+            self.notes.append(f"The set-aside frames of {target_id} could not be listed: {error}")
+            listed = []
+        return set_aside_reasons(rows, listed)
 
     def targets(self) -> dict[str, Target]:
         """List the library's targets once.
@@ -663,7 +730,7 @@ class LibraryInputs:
         self,
         settings: Iterable[CaptureSetting],
         observations: Sequence[FrameObservation],
-        goal: ScienceGoal,
+        goal: GoalSource,
         exclude_night_id: str | None = None,
     ) -> list[str]:
         """State which reference each setting uses, and the other one.
@@ -674,8 +741,9 @@ class LibraryInputs:
             The capture settings to describe.
         observations : `Sequence` [`FrameObservation`]
             The frames.
-        goal : `ScienceGoal`
-            The target's goal.
+        goal : `ScienceGoal` or `Callable`
+            The goal, or a function that gives the goal of a capture setting
+            (user decision U2: the goal is chosen for each setting).
         exclude_night_id : `str`, optional
             A night left out of the baseline.
 
@@ -703,7 +771,7 @@ class LibraryInputs:
                 notes.append(f"{head} The {other_kind} reference is not available: {other_reason}")
                 continue
             kept = [o for o in observations if o.capture_setting == setting and o.set_aside_reason is None]
-            eta = assess_efficiency(kept, goal, other).result.eta
+            eta = assess_efficiency(kept, goal_of_setting(goal, setting), other).result.eta
             text = f"{eta:.2f}" if eta is not None else "not found"
             notes.append(
                 f"{head} Against the {other.name} reference the same frames reach an efficiency of {text}."
@@ -822,7 +890,6 @@ class LibraryInputs:
 __all__ = [
     "DEFAULT_SITE_PROFILE_ID",
     "SET_ASIDE_MARKER",
-    "UNKNOWN_SETTING_CAMERA",
     "LibraryInputs",
     "ReferenceChoice",
     "ReferenceProvider",

@@ -26,7 +26,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from wayfindinglib.models.session.session_quality import Recommendation
+from wayfindinglib.models.quality.statements import TargetStatement
 
 SKY_ANALYSIS_VERSION = "1.0.0"
 """Bumped whenever the sky analysis changes what it measures or reports."""
@@ -245,16 +245,16 @@ class SkyAnalysis(BaseModel):
     equipment_fingerprint : `str`
         The equipment the analysis is for.
     flagged : `bool`
-        `True` if any recommendation is a warning.
+        `True` if any statement is a warning.
     flag_reasons : `list` [`str`]
-        The kinds of the warnings.
+        The rule names of the warnings.
     resolved_parameters : `dict` [`str`, `Any`]
         The tolerance and definitions the analysis used.
     input_quality : `SkyInputQuality`
         Pre-processing: can the data answer the question?
     performance : `SkyPerformance`
         Processing: how does each part of the sky compare?
-    recommendations : `list` [`Recommendation`]
+    recommendations : `list` [`TargetStatement`]
         Post-processing: what to do about it.
     created_at : `datetime`
         When the analysis was run.
@@ -271,5 +271,5 @@ class SkyAnalysis(BaseModel):
     resolved_parameters: dict[str, Any] = Field(default_factory=dict, alias="resolvedParameters")
     input_quality: SkyInputQuality = Field(alias="inputQuality")
     performance: SkyPerformance
-    recommendations: list[Recommendation] = Field(default_factory=list)
+    recommendations: list[TargetStatement] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), alias="createdAt")

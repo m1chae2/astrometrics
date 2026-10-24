@@ -1,9 +1,14 @@
 """Purpose: Shared helpers for the rules of the per-night analyses.
 
 Description: The guiding, capture and sky analyses each turn measurements
-into `Recommendation` statements. Every statement carries a confidence and
-the limits it was compared with. Two small things are the same in all three,
-so they live here:
+into `TargetStatement` objects, the same shape the target report uses. Every
+statement carries a confidence and the limits it was compared with. Three small
+things are the same in all three, so they live here:
+
+* A statement is built from its row of the session rule table
+  (`session_statement`), so its kind, severity and action class come from the
+  table and cannot drift from it.
+* Statements are put in order, most serious first (`sort_by_severity`).
 
 * The confidence of a statement comes from the validation register entry
   behind the analysis that made it (`PIPELINE_REGISTER_ENTRIES`), using the
@@ -16,9 +21,17 @@ so they live here:
   shape and names its register row.
 """
 
-from astrometricslib import LimitTier, QualityLimit
+from collections.abc import Iterable
+
+from astrometricslib import LimitTier, MeasurementReference, QualityLimit
+from wayfindinglib.analytics.result_quality.session_rules import SESSION_RULES_BY_NAME
 from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
-from wayfindinglib.models.quality.statements import Confidence
+from wayfindinglib.models.quality.statements import (
+    Confidence,
+    ProposedAction,
+    Severity,
+    TargetStatement,
+)
 
 PIPELINE_REGISTER_ENTRIES = {
     "guiding": "WAY-45",
@@ -120,3 +133,86 @@ def envelope_limits(
     if envelope is None or not applies:
         return []
     return [limit for name in names if (limit := envelope.limit(name)) is not None]
+
+
+_SEVERITY_ORDER = {Severity.WARNING: 0, Severity.ADVICE: 1, Severity.INFO: 2}
+"""Sort position of each severity: warnings first."""
+
+
+def sort_by_severity(statements: Iterable[TargetStatement]) -> list[TargetStatement]:
+    """Put statements in order, most serious first.
+
+    Parameters
+    ----------
+    statements : `Iterable` [`TargetStatement`]
+        The statements of one analysis.
+
+    Returns
+    -------
+    ordered : `list` [`TargetStatement`]
+        The same statements. Ones with equal severity keep their order, and a
+        statement without a severity sorts with the information level.
+    """
+    return sorted(
+        statements,
+        key=lambda statement: _SEVERITY_ORDER[statement.severity or Severity.INFO],
+    )
+
+
+def session_statement(
+    rule_name: str,
+    *,
+    message: str,
+    confidence: Confidence,
+    reason: str = "",
+    evidence: Iterable[MeasurementReference] = (),
+    limits: Iterable[QualityLimit] = (),
+    values: dict[str, float | str | None] | None = None,
+    proposed_action: ProposedAction | None = None,
+) -> TargetStatement:
+    """Build a statement from its row of the session rule table.
+
+    Parameters
+    ----------
+    rule_name : `str`
+        The row's name, a key of `SESSION_RULES_BY_NAME`. An unknown name
+        raises a ``KeyError``, which is a bug in the caller.
+    message : `str`
+        What was found and what to do, in plain language.
+    confidence : `Confidence`
+        How well the statement is backed. The row gives the base label; the
+        caller passes a lower one when the evidence is weaker than the rule
+        assumes.
+    reason : `str`, optional
+        Why. Required for a statement about missing data: what is missing and
+        how to get it.
+    evidence : `Iterable` [`MeasurementReference`], optional
+        The stored measurements the statement rests on.
+    limits : `Iterable` [`QualityLimit`], optional
+        The limits the evidence was compared with.
+    values : `dict` [`str`, `float` or `str` or `None`], optional
+        The numbers it rests on that are not rows of the measurement store,
+        such as guide-log values and counts.
+    proposed_action : `ProposedAction` or `None`, optional
+        The values proposed, when the statement proposes some.
+
+    Returns
+    -------
+    statement : `TargetStatement`
+        The statement. Its kind, severity and action class are the row's.
+
+    """
+    rule = SESSION_RULES_BY_NAME[rule_name]
+    return TargetStatement(
+        rule=rule.name,
+        kind=rule.statement_kind,
+        severity=rule.severity,
+        action_class=rule.action_class,
+        message=message,
+        reason=reason,
+        proposed_action=proposed_action,
+        evidence=list(evidence),
+        limits=list(limits),
+        values=values or {},
+        confidence=confidence,
+    )

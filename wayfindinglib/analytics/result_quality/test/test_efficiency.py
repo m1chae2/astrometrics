@@ -5,13 +5,13 @@ the caps, the goals, the regime, the depth view, the loss split and the
 reading of stored measurements.
 """
 
-import importlib
 import math
 from datetime import UTC, datetime
 
 import pytest
 
 from astrometricslib import (
+    PIXEL_BLUR_FWHM_SQUARED_FACTOR,
     CaptureSetting,
     MeasurementOrigin,
     MeasurementStatus,
@@ -98,12 +98,6 @@ def test_diffraction_limit_of_a_75_mm_aperture() -> None:
     assert eff.diffraction_fwhm_arcsec(75.0) == pytest.approx(1.56, abs=0.01)
 
 
-def test_pixel_blur_constant_matches_the_astrometricslib_value() -> None:
-    """The reference uses the registered pixel blur."""
-    module = importlib.import_module("astrometricslib.pipelines.shared.quality.frame_measurement")
-    assert module.PIXEL_BLUR_FWHM_SQUARED_FACTOR == pytest.approx(eff.PIXEL_BLUR_FWHM_SQUARED_FACTOR)
-
-
 def test_physical_reference_adds_diffraction_seeing_and_pixel_in_quadrature() -> None:
     """The reference width is the quadrature sum.
 
@@ -112,7 +106,7 @@ def test_physical_reference_adds_diffraction_seeing_and_pixel_in_quadrature() ->
     outcome = eff.physical_reference(100.0, 1.5, 2.0)
     assert outcome.reference is not None
     diffraction = eff.diffraction_fwhm_arcsec(100.0)
-    expected = math.sqrt(diffraction**2 + 4.0 + eff.PIXEL_BLUR_FWHM_SQUARED_FACTOR * 2.25)
+    expected = math.sqrt(diffraction**2 + 4.0 + PIXEL_BLUR_FWHM_SQUARED_FACTOR * 2.25)
     assert outcome.reference.factors[eff.STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC] == pytest.approx(expected)
     assert "sky_brightness" in outcome.reference.not_included
     assert "transparency" in outcome.reference.not_included

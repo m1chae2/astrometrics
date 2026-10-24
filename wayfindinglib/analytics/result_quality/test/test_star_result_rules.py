@@ -8,10 +8,6 @@ all. Every statement must cite the star result it used, and the copies of the
 spectroscopy limits must equal the pipeline's.
 """
 
-import importlib
-
-import pytest
-
 from astrometricslib import PhotometryResult, SpectroscopyResult
 from wayfindinglib.analytics.result_quality import star_result_rules as sr
 from wayfindinglib.models.quality.statements import ActionClass, StatementKind
@@ -217,12 +213,3 @@ def test_every_rule_row_is_consistent_with_its_register_entry() -> None:
         assert rule.register_entry
         if rule.register_entry.startswith("WAY-D"):
             assert rule.confidence.value == "design_estimate"
-
-
-@pytest.mark.parametrize(
-    ("copy", "name"), [(sr.POOR_MATCH_RMS, "NO_GOOD_MATCH_RMS"), (sr.AMBIGUOUS_RMS_GAP, "AMBIGUOUS_RMS_GAP")]
-)
-def test_copied_limits_match_the_spectroscopy_pipeline(copy: float, name: str) -> None:
-    """The quoted limits equal the ones the star record uses."""
-    module = importlib.import_module("astrometricslib.models.stellar_source")
-    assert getattr(module, name) == copy

@@ -50,7 +50,13 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
-from astrometricslib import CaptureSetting, MeasurementStatus, QualityMeasurement
+from astrometricslib import (
+    PIXEL_BLUR_FWHM_SQUARED_FACTOR,
+    UNKNOWN_CAPTURE_SETTING_CAMERA,
+    CaptureSetting,
+    MeasurementStatus,
+    QualityMeasurement,
+)
 from wayfindinglib.models.equipment_and_site.equipment import Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
 from wayfindinglib.models.quality.efficiency import (
@@ -111,14 +117,6 @@ ignored. Derived, register row WAY-D20."""
 ARCSEC_PER_RADIAN = 206264.806
 """Arcseconds in one radian (180 * 3600 / pi)."""
 
-PIXEL_BLUR_FWHM_SQUARED_FACTOR = 2.0 * math.log(2.0) / 3.0
-"""The square pixel's blur added to a star's squared width, in squared pixels:
-2
-ln 2 / 3 = 0.4621. A position spread evenly over a pixel side p has variance
-p^2 / 12, and the FWHM of a Gaussian is 2 sqrt(2 ln 2) sigma. This is the same
-theoretical value the registered effective star width uses (validation register
-entry AST-18), so the reference and the measured width include the same blur. A
-test compares it with the astrometricslib value."""
 
 # --- Goals and exponents
 SEEING_EXPONENT_POINT_SOURCE = 2.0
@@ -1246,9 +1244,6 @@ def split_kept_frame_deficit(
 # Reading the measurement store
 # -----------------------------------------------------------------------------
 
-_UNKNOWN_SETTING_CAMERA = "unknown capture setting"
-"""The camera name given to a frame whose capture setting row is missing."""
-
 _FIELD_BY_METRIC = {
     STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC: "star_width_effective_arcsec",
     SKY_RATE_METRIC: "sky_rate_e_per_s_per_px",
@@ -1342,7 +1337,7 @@ def frame_observations_from_measurements(
         observations.append(
             FrameObservation(
                 frame_id=frame_id,
-                capture_setting=setting or CaptureSetting(camera=_UNKNOWN_SETTING_CAMERA),
+                capture_setting=setting or CaptureSetting(camera=UNKNOWN_CAPTURE_SETTING_CAMERA),
                 night_id=row.subject.observing_night_id,
                 target_id=row.subject.target_id,
                 start_epoch_seconds=(start_epoch_by_frame or {}).get(frame_id),

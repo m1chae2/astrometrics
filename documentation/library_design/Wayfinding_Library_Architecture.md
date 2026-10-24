@@ -1,6 +1,6 @@
 # Wayfinding library architecture
 
-*Version 3.1 · 2026-10-15 · Status: current*
+*Version 3.2 · 2026-10-24 · Status: current*
 
 ## Abstract
 
@@ -14,7 +14,7 @@ Terms are defined in the [glossary](../Glossary.md). This document also defines 
 
 **Approach.** This architecture separates the three jobs so each can be built, used and checked alone. Planning and control are peers: an operator can plan a night without commanding any hardware, and the observatory can protect itself with no plan in existence. Execution sits above both.
 
-**Scope.** This paper explains what each part does and why, and the idea behind each setting, not its value. The [Wayfinding library implementation](./Wayfinding_Library_Implementation.md) paper names the code and lists the settings. The library has no validation register yet, so this paper makes no claim that a setting has been measured.
+**Scope.** This paper explains what each part does and why, and the idea behind each setting, not its value. The [Wayfinding library implementation](./Wayfinding_Library_Implementation.md) paper names the code and lists the settings. The evidence for each setting is in the validation register, not here.
 
 ### 1.1 Related work
 
@@ -43,7 +43,7 @@ flowchart TB
         DEV["Device summary state"]
     end
     subgraph PLAN["Observation planning"]
-        SCHED["Scheduling & quality advisory"]
+        SCHED["Scheduling, ranking & target dataset report"]
     end
     subgraph FOUND["Foundation"]
         MODELS["Domain models"]
@@ -705,6 +705,11 @@ Four rules keep the analysis honest.
 - **Asymmetric enclosure hysteresis.** Closure is immediate. Reopening needs a settling period of safe readings.
 - **Estimates are not measurements.** Analysis reads only samples measured from a real star.
 - **Limits follow the equipment.** No limit is stored. Changing the equipment changes the limit.
+- **Advice names its evidence and its class.** Every statement cites its measurements, and none advises new hardware (Section 6.11).
+
+### 6.11 Judging quality and recommending the next observation
+
+Planning and control share one way to judge stored measurements and to recommend the next observation. The science library measures and gives no advice. This library compares measurements with limits that follow the equipment, and it states each result with its evidence, its class of action and a confidence taken from the validation register. It never advises new hardware, and it stores no judgment. The theory is in the companion paper [Wayfinding quality judgment](./Wayfinding_Quality_Judgment.md).
 
 ## 7. Verification
 
@@ -759,7 +764,7 @@ Several parts of the architecture are units that take their hardware steps from 
 
 This paper presented a three-function architecture for operating a single-observer observatory unattended and for replacing the current third-party control software in stages. Control and planning are independent peers, with execution built on both and required by neither. Safety sits in control, where it works with no plan and no session. A per-capability delegation model moves six capabilities through the phases of Table 1 on recorded evidence until the incumbent is removed. Planning places packages with one stated rule and names a reason for every package that does not fit. Control derives its limits from the equipment in use, judges each night only against earlier nights, and treats missing safety information as unsafe.
 
-The main limits are in Section 8. Future work follows from them: closed-loop re-placement, wiring the flip, recovery and safe-state sequences into the queue, connecting the watchdog, a validation register for the library's settings, and the first measured spread of divergence sizes from the shadow phase.
+The main limits are in Section 8. Future work follows from them: closed-loop re-placement, wiring the flip, recovery and safe-state sequences into the queue, connecting the watchdog, and the first measured spread of divergence sizes from the shadow phase.
 
 ## Acknowledgments
 

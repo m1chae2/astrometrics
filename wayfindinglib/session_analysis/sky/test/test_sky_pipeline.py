@@ -10,8 +10,7 @@ from typing import Any
 
 import pytest
 
-from wayfindinglib.models.quality.statements import Confidence
-from wayfindinglib.models.session.session_quality import RecommendationKind, RecommendationSeverity
+from wayfindinglib.models.quality.statements import Confidence, Severity
 from wayfindinglib.session_analysis.sky.pipeline import SkyAnalysisRequest, analyze_sky_request
 from wayfindinglib.session_analysis.sky.pre_processing.assess_sky_input_quality import (
     MINIMUM_NIGHTS_PER_BIN,
@@ -82,7 +81,7 @@ def test_too_few_nights_is_only_a_statement_of_the_shortfall(make_nights: Any) -
     """Verify a handful of nights gives no comparison."""
     analysis = analyze_sky_request(_request(make_nights(nights=3)))
 
-    assert [r.kind for r in analysis.recommendations] == [RecommendationKind.INSUFFICIENT_DATA]
+    assert [r.rule for r in analysis.recommendations] == ["sky_insufficient_data"]
     assert analysis.performance.metrics == []
 
 
@@ -91,15 +90,15 @@ def test_a_planted_low_altitude_effect_gives_advice_and_a_minimum_altitude(make_
     samples = make_nights(bands={35.0: 1.3, 65.0: 1.0})
 
     analysis = analyze_sky_request(_request(samples))
-    kinds = [r.kind for r in analysis.recommendations]
+    kinds = [r.rule for r in analysis.recommendations]
 
-    assert RecommendationKind.SKY_REGION_POOR in kinds
-    assert RecommendationKind.MINIMUM_ALTITUDE_SUGGESTED in kinds
-    poor = next(r for r in analysis.recommendations if r.kind == RecommendationKind.SKY_REGION_POOR)
-    assert poor.severity == RecommendationSeverity.ADVICE
+    assert "sky_region_poor" in kinds
+    assert "minimum_altitude_suggested" in kinds
+    poor = next(r for r in analysis.recommendations if r.rule == "sky_region_poor")
+    assert poor.severity == Severity.ADVICE
     assert poor.confidence == Confidence.DESIGN_ESTIMATE
     assert "poor hour" in poor.message
-    assert poor.compared_to[0].value == pytest.approx(0.10)
+    assert poor.limits[0].value == pytest.approx(0.10)
 
 
 def test_no_minimum_altitude_is_suggested_below_the_configured_one(make_nights: Any) -> None:
@@ -108,16 +107,16 @@ def test_no_minimum_altitude_is_suggested_below_the_configured_one(make_nights: 
 
     analysis = analyze_sky_request(_request(samples, minimum_altitude_degrees=50.0))
 
-    assert RecommendationKind.MINIMUM_ALTITUDE_SUGGESTED not in [r.kind for r in analysis.recommendations]
+    assert "minimum_altitude_suggested" not in [r.rule for r in analysis.recommendations]
 
 
 def test_nothing_poor_says_so(make_nights: Any) -> None:
     """Verify uniform nights give the within-limits statement and the gaps."""
     analysis = analyze_sky_request(_request(make_nights(bands={35.0: 1.0, 65.0: 1.0})))
-    kinds = {r.kind for r in analysis.recommendations}
+    kinds = {r.rule for r in analysis.recommendations}
 
-    assert RecommendationKind.SKY_REGION_POOR not in kinds
-    assert RecommendationKind.SKY_COVERAGE_GAP in kinds
+    assert "sky_region_poor" not in kinds
+    assert "sky_coverage_gap" in kinds
     assert not analysis.flagged
     assert analysis.pipeline_name == "sky"
     assert analysis.resolved_parameters["minimum_nights_per_bin"] == MINIMUM_NIGHTS_PER_BIN
@@ -127,6 +126,6 @@ def test_a_dimension_nobody_compared_along_is_explained(make_nights: Any) -> Non
     """Verify pier side, seen from one side only, says how to compare."""
     analysis = analyze_sky_request(_request(make_nights(bands={35.0: 1.0, 65.0: 1.0})))
 
-    messages = [r.message for r in analysis.recommendations if r.kind == RecommendationKind.SKY_COVERAGE_GAP]
+    messages = [r.message for r in analysis.recommendations if r.rule == "sky_coverage_gap"]
 
     assert any("pier side" in message and "both sides of the meridian" in message for message in messages)

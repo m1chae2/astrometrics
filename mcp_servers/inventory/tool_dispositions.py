@@ -392,6 +392,13 @@ DECISIONS = {
         "no table.",
         tool_class="observe",
     ),
+    "quality_set_aside_frames": ToolDecision(
+        "keep",
+        "Built 2026-10-24. Lists the frames lying in a target's _excluded folders with the kind and "
+        "reason, and says whether the reason came from a stored quality row, the folder's manifest file, "
+        "or nothing but the folder. Moves nothing and writes nothing.",
+        tool_class="observe",
+    ),
     "quality_metrics": ToolDecision(
         "keep",
         "Built 2026-10-21. Lists the declared quality metrics (or one, given its name, or those of one "
@@ -401,6 +408,16 @@ DECISIONS = {
     ),
     "observatory_mount_abort_motion": ToolDecision(
         "drop", "Commands the mount, so it is dropped with the other hardware tools."
+    ),
+    "observatory_mount_cancel_centering": ToolDecision(
+        "drop",
+        "Stops a centering run by aborting the mount, so it is dropped with the other hardware tools.",
+        "safe-stop",
+    ),
+    "observatory_guiding_stop_loop": ToolDecision(
+        "drop",
+        "Ends the guide loop through a stop event MCP cannot send. Dropped with the other hardware tools.",
+        "safe-stop",
     ),
     "observatory_safety_execute_safe_state": ToolDecision(
         "drop", "Commands the mount and enclosure, so it is dropped with the other hardware tools."

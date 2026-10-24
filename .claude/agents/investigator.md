@@ -14,6 +14,7 @@ tools:
   - mcp__astrometricslib-core__quality_measure_stack
   - mcp__astrometricslib-core__quality_metrics
   - mcp__astrometricslib-core__quality_query
+  - mcp__astrometricslib-core__quality_set_aside_frames
   - mcp__astrometricslib-core__star_get
   - mcp__astrometricslib-core__star_query
   - mcp__astrometricslib-core__target_get_frame

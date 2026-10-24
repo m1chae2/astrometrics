@@ -388,10 +388,13 @@ CLASSIFICATION_RULES = (
         "Reads the job history and lineage. The logs database is opened read-only.",
     ),
     _rule(
-        r"^quality_(query|metrics)$",
+        r"^quality_(query|metrics|set_aside_frames)$",
         "observe",
         "high",
-        "Reads stored quality measurements, or the fixed list of metric declarations. Writes nothing.",
+        (
+            "Reads stored quality measurements, the fixed list of metric declarations, "
+            "or the frames set aside in _excluded folders. Writes nothing."
+        ),
     ),
     _rule(
         r"^calibration_query$",

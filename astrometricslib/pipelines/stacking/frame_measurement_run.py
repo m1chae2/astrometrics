@@ -73,7 +73,7 @@ import sqlite3
 import threading
 import time
 import uuid
-from collections.abc import Callable, Generator, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from concurrent.futures import Executor, Future, ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -819,6 +819,7 @@ def quarantine_measurements_for_frame(
     job_id: str | None,
     measured_at: datetime,
     capture_setting_id: int | None,
+    action_taken: str | None = None,
 ) -> list[QualityMeasurement]:
     """Turn one frame's quarantine measurement into quality rows.
 
@@ -839,6 +840,11 @@ def quarantine_measurements_for_frame(
         When the quarantine step measured (with a time zone).
     capture_setting_id : `int` or `None`
         The frame's capture setting row.
+    action_taken : `str` or `None`, optional
+        What the step did with the frame, such as the text of
+        `set_aside_action_text` when it moved the frame. A processing
+        decision is stored as its measurement plus the action taken, so both
+        rows carry it. `None` for a frame that was kept.
 
     Returns
     -------
@@ -854,6 +860,7 @@ def quarantine_measurements_for_frame(
         "run_id": run_id,
         "job_id": job_id,
         "measured_at": measured_at,
+        "action_taken": action_taken,
     }
     roundness = measurement.get("roundness")
     sky = measurement.get("sky_median_adu")
@@ -1132,6 +1139,7 @@ def record_stage_frame_quality(
     recording: FrameQualityRecording,
     measured_at: datetime,
     save_target: Callable[[], None] | None = None,
+    actions_by_path: Mapping[str, str] | None = None,
 ) -> FrameMeasurementSummary:
     """Store what the stacking stage measured about a target's frames.
 
@@ -1173,6 +1181,10 @@ def record_stage_frame_quality(
         Saves the frames' stamps (see `record_frame_measurements_for_target`).
         The stage saves the whole target itself later when no function is
         given.
+    actions_by_path : `Mapping` [`str`, `str`], optional
+        For each frame the quarantine step moved (by its original path), the
+        ``action_taken`` text stored with its quarantine rows
+        (`QuarantineReport.actions_by_path`). Frames not listed get none.
 
     Returns
     -------
@@ -1212,6 +1224,7 @@ def record_stage_frame_quality(
                 job_id=session.job_id,
                 measured_at=session.measured_at,
                 capture_setting_id=session.capture_setting_id(frame),
+                action_taken=(actions_by_path or {}).get(frame.path),
             )
             summary.rows_written += session.record(rows)
         except AstrometricsError as error:

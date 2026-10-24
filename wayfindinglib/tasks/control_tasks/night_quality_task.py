@@ -37,8 +37,9 @@ from __future__ import annotations
 
 import bisect
 from collections import defaultdict
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import UTC, datetime
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from astrometricslib import (
@@ -53,7 +54,11 @@ from astrometricslib import (
 )
 from wayfindinglib.analytics.result_quality.aggregates import DataSummary, SetAsideInput, night_summary
 from wayfindinglib.analytics.result_quality.allowed_capture_values import filter_names_match
-from wayfindinglib.analytics.result_quality.efficiency import frame_observations_from_measurements
+from wayfindinglib.analytics.result_quality.efficiency import (
+    FrameObservation,
+    frame_observations_from_measurements,
+)
+from wayfindinglib.analytics.result_quality.evidence_order import order_statements_evidence
 from wayfindinglib.analytics.result_quality.focus_drift import (
     FocusFrameSample,
     fit_focus_drift,
@@ -66,7 +71,6 @@ from wayfindinglib.analytics.result_quality.judge_results import (
 )
 from wayfindinglib.analytics.result_quality.library_inputs import (
     LibraryInputs,
-    set_aside_reasons,
     times_and_directions,
 )
 from wayfindinglib.analytics.result_quality.observing_values import (
@@ -76,14 +80,13 @@ from wayfindinglib.analytics.result_quality.observing_values import (
     observing_values,
     polar_alignment_from_rotation,
 )
-from wayfindinglib.analytics.result_quality.reply_budget import (
-    EVIDENCE_STEPS,
-    fit_reply,
-    limit_statement_evidence,
-    reply_budget,
-)
 from wayfindinglib.analytics.result_quality.rules import FOCUSER_TEMPERATURE_METRIC, STAR_WIDTH_PIXELS_METRIC
-from wayfindinglib.analytics.result_quality.science_goal import science_goal_for_target
+from wayfindinglib.analytics.result_quality.science_goal import (
+    goal_of_setting,
+    science_goal_for_setting,
+    science_goal_for_target,
+)
+from wayfindinglib.models.quality.efficiency import ScienceGoal
 from wayfindinglib.models.quality.statements import TargetStatement
 from wayfindinglib.models.session.ekos_session import EkosSessionContext
 from wayfindinglib.models.session.guiding_run import GuidingRunSummary
@@ -250,62 +253,6 @@ def _target_quality(
         needs_attention=needs_attention(statements),
         notes=notes,
     )
-
-
-def fit_night_quality_to_budget(quality: NightQuality, budget: int | None = None) -> NightQuality:
-    """Shorten the evidence lists until the review fits the reply budget.
-
-    Parameters
-    ----------
-    quality : `NightQuality`
-        The finished review.
-    budget : `int`, optional
-        The most characters its JSON may have, measured the way the MCP tool
-        registry measures a reply. `reply_budget` when omitted.
-
-    Returns
-    -------
-    quality : `NightQuality`
-        The same review when it fits. Otherwise a copy whose statements keep
-        fewer references each (``EVIDENCE_STEPS``, in turn) and count what
-        they lost; a note says it was done. No statement is removed.
-    """
-    limit = reply_budget() if budget is None else budget
-    note = (
-        f"The evidence lists of the statements were cut to fit the reply budget of {limit:,} characters. "
-        "Read the rows with QualityRecords.query."
-    )
-
-    def shrink(current: NightQuality, round_number: int) -> NightQuality | None:
-        """Cut the evidence lists one step shorter.
-
-        Parameters
-        ----------
-        current : `NightQuality`
-            The review so far.
-        round_number : `int`
-            Which step of ``EVIDENCE_STEPS`` to apply.
-
-        Returns
-        -------
-        smaller : `NightQuality` or `None`
-            The shorter review, or ``None`` when no step is left.
-        """
-        if round_number >= len(EVIDENCE_STEPS):
-            return None
-        keep = EVIDENCE_STEPS[round_number]
-        return current.model_copy(
-            update={
-                "targets": [
-                    entry.model_copy(update={"statements": limit_statement_evidence(entry.statements, keep)})
-                    for entry in current.targets
-                ],
-                "night_statements": limit_statement_evidence(current.night_statements, keep),
-                "notes": current.notes if note in current.notes else [*current.notes, note],
-            }
-        )
-
-    return fit_reply(quality, shrink, limit)
 
 
 def _latest_values(rows: Iterable[QualityMeasurement], metric: str) -> dict[str, QualityMeasurement]:
@@ -545,7 +492,14 @@ def build_night_quality(context: ControlContext, night_id: str) -> NightQuality:
     targets: dict[str, Target] = inputs.targets()
 
     night_frame_rows = [row for row in night_rows if row.subject.level == SubjectLevel.FRAME]
-    reasons = set_aside_reasons(night_frame_rows)
+    reasons: dict[str, str] = {}
+    for listed_target_id in sorted(rows_by_target):
+        reasons.update(
+            inputs.set_aside_reasons(
+                listed_target_id,
+                [row for row in night_frame_rows if row.subject.target_id == listed_target_id],
+            )
+        )
     epochs, directions = times_and_directions(targets[t] for t in rows_by_target if t in targets)
     night_observations = frame_observations_from_measurements(
         night_frame_rows,
@@ -568,28 +522,37 @@ def build_night_quality(context: ControlContext, night_id: str) -> NightQuality:
     all_statements: list[TargetStatement] = []
     for target_id in sorted(rows_by_target):
         target = targets.get(target_id)
-        goal = science_goal_for_target(target if target else Target(id=target_id))
+        goal_target = target if target else Target(id=target_id)
+        target_goal = science_goal_for_target(goal_target)
+
+        goal_for_setting = partial(science_goal_for_setting, goal_target)  # user decision U2
         target_observations = [o for o in night_observations if o.target_id == target_id]
         set_aside = _unobserved_set_aside(
             night_frame_rows, target_id, night_id, reasons, observed_ids, capture_settings
         )
-        summary = night_summary(
+        summary, goal = _summary_by_goal(
             night_id,
             target_observations,
-            goal,
+            set_aside,
+            goal_for_setting,
+            target_goal,
             reference_for,
-            set_aside=set_aside,
-            moonless_sky_rate_by_frame=moonless or None,
+            moonless or None,
         )
         target_night_rows = rows_by_target[target_id]
         stack_rows = astrometrics.quality.query(target_id=target_id, level="stack", library_only=True)
         statements = _target_statements(
             target_night_rows, stack_rows, capture_settings, _main_setting_id(target_night_rows)
         )
+        # The most extreme evidence first, so a shortened reply keeps it.
+        statements = order_statements_evidence(statements, [*target_night_rows, *stack_rows])
         all_statements.extend(statements)
         entry = _target_quality(target_id, summary, statements, target, goal)
         reference_notes = inputs.reference_notes(
-            {o.capture_setting for o in target_observations}, target_observations, goal, night_id
+            {o.capture_setting for o in target_observations},
+            target_observations,
+            goal_for_setting,
+            night_id,
         )
         entries.append(entry.model_copy(update={"notes": [*entry.notes, *reference_notes]}))
 
@@ -607,6 +570,7 @@ def build_night_quality(context: ControlContext, night_id: str) -> NightQuality:
         night_rows, epochs, directions, night_runs, inputs, target_by_frame
     )
     notes.extend(polar_notes)
+    focus_statements = order_statements_evidence(focus_statements, night_rows)
     all_statements.extend(focus_statements)
 
     if not reasons:
@@ -616,20 +580,123 @@ def build_night_quality(context: ControlContext, night_id: str) -> NightQuality:
         )
     notes.extend(inputs.notes)
     entries.sort(key=lambda entry: (-entry.needs_attention.warning_count, entry.target_id))
-    return fit_night_quality_to_budget(
-        NightQuality(
-            night_id=night_id,
-            targets=entries,
-            needs_attention=needs_attention(all_statements),
-            guiding=guiding,
-            night_statements=order_statements(focus_statements),
-            focus_drift=NightFocusDrift.model_validate(focus_result, from_attributes=True),
-            polar_alignment=NightPolarAlignment.model_validate(polar, from_attributes=True)
-            if polar is not None
-            else None,
-            notes=notes,
-        )
+    return NightQuality(
+        night_id=night_id,
+        targets=entries,
+        needs_attention=needs_attention(all_statements),
+        guiding=guiding,
+        night_statements=order_statements(focus_statements),
+        focus_drift=NightFocusDrift.model_validate(focus_result, from_attributes=True),
+        polar_alignment=NightPolarAlignment.model_validate(polar, from_attributes=True)
+        if polar is not None
+        else None,
+        notes=notes,
     )
+
+
+def _summary_by_goal(
+    night_id: str,
+    observations: Sequence[FrameObservation],
+    set_aside: Sequence[SetAsideInput],
+    goal_for_setting: Callable[[CaptureSetting], ScienceGoal],
+    default_goal: ScienceGoal,
+    reference_for: Any,
+    moonless_sky_rate_by_frame: Mapping[str, float] | None,
+) -> tuple[DataSummary, ScienceGoal]:
+    """Summarize a target's night, each capture setting for its own goal.
+
+    The user decided on 2026-10-24 (issue #95, decision U2) that the goal is
+    chosen for each capture setting. The settings are split into groups that
+    share a goal, each group is summarized, and the groups are added up. When
+    the goals differ, the whole-target loss account is left out (it would have
+    to state one goal); each setting's own account stays in its summary.
+
+    Parameters
+    ----------
+    night_id : `str`
+        The night.
+    observations : `Sequence` [`FrameObservation`]
+        The target's frames.
+    set_aside : `Sequence` [`SetAsideInput`]
+        The target's set-aside frames that were not measured.
+    goal_for_setting : `Callable`
+        Gives the goal of a capture setting.
+    default_goal : `ScienceGoal`
+        The target-level goal, used when there is no frame to read settings
+        from.
+    reference_for : `Callable`
+        Gives the efficiency reference of a capture setting.
+    moonless_sky_rate_by_frame : `Mapping` [`str`, `float`] or `None`
+        The sky model's no-Moon rates.
+
+    Returns
+    -------
+    summary, goal : `tuple`
+        The summary, and the goal that holds most of the captured time (the
+        target's goal when the goals agree).
+    """
+    settings = {o.capture_setting for o in observations} | {f.capture_setting for f in set_aside}
+    goals = {setting: goal_of_setting(goal_for_setting, setting) for setting in settings}
+    distinct = set(goals.values())
+    if len(distinct) <= 1:
+        goal = next(iter(distinct), default_goal)
+        summary = night_summary(
+            night_id,
+            observations,
+            goal,
+            reference_for,
+            set_aside=set_aside,
+            moonless_sky_rate_by_frame=moonless_sky_rate_by_frame,
+        )
+        summary = summary.model_copy(
+            update={
+                "setting_summaries": [
+                    item.model_copy(update={"science_goal": goal}) for item in summary.setting_summaries
+                ]
+            }
+        )
+        return summary, goal
+    parts: list[tuple[ScienceGoal, DataSummary]] = []
+    for group_goal in distinct:
+        parts.append((
+            group_goal,
+            night_summary(
+                night_id,
+                [o for o in observations if goals[o.capture_setting] == group_goal],
+                group_goal,
+                reference_for,
+                set_aside=[f for f in set_aside if goals[f.capture_setting] == group_goal],
+                moonless_sky_rate_by_frame=moonless_sky_rate_by_frame,
+            ),
+        ))
+    parts.sort(key=lambda part: (-part[1].captured_seconds, part[0].value))
+    effective = [
+        p.efficiency_effective_seconds for _g, p in parts if p.efficiency_effective_seconds is not None
+    ]
+    summaries = [
+        item.model_copy(update={"science_goal": group_goal})
+        for group_goal, part in parts
+        for item in part.setting_summaries
+    ]
+    notes = [note for _g, part in parts for note in part.notes]
+    notes.append(
+        "The target's capture settings have different science goals ("
+        + ", ".join(sorted(g.value for g in distinct))
+        + "), so there is no loss account for the whole target. Each setting states its own goal and account."
+    )
+    merged = DataSummary(
+        scope="night",
+        scope_id=night_id,
+        nights=sorted({n for _g, part in parts for n in part.nights}),
+        frames_taken=sum(p.frames_taken for _g, p in parts),
+        frames_set_aside=sum(p.frames_set_aside for _g, p in parts),
+        captured_seconds=sum(p.captured_seconds for _g, p in parts),
+        efficiency_effective_seconds=sum(effective) if effective else None,
+        setting_summaries=summaries,
+        loss_account=None,
+        notes=notes,
+    )
+    return merged, parts[0][0]
 
 
 def _unobserved_set_aside(
@@ -691,5 +758,4 @@ def _unobserved_set_aside(
 __all__ = [
     "NIGHT_QUALITY_ENTRY",
     "build_night_quality",
-    "fit_night_quality_to_budget",
 ]

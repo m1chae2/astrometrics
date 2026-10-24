@@ -18,6 +18,7 @@ import pytest
 from astrometricslib import AppConfiguration, FrameRecord, NotFoundError
 from wayfindinglib.analytics.result_quality.efficiency import STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC
 from wayfindinglib.analytics.result_quality.judge_results import needs_attention
+from wayfindinglib.analytics.result_quality.science_goal import science_goal_for_setting
 from wayfindinglib.analytics.test.night_quality_helpers import (
     FIRST_NIGHT,
     OTHER,
@@ -241,10 +242,14 @@ def test_a_night_with_only_guiding_still_answers(monkeypatch: pytest.MonkeyPatch
     assert guiding.runs[0].run_id == "r1"
 
 
-def test_a_review_with_long_evidence_lists_is_cut_to_fit_the_reply_budget() -> None:
+def test_a_review_with_long_evidence_lists_is_cut_for_the_mcp_reply_budget() -> None:
     """Statements keep fewer references, count the lost ones, and all stay."""
     from astrometricslib import MeasurementReference
-    from wayfindinglib.analytics.result_quality.reply_budget import MAXIMUM_REPLY_CHARACTERS, reply_characters
+    from wayfindinglib.analytics.result_quality.reply_budget import (
+        MAXIMUM_REPLY_CHARACTERS,
+        fit_reply_to_budget,
+        reply_characters,
+    )
     from wayfindinglib.models.quality.statements import (
         ActionClass,
         Confidence,
@@ -283,7 +288,7 @@ def test_a_review_with_long_evidence_lists_is_cut_to_fit_the_reply_budget() -> N
         guiding=GuidingNightSummary(available=False, reason="No guiding."),
     )
     assert reply_characters(review) > MAXIMUM_REPLY_CHARACTERS
-    fitted = night_quality_task.fit_night_quality_to_budget(review)
+    fitted = fit_reply_to_budget(review)
     assert reply_characters(fitted) <= MAXIMUM_REPLY_CHARACTERS
     for entry in fitted.targets:
         assert len(entry.statements) == 2
@@ -349,3 +354,40 @@ def test_a_night_without_rotation_or_focus_rows_says_so() -> None:
     assert any("polar-alignment" in note for note in quality.notes)
     assert quality.focus_drift is not None
     assert quality.focus_drift.status == "insufficient_data"
+
+
+def test_a_target_with_two_goals_states_each_setting_goal() -> None:
+    """Decision U2: a grating and an imaging setting are judged apart."""
+    from astrometricslib import CaptureSetting, Target
+    from wayfindinglib.analytics.result_quality.efficiency import FrameObservation
+    from wayfindinglib.models.quality.efficiency import ScienceGoal
+
+    imaging = CaptureSetting(camera="Cam", filter_name="L", exposure_seconds=60.0)
+    grating = CaptureSetting(camera="Cam", filter_name="Star Analyzer 200", exposure_seconds=20.0)
+    observations = [
+        FrameObservation(
+            frame_id=f"{name}{index}", capture_setting=setting, night_id="n", exposure_seconds=seconds
+        )
+        for name, setting, seconds in (("i", imaging, 60.0), ("g", grating, 20.0))
+        for index in range(3)
+    ]
+    target = Target(id="NGC 7331")
+
+    summary, goal = night_quality_task._summary_by_goal(
+        "n",
+        observations,
+        [],
+        lambda setting: science_goal_for_setting(target, setting),
+        ScienceGoal.FAINT_POINT_SOURCE,
+        lambda _setting: None,
+        None,
+    )
+
+    goals = {item.capture_setting.filter_name: item.science_goal for item in summary.setting_summaries}
+    assert goals == {
+        "L": ScienceGoal.EXTENDED_OBJECT,
+        "Star Analyzer 200": ScienceGoal.SLITLESS_SPECTRAL_RESOLUTION,
+    }
+    assert goal == ScienceGoal.EXTENDED_OBJECT
+    assert summary.loss_account is None
+    assert any("different science goals" in note for note in summary.notes)

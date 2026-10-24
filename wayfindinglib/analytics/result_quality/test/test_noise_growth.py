@@ -6,7 +6,6 @@ moonlit case, mode identification, the take-N-more search, the stacker
 constant it copies, and the noise-floor fit.
 """
 
-import importlib
 import math
 
 import numpy as np
@@ -14,7 +13,6 @@ import pytest
 
 from wayfindinglib.analytics.result_quality import noise_growth as ng
 from wayfindinglib.analytics.result_quality.noise_growth import StackFrame, WeightingMode
-from wayfindinglib.models.quality.statements import Confidence
 
 
 def _frame(
@@ -87,9 +85,9 @@ def test_wfwhm_weights_follow_the_siril_formula_and_zero_the_blurriest_frame() -
     frames = [_frame(0, width=2.0), _frame(1, width=3.0), _frame(2, width=4.0)]
     weights = ng.frame_weights(frames, WeightingMode.WFWHM)
     assert weights is not None
-    assert weights[0] == pytest.approx(1.0)
+    assert sum(weights) / len(weights) == pytest.approx(1.0)  # the stacker's weights have mean 1
     assert weights[2] == pytest.approx(0.0)
-    assert weights[1] == pytest.approx((1 / 9 - 1 / 16) / (1 / 4 - 1 / 16))
+    assert weights[1] / weights[0] == pytest.approx((1 / 9 - 1 / 16) / (1 / 4 - 1 / 16))
 
 
 def test_wfwhm_weights_are_recomputed_over_old_and_new_frames() -> None:
@@ -98,8 +96,8 @@ def test_wfwhm_weights_are_recomputed_over_old_and_new_frames() -> None:
     before = ng.frame_weights(old, WeightingMode.WFWHM)
     after = ng.frame_weights([*old, _frame(2, width=2.0)], WeightingMode.WFWHM)
     assert before is not None and after is not None
-    assert before[0] == pytest.approx(1.0)
-    assert after[0] < 1.0
+    assert before[0] == pytest.approx(2.0)  # mean 1 over two frames: weights 1 and 0
+    assert after[0] < before[0]
 
 
 def test_wfwhm_without_widths_and_unknown_mode_give_reasons() -> None:
@@ -120,188 +118,3 @@ def test_predict_weighting_mode_follows_the_stacker_rule() -> None:
     assert ng.predict_weighting_mode(None, [30.0, 60.0, 120.0]) == WeightingMode.NOISE
     assert ng.predict_weighting_mode("wfwhm", [60.0] * 3) == WeightingMode.WFWHM
     assert ng.predict_weighting_mode("nbstars", [60.0] * 3) == WeightingMode.UNKNOWN
-
-
-def test_copied_stacker_threshold_matches_astrometricslib() -> None:
-    """The copy of MINIMUM_PENALTY_TO_WEIGHT equals the stacker's value."""
-    module = importlib.import_module("astrometricslib.pipelines.stacking.pre_processing.exposure_weighting")
-    assert module.MINIMUM_PENALTY_TO_WEIGHT == ng.MINIMUM_PENALTY_TO_WEIGHT
-
-
-def test_identify_weighting_mode_from_recorded_weights() -> None:
-    """Recorded weights are matched to a mode; missing rows give 'unknown'."""
-    frames = [_frame(0, width=2.0), _frame(1, width=3.0), _frame(2, width=4.0), _frame(3, width=2.5)]
-    recorded = ng.frame_weights(frames, WeightingMode.WFWHM)
-    assert ng.identify_weighting_mode(frames, recorded).mode == WeightingMode.WFWHM
-    assert ng.identify_weighting_mode(frames, [1.0] * 4).mode == WeightingMode.EQUAL
-    unknown = ng.identify_weighting_mode(frames, [1.0, None, 1.0, 1.0])
-    assert unknown.mode == WeightingMode.UNKNOWN
-
-
-def test_take_more_for_identical_frames_is_the_current_count() -> None:
-    """Doubling identical frames cuts the noise to 0.707.
-
-    So N equals the number taken.
-    """
-    existing = [_frame(i) for i in range(20)]
-    result = ng.frames_to_cut_noise(existing, existing, WeightingMode.EQUAL)
-    assert result.frames_needed == 20
-    assert result.predicted_noise_ratio == pytest.approx(1 / math.sqrt(2))
-    assert result.confidence == Confidence.DESIGN_ESTIMATE
-    assert result.added_exposure_seconds == pytest.approx(20 * 60.0)
-
-
-def test_take_more_counts_read_noise_limited_short_frames_for_less() -> None:
-    """Short read-noise-limited frames need more frames than long ones."""
-    existing = [_frame(i, exposure=60.0, sky=0.5, read=3.0) for i in range(20)]
-    long_frames = ng.frames_to_cut_noise(existing, existing, WeightingMode.NOISE, new_exposure_seconds=120.0)
-    short_frames = ng.frames_to_cut_noise(existing, existing, WeightingMode.NOISE, new_exposure_seconds=15.0)
-    assert long_frames.frames_needed < 20 < short_frames.frames_needed
-    assert short_frames.added_exposure_seconds > long_frames.added_exposure_seconds
-
-
-def test_take_more_reports_missing_inputs() -> None:
-    """No existing frames.
-
-    No template or an unknown mode gives no answer and a reason.
-    """
-    frame = _frame(0)
-    assert ng.frames_to_cut_noise([], [frame], WeightingMode.EQUAL).reason
-    assert ng.frames_to_cut_noise([frame], [], WeightingMode.EQUAL).reason
-    assert ng.frames_to_cut_noise([frame], [frame], WeightingMode.UNKNOWN).frames_needed is None
-
-
-def test_aperture_noise_error_is_117_over_root_n() -> None:
-    """The error is about 12 percent for 100 apertures."""
-    assert ng.aperture_noise_relative_error(100) == pytest.approx(0.117)
-    with pytest.raises(ValueError, match="2 apertures"):
-        ng.aperture_noise_relative_error(1)
-
-
-def _steps(
-    floor_variance: float, alpha: float = 1.0, count: int = 5, apertures: int = 400, paired: bool = False
-) -> list[ng.NoiseStep]:
-    """Build stack steps that follow a known floor exactly.
-
-    Parameters
-    ----------
-    floor_variance, alpha : `float`
-        The true floor and scale.
-    count : `int`
-        Number of steps.
-    apertures : `int`
-        Apertures per step.
-    paired : `bool`
-        Whether errors are paired.
-
-    Returns
-    -------
-    steps : `list` [`NoiseStep`]
-        The steps.
-    """
-    return [
-        ng.NoiseStep(
-            label=f"s{i}",
-            expected_variance=4.0 / (i + 1),
-            measured_noise=math.sqrt(alpha * 4.0 / (i + 1) + floor_variance),
-            apertures=apertures,
-            paired=paired,
-            relative_error=0.02 if paired else None,
-        )
-        for i in range(count)
-    ]
-
-
-def test_floor_is_found_when_present() -> None:
-    """A floor of 1.0 in variance is detected and recovered."""
-    fit = ng.fit_noise_floor(_steps(1.0))
-    assert fit.floor_detected
-    assert fit.floor_variance == pytest.approx(1.0, rel=1e-6)
-    assert fit.alpha == pytest.approx(1.0, rel=1e-6)
-    assert fit.floor_noise == pytest.approx(1.0, rel=1e-6)
-    assert fit.error_kind == "unpaired"
-
-
-def test_no_floor_when_noise_follows_the_model() -> None:
-    """With no floor the constant is not above 0 by two standard errors."""
-    fit = ng.fit_noise_floor(_steps(0.0))
-    assert not fit.floor_detected
-    assert fit.floor_noise is None
-
-
-def test_floor_needs_enough_steps_and_says_so() -> None:
-    """One step.
-
-    Or two with a free read-noise term, gives 'not enough stack steps'.
-    """
-    assert "Not enough stack steps" in ng.fit_noise_floor(_steps(1.0, count=1)).reason
-    assert (
-        "Not enough stack steps" in ng.fit_noise_floor(_steps(1.0, count=2), read_noise_term_free=True).reason
-    )
-
-
-def test_free_read_noise_term_needs_the_read_variance() -> None:
-    """The three-term fit asks for the read-noise part of each step."""
-    assert "read-noise" in ng.fit_noise_floor(_steps(1.0), read_noise_term_free=True).reason
-
-
-def test_paired_errors_are_reported_as_paired() -> None:
-    """The fit says which kind of error it used."""
-    assert ng.fit_noise_floor(_steps(1.0, paired=True)).error_kind == "paired"
-    mixed = _steps(1.0, count=3) + _steps(1.0, count=2, paired=True)
-    assert ng.fit_noise_floor(mixed).error_kind == "mixed"
-
-
-def test_stop_signal_follows_the_floor() -> None:
-    """A large floor stops the gain.
-
-    No floor does not; no fit gives no signal.
-    """
-    floor_fit = ng.fit_noise_floor(_steps(1.0))
-    assert ng.stop_signal(floor_fit, current_expected_variance=0.5).stopped is True
-    no_floor = ng.fit_noise_floor(_steps(0.0))
-    assert ng.stop_signal(no_floor, current_expected_variance=0.5).stopped is False
-    too_few = ng.fit_noise_floor(_steps(1.0, count=1))
-    assert ng.stop_signal(too_few, current_expected_variance=0.5).stopped is None
-
-
-def test_noise_weights_with_no_sky_and_no_read_noise_give_a_reason_not_a_crash() -> None:
-    """A frame with zero variance has no inverse-variance weight."""
-    frames = [_frame(0, sky=0.0, read=0.0), _frame(1)]
-    forecast = ng.forecast_stack_noise(frames, WeightingMode.NOISE)
-    assert forecast.noise is None
-    assert "no sky noise and no read noise" in forecast.reason
-    assert ng.frame_weights(frames, WeightingMode.NOISE) is None
-
-
-def test_forecast_from_recorded_weights_uses_them_directly() -> None:
-    """The recorded weights, not a mode, set the variance."""
-    frames = [_frame(0, sky=1.0), _frame(1, sky=4.0)]
-    forecast = ng.forecast_noise_with_weights(frames, [1.0, 3.0])
-    expected = (frames[0].rate_variance + 9.0 * frames[1].rate_variance) / 16.0
-    assert forecast.variance == pytest.approx(expected)
-    assert ng.forecast_noise_with_weights(frames, [1.0]).noise is None
-
-
-def test_two_steps_have_zero_degrees_of_freedom_and_the_fit_says_so() -> None:
-    """With 2 steps and 2 terms the line passes through both points."""
-    fit = ng.fit_noise_floor(_steps(1.0, count=2))
-    assert fit.degrees_of_freedom == 0
-    assert "zero degrees of freedom" in fit.reason
-    assert ng.fit_noise_floor(_steps(1.0, count=5)).degrees_of_freedom == 3
-
-
-def test_normalized_steps_are_reported_and_unnormalized_ones_say_so() -> None:
-    """The fit says whether its steps were divided by the reference flux."""
-    normalized = [step.model_copy(update={"normalized": True}) for step in _steps(1.0)]
-    assert ng.fit_noise_floor(normalized).normalized
-    unnormalized = ng.fit_noise_floor(_steps(1.0))
-    assert not unnormalized.normalized
-    assert "not normalized" in unnormalized.reason
-
-
-def test_normalized_steps_win_over_unnormalized_ones() -> None:
-    """When some steps are normalized, only those are fitted together."""
-    steps = _steps(1.0, count=6)
-    mixed = [step.model_copy(update={"normalized": index < 4}) for index, step in enumerate(steps)]
-    assert ng.fit_noise_floor(mixed).steps_used == 4

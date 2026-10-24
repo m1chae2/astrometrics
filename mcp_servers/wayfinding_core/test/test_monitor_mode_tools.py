@@ -44,7 +44,8 @@ ALLOWED_IN_MONITOR_MODE = frozenset({
 })
 """Commands that stay allowed in monitor mode: the user's decision of
 2026-10-24 (issue #95, settled decision S10). Device settings and the app's
-own INDI connect and disconnect move nothing and take no picture."""
+own INDI connect and disconnect move nothing and take no picture. Decision
+U4 of the same day: nothing else is allowed, not even stopping a run."""
 
 CALLER_SUPPLIED_STEP_TOOLS = frozenset({
     "execution_execute_meridian_flip",
@@ -58,7 +59,11 @@ CALLER_SUPPLIED_STEP_TOOLS = frozenset({
 them and they touch no driver themselves. Reported to the systems engineer
 (issue #95, batch 5); the library test keeps the same list."""
 
-JSON_CANNOT_CARRY_THE_ARGUMENT = frozenset({"observatory_guiding_run_loop", "observatory_mount_sync"})
+JSON_CANNOT_CARRY_THE_ARGUMENT = frozenset({
+    "observatory_guiding_run_loop",
+    "observatory_guiding_stop_loop",
+    "observatory_mount_sync",
+})
 """Tools whose argument a JSON call cannot carry: a `threading.Event`, or a
 sky position (the tool's schema asks for text). They must fail without
 sending a command, though not with `permission_denied`."""
@@ -71,10 +76,12 @@ SAMPLE_ARGUMENTS = {
     "observatory_guiding_pulse": {"direction": "north", "duration_ms": 100.0},
     "observatory_guiding_run_exposure_test": {},
     "observatory_guiding_run_loop": {},
+    "observatory_guiding_stop_loop": {},
     "observatory_imaging_capture_image": {"exposure_seconds": 1.0, "register_job": False},
     "observatory_imaging_focus_move": {"steps": 10},
     "observatory_imaging_set_filter": {"filter_name": "L"},
     "observatory_mount_abort_motion": {},
+    "observatory_mount_cancel_centering": {"run_is_active": True},
     "observatory_mount_manual_move": {"direction": "north"},
     "observatory_mount_park": {},
     "observatory_mount_set_slew_rate": {"rate_index": 1},

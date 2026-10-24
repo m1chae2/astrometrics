@@ -175,6 +175,14 @@ def test_frame_readings_use_the_median_over_frames() -> None:
     assert len(statement.evidence) == 3
 
 
+def test_evidence_lists_the_row_furthest_beyond_the_limit_first() -> None:
+    """The stretched frame comes first and the frame within the limit last."""
+    rows = [_row("frame.star_elongation", value) for value in (1.0, 1.6, 1.9, 1.5)]
+    statement = _of_rule(_judge(rows), "trailed_stars")[0]
+    by_id = {row.row_id: row.value for row in rows}
+    assert [by_id[reference.row_id] for reference in statement.evidence] == [1.9, 1.6, 1.5, 1.0]
+
+
 def test_only_the_newest_row_of_a_subject_counts() -> None:
     """A re-measurement of the same frame replaces the older row."""
     old = _row("frame.star_elongation", 1.6, subject_id="T/f1", minutes=0)

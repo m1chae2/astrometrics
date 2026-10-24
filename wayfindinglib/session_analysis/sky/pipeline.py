@@ -15,7 +15,7 @@ from typing import Any, cast
 from pydantic import BaseModel
 
 from wayfindinglib.analytics.performance_envelope import BASELINE_SPREAD_MULTIPLIER
-from wayfindinglib.models.session.session_quality import RecommendationSeverity
+from wayfindinglib.models.quality.statements import StatementKind
 from wayfindinglib.models.session.sky_quality import (
     SkyAnalysis,
     SkyInputQuality,
@@ -127,12 +127,12 @@ class SkySessionPipeline(SessionAnalysisPipeline):
         input_quality: SkyInputQuality = result.input_quality
         performance: SkyPerformance = result.performance or SkyPerformance()
         recommendations = recommend_for_sky(input_quality, performance, request.blur_tolerance_fraction)
-        warnings = [r for r in recommendations if r.severity == RecommendationSeverity.WARNING]
+        warnings = [r for r in recommendations if r.kind == StatementKind.WARNING]
         return SkyAnalysis(
             session_id=request.session_id,
             equipment_fingerprint=request.equipment_fingerprint,
             flagged=bool(warnings),
-            flag_reasons=[warning.kind.value for warning in warnings],
+            flag_reasons=[warning.rule for warning in warnings],
             resolved_parameters={
                 "blur_tolerance_fraction": request.blur_tolerance_fraction,
                 "minimum_z_score": BASELINE_SPREAD_MULTIPLIER,

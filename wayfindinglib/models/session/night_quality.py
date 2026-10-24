@@ -40,7 +40,9 @@ class NightTargetQuality(BaseModel):
     target_id : `str`
         The target.
     goal : `ScienceGoal`
-        The goal its efficiency is stated for, read from the target.
+        The goal that holds most of the target's captured time. The goal is
+        chosen for each capture setting (decision U2), so when the settings
+        differ, each ``capture_settings`` entry states its own goal.
     frames_taken : `int`
         Frames of the night, kept and set aside.
     frames_set_aside : `int`

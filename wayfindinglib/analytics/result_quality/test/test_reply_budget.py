@@ -13,11 +13,22 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from astrometricslib import MeasurementReference
 from wayfindinglib.analytics.result_quality.reply_budget import (
     MAXIMUM_REPLY_CHARACTERS,
     fit_reply,
+    fit_reply_to_budget,
     reply_budget,
     reply_characters,
+)
+from wayfindinglib.models.planning.target_report import TargetDatasetReport
+from wayfindinglib.models.quality.statements import (
+    ActionClass,
+    Confidence,
+    NeedsAttention,
+    Severity,
+    StatementKind,
+    TargetStatement,
 )
 
 
@@ -70,3 +81,57 @@ def test_fit_reply_applies_steps_until_the_reply_fits() -> None:
     assert 1 <= len(fitted.items) < 64
     assert fit_reply(reply, halve, budget=10).items == ["x" * 10]
     assert fit_reply(reply, halve, budget=10**6) is reply
+
+
+def _busy_statement(reference_count: int) -> TargetStatement:
+    """Build a statement with many references, the most extreme first.
+
+    Returns
+    -------
+    statement : `TargetStatement`
+        A warning that cites row ids 1 to ``reference_count`` in order.
+    """
+    return TargetStatement(
+        rule="trailed_stars",
+        kind=StatementKind.WARNING,
+        severity=Severity.ADVICE,
+        action_class=ActionClass.SESSION_PROCEDURE,
+        message="Stars are trailed.",
+        confidence=Confidence.DESIGN_ESTIMATE,
+        evidence=[MeasurementReference(row_id=row) for row in range(1, reference_count + 1)],
+    )
+
+
+def test_a_busy_report_is_trimmed_for_the_mcp_and_keeps_the_most_extreme_references() -> None:
+    """Trimming gets under budget, keeps first references, drops nothing."""
+    statements = [_busy_statement(900) for _ in range(30)]
+    report = TargetDatasetReport(
+        targetId="T",
+        statements=statements,
+        needsAttention=NeedsAttention(warning_count=30, worst_severity=Severity.ADVICE),
+        generatedAt=datetime(2026, 10, 24, tzinfo=UTC),
+    )
+    assert reply_characters(report) > MAXIMUM_REPLY_CHARACTERS
+    fitted = fit_reply_to_budget(report)
+    assert reply_characters(fitted) <= reply_budget()
+    assert len(fitted.statements) == 30
+    for kept, original in zip(fitted.statements, statements, strict=True):
+        assert kept.evidence == original.evidence[: len(kept.evidence)]
+        assert len(kept.evidence) + kept.evidence_omitted_count == 900
+        assert len(kept.evidence) >= 1
+    # The full report (the library's own reply) is not changed by trimming.
+    assert all(statement.evidence_omitted_count == 0 for statement in report.statements)
+    assert len(report.statements[0].evidence) == 900
+
+
+def test_a_reply_that_fits_or_is_of_another_kind_is_returned_as_it_is() -> None:
+    """Other values and short replies pass through unchanged."""
+    report = TargetDatasetReport(
+        targetId="T",
+        statements=[_busy_statement(3)],
+        needsAttention=NeedsAttention(warning_count=1, worst_severity=Severity.ADVICE),
+        generatedAt=datetime(2026, 10, 24, tzinfo=UTC),
+    )
+    assert fit_reply_to_budget(report) is report
+    other = {"anything": 1}
+    assert fit_reply_to_budget(other) is other

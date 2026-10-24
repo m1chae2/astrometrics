@@ -30,6 +30,7 @@ from wayfindinglib.analytics.capture_history import (
     usable_star_frames,
 )
 from wayfindinglib.analytics.performance_envelope import MINIMUM_FRAMES_PER_NIGHT
+from wayfindinglib.analytics.result_quality.evidence_order import distance_beyond_limit
 from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
 from wayfindinglib.models.session.capture_frame import CaptureFrame
 from wayfindinglib.models.session.capture_quality import (
@@ -68,6 +69,57 @@ def _references(frames: Sequence[CaptureFrame], metric: str) -> list[Measurement
         One per frame that has a stored row of the metric.
     """
     return [reference for frame in frames if (reference := frame.reference(metric)) is not None]
+
+
+def _most_extreme_first(
+    frames: Sequence[CaptureFrame],
+    values: dict[str, float],
+    limit: float | None,
+    *,
+    higher_is_beyond: bool,
+) -> list[CaptureFrame]:
+    """Sort frames so the one furthest beyond a limit comes first.
+
+    Parameters
+    ----------
+    frames : `Sequence` [`CaptureFrame`]
+        The frames to sort.
+    values : `dict` [`str`, `float`]
+        The value judged for each frame, by the frame's path.
+    limit : `float` or `None`
+        The night's limit for this value. With ``None`` the frames go newest
+        first.
+    higher_is_beyond : `bool`
+        True when a value above the limit is the bad side (star width);
+        False when a value below it is (roundness).
+
+    Returns
+    -------
+    ordered : `list` [`CaptureFrame`]
+        The frames, furthest beyond the limit first, ties newest first.
+    """
+
+    def key(frame: CaptureFrame) -> tuple[float, float]:
+        """Give the sort key of one frame: distance beyond the limit, then age.
+
+        Parameters
+        ----------
+        frame : `CaptureFrame`
+            The frame.
+
+        Returns
+        -------
+        key : `tuple` [`float`, `float`]
+            Minus the distance beyond the limit, then minus the time stamp.
+        """
+        distance = (
+            distance_beyond_limit(values[frame.path], limit, higher_is_beyond=higher_is_beyond)
+            if limit is not None
+            else 0.0
+        )
+        return (-distance, -frame.timestamp)
+
+    return sorted(frames, key=key)
 
 
 def measure_clipping(
@@ -164,11 +216,21 @@ def measure_star_quality(
     if len(usable) < MINIMUM_FRAMES_PER_NIGHT:
         return quality
     quality.median_star_width_arcsec = statistics.median(frame.star_width_arcsec for frame in usable)
-    quality.width_evidence = _references(usable, STAR_WIDTH_METRIC)
+    widths = {frame.path: frame.star_width_arcsec for frame in usable}
+    quality.width_evidence = _references(
+        _most_extreme_first(usable, widths, quality.star_width_limit_arcsec, higher_is_beyond=True),
+        STAR_WIDTH_METRIC,
+    )
     with_roundness = [frame for frame in usable if frame.roundness is not None]
     if len(with_roundness) >= MINIMUM_FRAMES_PER_NIGHT:
         quality.median_roundness = statistics.median(frame.roundness for frame in with_roundness)
-        quality.roundness_evidence = _references(with_roundness, STAR_ELONGATION_METRIC)
+        roundness_values = {frame.path: frame.roundness for frame in with_roundness}
+        quality.roundness_evidence = _references(
+            _most_extreme_first(
+                with_roundness, roundness_values, quality.roundness_limit, higher_is_beyond=False
+            ),
+            STAR_ELONGATION_METRIC,
+        )
     return quality
 
 

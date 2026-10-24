@@ -64,6 +64,11 @@ every motion and capture command stays refused while delegated, but
 device settings (`set_device_property`, the backend's
 ``telescope:set_indi_property``) and the app's own INDI connect and
 disconnect stay allowed, because they move nothing and take no picture.
+Decision U4 of the same day: stopping a guiding run or an alignment run is
+NOT allowed. The library refuses it (`control.guiding.stop_loop` and
+`control.mount.cancel_centering`), so the backend's ``guiding:stop`` and
+``telescope:alignment_stop`` are refused too. The two stops are not MCP
+tools; `test_monitor_mode_sends_no_commands` tests them by name.
 """
 
 ALLOWED_RPC_IN_MONITOR_MODE = frozenset({"telescope:connect", "telescope:set_indi_property"})
@@ -125,6 +130,7 @@ SAMPLE_ARGUMENTS: dict[str, dict[str, Any]] = {
     "observatory_imaging_focus_move": {"steps": 10},
     "observatory_imaging_set_filter": {"filter_name": "L"},
     "observatory_mount_abort_motion": {},
+    "observatory_mount_cancel_centering": {"run_is_active": True},
     "observatory_mount_manual_move": {"direction": "north"},
     "observatory_mount_park": {},
     "observatory_mount_set_slew_rate": {"rate_index": 1},
@@ -138,8 +144,8 @@ SAMPLE_ARGUMENTS: dict[str, dict[str, Any]] = {
 }
 """Sample arguments for each command a test calls.
 
-`observatory_guiding_run_loop` is added by `sample_arguments`, because
-it needs a fresh `threading.Event`."""
+`observatory_guiding_run_loop` and `observatory_guiding_stop_loop` are
+added by `sample_arguments`, because they need a fresh `threading.Event`."""
 
 CHILD_PREFIXES = ("mount", "imaging", "guiding", "remote", "history", "safety", "equipment")
 """The children of `Wayfinder.control` that hold operations."""
@@ -188,7 +194,7 @@ def sample_arguments(tool_name: str) -> dict[str, Any]:
         Arguments that pass the tool's own checks, so a refusal can only
         come from monitor mode.
     """
-    if tool_name == "observatory_guiding_run_loop":
+    if tool_name in ("observatory_guiding_run_loop", "observatory_guiding_stop_loop"):
         return {"stop": threading.Event()}
     return dict(SAMPLE_ARGUMENTS[tool_name])
 

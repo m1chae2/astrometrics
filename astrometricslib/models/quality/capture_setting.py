@@ -11,6 +11,14 @@ header cards, and a partial record is still worth storing.
 
 from pydantic import BaseModel, ConfigDict, Field
 
+UNKNOWN_CAPTURE_SETTING_CAMERA = "unknown capture setting"
+"""The camera name for a frame whose rows point at no capture setting.
+
+`CaptureSetting` needs a camera, so a reader that must describe a frame with no
+setting row uses this text. It is a placeholder, not a real camera; a reader
+that sees it knows the setting is unknown and must not treat it as equipment.
+"""
+
 
 class CaptureSetting(BaseModel):
     """One combination of equipment and exposure settings.

@@ -8,8 +8,11 @@ saves the identified stars into the shared star catalog.
 import logging
 from typing import Any
 
+from astropy import units as u
+from astropy.coordinates import SkyCoord
+
+from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
-from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.quality.gate_result import failed_gate, passed_gate
 from astrometricslib.models.quality.quality_summary import (
     AstrometryPipelineQualityMetrics,
@@ -29,7 +32,7 @@ from astrometricslib.pipelines.shared.star_recording import (
     merge_astrometry_stellar_object,
     record_pipeline_stars,
 )
-from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
+from astrometricslib.pipelines.shared.target_position import fill_target_position, parse_target_position
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 # The name the plate-solve check goes by in an astrometry run's gate record.
@@ -38,51 +41,41 @@ PLATE_SOLVE_GATE_NAME = "plate_solve"
 logger = logging.getLogger(__name__)
 
 
-def _backfill_target_ra_dec_from_wcs(target: Any, context: Any) -> None:
-    """Fill in a target's RA/Dec from a solved WCS, if they were unset.
+def _fill_target_position(target: Any, context: Any, drivers: Any = None) -> None:
+    """Give a target with no position the position of its object.
 
     A target created before its position was known starts with empty or
-    all-zero coordinates. Once astrometry solves an image of it, that
-    solve is a better answer than "unknown" -- so it gets written back
-    onto the target record.
+    all-zero coordinates. The position is looked up from the target's name
+    in SIMBAD. The solved image's center is only a fallback for a name
+    SIMBAD cannot resolve, and the target is then marked unverified (see
+    `fill_target_position`). A position already set is never changed.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target to update.
+    context : `Any`
+        The finished pipeline context. Its `wcs` attribute is the solved
+        sky map, or `None` when the image was not solved.
+    drivers : `Drivers`, optional
+        Supplies the SIMBAD driver. The built-in one is used when absent.
     """
-    # If target RA and DEC are not populated or zero, pull
-    # coordinates from plate solver
-    is_ra_empty = not target.ra or target.ra.strip() in ("", "0", "0.0", "0h 0m 0s")
-    is_dec_empty = not target.dec or target.dec.strip() in ("", "0", "0.0", "0° 0′ 0′′")
-    is_zero = False
-    if not (is_ra_empty or is_dec_empty):
+    if parse_target_position(target) is not None and not target.position_unverified:
+        return
+    frame_center = None
+    if context.wcs is not None:
         try:
-            resolved_ra_deg = parse_coordinate_string(str(target.ra), is_ra=True)
-            resolved_dec_deg = parse_coordinate_string(str(target.dec), is_ra=False)
-            # ruff: ignore[float-equality-comparison] -- exact
-            # sentinel check against the unset-coordinate
-            # default ("0h 0m 0s" / "0(deg) 0' 0''"), not a
-            # measured/computed value comparison.
-            if resolved_ra_deg == 0.0 and resolved_dec_deg == 0.0:
-                is_zero = True
-        except InvalidArgumentError:
-            is_zero = True
-
-    if not (is_ra_empty or is_dec_empty or is_zero):
-        return
-    if context.wcs is None:
-        return
-
-    try:
-        from astropy import units as u
-        from astropy.coordinates import SkyCoord
-
-        ra_deg = float(context.wcs.wcs.crval[0])
-        dec_deg = float(context.wcs.wcs.crval[1])
-        solved_coord = SkyCoord(ra=ra_deg * u.deg, dec=dec_deg * u.deg, frame="icrs")
-        target.ra = solved_coord.ra.to_string(unit=u.hour, sep=" ", precision=2)
-        target.dec = solved_coord.dec.to_string(unit=u.deg, sep=" ", precision=2)
-        logger.info(
-            "Updated Target %s RA/Dec from plate solver: RA=%s, DEC=%s", target.id, target.ra, target.dec
-        )
-    except DATA_ERRORS as wcs_error:
-        logger.warning("Failed to extract center coordinate from WCS for target %s: %s", target.id, wcs_error)
+            frame_center = SkyCoord(
+                ra=float(context.wcs.wcs.crval[0]) * u.deg,
+                dec=float(context.wcs.wcs.crval[1]) * u.deg,
+                frame="icrs",
+            )
+        except DATA_ERRORS as wcs_error:
+            logger.warning(
+                "Failed to extract center coordinate from WCS for target %s: %s", target.id, wcs_error
+            )
+    simbad = (drivers or Drivers()).simbad_or_default()
+    fill_target_position(target, simbad, frame_center)
 
 
 def _write_solved_wcs_to_fits_header(path: str | None, context: Any) -> None:
@@ -305,7 +298,7 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
         gaia_statistics = get_gaia_query_statistics()
         plate_solve_attempts = get_plate_solve_attempt_count()
 
-        _backfill_target_ra_dec_from_wcs(target, context)
+        _fill_target_position(target, context, request.options.get("drivers"))
         _write_solved_wcs_to_fits_header(path, context)
 
         context.stellar_objects, _ = record_pipeline_stars(

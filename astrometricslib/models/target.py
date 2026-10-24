@@ -296,6 +296,10 @@ class Target(BaseModel):
     image_type: ImageType = Field(default=ImageType.TARGET_IMAGE, alias="imageType")
     ra: str = Field(default="0h 0m 0s", alias="ra")
     dec: str = Field(default="0° 0′ 0′′", alias="dec")
+    # True when `ra`/`dec` came from the center of a solved image because
+    # the target's name could not be resolved in a catalog. That point is
+    # where the camera looked, not necessarily where the object is.
+    position_unverified: bool = Field(default=False, alias="positionUnverified")
     field_of_view: str = Field(default="0′", alias="fieldOfView")
     main_camera: str = Field(default="", alias="mainCamera")
     main_scope: str = Field(default="", alias="mainScope")

@@ -223,6 +223,7 @@ export interface TargetObject {
   imageType?: ImageType;
   ra?: string;
   dec?: string;
+  positionUnverified?: boolean;
   fieldOfView?: string;
   mainCamera?: string;
   mainScope?: string;

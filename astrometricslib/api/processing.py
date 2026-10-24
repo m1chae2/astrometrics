@@ -928,8 +928,12 @@ class ProcessingPipelines:
         ``..._normalized``), the reference flux the normalized value divides
         by, the two halves' effective frame counts, the variance factor, the
         variance ratio with each frame's modeled noise, and the shared
-        frame's two weight shares (all ``stacking.half_difference_*``). The
-        halves are deleted afterwards.
+        frame's two weight shares (all ``stacking.half_difference_*``). Five
+        more rows say what the two halves share at the scale of a few pixels
+        (an upper limit of a fixed pattern on the sensor) and how that
+        differs along and across the pointing drift (the
+        ``stacking.half_shared_fine_scale_*`` and ``stacking.walking_noise_*``
+        metrics). The halves are deleted afterwards.
 
         Cost: two stacks of half the frames each, about one library stack's
         time in all, plus the temporary disk space Siril needs for each

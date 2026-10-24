@@ -116,6 +116,7 @@ __all__ = [
     "paired_noise_difference",
     "paired_noise_ratio",
     "place_empty_apertures",
+    "read_stack_plane",
     "reset_apertures",
     "save_noise_sums",
     "signed_aperture_sum",
@@ -855,13 +856,17 @@ def signed_aperture_sum(
     return float(aperture_values.sum() - aperture.area * np.median(ring_values))
 
 
-def _stack_plane(stack_path: str) -> np.ndarray | None:
+def read_stack_plane(stack_path: str, dtype: type[np.floating] = np.float64) -> np.ndarray | None:
     """Read a stack as one 2-D float image.
 
     Parameters
     ----------
     stack_path : `str`
         The stack file.
+    dtype : `type`, optional
+        The floating-point type of the image. 64-bit by default; a caller that
+        keeps two large planes at once (the half-stack jobs) asks for 32-bit,
+        which is the type Siril writes.
 
     Returns
     -------
@@ -872,7 +877,7 @@ def _stack_plane(stack_path: str) -> np.ndarray | None:
     data = read_data(stack_path)
     if data is None:
         return None
-    return collapse_to_2d(np.asarray(data, dtype=np.float64))
+    return collapse_to_2d(np.asarray(data, dtype=dtype))
 
 
 def sky_level_of_plane(plane: np.ndarray) -> float | None:
@@ -1855,7 +1860,7 @@ def measure_stack_noise(
         does not fit the stored stars or is rotated too far, or a pixel scale
         unlike the one the apertures were chosen at).
     """
-    plane = _stack_plane(stack_path)
+    plane = read_stack_plane(stack_path)
     if plane is None:
         return StackNoiseOutcome(None, "the stack file holds no pixels")
     # The plane is read once; the sky level is taken from it here so no later
@@ -1871,6 +1876,9 @@ def measure_difference_noise(
     second_stack_path: str,
     reference_frame_path: str | None,
     apertures_path: str,
+    *,
+    first_plane: np.ndarray | None = None,
+    second_plane: np.ndarray | None = None,
 ) -> StackNoiseOutcome:
     """Measure the noise of the difference of two stacks in empty sky.
 
@@ -1895,6 +1903,10 @@ def measure_difference_noise(
         The registration reference frame both stacks share.
     apertures_path : `str`
         Where the target's apertures are kept.
+    first_plane, second_plane : `numpy.ndarray`, optional
+        The two stacks' images, when the caller has already read them (see
+        `read_stack_plane`), so the files are not read again. Both must be
+        given, or both are read here.
 
     Returns
     -------
@@ -1903,8 +1915,9 @@ def measure_difference_noise(
         stack with no pixels, stacks on different grids, or any reason
         `measure_stack_noise` gives).
     """
-    first_plane = _stack_plane(first_stack_path)
-    second_plane = _stack_plane(second_stack_path)
+    if first_plane is None or second_plane is None:
+        first_plane = read_stack_plane(first_stack_path)
+        second_plane = read_stack_plane(second_stack_path)
     if first_plane is None or second_plane is None:
         return StackNoiseOutcome(None, "a half stack file holds no pixels")
     if first_plane.shape != second_plane.shape:

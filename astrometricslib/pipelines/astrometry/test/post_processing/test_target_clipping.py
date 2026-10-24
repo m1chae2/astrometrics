@@ -608,14 +608,14 @@ def test_progress_is_reported_during_the_frame_reads(tmp_path: Path) -> None:
 
 def test_the_rows_of_the_run_and_the_frame_job_share_one_frame_subject(tmp_path: Path) -> None:
     """Clipping, rotation and frame-job rows share one frame subject."""
+    from astrometricslib.pipelines.shared.registration_record import build_registration_record
     from astrometricslib.pipelines.stacking.frame_measurement_run import quarantine_measurements_for_frame
     from astrometricslib.pipelines.stacking.post_processing.field_rotation import field_rotation_measurements
 
     setup = _setup(tmp_path, count=2)
     frame = setup.frames[1]
     clipping_row = _by_name(_clipping(setup), 1)[ASTROMETRY_FRAME_TARGET_CLIPPED_FRACTION]
-    rotation_row = field_rotation_measurements(
-        setup.frames,
+    record = build_registration_record(
         {
             "symlinked_light_paths": [f.path for f in setup.frames],
             "registration_included": [True, True],
@@ -634,9 +634,10 @@ def test_the_rows_of_the_run_and_the_frame_job_share_one_frame_subject(tmp_path:
                 },
             ],
         },
-        CONTEXT,
-        is_spectral=False,
-    )[1]
+        (0, 0),
+        None,
+    )
+    rotation_row = field_rotation_measurements(setup.frames, record, CONTEXT, is_spectral=False)[1]
     job_row = quarantine_measurements_for_frame(
         {"roundness": 0.9, "sky_median_adu": 500.0},
         SimpleNamespace(path=frame.path, timestamp=frame.timestamp),

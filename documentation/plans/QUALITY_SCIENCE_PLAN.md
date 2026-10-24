@@ -90,6 +90,29 @@ implied random noise is 1.32 times the model's and the empty-aperture noise is 1
 about half of it is shared structure. The measurement takes the time of one library stack. Numbers
 are in `STK-42`.
 
+Status on 2026-10-24, batch S4 (branch `94-science-s4-dither`, after the board's fixes): built and run on stored shifts and on scratch half stacks. Section 2.2 "Fixed pattern left after calibration" and section 2.3 "Walking
+noise" are measured from the two half stacks of the half-stack difference job, not from calibrated
+frames (the stacker keeps none). The difference cancels what the halves share and keeps the random
+noise; the new rows keep the other side: the variance the halves share at a few pixels (a
+high-pass of 3 px, in sky clear of flagged sources, with the reference frame's own noise taken out),
+beside the library stack's random variance, with the three parts of that ratio stored, and the halves'
+correlation at a 6 px lag along the drift minus the same across it. The shared variance is the part of
+any fixed pattern that stays coherent in both halves plus faint sky, not a bound on the sensor
+pattern; only the along-minus-across excess points to the sensor, and stars elongated along the drift
+add to it. On M 57 the halves share 1.84 (+- 0.33) times the stack's random variance (the
+reference-frame correction, a model, is 0.47 of it, 20% of the uncorrected value) and the excess is
+-0.0006 (+- 0.0015). The supported statement is that M 57's halves hold no white, pixel-scale pattern
+moving with the pointing at about half the stack's random variance or more; the grain a flat is
+expected to leave (a ratio of about 0.02) is 25 times below that, so the null result was expected.
+The registration step rows (`stacking.registration_step_*`) and the drift rows are stored with the
+stack's other rows from one reading of Siril's registration. The median step does not see a dither
+made every N exposures: M 57, M 52 and NGC 7331 were dithered every 10 exposures with medians of
+0.3 to 0.5 px, which the jump count and the exposure gaps show. Steps are not measured for a run
+whose transforms are not pointings (more than 10% degenerate pairs, or mostly identity
+transforms) or for a stack of several exposure groups. No dithered and undithered run of one
+field exist on one night, so the effect of dithering is not measured. Evidence is in `STK-44` and
+`STK-45`.
+
 The second review of 2026-10-17 moved the observing values (guide error, pointing error, dew,
 Moon and airmass) out of the `astrometricslib` tables into `wayfindinglib` (section 2.5). It added
 the undersampling term, the spectroscopy class gap against SNR, the flat-noise check and the
@@ -418,3 +441,23 @@ systems engineer settled every finding; the user reviews those choices in the pu
 
 No findings were rejected. The real M 57 target record was corrected in the user's database on
 2026-10-23 with the user's approval, after a backup.
+
+## Appendix F. Review board changes, batch S4
+
+The board reviewed batch S4 on 2026-10-24, and all three reviewers approved it with changes. The
+systems engineer settled every finding under the user's instruction to finish the issue without
+stopping; the user reviews those choices in the pull request.
+
+| Finding | Raised by | Where it landed |
+| :--- | :--- | :--- |
+| A fourth reader of Siril's registration data. | Architect | One registration record read once; rotation and pointing rows from it |
+| A pointing failure dropped the rotation rows; a pattern failure could drop the noise rows. | Engineer | Separate record calls and safe wrappers, each tested |
+| "Dither step" names a cause the value does not show; a duplicate count row. | Architect | `registration_step_*`; the count is the median row's sample count |
+| A median step misses dithers every N frames. | Astronomer | A jump count; it found the M 57 night of 2026-10-03 dithered every 10 frames (`STK-44`) |
+| Nikon groups with unexplained jumps were stored as measured. | Engineer | Not measured above 10% degenerate pairs or 50% identity frames |
+| The shared-variance ratio's parts were not stored. | Astronomer | The covariance, the fine-scale difference variance and the reference correction stored (`STK-45`) |
+| The reference-frame correction is not small; the walking test cannot see the expected flat grain; "upper limit" holds only coherently. | Astronomer | Stated in `STK-45`; the "80% sky" claim dropped |
+| Memory and time were not measured. | Engineer | float32 planes read once: 0.6 GB for 3008 x 3008, 1.3 GB for a Nikon RGB stack (`STK-45`) |
+
+No findings were rejected. The M 57 night is dithered every 10 frames, so earlier register text that
+calls it undithered is corrected in the issue's final cleanup.

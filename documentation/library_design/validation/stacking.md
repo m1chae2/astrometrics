@@ -1873,6 +1873,193 @@ Every Python example assumes the library is installed and configured with your o
 - **Guarded by tests:** `astrometricslib/pipelines/stacking/test/post_processing/test_frame_rotation.py` checks the rows, the polar angle against a stretch, the wrap, the parity, the not-measured cases (including a frame missing from Siril's table), the shared frame subject and that `record_stacking_quality` stores the rows in their own call.
 - **Raw record:** None kept.
 
+### STK-44
+
+**Registration step and pointing drift of a run**
+
+- **Claim:** The distance between the pointings of two exposures taken one after the other, read from the transform Siril fits for each frame (the transform's shift at the middle of the image), separates the ZWO runs with a median step of 1.2 to 2.5 px (M 27, NGC 2244 on 2026-01-17, NGC 2903, NGC 4438, Mirach), consistent with a dither at nearly every exposure, from the rest (0.25 to 0.71 px). A small median does not mean a run was not dithered. Three runs with medians of 0.31 to 0.50 px (M 57, M 52 and NGC 7331) were dithered once every 10 exposures: the median step is the drift step, and the dither shows only in the jump count (`stacking.registration_step_jump_count`) and, independently, in the capture times, where each jump comes with an exposure gap about 40 s longer than usual. A median step below one pixel is a slow drift plus the pointing jitter between exposures and the noise of Siril's fit. Whether a given step is enough to average a sensor pattern out is not known.
+- **Settings it supports:** None. The 50 px limit above which a step is left out as degenerate (`MAXIMUM_PLAUSIBLE_STEP_PX`), the 10% share of degenerate pairs and the 50% share of identity transforms above which the step rows are not measured (`MAXIMUM_DEGENERATE_SHARE`, `MAXIMUM_IDENTITY_SHARE`), and the 5 robust deviations that make a step a jump (`STEP_JUMP_SIGMAS`) are reasoned choices with the survey below behind them, not tuned values that change a result.
+- **Status:** Partly measured. The stored shifts of 40 targets (those with five or more frames of one camera) were read with the production code, and the production code was run on the registration of the M 57 half stacks. A dither every 10 exposures was checked against the capture times in three runs. No second, independent measure of the pointing exists (the Ekos logs that exist on disk, 17 analyze files from 2023 and 2024, are from the Nikon era, hold no dither event and cover none of the ZWO nights), and no field has a dithered and an undithered night on the same night.
+- **Data you need:** Frames registered by Siril with its transform (not a sequence already registered, and not a stack that joins several exposure groups), with capture times in the frame records. For the comparison of dithered with undithered runs: two runs of one field on one night, one with dithering and one without. The observatory holds none (see the result).
+- **Procedure:**
+  1. Stack the frames. The record step reads Siril's registration once into a registration record (`registration_record.py`) and stores eight rows on the stack: `stacking.registration_step_median_px`, `stacking.registration_step_mad_px`, `stacking.registration_step_jump_count`, `stacking.registration_step_degenerate_count`, `stacking.registration_step_after_drift_median_px`, `stacking.registration_drift_rate_px_per_hour`, `stacking.registration_drift_direction_deg` and `stacking.registration_drift_extent_px`. The number of pairs used is the sample count of the median row. Each measured row names, in its reason, whether the pointing was taken at the middle of the image or at the corner (the image size was unknown), the number of frames, and the pairs used and left out. A spectral stack is registered by shift only; its rows are made the same way and say so.
+  2. Read the rows.
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  for name in (
+      "stacking.registration_step_median_px",
+      "stacking.registration_step_mad_px",
+      "stacking.registration_step_jump_count",
+      "stacking.registration_step_degenerate_count",
+      "stacking.registration_step_after_drift_median_px",
+      "stacking.registration_drift_rate_px_per_hour",
+      "stacking.registration_drift_direction_deg",
+      "stacking.registration_drift_extent_px",
+  ):
+      for row in astro.quality.query(metric=name, target_id="M 57"):
+          print(name, row.value, row.uncertainty, row.sample_count, row.status.value, row.reason)
+  ```
+
+  `pointing_measurements` <!-- impl: astrometricslib.pipelines.stacking.post_processing.registration_shifts.pointing_measurements --> builds the rows from the registration record of the run. `shifts_from_registration` <!-- impl: astrometricslib.pipelines.stacking.post_processing.registration_shifts.shifts_from_registration --> takes each frame's pointing from its transform, `fit_nights` <!-- impl: astrometricslib.pipelines.stacking.post_processing.registration_shifts.fit_nights --> fits each night once, `step_summary` <!-- impl: astrometricslib.pipelines.stacking.post_processing.registration_shifts.step_summary --> gives the steps, and `drift_summary` <!-- impl: astrometricslib.pipelines.stacking.post_processing.registration_shifts.drift_summary --> the drift. `frame_geometry_measurements` <!-- impl: astrometricslib.pipelines.stacking.post_processing.record_quality.frame_geometry_measurements --> reads the registration once and builds both the frames' rotation and these rows from it; `record_stacking_quality` stores the rotation rows and the pointing rows in a call each, after the stack's rows, so a failure in one leaves the others. The stored shifts of every run in the library database are listed by `evidence_steps_v2.py` in the session's scratch folder (`science/s4/`).
+
+  Definitions. The pointing of a frame is where its transform puts the middle of the image, in pixels, compared with the registration reference frame. (Siril's matrix writes the shift of the image corner; with a turn of 0.01 degree the corner moves 0.26 px more than the middle, and that part is no pointing change.) The step is the distance between the pointings of neighboring exposures of one observing night. A step across two nights, and a step longer than 50 px, are left out and counted. The step after the drift is taken out uses a straight line fitted to each night's pointings (the Theil-Sen line decides which frames are more than 50 px off it, then a least-squares line is fitted to the rest; a night of more than 448 frames uses a fixed random sample of 100,000 pairs for the slope). The drift rate is the length of that line's slope; the axis is its direction (0 to 180 degrees from the column axis toward the row axis, rows counted downward), found only on nights whose drift is at least 3 times the error of its slope, and only when the nights' axes agree (the length of the mean at twice the angle is at least 0.5). The length of a slope is never below zero, so a rate within 3 errors of zero is biased upward (about 1.25 errors for no drift); its row says so.
+
+  The jump count. A step is a jump when it is larger than the median step plus 5 robust deviations of the steps (1.4826 times the median absolute deviation, but at least 0.1 px, so a pure drift with a spread near zero does not count every step above its median). The 90th percentile of the steps was tried first and does not see a dither every 10 exposures: one step in ten is at its edge. A simulation of 200 runs of 60 frames of independent jitter of 0.3 px plus a drift gave 2 false jumps in 11,800 steps (about one run in a hundred, because the spread is taken from the run's own steps). The number of used pairs divided by the jump count is about the dither interval N.
+
+  When the steps are refused. The step rows (all but the count of degenerate pairs, which stays as the evidence) are not measured when more than 10% of the pairs of one night have a step longer than 50 px, or when more than half of the frames have exactly the identity transform. A stack that joins several exposure groups has no one list of transforms (each group has its own reference) and all its rotation and pointing rows say so.
+- **Acceptance criterion:** Not recorded. A threshold that calls a run dithered would need runs whose dithering is known from the capture log, and the observatory has none.
+- **What to look at:** The jump count next to the median step. A median below one pixel with no jumps is pointing jitter and drift without a dither. A median below one pixel with jumps every N frames is a dither every N frames, and the capture times (a gap longer than the exposure cadence at each jump) confirm it. A median above one pixel was dithered at nearly every frame or was disturbed (a re-center, a flip, a guiding upset); the spread (`mad`) and the count of left-out pairs show which. A single jump is an upset, not a dither.
+- **Our result:** 2026-10-23 and 24, the library database copy, every run with stored registration shifts and capture times (one stack per target and camera, and each observing night alone; `science/s4/evidence_steps_v2.py`). `Jumps` is the jump count over the pairs used. `After` is the median step after each night's drift line is taken out.
+
+  | Run (ZWO ASI 533MM Pro) | Frames | Median step (px) | MAD (px) | Jumps / pairs | After drift (px) | Drift (px per hour) | Axis (deg) |
+  | --- | --- | --- | --- | --- | --- | --- | --- |
+  | M 57 2026-10-03 (stored shifts) | 61 | 0.45 | 0.22 | 8 / 60 | 0.44 | 5.7 | 43.4 |
+  | M 52 | 52 | 0.31 | 0.15 | 5 / 50 | 0.34 | 4.4 | 89.5 |
+  | NGC 7331 | 123 | 0.50 | 0.27 | 14 / 120 | 0.47 | 5.5 | 27.1 |
+  | NGC 1893 | 49 | 0.35 | 0.19 | 4 / 48 | 0.26 | 7.8 | 151.0 |
+  | M 81 2026-01-16 | 30 | 0.25 | 0.07 | 2 / 29 | 0.20 | 6.6 | 90.4 |
+  | M 81 2026-01-14 | 9 | 0.33 | 0.05 | 0 / 8 | 0.20 | 3.4 | 149.8 |
+  | M 101 2026-05-01 | 9 | 0.29 | 0.09 | 0 / 8 | 0.28 | 1.8 | 114.5 |
+  | M 45 2026-01-14 | 14 | 0.65 | 0.14 | 0 / 13 | 0.32 | 7.1 | 163.7 |
+  | NGC 2244 2026-01-14 | 6 | 0.38 | 0.08 | 0 / 5 | 0.41 | 4.9 | 144.4 |
+  | NGC 2244 2026-01-17 | 18 | 1.28 | 0.48 | 2 / 17 | 0.77 | 12.7 | 145.9 |
+  | M 27 2026-09-23 | 30 | 1.48 | 0.62 | 4 / 28 | 1.20 | 64.8 | 132.3 |
+  | M 27 2026-09-24 | 33 | 2.47 | 0.96 | 2 / 32 | 1.79 | 120.6 | 134.9 |
+  | NGC 2903 | 17 | 1.26 | 0.39 | 1 / 16 | 0.81 | 10.6 | 134.7 |
+  | NGC 4438 | 11 | 1.27 | 0.10 | 1 / 10 | 0.64 | 11.0 | 139.6 |
+  | Mirach | 40 | 1.23 | 0.70 | 0 / 39 | 1.30 | 48.5 | 90.4 |
+  | NGC 2403 | 35 | 0.60 | 0.40 | 2 / 34 | 0.52 | 8.6 | 5.0 |
+  | Deneb, Schedar, Mirfak, Albireo, Vega, M 13 2026-05-23 | 20 to 46 | 0.42 to 0.71 | 0.16 to 0.35 | 0 to 2 | 0.40 to 0.67 | 6 to 70 | |
+  | M 42, Navi, M 101 (all nights) | 13 to 80 | 0.34 to 0.36 | 0.15 to 0.20 | 0 to 1 | 0.28 to 0.36 | 2 to 18 | |
+
+  The median step separates the runs with a median of 1.2 px or more (consistent with a dither at nearly every exposure) from the others. It does not separate the others into dithered and undithered. In three runs the jump count and the capture times agree on a dither every 10 exposures: in NGC 7331 (frames 11, 21, 31 and 41, with exposure gaps of 158 to 173 s against the cadence of 123 s), M 52 (frames 16, 26, 36 and 46, gaps of 159 to 163 s against 123 s) and M 57 (below). In the other runs the jumps are single (a re-center, a flip or a guiding upset: NGC 1893, whose five jumps include an out-and-back excursion of 12.8 px at frames 25 and 26, and the several jumps of NGC 7331 away from its 10-frame pattern) or absent. Whether the dither is Ekos's own setting could not be checked: no Ekos log of a ZWO night is on disk.
+
+  The Moon (median 1.34 px) is moving on the sky and is not a dither. The Nikon DSLR groups are not comparable. Of the 19 groups with enough frames, 5 are refused over all their nights: NGC 1499 (60 of its 81 frames have exactly the identity transform) and four with a large share of degenerate pairs (M 31 25%, IC 1805 18%, NGC 6823 18% and Algol 44%). Single nights are refused too: six of M 31's, all three of IC 1805's, NGC 7000 on 2023-12-13 and NGC 7023 on 2023-10-14. The other groups keep their step rows (for example NGC 7000 with 6% degenerate pairs over its two nights and NGC 7023 with 2%), with medians from 0.3 to 9 px that for most follow the drift of an unguided mount. The limit of 10% is a coin toss near itself: NGC 7000 on 2023-12-13 has 5 degenerate pairs of 49 (10.2%) and is refused, and the Moon's 9.6% passes. Among the ZWO nights only M 27 on 2026-10-02 (3 of 18 pairs, a night for which Siril named no single reference) and the six-frame M 13 night of 2026-01-10 (1 of 5) are refused. The first survey found shifts of 5,000 to 7,400 px in some DSLR groups.
+
+  Across-night candidates of one field (they are confounded by every other difference between the nights, and none has both nights long enough for the half-stack pattern measurement of [STK-45](#stk-45), which needs eight frames in a half): M 81 (0.25 and 0.33 px on 2026-01-14 and 16, 1.32 px on 2026-01-17, 6 frames), NGC 2244 (0.38 px, 6 frames, against 1.28 px, 18 frames) and M 101 (0.29 px on 2026-05-01; the night of 2026-01-10 has 4 frames, too few for a step). **There is no pair of a dithered and an undithered run of one field on one night.**
+
+  M 57 on the night of 2026-10-03, with the production code on the registration of its two half stacks (the run behind STK-45; the reference frame is M_57_Light_Luminance_050, the frame of the heaviest weight): 61 frames over 1.20 hours; the median step 0.455 px (spread 0.168, none left out), 5 jumps in 60 pairs (the threshold is 1.70 px), the step after the drift 0.452 px, and the drift 12.9 +- 0.6 px per hour along 37.6 degrees with the pointings ranging over 12.7 px along that axis. The jumps are frames 11, 21, 31, 41 and 51 (steps of 3.8, 4.3, 5.8, 2.7 and 3.1 px, each after an exposure gap of 99 to 174 s against the cadence of 63 s) and a 1.08 px step at frame 22: this night was dithered every 10 exposures, which its median step cannot show. The frame-to-frame jitter (0.45 px, about 0.27 px in each coordinate) is as large as the median step. The stored shifts of the library stack's own registration give a different picture of the same night: the same median (0.45 px) but 8 jumps in 60 pairs (single-frame excursions at frames 3 and 4 and a jump at frame 16 that the half-stack registration does not have), a drift of 5.7 px per hour along 43.4 degrees, and a range of 11.9 px; the registration of the library stack and of the half stacks (a different reference frame, and halves registered apart) differ by more than the fit noise in the slope, which is not understood. The pattern measurement of STK-45 uses the half stacks' registration.
+
+  The stored shifts the survey used (`registrationDxPx`, `registrationDyPx` in the frame records) are the corner shifts. For the steps this makes no difference (the turn changes by about 1e-4 degree between neighboring frames, 2e-4 px at the corner), and the table above agrees with the first survey to two decimals where the two overlap.
+
+  To repeat: `science/s4/evidence_steps_v2.py` (the stored shifts of every run), `science/s4/step_sequence.py` (the step and the exposure gap of each pair of one run, for example `"M 57" 2026-10-03 ZWO`) and `science/s4/real_m57_job_v2.py` (M 57 from the half stacks' registration, with the production rows) in the session's scratch folder, or the call in the procedure.
+- **Verdict:** Not judged.
+- **Limits:** The pointing comes from Siril's fit; it has no stated error, and the jitter and the fit noise cannot be told apart. A step measures a distance, not a cause: a dither, a re-center and a guiding upset look alike, and the capture-time gap is the only second cue. A single jump is not told from an upset; a dither is recognized by three or more jumps at regular intervals. The drift line is straight; a curved drift, or dithers that walk the pointing (M 57 moves in steps of 3 to 6 px that do not average out), leave their steps in the line's residuals and widen the rate's error; the rate and the extent of a dithered run therefore include the dither. The rate is the length of a slope and is biased upward when it is not several times its error. The axis needs one night with a drift of 3 errors; runs dithered at nearly every frame have no axis, by design. A sequence already registered, a frame Siril dropped or never read, a transform that does not map the image to the plane, a stack of several exposure groups and a run whose transforms are not pointings give not-measured rows with the reason. The rules that refuse a run are a reasoned limit near which a decision is a coin toss. The pointing rows of a spectral stack (registered by shift only) are tested on synthetic records and have not been run on a real spectral stack. A stack made before the registration record existed has none and its rows are made at the next stacking run: the backfill script does not fill them (a stored summary holds no registration and a backfill invents no run).
+- **To tune for your setup:** None.
+- **Regenerate with:** The call in the procedure.
+- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/post_processing/test_registration_shifts.py` checks the pointing at the middle of the image (a turn does not move it), the sign of the row shift, the dropped and untimed frames, the step of a drift and of a dither, a dither every 5 and every 12 frames in the jump count (and that the 90th percentile misses the second), no jumps for jitter and drift, the step after the drift, a degenerate step, the refusal of a run with many degenerate pairs and of one with mostly identity transforms (with the count kept), a step across two nights, the axis of a drift (and its independence of sign), a drift lost in noise and its warning, two nights along different axes and along one axis, a bad transform that must not tilt the line, the fits made once, the bounded sample of pairs for a long night, the eight rows with their reasons, the rows of a spectral stack, and a missing transform. `astrometricslib/pipelines/stacking/test/post_processing/test_frame_rotation.py` checks that the registration is read once for both row groups, that a failure in one group leaves the other, and the reason of a multi-group stack.
+- **Raw record:** None kept in the repository. The scripts and their output are in the session's scratch folder (`science/s4/`).
+
+### STK-45
+
+**What two half stacks share at a few pixels, and whether a drift smears it**
+
+- **Claim:** The covariance of the two half stacks' fine-scale residuals (Gaussian high-pass, sigma 3 px) in sky clear of flagged sources, less the registration reference frame's own random noise, is the variance of what the halves share at that scale. It is the part of any fixed pattern that stays coherent in both halves, plus faint sky structure that the mask does not flag; it is not a measurement of the sensor pattern, and it is not an upper limit of it either (a dither that gives every exposure its own pointing takes pattern out of the shared part). A sensor pattern is smeared along the pointing drift and sky structure is not, so the halves' correlation at a lag of 6 px along the drift minus the same across it separates the two. On a real stack (M 57) an injected white pixel-scale pattern, moved by each frame's real pointing, is recovered in variance within 13% (up to a variance equal to the stack's random variance) and is seen at 5 standard errors when it is that large. The M 57 halves show no white, pixel-scale pattern that moves with the pointing (excess -0.0006 +- 0.0015), at a sensitivity of about half the stack's random variance (3 standard errors). That is all the data support.
+- **Settings it supports:** None. The filter width (3 px), the lag (6 px), the 10 px clearance and the tile size (64 px) are chosen in the code with their reasons and were not tuned.
+- **Status:** Partly measured. One injection on one real pair of halves, and four real half-stack pairs of three fields (one night dithered every 10 exposures, one nearly undithered night too short in drift, two nights of a crowded field dithered at nearly every exposure; see [STK-44](#stk-44)). The reference-frame correction is a model (below). No field has both a dithered and an undithered night, so the effect of dithering is not measured.
+- **Data you need:** A library stack of at least 16 light frames of one setting for the job; for the walking-noise rows, a drift of at least 12 px along one axis within a night. For the effect of dithering, a dithered and an undithered run of one field on one night, which the observatory does not hold (see [STK-44](#stk-44)).
+- **Procedure:**
+  1. Run the half-stack difference job ([STK-42](#stk-42)). It stacks the two halves and, from the same two files, stores eight more rows on the library stack: `stacking.half_shared_fine_scale_rms_stack_unit`, `stacking.half_shared_fine_scale_variance_ratio`, the three parts of the ratio (`stacking.half_shared_fine_scale_covariance_stack_unit_squared`, `stacking.half_fine_scale_difference_variance_stack_unit_squared` and `stacking.half_shared_fine_scale_reference_correction_stack_unit_squared`), `stacking.walking_noise_along_drift_correlation`, `stacking.walking_noise_across_drift_correlation` and `stacking.walking_noise_correlation_excess`.
+  2. Read the rows and their errors.
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  result = astro.processing.measure_half_difference_noise("M 57")
+  print(
+      result.shared_fine_scale_variance_ratio,
+      result.walking_noise_correlation_excess,
+      result.walking_noise_correlation_excess_error,
+  )
+  for name in (
+      "stacking.half_shared_fine_scale_rms_stack_unit",
+      "stacking.half_shared_fine_scale_variance_ratio",
+      "stacking.half_shared_fine_scale_covariance_stack_unit_squared",
+      "stacking.half_fine_scale_difference_variance_stack_unit_squared",
+      "stacking.half_shared_fine_scale_reference_correction_stack_unit_squared",
+      "stacking.walking_noise_along_drift_correlation",
+      "stacking.walking_noise_across_drift_correlation",
+      "stacking.walking_noise_correlation_excess",
+  ):
+      for row in astro.quality.query(metric=name, target_id="M 57", library_only=True):
+          print(name, row.value, row.uncertainty, row.status.value, row.reason)
+  ```
+
+  `measure_half_pattern` <!-- impl: astrometricslib.pipelines.stacking.post_processing.half_pattern.measure_half_pattern --> does the measurement and `half_pattern_measurements` <!-- impl: astrometricslib.pipelines.stacking.post_processing.half_pattern.half_pattern_measurements --> builds the rows. The job reads each half stack once, as 32-bit (`read_stack_plane` <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.read_stack_plane -->), and gives the two planes to both the difference noise and the pattern. It takes the drift axis from the two half runs' registration records (`drift_of_runs` <!-- impl: astrometricslib.pipelines.stacking.post_processing.registration_shifts.drift_of_runs -->). A failure of the pattern step is logged and stored as a reason, and a failure while building its rows leaves the nine rows of the difference; neither loses the difference noise.
+
+  The estimator. Both halves are high-pass filtered (the image minus its 3 px Gaussian smoothing; the empty edge is filled with the median first). The sample is the pixels at least 10 px from every faint source that the stack's faint-source mask flags ([STK-36](#stk-36)) and at least 9 px from the empty edge. The covariance of the two residuals over the sample is c. The registration reference frame is in both halves; its random noise is shared and is taken out as sigma_f^2 a b, where a and b are its weight shares and sigma_f^2 = D / F is one frame's variance: D is the variance of the difference of the residuals and F is the variance factor of [STK-42](#stk-42). The shared variance is c - sigma_f^2 a b. The random variance of the whole library stack at the same scale is D / (F N), with N the library stack's effective frame count. The ratio of the two is stored, and the root of the shared variance when it is above zero. All three parts (c, D and sigma_f^2 a b) are stored with their errors, so the ratio can be rebuilt from them, F, N, a and b (rows of [STK-42](#stk-42) and the stack's own effective frame count). The sums are taken in tiles of 64 by 64 px, and 400 bootstrap resamples of the tiles (a fixed seed) give the errors. The ratio's error leaves out the uncertainty of F and of N, and so does every row's.
+
+  The reference-frame correction is a model. It assumes that every frame has the noise of the average frame (that is what F and sigma_f^2 = D / F mean), and the reference is the frame with the heaviest weight in Siril's star-width weighting, so equal noise is the least likely to hold for it. On M 57 it is large: 0.47 in ratio units (it is N a b, whatever F is), 20% of the uncorrected ratio of 2.32. It would have to be wrong by 70% to move the ratio by its error of 0.33, and with the correction doubled the ratio would still be 1.37.
+
+  The walking-noise rows. The second half is moved by a lag of 6 px along the drift axis and by the same across it (bilinear interpolation, both signs averaged); the product with the first half, summed over the sample pairs whose four interpolation neighbors are all in the sample, divided by the geometric mean of the halves' variances, is the correlation. The drift axis is the one of [STK-44](#stk-44), found from the two half runs' transforms; it needs a drift of three errors of its slope, and the pointings must cover at least 12 px along it (twice the lag), or the rows are not measured with the reason. A pattern fixed on the sensor and smeared by the drift is correlated along it to a lag of about its length, and the signal at the lag falls as about (1 - lag / extent) of the pointing range along the axis (0.53 for M 57's 12.7 px). Faint sky structure is not smeared and is correlated alike in both directions. Stars that are elongated along the drift (a trail from field rotation or a guiding drift) are also correlated more along it than across it, and add to the excess.
+- **Acceptance criterion:** Not recorded. The injection below gives the strength at which the excess is seen, which is the only criterion the data support.
+- **What to look at:** The excess with its error. An excess above 3 errors on a drifting run says a smeared pattern is present, or stars are elongated along the drift (look at the stack); the variance ratio next to it says how large. A ratio above zero with an excess near zero says the halves share structure that does not move with the drift (sky, or a pattern that does not move with the pointing). The correlations on their own are not a result; both are small and negative at 6 px because of the filter's side lobes. A ratio is read together with its correction: a ratio below its correction (here 0.47) is not distinguished from the reference frame's noise being mis-modeled.
+- **Our result:** 2026-10-23 and 24, on scratch copies. The production job on the M 57 library stack (night of 2026-10-03, 61 frames of 60 s, dithered every 10 exposures by 2.7 to 5.8 px, ZWO ASI 533MM Pro, the private copy of [STK-42](#stk-42), 58 s for the whole job, peak memory of the process 800 MB) stored 17 rows; the eight of this entry are:
+
+  | Quantity | M 57 value |
+  | --- | --- |
+  | Pixels in the sample | 3.20 million of 9.05 million (2,209 tiles) |
+  | Covariance c of the halves | 7.38e-9 (+- 1.05e-9) stack units squared |
+  | Variance of the difference D | 1.098e-8 (+- 1.3e-11); variance factor F 0.0845, library effective frame count N 40.78 |
+  | Reference-frame correction D / F a b | 1.512e-9 (+- 1.8e-12), with a = 0.1075 and b = 0.1083 |
+  | Shared variance of the halves c - D / F a b | 5.87e-9 (+- 1.05e-9) |
+  | Random variance of the whole stack, D / (F N) | 3.19e-9 |
+  | Ratio of the two | 1.84 (+- 0.33) |
+  | Root of the shared variance | 7.7e-5 (+- 0.7e-5), 1.2% of the sky level 6.3e-3 |
+  | Correlation along the drift (axis 37.6 degrees, pointings range over 12.7 px) | -0.0165 (+- 0.0014) |
+  | Correlation across the drift | -0.0160 (+- 0.0018) |
+  | Excess | -0.0006 (+- 0.0015) |
+
+  The shared variance, the ratio and the correlations equal those of the earlier run of the same job (before the three parts were stored and the halves were read as 32-bit) to the digits shown, and the difference noise (1.0535756660888078e-3 stack units) is the same to the last digit: two 32-bit numbers this close subtract exactly. So the halves share a variance 1.8 times the library stack's own random variance at the scale of a few pixels, and none of it moves with the drift to within the error. The error of c (1.05e-9) is mostly the scatter of the sky structure over the tiles.
+
+  Injection on the same two real halves. A white pattern (one value per detector pixel) was moved by each frame's real pointing shift (the 10-frame dithers and the drift of this night) and averaged over the frames of each half, then added to the half, with its size set as a multiple s of the library stack's random rms at this scale (5.6e-5). The recovered ratio is the real ratio plus the injected variance (s squared), and the excess rises with it:
+
+  | Injected s | Injected variance ratio | Measured ratio | Excess (+- error) |
+  | --- | --- | --- | --- |
+  | 0 | 0 | 1.84 (+- 0.33) | -0.0006 (+- 0.0015) |
+  | 0.1 | 0.01 | 1.85 | -0.0004 (+- 0.0015) |
+  | 0.2 | 0.04 | 1.87 | -0.0001 (+- 0.0015) |
+  | 0.5 | 0.25 | 2.06 | +0.0019 (+- 0.0015) |
+  | 1.0 | 1.0 | 2.71 | +0.0078 (+- 0.0014) |
+  | 2.0 | 4.0 | 5.12 | +0.0203 (+- 0.0013) |
+
+  The measured ratio gains 0.22, 0.87 and 3.28 for injected variances of 0.25, 1 and 4 (12%, 13% and 18% low, the last inside the error of 0.3). The excess rises by 0.0083 to 0.0100 for each unit of injected variance ratio, and is seen at 5 errors at s = 1 and not at s = 0.5. So the walking test sees a white, pixel-scale pattern from an injected variance ratio of about 0.5 (3 errors, an excess of 0.0046). It calibrates the geometry of this one night (a 12.7 px range of dithers and drift, and a lag of 6 px); a different range or lag gives a different slope.
+
+  What the null result means. The grain that the master flat is expected to leave is far below this sensitivity: the flat's noise is 0.119% of its level ([STK-39](#stk-39)), which is 7.5e-6 of M 57's sky level 6.28e-3, a variance of 5.6e-11, a ratio of 0.018 to the stack's random variance of 3.19e-9. That is about 25 times below the 0.5 that the walking test sees (the review board's rough estimate was 10 times). The null excess was therefore expected, and it does not show that the flat leaves no pattern. The supported statement is that the M 57 halves hold no white, pixel-scale pattern moving with the pointing at a variance of about half the stack's random variance or more. It is not "80% of the shared variance is sky": an earlier reading of this entry gave that figure, from an excess at 2 errors above its value read as a pattern of 0.3 to 0.4 of the random variance, and the injection does not support so exact a split. Not ruled out: a pattern wider than the 6 px lag (flat errors correlated over 10 px or more are correlated alike along and across at this lag), a pattern that does not move with the pointing (optics, a fixed ghost), and the reference-frame correction being wrong. The ratio of 1.84 therefore stays a measure of what the halves share, with sky structure as the likely main part (the other pairs below range from 0.2 to 4.3 with the field) and not an inference about the sensor.
+
+  Other real pairs (stacked by `science/s4/pattern_run.py`: the whole night's frames first, to find Siril's own reference and the whole stack's effective frame count, then the two halves with that frame in both; the stacks were not written to the copy's stacks folder; the numbers were made before the three parts were stored and the halves were read as 32-bit, and the code is otherwise the same):
+
+  | Night | Frames in halves | Median step (STK-44) | Drift axis range (px) | Shared variance / random variance | Excess (+- error) |
+  | --- | --- | --- | --- | --- | --- |
+  | M 81 2026-01-16, 60 s | 15, 16 | 0.20 px | 2.8 | 0.21 (+- 0.006) | not measured: the drift is shorter than 12 px |
+  | M 27 2026-09-24, 60 s | 17, 17 | 2.43 px | 83.7 | 1.14 (+- 0.026) | -0.0002 (+- 0.0011) |
+  | M 27 2026-09-23, 30 s | 24, 25 | 2.23 px | 93.5 | 4.30 (+- 0.22) | -0.0018 (+- 0.0013) |
+
+  The shared variance of the halves ranges from 0.21 to 4.3 times the random variance with the field (a sparse field, a crowded Milky Way field) and not with the dithering: the two dithered M 27 nights differ by a factor of 4 from each other, and the dithered M 27 night with 33 frames has less than the M 57 night dithered every 10 exposures. The excess of both M 27 nights is zero within 1.4 errors. M 27 2026-10-02 (18 frames of 120 s) stacked as a whole night but Siril left no single reference frame, so no halves; NGC 2244 2026-01-17 has 11 frames of one exposure, too few for halves of 8. **There is no pair of a dithered and an undithered run of one field on one night, so this entry does not measure the effect of dithering.** The alternating split gives each pointing held for several exposures to both halves, so a dither every 10 exposures (M 57) leaves both halves the same set of pointings and does not reduce what they share; only a dither with a new pointing at every exposure (M 27) could.
+
+  Memory and time of the pattern step. On synthetic stacks (shared sky structure and about 750 to 6,000 stars, independent noise; `science/s4/memory_time.py`, each size in its own process through the real-run script, with the library's imports counted: the process starts at 184 MB):
+
+  | Stack | Planes | Peak after reading | Peak after the measurement | Read | Measurement |
+  | --- | --- | --- | --- | --- | --- |
+  | 3008 x 3008, one channel | 32-bit, 36 MB each | 288 MB | 608 MB | 0.0 s | 5.4 s |
+  | 6000 x 4000, three channels (averaged) | 32-bit, 96 MB each | 917 MB | 1,307 MB | 0.4 s | 13.9 s |
+  | 3008 x 3008, one channel | 64-bit, 72 MB each | 357 MB | 746 MB | 0.0 s | 5.4 s |
+  | 6000 x 4000, three channels | 64-bit, 192 MB each | 1,374 MB | 1,673 MB | 0.6 s | 14.0 s |
+
+  The measurement adds about ten copies of one plane's 32-bit size above the two planes (the faint-source mask and its distance map, the two filtered residuals, the lagged copy and the products), for example 608 MB = 184 MB for the process, 72 MB for the planes and about 350 MB of working arrays. The job on the M 57 library stack ran in 58 s with a peak of 800 MB for the process (without Siril, which runs apart). The half stacks of the job are read once as 32-bit, as the job passes them on; the figures are for the pattern step and the reads only, and an earlier version (64-bit planes read twice, an array of ones for each count) was not measured.
+
+  To repeat: `science/s4/injection.py`, `science/s4/pattern_run.py` (arguments: target, night), `science/s4/real_m57_job_v2.py` and `science/s4/memory_time.py` (arguments: width, height, channels, precision) in the session's scratch folder, or the call in the procedure.
+- **Verdict:** Not judged.
+- **Limits:** The shared variance is the part of any fixed pattern that stays coherent in both halves plus faint sky, and it is dominated by sky structure on every field tried; it is not an upper limit of the sensor pattern. The excess is the only part that points to the sensor, and it needs a drift of 12 px or more along one axis within a night. Its sensitivity (a variance ratio of about 0.5 for a white pattern, on M 57's geometry) is 25 times above the grain a flat is expected to leave, so a null excess is expected and says little about the flat. Stars elongated along the drift add a positive excess, so a positive excess is not alone a sensor pattern. A pattern that does not move with the pointing (a fixed ghost, a pattern in the optics) is not smeared and would be counted with the sky. A pattern correlated over more than the 6 px lag is not told from sky. The equal-frame-noise model for the shared reference frame's noise is the one of [STK-42](#stk-42); the correction is not small (0.47 in ratio units, 20% of the uncorrected ratio on M 57), and the reference has the heaviest weight, so the model is weakest for it. The errors treat the 64 px tiles as independent; a smear 84 px long is longer than a tile, so the errors of a long drift are somewhat too small, and they leave out the uncertainty of F and N. Interpolating the second half at a non-integer lag smooths its residuals a little, the same for the two directions only on average. Nothing was tuned: the filter width, the lag and the clearance were chosen once, with reasons in the code. Spectral stacks are not measured (the job refuses them).
+- **To tune for your setup:** None.
+- **Regenerate with:** The call in the procedure.
+- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/post_processing/test_half_pattern.py` checks that noise alone shares nothing, that a shared pixel pattern is recovered in size, that a smeared pattern is more correlated along the drift than across for three drift directions (0, 90 and 37 degrees), that the wrong axis gives a negative excess, that smooth sky structure leaves the excess at zero, the removal of the shared frame's noise, that the stored parts rebuild the ratio, that pixels are counted from the mask, every not-measured case and the eight rows. `astrometricslib/pipelines/stacking/test/test_half_difference_noise.py` checks that the job stores them, that each half is read once as 32-bit and shared, and that a failure while building the pattern rows leaves the nine difference rows.
+- **Raw record:** None kept in the repository. The scripts and their output are in the session's scratch folder (`science/s4/`); the rows were stored in the quality store of the copy.
+
 ## Design estimates
 
 These tuned values have not been measured. Each is a reasoned choice; the last column says how you could measure it on your data.

@@ -18,19 +18,19 @@ from astrometricslib import InvalidArgumentError
 from wayfindinglib.models.planning.visibility import HorizonZone, VisibilityReport
 from wayfindinglib.tasks.planning_tasks.visibility_report import build_visibility_report
 
-START = 1791061200.0  # 2026-10-03T21:00:00Z, about 15:00 in Montana
+START = 1791061200.0  # 2026-10-03T21:00:00Z, about 15:00 in Denver
 """A start time, in Unix seconds, in the afternoon at the test site."""
 
 
 def _sky() -> SimpleNamespace:
-    """Build a stand-in for `SkyEngine` at a Montana site.
+    """Build a stand-in for `SkyEngine` at an example site (Denver, CO).
 
     Returns
     -------
     sky : `types.SimpleNamespace`
         An object with the location, sidereal time and flip delay.
     """
-    location = EarthLocation(lat=45.76 * u.deg, lon=-110.74 * u.deg, height=0 * u.m)
+    location = EarthLocation(lat=39.74 * u.deg, lon=-104.99 * u.deg, height=0 * u.m)
 
     def sidereal_hours(time: Time) -> float:
         """Give the local sidereal time in hours.
@@ -49,8 +49,8 @@ def _sky() -> SimpleNamespace:
 
     return SimpleNamespace(
         location=location,
-        latitude=45.76,
-        longitude=-110.74,
+        latitude=39.74,
+        longitude=-104.99,
         elevation=0.0,
         meridian_flip_delay_min=5.0,
         get_local_sidereal_time=sidereal_hours,
@@ -75,7 +75,10 @@ def _object_crossing_after(sky: SimpleNamespace, hours: float) -> SimpleNamespac
     sidereal_start = sky.get_local_sidereal_time(Time(START, format="unix"))
     right_ascension_hours = (sidereal_start + hours * 1.0027379) % 24.0
     # A plain number is read as hours of right ascension (like a target).
-    return SimpleNamespace(id="X", ra=str(right_ascension_hours), dec="40.0", common_name="X")
+    # 5.76 degrees below the site's latitude, so the object peaks about 84
+    # degrees up: under the 89 degree limit of the blocked-range test.
+    declination = sky.latitude - 5.76
+    return SimpleNamespace(id="X", ra=str(right_ascension_hours), dec=f"{declination:.2f}", common_name="X")
 
 
 def _table(sky: SimpleNamespace, sky_object: SimpleNamespace, **overrides: object) -> VisibilityReport:

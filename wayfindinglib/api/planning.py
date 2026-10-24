@@ -689,7 +689,7 @@ class ObservationPlanning:
             ``azimuth_start_deg``, ``azimuth_end_deg`` (a range may wrap
             past north) and ``min_clear_altitude_deg``.
         timezone_offset_hours : `float`, optional
-            Write times in this UTC offset, such as -6 for Montana in
+            Write times in this UTC offset, such as -6 for Denver in
             summer. Defaults to 0 (UTC).
         clear_only : `bool`, optional
             Keep only the objects that are clear of the horizon limit at

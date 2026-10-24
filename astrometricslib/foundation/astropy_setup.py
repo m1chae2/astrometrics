@@ -14,11 +14,11 @@ works offline. `warm_earth_orientation_data` loads the table ahead of time,
 so a program can pay the half-second load cost during startup instead of on
 the user's first click.
 
-Measured with astropy 8.0.1 for a star at RA 315.7 deg, Dec 68.7 deg seen
-from Bozeman: the first conversion took 5.8 to 13.8 s with the download and
-0.5 s without. Altitude and azimuth differed by at most 0.5 arcseconds for
-dates from two years ago to ten years ahead. That is far below what a sky map
-or a telescope slew can resolve, and no date raised an error.
+Measured with astropy 8.0.1 for a star at RA 315.7 deg, Dec 68.7 deg seen from
+the observatory site: the first conversion took 5.8 to 13.8 s with the
+download and 0.5 s without. Altitude and azimuth differed by at most 0.5
+arcseconds for dates from two years ago to ten years ahead. That is far below
+what a sky map or a telescope slew can resolve, and no date raised an error.
 """
 
 import time

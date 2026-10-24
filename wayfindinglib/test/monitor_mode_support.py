@@ -317,6 +317,7 @@ class RecordingDrivers:
         "_enclosure_driver",
         "_guiding_driver",
         "_driver",
+        "_indi_diagnostics",
     )
     """The context attributes the stand-ins replace, put back by `restore`."""
 
@@ -343,6 +344,13 @@ class RecordingDrivers:
         self.context._enclosure_driver = self.drivers["enclosure"]
         self.context._guiding_driver = self.drivers["guiding"]
         self.context.driver = self.indi_session
+        # The context builds its INDI diagnostics once and keeps them, tied
+        # to the session that existed then. An earlier test (or the app
+        # start-up) may have built them over another session, so a device
+        # setting would miss the recording session. Rebuild them over it.
+        from wayfindinglib.drivers.indi.diagnostics import IndiDiagnostics
+
+        self.context._indi_diagnostics = IndiDiagnostics(session=self.indi_session)
         for mock in self.drivers.values():
             mock.connect = AsyncMock(return_value=True)
             mock.disconnect = AsyncMock(return_value=True)

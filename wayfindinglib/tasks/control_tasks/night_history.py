@@ -60,6 +60,7 @@ KIND_ARGUMENTS = {
 TYPED_KIND_ARGUMENTS = {
     "nights": (),
     "target_changes": ("session_id",),
+    "night_quality": ("session_id",),
 }
 """The kinds that answer with a typed list instead of a dictionary, and the
 optional arguments each uses. `HistoryControl.query` answers these itself

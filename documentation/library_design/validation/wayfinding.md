@@ -50,7 +50,7 @@ Every Python example assumes the library is installed and configured with your o
 **The rule table and its conformance checks**
 
 - **Claim:** Every warning, recommendation and constraint the library makes about a target's data has one row in the rule table. The row names the metrics it reads, each at one definition version, one action class, its limits, and the register entry behind it. A rule's confidence equals the status label of that entry, and a rule never reads an exploratory metric.
-- **Settings it supports:** None. The entry backs the structure of the table, not a tuned value. The tuned values are the design estimates WAY-D05 to WAY-D12.
+- **Settings it supports:** None. The entry backs the structure of the table, not a tuned value. The tuned values are the design estimates WAY-D05 to WAY-D12 and WAY-D60 to WAY-D66.
 - **Status:** Partly measured. The structural checks run on every test run. No real night has been judged with the table yet.
 - **Data you need:** None for the structure. To judge a real target you need its stored quality measurements and its capture settings.
 - **Procedure:**
@@ -644,6 +644,215 @@ Every Python example assumes the library is installed and configured with your o
 - **Guarded by tests:** `wayfindinglib/tasks/control_tasks/test/` checks the flags on made-up nights.
 - **Raw record:** None kept.
 
+### WAY-60
+
+**The target dataset report: its inputs, its joins and its statements**
+
+- **Claim:** For one target, the report summarizes each capture setting, lists the warnings and recommendations in priority order, says explicitly what could not be checked, gives a starting point when there are no frames, checks earlier "take N more" forecasts, and brings back the checklist items the user ticked when the measurements taken since still trip the rule. It reads only stored measurements, the calibration library, the stacker's set-aside records, the stored night plans and the Ekos session records. It lists the newest value of each context metric for each capture setting. It stores nothing. A report that would be longer than 40,000 characters loses its context section first, then the long evidence lists of its statements, and says so.
+- **Settings it supports:** None. The entry backs a method, not a tuned value. The constants are the design estimates WAY-D60 and WAY-D61. The size of the reply is WAY-D77.
+- **Status:** Partly measured. The joins (a stack tied to its setting through its frame weights, a set-aside frame tied to its quarantine rows, a dark tied to the light frames) and every statement are checked on made-up libraries, and the report is shown to store nothing. No real target has been reported on yet (batch 7 does that on a copy).
+- **Data you need:** A target with measured frames (`QualityRecords.measure_frames`), at least one stack, and a calibration library. For the sky model and the equipment baseline, at least three nights of frames from the same camera and settings.
+- **Procedure:**
+  1. Build the report for a target.
+  2. Read the statements in order, and open the rows each cites with `QualityRecords.query(row_ids=...)`.
+  3. Compare a statement with what you know of the target.
+
+     ```python
+     from wayfindinglib import Wayfinder
+
+     report = Wayfinder().planning.get_advisory("quality", target="M 57")
+     print(report.needs_attention)
+     for statement in report.statements:
+         print(statement.kind.value, statement.rule, statement.confidence.value, statement.message)
+     ```
+
+  `build_target_dataset_report` <!-- impl: wayfindinglib.tasks.planning_tasks.target_report_tasks.build_target_dataset_report --> builds the report, and `TargetDatasetReport` <!-- impl: wayfindinglib.models.planning.target_report.TargetDatasetReport --> is its shape.
+- **Acceptance criterion:** Not recorded (set after the result).
+- **What to look at:** Whether every statement names its setting and cites rows that exist; whether a rule that could not be checked says what is missing; whether the Moon share, where shown, is labeled model-derived; whether the stack's rows were tied to the right setting (the notes say when a stack holds more than one).
+- **Our result:** Measured value not recorded.
+- **Verdict:** Not judged.
+- **Limits:** The items `guiding_limits_exposure` and `best_window` of the decision catalog are not made; both are listed as deferred rules with their reasons (the guiding analysis lives in Control and Planning may not import Control; the nights-by-visibility model is not built). A report over the reply budget keeps all its statements but may cut their evidence lists to 20, 5 or 1 references (WAY-D77); each statement says how many it lost, and the rows stay readable with `QualityRecords.query`. A stack of several capture settings is tied to the setting with most of its frames, so its rows are judged against that setting only. The reference for the efficiency of a setting is the equipment baseline when three nights exist, else the physical reference, else none (and the report says so). The sky model needs five nights and 20 frames of the equipment.
+- **To tune for your setup:** Change the design-estimate rows WAY-D60 to WAY-D69 and WAY-D77 first, then the constants they name.
+- **Regenerate with:** No script; run the example above.
+- **Guarded by tests:** `wayfindinglib/tasks/planning_tasks/test/test_target_report_tasks.py` checks the whole report on a made-up library, `wayfindinglib/analytics/result_quality/test/test_report_rules.py` checks each rule at its limit, `wayfindinglib/tasks/planning_tasks/test/test_target_report_context.py` checks that every context metric can be shown, and `test_target_report_tasks.py` checks that a busy target (3 capture settings, 500 frames, every metric) gives a report that fits the 40,000-character reply budget.
+- **Raw record:** None kept.
+
+### WAY-70
+
+**Forecast check: planned, given the frames taken, and measured**
+
+- **Claim:** For each pair of neighboring library stack runs of a target, the change in stack noise is forecast three ways and compared: as planned (the new frames look like the past frames, in the number and exposure actually taken), given the frames actually taken (their own sky rates and star widths, with the weighting mode the stacker really used), and as measured (the ratio of the two stacks' normalized empty-aperture noise). Each carries a tolerance of one standard error of the aperture noise, 1.17 divided by the square root of the aperture count, added in quadrature for two unpaired stacks. Two numbers agree when they differ by no more than two tolerances. The outcome is as forecast, short for a known reason, short for no known reason, or not checkable with the reason.
+- **Settings it supports:** None. The entry backs a method, not a tuned value. The agreement width is the design estimate WAY-D70.
+- **Status:** Partly measured. The check is tested on made-up histories with known noise and weights (equal weights, a moonlit night, star-width weights, an unknown mode, missing values, a paired error). No real target has been replayed yet (batch 7 does that on a copy). The star-width weights use the effective star width in arcseconds as a stand-in for Siril's weighted width.
+- **Data you need:** The library stack runs of one target: `stacking.empty_aperture_noise_normalized`, `stacking.empty_aperture_noise_stack_unit` and `stacking.expected_empty_aperture_noise_stack_unit` of each stack, the `stacking.frame_weight` rows of each run, and the sky rate, read noise and star width of every member frame. At least two stack runs.
+- **Procedure:**
+  1. Read every row of the target with all runs kept, and turn the stack and weight rows into run records.
+  2. Turn the frame rows into frame observations.
+  3. Run the check.
+
+     ```python
+     from astrometricslib import Astrometrics
+     from wayfindinglib.analytics.result_quality.efficiency import frame_observations_from_measurements
+     from wayfindinglib.analytics.result_quality.forecast import forecast_check, stack_runs_from_measurements
+
+     astro = Astrometrics()
+     stack_rows = astro.quality.query(target_id="M 57", level="stack", library_only=True, latest_only=False)
+     weight_rows = astro.quality.query(
+         target_id="M 57", metric="stacking.frame_weight", library_only=True, latest_only=False
+     )
+     frame_rows = astro.quality.query(target_id="M 57", level="frame", library_only=True)
+     runs = stack_runs_from_measurements(stack_rows + weight_rows)
+     observations = frame_observations_from_measurements(frame_rows, astro.quality.capture_settings())
+     for check in forecast_check(runs, observations):
+         print(check.outcome.value, check.forecast_when_planned, check.forecast_given_frames_taken, check.measured)
+     ```
+
+  `forecast_check` <!-- impl: wayfindinglib.analytics.result_quality.forecast.forecast_check --> makes the checks, and `stack_runs_from_measurements` <!-- impl: wayfindinglib.analytics.result_quality.forecast.stack_runs_from_measurements --> builds the run records. `ForecastCheck` <!-- impl: wayfindinglib.models.planning.target_report.ForecastCheck --> is the reply shape.
+- **Acceptance criterion:** Not recorded (set after the result).
+- **What to look at:** Whether the measured change agrees with the forecast given the frames taken on nights whose cause you know (a moonlit night should be short for a known reason), and how often a check is not checkable because a run stored no weights.
+- **Our result:** Measured value not recorded.
+- **Verdict:** Not judged.
+- **Limits:** The errors are unpaired unless the caller passes a paired error. A run that made more than one stack shares its member list between them. A weighting mode that Siril did not report cannot be identified, and the check says so. The star-width weights use a stand-in for the weighted width (WAY-D70). A noise floor is named only by the separate fit over two or more steps, never from one shortfall.
+- **To tune for your setup:** Change `AGREEMENT_TOLERANCES` after replaying your own nights (WAY-D70).
+- **Regenerate with:** No script; run the example above.
+- **Guarded by tests:** `wayfindinglib/analytics/result_quality/test/test_forecast.py`.
+- **Raw record:** None kept.
+
+### WAY-71
+
+**Tonight's sky: the user's own sky model, used to predict the sky of a target at a time**
+
+- **Claim:** The sky rate of a new frame tonight is predicted by the sky model fitted to the sky rates of the user's own frames (WAY-D29), at the target's position and the planning time, for the equipment setting the frames will use. The prediction is labeled as a model, gives the model's held-out error, and says when the Moon is up but the model has no Moon term. Extinction is not modeled separately.
+- **Settings it supports:** None. The entry backs a method; the model's own constants are WAY-D29.
+- **Status:** Design estimate. The model is checked on made-up frames only. No photometric night has checked it, and its error on a real new night is not known.
+- **Data you need:** At least five nights and 20 frames of the same equipment setting, each with a sky rate, a time and a target position.
+- **Procedure:**
+  1. Gather the sky samples of every library target.
+  2. Fit the model for each equipment setting.
+  3. Predict the sky of a target tonight and compare it with the first frames of the night.
+
+     ```python
+     from astrometricslib import Astrometrics
+     from wayfindinglib.analytics.result_quality.sky_samples import collect_sky_samples, fit_sky_models
+
+     astro = Astrometrics()
+     rows = astro.quality.query(metric="frame.sky_rate_e_per_s_per_px", level="frame", library_only=True)
+     samples = collect_sky_samples(astro.targets.list(), rows, astro.quality.capture_settings())
+     models, unavailable = fit_sky_models(samples, 45.76, -110.74, 1400.0)
+     print({key: model.held_out_relative_error for key, model in models.items()}, unavailable)
+     ```
+
+  `collect_sky_samples` <!-- impl: wayfindinglib.analytics.result_quality.sky_samples.collect_sky_samples --> gathers the samples, `fit_sky_models` <!-- impl: wayfindinglib.analytics.result_quality.sky_samples.fit_sky_models --> fits them, and `summarize_sky` <!-- impl: wayfindinglib.tasks.planning_tasks.tonight_ranking_tasks.summarize_sky --> builds the label the ranking shows.
+- **Acceptance criterion:** Not recorded (set after the result).
+- **What to look at:** The difference between the predicted and the measured sky rate of the first frames of a night, against the held-out error the model reports.
+- **Our result:** Measured value not recorded.
+- **Verdict:** Not judged.
+- **Limits:** A frame's position is its target's position. Extinction is folded into the airmass term. An equipment setting with fewer than five nights has no model, and its targets are ranked from the sky of their own past frames, with a note.
+- **To tune for your setup:** Nothing beyond WAY-D29.
+- **Regenerate with:** No script; run the example above.
+- **Guarded by tests:** `wayfindinglib/analytics/result_quality/test/test_sky_samples_and_goal.py` and `wayfindinglib/tasks/planning_tasks/test/test_tonight_ranking_tasks.py`.
+- **Raw record:** None kept.
+
+### WAY-72
+
+**Tonight's ranking: gain in stack noise per hour of clock time**
+
+- **Claim:** A target is ranked by how much one clock hour of exposures would cut the noise of its stack. The hour holds fewer frames than its seconds, because each frame costs a download, every third frame a dither settle, and the hour one autofocus run (overheads from the user's Ekos sessions, else defaults). The new frames follow the target's past frames, with tonight's modeled sky. A target whose fitted floor says doubling the data would cut the noise by under 10% is ranked at zero with the reason. A target with no measured frames is marked new and is not ranked. Imaging, photometry and spectroscopy are ranked in separate lists. Solar-system targets, comets, calibration folders and asteroid searches are never ranked. A thin dataset that leads a list is called out. A ranking over the reply budget leaves out its lowest candidates and says how many (WAY-D77).
+- **Settings it supports:** None. The entry backs a method, not a tuned value. The constants are the design estimates WAY-D71 and WAY-D72.
+- **Status:** Design estimate. The ranking is tested on a made-up library. Its gains inherit the "take N more" estimate (WAY-D30), which real subsets of M 57 fell 9% to 31% short of (STK-36), and the sky model of WAY-71. No real night has been ranked and then imaged.
+- **Data you need:** The library targets with their frame measurements, the stack runs of each, the user's Ekos session records (for the overheads), the site profile and the telescope's altitude limits.
+- **Procedure:**
+  1. Rank the targets at a planning time.
+  2. Image the top target for an hour and stack it with the old frames.
+  3. Compare the real fall in noise with the ranked gain, using the forecast check (WAY-70).
+
+     ```python
+     from datetime import UTC, datetime
+
+     from astrometricslib import Astrometrics
+     from wayfindinglib.tasks.planning_tasks.tonight_ranking_tasks import rank_tonight
+
+     ranking = rank_tonight(
+         datetime(2026, 10, 10, 6, 0, tzinfo=UTC), astrometrics=Astrometrics(), site_profile=site
+     )
+     for ranked_list in ranking.lists:
+         for candidate in ranked_list.candidates:
+             print(ranked_list.use.value, candidate.rank, candidate.target_id, candidate.gain_per_hour_fraction)
+     ```
+
+  `rank_tonight` <!-- impl: wayfindinglib.tasks.planning_tasks.tonight_ranking_tasks.rank_tonight --> makes the ranking, and `TonightRanking` <!-- impl: wayfindinglib.models.planning.tonight_ranking.TonightRanking --> is the reply shape.
+- **Acceptance criterion:** Not recorded (set after the result).
+- **What to look at:** Whether the hour's real noise gain on a ranked target agrees with its ranked gain, and whether the order of two targets holds when both are imaged for an hour.
+- **Our result:** Measured value not recorded.
+- **Verdict:** Not judged.
+- **Limits:** The gain is the fall in the noise of the whole stack; sharpness is not part of it. Photometry and spectroscopy gains are stack-noise gains, not precision or signal-to-noise gains. A target seen only through its past stack ranks by the exposure of its main capture setting. The star width does not change with altitude in the forecast.
+- **To tune for your setup:** Change the three constants named in WAY-D71 to match your sequence, then compare the estimate with the real time of a night's sequence (WAY-D33).
+- **Regenerate with:** No script; run the example above.
+- **Guarded by tests:** `wayfindinglib/tasks/planning_tasks/test/test_tonight_ranking_tasks.py`.
+- **Raw record:** None kept.
+
+### WAY-73
+
+**Trust in one star's science result: spectrum classification and period search**
+
+- **Claim:** A star's spectrum is judged by the relative RMS of its best match and the gaps to the second-best match and to the next class, against the limits of the spectroscopy pipeline (SPE-16 and SPE-18). A period or repeating-dip search is judged by its verdict, its false-alarm probability as the pipeline stored it, the checks made on data it was not found from, and the number of cycles seen (at least two). Each statement gives the number behind it and cites the per-star result by star, run and statistic. Whether more time would separate two classes is never guessed: it is an explicit missing-data statement until the class gap is calibrated against the signal-to-noise ratio. A star with neither result gets one missing-data statement that names what is missing.
+- **Settings it supports:**
+  - code constants `POOR_MATCH_RMS` and `AMBIGUOUS_RMS_GAP` in `analytics/result_quality/star_result_rules.py`. Relation: derived from the spectroscopy entries SPE-16 and SPE-18, whose limits they copy; a test compares them. <!-- impl: wayfindinglib.analytics.result_quality.star_result_rules.POOR_MATCH_RMS --> <!-- impl: wayfindinglib.analytics.result_quality.star_result_rules.AMBIGUOUS_RMS_GAP -->
+- **Status:** Design estimate. The statements are tested on made-up star records. The metric names of the per-star statistics (for example `spectroscopy.self_determined_spectral_type_rms`) name fields of the star record, not registered metrics, because a per-star result has no row in the measurement store.
+- **Data you need:** A star in the stellar catalog with a spectrum (`SpectroscopyResult`) or a period search (`PhotometryResult.periodogram`), recorded for the target.
+- **Procedure:**
+  1. Ask for the trust statements of a star.
+  2. Compare each with the raw number it quotes and with your own look at the spectrum or light curve.
+
+     ```python
+     from astrometricslib import Astrometrics
+     from wayfindinglib.tasks.planning_tasks.result_judgment_tasks import judge_star_result
+
+     for statement in judge_star_result("Alcor", "HD 116656", astrometrics=Astrometrics()):
+         print(statement.kind.value, statement.rule, statement.message)
+     ```
+
+  `judge_star_result` <!-- impl: wayfindinglib.tasks.planning_tasks.result_judgment_tasks.judge_star_result --> reads the star, and `judge_star_record` <!-- impl: wayfindinglib.analytics.result_quality.star_result_rules.judge_star_record --> judges it.
+- **Acceptance criterion:** Not recorded (set after the result).
+- **What to look at:** Whether a spectrum you know is wrong (a known-type star matched to the wrong type) draws the poor-match or ambiguity warning, and whether a period you trust passes without warnings.
+- **Our result:** Measured value not recorded.
+- **Verdict:** Not judged.
+- **Limits:** Asteroid candidates are not judged (the asteroid-linking rule is deferred). Alias checks of periods are deferred. The statements add no probability of their own.
+- **To tune for your setup:** Change `MINIMUM_CYCLES_FOR_PERIOD` (WAY-D73). The spectral limits are tuned in their own entries.
+- **Regenerate with:** No script; run the example above.
+- **Guarded by tests:** `wayfindinglib/analytics/result_quality/test/test_star_result_rules.py` and `wayfindinglib/tasks/planning_tasks/test/test_result_judgment_tasks.py`.
+- **Raw record:** None kept.
+
+### WAY-74
+
+**Night review: where each target's time went, its warnings, and the guiding**
+
+- **Claim:** For one observing night, each target imaged is given a loss account in two parts (frames set aside, and the efficiency lost in the frames kept) against the user's own baseline for the equipment, or against the telescope's physical limit when there are fewer than three nights. The goal comes from the target's kind (WAY-D74). The warnings come from the same plain rules and the same `needs_attention` function as the target report. The Moon's share of the sky loss comes from the sky model and is labeled model-derived. A frame is counted as set aside only when a stored row says it was moved to the `_excluded` folder. The review reads only what the last sync copied.
+- **Settings it supports:** None. The entry backs a method, not a tuned value. The set-aside marker is the design estimate WAY-D75.
+- **Status:** Design estimate. The review is tested on a made-up library. No real night has been reviewed with it, and the causes of loss have not been checked on nights with a known cause (a night with logged clouds, a night with a bright Moon).
+- **Data you need:** The frame measurements of the night, and of the nights before it for the baseline, the capture settings, the configured observer location (for the Moon share), and the recorded guiding runs.
+- **Procedure:**
+  1. Ask for the review of a night.
+  2. Check that the captured time, the set-aside time and the effective time add up, and that each lost hour has a cause or is marked "cause unknown".
+  3. Repeat on a night with a known cause.
+
+     ```python
+     quality = control.history.query(kind="night_quality", session_id="2026-10-02", register_job=False)
+     for entry in quality.targets:
+         print(entry.target_id, entry.frames_taken, entry.needs_attention, entry.loss_account)
+     ```
+
+  `build_night_quality` <!-- impl: wayfindinglib.tasks.control_tasks.night_quality_task.build_night_quality --> makes the review, and `NightQuality` <!-- impl: wayfindinglib.models.session.night_quality.NightQuality --> is the reply shape.
+- **Acceptance criterion:** Not recorded (set after the result).
+- **What to look at:** Whether the largest share of the lost time on a night with a known cause is that cause, and whether frames the stacker moved to `_excluded` appear as set-aside time.
+- **Our result:** Measured value not recorded.
+- **Verdict:** Not judged.
+- **Limits:** Set-aside frames are not stored one by one by the stacker today, so a night may show less set-aside time than it had; a note says so. Stack-level rules read the newest stack of the target, which may be newer than the night. A review over the reply budget cuts the evidence lists of its statements and says so (WAY-D77). Transparency is not included. Focus against temperature and warnings that repeat across nights are read with `control.history.query(kind="recurring_issues")`, not in this reply.
+- **To tune for your setup:** Nothing to tune in the review. The baseline needs three nights of the same equipment setting.
+- **Regenerate with:** No script; run the example above.
+- **Guarded by tests:** `wayfindinglib/tasks/control_tasks/test/test_night_quality_task.py` and `wayfindinglib/api/test/test_night_quality_control.py`.
+- **Raw record:** None kept.
+
 ## Design estimates
 
 These values have not been measured. Each is a reasoned choice; the last column says how you could measure it on your data.
@@ -658,7 +867,7 @@ These values have not been measured. Each is a reasoned choice; the last column 
 | WAY-D09 | Fewest frames and least temperature change for the focus drift fit | 5 frames per segment, 20 in all, 1.0 degree C | `MINIMUM_FRAMES_PER_SEGMENT` <!-- impl: wayfindinglib.analytics.result_quality.focus_drift.MINIMUM_FRAMES_PER_SEGMENT --> , `MINIMUM_FRAMES_TOTAL` <!-- impl: wayfindinglib.analytics.result_quality.focus_drift.MINIMUM_FRAMES_TOTAL --> and `MINIMUM_TEMPERATURE_CHANGE_DEGC` <!-- impl: wayfindinglib.analytics.result_quality.focus_drift.MINIMUM_TEMPERATURE_CHANGE_DEGC --> | A slope is fitted from noise, or a real drift is reported as "not enough data". | Fit nights of different length and see where the slope stops changing. |
 | WAY-D10 | Efficiency budget, bootstrap and significance of the focus drift fit | Seeing efficiency 0.9 (width up about 5%), 200 resamples, 2σ | `MINIMUM_SEEING_EFFICIENCY` <!-- impl: wayfindinglib.analytics.result_quality.focus_drift.MINIMUM_SEEING_EFFICIENCY --> , `BOOTSTRAP_RESAMPLES` <!-- impl: wayfindinglib.analytics.result_quality.focus_drift.BOOTSTRAP_RESAMPLES --> and `SIGNIFICANCE_SIGMAS` <!-- impl: wayfindinglib.analytics.result_quality.focus_drift.SIGNIFICANCE_SIGMAS --> | The refocus interval is too short (more autofocus time) or too long (soft stars). | Compare the stack noise of frames kept within 5% and within 10% of the best width. |
 | WAY-D11 | Airmass exponent of the seeing term in the focus drift fit | 1.2 (seeing grows as airmass to the power 0.6, squared) | `SEEING_SQUARED_AIRMASS_EXPONENT` <!-- impl: wayfindinglib.analytics.result_quality.focus_drift.SEEING_SQUARED_AIRMASS_EXPONENT --> | Seeing change is read as focus drift. | Fit the exponent on a night with a focus held fixed by frequent autofocus. |
-| WAY-D12 | Confidence of the rules whose statements are made by another module | Design estimate until that module has its own entry | rows `guiding_limits_exposure`, `frames_lost`, `more_frames`, `more_frames_will_not_help`, `calibration_gap`, `sky_cost`, `altitude_cost`, `best_window` and `seeing_limits_resolution` of `RESULT_QUALITY_RULES` <!-- impl: wayfindinglib.analytics.result_quality.rules.RESULT_QUALITY_RULES --> | A rule is shown as better backed than it is. | Repoint each row to the entry of the module that computes it (noise growth, efficiency, the target report) when that entry exists, and set the row's confidence from its status. |
+| WAY-D12 | Confidence of the rules whose statements are made by another module | Design estimate until that module has its own entry | row `seeing_limits_resolution` of `RESULT_QUALITY_RULES` <!-- impl: wayfindinglib.analytics.result_quality.rules.RESULT_QUALITY_RULES --> | A rule is shown as better backed than it is. | Repoint each row to the entry of the module that computes it (noise growth, efficiency, the target report) when that entry exists, and set the row's confidence from its status. |
 | WAY-D20 | Wavelength and Airy factor of the diffraction limit | 550 nm; 1.029 lambda / D | `REFERENCE_WAVELENGTH_NM`, `AIRY_FWHM_FACTOR` <!-- impl: wayfindinglib.analytics.result_quality.efficiency.REFERENCE_WAVELENGTH_NM --> | A narrowband filter or a central obstruction changes the limit by 10 to 30 percent, so the reference is a little off. | Compare the sharpest star width of your best night with the limit. |
 | WAY-D21 | Physical reference width | Diffraction, site seeing and pixel blur added as squared widths | `physical_reference` <!-- impl: wayfindinglib.analytics.result_quality.efficiency.physical_reference --> | Adding in quadrature slightly underestimates the real width, so the reference is a little too sharp and efficiency reads low. | Compare with the best widths in your own library. |
 | WAY-D22 | Equipment baseline | 10th percentile of per-night medians; at least 3 nights | `BASELINE_PERCENTILE`, `MINIMUM_NIGHTS_FOR_BASELINE` <!-- impl: wayfindinglib.analytics.result_quality.efficiency.BASELINE_PERCENTILE --> | Too few nights make the baseline noisy; a lasting fault hides in it. | Vary the percentile and the night count and watch how eta of one night moves. |
@@ -692,3 +901,21 @@ These values have not been measured. Each is a reasoned choice; the last column 
 | WAY-D56 | Distance that makes a slew end count as a new position | 0.25 degrees | `NEW_POSITION_DEGREES` <!-- impl: wayfindinglib.tasks.control_tasks.target_changes.NEW_POSITION_DEGREES --> | Centering steps or meridian flips are listed as new targets. | List the slew-end distances of centering steps on your mount. |
 | WAY-D57 | Time window to find a mount position near a state change | 120 seconds | `POSITION_WINDOW_SECONDS` <!-- impl: wayfindinglib.tasks.control_tasks.target_changes.POSITION_WINDOW_SECONDS --> | A change of target has no position and is dropped. | Measure the gap between a tracking start and the nearest logged position. |
 | WAY-D58 | Largest live-status reply | 30,000 characters | `MAXIMUM_STATUS_CHARACTERS` <!-- impl: wayfindinglib.tasks.control_tasks.live_session_status_task.MAXIMUM_STATUS_CHARACTERS --> | The transport cuts the reply (it cuts at 40,000), or a useful reply is trimmed too early. | Compare the reply size with the transport limit on a busy night. |
+| WAY-D60 | Share of a setting's frames set aside that makes the frames-lost rule warn | 0.05 (one frame in twenty) | `FRAME_LOSS_WARNING_FRACTION` <!-- impl: wayfindinglib.analytics.result_quality.report_rules.FRAME_LOSS_WARNING_FRACTION --> | A real loss goes unmentioned, or a single trailed frame is called a warning. | Count the frames the stacker set aside on your nights and compare with the loss in effective time. |
+| WAY-D61 | "Take N more" in the report: fewest usable frames, and rounding of a proposed exposure | 10 frames; round up to a multiple of 10 s | `MINIMUM_FRAMES_FOR_FORECAST` <!-- impl: wayfindinglib.tasks.planning_tasks.target_report_tasks.MINIMUM_FRAMES_FOR_FORECAST -->, `EXPOSURE_ROUNDING_SECONDS` <!-- impl: wayfindinglib.tasks.planning_tasks.target_report_tasks.EXPOSURE_ROUNDING_SECONDS --> | A forecast from too few frames copies a thin sky history; a proposed exposure is longer than needed. The count itself is the design estimate WAY-D30. | Replay a target's nights as the plan describes and compare the forecast with the stack that followed. |
+| WAY-D62 | The warning that more frames will not help, from the stop signal over the target's library stack runs | Raised when doubling the data is predicted to cut the noise by under 10% (WAY-D32), from two or more runs | `stop_statement` <!-- impl: wayfindinglib.analytics.result_quality.report_rules.stop_statement --> | A real noise floor is missed with few runs, or a false stop is raised. | Test on a target with a known fixed pattern, before and after the fix. |
+| WAY-D63 | What counts as a matching calibration frame | Darks: camera, gain, offset, binning, exposure within 0.5 s, sensor temperature within 3 °C (WAY-D47). Flats: camera, filter, gain, offset, binning. Biases are not asked for | `find_calibration_gaps` <!-- impl: wayfindinglib.analytics.result_quality.report_rules.find_calibration_gaps --> | A usable dark is called a gap, or a poor match is accepted. | Stack with a dark that differs in one setting at a time and compare the stack noise. |
+| WAY-D64 | Share of captured time lost to a bright sky that makes the sky-cost rule recommend darker nights | 0.10 | `SKY_COST_MINIMUM_SHARE` <!-- impl: wayfindinglib.analytics.result_quality.report_rules.SKY_COST_MINIMUM_SHARE --> | A small loss is called a problem, or a large one is missed. The Moon's part is model-derived (WAY-D29). | Compare the predicted Moon share with the effective time of moonlit and moonless nights of one target. |
+| WAY-D65 | Altitude cuts, frames needed on each side and loss that makes the altitude-cost rule fire | Cuts 30, 40 and 50 degrees; 5 frames per side; 0.15 | `ALTITUDE_CUTS_DEG` <!-- impl: wayfindinglib.analytics.result_quality.report_rules.ALTITUDE_CUTS_DEG -->, `ALTITUDE_MINIMUM_FRAMES_PER_SIDE` <!-- impl: wayfindinglib.analytics.result_quality.report_rules.ALTITUDE_MINIMUM_FRAMES_PER_SIDE -->, `ALTITUDE_MINIMUM_RELATIVE_LOSS` <!-- impl: wayfindinglib.analytics.result_quality.report_rules.ALTITUDE_MINIMUM_RELATIVE_LOSS --> | Altitude is mixed up with time of night, so part of the loss may be the sky or the seeing of that hour. | Plot frame efficiency against altitude on one night. |
+| WAY-D66 | Sharpness trade-off: share of frames kept, least gain and fewest frames | Keep 70%; the stars must narrow by at least 5%; 20 frames | `SHARPNESS_KEEP_FRACTION` <!-- impl: wayfindinglib.analytics.result_quality.report_rules.SHARPNESS_KEEP_FRACTION -->, `SHARPNESS_MINIMUM_GAIN` <!-- impl: wayfindinglib.analytics.result_quality.report_rules.SHARPNESS_MINIMUM_GAIN -->, `SHARPNESS_MINIMUM_FRAMES` <!-- impl: wayfindinglib.analytics.result_quality.report_rules.SHARPNESS_MINIMUM_FRAMES --> | The noise change is a forecast from sky and read noise, and the width of the stack is not the median of its frames. | Stack the sharpest 70% of a target's frames and compare the stack's star width and noise with the forecast. |
+| WAY-D67 | Starting point for a target with no frames | Sky variance at least 9 read-noise variances (WAY-D24), using the moonless sky while the target is above 30 degrees; the clipping cap is not computed without a zero point that is not exploratory | `build_starting_point` <!-- impl: wayfindinglib.analytics.result_quality.starting_point.build_starting_point -->, `STARTING_POINT_MINIMUM_ALTITUDE_DEG` <!-- impl: wayfindinglib.tasks.planning_tasks.target_report_tasks.STARTING_POINT_MINIMUM_ALTITUDE_DEG --> | The first exposure is too short (read noise) or too long (a bright star clips). It is always labeled a starting point. | Take the first frames at the proposed exposure and read `frame.sky_noise_e` against `frame.read_noise_e`. |
+| WAY-D68 | Choices that decide which numbers a setting is judged against | Science goal from the catalog type (extended for M, NGC and IC; spectral when more than half the lights are spectral; else faint point source); efficiency reference is the equipment baseline, else the physical reference; a stack belongs to the setting of most of its frames | `science_goal_for` <!-- impl: wayfindinglib.tasks.planning_tasks.target_report_inputs.science_goal_for -->, `assign_stacks_to_settings` <!-- impl: wayfindinglib.tasks.planning_tasks.target_report_inputs.assign_stacks_to_settings -->, `LibraryContext.reference_for` <!-- impl: wayfindinglib.tasks.planning_tasks.target_report_inputs.LibraryContext.reference_for --> | A galaxy that is also a star field, or a photometry target, gets the wrong goal exponent; a stack of mixed settings is judged against one. | Compare the efficiency of a target under each goal; list the stacks whose frames hold more than one setting. |
+| WAY-D69 | Checklist return and the priority boost rule | A ticked item returns when its rule still fires on a row measured after the tick, on a night that began on or after the tick's night; a row-less statement returns while it still fires. The boost fires on one or more warnings and on a confirmed asteroid or a variable candidate | `build_target_dataset_report` <!-- impl: wayfindinglib.tasks.planning_tasks.target_report_tasks.build_target_dataset_report -->, `place` <!-- impl: wayfindinglib.tasks.planning_tasks.scheduling.place --> | A fix is called failed when the data is older than the fix, or a package is raised for a minor warning. | Tick an item, take frames, and check that it returns only after a new measurement trips the rule. |
+| WAY-D70 | Agreement width of the forecast check, and the star-width stand-in | 2σ (σ is one tolerance, one standard error); the weighted star width of Siril is replaced by the effective star width in arcseconds | `AGREEMENT_TOLERANCES` <!-- impl: wayfindinglib.analytics.result_quality.forecast.AGREEMENT_TOLERANCES --> and `stack_frames_from_observations` <!-- impl: wayfindinglib.analytics.result_quality.forecast.stack_frames_from_observations --> | A shortfall is called as forecast (width too large) or a normal scatter is called a shortfall (width too small); star-width weights are forecast a little wrong. | Replay a target's nights, count how many checks fall outside two tolerances when the stack is known to be as forecast, and compare the weights Siril wrote with the forecast ones. |
+| WAY-D71 | Assumptions of the hour in the ranking | A dataset under 2 hours is thin; a dither every 3 frames; one autofocus run per hour | `THIN_DATASET_SECONDS` <!-- impl: wayfindinglib.tasks.planning_tasks.tonight_ranking_tasks.THIN_DATASET_SECONDS -->, `DITHER_EVERY_FRAMES` <!-- impl: wayfindinglib.tasks.planning_tasks.tonight_ranking_tasks.DITHER_EVERY_FRAMES --> and `AUTOFOCUS_RUNS_PER_HOUR` <!-- impl: wayfindinglib.tasks.planning_tasks.tonight_ranking_tasks.AUTOFOCUS_RUNS_PER_HOUR --> | The hour holds more or fewer frames than the sequence takes, so every gain per hour is off by the same factor. A thin target is not called out, or a deep one is. | Count the frames of a real hour of your sequence and compare them with the ranking's frames in the hour. |
+| WAY-D72 | What the gain of the ranking means | One minus the noise of the stack after one clock hour over its noise now, with the new frames copying the target's past frames and tonight's modeled sky | `score_candidate` <!-- impl: wayfindinglib.tasks.planning_tasks.tonight_ranking_tasks.score_candidate --> | A target is ranked high that gains in noise but not in the sharpness or the precision the user cares about. | Compare the ranked order with the order of the real gains after an hour on two targets. |
+| WAY-D73 | Fewest cycles for a period claim | 2 | `MINIMUM_CYCLES_FOR_PERIOD` <!-- impl: wayfindinglib.analytics.result_quality.star_result_rules.MINIMUM_CYCLES_FOR_PERIOD --> | A period seen for less than two cycles is trusted, or a good one is called short. | Test the period search on a light curve with a known period cut to different lengths. |
+| WAY-D74 | Science goal read from the target's kind | Spectral frames: slitless spectra; a photometry record: bright-star photometry; Messier, NGC or IC: extended object; any other name: faint point source | `science_goal_for_target` <!-- impl: wayfindinglib.analytics.result_quality.science_goal.science_goal_for_target --> | Seeing is counted as lost time for an extended object, or not counted for a star, so the loss account is off. | Compare the goal with what you imaged each target for. |
+| WAY-D75 | Text that marks a frame as set aside | A row whose action contains `_excluded` | `SET_ASIDE_MARKER` <!-- impl: wayfindinglib.tasks.control_tasks.night_quality_task.SET_ASIDE_MARKER --> | Set-aside frames are missed, so the lost time is shown lower. | List the `_excluded` folders of a night and compare the frames with the rows that carry the marker. |
+| WAY-D76 | Efficiency reference for the night review | The user's own baseline when there are at least three nights of the setting; otherwise the telescope's diffraction limit with the site's seeing | `make_reference_provider` <!-- impl: wayfindinglib.tasks.control_tasks.night_quality_task.make_reference_provider --> | A lasting fault hides in the baseline; a physical limit makes every frame look worse than it can be. | Compare the loss of one night against both references. |
+| WAY-D77 | Largest reply of the target report, tonight's ranking and the night review, and what is cut when it is too long | 40,000 characters of compact JSON (the reply limit of the MCP tools). The report drops its context section first. Then each statement of the report or the review keeps 20, then 5, then 1 references. The ranking leaves out its lowest candidates | `MAXIMUM_REPLY_CHARACTERS` <!-- impl: wayfindinglib.analytics.result_quality.reply_budget.MAXIMUM_REPLY_CHARACTERS -->, `EVIDENCE_STEPS` <!-- impl: wayfindinglib.analytics.result_quality.reply_budget.EVIDENCE_STEPS -->, `fit_report_to_budget` <!-- impl: wayfindinglib.tasks.planning_tasks.target_report_tasks.fit_report_to_budget -->, `fit_ranking_to_budget` <!-- impl: wayfindinglib.tasks.planning_tasks.tonight_ranking_tasks.fit_ranking_to_budget -->, `fit_night_quality_to_budget` <!-- impl: wayfindinglib.tasks.control_tasks.night_quality_task.fit_night_quality_to_budget --> | A long reply is cut by the transport without warning, or a statement loses references the reader needed, or a target is left out of the ranking. Each cut is stated in the reply. | Build the reply for your busiest target, library or night, count its characters, and compare what was cut with what you would have opened. |

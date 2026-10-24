@@ -25,6 +25,7 @@ from wayfindinglib.models.equipment_and_site.performance_envelope import Perform
 from wayfindinglib.models.session.ekos_session import EkosSessionContext
 from wayfindinglib.models.session.live_session_status import LiveSessionStatus
 from wayfindinglib.models.session.night_list import NightListEntry, TargetChange
+from wayfindinglib.models.session.night_quality import NightQuality
 
 __all__ = ["HistoryControl"]
 
@@ -39,10 +40,11 @@ HistoryKind = Literal[
     "alignment",
     "nights",
     "target_changes",
+    "night_quality",
 ]
 """The kinds of question `HistoryControl.query` answers."""
 
-TYPED_KINDS = ("nights", "target_changes")
+TYPED_KINDS = ("nights", "target_changes", "night_quality")
 """The kinds that answer with a typed list of models, not a dictionary.
 
 `HistoryControl._answer_typed` serves them. A new typed night read (for
@@ -66,7 +68,7 @@ class HistoryControl(ControlChild):
         include: list[str] | None = None,
         limit: int = 10,
         register_job: bool = True,
-    ) -> dict[str, Any] | list[NightListEntry] | list[TargetChange]:
+    ) -> dict[str, Any] | list[NightListEntry] | list[TargetChange] | NightQuality:
         """Analyse or list past observing nights, in replies of bounded size.
 
         One front door for the observatory's history. It only reads. A
@@ -91,12 +93,15 @@ class HistoryControl(ControlChild):
             recorded nights and what data each has), or
             ``"target_changes"`` (a typed list of the slews that moved the
             mount to a new place in the sky, each matched to the nearest
-            library target).
+            library target), or ``"night_quality"`` (needs `session_id`: a
+            typed review of one night, with where each target's time went,
+            its warnings and a guiding summary).
         session_id : `str`, optional
             An observing night, named for the local date on which it began,
             for example ``"2026-09-24"``. Used by ``capture``,
             ``guiding``, ``ekos_sessions``, ``guiding_runs``,
-            ``pointing_model``, ``alignment`` and ``target_changes``.
+            ``pointing_model``, ``alignment``, ``target_changes`` and
+            ``night_quality`` (which requires it).
         ekos_file_id : `str`, optional
             One Ekos session's id. Used only by ``ekos_sessions``.
         include : `list` [`str`], optional
@@ -118,12 +123,12 @@ class HistoryControl(ControlChild):
         -------
         reply : `dict` [`str`, `Any`] or `list`
             The answer: a dictionary, or for ``nights`` a list of
-            `NightListEntry` and for ``target_changes`` a list of
-            `TargetChange`. If a dictionary had to be cut to fit,
-            ``truncated`` is true. An unknown `kind`, or an argument that
-            `kind` does not use, is refused with `InvalidArgumentError`. A
-            night or Ekos session with nothing recorded raises
-            `NotFoundError`.
+            `NightListEntry`, for ``target_changes`` a list of
+            `TargetChange` and for ``night_quality`` a `NightQuality`. If a
+            dictionary had to be cut to fit, ``truncated`` is true. An
+            unknown `kind`, or an argument that `kind` does not use, is
+            refused with `InvalidArgumentError`. A night or Ekos session
+            with nothing recorded raises `NotFoundError`.
         """
         from wayfindinglib.tasks.control_tasks import night_history
 
@@ -145,8 +150,8 @@ class HistoryControl(ControlChild):
         ekos_file_id: str | None,
         include: list[str] | None,
         limit: int,
-    ) -> list[NightListEntry] | list[TargetChange]:
-        """Answer a question whose reply is a typed list.
+    ) -> list[NightListEntry] | list[TargetChange] | NightQuality:
+        """Answer a question whose reply is a typed model.
 
         Parameters
         ----------
@@ -157,15 +162,16 @@ class HistoryControl(ControlChild):
 
         Returns
         -------
-        reply : `list`
-            The typed list for `kind`.
+        reply : `list` or `NightQuality`
+            The typed reply for `kind`.
 
         Raises
         ------
         InvalidArgumentError
-            If an argument is given that `kind` does not use.
+            If an argument is given that `kind` does not use, or
+            ``night_quality`` is asked without a night.
         """
-        from wayfindinglib.tasks.control_tasks import night_history, target_changes
+        from wayfindinglib.tasks.control_tasks import night_history, night_quality_task, target_changes
 
         night_history.refuse_unused_arguments(
             kind, night_history.TYPED_KIND_ARGUMENTS[kind], session_id, ekos_file_id, include
@@ -176,6 +182,10 @@ class HistoryControl(ControlChild):
                 return night_history.build_night_list(self._context, limit)
             case "target_changes":
                 return target_changes.find_target_changes(self._context, session_id, limit)
+            case "night_quality":
+                if session_id is None:
+                    raise InvalidArgumentError("kind 'night_quality' needs session_id, the night to review.")
+                return night_quality_task.build_night_quality(self._context, session_id)
         raise InvalidArgumentError(f"kind {kind!r} is not a typed kind.")
 
     def get_live_session_status(

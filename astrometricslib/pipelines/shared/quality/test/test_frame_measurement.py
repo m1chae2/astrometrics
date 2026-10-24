@@ -1039,7 +1039,10 @@ def test_the_region_rows_give_counts_and_errors_per_region(tmp_path: Path) -> No
     assert corner.value == pytest.approx(4.5, rel=0.05)
     assert corner.value > 1.3 * center.value
     assert corner.sample_count is not None and corner.sample_count >= 5
-    assert corner.uncertainty is not None and corner.uncertainty > 0.0
+    # The lattice has no noise and identical stars per block, so the stars'
+    # widths agree to rounding and the bootstrap error is zero or a few 1e-15,
+    # depending on the CPU. Only "not negative" holds on every machine.
+    assert corner.uncertainty is not None and corner.uncertainty >= 0.0
     assert "lie in this region" in corner.reason
     for name in FRAME_STAR_WIDTH_REGION_PX.values():
         check_measurement_against_registry(rows[name][0])

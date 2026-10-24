@@ -198,6 +198,11 @@ RPC_METHODS: tuple[str, ...] = (
     "execution:abort_session",
     "execution:reconcile_session",
     "execution:record_divergence",
+    # Night plan: read it, edit it, tick a checklist item. Each write sends
+    # the `plan:changed` event.
+    "plan:get",
+    "plan:edit",
+    "plan:tick_checklist_item",
     # Sequencer queue
     "sequencer:get_queue",
     "sequencer:create_plan",
@@ -236,6 +241,11 @@ UI_EVENTS: tuple[UiEvent, ...] = (
         "quality:measured",
         "A frame measurement job stored new quality rows. The payload is "
         "{targetId, framesMeasured, rowsWritten, observingNightIds}.",
+    ),
+    UiEvent(
+        "plan:changed",
+        "A write changed the night plan. The payload is {sessionId, revision, changed}, where "
+        "revision is the plan revision now stored and changed lists the kind of each change.",
     ),
     UiEvent("system_state_update", "The mount, processing jobs or health status changed."),
     UiEvent("log", "A backend log line, for the app's log panel."),

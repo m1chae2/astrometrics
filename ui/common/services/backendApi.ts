@@ -247,6 +247,14 @@ export interface ActionRegistry {
     "execution:reconcile_session": { payload: { session_id: string }; response: Record<string, any> };
     "execution:record_divergence": { payload: { record_id: string; observation_session_id: string; capability: string; comparison_input_id: string; intended_value: number; observed_value: number; tolerance: number; divergence_unit: string; queued_observation_package_id?: string | null; converged?: boolean | null; detail?: string }; response: Record<string, any> };
 
+    // Night plan (#95). `plan:get` without a session id lists every session.
+    // The two writes send the `plan:changed` event and answer with the
+    // `conflict` error (current revision in its details) when
+    // `expected_revision` is out of date.
+    "plan:get": { payload: { session_id?: string }; response: import('../types/backendTypes').ObservationSession | ObservationSessionSummary[] };
+    "plan:edit": { payload: { session_id: string; add?: Array<Record<string, any>>; order?: string[]; remove?: string[]; set_exposures?: Record<string, Array<Record<string, any>>>; add_checklist?: Array<Record<string, any>>; framing?: Record<string, any>; expected_revision?: number }; response: import('../types/backendTypes').PlanChange };
+    "plan:tick_checklist_item": { payload: { session_id: string; item_id: string; expected_revision?: number; note?: string; ticked_at?: string }; response: import('../types/backendTypes').PlanChange };
+
     // Ingestion
     "ingestion:start": { payload: { type: 'local' | 'remote'; sourcePath: string; targetName?: string; telescope?: string; selectedFiles?: string[] }; response: { jobId: string } };
     "ingestion:status": { payload: { job_id: string }; response: { status: string; progress: string; logs: string[] } };
@@ -480,6 +488,7 @@ const HEAVY_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
 const IDEMPOTENT_READ_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
     'telescope:list_alignment_sessions',
     'execution:list_sessions',
+    'plan:get',
     'telescope:get_session_alignment',
     'telescope:get_cumulative_tracking_data',
     'telescope:get_performance_envelope',

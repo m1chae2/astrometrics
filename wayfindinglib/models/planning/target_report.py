@@ -108,6 +108,71 @@ class ForecastCheck(BaseModel):
         return self
 
 
+class ScienceOutcomeSummary(BaseModel):
+    """Notable science results already made from a target's data.
+
+    Planning uses these to raise the priority of a target whose data has
+    already produced something worth following up.
+
+    Parameters
+    ----------
+    variable_star_candidate_count : `int`
+        Variable star candidates the photometry run found. Read from the
+        stored measurement ``photometry.variable_candidate_count``.
+    asteroid_candidate_count : `int`
+        Asteroid candidates the detection run found.
+    confirmed_asteroid_candidate_count : `int`
+        Asteroid candidates that match a known orbit.
+    flagged_pipelines : `list` [`str`]
+        Names of the pipelines whose own quality summary is flagged.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    variable_star_candidate_count: int = Field(default=0, ge=0, alias="variableStarCandidateCount")
+    asteroid_candidate_count: int = Field(default=0, ge=0, alias="asteroidCandidateCount")
+    confirmed_asteroid_candidate_count: int = Field(default=0, ge=0, alias="confirmedAsteroidCandidateCount")
+    flagged_pipelines: list[str] = Field(default_factory=list, alias="flaggedPipelines")
+
+
+class ContextReading(BaseModel):
+    """One context measurement of the target, shown beside the statements.
+
+    A context metric explains other results (the sensor temperature, how a
+    stack was made, how many stars a solve matched). It drives no rule, so
+    the report shows it here instead.
+
+    Parameters
+    ----------
+    metric : `str`
+        The registered metric name.
+    level : `str`
+        ``"frame"``, ``"stack"`` or ``"run"``.
+    value : `float` or `None`
+        The value of the newest row of this metric for the capture setting.
+        ``None`` when that row was not measured.
+    unit : `str`
+        The unit of the metric.
+    capture_setting_id : `int` or `None`
+        The capture setting the value belongs to. ``None`` when the rows
+        belong to no single setting.
+    row_count : `int`
+        How many stored rows of this metric and setting there are.
+    row_id : `int`
+        The row the value comes from, so the reading is also a reference.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    metric: str
+    level: str
+    value: float | None = None
+    unit: str = ""
+    capture_setting_id: int | None = Field(default=None, alias="captureSettingId")
+    row_count: int = Field(default=1, ge=1, alias="rowCount")
+    row_id: int | None = Field(default=None, alias="rowId")
+
+
 class StartingPoint(BaseModel):
     """A first capture setting for a target with no frames yet.
 
@@ -158,6 +223,14 @@ class TargetDatasetReport(BaseModel):
         A first setting, for a target with no frames.
     forecast_checks : `list` [`ForecastCheck`]
         How earlier forecasts compare with what was measured.
+    science_outcomes : `ScienceOutcomeSummary`
+        Science results already made from the target's data.
+    context : `list` [`ContextReading`]
+        The newest value of each context metric the target has, for each
+        capture setting. Empty when the report would not fit the reply
+        budget; see ``context_omitted_reason``.
+    context_omitted_reason : `str` or `None`
+        Why ``context`` was left empty. ``None`` when it was not.
     generated_at : `datetime`
         When the report was computed.
     """
@@ -170,4 +243,9 @@ class TargetDatasetReport(BaseModel):
     needs_attention: NeedsAttention = Field(alias="needsAttention")
     starting_point: StartingPoint | None = Field(default=None, alias="startingPoint")
     forecast_checks: list[ForecastCheck] = Field(default_factory=list, alias="forecastChecks")
+    science_outcomes: ScienceOutcomeSummary = Field(
+        default_factory=ScienceOutcomeSummary, alias="scienceOutcomes"
+    )
+    context: list[ContextReading] = Field(default_factory=list)
+    context_omitted_reason: str | None = Field(default=None, alias="contextOmittedReason")
     generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC), alias="generatedAt")

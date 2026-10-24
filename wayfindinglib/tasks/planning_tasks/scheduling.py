@@ -4,7 +4,7 @@ Description: `schedule_session` does the work behind
 `ObservationPlanning.create_plan(kind="scheduled_session")` in seven
 steps: work out the night window, split the packages into fixed-time and
 "as soon as possible" ones, place the fixed-time ones, raise the priority
-of packages whose quality advisory asks for it, place the rest greedily
+of packages whose target report asks for it, place the rest greedily
 in priority order, explain why each package that did not fit was left
 out, and assemble the `ObservationSession`.
 
@@ -31,7 +31,7 @@ from wayfindinglib.models.equipment_and_site.equipment import Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
 from wayfindinglib.models.planning.observation_package import ObservationPackage
 from wayfindinglib.models.planning.planning_config import PlanningConfig
-from wayfindinglib.models.planning.quality_advisory import TargetQualityAdvisory
+from wayfindinglib.models.planning.target_report import TargetDatasetReport
 from wayfindinglib.models.session.observation_session import (
     InfeasibilityReason,
     InfeasibilityReasonCode,
@@ -82,14 +82,19 @@ def _target_coordinates(astrometrics: Any, target_id: str) -> tuple[float, float
 
 def _apply_advisory_boost(
     request: PlacementRequest,
-    quality_advisories: dict[str, TargetQualityAdvisory],
+    target_reports: dict[str, TargetDatasetReport],
     planning_config: PlanningConfig,
 ) -> int:
     """Compute the bounded priority boost for one opted-in package.
 
     Never a decrease: a package that has not opted in, or whose target
-    has no qualifying flag or outcome, receives a boost of zero. The
-    advisory only advises; it never removes a package.
+    has no qualifying warning or outcome, receives a boost of zero. The
+    report only advises; it never removes a package.
+
+    The flagged-quality boost is given when the report's warnings need
+    attention (`NeedsAttention.warning_count` above 0). The science-outcome
+    boost is given when the report's science outcomes show a confirmed
+    asteroid candidate or a variable star candidate.
 
     Returns
     -------
@@ -98,15 +103,15 @@ def _apply_advisory_boost(
     """
     if not request.package.quality_weighting_enabled:
         return 0
-    advisory = quality_advisories.get(request.package.target_id)
-    if advisory is None:
+    report = target_reports.get(request.package.target_id)
+    if report is None:
         return 0
     boost = 0
-    if advisory.has_any_flagged():
+    if report.needs_attention.warning_count > 0:
         boost += planning_config.flagged_quality_priority_boost
     if (
-        advisory.science_outcomes.confirmed_asteroid_candidate_count > 0
-        or advisory.science_outcomes.variable_star_candidate_count > 0
+        report.science_outcomes.confirmed_asteroid_candidate_count > 0
+        or report.science_outcomes.variable_star_candidate_count > 0
     ):
         boost += planning_config.science_outcome_priority_boost
     return boost
@@ -189,7 +194,7 @@ def place(
     night_window: tuple[datetime, datetime],
     site_profile: SiteProfile,
     telescope: Telescope,
-    quality_advisories: dict[str, TargetQualityAdvisory] | None = None,
+    target_reports: dict[str, TargetDatasetReport] | None = None,
     planning_config: PlanningConfig | None = None,
 ) -> tuple[list[QueuedObservationPackage], list[InfeasibilityReason]]:
     """Place every requested package into the night window.
@@ -205,7 +210,7 @@ def place(
         The observing site.
     telescope : `Telescope`
         The active telescope, supplying the pointing envelope.
-    quality_advisories : `dict` [`str`, `TargetQualityAdvisory`], optional
+    target_reports : `dict` [`str`, `TargetDatasetReport`], optional
         Pre-fetched advisories keyed by target id, consulted for
         packages with `quality_weighting_enabled`.
     planning_config : `PlanningConfig`, optional
@@ -219,7 +224,7 @@ def place(
         every package that could not be placed.
     """
     planning_config = planning_config or PlanningConfig()
-    quality_advisories = quality_advisories or {}
+    target_reports = target_reports or {}
     step = timedelta(minutes=planning_config.night_window_time_step_min)
     window_start, window_end = night_window
 
@@ -279,7 +284,7 @@ def place(
 
     # --- Step 4: Advisory-Informed Priority ---
     boosts: dict[str, int] = {
-        r.package.id: _apply_advisory_boost(r, quality_advisories, planning_config) for r in soonest_requests
+        r.package.id: _apply_advisory_boost(r, target_reports, planning_config) for r in soonest_requests
     }
 
     # --- Step 5: Greedy Placement ---
@@ -464,7 +469,7 @@ def schedule_session(
     telescope: Telescope,
     camera_id: str,
     night_date: date,
-    quality_advisories: dict[str, TargetQualityAdvisory] | None = None,
+    target_reports: dict[str, TargetDatasetReport] | None = None,
     planning_config: PlanningConfig | None = None,
 ) -> ObservationSession:
     """Resolve the night window and place every requested package into it.
@@ -497,7 +502,7 @@ def schedule_session(
 
     night_window = resolve_night_window(site_profile, night_date, planning_config)
     queue, diagnostics = place(
-        placement_requests, night_window, site_profile, telescope, quality_advisories, planning_config
+        placement_requests, night_window, site_profile, telescope, target_reports, planning_config
     )
 
     return ObservationSession(

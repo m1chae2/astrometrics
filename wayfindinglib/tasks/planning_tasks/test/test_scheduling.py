@@ -24,17 +24,43 @@ from wayfindinglib.models.equipment_and_site.equipment import Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import AvoidanceZone, SiteProfile
 from wayfindinglib.models.planning.observation_package import ExposureRequest, FrameType, ObservationPackage
 from wayfindinglib.models.planning.planning_config import PlanningConfig
-from wayfindinglib.models.planning.quality_advisory import (
-    QualityFlagSummary,
-    ScienceOutcomeSummary,
-    TargetQualityAdvisory,
-)
+from wayfindinglib.models.planning.target_report import ScienceOutcomeSummary, TargetDatasetReport
+from wayfindinglib.models.quality.statements import NeedsAttention, Severity
 from wayfindinglib.models.session.observation_session import (
     InfeasibilityReasonCode,
     QueueEntryStatus,
     StartTimeMode,
 )
 from wayfindinglib.tasks.planning_tasks.scheduling import PlacementRequest, place
+
+
+def _report(
+    target_id: str, warning_count: int = 0, science_outcomes: ScienceOutcomeSummary | None = None
+) -> TargetDatasetReport:
+    """Build a target report with a given number of warnings.
+
+    Parameters
+    ----------
+    target_id : `str`
+        The target.
+    warning_count : `int`, optional
+        How many warnings need attention.
+    science_outcomes : `ScienceOutcomeSummary`, optional
+        The science outcomes. None means no outcomes.
+
+    Returns
+    -------
+    report : `TargetDatasetReport`
+        The report.
+    """
+    return TargetDatasetReport(
+        targetId=target_id,
+        needsAttention=NeedsAttention(
+            warningCount=warning_count, worstSeverity=Severity.WARNING if warning_count else None
+        ),
+        scienceOutcomes=science_outcomes or ScienceOutcomeSummary(),
+    )
+
 
 _WINDOW_START = datetime(2026, 8, 10, 3, 0, 0)
 _WINDOW_END = _WINDOW_START + timedelta(hours=6)
@@ -217,11 +243,7 @@ def test_priority_breaks_tie_and_boost_is_recorded(_mock_altaz: MagicMock) -> No
         package=high_priority_pkg, start_time_mode=StartTimeMode.SOONEST, ra_deg=2.0, dec_deg=0.0
     )
 
-    advisory = TargetQualityAdvisory(
-        target_id=high_priority_pkg.target_id,
-        quality_flags=[QualityFlagSummary(pipeline_name="stacking", flagged=True, flag_reasons=["low SNR"])],
-        science_outcomes=ScienceOutcomeSummary(),
-    )
+    advisory = _report(high_priority_pkg.target_id, warning_count=1)
     config = PlanningConfig(flagged_quality_priority_boost=5)
 
     queue, _diagnostics = place(
@@ -229,7 +251,7 @@ def test_priority_breaks_tie_and_boost_is_recorded(_mock_altaz: MagicMock) -> No
         (_WINDOW_START, _WINDOW_END),
         site,
         telescope,
-        quality_advisories={high_priority_pkg.target_id: advisory},
+        target_reports={high_priority_pkg.target_id: advisory},
         planning_config=config,
     )
 
@@ -301,16 +323,55 @@ def test_quality_boost_never_applied_without_opt_in(_mock_altaz: MagicMock) -> N
     request = PlacementRequest(
         package=package, start_time_mode=StartTimeMode.SOONEST, ra_deg=1.0, dec_deg=0.0
     )
-    advisory = TargetQualityAdvisory(
-        target_id=package.target_id,
-        quality_flags=[QualityFlagSummary(pipeline_name="stacking", flagged=True)],
-    )
+    advisory = _report(package.target_id, warning_count=1)
 
     queue, _diagnostics = place(
         [request],
         (_WINDOW_START, _WINDOW_END),
         site,
         telescope,
-        quality_advisories={package.target_id: advisory},
+        target_reports={package.target_id: advisory},
+    )
+    assert queue[0].applied_priority_boost == 0
+
+
+@patch("wayfindinglib.tasks.planning_tasks.visibility_tasks.compute_altaz", side_effect=_always_high_altitude)
+def test_a_confirmed_asteroid_candidate_raises_the_science_boost(_mock_altaz: MagicMock) -> None:
+    """Verify the science boost follows the report's outcomes."""
+    site, telescope = _site(), _telescope()
+    package = _package(1.0, quality_weighting_enabled=True)
+    request = PlacementRequest(
+        package=package, start_time_mode=StartTimeMode.SOONEST, ra_deg=1.0, dec_deg=0.0
+    )
+    report = _report(
+        package.target_id, science_outcomes=ScienceOutcomeSummary(confirmed_asteroid_candidate_count=1)
+    )
+    config = PlanningConfig(science_outcome_priority_boost=3)
+
+    queue, _diagnostics = place(
+        [request],
+        (_WINDOW_START, _WINDOW_END),
+        site,
+        telescope,
+        target_reports={package.target_id: report},
+        planning_config=config,
+    )
+    assert queue[0].applied_priority_boost == 3
+
+
+@patch("wayfindinglib.tasks.planning_tasks.visibility_tasks.compute_altaz", side_effect=_always_high_altitude)
+def test_a_report_without_warnings_gives_no_flag_boost(_mock_altaz: MagicMock) -> None:
+    """Verify a report with no warnings and no outcomes boosts nothing."""
+    site, telescope = _site(), _telescope()
+    package = _package(1.0, quality_weighting_enabled=True)
+    request = PlacementRequest(
+        package=package, start_time_mode=StartTimeMode.SOONEST, ra_deg=1.0, dec_deg=0.0
+    )
+    queue, _diagnostics = place(
+        [request],
+        (_WINDOW_START, _WINDOW_END),
+        site,
+        telescope,
+        target_reports={package.target_id: _report(package.target_id)},
     )
     assert queue[0].applied_priority_boost == 0

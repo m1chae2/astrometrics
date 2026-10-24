@@ -1,0 +1,419 @@
+"""Purpose: Tests for the statements that need a join, a split or a fit.
+
+Description: Checks the pure rules of the target report with made-up data:
+frames lost, the cost of a bright sky, the cost of low altitude, the
+sharpness trade-off, the calibration gap, "take N more" and the stop signal.
+Each rule is checked at its limit (it fires just above and stays quiet just
+below), takes its kind and class from the rule table, and cites its evidence.
+The starting point (sky-dominated exposure and clipping cap) is checked
+against hand-worked numbers.
+"""
+
+from collections import Counter
+
+import pytest
+
+from astrometricslib import CaptureSetting, MeasurementReference
+from wayfindinglib.analytics.result_quality import report_rules as rr
+from wayfindinglib.analytics.result_quality.capture_overheads import CaptureOverheads
+from wayfindinglib.analytics.result_quality.efficiency import CAUSE_SKY, CAUSE_SKY_MOON
+from wayfindinglib.analytics.result_quality.noise_growth import (
+    StackFrame,
+    StopSignal,
+    TakeMoreResult,
+    WeightingMode,
+)
+from wayfindinglib.analytics.result_quality.starting_point import (
+    StartingPointInputs,
+    build_starting_point,
+    clipping_cap_seconds,
+    sky_dominated_exposure_seconds,
+)
+from wayfindinglib.models.quality.capture_summary import CaptureSettingSummary
+from wayfindinglib.models.quality.efficiency import LossAccount, LossShare, ScienceGoal
+from wayfindinglib.models.quality.statements import (
+    ActionClass,
+    Confidence,
+    Severity,
+    StatementKind,
+)
+
+SETTING = CaptureSetting(
+    camera="ASI533MM Pro",
+    telescope="RC8",
+    filter_name="L",
+    exposure_seconds=60.0,
+    gain_setting=100,
+    offset=50,
+    binning=1,
+)
+
+
+def _summary(
+    frames_taken: int = 100,
+    frames_set_aside: int = 0,
+    captured_seconds: float = 6000.0,
+    account: LossAccount | None = None,
+) -> CaptureSettingSummary:
+    """Build the summary of one setting.
+
+    Returns
+    -------
+    summary : `CaptureSettingSummary`
+        The summary.
+    """
+    return CaptureSettingSummary(
+        captureSetting=SETTING,
+        framesTaken=frames_taken,
+        nights=3,
+        framesSetAside=frames_set_aside,
+        capturedSeconds=captured_seconds,
+        lossAccount=account,
+    )
+
+
+def _account(sky_seconds: float, moon_seconds: float | None) -> LossAccount:
+    """Build a loss account with a sky loss and, optionally, its Moon share.
+
+    Returns
+    -------
+    account : `LossAccount`
+        The account.
+    """
+    shares = [LossShare(cause=CAUSE_SKY, seconds=sky_seconds, recoverableWithTime=True, modelDerived=False)]
+    if moon_seconds is not None:
+        shares.append(
+            LossShare(cause=CAUSE_SKY_MOON, seconds=moon_seconds, recoverableWithTime=True, modelDerived=True)
+        )
+    return LossAccount(
+        goal=ScienceGoal.FAINT_POINT_SOURCE,
+        referenceName="baseline:x",
+        setAsideSeconds=0.0,
+        keptFrameDeficit=shares,
+        causeUnknownReason="not measured",
+        transparencyIncluded=False,
+        transparencyReason="no zero point",
+    )
+
+
+# -- frames lost -------------------------------------------------------------
+
+
+def test_frames_lost_fires_at_the_share_and_cites_the_quarantine_rows() -> None:
+    """Five in a hundred frames set aside warns; four does not."""
+    reasons = {SETTING: Counter({"clouded": 3, "trailed": 2})}
+    evidence = {SETTING: [MeasurementReference(row_id=7)]}
+    fired = rr.frames_lost_statements([_summary(frames_set_aside=5)], reasons, evidence, Counter(), 0)
+    assert len(fired) == 1
+    assert fired[0].kind == StatementKind.WARNING
+    assert fired[0].severity == Severity.ADVICE
+    assert fired[0].action_class == ActionClass.DATA_SELECTION
+    assert fired[0].message == "5 of 100 frames were set aside (clouded 3, trailed 2)."
+    assert [reference.row_id for reference in fired[0].evidence] == [7]
+    quiet = rr.frames_lost_statements([_summary(frames_set_aside=4)], reasons, evidence, Counter(), 0)
+    assert quiet == []
+
+
+def test_frames_lost_reports_frames_no_measurement_could_place() -> None:
+    """Frames with no stored setting get a statement with no setting."""
+    statements = rr.frames_lost_statements([], {}, {}, Counter({"clouded": 2}), 8)
+    assert len(statements) == 1
+    assert statements[0].capture_setting is None
+    assert "2 of 10" in statements[0].message
+    assert "Measure the target's frames again" in statements[0].reason
+
+
+# -- sky cost ----------------------------------------------------------------
+
+
+def test_sky_cost_uses_the_moon_share_when_the_model_split_it() -> None:
+    """600 s of 6000 s lost to the Moon is exactly 10%: the rule fires."""
+    statements = rr.sky_cost_statements([_summary(account=_account(900.0, 600.0))])
+    assert len(statements) == 1
+    assert statements[0].action_class == ActionClass.SCHEDULING
+    assert "10%" in statements[0].message
+    assert "Moon" in statements[0].message
+    assert "model" in statements[0].reason
+    assert rr.sky_cost_statements([_summary(account=_account(900.0, 599.0))]) == []
+
+
+def test_sky_cost_without_a_split_uses_the_whole_sky_loss_and_says_so() -> None:
+    """With no Moon split, the whole sky loss is used."""
+    statements = rr.sky_cost_statements([_summary(account=_account(700.0, None))])
+    assert len(statements) == 1
+    assert "Moon, twilight or light pollution" in statements[0].message
+    assert "No sky model" in statements[0].reason
+
+
+def test_sky_cost_needs_a_loss_account() -> None:
+    """A summary with no loss account makes no statement."""
+    assert rr.sky_cost_statements([_summary()]) == []
+
+
+# -- altitude cost -----------------------------------------------------------
+
+
+def _altitude_samples(low_eta: float, high_eta: float, count: int = 6) -> list[rr.AltitudeSample]:
+    """Make frames at 25 and 55 degrees with given efficiencies.
+
+    Returns
+    -------
+    samples : `list` [`AltitudeSample`]
+        Half of them low and half high.
+    """
+    low = [rr.AltitudeSample(25.0, low_eta, 60.0) for _ in range(count)]
+    high = [rr.AltitudeSample(55.0, high_eta, 60.0) for _ in range(count)]
+    return low + high
+
+
+def test_altitude_cost_finds_the_cut_with_the_largest_loss() -> None:
+    """Low frames at 0.5 against 0.8 lose 37.5% at every cut."""
+    cost = rr.find_altitude_cost(_altitude_samples(0.5, 0.8))
+    assert cost is not None
+    assert cost.relative_loss == pytest.approx(1.0 - 0.5 / 0.8)
+    assert cost.cut_deg == pytest.approx(30.0)
+    statement = rr.altitude_cost_statement(cost, SETTING, [MeasurementReference(row_id=1)])
+    assert statement.action_class == ActionClass.SCHEDULING
+    assert statement.message == "Frames below 30 degrees lost 38%. Image above 30 degrees."
+
+
+def test_altitude_cost_is_quiet_below_the_loss_limit_or_with_few_frames() -> None:
+    """A 10% loss is under the 15% limit; four frames on a side are too few."""
+    assert rr.find_altitude_cost(_altitude_samples(0.72, 0.8)) is None
+    assert rr.find_altitude_cost(_altitude_samples(0.5, 0.8, count=4)) is None
+
+
+# -- sharpness trade-off -----------------------------------------------------
+
+
+def _frames(count: int, sky: float = 1.0) -> list[StackFrame]:
+    """Make frames of 60 s with the same sky and a 3 e read noise.
+
+    Returns
+    -------
+    frames : `list` [`StackFrame`]
+        The frames.
+    """
+    return [
+        StackFrame(frame_id=f"f{index}", exposure_seconds=60.0, sky_rate_e_per_s_per_px=sky, read_noise_e=3.0)
+        for index in range(count)
+    ]
+
+
+def test_sharpness_tradeoff_keeps_the_sharpest_share() -> None:
+    """Keeping 70% of 20 equal frames raises noise by sqrt(20/14) - 1."""
+    widths = [2.0 + 0.1 * index for index in range(20)]
+    tradeoff = rr.find_sharpness_tradeoff(_frames(20), widths, WeightingMode.EQUAL)
+    assert tradeoff is not None
+    assert tradeoff.kept_count == 14
+    # The median of all 20 widths is 2.95; of the sharpest 14, 2.65.
+    assert tradeoff.star_width_change == pytest.approx(2.65 / 2.95 - 1.0)
+    assert tradeoff.noise_change == pytest.approx((20 / 14) ** 0.5 - 1.0)
+    statement = rr.sharpness_statement(tradeoff, SETTING, [])
+    assert statement.action_class == ActionClass.DATA_SELECTION
+    assert statement.kind == StatementKind.RECOMMENDATION
+    assert (
+        statement.message
+        == "Keeping the sharpest 70% of frames sharpens stars by 10% and raises the noise by 20%."
+    )
+
+
+def test_sharpness_tradeoff_is_quiet_when_the_frames_are_alike_or_few() -> None:
+    """Equal widths gain nothing; 19 frames are below the minimum."""
+    assert rr.find_sharpness_tradeoff(_frames(20), [2.0] * 20, WeightingMode.EQUAL) is None
+    assert (
+        rr.find_sharpness_tradeoff(_frames(19), [2.0 + 0.1 * i for i in range(19)], WeightingMode.EQUAL)
+        is None
+    )
+
+
+# -- calibration gap ---------------------------------------------------------
+
+DARK_OK = {
+    "camera": "ASI533MM Pro",
+    "iso": "100",
+    "offset": 50.0,
+    "binning": "1x1",
+    "temperature_c": -10.0,
+    "exposure": 60.0,
+    "count": 20,
+}
+FLAT_OK = {
+    "camera": "ASI533MM Pro",
+    "filter": "L",
+    "iso": "100",
+    "offset": 50.0,
+    "binning": "1x1",
+    "count": 30,
+}
+
+
+def _group(temperature: float | None = -10.0) -> rr.LightFrameGroup:
+    """Make a group of light frames.
+
+    Returns
+    -------
+    group : `LightFrameGroup`
+        The group.
+    """
+    return rr.LightFrameGroup(capture_setting=SETTING, sensor_temperature_c=temperature, frame_count=40)
+
+
+def test_calibration_gap_is_quiet_when_darks_and_flats_match() -> None:
+    """A dark and a flat that match in every setting leave no gap."""
+    assert rr.find_calibration_gaps([_group()], [DARK_OK], [FLAT_OK]) == []
+
+
+@pytest.mark.parametrize(
+    ("change", "differs"),
+    [
+        ({"exposure": 120.0}, "exposure"),
+        ({"iso": "200"}, "gain"),
+        ({"offset": 10.0}, "offset"),
+        ({"binning": "2x2"}, "binning"),
+        ({"temperature_c": 5.0}, "temperature"),
+    ],
+)
+def test_calibration_gap_names_the_setting_that_differs(change: dict, differs: str) -> None:
+    """A dark that differs in one setting does not match."""
+    findings = rr.find_calibration_gaps([_group()], [{**DARK_OK, **change}], [FLAT_OK])
+    assert [finding.frame_type for finding in findings] == ["dark"]
+    statement = rr.calibration_gap_statement(findings[0])
+    assert statement.kind == StatementKind.RECOMMENDATION
+    assert statement.action_class == ActionClass.CALIBRATION
+    assert statement.proposed_action.calibration_frame_type == "dark"
+    assert f"differs in {differs}" in statement.reason
+    assert "library dark row" in statement.reason
+    assert (
+        statement.message
+        == "Take darks at gain 100, offset 50, bin 1, 60 s, -10 C: none in the library matches."
+    )
+
+
+def test_calibration_gap_accepts_a_temperature_within_the_tolerance() -> None:
+    """A dark 2 degrees from the lights still matches (the tolerance is 3)."""
+    assert rr.find_calibration_gaps([_group()], [{**DARK_OK, "temperature_c": -8.0}], [FLAT_OK]) == []
+
+
+def test_calibration_gap_flat_needs_the_filter_and_says_when_a_camera_has_none() -> None:
+    """A flat for another filter is a gap; a camera with no flats says so."""
+    findings = rr.find_calibration_gaps([_group()], [DARK_OK], [{**FLAT_OK, "filter": "Ha"}])
+    assert [finding.frame_type for finding in findings] == ["flat"]
+    assert "differs in filter" in findings[0].nearest_row_text
+    none = rr.find_calibration_gaps([_group()], [DARK_OK], [])
+    assert "no flats for the camera ASI533MM Pro" in none[0].nearest_row_text
+
+
+# -- more frames and the stop signal -----------------------------------------
+
+
+def test_more_frames_statement_gives_the_count_the_time_and_the_noise() -> None:
+    """The statement has the count, exposure, clock time and noise."""
+    result = TakeMoreResult(
+        frames_needed=20,
+        predicted_noise_ratio=0.71,
+        target_noise_ratio=0.707,
+        added_exposure_seconds=1800.0,
+        new_exposure_seconds=90.0,
+        reason="A design estimate.",
+    )
+    overheads = CaptureOverheads(
+        download_seconds=5.0,
+        dither_settle_seconds=20.0,
+        autofocus_seconds=120.0,
+        download_from_records=False,
+        dither_from_records=False,
+        autofocus_from_records=False,
+        gaps_used=0,
+    )
+    statement = rr.more_frames_statement(result, SETTING, overheads, [MeasurementReference(row_id=3)])
+    assert statement is not None
+    assert statement.kind == StatementKind.RECOMMENDATION
+    assert statement.confidence == Confidence.DESIGN_ESTIMATE
+    assert statement.proposed_action.frame_count == 20
+    assert statement.proposed_action.exposure_seconds == pytest.approx(90.0)
+    assert (
+        statement.message
+        == "Take 20 more at 90 s (about 32 min with downloads) to cut the noise by about 29%."
+    )
+    assert statement.expected_effect.wall_clock_seconds == pytest.approx(1900.0)
+    assert rr.more_frames_statement(TakeMoreResult(target_noise_ratio=0.707), SETTING, overheads, []) is None
+
+
+def test_stop_statement_is_a_warning_with_advice() -> None:
+    """The stop warning names the effective time and what to fix first."""
+    signal = StopSignal(
+        stopped=True,
+        predicted_gain_fraction=0.05,
+        reason="Doubling the data would cut the noise by 5 percent.",
+    )
+    statement = rr.stop_statement(signal, SETTING, 7200.0, [MeasurementReference(row_id=9)])
+    assert statement.kind == StatementKind.WARNING
+    assert statement.severity == Severity.ADVICE
+    assert (
+        statement.message
+        == "Noise stopped falling after about 2.0 h. Retake flats or dither before adding frames."
+    )
+
+
+# -- starting point ----------------------------------------------------------
+
+
+def test_sky_dominated_exposure_is_nine_read_noise_variances_over_the_sky_rate() -> None:
+    """Read noise 3 e and sky 0.5 e/s/px: 9 * 9 / 0.5 = 162 s."""
+    assert sky_dominated_exposure_seconds(0.5, 3.0) == pytest.approx(162.0)
+    with pytest.raises(ValueError, match="sky rate"):
+        sky_dominated_exposure_seconds(0.0, 3.0)
+
+
+def test_clipping_cap_aims_the_peak_at_the_target_fraction_of_the_room() -> None:
+    """A peak rate of 100 ADU/s and 40000 ADU of room give 320 s."""
+    assert clipping_cap_seconds(100.0, 40000.0) == pytest.approx(320.0)
+    with pytest.raises(ValueError, match="above 0"):
+        clipping_cap_seconds(0.0, 1.0)
+
+
+def _inputs(**changes: object) -> StartingPointInputs:
+    """Build starting point inputs with a sky and a read noise.
+
+    Returns
+    -------
+    inputs : `StartingPointInputs`
+        The inputs, with the given changes.
+    """
+    base = {
+        "capture_setting": SETTING,
+        "sky_rate_e_per_s_per_px": 0.5,
+        "sky_note": "Sky: test.",
+        "read_noise_e": 3.0,
+        "read_noise_note": "Read noise: test.",
+        "peak_rate_adu_per_s": None,
+        "room_adu": None,
+        "clipping_note": "No zero point exists.",
+    }
+    base.update(changes)
+    return StartingPointInputs(**base)
+
+
+def test_starting_point_has_an_exposure_and_no_cap_without_a_zero_point() -> None:
+    """The exposure is computed; the cap is not computed and says why."""
+    point = build_starting_point(_inputs())
+    assert point.exposure_seconds == pytest.approx(162.0)
+    assert point.clipping_cap_seconds is None
+    assert "No zero point" in point.clipping_cap_reason
+    assert point.confidence == Confidence.DESIGN_ESTIMATE
+
+
+def test_starting_point_is_held_to_the_clipping_cap_when_it_is_shorter() -> None:
+    """A cap of 80 s (0.8 * 10000 / 100) holds the 162 s exposure to 80 s."""
+    point = build_starting_point(_inputs(peak_rate_adu_per_s=100.0, room_adu=10000.0))
+    assert point.clipping_cap_seconds == pytest.approx(80.0)
+    assert point.exposure_seconds == pytest.approx(80.0)
+    assert "clipping cap" in point.exposure_reason
+
+
+def test_starting_point_says_what_is_missing_instead_of_inventing_a_number() -> None:
+    """With no read noise there is no exposure, and the reason names it."""
+    point = build_starting_point(_inputs(read_noise_e=None, read_noise_note="No measured read noise exists."))
+    assert point.exposure_seconds is None
+    assert "No measured read noise" in point.exposure_reason

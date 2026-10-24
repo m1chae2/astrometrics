@@ -14,7 +14,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib import AppConfiguration, InvalidArgumentError, NotFoundError, Target
+from astrometricslib import AppConfiguration, InvalidArgumentError, NotFoundError, RestoreReport, Target
+from astrometricslib.models.catalog_queries import CalibrationQueryResult
 from wayfindinglib.api.planning import ObservationPlanning
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.equipment_and_site.calibration import CalibrationAdvisory
@@ -26,9 +27,9 @@ from wayfindinglib.models.planning.observation_package import (
     FrameType,
     ObservationPackage,
 )
-from wayfindinglib.models.planning.quality_advisory import TargetQualityAdvisory
 from wayfindinglib.models.planning.sequence_plan import SequencePlan
 from wayfindinglib.models.planning.sequence_summary import SequenceSummary
+from wayfindinglib.models.planning.target_report import TargetDatasetReport
 from wayfindinglib.models.session.observation_session import (
     ObservationSession,
     PlanRevisionConflictError,
@@ -67,6 +68,16 @@ class _FakeTargetCatalog:
         """
         return self._targets.get(target_id)
 
+    def list(self) -> list[Target]:
+        """Give every target.
+
+        Returns
+        -------
+        targets : `list` [`Target`]
+            The library's targets.
+        """
+        return list(self._targets.values())
+
     def add(self, target: Target) -> None:
         """Keep one more target.
 
@@ -93,7 +104,22 @@ class _FakeAstrometrics:
             The library's targets.
         """
         self.targets = _FakeTargetCatalog(targets)
-        self.quality = SimpleNamespace(capture_settings=dict)
+        self.quality = SimpleNamespace(
+            query=lambda **_arguments: [],
+            capture_settings=lambda ids=None: {},
+            metrics=lambda **_arguments: [],
+        )
+        self.stars = SimpleNamespace(get=lambda object_id: None)
+        self.processing = SimpleNamespace(
+            restore_excluded_frames=lambda target, apply=False: RestoreReport(
+                targetId=getattr(target, "id", target), applied=False
+            ),
+            calibration=SimpleNamespace(
+                query=lambda **_arguments: CalibrationQueryResult(
+                    detail="counts", darks=[], biases=[], flats=[]
+                )
+            ),
+        )
 
 
 def _target(target_id: str, ra: str = "09:55:33", dec: str = "+69:03:55") -> Target:
@@ -309,7 +335,11 @@ def test_a_bad_night_id_is_refused(isolated_butler: DiskButler) -> None:
 def test_get_advisory_answers_each_kind_and_refuses_the_wrong_arguments(isolated_butler: DiskButler) -> None:
     """Quality takes a target; calibration takes a camera and frame type."""
     planning = _planning(isolated_butler, _target("M 81"))
-    assert isinstance(planning.get_advisory("quality", target="M 81"), TargetQualityAdvisory)
+    report = planning.get_advisory("quality", target="M 81")
+    assert isinstance(report, TargetDatasetReport)
+    assert report.target_id == "M 81"
+    assert report.needs_attention.warning_count == 0
+    assert report.starting_point is not None
     calibration = planning.get_advisory("calibration", camera_id="c1", frame_type=FrameType.DARK)
     assert isinstance(calibration, CalibrationAdvisory)
     assert calibration.existing_count == 0
@@ -317,6 +347,12 @@ def test_get_advisory_answers_each_kind_and_refuses_the_wrong_arguments(isolated
         planning.get_advisory("quality", target="M 81", camera_id="c1")
     with pytest.raises(NotFoundError):
         planning.get_advisory("quality", target="NOT-A-TARGET")
+    with pytest.raises(InvalidArgumentError, match="target"):
+        planning.get_advisory("tonight", target="M 81")
+    with pytest.raises(InvalidArgumentError, match="object_id"):
+        planning.get_advisory("result", target="M 81")
+    with pytest.raises(InvalidArgumentError, match="ISO 8601"):
+        planning.get_advisory("tonight", at="not a time")
 
 
 def test_create_mosaic_records_one_package_per_panel(isolated_butler: DiskButler) -> None:
@@ -822,3 +858,14 @@ def test_framing_is_stored_and_the_sequence_summary_follows_ekos_order(isolated_
     assert summary.dither_rows[0].size_pixels == pytest.approx(5.0)
     assert "Guide" in summary.dither_rows[0].size_ekos_screen
     assert "Capture" in summary.dither_rows[0].frequency_ekos_screen
+
+
+def test_get_advisory_tonight_and_result_reach_the_task_functions(isolated_butler: DiskButler) -> None:
+    """Tonight gives a ranking; a result for an unknown star is not found."""
+    from wayfindinglib.models.planning.tonight_ranking import TonightRanking
+
+    planning = _planning(isolated_butler, _target("M 81"))
+    ranking = planning.get_advisory("tonight", at="2026-10-24T04:00:00Z")
+    assert isinstance(ranking, TonightRanking)
+    with pytest.raises(NotFoundError):
+        planning.get_advisory("result", target="M 81", object_id="no-such-star")

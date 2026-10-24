@@ -1,10 +1,12 @@
 """Purpose: Calibration Inventory Domain Models.
 
 Description: Counts of previously captured calibration frames, grouped
-by camera, exposure, and filter. Foundation-level reference data: they
-describe what exists and are consulted by Observation Planning, never
-written by a running session (`Wayfinding_Library_Architecture.md`
-Section 3.3, "Configuration, not telemetry").
+by camera, exposure, filter, gain setting, offset, binning and sensor
+temperature (the last four are optional, so older records still load).
+Foundation-level reference data: they describe what exists and are
+consulted by Observation Planning, never written by a running session
+(`Wayfinding_Library_Architecture.md` Section 3.3, "Configuration, not
+telemetry").
 `CalibrationAdvisory` is the computed-on-demand view surfaced
 during package authoring -- informational only, never adjusting
 placement or priority.
@@ -31,6 +33,10 @@ class CalibrationEntry(BaseModel):
     frame_type: FrameType
     exposure_sec: float | None = Field(default=None)
     filter: FilterType | None = Field(default=None)
+    gain_setting: int | None = Field(default=None, alias="gainSetting")
+    offset: int | None = Field(default=None)
+    binning: int | None = Field(default=None)
+    sensor_temperature_c: float | None = Field(default=None, alias="sensorTemperatureC")
     count: int = Field(default=0, ge=0)
 
 
@@ -59,5 +65,9 @@ class CalibrationAdvisory(BaseModel):
     frame_type: FrameType
     exposure_sec: float | None = Field(default=None)
     filter: FilterType | None = Field(default=None)
+    gain_setting: int | None = Field(default=None, alias="gainSetting")
+    offset: int | None = Field(default=None)
+    binning: int | None = Field(default=None)
+    sensor_temperature_c: float | None = Field(default=None, alias="sensorTemperatureC")
     existing_count: int = Field(default=0, ge=0)
     generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

@@ -62,6 +62,7 @@ class Container:
         self.guiding_service = None
         self.alignment_service = None
         self.mosaic_service = None
+        self.plan_service = None
         self.analysis_orchestrator = None
         self.job_repository = None
         self.job_service = None
@@ -263,6 +264,10 @@ class Container:
         from backend.services.observatory.mosaic_service import MosaicService
 
         self.mosaic_service = MosaicService(wayfinder=self.wayfinder)
+
+        from backend.services.observatory.plan_service import PlanService
+
+        self.plan_service = PlanService(wayfinder=self.wayfinder, socket_manager=self.socket_manager)
 
         from backend.services.processing.ingestion_service import IngestionService
 

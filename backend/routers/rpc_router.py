@@ -237,6 +237,14 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "execution:abort_session": ("execution_service", "abort_session"),
     "execution:reconcile_session": ("execution_service", "reconcile_session"),
     "execution:record_divergence": ("execution_service", "record_divergence"),
+    # Night plan. `plan:get` reads (no `session_id` lists all). `plan:edit`
+    # and `plan:tick_checklist_item` write and send the `plan:changed` event;
+    # a stale `expected_revision` answers with the `conflict` error and the
+    # current revision in its details. Writes, so the AI's read-only profile
+    # withholds them.
+    "plan:get": ("plan_service", "get_plan"),
+    "plan:edit": ("plan_service", "edit_plan"),
+    "plan:tick_checklist_item": ("plan_service", "tick_checklist_item"),
     # Sequencer queue
     "sequencer:get_queue": ("target_imaging_executor", "get_queue"),
     "sequencer:create_plan": ("target_imaging_executor", "create_plan"),

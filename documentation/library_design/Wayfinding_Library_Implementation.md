@@ -103,7 +103,9 @@ Table 3 maps the architecture's Table 2 records to pydantic classes.
 | Recovery policy and fault record | `RecoveryPolicy`, `RecoveryAttempt`, `FaultRecord` | `policy/recovery.py` |
 | Device summary state; correction settings | `DeviceState`, `DeviceRole`, `DeviceSummaryState`; `CorrectionConfig` | `policy/device_state.py`, `session/correction_config.py` |
 | Observation package; mosaic | `ObservationPackage`, `ExposureRequest`, `DitherConfig`; `MosaicPlan` | `planning/observation_package.py`, `mosaic.py` |
-| Target quality advisory | `TargetQualityAdvisory`, `QualityFlagSummary`, `ScienceOutcomeSummary` | `planning/quality_advisory.py` |
+| Target dataset report | `TargetDatasetReport`, `ScienceOutcomeSummary`, `ContextReading`, `StartingPoint`, `ForecastCheck` | `planning/target_report.py` |
+| Tonight's ranking | `TonightRanking`, `RankedList`, `RankedCandidate`, `TonightSkyModel` | `planning/tonight_ranking.py` |
+| Night review | `NightQuality`, `NightTargetQuality`, `GuidingNightSummary` | `session/night_quality.py` |
 | Session, queue entry, diagnostic | `ObservationSession`, `QueuedObservationPackage`, `InfeasibilityReason`, `SessionStatus`, `QueueRequest` | `session/observation_session.py` |
 | Divergence record; session record | `DivergenceRecord`; `EkosSessionContext` | `session/divergence.py`, `ekos_session.py` |
 | Telemetry | `GuidingSample`, `WeatherSample`, `MountPointingModel`, `GuidingSpectrumAnalysis` | `session/telemetry.py` |
@@ -365,6 +367,9 @@ The result-quality work adds more entries to the validation register. These are 
 - The performance envelope limits are in [WAY-40](validation/wayfinding.md#way-40), [WAY-41](validation/wayfinding.md#way-41), [WAY-42](validation/wayfinding.md#way-42), [WAY-43](validation/wayfinding.md#way-43) and [WAY-44](validation/wayfinding.md#way-44), and the rules that read the guiding, capture and sky pipelines are in [WAY-45](validation/wayfinding.md#way-45), [WAY-46](validation/wayfinding.md#way-46) and [WAY-47](validation/wayfinding.md#way-47). Their constants are WAY-D40 to WAY-D48.
 - The stored night plan, allowed capture values, sequence summary, mosaic rotation and checklist are in [WAY-50](validation/wayfinding.md#way-50), [WAY-51](validation/wayfinding.md#way-51), [WAY-52](validation/wayfinding.md#way-52), [WAY-53](validation/wayfinding.md#way-53) and [WAY-54](validation/wayfinding.md#way-54), with constants WAY-D50 to WAY-D54.
 - Target-change detection is in [WAY-55](validation/wayfinding.md#way-55), the monitor-mode guarantee is in [WAY-56](validation/wayfinding.md#way-56), and the night list is in [WAY-57](validation/wayfinding.md#way-57). Their constants are WAY-D55 to WAY-D58.
+- The target dataset report (its joins, rules and the size limit of its reply) is in [WAY-60](validation/wayfinding.md#way-60), with constants WAY-D60, WAY-D61, WAY-D62, WAY-D63, WAY-D64, WAY-D65, WAY-D66, WAY-D67, WAY-D68, WAY-D69 and WAY-D77.
+- The forecast check is in [WAY-70](validation/wayfinding.md#way-70) and WAY-D70. Tonight's sky model is in [WAY-71](validation/wayfinding.md#way-71), and tonight's ranking is in [WAY-72](validation/wayfinding.md#way-72) with WAY-D71 and WAY-D72.
+- The trust statements for one star's result are in [WAY-73](validation/wayfinding.md#way-73) with WAY-D73. The night review is in [WAY-74](validation/wayfinding.md#way-74) with WAY-D74, WAY-D75 and WAY-D76.
 
 **Table 10.** Settings of the performance envelope and the session-quality analyses. The Basis column gives an observation or reason, where there is one.
 

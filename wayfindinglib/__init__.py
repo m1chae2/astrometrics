@@ -64,10 +64,11 @@ if TYPE_CHECKING:
         FrameType,
         ObservationPackage,
     )
-    from wayfindinglib.models.planning.quality_advisory import TargetQualityAdvisory
     from wayfindinglib.models.planning.sequence_plan import SequenceItem, SequencePlan
     from wayfindinglib.models.planning.sequence_summary import SequenceSummary
     from wayfindinglib.models.planning.sky_source import SkySource
+    from wayfindinglib.models.planning.target_report import TargetDatasetReport
+    from wayfindinglib.models.planning.tonight_ranking import TonightRanking
     from wayfindinglib.models.planning.visibility import (
         HorizonZone,
         MeridianStatus,
@@ -77,9 +78,11 @@ if TYPE_CHECKING:
         VisibilitySpan,
     )
     from wayfindinglib.models.policy.delegation import ObservatoryCapability
+    from wayfindinglib.models.quality.statements import TargetStatement
     from wayfindinglib.models.session.capture_result import CaptureResult
     from wayfindinglib.models.session.live_session_status import LiveSessionStatus
     from wayfindinglib.models.session.night_list import NightListEntry, TargetChange
+    from wayfindinglib.models.session.night_quality import NightQuality
     from wayfindinglib.models.session.observation_session import (
         ChecklistItem,
         Framing,
@@ -139,7 +142,9 @@ _LAZY_EXPORTS = {
     "MeridianStatus": "wayfindinglib.models.planning.visibility",
     "NightConditions": "wayfindinglib.models.planning.visibility",
     "HorizonZone": "wayfindinglib.models.planning.visibility",
-    "TargetQualityAdvisory": "wayfindinglib.models.planning.quality_advisory",
+    "TargetDatasetReport": "wayfindinglib.models.planning.target_report",
+    "TonightRanking": "wayfindinglib.models.planning.tonight_ranking",
+    "TargetStatement": "wayfindinglib.models.quality.statements",
     "CalibrationAdvisory": "wayfindinglib.models.equipment_and_site.calibration",
     "MosaicPanel": "wayfindinglib.models.planning.mosaic",
     "MosaicPlan": "wayfindinglib.models.planning.mosaic",
@@ -162,6 +167,7 @@ _LAZY_EXPORTS = {
     # Models that `control.history` returns.
     "NightListEntry": "wayfindinglib.models.session.night_list",
     "TargetChange": "wayfindinglib.models.session.night_list",
+    "NightQuality": "wayfindinglib.models.session.night_quality",
     "LiveSessionStatus": "wayfindinglib.models.session.live_session_status",
     "DeepCatalogStatus": "wayfindinglib.models.planning.deep_catalog",
     "SkySource": "wayfindinglib.models.planning.sky_source",

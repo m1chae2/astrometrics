@@ -115,7 +115,9 @@ DECISIONS = {
     # ---- Withheld: code runners and the whole-app channel ----
     "electron_run_python": ToolDecision("withhold", "Runs AI-written Python inside the backend."),
     "backend_call_rpc": ToolDecision(
-        "withhold", "Reaches every backend method, including all the ones above."
+        "withhold",
+        "Reaches every backend method, including all the ones above and the night plan writes "
+        "(plan:edit, plan:tick_checklist_item).",
     ),
     "terminal_inspect_api": ToolDecision("withhold", "Builds Python code from its argument. Console only."),
     "terminal_get_workspace": ToolDecision("withhold", "Console only. Has no use without the code runner."),
@@ -343,7 +345,10 @@ DECISIONS = {
         "caller-given blocked ranges, meridian crossing, Sun and Moon. Reads nothing stored.",
     ),
     "planning_get_advisory": ToolDecision(
-        "keep", "Built 2026-10-06. Quality or calibration advice, worked out on demand. Saves nothing."
+        "keep",
+        "Built 2026-10-06; widened 2026-10-24. The target dataset report (quality), tonight's ranking, "
+        "the trust "
+        "in one star result, or the calibration inventory, worked out on demand. Saves nothing.",
     ),
     "planning_get_plan": ToolDecision(
         "keep", "Built 2026-10-06. Reads a recorded session or the session list."
@@ -367,7 +372,8 @@ DECISIONS = {
     "observatory_history_query": ToolDecision(
         "keep",
         "Built 2026-10-03. Reads the recorded nights and calculates the analyses, in replies under 30,000 "
-        "characters. The recorded-data tables are read through the butler, which creates a missing table.",
+        "characters. The recorded-data tables are read through the butler, which creates a missing table. "
+        "Kind night_quality needs session_id (the night) and returns a typed review.",
     ),
     "jobs_query": ToolDecision(
         "keep",

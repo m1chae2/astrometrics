@@ -232,6 +232,9 @@ class TargetStatement(BaseModel):
         What the action is expected to do.
     evidence : `list` [`MeasurementReference`]
         The exact measurements used.
+    evidence_omitted_count : `int`
+        How many references were left out of ``evidence`` to keep a long
+        reply short. Zero when none were left out.
     limits : `list` [`QualityLimit`]
         The limits they were compared with.
     confidence : `Confidence`
@@ -252,6 +255,7 @@ class TargetStatement(BaseModel):
     proposed_action: ProposedAction | None = Field(default=None, alias="proposedAction")
     expected_effect: ExpectedEffect | None = Field(default=None, alias="expectedEffect")
     evidence: list[MeasurementReference] = Field(default_factory=list)
+    evidence_omitted_count: int = Field(default=0, ge=0, alias="evidenceOmittedCount")
     limits: list[QualityLimit] = Field(default_factory=list)
     confidence: Confidence
     checklist_return: ChecklistReturn | None = Field(default=None, alias="checklistReturn")

@@ -21,7 +21,7 @@ directly.
 import threading
 import uuid
 from collections.abc import Sequence
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from types import SimpleNamespace
 from typing import Any, Literal
 
@@ -57,10 +57,12 @@ from wayfindinglib.models.planning.observation_package import (
     ObservationPackage,
 )
 from wayfindinglib.models.planning.planning_config import PlanningConfig
-from wayfindinglib.models.planning.quality_advisory import TargetQualityAdvisory
 from wayfindinglib.models.planning.sequence_plan import SequencePlan
 from wayfindinglib.models.planning.sky_source import SkySource
+from wayfindinglib.models.planning.target_report import TargetDatasetReport
+from wayfindinglib.models.planning.tonight_ranking import TonightRanking
 from wayfindinglib.models.planning.visibility import HorizonZone, VisibilityReport
+from wayfindinglib.models.quality.statements import TargetStatement
 from wayfindinglib.models.session.observation_session import (
     ChecklistItem,
     Framing,
@@ -86,12 +88,23 @@ __all__ = [
 MAXIMUM_SOURCES = 300
 """Most stars one `ObservationPlanning.find_sources` answer lists."""
 
-AdvisoryKind = Literal["quality", "calibration"]
+AdvisoryKind = Literal["quality", "calibration", "tonight", "result"]
 """The kinds of advice `ObservationPlanning.get_advisory` gives."""
 
 ADVISORY_ARGUMENTS = {
     "quality": ("target",),
-    "calibration": ("camera_id", "frame_type", "exposure_seconds", "filter"),
+    "calibration": (
+        "camera_id",
+        "frame_type",
+        "exposure_seconds",
+        "filter",
+        "gain_setting",
+        "offset",
+        "binning",
+        "sensor_temperature_c",
+    ),
+    "tonight": ("at",),
+    "result": ("target", "object_id"),
 }
 """The arguments each advisory kind uses."""
 
@@ -151,6 +164,37 @@ def _night_date(night_id: str) -> date:
         raise InvalidArgumentError(
             f"night_id must be a date such as 2026-09-24, not {night_id!r}.", details={"night_id": night_id}
         ) from error
+
+
+def _advisory_time(at: datetime | str | None) -> datetime:
+    """Read the time an advisory is for.
+
+    Parameters
+    ----------
+    at : `datetime`, `str` or `None`
+        A time, ISO 8601 text, or ``None`` for now. A time with no offset
+        counts as UTC.
+
+    Returns
+    -------
+    moment : `datetime`
+        The time, with an offset.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If the text is not an ISO 8601 time.
+    """
+    if at is None:
+        return datetime.now(UTC)
+    if isinstance(at, str):
+        try:
+            at = datetime.fromisoformat(at)
+        except ValueError as error:
+            raise InvalidArgumentError(
+                f"at must be an ISO 8601 time, not {at!r}.", details={"at": at}
+            ) from error
+    return at if at.tzinfo is not None else at.replace(tzinfo=UTC)
 
 
 class ObservationPlanning:
@@ -753,19 +797,34 @@ class ObservationPlanning:
         frame_type: FrameType | None = None,
         exposure_seconds: float | None = None,
         filter: FilterType | None = None,
-    ) -> TargetQualityAdvisory | CalibrationAdvisory:
-        """Give planning advice about a target or about calibration frames.
+        *,
+        at: datetime | str | None = None,
+        object_id: str | None = None,
+        gain_setting: int | None = None,
+        offset: int | None = None,
+        binning: int | None = None,
+        sensor_temperature_c: float | None = None,
+    ) -> TargetDatasetReport | CalibrationAdvisory | TonightRanking | list[TargetStatement]:
+        """Give planning advice about data, a result, tonight or calibration.
 
         The advice is worked out on demand and never stored.
 
         Parameters
         ----------
         kind : `str`
-            ``"quality"``: the quality flags each pipeline raised for a
-            target and its science results so far. Uses `target`.
+            ``"quality"``: the target dataset report. It summarizes each
+            capture setting, lists warnings and recommendations in priority
+            order, and gives a starting point when the target has no frames.
+            Uses `target`.
             ``"calibration"``: how many calibration frames of one kind the
             library already holds for a camera. Uses `camera_id`,
-            `frame_type`, `exposure_seconds` and `filter`.
+            `frame_type`, `exposure_seconds`, `filter` and, to narrow the
+            match, `gain_setting`, `offset`, `binning` and
+            `sensor_temperature_c`.
+            ``"tonight"``: the targets ranked by what the next hour of
+            each would add. Uses `at`.
+            ``"result"``: how far one per-star science result can be
+            trusted, as statements. Uses `target` and `object_id`.
         target : `str` or `Target`, optional
             The target, by id or as a `Target`.
         camera_id : `str`, optional
@@ -776,11 +835,25 @@ class ObservationPlanning:
             Count only frames of this exposure, when the frame type has one.
         filter : `FilterType`, optional
             Count only frames taken through this filter.
+        at : `datetime` or `str`, optional
+            The time to rank for (ISO 8601; no offset means UTC). Defaults
+            to now.
+        object_id : `str`, optional
+            The star whose result is judged.
+        gain_setting : `int`, optional
+            Count only calibration frames taken at this gain setting.
+        offset : `int`, optional
+            Count only calibration frames taken at this offset.
+        binning : `int`, optional
+            Count only calibration frames taken at this binning.
+        sensor_temperature_c : `float`, optional
+            Count only darks within the dark temperature tolerance of this
+            sensor temperature, in degrees Celsius.
 
         Returns
         -------
-        advisory : `TargetQualityAdvisory` or `CalibrationAdvisory`
-            The advice for the chosen kind.
+        advice : `TargetDatasetReport`, `CalibrationAdvisory`, `TonightRanking`
+            or `list` [`TargetStatement`]. The advice for the chosen kind.
 
         Raises
         ------
@@ -795,22 +868,54 @@ class ObservationPlanning:
             "frame_type": frame_type is not None,
             "exposure_seconds": exposure_seconds is not None,
             "filter": filter is not None,
+            "at": at is not None,
+            "object_id": object_id is not None,
+            "gain_setting": gain_setting is not None,
+            "offset": offset is not None,
+            "binning": binning is not None,
+            "sensor_temperature_c": sensor_temperature_c is not None,
         }
         reject_unused_arguments(kind, ADVISORY_ARGUMENTS, given)
         if kind == "quality":
             if target is None:
                 raise InvalidArgumentError('kind="quality" needs a target.')
-            from wayfindinglib.tasks.planning_tasks.quality_advisory_tasks import (
-                build_target_quality_advisory,
-            )
+            from wayfindinglib.tasks.planning_tasks.target_report_tasks import build_target_dataset_report
 
-            return build_target_quality_advisory(self._target(target))
+            return build_target_dataset_report(
+                self._target(target),
+                astrometrics=self._astrometrics,
+                butler=self._butler,
+                config=self._config,
+            )
+        if kind == "tonight":
+            from wayfindinglib.tasks.planning_tasks.tonight_ranking_tasks import rank_tonight
+
+            return rank_tonight(
+                _advisory_time(at),
+                astrometrics=self._astrometrics,
+                butler=self._butler,
+                config=self._config,
+            )
+        if kind == "result":
+            if target is None or object_id is None:
+                raise InvalidArgumentError('kind="result" needs a target and an object_id.')
+            from wayfindinglib.tasks.planning_tasks.result_judgment_tasks import judge_star_result
+
+            return judge_star_result(self._target(target).id, object_id, astrometrics=self._astrometrics)
         if camera_id is None or frame_type is None:
             raise InvalidArgumentError('kind="calibration" needs camera_id and frame_type.')
         from wayfindinglib.tasks.planning_tasks.calibration_advisory_tasks import build_calibration_advisory
 
         return build_calibration_advisory(
-            self._butler, camera_id, FrameType(frame_type), exposure_seconds, filter
+            self._butler,
+            camera_id,
+            FrameType(frame_type),
+            exposure_seconds,
+            filter,
+            gain_setting=gain_setting,
+            offset=offset,
+            binning=binning,
+            sensor_temperature_c=sensor_temperature_c,
         )
 
     # -- Mosaics -------------------------------------------------------------
@@ -986,7 +1091,7 @@ class ObservationPlanning:
         priority : `int`, optional
             A package's priority; higher is placed first. Defaults to 0.
         quality_weighting_enabled : `bool`, optional
-            Let the target's quality advisory raise the package's
+            Let the target's dataset report raise the package's
             priority during automatic placement. Defaults to `False`.
         notes : `str`, optional
             Free text kept with a package.
@@ -1108,18 +1213,21 @@ class ObservationPlanning:
         session : `ObservationSession`
             The placed queue and the reasons any package was left out.
         """
-        from wayfindinglib.tasks.planning_tasks.quality_advisory_tasks import build_target_quality_advisory
         from wayfindinglib.tasks.planning_tasks.scheduling import schedule_session
+        from wayfindinglib.tasks.planning_tasks.target_report_tasks import build_target_dataset_report
 
         placements = []
-        quality_advisories = {}
+        target_reports = {}
         for item in requests:
             request = QueueRequest.model_validate(item)
             package = self._package(request.package_id)
             placements.append((package, request.start_time_mode, request.requested_start_time))
             if package.quality_weighting_enabled:
-                quality_advisories[package.target_id] = build_target_quality_advisory(
-                    self._target(package.target_id)
+                target_reports[package.target_id] = build_target_dataset_report(
+                    self._target(package.target_id),
+                    astrometrics=self._astrometrics,
+                    butler=self._butler,
+                    config=self._config,
                 )
         return schedule_session(
             self._astrometrics,
@@ -1128,7 +1236,7 @@ class ObservationPlanning:
             telescope,
             camera_id,
             night,
-            quality_advisories=quality_advisories,
+            target_reports=target_reports,
             planning_config=self._planning_config,
         )
 

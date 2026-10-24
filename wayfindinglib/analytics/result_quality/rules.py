@@ -54,6 +54,10 @@ EFFECTIVE_TIME_METRIC = "stacking.effective_time_s"
 STAR_WIDTH_PIXELS_METRIC = "frame.star_width_moffat_px"
 STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC = "frame.star_width_effective_arcsec"
 FOCUSER_TEMPERATURE_METRIC = "frame.focuser_temperature_degc"
+STAR_WIDTH_MOFFAT_ARCSEC_METRIC = "frame.star_width_moffat_arcsec"
+QUARANTINE_ROUNDNESS_METRIC = "frame.quarantine_roundness"
+QUARANTINE_SKY_MEDIAN_METRIC = "frame.quarantine_sky_median_adu"
+DETECTED_REGION_COUNT_METRIC = "frame.detected_region_count"
 
 # The brightest star's peak, as a fraction of the room between the sky and the
 # ceiling, at which the star clips. 1.0 is the ceiling by definition, so the
@@ -322,35 +326,25 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         ),
     ),
     QualityRule(
-        name="guiding_limits_exposure",
-        statement_kind=StatementKind.RECOMMENDATION,
-        action_class=ActionClass.CAPTURE_SETTINGS,
-        requires=[],
-        limits=[],
-        register_entry="WAY-D12",
-        confidence=Confidence.DESIGN_ESTIMATE,
-        wording=(
-            "At {exposure_text} only {sharp_percent:.0f}% of frames stay sharp; at {shorter_text}, "
-            "{shorter_percent:.0f}%."
-        ),
-        purpose=(
-            "Guiding error blurs long exposures, so the longest exposure that stays sharp is a "
-            "limit on the setting."
-        ),
-        computed_by="guide_exposure_ladder",
-    ),
-    QualityRule(
         name="frames_lost",
         statement_kind=StatementKind.WARNING,
         action_class=ActionClass.DATA_SELECTION,
         severity=Severity.ADVICE,
-        requires=[],
+        # The stacker's frame quarantine moves a frame out of the stack when
+        # its stars are few (cloud) or smeared (trailing). The report cites
+        # the stored quarantine rows of each set-aside frame as the evidence
+        # of its statement.
+        requires=[
+            MetricRequirement(name=QUARANTINE_ROUNDNESS_METRIC, definition_version=1),
+            MetricRequirement(name=QUARANTINE_SKY_MEDIAN_METRIC, definition_version=1),
+            MetricRequirement(name=DETECTED_REGION_COUNT_METRIC, definition_version=1),
+        ],
         limits=[],
-        register_entry="WAY-D12",
+        register_entry="WAY-D60",
         confidence=Confidence.DESIGN_ESTIMATE,
         wording="{lost_count} of {frame_count} frames were set aside ({reason_text}).",
         purpose="Frames set aside for cloud or trailing are time that did not reach the stack.",
-        computed_by="target_report_tasks",
+        computed_by="report_rules",
     ),
     QualityRule(
         name="more_frames",
@@ -363,7 +357,7 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
             MetricRequirement(name=READ_NOISE_METRIC, definition_version=1),
         ],
         limits=[],
-        register_entry="WAY-D12",
+        register_entry="WAY-D61",
         confidence=Confidence.DESIGN_ESTIMATE,
         wording=(
             "Take {frame_count} more at {exposure_text} (about {wall_clock_text}) to cut the noise "
@@ -373,7 +367,7 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
             "Noise falls as the square root of the effective time, so the next step shows how much "
             "more data is worth."
         ),
-        computed_by="noise_growth",
+        computed_by="report_rules",
     ),
     QualityRule(
         name="more_frames_will_not_help",
@@ -385,14 +379,14 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
             MetricRequirement(name=EFFECTIVE_TIME_METRIC, definition_version=1),
         ],
         limits=[],
-        register_entry="WAY-D12",
+        register_entry="WAY-D62",
         confidence=Confidence.DESIGN_ESTIMATE,
         wording="Noise stopped falling after about {effective_time_text}. {advice_text}",
         purpose=(
             "A noise floor means more frames do not help until the cause (flats, dither, a fixed "
             "pattern) is fixed."
         ),
-        computed_by="noise_growth",
+        computed_by="report_rules",
     ),
     QualityRule(
         name="calibration_gap",
@@ -400,14 +394,14 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         action_class=ActionClass.CALIBRATION,
         requires=[],
         limits=[],
-        register_entry="WAY-D12",
+        register_entry="WAY-D63",
         confidence=Confidence.DESIGN_ESTIMATE,
         wording="Take {frame_type_text} at {setting_text}: none in the library matches.",
         purpose=(
             "A calibration frame taken at other settings does not remove the fixed pattern of the "
             "light frames."
         ),
-        computed_by="target_report_tasks",
+        computed_by="report_rules",
     ),
     QualityRule(
         name="focus_drift",
@@ -435,7 +429,7 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         action_class=ActionClass.SCHEDULING,
         requires=[MetricRequirement(name=SKY_RATE_METRIC, definition_version=2)],
         limits=[],
-        register_entry="WAY-D12",
+        register_entry="WAY-D64",
         confidence=Confidence.DESIGN_ESTIMATE,
         wording=(
             "Frames with a bright sky ({condition_text}) lost about {loss_percent:.0f}% "
@@ -445,7 +439,7 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
             "A bright sky (Moon, twilight, light pollution) raises the noise, so the sky's cost "
             "says which nights to avoid."
         ),
-        computed_by="efficiency",
+        computed_by="report_rules",
     ),
     QualityRule(
         name="altitude_cost",
@@ -456,29 +450,32 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
             MetricRequirement(name=SKY_RATE_METRIC, definition_version=2),
         ],
         limits=[],
-        register_entry="WAY-D12",
+        register_entry="WAY-D65",
         confidence=Confidence.DESIGN_ESTIMATE,
         wording=(
             "Frames below {altitude_degrees:.0f} degrees lost {loss_percent:.0f}%. Image above "
             "{advice_altitude_degrees:.0f} degrees."
         ),
         purpose="Low targets are seen through more air, which widens stars and brightens the sky.",
-        computed_by="efficiency",
+        computed_by="report_rules",
     ),
     QualityRule(
-        name="best_window",
+        name="sharpness_tradeoff",
         statement_kind=StatementKind.RECOMMENDATION,
-        action_class=ActionClass.SCHEDULING,
-        requires=[],
+        action_class=ActionClass.DATA_SELECTION,
+        requires=[MetricRequirement(name=STAR_WIDTH_MOFFAT_ARCSEC_METRIC, definition_version=1)],
         limits=[],
-        register_entry="WAY-D12",
+        register_entry="WAY-D66",
         confidence=Confidence.DESIGN_ESTIMATE,
-        wording="Best nights: {nights_text}, {hours_text}.",
-        purpose=(
-            "The best window combines visibility, Moon and the sky history, so the user can plan "
-            "the next session."
+        wording=(
+            "Keeping the sharpest {keep_percent:.0f}% of frames sharpens stars by {sharper_percent:.0f}% "
+            "and raises the noise by {noisier_percent:.0f}%."
         ),
-        computed_by="target_report_tasks",
+        purpose=(
+            "Stacking only the sharpest frames trades noise for sharper stars, so the user can choose "
+            "which matters more for the target."
+        ),
+        computed_by="report_rules",
     ),
     QualityRule(
         name="seeing_limits_resolution",
@@ -497,6 +494,32 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
 )
 
 DEFERRED_RULES: tuple[DeferredRule, ...] = (
+    DeferredRule(
+        name="guiding_limits_exposure",
+        catalog_item="Guiding limits exposure",
+        reason=(
+            "The share of frames that stay sharp at each exposure comes from the guiding analysis of "
+            "Control (session_analysis), which Planning may not import. The guide exposure ladder works "
+            "on guide-camera test frames, not on the stored guide logs, so it cannot give an exposure "
+            "limit for a capture setting in the target report."
+        ),
+        unblocked_by=(
+            "A Foundation function that turns the stored guide records into the longest sharp exposure, "
+            "with a register entry."
+        ),
+    ),
+    DeferredRule(
+        name="best_window",
+        catalog_item="Best window",
+        reason=(
+            "The best nights need a model that combines each night's visibility of the target, the Moon "
+            "and the sky history. That nights-by-visibility model is not built. Tonight's ranking "
+            "(get_advisory, kind tonight) covers tonight only."
+        ),
+        unblocked_by=(
+            "A nights, visibility and Moon model that scores the coming nights, with a register entry."
+        ),
+    ),
     DeferredRule(
         name="polar_alignment",
         catalog_item="Polar alignment",
@@ -540,6 +563,16 @@ DEFERRED_RULES: tuple[DeferredRule, ...] = (
             "so the rule could not say how many more spectra reach a subtype."
         ),
         unblocked_by="Degrading high-SNR spectra with added noise to measure the class gap against SNR.",
+    ),
+    DeferredRule(
+        name="photometry_precision",
+        catalog_item="Photometry precision (natural goal)",
+        reason=(
+            "The natural finish line of photometry is a precision fine enough to detect the target's known "
+            "variation. The amplitude is stored (photometry.target_catalog_amplitude_mag) and so is the "
+            "detectable amplitude of a run, but no calibration turns the gap into a number of frames."
+        ),
+        unblocked_by="Calibrating the detectable amplitude against frame count on real photometry runs.",
     ),
     DeferredRule(
         name="tilt",

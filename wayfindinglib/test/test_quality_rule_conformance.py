@@ -15,7 +15,7 @@ from the evidence behind it (plan section 3.7 and 6.7, decisions S12 and S13):
 * every decision metric is required by a rule or is on a commented allow-list
   that names the batch that will use it;
 * every context metric states why it exists (the check that a report section
-  shows it is added with the report, issue 95 batch 6a);
+  shows it is in ``tasks/planning_tasks/test/test_target_report_context.py``);
 * every exploratory metric states its question and a review date that has not
   passed;
 * every item of the decision catalog has a rule or a deferred entry with a
@@ -45,8 +45,8 @@ KNOWN_COMPUTING_MODULES = {
     "noise_growth": "batch 2",
     "efficiency": "batch 2",
     "focus_drift": "batch 1",
-    "guide_exposure_ladder": "existing, wayfindinglib/analytics",
     "target_report_tasks": "batch 6a",
+    "report_rules": "batch 6a",
 }
 
 # The items of the decision catalog (plan section 6.6) and the rule or
@@ -74,39 +74,27 @@ DECISION_CATALOG = {
 
 # Decision metrics that no rule of the table requires, each with the batch or
 # issue that will use it. A metric whose name contains ".gate_" is a self-check
-# that its own pipeline judges (the check outcome is stored on the row); the
-# report reads those outcomes in batch 6a, and no rule compares them with a
-# limit of its own, so they are listed once by pattern (see
+# that its own pipeline judges (the check outcome is stored on the row); no
+# rule of this table compares them with a limit of its own, and the view of
+# those outcomes belongs to issue 97, so they are listed once by pattern (see
 # `SELF_CHECK_MARKER`) and not by name.
 UNUSED_DECISION_METRICS = {
     "frame.background_level_adu": (
-        "issue 95 batch 6a: input of the stacker's cloud check (STK-04); the report reads its outcome "
-        "through the frames-lost statement."
+        "issue 97: input of the stacker's cloud check (STK-04). The stacker judges it and moves the frame; "
+        "the report counts the frames moved (rule frames_lost, through the quarantine rows). A rule that "
+        "reads the level itself would repeat the stacker's check."
     ),
     "frame.saturated_pixel_fraction": (
-        "issue 95 batch 6a: input of the stacker's raw-frame checks; the report reads their outcome."
+        "issue 97: input of the stacker's raw-frame checks, which stack the outcome as a gate row. "
+        "Showing gate outcomes of every pipeline is the pipeline-quality view of issue 97."
     ),
     "frame.star_width_gaussian_brightest_px": (
-        "issue 95 batch 6a: input of the stack sharpness check (STK-25); the report reads its outcome."
-    ),
-    "frame.detected_region_count": (
-        "issue 95 batch 6a: input of the frame quarantine (STK-01); the frames-lost statement reads the "
-        "quarantine's records."
-    ),
-    "frame.star_width_moffat_arcsec": (
-        "issue 95 batch 6a: the sharpness trade-off (keep the sharpest share of frames) reads the "
-        "width in arcseconds."
+        "issue 97: input of the stack sharpness check (STK-25), judged by the stacker. The report's "
+        "sharpness trade-off reads the Moffat width in arcseconds, not this width."
     ),
     "stacking.rejected_pixel_fraction": (
-        "issue 95 batch 6a: input of the stacker's rejection check (STK-24); the report reads its outcome."
-    ),
-    "frame.quarantine_roundness": (
-        "issue 95 batch 6a: input of the frame quarantine (STK-01); the frames-lost statement reads the "
-        "quarantine's records."
-    ),
-    "frame.quarantine_sky_median_adu": (
-        "issue 95 batch 6a: input of the frame quarantine (STK-01); the frames-lost statement reads the "
-        "quarantine's records."
+        "issue 97: input of the stacker's rejection check (STK-24), judged by the stacker; its gate "
+        "outcome belongs to the pipeline-quality view of issue 97."
     ),
     "astrometry.gaia_fit_rms_arcsec": (
         "issue 96: input of the astrometry self-check (AST-02), judged in astrometricslib."

@@ -245,7 +245,7 @@
       "category": "observatory-status",
       "disposition": "keep",
       "interim_block": "",
-      "note": "Built 2026-10-03. Reads the recorded nights and calculates the analyses, in replies under 30,000 characters. The recorded-data tables are read through the butler, which creates a missing table."
+      "note": "Built 2026-10-03. Reads the recorded nights and calculates the analyses, in replies under 30,000 characters. The recorded-data tables are read through the butler, which creates a missing table. Kind night_quality needs session_id (the night) and returns a typed review."
     },
     "observatory_history_save_ekos_session_context": {
       "tool_class": "change-data",
@@ -525,7 +525,7 @@
       "category": "planning-sessions",
       "disposition": "keep",
       "interim_block": "",
-      "note": "Built 2026-10-06. Quality or calibration advice, worked out on demand. Saves nothing."
+      "note": "Built 2026-10-06; widened 2026-10-24. The target dataset report (quality), tonight's ranking, the trust in one star result, or the calibration inventory, worked out on demand. Saves nothing."
     },
     "planning_get_constellation_lines": {
       "tool_class": "observe",

@@ -259,11 +259,11 @@ A silent drop is not useful, so the operator is told *why* a package did not fit
 <!-- impl: wayfindinglib.models.session.observation_session.InfeasibilityReasonCode -->
 <!-- impl: wayfindinglib.models.session.observation_session.InfeasibilityReason -->
 
-Archive-derived advice informs authoring and placement without dictating them. An operator may opt a package in to a bounded priority boost drawn from the target quality advisory. The boost only raises priority, for a flagged quality condition or a notable science outcome. It changes the order only when two packages could start together, because priority is the tie-breaker. The amount is recorded on the queue entry. The calibration advisory shows what the inventory already holds and never changes placement.
+Archive-derived advice informs authoring and placement without dictating them. An operator may opt a package in to a bounded priority boost drawn from the target dataset report. The boost only raises priority, when the report has one or more warnings that need attention or a notable science outcome (a confirmed asteroid candidate or a variable star candidate). It changes the order only when two packages could start together, because priority is the tie-breaker. The amount is recorded on the queue entry. The calibration advisory shows what the inventory already holds and never changes placement.
 
-<!-- impl: wayfindinglib.models.planning.quality_advisory.TargetQualityAdvisory -->
+<!-- impl: wayfindinglib.models.planning.target_report.TargetDatasetReport -->
 <!-- impl: wayfindinglib.models.equipment_and_site.calibration.CalibrationAdvisory -->
-<!-- impl: wayfindinglib.tasks.planning_tasks.quality_advisory_tasks.build_target_quality_advisory -->
+<!-- impl: wayfindinglib.tasks.planning_tasks.target_report_tasks.build_target_dataset_report -->
 <!-- impl: wayfindinglib.tasks.planning_tasks.calibration_advisory_tasks.build_calibration_advisory -->
 
 An operator may also build or edit a queue by hand. Both paths write the same structure. Planning also answers visibility questions that place nothing.
@@ -752,7 +752,7 @@ Several parts of the architecture are units that take their hardware steps from 
 - **Observer position.** Control reads the position from the mount first and falls back to the settings, so the single-source rule of Section 3.3 holds for planning only.
 - **Device summary state.** The library does not yet read the raw signals for every device role, and the queue passes no device states to execution.
 - **Own guide loop and protocols.** This system's own guide loop runs only against a simulated guider, and only INDI implements the hardware interfaces.
-- **Advice.** The variable-star count in the target quality advisory is always zero, because the star catalog cannot yet list a target's stars cheaply.
+- **Advice.** The variable-star count in the target dataset report comes from the stored photometry measurements, so it is zero for a target that no photometry run has measured.
 - **Equipment-derived limits.** A new setup gets numbers without verdicts until its history builds. The periodic-error model assumes a single sinusoid.
 
 ## 9. Conclusion

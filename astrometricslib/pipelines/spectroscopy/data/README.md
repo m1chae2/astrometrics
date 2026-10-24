@@ -13,6 +13,7 @@ The folder holds these files:
 - `line_spread_zwo_asi_533mm_pro.json`, the instrument's blur at each wavelength (see [Line spread](#line-spread)).
 - `cross_trail_blur_zwo_asi_533mm_pro.json`, the shape of a spectrum trail (a star's spread-out spectrum on the image) across the dispersion direction, the direction in which the grating spreads the light (see [Cross-trail blur](#cross-trail-blur)).
 - `atmospheric_extinction_kpno.txt`, the air's dimming at each wavelength (see [Atmospheric extinction](#atmospheric-extinction)).
+- `class_gap_against_snr_zwo_asi_533mm_pro.json`, how the gap between the best and next spectral class grows with signal-to-noise (see [Class gap table](#class-gap-table)).
 
 The camera-specific JSON files are found by their `camera_name` field, so a second camera needs its own file of each kind.
 
@@ -115,5 +116,9 @@ A setup where extending the range would help, for example one that adds a blocki
 Mean extinction curve for Kitt Peak National Observatory, from the file `noao/lib/onedstds/kpnoextinct.dat` of the IRAF distribution (a long-standing astronomy data-reduction package) (<https://github.com/iraf-community/iraf>). The IRAF `onedstds` README describes it as the KPNO extinction table for ONEDSPEC. It does not give a journal reference for the KPNO values. The file here keeps rows up to 8370 Å unchanged from the source; the source's last four rows (8708 to 10,400 Å) are CTIO values that the IRAF file itself marks as not measured at KPNO, and this file leaves them out. The download happened on 2026-10-10.
 
 Kitt Peak is a dry site at 2 km altitude. A site at lower altitude has somewhat larger extinction in the blue. The correction uses the difference between two airmasses, so the curve's shape matters more than its overall level.
+
+## Class gap table
+
+`class_gap_against_snr_zwo_asi_533mm_pro.json` holds the table that `class_gap_for_snr` reads. There is one file for each camera, and the name carries the camera. It is made from the library's own spectra, not downloaded. The script `scripts/calibrate_class_gap_against_snr.py --apply` builds it: it takes stored spectra with a catalog type and a signal-to-noise of at least 30, degrades each with white noise to each value of a grid from 3 to 30, and classifies each copy with the project's classifier. Each row gives the median gap to the next class and to the second-best reference with a range, the share of cases at or above the ambiguity limit, the share whose class letter matches the catalog, and the share that keeps the spectrum's own undegraded class, each share with a 16 to 84 percent interval. The file also names the camera, the definition version, the ambiguity threshold, the signal-to-noise estimator, the fields used, the number of draws and resamples, and the random seed. When no level separates the subtype, the verdict reads "confidence-limited at this resolution" (`CONFIDENCE_LIMITED`). `class_gap_for_snr` gives `None` and a reason when the file is missing, does not read, or does not match the code's camera, version, threshold or estimator. The signal-to-noise is the estimate from the spectrum's own scatter. Rebuild the file after a change of classifier, reference spectra or instrument response (partly measured; see [SPE-30](../../../../documentation/library_design/validation/spectroscopy.md#spe-30)).
 
 For exact behavior, read the code.

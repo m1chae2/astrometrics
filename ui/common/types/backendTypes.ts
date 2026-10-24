@@ -314,6 +314,12 @@ export interface Spectrum {
   gaiaVariableFlag?: string;
   gaiaDr3SourceId?: number | null;
   vsxVariabilityType?: string;
+  vsxBrightMagnitude?: number | null;
+  vsxFaintMagnitude?: number | null;
+  vsxAmplitudeMag?: number | null;
+  vsxPeriodDays?: number | null;
+  vsxMagnitudeBand?: string;
+  vsxRangeChecked?: boolean;
   catalogMatchQuality?: CatalogMatchQuality | null;
   /** How much this star's brightness jumps around, on a display scale. */
   variabilityScore?: number | null;

@@ -88,8 +88,9 @@ def noise_metrics(
     Returns
     -------
     metrics : `list` [`StageQualityMetric`]
-        ``median_snr_per_resolution_element``, ``fraction_samples_snr_below_5``
-        and ``snr_estimate_ratio``, all without a limit.
+        ``median_snr_per_resolution_element``, ``snr_at_classifying_lines``,
+        ``fraction_samples_snr_below_5`` and ``snr_estimate_ratio``, all
+        without a limit.
     """
     assumed = []
     if noise_model is not None and noise_model.gain_is_assumed:
@@ -113,6 +114,18 @@ def noise_metrics(
                 f"median over {span} of the brightness summed over one resolution element divided by the "
                 "error of that sum, from the per-sample variance; reported only, no measured limit."
                 + assumption_note
+            ),
+        ),
+        metric(
+            "snr_at_classifying_lines",
+            summary.snr_at_classifying_lines,
+            "per resolution element",
+            note=(
+                "median, over the line-index cores that can be measured, of the signal-to-noise per "
+                "resolution element of the stretch around the line, on the scatter scale (the spectrum's "
+                "own scatter between neighbouring elements, as the class-gap table reads it), using the "
+                "measured line spread; reported only, no measured limit. It does not use the extractor's "
+                "per-sample errors, which read about five times higher (SPE-09)." + assumption_note
             ),
         ),
         metric(

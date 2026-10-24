@@ -289,3 +289,80 @@ def test_a_failed_gaia_download_keeps_the_solver_solution(monkeypatch: pytest.Mo
     assert result is solver
     assert star_identifier_module.FLAG_WCS_REFINEMENT_SKIPPED in identifier.astrometry_flags
     assert identifier.wcs_refinement is None
+
+
+def test_the_refinement_names_the_stars_the_final_fit_used() -> None:
+    """The indices point into the given positions and number `star_count`."""
+    measured, gaia, _ = make_field()
+    refinement = wcs_refinement.refine_wcs_with_gaia(
+        alnath_like_solution(), np.array(measured), gaia, IMAGE_SHAPE
+    )
+    assert len(refinement.fit_star_indices) == refinement.star_count > 0
+    assert max(refinement.fit_star_indices) < len(measured)
+    assert len(set(refinement.fit_star_indices)) == refinement.star_count
+
+
+def _refit_with_peaks(
+    monkeypatch: pytest.MonkeyPatch, peak_of: object, noise: float | None, binned: bool = False
+) -> tuple[StarIdentifier, list]:
+    """Run the identifier's refit on a field whose sources carry peaks.
+
+    Parameters
+    ----------
+    monkeypatch : `pytest.MonkeyPatch`
+        Replaces the Gaia query.
+    peak_of : `Callable`
+        Gives a source's peak from its index.
+    noise : `float` or `None`
+        The detector's last background noise.
+    binned : `bool`, optional
+        Whether the detection ran on a binned color frame.
+
+    Returns
+    -------
+    identifier : `StarIdentifier`
+        The identifier after the refit.
+    measured : `list`
+        The source centroids given to the refit.
+    """
+    measured, gaia, _ = make_field()
+    identifier = make_identifier()
+    identifier.detector.last_background_noise = noise
+    identifier._detected_on_binned_copy = binned
+    monkeypatch.setattr(
+        StarIdentifier, "_query_gaia_region", staticmethod(lambda *a, **k: (gaia_table_for(gaia), gaia))
+    )
+    sources = [
+        {"x_centroid": x, "y_centroid": y, "peak": peak_of(index)} for index, (x, y) in enumerate(measured)
+    ]
+    identifier._refine_wcs_against_gaia(alnath_like_solution(), sources, *IMAGE_SHAPE)
+    return identifier, measured
+
+
+def test_the_identifier_keeps_the_peak_over_noise_of_the_fit_stars(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each fit star's peak is divided by the detector noise, in fit order."""
+    identifier, _ = _refit_with_peaks(monkeypatch, lambda index: 100.0 + index, noise=4.0)
+    refinement = identifier.wcs_refinement
+    assert refinement is not None and refinement.star_count > 0
+    assert identifier.gaia_fit_signal_reason == ""
+    expected = tuple((100.0 + index) / 4.0 for index in refinement.fit_star_indices)
+    assert identifier.gaia_fit_peak_over_noise == pytest.approx(expected)
+
+
+@pytest.mark.parametrize(
+    ("peak", "noise", "binned", "words"),
+    [
+        (50.0, 4.0, True, "binned copy"),
+        (50.0, None, False, "no background noise"),
+        (50.0, 0.0, False, "no background noise"),
+        (float("nan"), 4.0, False, "positive peak"),
+        (-5.0, 4.0, False, "positive peak"),
+    ],
+)
+def test_the_identifier_gives_no_signal_when_the_peaks_or_noise_cannot_be_trusted(
+    monkeypatch: pytest.MonkeyPatch, peak: float, noise: float | None, binned: bool, words: str
+) -> None:
+    """A binned frame, no noise or a bad peak leaves the list empty."""
+    identifier, _ = _refit_with_peaks(monkeypatch, lambda index: peak, noise=noise, binned=binned)
+    assert identifier.gaia_fit_peak_over_noise == ()
+    assert words in identifier.gaia_fit_signal_reason

@@ -138,3 +138,128 @@ def test_an_empty_table_makes_no_request() -> None:
 
     assert result is None
     assert calls == []
+
+
+def vsx_range_matches() -> Table:
+    """Build a VSX result with the range columns the live service returns.
+
+    The columns and the Algol, delta Cep and Mira values were read from the
+    live CDS XMatch service on 2026-10-23. The last two rows are made up to
+    cover the amplitude flag and a masked range.
+
+    Returns
+    -------
+    matches : `astropy.table.Table`
+        Rows for Algol, delta Cep, Mira (and its companion), a star whose
+        minimum column is an amplitude, and a typed star with no range.
+    """
+    return Table({
+        "id": ["Algol", "dCep", "Mira", "Mira", "AmpStar", "NoRange"],
+        "angDist": [0.087, 0.05, 0.144, 0.5, 0.2, 0.3],
+        "Type": ["EA/SD", "DCEP", "M", "*", "SR", "LPV"],
+        "max": MaskedColumn([2.09, 3.49, 2.0, 9.5, 11.0, 0.0], mask=[False] * 5 + [True]),
+        "min": MaskedColumn([3.3, 4.36, 10.1, 12.0, 0.8, 0.0], mask=[False] * 5 + [True]),
+        "f_min": ["", "", "", "", "(", ""],
+        "n_max": ["V", "V", "V", "V", "p", ""],
+        "Period": MaskedColumn([2.867343, 5.36629, 331.3, 4750.0, 120.0, 0.0], mask=[False] * 5 + [True]),
+    })
+
+
+def test_the_vsx_range_is_the_faint_minus_the_bright_magnitude_with_the_period_and_band() -> None:
+    """Algol lists 2.09 to 3.30 V, a range of 1.21 mag every 2.867343 d."""
+    entries = catalogs.vsx_entries_from_matches(["Algol", "dCep"], vsx_range_matches())
+
+    algol = entries["Algol"]
+    assert algol is not None
+    assert (algol.bright_magnitude, algol.faint_magnitude) == (2.09, 3.3)
+    assert algol.amplitude_mag == pytest.approx(1.21)
+    assert algol.period_days == pytest.approx(2.867343)
+    assert (algol.variability_type, algol.band) == ("EA/SD", "V")
+    assert entries["dCep"].amplitude_mag == pytest.approx(0.87)
+
+
+def test_the_entry_is_the_one_that_gives_the_type_so_a_companion_cannot_replace_it() -> None:
+    """Mira is its nearest typed entry (M, 2.0 to 10.1), not its companion."""
+    mira = catalogs.vsx_entries_from_matches(["Mira"], vsx_range_matches())["Mira"]
+    assert mira is not None
+    assert mira.variability_type == "M"
+    assert mira.amplitude_mag == pytest.approx(8.1)
+    assert mira.period_days == pytest.approx(331.3)
+
+
+def test_an_amplitude_flag_means_the_minimum_column_is_the_amplitude() -> None:
+    """A ( flag means the minimum column is the amplitude."""
+    entry = catalogs.vsx_entries_from_matches(["AmpStar"], vsx_range_matches())["AmpStar"]
+    assert entry is not None
+    assert entry.amplitude_mag == pytest.approx(0.8)
+    assert entry.faint_magnitude is None
+    assert entry.band == "p"
+
+
+def test_a_typed_star_with_a_masked_range_has_an_entry_with_nothing_in_it() -> None:
+    """The type is kept; the range and the period are missing, not zero."""
+    entry = catalogs.vsx_entries_from_matches(["NoRange"], vsx_range_matches())["NoRange"]
+    assert entry is not None
+    assert entry.variability_type == "LPV"
+    assert (entry.bright_magnitude, entry.faint_magnitude, entry.amplitude_mag, entry.period_days) == (
+        None,
+        None,
+        None,
+        None,
+    )
+
+
+def test_constants_untyped_and_absent_stars_have_no_entry() -> None:
+    """Only a typed variable gets an entry; the others are None."""
+    entries = catalogs.vsx_entries_from_matches(["Vega", "Sirius", "Absent"], vsx_matches())
+    assert entries == {"Vega": None, "Sirius": None, "Absent": None}
+    assert catalogs.vsx_entries_from_matches(["Algol"], None) == {"Algol": None}
+
+
+def test_a_result_without_the_range_columns_still_gives_the_type() -> None:
+    """A table without range columns gives entries with no range."""
+    entry = catalogs.vsx_entries_from_matches(["Algol"], vsx_matches())["Algol"]
+    assert entry is not None
+    assert entry.variability_type == "EA/SD"
+    assert entry.amplitude_mag is None
+    assert entry.period_days is None
+
+
+def test_a_negative_range_or_period_is_dropped() -> None:
+    """A negative range or a period of zero is not kept."""
+    table = Table({
+        "id": ["Odd"],
+        "angDist": [0.1],
+        "Type": ["EA"],
+        "max": [12.0],
+        "min": [11.0],
+        "f_min": [""],
+        "n_max": ["V"],
+        "Period": [0.0],
+    })
+    entry = catalogs.vsx_entries_from_matches(["Odd"], table)["Odd"]
+    assert entry is not None
+    assert entry.amplitude_mag is None
+    assert entry.faint_magnitude is None
+    assert entry.bright_magnitude == pytest.approx(12.0)
+    assert entry.period_days is None
+
+
+def test_a_minimum_in_another_band_than_the_maximum_gives_no_range() -> None:
+    """A range across two bands gives no faint magnitude and no range."""
+    table = Table({
+        "id": ["Mixed", "Same"],
+        "angDist": [0.1, 0.1],
+        "Type": ["EA", "EA"],
+        "max": [9.0, 9.0],
+        "min": [10.5, 10.5],
+        "f_min": ["", ""],
+        "n_max": ["V", "V"],
+        "n_min": ["p", "V"],
+        "Period": [1.0, 1.0],
+    })
+    entries = catalogs.vsx_entries_from_matches(["Mixed", "Same"], table)
+    assert entries["Mixed"].amplitude_mag is None
+    assert entries["Mixed"].faint_magnitude is None
+    assert entries["Mixed"].bright_magnitude == pytest.approx(9.0)
+    assert entries["Same"].amplitude_mag == pytest.approx(1.5)

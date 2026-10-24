@@ -1178,6 +1178,23 @@ class StellarObject(BaseModel):
     # "CST" for a star checked and found constant), "NOT_IN_VSX", or
     # "LISTED_WITHOUT_TYPE". Empty when VSX was never asked.
     vsx_variability_type: str = Field(default="", alias="vsxVariabilityType")
+    # The brightness range and period VSX lists for this star, from the same
+    # nearest typed entry as `vsx_variability_type` (see
+    # `variable_star_catalogs.VsxEntry`). They are catalog values, not
+    # measurements: VSX often lists them for one band and from old data.
+    # `None` when VSX was never asked, lists no such star, or gives no value.
+    # The magnitude at maximum light and at minimum light, the size of the
+    # range in magnitudes, the period in days, and the band VSX names.
+    vsx_bright_magnitude: float | None = Field(default=None, alias="vsxBrightMagnitude")
+    vsx_faint_magnitude: float | None = Field(default=None, alias="vsxFaintMagnitude")
+    vsx_amplitude_mag: float | None = Field(default=None, alias="vsxAmplitudeMag")
+    vsx_period_days: float | None = Field(default=None, alias="vsxPeriodDays")
+    vsx_magnitude_band: str = Field(default="", alias="vsxMagnitudeBand")
+    # `True` once the VSX range fields above were looked up for this star
+    # (the lookup may have found no range, which leaves them `None`). `False`
+    # for a star saved before VSX ranges were kept, whose `None` fields then
+    # mean "never looked up", not "VSX lists none".
+    vsx_range_checked: bool = Field(default=False, alias="vsxRangeChecked")
     # How confidently this star was matched to its SIMBAD/Gaia entry --
     # see CatalogMatchQuality. `None` for a star that was never matched
     # (a FIELD_J... position-only id).

@@ -28,6 +28,7 @@ from astrometricslib.pipelines.photometry.metrics import (
     PHOTOMETRY_GATE_REGISTRATION_DRIFT,
     PHOTOMETRY_LIGHT_CURVE_SCATTER_RMS_MEDIAN_MAG,
     PHOTOMETRY_METRICS,
+    PHOTOMETRY_SCIENCE_OUTCOME_METRIC_NAMES,
     PHOTOMETRY_STARS_PROCESSED,
     PHOTOMETRY_ZERO_POINT_METRIC_NAMES,
 )
@@ -50,14 +51,20 @@ def _declared_names() -> set[str]:
     """Give the name of every run-level metric the pipeline declares.
 
     The zero point metrics are about frames and sessions and are checked in
-    `test_record_zero_point.py`; a run with no zero points emits none.
+    `test_record_zero_point.py`; a run with no zero points emits none. The
+    noise model, alias peaks and target amplitude have steps of their own
+    (`test_record_science_outcomes.py`).
 
     Returns
     -------
     names : `set` of `str`
-        The declared names, less the zero point metrics.
+        The declared names, less the zero point and science outcome metrics.
     """
-    return {spec.name for spec in PHOTOMETRY_METRICS} - PHOTOMETRY_ZERO_POINT_METRIC_NAMES
+    return (
+        {spec.name for spec in PHOTOMETRY_METRICS}
+        - PHOTOMETRY_ZERO_POINT_METRIC_NAMES
+        - PHOTOMETRY_SCIENCE_OUTCOME_METRIC_NAMES
+    )
 
 
 def _context(run_id: str = "job-1") -> PipelineRunContext:
@@ -298,8 +305,10 @@ def test_the_runner_writes_one_row_per_declared_metric_and_a_repeat_writes_none(
     summary = _run_validate_output({"job_id": "job-7", "measured_at": MEASURED_AT})
     rows = [row for row in store.query(target_id="Test Target", latest_only=False) if row.run_id == "job-7"]
 
-    assert {row.metric for row in rows} == _declared_names()
-    assert len(rows) == len(_declared_names())
+    # The runner also stores the noise model, alias peaks and amplitude rows.
+    expected = _declared_names() | PHOTOMETRY_SCIENCE_OUTCOME_METRIC_NAMES
+    assert {row.metric for row in rows} == expected
+    assert len(rows) == len(expected)
     work = next(row for row in rows if row.metric == PHOTOMETRY_GATE_PHOTOMETRY_WORK)
     assert work.check_outcome is GateStatus.FAILED
     again = rq.record_photometry_quality(
@@ -314,7 +323,7 @@ def test_a_run_without_a_job_gets_a_generated_run_id(tmp_path: Path, monkeypatch
     _run_validate_output({"measured_at": MEASURED_AT})
     rows = store.query(target_id="Test Target", latest_only=False)
 
-    assert len(rows) == len(_declared_names())
+    assert len(rows) == len(_declared_names() | PHOTOMETRY_SCIENCE_OUTCOME_METRIC_NAMES)
     assert len({row.run_id for row in rows}) == 1
     assert rows[0].run_id.startswith("run-")
     assert rows[0].job_id is None

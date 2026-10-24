@@ -1046,6 +1046,17 @@ def summarize_centroid_shifts(
     )
 
 
+# The aperture the photometry measures every star in, in pixels. The star
+# circle has a radius of 4 px, about 1 to 2 times the star's FWHM (full width
+# at half maximum) on a good night, and the sky ring runs from 7 to 12 px,
+# which keeps it clear of the star's wings. These are the defaults of
+# `measure_aperture_photometry` and the geometry behind the noise budget in
+# `processing/noise_budget.py`, so they are defined once, here.
+APERTURE_RADIUS_PX = 4.0
+SKY_ANNULUS_INNER_RADIUS_PX = 7.0
+SKY_ANNULUS_OUTER_RADIUS_PX = 12.0
+
+
 def aperture_flux_error_adu(
     net_flux_adu: float,
     sky_adu_per_pixel: float,
@@ -1147,9 +1158,9 @@ def measure_aperture_photometry(
     data: np.ndarray,
     x: float,
     y: float,
-    radius: float = 4.0,
-    annulus_inner: float = 7.0,
-    annulus_outer: float = 12.0,
+    radius: float = APERTURE_RADIUS_PX,
+    annulus_inner: float = SKY_ANNULUS_INNER_RADIUS_PX,
+    annulus_outer: float = SKY_ANNULUS_OUTER_RADIUS_PX,
     cutout_radius: int = 15,
     fallback_background: float | None = None,
     *,
@@ -1275,9 +1286,9 @@ def _measure_aperture_flux(
     data: np.ndarray,
     x: float,
     y: float,
-    radius: float = 4.0,
-    annulus_inner: float = 7.0,
-    annulus_outer: float = 12.0,
+    radius: float = APERTURE_RADIUS_PX,
+    annulus_inner: float = SKY_ANNULUS_INNER_RADIUS_PX,
+    annulus_outer: float = SKY_ANNULUS_OUTER_RADIUS_PX,
     cutout_radius: int = 15,
     fallback_background: float | None = None,
     *,

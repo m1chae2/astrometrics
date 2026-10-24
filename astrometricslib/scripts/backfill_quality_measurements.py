@@ -134,6 +134,18 @@ from astrometricslib.pipelines.astrometry.post_processing.record_quality import 
 from astrometricslib.pipelines.astrometry.post_processing.record_quality import (
     gate_for_measurement as astrometry_gate_for_measurement,
 )
+from astrometricslib.pipelines.photometry.metrics import (
+    NOISE_MODEL_MAGNITUDES,
+    NOISE_MODEL_PARTS,
+    PHOTOMETRY_MODEL_NOISE_SCINTILLATION_MAG,
+    PHOTOMETRY_TARGET_CATALOG_AMPLITUDE_MAG,
+    PHOTOMETRY_TARGET_LIGHT_CURVE_AMPLITUDE_MAG,
+    PHOTOMETRY_TARGET_PHASE_COVERAGE_FRACTION,
+    WINDOW_ALIAS_RANKS,
+    model_noise_metric_name,
+    window_alias_frequency_metric_name,
+    window_alias_power_metric_name,
+)
 from astrometricslib.pipelines.photometry.post_processing.record_quality import (
     GATE_LIMIT_SOURCES as PHOTOMETRY_GATE_LIMIT_SOURCES,
 )
@@ -1333,6 +1345,12 @@ _STACKING_NOT_HELD: tuple[str, ...] = (
 _ASTROMETRY_NOT_HELD: tuple[str, ...] = (
     "astrometry.frame_target_clipped_fraction",
     "astrometry.frame_target_nonlinear_fraction",
+    # The expected residual needs the star finder's peaks and noise of the run
+    # that solved the stack, which a stored summary does not hold.
+    "astrometry.expected_centroid_noise_rms_arcsec",
+    "astrometry.expected_pixel_phase_rms_arcsec",
+    "astrometry.expected_gaia_epoch_error_rms_arcsec",
+    "astrometry.expected_residual_star_count",
 )
 
 _ASTROMETRY_VALUES: tuple[ValueMapping, ...] = (
@@ -1434,6 +1452,23 @@ _PHOTOMETRY_NOT_HELD: tuple[str, ...] = (
     "photometry.catalog_zero_point_color_slope",
     "photometry.catalog_zero_point_star_sample_error_gaia_g_mag",
     "photometry.catalog_zero_point_star_sample_error_simbad_v_mag",
+    # The noise model, the schedule's alias peaks and the target amplitude are
+    # made from the run's saved flux errors, frame times, frame headers and the
+    # configuration, none of which a stored summary holds.
+    *(
+        model_noise_metric_name(part, magnitude)
+        for magnitude in NOISE_MODEL_MAGNITUDES
+        for part in NOISE_MODEL_PARTS
+    ),
+    PHOTOMETRY_MODEL_NOISE_SCINTILLATION_MAG,
+    *(
+        name
+        for rank in WINDOW_ALIAS_RANKS
+        for name in (window_alias_frequency_metric_name(rank), window_alias_power_metric_name(rank))
+    ),
+    PHOTOMETRY_TARGET_LIGHT_CURVE_AMPLITUDE_MAG,
+    PHOTOMETRY_TARGET_PHASE_COVERAGE_FRACTION,
+    PHOTOMETRY_TARGET_CATALOG_AMPLITUDE_MAG,
 )
 
 _SPECTROSCOPY_VALUES: tuple[ValueMapping, ...] = (

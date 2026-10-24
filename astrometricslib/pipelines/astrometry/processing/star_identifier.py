@@ -843,6 +843,12 @@ class StarIdentifier:
         # What the Gaia refit of the plate solution found for the last image
         # (see `_refine_wcs_against_gaia`), or `None` before one was tried.
         self.wcs_refinement: WcsRefinement | None = None
+        # The peak over the background noise of each star the final Gaia fit
+        # used, and why there is none (see `_record_fit_star_signal`). The
+        # expected position error is found from them.
+        self.gaia_fit_peak_over_noise: tuple[float, ...] = ()
+        self.gaia_fit_signal_reason: str = "no Gaia fit was made"
+        self._detected_on_binned_copy = False
 
     def _add_flag(self, flag: str) -> None:
         """Record a limiting condition once for the current image.
@@ -1159,6 +1165,9 @@ class StarIdentifier:
         self.plate_solve_matched_star_count = None
         self.astrometry_flags = []
         self.wcs_refinement = None
+        self.gaia_fit_peak_over_noise = ()
+        self.gaia_fit_signal_reason = "no Gaia fit was made"
+        self._detected_on_binned_copy = is_color_frame
 
         # We limit how many stars we send to the plate solver because it
         # only needs the brightest ones to figure out where the image is
@@ -1285,11 +1294,13 @@ class StarIdentifier:
             The refined solution, or `wcs` unchanged.
         """
         centroids = []
-        for source in sources:
+        centroid_source_indices = []
+        for source_index, source in enumerate(sources):
             x = source.get("x_centroid", source.get("xcentroid"))
             y = source.get("y_centroid", source.get("ycentroid"))
             if x is not None and y is not None:
                 centroids.append((float(x), float(y)))
+                centroid_source_indices.append(source_index)
         try:
             centre = wcs.pixel_to_world(width / 2.0, height / 2.0)
             scales = proj_plane_pixel_scales(wcs)
@@ -1308,6 +1319,7 @@ class StarIdentifier:
         gaia_coords = self._move_gaia_coords_to_observation_epoch(gaia_table, gaia_coords)
         refinement = refine_wcs_with_gaia(wcs, np.array(centroids), gaia_coords, (height, width))
         self.wcs_refinement = refinement
+        self._record_fit_star_signal(refinement, sources, centroid_source_indices)
         if refinement.applied:
             logger.info(
                 "Refit the solution to %s Gaia stars: RMS %.2f -> %.2f arcsec, moved up to %.2f arcsec.",
@@ -1321,6 +1333,48 @@ class StarIdentifier:
         logger.warning("The solver's solution was kept: %s.", refinement.reason)
         self._add_flag(FLAG_WCS_REFINEMENT_SKIPPED)
         return wcs
+
+    def _record_fit_star_signal(
+        self, refinement: WcsRefinement, sources: list[dict], centroid_source_indices: list[int]
+    ) -> None:
+        """Keep the peak over the noise of the stars the Gaia fit used.
+
+        The expected position error of a star follows from how far its peak
+        stands above the background noise. The fit's stars are the ones the
+        measured residual is taken over, so the expectation is found over the
+        same stars. A one-shot-color frame is searched on a binned copy whose
+        peaks and noise are in other units, so it gets no value.
+
+        Parameters
+        ----------
+        refinement : `WcsRefinement`
+            What the Gaia fit found.
+        sources : `list` [`dict`]
+            The detected stars the fit was given, each with a ``peak``.
+        centroid_source_indices : `list` [`int`]
+            For each centroid given to the fit, the index of its source in
+            `sources`.
+        """
+        noise = self.detector.last_background_noise
+        if not refinement.fit_star_indices:
+            self.gaia_fit_signal_reason = "the Gaia fit used no stars"
+        elif self._detected_on_binned_copy:
+            self.gaia_fit_signal_reason = (
+                "the stars were found on a binned copy of a one-shot-color frame, whose peaks and noise "
+                "are not in full-pixel units"
+            )
+        elif noise is None or not math.isfinite(noise) or noise <= 0:
+            self.gaia_fit_signal_reason = "the detector measured no background noise"
+        else:
+            peaks = [
+                float(sources[centroid_source_indices[index]].get("peak", math.nan))
+                for index in refinement.fit_star_indices
+            ]
+            if all(math.isfinite(peak) and peak > 0 for peak in peaks):
+                self.gaia_fit_peak_over_noise = tuple(peak / noise for peak in peaks)
+                self.gaia_fit_signal_reason = ""
+            else:
+                self.gaia_fit_signal_reason = "a fitted star had no positive peak from the star finder"
 
     def _query_simbad_region(
         self,

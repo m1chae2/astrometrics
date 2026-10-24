@@ -82,6 +82,77 @@ PHOTOMETRY_ZERO_POINT_METRIC_NAMES: frozenset[str] = frozenset({
     PHOTOMETRY_CATALOG_ZERO_POINT_STAR_SAMPLE_ERROR_SIMBAD_V_MAG,
 })
 
+# The noise model, by source (photon, sky, read, scintillation), stored for a
+# star of each stated catalog magnitude. The scintillation of a star does not
+# depend on its magnitude, so it has one value. The magnitudes are in the band
+# of the session's zero point.
+NOISE_MODEL_MAGNITUDES: tuple[int, ...] = (10, 12, 14)
+NOISE_MODEL_PARTS: tuple[str, ...] = ("photon", "sky", "read")
+
+
+def model_noise_metric_name(part: str, magnitude: int) -> str:
+    """Name the metric that holds one noise source at one stated magnitude.
+
+    Parameters
+    ----------
+    part : `str`
+        One of `NOISE_MODEL_PARTS`.
+    magnitude : `int`
+        One of `NOISE_MODEL_MAGNITUDES`.
+
+    Returns
+    -------
+    name : `str`
+        ``photometry.model_noise_<part>_at_mag<magnitude>_mag``.
+    """
+    return f"photometry.model_noise_{part}_at_mag{magnitude}_mag"
+
+
+PHOTOMETRY_MODEL_NOISE_SCINTILLATION_MAG = "photometry.model_noise_scintillation_mag"
+
+# The strongest peaks of the window function of the run's frame times (the
+# alias peaks), by rank. Each has a frequency and a power.
+WINDOW_ALIAS_RANKS: tuple[int, ...] = (1, 2, 3)
+
+
+def window_alias_frequency_metric_name(rank: int) -> str:
+    """Name the metric that holds the frequency of one alias peak.
+
+    Parameters
+    ----------
+    rank : `int`
+        One of `WINDOW_ALIAS_RANKS` (1 is the strongest).
+
+    Returns
+    -------
+    name : `str`
+        ``photometry.window_alias_<rank>_frequency_per_day``.
+    """
+    return f"photometry.window_alias_{rank}_frequency_per_day"
+
+
+def window_alias_power_metric_name(rank: int) -> str:
+    """Name the metric that holds the power of one alias peak.
+
+    Parameters
+    ----------
+    rank : `int`
+        One of `WINDOW_ALIAS_RANKS` (1 is the strongest).
+
+    Returns
+    -------
+    name : `str`
+        ``photometry.window_alias_<rank>_power_fraction``.
+    """
+    return f"photometry.window_alias_{rank}_power_fraction"
+
+
+# The target's amplitude, from its own light curve or from the VSX catalog,
+# named for its source so that the two are never mixed.
+PHOTOMETRY_TARGET_LIGHT_CURVE_AMPLITUDE_MAG = "photometry.target_light_curve_amplitude_mag"
+PHOTOMETRY_TARGET_PHASE_COVERAGE_FRACTION = "photometry.target_phase_coverage_fraction"
+PHOTOMETRY_TARGET_CATALOG_AMPLITUDE_MAG = "photometry.target_catalog_amplitude_mag"
+
 PHOTOMETRY_GATE_ENSEMBLE_FRAME_REJECTION = "photometry.gate_ensemble_frame_rejection"
 PHOTOMETRY_GATE_CAPTURE_TIMESTAMPS = "photometry.gate_capture_timestamps"
 PHOTOMETRY_GATE_SESSION_CONTENT = "photometry.gate_session_content"
@@ -402,6 +473,328 @@ def _star_sample_error_metric(name: str, band_name: str, zero_point_name: str) -
     )
 
 
+_NOISE_MODEL_REVIEW_DATE = datetime.date(2027, 4, 30)
+_NOISE_MODEL_COMPUTED_BY = (
+    "pipelines.photometry.post_processing.record_noise_budget.noise_budget_measurements"
+)
+_NOISE_MODEL_BAND = (
+    "The catalog band of the run's dominant session's zero point (Gaia G when the session had enough "
+    "stars, else SIMBAD V), against the frame's own filter, with no color term. The magnitude in the "
+    "name is in that band."
+)
+_NOISE_MODEL_UNCERTAINTY = (
+    "No uncertainty is reported. The value is model-derived: it follows from the CCD equation, the "
+    "camera gain and read noise, and the session's zero point, and the error of those is not carried."
+)
+_NOISE_MODEL_SAMPLE = (
+    "The run's dominant session (the one with the most light-curve points): the median background term "
+    "of its saved flux errors, its median exposure, its camera gain and read noise, and the median of "
+    "its frames' zero points."
+)
+_NOISE_PART_ESTIMATOR = {
+    "photon": (
+        "The star's own electrons: its flux, 10 ** (0.4 (ZP - m)) ADU per second for the zero point "
+        "ZP of the session and the stated magnitude m, times the median exposure and the gain. The "
+        "noise is the square root of the electron count, over the electron count, times 1.0857 to give "
+        "magnitudes. The flux is in the photometry's 4 px circle with no aperture correction, as the "
+        "zero point is."
+    ),
+    "sky": (
+        "The sky's share of the background term of the CCD equation (the pixels of the star circle and "
+        "of the sky ring). The whole background term is the median, over the saved light-curve points, "
+        "of the squared flux error in electrons minus the star's own electrons (exact, because the error "
+        "was made by that equation). The read term is taken from it and what is left is the sky. The "
+        "dark current is assumed to be zero, as the photometry assumes. Not found when the read noise "
+        "was only assumed or the sky term would come out negative."
+    ),
+    "read": (
+        "The camera's read noise squared times the number of pixel variances one measurement carries: "
+        "the circle's area plus the circle's area squared over the number of ring pixels. Not found "
+        "when the read noise was only assumed."
+    ),
+}
+
+
+def _noise_model_metric(part: str, magnitude: int) -> MetricSpec:
+    """Declare one noise source at one stated magnitude.
+
+    Parameters
+    ----------
+    part : `str`
+        ``"photon"``, ``"sky"`` or ``"read"``.
+    magnitude : `int`
+        The stated catalog magnitude.
+
+    Returns
+    -------
+    spec : `MetricSpec`
+        A context run metric in magnitudes, model-derived.
+    """
+    return MetricSpec(
+        name=model_noise_metric_name(part, magnitude),
+        definition_version=1,
+        unit="mag",
+        checkpoint=Checkpoint.PHOTOMETRY,
+        levels=_RUN_ONLY,
+        better=Direction.LOWER,
+        meaning=(
+            f"The {part} noise of one measurement of a star of catalog magnitude {magnitude}, in "
+            "magnitudes, as the noise model predicts it."
+        ),
+        decisions=("systematic floor, flats and comparison stars",),
+        estimator=_NOISE_PART_ESTIMATOR[part],
+        sample_definition=_NOISE_MODEL_SAMPLE,
+        band=_NOISE_MODEL_BAND,
+        computed_by=_NOISE_MODEL_COMPUTED_BY,
+        uncertainty_kind=UncertaintyKind.MODEL_DERIVED,
+        uncertainty_method=_NOISE_MODEL_UNCERTAINTY,
+        register_entry="PHO-17",
+        purpose=MetricPurpose.CONTEXT,
+        purpose_reason=(
+            "A reader who sees more scatter than the saved flux errors predict needs to know which "
+            "source dominates at the star's magnitude: photon noise falls with brightness, sky and read "
+            "noise do not, and scintillation sets a floor."
+        ),
+    )
+
+
+_SCINTILLATION_ESTIMATOR = (
+    "Young's formula as Dravins and others wrote it: 0.09 * D ** (-2/3) * X ** 1.75 * exp(-h / 8000) / "
+    "sqrt(2 t), for the aperture diameter D in centimeters, the median airmass X of the frames "
+    "whose headers gave one, the site height h in meters and the median exposure t in seconds, times "
+    "1.0857 to give magnitudes. D is the focal length over the focal ratio of the optic the frames "
+    "were taken with, from the configuration. The site height is not known (the configuration holds 0 "
+    "for unknown), so h = 0 is used and the row is marked assumed. No bound is claimed: the site's real "
+    "height would lower the value (about 12 percent for each kilometer), while measured coefficients run "
+    "about 1.5 times Young's (Osborn et al. 2015). No site-dependent factor is applied. "
+    "The frames' airmass is read from their headers and never taken from a default."
+)
+_NOISE_MODEL_METRICS: tuple[MetricSpec, ...] = (
+    *(
+        _noise_model_metric(part, magnitude)
+        for magnitude in NOISE_MODEL_MAGNITUDES
+        for part in NOISE_MODEL_PARTS
+    ),
+    MetricSpec(
+        name=PHOTOMETRY_MODEL_NOISE_SCINTILLATION_MAG,
+        definition_version=1,
+        unit="mag",
+        checkpoint=Checkpoint.PHOTOMETRY,
+        levels=_RUN_ONLY,
+        better=Direction.LOWER,
+        meaning=(
+            "The scintillation noise of one measurement of any star, in magnitudes, as Young's formula "
+            "predicts it. It does not depend on the star's magnitude."
+        ),
+        decisions=("systematic floor, flats and comparison stars",),
+        estimator=_SCINTILLATION_ESTIMATOR,
+        sample_definition=(
+            "The run's dominant session: its median exposure, the median airmass of its frames whose "
+            "headers gave one, and the optic of its frames."
+        ),
+        band="Not applicable: scintillation does not depend on the band at this level of detail.",
+        computed_by=_NOISE_MODEL_COMPUTED_BY,
+        uncertainty_kind=UncertaintyKind.MODEL_DERIVED,
+        uncertainty_method=_NOISE_MODEL_UNCERTAINTY,
+        register_entry="PHO-17",
+        purpose=MetricPurpose.CONTEXT,
+        purpose_reason=(
+            "Scintillation does not shrink with a brighter star, so it is the noise floor of a bright "
+            "target and a reader needs it beside the other sources."
+        ),
+    ),
+)
+
+_WINDOW_COMPUTED_BY = "pipelines.photometry.processing.observing_window.strongest_window_peaks"
+_WINDOW_SAMPLE = (
+    "The distinct exposure starts of the run's measured frames (every point of every light curve), "
+    "over all sessions. Missing when the run is a single night, which has no daily echo to measure."
+)
+
+
+def _window_metrics(rank: int) -> tuple[MetricSpec, MetricSpec]:
+    """Declare the frequency and power of one alias peak.
+
+    Parameters
+    ----------
+    rank : `int`
+        The peak's rank by power, 1 for the strongest.
+
+    Returns
+    -------
+    frequency_spec, power_spec : `tuple` [`MetricSpec`, `MetricSpec`]
+        Two context run metrics.
+    """
+    common = {
+        "definition_version": 1,
+        "checkpoint": Checkpoint.PHOTOMETRY,
+        "levels": _RUN_ONLY,
+        "better": Direction.NONE,
+        "decisions": ("which nights to add to break an alias",),
+        "sample_definition": _WINDOW_SAMPLE,
+        "band": "Not applicable: the window depends only on the frame times.",
+        "computed_by": _WINDOW_COMPUTED_BY,
+        "uncertainty_kind": UncertaintyKind.NONE,
+        "uncertainty_method": "No uncertainty is reported. The window is computed exactly from the times.",
+        "register_entry": "PHO-18",
+        "purpose": MetricPurpose.CONTEXT,
+        "purpose_reason": (
+            "Two periods whose frequencies differ by an alias frequency cannot be told apart by this "
+            "run. A reader who wants to break an alias needs to know the frequencies and how strong "
+            "each is."
+        ),
+    }
+    frequency = MetricSpec(
+        name=window_alias_frequency_metric_name(rank),
+        unit="1/d",
+        meaning=(
+            f"The frequency, in cycles per day, of the number {rank} peak of the window function of the "
+            "run's frame times. Two periods P and P' with 1/P - 1/P' equal to it are aliases of each other."
+        ),
+        estimator=(
+            "The Lomb-Scargle power of a constant signal sampled at the frame times, with the mean not "
+            "removed, on a grid five samples wide across each 1/span peak, from two peak widths up to "
+            "2 cycles per day. The local maxima of that power are ranked by power, and the rank-"
+            f"{rank} one is stored. The window is 1 at zero frequency; that central peak is left out."
+        ),
+        **common,
+    )
+    power = MetricSpec(
+        name=window_alias_power_metric_name(rank),
+        unit="fraction",
+        meaning=(
+            f"The window function's power at the number {rank} alias peak, from 0 to 1 (1 is the central "
+            "peak at zero frequency). A value near 1 means the schedule cannot separate periods that "
+            "differ by that frequency."
+        ),
+        estimator="The power of the peak whose frequency the matching metric stores.",
+        **common,
+    )
+    return frequency, power
+
+
+_WINDOW_METRICS: tuple[MetricSpec, ...] = tuple(
+    spec for rank in WINDOW_ALIAS_RANKS for spec in _window_metrics(rank)
+)
+
+_AMPLITUDE_REVIEW_DATE = datetime.date(2027, 4, 30)
+_AMPLITUDE_COMPUTED_BY = (
+    "pipelines.photometry.post_processing.record_target_amplitude.target_amplitude_measurements"
+)
+_AMPLITUDE_QUESTION = (
+    "How much of its known amplitude does the target's own light curve show once its phase coverage is "
+    "enough, and how far is the VSX catalog's range from the one measured here? Few targets have both "
+    "a period and a covered cycle, so the comparison has not been made."
+)
+
+_AMPLITUDE_METRICS: tuple[MetricSpec, ...] = (
+    MetricSpec(
+        name=PHOTOMETRY_TARGET_LIGHT_CURVE_AMPLITUDE_MAG,
+        definition_version=1,
+        unit="mag",
+        checkpoint=Checkpoint.PHOTOMETRY,
+        levels=_RUN_ONLY,
+        better=Direction.NONE,
+        meaning=(
+            "The amplitude of the target star's own light curve, folded on its period: the difference "
+            "between its faintest and brightest bin medians. Source: the light curve."
+        ),
+        decisions=("when the light curve is good enough",),
+        estimator=(
+            "The target star is the catalog-identified star nearest the target's position, within 30 "
+            "arcseconds. Its normalized (or detrended) brightness is turned into magnitudes and folded "
+            "on a period: the star's own periodogram result when the search called it detected or "
+            "possible, else the period VSX lists. The fold is cut into 10 equal bins of phase. The "
+            "amplitude is stored when at least 8 bins hold at least 3 points; it is then the largest "
+            "bin median minus the smallest. A sharp minimum narrower than a tenth of the period is "
+            "smoothed and the amplitude reads too small."
+        ),
+        sample_definition=(
+            "The target star's light-curve points. Missing when the target star is not found, has no "
+            "period, or the fold fills too few bins."
+        ),
+        band="The run's filter; differential brightness, so it is not tied to a catalog band.",
+        computed_by=_AMPLITUDE_COMPUTED_BY,
+        uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
+        uncertainty_method=(
+            "The standard errors of the two bin medians added in quadrature; each is 1.2533 times 1.4826 "
+            "times the median absolute deviation over the square root of the bin's point count. The "
+            "smoothing of a narrow minimum is not included."
+        ),
+        register_entry="PHO-19",
+        purpose=MetricPurpose.EXPLORATORY,
+        exploratory_question=_AMPLITUDE_QUESTION,
+        review_date=_AMPLITUDE_REVIEW_DATE,
+    ),
+    MetricSpec(
+        name=PHOTOMETRY_TARGET_PHASE_COVERAGE_FRACTION,
+        definition_version=1,
+        unit="fraction",
+        checkpoint=Checkpoint.PHOTOMETRY,
+        levels=_RUN_ONLY,
+        better=Direction.HIGHER,
+        meaning="The share of the 10 phase bins of the target's folded light curve that hold enough points.",
+        decisions=("when the light curve is good enough",),
+        estimator=(
+            "The number of phase bins with at least 3 points over 10, for the fold the amplitude uses. "
+            "The amplitude counts as covered at 0.8 or more."
+        ),
+        sample_definition="The target star's light-curve points. Missing when there is no period to fold on.",
+        band="The run's filter.",
+        computed_by=_AMPLITUDE_COMPUTED_BY,
+        uncertainty_kind=UncertaintyKind.NONE,
+        uncertainty_method="No uncertainty is reported. The value is a count over 10.",
+        register_entry="PHO-19",
+        purpose=MetricPurpose.CONTEXT,
+        purpose_reason=(
+            "A reader judging a missing light-curve amplitude needs to know whether the cycle was "
+            "covered, and by how much."
+        ),
+    ),
+    MetricSpec(
+        name=PHOTOMETRY_TARGET_CATALOG_AMPLITUDE_MAG,
+        definition_version=1,
+        unit="mag",
+        checkpoint=Checkpoint.PHOTOMETRY,
+        levels=_RUN_ONLY,
+        better=Direction.NONE,
+        meaning=(
+            "The size of the target's brightness range as the AAVSO Variable Star Index lists it. "
+            "Source: the VSX catalog, not this run."
+        ),
+        decisions=("when the light curve is good enough",),
+        estimator=(
+            "The faint magnitude minus the bright magnitude of the nearest typed VSX entry within 3 "
+            "arcseconds of the target star, or the amplitude itself when VSX lists the range that way. "
+            "It is a catalog value for the band VSX names (stored on the star), often from old or visual "
+            "data, and is not converted to this telescope's band."
+        ),
+        sample_definition=(
+            "The target star's saved VSX entry. Missing when the star was never asked about VSX, VSX "
+            "lists no such variable, or the entry gives no range."
+        ),
+        band="The band VSX names for the entry, as VSX writes it.",
+        computed_by=_AMPLITUDE_COMPUTED_BY,
+        uncertainty_kind=UncertaintyKind.NONE,
+        uncertainty_method="No uncertainty is reported. VSX lists none for the range.",
+        register_entry="PHO-19",
+        purpose=MetricPurpose.CONTEXT,
+        purpose_reason=(
+            "The photometry finish line is measured against the target's known amplitude. When the "
+            "light curve cannot give one, the catalog value is the only number there is, and it is "
+            "labeled by its source."
+        ),
+    ),
+)
+
+# The noise model, the alias peaks and the target amplitude. They have record
+# steps of their own (`record_noise_budget`, `record_period_sensitivity` and
+# `record_target_amplitude`), so the main record step emits none of them.
+PHOTOMETRY_SCIENCE_OUTCOME_METRIC_NAMES: frozenset[str] = frozenset(
+    spec.name for spec in (*_NOISE_MODEL_METRICS, *_WINDOW_METRICS, *_AMPLITUDE_METRICS)
+)
+
+
 PHOTOMETRY_METRICS: tuple[MetricSpec, ...] = (
     _count_metric(
         PHOTOMETRY_STARS_PROCESSED,
@@ -711,4 +1104,7 @@ PHOTOMETRY_METRICS: tuple[MetricSpec, ...] = (
         "SIMBAD V",
         PHOTOMETRY_CATALOG_ZERO_POINT_SIMBAD_V_MAG,
     ),
+    *_NOISE_MODEL_METRICS,
+    *_WINDOW_METRICS,
+    *_AMPLITUDE_METRICS,
 )

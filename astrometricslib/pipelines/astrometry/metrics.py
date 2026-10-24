@@ -35,6 +35,8 @@ Names follow ``<checkpoint>.<snake_case>``, so a gate's name is joined to the
 prefix ``gate_`` (for example ``astrometry.gate_astrometric_residual``).
 """
 
+import datetime
+
 from astrometricslib.models.quality.measurement import SubjectLevel
 from astrometricslib.models.quality.metric_spec import (
     Checkpoint,
@@ -67,6 +69,16 @@ ASTROMETRY_STAR_WIDTH_GAUSSIAN_PX = "astrometry.star_width_gaussian_px"
 # a count is the share times the row's sample count (the pixels of the disc).
 ASTROMETRY_FRAME_TARGET_CLIPPED_FRACTION = "astrometry.frame_target_clipped_fraction"
 ASTROMETRY_FRAME_TARGET_NONLINEAR_FRACTION = "astrometry.frame_target_nonlinear_fraction"
+
+# The residual the stars' own noise leads one to expect, stored beside the
+# measured Gaia residual as its parts. Each is a root mean square of the
+# distance between a star and its Gaia position (two axes), over the stars of
+# the Gaia fit. The Gaia position error at the image's epoch is declared too,
+# and is never measured (the cache holds no Gaia errors).
+ASTROMETRY_EXPECTED_CENTROID_NOISE_RMS_ARCSEC = "astrometry.expected_centroid_noise_rms_arcsec"
+ASTROMETRY_EXPECTED_PIXEL_PHASE_RMS_ARCSEC = "astrometry.expected_pixel_phase_rms_arcsec"
+ASTROMETRY_EXPECTED_GAIA_EPOCH_ERROR_RMS_ARCSEC = "astrometry.expected_gaia_epoch_error_rms_arcsec"
+ASTROMETRY_EXPECTED_RESIDUAL_STAR_COUNT = "astrometry.expected_residual_star_count"
 
 ASTROMETRY_GATE_PLATE_SOLVE = "astrometry.gate_plate_solve"
 ASTROMETRY_GATE_SOURCE_DETECTION = "astrometry.gate_source_detection"
@@ -314,6 +326,131 @@ _TARGET_CLIPPING_SAMPLE = (
 _TARGET_CLIPPING_PURPOSE = (
     "It tells whether the target's own pixels were clipped or left the sensor's linear range in a "
     "frame, which would flatten the target in the stack or bend its brightness. Nothing decides from it yet."
+)
+
+_EXPECTED_RESIDUAL_REVIEW_DATE = datetime.date(2027, 4, 30)
+_EXPECTED_RESIDUAL_COMPUTED_BY = "pipelines.astrometry.post_processing.expected_residual.expected_residual"
+_EXPECTED_RESIDUAL_SAMPLE = (
+    "The stars of the Gaia refit's final set, the same stars the Gaia refit RMS is taken over. Missing "
+    "when the refit was not tried, had too few stars, or the frame is a one-shot-color frame."
+)
+_EXPECTED_RESIDUAL_QUESTION = (
+    "Does the Gaia refit RMS come down to what the stars' own centroid noise, the pixel phase and the "
+    "Gaia position error predict? If the measured RMS is several times the expectation, the difference "
+    "is distortion, tilt or a bad match, not noise. The observatory has too few solved stacks to "
+    "say yet where the two part company."
+)
+_EXPECTED_RESIDUAL_UNCERTAINTY = (
+    "No uncertainty is reported. The value is model-derived: it assumes a Gaussian star and white "
+    "noise, and the measured ratio of the star finder's scatter to the model is in AST-21."
+)
+
+_EXPECTED_RESIDUAL_METRICS: tuple[MetricSpec, ...] = (
+    MetricSpec(
+        name=ASTROMETRY_EXPECTED_CENTROID_NOISE_RMS_ARCSEC,
+        definition_version=1,
+        unit="arcsec",
+        checkpoint=Checkpoint.ASTROMETRY,
+        levels=_STACK_ONLY,
+        better=Direction.LOWER,
+        meaning=(
+            "A lower bound on the root mean square distance from a Gaia position that noise in each star's "
+            "own centroid leaves, over the stars of the Gaia refit. It is a lower bound because the "
+            "Cramer-Rao limit is the best any estimator can do; the star finder does worse."
+        ),
+        decisions=("distortion or tilt against noise",),
+        estimator=(
+            "For each refit star the peak over the background noise is A/n (its peak above the sky, over "
+            "the standard deviation of the sky pixels, both from the star finder). The centroid error of a "
+            "Gaussian star on a white-noise background is at least sqrt(2/pi) / (A/n) pixels along each "
+            "axis (the Cramer-Rao bound; it equals sqrt(2) times FWHM / (2.355 SNR) with SNR the signal-to-"
+            "noise ratio of an optimal aperture, and does not depend on the width). The value is the "
+            "square root of the mean, over the stars, of twice that squared (two axes), times the pixel "
+            "scale of the solved coordinates. The noise is the sky's only, so it is too small for a star "
+            "bright enough that its own photon noise dominates."
+        ),
+        sample_definition=_EXPECTED_RESIDUAL_SAMPLE,
+        band=_BAND,
+        computed_by=_EXPECTED_RESIDUAL_COMPUTED_BY,
+        uncertainty_kind=UncertaintyKind.MODEL_DERIVED,
+        uncertainty_method=_EXPECTED_RESIDUAL_UNCERTAINTY,
+        register_entry="AST-21",
+        purpose=MetricPurpose.EXPLORATORY,
+        exploratory_question=_EXPECTED_RESIDUAL_QUESTION,
+        review_date=_EXPECTED_RESIDUAL_REVIEW_DATE,
+    ),
+    MetricSpec(
+        name=ASTROMETRY_EXPECTED_PIXEL_PHASE_RMS_ARCSEC,
+        definition_version=1,
+        unit="arcsec",
+        checkpoint=Checkpoint.ASTROMETRY,
+        levels=_STACK_ONLY,
+        better=Direction.LOWER,
+        meaning=(
+            "The root mean square distance from a Gaia position that the pixel phase leaves, for stars "
+            "of the stack's width: the error a centroid makes only because the star sits at one place "
+            "inside its pixel."
+        ),
+        decisions=("distortion or tilt against noise",),
+        estimator=(
+            "A star finder's centroid error from the star's position inside its pixel, found by "
+            "injecting noise-free, pixel-integrated Gaussian stars at random positions and finding them "
+            "with the project's own star finder (AST-21). The table is by star width (FWHM) from 1.5 to "
+            "5 px, and the value for the stack's width is read from it by straight-line interpolation. "
+            "The value is the root of 2 (two axes) times that error times the pixel scale. A width "
+            "outside 1.5 to 5 px is not measured."
+        ),
+        sample_definition=(
+            "The stack's star width (the Gaussian-fit width of up to 15 bright stars) and its pixel "
+            "scale. Missing when either is missing or the width lies outside the injected range."
+        ),
+        band=_BAND,
+        computed_by=_EXPECTED_RESIDUAL_COMPUTED_BY,
+        uncertainty_kind=UncertaintyKind.MODEL_DERIVED,
+        uncertainty_method=_EXPECTED_RESIDUAL_UNCERTAINTY,
+        register_entry="AST-21",
+        purpose=MetricPurpose.EXPLORATORY,
+        exploratory_question=_EXPECTED_RESIDUAL_QUESTION,
+        review_date=_EXPECTED_RESIDUAL_REVIEW_DATE,
+    ),
+    MetricSpec(
+        name=ASTROMETRY_EXPECTED_GAIA_EPOCH_ERROR_RMS_ARCSEC,
+        definition_version=1,
+        unit="arcsec",
+        checkpoint=Checkpoint.ASTROMETRY,
+        levels=_STACK_ONLY,
+        better=Direction.LOWER,
+        meaning=(
+            "The root mean square error of the Gaia positions themselves, moved to the image's date by "
+            "proper motion, over the stars of the Gaia refit."
+        ),
+        decisions=("distortion or tilt against noise",),
+        estimator=(
+            "Would be the Gaia position errors and proper-motion errors carried to the image's date, "
+            "added in quadrature. The cached Gaia cone holds no error columns, so this value is not "
+            "found, and each row says so."
+        ),
+        sample_definition="The stars of the Gaia refit's final set. Never measured at present.",
+        band=_BAND,
+        computed_by=_EXPECTED_RESIDUAL_COMPUTED_BY,
+        uncertainty_kind=UncertaintyKind.NONE,
+        uncertainty_method="No uncertainty is reported. The value is never found at present.",
+        register_entry="AST-21",
+        purpose=MetricPurpose.EXPLORATORY,
+        exploratory_question=_EXPECTED_RESIDUAL_QUESTION,
+        review_date=_EXPECTED_RESIDUAL_REVIEW_DATE,
+    ),
+    _count_metric(
+        ASTROMETRY_EXPECTED_RESIDUAL_STAR_COUNT,
+        "How many stars the expected residual rests on.",
+        "The number of stars in the Gaia refit's final set that have a peak over the noise.",
+        _EXPECTED_RESIDUAL_SAMPLE,
+        "The expected centroid noise is a root mean square over these stars, so the count says how far "
+        "to trust it.",
+        better=Direction.HIGHER,
+        computed_by=_EXPECTED_RESIDUAL_COMPUTED_BY,
+        register_entry="AST-21",
+    ),
 )
 
 _TARGET_CLIPPING_METRICS: tuple[MetricSpec, ...] = (
@@ -564,6 +701,7 @@ ASTROMETRY_METRICS: tuple[MetricSpec, ...] = (
         decisions=("run flag",),
     ),
     *_TARGET_CLIPPING_METRICS,
+    *_EXPECTED_RESIDUAL_METRICS,
     _gate_metric(
         ASTROMETRY_GATE_PLATE_SOLVE,
         "count",

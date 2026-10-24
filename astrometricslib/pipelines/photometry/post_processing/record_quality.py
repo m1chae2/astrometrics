@@ -1062,8 +1062,9 @@ def photometry_run_measurements(
         no fitted rotation, a count that was not made) is ``not_measured``
         with a reason. The gate metrics carry the gate's outcome and limit.
         The flux-uncertainty value is ``assumed`` when the errors assumed a
-        gain of 1 e-/ADU. The catalog zero points of the frames and their
-        spread for each session follow (see `zero_point_measurements`).
+        gain of 1 e-/ADU. The catalog zero points of the frames are not here;
+        `record_photometry_quality` stores them in a call of their own (see
+        `zero_point_measurements`).
     """
     subject = context.run_subject()
     measurements: list[QualityMeasurement] = []
@@ -1140,7 +1141,6 @@ def photometry_run_measurements(
             # The gate's own detail names the assumed gain as the source.
             measurement = measurement.model_copy(update={"status": MeasurementStatus.ASSUMED})
         measurements.append(measurement)
-    measurements.extend(zero_point_measurements(inputs.session_zero_points, context))
     return measurements
 
 
@@ -1173,8 +1173,16 @@ def record_photometry_quality(
         How many rows were new. It is 0 when anything went wrong, either in
         building the rows or in storing them (both are logged).
     """
-    return build_and_record_measurements(
+    run_count = build_and_record_measurements(
         lambda: photometry_run_measurements(metrics, gates, inputs, context),
         f"photometry run on {context.target_id}",
         config=config,
     )
+    # The zero points have a call of their own, so an error in them never
+    # drops the run's other rows.
+    zero_point_count = build_and_record_measurements(
+        lambda: zero_point_measurements(inputs.session_zero_points, context),
+        f"photometry zero points on {context.target_id}",
+        config=config,
+    )
+    return run_count + zero_point_count

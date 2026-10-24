@@ -113,6 +113,7 @@ from astrometricslib.pipelines.stacking.post_processing.stack_membership import 
 from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
     APERTURE_FILE_NAME,
     StackNoiseOutcome,
+    load_apertures_with_reason,
     load_noise_sums,
     paired_noise_difference,
 )
@@ -399,8 +400,8 @@ class LibraryRun:
         The library stack's effective frame count.
     noise_sums : `tuple` or `None`
         The library stack's per-aperture noise sums, the reference flux they
-        are read against and the name of the stack that chose the apertures
-        (see `stack_noise.load_noise_sums`); `None` when not saved.
+        are read against and the identity of the apertures they were
+        measured in (see `stack_noise.load_noise_sums`); `None` when not saved.
     store : `QualityStore` or `None`
         The quality store the run read, so later steps (the expected noise of
         each subset) read from it instead of opening their own.
@@ -758,20 +759,20 @@ def _stack_and_measure(
         membership_reason = why
     else:
         apertures_path = os.path.join(library_folder, APERTURE_FILE_NAME)
-        if os.path.isfile(apertures_path):
+        # A subset never chooses apertures: it reads the ones its library
+        # stack chose, and says why when there are none or they are old.
+        stored_apertures, apertures_reason = load_apertures_with_reason(apertures_path)
+        if stored_apertures is not None:
             noise = measure_noise_safely(
                 outcome.stack_path,
                 outcome.registration_reference_frame,
                 outcome.is_spectral,
                 outcome.crop_offset,
                 apertures_path,
+                may_choose_apertures=False,
             )
         else:
-            noise = StackNoiseOutcome(
-                None,
-                "the target has no stored noise apertures; stack the target once so its first stack "
-                "chooses them",
-            )
+            noise = StackNoiseOutcome(None, apertures_reason)
         try:
             membership = determine_stack_members(frames, outcome.diagnostics, outcome.stack_weight)
         except Exception as error:  # a by-product: a failure here must not lose the stack
@@ -1130,7 +1131,7 @@ def night_measurements(
         the share is stored as assumed.
     library_noise_sums : `tuple`, optional
         The library stack's per-aperture sums, its reference flux and the
-        name of the stack that chose the apertures. Without it the
+        identity of the apertures they were measured in. Without it the
         difference from the library stack's noise is not measured.
 
     Returns
@@ -1192,14 +1193,20 @@ def night_measurements(
         difference_reason = (
             "the library stack's per-aperture sums were not saved; stack the target again to save them"
         )
-    elif library_noise_sums[2] != outcome.aperture_set_origin:
-        difference_reason = "the library stack was measured in other apertures than this stack"
+    elif not library_noise_sums[2] or library_noise_sums[2] != outcome.aperture_identity:
+        difference_reason = (
+            "the library stack was measured in other apertures than this stack "
+            f"(identities {library_noise_sums[2] or 'unknown'} and {outcome.aperture_identity}); "
+            "stack the target again so the library stack is measured in the current apertures"
+        )
     else:
         difference = paired_noise_difference(
             library_noise_sums[0],
             library_noise_sums[1],
+            library_noise_sums[2],
             np.asarray(outcome.aperture_sums, dtype=float),
             outcome.reference_flux_adu,
+            outcome.aperture_identity,
         )
         if difference is None:
             difference_reason = "too few apertures are usable on both stacks"

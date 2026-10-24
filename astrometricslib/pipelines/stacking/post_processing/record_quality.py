@@ -100,7 +100,9 @@ from astrometricslib.pipelines.stacking.post_processing.stack_membership import 
 from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
     APERTURE_FILE_NAME,
     NO_WCS_REASON,
+    StackDepth,
     StackNoiseOutcome,
+    discard_noise_sums,
     measure_stack_noise,
     save_noise_sums,
 )
@@ -116,6 +118,7 @@ __all__ = [
     "membership_count_measurements",
     "noise_measurements",
     "record_stacking_quality",
+    "stack_depth_of",
     "stacking_measurements",
 ]
 
@@ -408,6 +411,9 @@ def noise_measurements(
             f"{result.saturated_reference_stars} stored reference star(s) were left out because they "
             f"reach the camera's saturation level ({result.saturation_source})."
         )
+    # Every row says which apertures it was measured in and how deep the stack
+    # that chose them was, so rows of different sets are never compared.
+    notes.append(result.aperture_definition_note)
     note = " ".join(part for part in notes if part)
     if not note:
         return rows
@@ -676,6 +682,9 @@ def measure_noise_safely(
     is_spectral: bool,
     crop_offset: tuple[int, int] = (0, 0),
     apertures_path: str | None = None,
+    *,
+    may_choose_apertures: bool = True,
+    depth: StackDepth | None = None,
 ) -> StackNoiseOutcome:
     """Measure the stack's empty-aperture noise, never raising.
 
@@ -695,6 +704,12 @@ def measure_noise_safely(
         stack. A subset stack is kept in a folder of its own, so its caller
         passes the file beside the target's library stack, which makes the
         subset's noise comparable with the library stack's.
+    may_choose_apertures : `bool`, optional
+        False for a subset stack, which never chooses or replaces apertures
+        (see `stack_noise.measure_stack_noise`).
+    depth : `StackDepth`, optional
+        The stack's frame counts, for the rule that keeps the apertures
+        matched to the stack's depth.
 
     Returns
     -------
@@ -708,7 +723,14 @@ def measure_noise_safely(
         apertures_path = os.path.join(os.path.dirname(stack_path), APERTURE_FILE_NAME)
     started = time.monotonic()
     try:
-        outcome = measure_stack_noise(stack_path, reference_frame_path, apertures_path, crop_offset)
+        outcome = measure_stack_noise(
+            stack_path,
+            reference_frame_path,
+            apertures_path,
+            crop_offset,
+            may_choose_apertures=may_choose_apertures,
+            depth=depth,
+        )
     except Exception as error:  # the noise is a by-product: no failure here may fail the stack
         logger.exception("The noise of the stack %s could not be measured", stack_path)
         return StackNoiseOutcome(None, f"the noise measurement failed: {type(error).__name__}")
@@ -719,6 +741,32 @@ def measure_noise_safely(
         "" if outcome.result is not None else f" (no result: {outcome.reason or NO_WCS_REASON})",
     )
     return outcome
+
+
+def stack_depth_of(membership: StackMembership | None) -> StackDepth | None:
+    """Give a stack's frame counts from its members.
+
+    Parameters
+    ----------
+    membership : `StackMembership` or `None`
+        The stack's members, or `None` when they could not be worked out.
+
+    Returns
+    -------
+    depth : `StackDepth` or `None`
+        The number of member frames and the effective frame count; `None`
+        when the members or their weights are unknown.
+    """
+    if membership is None or not membership.members:
+        return None
+    try:
+        count = effective_frame_count(normalized_weights(membership))
+    except Exception:  # a by-product: unknown depth only stops a set from being replaced
+        logger.exception("The effective frame count of a stack could not be worked out")
+        return None
+    if count is None:
+        return None
+    return StackDepth(frame_count=len(membership.members), effective_frame_count=float(count))
 
 
 def record_stacking_quality(
@@ -761,12 +809,6 @@ def record_stacking_quality(
         How many rows were new; 0 when anything failed.
     """
     try:
-        noise = measure_noise_safely(
-            stack_path,
-            summary.stacking_metrics.registration_reference_frame,
-            summary.stacking_metrics.is_spectral,
-            crop_offset,
-        )
         membership = None
         membership_reason = ""
         try:
@@ -774,10 +816,24 @@ def record_stacking_quality(
         except Exception as error:  # a by-product again
             logger.exception("The member frames of the stack %s could not be worked out", stack_path)
             membership_reason = f"the member frames could not be worked out: {type(error).__name__}"
+        # The members are worked out first: their effective frame count says
+        # how deep this stack is, which decides whether the stored apertures
+        # are kept or replaced (see `stack_noise.REPLACEMENT_DEPTH_FACTOR`).
+        noise = measure_noise_safely(
+            stack_path,
+            summary.stacking_metrics.registration_reference_frame,
+            summary.stacking_metrics.is_spectral,
+            crop_offset,
+            depth=stack_depth_of(membership),
+        )
         if noise.result is not None:
             # The library stack's sums, kept for the leave-one-night-out
             # comparison (see `paired_noise_difference`).
             save_noise_sums(stack_path, noise.result)
+        else:
+            # A failed measurement must not leave the sums of an older stack
+            # of this name for a later comparison to read.
+            discard_noise_sums(stack_path)
         science = compute_stack_science(
             stack_path,
             summary.stacking_metrics.flat_noise_fraction,

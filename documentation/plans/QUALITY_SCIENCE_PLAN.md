@@ -57,6 +57,20 @@ square pixel adds a variance of p²/12 along each axis, so for a Gaussian core F
 The value is labeled model-derived. A computed Moffat star reads 1 to 4 percent wider than the
 formula at 2 px (`AST-18`).
 
+Status on 2026-10-23, aperture fix (branch `94-noise-aperture-fix`, board fixes applied): the empty
+noise apertures are now chosen by a pixel mask made from the stack before any aperture is placed
+(away from faint sources as well as bright stars), not by their own sums. On the M 57 library stack
+the measured noise fell from 3.8 to 2.5 times the model's, but it does not reach 1: the mask's scale
+on this stack is 10 to 30 times that of the white-noise model, so the mask finds sources far above
+the noise and not those near it, and shared structure remains. Every set of apertures has an
+identity, a subset stack never chooses one, a library stack with twice the effective frames
+replaces it, and rows of different sets are never compared (definition version 3). `STK-36`'s 5%
+growth criterion is not tested at the required precision (the three M 57 subsets lie 9 to 31% below
+the prediction, each with an error of 14 to 20%). The separating tests of `STK-38` exclude the
+master flat's random noise and do not identify one cause. For a deep stack of a crowded field the
+half-stack difference, not the empty-aperture noise, may be the honest noise measure; this is open.
+Numbers are in `STK-36` and `STK-38`.
+
 The second review of 2026-10-17 moved the observing values (guide error, pointing error, dew,
 Moon and airmass) out of the `astrometricslib` tables into `wayfindinglib` (section 2.5). It added
 the undersampling term, the spectroscopy class gap against SNR, the flat-noise check and the
@@ -318,6 +332,27 @@ half-stacks (`STK-38`).
 
 No findings were rejected. The architect also suggested dropping the stored aperture area and
 linearity limit; both stay, as inputs to the expected noise and the peak.
+
+## Appendix C. Review board changes, batch S2
+
+The board reviewed batch S2 on 2026-10-23, and all three reviewers approved it with changes. The
+systems engineer settled every finding; the user reviews those choices in the pull request.
+
+| Finding | Raised by | Where it landed |
+| :--- | :--- | :--- |
+| A stored night spread and a stored airmass contradict decision 18 of `QUALITY_METRICS_PLAN.md`. | Architect | Both metrics dropped; the spread stays a library helper for UC15 (`PHO-16`) |
+| The median over a changing star set moves when stars join or leave, and faint stars leave first under cloud. | Astronomer | A fixed star set per session and a differential frame value (`PHO-15`) |
+| The bootstrap error was labelled as the absolute error and is about five times the frame-to-frame precision. | Astronomer | The frame value carries its own precision; the level's star-sample error is a separate metric |
+| Choosing the band by star count follows the catalog's state. | Astronomer, with the engineer | Gaia G preferred whenever it has enough stars (`PHO-D24`) |
+| The fixed aperture makes the zero point depend on star width. | Astronomer | Stated in the metric text; on M 57 the slope is not resolved (`PHO-15`) |
+| Stars above the linearity limit entered the sample. | Astronomer | Cut at the camera profile's linearity limit |
+| One error in the new rows would drop every photometry row of the run. | Engineer | Its own record call |
+| Frames without a path were stored under "Unknown", and frames could collide. | Engineer, with the architect | Paths kept in light-curve order; a frame without one is skipped and logged |
+| No test of the runner join. | Engineer | Two-session test |
+| Statistics helpers in the wrong module, a duplicate MAD factor, British spelling, two wrong comments. | Architect, with the engineer | `frame_statistics.py`, `mad_std`, US spelling, comments corrected |
+
+No findings were rejected. The night's spread now lives only in the library helper, so `PHO-16`
+is evidence for that helper, not for a stored metric.
 
 ## Appendix E. Review board changes, batch S3
 

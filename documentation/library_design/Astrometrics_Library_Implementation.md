@@ -4,7 +4,7 @@
 
 ## Abstract
 
-This paper maps the design in `Astrometrics_Library_Architecture.md` to the Python source in `astrometricslib/`. It names the layers and the rule that keeps them apart, the model classes, the modules of each of the five pipelines, and the scripts and tests that check them. It lists each pipeline's tuned values with a status label and a link to the register entry that holds the evidence. It is written for developers who review or change the algorithms.
+This paper maps the design in `Astrometrics_Library_Architecture.md` to the Python source in `astrometricslib/`. It names the layers and the rule that keeps them apart, the model classes, the modules of each of the five pipelines, and the scripts and tests that check them. It lists each pipeline's tuned values with a status label and a link to the register entry that holds the evidence.
 
 The [glossary](../Glossary.md) defines the terms, and this document defines each at first use.
 
@@ -55,7 +55,7 @@ Pydantic classes in `models/` hold fields and validation only. Table 3 maps each
 | Stellar object (§2.1) | `StellarObject`, with `PhotometryResult`, `PeriodogramResult`, `TransitCandidate`, `SessionPhotometrySummary`, `StellarSessionMatch` and `SpectroscopyResult` | `models/stellar_source.py`, `models/spectral_cross_checks.py` |
 | Moving object candidate (§2.1) | `AsteroidDetectionCandidate`, `FrameDetection`, `MovingObjectTrack`, `EphemerisMatch`, `CascadeStage` | `models/moving_object.py` |
 | Quality record (§2.1) | `PipelineQualitySummaryBase` and one subclass per pipeline (`StackQualitySummary`, `AstrometryQualitySummary`, and so on); gates are `GateResult` with a `GateStatus` | `models/quality/quality_summary.py`, `models/quality/gate_result.py` |
-| Camera profile (§2.3) | `CameraProfile` (schema 2), `SensorSettingNoise` (gain and read noise per gain setting, offset and binning), `ProvenancedValue`, `QuantumEfficiencyRecord`, `AppliedCameraProfile` | `models/camera_profile.py`, `models/applied_camera_profile.py` |
+| Camera profile (§2.3) | `CameraProfile` (schema 2), `SensorSettingNoise`, `ProvenancedValue`, `QuantumEfficiencyRecord`, `AppliedCameraProfile` | `models/camera_profile.py`, `models/applied_camera_profile.py` |
 | Provenance (§2.3) | IVOA Provenance Data Model [7] classes such as `Agent`, `Entity`, `Used`, `WasGeneratedBy` | `models/provenance.py` |
 
 Camera profiles: `drivers/camera_profile_store.py`, `drivers/camera_profile_migration.py`, `pipelines/shared/applied_camera_profile.py` (`record_camera_profile`). Provenance: `pipelines/shared/provenance_recording.py` (`record_pipeline_run`), `drivers/provenance_store.py` (`ProvenanceStore`).
@@ -68,20 +68,20 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 
 *Located in:* `astrometricslib/pipelines/stacking/`
 
-- **Interfaces (§3.1).** `stack_request.py` (`choose_frames_to_stack`, `run_stack`), `stage.py` (`stack_frames`), `stack_runner.py`.
+- **Interfaces (§3.1).** `stack_request.py` (`choose_frames_to_stack`, `run_stack`), `stage.py` (`stack_frames`), `stack_runner.py` (`PIPELINE_STEPS`).
 - **Calibration frames (§3.2).** `calibration_ingest.py`, `astrometricslib/drivers/calibration_library.py`, `pre_processing/flat_calibration.py`.
 - **Gain and read noise (§3.2).** `CalibrationCatalog.measure_sensor_noise` (`astrometricslib/api/processing.py`) calls `sensor_noise_run.py`, which calls `pre_processing/sensor_noise.py`. With `save=True` it writes the camera profile. The MCP server withholds the RPC `calibration:measure_sensor_noise`. Evidence: [STK-35](validation/stacking.md#stk-35).
 - **Rejection and filtering (§3.2).** `astrometricslib/utilities/rejection_thresholds.py`, `astrometricslib/utilities/stack_filter_floor.py`.
 - **Exposure groups and weights (§3.2).** `processing/exposure_groups.py`, `group_alignment.py`, `group_derotation.py`, `star_pattern_candidates.py`, `spectral_frame_alignment.py`; `pre_processing/exposure_weighting.py`.
 - **Sequence and restacks (§3.3).** `pre_processing/stack_inputs.py`; `post_processing/previous_stack.py`, `stack_comparison.py`, `interrupted_jobs.py`.
 - **Previews (§3.3).** `post_processing/stack_preview.py`, `colour_calibration.py`, `starnet_stretch.py`, `sky_level.py`, `star_tone.py`, `bright_object.py`, `stack_crop.py`, `preview_remake.py`.
-- **Frame measurement (§2.1).** `ProcessingPipelines.record_frame_measurements` (`frame_measurement_run.py`) measures each light frame with `measure_frame`, which also calls `measure_star_profiles` and `measure_field_region_widths`. Evidence: [AST-17](validation/astrometry.md#ast-17), [AST-18](validation/astrometry.md#ast-18).
+- **Frame measurement (§2.1).** `ProcessingPipelines.record_frame_measurements` (`frame_measurement_run.py`) measures each light frame with `measure_frame`. Evidence: [AST-17](validation/astrometry.md#ast-17), [AST-18](validation/astrometry.md#ast-18).
 - **Frame geometry (§3.4.2).** `post_processing/field_rotation.py` (`field_rotation_measurements`) stores each frame's rotation. `shared/registration_record.py` keeps `<stack>_registration_frames.json`, which the astrometry pipeline reads (§4.2). Evidence: [STK-43](validation/stacking.md#stk-43).
 - **Input screening (§3.4.1).** `pre_processing/frame_quarantine.py`, `frame_homogeneity.py`, `background_homogeneity.py`, `camera_selection.py`, `assess_input_quality.py`.
 - **Output checks (§3.4.2).** `post_processing/assess_output_quality.py`, `stack_quality.py`, `exposure_group_report.py`, `stack_quality_report.py`.
-- **Stack measurements (§3.4.2).** `stage._record_stack_quality` calls `record_stacking_quality` (`post_processing/record_quality.py`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.record_quality.record_stacking_quality -->
+- **Stack measurements (§3.4.2).** `stage._record_stack_quality` calls `record_stacking_quality` (`post_processing/record_quality.py`), which stores the summary, gates, noise and weights. <!-- impl: astrometricslib.pipelines.stacking.post_processing.record_quality.record_stacking_quality -->
 - **Stack noise and weights (§3.4.2).** `post_processing/stack_noise.py`, `stack_membership.py`, `expected_noise.py`, `flat_noise_contribution.py`, `record_science.py`. Evidence: [STK-36](validation/stacking.md#stk-36), [STK-07](validation/stacking.md#stk-07), [STK-38](validation/stacking.md#stk-38), [STK-39](validation/stacking.md#stk-39), [STK-40](validation/stacking.md#stk-40), [STK-41](validation/stacking.md#stk-41).
-- **Subset stacks (§3.4.2).** `subset_noise_run.py` and `subset_stack.stack_frame_subset` stack parts of the library stack into `_subsets/`. Evidence: [STK-36](validation/stacking.md#stk-36), [STK-37](validation/stacking.md#stk-37).
+- **Subset stacks (§3.4.2).** `subset_noise_run.py` and `subset_stack.stack_frame_subset` stack subsets. Evidence: [STK-36](validation/stacking.md#stk-36), [STK-37](validation/stacking.md#stk-37).
 
 ### 4.2 Astrometry (Architecture §4)
 
@@ -93,13 +93,13 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 - **Gaia refit (§4.2).** `processing/wcs_refinement.py`.
 - **WCS header (§4.3).** `astrometricslib/pipelines/shared/session_identification.py` (`write_wcs_to_fits_header`).
 - **Checks (§4.4).** `post_processing/record_quality.py`, `assess_match_quality.py`.
-- **Target clipping (§3.4.2).** `post_processing/target_clipping.py` (`target_clipping_measurements`) counts clipped and nonlinear pixels near the target on each raw frame. It needs this run's plate solution, the registration record and a source in the disc. Evidence: [AST-19](validation/astrometry.md#ast-19).
+- **Target clipping (§3.4.2).** `post_processing/target_clipping.py` (`target_clipping_measurements`) counts clipped and nonlinear pixels near the target on each raw frame. Evidence: [AST-19](validation/astrometry.md#ast-19).
 
 ### 4.3 Photometry (Architecture §5)
 
 *Located in:* `astrometricslib/pipelines/photometry/`
 
-- **Interfaces (§5.1).** `runner.py` (adapter); `batch.py` (per-session runs, cross-session matching, period search).
+- **Interfaces (§5.1).** `runner.py` (adapter); `batch.py`.
 - **Aperture photometry (§5.2).** `pre_processing/frame_photometry.py`, `detector_noise.py`, `observation_times.py`.
 - **Comparison stars and light curves (§5.2).** `processing/comparison_ensemble.py`, `catalog_zero_point.py`, `variability_analyzer.py`, `variability_indices.py`.
 - **Period search (§5.2).** `processing/periodicity_search.py`, `period_checks.py`, `family_wise_correction.py`.
@@ -188,7 +188,14 @@ Tables 4 to 8 list each pipeline's tuned values and the architecture section tha
 | Share of spectral frames that must register before fallback | 0.9 | Design estimate ([stacking table](validation/stacking.md#design-estimates)); counts in [STK-12](validation/stacking.md#stk-12) | §3.3 |
 | Rejected pixel share that flags a stack | 15% | Partly measured ([STK-24](validation/stacking.md#stk-24)) | §3.4.2 |
 | Star sharpness warning ratio (fails above) | 1.2 | Partly measured ([STK-25](validation/stacking.md#stk-25)) | §3.4.2 |
+| Noise apertures off faint sources: threshold; smoothing widths; high-pass; clearance; fewest clean apertures; file version | 3.5σ; 1.5, 3, 6 px; 12 px; 13 px; 20; 3 | Partly measured ([STK-36](validation/stacking.md#stk-36)) | §3.4.2 |
 
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.FAINT_SOURCE_THRESHOLD_SIGMAS -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.FAINT_SOURCE_SMOOTHING_SIGMAS_PX -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.FAINT_SOURCE_HIGH_PASS_SIGMA_PX -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.FAINT_SOURCE_CLEARANCE_PX -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.MINIMUM_USABLE_APERTURES -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.APERTURE_FILE_VERSION -->
 <!-- impl: astrometricslib.utilities.rejection_thresholds.rejection_bounds -->
 <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.FRAME_MEASUREMENT_TIME_BUDGET_SECONDS -->
 <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_GRID_CELL_COUNT -->
@@ -307,18 +314,17 @@ Tables 4 to 8 list each pipeline's tuned values and the architecture section tha
 | --- | --- | --- | --- |
 | Aperture radius; sky ring radii | 4 px; 7 to 12 px | Design estimate ([photometry table](validation/photometry.md#design-estimates)) | §5.2 (concept 1) |
 | Re-centering box; refinement passes; largest move | 11 px; 3; 1.5 px | Design estimate ([photometry table](validation/photometry.md#design-estimates)) | §5.2 (concept 1) |
-| Comparison band: brightest skipped; band ends at | 2%; 30% of candidates | Design estimate ([photometry table](validation/photometry.md#design-estimates)) | §5.2 (concept 4) |
-| Candidates vetted; minimum and cap of comparison stars | 100; 5 and 20 | Design estimate ([photometry table](validation/photometry.md#design-estimates)) | §5.2 (concept 4) |
-| Vetting limit; share of typical stars for a usable frame | 3σ; one half | Design estimate ([photometry table](validation/photometry.md#design-estimates)) | §5.2 (concept 4) |
-| Frame outlier clip; per-star outlier clip | 3σ (at least 5 frames); 5σ | Design estimate ([photometry table](validation/photometry.md#design-estimates)) | §5.2 (concept 4) |
+| Comparison stars: brightest skipped; band ends at; candidates vetted; minimum and cap | 2%; 30%; 100; 5 and 20 | Design estimate ([photometry table](validation/photometry.md#design-estimates)) | §5.2 (concept 4) |
+| Vetting limit; usable-frame share; frame and per-star outlier clips | 3σ; one half; 3σ (at least 5 frames), 5σ | Design estimate ([photometry table](validation/photometry.md#design-estimates)) | §5.2 (concept 4) |
 | Share of frames rejected before the run is flagged | 25% | Design estimate ([photometry table](validation/photometry.md#design-estimates)) | §5.4.2 |
 | Noise model: minimum stars; stars per bin; most bins | 20; 10; 10 | Design estimate ([photometry table](validation/photometry.md#design-estimates)) | §5.2 (concept 5) |
 | Thresholds: excess scatter; chi-square and Stetson J | 1.5; field median + 2.326 robust σ | Partly measured ([PHO-06](validation/photometry.md#pho-06)); synthetic only | §5.2 (concept 5) |
 | Small-field cutoff on the coefficient of variation | median + 7.4 MAD (about 5 robust σ), never below 0.02 | Measured ([PHO-10](validation/photometry.md#pho-10)) | §5.2 (concept 5) |
 | Period verdicts: false-alarm limit for "possible"; for "detected"; shuffles | 0.05; 0.01 with at least 3 cycles; 300 | Partly measured ([PHO-12](validation/photometry.md#pho-12)); synthetic only | §5.2 (concept 8) |
 | Between-session flag: significance; amplitude | above 3; at least 0.02 mag | Design estimate ([photometry table](validation/photometry.md#design-estimates)) | §5.2 (concept 6) |
-| Discrimination AUC floor | 0.7 | Design estimate ([photometry table](validation/photometry.md#design-estimates)) | §5.4.2 |
-| Largest acceptable smallest detectable change (peak to peak) | 0.3 mag | Design estimate ([photometry table](validation/photometry.md#design-estimates)); real-field value in [PHO-09](validation/photometry.md#pho-09) | §5.4.2 |
+| Zero point cuts: `CENTRAL_RADIUS_HALF_DIAGONAL_FRACTION`; `MINIMUM_STARS_FOR_ZERO_POINT`; `MINIMUM_SIGNAL_TO_NOISE`; `SESSION_STAR_FRAME_SHARE`; linearity limit from the camera profile | 0.5; 10; 20; 80% | Design estimate (PHO-D24); partly measured ([PHO-15](validation/photometry.md#pho-15)) | §5.2 (concept 9) |
+| Zero point extras: `MINIMUM_STARS_FOR_COLOR_SLOPE`; `MINIMUM_COLOR_RANGE_MAG`; `MINIMUM_FRAMES_FOR_SCATTER`; `STANDARD_ERROR_OF_MEDIAN_FACTOR` | 20; 0.4 mag; 10; 1.2533 | Design estimate (PHO-D25, PHO-D26) | §5.2 (concept 9) |
+| Discrimination AUC floor; largest acceptable smallest detectable change (peak to peak) | 0.7; 0.3 mag | Design estimate ([photometry table](validation/photometry.md#design-estimates)); real-field value in [PHO-09](validation/photometry.md#pho-09) | §5.4.2 |
 
 <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.measure_aperture_photometry -->
 <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.CENTROID_BOX_HALF_WIDTH_PX -->
@@ -339,6 +345,14 @@ Tables 4 to 8 list each pipeline's tuned values and the architecture section tha
 <!-- impl: astrometricslib.pipelines.photometry.processing.variability_indices.CALIBRATION_SIGMAS -->
 <!-- impl: astrometricslib.pipelines.photometry.processing.variability_analyzer.MINIMUM_LONG_TERM_AMPLITUDE_MAG -->
 <!-- impl: astrometricslib.pipelines.photometry.processing.variability_analyzer.DEFAULT_LONG_TERM_SIGNIFICANCE_THRESHOLD -->
+<!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.CENTRAL_RADIUS_HALF_DIAGONAL_FRACTION -->
+<!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.MINIMUM_STARS_FOR_ZERO_POINT -->
+<!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.MINIMUM_SIGNAL_TO_NOISE -->
+<!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.SESSION_STAR_FRAME_SHARE -->
+<!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.MINIMUM_STARS_FOR_COLOR_SLOPE -->
+<!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.MINIMUM_COLOR_RANGE_MAG -->
+<!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.MINIMUM_FRAMES_FOR_SCATTER -->
+<!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.STANDARD_ERROR_OF_MEDIAN_FACTOR -->
 <!-- impl: astrometricslib.pipelines.photometry.post_processing.variability_skill.MINIMUM_DISCRIMINATION_AUC -->
 <!-- impl: astrometricslib.pipelines.photometry.post_processing.record_quality.MAXIMUM_DETECTABLE_AMPLITUDE_MAG -->
 <!-- impl: astrometricslib.pipelines.photometry.post_processing.record_quality.MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG -->

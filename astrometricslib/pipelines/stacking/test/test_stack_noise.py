@@ -9,6 +9,7 @@ when it fits the stack.
 
 import json
 import math
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -17,17 +18,36 @@ import pytest
 from astropy.io import fits
 from astropy.wcs import WCS
 
+from astrometricslib.pipelines.stacking.post_processing import stack_noise
 from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
     APERTURE_FILE_NAME,
+    APERTURE_FILE_VERSION,
     APERTURE_RADIUS_PX,
     APERTURE_SEPARATION_PX,
+    FAINT_SOURCE_CLEARANCE_PX,
     MAD_SIGMA_ERROR_FACTOR,
+    MINIMUM_USABLE_APERTURES,
     NO_WCS_REASON,
+    OLD_APERTURES_REASON,
+    REPLACEMENT_DEPTH_FACTOR,
     RING_INNER_PX,
     RING_OUTER_PX,
+    ApertureSetMismatchError,
+    FaintSourceAnalysis,
+    StackDepth,
+    analyze_faint_sources,
+    discard_noise_sums,
+    faint_source_distance,
     load_apertures,
+    load_apertures_with_reason,
+    load_noise_sums,
     measure_stack_noise,
+    noise_sums_path,
+    paired_noise_difference,
+    paired_noise_ratio,
+    place_empty_apertures,
     reset_apertures,
+    save_noise_sums,
     signed_aperture_sum,
 )
 
@@ -522,4 +542,306 @@ def test_an_aperture_file_from_the_first_development_version_is_replaced(tmp_pat
     stack = _write(tmp_path / "stack.fits", _sky_image(2.0, seed=1), _sky_header())
     result = measure_stack_noise(stack, None, str(apertures)).result
     assert result is not None and result.apertures_created
-    assert json.loads(apertures.read_text())["version"] == 2
+    assert json.loads(apertures.read_text())["version"] == APERTURE_FILE_VERSION
+
+
+def _faint_field(seed: int, star_count: int, nebula: bool) -> tuple[np.ndarray, np.ndarray]:
+    """Build unit noise, then add faint stars and a nebula to a copy.
+
+    Parameters
+    ----------
+    seed : `int`
+        Seed of the noise and the stars.
+    star_count : `int`
+        How many faint Gaussian stars (width 2.2 px FWHM) to add. Their peaks
+        run from 0.2 to 30 times the noise of one pixel, evenly in the
+        logarithm.
+    nebula : `bool`
+        Whether to add a halo 60 px wide and a few small knots.
+
+    Returns
+    -------
+    noise, image : `numpy.ndarray`
+        The noise alone and the noise plus the sources.
+    """
+    generator = np.random.default_rng(seed)
+    noise = generator.normal(size=(SIZE, SIZE))
+    image = noise.copy()
+    width = 2.2 / 2.3548
+    offsets = np.arange(-10, 11)
+    kernel = np.exp(-(offsets[:, None] ** 2 + offsets[None, :] ** 2) / (2 * width**2))
+    peaks = np.exp(generator.uniform(np.log(0.2), np.log(30.0), star_count))
+    for peak in peaks:
+        row, column = generator.integers(12, SIZE - 12, 2)
+        image[row - 10 : row + 11, column - 10 : column + 11] += peak * kernel
+    if nebula:
+        rows, columns = np.mgrid[0:SIZE, 0:SIZE]
+        image += np.exp(-((rows - 450) ** 2 + (columns - 450) ** 2) / (2 * 60.0**2))
+        for _ in range(6):
+            knot_row, knot_column = generator.uniform(100, SIZE - 100, 2)
+            image += 0.6 * np.exp(-((rows - knot_row) ** 2 + (columns - knot_column) ** 2) / (2 * 6.0**2))
+    return noise, image
+
+
+def _spread_of_sums(plane: np.ndarray, positions: list[tuple[float, float]]) -> float:
+    """Give the robust spread of the aperture sums at the given positions.
+
+    Parameters
+    ----------
+    plane : `numpy.ndarray`
+        The image.
+    positions : `list` [`tuple` [`float`, `float`]]
+        The (row, column) of each aperture.
+
+    Returns
+    -------
+    spread : `float`
+        1.4826 times the median absolute deviation of the sums.
+    """
+    sums = np.array([signed_aperture_sum(plane, column, row) for row, column in positions])
+    return 1.4826 * float(np.median(np.abs(sums - np.median(sums))))
+
+
+def _unselected_spread(noise: np.ndarray) -> float:
+    """Give the noise's own aperture spread at unselected positions.
+
+    Parameters
+    ----------
+    noise : `numpy.ndarray`
+        The noise alone.
+
+    Returns
+    -------
+    spread : `float`
+        The robust spread of 400 sums at random positions.
+    """
+    generator = np.random.default_rng(7)
+    positions = [tuple(generator.uniform(20, SIZE - 20, 2)) for _ in range(400)]
+    return _spread_of_sums(noise, positions)
+
+
+def test_a_faint_source_keeps_the_apertures_away() -> None:
+    """A source far below the star finder's limit still clears its area."""
+    generator = np.random.default_rng(11)
+    image = generator.normal(size=(SIZE, SIZE))
+    rows, columns = np.mgrid[0:SIZE, 0:SIZE]
+    image += 1.5 * np.exp(-((rows - 300) ** 2 + (columns - 600) ** 2) / (2 * 3.0**2))
+    distance = faint_source_distance(image)
+    assert distance[300, 600] == 0
+    positions = place_empty_apertures(image, np.empty((0, 2)))
+    assert len(positions) >= MINIMUM_USABLE_APERTURES
+    nearest = min(math.hypot(row - 300, column - 600) for row, column in positions)
+    assert nearest > FAINT_SOURCE_CLEARANCE_PX
+
+
+def test_the_mask_on_pure_noise_leaves_the_noise_unbiased_within_its_error() -> None:
+    """On noise alone the rule keeps the apertures and does not pull low."""
+    ratios = []
+    for seed in range(8):
+        noise = np.random.default_rng(300 + seed).normal(size=(SIZE, SIZE))
+        positions = place_empty_apertures(noise, np.empty((0, 2)))
+        assert len(positions) >= 90
+        ratios.append(_spread_of_sums(noise, positions) / _unselected_spread(noise))
+    error = float(np.std(ratios)) / math.sqrt(len(ratios))
+    # The measured bias is in validation entry STK-36; the test only guards a
+    # large bias (5% covers the mean's error and the rule's own bias).
+    assert abs(float(np.mean(ratios)) - 1.0) < max(0.05, 3 * error)
+
+
+def test_faint_stars_and_a_nebula_no_longer_inflate_the_noise() -> None:
+    """The new placement recovers the injected noise; the old does not."""
+    old_excess, new_ratios = [], []
+    for seed in range(4):
+        noise, image = _faint_field(500 + seed, star_count=3300, nebula=True)
+        truth = _unselected_spread(noise)
+        # The old rule: no faint-source mask (the finder sees bright stars).
+        generator = np.random.default_rng(5)
+        old_positions = [tuple(generator.uniform(20, SIZE - 20, 2)) for _ in range(300)]
+        old_excess.append(_spread_of_sums(image, old_positions) / truth)
+        new_positions = place_empty_apertures(image, np.empty((0, 2)))
+        assert len(new_positions) >= MINIMUM_USABLE_APERTURES
+        new_ratios.append(_spread_of_sums(image, new_positions) / truth)
+    assert float(np.mean(old_excess)) > 1.15
+    # Measured over 6 fields: the ratio is within 1.10 (the margin covers the
+    # mean's error of about 0.03 and the rule's own small bias).
+    assert abs(float(np.mean(new_ratios)) - 1.0) < 0.10
+
+
+def test_too_few_clean_apertures_is_a_reason_not_a_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A field with no clean sky gives a reason, never the old placement."""
+    monkeypatch.setattr(
+        stack_noise,
+        "analyze_faint_sources",
+        lambda plane: FaintSourceAnalysis(np.zeros(plane.shape), (1.0, 1.0, 1.0), 0.3, 1.0, 0.8),
+    )
+    stack = _write(tmp_path / "stack.fits", _sky_image(2.0, seed=1), _sky_header())
+    outcome = measure_stack_noise(stack, None, str(tmp_path / APERTURE_FILE_NAME))
+    assert outcome.result is None
+    assert "faint sources" in outcome.reason
+    assert "flagged 30% of the image" in outcome.reason
+    assert "excludes 80% of it" in outcome.reason
+    # The stored row, not only the outcome, carries the reason.
+    from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
+    from astrometricslib.pipelines.stacking.post_processing.record_quality import noise_measurements
+
+    context = PipelineRunContext("M 99", "stacking", "1.3.0", "run", "run", datetime(2026, 10, 1, tzinfo=UTC))
+    rows = noise_measurements(outcome, context, context.stack_subject("stack.fits"))
+    assert rows and all("excludes 80% of it" in row.reason for row in rows)
+    assert not (tmp_path / APERTURE_FILE_NAME).exists()
+
+
+def test_an_aperture_file_of_version_two_is_replaced(tmp_path: Path) -> None:
+    """Apertures placed by stars alone are never reused."""
+    apertures = tmp_path / APERTURE_FILE_NAME
+    apertures.write_text(json.dumps({"version": 2, "sets": {"unspecified": {}}}))
+    stack = _write(tmp_path / "stack.fits", _sky_image(2.0, seed=1), _sky_header())
+    result = measure_stack_noise(stack, None, str(apertures)).result
+    assert result is not None and result.apertures_created
+    assert json.loads(apertures.read_text())["version"] == APERTURE_FILE_VERSION
+
+
+def _identity_stack(tmp_path: Path, name: str, seed: int, center_ra: float = 150.0) -> str:
+    """Write a synthetic stack whose coordinate solution has the given center.
+
+    Parameters
+    ----------
+    tmp_path : `pathlib.Path`
+        The folder.
+    name : `str`
+        The file name.
+    seed : `int`
+        Seed of the noise.
+    center_ra : `float`, optional
+        The right ascension of the image center, in degrees.
+
+    Returns
+    -------
+    path : `str`
+        The stack's path.
+    """
+    header = _sky_header()
+    header["CRVAL1"] = center_ra
+    return _write(tmp_path / name, _sky_image(2.0, seed=seed), header)
+
+
+def test_the_mask_clearance_covers_the_rounding_of_the_center() -> None:
+    """The clearance is the ring's outer radius plus one pixel."""
+    assert FAINT_SOURCE_CLEARANCE_PX == pytest.approx(RING_OUTER_PX + 1.0)
+
+
+def test_the_mask_scale_ignores_the_empty_edge() -> None:
+    """A wide empty (zero) border does not pull the noise scale down."""
+    noise = np.random.default_rng(21).normal(size=(SIZE, SIZE)).astype(np.float32) + 50.0
+    bordered = noise.copy()
+    bordered[:, :450] = 0.0
+    full_scale = analyze_faint_sources(noise).noise_scales
+    border_scale = analyze_faint_sources(bordered).noise_scales
+    assert analyze_faint_sources(bordered).usable_fraction == pytest.approx(0.5)
+    for full, edge in zip(full_scale, border_scale, strict=True):
+        assert edge == pytest.approx(full, rel=0.15)
+
+
+def test_a_set_has_an_identity_that_survives_the_file_and_names_its_depth(tmp_path: Path) -> None:
+    """The identity is stored, repeats on reload and names the depth."""
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    stack = _identity_stack(tmp_path, "a.fits", seed=1)
+    result = measure_stack_noise(stack, None, apertures, depth=StackDepth(61, 40.5)).result
+    stored = load_apertures(apertures)
+    assert result.aperture_identity == stored.identity
+    assert stored.identity.startswith(f"v{APERTURE_FILE_VERSION}-")
+    assert stored.defining_frame_count == 61
+    assert stored.defining_effective_frame_count == pytest.approx(40.5)
+    assert len(stored.mask_noise_scales) == 3 and all(scale > 0 for scale in stored.mask_noise_scales)
+    assert 0.0 <= stored.flagged_fraction <= stored.excluded_fraction < 0.5
+    assert "61 frames (effective 40.5)" in result.aperture_definition_note
+    assert stored.identity in result.aperture_definition_note
+
+
+def test_a_much_deeper_library_stack_replaces_the_set_and_a_close_one_does_not(tmp_path: Path) -> None:
+    """Twice the effective frame count makes a new set with a new identity."""
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    first = _identity_stack(tmp_path, "first.fits", seed=1)
+    old = measure_stack_noise(first, None, apertures, depth=StackDepth(10, 10.0)).result
+    nearly = _identity_stack(tmp_path, "nearly.fits", seed=2, center_ra=150.3)
+    kept = measure_stack_noise(
+        nearly, None, apertures, depth=StackDepth(19, 0.99 * REPLACEMENT_DEPTH_FACTOR * 10.0)
+    ).result
+    assert kept.aperture_identity == old.aperture_identity and not kept.apertures_created
+    deep = _identity_stack(tmp_path, "deep.fits", seed=3, center_ra=150.3)
+    new = measure_stack_noise(
+        deep, None, apertures, depth=StackDepth(20, REPLACEMENT_DEPTH_FACTOR * 10.0)
+    ).result
+    assert new.apertures_created and new.aperture_identity != old.aperture_identity
+    assert load_apertures(apertures).identity == new.aperture_identity
+    assert load_apertures(apertures).defining_effective_frame_count == pytest.approx(20.0)
+
+
+def test_a_set_with_no_recorded_depth_is_never_replaced(tmp_path: Path) -> None:
+    """With no recorded depth there is nothing to compare; the set stays."""
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    first = measure_stack_noise(_identity_stack(tmp_path, "a.fits", seed=1), None, apertures).result
+    deep = _identity_stack(tmp_path, "b.fits", seed=2, center_ra=150.3)
+    second = measure_stack_noise(deep, None, apertures, depth=StackDepth(500, 500.0)).result
+    assert second.aperture_identity == first.aperture_identity and not second.apertures_created
+
+
+def test_a_stack_that_may_not_choose_never_makes_or_replaces_a_set(tmp_path: Path) -> None:
+    """A subset stack uses the stored set, or says why it cannot."""
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    stack = _identity_stack(tmp_path, "a.fits", seed=1)
+    none = measure_stack_noise(stack, None, apertures, may_choose_apertures=False)
+    assert none.result is None and "no stored noise apertures" in none.reason
+    assert not (tmp_path / APERTURE_FILE_NAME).exists()
+    first = measure_stack_noise(stack, None, apertures, depth=StackDepth(10, 10.0)).result
+    deep = _identity_stack(tmp_path, "deep.fits", seed=2, center_ra=150.3)
+    second = measure_stack_noise(
+        deep, None, apertures, may_choose_apertures=False, depth=StackDepth(500, 500.0)
+    ).result
+    assert second.aperture_identity == first.aperture_identity and not second.apertures_created
+
+
+def test_a_version_two_file_is_refused_with_a_reason_by_a_stack_that_may_not_choose(tmp_path: Path) -> None:
+    """A subset stack leaves a version-2 file alone and says why."""
+    apertures = tmp_path / APERTURE_FILE_NAME
+    body = json.dumps({"version": 2, "sets": {"unspecified": {}}})
+    apertures.write_text(body)
+    stack = _identity_stack(tmp_path, "a.fits", seed=1)
+    outcome = measure_stack_noise(stack, None, str(apertures), may_choose_apertures=False)
+    assert outcome.result is None and outcome.reason == OLD_APERTURES_REASON
+    assert "predate version 3" in outcome.reason and "library stack chooses them" in outcome.reason
+    assert apertures.read_text() == body
+    assert load_apertures_with_reason(str(apertures)) == (None, OLD_APERTURES_REASON)
+
+
+def test_the_saved_sums_carry_the_identity_and_paired_comparison_refuses_another(tmp_path: Path) -> None:
+    """Sums from different sets are never paired, whatever the names."""
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    stack = _identity_stack(tmp_path, "a.fits", seed=1)
+    result = measure_stack_noise(stack, None, apertures).result
+    save_noise_sums(stack, result)
+    sums, flux, identity = load_noise_sums(stack)
+    assert identity == result.aperture_identity
+    assert paired_noise_difference(sums, flux, identity, sums, flux, identity) is not None
+    with pytest.raises(ApertureSetMismatchError, match="different apertures"):
+        paired_noise_difference(sums, flux, identity, sums, flux, "v3-other")
+    with pytest.raises(ApertureSetMismatchError):
+        paired_noise_ratio(sums, flux, "", sums, flux, "")
+    assert json.loads(Path(noise_sums_path(stack)).read_text())["aperture_identity"] == identity
+    discard_noise_sums(stack)
+    assert not Path(noise_sums_path(stack)).exists()
+    discard_noise_sums(stack)
+
+
+def test_the_paired_ratio_of_a_stack_with_itself_is_one_with_no_error(tmp_path: Path) -> None:
+    """The ratio of identical sums is 1, and of sums scaled by 2 is 2."""
+    generator = np.random.default_rng(3)
+    sums = generator.normal(size=100)
+    ratio, error, count = paired_noise_ratio(sums, 1.0, "v3-x", sums, 1.0, "v3-x")
+    assert ratio == pytest.approx(1.0) and error == pytest.approx(0.0, abs=1e-12) and count == 100
+    ratio, error, _ = paired_noise_ratio(sums, 1.0, "v3-x", 2.0 * sums, 1.0, "v3-x")
+    assert ratio == pytest.approx(2.0) and error == pytest.approx(0.0, abs=1e-12)
+    noisy = sums + 0.5 * generator.normal(size=100)
+    _, error, _ = paired_noise_ratio(sums, 1.0, "v3-x", noisy, 1.0, "v3-x")
+    assert 0.0 < error < 0.2

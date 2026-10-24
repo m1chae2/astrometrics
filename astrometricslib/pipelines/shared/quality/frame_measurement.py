@@ -70,6 +70,11 @@ from astrometricslib.models.quality.measurement import (
     SubjectLevel,
 )
 from astrometricslib.models.target import FrameRecord
+from astrometricslib.pipelines.shared.quality.frame_statistics import (
+    BOOTSTRAP_RESAMPLE_COUNT,
+    BOOTSTRAP_SEED,
+    bootstrap_median_error,
+)
 from astrometricslib.pipelines.shared.quality.metrics import (
     FRAME_BACKGROUND_LEVEL,
     FRAME_DETECTED_REGION_COUNT,
@@ -214,14 +219,6 @@ MOFFAT_MINIMUM_STAR_COUNT = 5
 # `_measure_second_moments`), so a trailed star is not cut short.
 MOMENT_APERTURE_FWHM_MULTIPLE = 1.5
 MOMENT_APERTURE_MINIMUM_RADIUS_PX = 3.0
-
-# The number of resamples for the bootstrap of a median. 1000 puts the error
-# of the uncertainty itself near 2 percent.
-BOOTSTRAP_RESAMPLE_COUNT = 1000
-
-# Seed of the bootstrap, so one frame always gives the same uncertainty. The
-# value itself is arbitrary.
-BOOTSTRAP_SEED = 20261022
 
 # The blur a square pixel adds to a star, as a multiple of the pixel side
 # squared (the "c" of the effective star width). A star is the sky's image
@@ -1035,26 +1032,6 @@ def _mean_ellipticity_angle(
     mean_length = float(np.mean(np.hypot(first_components, second_components)))
     coherence = math.hypot(mean_first, mean_second) / mean_length if mean_length > 0.0 else 0.0
     return angle_deg, coherence
-
-
-def bootstrap_median_error(values: np.ndarray, generator: np.random.Generator) -> float:
-    """Estimate the standard error of a median by resampling.
-
-    Parameters
-    ----------
-    values : `numpy.ndarray`
-        The sample.
-    generator : `numpy.random.Generator`
-        The seeded random generator.
-
-    Returns
-    -------
-    error : `float`
-        The standard deviation of the medians of
-        `BOOTSTRAP_RESAMPLE_COUNT` resamples drawn with replacement.
-    """
-    draws = generator.integers(0, values.size, size=(BOOTSTRAP_RESAMPLE_COUNT, values.size))
-    return float(np.std(np.median(values[draws], axis=1)))
 
 
 def _bootstrap_angle_error_deg(

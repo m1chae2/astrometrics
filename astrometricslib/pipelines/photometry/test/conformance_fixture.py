@@ -17,6 +17,7 @@ from astrometricslib.pipelines.photometry.post_processing.record_quality import 
     photometry_run_gates,
     photometry_run_measurements,
 )
+from astrometricslib.pipelines.photometry.post_processing.record_zero_point import zero_point_measurements
 from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import CentroidShiftSummary
 from astrometricslib.pipelines.photometry.processing.catalog_zero_point import (
     CatalogBand,
@@ -54,7 +55,7 @@ FIXTURE_CENTROID_SUMMARIES = (
 
 
 def _fixture_session_zero_points(band: CatalogBand, session_id: str) -> SessionZeroPoints:
-    """Build one session of twelve frames with zero points and airmasses.
+    """Build one session of twelve frames with zero points.
 
     Parameters
     ----------
@@ -66,14 +67,14 @@ def _fixture_session_zero_points(band: CatalogBand, session_id: str) -> SessionZ
     Returns
     -------
     session : `SessionZeroPoints`
-        Twelve frames whose zero points wander a little around 21.5 mag.
+        Twelve frames whose zero points wander a little around 21.5 mag,
+        with a distinct path and exposure start each.
     """
     start = datetime(2026, 10, 3, 4, 0, 0)
     frames = tuple(
         FrameZeroPoint(
             frame_path=f"/library/lights/M 99/Apertura 75Q/M99_{session_id}_{index:03d}.fits",
             timestamp=start + timedelta(minutes=index),
-            airmass=1.2 + 0.01 * index,
             estimate=FrameZeroPointEstimate(
                 zero_point_mag=21.5 + 0.01 * ((index % 5) - 2),
                 error_mag=0.004,
@@ -81,11 +82,12 @@ def _fixture_session_zero_points(band: CatalogBand, session_id: str) -> SessionZ
                 reason="",
                 color_slope=0.08 if band is CatalogBand.SIMBAD_V else None,
                 color_reason="" if band is CatalogBand.SIMBAD_V else "color term not fitted: no color",
+                star_sample_error_mag=0.02,
             ),
         )
         for index in range(12)
     )
-    return SessionZeroPoints(session_id, band, "", frames)
+    return SessionZeroPoints(session_id, band, "", frames, star_set_size=80)
 
 
 def photometry_fixture_metrics() -> PhotometryPipelineQualityMetrics:
@@ -169,11 +171,16 @@ def photometry_emitted_measurements() -> list[QualityMeasurement]:
     Returns
     -------
     measurements : `list` of `QualityMeasurement`
-        What the record step emits for a healthy two-session run.
+        What the record step emits for a healthy two-session run, the run's
+        rows and the zero point rows.
     """
     context = PipelineRunContext(
         "M 99", "photometry", "1.3.0", "job-1", "job-1", datetime(2026, 10, 22, tzinfo=UTC)
     )
-    return photometry_run_measurements(
-        photometry_fixture_metrics(), photometry_fixture_gates(), photometry_fixture_inputs(), context
-    )
+    inputs = photometry_fixture_inputs()
+    return [
+        *photometry_run_measurements(
+            photometry_fixture_metrics(), photometry_fixture_gates(), inputs, context
+        ),
+        *zero_point_measurements(inputs.session_zero_points, context),
+    ]

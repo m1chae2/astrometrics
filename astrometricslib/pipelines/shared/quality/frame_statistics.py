@@ -2,11 +2,43 @@
 
 This file contains tools for calculating statistics about the images,
 such as counting how many images there are for different camera settings,
-and measuring basic quality metrics like the sky background brightness.
+and measuring basic quality metrics like the sky background brightness. It
+also holds the seeded bootstrap error of a median, which the frame
+measurement and the photometry zero point both use.
 """
 
 from collections.abc import Callable
 from typing import Any
+
+import numpy as np
+
+# The number of resamples for the bootstrap of a median. 1000 puts the error
+# of the uncertainty itself near 2 percent.
+BOOTSTRAP_RESAMPLE_COUNT = 1000
+
+# Seed of the bootstrap, so one frame always gives the same uncertainty. The
+# value itself is arbitrary.
+BOOTSTRAP_SEED = 20261022
+
+
+def bootstrap_median_error(values: np.ndarray, generator: np.random.Generator) -> float:
+    """Estimate the standard error of a median by resampling.
+
+    Parameters
+    ----------
+    values : `numpy.ndarray`
+        The sample.
+    generator : `numpy.random.Generator`
+        The seeded random generator.
+
+    Returns
+    -------
+    error : `float`
+        The standard deviation of the medians of
+        `BOOTSTRAP_RESAMPLE_COUNT` resamples drawn with replacement.
+    """
+    draws = generator.integers(0, values.size, size=(BOOTSTRAP_RESAMPLE_COUNT, values.size))
+    return float(np.std(np.median(values[draws], axis=1)))
 
 
 def get_frame_stats(target: Any) -> dict[str, Any]:

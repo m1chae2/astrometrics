@@ -313,7 +313,9 @@ def _record(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[int, list[
         The three frames given to it.
     """
     monkeypatch.setattr(
-        record_quality, "measure_noise_safely", lambda *_: SimpleNamespace(result=None, reason="test")
+        record_quality,
+        "measure_noise_safely",
+        lambda *_args, **_kwargs: SimpleNamespace(result=None, reason="test"),
     )
     monkeypatch.setattr(record_quality, "determine_stack_members", lambda *_: None)
     monkeypatch.setattr(record_quality, "compute_stack_science", lambda *_args, **_kwargs: None)

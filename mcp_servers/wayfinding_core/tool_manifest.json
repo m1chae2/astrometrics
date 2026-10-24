@@ -596,6 +596,13 @@
       "disposition": "keep",
       "interim_block": "Returns the whole target record, frames and all, which overflows the reply. Use planning_lookup_coordinates, which returns the position.",
       "note": "Looks up an object's position by name. Unknown names go to SIMBAD over the network."
+    },
+    "planning_tick_checklist_item": {
+      "tool_class": "change-data",
+      "category": "planning-sessions",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "The AI is read-only, so a tool that writes is not offered."
     }
   }
 }

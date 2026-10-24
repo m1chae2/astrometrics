@@ -3,15 +3,14 @@
 Description: Works out three things from the night's light frames.
 
 1. Clipping. For each target and exposure length, whether a star clips at
-   the camera's ceiling. The science library has already judged this on the
-   pixels when it stacked the target, so its verdict is used whenever it has
-   one. Otherwise the frames' saturated-pixel counts decide, by the science
-   library's own rule: a star clips when at least 4 connected pixels sit at
-   the ceiling, and an exposure length clips when at least half its frames do.
-   The count here is of saturated pixels, not of connected blobs, which
-   agreed with the science library's verdict for 67 of the 69 exposure groups
-   where both exist. The two that differed are Moon frames, where an extended
-   bright disc, not a star, reaches the ceiling.
+   the camera's ceiling. The frames' stored saturated-pixel measurements
+   decide, by the science library's own rule: a star clips when at least 4
+   connected pixels sit at the ceiling, and an exposure length clips when at
+   least half its frames do. The count here is of saturated pixels, not of
+   connected blobs, which agreed with the stacking summary's verdict for 67
+   of the 69 exposure groups where both existed (measured before the stacking
+   summary's verdict was dropped as an input). The two that differed are Moon
+   frames, where an extended bright disc, not a star, reaches the ceiling.
 2. Star quality. The median star width and roundness of the imaging frames,
    compared with the limits from this equipment's earlier nights.
 3. Efficiency. How much of the night's span went to exposing.
@@ -23,17 +22,22 @@ import statistics
 from collections import defaultdict
 from collections.abc import Sequence
 
-from astrometricslib import SATURATED_BLOB_MINIMUM_PIXELS, SATURATED_FRAME_FRACTION
+from astrometricslib import SATURATED_BLOB_MINIMUM_PIXELS, SATURATED_FRAME_FRACTION, MeasurementReference
+from wayfindinglib.analytics.capture_history import (
+    SATURATED_FRACTION_METRIC,
+    STAR_ELONGATION_METRIC,
+    STAR_WIDTH_METRIC,
+    usable_star_frames,
+)
 from wayfindinglib.analytics.performance_envelope import MINIMUM_FRAMES_PER_NIGHT
 from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
-from wayfindinglib.models.session.capture_frame import CaptureFrame, StackSaturationVerdict
+from wayfindinglib.models.session.capture_frame import CaptureFrame
 from wayfindinglib.models.session.capture_quality import (
     CaptureEfficiency,
     CapturePerformance,
     ExposureClipping,
     StarQuality,
 )
-from wayfindinglib.tasks.control_tasks.capture_analysis_tasks import usable_star_frames
 
 _EXPOSURE_DECIMALS = 4
 """Exposure lengths are rounded to this many decimals before grouping, so
@@ -55,10 +59,19 @@ def _limit(envelope: PerformanceEnvelope | None, name: str, limits_equipment_mat
     return envelope.value(name)
 
 
+def _references(frames: Sequence[CaptureFrame], metric: str) -> list[MeasurementReference]:
+    """Point at the stored rows of one metric for these frames.
+
+    Returns
+    -------
+    references : `list` [`MeasurementReference`]
+        One per frame that has a stored row of the metric.
+    """
+    return [reference for frame in frames if (reference := frame.reference(metric)) is not None]
+
+
 def measure_clipping(
-    frames: Sequence[CaptureFrame],
-    verdicts: Sequence[StackSaturationVerdict],
-    sensor_pixel_count: int | None,
+    frames: Sequence[CaptureFrame], sensor_pixel_count: int | None
 ) -> list[ExposureClipping]:
     """Find, for each target and exposure length, whether a star clips.
 
@@ -66,8 +79,6 @@ def measure_clipping(
     ----------
     frames : `Sequence` [`CaptureFrame`]
         The night's light frames.
-    verdicts : `Sequence` [`StackSaturationVerdict`]
-        The science library's verdicts for stacked exposures.
     sensor_pixel_count : `int` or `None`
         Pixels on the camera's sensor with no binning. Without it a frame's
         saturated-pixel fraction cannot be turned into a count.
@@ -76,13 +87,9 @@ def measure_clipping(
     -------
     clipping : `list` [`ExposureClipping`]
         One entry per target, spectral or imaging, and exposure length, in
-        that order. A group with no frame that has a measured clipping value
-        and no science verdict is left out.
+        that order. A group with no frame that has a stored saturated-pixel
+        measurement is left out.
     """
-    science = {
-        (verdict.target_id, verdict.is_spectral, round(verdict.exposure_seconds, _EXPOSURE_DECIMALS)): verdict
-        for verdict in verdicts
-    }
     groups: dict[tuple[str, bool, float], list[CaptureFrame]] = defaultdict(list)
     for frame in frames:
         key = (frame.target_id, frame.is_spectral, round(frame.exposure_seconds, _EXPOSURE_DECIMALS))
@@ -91,18 +98,17 @@ def measure_clipping(
     results = []
     for key, group in sorted(groups.items()):
         target_id, is_spectral, exposure_seconds = key
+        measured = [frame for frame in group if frame.saturated_pixel_fraction is not None]
         counts = (
             [
                 round(frame.saturated_pixel_fraction * sensor_pixel_count / frame.binning**2)
-                for frame in group
-                if frame.saturated_pixel_fraction is not None
+                for frame in measured
             ]
             if sensor_pixel_count
             else []
         )
         clipped_frames = sum(1 for count in counts if count >= SATURATED_BLOB_MINIMUM_PIXELS)
-        verdict = science.get(key)
-        if not counts and verdict is None:
+        if not counts:
             continue
         clipped_fraction = clipped_frames / len(counts) if counts else 0.0
         results.append(
@@ -113,11 +119,8 @@ def measure_clipping(
                 frames=len(counts),
                 clipped_frames=clipped_frames,
                 clipped_fraction=clipped_fraction,
-                is_clipped=verdict.saturated if verdict else clipped_fraction >= SATURATED_FRAME_FRACTION,
-                basis="science_stack" if verdict else "frame_pixel_count",
-                science_recommended_exposure_seconds=verdict.recommended_exposure_seconds
-                if verdict
-                else None,
+                is_clipped=clipped_fraction >= SATURATED_FRAME_FRACTION,
+                evidence=_references(measured, SATURATED_FRACTION_METRIC),
             )
         )
     return results
@@ -161,9 +164,11 @@ def measure_star_quality(
     if len(usable) < MINIMUM_FRAMES_PER_NIGHT:
         return quality
     quality.median_star_width_arcsec = statistics.median(frame.star_width_arcsec for frame in usable)
-    roundness = [frame.roundness for frame in usable if frame.roundness is not None]
-    if len(roundness) >= MINIMUM_FRAMES_PER_NIGHT:
-        quality.median_roundness = statistics.median(roundness)
+    quality.width_evidence = _references(usable, STAR_WIDTH_METRIC)
+    with_roundness = [frame for frame in usable if frame.roundness is not None]
+    if len(with_roundness) >= MINIMUM_FRAMES_PER_NIGHT:
+        quality.median_roundness = statistics.median(frame.roundness for frame in with_roundness)
+        quality.roundness_evidence = _references(with_roundness, STAR_ELONGATION_METRIC)
     return quality
 
 
@@ -191,7 +196,6 @@ def measure_efficiency(frames: Sequence[CaptureFrame]) -> CaptureEfficiency:
 
 def measure_capture_performance(
     frames: Sequence[CaptureFrame],
-    verdicts: Sequence[StackSaturationVerdict],
     sensor_pixel_count: int | None,
     envelope: PerformanceEnvelope | None,
     limits_equipment_match: str,
@@ -204,7 +208,7 @@ def measure_capture_performance(
         Clipping, star quality and efficiency.
     """
     return CapturePerformance(
-        clipping=measure_clipping(frames, verdicts, sensor_pixel_count),
+        clipping=measure_clipping(frames, sensor_pixel_count),
         star_quality=measure_star_quality(frames, envelope, limits_equipment_match),
         efficiency=measure_efficiency(frames),
     )

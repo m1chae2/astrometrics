@@ -16,7 +16,7 @@ Unlike the guiding and capture analyses, this one judges every recorded night to
 
 Three measurements, each with a position:
 
-- **Star width** (arcseconds) and **star roundness** (narrow axis over wide axis), from the imaging frames the science library registered.
+- **Star width** (arcseconds) and **star roundness** (narrow axis over wide axis), from the imaging frames whose stars were measured (the stored measurements).
 - **Guiding error** (arcseconds per axis), from each guiding run of a night whose guiding data was trustworthy.
 
 ## Why a night counts only if it saw two parts of the sky

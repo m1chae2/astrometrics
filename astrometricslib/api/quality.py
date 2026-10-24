@@ -19,6 +19,7 @@ from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.jobs.runner import background_job, registered_job
+from astrometricslib.models.quality.capture_setting import CaptureSetting
 from astrometricslib.models.quality.excluded_frames import QuarantinePreview
 from astrometricslib.models.quality.measurement import QualityMeasurement, SubjectLevel
 from astrometricslib.models.quality.metric_spec import Checkpoint, MetricSpec, MetricSummary
@@ -205,6 +206,30 @@ class QualityRecords:
             variant=variant,
             library_only=library_only,
         )
+
+    def capture_settings(self, ids: list[int] | None = None) -> dict[int, CaptureSetting]:
+        """Read the capture settings that stored measurements point at.
+
+        A stored measurement carries only a ``capture_setting_id``. This
+        turns those ids into the camera, telescope, filter, exposure, gain
+        setting, offset and binning, in one read. Nothing is measured or
+        written, and a library with no quality database gives an empty
+        dictionary without creating one.
+
+        Parameters
+        ----------
+        ids : `list` [`int`], optional
+            Only these ids. Leave it out to read every stored setting.
+            An id that is not stored is left out of the result.
+
+        Returns
+        -------
+        settings : `dict` [`int`, `CaptureSetting`]
+            The settings, keyed by their id.
+        """
+        from astrometricslib.drivers.quality_store import QualityStore, quality_database_path
+
+        return QualityStore(quality_database_path(self._config)).get_capture_settings(ids)
 
     def metrics(
         self,

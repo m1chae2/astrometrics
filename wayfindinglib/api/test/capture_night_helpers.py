@@ -12,7 +12,7 @@ from typing import Any
 from astrometricslib import observing_night_id
 from wayfindinglib import ObservatoryControl
 from wayfindinglib.api.test.guiding_night_helpers import FIRST_NIGHT, record_guiding_night
-from wayfindinglib.models.session.capture_frame import CaptureFrame, StackSaturationVerdict
+from wayfindinglib.models.session.capture_frame import CaptureFrame
 from wayfindinglib.models.session.ekos_session import EkosCapture, EkosSessionContext
 
 SENSOR_PIXELS = 3008 * 3008
@@ -20,12 +20,11 @@ SENSOR_PIXELS = 3008 * 3008
 
 
 class Library:
-    """The frames and verdicts the science library would hold."""
+    """The frames the science library would hold."""
 
     def __init__(self) -> None:
         """Start with an empty library."""
         self.frames: list[CaptureFrame] = []
-        self.verdicts: list[StackSaturationVerdict] = []
 
 
 def add_frames(library: Library, day: int, count: int = 30, **overrides: Any) -> str:

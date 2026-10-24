@@ -95,8 +95,16 @@ def calculate_panels(
     cols: int,
     overlap_percent: float,
     equipment: EquipmentConfiguration | None = None,
+    rotation_deg: float = 0.0,
 ) -> list[MosaicPanel]:
     """Work out the center of every panel in a mosaic grid.
+
+    With a rotation, the whole grid is turned about its center the way the
+    camera is turned. The camera's up direction (increasing row) points
+    `rotation_deg` east of north, and its columns follow. At 0 degrees the
+    rows run along declination and the columns along right ascension. At 90
+    degrees the rows run east and the columns run south, so the two grid
+    axes swap.
 
     Parameters
     ----------
@@ -114,6 +122,9 @@ def calculate_panels(
         How much neighbouring panels overlap, from 0 to just under 100.
     equipment : `EquipmentConfiguration`, optional
         The telescope and camera; their field of view sets the spacing.
+    rotation_deg : `float`, optional
+        How far the camera is turned, in degrees east of north, the way
+        Ekos and KStars give it. Defaults to 0.
 
     Returns
     -------
@@ -123,8 +134,10 @@ def calculate_panels(
     Raises
     ------
     InvalidArgumentError
-        If the grid size or overlap is out of range.
+        If the grid size, overlap or rotation is out of range.
     """
+    if not math.isfinite(rotation_deg):
+        raise InvalidArgumentError("rotation_deg must be a finite number of degrees.")
     if rows < 1 or cols < 1:
         raise InvalidArgumentError("rows and cols must each be at least 1.")
     if not 0.0 <= overlap_percent < 100.0:
@@ -142,9 +155,17 @@ def calculate_panels(
     center_ra_deg = parse_coordinate_string(center_ra, is_ra=True)
     center_dec_deg = parse_coordinate_string(center_dec, is_ra=False)
 
+    rotation_sin = math.sin(math.radians(rotation_deg))
+    rotation_cos = math.cos(math.radians(rotation_deg))
     panels = []
-    for row, dec_offset in enumerate(dec_offsets):
-        for column, ra_offset in enumerate(ra_offsets):
+    for row, row_offset_deg in enumerate(dec_offsets):
+        for column, column_offset_deg in enumerate(ra_offsets):
+            # Turn the grid offset into east and north offsets on the sky.
+            # Up (a larger row) points rotation_deg east of north; a larger
+            # column points a further 90 degrees clockwise. At 0 degrees
+            # this leaves the offsets unchanged.
+            ra_offset = column_offset_deg * rotation_cos + row_offset_deg * rotation_sin
+            dec_offset = row_offset_deg * rotation_cos - column_offset_deg * rotation_sin
             panel_dec_deg = center_dec_deg + dec_offset
             cos_dec = max(abs(math.cos(math.radians(panel_dec_deg))), 1e-5)
             panel_ra_deg = (center_ra_deg + ra_offset / cos_dec) % 360.0
@@ -160,6 +181,7 @@ def calculate_panels(
                     ra_deg=panel_ra_deg,
                     dec_deg=panel_dec_deg,
                     panel_id=f"P{row + 1}_{column + 1}",
+                    rotation_deg=rotation_deg,
                 )
             )
     return panels

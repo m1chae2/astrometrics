@@ -8,12 +8,16 @@ analysis works on plain data and never touches the frame library itself.
 
 A frame's own fields come from the camera at capture time. Its measurements
 (`saturated_pixel_fraction`, `background_adu`, `star_width_arcsec`,
-`roundness`) come from the science library's frame scan and registration.
-Registration runs only on frames that were stacked, so the star measurements
-are missing for many frames, and a missing value stays `None`.
+`roundness`) are read from the quality measurements the science library
+stored for the frame. A frame that was not measured, or whose measurement
+failed, has `None` for that value, and a missing value is never replaced by a
+default. `measurement_rows` keeps the id of each stored row, so a statement
+that rests on a frame can cite the exact measurement.
 """
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from astrometricslib import MeasurementReference
 
 
 class CaptureFrame(BaseModel):
@@ -44,10 +48,12 @@ class CaptureFrame(BaseModel):
     background_adu : `float` or `None`
         Median pixel value of the frame, in ADU (the camera's counts).
     star_width_arcsec : `float` or `None`
-        Star width (FWHM) from registration, in arcseconds.
+        Star width (FWHM of a Moffat fit) from the stored measurement
+        ``frame.star_width_moffat_arcsec``, in arcseconds.
     roundness : `float` or `None`
-        Star roundness from registration: the narrow axis divided by the wide
-        one, so 1.0 is a circle and lower is more elongated.
+        Star roundness: the narrow axis divided by the wide one, so 1.0 is a
+        circle and lower is more elongated. It is the inverse of the stored
+        measurement ``frame.star_elongation``.
     altitude_degrees : `float` or `None`
         Altitude of the pointing, in degrees.
     azimuth_degrees : `float` or `None`
@@ -58,6 +64,9 @@ class CaptureFrame(BaseModel):
         Arcseconds of sky per pixel for this frame.
     binning : `int`
         Pixel binning the frame was taken with (1 is unbinned).
+    measurement_rows : `dict` [`str`, `int`]
+        For each stored measurement this frame's values came from, the id of
+        its row in the measurement store, by metric name.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -78,38 +87,21 @@ class CaptureFrame(BaseModel):
     pier_side: str | None = Field(default=None, alias="pierSide")
     pixel_scale_arcsec: float | None = Field(default=None, alias="pixelScaleArcsec")
     binning: int = 1
+    measurement_rows: dict[str, int] = Field(default_factory=dict, alias="measurementRows")
 
+    def reference(self, metric: str) -> MeasurementReference | None:
+        """Point at the stored measurement of one metric for this frame.
 
-class StackSaturationVerdict(BaseModel):
-    """The science library's verdict on one exposure length of a target.
+        Parameters
+        ----------
+        metric : `str`
+            A metric name, such as ``"frame.star_width_moffat_arcsec"``.
 
-    The science library stacks a target's frames one exposure length at a
-    time and checks, on the pixels, whether a star clips at that length. It
-    also works out the exposure that would keep the brightest star below the
-    camera's ceiling. This holds those two results, so the capture analysis
-    reuses the science library's verdict and does not repeat the check.
-
-    Attributes
-    ----------
-    target_id : `str`
-        The target.
-    is_spectral : `bool`
-        Whether the verdict is from the spectroscopy stack.
-    exposure_seconds : `float`
-        The exposure length the verdict is for.
-    saturated : `bool`
-        Whether a star clips at this exposure length.
-    recommended_exposure_seconds : `float` or `None`
-        The exposure that would keep the brightest star in the stack below
-        the ceiling, or `None` if it could not be worked out. It describes
-        the brightest star in the field, which is the target only for a
-        single-star field such as a spectroscopy target.
-    """
-
-    model_config = ConfigDict(populate_by_name=True)
-
-    target_id: str = Field(alias="targetId")
-    is_spectral: bool = Field(alias="isSpectral")
-    exposure_seconds: float = Field(alias="exposureSeconds")
-    saturated: bool
-    recommended_exposure_seconds: float | None = Field(default=None, alias="recommendedExposureSeconds")
+        Returns
+        -------
+        reference : `MeasurementReference` or `None`
+            The reference, or `None` if this frame has no stored row of that
+            metric.
+        """
+        row_id = self.measurement_rows.get(metric)
+        return None if row_id is None else MeasurementReference(row_id=row_id)

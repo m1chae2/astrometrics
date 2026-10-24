@@ -1,9 +1,10 @@
 """Purpose: Unit tests for gathering the capture analysis's inputs.
 
 Description: Verifies which frames belong to the equipment in use, how a
-frame's measurements are carried over, how Ekos captures are classified, how
-the science library's saturation verdicts are read, and that the per-night
-baseline uses only earlier nights of the same equipment.
+frame's stored quality measurements are joined to it (and that a measurement
+of another definition version is not used), how Ekos captures are classified,
+and that the per-night baseline uses only earlier nights of the same
+equipment.
 """
 
 from pathlib import Path
@@ -13,17 +14,22 @@ from typing import Any
 import pytest
 
 from astrometricslib import AppConfiguration, observing_night_id
-from wayfindinglib.models.session.capture_frame import CaptureFrame
-from wayfindinglib.models.session.ekos_session import EkosCapture, EkosSessionContext
-from wayfindinglib.tasks.control_tasks.capture_analysis_tasks import (
+from wayfindinglib.analytics.capture_history import (
+    BACKGROUND_METRIC,
+    PINNED_FRAME_METRICS,
+    SATURATED_FRACTION_METRIC,
+    STAR_ELONGATION_METRIC,
+    STAR_WIDTH_METRIC,
     capture_kind,
     collect_capture_baseline_values,
     collect_capture_frames,
-    collect_stack_saturation_verdicts,
     frames_by_night,
     night_captures,
     usable_star_frames,
 )
+from wayfindinglib.analytics.test.frame_measurement_helpers import FakeAstrometrics
+from wayfindinglib.models.session.capture_frame import CaptureFrame
+from wayfindinglib.models.session.ekos_session import EkosCapture, EkosSessionContext
 
 _NIGHT_ONE = 1790217108.0
 """2026-09-23 20:31:48 MDT, as seconds since the epoch."""
@@ -90,7 +96,7 @@ def _library_frame(**overrides: Any) -> SimpleNamespace:
         A 60 second light frame of this observatory's equipment.
     """
     fields: dict[str, Any] = {
-        "path": "/library/Target/Target_Light_001.fits",
+        "path": "/lib/lights/Target/Apertura/ASI/Target_Light_001.fits",
         "role": "LIGHT",
         "timestamp": _NIGHT_ONE,
         "exposure": "60.0",
@@ -103,68 +109,119 @@ def _library_frame(**overrides: Any) -> SimpleNamespace:
         "pier_side": "East",
         "pixel_scale_arcsec": 2.0,
         "binning": 1,
-        "measurements": SimpleNamespace(
-            saturated_pixel_fraction=0.0,
-            background_level=120.0,
-            registration_fwhm_x_px=2.5,
-            registration_roundness=0.88,
-        ),
     }
     fields.update(overrides)
     return SimpleNamespace(**fields)
 
 
-def _astrometrics(frames: list[SimpleNamespace], **target_fields: Any) -> SimpleNamespace:
+_STORED = {
+    STAR_WIDTH_METRIC: 5.0,
+    STAR_ELONGATION_METRIC: 1.25,
+    SATURATED_FRACTION_METRIC: 0.0,
+    BACKGROUND_METRIC: 120.0,
+}
+"""Stored values of an ordinary frame: a 5 arcsec star, 1.25 times long."""
+
+
+def _astrometrics(
+    frames: list[SimpleNamespace], stored: dict[str, float | None] | None = None
+) -> FakeAstrometrics:
     """Build a science-library stand-in holding one target.
+
+    Every frame has the stored values in `stored` (`_STORED` when omitted).
 
     Returns
     -------
-    astrometrics : `SimpleNamespace`
-        Offers ``targets.list()`` returning the one target.
+    astrometrics : `FakeAstrometrics`
+        Offers ``targets.list()`` and ``quality.query``.
     """
-    target = SimpleNamespace(id="Target", frames=frames, **target_fields)
-    return SimpleNamespace(targets=SimpleNamespace(list=lambda: [target]))
+    values = _STORED if stored is None else stored
+    return FakeAstrometrics(frames, {frame.path: values for frame in frames})
 
 
-def test_star_width_is_the_registration_width_in_arcseconds(camera_profile_config: Any) -> None:
-    """Verify the width is converted with the frame's own plate scale."""
+def test_star_width_and_roundness_come_from_the_stored_measurements(camera_profile_config: Any) -> None:
+    """Verify width is the stored value and roundness is 1 / elongation."""
     (frame,) = collect_capture_frames(
         _astrometrics([_library_frame()]), "Apertura 75Q", "ZWO ASI 533MM Pro", camera_profile_config
     )
 
     assert frame.star_width_arcsec == pytest.approx(5.0)
-    assert frame.roundness == pytest.approx(0.88)
+    assert frame.roundness == pytest.approx(0.8)
     assert frame.exposure_seconds == pytest.approx(60.0)
     assert frame.target_id == "Target"
     assert not frame.is_spectral
+    assert set(frame.measurement_rows) == set(_STORED)
+    assert frame.reference(STAR_WIDTH_METRIC).row_id == frame.measurement_rows[STAR_WIDTH_METRIC]
 
 
 def test_a_failed_fit_is_not_a_measurement(camera_profile_config: Any) -> None:
-    """Verify a zero width or roundness is stored as missing, not as zero."""
-    measurements = SimpleNamespace(
-        saturated_pixel_fraction=0.0,
-        background_level=1.0,
-        registration_fwhm_x_px=0.0,
-        registration_roundness=0.0,
-    )
+    """Verify a zero width and a not-measured row stay missing."""
+    stored = {STAR_WIDTH_METRIC: 0.0, STAR_ELONGATION_METRIC: None, SATURATED_FRACTION_METRIC: None}
 
     (frame,) = collect_capture_frames(
-        _astrometrics([_library_frame(measurements=measurements)]),
-        "Apertura 75Q",
-        "ZWO ASI 533MM Pro",
-        camera_profile_config,
+        _astrometrics([_library_frame()], stored), "Apertura 75Q", "ZWO ASI 533MM Pro", camera_profile_config
     )
 
     assert frame.star_width_arcsec is None
     assert frame.roundness is None
+    assert frame.saturated_pixel_fraction is None
+    assert STAR_ELONGATION_METRIC not in frame.measurement_rows
+
+
+def test_a_frame_with_no_stored_rows_has_missing_measurements(camera_profile_config: Any) -> None:
+    """Verify an unmeasured frame is collected with measurements missing."""
+    (frame,) = collect_capture_frames(
+        _astrometrics([_library_frame()], {}), "Apertura 75Q", "ZWO ASI 533MM Pro", camera_profile_config
+    )
+
+    assert frame.star_width_arcsec is None
+    assert frame.background_adu is None
+    assert frame.measurement_rows == {}
+
+
+def test_a_row_of_another_definition_version_is_not_used(camera_profile_config: Any) -> None:
+    """Verify a pinned metric ignores rows of another definition."""
+    astrometrics = _astrometrics([_library_frame()])
+    for row in astrometrics.rows:
+        if row.metric == STAR_WIDTH_METRIC:
+            row.definition_version = 2
+
+    (frame,) = collect_capture_frames(
+        astrometrics, "Apertura 75Q", "ZWO ASI 533MM Pro", camera_profile_config
+    )
+
+    assert frame.star_width_arcsec is None
+    assert frame.saturated_pixel_fraction == pytest.approx(0.0)
+
+
+def test_the_pinned_versions_match_the_registered_metrics() -> None:
+    """Verify the registry has not moved past a pinned definition."""
+    from astrometricslib.pipelines.shared.quality.metric_registry import get_metric_registry
+
+    registry = get_metric_registry()
+    for metric, version in PINNED_FRAME_METRICS.items():
+        assert registry.get(metric).definition_version == version, metric
+
+
+def test_channel_rows_are_not_used_for_the_whole_frame(camera_profile_config: Any) -> None:
+    """Verify a per-color-plane row never stands in for the whole frame."""
+    astrometrics = _astrometrics([_library_frame()])
+    for row in astrometrics.rows:
+        row.subject.channel = "R"
+
+    (frame,) = collect_capture_frames(
+        astrometrics, "Apertura 75Q", "ZWO ASI 533MM Pro", camera_profile_config
+    )
+
+    assert frame.measurement_rows == {}
 
 
 def test_frames_of_other_equipment_are_left_out(camera_profile_config: Any) -> None:
     """Verify only the equipment in use contributes frames."""
     frames = [
         _library_frame(),
-        _library_frame(camera="Nikon DSLR DSC D5300"),
-        _library_frame(telescope="Nikkor 300mm"),
+        _library_frame(camera="Nikon DSLR DSC D5300", path="/lib/lights/Target/x/n1.fits"),
+        _library_frame(telescope="Nikkor 300mm", path="/lib/lights/Target/x/n2.fits"),
     ]
 
     result = collect_capture_frames(
@@ -188,7 +245,11 @@ def test_a_cameras_other_spellings_are_accepted(camera_profile_config: Any) -> N
 
 def test_calibration_frames_and_frames_with_no_time_are_left_out(camera_profile_config: Any) -> None:
     """Verify only light frames with a capture time are collected."""
-    frames = [_library_frame(), _library_frame(role="DARK"), _library_frame(timestamp=None)]
+    frames = [
+        _library_frame(),
+        _library_frame(role="DARK", path="/lib/lights/Target/x/d.fits"),
+        _library_frame(timestamp=None, path="/lib/lights/Target/x/t.fits"),
+    ]
 
     result = collect_capture_frames(
         _astrometrics(frames), "Apertura 75Q", "ZWO ASI 533MM Pro", camera_profile_config
@@ -213,7 +274,10 @@ def test_post_processing_output_recorded_as_a_light_frame_is_left_out(camera_pro
 
 def test_frames_come_back_oldest_first(camera_profile_config: Any) -> None:
     """Verify the frames are ordered by capture time."""
-    frames = [_library_frame(timestamp=_NIGHT_ONE + 100.0), _library_frame(timestamp=_NIGHT_ONE)]
+    frames = [
+        _library_frame(timestamp=_NIGHT_ONE + 100.0, path="/lib/lights/Target/x/a.fits"),
+        _library_frame(timestamp=_NIGHT_ONE),
+    ]
 
     result = collect_capture_frames(
         _astrometrics(frames), "Apertura 75Q", "ZWO ASI 533MM Pro", camera_profile_config
@@ -283,23 +347,6 @@ def test_a_nights_captures_and_aborts_are_summed_across_sessions() -> None:
 
     assert (len(captures), aborted, has_record) == (3, 1, True)
     assert night_captures([other], "2026-01-01") == ([], 0, False)
-
-
-def test_the_science_librarys_saturation_verdicts_are_read_for_both_stacks() -> None:
-    """Verify imaging and spectroscopy verdicts are read per exposure group."""
-    group = SimpleNamespace(exposure_seconds=2.0, saturated=True)
-    metrics = SimpleNamespace(exposure_groups=[group], recommended_exposure_seconds=0.55)
-    summary = SimpleNamespace(stacking_metrics=metrics)
-    stack = SimpleNamespace(quality_summary=summary)
-    never_stacked = SimpleNamespace(id="Unstacked", stacking=None, spectral_stacking=None)
-    target = SimpleNamespace(id="Vega", stacking=stack, spectral_stacking=stack)
-    astrometrics = SimpleNamespace(targets=SimpleNamespace(list=lambda: [target, never_stacked]))
-
-    verdicts = collect_stack_saturation_verdicts(astrometrics)
-
-    assert [(v.target_id, v.is_spectral) for v in verdicts] == [("Vega", False), ("Vega", True)]
-    assert verdicts[0].saturated
-    assert verdicts[0].recommended_exposure_seconds == pytest.approx(0.55)
 
 
 def _night_of_frames(make_frame: Any, day: int, count: int = 12, **overrides: Any) -> list:

@@ -230,7 +230,12 @@ CLASSIFICATION_RULES = (
     ),
     _rule(r"^processing_acquire_.+_slot$", "change-data", "low", "Takes a work slot (a lock). Check."),
     _rule(r"^star_tune_spectroscopy_calibration$", "change-data", "low", "May store a new calibration."),
-    _rule(r"^planning_edit_queue$", "change-data", "high", "Changes the saved queue."),
+    _rule(
+        r"^planning_(edit_queue|tick_checklist_item)$",
+        "change-data",
+        "high",
+        "Changes the saved queue or checklist.",
+    ),
     _rule(
         r"^planning_(build_deep_star_catalog|create_mosaic)$",
         "change-data",

@@ -34,7 +34,8 @@ def executor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TargetImagingEx
     config.update_config({"Wayfinding Library": {"path": str(tmp_path / "wayfinding_library")}})
     targets = {"M 81": Target(id="M 81", ra="09:55:33", dec="+69:03:55")}
     astrometrics = SimpleNamespace(
-        targets=SimpleNamespace(get=lambda target_id, refresh=False: targets.get(target_id))
+        targets=SimpleNamespace(get=lambda target_id, refresh=False: targets.get(target_id)),
+        quality=SimpleNamespace(capture_settings=lambda ids=None: {}),
     )
     telescope = Telescope(id="t1", name="Scope", focal_length_mm=450.0, focal_ratio=6.0)
     catalog = SimpleNamespace(

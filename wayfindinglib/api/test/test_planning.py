@@ -10,6 +10,8 @@ fresh process loads no hardware driver and no Control module, so planning
 stays free of hardware.
 """
 
+from types import SimpleNamespace
+
 import pytest
 
 from astrometricslib import AppConfiguration, InvalidArgumentError, NotFoundError, Target
@@ -18,10 +20,21 @@ from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.equipment_and_site.calibration import CalibrationAdvisory
 from wayfindinglib.models.equipment_and_site.equipment import Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
-from wayfindinglib.models.planning.observation_package import ExposureRequest, FrameType, ObservationPackage
+from wayfindinglib.models.planning.observation_package import (
+    DitherConfig,
+    ExposureRequest,
+    FrameType,
+    ObservationPackage,
+)
 from wayfindinglib.models.planning.quality_advisory import TargetQualityAdvisory
 from wayfindinglib.models.planning.sequence_plan import SequencePlan
-from wayfindinglib.models.session.observation_session import ObservationSession, QueueRequest, StartTimeMode
+from wayfindinglib.models.planning.sequence_summary import SequenceSummary
+from wayfindinglib.models.session.observation_session import (
+    ObservationSession,
+    PlanRevisionConflictError,
+    QueueRequest,
+    StartTimeMode,
+)
 
 
 class _FakeTargetCatalog:
@@ -80,6 +93,7 @@ class _FakeAstrometrics:
             The library's targets.
         """
         self.targets = _FakeTargetCatalog(targets)
+        self.quality = SimpleNamespace(capture_settings=dict)
 
 
 def _target(target_id: str, ra: str = "09:55:33", dec: str = "+69:03:55") -> Target:
@@ -225,7 +239,7 @@ def test_a_hand_built_queue_matches_the_automatic_structure(isolated_butler: Dis
     )
     package = _package(planning)
 
-    updated = planning.edit_queue(session.id, add=[QueueRequest(package_id=package.id)])
+    updated = planning.edit_queue(session.id, add=[QueueRequest(package_id=package.id)]).session
 
     assert len(updated.queue) == 1
     entry = updated.queue[0]
@@ -242,12 +256,14 @@ def test_edit_queue_reorders_and_refuses_a_wrong_entry_set(isolated_butler: Disk
         "empty_session", site_profile=_site(), telescope=_telescope(), camera_id="c1", night_id="2026-08-10"
     )
     package = _package(planning)
-    filled = planning.edit_queue(session.id, add=[{"package_id": package.id}, {"package_id": package.id}])
+    filled = planning.edit_queue(
+        session.id, add=[{"package_id": package.id}, {"package_id": package.id}]
+    ).session
     first, second = (entry.id for entry in filled.queue)
 
     with pytest.raises(InvalidArgumentError, match="order"):
         planning.edit_queue(session.id, order=["nonexistent-entry-id"])
-    reordered = planning.edit_queue(session.id, order=[second, first])
+    reordered = planning.edit_queue(session.id, order=[second, first]).session
     assert [entry.id for entry in reordered.queue] == [second, first]
 
 
@@ -531,11 +547,278 @@ def test_edit_queue_removes_entries_and_refuses_unknown_ones(isolated_butler: Di
         "empty_session", site_profile=_site(), telescope=_telescope(), camera_id="c1", night_id="2026-08-10"
     )
     package = _package(planning)
-    filled = planning.edit_queue(session.id, add=[{"package_id": package.id}, {"package_id": package.id}])
+    filled = planning.edit_queue(
+        session.id, add=[{"package_id": package.id}, {"package_id": package.id}]
+    ).session
     first, second = (entry.id for entry in filled.queue)
 
-    remaining = planning.edit_queue(session.id, remove=[first])
+    remaining = planning.edit_queue(session.id, remove=[first]).session
 
     assert [entry.id for entry in remaining.queue] == [second]
     with pytest.raises(NotFoundError):
         planning.edit_queue(session.id, remove=[first])
+
+
+def _session(planning: ObservationPlanning) -> ObservationSession:
+    """Record an empty night plan for camera ``c1``.
+
+    Parameters
+    ----------
+    planning : `ObservationPlanning`
+        The API under test.
+
+    Returns
+    -------
+    session : `ObservationSession`
+        The recorded, empty session at revision 0.
+    """
+    return planning.create_plan(
+        "empty_session", site_profile=_site(), telescope=_telescope(), camera_id="c1", night_id="2026-08-10"
+    )
+
+
+def _measured_profile() -> SimpleNamespace:
+    """Build a camera profile that measured one setting.
+
+    Returns
+    -------
+    profile : `SimpleNamespace`
+        Gain setting 100, offset 10, binning 1x1 measured.
+    """
+    return SimpleNamespace(
+        camera_name="c1",
+        is_generic_fallback=False,
+        sensor_noise=[SimpleNamespace(gain_setting="100", offset="10", binning="1x1")],
+    )
+
+
+def test_each_plan_write_adds_one_to_the_revision(isolated_butler: DiskButler) -> None:
+    """A write returns the new revision, the changes and the session."""
+    planning = _planning(isolated_butler, _target("M 81"))
+    session = _session(planning)
+    package = _package(planning)
+    assert session.revision == 0
+
+    change = planning.edit_queue(session.id, add=[{"package_id": package.id}], expected_revision=0)
+
+    assert (change.previous_revision, change.revision) == (0, 1)
+    assert [item.kind for item in change.changes] == ["queue_added"]
+    assert planning.get_plan(session.id).revision == 1
+
+
+def test_a_stale_revision_is_refused_and_names_the_current_one(isolated_butler: DiskButler) -> None:
+    """A second window that read revision 0 cannot overwrite revision 1."""
+    planning = _planning(isolated_butler, _target("M 81"))
+    session = _session(planning)
+    package = _package(planning)
+    planning.edit_queue(session.id, add=[{"package_id": package.id}], expected_revision=0)
+
+    with pytest.raises(PlanRevisionConflictError) as caught:
+        planning.edit_queue(session.id, add=[{"package_id": package.id}], expected_revision=0)
+
+    assert caught.value.details["current_revision"] == 1
+    assert len(planning.get_plan(session.id).queue) == 1
+
+
+def test_the_database_write_refuses_a_revision_that_moved(isolated_butler: DiskButler) -> None:
+    """A second write from the same revision stores nothing."""
+    planning = _planning(isolated_butler, _target("M 81"))
+    session = _session(planning)
+    first = session.model_copy(update={"revision": 1, "status_detail": "first"})
+    second = session.model_copy(update={"revision": 1, "status_detail": "second"})
+
+    assert isolated_butler.put_session_if_revision(first, 0)
+    assert not isolated_butler.put_session_if_revision(second, 0)
+    assert planning.get_plan(session.id).status_detail == "first"
+    assert not isolated_butler.put_session_if_revision(first.model_copy(update={"id": "nope"}), 0)
+
+
+def test_a_session_stored_before_the_night_plan_fields_still_loads(isolated_butler: DiskButler) -> None:
+    """Old stored JSON lacks the checklist, framing and revision fields."""
+    import json
+    import sqlite3
+
+    planning = _planning(isolated_butler, _target("M 81"))
+    session = _session(planning)
+    package = _package(planning)
+    planning.edit_queue(session.id, add=[{"package_id": package.id}])
+    database = isolated_butler.library_path / "wayfinding.db"
+    connection = sqlite3.connect(database)
+    try:
+        selects = {
+            "wayfinding_observation_sessions": "SELECT id, data_json FROM wayfinding_observation_sessions",
+            "observation_packages": "SELECT id, data_json FROM observation_packages",
+        }
+        updates = {
+            "wayfinding_observation_sessions": (
+                "UPDATE wayfinding_observation_sessions SET data_json = ? WHERE id = ?"
+            ),
+            "observation_packages": "UPDATE observation_packages SET data_json = ? WHERE id = ?",
+        }
+        for table, select in selects.items():
+            for row_id, text in connection.execute(select).fetchall():
+                data = json.loads(text)
+                for key in ("checklist", "framing", "revision"):
+                    data.pop(key, None)
+                requests = [
+                    request for entry in data.get("queue", []) for request in entry["exposureRequests"]
+                ]
+                requests.extend(data.get("exposureRequests", []))
+                for request in requests:
+                    for key in ("gainSetting", "offset", "binning"):
+                        request.pop(key, None)
+                connection.execute(updates[table], (json.dumps(data), row_id))
+        connection.commit()
+    finally:
+        connection.close()
+
+    loaded = planning.get_plan(session.id)
+    assert (loaded.checklist, loaded.framing, loaded.revision) == ([], None, 0)
+    assert loaded.queue[0].exposure_requests[0].gain_setting is None
+    change = planning.edit_queue(session.id, add=[{"package_id": package.id}])
+    assert change.revision == 1
+
+
+def test_exact_duplicates_merge_and_conflicting_ones_are_refused(isolated_butler: DiskButler) -> None:
+    """Identical requests add counts; a delay-only difference conflicts."""
+    planning = _planning(isolated_butler, _target("M 81"))
+    session = _session(planning)
+    package = _package(planning)
+    light = {"frame_type": "LIGHT", "exposure_sec": 60.0, "count": 5}
+
+    change = planning.edit_queue(
+        session.id, add=[{"package_id": package.id, "exposure_requests": [light, dict(light, count=3)]}]
+    )
+    assert [request.count for request in change.session.queue[0].exposure_requests] == [8]
+    with pytest.raises(InvalidArgumentError, match="delays"):
+        planning.edit_queue(
+            session.id,
+            add=[{"package_id": package.id, "exposure_requests": [light, dict(light, delay_sec=2.0)]}],
+        )
+
+
+def test_a_measured_camera_refuses_an_unmeasured_setting(
+    isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A gain setting the profile never measured is refused."""
+    import astrometricslib
+
+    monkeypatch.setattr(
+        astrometricslib, "resolve_camera_profile", lambda name, config=None: _measured_profile()
+    )
+    planning = _planning(isolated_butler, _target("M 81"))
+    session = _session(planning)
+    package = _package(planning)
+    good = {"frame_type": "LIGHT", "exposure_sec": 60.0, "count": 1, "gain_setting": 100, "offset": 10}
+    bad = dict(good, gain_setting=250)
+
+    assert (
+        planning.edit_queue(
+            session.id, add=[{"package_id": package.id, "exposure_requests": [good]}]
+        ).setting_notes
+        == []
+    )
+    with pytest.raises(InvalidArgumentError, match="gain setting 100"):
+        planning.edit_queue(session.id, add=[{"package_id": package.id, "exposure_requests": [bad]}])
+    assert len(planning.get_plan(session.id).queue) == 1
+
+
+def test_an_unprofiled_camera_accepts_and_marks_the_setting(isolated_butler: DiskButler) -> None:
+    """Camera c1 has no profile, so any setting is accepted with a note."""
+    planning = _planning(isolated_butler, _target("M 81"))
+    session = _session(planning)
+    package = _package(planning)
+    request = {"frame_type": "LIGHT", "exposure_sec": 60.0, "count": 1, "gain_setting": 321}
+
+    change = planning.edit_queue(session.id, add=[{"package_id": package.id, "exposure_requests": [request]}])
+
+    assert change.session.queue[0].exposure_requests[0].gain_setting == 321
+    assert any("setting not measured" in note for note in change.setting_notes)
+
+
+def test_set_exposures_changes_a_pending_entry_only(isolated_butler: DiskButler) -> None:
+    """New exposures replace a pending entry's; an unknown entry fails."""
+    planning = _planning(isolated_butler, _target("M 81"))
+    session = _session(planning)
+    package = _package(planning)
+    entry_id = planning.edit_queue(session.id, add=[{"package_id": package.id}]).session.queue[0].id
+
+    change = planning.edit_queue(
+        session.id, set_exposures={entry_id: [{"frame_type": "LIGHT", "exposure_sec": 30.0, "count": 4}]}
+    )
+
+    assert change.session.queue[0].exposure_requests[0].exposure_sec == pytest.approx(30.0)
+    with pytest.raises(NotFoundError):
+        planning.edit_queue(session.id, set_exposures={"missing": []})
+
+
+def test_checklist_items_are_added_once_and_ticked(isolated_butler: DiskButler) -> None:
+    """A rule and setting are added once; ticks keep their history."""
+    planning = _planning(isolated_butler, _target("M 81"))
+    session = _session(planning)
+    item = {"rule": "refocus_when_temperature_drifts"}
+
+    first = planning.edit_queue(session.id, add_checklist=[item])
+    again = planning.edit_queue(session.id, add_checklist=[item])
+    item_id = first.session.checklist[0].item_id
+    assert [change.kind for change in again.changes] == ["checklist_already_present"]
+    assert len(again.session.checklist) == 1
+
+    ticked = planning.tick_checklist_item(
+        session.id, item_id, expected_revision=again.revision, note="did it"
+    )
+    retick = planning.tick_checklist_item(session.id, item_id)
+
+    assert ticked.revision == again.revision + 1
+    assert ticked.session.checklist[0].ticked_at is not None
+    assert len(retick.session.checklist[0].tick_history) == 2
+    assert retick.session.checklist[0].note == "did it"
+    with pytest.raises(NotFoundError):
+        planning.tick_checklist_item(session.id, "no-such-item")
+    with pytest.raises(PlanRevisionConflictError):
+        planning.tick_checklist_item(session.id, item_id, expected_revision=0)
+
+
+def test_framing_is_stored_and_the_sequence_summary_follows_ekos_order(isolated_butler: DiskButler) -> None:
+    """Framing round trips; summary rows follow the Ekos Capture order."""
+    planning = _planning(isolated_butler, _target("M 81"))
+    session = _session(planning)
+    package = planning.create_plan(
+        "package",
+        target="M 81",
+        exposure_requests=[
+            ExposureRequest(
+                frame_type=FrameType.LIGHT,
+                exposure_sec=60.0,
+                count=12,
+                gain_setting=100,
+                offset=10,
+                binning=1,
+            )
+        ],
+        dither_config=DitherConfig(enabled=True, every_n_frames=4, pixels=5.0),
+    )
+    panels = planning.calculate_panels("10:00:00", "+30:00:00", 1, 2, 10.0, rotation_deg=45.0)
+    change = planning.edit_queue(
+        session.id,
+        add=[{"package_id": package.id}],
+        framing={"center_ra_deg": 150.0, "center_dec_deg": 30.0, "rotation_deg": 45.0, "panels": panels},
+    )
+
+    stored = planning.get_plan(session.id)
+    assert stored.framing.rotation_deg == pytest.approx(45.0)
+    assert len(stored.framing.panels) == 2
+    summary = SequenceSummary.from_session(change.session)
+    assert [field.name for field in summary.rows[0].fields] == [
+        "filter",
+        "exposure_seconds",
+        "count",
+        "binning",
+        "gain_setting",
+        "offset",
+    ]
+    assert [field.value for field in summary.rows[0].fields][1:] == [60.0, 12, 1, 100, 10]
+    assert summary.revision == stored.revision
+    assert summary.dither_rows[0].size_pixels == pytest.approx(5.0)
+    assert "Guide" in summary.dither_rows[0].size_ekos_screen
+    assert "Capture" in summary.dither_rows[0].frequency_ekos_screen

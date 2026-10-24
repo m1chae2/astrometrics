@@ -18,7 +18,7 @@ from astrometricslib import (
     SATURATED_BLOB_MINIMUM_PIXELS,
     SATURATED_FRAME_FRACTION,
 )
-from wayfindinglib.models.session.capture_frame import CaptureFrame, StackSaturationVerdict
+from wayfindinglib.models.session.capture_frame import CaptureFrame
 from wayfindinglib.models.session.capture_quality import (
     CaptureInputQuality,
     CapturePerformance,
@@ -63,8 +63,6 @@ class CaptureAnalysisRequest(SessionAnalysisRequest):
         How many exposures Ekos cancelled that night.
     has_ekos_record : `bool`
         Whether any Ekos session record exists for the night.
-    stack_saturation : `list` [`StackSaturationVerdict`]
-        The science library's saturation verdicts for stacked exposures.
     sensor_pixel_count : `int` or `None`
         Pixels on the camera's sensor with no binning.
     """
@@ -73,7 +71,6 @@ class CaptureAnalysisRequest(SessionAnalysisRequest):
     captures: list[EkosCapture] = field(default_factory=list)
     aborted_captures: int = 0
     has_ekos_record: bool = False
-    stack_saturation: list[StackSaturationVerdict] = field(default_factory=list)
     sensor_pixel_count: int | None = None
 
 
@@ -120,7 +117,6 @@ class CaptureSessionPipeline(SessionAnalysisPipeline):
         """
         result.performance = measure_capture_performance(
             request.frames,
-            request.stack_saturation,
             request.sensor_pixel_count,
             request.envelope,
             request.limits_equipment_match,
@@ -140,7 +136,7 @@ class CaptureSessionPipeline(SessionAnalysisPipeline):
         """
         input_quality: CaptureInputQuality = result.input_quality
         performance: CapturePerformance = result.performance or CapturePerformance()
-        recommendations = recommend_for_capture(input_quality, performance)
+        recommendations = recommend_for_capture(input_quality, performance, request.envelope)
         warnings = [r for r in recommendations if r.severity == RecommendationSeverity.WARNING]
         resolved: dict[str, Any] = {
             "limits_equipment_match": request.limits_equipment_match,

@@ -9,7 +9,7 @@
 - **Unclassified captures** (`capturesWithoutFrameOfUnknownKind`). Exposures with no frame whose saved path Ekos did not log. They may be calibration frames, or shots that were never saved, such as focusing and alignment exposures. They are reported and never counted as missing.
 - **Frames without a capture** (`framesWithoutCapture`). Library frames no Ekos exposure accounts for. A high number means the Ekos log is incomplete, not that the frames are bad.
 - **Cancelled exposures** (`abortedCaptures`, `abortFraction`, a share from 0 to 1). Exposures Ekos cancelled divided by all it started. `hasFrequentAborts` is true when the share exceeds the level that 90 percent of this equipment's earlier nights stayed under.
-- **Missing measurements** (`framesMissingMeasurements`). For each measurement later steps use (saturated-pixel fraction, background, pixel scale, altitude, sensor temperature), how many frames lack it. Star width and roundness are not counted, because the science library measures them only for frames it stacked.
+- **Missing measurements** (`framesMissingMeasurements`). For each measurement later steps use (saturated-pixel fraction, background, pixel scale, altitude, sensor temperature), how many frames lack it. Star width and roundness are not counted, because the measurement job may find too few stars in a frame.
 - **Sensor temperature** (`sensorTemperatureSpreadC`, `framesOutsideDarkTolerance`). The spread in degrees Celsius between the coldest and warmest frame, and how many frames differ from the night's median by more than the dark tolerance. A dark frame calibrates a light well only within that range.
 
 ## Who reads it

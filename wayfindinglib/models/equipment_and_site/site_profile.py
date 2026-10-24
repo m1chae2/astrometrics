@@ -47,7 +47,17 @@ class AvoidanceZone(BaseModel):
 
 
 class SiteProfile(BaseModel):
-    """The observing location's coordinates and horizon obstructions."""
+    """The observing location's coordinates and horizon obstructions.
+
+    Parameters
+    ----------
+    typical_seeing_fwhm_arcsec : `float` or `None`
+        The star width (full width at half maximum, in arcseconds) that the
+        sky at this site gives on a typical good night. The user reads it
+        from a local seeing forecast or from their own best nights. It sets
+        the physical reference for efficiency. ``None`` means unknown, and
+        the reference then uses the telescope's diffraction limit alone.
+    """
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -56,6 +66,7 @@ class SiteProfile(BaseModel):
     latitude_deg: float = Field(..., ge=-90.0, le=90.0)
     longitude_deg: float = Field(..., ge=-180.0, le=180.0)
     elevation_m: float = Field(default=0.0)
+    typical_seeing_fwhm_arcsec: float | None = Field(default=None, gt=0.0)
     avoidance_zones: list[AvoidanceZone] = Field(default_factory=list)
 
     @model_validator(mode="after")

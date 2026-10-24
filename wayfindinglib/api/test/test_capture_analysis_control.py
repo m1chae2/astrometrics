@@ -6,7 +6,7 @@ a real isolated configuration, a real Butler and a real log database. The
 science library's frame records are replaced by synthetic light frames, so the
 tests state only what makes a night different. The main thing verified is that
 a night is judged only against the equipment's earlier nights, never against
-itself, and that the science library's saturation verdicts reach the
+itself, and that clipping is found from the frames for the
 recommendations.
 """
 
@@ -20,7 +20,6 @@ from wayfindinglib.api.test.capture_night_helpers import (
     record_good_history,
 )
 from wayfindinglib.api.test.guiding_night_helpers import record_guiding_night
-from wayfindinglib.models.session.capture_frame import StackSaturationVerdict
 from wayfindinglib.tasks.control_tasks import night_analysis
 
 
@@ -114,27 +113,25 @@ def test_exposures_ekos_finished_that_are_not_in_the_library_are_reported(
     assert "captures_not_in_library" in [r.kind.value for r in analysis.recommendations]
 
 
-def test_the_science_librarys_verdict_reaches_the_recommendation(
+def test_a_clipped_spectral_star_is_found_from_the_frames_alone(
     control: ObservatoryControl, library: Library
 ) -> None:
-    """Verify a stacked target's saturation verdict is used and quoted."""
+    """Verify clipping comes from the frames' saturated pixels."""
     record_guiding_night(control, 0)
-    night = add_frames(library, 0, is_spectral=True, exposure_seconds=2.0, filter_name="Star Analyzer 200")
-    library.verdicts.append(
-        StackSaturationVerdict(
-            target_id="Target",
-            is_spectral=True,
-            exposure_seconds=2.0,
-            saturated=True,
-            recommended_exposure_seconds=0.55,
-        )
+    night = add_frames(
+        library,
+        0,
+        is_spectral=True,
+        exposure_seconds=2.0,
+        filter_name="Star Analyzer 200",
+        saturated_pixel_fraction=0.01,
     )
 
     analysis = night_analysis.capture_night_analysis(control._context, night)
 
     (recommendation,) = [r for r in analysis.recommendations if r.kind.value == "spectral_star_clipped"]
-    assert recommendation.confidence == "high"
-    assert "0.55 s" in recommendation.message
+    assert recommendation.confidence.value == "partly_measured"
+    assert "stacking" not in recommendation.message
 
 
 def test_the_summary_has_one_row_per_night_oldest_first(

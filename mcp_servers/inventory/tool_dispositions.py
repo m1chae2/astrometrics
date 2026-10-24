@@ -379,6 +379,13 @@ DECISIONS = {
         "Built 2026-10-21. Reads the quality measurements that earlier runs stored (the latest for each "
         "subject and metric, or every row). Writes nothing and creates no table.",
     ),
+    "quality_capture_settings": ToolDecision(
+        "keep",
+        "Built 2026-10-24. Reads the camera, telescope, filter, exposure, gain setting, offset and binning "
+        "that stored quality measurements point at, by capture setting id. Writes nothing and creates "
+        "no table.",
+        tool_class="observe",
+    ),
     "quality_metrics": ToolDecision(
         "keep",
         "Built 2026-10-21. Lists the declared quality metrics (or one, given its name, or those of one "
@@ -530,6 +537,7 @@ DECISIONS = {
             "planning_create_mosaic",
             "planning_create_plan",
             "planning_edit_queue",
+            "planning_tick_checklist_item",
         ),
         ToolDecision("withhold", READ_ONLY_NOTE),
     ),

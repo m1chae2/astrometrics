@@ -97,7 +97,7 @@ Table 3 maps the architecture's Table 2 records to pydantic classes.
 | Enclosure specification | `Enclosure`, `EnclosureState` | `equipment_and_site/enclosure.py` |
 | Guider calibration; focus model | `GuiderCalibration`; `FocusModel` | `equipment_and_site/guider_calibration.py`, `focus_model.py` |
 | Calibration inventory and advisory | `CalibrationEntry`, `CalibrationAdvisory` | `equipment_and_site/calibration.py` |
-| Performance envelope | `PerformanceEnvelope`, `PerformanceThreshold` | `equipment_and_site/performance_envelope.py` |
+| Performance envelope | `PerformanceEnvelope`, `QualityLimit` (from `astrometricslib`) | `equipment_and_site/performance_envelope.py` |
 | Delegation policy; commissioning run | `DelegationPolicy`, `CapabilityDelegation`; `CommissioningRun` | `policy/delegation.py`, `commissioning.py` |
 | Safety rules and assessment | `SafetyRule`, `SafetyRuleSet`, `SafetyAssessment`, `SafetyVerdict` | `policy/safety.py` |
 | Recovery policy and fault record | `RecoveryPolicy`, `RecoveryAttempt`, `FaultRecord` | `policy/recovery.py` |
@@ -352,6 +352,19 @@ All in `tasks/control_tasks/` unless noted.
 <!-- impl: wayfindinglib.tasks.control_tasks.live_session_status_task -->
 <!-- impl: wayfindinglib.tasks.control_tasks.frame_guiding -->
 <!-- impl: wayfindinglib.tasks.control_tasks.alignment_history -->
+
+Planning and Control share one statement vocabulary in `models/quality/statements.py`: `TargetStatement`, with the action classes, severity and confidence. A rule's confidence is the status label of its register entry (partly measured; see [WAY-01](validation/wayfinding.md#way-01)). The physical efficiency reference uses the diffraction limit alone when `SiteProfile.typical_seeing_fwhm_arcsec` is not set (design estimate; WAY-D01).
+
+<!-- impl: wayfindinglib.models.quality.statements.TargetStatement -->
+<!-- impl: wayfindinglib.models.equipment_and_site.site_profile.SiteProfile -->
+
+The result-quality work adds more entries to the validation register. These are short pointers. A full description is still to be written.
+
+- The rule table and its constants are listed in [WAY-05](validation/wayfinding.md#way-05) and WAY-D05 to WAY-D12.
+- The efficiency factors, goal exponents and loss split are in [WAY-20](validation/wayfinding.md#way-20), and the noise-growth forward model and noise floor fit are in [WAY-21](validation/wayfinding.md#way-21). Their constants are WAY-D20 to WAY-D34.
+- The performance envelope limits are in [WAY-40](validation/wayfinding.md#way-40), [WAY-41](validation/wayfinding.md#way-41), [WAY-42](validation/wayfinding.md#way-42), [WAY-43](validation/wayfinding.md#way-43) and [WAY-44](validation/wayfinding.md#way-44), and the rules that read the guiding, capture and sky pipelines are in [WAY-45](validation/wayfinding.md#way-45), [WAY-46](validation/wayfinding.md#way-46) and [WAY-47](validation/wayfinding.md#way-47). Their constants are WAY-D40 to WAY-D48.
+- The stored night plan, allowed capture values, sequence summary, mosaic rotation and checklist are in [WAY-50](validation/wayfinding.md#way-50), [WAY-51](validation/wayfinding.md#way-51), [WAY-52](validation/wayfinding.md#way-52), [WAY-53](validation/wayfinding.md#way-53) and [WAY-54](validation/wayfinding.md#way-54), with constants WAY-D50 to WAY-D54.
+- Target-change detection is in [WAY-55](validation/wayfinding.md#way-55), the monitor-mode guarantee is in [WAY-56](validation/wayfinding.md#way-56), and the night list is in [WAY-57](validation/wayfinding.md#way-57). Their constants are WAY-D55 to WAY-D58.
 
 **Table 10.** Settings of the performance envelope and the session-quality analyses. The Basis column gives an observation or reason, where there is one.
 

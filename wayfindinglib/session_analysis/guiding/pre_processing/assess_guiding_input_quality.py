@@ -131,11 +131,11 @@ def assess_guiding_input_quality(
     typical_star_mass = None
     typical_cadence = None
     if envelope is not None and limits_equipment_match != "none":
-        mass_threshold = envelope.thresholds.get("guide_star_mass_low_limit")
-        median_input = mass_threshold.inputs.get("median") if mass_threshold else None
+        median_input = envelope.limit_inputs.get("guide_star_mass_low_limit", {}).get("median")
         typical_star_mass = float(median_input) if isinstance(median_input, int | float) else None
-        exposure_threshold = envelope.thresholds.get("minimum_star_measurement_exposure")
-        cadence_input = exposure_threshold.inputs.get("guide_cadence_seconds") if exposure_threshold else None
+        cadence_input = envelope.limit_inputs.get("minimum_star_measurement_exposure", {}).get(
+            "guide_cadence_seconds"
+        )
         typical_cadence = float(cadence_input) if isinstance(cadence_input, int | float) else None
 
     times = sorted(sample["timestamp"] for sample in samples)

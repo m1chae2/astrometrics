@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+from wayfindinglib.models.quality.statements import Confidence
 from wayfindinglib.models.session.session_quality import RecommendationKind, RecommendationSeverity
 from wayfindinglib.session_analysis.sky.pipeline import SkyAnalysisRequest, analyze_sky_request
 from wayfindinglib.session_analysis.sky.pre_processing.assess_sky_input_quality import (
@@ -96,9 +97,9 @@ def test_a_planted_low_altitude_effect_gives_advice_and_a_minimum_altitude(make_
     assert RecommendationKind.MINIMUM_ALTITUDE_SUGGESTED in kinds
     poor = next(r for r in analysis.recommendations if r.kind == RecommendationKind.SKY_REGION_POOR)
     assert poor.severity == RecommendationSeverity.ADVICE
-    assert poor.confidence == "medium"
+    assert poor.confidence == Confidence.DESIGN_ESTIMATE
     assert "poor hour" in poor.message
-    assert poor.compared_to["blur_tolerance_fraction"] == pytest.approx(0.10)
+    assert poor.compared_to[0].value == pytest.approx(0.10)
 
 
 def test_no_minimum_altitude_is_suggested_below_the_configured_one(make_nights: Any) -> None:

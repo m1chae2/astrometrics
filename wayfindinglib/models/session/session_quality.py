@@ -22,21 +22,18 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from wayfindinglib.models.quality.statements import Severity
+
 GUIDING_ANALYSIS_VERSION = "1.0.0"
 """Bumped whenever the guiding analysis changes what it measures or reports."""
 
 
-class RecommendationSeverity(StrEnum):
-    """How much attention a recommendation needs.
+RecommendationSeverity = Severity
+"""Another name for `Severity`, kept so that existing code keeps working.
 
-    `INFO` states a finding with nothing to do. `ADVICE` suggests a change
-    that would improve results. `WARNING` names a problem that makes the
-    night's data unreliable or the equipment misconfigured.
-    """
-
-    INFO = "info"
-    ADVICE = "advice"
-    WARNING = "warning"
+The per-night analysis and the per-target statements share one severity
+scale: ``info``, ``advice`` and ``warning``.
+"""
 
 
 class RecommendationKind(StrEnum):

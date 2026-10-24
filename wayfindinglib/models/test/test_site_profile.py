@@ -52,3 +52,16 @@ def test_site_profile_constructs_with_no_obstructions() -> None:
     profile = SiteProfile(id="site1", name="Backyard", latitude_deg=39.7392, longitude_deg=-104.9903)
     assert profile.avoidance_zones == []
     assert profile.elevation_m == pytest.approx(0.0)
+
+
+def test_site_profile_seeing_defaults_to_unknown_and_must_be_positive() -> None:
+    """Verify the typical seeing is optional and positive."""
+    profile = SiteProfile(id="s", name="Home", latitude_deg=45.0, longitude_deg=-110.0)
+    assert profile.typical_seeing_fwhm_arcsec is None
+    assert SiteProfile(
+        id="s", name="Home", latitude_deg=45.0, longitude_deg=-110.0, typical_seeing_fwhm_arcsec=2.5
+    ).typical_seeing_fwhm_arcsec == pytest.approx(2.5)
+    with pytest.raises(ValidationError):
+        SiteProfile(
+            id="s", name="Home", latitude_deg=45.0, longitude_deg=-110.0, typical_seeing_fwhm_arcsec=0.0
+        )

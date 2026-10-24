@@ -212,3 +212,13 @@ def test_guider_plate_scale_uses_guide_camera_with_the_main_telescope() -> None:
     main = EquipmentConfiguration(telescope=_make_telescope(focal_length_mm=450.0), camera=_make_camera())
     guide_camera = _make_camera(id="guide", name="Guide", pixel_size_um=3.75)
     assert main.guider_plate_scale_arcsec_per_px(None, guide_camera) == pytest.approx(206.265 * 3.75 / 450.0)
+
+
+def test_aperture_is_focal_length_over_focal_ratio() -> None:
+    """Verify the aperture is focal length over focal ratio."""
+    assert _make_telescope(focal_length_mm=450.0, focal_ratio=6.0).aperture_mm == pytest.approx(75.0)
+
+
+def test_aperture_is_unknown_when_the_focal_ratio_is_zero() -> None:
+    """Verify a focal ratio of 0 gives no aperture."""
+    assert _make_telescope(focal_ratio=0.0).aperture_mm is None

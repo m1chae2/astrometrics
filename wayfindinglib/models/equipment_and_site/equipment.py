@@ -115,6 +115,24 @@ class Telescope(BaseModel):
         """
         return (self.flip_hour_angle_deg / SIDEREAL_DEGREES_PER_HOUR) * 60.0
 
+    @property
+    def aperture_mm(self) -> float | None:
+        """Aperture diameter, in millimeters.
+
+        Derived from the focal length and the focal ratio: aperture =
+        focal length / focal ratio. A focal ratio of 0 means "not set", so
+        the aperture is then unknown.
+
+        Returns
+        -------
+        aperture_mm : `float` or `None`
+            The aperture, or `None` when the focal length or the focal ratio
+            is missing or not above 0.
+        """
+        if not (self.focal_length_mm and self.focal_ratio) or self.focal_ratio < 0.0:
+            return None
+        return self.focal_length_mm / self.focal_ratio
+
 
 class Camera(BaseModel):
     """A physical sensor's imaging geometry and thermal envelope.

@@ -678,6 +678,50 @@ class QualityStore:
             return None
         return CaptureSetting(**{name: row[name] for name in _CAPTURE_SETTING_FIELDS})
 
+    def get_capture_settings(
+        self, capture_setting_ids: Sequence[int] | None = None
+    ) -> dict[int, CaptureSetting]:
+        """Read several capture settings in one query.
+
+        Parameters
+        ----------
+        capture_setting_ids : `Sequence` of `int`, optional
+            The ids to read. ``None`` reads every stored setting.
+
+        Returns
+        -------
+        settings : `dict` [`int`, `CaptureSetting`]
+            The settings by id. An unknown id is left out. A library with no
+            quality database gives an empty dictionary, and nothing is created.
+        """
+        if capture_setting_ids is not None and not capture_setting_ids:
+            return {}
+        with self._read_connection() as connection:
+            if connection is None:
+                return {}
+            if capture_setting_ids is None:
+                rows = connection.execute("SELECT * FROM quality_capture_setting").fetchall()
+            else:
+                rows = []
+                identifiers = [int(identifier) for identifier in capture_setting_ids]
+                # 500 per query stays below old SQLite's 999 limit.
+                for start in range(0, len(identifiers), 500):
+                    chunk = identifiers[start : start + 500]
+                    placeholders = ", ".join("?" for _ in chunk)
+                    rows.extend(
+                        connection.execute(
+                            "SELECT * FROM quality_capture_setting "  # ruff: ignore[hardcoded-sql-expression]
+                            f"WHERE capture_setting_id IN ({placeholders})",
+                            chunk,
+                        ).fetchall()
+                    )
+        return {
+            int(row["capture_setting_id"]): CaptureSetting(**{
+                name: row[name] for name in _CAPTURE_SETTING_FIELDS
+            })
+            for row in rows
+        }
+
     def write_measurements(self, measurements: Sequence[QualityMeasurement]) -> int:
         """Append the measurements of one run in a single transaction.
 

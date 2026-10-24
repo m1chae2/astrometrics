@@ -353,6 +353,11 @@ All in `tasks/control_tasks/` unless noted.
 <!-- impl: wayfindinglib.tasks.control_tasks.frame_guiding -->
 <!-- impl: wayfindinglib.tasks.control_tasks.alignment_history -->
 
+Planning and Control share one statement vocabulary in `models/quality/statements.py`: `TargetStatement`, with the action classes, severity and confidence. A rule's confidence is the status label of its register entry (partly measured; see [WAY-01](validation/wayfinding.md#way-01)). The physical efficiency reference uses the diffraction limit alone when `SiteProfile.typical_seeing_fwhm_arcsec` is not set (design estimate; WAY-D01).
+
+<!-- impl: wayfindinglib.models.quality.statements.TargetStatement -->
+<!-- impl: wayfindinglib.models.equipment_and_site.site_profile.SiteProfile -->
+
 **Table 10.** Settings of the performance envelope and the session-quality analyses. The Basis column gives an observation or reason, where there is one.
 
 | Setting | Value | Where | Basis |

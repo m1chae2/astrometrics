@@ -36,6 +36,7 @@ REGISTER_FILES = {
     "photometry.md": "PHO",
     "spectroscopy.md": "SPE",
     "asteroid_detection.md": "MOV",
+    "wayfinding.md": "WAY",
 }
 REQUIRED_FIELDS = (
     "Claim",

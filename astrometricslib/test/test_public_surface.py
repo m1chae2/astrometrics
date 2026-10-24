@@ -349,6 +349,7 @@ SUB_API_MEMBERS = {
         "save",
     },
     "quality": {
+        "capture_settings",
         "check_spectral_frames",
         "flag_value_outliers",
         "measure_frames",

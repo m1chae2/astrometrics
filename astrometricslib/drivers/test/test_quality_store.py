@@ -233,6 +233,20 @@ def test_capture_setting_get_or_create_is_stable(store: QualityStore) -> None:
     assert store.get_capture_setting(9999) is None
 
 
+def test_capture_settings_batch_read(store: QualityStore, tmp_path: Path) -> None:
+    """One read gives several settings and creates no file."""
+    first = store.get_or_create_capture_setting(CaptureSetting(camera="ASI533MM"))
+    second = store.get_or_create_capture_setting(CaptureSetting(camera="ASI533MM", gain_setting=100))
+    everything = store.get_capture_settings()
+    assert set(everything) == {first, second}
+    assert everything[second].gain_setting == 100
+    assert set(store.get_capture_settings([second, 9999])) == {second}
+    assert store.get_capture_settings([]) == {}
+    missing = tmp_path / "absent" / "astrometrics.db"
+    assert QualityStore(str(missing)).get_capture_settings() == {}
+    assert not missing.exists()
+
+
 def test_failing_write_raises_storage_error(store: QualityStore) -> None:
     """A damaged database raises `StorageError` and stores nothing."""
     store.write_measurements([make_measurement(run_id="before")])

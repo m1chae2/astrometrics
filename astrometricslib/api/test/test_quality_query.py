@@ -87,6 +87,21 @@ def test_a_database_without_the_quality_table_is_left_alone(quality: QualityReco
     assert tables == {"other"}
 
 
+def test_capture_settings_read_by_id(quality: QualityRecords, tmp_path: Path) -> None:
+    """The capture settings come back by id; asking first creates no file."""
+    assert quality.capture_settings() == {}
+    assert list(tmp_path.iterdir()) == []
+
+    store = QualityStore(str(tmp_path / "astrometrics.db"))
+    first = store.get_or_create_capture_setting(CaptureSetting(camera="ASI533MM", binning=1))
+    second = store.get_or_create_capture_setting(CaptureSetting(camera="D5300"))
+
+    assert set(quality.capture_settings()) == {first, second}
+    only_first = quality.capture_settings([first, 9999])
+    assert list(only_first) == [first]
+    assert only_first[first].camera == "ASI533MM"
+
+
 def test_stored_measurements_come_back_filtered(quality: QualityRecords, tmp_path: Path) -> None:
     """The filters narrow the rows, and the newest row wins by default."""
     store = QualityStore(str(tmp_path / "astrometrics.db"))

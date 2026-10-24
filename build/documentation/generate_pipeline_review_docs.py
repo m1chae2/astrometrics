@@ -1638,7 +1638,8 @@ The gate detail names the one used.
   already checked that an image path exists.
 - **Stage 2 (`run`).** Runs `AstrometryPipeline.process` (detection, solve, refit, header-WCS
   fallback, naming). It writes the solved WCS into the FITS header, fills in the target's RA/Dec
-  when they were unset, and saves the stars to the shared catalog.
+  when they were unset (from its SIMBAD position, with the solved image's center only as a marked,
+  unverified fallback), and saves the stars to the shared catalog.
 - **Stage 3 (`validate_output`).** Builds the `AstrometryQualitySummary`. The runner records
   `plate_solve`, then `astrometry_run_gates` adds the rest (<<gate_count>> in all).
   The runner then stores the summary's numbers and the gates as quality measurements

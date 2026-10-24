@@ -163,7 +163,7 @@ Symbols follow the architecture paper's [list of symbols](../Astrometrics_Librar
 `run_astrometry_analysis` (`runner.py`) runs `AstrometryPipelineAdapter` through `run_pipeline`. `run_pipeline` (`pipeline_base.py`) calls the adapter's four methods in order. It skips `run` only when `process_input` returns a `Result` with `has_work=False`. After `validate_output` it stores the quality summary on the target and records the run's provenance.
 
 - **Stage 1 (`process_input`).** A no-op that returns an empty `Result`. `analyze_target` has already checked that an image path exists.
-- **Stage 2 (`run`).** Runs `AstrometryPipeline.process` (detection, solve, refit, header-WCS fallback, naming). It writes the solved WCS into the FITS header, fills in the target's RA/Dec when they were unset, and saves the stars to the shared catalog.
+- **Stage 2 (`run`).** Runs `AstrometryPipeline.process` (detection, solve, refit, header-WCS fallback, naming). It writes the solved WCS into the FITS header, fills in the target's RA/Dec when they were unset (from its SIMBAD position, with the solved image's center only as a marked, unverified fallback), and saves the stars to the shared catalog.
 - **Stage 3 (`validate_output`).** Builds the `AstrometryQualitySummary`. The runner records `plate_solve`, then `astrometry_run_gates` adds the rest (5 run gates in all). The runner then stores the summary's numbers and the gates as quality measurements (`record_astrometry_quality`).
 - **Stage 4 (`to_result_dict`).** Returns `context`, `stellar_objects`, `wcs` and `image_stats`.
 

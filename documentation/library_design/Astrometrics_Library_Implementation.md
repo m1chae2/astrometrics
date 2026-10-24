@@ -97,6 +97,7 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 - **Checks (§4.4).** `post_processing/record_quality.py`, `assess_match_quality.py`.
 - **Target clipping (Quality §5.4).** `post_processing/target_clipping.py` (`target_clipping_measurements`). Evidence: [AST-19](validation/astrometry.md#ast-19).
 - **Expected residual (Quality §7).** `post_processing/expected_residual.py` stores four `astrometry.expected_*` metrics. Evidence: [AST-21](validation/astrometry.md#ast-21).
+- **Target position.** `astrometricslib/pipelines/shared/target_position.py` takes a target's RA/Dec from its SIMBAD position (ICRS, epoch J2000), not from a frame center; `astrometricslib/scripts/audit_target_positions.py` checks the stored ones.
 
 ### 4.3 Photometry (Architecture §5)
 
@@ -314,6 +315,8 @@ Tables 4 to 8 list each pipeline's tuned values and the section that explains it
 | Failed catalog lookups allowed | under 50% | Design estimate ([table](validation/astrometry.md#design-estimates)) | §4.4.2 |
 | Target clipping: disc radius; frame cap; read time limit; least peak above sky | 30 arcsec; 200; 120 s; 5σ | Partly measured ([AST-19](validation/astrometry.md#ast-19)) | Quality §5.4 |
 | Expected residual: centroid factor; pixel-phase rms per axis at widths 1.5 to 5 px | √(2/π); 0.092 to 0.008 px (six widths) | Partly measured ([AST-21](validation/astrometry.md#ast-21)) | Quality §7 |
+| Target position tolerance: floor; extent factor | 15 arcmin; 1.0 of the object's radius | Partly measured ([AST-20](validation/astrometry.md#ast-20)) | §4.2 |
+| Margin around the solved frame for a catalog position | 15 arcmin | Design estimate ([astrometry table](validation/astrometry.md#design-estimates)) | §4.2 |
 
 <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.source_detection.SourceDetector -->
 <!-- impl: astrometricslib.drivers.astrometry_net_driver.MINIMUM_SOURCES_FOR_LOCAL_SOLVE -->
@@ -327,6 +330,9 @@ Tables 4 to 8 list each pipeline's tuned values and the section that explains it
 <!-- impl: astrometricslib.pipelines.astrometry.post_processing.target_clipping.MINIMUM_PEAK_SIGMA -->
 <!-- impl: astrometricslib.pipelines.astrometry.post_processing.expected_residual.CRAMER_RAO_PEAK_FACTOR -->
 <!-- impl: astrometricslib.pipelines.astrometry.post_processing.expected_residual.PIXEL_PHASE_RMS_PX_BY_FWHM_PX -->
+<!-- impl: astrometricslib.pipelines.shared.target_position.POSITION_TOLERANCE_FLOOR_ARCMIN -->
+<!-- impl: astrometricslib.pipelines.shared.target_position.EXTENT_TOLERANCE_FACTOR -->
+<!-- impl: astrometricslib.pipelines.shared.target_position.FOOTPRINT_MARGIN_ARCMIN -->
 <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.MAXIMUM_PLATE_SOLVE_SOURCES -->
 <!-- impl: astrometricslib.pipelines.astrometry.processing.wcs_refinement.MINIMUM_MATCHED_STARS -->
 <!-- impl: astrometricslib.pipelines.astrometry.processing.wcs_refinement.MAXIMUM_SHIFT_ARCSEC -->

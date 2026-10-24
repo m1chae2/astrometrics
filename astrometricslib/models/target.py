@@ -324,8 +324,16 @@ class Target(BaseModel):
     id: str = Field(default="", alias="id")
     common_name: str = Field(default="", alias="commonName")
     image_type: ImageType = Field(default=ImageType.TARGET_IMAGE, alias="imageType")
+    # The object's position as ICRS coordinates at epoch J2000 (what SIMBAD
+    # gives). A double star holds its primary; a companion needs a target id
+    # of its own. Setting `ra` or `dec` by hand clears `position_unverified`.
     ra: str = Field(default="0h 0m 0s", alias="ra")
     dec: str = Field(default="0° 0′ 0′′", alias="dec")
+    # True when `ra`/`dec` came from the center of a solved image because
+    # the target's name could not be trusted in a catalog (not found, found
+    # outside the image, or its id and common name disagreed). That point is
+    # where the camera looked, not necessarily where the object is.
+    position_unverified: bool = Field(default=False, alias="positionUnverified")
     field_of_view: str = Field(default="0′", alias="fieldOfView")
     main_camera: str = Field(default="", alias="mainCamera")
     main_scope: str = Field(default="", alias="mainScope")

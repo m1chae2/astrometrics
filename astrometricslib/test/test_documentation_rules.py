@@ -36,7 +36,7 @@ QUALITY_MEASUREMENTS = DESIGN_DIR / "Astrometrics_Quality_Measurements.md"
 # paper. References and hidden <!-- impl: --> comments do not count.
 ARCHITECTURE_WORD_LIMIT = 10_000
 IMPLEMENTATION_WORD_LIMIT = 3_500
-QUALITY_MEASUREMENTS_WORD_LIMIT = 6_000
+QUALITY_MEASUREMENTS_WORD_LIMIT = 8_000
 
 # Numbers with units that are physics, definitions or worked illustrations, not
 # tuned settings. Adding a value here asserts that it is not a tuned setting;

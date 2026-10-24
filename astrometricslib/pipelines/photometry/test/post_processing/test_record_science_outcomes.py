@@ -126,6 +126,16 @@ def test_photon_noise_falls_and_sky_noise_rises_toward_faint_stars() -> None:
     )
 
 
+def test_scintillation_provenance_names_the_header_source_without_the_airmass_value() -> None:
+    """The provenance names the header source and omits the airmass value."""
+    inputs = photometry_fixture_noise_inputs()
+    rows = noise_budget_measurements(inputs, CONTEXT)
+    reason = one(rows, PHOTOMETRY_MODEL_NOISE_SCINTILLATION_MAG).reason
+    assert "airmass from the median of" in reason
+    assert "frame headers" in reason
+    assert f"{inputs.airmass:.2f}" not in reason
+
+
 def test_an_unknown_site_height_makes_scintillation_assumed() -> None:
     """A site height of 0 means unknown, so sea level is assumed."""
     inputs = NoiseBudgetInputs(**{**photometry_fixture_noise_inputs().__dict__, "site_elevation_m": None})

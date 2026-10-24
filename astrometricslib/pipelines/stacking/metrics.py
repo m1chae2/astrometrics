@@ -289,6 +289,8 @@ def _context_metric(
     band: str = _BAND,
     definition_version: int = 1,
     decisions: tuple[str, ...] = (),
+    exploratory_question: str = "",
+    review_date: datetime.date | None = None,
 ) -> MetricSpec:
     """Declare one value that the stacking stage already makes.
 
@@ -327,6 +329,12 @@ def _context_metric(
         when any of them changes (plan section 3.4).
     decisions : `tuple` [`str`], optional
         The decisions the value informs (documentation only).
+    exploratory_question : `str`, optional
+        The question an exploratory value answers. Needed for the
+        exploratory purpose.
+    review_date : `datetime.date` or `None`, optional
+        When an exploratory value must be promoted or removed. Needed for
+        the exploratory purpose.
 
     Returns
     -------
@@ -351,6 +359,8 @@ def _context_metric(
         register_entry=register_entry,
         purpose=purpose,
         purpose_reason=purpose_reason,
+        exploratory_question=exploratory_question,
+        review_date=review_date,
     )
 
 
@@ -716,6 +726,7 @@ _NOISE_AND_WEIGHT_METRICS: tuple[MetricSpec, ...] = (
         purpose_reason=_NOISE_PURPOSE_REASON,
         uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
         uncertainty_method=_NOISE_UNCERTAINTY,
+        register_entry="STK-36",
         definition_version=3,
     ),
     _context_metric(
@@ -745,6 +756,7 @@ _NOISE_AND_WEIGHT_METRICS: tuple[MetricSpec, ...] = (
             "stack defines the scale. A star that widens past the large aperture would lower its ratio and "
             "widen the scatter; no change in the stars themselves is in the error."
         ),
+        register_entry="STK-36",
         definition_version=3,
     ),
     _context_metric(
@@ -765,6 +777,7 @@ _NOISE_AND_WEIGHT_METRICS: tuple[MetricSpec, ...] = (
             "of the zero point added in quadrature, times the ratio. The scatter of the stars' brightness "
             "ratios is included; any real change in a star's brightness between stacks is not."
         ),
+        register_entry="STK-36",
         definition_version=3,
     ),
     _context_metric(
@@ -867,6 +880,13 @@ _NIGHT_SAMPLE = (
     "left out."
 )
 
+_NIGHT_REVIEW_DATE = datetime.date(2027, 4, 30)
+_NIGHT_QUESTION = (
+    "Does leaving one observing night out of a real target's library stack change the stack's noise "
+    "by the amount that the night's share of the summed frame weights predicts? The register entry is "
+    "a design estimate, because leaving a night out has been run on synthetic frames only."
+)
+
 _NIGHT_METRICS: tuple[MetricSpec, ...] = (
     _context_metric(
         STACKING_NIGHT_WEIGHT_SHARE,
@@ -883,7 +903,10 @@ _NIGHT_METRICS: tuple[MetricSpec, ...] = (
         _NIGHT_SAMPLE,
         "pipelines.stacking.subset_noise_run.night_weight_shares",
         better=Direction.NONE,
-        purpose_reason=_NIGHT_PURPOSE_REASON,
+        register_entry="STK-37",
+        purpose=MetricPurpose.EXPLORATORY,
+        exploratory_question=_NIGHT_QUESTION,
+        review_date=_NIGHT_REVIEW_DATE,
     ),
     _context_metric(
         STACKING_NOISE_WITHOUT_NIGHT,
@@ -901,7 +924,10 @@ _NIGHT_METRICS: tuple[MetricSpec, ...] = (
         _NIGHT_SAMPLE + " Up to 100 empty apertures, as for the stack noise.",
         "pipelines.stacking.subset_noise_run.run_night_contributions",
         better=Direction.LOWER,
-        purpose_reason=_NIGHT_PURPOSE_REASON,
+        register_entry="STK-37",
+        purpose=MetricPurpose.EXPLORATORY,
+        exploratory_question=_NIGHT_QUESTION,
+        review_date=_NIGHT_REVIEW_DATE,
         uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
         uncertainty_method=(
             "Statistical, 1 sigma: as for `stacking.empty_aperture_noise_normalized`. This is the "
@@ -930,7 +956,10 @@ _NIGHT_METRICS: tuple[MetricSpec, ...] = (
         _NIGHT_SAMPLE + " Only the apertures usable on both stacks.",
         "pipelines.stacking.post_processing.difference_noise.paired_noise_difference",
         better=Direction.NONE,
-        purpose_reason=_NIGHT_PURPOSE_REASON,
+        register_entry="STK-37",
+        purpose=MetricPurpose.EXPLORATORY,
+        exploratory_question=_NIGHT_QUESTION,
+        review_date=_NIGHT_REVIEW_DATE,
         uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
         uncertainty_method=(
             "Statistical, 1 sigma, paired: the apertures are resampled with replacement 1000 times (a fixed "

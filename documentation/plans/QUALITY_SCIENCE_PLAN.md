@@ -39,7 +39,7 @@ Status on 2026-10-23, batch S3 (branch `94-science-s3-shape`): built and run on 
 stack and frames, then changed after the change control board's review. Section 2.1: the effective
 star width (model-derived, a new uncertainty kind, with its bias stated), the star width in the
 center and the four corners with counts and errors (exploratory; the 16 stars of a region are the
-same in every frame of an undithered night, so a second field or night is needed before any tilt
+same in every frame of the night (the pointing was dithered every 10 frames by about 1.7 px or more and otherwise drifted about 13 px an hour, so the same stars stay in view), so a second field or night is needed before any tilt
 reading), and the rotation of each frame about the registration reference from the polar
 decomposition of Siril's transform (exploratory, no conversion to a polar-alignment error). The
 target's clipped and nonlinear pixels are measured by the astrometry pipeline (checkpoint
@@ -169,7 +169,7 @@ section 2 backs.
 | Metric (section) | Backs |
 | :--- | :--- |
 | Catalog zero point (2.1) | UC1 transparency in the loss account; UC6 tonight's sky model |
-| Zero-point scatter within a night (2.1) | UC15 "Is tonight photometric?" |
+| Zero-point scatter within a night (2.1; computed by `wayfindinglib` when read, not stored) | UC15 "Is tonight photometric?" |
 | Effective star width (2.1) | UC1 and UC6 seeing factor of efficiency |
 | Target clipped (2.1) | UC2 overexposed setting |
 | Center-to-corner star width (2.1) | UC10 tilt |
@@ -199,7 +199,7 @@ in section 2.4, the later items of section 6 and the deferred items of section 7
 | Metric | Definition | Decision it informs | Depends on | Data |
 | :--- | :--- | :--- | :--- | :--- |
 | Catalog zero point | Instrumental magnitudes of matched stars against Gaia G, or Gaia-XP magnitudes synthesized in the frame's filter, with a fitted color term. Corrected for airmass with a fitted extinction coefficient. | Transparency, cloud | Plate solution; Gaia access | A few photometric nights to fit the extinction coefficient |
-| Zero-point scatter within a night | Robust spread of the airmass-corrected zero point across the night's frames | Whether the night suits photometry. This backs the use case "Is tonight photometric?" (UC15 in `QUALITY_USE_CASES.md`). | Catalog zero point | None |
+| Zero-point scatter within a night | Robust spread of the airmass-corrected zero point across the night's frames. `wayfindinglib` computes it when it is read, from the stored zero points (decision 18 of `QUALITY_METRICS_PLAN.md`), with the library helper `zero_point_scatter` (PHO-16). Nothing stores it. | Whether the night suits photometry. This backs the use case "Is tonight photometric?" (UC15 in `QUALITY_USE_CASES.md`). | Catalog zero point | None |
 | Effective star width | The star width with the pixel's own blur added: FWHM_eff² = FWHM² + c·p², with p the pixel size and c = 2 ln 2 / 3 = 0.4621 from theory (decision of 2026-10-23, not fitted). Efficiency's seeing factor uses it, and the physical reference states the pixel scale. | Undersampling; seeing loss | The corrected star width; plate scale | None |
 | Background gradient | Size and direction of a fitted plane or low-order surface across the background, with stars masked | Moon, horizon or a light source; flats | None | None |
 | Target clipped | Whether pixels of the target itself reach the saturation level, with the target located through the WCS | Exposure too long for the target | Plate solution; camera saturation level | None |
@@ -456,7 +456,7 @@ systems engineer settled every finding; the user reviews those choices in the pu
 | One bad geometry row would drop every row of the stack. | Engineer | Rotation rows have their own record call |
 | Wrong reason on the nonlinear rows. | All three | Fixed and tested |
 | Rotation rows lacked the reference frame, the image parity and the frame-time convention; values compare only within one run. | Astronomer, architect | Recorded in the row; polar decomposition for the angle (`STK-43`) |
-| The corner widths come from the same 16 stars in every undithered frame. | Astronomer | Leave-one-star-out check added (`AST-18`); a second field or night is needed before any tilt reading |
+| The corner widths come from the same 16 stars in every frame (the M 57 night was dithered every 10 frames, which moves the stars by a few pixels but does not change which stars they are). | Astronomer | Leave-one-star-out check added (`AST-18`); a second field or night is needed before any tilt reading |
 | A fourth clip-level rule, a duplicate subject builder, counts stored beside fractions. | Architect | One shared level helper and subject builder; fractions only |
 | Frames beyond the read cap or missing from Siril's list got no rows. | Engineer | Not-measured rows with reasons |
 

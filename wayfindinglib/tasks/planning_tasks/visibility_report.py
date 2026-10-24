@@ -184,7 +184,7 @@ def _format_time(epoch_seconds: float, offset_hours: float) -> str:
     epoch_seconds : `float`
         Seconds since the Unix epoch.
     offset_hours : `float`
-        The offset from UTC to write the time in, such as -6 for Montana
+        The offset from UTC to write the time in, such as -6 for Denver
         in summer.
 
     Returns

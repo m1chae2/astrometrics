@@ -6,9 +6,9 @@ where the mount points. The ``[Observatory.Location]`` section of the
 configuration holds it::
 
     ["Observatory.Location"]
-    latitude = "45.76"     # degrees, north is positive
-    longitude = "-110.74"  # degrees, east is positive (west is negative)
-    elevation = "1450"     # metres above sea level; 0 if unknown
+    latitude = "39.74"     # degrees, north is positive
+    longitude = "-104.99"  # degrees, east is positive (west is negative)
+    elevation = "1609"     # metres above sea level; 0 if unknown
 
 Every part of wayfindinglib reads the site through this module, so the
 planning code, the live-status tools and the stored default

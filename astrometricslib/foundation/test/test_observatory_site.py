@@ -46,15 +46,15 @@ class ConfigParserAdapter:
 def test_a_complete_location_section_is_read() -> None:
     """Latitude, longitude and elevation come back as numbers."""
     config = ConfigParserAdapter(
-        '["Observatory.Location"]\nlatitude = "45.76"\nlongitude = "-110.74"\nelevation = "1500"\n'
+        '["Observatory.Location"]\nlatitude = "39.74"\nlongitude = "-104.99"\nelevation = "1609"\n'
     )
 
     site = load_observatory_site(config)
 
     assert site is not None
-    assert site.latitude_deg == pytest.approx(45.76)
-    assert site.longitude_deg == pytest.approx(-110.74)
-    assert site.elevation_m == pytest.approx(1500.0)
+    assert site.latitude_deg == pytest.approx(39.74)
+    assert site.longitude_deg == pytest.approx(-104.99)
+    assert site.elevation_m == pytest.approx(1609.0)
 
 
 def test_a_missing_elevation_counts_as_sea_level() -> None:

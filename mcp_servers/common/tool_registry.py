@@ -368,8 +368,10 @@ def result_content(result: Any) -> list[Any]:
     content : `list`
         Content a tool already built is passed on. A picture (an object with
         ``png_bytes`` and ``description``) and a matplotlib figure become an
-        image and a short text. Anything else becomes indented JSON text, cut
-        at `MAXIMUM_REPLY_BYTES`.
+        image and a short text. Anything else becomes indented JSON text;
+        a reply too long for `MAXIMUM_REPLY_BYTES` is sent without the
+        indentation. A list still too long keeps as many whole items as fit
+        (see `_whole_items_that_fit`); anything else is cut.
     """
     if isinstance(result, list) and result and isinstance(result[0], (TextContent, ImageContent)):
         return result
@@ -383,13 +385,57 @@ def result_content(result: Any) -> list[Any]:
         ]
     if callable(getattr(result, "savefig", None)):
         return _figure_as_image(result)
-    text = json.dumps(_serialize_result(result), indent=2, default=str)
+    serialized = _serialize_result(result)
+    text = json.dumps(serialized, indent=2, default=str)
+    if len(text) > MAXIMUM_REPLY_BYTES:
+        # The indentation alone can be a third of a long list; drop it before
+        # cutting anything.
+        text = json.dumps(serialized, separators=(",", ":"), default=str)
+    if len(text) > MAXIMUM_REPLY_BYTES and isinstance(serialized, list):
+        return _whole_items_that_fit(serialized)
     if len(text) > MAXIMUM_REPLY_BYTES:
         text = text[:MAXIMUM_REPLY_BYTES] + (
             f"\n\n... [Output truncated: payload exceeded {MAXIMUM_REPLY_BYTES} bytes. "
             "Use specific filtering arguments or limit queries to avoid context blowout.]"
         )
     return [TextContent(type="text", text=text)]
+
+
+def _whole_items_that_fit(items: list[Any]) -> list[TextContent]:
+    """Send the leading items of a long list that fit, and note the rest.
+
+    Cutting the text of a JSON list part way through leaves text that does
+    not parse. This keeps the reply valid JSON by sending only whole items,
+    as compact JSON, and adds a second text that says how many items were
+    left out and how to ask for fewer.
+
+    Parameters
+    ----------
+    items : `list`
+        The serialized list, too long for `MAXIMUM_REPLY_BYTES` even without
+        indentation.
+
+    Returns
+    -------
+    content : `list` [`TextContent`]
+        The JSON text of the items that fit, then the note.
+    """
+    # The largest count whose compact JSON fits, found by halving the range.
+    low, high = 0, len(items)
+    while low < high:
+        middle = (low + high + 1) // 2
+        if len(json.dumps(items[:middle], separators=(",", ":"), default=str)) <= MAXIMUM_REPLY_BYTES:
+            low = middle
+        else:
+            high = middle - 1
+    note = (
+        f"Showing the first {low} of {len(items)} items; the rest were left out to keep the reply under "
+        f"{MAXIMUM_REPLY_BYTES} bytes. Ask for fewer with the tool's filtering arguments."
+    )
+    return [
+        TextContent(type="text", text=json.dumps(items[:low], separators=(",", ":"), default=str)),
+        TextContent(type="text", text=note),
+    ]
 
 
 def _picture_description(picture: Any) -> dict[str, Any]:

@@ -5,15 +5,19 @@ tests check the wiring: the stage hands the step the frames, stacks only the
 frames it keeps, and records the moved ones as excluded.
 """
 
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.enums import FilterType
+from astrometricslib.foundation.errors import StorageError
 from astrometricslib.models.quality.gate_result import GateStatus, failed_gate
 from astrometricslib.models.quality.quality_summary import StackingPipelineQualityMetrics, StackQualitySummary
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.stacking import stage as stacking_tasks
+from astrometricslib.pipelines.stacking.frame_measurement_run import FrameQualityRecording
 from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import (
     QUARANTINE_EXCLUSION_REASON_PREFIX,
 )
@@ -50,7 +54,11 @@ def make_target(frame_count: int = 10) -> Target:
     )
 
 
-def run_stage(target: Target) -> tuple[MagicMock, MagicMock]:
+def run_stage(
+    target: Target,
+    measured_at: datetime | None = None,
+    quality_recording: FrameQualityRecording | None = None,
+) -> tuple[MagicMock, MagicMock]:
     """Run `stack_frames` with the stacker and the summary builder stubbed.
 
     Returns
@@ -74,7 +82,9 @@ def run_stage(target: Target) -> tuple[MagicMock, MagicMock]:
         driver.process_target.return_value = "/library/lights/M_52/M_52_L_Stacked.fits"
         driver_class.return_value = driver
         summary_builder.return_value = dummy_summary
-        stacking_tasks.stack_frames(target, filter_type=FilterType.L)
+        stacking_tasks.stack_frames(
+            target, filter_type=FilterType.L, measured_at=measured_at, quality_recording=quality_recording
+        )
     return driver, summary_builder
 
 
@@ -160,3 +170,83 @@ def test_a_failed_quarantine_gate_survives_the_flag_rebuild() -> None:
     assert summary.flagged is True
     assert "too many bad frames; still in the stack" in summary.flag_reasons
     assert summary.gate("frame_quarantine").status is GateStatus.FAILED
+
+
+MEASURED_AT = datetime(2026, 10, 22, 6, 0, tzinfo=UTC)
+HOOK = "astrometricslib.pipelines.stacking.frame_measurement_run.record_stage_frame_quality"
+
+
+@pytest.fixture
+def recording(config_in_tmp_path: AppConfiguration) -> FrameQualityRecording:
+    """Give the stage a recording context with its database in `tmp_path`.
+
+    Returns
+    -------
+    recording : `FrameQualityRecording`
+        A context with the test's own configuration, so nothing is written
+        outside the test's folder.
+    """
+    return FrameQualityRecording(configuration=config_in_tmp_path, calibration_library=MagicMock())
+
+
+def test_stage_hands_every_quarantine_measurement_to_the_quality_hook(
+    recording: FrameQualityRecording,
+) -> None:
+    """Kept frames' quarantine numbers reach the hook, not only moved ones."""
+    target = make_target()
+    measurements = [
+        {"path": frame.path, "roundness": 0.95, "sky_median_adu": 1000.0} for frame in target.frames
+    ]
+    report = QuarantineReport(batches_judged=1, measurements=measurements)
+
+    with (
+        patch(QUARANTINE_STEP, side_effect=lambda target, frames: (list(frames), report)),
+        patch(HOOK) as hook,
+    ):
+        run_stage(target, MEASURED_AT, recording)
+
+    hook.assert_called_once()
+    assert hook.call_args.args[2] == measurements
+    assert len(hook.call_args.args[1]) == 10
+
+
+@pytest.mark.parametrize(
+    "error",
+    [StorageError("database is locked"), RuntimeError("photutils broke"), MemoryError("out of memory")],
+)
+def test_a_failing_quality_hook_never_stops_the_stack(
+    error: Exception, recording: FrameQualityRecording
+) -> None:
+    """Any error in the hook is logged and the stack still runs."""
+    report = QuarantineReport(batches_judged=1)
+    with (
+        patch(QUARANTINE_STEP, side_effect=lambda target, frames: (list(frames), report)),
+        patch(HOOK, side_effect=error),
+    ):
+        driver, _summary_builder = run_stage(make_target(), MEASURED_AT, recording)
+
+    driver.process_target.assert_called_once()
+
+
+def test_without_a_measurement_time_the_stage_stores_no_frame_quality() -> None:
+    """No measurement time from the caller means no rows are stored."""
+    report = QuarantineReport(batches_judged=1)
+    with (
+        patch(QUARANTINE_STEP, side_effect=lambda target, frames: (list(frames), report)),
+        patch(HOOK) as hook,
+    ):
+        run_stage(make_target())
+
+    hook.assert_not_called()
+
+
+def test_without_a_recording_context_the_stage_stores_no_frame_quality() -> None:
+    """Without the caller's recording context the stage stores nothing."""
+    report = QuarantineReport(batches_judged=1)
+    with (
+        patch(QUARANTINE_STEP, side_effect=lambda target, frames: (list(frames), report)),
+        patch(HOOK) as hook,
+    ):
+        run_stage(make_target(), MEASURED_AT)
+
+    hook.assert_not_called()

@@ -7,6 +7,7 @@ captured frames associated with targets.
 
 import logging
 import os
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from astrometricslib import (
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
     from backend.services.data.target_service import TargetService
     from backend.services.processing.image_processing_service import ImageProcessingService
     from backend.services.processing.job_service import JobService
+    from backend.services.processing.quality_measurement_service import QualityMeasurementPort
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +48,10 @@ class IngestionService(BaseBackgroundService):
         job_service: JobService | None = None,
         image_processing_service: ImageProcessingService | None = None,
         wayfinder: Wayfinder | None = None,
+        quality_measurement_service: QualityMeasurementPort | None = None,
     ) -> None:
         super().__init__(job_service=job_service)
+        self._quality_measurement_service = quality_measurement_service
         self._target_service = target_service
         self._config_service = config_service
         self._calibration_library = calibration_library
@@ -242,7 +246,6 @@ class IngestionService(BaseBackgroundService):
 
         # REQ: IMG-5.3: Isolated log file per job
         safe_target = target_name.replace(" ", "_").replace("/", "_")
-        from datetime import datetime
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         log_dir = self._config_service.get_logs_path()
@@ -277,7 +280,6 @@ class IngestionService(BaseBackgroundService):
                     )
 
         # REQ: IMG-5.3: Isolated log file per job
-        from datetime import datetime
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         log_dir = self._config_service.get_logs_path()
@@ -334,6 +336,9 @@ class IngestionService(BaseBackgroundService):
                 self._job_service.update_job(job_id, progress=int(((index + 1) / total) * 100))
 
         report = self._target_service.reindex_library(prune_missing=True, on_progress=report_progress)
+        for change in report.targets:
+            if change.frames_after > change.frames_before:
+                self._start_measurement(job_id, change.target_id)
         self._log(job_id, f"Light frames of {len(report.targets)} target folders indexed and saved.")
 
         # 3. Refresh calibration frames
@@ -359,6 +364,53 @@ class IngestionService(BaseBackgroundService):
 
         self._log(job_id, "Re-index complete.")
         return True
+
+    def _start_measurement(self, job_id: str, target_id: str) -> None:
+        """Start measuring a target's new light frames, in the background.
+
+        The job runs on its own thread and announces ``quality:measured`` when
+        it stores rows. A failure to start it never fails the ingestion.
+
+        Parameters
+        ----------
+        job_id : `str`
+            The ingestion job, for the log line.
+        target_id : `str`
+            The target that gained frames.
+        """
+        if self._quality_measurement_service is None:
+            return
+        try:
+            self._quality_measurement_service.start_frame_measurements(target_id)
+        except Exception:  # starting the measurement must never fail the ingestion: log it
+            logger.exception("Could not start measuring the new frames of %s", target_id)
+            return
+        self._log(job_id, f"Measuring the new frames of {target_id} in the background.")
+
+    def _announce_measurements(self, job_id: str, measurement_results: list[dict[str, Any]]) -> None:
+        """Announce what the frame sync measured.
+
+        The frame sync measures the frames it adds, and returns the summary of
+        that run. This announces it, so the screens that show quality numbers
+        read them again. It starts no second run. A failure here is logged and
+        never fails the ingestion.
+
+        Parameters
+        ----------
+        job_id : `str`
+            The ingestion job, for the log.
+        measurement_results : `list` [`dict`]
+            The summaries (as plain dicts) that the sync returned under
+            ``measurements``.
+        """
+        if not measurement_results or self._quality_measurement_service is None:
+            return
+        try:
+            self._quality_measurement_service.announce_summaries(measurement_results)
+        except Exception:  # an announcement must never fail the ingestion: log it
+            logger.exception("Could not announce the quality rows of the ingestion")
+            return
+        self._log(job_id, "Measured the new frames.")
 
     def _log(self, job_id: str, message: str) -> None:
         """Show a progress line on the job and write it to the log.
@@ -435,6 +487,7 @@ class IngestionService(BaseBackgroundService):
         ExternalServiceError
             If the remote download fails in any other way.
         """
+        measurement_results: list[dict[str, Any]] = []
         ingest_type = payload.get("type", "local")
         target_name = payload.get("targetName")
         selected_files = payload.get("selectedFiles", None)
@@ -561,9 +614,10 @@ class IngestionService(BaseBackgroundService):
                             progress_pct = min(int((downloaded_count / total_files) * 100), 99)
                             self._job_service.update_job(job_id, progress=progress_pct)
 
-                    self._wayfinder.control.remote.sync_frames(
+                    sync_result = self._wayfinder.control.remote.sync_frames(
                         target_name, files=selected_files, log_callback=ingest_log_callback
                     )
+                    measurement_results = list((sync_result or {}).get("measurements") or [])
                     self._log(job_id, "Download complete.")
                 except AstrometricsError as e:
                     self._log(job_id, f"Download failed: {e}")
@@ -581,8 +635,14 @@ class IngestionService(BaseBackgroundService):
         if ingest_type != "remote":
             # Local ingestion goes through the same library entry point
             # as remote downloads.
-            self._wayfinder.control.remote.sync_frames(target_name, local_path=source_dir)
+            sync_result = self._wayfinder.control.remote.sync_frames(target_name, local_path=source_dir)
+            measurement_results = list((sync_result or {}).get("measurements") or [])
             self._log(job_id, "Local frames ingested successfully.")
+
+        # The sync already measured the frames it added. Announce that run's
+        # own result; there is no second run (a frame that failed is measured
+        # by an explicit run or the re-index).
+        self._announce_measurements(job_id, measurement_results)
 
         # --- 3. Regeneration ---
         self._log(job_id, "Refreshing Shared State...")

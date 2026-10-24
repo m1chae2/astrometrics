@@ -24,7 +24,6 @@ import json
 import logging
 import math
 import os
-import re
 import threading
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -35,6 +34,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from astrometricslib.drivers.camera_profile_store import camera_identity, record_name_for_camera
 from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
+from astrometricslib.utilities.camera_setting_text import UNBINNED_TEXT, canonical_binning_setting
 from astrometricslib.utilities.iso_text import iso_or_gain_values_match
 
 logger = logging.getLogger(__name__)
@@ -78,8 +78,17 @@ DEFAULT_DARK_TEMPERATURE_TOLERANCE_C = 3.0
 # ``calibration_metadata`` gate when the list is not empty.
 CALIBRATION_MATCH_BLOCKING_FLAGS_KEY = "calibration_match_blocking_flags"
 
+# The keys in `ImageProcessing.last_run_diagnostics` that hold the library
+# files of the flat and bias frames a run staged (the ones that were readable
+# and linked into the work folder), as a list of path strings. They are
+# recorded where the library's selection is made, so the quality step does not
+# have to guess them from the staging folder. The flat-to-light match reads
+# both (see `pipelines/stacking/post_processing/flat_match.py`).
+FLAT_FRAME_PATHS_KEY = "flat_frame_paths"
+BIAS_FRAME_PATHS_KEY = "bias_frame_paths"
+
 # The binning of a frame whose header names none: no binning at all.
-UNBINNED = "1x1"
+UNBINNED = UNBINNED_TEXT
 
 # The names of the parts of a library key after the gain, each written
 # ``@<name>=<value>``, for example "0.0@offset=30@bin=2x2@temp=-9". A key
@@ -153,6 +162,10 @@ def format_binning(x_binning: Any = None, y_binning: Any = None) -> str:
 def normalize_binning(binning: Any) -> str:
     """Write a binning given as text or as a number in the standard form.
 
+    This is `canonical_binning_setting` from
+    `astrometricslib.utilities.camera_setting_text`, the one place that
+    decides what a binning is written as, kept here under its old name.
+
     Parameters
     ----------
     binning : `Any`
@@ -164,10 +177,7 @@ def normalize_binning(binning: Any) -> str:
     binning : `str`
         The standard form, such as ``"2x2"`` (see `format_binning`).
     """
-    match = re.fullmatch(r"\s*(\d+)\s*[xX]\s*(\d+)\s*", str(binning))
-    if match:
-        return format_binning(match.group(1), match.group(2))
-    return format_binning(binning)
+    return canonical_binning_setting(binning)
 
 
 def header_binning(header: Any) -> str:

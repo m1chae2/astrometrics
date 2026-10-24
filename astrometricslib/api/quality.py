@@ -1,12 +1,18 @@
-"""Quality diagnostics: measure raw frames and finished stacks.
+"""The quality root: every quality read starts here.
 
-`QualityDiagnostics` is the child of `ProcessingPipelines` that measures
-without changing anything. It is reached as
-`astrometrics.processing.diagnostics`.
+`QualityRecords` is the child of `Astrometrics` reached as
+`astrometrics.quality`. It answers two kinds of question:
+
+* Stored: `query` reads the quality measurements that earlier runs saved,
+  and `metrics` lists what each metric means.
+* Live: `measure_frames`, `check_spectral_frames` and `measure_stack` measure
+  raw frames and finished stacks now, without changing anything.
+
 The argument helpers it shares with `ProcessingPipelines` live in
 `pipelines/shared/api_arguments.py`.
 """
 
+from datetime import UTC, datetime
 from typing import Literal
 
 from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
@@ -14,6 +20,8 @@ from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.jobs.runner import background_job, registered_job
 from astrometricslib.models.quality.excluded_frames import QuarantinePreview
+from astrometricslib.models.quality.measurement import QualityMeasurement, SubjectLevel
+from astrometricslib.models.quality.metric_spec import Checkpoint, MetricSpec, MetricSummary
 from astrometricslib.models.quality.quality_reports import (
     InputQualityReport,
     RawFrameCheckReport,
@@ -31,9 +39,10 @@ from astrometricslib.pipelines.shared.api_arguments import (
     make_frame_selection,
     reject_unused_arguments,
     resolve_target,
+    to_epoch_seconds,
 )
 
-__all__ = ["QualityDiagnostics"]
+__all__ = ["QualityRecords"]
 
 FRAME_QUALITY_KINDS = ("input_quality", "raw_check", "quarantine_preview")
 FRAME_QUALITY_SECTIONS = ("fwhm", "spectra", "excluded")
@@ -79,9 +88,11 @@ def _clamp(value: int, lowest: int, highest: int) -> int:
     return max(lowest, min(int(value), highest))
 
 
-class QualityDiagnostics:
-    """Measure raw frames and finished stacks, without changing anything.
+class QualityRecords:
+    """The start of every quality read: stored measurements and live checks.
 
+    `query` and `metrics` read what earlier runs stored. The other methods
+    measure raw frames and finished stacks now, without changing anything.
     The checks show whether a night had good tracking and clear skies, which
     frames the stacker would set aside, and whether a restack made the
     stack better or worse. A target id that names no target, or a stack
@@ -104,6 +115,147 @@ class QualityDiagnostics:
         self._storage = storage
         self._targets = targets
 
+    def query(
+        self,
+        metric: str | None = None,
+        level: str | None = None,
+        target_id: str | None = None,
+        observing_night_id: str | None = None,
+        camera: str | None = None,
+        telescope: str | None = None,
+        since: TimeInput = None,
+        row_ids: list[int] | None = None,
+        latest_only: bool = True,
+        variant: str | None = None,
+        library_only: bool = False,
+    ) -> list[QualityMeasurement]:
+        """Read the quality measurements that earlier runs stored.
+
+        Nothing is measured and nothing is written. A library with no
+        stored measurements yet gives an empty list, and no database file
+        or table is created by asking.
+
+        Parameters
+        ----------
+        metric : `str`, optional
+            Only this metric. See `metrics` for the names.
+        level : `str`, optional
+            Only subjects of this level: ``"frame"``, ``"target"``, and so
+            on (the values of `SubjectLevel`).
+        target_id : `str`, optional
+            Only this target.
+        observing_night_id : `str`, optional
+            Only this observing night.
+        camera : `str`, optional
+            Only measurements made with this camera.
+        telescope : `str`, optional
+            Only measurements made with this telescope.
+        since : `str`, `datetime` or `Time`, optional
+            Only measurements made at or after this time. Text is ISO 8601;
+            no offset means UTC.
+        row_ids : `list` [`int`], optional
+            Only these rows, exactly as stored, even if newer ones exist.
+            ``latest_only`` is then ignored.
+        latest_only : `bool`, optional
+            Give the newest row for each subject, metric and channel
+            (default) instead of every row.
+        variant : `str`, optional
+            Only rows about the subset stack with this label.
+        library_only : `bool`, optional
+            Only rows that are not about a subset stack. Cannot be combined
+            with ``variant``.
+
+        Returns
+        -------
+        measurements : `list` [`QualityMeasurement`]
+            The matching measurements, oldest first.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If ``metric`` is not registered (the error lists the registered
+            names), ``level`` is unknown, ``since`` cannot be read as a
+            time, or both ``variant`` and ``library_only`` are given.
+
+        Notes
+        -----
+        A stored row that fails the model's checks raises `StorageError`.
+        """
+        from astrometricslib.drivers.quality_store import QualityStore, quality_database_path
+        from astrometricslib.pipelines.shared.quality.metric_registry import get_metric_registry
+
+        if metric is not None:
+            check_choice("metric", metric, get_metric_registry().names())
+        if level is not None:
+            check_choice("level", level, tuple(member.value for member in SubjectLevel))
+        if variant is not None and library_only:
+            raise InvalidArgumentError("Give either variant or library_only, not both.")
+        since_seconds = to_epoch_seconds(since, "since")
+        since_time = None if since_seconds is None else datetime.fromtimestamp(since_seconds, tz=UTC)
+        return QualityStore(quality_database_path(self._config)).query(
+            metric=metric,
+            level=None if level is None else SubjectLevel(level),
+            target_id=target_id,
+            observing_night_id=observing_night_id,
+            camera=camera,
+            telescope=telescope,
+            since=since_time,
+            row_ids=None if row_ids is None else [int(row_id) for row_id in row_ids],
+            latest_only=latest_only,
+            variant=variant,
+            library_only=library_only,
+        )
+
+    def metrics(
+        self,
+        name: str | None = None,
+        checkpoint: str | None = None,
+        detail: Literal["summary", "full"] = "summary",
+    ) -> list[MetricSummary] | list[MetricSpec]:
+        """List the declared quality metrics and what they mean.
+
+        Parameters
+        ----------
+        name : `str`, optional
+            One metric name. The list then holds only that metric.
+        checkpoint : `str`, optional
+            Only the metrics measured at this checkpoint, such as
+            ``"frame"`` or ``"spectroscopy"``.
+        detail : {``"summary"``, ``"full"``}, optional
+            ``"summary"`` (the default) gives the name, unit, checkpoint,
+            levels and purpose of each metric. Over 200 metrics are
+            registered, so the full list is too long for an MCP reply.
+            ``"full"`` gives the whole declaration, including the meaning,
+            which way is better and how the number is estimated. Pair it with
+            ``checkpoint`` or ``name``.
+
+        Returns
+        -------
+        metrics : `list` [`MetricSummary`] or `list` [`MetricSpec`]
+            The declarations, in the order they are registered.
+
+        Notes
+        -----
+        An unknown ``name``, ``checkpoint`` or ``detail`` raises
+        `InvalidArgumentError`.
+        """
+        from astrometricslib.pipelines.shared.quality.metric_registry import get_metric_registry
+
+        check_choice("detail", detail, ("summary", "full"))
+        if checkpoint is not None:
+            check_choice("checkpoint", checkpoint, tuple(member.value for member in Checkpoint))
+        registry = get_metric_registry()
+        if name is not None:
+            check_choice("name", name, registry.names())
+            specs = [registry.get(name)]
+        else:
+            specs = list(registry.all())
+        if checkpoint is not None:
+            specs = [spec for spec in specs if spec.checkpoint.value == checkpoint]
+        if detail == "full":
+            return specs
+        return [MetricSummary.from_spec(spec) for spec in specs]
+
     def _label(self, target: Target | None, folder_path: str | None = None) -> str:
         """Name the subject of a job.
 
@@ -115,7 +267,7 @@ class QualityDiagnostics:
         return target.id if target is not None else (folder_path or "library")
 
     @background_job("diagnostics", grace_period_seconds=20.0)
-    def frame_quality(
+    def measure_frames(
         self,
         target: str | Target | None = None,
         folder_path: str | None = None,
@@ -286,7 +438,7 @@ class QualityDiagnostics:
             return report
 
     @background_job("diagnostics", grace_period_seconds=20.0)
-    def spectral_frame_check(
+    def check_spectral_frames(
         self,
         target: str | Target,
         first_file: str | None = None,
@@ -355,7 +507,7 @@ class QualityDiagnostics:
             )
 
     @background_job("diagnostics", grace_period_seconds=20.0)
-    def stack_quality(
+    def measure_stack(
         self,
         path_or_target: str | Target,
         kind: StackKind = "imaging",
@@ -463,7 +615,6 @@ class QualityDiagnostics:
 
         return {
             "min_matched_star_pairs": srq.MIN_MATCHED_STAR_PAIRS,
-            "rmse_outlier_sigma": srq.RMSE_OUTLIER_SIGMA,
             "zero_order_amplitude_outlier_sigma": srq.ZERO_ORDER_AMPLITUDE_OUTLIER_SIGMA,
             "zero_order_position_jump_outlier_sigma": srq.ZERO_ORDER_POSITION_JUMP_OUTLIER_SIGMA,
         }

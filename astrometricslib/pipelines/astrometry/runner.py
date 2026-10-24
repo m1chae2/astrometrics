@@ -6,83 +6,128 @@ saves the identified stars into the shared star catalog.
 """
 
 import logging
+from pathlib import Path
 from typing import Any
 
+import numpy as np
+from astropy import units as u
+from astropy.coordinates import SkyCoord
+
+from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
-from astrometricslib.foundation.errors import InvalidArgumentError
+from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.models.quality.gate_result import failed_gate, passed_gate
 from astrometricslib.models.quality.quality_summary import (
+    ASTROMETRY_PIPELINE_VERSION,
     AstrometryPipelineQualityMetrics,
     AstrometryQualitySummary,
 )
 from astrometricslib.models.target import Target
-from astrometricslib.pipelines.astrometry.post_processing.run_gates import astrometry_run_gates
+from astrometricslib.pipelines.astrometry.post_processing.expected_residual import (
+    record_expected_residual_quality,
+)
+from astrometricslib.pipelines.astrometry.post_processing.record_quality import (
+    PLATE_SOLVE_GATE_NAME,
+    astrometry_run_gates,
+    record_astrometry_quality,
+    record_target_clipping_quality,
+)
 from astrometricslib.pipelines.pipeline_base import (
     AnalysisPipeline,
     PipelineRequest,
     Result,
     run_pipeline,
 )
+from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
 from astrometricslib.pipelines.shared.session_identification import write_wcs_to_fits_header
 from astrometricslib.pipelines.shared.star_recording import (
     _drop_unresolved_stars,
     merge_astrometry_stellar_object,
     record_pipeline_stars,
 )
-from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
-from astrometricslib.utilities.exceptions import DATA_ERRORS
-
-# The name the plate-solve check goes by in an astrometry run's gate record.
-PLATE_SOLVE_GATE_NAME = "plate_solve"
+from astrometricslib.pipelines.shared.target_center_hint import resolve_target_center_hint
+from astrometricslib.pipelines.shared.target_position import (
+    fill_target_position,
+    has_no_fixed_position,
+    parse_target_position,
+)
+from astrometricslib.utilities.exceptions import DATA_ERRORS, ONLINE_QUERY_ERRORS
 
 logger = logging.getLogger(__name__)
 
 
-def _backfill_target_ra_dec_from_wcs(target: Any, context: Any) -> None:
-    """Fill in a target's RA/Dec from a solved WCS, if they were unset.
+def _footprint_radius_arcmin(wcs: Any) -> float | None:
+    """Return half the diagonal of a solved image on the sky.
+
+    Parameters
+    ----------
+    wcs : `astropy.wcs.WCS`
+        The solved sky map.
+
+    Returns
+    -------
+    radius_arcmin : `float` or `None`
+        Half the image diagonal in arcminutes, or `None` when the map does
+        not know the image size.
+    """
+    pixel_shape = getattr(wcs, "pixel_shape", None)
+    if not pixel_shape:
+        return None
+    try:
+        from astropy.wcs.utils import proj_plane_pixel_scales
+
+        scale_degrees = float(sum(proj_plane_pixel_scales(wcs)) / 2.0)
+        half_diagonal_pixels = 0.5 * float(np.hypot(pixel_shape[0], pixel_shape[1]))
+    except DATA_ERRORS:
+        return None
+    return half_diagonal_pixels * scale_degrees * 60.0
+
+
+def _fill_target_position(target: Any, context: Any, drivers: Any = None) -> None:
+    """Give a target with no position the position of its object.
 
     A target created before its position was known starts with empty or
-    all-zero coordinates. Once astrometry solves an image of it, that
-    solve is a better answer than "unknown" -- so it gets written back
-    onto the target record.
+    all-zero coordinates. The position is looked up from the target's name
+    in SIMBAD. The solved image's center is only a fallback for a name
+    SIMBAD cannot resolve or whose answer lies outside the image, and the
+    target is then marked unverified (see `fill_target_position`). A
+    position already set is never changed. Moving bodies and calibration
+    targets never get a fixed position. A SIMBAD failure never stops the
+    run: it is logged and the fallback applies.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target to update.
+    context : `Any`
+        The finished pipeline context. Its `wcs` attribute is the solved
+        sky map, or `None` when the image was not solved.
+    drivers : `Drivers`, optional
+        Supplies the SIMBAD driver. The built-in one is used when absent.
     """
-    # If target RA and DEC are not populated or zero, pull
-    # coordinates from plate solver
-    is_ra_empty = not target.ra or target.ra.strip() in ("", "0", "0.0", "0h 0m 0s")
-    is_dec_empty = not target.dec or target.dec.strip() in ("", "0", "0.0", "0° 0′ 0′′")
-    is_zero = False
-    if not (is_ra_empty or is_dec_empty):
+    if has_no_fixed_position(target.id):
+        return
+    if parse_target_position(target) is not None and not target.position_unverified:
+        return
+    frame_center = None
+    footprint_radius = None
+    if context.wcs is not None:
         try:
-            resolved_ra_deg = parse_coordinate_string(str(target.ra), is_ra=True)
-            resolved_dec_deg = parse_coordinate_string(str(target.dec), is_ra=False)
-            # ruff: ignore[float-equality-comparison] -- exact
-            # sentinel check against the unset-coordinate
-            # default ("0h 0m 0s" / "0(deg) 0' 0''"), not a
-            # measured/computed value comparison.
-            if resolved_ra_deg == 0.0 and resolved_dec_deg == 0.0:
-                is_zero = True
-        except InvalidArgumentError:
-            is_zero = True
-
-    if not (is_ra_empty or is_dec_empty or is_zero):
-        return
-    if context.wcs is None:
-        return
-
+            frame_center = SkyCoord(
+                ra=float(context.wcs.wcs.crval[0]) * u.deg,
+                dec=float(context.wcs.wcs.crval[1]) * u.deg,
+                frame="icrs",
+            )
+            footprint_radius = _footprint_radius_arcmin(context.wcs)
+        except DATA_ERRORS as wcs_error:
+            logger.warning(
+                "Failed to extract center coordinate from WCS for target %s: %s", target.id, wcs_error
+            )
     try:
-        from astropy import units as u
-        from astropy.coordinates import SkyCoord
-
-        ra_deg = float(context.wcs.wcs.crval[0])
-        dec_deg = float(context.wcs.wcs.crval[1])
-        solved_coord = SkyCoord(ra=ra_deg * u.deg, dec=dec_deg * u.deg, frame="icrs")
-        target.ra = solved_coord.ra.to_string(unit=u.hour, sep=" ", precision=2)
-        target.dec = solved_coord.dec.to_string(unit=u.deg, sep=" ", precision=2)
-        logger.info(
-            "Updated Target %s RA/Dec from plate solver: RA=%s, DEC=%s", target.id, target.ra, target.dec
-        )
-    except DATA_ERRORS as wcs_error:
-        logger.warning("Failed to extract center coordinate from WCS for target %s: %s", target.id, wcs_error)
+        simbad = (drivers or Drivers()).simbad_or_default()
+        fill_target_position(target, simbad, frame_center, footprint_radius)
+    except (ExternalServiceError, *ONLINE_QUERY_ERRORS) as lookup_error:
+        logger.warning("Could not look up the position of target %s: %s", target.id, lookup_error)
 
 
 def _write_solved_wcs_to_fits_header(path: str | None, context: Any) -> None:
@@ -181,8 +226,6 @@ def _stored_stack_fwhm_px(path: str, target: Any) -> float | None:
         The stored width, or `None` when there is no target, the image is not
         the target's stacked image, or no width was stored.
     """
-    from pathlib import Path
-
     try:
         stacking = target.stacking
         stacked_image = stacking.stacked_image
@@ -305,7 +348,12 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
         gaia_statistics = get_gaia_query_statistics()
         plate_solve_attempts = get_plate_solve_attempt_count()
 
-        _backfill_target_ra_dec_from_wcs(target, context)
+        # The target's catalog position as the record held it before this run:
+        # the fill below may set an empty position, and target clipping must
+        # use the position the record held (see `target_clipping.py`).
+        target_center_deg = resolve_target_center_hint(target)
+
+        _fill_target_position(target, context, request.options.get("drivers"))
         _write_solved_wcs_to_fits_header(path, context)
 
         context.stellar_objects, _ = record_pipeline_stars(
@@ -329,6 +377,7 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
                 "simbad_matched_count": simbad_matched_count,
                 "gaia_statistics": gaia_statistics,
                 "plate_solve_attempts": plate_solve_attempts,
+                "target_center_deg": target_center_deg,
             },
         )
 
@@ -378,6 +427,45 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
             summary.record_gate(failed_gate(PLATE_SOLVE_GATE_NAME, "plate solve failed"))
         for gate in astrometry_run_gates(summary.astrometry_metrics):
             summary.record_gate(gate)
+
+        # The same numbers and gates, stored as measurements next to the
+        # summary. The context is None when the caller gave no time; then
+        # nothing is stored (a warning says so). A storage failure is logged
+        # inside and never fails the run.
+        measurement_context = PipelineRunContext.from_options(
+            request.target.id, self.pipeline_name, ASTROMETRY_PIPELINE_VERSION, request.options
+        )
+        if measurement_context is not None:
+            # Values read from the stacked image go on the stack's subject.
+            image_path = getattr(result.context.image, "path", None)
+            record_astrometry_quality(
+                summary.astrometry_metrics,
+                list(summary.gates),
+                measurement_context,
+                Path(image_path).name if image_path else None,
+            )
+            # What noise alone should leave of the Gaia residual, stored beside
+            # the measured one, on the same stack and over the same stars.
+            if image_path:
+                record_expected_residual_quality(
+                    getattr(result.context, "gaia_fit_peak_over_noise", ()),
+                    getattr(result.context, "gaia_fit_signal_reason", "no Gaia fit was made"),
+                    summary.astrometry_metrics.star_fwhm_px,
+                    summary.astrometry_metrics.plate_scale_arcsec_per_pixel,
+                    measurement_context,
+                    Path(image_path).name,
+                )
+            # The share of the target's own pixels that are clipped in each
+            # frame of the stack. It needs this run's own plate solution (not
+            # the header's) and the registration record the stacking run wrote.
+            if image_path:
+                record_target_clipping_quality(
+                    image_path,
+                    list(request.target.frames),
+                    measurement_context,
+                    solved_wcs=None if result.context.wcs_is_header_fallback else result.context.wcs,
+                    target_center_deg=result.payload["target_center_deg"],
+                )
 
         from astrometricslib.pipelines.shared.applied_camera_profile import (
             camera_name_from_header,

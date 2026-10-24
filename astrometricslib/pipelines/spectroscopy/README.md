@@ -125,7 +125,7 @@ A new metric needs no change to the models, the run summary or the generated Typ
 
 ### The run-level summary
 
-Both `runner.py` (one image) and `batch.py` (a session) roll the per-spectrum checkpoints up into `stage_quality_summary` on the summary's `spectroscopy_metrics` (`SpectroscopyPipelineQualityMetrics`). `summarize_stage_quality` in `post_processing/run_gates.py` builds it. It holds one `StageQualityRollup` per stage, in stage order:
+Both `runner.py` (one image) and `batch.py` (a session) roll the per-spectrum checkpoints up into `stage_quality_summary` on the summary's `spectroscopy_metrics` (`SpectroscopyPipelineQualityMetrics`). `summarize_stage_quality` in `post_processing/record_quality.py` builds it. It holds one `StageQualityRollup` per stage, in stage order:
 
 - `spectrum_count`. How many spectra have a checkpoint for the stage.
 - `failed_spectrum_count`. How many of them have at least one metric with `passed` equal to `False`. A spectrum counts once per stage.
@@ -181,7 +181,7 @@ An emission line is a bright bump at one wavelength, made by glowing gas (a nebu
 
 A gate is a run-level pass-or-fail entry, as opposed to the checkpoints kept for each spectrum.
 
-A run keeps one record per gate in the summary's `gates` (built in `post_processing/run_gates.py`, by both `runner.py` and `batch.py`). Each gate is `passed`, `failed` or `not_checked`; a gate that could not look is never recorded as passed. The tests in `test/post_processing/test_run_gates.py` give every gate input that must fail it.
+A run keeps one record per gate in the summary's `gates` (built in `post_processing/record_quality.py`, by both `runner.py` and `batch.py`). Each gate is `passed`, `failed` or `not_checked`; a gate that could not look is never recorded as passed. The tests in `test/post_processing/test_record_quality.py` give every gate input that must fail it.
 
 | Gate | Fails when | Not checked when |
 | --- | --- | --- |
@@ -198,6 +198,17 @@ A run keeps one record per gate in the summary's `gates` (built in `post_process
 `catalog_agreement`, `feature_significance` and `spectra_extracted` raise at the level of the run what would otherwise show only on a star's own record (a disagreement with the catalog, an uncalibrated p-value), and flag a run with no spectra.
 
 The counts behind the gates come from `spectrum_facts`, which the batch workers return per frame so the parallel path builds the same gates as the single-image path.
+
+### Quality measurements
+
+Next to the summary and its gates, a run stores its numbers as quality measurements, one row for each metric declared in `metrics.py`. `spectroscopy_run_measurements` in `post_processing/record_quality.py` builds them and `record_spectroscopy_quality` stores them through the shared helpers in `pipelines/shared/quality/pipeline_measurements.py`. Both `runner.py` (one image) and `batch.py` (a session) call it after the gates are recorded. The gates and the summary are unchanged.
+
+- Every row is about the run (subject level `run`) and carries the job id, the pipeline version, `origin = measured` and a time with a time zone. The caller supplies the time (`measured_at`); a run without it stores nothing and logs a warning.
+- A number the run could not make is stored as `not_measured` with a reason, never as zero. The session batch does not count star identification, so its three identification counts are `not_measured`.
+- A gate is stored as a self-check: its value, its outcome (`passed`, `failed` or `not_checked`) and its limit. A limit that follows from what the check is for (a count that must be zero, the one spectrum a run needs) is geometry. The saturation share, the failed-spectrum share, the wavelength-scale RMS and the Gaia XP limits are design estimates, stored with their register entry (`GATE_LIMIT_SOURCES` in `post_processing/record_quality.py`). None claims a validated data set.
+- A failure while building or storing the rows is logged and never fails the run. A NaN or infinite number is stored as not measured with the reason "the value was not finite".
+- The values are run-level, not stack-level: the session batch rolls up every frame of every session, and the single-image runner does not say which stack it read. Each name ends with its unit; a stage metric adds the unit to the checkpoint's own name (for example `stage_raw_frame_streak_tilt_deg`).
+- The summary keeps only the median of each checkpoint metric over the spectra, so the stage metrics are those medians. The per-star values stay in the star records. Yes/no verdicts (for example `poor_match`, `trustworthy`, `wavelength_zero_point_applied`) and the failed-spectrum counts are not measurements.
 
 ### Run-level metrics
 
@@ -217,6 +228,7 @@ The counts behind the gates come from `spectrum_facts`, which the batch workers 
 
 Each star's spectrum moves through all three stages in order. The pipeline stores the result of each stage on the star, so a reviewer can see the final classification along with the input quality and output trust score behind it. A quality checkpoint sits before the first stage and after each stage, so a reviewer can also see where quality was lost (see [Quality checkpoints](#quality-checkpoints) below).
 
+- `metrics.py` is where this pipeline declares its quality metrics for the metric registry: the run totals of the summary, the median of every numeric checkpoint metric (`spectroscopy.stage_<stage>_<metric>`), the wavelength-scale and Gaia XP roll-ups, and one self-check metric for each gate (for example `spectroscopy.gate_wavelength_scale`). Yes/no verdicts are not measurements and are not declared. See [shared quality](../shared/quality/README.md).
 - **Utilities** (`utilities/`) hold tools that are not part of processing a target's spectra:
   - `calibration_tuner.py` derives a camera's physical calibration ahead of time (see [Calibration tuning](#calibration-tuning)).
   - `registration_quality.py` checks how well a stack of spectral images aligned. It follows each frame's zero-order star (the star's undispersed image) and flags frames where that star jumps or fades. The stacking stage calls it after it stacks spectral frames (`_check_spectral_registration_quality` in `pipelines/stacking/stage.py`), and `api/quality.py` exposes its outlier test and thresholds.
@@ -226,7 +238,7 @@ Each star's spectrum moves through all three stages in order. The pipeline store
   - `batch.py` runs a whole session in parallel, one worker per frame.
   - `frame_analysis.py` (`analyze_frame_spectroscopy`) analyzes one frame for a target outside a full run and merges its stars into the catalog.
   - `record_and_flag_spectroscopy_stars.py` saves one frame's stars to the catalog and flags shaky classifications. Both `runner.py` and `batch.py` call it.
-- `pre_processing/spectral_frame_check.py` measures raw slitless-spectrum frames for `QualityDiagnostics.spectral_frame_check`, outside any run: the zero-order position, the trail's tilt and width, and the saturated patches along the spectrum. It finds the zero order with the stacking stage's point-source search, then its extended-target search for targets such as globular clusters, or accepts a position from the caller. It takes the saturation level from the camera profile (`shared/quality/saturation.py`) and records the level and its source in each result.
+- `pre_processing/spectral_frame_check.py` measures raw slitless-spectrum frames for `QualityRecords.check_spectral_frames`, outside any run: the zero-order position, the trail's tilt and width, and the saturated patches along the spectrum. It finds the zero order with the stacking stage's point-source search, then its extended-target search for targets such as globular clusters, or accepts a position from the caller. It takes the saturation level from the camera profile (`shared/quality/saturation.py`) and records the level and its source in each result.
 - `data/` holds the reference spectra, the instrument response, the line-spread profile and the extinction curve (see the [data README](data/README.md)).
 - The [spectroscopy review guide](../../../documentation/library_design/pipelines/spectroscopy.md) summarizes the pipeline for reviewers.
 

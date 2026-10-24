@@ -18,13 +18,20 @@ from astrometricslib.pipelines.astrometry.processing import star_identifier
 from astrometricslib.pipelines.pipeline_base import PipelineRequest, Result
 
 
-def _validate(monkeypatch: pytest.MonkeyPatch, wcs: Any, **context_fields: Any) -> AstrometryQualitySummary:
-    """Run `validate_output` on a canned context.
+def validate_with_options(
+    monkeypatch: pytest.MonkeyPatch,
+    options: dict[str, Any],
+    wcs: Any,
+    **context_fields: Any,
+) -> AstrometryQualitySummary:
+    """Run `validate_output` on a canned context, with request options.
 
     Parameters
     ----------
     monkeypatch : `pytest.MonkeyPatch`
         Used to stub the driver statistics the summary reads.
+    options : `dict`
+        The request options, such as ``job_id`` and ``measured_at``.
     wcs : `Any`
         The solved coordinate system, or `None` for an unsolved image.
     **context_fields
@@ -47,6 +54,7 @@ def _validate(monkeypatch: pytest.MonkeyPatch, wcs: Any, **context_fields: Any) 
         wcs_refinement=None,
         astrometry_flags=[],
         wcs=wcs,
+        wcs_is_header_fallback=False,
         image=SimpleNamespace(header={}),
     )
     for name, value in context_fields.items():
@@ -61,10 +69,33 @@ def _validate(monkeypatch: pytest.MonkeyPatch, wcs: Any, **context_fields: Any) 
             "simbad_matched_count": 0,
             "gaia_statistics": gaia,
             "plate_solve_attempts": 1,
+            "target_center_deg": (None, None),
         },
     )
-    request = PipelineRequest(target=Target(id="Test Target"), catalog_access=None, path="stack.fits")
+    request = PipelineRequest(
+        target=Target(id="Test Target"), catalog_access=None, path="stack.fits", options=options
+    )
     return runner.AstrometryPipelineAdapter().validate_output(request, result)
+
+
+def _validate(monkeypatch: pytest.MonkeyPatch, wcs: Any, **context_fields: Any) -> AstrometryQualitySummary:
+    """Run `validate_output` on a canned context with no request options.
+
+    Parameters
+    ----------
+    monkeypatch : `pytest.MonkeyPatch`
+        Used to stub the driver statistics the summary reads.
+    wcs : `Any`
+        The solved coordinate system, or `None` for an unsolved image.
+    **context_fields
+        Context fields to replace.
+
+    Returns
+    -------
+    summary : `AstrometryQualitySummary`
+        The summary `validate_output` built.
+    """
+    return validate_with_options(monkeypatch, {}, wcs, **context_fields)
 
 
 def test_an_unsolved_image_fails_the_gate_and_flags_the_run(monkeypatch: pytest.MonkeyPatch) -> None:

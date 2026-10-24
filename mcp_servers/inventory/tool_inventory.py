@@ -315,7 +315,7 @@ CLASSIFICATION_RULES = (
         "Brings new data from the telescope computer into the library. Never deletes.",
     ),
     _rule(
-        r"^diagnostics_frame_quality$",
+        r"^quality_measure_frames$",
         "compute",
         "high",
         "Measures frames and returns statistics. Saves nothing.",
@@ -359,7 +359,7 @@ CLASSIFICATION_RULES = (
         "Reads targets or stars in short, capped records.",
     ),
     _rule(
-        r"^diagnostics_spectral_frame_check$",
+        r"^quality_check_spectral_frames$",
         "compute",
         "high",
         "Measures raw spectrum frames and returns statistics. Saves nothing.",
@@ -383,13 +383,19 @@ CLASSIFICATION_RULES = (
         "Reads the job history and lineage. The logs database is opened read-only.",
     ),
     _rule(
+        r"^quality_(query|metrics)$",
+        "observe",
+        "high",
+        "Reads stored quality measurements, or the fixed list of metric declarations. Writes nothing.",
+    ),
+    _rule(
         r"^calibration_query$",
         "observe",
         "high",
         "Reads calibration counts. refresh reloads the index into memory and writes nothing.",
     ),
     _rule(
-        r"^diagnostics_stack_quality$",
+        r"^quality_measure_stack$",
         "compute",
         "high",
         "Measures a stack and compares it with another. Saves nothing.",

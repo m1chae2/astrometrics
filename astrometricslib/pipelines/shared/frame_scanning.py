@@ -393,6 +393,35 @@ def _stat_or_none(file_path: str) -> os.stat_result | None:
         return None
 
 
+def file_state_matches(
+    file_state: os.stat_result | None, stored_size: int | None, stored_modified_ns: int | None
+) -> bool:
+    """Tell whether a file still has a size and time that were stored earlier.
+
+    This is the one rule for "the file has not changed". The header scan uses
+    it with the stamp it took when it read the header, and the quality
+    measurement job uses it with the stamp it took when it measured the pixels.
+
+    Parameters
+    ----------
+    file_state : `os.stat_result` or `None`
+        The file's `os.stat` result now, or `None` if it cannot be read.
+    stored_size : `int` or `None`
+        The size in bytes stored earlier.
+    stored_modified_ns : `int` or `None`
+        The last-change time in nanoseconds stored earlier.
+
+    Returns
+    -------
+    matches : `bool`
+        `True` only if both stored values exist and both equal the file's
+        values now.
+    """
+    if file_state is None or stored_size is None or stored_modified_ns is None:
+        return False
+    return stored_size == file_state.st_size and stored_modified_ns == file_state.st_mtime_ns
+
+
 def _is_unchanged(frame: Any, file_state: os.stat_result | None) -> bool:
     """Tell whether a file still has the size and time stored on its record.
 
@@ -403,13 +432,9 @@ def _is_unchanged(frame: Any, file_state: os.stat_result | None) -> bool:
         `file_state`. A record without them (saved by older code) is never
         unchanged, so it is read once and stamped.
     """
-    if file_state is None:
-        return False
-    stored_size = getattr(frame, "file_size", None)
-    stored_modified_ns = getattr(frame, "file_modified_ns", None)
-    if stored_size is None or stored_modified_ns is None:
-        return False
-    return stored_size == file_state.st_size and stored_modified_ns == file_state.st_mtime_ns
+    return file_state_matches(
+        file_state, getattr(frame, "file_size", None), getattr(frame, "file_modified_ns", None)
+    )
 
 
 def scan_target_directory(target: Target, frames_root_path: str, refresh_headers: bool = False) -> None:

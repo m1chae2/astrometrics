@@ -259,6 +259,24 @@ def test_unchanged_stacks_are_skipped_by_default(config_in_tmp_path: AppConfigur
     assert config.get_skip_unchanged_stacks_enabled() is True
 
 
+def test_the_flat_match_time_limit_defaults_to_five_minutes(config_in_tmp_path: AppConfiguration) -> None:
+    """The flat-to-light match may read frames for 300 s by default."""
+    config = config_in_tmp_path
+    assert config.get_flat_match_time_limit_seconds() == pytest.approx(300.0)
+
+
+def test_the_flat_match_time_limit_can_be_set_and_ignores_bad_values(
+    config_in_tmp_path: AppConfiguration,
+) -> None:
+    """A positive number is used; bad values give the default."""
+    config = config_in_tmp_path
+    config.app_config.set("Processing.Siril", "flat_match_time_limit_seconds", "45")
+    assert config.get_flat_match_time_limit_seconds() == pytest.approx(45.0)
+    for bad in ("soon", "0", "-5"):
+        config.app_config.set("Processing.Siril", "flat_match_time_limit_seconds", bad)
+        assert config.get_flat_match_time_limit_seconds() == pytest.approx(300.0)
+
+
 def test_skipping_unchanged_stacks_can_be_turned_off(config_in_tmp_path: AppConfiguration) -> None:
     """The ``skip_unchanged_stacks_enabled`` setting switches the skip off."""
     config = config_in_tmp_path

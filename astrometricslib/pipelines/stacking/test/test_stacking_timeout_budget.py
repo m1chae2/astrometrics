@@ -8,6 +8,7 @@ be penalized for their wait time.
 import os
 import threading
 import time
+from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
@@ -130,7 +131,19 @@ def test_queue_time_does_not_consume_the_stacking_budget(monkeypatch: pytest.Mon
     stack_duration_seconds = 0.6
     reported_lock_wait = 5.0
 
-    def _slow_stack(target, frames_to_stack=None) -> str:  # ruff: ignore[missing-type-function-argument]
+    def _slow_stack(
+        target: object,
+        frames_to_stack: list | None = None,
+        measured_at: datetime | None = None,
+        quality_recording: object | None = None,
+    ) -> str:
+        """Stand in for a stack that takes a little while.
+
+        Returns
+        -------
+        stacked_path : `str`
+            A made-up output path.
+        """
         time.sleep(stack_duration_seconds)
         return "/stacked/output.fits"
 
@@ -153,7 +166,19 @@ def test_a_genuinely_hung_stack_is_still_abandoned(monkeypatch: pytest.MonkeyPat
     """Excluding queue time must not disarm hang detection."""
     release_hung_stack = threading.Event()
 
-    def _hung_stack(target, frames_to_stack=None) -> str:  # ruff: ignore[missing-type-function-argument]
+    def _hung_stack(
+        target: object,
+        frames_to_stack: list | None = None,
+        measured_at: datetime | None = None,
+        quality_recording: object | None = None,
+    ) -> str:
+        """Stand in for a stack that never finishes until released.
+
+        Returns
+        -------
+        stacked_path : `str`
+            A path that is never used.
+        """
         release_hung_stack.wait(30)
         return "/never/reached.fits"
 

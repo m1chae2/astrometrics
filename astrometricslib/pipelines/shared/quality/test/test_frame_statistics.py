@@ -169,7 +169,7 @@ def test_measured_fwhm_is_kept_apart_from_registration_fwhm(tmp_path: Path) -> N
     """The two FWHM sources must never be mixed in one field.
 
     photutils measures ~1.53x Siril's PSF fit on identical frames, so a
-    value written into registration_fwhm_x/y_px would look like a ~50%
+    value written into registration_fwhm_x_px would look like a ~50%
     seeing change caused purely by which stage did the measuring.
     """
     target = _target_with_frames([_write_frame(tmp_path / "a.fits")])

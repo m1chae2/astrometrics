@@ -16,7 +16,7 @@ import pytest
 
 from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObject
 from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline
-from astrometricslib.pipelines.spectroscopy.post_processing.run_gates import (
+from astrometricslib.pipelines.spectroscopy.post_processing.record_quality import (
     stage_quality_rows,
     summarize_stage_quality,
 )

@@ -8,7 +8,7 @@ Description: Verifies the listing, download, sync and log-sync tasks behind
 import os
 import time
 from contextlib import AbstractContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -16,7 +16,7 @@ from unittest.mock import ANY, Mock, patch
 
 import pytest
 
-from astrometricslib import ExternalServiceError, NotFoundError
+from astrometricslib import ExternalServiceError, FrameMeasurementSummary, FrameRecord, NotFoundError
 from wayfindinglib.tasks.control_tasks import remote_transfer_tasks as remote_operations
 
 
@@ -133,11 +133,17 @@ def test_download_remote_frames_returns_false_without_indexing_on_failure() -> N
 
 @dataclass
 class _FakeTargetRecord:
-    """A stand-in target record with an id and a position."""
+    """A stand-in target record with an id, a position and frame records."""
 
     id: str
     ra: str = "0h 0m 0s"
     dec: str = "0° 0′ 0″"
+    frames: list[FrameRecord] = field(
+        default_factory=lambda: [
+            FrameRecord(path="/library/lights/M 81/frame_001.fits"),
+            FrameRecord(path="/library/lights/M 81/older_frame.fits"),
+        ]
+    )
 
 
 class _FakeAstrometrics:
@@ -188,6 +194,133 @@ def test_download_remote_targets_downloads_and_reindexes_on_success() -> None:
     assert fake_astrometrics.created == ["M 81"]
     mock_classify.assert_called_once()
     assert fake_astrometrics.saved is True
+
+
+def _download_with_one_new_frame(
+    measure: Mock, measurement_summaries: list | None = None
+) -> tuple[bool, _FakeAstrometrics]:
+    """Run a local-path ingest in which the classifier adds one frame.
+
+    Parameters
+    ----------
+    measure : `Mock`
+        Stands in for ``astrometrics.processing.record_frame_measurements``.
+    measurement_summaries : `list`, optional
+        Collects the measurement summary, as the caller of a sync would.
+
+    Returns
+    -------
+    success : `bool`
+        What `download_remote_targets` returned.
+    fake_astrometrics : `_FakeAstrometrics`
+        The stand-in science library, to check what was called.
+    """
+    fake_astrometrics = _FakeAstrometrics(existing=[_FakeTargetRecord("M 81")])
+    fake_astrometrics.processing = SimpleNamespace(record_frame_measurements=measure)
+    observatory = _FakeObservatory(Mock())
+    observatory.astrometrics = fake_astrometrics
+
+    def classify(scan_list: list[str], target_id: str, config: Any, telescope: str, added: list[str]) -> None:
+        """Pretend one new frame was filed."""
+        added.append("/library/lights/M 81/frame_001.fits")
+
+    with (
+        patch("astrometricslib.get_configuration", return_value=_patched_config()),
+        patch("astrometricslib.classify_and_sort_fits_files", side_effect=classify),
+    ):
+        success = remote_operations.download_remote_targets(
+            observatory,
+            "M 81",
+            local_path="/local/lights/M81",
+            measurement_summaries=measurement_summaries,
+        )
+    return success, fake_astrometrics
+
+
+def _summary(**fields: Any) -> FrameMeasurementSummary:
+    """Build a measurement summary for the stand-in library to return.
+
+    Returns
+    -------
+    summary : `FrameMeasurementSummary`
+        A summary of one frame measured.
+    """
+    return FrameMeasurementSummary(**{
+        "target_id": "M 81",
+        "frames_measured": 1,
+        "rows_written": 20,
+        **fields,
+    })
+
+
+def test_a_sync_that_adds_frames_measures_only_those_frames_after_saving_the_target() -> None:
+    """Only the added frames are measured, once, by the processing API."""
+    measure = Mock(return_value=_summary())
+    summaries: list = []
+
+    success, fake_astrometrics = _download_with_one_new_frame(measure, summaries)
+
+    assert success is True
+    assert fake_astrometrics.saved is True
+    measure.assert_called_once()
+    assert measure.call_args.args[0].id == "M 81"
+    assert [frame.path for frame in measure.call_args.kwargs["frames"]] == [
+        "/library/lights/M 81/frame_001.fits"
+    ]
+    assert measure.call_args.kwargs["register_job"] is True
+    # The run's own summary is handed back for the one announcement.
+    assert summaries == [measure.return_value]
+
+
+def test_a_failed_measurement_never_fails_the_sync() -> None:
+    """An error in the measurement is logged and the sync still succeeds."""
+    measure = Mock(side_effect=ExternalServiceError("disk went away"))
+    summaries: list = []
+
+    success, fake_astrometrics = _download_with_one_new_frame(measure, summaries)
+
+    assert success is True
+    assert fake_astrometrics.saved is True
+    measure.assert_called_once()
+    assert summaries == []
+
+
+def test_an_unexpected_error_in_the_measurement_never_fails_the_sync() -> None:
+    """A RuntimeError from the image libraries leaves the sync a success."""
+    measure = Mock(side_effect=RuntimeError("photutils broke"))
+
+    success, _fake_astrometrics = _download_with_one_new_frame(measure)
+
+    assert success is True
+
+
+def test_a_measurement_skipped_because_the_target_is_busy_is_still_reported() -> None:
+    """The summary that says another run has the target comes back too."""
+    busy = _summary(frames_measured=0, rows_written=0, already_running=True, notes=["already going"])
+    measure = Mock(return_value=busy)
+    summaries: list = []
+
+    success, _fake_astrometrics = _download_with_one_new_frame(measure, summaries)
+
+    assert success is True
+    assert summaries[0].already_running is True
+
+
+def test_a_sync_that_adds_no_frames_measures_nothing() -> None:
+    """With nothing new, the measurement is not started."""
+    measure = Mock()
+    fake_astrometrics = _FakeAstrometrics(existing=[_FakeTargetRecord("M 81")])
+    fake_astrometrics.processing = SimpleNamespace(record_frame_measurements=measure)
+    observatory = _FakeObservatory(Mock())
+    observatory.astrometrics = fake_astrometrics
+
+    with (
+        patch("astrometricslib.get_configuration", return_value=_patched_config()),
+        patch("astrometricslib.classify_and_sort_fits_files"),
+    ):
+        remote_operations.download_remote_targets(observatory, "M 81", local_path="/local/lights/M81")
+
+    measure.assert_not_called()
 
 
 def test_download_remote_targets_local_path_skips_download() -> None:

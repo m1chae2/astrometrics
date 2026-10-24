@@ -1,0 +1,228 @@
+"""The declaration of one quality metric, as kept in the metric registry.
+
+Each pipeline declares its metrics as `MetricSpec` records. A record says
+what the metric means, how it is estimated, which way is better, what kind of
+uncertainty it has, and why it exists (its `MetricPurpose`). Readers such as
+`wayfindinglib`, the backend and the MCP servers use the registry to
+interpret stored measurements.
+
+A `MetricSpec` is immutable. Changing a metric's estimator, sample or
+constants means raising its `definition_version`.
+"""
+
+import datetime
+from enum import StrEnum
+from typing import Self
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from astrometricslib.models.quality.measurement import SubjectLevel
+
+
+class Checkpoint(StrEnum):
+    """The point in processing where a metric is measured."""
+
+    FRAME = "frame"
+    CALIBRATION = "calibration"
+    STACKING = "stacking"
+    ASTROMETRY = "astrometry"
+    PHOTOMETRY = "photometry"
+    SPECTROSCOPY = "spectroscopy"
+    ASTEROID_DETECTION = "asteroid_detection"
+
+
+class Direction(StrEnum):
+    """Which direction of a metric is better."""
+
+    LOWER = "lower"
+    HIGHER = "higher"
+    NONE = "none"
+
+
+class UncertaintyKind(StrEnum):
+    """What kind of uncertainty a metric reports.
+
+    ``MODEL_DERIVED`` marks a value that adds a term from a model (such as the
+    blur of a square pixel) to a measured value. Its uncertainty carries only
+    the statistical error of the measured part. The error of the model term
+    is not included, so the value must be read as model-derived.
+    """
+
+    STATISTICAL_1_SIGMA = "statistical_1_sigma"
+    SYSTEMATIC_BOUND = "systematic_bound"
+    MODEL_DERIVED = "model_derived"
+    NONE = "none"
+
+
+class MetricPurpose(StrEnum):
+    """Why a metric exists."""
+
+    DECISION = "decision"
+    CONTEXT = "context"
+    EXPLORATORY = "exploratory"
+
+
+class MetricSpec(BaseModel):
+    """The declaration of one registered metric.
+
+    Parameters
+    ----------
+    name : `str`
+        The metric name, such as ``"frame.star_width_moffat_arcsec"``.
+    definition_version : `int`
+        Raised whenever the estimator, sample or constants change.
+    unit : `str`
+        The unit every measurement of this metric must use.
+    checkpoint : `Checkpoint`
+        Where in processing the metric is measured.
+    levels : `tuple` of `SubjectLevel`
+        The subject levels the metric applies to. Stored sorted by value
+        with no repeats, so the JSON form is always the same.
+    better : `Direction`
+        Which direction is better.
+    meaning : `str`
+        One line in plain words.
+    decisions : `tuple` of `str`
+        The decisions the metric informs. Documentation only.
+    estimator : `str`
+        How the value is estimated.
+    sample_definition : `str`
+        What is sampled, such as which stars.
+    band : `str`
+        The filter or color channel the metric applies to.
+    computed_by : `str`
+        Dotted path of the function that computes it, relative to
+        ``astrometricslib``.
+    uncertainty_kind : `UncertaintyKind`
+        The kind of uncertainty reported.
+    uncertainty_method : `str`
+        How the uncertainty is found.
+    register_entry : `str` or `None`
+        The validation register entry an auditor checks.
+    purpose : `MetricPurpose`
+        Why the metric exists.
+    purpose_reason : `str`
+        Required for a decision or context metric.
+    exploratory_question : `str`
+        The question an exploratory metric answers. Required for exploratory.
+    review_date : `datetime.date` or `None`
+        When an exploratory metric must be promoted or removed. Required for
+        exploratory.
+    """
+
+    model_config = ConfigDict(frozen=True, populate_by_name=True)
+
+    name: str
+    definition_version: int = Field(alias="definitionVersion")
+    unit: str
+    checkpoint: Checkpoint
+    levels: tuple[SubjectLevel, ...]
+    better: Direction
+    meaning: str
+    decisions: tuple[str, ...] = ()
+    estimator: str
+    sample_definition: str = Field(alias="sampleDefinition")
+    band: str
+    computed_by: str = Field(alias="computedBy")
+    uncertainty_kind: UncertaintyKind = Field(alias="uncertaintyKind")
+    uncertainty_method: str = Field(alias="uncertaintyMethod")
+    register_entry: str | None = Field(default=None, alias="registerEntry")
+    purpose: MetricPurpose
+    purpose_reason: str = Field(default="", alias="purposeReason")
+    exploratory_question: str = Field(default="", alias="exploratoryQuestion")
+    review_date: datetime.date | None = Field(default=None, alias="reviewDate")
+
+    @field_validator("levels")
+    @classmethod
+    def _sort_levels(cls, levels: tuple[SubjectLevel, ...]) -> tuple[SubjectLevel, ...]:
+        """Sort the levels and drop repeats, so the JSON form is stable.
+
+        Parameters
+        ----------
+        levels : `tuple` of `SubjectLevel`
+            The levels as given.
+
+        Returns
+        -------
+        levels : `tuple` of `SubjectLevel`
+            The levels sorted by value, each once.
+        """
+        return tuple(sorted(set(levels), key=lambda level: level.value))
+
+    @model_validator(mode="after")
+    def _check_purpose_fields(self) -> Self:
+        """Require the fields that go with the metric's purpose.
+
+        Returns
+        -------
+        spec : `MetricSpec`
+            This spec, unchanged.
+
+        Raises
+        ------
+        ValueError
+            If a decision or context metric has no reason, or an exploratory
+            metric has no question or review date.
+        """
+        if self.purpose == MetricPurpose.EXPLORATORY:
+            if not self.exploratory_question.strip():
+                raise ValueError("An exploratory metric must state its question.")
+            if self.review_date is None:
+                raise ValueError("An exploratory metric must have a review date.")
+        elif not self.purpose_reason.strip():
+            raise ValueError(f"A {self.purpose.value} metric must give a purpose_reason.")
+        return self
+
+
+class MetricSummary(BaseModel):
+    """The short form of a `MetricSpec`, for listings.
+
+    A full `MetricSpec` is long. About 170 metrics are registered, and even a
+    one-line meaning for each makes a listing of all of them too long for an
+    MCP reply (the limit is 40,000 bytes). This record keeps only what a
+    reader needs to find a metric. Ask for the meaning and the rest with
+    ``detail="full"``, usually together with a ``checkpoint``.
+
+    Parameters
+    ----------
+    name : `str`
+        The metric name.
+    unit : `str`
+        The unit every measurement of this metric uses.
+    checkpoint : `Checkpoint`
+        Where in processing the metric is measured.
+    levels : `tuple` of `SubjectLevel`
+        The subject levels the metric applies to, sorted by value.
+    purpose : `MetricPurpose`
+        Why the metric exists.
+    """
+
+    model_config = ConfigDict(frozen=True, populate_by_name=True)
+
+    name: str
+    unit: str
+    checkpoint: Checkpoint
+    levels: tuple[SubjectLevel, ...]
+    purpose: MetricPurpose
+
+    @classmethod
+    def from_spec(cls, spec: MetricSpec) -> Self:
+        """Build the short form of a full declaration.
+
+        Parameters
+        ----------
+        spec : `MetricSpec`
+            The full declaration.
+
+        Returns
+        -------
+        summary : `MetricSummary`
+            The short form.
+        """
+        return cls(
+            name=spec.name,
+            unit=spec.unit,
+            checkpoint=spec.checkpoint,
+            levels=spec.levels,
+            purpose=spec.purpose,
+        )

@@ -43,7 +43,7 @@ The table uses these terms:
 
 | Section | Frame | Numbers | Measured by |
 | --- | --- | --- | --- |
-| `raw_frame_quality` | each of the 5 lights | star shape and count (star count, median FWHM, roundness, longest star streak); sky and saturation (sky median, saturated pixel count, background level, background noise, saturated fraction); shift from the previous frame and the number of stars matched to measure it; number of quality flags | `QualityDiagnostics.frame_quality(kind="raw_check")` and `measure_frame_input_quality`; the noise is a sigma-clipped standard deviation (one computed after dropping values far from the rest) |
+| `raw_frame_quality` | each of the 5 lights | star shape and count (star count, median FWHM, roundness, longest star streak); sky and saturation (sky median, saturated pixel count, background level, background noise, saturated fraction); shift from the previous frame and the number of stars matched to measure it; number of quality flags | `QualityRecords.measure_frames(kind="raw_check")` and `measure_frame_input_quality`; the noise is a sigma-clipped standard deviation (one computed after dropping values far from the rest) |
 | `raw_frame_quality` | `batch` | median star count, median FWHM, flagged frame count | the same raw check |
 | `source_detection` | `020` | source count; x, y and flux of the 10 brightest sources | `SourceDetector.detect` |
 | `fwhm_top5` | `020` | median FWHM of a Gaussian fit to the 5 brightest stars | `measure_fwhm_from_data` |

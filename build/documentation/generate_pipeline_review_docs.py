@@ -90,7 +90,7 @@ class GateDefinition:
         Returns
         -------
         path : `str`
-            For example ``"post_processing/run_gates.py"``.
+            For example ``"post_processing/record_quality.py"``.
         """
         parts = self.module.split(".")[3:]
         return "/".join(parts) + ".py"
@@ -1248,7 +1248,7 @@ def build_astrometry_doc() -> str:
         Markdown content for astrometry.md.
     """
     gates = discover_gate_names("astrometry")
-    run_gates_module = "astrometricslib.pipelines.astrometry.post_processing.run_gates"
+    record_quality_module = "astrometricslib.pipelines.astrometry.post_processing.record_quality"
     identifier_module = "astrometricslib.pipelines.astrometry.processing.star_identifier"
     refine_module = "astrometricslib.pipelines.astrometry.processing.wcs_refinement"
     driver_module = "astrometricslib.drivers.astrometry_net_driver"
@@ -1258,9 +1258,9 @@ def build_astrometry_doc() -> str:
     )
     values = {
         "version_line": VERSION_LINE,
-        "max_res": require_symbol(run_gates_module, "MAXIMUM_RESIDUAL_FRACTION_OF_FWHM"),
-        "min_match": require_symbol(run_gates_module, "MINIMUM_MATCHED_STARS"),
-        "max_fail": require_symbol(run_gates_module, "MAXIMUM_FAILED_LOOKUP_FRACTION"),
+        "max_res": require_symbol(record_quality_module, "MAXIMUM_RESIDUAL_FRACTION_OF_FWHM"),
+        "min_match": require_symbol(record_quality_module, "MINIMUM_MATCHED_STARS"),
+        "max_fail": require_symbol(record_quality_module, "MAXIMUM_FAILED_LOOKUP_FRACTION"),
         "match_radius": require_symbol(
             "astrometricslib.pipelines.shared.catalog_star_identity", "CATALOG_MATCH_RADIUS_ARCSEC"
         ),
@@ -1354,7 +1354,7 @@ def build_astrometry_doc() -> str:
             "It is there to catch a failed solve, not to rank good ones.",
         ],
         [
-            "`MINIMUM_MATCHED_STARS` (`run_gates`)",
+            "`MINIMUM_MATCHED_STARS` (`record_quality`)",
             f"`{values['min_match']}`",
             status_cell(STATUS_PARTLY_MEASURED, "AST-05"),
             "Fewest stars matched to a catalog for the residual to mean anything.",
@@ -1638,9 +1638,12 @@ The gate detail names the one used.
   already checked that an image path exists.
 - **Stage 2 (`run`).** Runs `AstrometryPipeline.process` (detection, solve, refit, header-WCS
   fallback, naming). It writes the solved WCS into the FITS header, fills in the target's RA/Dec
-  when they were unset, and saves the stars to the shared catalog.
+  when they were unset (from its SIMBAD position, with the solved image's center only as a marked,
+  unverified fallback), and saves the stars to the shared catalog.
 - **Stage 3 (`validate_output`).** Builds the `AstrometryQualitySummary`. The runner records
   `plate_solve`, then `astrometry_run_gates` adds the rest (<<gate_count>> in all).
+  The runner then stores the summary's numbers and the gates as quality measurements
+  (`record_astrometry_quality`).
 - **Stage 4 (`to_result_dict`).** Returns `context`, `stellar_objects`, `wcs` and `image_stats`.
 
 ### 4.1 Quality gates
@@ -1691,7 +1694,7 @@ def build_photometry_doc() -> str:
         Markdown content for photometry.md.
     """
     gates = discover_gate_names("photometry")
-    run_gates_module = "astrometricslib.pipelines.photometry.post_processing.run_gates"
+    record_quality_module = "astrometricslib.pipelines.photometry.post_processing.record_quality"
     ensemble_module = "astrometricslib.pipelines.photometry.processing.comparison_ensemble"
     indices_module = "astrometricslib.pipelines.photometry.processing.variability_indices"
     analyzer_module = "astrometricslib.pipelines.photometry.processing.variability_analyzer"
@@ -1701,13 +1704,13 @@ def build_photometry_doc() -> str:
     )
     values = {
         "version_line": VERSION_LINE,
-        "rej_frac": require_symbol(run_gates_module, "MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG"),
-        "rej_cnt": require_symbol(run_gates_module, "MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG"),
-        "max_amp": require_symbol(run_gates_module, "MAXIMUM_DETECTABLE_AMPLITUDE_MAG"),
-        "corner": require_symbol(run_gates_module, "MAXIMUM_CORNER_DISPLACEMENT_PX"),
-        "ens_scatter": require_symbol(run_gates_module, "MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED"),
-        "scatter_pop": require_symbol(run_gates_module, "MINIMUM_STARS_FOR_SCATTER_POPULATION"),
-        "fallback": require_symbol(run_gates_module, "MAXIMUM_CENTROID_FALLBACK_FRACTION"),
+        "rej_frac": require_symbol(record_quality_module, "MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG"),
+        "rej_cnt": require_symbol(record_quality_module, "MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG"),
+        "max_amp": require_symbol(record_quality_module, "MAXIMUM_DETECTABLE_AMPLITUDE_MAG"),
+        "corner": require_symbol(record_quality_module, "MAXIMUM_CORNER_DISPLACEMENT_PX"),
+        "ens_scatter": require_symbol(record_quality_module, "MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED"),
+        "scatter_pop": require_symbol(record_quality_module, "MINIMUM_STARS_FOR_SCATTER_POPULATION"),
+        "fallback": require_symbol(record_quality_module, "MAXIMUM_CENTROID_FALLBACK_FRACTION"),
         "drift": require_symbol(
             "astrometricslib.pipelines.photometry.pre_processing.assess_input_quality",
             "UNSTABLE_TRACKING_DRIFT_PX",
@@ -2204,6 +2207,8 @@ Variable Star Index) as listed, not listed, or unknown (`known_variability_label
 - **Stage 3 (`validate_output`).** Fits the run's noise model and records the run gates from
   `photometry_run_gates`. The period checks were already recorded on each period result in
   stage 2. The package defines <<gate_count>>.
+  It then stores the run's counts, four run measurements and the gates as quality measurements
+  next to the summary (`record_photometry_quality`).
 - **Stage 4 (`to_result_dict`).** Returns run counts, the rejected frames, the short-term and
   long-term variable candidates and the cross-session match count.
 
@@ -2279,7 +2284,7 @@ def build_spectroscopy_doc() -> str:
             "GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM",
         ),
         "processing_fraction": require_symbol(
-            "astrometricslib.pipelines.spectroscopy.post_processing.run_gates",
+            "astrometricslib.pipelines.spectroscopy.post_processing.record_quality",
             "PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION",
         ),
         "gate_count": gate_count_text(gates),
@@ -2625,6 +2630,8 @@ together.
   type.
 - **Stage 3 (`validate_output`).** Builds the summary, records the eight
   `spectroscopy_run_gates`, then `gaia_xp_agreement` (<<gate_count>> in all).
+  It then stores the run totals, the per-stage medians and the gates as quality measurements
+  (`record_spectroscopy_quality`).
 - **Stage 4 (`to_result_dict`).** Returns only `context` and `stellar_objects`.
 
 A session of raw frames runs through `batch.py` instead. It names the stars in one reference
@@ -2995,8 +3002,9 @@ body also moves the same way. A known body matches only if it is within
 - **Stage 1 (`process_input`).** A no-op that returns an empty `Result`.
 - **Stage 2 (`run`).** Runs `AsteroidDetectionPipeline.process` on the light frames that have a
   timestamp. Only straight-line movers and matched bodies are kept on the target.
-- **Stage 3 (`validate_output`).** Builds the summary and records `asteroid_run_gates`
-  (<<gate_count>>).
+- **Stage 3 (`validate_output`).** Builds the summary, records `asteroid_run_gates`
+  (<<gate_count>>) and stores the run's counts and gates as quality measurements
+  (`record_asteroid_quality`).
 - **Stage 4 (`to_result_dict`).** Returns the status, stage counts and surviving candidates.
 
 `mpc_report.py` can write Minor Planet Center (MPC, the clearing house for asteroid
@@ -3446,6 +3454,13 @@ Stacking has no `AnalysisPipeline` adapter. The entry point is `stage.stack_fram
    so the edges of a stack are covered by fewer frames than the middle and are noisier. The trim
    measures the noise and cuts each side back to where it matches the interior; a stack with
    clean edges is left alone. The quality summary and its gates are built (<<gate_count>>).
+   The stage then stores the summary's numbers, the gates, the stack's noise, the effective frame
+   count and time, and one weight per member frame as quality measurements
+   (`record_stacking_quality`). The noise is the scatter of the summed sky in fixed empty
+   patches, scaled by the flux of reference stars. With star-width weighting the frame weights
+   are rebuilt from the sequence file's star widths; with noise or star-count weighting they are
+   stored as not measured. When the patches' sky coordinates come from a frame header, they are
+   first moved onto the stored reference stars.
 6. **Preview image.** A JPEG for people to look at is made from a copy of the stack; the stack
    itself is never changed. GraXpert, an AI tool, removes the sky's brightness gradient. Siril
    stretches the brightness so faint parts show. Cosmic Clarity, another AI tool, removes noise.

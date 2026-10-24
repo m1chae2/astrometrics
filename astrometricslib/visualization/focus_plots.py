@@ -48,8 +48,8 @@ def _collect_focus_samples(target: Any) -> dict[str, np.ndarray]:
         ``"timestamp"``: seconds since 1970 (UTC), `NaN` where the frame has
         none. ``"temperature_c"``: focuser temperature in degrees Celsius.
         ``"position"``: focuser position in steps, `NaN` where missing.
-        ``"star_width_px"``: the frame's star-image width in pixels (the mean
-        of its x and y widths from alignment), `NaN` where missing.
+        ``"star_width_px"``: the frame's star-image width in pixels (the
+        FWHM from alignment), `NaN` where missing.
     """
     timestamps = []
     temperatures = []
@@ -63,14 +63,13 @@ def _collect_focus_samples(target: Any) -> dict[str, np.ndarray]:
             continue
         measurements = getattr(frame, "measurements", None)
         width_x = getattr(measurements, "registration_fwhm_x_px", None)
-        width_y = getattr(measurements, "registration_fwhm_y_px", None)
         timestamps.append(np.nan if getattr(frame, "timestamp", None) is None else float(frame.timestamp))
         temperatures.append(float(temperature))
         position = getattr(frame, "focuser_position", None)
         positions.append(np.nan if position is None else float(position))
-        widths.append(
-            np.nan if width_x is None or width_y is None else 0.5 * (float(width_x) + float(width_y))
-        )
+        # Siril reports one FWHM per frame. The old "y" width was really the
+        # weighted FWHM, so it is no longer averaged in.
+        widths.append(np.nan if width_x is None else float(width_x))
     samples = {
         "timestamp": np.array(timestamps, dtype=float),
         "temperature_c": np.array(temperatures, dtype=float),

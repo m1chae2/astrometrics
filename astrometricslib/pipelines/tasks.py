@@ -37,7 +37,8 @@ import logging
 import os
 import threading
 import time
-from typing import Any
+from datetime import datetime
+from typing import TYPE_CHECKING, Any
 
 from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.foundation.errors import ConflictError, InvalidArgumentError, ProcessingError
@@ -55,6 +56,9 @@ from astrometricslib.pipelines.shared.frame_grouping import (
     split_standard_and_spectral_frames,
 )
 from astrometricslib.pipelines.spectroscopy.runner import run_spectroscopy_analysis
+
+if TYPE_CHECKING:
+    from astrometricslib.pipelines.stacking.frame_measurement_run import FrameQualityRecording
 
 logger = logging.getLogger(__name__)
 
@@ -103,8 +107,27 @@ def compute_stacking_timeout_seconds(frame_count: int) -> int:
     return int(max(STACKING_TIMEOUT_SECONDS, scaled_timeout))
 
 
-def _stack_with_job_tracking(target: Target, frames_to_stack: list[FrameRecord]) -> str | None:
+def _stack_with_job_tracking(
+    target: Target,
+    frames_to_stack: list[FrameRecord],
+    measured_at: datetime | None = None,
+    quality_recording: FrameQualityRecording | None = None,
+) -> str | None:
     """Run Siril stacking, registered as a job the UI can track.
+
+    Parameters
+    ----------
+    target : Target
+        The target being stacked.
+    frames_to_stack : list
+        The frames to combine.
+    measured_at : `datetime`, optional
+        When the run started, with a time zone, for the quality rows the
+        stacking stage stores. The caller supplies it because pipeline code
+        does not read the clock. `None` (for tests only) stores no rows.
+    quality_recording : `FrameQualityRecording`, optional
+        The configuration and shared calibration library for those rows.
+        `None` stores no rows.
 
     Returns
     -------
@@ -122,7 +145,13 @@ def _stack_with_job_tracking(target: Target, frames_to_stack: list[FrameRecord])
 
         from astrometricslib.pipelines.stacking import stage as stacking_tasks
 
-        stacked_path = stacking_tasks.stack_frames(target, frames_to_stack=frames_to_stack, job_id=job.job_id)
+        stacked_path = stacking_tasks.stack_frames(
+            target,
+            frames_to_stack=frames_to_stack,
+            job_id=job.job_id,
+            measured_at=measured_at,
+            quality_recording=quality_recording,
+        )
         # Stacking can finish without raising and still produce no
         # image, so the outcome is decided here rather than left to the
         # context manager's "no exception means success" default.
@@ -131,7 +160,11 @@ def _stack_with_job_tracking(target: Target, frames_to_stack: list[FrameRecord])
 
 
 def stack_frames_with_timeout(
-    target: Target, frames_to_stack: list[FrameRecord], timeout_seconds: int | None = None
+    target: Target,
+    frames_to_stack: list[FrameRecord],
+    timeout_seconds: int | None = None,
+    measured_at: datetime | None = None,
+    quality_recording: FrameQualityRecording | None = None,
 ) -> str | None:
     """Run the image stacker with a time limit so it doesn't freeze forever.
 
@@ -149,6 +182,13 @@ def stack_frames_with_timeout(
     timeout_seconds : int, optional
         The maximum time allowed in seconds. If blank, it calculates
         a budget based on the number of frames.
+    measured_at : `datetime`, optional
+        When the run started, with a time zone, for the quality rows the
+        stacking stage stores. The caller supplies it because pipeline code
+        does not read the clock. `None` (for tests only) stores no rows.
+    quality_recording : `FrameQualityRecording`, optional
+        The configuration and shared calibration library for those rows.
+        `None` stores no rows.
 
     Returns
     -------
@@ -171,7 +211,9 @@ def stack_frames_with_timeout(
 
     def _run_stacking() -> None:
         try:
-            outcome["path"] = _stack_with_job_tracking(target, frames_to_stack)
+            outcome["path"] = _stack_with_job_tracking(
+                target, frames_to_stack, measured_at, quality_recording
+            )
         except Exception as stacking_error:
             # This runs in its own thread, so any error is kept here and
             # raised again in the calling thread below. The traceback is
@@ -243,6 +285,7 @@ def analyze_target(
     catalog_access=None,  # ruff: ignore[missing-type-function-argument]
     register_job: bool = True,
     path: str | None = None,
+    measured_at: datetime | None = None,
     **kwargs,  # ruff: ignore[missing-type-kwargs]
 ) -> dict[str, Any]:
     """Run a specific analysis pipeline on the given target.
@@ -258,6 +301,11 @@ def analyze_target(
         show up in the user interface's job tracker. Set to False if
         you are calling this from a tool that already tracks its own jobs
         (to prevent double-counting).
+    measured_at : datetime, optional
+        The time stamped on the quality measurements the pipeline stores,
+        with a time zone. Pipeline code never reads the clock, so the caller
+        supplies it. With `None` (for tests only) the pipeline stores no
+        quality measurements and logs a warning.
 
     Returns
     -------
@@ -308,6 +356,7 @@ def analyze_target(
                 )
 
         kwargs["job_id"] = job.job_id
+        kwargs["measured_at"] = measured_at
         return _run_analysis_pipeline_match(
             target, frames, pipeline_type, filter_type, catalog_access, path, **kwargs
         )
@@ -360,6 +409,7 @@ def run_target_stages(
     register_job: bool,
     drivers: Drivers | None = None,
     frame_selection: ProcessingFrameSelection | None = None,
+    measured_at: datetime | None = None,
 ) -> ProcessTargetResult:
     """Run the chosen analysis stages for one target, always in the same order.
 
@@ -390,6 +440,10 @@ def run_target_stages(
         unless its options name ``frames``. Spectroscopy runs only when
         the selection holds spectral frames or the target already has a
         spectral stack. Without it, every frame of the target is used.
+    measured_at : `datetime`, optional
+        The time stamped on the quality measurements each stage stores,
+        with a time zone. The caller supplies it because pipeline code does
+        not read the clock. `None` (for tests only) stores no measurements.
 
     Returns
     -------
@@ -425,6 +479,7 @@ def run_target_stages(
             pipeline_type=_PIPELINE_TYPES[stage],
             catalog_access=catalog_access,
             register_job=register_job,
+            measured_at=measured_at,
             **options,
         )
         result.stages_run.append(stage)
@@ -443,6 +498,8 @@ def run_full_pipeline(
     *,
     camera_name: str,
     focal_length_mm: float | None = None,
+    measured_at: datetime | None = None,
+    quality_recording: FrameQualityRecording | None = None,
 ) -> dict[str, str]:
     """Run the complete start-to-finish processing pipeline for a target.
 
@@ -464,6 +521,13 @@ def run_full_pipeline(
     camera_name : str
         The name of the camera to process images for. Any images taken
         by a different camera will be ignored.
+    measured_at : `datetime`, optional
+        When the run started, with a time zone, for the quality rows the
+        stacking stage stores. The caller supplies it because pipeline code
+        does not read the clock. `None` (for tests only) stores no rows.
+    quality_recording : `FrameQualityRecording`, optional
+        The configuration and shared calibration library for those rows. The
+        caller builds it once for the target. `None` stores no rows.
 
     Returns
     -------
@@ -480,7 +544,9 @@ def run_full_pipeline(
         return {}
 
     standard_frames, spectral_frames = split_standard_and_spectral_frames(target, camera_frames)
-    stack_outputs = _stack_camera_frames(target, camera_name, standard_frames, spectral_frames)
+    stack_outputs = _stack_camera_frames(
+        target, camera_name, standard_frames, spectral_frames, measured_at, quality_recording
+    )
     # The stacking stage moves frames with clouds or trailed stars out of the
     # target (see `stacking/pre_processing/frame_quarantine.py`) and no longer
     # lists them in `target.frames`. The frame lists above were made before
@@ -496,9 +562,11 @@ def run_full_pipeline(
     # standard stack -- skip them (rather than fail the whole target) when
     # it didn't stack, so a spectral-only success is still saved below.
     if "standard" in stack_outputs:
-        _run_astrometry_stage(target, catalog_access)
+        _run_astrometry_stage(target, catalog_access, measured_at)
         _save_target(target, catalog_access)
-        _run_photometry_stage(target, catalog_access, config, camera_frames, max_workers, max_concurrent_jobs)
+        _run_photometry_stage(
+            target, catalog_access, config, camera_frames, max_workers, max_concurrent_jobs, measured_at
+        )
         _save_target(target, catalog_access)
     elif standard_frames:
         logger.warning("[%s] Standard stacking failed; skipping astrometry and photometry.", target.id)
@@ -506,7 +574,9 @@ def run_full_pipeline(
     # 4. Spectroscopy Analysis (only when this target actually has a
     # SPEC stack)
     if "spectral" in stack_outputs:
-        _run_spectroscopy_stage(target, catalog_access, config, spectral_frames, max_concurrent_jobs)
+        _run_spectroscopy_stage(
+            target, catalog_access, config, spectral_frames, max_concurrent_jobs, measured_at
+        )
         _save_target(target, catalog_access)
     elif spectral_frames:
         logger.warning("[%s] Spectral stacking failed; skipping spectroscopy.", target.id)
@@ -541,6 +611,8 @@ def _stack_camera_frames(
     camera_name: str,
     standard_frames: list[FrameRecord],
     spectral_frames: list[FrameRecord],
+    measured_at: datetime | None = None,
+    quality_recording: FrameQualityRecording | None = None,
 ) -> dict[str, str]:
     """Stack a target's standard and/or spectral frames.
 
@@ -579,7 +651,9 @@ def _stack_camera_frames(
         try:
             # Caught broadly and deliberately: this kind's failure, whatever
             # its cause, must not take down the other kind's stack.
-            stacked_path = stack_frames_with_timeout(target, frames)
+            stacked_path = stack_frames_with_timeout(
+                target, frames, measured_at=measured_at, quality_recording=quality_recording
+            )
         except Exception:
             logger.exception("[%s] %s stacking raised an error", target.id, kind.capitalize())
             continue
@@ -601,7 +675,9 @@ def _stack_camera_frames(
     return stack_outputs
 
 
-def _run_astrometry_stage(target: Target, catalog_access: Any) -> dict[str, Any]:
+def _run_astrometry_stage(
+    target: Target, catalog_access: Any, measured_at: datetime | None = None
+) -> dict[str, Any]:
     """Run astrometry analysis on the target's stacked image.
 
     Returns
@@ -615,7 +691,9 @@ def _run_astrometry_stage(target: Target, catalog_access: Any) -> dict[str, Any]
         If astrometry analysis failed to produce a result.
     """
     logger.info("[%s] Running Astrometry Analysis...", target.id)
-    astrometry_results = analyze_target(target, pipeline_type="astrometry", catalog_access=catalog_access)
+    astrometry_results = analyze_target(
+        target, pipeline_type="astrometry", catalog_access=catalog_access, measured_at=measured_at
+    )
     if astrometry_results is None:
         raise ProcessingError("Astrometry analysis failed.")
     logger.info(
@@ -633,6 +711,7 @@ def _run_photometry_stage(
     camera_frames: list[FrameRecord],
     max_workers: int | None,
     max_concurrent_jobs: int,
+    measured_at: datetime | None = None,
 ) -> dict[str, Any]:
     """Run photometry/variability analysis on the target's camera frames.
 
@@ -649,6 +728,7 @@ def _run_photometry_stage(
             frames=camera_frames,
             catalog_access=catalog_access,
             max_workers=max_workers,
+            measured_at=measured_at,
         )
     logger.info(
         "[%s] Photometry Analysis complete. Stars found: %s",
@@ -664,6 +744,7 @@ def _run_spectroscopy_stage(
     config: Any,
     spectral_frames: list[FrameRecord],
     max_concurrent_jobs: int,
+    measured_at: datetime | None = None,
 ) -> None:
     """Run spectroscopy analysis when the target has SPEC frames.
 
@@ -679,7 +760,11 @@ def _run_spectroscopy_stage(
     logger.info("[%s] Running Spectroscopy Analysis...", target.id)
     with acquire_resource_slot(config, "job", max_concurrent_jobs):
         spectroscopy_results = analyze_target(
-            target, pipeline_type="spectroscopy", limit=10, catalog_access=catalog_access
+            target,
+            pipeline_type="spectroscopy",
+            limit=10,
+            catalog_access=catalog_access,
+            measured_at=measured_at,
         )
     if spectroscopy_results is None:
         raise ProcessingError("Spectroscopy analysis failed.")

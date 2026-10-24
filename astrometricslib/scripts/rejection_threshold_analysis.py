@@ -159,9 +159,7 @@ def run_analysis() -> None:
                 results.append(row)
                 continue
 
-            quality = astrometrics.processing.diagnostics.stack_quality(
-                stacked_path, include=["fwhm", "rejected_fraction"]
-            )
+            quality = astrometrics.quality.measure_stack(stacked_path, include=["fwhm", "rejected_fraction"])
             row["stacked_fwhm"] = quality.fwhm_px
             row["rejected_fraction"] = quality.rejected_fraction
             print(

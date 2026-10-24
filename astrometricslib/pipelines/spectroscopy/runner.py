@@ -13,6 +13,7 @@ from typing import Any
 import numpy as np
 
 from astrometricslib.models.quality.quality_summary import (
+    SPECTROSCOPY_PIPELINE_VERSION,
     SpectroscopyPipelineQualityMetrics,
     SpectroscopyQualitySummary,
 )
@@ -23,6 +24,7 @@ from astrometricslib.pipelines.pipeline_base import (
     Result,
     run_pipeline,
 )
+from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
 from astrometricslib.pipelines.shared.target_center_hint import (
     resolve_solved_stack_center_hint,
     resolve_solved_stack_wcs,
@@ -32,7 +34,8 @@ from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp i
     gaia_xp_rows,
     summarize_gaia_xp,
 )
-from astrometricslib.pipelines.spectroscopy.post_processing.run_gates import (
+from astrometricslib.pipelines.spectroscopy.post_processing.record_quality import (
+    record_spectroscopy_quality,
     spectroscopy_run_gates,
     spectrum_facts,
     stage_quality_rows,
@@ -523,14 +526,27 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
                 wavelength_scale_summary=wavelength_scale,
             ),
         )
-        for gate in spectroscopy_run_gates(
-            spectrum_facts(stellar_objects),
-            zero_order_fractions,
-            flagged_spectral_classifications,
-            wavelength_scale,
-        ):
+        gates = [
+            *spectroscopy_run_gates(
+                spectrum_facts(stellar_objects),
+                zero_order_fractions,
+                flagged_spectral_classifications,
+                wavelength_scale,
+            ),
+            gaia_xp_gate(gaia_rows),
+        ]
+        for gate in gates:
             summary.record_gate(gate)
-        summary.record_gate(gaia_xp_gate(gaia_rows))
+
+        # The same numbers, roll-ups and gates, stored as measurements next
+        # to the summary. The context is None when the caller gave no time;
+        # then nothing is stored (a warning says so). A storage failure is
+        # logged inside and never fails the run.
+        measurement_context = PipelineRunContext.from_options(
+            request.target.id, self.pipeline_name, SPECTROSCOPY_PIPELINE_VERSION, request.options
+        )
+        if measurement_context is not None:
+            record_spectroscopy_quality(summary.spectroscopy_metrics, gates, measurement_context)
 
         from astrometricslib.pipelines.shared.applied_camera_profile import record_camera_profile
 

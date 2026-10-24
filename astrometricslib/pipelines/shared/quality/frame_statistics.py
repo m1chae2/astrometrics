@@ -2,11 +2,43 @@
 
 This file contains tools for calculating statistics about the images,
 such as counting how many images there are for different camera settings,
-and measuring basic quality metrics like the sky background brightness.
+and measuring basic quality metrics like the sky background brightness. It
+also holds the seeded bootstrap error of a median, which the frame
+measurement and the photometry zero point both use.
 """
 
 from collections.abc import Callable
 from typing import Any
+
+import numpy as np
+
+# The number of resamples for the bootstrap of a median. 1000 puts the error
+# of the uncertainty itself near 2 percent.
+BOOTSTRAP_RESAMPLE_COUNT = 1000
+
+# Seed of the bootstrap, so one frame always gives the same uncertainty. The
+# value itself is arbitrary.
+BOOTSTRAP_SEED = 20261022
+
+
+def bootstrap_median_error(values: np.ndarray, generator: np.random.Generator) -> float:
+    """Estimate the standard error of a median by resampling.
+
+    Parameters
+    ----------
+    values : `numpy.ndarray`
+        The sample.
+    generator : `numpy.random.Generator`
+        The seeded random generator.
+
+    Returns
+    -------
+    error : `float`
+        The standard deviation of the medians of
+        `BOOTSTRAP_RESAMPLE_COUNT` resamples drawn with replacement.
+    """
+    draws = generator.integers(0, values.size, size=(BOOTSTRAP_RESAMPLE_COUNT, values.size))
+    return float(np.std(np.median(values[draws], axis=1)))
 
 
 def get_frame_stats(target: Any) -> dict[str, Any]:
@@ -135,7 +167,7 @@ def measure_frame_input_quality(
         if metrics["saturated_pixel_fraction"] is not None:
             frame.measurements.saturated_pixel_fraction = metrics["saturated_pixel_fraction"]
         if metrics["fwhm_px"] is not None:
-            # Deliberately NOT written into registration_fwhm_x/y_px.
+            # Deliberately NOT written into registration_fwhm_x_px.
             # Siril's registration PSF fit and this photutils measurement
             # are not on the same absolute scale -- measured on identical
             # NGC 4438 frames, photutils reports ~1.53x Siril's value
@@ -144,10 +176,10 @@ def measure_frame_input_quality(
             # Mixing them in one field would make a frame appear to jump
             # ~50% in seeing purely from which stage measured it, which
             # is precisely the false signal any trend analysis over these
-            # numbers must not see. Siril's pair is also genuinely
-            # per-axis (fwhm_x != fwhm_y on 228 of 238 measured frames),
-            # carrying elongation information a single circularized
-            # median cannot represent.
+            # numbers must not see. (Siril's second number was once read as
+            # a width along y, from a count of 228 of 238 frames where the
+            # two differed. It is the weighted FWHM, so that count did not
+            # show elongation.)
             frame.measurements.measured_fwhm_px = metrics["fwhm_px"]
         counts["measured"] += 1
 

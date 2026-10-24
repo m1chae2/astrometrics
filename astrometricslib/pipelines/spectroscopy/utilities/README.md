@@ -7,6 +7,6 @@ Terms are defined in the [glossary](../../../../documentation/Glossary.md). This
 ## What each file is for
 
 - `calibration_tuner.py` — derives the camera's physical settings from a bright reference star such as Vega and saves them for later runs. It finds the star's known hydrogen absorption lines and uses their positions to calculate the grating-to-sensor distance and where the spectrum starts.
-- `registration_quality.py` — checks the alignment quality of a spectroscopy stack after the fact. A spectrum frame has no sharp star to measure, so the check follows the zero-order star (the undispersed image of the star) and tests whether it jumps around or fades out.
+- `registration_quality.py` — checks the alignment quality of a spectroscopy stack after the fact. A spectrum frame has no sharp star to measure, so the check follows the zero-order star (the undispersed image of the star) and tests whether it jumps around or fades out, and whether too few stars matched. It does not test the frame's sky background level: Siril's "rmse" column holds that level, not a registration error.
 
 For exact behavior, read the code.

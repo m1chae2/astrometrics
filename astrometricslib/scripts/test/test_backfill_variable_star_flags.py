@@ -65,6 +65,11 @@ class FakeXMatch:
                 "id": [k[0] for k in known],
                 "angDist": [0.1] * len(known),
                 "Type": [k[1] for k in known],
+                "max": [2.09] * len(known),
+                "min": [3.3] * len(known),
+                "f_min": [""] * len(known),
+                "n_max": ["V"] * len(known),
+                "Period": [2.867343] * len(known),
             })
         known = [(i, f) for i, f in self.gaia.items() if i in ids]
         if not known:
@@ -205,7 +210,7 @@ def test_apply_backs_up_first_and_saves_the_looked_up_stars() -> None:
     assert catalog.stars["HD 1"].vsx_variability_type == NOT_IN_VSX
 
 
-def test_the_merge_rule_changes_only_the_two_flag_fields() -> None:
+def test_the_merge_rule_changes_only_the_flag_fields() -> None:
     """Anything a pipeline wrote since the star was loaded is kept."""
     saved = make_star("A")
     saved.spectral_type = "B8V"
@@ -277,3 +282,80 @@ def test_only_stars_with_a_light_curve_can_be_chosen() -> None:
     )
 
     assert report.candidates == 2
+
+
+def test_a_typed_variable_is_saved_with_its_vsx_range_and_period() -> None:
+    """The VSX range, period and band are saved with the type."""
+    catalog = small_catalog()
+
+    backfill.run_backfill(catalog, fake_service(), apply=True, make_backup=lambda: "b", log=no_log)
+
+    algol = catalog.stars["* bet Per"]
+    assert (algol.vsx_bright_magnitude, algol.vsx_faint_magnitude) == (2.09, 3.3)
+    assert algol.vsx_amplitude_mag == pytest.approx(1.21)
+    assert algol.vsx_period_days == pytest.approx(2.867343)
+    assert algol.vsx_magnitude_band == "V"
+    vega = catalog.stars["* alf Lyr"]
+    assert vega.vsx_variability_type == "CST"
+    assert vega.vsx_amplitude_mag is None
+    assert vega.vsx_magnitude_band == ""
+
+
+def test_the_merge_rule_also_copies_the_vsx_range_and_nothing_else() -> None:
+    """The five range fields travel with the flags; others stay."""
+    saved = make_star("A")
+    saved.spectral_type = "B8V"
+    loaded = make_star(
+        "A",
+        vsxVariabilityType="EA",
+        vsxBrightMagnitude=2.1,
+        vsxFaintMagnitude=3.3,
+        vsxAmplitudeMag=1.2,
+        vsxPeriodDays=2.87,
+        vsxMagnitudeBand="V",
+        vsxRangeChecked=True,
+    )
+
+    merged = backfill.copy_flags(saved, loaded)
+
+    assert (merged.vsx_bright_magnitude, merged.vsx_faint_magnitude, merged.vsx_amplitude_mag) == (
+        2.1,
+        3.3,
+        1.2,
+    )
+    assert (merged.vsx_period_days, merged.vsx_magnitude_band) == (2.87, "V")
+    assert merged.vsx_range_checked is True
+    assert merged.spectral_type == "B8V"
+
+
+def test_a_finished_variable_without_a_range_is_looked_up_again_only_when_asked() -> None:
+    """Stars saved before the ranges need --refresh-vsx-ranges."""
+    old_variable = make_star("A", vsxVariabilityType="EA/SD", gaiaVariableFlag="VARIABLE")
+    with_range = make_star(
+        "B",
+        vsxVariabilityType="EA/SD",
+        gaiaVariableFlag="VARIABLE",
+        vsxAmplitudeMag=1.2,
+        vsxRangeChecked=True,
+    )
+    asked_no_range = make_star(
+        "D", vsxVariabilityType="LPV", gaiaVariableFlag="VARIABLE", vsxRangeChecked=True
+    )
+    constant = make_star("C", vsxVariabilityType="CST", gaiaVariableFlag="CONSTANT")
+
+    assert not backfill.needs_lookup(old_variable, False)
+    assert backfill.needs_lookup(old_variable, False, refresh_vsx_ranges=True)
+    assert not backfill.needs_lookup(with_range, False, refresh_vsx_ranges=True)
+    assert not backfill.needs_lookup(asked_no_range, False, refresh_vsx_ranges=True)
+    assert not backfill.needs_lookup(constant, False, refresh_vsx_ranges=True)
+
+
+def test_a_legacy_record_is_marked_checked_after_the_lookup() -> None:
+    """A star saved before VSX ranges were kept is False until looked up."""
+    assert make_star("A", vsxVariabilityType="EA/SD").vsx_range_checked is False
+    catalog = small_catalog()
+
+    backfill.run_backfill(catalog, fake_service(), apply=True, make_backup=lambda: "b", log=no_log)
+
+    assert catalog.stars["* bet Per"].vsx_range_checked is True
+    assert catalog.stars["* alf Lyr"].vsx_range_checked is True

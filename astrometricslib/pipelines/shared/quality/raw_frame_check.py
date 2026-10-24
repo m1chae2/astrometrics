@@ -442,7 +442,7 @@ def _detect_straight_trail(
     return round(length_px), best[1]
 
 
-def _detect_stars(
+def detect_stars(
     image: np.ndarray, trail_min_diagonal_fraction: float = TRAIL_MIN_DIAGONAL_FRACTION
 ) -> tuple[np.ndarray, int, int, tuple[int, float] | None]:
     """Find the bright stars, and any long straight trail, in one image.
@@ -516,7 +516,7 @@ def _match_shift(previous_stars: np.ndarray, stars: np.ndarray) -> tuple[tuple[f
     Parameters
     ----------
     previous_stars, stars : `numpy.ndarray`
-        Star rows from `_detect_stars` for the earlier and the later frame.
+        Star rows from `detect_stars` for the earlier and the later frame.
 
     Returns
     -------
@@ -574,7 +574,7 @@ def measure_raw_frame(
         camera = hdu.header.get("INSTRUME")
         bayer_pattern = hdu.header.get("BAYERPAT")
     camera = str(camera) if camera else None
-    stars, blob_count, longest_blob, straight_trail = _detect_stars(image, trail_min_diagonal_fraction)
+    stars, blob_count, longest_blob, straight_trail = detect_stars(image, trail_min_diagonal_fraction)
     threshold_adu, threshold_source = resolve_saturation_threshold(camera)
     fwhm = roundness = None
     if len(stars):

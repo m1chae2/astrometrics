@@ -21,6 +21,7 @@ from astropy.io import fits
 from astrometricslib.models.camera_profile import (
     CameraProfile,
     ProvenancedValue,
+    SensorSettingNoise,
     ValueProvenance,
 )
 from astrometricslib.pipelines.photometry.pre_processing.detector_noise import (
@@ -38,13 +39,13 @@ SATURATION_ADU = 65535.0
 FRAME_SHAPE = (80, 80)
 
 
-def _profile(**changes: ProvenancedValue | None) -> CameraProfile:
+def _profile(**changes: object) -> CameraProfile:
     """Build a camera profile for the gain tests.
 
     Parameters
     ----------
     **changes
-        Fields of `CameraProfile` to set, such as ``gain_e_per_adu``.
+        Fields of `CameraProfile` to set, such as ``sensor_noise``.
 
     Returns
     -------
@@ -235,15 +236,38 @@ def test_the_worker_reports_flux_and_error_in_adu_per_second(tmp_path: Path) -> 
     assert error == pytest.approx(direct.flux_error_adu / 30.0, rel=0.01)
 
 
+# The setting the gain tests measure at: gain 0, offset 10, no binning.
+SETTING_HEADER = {"GAIN": 0.0, "OFFSET": 10, "XBINNING": 1, "YBINNING": 1}
+
+
+def _profile_with_noise_at_gain_zero(**changes: object) -> CameraProfile:
+    """Build a profile with gain 1.1 and read noise 3.2 at one setting.
+
+    Returns
+    -------
+    profile : `CameraProfile`
+        A profile whose only noise entry is for gain 0, offset 10, 1x1.
+    """
+    entry = SensorSettingNoise(
+        gain_setting="0",
+        offset="10",
+        binning="1x1",
+        gain_e_per_adu=_measured(1.1),
+        read_noise_e=_measured(3.2),
+        **changes,
+    )
+    return _profile(sensor_noise=(entry,))
+
+
 def test_the_profile_gain_comes_first_then_egain_and_gain_is_never_used() -> None:
     """The gain comes from the profile, then ``EGAIN``, never ``GAIN``.
 
     The ``GAIN`` card of ZWO cameras is a setting index, not electrons per
     ADU, so a header with only ``GAIN`` leaves the gain assumed.
     """
-    profile = _profile(gain_e_per_adu=_measured(1.1), read_noise_e=_measured(3.2))
+    profile = _profile_with_noise_at_gain_zero()
     bare = _profile()
-    header = fits.Header({"EGAIN": 0.8, "RDNOISE": 2.0, "GAIN": 120.0})
+    header = fits.Header({"EGAIN": 0.8, "RDNOISE": 2.0, **SETTING_HEADER})
 
     from_profile = resolve_detector_noise(profile, header)
     from_header = resolve_detector_noise(bare, header)
@@ -253,12 +277,55 @@ def test_the_profile_gain_comes_first_then_egain_and_gain_is_never_used() -> Non
     assert (from_profile.gain_e_per_adu, from_profile.read_noise_e) == (1.1, 3.2)
     assert not from_profile.gain_is_assumed
     assert not from_profile.read_noise_is_assumed
+    assert from_profile.profile_gap_reason is None
     assert (from_header.gain_e_per_adu, from_header.read_noise_e) == (0.8, 2.0)
     assert not from_header.gain_is_assumed
-    assert only_gain_card == DetectorNoise()
-    assert nothing == DetectorNoise()
+    assert from_header.profile_gap_reason is not None
+    assert (only_gain_card.gain_e_per_adu, only_gain_card.gain_is_assumed) == (1.0, True)
     assert nothing.gain_is_assumed
     assert nothing.read_noise_is_assumed
+
+
+def test_a_frame_at_another_setting_gets_nothing_from_the_profile() -> None:
+    """Gain and read noise are used only at the setting they were recorded at.
+
+    A frame at gain 100 must not borrow the gain-0 entry, and the result says
+    why. A header ``EGAIN`` may still fill the gap.
+    """
+    profile = _profile_with_noise_at_gain_zero()
+    other_gain = {**SETTING_HEADER, "GAIN": 100.0}
+    other_offset = {**SETTING_HEADER, "OFFSET": 30}
+    other_binning = {**SETTING_HEADER, "XBINNING": 2, "YBINNING": 2}
+
+    for header in (other_gain, other_offset, other_binning):
+        noise = resolve_detector_noise(profile, header)
+        assert noise.gain_is_assumed and noise.read_noise_is_assumed
+        assert noise.gain_e_per_adu == pytest.approx(1.0)
+        assert "no gain and read noise entry" in (noise.profile_gap_reason or "")
+    with_egain = resolve_detector_noise(profile, {**other_gain, "EGAIN": 0.9})
+    assert with_egain.gain_e_per_adu == pytest.approx(0.9)
+    assert not with_egain.gain_is_assumed
+
+
+def test_the_setting_can_be_given_by_a_frame_record_instead_of_a_header() -> None:
+    """A frame record's gain, offset and binning pick the entry too."""
+    profile = _profile_with_noise_at_gain_zero()
+
+    noise = resolve_detector_noise(profile, None, gain_setting="0.0", offset="10", binning=1)
+
+    assert (noise.gain_e_per_adu, noise.read_noise_e) == (1.1, 3.2)
+
+
+def test_an_unmigrated_profile_gives_the_migration_reason() -> None:
+    """Old single values are not applied; the reason names the migration."""
+    profile = _profile(has_unkeyed_noise_values=True)
+
+    noise = resolve_detector_noise(profile, SETTING_HEADER)
+
+    assert noise.gain_is_assumed and noise.read_noise_is_assumed
+    assert noise.profile_gap_reason == (
+        "camera profile has no setting-keyed gain and read noise; run the profile migration"
+    )
 
 
 @pytest.mark.parametrize("bad_value", [0.0, -1.0, float("nan"), "text"])
@@ -271,8 +338,8 @@ def test_an_unusable_egain_card_leaves_the_gain_assumed(bad_value: object) -> No
 
 
 def test_existing_profiles_without_gain_still_load() -> None:
-    """A profile with no gain or read noise is valid; both are `None`."""
+    """A profile with no noise entries is valid."""
     profile = _profile()
 
-    assert profile.gain_e_per_adu is None
-    assert profile.read_noise_e is None
+    assert profile.sensor_noise == ()
+    assert profile.has_unkeyed_noise_values is False

@@ -9,7 +9,7 @@ UI can only name methods and routes the backend serves.
 
 import os
 import sys
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 from typing import Any, Union, get_args, get_origin, get_type_hints
 
@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../.
 
 from astrometricslib import ErrorInfo, FilterType
 from astrometricslib.foundation.jobs.models import ProcessingJob, ProcessStatus
+from astrometricslib.models.applied_camera_profile import AppliedCameraProfile
 from astrometricslib.models.calibration_inventory import CalibrationEntry, CalibrationStats
 from astrometricslib.models.catalog_queries import OverlayStar, TargetStarCount
 from astrometricslib.models.measured_line_spread import MeasuredLineSpread
@@ -31,6 +32,7 @@ from astrometricslib.models.moving_object import (
     MovingObjectTrack,
 )
 from astrometricslib.models.quality.astrometry_quality import CatalogMatchQuality
+from astrometricslib.models.quality.capture_setting import CaptureSetting
 from astrometricslib.models.quality.gaia_xp_comparison import (
     GaiaXpBandResidual,
     GaiaXpBandSummary,
@@ -38,8 +40,25 @@ from astrometricslib.models.quality.gaia_xp_comparison import (
     GaiaXpRunSummary,
 )
 from astrometricslib.models.quality.gate_result import GateResult, GateStatus
+from astrometricslib.models.quality.limit import LimitTier, QualityLimit
+from astrometricslib.models.quality.measurement import (
+    MeasurementOrigin,
+    MeasurementReference,
+    MeasurementStatus,
+    QualityMeasurement,
+    QualitySubject,
+    StarResultReference,
+    SubjectLevel,
+)
+from astrometricslib.models.quality.metric_spec import (
+    Checkpoint,
+    Direction,
+    MetricPurpose,
+    MetricSpec,
+    MetricSummary,
+    UncertaintyKind,
+)
 from astrometricslib.models.quality.quality_summary import (
-    AppliedCameraProfile,
     AsteroidDetectionPipelineQualityMetrics,
     AsteroidDetectionQualitySummary,
     AstrometryPipelineQualityMetrics,
@@ -66,6 +85,7 @@ from astrometricslib.models.quality.spectroscopy_quality import (
     StageQualityRollup,
 )
 from astrometricslib.models.quality.stacking_quality import StackingInputQuality, StackingOutputQuality
+from astrometricslib.models.sensor_noise_measurement import SensorNoiseMeasurement
 from astrometricslib.models.spectral_cross_checks import LineIndexClassification, ReddeningRecord
 from astrometricslib.models.stellar_source import (
     AnalysisResult,
@@ -105,7 +125,7 @@ from astrometricslib.models.wavelength_scale import (
     WavelengthZeroPointLine,
     WavelengthZeroPointRecord,
 )
-from backend.public_interface import ROUTES, RPC_METHODS
+from backend.public_interface import ROUTES, RPC_METHODS, UI_EVENTS
 from backend.services.infrastructure.system_status_service import (
     IndiStatus,
     IntrospectionEndpoint,
@@ -176,7 +196,7 @@ def get_ts_type(py_type: Any) -> str:
         return "boolean"
     if py_type is Any:
         return "any"
-    if py_type is datetime:
+    if py_type is datetime or py_type is date:
         return "string"
     if py_type is type(None) or py_type is None:
         return "null"
@@ -198,9 +218,13 @@ def get_ts_type(py_type: Any) -> str:
                 unique_types.append(t)
         return " | ".join(unique_types)
 
-    if origin is list or origin is list:
+    if origin in (list, set, frozenset):
         item_type = get_ts_type(args[0]) if args else "any"
         return f"{item_type}[]"
+
+    if origin is tuple and len(args) == 2 and args[1] is Ellipsis:
+        # `tuple[X, ...]` is a list of X of any length.
+        return f"{get_ts_type(args[0])}[]"
 
     if origin is dict or origin is dict:
         key_type = get_ts_type(args[0]) if args else "string"
@@ -309,13 +333,14 @@ def generate_interface(model: type[BaseModel], name: str) -> str:
 
 
 def generate_public_interface() -> str:
-    """Generate the TypeScript list of the backend's methods and routes.
+    """Generate the TypeScript lists of the backend's methods, events, routes.
 
     Returns
     -------
     text : `str`
-        ``RPC_METHODS`` and its ``RpcMethod`` type, then
-        ``BACKEND_ROUTES``, one path per route name.
+        ``RPC_METHODS`` and its ``RpcMethod`` type, then ``UI_EVENTS`` and
+        its ``UiEvent`` type, then ``BACKEND_ROUTES``, one path per route
+        name.
     """
     lines = [
         "/**",
@@ -329,6 +354,21 @@ def generate_public_interface() -> str:
         "",
         "/** The name of one RPC method the backend serves. */",
         "export type RpcMethod = (typeof RPC_METHODS)[number];",
+        "",
+        "/**",
+        " * Every event the backend pushes to the app over the events WebSocket,",
+        " * from backend/public_interface.py.",
+        " */",
+        "export const UI_EVENTS = {",
+    ])
+    for event in UI_EVENTS:
+        lines.append(f"  /** {event.meaning} */")
+        lines.append(f'  "{event.name}": "{event.name}",')
+    lines.extend([
+        "} as const;",
+        "",
+        "/** The name of one event the backend pushes to the app. */",
+        "export type UiEvent = (typeof UI_EVENTS)[keyof typeof UI_EVENTS];",
         "",
         "/**",
         " * The path of every other route the backend serves, by name, from",
@@ -476,6 +516,23 @@ def render_types() -> str:
         ),
         generate_interface(AsteroidDetectionQualitySummary, "AsteroidDetectionQualitySummary"),
         generate_interface(WeatherSample, "WeatherSample"),
+        generate_enum(SubjectLevel, "SubjectLevel"),
+        generate_enum(MeasurementStatus, "MeasurementStatus"),
+        generate_enum(MeasurementOrigin, "MeasurementOrigin"),
+        generate_enum(LimitTier, "LimitTier"),
+        generate_enum(Checkpoint, "Checkpoint"),
+        generate_enum(Direction, "Direction"),
+        generate_enum(UncertaintyKind, "UncertaintyKind"),
+        generate_enum(MetricPurpose, "MetricPurpose"),
+        generate_interface(QualitySubject, "QualitySubject"),
+        generate_interface(QualityLimit, "QualityLimit"),
+        generate_interface(CaptureSetting, "CaptureSetting"),
+        generate_interface(StarResultReference, "StarResultReference"),
+        generate_interface(MeasurementReference, "MeasurementReference"),
+        generate_interface(QualityMeasurement, "QualityMeasurement"),
+        generate_interface(MetricSpec, "MetricSpec"),
+        generate_interface(MetricSummary, "MetricSummary"),
+        generate_interface(SensorNoiseMeasurement, "SensorNoiseMeasurement"),
         generate_public_interface(),
     ]
 

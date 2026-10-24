@@ -267,7 +267,18 @@ export interface ActionRegistry {
     // Backed by JobService.get_active_jobs(), which returns full ProcessingJob
     // records (with progressCurrent/progressTotal), not the lighter ProcessStatus.
     "processing:active_jobs": { payload: Record<string, never>; response: ProcessingJob[] };
+    "processing:record_frame_measurements": { payload: { target_id: string; limit?: number }; response: { started: boolean; target_id: string } };
+    // Stack some of a target's frames apart from its library stack and measure the noise of each result.
+    "processing:measure_half_difference_noise": { payload: { target_id: string }; response: { started: boolean; target_id: string } };
+    "processing:measure_noise_growth": { payload: { target_id: string; maximum_steps?: number; include_night_contributions?: boolean; include_half_difference?: boolean }; response: { started: boolean; target_id: string } };
+    "processing:measure_night_contributions": { payload: { target_id: string }; response: { started: boolean; target_id: string } };
     "processing:job_log_tail": { payload: { job_id: string; lines?: number }; response: string[] };
+
+    // Quality measurements: the stored ones, and what each metric means.
+    // Parameter names are snake_case (target_id, not targetId); the router
+    // drops names it does not know, so a misspelled filter is ignored.
+    "quality:query": { payload: { metric?: string; level?: import('../types/backendTypes').SubjectLevel; target_id?: string; observing_night_id?: string; camera?: string; telescope?: string; since?: string; row_ids?: number[]; latest_only?: boolean; variant?: string; library_only?: boolean }; response: import('../types/backendTypes').QualityMeasurement[] };
+    "quality:metrics": { payload: { name?: string; checkpoint?: import('../types/backendTypes').Checkpoint; detail?: 'summary' | 'full' }; response: import('../types/backendTypes').MetricSummary[] | import('../types/backendTypes').MetricSpec[] };
 
     // Analysis
     "analysis:analyze_image": { payload: { target_id: string; filter_type?: string; image_files?: string[]; type?: string }; response: AnalysisResult };
@@ -291,6 +302,7 @@ export interface ActionRegistry {
 
     // Calibration
     "calibration:get_stats": { payload: Record<string, never>; response: CalibrationStats };
+    "calibration:measure_sensor_noise": { payload: { camera_id: string; gain: string | number; offset: string | number; binning?: string; temperature?: number; exposure_seconds?: number; telescope?: string; filter_type?: string; save?: boolean }; response: import('../types/backendTypes').SensorNoiseMeasurement };
 
 
 

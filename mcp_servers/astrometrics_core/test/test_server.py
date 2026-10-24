@@ -21,7 +21,7 @@ from PIL import Image
 from astrometricslib import Visualization
 from mcp_servers.astrometrics_core.definition import MANIFEST_PATH, build_registry
 from mcp_servers.common.profile import load_manifest
-from mcp_servers.common.tool_registry import ToolRegistry
+from mcp_servers.common.tool_registry import MAXIMUM_REPLY_BYTES, ToolRegistry
 
 pytestmark = pytest.mark.anyio
 
@@ -58,7 +58,9 @@ def test_the_main_sub_apis_are_reflected(registry: ToolRegistry) -> None:
         "target_create",
         "visualization_render_fits",
         "star_query",
-        "diagnostics_stack_quality",
+        "quality_measure_stack",
+        "quality_query",
+        "quality_metrics",
         "calibration_query",
         "typegen_contract_validator",
     ):
@@ -80,8 +82,8 @@ async def test_a_reflected_tool_runs(registry: ToolRegistry) -> None:
 
 
 def test_frame_quality_has_the_documented_arguments(registry: ToolRegistry) -> None:
-    """`diagnostics_frame_quality` takes the documented, optional arguments."""
-    schema = registry.tools["diagnostics_frame_quality"]["tool_def"].input_schema
+    """`quality_measure_frames` takes the documented, optional arguments."""
+    schema = registry.tools["quality_measure_frames"]["tool_def"].input_schema
     assert set(schema["properties"]) == {
         "target",
         "folder_path",
@@ -155,3 +157,62 @@ def test_a_rendered_frame_reaches_the_client_as_an_image(tmp_path: Path) -> None
     assert content[0].mime_type == "image/png"
     assert Image.open(BytesIO(base64.b64decode(content[0].data))).size[0] > 0
     assert "brightness_range_shown" in json.loads(content[1].text)
+
+
+def test_the_quality_root_replaces_the_diagnostics_tools(registry: ToolRegistry) -> None:
+    """Quality tools are named ``quality_*``; none is ``diagnostics_*``."""
+    names = set(registry.tools)
+    assert not [name for name in names if name.startswith("diagnostics_")]
+    assert {"quality_measure_frames", "quality_check_spectral_frames", "quality_measure_stack"} <= names
+
+
+def test_the_stored_quality_query_has_the_documented_arguments(registry: ToolRegistry) -> None:
+    """`quality_query` offers the stored-read filters, none required."""
+    schema = registry.tools["quality_query"]["tool_def"].input_schema
+    assert set(schema["properties"]) == {
+        "metric",
+        "level",
+        "target_id",
+        "observing_night_id",
+        "camera",
+        "telescope",
+        "since",
+        "row_ids",
+        "latest_only",
+        "variant",
+        "library_only",
+    }
+    assert not schema.get("required")
+
+
+async def test_quality_metrics_reply_is_json_with_levels_as_a_list(registry: ToolRegistry) -> None:
+    """The summary reply is JSON under the size limit."""
+    reply = await registry.execute("quality_metrics", {})
+    assert len(reply[0].text.encode()) < MAXIMUM_REPLY_BYTES
+    specs = json.loads(reply[0].text)
+    assert specs
+    for spec in specs:
+        assert isinstance(spec["levels"], list)
+        assert all(isinstance(level, str) for level in spec["levels"])
+        assert "estimator" not in spec
+        assert "meaning" not in spec
+    one = json.loads((await registry.execute("quality_metrics", {"name": specs[0]["name"]}))[0].text)
+    assert [spec["name"] for spec in one] == [specs[0]["name"]]
+
+
+async def test_quality_metrics_full_detail_with_a_checkpoint_is_json(registry: ToolRegistry) -> None:
+    """Full detail for one checkpoint is JSON with whole declarations."""
+    reply = await registry.execute("quality_metrics", {"detail": "full", "checkpoint": "frame"})
+    specs = json.loads(reply[0].text)
+    assert specs
+    for spec in specs:
+        assert spec["checkpoint"] == "frame"
+        assert isinstance(spec["decisions"], list)
+        assert "estimator" in spec
+
+
+def test_quality_metrics_offers_optional_arguments(registry: ToolRegistry) -> None:
+    """`quality_metrics` takes `name`, `checkpoint` and `detail`."""
+    schema = registry.tools["quality_metrics"]["tool_def"].input_schema
+    assert set(schema["properties"]) == {"name", "checkpoint", "detail"}
+    assert not schema.get("required")

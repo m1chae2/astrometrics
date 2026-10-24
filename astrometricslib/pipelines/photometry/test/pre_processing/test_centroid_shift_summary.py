@@ -22,7 +22,7 @@ import pytest
 from astropy.io import fits
 
 from astrometricslib.models.quality.gate_result import GateResult, GateStatus
-from astrometricslib.pipelines.photometry.post_processing import run_gates as rg
+from astrometricslib.pipelines.photometry.post_processing import record_quality as rg
 from astrometricslib.pipelines.photometry.pre_processing.detector_noise import DetectorNoise
 from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import (
     CentroidShiftSummary,
@@ -114,7 +114,7 @@ def _measure_offsets(
             DetectorNoise(),
         ))
         assert isinstance(result, tuple), f"frame {index} was not measured: {result!r}"
-        _, _, shift_x, shift_y, _, _, positions, _, _ = result
+        _, _, shift_x, shift_y, _, _, positions, _, _, _ = result
         offsets, fallbacks = centroid_offsets_px(positions, reference_positions, shift_x, shift_y)
         offsets_by_frame[timestamp] = offsets
         measurement_count += len(positions)

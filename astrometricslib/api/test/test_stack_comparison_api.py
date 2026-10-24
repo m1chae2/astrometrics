@@ -11,7 +11,7 @@ import pytest
 from astropy.io import fits
 
 from astrometricslib.api.processing import ProcessingPipelines
-from astrometricslib.api.quality import QualityDiagnostics
+from astrometricslib.api.quality import QualityRecords
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.models.target import Target
@@ -54,15 +54,15 @@ def pipelines() -> ProcessingPipelines:
     return ProcessingPipelines(AppConfiguration(), MagicMock())
 
 
-def _diagnostics() -> QualityDiagnostics:
+def _diagnostics() -> QualityRecords:
     """Make diagnostics on a default configuration.
 
     Returns
     -------
-    diagnostics : `QualityDiagnostics`
+    diagnostics : `QualityRecords`
         Diagnostics that need no target catalog for stack paths.
     """
-    return QualityDiagnostics(AppConfiguration(), MagicMock())
+    return QualityRecords(AppConfiguration(), MagicMock())
 
 
 def _flatness(stack: Path) -> float:
@@ -73,7 +73,7 @@ def _flatness(stack: Path) -> float:
     flatness : `float`
         The flatness number of the stack compared with itself.
     """
-    report = _diagnostics().stack_quality(str(stack), compare_to=str(stack), register_job=False)
+    report = _diagnostics().measure_stack(str(stack), compare_to=str(stack), register_job=False)
     return report.comparison.before.flatness_rms
 
 
@@ -105,7 +105,7 @@ def test_stack_quality_compares_two_stack_files() -> None:
         write_fits(Path(folder) / "a.fits", 0.05, 1)
         write_fits(Path(folder) / "b.fits", 0.01, 2)
 
-        report = _diagnostics().stack_quality(
+        report = _diagnostics().measure_stack(
             str(Path(folder) / "b.fits"), compare_to=str(Path(folder) / "a.fits"), register_job=False
         )
         comparison = report.comparison
@@ -121,9 +121,11 @@ def test_comparing_with_the_previous_stack_uses_the_kept_stack(
     stack = tmp_path / "M_27_L_Stacked.fits"
     keep_old_stack(stack)
 
-    comparison = pipelines.diagnostics.stack_quality(
-        target_with_stack(stack), compare_to="previous", register_job=False
-    ).comparison
+    comparison = (
+        _diagnostics()
+        .measure_stack(target_with_stack(stack), compare_to="previous", register_job=False)
+        .comparison
+    )
 
     assert comparison is not None
     assert comparison.before.path.endswith("_previous/M_27_L_Stacked.fits")
@@ -138,9 +140,7 @@ def test_comparing_with_the_previous_stack_notes_when_nothing_is_kept(
     stack = tmp_path / "M_27_L_Stacked.fits"
     write_fits(stack, 0.01, 2)
 
-    report = pipelines.diagnostics.stack_quality(
-        target_with_stack(stack), compare_to="previous", register_job=False
-    )
+    report = _diagnostics().measure_stack(target_with_stack(stack), compare_to="previous", register_job=False)
     assert report.comparison is None
     assert "No previous stack" in report.notes[0]
 
@@ -155,7 +155,7 @@ def test_discard_previous_stack_deletes_it(tmp_path: Path, pipelines: Processing
 
     assert len(removed) == 1
     assert stack.exists()
-    report = pipelines.diagnostics.stack_quality(target, compare_to="previous", register_job=False)
+    report = _diagnostics().measure_stack(target, compare_to="previous", register_job=False)
     assert report.comparison is None
 
 
@@ -178,7 +178,7 @@ def test_swap_with_previous_stack_restores_the_old_stack(
 def test_a_target_without_a_stack_raises_a_clear_error(pipelines: ProcessingPipelines) -> None:
     """Asking about a missing stack is an error, not a silent no-op."""
     with pytest.raises(NotFoundError, match="has no stack"):
-        pipelines.diagnostics.stack_quality(Target(id="M 27"), compare_to="previous", register_job=False)
+        _diagnostics().measure_stack(Target(id="M 27"), compare_to="previous", register_job=False)
 
 
 def test_a_kind_is_refused_with_a_stack_path(tmp_path: Path) -> None:
@@ -186,19 +186,38 @@ def test_a_kind_is_refused_with_a_stack_path(tmp_path: Path) -> None:
     stack = tmp_path / "M_27_L_Stacked.fits"
     write_fits(stack, 0.01, 2)
     with pytest.raises(InvalidArgumentError):
-        _diagnostics().stack_quality(str(stack), kind="spectral", register_job=False)
+        _diagnostics().measure_stack(str(stack), kind="spectral", register_job=False)
     with pytest.raises(InvalidArgumentError):
-        _diagnostics().stack_quality(str(stack), include=["colour"], register_job=False)
+        _diagnostics().measure_stack(str(stack), include=["colour"], register_job=False)
 
 
 def test_the_registration_section_reports_a_missing_seq_file(tmp_path: Path) -> None:
     """A section that cannot be measured is `None`, with a note saying why."""
     stack = tmp_path / "M_27_L_Stacked.fits"
     write_fits(stack, 0.01, 2)
-    report = _diagnostics().stack_quality(
+    report = _diagnostics().measure_stack(
         str(stack), include=["registration", "rejected_fraction"], register_job=False
     )
     assert report.registration is None
     assert report.rejected_fraction is None
     assert report.included == ["registration", "rejected_fraction"]
     assert len(report.notes) == 2
+
+
+def test_the_registration_section_returns_typed_rows_from_a_real_format_seq_file(tmp_path: Path) -> None:
+    """A real registration line becomes a typed row."""
+    stack = tmp_path / "M_27_L_Stacked.fits"
+    write_fits(stack, 0.01, 2)
+    # The line is copied from a real M 106 stack.
+    (tmp_path / "M_27_L_Stacked_Registration.seq").write_text(
+        "I 0 1\n"
+        "R1 2.83064 3.27475 0.886847 0 0.0238392 1163 H 1 -1.53863e-05 6.3825 1.73631e-05 "
+        "1.00003 -29.2903 -2.69105e-09 4.67203e-09 1\n"
+    )
+    report = _diagnostics().measure_stack(str(stack), include=["registration"], register_job=False)
+    assert report.registration is not None
+    (row,) = report.registration
+    assert row.star_count == 1163
+    assert row.dx == pytest.approx(6.3825)
+    assert len(row.homography) == 9
+    assert row.model_dump(by_alias=True)["weightedFwhmPx"] == pytest.approx(3.27475)

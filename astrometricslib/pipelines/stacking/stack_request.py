@@ -20,7 +20,8 @@ import os
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from typing import Literal
+from datetime import datetime
+from typing import TYPE_CHECKING, Literal
 
 from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError, ProcessingError
@@ -36,6 +37,9 @@ from astrometricslib.pipelines.stacking.pre_processing.camera_selection import (
     describe_cameras,
     split_frames_by_camera,
 )
+
+if TYPE_CHECKING:
+    from astrometricslib.pipelines.stacking.frame_measurement_run import FrameQualityRecording
 
 __all__ = ["SirilOptions", "choose_frames_to_stack", "run_stack"]
 
@@ -168,6 +172,8 @@ def run_stack(
     stacking_slot: Callable[[], AbstractContextManager],
     save_targets: Callable[[], None],
     drivers: Drivers | None = None,
+    measured_at: datetime | None = None,
+    quality_recording: FrameQualityRecording | None = None,
 ) -> StackResult:
     """Stack the chosen frames, or only report the plan.
 
@@ -197,6 +203,14 @@ def run_stack(
         Saves the target catalog.
     drivers : `Drivers`, optional
         The stacking program to use. Left out, it is Siril.
+    measured_at : `datetime`, optional
+        When the stack started, with a time zone, for the quality rows the
+        stage stores. The API layer supplies it. Left out, the stage stores
+        no frame quality rows.
+    quality_recording : `FrameQualityRecording`, optional
+        The configuration and the shared calibration library for those rows.
+        The API layer supplies it. Left out, the stage stores no frame
+        quality rows.
 
     Returns
     -------
@@ -247,6 +261,8 @@ def run_stack(
             force=force,
             preview_settings=preview_settings,
             drivers=drivers,
+            measured_at=measured_at,
+            quality_recording=quality_recording,
         )
         # Stacking can finish without raising and still make no image, so
         # the outcome is decided here, not left to "no exception means done".
@@ -265,6 +281,6 @@ def run_stack(
             "flagged": getattr(quality, "flagged", None),
             "flag_reasons": list(getattr(quality, "flag_reasons", []) or []),
             "quality_summary": quality,
-            "note": "To compare this stack with the previous one, use QualityDiagnostics.stack_quality.",
+            "note": "To compare this stack with the previous one, use QualityRecords.measure_stack.",
         }
     )

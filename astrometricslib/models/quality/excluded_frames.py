@@ -7,7 +7,7 @@ frames back:
 
 - `SetAsideFrame` describes one frame, moved or about to be moved.
 - `QuarantinePreview` says what the check would move, without moving it.
-  `QualityDiagnostics.frame_quality(kind="quarantine_preview")` returns it.
+  `QualityRecords.measure_frames(kind="quarantine_preview")` returns it.
 - `RestoreReport` says what a restore listed or moved back.
 """
 

@@ -39,6 +39,10 @@ class AnalysisContext:
     image: AstrometricsImage
     stellar_objects: list[StellarObject]
     wcs: WCS | None = None
+    # True when `wcs` is the image header's own coordinate solution, used
+    # because this pass found none. Such a solution is whatever the header
+    # held (a commanded pointing, an earlier solve), not a solve of this pass.
+    wcs_is_header_fallback: bool = False
     extended_target: StellarObject | None = None
     extended_source_hint: ExtendedSourceHint | None = None
     sources_detected: int = 0
@@ -50,4 +54,9 @@ class AnalysisContext:
     # solution), or `None`. Typed `Any` because this shared module does not
     # import from one pipeline.
     wcs_refinement: Any = None
+    # The peak over the background noise of each star the Gaia refit used, in
+    # the order the fit used them, from which the expected position error is
+    # found. Empty when there is none; `gaia_fit_signal_reason` says why.
+    gaia_fit_peak_over_noise: tuple[float, ...] = ()
+    gaia_fit_signal_reason: str = "no Gaia fit was made"
     astrometry_flags: list[str] = field(default_factory=list)

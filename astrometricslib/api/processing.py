@@ -2,24 +2,25 @@
 
 `ProcessingPipelines` stacks a target's frames, makes the preview picture of a
 stack again, and runs the analysis stages (astrometry, photometry,
-spectroscopy and the asteroid search). It holds two children that it builds
-once and shares:
+spectroscopy and the asteroid search). It holds one child that it builds
+once and shares: `CalibrationCatalog` keeps track of the dark, bias and
+flat frames that remove a camera's noise from the raw frames.
 
-* `QualityDiagnostics` (in `quality.py`) measures raw frames and finished
-  stacks without changing anything.
-* `CalibrationCatalog` keeps track of the dark, bias and flat frames that
-  remove a camera's noise from the raw frames.
+Quality reads are not here. They start at `astrometrics.quality`
+(`QualityRecords`, in `quality.py`).
 
 The methods here check their arguments and hand the work to `pipelines/`.
 They raise an error from `astrometricslib.foundation.errors` when a request
 cannot be met, and return a typed result otherwise.
 """
 
+import logging
+import os
 from collections.abc import Callable
 from contextlib import AbstractContextManager
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
 
-from astrometricslib.api.quality import QualityDiagnostics
 from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.foundation.config import AppConfiguration
@@ -29,9 +30,18 @@ from astrometricslib.models.calibration_ingest import CalibrationIngestReport, F
 from astrometricslib.models.catalog_queries import CalibrationQueryResult
 from astrometricslib.models.processing_results import PreviewRemakeResult, ProcessTargetResult, StackResult
 from astrometricslib.models.quality.excluded_frames import RestoreReport
+from astrometricslib.models.quality.frame_measurement_summary import FrameMeasurementSummary
 from astrometricslib.models.quality.quality_reports import (
     StackSummary,
 )
+from astrometricslib.models.quality.quality_summary import STACKING_PIPELINE_VERSION
+from astrometricslib.models.quality.subset_stacks import (
+    HalfDifferenceNoiseResult,
+    NightContributionResult,
+    NoiseGrowthResult,
+    SubsetStackResult,
+)
+from astrometricslib.models.sensor_noise_measurement import SensorNoiseMeasurement
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.api_arguments import (
     STACK_KINDS,
@@ -44,15 +54,19 @@ from astrometricslib.pipelines.shared.api_arguments import (
     resolve_target,
 )
 from astrometricslib.pipelines.shared.camera_passes import resolve_processing_frames
+from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
 from astrometricslib.pipelines.stacking.calibration_ingest import (
     assess_flat_group,
     build_ingest_report,
     flatten_frame_index,
 )
+from astrometricslib.pipelines.stacking.sensor_noise_run import measure_sensor_noise_from_library
 from astrometricslib.utilities.parallel_batch import BatchRunSummary
 
 if TYPE_CHECKING:
     from astrometricslib.api.targets import TargetCatalog
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["CalibrationCatalog", "ProcessingPipelines"]
 
@@ -299,6 +313,80 @@ class CalibrationCatalog:
             )
             return [assess_flat_group(group) for group in groups]
 
+    @background_job("diagnostics", grace_period_seconds=20.0)
+    def measure_sensor_noise(
+        self,
+        camera_id: str,
+        gain: str | float,
+        offset: str | float,
+        binning: str = "1x1",
+        temperature: float | None = None,
+        exposure_seconds: float | None = None,
+        telescope: str | None = None,
+        filter_type: str | None = None,
+        save: bool = False,
+        register_job: bool = True,
+    ) -> SensorNoiseMeasurement:
+        """Measure a camera setting's gain and read noise.
+
+        The gain (electrons per ADU, where ADU is one step of the stored
+        pixel value) comes from pairs of flat frames, and the read noise
+        from pairs of bias frames, all taken at exactly this setting. The
+        frames are paired in file-name order. Reading never writes: the
+        camera profile changes only when ``save`` is `True` and the
+        measurement succeeded. If it cannot be made (too few pairs, or the
+        frames do not share one setting, exposure or temperature), the result
+        has status ``not_measured`` and a reason, and nothing is written.
+        Saving raises `ConfigurationError` when the camera has no profile or
+        its profile still holds an unmigrated gain.
+
+        Parameters
+        ----------
+        camera_id : `str`
+            The camera whose frames to use.
+        gain : `str` or `float`
+            The camera gain setting (or ISO).
+        offset : `str` or `float`
+            The camera offset.
+        binning : `str`, optional
+            The binning, such as ``"1x1"``. Defaults to ``"1x1"``.
+        temperature : `float`, optional
+            Use only frames within 1 degree C of this sensor temperature.
+        exposure_seconds : `float`, optional
+            Use only flats of this exposure. Needed when the setting's flats
+            were taken at several exposures.
+        telescope : `str`, optional
+            Use only flats taken through this telescope.
+        filter_type : `str`, optional
+            Use only flats taken through this filter.
+        save : `bool`, optional
+            Write a measured result into the camera profile, with a backup
+            of the config first. Defaults to `False`.
+        register_job : `bool`, optional
+            Record the run in the job list. Defaults to `True`.
+
+        Returns
+        -------
+        measurement : `SensorNoiseMeasurement`
+            The gain, read noise, spreads, counts and a source sentence for
+            the profile, or the reason nothing was measured.
+        """
+        with registered_job(enabled=register_job, job_type="diagnostics", target_id="calibration"):
+            return measure_sensor_noise_from_library(
+                self.library,
+                self._config,
+                camera_id,
+                gain,
+                offset,
+                binning,
+                temperature_c=temperature,
+                exposure_seconds=exposure_seconds,
+                telescope=telescope,
+                filter_type=filter_type,
+                save=save,
+                measured_on=datetime.now(UTC).date(),
+            )
+
 
 class _TargetsOnDemand:
     """Find targets through a `ProcessingPipelines`, building its catalog late.
@@ -362,8 +450,6 @@ class ProcessingPipelines:
     calibration : `CalibrationCatalog`
         Tracking, querying, and refreshing dark, bias, and flat
         calibration frames.
-    diagnostics : `QualityDiagnostics`
-        Measuring raw frame metrics, quarantine previews, and stack quality.
     """
 
     def __init__(
@@ -381,7 +467,6 @@ class ProcessingPipelines:
         self._target_catalog = targets
         lookup = targets if targets is not None else _TargetsOnDemand(self)
         self.calibration = calibration or CalibrationCatalog(config, storage, targets=lookup)
-        self.diagnostics = QualityDiagnostics(config, storage, targets=lookup)
 
     @property
     def _targets(self) -> TargetCatalog:
@@ -512,7 +597,7 @@ class ProcessingPipelines:
             The frames chosen and, unless ``plan_only``, the stack's path,
             flags and quality summary (``quality_summary``). To compare
             it with the previous stack, use
-            `QualityDiagnostics.stack_quality`.
+            `Astrometrics.quality.measure_stack`.
 
         Raises
         ------
@@ -521,6 +606,7 @@ class ProcessingPipelines:
             cannot be read, ``frames`` is combined with a frame choice, or
             the frames come from more than one camera.
         """
+        from astrometricslib.pipelines.stacking.frame_measurement_run import FrameQualityRecording
         from astrometricslib.pipelines.stacking.post_processing.stack_preview import PreviewSettings
         from astrometricslib.pipelines.stacking.stack_request import (
             SirilOptions,
@@ -571,6 +657,380 @@ class ProcessingPipelines:
             stacking_slot=self.acquire_stacking_slot,
             save_targets=self._targets.save,
             drivers=self._drivers,
+            measured_at=datetime.now(UTC),
+            quality_recording=FrameQualityRecording(self._config, self.calibration.library),
+        )
+
+    @background_job("stacking", grace_period_seconds=8.0)
+    def stack_subset(
+        self,
+        target: str | Target,
+        frames: list[FrameRecord],
+        *,
+        label: str,
+        output_folder: str | None = None,
+        register_job: bool = True,
+    ) -> SubsetStackResult:
+        """Stack exactly the given frames into a scratch folder.
+
+        The stack uses the target's normal settings (rejection, weighting,
+        exposure groups and edge trim). It is written to
+        ``<target's stacks folder>/_subsets/<label>/<label>.fits``, or to
+        ``output_folder`` when that lies inside the ``_subsets`` folder,
+        never to the library stack's path. While it runs, no library stack
+        and no other subset job of the target can run; a second one is
+        refused with `ConflictError`, not queued. Nothing is
+        assigned on the target and the target is not saved. The frame
+        quarantine step is not run, so give frames the library stack already
+        kept. The stack's noise in the target's stored sky apertures, its
+        effective frame count and its effective time are stored in the quality
+        database at level ``stack``. Delete the ``_subsets`` folder whenever
+        you like; nothing reads it back. A label that is unsafe in a path,
+        fewer than four frames, or frames from more than one camera raise
+        `InvalidArgumentError`.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target the frames belong to.
+        frames : `list` [`FrameRecord`]
+            The frames to stack, at least four, all from one camera.
+        label : `str`
+            Names the subset's folder and file. Letters, digits, dots,
+            underscores and hyphens; it may not start with a dot.
+        output_folder : `str`, optional
+            Write the stack here instead of the default subset folder. It
+            must be inside the target's ``_subsets`` folder.
+        register_job : `bool`, optional
+            Record the run in the job list. Defaults to `True`.
+
+        Returns
+        -------
+        result : `SubsetStackResult`
+            The subset stack's path, its frame counts and its noise (or why
+            there is none).
+        """
+        from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
+        from astrometricslib.pipelines.stacking.subset_noise_run import stack_chosen_subset
+
+        resolved = self._resolve(target)
+        with registered_job(enabled=register_job, job_type="stacking", target_id=resolved.id) as job:
+            context = self._subset_context(resolved, job.job_id)
+            return stack_chosen_subset(
+                resolved,
+                frames,
+                label,
+                self._library_stack_path(
+                    resolved,
+                    "spectral" if any(frame_is_spectral(frame) for frame in frames) else "imaging",
+                    must_exist=False,
+                ),
+                context=context,
+                configuration=self._config,
+                drivers=self._drivers,
+                stacking_slot=self.acquire_stacking_slot,
+                output_folder=output_folder,
+            )
+
+    @background_job("stacking", grace_period_seconds=8.0)
+    def measure_noise_growth(
+        self,
+        target: str | Target,
+        *,
+        maximum_steps: int = 4,
+        include_night_contributions: bool = False,
+        include_half_difference: bool = True,
+        register_job: bool = True,
+    ) -> NoiseGrowthResult:
+        """Stack growing subsets of a target and measure each one's noise.
+
+        The frames of the target's library stack (read from the stack's
+        ``_inputs.json``) are split by observing night. The subsets are the
+        first night, the first two nights, and so on, up to one night fewer
+        than the stack. A stack of one night uses the first quarter, half and
+        three quarters of its frames instead. At most ``maximum_steps``
+        subsets are made, spaced evenly through the possible ones, and a
+        subset with fewer than four frames is left out. The library stack is
+        the last point of the curve and is not stacked again.
+
+        Each subset is stacked into the target's ``_subsets`` folder with the
+        normal settings (without the frame quarantine step). Its noise is
+        measured in the same sky apertures as the library stack, so the
+        numbers compare. The noise, the reference flux, the effective frame
+        count and the effective time are stored at level ``stack``, with the
+        subset's label in the subject. The library stack, its previews and its
+        record are never changed.
+
+        Cost: one stack for each subset, four by default, each with fewer
+        frames than the library stack, plus the half-difference noise (two
+        stacks of half the frames each, about one library stack's time and
+        Siril's temporary disk). Expect the time of about two to four library
+        stacks (a design estimate, not a measurement). This job does not
+        start by itself after a stack; a caller starts it. The target must
+        already have the noise apertures that its library stack stored, so
+        stack it once first if it was stacked before they were recorded. A
+        target with no stack, or a stack with no ``_inputs.json``, raises
+        `NotFoundError`.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target.
+        maximum_steps : `int`, optional
+            The most subsets to stack. Defaults to 4.
+        include_night_contributions : `bool`, optional
+            Also run `measure_night_contributions` in the same job. Defaults
+            to `False`, because it costs one more stack for every night.
+        include_half_difference : `bool`, optional
+            Also run `measure_half_difference_noise` in the same job, under
+            the same lock, after the series. Defaults to `True`: it costs
+            about one library stack's time, and it is the noise measure that
+            ignores structure the frames share. Its result is in
+            ``half_difference`` and its rows are counted there.
+        register_job : `bool`, optional
+            Record the run in the job list. Defaults to `True`.
+
+        Returns
+        -------
+        result : `NoiseGrowthResult`
+            The subsets, smallest first, with notes about steps left out.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If ``maximum_steps`` is below 1.
+        """
+        from astrometricslib.pipelines.stacking.subset_noise_run import (
+            run_half_difference_noise,
+            run_night_contributions,
+            run_noise_growth,
+        )
+
+        if maximum_steps < 1:
+            raise InvalidArgumentError("maximum_steps must be at least 1.")
+        from astrometricslib.pipelines.stacking.target_stack_guard import subset_job_guard
+
+        resolved = self._resolve(target)
+        library_stack_path = self._library_stack_path(resolved, "imaging")
+        with (
+            registered_job(enabled=register_job, job_type="stacking", target_id=resolved.id) as job,
+            subset_job_guard(resolved.id),
+        ):
+            context = self._subset_context(resolved, job.job_id)
+            result = run_noise_growth(
+                resolved,
+                library_stack_path,
+                context=context,
+                configuration=self._config,
+                drivers=self._drivers,
+                stacking_slot=self.acquire_stacking_slot,
+                maximum_steps=maximum_steps,
+            )
+            if include_night_contributions:
+                result.night_contributions = run_night_contributions(
+                    resolved,
+                    library_stack_path,
+                    context=context,
+                    configuration=self._config,
+                    drivers=self._drivers,
+                    stacking_slot=self.acquire_stacking_slot,
+                )
+            if include_half_difference:
+                try:
+                    result.half_difference = run_half_difference_noise(
+                        resolved,
+                        library_stack_path,
+                        context=context,
+                        configuration=self._config,
+                        drivers=self._drivers,
+                        stacking_slot=self.acquire_stacking_slot,
+                    )
+                except Exception as error:  # the series is already stored; report, do not lose it
+                    logger.exception("The half-difference noise of %s failed", resolved.id)
+                    result.notes.append(
+                        f"The half-difference noise was not measured ({type(error).__name__}: {error})."
+                    )
+            return result
+
+    @background_job("stacking", grace_period_seconds=8.0)
+    def measure_night_contributions(
+        self, target: str | Target, *, register_job: bool = True
+    ) -> NightContributionResult:
+        """Measure what each observing night gave to a target's library stack.
+
+        For every night of the stack's frames, the stack's frames without that
+        night are stacked into the target's ``_subsets`` folder, and two
+        numbers are stored at level ``stack`` on that leave-out stack, with the
+        night in the subject's observing night: the night's share of the
+        library stack's total frame weight (``stacking.night_weight_fraction``)
+        and the noise of the stack without the night
+        (``stacking.noise_without_night``), with the paired difference from the
+        library stack's noise (``stacking.noise_difference_without_night``)
+        and the ratio the two stacks' effective frame counts predict
+        (``stacking.subset_expected_noise_ratio``).
+
+        Cost: one stack for every night, each close to the library stack's own
+        cost. It never runs by itself after a stack; call it when you want
+        it, or pass ``include_night_contributions`` to
+        `measure_noise_growth`. A stack of one night has nothing to leave out.
+        A target with no stack, or a stack with no ``_inputs.json``, raises
+        `NotFoundError`.
+        A share is stored as not measured when the stack's weights are unknown
+        (Siril weighted the frames itself).
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target.
+        register_job : `bool`, optional
+            Record the run in the job list. Defaults to `True`.
+
+        Returns
+        -------
+        result : `NightContributionResult`
+            One entry for each night.
+        """
+        from astrometricslib.pipelines.stacking.subset_noise_run import run_night_contributions
+
+        resolved = self._resolve(target)
+        library_stack_path = self._library_stack_path(resolved, "imaging")
+        with registered_job(enabled=register_job, job_type="stacking", target_id=resolved.id) as job:
+            context = self._subset_context(resolved, job.job_id)
+            return run_night_contributions(
+                resolved,
+                library_stack_path,
+                context=context,
+                configuration=self._config,
+                drivers=self._drivers,
+                stacking_slot=self.acquire_stacking_slot,
+            )
+
+    @background_job("stacking", grace_period_seconds=8.0)
+    def measure_half_difference_noise(
+        self, target: str | Target, *, keep_halves: bool = False, register_job: bool = True
+    ) -> HalfDifferenceNoiseResult:
+        """Measure a library stack's random noise from two halves.
+
+        The library stack's frames are put in order of capture time and split
+        into two disjoint halves, the 1st, 3rd, ... and the 2nd, 4th, ...
+        frame. The library stack's registration reference frame goes into
+        both, and it is handed to the stacker as the frame to line up with,
+        so a half cannot choose its own and the two half stacks have the same
+        pixel grid. Each half is stacked into the target's ``_subsets``
+        folder (normal settings, without the edge trim and the frame
+        quarantine), the difference is taken, and its noise is measured in
+        the library stack's stored empty apertures. The difference cancels
+        what the frames share (sky structure, faint stars, nebula) and keeps
+        their random noise, so it is the more honest noise of a deep or
+        crowded field. Nine rows are stored on the library stack at level
+        ``stack``, beside its ``stacking.empty_aperture_noise_*`` rows and
+        never replacing them: the noise (``..._stack_unit`` and
+        ``..._normalized``), the reference flux the normalized value divides
+        by, the two halves' effective frame counts, the variance factor, the
+        variance ratio with each frame's modeled noise, and the shared
+        frame's two weight shares (all ``stacking.half_difference_*``). Five
+        more rows say what the two halves share at the scale of a few pixels
+        (an upper limit of a fixed pattern on the sensor) and how that
+        differs along and across the pointing drift (the
+        ``stacking.half_shared_fine_scale_*`` and ``stacking.walking_noise_*``
+        metrics). The halves are deleted afterwards.
+
+        Cost: two stacks of half the frames each, about one library stack's
+        time in all, plus the temporary disk space Siril needs for each
+        (its converted and registered frames, deleted after each stack).
+        Neither this job nor `measure_noise_growth` starts by itself after a
+        stack, and neither runs inside the stack's own process. While it runs,
+        no library stack and no other subset job of the target can run.
+        When the measurement cannot be made (a half with under 8 frames, no
+        recorded registration reference, other apertures than the library
+        stack's, a Siril failure), the rows are stored as not measured with
+        the reason, and the result says why. A target with no stack, or a
+        stack with no recorded frames, raises `NotFoundError`.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target.
+        keep_halves : `bool`, optional
+            Keep the two half stacks in the ``_subsets`` folder. Defaults to
+            `False`.
+        register_job : `bool`, optional
+            Record the run in the job list. Defaults to `True`.
+
+        Returns
+        -------
+        result : `HalfDifferenceNoiseResult`
+            The difference noise, the halves' effective frame counts and the
+            library stack's own noise that the difference implies, or the
+            reason there are none.
+        """
+        from astrometricslib.pipelines.stacking.subset_noise_run import run_half_difference_noise
+
+        resolved = self._resolve(target)
+        library_stack_path = self._library_stack_path(resolved, "imaging")
+        with registered_job(enabled=register_job, job_type="stacking", target_id=resolved.id) as job:
+            context = self._subset_context(resolved, job.job_id)
+            return run_half_difference_noise(
+                resolved,
+                library_stack_path,
+                context=context,
+                configuration=self._config,
+                drivers=self._drivers,
+                stacking_slot=self.acquire_stacking_slot,
+                keep_halves=keep_halves,
+            )
+
+    def _library_stack_path(self, target: Target, kind: StackKind, *, must_exist: bool = True) -> str:
+        """Find the path of a target's library stack for the subset jobs.
+
+        Parameters
+        ----------
+        target : `Target`
+            The target.
+        kind : {"imaging", "spectral"}
+            Which stack.
+        must_exist : `bool`, optional
+            Raise when the target has no stack. When `False`, a target
+            without a stack gets the path its stack would have, so a
+            subset can still be stacked beside it.
+
+        Returns
+        -------
+        path : `str`
+            The library stack's path.
+        """
+        from astrometricslib.pipelines.stacking.post_processing.stack_quality_report import stack_path_of
+
+        if must_exist:
+            return stack_path_of(target, kind)
+        stacking = target.spectral_stacking if kind == "spectral" else target.stacking
+        if stacking.stacked_image:
+            return str(stacking.stacked_image)
+        folder = os.path.join(str(self._config.get_stacks_path()), "lights", target.id)
+        tag = "_SPEC" if kind == "spectral" else ""
+        return os.path.join(folder, f"{target.id.replace(' ', '_')}{tag}_Stacked.fits")
+
+    def _subset_context(self, target: Target, job_id: str | None) -> PipelineRunContext | None:
+        """Make the shared facts of one subset-stack run.
+
+        Parameters
+        ----------
+        target : `Target`
+            The target.
+        job_id : `str` or `None`
+            The run's job id, if it recorded a job.
+
+        Returns
+        -------
+        context : `PipelineRunContext`
+            The context, stamped with the time now (the API layer reads the
+            clock, the pipelines do not).
+        """
+        return PipelineRunContext.from_options(
+            target.id,
+            "stacking",
+            STACKING_PIPELINE_VERSION,
+            {"job_id": job_id, "measured_at": datetime.now(UTC)},
         )
 
     @background_job("preview", grace_period_seconds=20.0)
@@ -799,6 +1259,7 @@ class ProcessingPipelines:
                 camera_id=camera_id,
                 focal_length_mm=focal_length_mm,
                 on_item_complete=on_item_complete,
+                measured_at=datetime.now(UTC),
             )
 
         reject_unused_arguments(
@@ -836,6 +1297,7 @@ class ProcessingPipelines:
             register_job,
             drivers=self._drivers,
             frame_selection=frame_selection,
+            measured_at=datetime.now(UTC),
         )
 
     def run_spectroscopy_by_session(
@@ -888,6 +1350,7 @@ class ProcessingPipelines:
                 on_item_complete=on_item_complete,
                 job_id=job.job_id,
                 drivers=self._drivers,
+                measured_at=datetime.now(UTC),
             )
 
     # -- Reading and changing a target's stacks and set-aside frames --------
@@ -975,6 +1438,103 @@ class ProcessingPipelines:
         check_choice("kind", kind, STACK_KINDS)
         return swap_with_previous_stack(stack_path_of(self._resolve(target), kind))
 
+    @background_job("quality", grace_period_seconds=20.0)
+    def record_frame_measurements(
+        self,
+        target: str | Target,
+        frames: list[FrameRecord] | None = None,
+        limit: int | None = None,
+        register_job: bool = True,
+    ) -> FrameMeasurementSummary:
+        """Measure a target's light frames once and store the numbers.
+
+        Each light frame is read once and measured: the width, elongation
+        and direction of its stars, the sky brightness and noise in
+        electrons, the camera's read noise, the temperatures, and the
+        measurements the library already makes (background level, saturated
+        fraction, Gaussian star width, count of bright regions). The numbers
+        go into the quality database and can be read with
+        ``Astrometrics.quality.query``. A value that cannot be measured is
+        stored as ``not_measured`` with the reason. The sky brightness needs
+        the bias level of the frame's exact camera setting, taken from the
+        calibration library's bias frames; with none at that setting those
+        two metrics are ``not_measured``.
+
+        The frame files are never moved or changed. Each measured frame gets
+        a stamp (the file size and change time at the measurement), saved to
+        the stored target every 20 frames and at the end. Only the stamps are
+        written, so the save never overwrites other changes to the target. A
+        frame whose file still matches its stamp is skipped, so a second call
+        measures nothing again. A frame that fails, for any reason, is
+        counted and tried again next time; one failure does not stop the
+        others. Each frame takes about 12 s of one core, and four frames are
+        measured at once in four worker processes: real data (61 frames of
+        3008 by 3008 pixels) took about 345 s and about 2.7 GB of memory.
+
+        The worker processes are started with "spawn", which imports the
+        calling script again in each worker. A script that calls this method
+        must therefore keep its top-level code under
+        ``if __name__ == "__main__":``, or the workers stop and every frame
+        fails. The backend, the bundled scripts and notebooks run as modules
+        or cells and are not affected.
+
+        Only one run measures a target at a time, and only one run in the
+        process reads frames at a time. A second call for a target that is
+        already being measured returns at once with ``already_running`` set
+        and nothing measured. A call for another target waits for its turn.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target whose light frames to measure.
+        frames : `list` [`FrameRecord`], optional
+            Only these frames. All of the target's light frames when omitted.
+        limit : `int`, optional
+            Measure at most this many frames, newest first. The rest wait for
+            the next call.
+        register_job : `bool`, optional
+            Record the run in the job list. Defaults to `True`.
+
+        Returns
+        -------
+        summary : `FrameMeasurementSummary`
+            How many frames were measured, skipped because they had not
+            changed, or failed, and how many rows were written.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If ``limit`` is below 1.
+        """
+        from astrometricslib.drivers.quality_store import QualityStore
+        from astrometricslib.pipelines.shared.target_records import save_quality_stamps
+        from astrometricslib.pipelines.stacking.frame_measurement_run import (
+            FrameMeasurementSession,
+            record_frame_measurements_for_target,
+        )
+
+        if limit is not None and limit < 1:
+            raise InvalidArgumentError("limit must be at least 1.")
+        resolved = self._resolve(target)
+        with registered_job(enabled=register_job, job_type="quality", target_id=resolved.id) as job:
+            # The run gets its own run id and reports progress only when it
+            # registered (or joined) a job of its own. Called from inside
+            # another job (stacking, ingestion), it leaves that job's
+            # progress and id alone.
+            session = FrameMeasurementSession(
+                QualityStore.from_configuration(self._config),
+                self.calibration.library,
+                progress_job=job if job.job_id is not None and job.job_type == "quality" else None,
+                measured_at=datetime.now(UTC),
+            )
+            return record_frame_measurements_for_target(
+                resolved,
+                session,
+                frames=frames,
+                limit=limit,
+                save_target=lambda: save_quality_stamps(self._targets, resolved),
+            )
+
     def restore_excluded_frames(self, target: str | Target, apply: bool = False) -> RestoreReport:
         """List, or move back, the frames the stacker set aside for a target.
 
@@ -983,7 +1543,7 @@ class ProcessingPipelines:
         saves it. The next stack may set the same frames aside again. To
         keep them in the stack, turn off ``quarantine_bad_frames_enabled`` in
         the configuration first. To only read the list, use
-        ``QualityDiagnostics.frame_quality(include=["excluded"])``.
+        ``Astrometrics.quality.measure_frames(include=["excluded"])``.
 
         Parameters
         ----------

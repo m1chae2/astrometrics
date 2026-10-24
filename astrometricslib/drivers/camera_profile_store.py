@@ -10,10 +10,26 @@ taken from a FITS header, a frame record, or the config itself.
 A camera that has no profile gets the generic fallback profile instead of
 an error, so a new camera does not stop processing. A warning is logged
 the first time each unlisted name is seen, so the gap is not silent.
+
+A profile keeps its gain and read noise per camera setting, as an array of
+inline tables named ``sensor_noise`` (see
+`astrometricslib.models.camera_profile.SensorSettingNoise`). This module also
+writes such an entry back to the config file (`save_sensor_setting_noise`),
+after copying the file to a timestamped backup. The older layout, one
+``gain_e_per_adu`` and one ``read_noise_e`` per camera with no setting, still
+loads, but its values are not used: nobody recorded the setting they were
+measured at. A warning is logged once per camera, and the migration in
+`astrometricslib.drivers.camera_profile_migration` converts the file.
 """
 
+import datetime
 import functools
+import glob
 import logging
+import shutil
+from pathlib import Path
+
+import tomlkit
 
 from astrometricslib.foundation.camera_names import normalize_camera_name
 from astrometricslib.foundation.config import AppConfiguration, get_configuration
@@ -22,12 +38,28 @@ from astrometricslib.models.camera_profile import (
     CameraProfile,
     ProvenancedValue,
     QuantumEfficiencyRecord,
+    SensorSettingNoise,
     ValueProvenance,
 )
 
 logger = logging.getLogger(__name__)
 
 _CAMERA_SECTION_PREFIX = "Observatory.Camera."
+
+# The keys of the old layout, which held one gain and one read noise for the
+# whole camera, whatever its setting. They are read only to be flagged and
+# migrated, never applied.
+LEGACY_NOISE_KEYS = ("gain_e_per_adu", "read_noise_e")
+
+# The key of the current layout: an array of inline tables, one per setting.
+SENSOR_NOISE_KEY = "sensor_noise"
+
+# How many ``.bak`` copies of one config file are kept. Each saved measurement
+# or migration copies the config first, and the config is a few tens of
+# kilobytes, so ten copies cost a few hundred kilobytes and cover the last ten
+# edits, enough to undo a mistake noticed within a session or two. Older copies
+# are deleted when a new one is made. A design choice, not a tuned value.
+MAXIMUM_CONFIG_BACKUPS = 10
 
 
 def _build_provenanced_value(field) -> ProvenancedValue:  # ruff: ignore[missing-type-function-argument]
@@ -59,6 +91,53 @@ def _build_quantum_efficiency(field) -> QuantumEfficiencyRecord:  # ruff: ignore
     )
 
 
+def _build_sensor_setting_noise(field) -> SensorSettingNoise:  # ruff: ignore[missing-type-function-argument]
+    """Build a `SensorSettingNoise` from one ``sensor_noise`` entry.
+
+    Returns
+    -------
+    entry : `SensorSettingNoise`
+        The gain and read noise recorded for one camera setting.
+    """
+    kwargs = {
+        "gain_setting": str(field["gain_setting"]),
+        "offset": str(field.get("offset", "0")),
+        "binning": str(field.get("binning", "1x1")),
+    }
+    for name in ("gain_e_per_adu", "read_noise_e"):
+        if name in field:
+            kwargs[name] = _build_provenanced_value(field[name])
+    if "temperature_c" in field:
+        kwargs["temperature_c"] = float(field["temperature_c"])
+    for name in ("gain_spread_e_per_adu", "read_noise_adu_robust"):
+        if name in field:
+            kwargs[name] = float(field[name])
+    for name in ("pair_gains_e_per_adu", "pair_read_noises_adu"):
+        if name in field:
+            kwargs[name] = tuple(float(value) for value in field[name])
+    return SensorSettingNoise(**kwargs)
+
+
+@functools.cache
+def _warn_once_about_unkeyed_noise(camera_name: str) -> None:
+    """Log a warning once per camera with the old noise layout.
+
+    Parameters
+    ----------
+    camera_name : `str`
+        The camera whose section holds a single gain or read noise with no
+        setting. Because the result is cached, a second call with the same
+        name does nothing.
+    """
+    logger.warning(
+        "The camera profile for %r holds a gain or read noise with no camera setting. These values are "
+        "not used, because nobody recorded the gain, offset and binning they were measured at. Run "
+        "astrometricslib/scripts/migrate_camera_profiles.py to move them into a setting-keyed "
+        "sensor_noise entry.",
+        camera_name,
+    )
+
+
 def _build_camera_profile(section_name: str, section: dict) -> CameraProfile:
     """Build a `CameraProfile` from one config section.
 
@@ -85,11 +164,19 @@ def _build_camera_profile(section_name: str, section: dict) -> CameraProfile:
         )
     if "quantum_efficiency" in section:
         kwargs["quantum_efficiency"] = _build_quantum_efficiency(section["quantum_efficiency"])
-    # Detector noise terms for the photometric error budget. Both are optional;
-    # without them the pipeline assumes unit gain, no read noise, and says so.
-    for field_name in ("gain_e_per_adu", "read_noise_e"):
-        if field_name in section:
-            kwargs[field_name] = _build_provenanced_value(section[field_name])
+    # Detector noise terms for the photometric error budget, one entry per
+    # camera setting. Both are optional; without a matching entry the pipeline
+    # falls back to the FITS header, then assumes unit gain and no read noise,
+    # and says so.
+    if SENSOR_NOISE_KEY in section:
+        kwargs["sensor_noise"] = tuple(
+            _build_sensor_setting_noise(entry) for entry in section[SENSOR_NOISE_KEY]
+        )
+    if any(key in section for key in LEGACY_NOISE_KEYS):
+        # Old layout: one value with no setting. It is not applied (decision 7
+        # of the quality-metrics plan), only flagged.
+        kwargs["has_unkeyed_noise_values"] = True
+        _warn_once_about_unkeyed_noise(camera_name)
     return CameraProfile(**kwargs)
 
 
@@ -276,3 +363,187 @@ def record_name_for_camera(camera_name: str, config: AppConfiguration | None = N
     """
     profile = resolve_camera_profile(camera_name, config)
     return profile.record_name or camera_name
+
+
+def _find_camera_section_name(config: AppConfiguration, camera_name: str) -> str:
+    """Find the config section that holds a camera's profile.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The config to search.
+    camera_name : `str`
+        The camera, written in any spelling the profile knows (its name or
+        one of its aliases).
+
+    Returns
+    -------
+    section_name : `str`
+        The full section name, such as ``Observatory.Camera.ZWO ASI533MM Pro``.
+
+    Raises
+    ------
+    ConfigurationError
+        If no camera profile section has that name.
+    """
+    wanted_name = normalize_camera_name(camera_name)
+    for section_name in config.app_config.sections():
+        if not section_name.startswith(_CAMERA_SECTION_PREFIX) or section_name == "Observatory.Camera":
+            continue
+        section = dict(config.app_config[section_name])
+        if "clip_ceiling_adu" not in section:
+            continue
+        profile = _build_camera_profile(section_name, section)
+        if any(
+            normalize_camera_name(name) == wanted_name
+            for name in (profile.camera_name, *profile.name_aliases)
+        ):
+            return section_name
+    raise ConfigurationError(f"no camera profile section matches the camera {camera_name!r}")
+
+
+def backup_config_file(config: AppConfiguration) -> Path | None:
+    """Copy the config file to a new timestamped ``.bak`` file beside it.
+
+    At most `MAXIMUM_CONFIG_BACKUPS` backups of this config are kept: after
+    the copy is made, the oldest ones beyond that number are deleted. Only
+    files named like this function's own backups are touched.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The config whose file is copied.
+
+    Returns
+    -------
+    backup_path : `Path` or `None`
+        The new copy, named like
+        ``astrometrics.config.toml.20261021-101500-123456.bak``.
+        `None` when the config has no file on disk yet.
+    """
+    path = getattr(config, "config_file_path", None)
+    if path is None or not Path(path).is_file():
+        return None
+    stamp = datetime.datetime.now(datetime.UTC).strftime("%Y%m%d-%H%M%S-%f")
+    backup_path = Path(path).with_name(f"{Path(path).name}.{stamp}.bak")
+    shutil.copy2(path, backup_path)
+    # The timestamp in the name sorts in time order, so the oldest come first.
+    backups = sorted(Path(path).parent.glob(f"{glob.escape(Path(path).name)}.????????-??????-??????.bak"))
+    for stale_backup in backups[:-MAXIMUM_CONFIG_BACKUPS]:
+        try:
+            stale_backup.unlink()
+        except OSError as error:
+            logger.warning("Could not delete the old config backup %s: %s", stale_backup, error)
+    return backup_path
+
+
+def sensor_noise_to_toml_array(
+    entries: tuple[SensorSettingNoise, ...] | list[SensorSettingNoise],
+) -> tomlkit.items.Array:
+    """Write noise entries as the TOML array a profile section stores.
+
+    Parameters
+    ----------
+    entries : `tuple` [`SensorSettingNoise`, ...]
+        The entries, in the order to store them.
+
+    Returns
+    -------
+    array : `tomlkit.items.Array`
+        An array of inline tables, one per entry, one entry per line.
+    """
+
+    def provenanced_table(value: ProvenancedValue) -> tomlkit.items.InlineTable:
+        """Write one value and its provenance as an inline table.
+
+        Returns
+        -------
+        table : `tomlkit.items.InlineTable`
+            ``{ value = ..., kind = ..., source = ... }``.
+        """
+        table = tomlkit.inline_table()
+        table["value"] = value.value
+        table["kind"] = value.provenance.kind.value
+        table["source"] = value.provenance.source
+        return table
+
+    array = tomlkit.array()
+    array.multiline(True)
+    for entry in entries:
+        table = tomlkit.inline_table()
+        table["gain_setting"] = entry.gain_setting
+        table["offset"] = entry.offset
+        table["binning"] = entry.binning
+        if entry.temperature_c is not None:
+            table["temperature_c"] = entry.temperature_c
+        if entry.gain_e_per_adu is not None:
+            table["gain_e_per_adu"] = provenanced_table(entry.gain_e_per_adu)
+        if entry.read_noise_e is not None:
+            table["read_noise_e"] = provenanced_table(entry.read_noise_e)
+        if entry.gain_spread_e_per_adu is not None:
+            table["gain_spread_e_per_adu"] = entry.gain_spread_e_per_adu
+        if entry.pair_gains_e_per_adu:
+            table["pair_gains_e_per_adu"] = list(entry.pair_gains_e_per_adu)
+        if entry.read_noise_adu_robust is not None:
+            table["read_noise_adu_robust"] = entry.read_noise_adu_robust
+        if entry.pair_read_noises_adu:
+            table["pair_read_noises_adu"] = list(entry.pair_read_noises_adu)
+        array.append(table)
+    return array
+
+
+def save_sensor_setting_noise(
+    config: AppConfiguration, camera_name: str, entry: SensorSettingNoise
+) -> Path | None:
+    """Write the gain and read noise of one camera setting to the config.
+
+    An existing entry for the same gain setting, offset and binning is
+    replaced in place. Every other entry is kept. The config file is copied
+    to a timestamped backup first, and the profile cache is cleared after the
+    write so the next load sees the new entry.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The config to change. Its file is rewritten.
+    camera_name : `str`
+        The camera the entry belongs to, written in any spelling its profile
+        knows.
+    entry : `SensorSettingNoise`
+        The gain and read noise to store.
+
+    Returns
+    -------
+    backup_path : `Path` or `None`
+        The backup made before the write, or `None` when the config had no
+        file yet.
+
+    Raises
+    ------
+    ConfigurationError
+        If no profile matches `camera_name`, or if its section still holds the
+        old single gain or read noise (run the profile migration first, so
+        old and new values are never mixed).
+    """
+    # The whole read-modify-write holds the config's write lock, so two saves
+    # (two threads, or the app and a script) cannot each read the file before
+    # the other writes it and then overwrite each other's entry.
+    with config.write_lock():
+        section_name = _find_camera_section_name(config, camera_name)
+        section = dict(config.app_config[section_name])
+        if any(key in section for key in LEGACY_NOISE_KEYS):
+            raise ConfigurationError(
+                f"The camera section [{section_name}] still holds a gain or read noise with no camera "
+                "setting. Run the profile migration before adding setting-keyed entries.",
+                details={"section": section_name},
+            )
+        existing = [_build_sensor_setting_noise(item) for item in section.get(SENSOR_NOISE_KEY, [])]
+        merged = [entry if item.setting_key == entry.setting_key else item for item in existing]
+        if all(item.setting_key != entry.setting_key for item in existing):
+            merged.append(entry)
+
+        backup_path = backup_config_file(config)
+        config.app_config.set_item(section_name, SENSOR_NOISE_KEY, sensor_noise_to_toml_array(merged))
+        config.save_configuration()
+        _load_profiles_from_config.cache_clear()
+    return backup_path

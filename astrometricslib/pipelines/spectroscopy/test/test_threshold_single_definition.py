@@ -5,7 +5,7 @@ Description: The limits for "poor match", "no match at all", "ambiguous" and
 with a docstring that states its unit. This test imports every limit from
 there. It then reads the source of the modules that once held copies
 (`spectral_classifier.py`, `compare_to_catalog.py`, `assess_output_quality.py`
-and `run_gates.py`) with ``ast``. It fails if any of them assigns a module
+and `record_quality.py`) with ``ast``. It fails if any of them assigns a module
 constant whose name looks like a limit: a name containing ``THRESHOLD`` or
 ending in ``_RMS``, ``_GAP``, ``_MARGIN``, ``_STEPS`` or ``_SUBTYPES``. A
 module may import a limit but may not define one.
@@ -28,7 +28,7 @@ from astrometricslib.models.stellar_source import (
 from astrometricslib.pipelines.spectroscopy.post_processing import (
     assess_output_quality,
     compare_to_catalog,
-    run_gates,
+    record_quality,
 )
 from astrometricslib.pipelines.spectroscopy.processing import assess_processing_quality, spectral_classifier
 
@@ -49,7 +49,7 @@ MODULES_THAT_MUST_NOT_DEFINE_LIMITS = (
     compare_to_catalog,
     assess_output_quality,
     assess_processing_quality,
-    run_gates,
+    record_quality,
 )
 
 # Names these modules used for limits that now live only in `stellar_source`.

@@ -5,6 +5,10 @@ But spectroscopy images are mostly stretched-out streaks of light, so that
 doesn't work. Instead, we check the single round dot (the 'zero-order star')
 that creates each streak. This module checks if that star jumps around or
 fades out, which means the software might be confused and ruining the stack.
+
+Siril's per-frame "rmse" column is really the frame's sky background level,
+not a registration error, so this check no longer tests it. Sky changes are
+caught by the quarantine's cloud check and the background-homogeneity check.
 """
 
 import itertools
@@ -15,7 +19,6 @@ import numpy as np
 from astropy.stats import sigma_clip
 
 MIN_MATCHED_STAR_PAIRS = 10
-RMSE_OUTLIER_SIGMA = 2.5
 ZERO_ORDER_POSITION_JUMP_OUTLIER_SIGMA = 3.0
 ZERO_ORDER_AMPLITUDE_OUTLIER_SIGMA = 2.5
 
@@ -86,7 +89,9 @@ def evaluate_spectral_registration_quality(
     frame_paths : `list` of `str`
         The file locations for the images being checked.
     seq_frames : `list` of `dict`
-        Alignment stats from Siril (like 'nb_stars' and 'rmse').
+        Alignment stats from Siril (only 'star_count' is used; the sky
+        background level it also holds is not checked here, because it
+        says nothing about alignment).
     zero_order_stars : `list` of `dict` or `None`
         Details about the zero-order star in each frame (x/y position,
         brightness).
@@ -106,8 +111,7 @@ def evaluate_spectral_registration_quality(
     if len(seq_frames) != n or len(zero_order_stars) != n:
         return []
 
-    nb_stars = [f.get("nb_stars") for f in seq_frames]
-    rmse_values = [f.get("rmse") for f in seq_frames]
+    nb_stars = [f.get("star_count") for f in seq_frames]
     peak_to_background_ratios = [s["peak_to_background_ratio"] if s else None for s in zero_order_stars]
 
     position_jumps: list[float | None] = [None]
@@ -118,7 +122,6 @@ def evaluate_spectral_registration_quality(
             position_jumps.append(math.hypot(curr["x"] - prev["x"], curr["y"] - prev["y"]))
 
     low_star_count_flags = [count is not None and count < MIN_MATCHED_STAR_PAIRS for count in nb_stars]
-    high_rmse_flags = flag_outliers(rmse_values, RMSE_OUTLIER_SIGMA)
     dim_zero_order_flags = flag_outliers(
         peak_to_background_ratios, ZERO_ORDER_AMPLITUDE_OUTLIER_SIGMA, low_is_bad=True
     )
@@ -129,8 +132,6 @@ def evaluate_spectral_registration_quality(
         reasons = []
         if low_star_count_flags[i]:
             reasons.append(f"low matched star count ({nb_stars[i]})")
-        if high_rmse_flags[i]:
-            reasons.append("elevated registration fit RMSE")
         if dim_zero_order_flags[i]:
             reasons.append("dim zero-order star")
         if position_jump_flags[i]:

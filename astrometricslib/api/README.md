@@ -44,7 +44,7 @@ Each sub-API checks its arguments and hands the work to `pipelines/`. Three rule
 
 ### `processing.py`
 
-`processing.py` holds `ProcessingPipelines` and its child `CalibrationCatalog`. `quality.py` holds its other child, `QualityDiagnostics`.
+`processing.py` holds `ProcessingPipelines` and its child `CalibrationCatalog`. `quality.py` holds `QualityRecords`, which is a sub-API of its own (see below), not a child of `ProcessingPipelines`.
 
 `ProcessingPipelines` makes stacks and runs the analysis.
 
@@ -54,17 +54,28 @@ Each sub-API checks its arguments and hands the work to `pipelines/`. Three rule
   - For one target, it runs the analysis stages (`astrometry`, `photometry`, `spectroscopy` and `asteroids`) on the frames and stack the target already has. It does not stack.
   - For a list of targets, or for every target, it runs the full pipeline: stacking first, then the analysis stages.
 - A restack keeps the stack it replaces in a `_previous` folder. `discard_previous_stack` deletes it and `swap_with_previous_stack` puts it back.
+- `record_frame_measurements(target)` measures a target's light frames and stores the numbers in the quality database (read them with `Astrometrics.quality.query`). It reads each frame once and measures the stars' width and stretch, the sky and its noise in electrons, the read noise and the temperatures. A value it cannot measure is stored as `not_measured` with the reason. A frame whose file has not changed since its last measurement is skipped, so a second call measures nothing again. A frame that fails, for any reason, is counted and tried again next time. It never moves or changes a frame file. Only one run measures a target at a time, and one run reads frames at a time; a second call for the same target returns at once with `already_running` set. A sync measures only the frames it added, at about 11 s per frame. It runs as a background job of type `quality` and returns a `FrameMeasurementSummary`. A sync that adds frames starts it by itself. See [frame measurement](../pipelines/stacking/README.md#frame-measurement) and. The star measurements are a design estimate (see [AST-17](../../documentation/library_design/validation/astrometry.md#ast-17)).
+- `stack_subset(target, frames, label=...)` stacks exactly the given frames into the target's `_subsets` folder with the normal settings, and stores the result's noise, effective frame count and effective time. It never writes to the library stack's path, assigns nothing on the target and saves nothing. `measure_noise_growth(target)` stacks the first night, the first two nights and so on (at most 4 subsets by default) and measures each result's noise in the library stack's sky apertures. It also runs the half-difference noise below, in the same lock, unless `include_half_difference=False`. `measure_night_contributions(target)` stacks the library stack's frames without each night in turn and stores the night's share of the weight and the noise without it. `measure_half_difference_noise(target)` stacks two disjoint halves of the library stack's frames on one registration reference, subtracts them and stores the noise of the difference beside the library stack's empty-aperture noise (the halves are deleted afterwards; the job refuses with a reason rather than guess). Neither the growth job nor the half-difference job starts by itself after a stack; a caller starts them (the app has the RPCs `processing:measure_noise_growth` and `processing:measure_half_difference_noise`). They cost one stack per subset (the half-difference job costs about one library stack's time in all, two stacks of half the frames, plus the temporary disk space Siril needs for each: its converted and registered copies of the frames, deleted after each stack; the M 106 run in the comment in `siril_interface.py` measured 65 GB for 238 frames, about 0.27 GB a frame, so a half of 30 frames needs about 8 GB), run as background jobs of type `stacking`, and raise `NotFoundError` for a target with no stack. They return `SubsetStackResult`, `NoiseGrowthResult`, `NightContributionResult` and `HalfDifferenceNoiseResult`. See [subset stacks](../pipelines/stacking/README.md#subset-stacks).
 - `restore_excluded_frames(target, apply=True)` moves frames the stacker set aside back into the frames folder. The stacker sets a frame aside, into an `_excluded` folder, when clouds or trailed stars (stars smeared into short lines) make it unusable.
 
-`QualityDiagnostics` measures without changing anything.
+### `quality.py`
 
-- `frame_quality` measures raw frames:
+`QualityRecords` is reached as `astrometrics.quality`. It is the start of every quality read, whether the numbers were stored by an earlier run or are measured now. Nothing it does changes data.
+
+Stored reads:
+
+- `query` reads the quality measurements that earlier runs saved in `astrometrics.db`. It filters by `metric`, `level` (`frame`, `stack` or `run`), `target_id`, `observing_night_id`, `camera`, `telescope` and `since`. It gives the newest row for each subject and metric unless `latest_only=False`, and `row_ids` returns exactly the rows a report cited. `variant` keeps only the rows about one subset stack, and `library_only=True` leaves subset-stack rows out (giving both raises `InvalidArgumentError`). A library with no quality table yet gives an empty list; the read opens the file read-only and creates no file and no table. A `metric` that is not registered raises `InvalidArgumentError`.
+- `metrics` lists the declared metrics, or with `name=` just that one, or with `checkpoint=` only those measured at that checkpoint. An unknown `name`, `checkpoint` or `detail` raises `InvalidArgumentError`. About 170 metrics are registered, so the default `detail="summary"` gives a short `MetricSummary` for each (name, unit, checkpoint, levels, purpose). `detail="full"` gives the whole `MetricSpec`, which adds the meaning, which way is better and how the number is estimated; pair it with `checkpoint=` or `name=`.
+
+Live checks:
+
+- `measure_frames` measures raw frames:
   - `kind="input_quality"` measures them one by one.
   - `kind="raw_check"` checks a folder or a target's frames as a batch.
   - `kind="quarantine_preview"` previews which frames the stacker would set aside.
   - `include=["excluded"]` adds the frames already set aside.
-- `stack_quality` measures a stack (star width, the share of rejected pixels, frame registration) and compares it with the previous stack or another stack file.
-- `spectral_frame_check` measures a target's raw slitless-spectrum frames. These are frames taken through a grating with no slit, which spreads each star into a spectrum trail of colors. For each frame it reports:
+- `measure_stack` measures a stack (star width, the share of rejected pixels, frame registration) and compares it with the previous stack or another stack file.
+- `check_spectral_frames` measures a target's raw slitless-spectrum frames. These are frames taken through a grating with no slit, which spreads each star into a spectrum trail of colors. For each frame it reports:
   - where the zero order (the undispersed image of the star) sits;
   - the tilt and width of the spectrum trail, and the sky level;
   - every saturated patch, that is, pixels at the sensor's maximum value, where the true brightness is lost.
@@ -77,6 +88,7 @@ Each sub-API checks its arguments and hands the work to `pipelines/`. Three rule
 - `query` reports counts, or how a target's light frames (frames of the sky) match the darks.
 - `refresh("flat")` rescans one kind and reports what it found. For flats it also says whether each new flat set is good enough: enough frames, bright enough but not too bright, and a master flat (the combination of the set) that is not too noisy.
 - `assess_flats` runs the same check on the flats already in the library.
+- `measure_sensor_noise(camera_id, gain, offset, binning)` measures the camera's conversion gain (electrons per ADU, one step of the stored pixel value) and its read noise (the electronic noise added when a frame is read out) from the flat and bias frames in the library at exactly that setting. It pairs the frames in file-name order, so it needs at least 5 flat pairs and 3 bias pairs that share one setting, one flat exposure and one temperature. If it cannot measure, the result says why and holds no numbers. Reading never writes. With `save=True` a measured result goes into the camera profile in the configuration file, after a backup. The result's `provenance` sentence is stored as the value's source. Set `exposure_seconds`, `temperature`, `telescope` or `filter_type` to choose among flats of several kinds. It runs as a background job. Its result matched a hand measurement (measured; see [STK-35](../../documentation/library_design/validation/stacking.md#stk-35)).
 
 ### `visualization.py`
 

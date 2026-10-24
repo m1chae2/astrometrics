@@ -1046,6 +1046,17 @@ def summarize_centroid_shifts(
     )
 
 
+# The aperture the photometry measures every star in, in pixels. The star
+# circle has a radius of 4 px, about 1 to 2 times the star's FWHM (full width
+# at half maximum) on a good night, and the sky ring runs from 7 to 12 px,
+# which keeps it clear of the star's wings. These are the defaults of
+# `measure_aperture_photometry` and the geometry behind the noise budget in
+# `processing/noise_budget.py`, so they are defined once, here.
+APERTURE_RADIUS_PX = 4.0
+SKY_ANNULUS_INNER_RADIUS_PX = 7.0
+SKY_ANNULUS_OUTER_RADIUS_PX = 12.0
+
+
 def aperture_flux_error_adu(
     net_flux_adu: float,
     sky_adu_per_pixel: float,
@@ -1130,20 +1141,26 @@ class ApertureMeasurement:
         the star was too close to the frame edge to measure.
     is_saturated : `bool`
         Whether the aperture holds a significant number of saturated pixels.
+    peak_adu : `float`
+        The largest raw pixel value inside the aperture, in ADU (sky
+        included). It is NaN when the star was too close to the frame edge to
+        measure. The catalog zero point leaves out a star whose peak lies
+        above the camera's photometric linearity limit.
     """
 
     net_flux_adu: float
     flux_error_adu: float
     is_saturated: bool
+    peak_adu: float = math.nan
 
 
 def measure_aperture_photometry(
     data: np.ndarray,
     x: float,
     y: float,
-    radius: float = 4.0,
-    annulus_inner: float = 7.0,
-    annulus_outer: float = 12.0,
+    radius: float = APERTURE_RADIUS_PX,
+    annulus_inner: float = SKY_ANNULUS_INNER_RADIUS_PX,
+    annulus_outer: float = SKY_ANNULUS_OUTER_RADIUS_PX,
     cutout_radius: int = 15,
     fallback_background: float | None = None,
     *,
@@ -1261,16 +1278,17 @@ def measure_aperture_photometry(
         dark_current_e_per_pixel,
     )
 
-    return ApertureMeasurement(net_flux, flux_error, is_saturated)
+    peak_adu = float(np.max(star_raw_values)) if star_raw_values.size else math.nan
+    return ApertureMeasurement(net_flux, flux_error, is_saturated, peak_adu)
 
 
 def _measure_aperture_flux(
     data: np.ndarray,
     x: float,
     y: float,
-    radius: float = 4.0,
-    annulus_inner: float = 7.0,
-    annulus_outer: float = 12.0,
+    radius: float = APERTURE_RADIUS_PX,
+    annulus_inner: float = SKY_ANNULUS_INNER_RADIUS_PX,
+    annulus_outer: float = SKY_ANNULUS_OUTER_RADIUS_PX,
     cutout_radius: int = 15,
     fallback_background: float | None = None,
     *,
@@ -1351,7 +1369,7 @@ def _process_single_frame_worker(
         The picture's path and one of:
 
         * A tuple ``(timestamp, fluxes, shift_x, shift_y, background,
-          airmass, positions, exposure_seconds, alignment)``.
+          airmass, positions, exposure_seconds, alignment, peaks)``.
           ``timestamp`` is the exposure start in UTC. ``fluxes`` maps
           each star id to ``(flux in ADU per second, is_saturated, flux
           error in ADU per second)``. ``positions`` maps each star id to its
@@ -1359,7 +1377,9 @@ def _process_single_frame_worker(
           the centroid was refused. ``exposure_seconds`` is the exposure
           time used to turn ADU into ADU per second. ``alignment`` is the
           picture's `FrameAlignment`; ``shift_x`` and ``shift_y`` are its
-          shift of the middle of the frame.
+          shift of the middle of the frame. The last item, ``peaks``, maps
+          each star id to the largest raw pixel value in its aperture, in
+          ADU.
         * A `FrameRejection` when the picture has no usable ``DATE-OBS``.
         * `None` when the picture could not be read or measured.
     """
@@ -1391,6 +1411,7 @@ def _process_single_frame_worker(
         # 3. Forced Photometry
         fluxes_dict = {}
         positions_dict = {}
+        peaks_dict = {}
 
         for reference_id, reference_x, reference_y in reference_stars_list:
             # The frame's alignment (shift, rotation and scale change) says
@@ -1422,6 +1443,7 @@ def _process_single_frame_worker(
                 measurement.is_saturated,
                 measurement.flux_error_adu / exposure_seconds,
             )
+            peaks_dict[reference_id] = measurement.peak_adu
 
         return path, (
             timestamp,
@@ -1433,6 +1455,7 @@ def _process_single_frame_worker(
             positions_dict,
             exposure_seconds,
             alignment,
+            peaks_dict,
         )
 
     except Exception:

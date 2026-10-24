@@ -11,6 +11,7 @@ from astrometricslib.models.camera_profile import (
     CameraProfile,
     ProvenanceKind,
     QuantumEfficiencyRecord,
+    SensorSettingNoise,
     ValueProvenance,
 )
 
@@ -143,3 +144,55 @@ def test_the_threshold_can_be_reached_only_when_it_is_not_above_the_ceiling(
         )
     )
     assert profile.saturation_threshold_can_be_reached is expected
+
+
+NOISE_VALUE = {"value": 0.78, "provenance": PROVENANCE}
+
+
+def make_noise_entry(**overrides: object) -> dict[str, object]:
+    """Build a valid sensor noise entry as a dictionary, with changes.
+
+    Returns
+    -------
+    data : `dict` [`str`, `object`]
+        Entry data ready for `SensorSettingNoise.model_validate`.
+    """
+    data: dict[str, object] = {
+        "gain_setting": "0",
+        "offset": "10",
+        "binning": "1x1",
+        "gain_e_per_adu": NOISE_VALUE,
+    }
+    data.update(overrides)
+    return data
+
+
+def test_two_noise_entries_for_the_same_setting_are_rejected() -> None:
+    """Spellings of one setting count as the same key."""
+    entries = [make_noise_entry(), make_noise_entry(gain_setting="0.0", offset="10.0")]
+    with pytest.raises(ValidationError, match="share gain"):
+        CameraProfile.model_validate(make_profile_data(sensor_noise=entries))
+
+
+def test_lookup_needs_an_exact_setting_and_never_uses_the_nearest() -> None:
+    """Only an entry with the same gain, offset and binning is found."""
+    profile = CameraProfile.model_validate(make_profile_data(sensor_noise=[make_noise_entry()]))
+    assert profile.sensor_noise_for(0.0, 10, "1X1") is not None
+    assert profile.sensor_noise_for(0, "10", 1) is not None
+    assert profile.sensor_noise_for(1, "10", "1x1") is None
+    assert profile.sensor_noise_for(0, "9", "1x1") is None
+    assert profile.sensor_noise_for(0, "10", "2x2") is None
+    assert "offset 9" in (profile.sensor_noise_gap_reason(0, 9, "1x1") or "")
+    assert profile.sensor_noise_gap_reason(0, 10, "1x1") is None
+
+
+def test_an_entry_with_neither_gain_nor_read_noise_is_rejected() -> None:
+    """An entry must hold at least one number."""
+    with pytest.raises(ValidationError, match="gain, a read noise"):
+        SensorSettingNoise.model_validate({"gain_setting": "0"})
+
+
+def test_the_old_schema_version_is_refused() -> None:
+    """Schema 1 held single values; this model only accepts schema 2."""
+    with pytest.raises(ValidationError):
+        CameraProfile.model_validate(make_profile_data(schema_version=1))

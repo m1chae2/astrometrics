@@ -6,6 +6,9 @@ Description: The library's documentation is split by purpose:
   implementation names (files, classes, functions, config keys) and no tuned
   values. Hidden ``<!-- impl: -->`` comments may name code, because they do
   not render; ``test_architecture_doc_claims.py`` checks them.
+- ``Astrometrics_Quality_Measurements.md`` explains the theory of the quality
+  measurements, the numbers the library derives from data. It follows the same
+  rules as the architecture paper.
 - ``Astrometrics_Library_Implementation.md`` carries the code names and the
   tuned values.
 - ``documentation/library_design/validation/`` (the validation register)
@@ -26,12 +29,14 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DESIGN_DIR = REPO_ROOT / "documentation" / "library_design"
 ARCHITECTURE = DESIGN_DIR / "Astrometrics_Library_Architecture.md"
 IMPLEMENTATION = DESIGN_DIR / "Astrometrics_Library_Implementation.md"
+QUALITY_MEASUREMENTS = DESIGN_DIR / "Astrometrics_Quality_Measurements.md"
 # Length limits for the papers (documentation/Documentation_Conventions.md,
 # Section 3.4). A journal paper on scientific software runs 5,000 to 10,000
 # words; the implementation paper is an index into the code, not a second
 # paper. References and hidden <!-- impl: --> comments do not count.
 ARCHITECTURE_WORD_LIMIT = 10_000
-IMPLEMENTATION_WORD_LIMIT = 3_500
+IMPLEMENTATION_WORD_LIMIT = 4_500
+QUALITY_MEASUREMENTS_WORD_LIMIT = 8_000
 
 # Numbers with units that are physics, definitions or worked illustrations, not
 # tuned settings. Adding a value here asserts that it is not a tuned setting;
@@ -56,8 +61,9 @@ ALLOWED_QUANTITIES = frozenset({
     "0.1 nm",
     "60 arcsec",
     "24 h",
-    # Angles on the sky.
+    # Angles on the sky. A meridian flip turns the field half a turn (180°).
     "0°",
+    "180°",
     "30°",
     "90°",
     "360°",
@@ -165,13 +171,33 @@ def _method_documents() -> list[Path]:
     paths : `list` [`pathlib.Path`]
         Every README under ``astrometricslib/`` except the ones that describe
         shipped data files (their download dates are provenance, not
-        evidence), the pipeline review guides and the architecture paper.
+        evidence), the pipeline review guides, the architecture paper and the
+        quality measurements paper.
     """
     readmes = [
         path for path in (REPO_ROOT / "astrometricslib").rglob("README.md") if "data" not in path.parts
     ]
     guides = sorted((DESIGN_DIR / "pipelines").glob("*.md"))
-    return sorted(readmes) + guides + [ARCHITECTURE]
+    return sorted(readmes) + guides + [ARCHITECTURE, QUALITY_MEASUREMENTS]
+
+
+def _implementation_paper_name(paper: Path) -> str:
+    """Name the implementation paper that holds a theory paper's code names.
+
+    Parameters
+    ----------
+    paper : `pathlib.Path`
+        A theory paper: an architecture paper, or the quality measurements
+        paper of the Astrometrics library.
+
+    Returns
+    -------
+    name : `str`
+        The file name of the matching implementation paper.
+    """
+    if paper.name == QUALITY_MEASUREMENTS.name:
+        return IMPLEMENTATION.name
+    return paper.name.replace("Architecture", "Implementation")
 
 
 def assert_names_no_code(paper: Path) -> None:
@@ -199,7 +225,7 @@ def assert_names_no_code(paper: Path) -> None:
             problems.append(f"line {_line_of(text, match.start())}: {match.group(0)}")
     for match in re.finditer(r"\b[\w/]+\.(?:py|json|toml|fits)\b|\[[A-Z][a-z]+\.[A-Z]\w*\]", text):
         problems.append(f"line {_line_of(text, match.start())}: {match.group(0)}")
-    implementation = paper.name.replace("Architecture", "Implementation")
+    implementation = _implementation_paper_name(paper)
     assert not problems, (
         f"{paper.name} explains the theory and names no code. Move these names to "
         f"{implementation} (outside tools may be named in plain text): {problems}"
@@ -221,7 +247,7 @@ def assert_states_no_tuned_values(paper: Path) -> None:
         for match in QUANTITY.finditer(text)
         if re.sub(r"\s", " ", match.group(0)) not in ALLOWED_QUANTITIES
     ]
-    implementation = paper.name.replace("Architecture", "Implementation")
+    implementation = _implementation_paper_name(paper)
     assert not problems, (
         f"{paper.name} states no tuned values. Describe the idea instead "
         "(for example 'a fixed share of the session median') and put the value in "
@@ -277,6 +303,16 @@ def test_architecture_states_no_tuned_values() -> None:
     assert_states_no_tuned_values(ARCHITECTURE)
 
 
+def test_quality_measurements_names_no_code() -> None:
+    """The quality paper shows no file, class, function or config name."""
+    assert_names_no_code(QUALITY_MEASUREMENTS)
+
+
+def test_quality_measurements_states_no_tuned_values() -> None:
+    """The quality paper describes each setting's idea, not its value."""
+    assert_states_no_tuned_values(QUALITY_MEASUREMENTS)
+
+
 def test_validation_evidence_lives_in_the_register() -> None:
     """Method documents carry no measurement records; the register does."""
     problems = []
@@ -296,7 +332,11 @@ def test_validation_evidence_lives_in_the_register() -> None:
 
 @pytest.mark.parametrize(
     ("paper", "limit"),
-    [(ARCHITECTURE, ARCHITECTURE_WORD_LIMIT), (IMPLEMENTATION, IMPLEMENTATION_WORD_LIMIT)],
+    [
+        (ARCHITECTURE, ARCHITECTURE_WORD_LIMIT),
+        (IMPLEMENTATION, IMPLEMENTATION_WORD_LIMIT),
+        (QUALITY_MEASUREMENTS, QUALITY_MEASUREMENTS_WORD_LIMIT),
+    ],
     ids=lambda value: value.stem if isinstance(value, Path) else str(value),
 )
 def test_papers_stay_within_their_length(paper: Path, limit: int) -> None:

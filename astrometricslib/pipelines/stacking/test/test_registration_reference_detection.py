@@ -20,6 +20,8 @@ actual frame. Two ways that can go wrong if unguarded:
 
 from unittest.mock import patch
 
+import pytest
+
 from astrometricslib.models.target import FrameRecord, Target
 
 
@@ -27,10 +29,10 @@ def _registration_fact(
     dx: float = 0.0,
     dy: float = 0.0,
     nb_stars: int = 100,
-    fwhm_x: float = 3.0,
-    fwhm_y: float = 3.0,
+    fwhm_px: float = 3.0,
+    weighted_fwhm_px: float = 3.0,
     roundness: float = 0.9,
-    rmse: float = 0.5,
+    background_level: float = 0.02,
 ) -> dict:
     """Build one parse_seq_file-shaped registration fact dict.
 
@@ -42,11 +44,13 @@ def _registration_fact(
     return {
         "dx": dx,
         "dy": dy,
-        "nb_stars": nb_stars,
-        "fwhm_x": fwhm_x,
-        "fwhm_y": fwhm_y,
+        "star_count": nb_stars,
+        "fwhm_px": fwhm_px,
+        "weighted_fwhm_px": weighted_fwhm_px,
         "roundness": roundness,
-        "rmse": rmse,
+        "quality": 0.0,
+        "background_level": background_level,
+        "rotation_deg": 0.0,
     }
 
 
@@ -168,3 +172,29 @@ def test_the_stack_summary_records_the_camera_profile_of_its_frames() -> None:
     assert unlisted_summary.camera_profile.is_generic_fallback is True
     assert unlisted_summary.flagged is True
     assert any("Acme Imager 9000" in reason for reason in unlisted_summary.flag_reasons)
+
+
+def test_registration_facts_fill_the_honestly_named_fields_only() -> None:
+    """Siril's values fill the new fields; the mislabeled ones stay empty."""
+    frame = FrameRecord(path="/lib/a.fits", role="LIGHT", camera="c", exposure="1.0")
+    other = FrameRecord(path="/lib/b.fits", role="LIGHT", camera="c", exposure="1.0")
+    registration_fact = _registration_fact(
+        dx=0.0, dy=0.0, nb_stars=1163, fwhm_px=2.83064, weighted_fwhm_px=3.27475, background_level=0.0238392
+    )
+    registration_fact["rotation_deg"] = 0.001
+
+    _build_summary(
+        [frame, other],
+        [registration_fact, _registration_fact(dx=1.0, dy=1.0)],
+        ["/lib/a.fits", "/lib/b.fits"],
+    )
+
+    measurements = frame.measurements
+    assert measurements.registration_fwhm_x_px == pytest.approx(2.83064)
+    assert measurements.registration_weighted_fwhm_px == pytest.approx(3.27475)
+    assert measurements.registration_background_level == pytest.approx(0.0238392)
+    assert measurements.registration_quality == pytest.approx(0.0)
+    assert measurements.registration_rotation_deg == pytest.approx(0.001)
+    assert measurements.registration_star_count == 1163
+    assert measurements.registration_fwhm_y_px is None
+    assert measurements.registration_rmse is None

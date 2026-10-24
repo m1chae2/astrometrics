@@ -148,6 +148,26 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "processing:delete_job": ("job_service", "delete_job"),
     "processing:jobs_for_target": ("job_service", "get_jobs_for_target"),
     "processing:job_log_tail": ("image_processing_service", "fetch_job_log_tail"),
+    # Measures a target's light frames and stores the numbers. Starts a
+    # background run and answers at once; the result arrives as the
+    # `quality:measured` event. A write, so the AI's read-only profile
+    # withholds it.
+    "processing:record_frame_measurements": ("quality_measurement_service", "start_frame_measurements"),
+    # Stack some of a target's frames apart from its library stack, into the
+    # target's `_subsets` folder, and measure the noise of each result. Each
+    # starts a background run and answers at once. Writes (they stack and store
+    # rows), so the AI's read-only profile withholds them.
+    "processing:measure_half_difference_noise": (
+        "quality_measurement_service",
+        "start_half_difference_noise",
+    ),
+    "processing:measure_noise_growth": ("quality_measurement_service", "start_noise_growth"),
+    "processing:measure_night_contributions": ("quality_measurement_service", "start_night_contributions"),
+    # Quality measurements. These read the library's quality root directly:
+    # `query` reads the stored measurements and `metrics` lists the declared
+    # metrics. Neither writes anything.
+    "quality:query": ("astrometrics.quality", "query"),
+    "quality:metrics": ("astrometrics.quality", "metrics"),
     # Photometry and spectroscopy analysis
     "analysis:analyze_image": ("analysis_orchestrator", "analyze_image"),
     "analysis:get_results": ("analysis_orchestrator", "get_analysis_results"),
@@ -202,6 +222,10 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "images:last": ("image_service", "get_last_image"),
     # Calibration frames
     "calibration:get_stats": ("image_processing_service", "get_calibration_stats"),
+    # Measures a camera setting's gain and read noise from the library's
+    # flat and bias frames. With `save` true it writes the camera profile in
+    # the config (after a backup), so the AI's read-only profile withholds it.
+    "calibration:measure_sensor_noise": ("astrometrics.processing.calibration", "measure_sensor_noise"),
     # Mosaics
     "mosaic:preview": ("mosaic_service", "preview_mosaic"),
     "mosaic:create": ("mosaic_service", "create_mosaic"),

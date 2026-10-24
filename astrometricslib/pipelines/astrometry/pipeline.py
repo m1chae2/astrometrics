@@ -125,6 +125,7 @@ class AstrometryPipeline:
             center_dec=dec_hint,
             target_name=target_name,
         )
+        solved_wcs = wcs
         wcs = self._fallback_to_header_wcs(image, wcs)
 
         object_name = self._resolve_object_name(image)
@@ -138,6 +139,7 @@ class AstrometryPipeline:
             image=image,
             stellar_objects=stellar_objects,
             wcs=wcs,
+            wcs_is_header_fallback=solved_wcs is None and wcs is not None,
             extended_source_hint=extended_source_hint,
             sources_detected=self.star_identifier.sources_detected,
             solve_attempted=self.star_identifier.solve_attempted,
@@ -147,6 +149,8 @@ class AstrometryPipeline:
             plate_solve_fit_residual_rms_arcsec=self.star_identifier.plate_solve_fit_residual_rms_arcsec,
             plate_solve_matched_star_count=self.star_identifier.plate_solve_matched_star_count,
             wcs_refinement=self.star_identifier.wcs_refinement,
+            gaia_fit_peak_over_noise=self.star_identifier.gaia_fit_peak_over_noise,
+            gaia_fit_signal_reason=self.star_identifier.gaia_fit_signal_reason,
             astrometry_flags=list(self.star_identifier.astrometry_flags),
         )
 

@@ -18,7 +18,7 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib.api.quality import QualityDiagnostics
+from astrometricslib.api.quality import QualityRecords
 from astrometricslib.drivers import camera_profile_store
 from astrometricslib.foundation.config import AppConfiguration, _TomlSectionedConfig
 from astrometricslib.foundation.errors import ConfigurationError
@@ -183,11 +183,11 @@ def test_an_empty_folder_gives_an_empty_report(tmp_path: Path) -> None:
 
 
 def test_the_diagnostics_api_runs_the_check_on_a_folder(tmp_path: Path) -> None:
-    """`frame_quality(kind="raw_check")` runs the same check on a folder."""
+    """`measure_frames(kind="raw_check")` runs the same check on a folder."""
     _write_batch(tmp_path, _clean_batch(3))
 
-    diagnostics = QualityDiagnostics(AppConfiguration(), MagicMock())
-    report = diagnostics.frame_quality(folder_path=str(tmp_path), kind="raw_check", register_job=False)
+    diagnostics = QualityRecords(AppConfiguration(), MagicMock())
+    report = diagnostics.measure_frames(folder_path=str(tmp_path), kind="raw_check", register_job=False)
 
     assert report.batch["frame_count"] == 3
     assert report.frames_checked == 3

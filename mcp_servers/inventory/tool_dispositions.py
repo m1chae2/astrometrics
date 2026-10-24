@@ -219,7 +219,7 @@ DECISIONS = {
         "never deletes.",
         "ingest",
     ),
-    "diagnostics_frame_quality": ToolDecision(
+    "quality_measure_frames": ToolDecision(
         "keep", "Built 2026-10-03. Statistics on raw frames. Nothing is saved."
     ),
     "observatory_history_get_live_session_status": ToolDecision(
@@ -275,7 +275,7 @@ DECISIONS = {
         "2026-10-05 it is ProcessingPipelines.stack, which also takes the exact frames to stack.",
         "process",
     ),
-    "diagnostics_spectral_frame_check": ToolDecision(
+    "quality_check_spectral_frames": ToolDecision(
         "keep",
         "Built 2026-10-04. Measures raw spectrum frames: zero-order position, tilt, width, peaks, saturated "
         "patches along the spectrum, a predicted peak at another exposure, and a summary by exposure and by "
@@ -316,7 +316,7 @@ DECISIONS = {
         "Built 2026-10-05. Calibration counts, or how a target's light frames match the darks. refresh "
         "reloads the index into memory and writes nothing.",
     ),
-    "diagnostics_stack_quality": ToolDecision(
+    "quality_measure_stack": ToolDecision(
         "keep",
         "Built 2026-10-05. Measures a stack (star width, rejected share, registration) and compares it with "
         "the previous stack or another stack file. Saves nothing.",
@@ -374,6 +374,18 @@ DECISIONS = {
         "Built 2026-10-03. Reads jobs, log tails, stored results and data lineage from the logs database, "
         "opened read-only. A job stuck at 'started' after the app stopped still shows as active.",
     ),
+    "quality_query": ToolDecision(
+        "keep",
+        "Built 2026-10-21. Reads the quality measurements that earlier runs stored (the latest for each "
+        "subject and metric, or every row). Writes nothing and creates no table.",
+    ),
+    "quality_metrics": ToolDecision(
+        "keep",
+        "Built 2026-10-21. Lists the declared quality metrics (or one, given its name, or those of one "
+        "checkpoint). The default detail is a short summary (unit, checkpoint, levels, purpose); "
+        "detail=full adds the meaning, which way is better and how it is estimated. Fixed text, "
+        "nothing is read from disk.",
+    ),
     "observatory_mount_abort_motion": ToolDecision(
         "drop", "Commands the mount, so it is dropped with the other hardware tools."
     ),
@@ -422,6 +434,11 @@ DECISIONS = {
     ),
     "calibration_save": ToolDecision("withhold", "Writes the calibration index. The AI is read-only."),
     "calibration_assess_flats": ToolDecision("keep", "Checks flats. Writes nothing."),
+    "calibration_measure_sensor_noise": ToolDecision(
+        "withhold",
+        "With save on, it writes a measured gain and read noise into the camera profile in the "
+        "configuration file. The AI is read-only.",
+    ),
     "target_get_header": ToolDecision("keep", "Reads one FITS header."),
     "target_read_saved": ToolDecision(
         "drop",
@@ -493,7 +510,7 @@ DECISIONS = {
     "observatory_mount_compute_pointing_correction": ToolDecision(
         "drop", "Advice for a device command the app will not send. The user does not want it."
     ),
-    "diagnostics_flag_value_outliers": ToolDecision(
+    "quality_flag_value_outliers": ToolDecision(
         "drop", "Arithmetic on numbers the caller passes in. The user does not want it."
     ),
     # ---- Writers with no read-only form ----
@@ -515,6 +532,37 @@ DECISIONS = {
             "planning_edit_queue",
         ),
         ToolDecision("withhold", READ_ONLY_NOTE),
+    ),
+    "processing_record_frame_measurements": ToolDecision(
+        "withhold",
+        "Measures a target's light frames and writes the numbers into the quality database, and stamps "
+        "each measured frame on the target record. It never changes a frame file. The AI is read-only, "
+        "so it reads the stored numbers with quality_query instead.",
+        "change-data",
+    ),
+    "processing_measure_half_difference_noise": ToolDecision(
+        "withhold",
+        "Stacks two halves of a target's frames into the target's _subsets folder (about one library "
+        "stack's time in all), subtracts them, and writes the noise of the difference into the quality "
+        "database. The halves are deleted afterwards, and the library stack, its previews and its "
+        "records are never changed. The AI is read-only, so it reads the stored numbers with "
+        "quality_query instead.",
+        "change-data",
+    ),
+    **dict.fromkeys(
+        (
+            "processing_stack_subset",
+            "processing_measure_noise_growth",
+            "processing_measure_night_contributions",
+        ),
+        ToolDecision(
+            "withhold",
+            "Stacks some of a target's frames into the target's _subsets folder (never over the library "
+            "stack, its previews or its records) and writes the noise of each result into the quality "
+            "database. It costs one stack for each subset, so it takes minutes. The AI is read-only, so "
+            "it reads the stored numbers with quality_query instead.",
+            "change-data",
+        ),
     ),
     "target_reindex_frames": ToolDecision(
         "withhold",
@@ -572,7 +620,7 @@ CATEGORY_RULES = (
     (re.compile(r"^calibration_"), "calibration"),
     (re.compile(r"^target_"), "targets"),
     (re.compile(r"^star_"), "stars"),
-    (re.compile(r"^(processing_|diagnostics_|visualization_)"), "image-processing"),
+    (re.compile(r"^(processing_|diagnostics_|quality_|visualization_)"), "image-processing"),
     (re.compile(r"^jobs_"), "jobs-history"),
     (re.compile(r"^(planning_|execution_)"), "planning-sessions"),
     (

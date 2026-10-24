@@ -1117,19 +1117,56 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
 
 - **Claim:** On the M 13 grating session, all 86 frames were extracted with no zero-order tracking failure, and the zero-order position was stable to ±0.2 px.
 - **Settings it supports:**
-  - the registration-quality thresholds (design estimate; see the table below), reached through `QualityDiagnostics.spectral_registration_thresholds`. Relation: sanity check only. <!-- impl: astrometricslib.QualityDiagnostics.spectral_registration_thresholds -->
+  - the registration-quality thresholds (design estimate; see the table below), reached through `QualityRecords.spectral_registration_thresholds`. Relation: sanity check only. <!-- impl: astrometricslib.QualityRecords.spectral_registration_thresholds -->
 - **Status:** Partly measured. One session, measured with an earlier version of the extraction (see the first validation campaign, [index.md](index.md#6-validation-sessions) Section 6).
 - **Data you need:** A session of 30 or more grating frames of one field, and Siril installed.
-- **Procedure:** Run the script on the target and date. It registers the frames with Siril's shift-only transform, parses the per-frame star lists and flags frames with too few matched pairs, a high fit RMSE, or a zero-order star that jumps or fades. `--sweep-filters` also stacks with several sharpness filters and measures the stacked zero-order FWHM.
+- **Procedure:** Run the script on the target and date. It registers the frames with Siril's shift-only transform, parses the per-frame star lists and flags frames with too few matched pairs or a zero-order star that jumps or fades. `--sweep-filters` also stacks with several sharpness filters and measures the stacked zero-order FWHM.
 - **Acceptance criterion:** Not recorded (set after the result).
 - **What to look at:** The count of flagged frames and the zero-order position scatter (pixels).
 - **Our result:** M 13 session (DS-M13; 86 frames, 2520 s total): 86 extracted, 0 tracking failures, position stable to ±0.2 px.
 - **Verdict:** Not judged.
-- **Limits:** Predates the current extraction and registration checks; not repeated.
+- **Limits:** Predates the current extraction and registration checks; not repeated. Note added 2026-10-23: the per-frame number this check called the fit RMSE is the frame's sky background level, because Siril's sequence file holds no registration error. The check no longer tests that number (removed 2026-10-23). The evidence above is unchanged.
 - **To tune for your setup:** If good frames are flagged, raise the sigma thresholds; if bad frames pass, lower them.
 - **Regenerate with:** `python -m astrometricslib.scripts.spectral_registration_quality_analysis "M 13" [--date 2026-05-23] [--camera "ZWO ASI 533MM Pro"] [--sweep-filters]`; `python -m astrometricslib.scripts.run_empirical_validation`.
 - **Guarded by tests:** `astrometricslib/pipelines/spectroscopy/utilities/test/test_spectral_registration_quality.py`.
 - **Raw record:** None kept.
+
+### SPE-30
+
+**Signal-to-noise at the classifying lines, and the class gap against signal-to-noise**
+
+- **Claim:** Two things are stored. First, each spectrum's signal-to-noise per resolution element inside the cores of the six line indices (H-beta, H-alpha, Mg b, Na D and the two TiO bands), using the measured line spread; its run median is a new checkpoint-1 roll-up. Second, a table made by degrading the stored high-signal-to-noise spectra with white noise, classifying each copy with `classify_spectral_type`, and recording the gap to the next class and to the second-best reference at each signal-to-noise. Both are on the same scatter scale (see Limits). The class letter agrees with the spectrum's own undegraded class in 65 percent of copies at a signal-to-noise of 3, 84 at 5, 94 at 8 and 99 at 30, so noise alone moves the class at the low end; the class separation (a gap at or above the limit) is reached from a signal-to-noise of 20 and the subtype separation never, which is a statement about the classifier's confidence, called confidence-limited, not about whether the classes can be told apart.
+- **Settings it supports:**
+  - code constants `DEFAULT_SNR_GRID` and `REACHED_SHARE` = 0.5 in `astrometricslib/pipelines/spectroscopy/processing/class_gap_calibration.py`. Relation: sanity check only ([SPE-D25](#design-estimates)). <!-- impl: astrometricslib.pipelines.spectroscopy.processing.class_gap_calibration.REACHED_SHARE -->
+  - the stored table `astrometricslib/pipelines/spectroscopy/data/class_gap_against_snr_zwo_asi_533mm_pro.json` (one file for each camera, with its definition version, ambiguity threshold and estimator), read by `class_gap_for_snr`, which gives `None` and a reason when the file is missing, does not read, or does not match the code. Nothing in the pipeline calls it. Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.spectroscopy.processing.class_gap_calibration.class_gap_for_snr -->
+- **Status:** Partly measured. The line signal-to-noise is measured on 83 stored spectra with errors; the table is made from 53 spectra of 15 fields, injection only, and the white-noise assumption is not tested against real faint spectra.
+- **Data you need:** Stored spectra with a catalog type on the O-to-M ladder, a response-corrected spectrum and a signal-to-noise of 30 or more by the spectrum's own scatter, from several star fields.
+- **Procedure:**
+  1. Select the spectra, degrade each to every grid value with five noise draws, classify, and take medians and the shares of cases whose gap is at least `AMBIGUOUS_RMS_GAP` (0.02). The uncertainty is the 16th and 84th percentile over 400 resamples of the star fields, for the median gap and for each share; the range with each field left out in turn is stored too. Each row also holds the share of copies whose class letter equals the spectrum's own undegraded class, and the table holds the native class agreement for each field.
+
+```python
+from astrometricslib import Astrometrics
+from astrometricslib.scripts.calibrate_class_gap_against_snr import select_samples
+from astrometricslib.pipelines.spectroscopy.processing.class_gap_calibration import class_gap_table
+
+samples = select_samples(Astrometrics().catalog_access)
+table = class_gap_table(samples)
+print(table.class_reachable_snr, table.subtype_reachable_snr)
+```
+
+  The script `astrometricslib/scripts/calibrate_class_gap_against_snr.py` does this and, with `--apply`, stores the table. <!-- impl: astrometricslib.scripts.calibrate_class_gap_against_snr.select_samples --> <!-- impl: astrometricslib.pipelines.spectroscopy.processing.class_gap_calibration.class_gap_table -->
+
+  1. For the line signal-to-noise, call `line_window_signal_to_noise` <!-- impl: astrometricslib.pipelines.spectroscopy.processing.spectral_line_indices.line_window_signal_to_noise --> on a stored spectrum's response-corrected brightness and errors.
+
+- **Acceptance criterion:** Not recorded (set after the result).
+- **What to look at:** For each signal-to-noise: the median gap to the next class and to the second-best reference with its range, the share of cases at or above the ambiguity limit, the share of cases whose class letter equals the catalog's, and the median distance in subtype steps. The share of copies that keep the spectrum's own undegraded class (this isolates what noise did). A level is "reached" where at least half of the cases pass at that value and at every higher one; when no value passes, the verdict is "confidence-limited at this resolution".
+- **Our result:** 2026-10-23 and 2026-10-24, scratch copy, `science/s5/real_spectra_snr.py` and `science/s5/run_class_gap.py`. Line signal-to-noise on 83 spectra with errors: median 54.0 (interquartile range 24.8 to 93.4) on the scatter scale, against 130.3 (23.6 to 361.9) when the extractor's per-sample variance was used; the whole-spectrum scatter estimate of the same spectra has median 22.8, so the line value is 1.9 times it (5.5 times before the change, and the variance-based whole-spectrum value is 4.9 times it). Class-gap table, 53 spectra, 15 fields, five draws, 400 field resamples, shares with 16 to 84 percent intervals. Undegraded: median gap to the next class 0.0302 (0.0266 to 0.0424), class separated 0.69 (0.62 to 0.74), subtype separated 0.16 (0.11 to 0.19), class equals catalog 0.67 (0.59 to 0.74). By signal-to-noise 3, 5, 8, 12, 20, 30: class separated 0.17, 0.23, 0.35, 0.46, 0.60, 0.64; subtype separated 0.00, 0.00, 0.00, 0.00, 0.04, 0.12; class equals catalog 0.54, 0.63, 0.68, 0.68, 0.68, 0.68; class equals own undegraded class 0.65 (0.56 to 0.73), 0.84 (0.79 to 0.88), 0.94, 0.95, 0.98, 0.99 (0.98 to 1.00). Native class agreement by field: Albireo 0.50 (n 6), Alcor 1.00 (1), Aldebaran 1.00 (1), Alhena 0.00 (1), Alnath 0.00 (1), Deneb 1.00 (2), M 13 0.86 (7), M 27 0.86 (7), M 57 0.50 (2), Mirach 0.50 (8), Mirfak 1.00 (1), Navi 0.25 (6), Schedar 0.83 (6), Sirius 0.00 (1), Vega 1.00 (3). The agreement with the catalog stays near 0.68 as noise falls, so it is limited by the catalog labels and the classifier, not by noise; it is carried by a few fields (several have one spectrum). Class separation is reached from a signal-to-noise of 20; subtype separation is confidence-limited. Sample: 53 spectra; held out by star field.
+- **Verdict:** Not judged.
+- **Limits:** Nothing is fitted, so no spectrum is held out for training; the uncertainty is found by resampling the star fields, and 15 fields is a small number. The noise is white and Gaussian, and real spectra also carry error that does not shrink with exposure (response, sky residue), so the table says what noise alone does. The classifier ignores the errors (it ranks by relative RMS), so the gap changes with noise only through the fit. The catalog type is a label with its own scatter (SIMBAD types come from many sources). The signal-to-noise is the estimate from the spectrum's own scatter; the per-sample-variance estimate stored beside it reads about five times higher on these spectra, so it must not be used to read the table. The line signal-to-noise is on the same scatter scale: it reads `estimate_spectrum_signal_to_noise` on the stretch within 6 resolution elements of each line (an unmeasured choice), so it is local and uses 12 or so elements; the errors only decide which samples are usable. The share of copies that equal the catalog class is a mix of noise and the catalog's own scatter, which is why the share that equals the spectrum's own undegraded class is given beside it.
+- **To tune for your setup:** Rebuild the table after a change of classifier, references or instrument response, with `--apply`. Change `REACHED_SHARE` to demand a larger share.
+- **Regenerate with:** `python -m astrometricslib.scripts.calibrate_class_gap_against_snr --apply`.
+- **Guarded by tests:** `astrometricslib/pipelines/spectroscopy/test/processing/test_class_gap_calibration.py` (the injected noise reads the target signal-to-noise, the verdict logic, the field resampling, the lookup that never gives a better row and refuses a table of another camera, version, threshold or estimator, the shares' intervals and the undegraded-class share) and `astrometricslib/pipelines/spectroscopy/test/test_uncertainty_checkpoints.py` (the new checkpoint metric).
+- **Raw record:** `astrometricslib/pipelines/spectroscopy/data/class_gap_against_snr_zwo_asi_533mm_pro.json` is the stored table.
 
 ## Design estimates
 
@@ -1149,7 +1186,7 @@ These tuned values have not been measured. Each is a reasoned choice.
 | SPE-D10 | Blur with the measured line spread | off | `use_measured_line_spread` argument of `SpectroscopyPipeline` | Template blur that does not match the observed star. | Classify stars of known type with the option off and on and compare the steps from the catalog type. |
 | SPE-D11 | Zero-order saturation limit | 0.1% of pixels | `DEFAULT_SATURATION_FLAG_THRESHOLD` in `pipelines/shared/quality/saturation.py` | Saturated zero orders pass unflagged. | Plot `wavelength_scale_summary.offset_saturation_correlation` against the saturated share over many runs. |
 | SPE-D12 | Wavelength-scale gate | 11 Å RMS (one pixel of dispersion) | `WAVELENGTH_SCALE_LIMIT_ANGSTROM` in `post_processing/wavelength_scale.py` | A poor wavelength scale passes, or a good one fails. | Collect `rms_after_correction_angstrom` over many runs with `report_gate_limits.py`. |
-| SPE-D13 | Processing-quality gate | 50% of classified spectra | `PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION` in `post_processing/run_gates.py` | A run with many failed spectra passes. | Collect the failed share from `stage_quality_summary` over many runs with `report_gate_limits.py`. |
+| SPE-D13 | Processing-quality gate | 50% of classified spectra | `PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION` in `post_processing/record_quality.py` | A run with many failed spectra passes. | Collect the failed share from `stage_quality_summary` over many runs with `report_gate_limits.py`. |
 | SPE-D14 | Gaia XP residual limit | 0.05 RMS (above XP's own 1 to 2% calibration error) | `GAIA_XP_RESIDUAL_RMS_LIMIT` in `post_processing/compare_to_gaia_xp.py` | Calibration errors pass, or good runs fail. | Run `compare_spectra_with_gaia_xp.py` on targets of known good calibration and take the spread. |
 | SPE-D15 | Gaia XP tilt limit | 3% per 1000 Å (11% across the range; about the extinction error at 0.3 airmass) | `GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM` in `post_processing/compare_to_gaia_xp.py` | Response tilt errors pass, or good runs fail. | As above, over several nights. |
 | SPE-D16 | Gaia XP shift limit | 11 Å (one pixel) | `GAIA_XP_WAVELENGTH_SHIFT_LIMIT_ANGSTROM` in `post_processing/compare_to_gaia_xp.py` | Wavelength shifts pass, or good runs fail. | As above; first measure the shift's noise floor on one star observed many times. |
@@ -1159,8 +1196,9 @@ These tuned values have not been measured. Each is a reasoned choice.
 | SPE-D20 | Response agreement tolerance | 0.02 | `DEFAULT_TOLERANCE` in `scripts/compare_instrument_responses.py` | Different responses accepted as the same. | Derive responses from pairs of standard stars on the same night and take the spread. |
 | SPE-D21 | Calibration fit rejection | 10 nm RMS | literal in `SpectroscopyCalibrationTuner._fit_grating_distance` | A bad grating-distance fit accepted. | Run the tuner on several standards (SPE-12); good fits land far below. |
 | SPE-D22 | Calibration dip search | 12 candidates; depth 1% (down to 0.1%); 5 × local noise; 101-sample continuum | `_MAX_DIP_CANDIDATES`, `_FIRST_FRACTIONAL_PROMINENCE`, `_LAST_FRACTIONAL_PROMINENCE`, `_NOISE_PROMINENCE_MULTIPLE`, `_CONTINUUM_WINDOW_SAMPLES` in `utilities/calibration_tuner.py` | True lines missed among the dip candidates. | Run the tuner on faint standards and count how often the true lines are among the candidates. |
-| SPE-D23 | Registration checks | 10 matched pairs; 2.5σ RMSE; 3σ position jump; 2.5σ amplitude | `MIN_MATCHED_STAR_PAIRS`, `RMSE_OUTLIER_SIGMA`, `ZERO_ORDER_POSITION_JUMP_OUTLIER_SIGMA`, `ZERO_ORDER_AMPLITUDE_OUTLIER_SIGMA` in `utilities/registration_quality.py` | Bad frames missed, or good frames flagged. | Run `spectral_registration_quality_analysis.py` on sessions with known bad frames (SPE-29). |
+| SPE-D23 | Registration checks | 10 matched pairs; 3σ position jump; 2.5σ amplitude. 2026-10-23: the 2.5σ background-level ("RMSE") criterion was removed (user decision). It was a sky background check mislabeled as a registration error, so its limit no longer applies. | `MIN_MATCHED_STAR_PAIRS`, `ZERO_ORDER_POSITION_JUMP_OUTLIER_SIGMA`, `ZERO_ORDER_AMPLITUDE_OUTLIER_SIGMA` in `utilities/registration_quality.py` | Bad frames missed, or good frames flagged. | Run `spectral_registration_quality_analysis.py` on sessions with known bad frames (SPE-29). |
 | SPE-D24 | Extinction curve | Kitt Peak mean curve | `data/atmospheric_extinction_kpno.txt` | A wrong airmass correction across wavelength. | Observe one standard at two airmasses and fit k(λ) from the ratio. |
+| SPE-D25 | Class gap table: share of cases that counts as reached; signal-to-noise grid; noise draws; field resamples | 50 percent; 3 to 30; 5; 400 | `REACHED_SHARE`, `DEFAULT_SNR_GRID` in `pipelines/spectroscopy/processing/class_gap_calibration.py`; `--draws` and `--bootstrap` of the script <!-- impl: astrometricslib.pipelines.spectroscopy.processing.class_gap_calibration.REACHED_SHARE --> | A level called reached or unreachable on a share chosen without evidence. | Repeat the table with shares of 30 and 70 percent and see whether the verdict moves ([SPE-30](#spe-30)). |
 
 <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.SKY_CLIP_SIGMA -->
 <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.SKY_CLIP_MAX_PASSES -->
@@ -1173,7 +1211,7 @@ These tuned values have not been measured. Each is a reasoned choice.
 <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.measured_line_spread.CHROMATIC_DEFOCUS_RATIO_LIMIT -->
 <!-- impl: astrometricslib.pipelines.shared.quality.saturation.DEFAULT_SATURATION_FLAG_THRESHOLD -->
 <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.wavelength_scale.WAVELENGTH_SCALE_LIMIT_ANGSTROM -->
-<!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.run_gates.PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION -->
+<!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.record_quality.PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION -->
 <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp.GAIA_XP_RESIDUAL_RMS_LIMIT -->
 <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp.GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM -->
 <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp.GAIA_XP_WAVELENGTH_SHIFT_LIMIT_ANGSTROM -->
@@ -1186,6 +1224,5 @@ These tuned values have not been measured. Each is a reasoned choice.
 <!-- impl: astrometricslib.pipelines.spectroscopy.utilities.calibration_tuner._NOISE_PROMINENCE_MULTIPLE -->
 <!-- impl: astrometricslib.pipelines.spectroscopy.utilities.calibration_tuner._CONTINUUM_WINDOW_SAMPLES -->
 <!-- impl: astrometricslib.pipelines.spectroscopy.utilities.registration_quality.MIN_MATCHED_STAR_PAIRS -->
-<!-- impl: astrometricslib.pipelines.spectroscopy.utilities.registration_quality.RMSE_OUTLIER_SIGMA -->
 <!-- impl: astrometricslib.pipelines.spectroscopy.utilities.registration_quality.ZERO_ORDER_POSITION_JUMP_OUTLIER_SIGMA -->
 <!-- impl: astrometricslib.pipelines.spectroscopy.utilities.registration_quality.ZERO_ORDER_AMPLITUDE_OUTLIER_SIGMA -->

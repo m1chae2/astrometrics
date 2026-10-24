@@ -1,6 +1,6 @@
 """Tests for the raw-frame quality tool.
 
-`QualityDiagnostics.frame_quality` gives an AI client statistics on a
+`QualityRecords.measure_frames` gives an AI client statistics on a
 target's frames, a check of a folder, or a quarantine preview. These tests
 use small fake frames and a fake measuring function, and check the choice of
 kind, the newest-frames limit, the summary, and above all that the saved
@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 import pytest
 
-from astrometricslib.api.quality import QualityDiagnostics
+from astrometricslib.api.quality import QualityRecords
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.target import FrameRecord, Target
 
@@ -56,23 +56,23 @@ def _fake_measure(
 
 
 @pytest.fixture
-def diagnostics() -> QualityDiagnostics:
+def diagnostics() -> QualityRecords:
     """Make the diagnostics object under test.
 
     Returns
     -------
-    diagnostics : `QualityDiagnostics`
+    diagnostics : `QualityRecords`
         An instance with no configuration, since these kinds need none.
     """
-    return QualityDiagnostics(None, None)
+    return QualityRecords(None, None)
 
 
-def test_input_quality_summarizes_the_newest_frames(diagnostics: QualityDiagnostics) -> None:
+def test_input_quality_summarizes_the_newest_frames(diagnostics: QualityRecords) -> None:
     """Only the newest light frames are measured, with a summary per number."""
     with patch(
         "astrometricslib.pipelines.shared.quality.frame_statistics.measure_frame_input_quality", _fake_measure
     ):
-        report = diagnostics.frame_quality(_target(), kind="input_quality", limit=3)
+        report = diagnostics.measure_frames(_target(), kind="input_quality", limit=3)
     assert report.frames_measured == 3
     assert report.light_frames_in_target == 6
     assert [row["file"] for row in report.frames] == ["f3.fits", "f4.fits", "f5.fits"]
@@ -81,37 +81,37 @@ def test_input_quality_summarizes_the_newest_frames(diagnostics: QualityDiagnost
     assert report.summary["measured_fwhm_px"] == {"frames": 0}
 
 
-def test_the_saved_target_is_never_changed(diagnostics: QualityDiagnostics) -> None:
+def test_the_saved_target_is_never_changed(diagnostics: QualityRecords) -> None:
     """Measuring works on a copy, so the original frames keep no new values."""
     target = _target()
     with patch(
         "astrometricslib.pipelines.shared.quality.frame_statistics.measure_frame_input_quality", _fake_measure
     ):
-        diagnostics.frame_quality(target, kind="input_quality")
+        diagnostics.measure_frames(target, kind="input_quality")
     assert all(frame.measurements.background_level is None for frame in target.frames)
 
 
-def test_camera_filter_and_dark_frames(diagnostics: QualityDiagnostics) -> None:
+def test_camera_filter_and_dark_frames(diagnostics: QualityRecords) -> None:
     """Dark frames are never measured, and a camera filter can leave none."""
     with patch(
         "astrometricslib.pipelines.shared.quality.frame_statistics.measure_frame_input_quality", _fake_measure
     ):
-        assert diagnostics.frame_quality(_target(), camera_id="asi533").frames_measured == 6
-        assert diagnostics.frame_quality(_target(), camera_id="nikon").frames_measured == 0
+        assert diagnostics.measure_frames(_target(), camera_id="asi533").frames_measured == 6
+        assert diagnostics.measure_frames(_target(), camera_id="nikon").frames_measured == 0
 
 
-def test_limit_is_clamped(diagnostics: QualityDiagnostics) -> None:
+def test_limit_is_clamped(diagnostics: QualityRecords) -> None:
     """A limit below 1 is raised to 1."""
     with patch(
         "astrometricslib.pipelines.shared.quality.frame_statistics.measure_frame_input_quality", _fake_measure
     ):
-        assert diagnostics.frame_quality(_target(), limit=0).frames_measured == 1
+        assert diagnostics.measure_frames(_target(), limit=0).frames_measured == 1
 
 
-def test_raw_check_needs_a_folder_and_passes_the_limit(diagnostics: QualityDiagnostics) -> None:
+def test_raw_check_needs_a_folder_and_passes_the_limit(diagnostics: QualityRecords) -> None:
     """The folder check needs a folder and measures only the newest frames."""
     with pytest.raises(InvalidArgumentError, match="needs a target or a folder_path"):
-        diagnostics.frame_quality(kind="raw_check")
+        diagnostics.measure_frames(kind="raw_check")
     selected = ["/staging/a.fits", "/staging/b.fits", "/staging/c.fits"]
     with (
         patch(
@@ -123,40 +123,40 @@ def test_raw_check_needs_a_folder_and_passes_the_limit(diagnostics: QualityDiagn
             return_value={"frames": [], "batch": {}},
         ) as check,
     ):
-        report = diagnostics.frame_quality(kind="raw_check", folder_path="/staging", limit=2)
+        report = diagnostics.measure_frames(kind="raw_check", folder_path="/staging", limit=2)
     check.assert_called_once_with(paths=selected[-2:])
     assert (report.frames_matching, report.frames_checked) == (3, 2)
     assert report.kind == "raw_check"
     assert report.folder_path == "/staging"
 
 
-def test_bad_requests_are_errors(diagnostics: QualityDiagnostics) -> None:
+def test_bad_requests_are_errors(diagnostics: QualityRecords) -> None:
     """An unknown kind, a missing target, or an unused argument is refused."""
     with pytest.raises(InvalidArgumentError, match="kind must be one of"):
-        diagnostics.frame_quality(kind="everything")
+        diagnostics.measure_frames(kind="everything")
     with pytest.raises(InvalidArgumentError, match="needs a target"):
-        diagnostics.frame_quality(kind="input_quality")
+        diagnostics.measure_frames(kind="input_quality")
     with pytest.raises(InvalidArgumentError, match="needs a target"):
-        diagnostics.frame_quality(kind="quarantine_preview")
+        diagnostics.measure_frames(kind="quarantine_preview")
     with pytest.raises(InvalidArgumentError, match="does not use: camera_id"):
-        diagnostics.frame_quality(_target(), kind="quarantine_preview", camera_id="asi533")
+        diagnostics.measure_frames(_target(), kind="quarantine_preview", camera_id="asi533")
     with pytest.raises(InvalidArgumentError, match="does not use: fwhm"):
-        diagnostics.frame_quality(_target(), kind="raw_check", include=["fwhm"])
+        diagnostics.measure_frames(_target(), kind="raw_check", include=["fwhm"])
 
 
-def test_a_file_range_takes_the_first_frames_inside_it(diagnostics: QualityDiagnostics) -> None:
+def test_a_file_range_takes_the_first_frames_inside_it(diagnostics: QualityRecords) -> None:
     """With a range, the limit keeps the first frames in it, not the newest."""
     with patch(
         "astrometricslib.pipelines.shared.quality.frame_statistics.measure_frame_input_quality", _fake_measure
     ):
-        report = diagnostics.frame_quality(
+        report = diagnostics.measure_frames(
             _target(), kind="input_quality", first_file="1", last_file="4", limit=2
         )
     assert [row["file"] for row in report.frames] == ["f1.fits", "f2.fits"]
     assert report.frames_matching == 4
 
 
-def test_a_bad_time_is_refused(diagnostics: QualityDiagnostics) -> None:
+def test_a_bad_time_is_refused(diagnostics: QualityRecords) -> None:
     """An unreadable time raises InvalidArgumentError."""
     with pytest.raises(InvalidArgumentError, match="ISO 8601"):
-        diagnostics.frame_quality(_target(), since="last night")
+        diagnostics.measure_frames(_target(), since="last night")

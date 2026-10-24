@@ -11,10 +11,11 @@ import logging
 import os
 import sqlite3
 import statistics
+from dataclasses import replace
 from typing import Any
 
 from astrometricslib.foundation.errors import AstrometricsError
-from astrometricslib.models.quality.quality_summary import NoiseModelPoint
+from astrometricslib.models.quality.quality_summary import PHOTOMETRY_PIPELINE_VERSION, NoiseModelPoint
 from astrometricslib.models.stellar_source import PhotometryResult, StellarObject, VariableCandidate
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.photometry.batch import (
@@ -26,12 +27,27 @@ from astrometricslib.pipelines.photometry.post_processing.known_variability_labe
     label_known_variability,
     split_scores_by_catalog_status,
 )
-from astrometricslib.pipelines.photometry.post_processing.run_gates import photometry_run_gates
+from astrometricslib.pipelines.photometry.post_processing.record_noise_budget import (
+    noise_budget_inputs,
+    record_noise_budget_quality,
+)
+from astrometricslib.pipelines.photometry.post_processing.record_period_sensitivity import (
+    record_period_sensitivity_quality,
+)
+from astrometricslib.pipelines.photometry.post_processing.record_quality import (
+    PhotometryRunInputs,
+    photometry_run_gates,
+    record_photometry_quality,
+)
+from astrometricslib.pipelines.photometry.post_processing.record_target_amplitude import (
+    record_target_amplitude_quality,
+)
 from astrometricslib.pipelines.photometry.pre_processing.observation_times import (
     TIME_BASIS_BJD_TDB,
     TIME_BASIS_BJD_TDB_GEOCENTRIC,
     TIME_BASIS_UTC_START,
 )
+from astrometricslib.pipelines.photometry.processing.noise_budget import SessionNoiseInputs
 from astrometricslib.pipelines.photometry.processing.variability_indices import NoiseModel, fit_noise_model
 from astrometricslib.pipelines.pipeline_base import (
     AnalysisPipeline,
@@ -39,6 +55,7 @@ from astrometricslib.pipelines.pipeline_base import (
     Result,
     run_pipeline,
 )
+from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
 from astrometricslib.pipelines.shared.star_recording import (
     merge_photometry_stellar_object,
     record_pipeline_stars,
@@ -211,6 +228,8 @@ def _empty_photometry_result(no_work_reason: str) -> Result:
             "all_frame_ensemble_composition": [],
             "all_comparison_sets": [],
             "all_centroid_shift_summaries": [],
+            "all_session_zero_points": [],
+            "all_session_noise_inputs": [],
             "session_empty_reasons": [],
             "sessions_missing_wcs": [],
             "cross_session_match_count": 0,
@@ -358,6 +377,13 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         # one frame (see `CentroidShiftSummary`), for the
         # `registration_drift` gate.
         all_centroid_shift_summaries = []
+        # One catalog zero point record per session that has frames (see
+        # `SessionZeroPoints`), stored as measurements next to the summary.
+        all_session_zero_points = []
+        # What each session's saved flux errors say about its own noise, for
+        # the noise model stored next to the summary (see
+        # `SessionNoiseInputs`).
+        all_session_noise_inputs = []
         session_empty_reasons = []
         # Only session-prefix ids when there's more than one session,
         # so the common single-session target keeps today's plain
@@ -431,6 +457,27 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             centroid_shift_summary = analyzer.centroid_shift_summary()
             if centroid_shift_summary is not None:
                 all_centroid_shift_summaries.append(centroid_shift_summary)
+            if analyzer.session_zero_points is not None:
+                all_session_zero_points.append(replace(analyzer.session_zero_points, session_id=session.id))
+            try:
+                all_session_noise_inputs.append(
+                    SessionNoiseInputs.from_analyzer_results(
+                        session.id,
+                        analyzer.stellar_objects,
+                        analyzer.frame_exposure_seconds,
+                        analyzer.detector_noise,
+                    )
+                )
+            except (AstrometricsError, AttributeError, *DATA_ERRORS):
+                # A session's noise inputs are context only; a failure here
+                # (an analyzer that lacks a field, as well as unusable data)
+                # is logged and never fails the run.
+                logger.warning(
+                    "[%s] The noise inputs of session %s could not be gathered.",
+                    target.id,
+                    session.id,
+                    exc_info=True,
+                )
 
         # Captured before cross-session merging/re-flagging below so
         # each candidate reflects its own session's local adaptive
@@ -496,6 +543,8 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 "all_frame_ensemble_composition": all_frame_ensemble_composition,
                 "all_comparison_sets": all_comparison_sets,
                 "all_centroid_shift_summaries": all_centroid_shift_summaries,
+                "all_session_zero_points": all_session_zero_points,
+                "all_session_noise_inputs": all_session_noise_inputs,
                 "session_empty_reasons": session_empty_reasons,
                 "sessions_missing_wcs": sessions_missing_wcs,
                 "cross_session_match_count": cross_session_match_count,
@@ -607,7 +656,19 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         frames_without_timestamp_total = len(photometry_frames_without_timestamp) + len(
             unreadable_date_obs_frames
         )
-        for gate in photometry_run_gates(
+        comparison_sets = payload.get("all_comparison_sets", [])
+        registration_drifts_px = [
+            photometry.input_quality.max_registration_drift_px if photometry.input_quality else None
+            for photometry in star_photometry
+        ]
+        centroid_shift_summaries = payload.get("all_centroid_shift_summaries", [])
+        stars_with_scatter = sum(
+            1 for photometry in star_photometry if photometry.coefficient_of_variation is not None
+        )
+        noise_model_star_count = len(_noise_model_inputs(star_photometry)[0])
+        flux_error_mag = median_flux_error_mag(result.stellar_objects)
+        errors_assume_unit_gain = any(photometry.errors_assume_unit_gain for photometry in star_photometry)
+        gates = photometry_run_gates(
             frames_contributed=frames_contributed_total,
             rejected_frame_count=len(all_rejected_files),
             frames_without_timestamp=frames_without_timestamp_total,
@@ -618,28 +679,49 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             session_empty_reasons=session_empty_reasons,
             sessions_missing_wcs=sessions_missing_wcs,
             no_work_reason=payload.get("no_work_reason"),
-            comparison_sets=payload.get("all_comparison_sets", []),
-            registration_drifts_px=[
-                photometry.input_quality.max_registration_drift_px if photometry.input_quality else None
-                for photometry in star_photometry
-            ],
-            centroid_shift_summaries=payload.get("all_centroid_shift_summaries", []),
-            stars_with_scatter=sum(
-                1 for photometry in star_photometry if photometry.coefficient_of_variation is not None
-            ),
+            comparison_sets=comparison_sets,
+            registration_drifts_px=registration_drifts_px,
+            centroid_shift_summaries=centroid_shift_summaries,
+            stars_with_scatter=stars_with_scatter,
             known_variable_scores=known_variable_scores,
             unlisted_scores=unlisted_scores,
             cutoff_cv=float(statistics.median(cutoffs)) if cutoffs else None,
-            noise_model_stars=len(_noise_model_inputs(star_photometry)[0]),
+            noise_model_stars=noise_model_star_count,
             noise_floor_mag=_typical_noise_mag(noise_model, star_photometry),
             time_basis=_run_time_basis(star_photometry),
-            median_flux_error_mag=median_flux_error_mag(result.stellar_objects),
-            errors_assume_unit_gain=any(photometry.errors_assume_unit_gain for photometry in star_photometry),
+            median_flux_error_mag=flux_error_mag,
+            errors_assume_unit_gain=errors_assume_unit_gain,
             errors_assume_zero_read_noise=any(
                 photometry.errors_assume_zero_read_noise for photometry in star_photometry
             ),
-        ):
+        )
+        for gate in gates:
             summary.record_gate(gate)
+
+        # The same counts, measurements and gates, stored as measurements
+        # next to the summary. The context is None when the caller gave no
+        # time; then nothing is stored (a warning says so). A storage failure
+        # is logged inside and never fails the run.
+        measurement_context = PipelineRunContext.from_options(
+            target.id, self.pipeline_name, PHOTOMETRY_PIPELINE_VERSION, request.options
+        )
+        if measurement_context is not None:
+            record_photometry_quality(
+                summary.photometry_metrics,
+                gates,
+                PhotometryRunInputs(
+                    comparison_sets=comparison_sets,
+                    registration_drifts_px=registration_drifts_px,
+                    centroid_shift_summaries=centroid_shift_summaries,
+                    stars_with_scatter=stars_with_scatter,
+                    noise_model_star_count=noise_model_star_count,
+                    median_flux_error_mag=flux_error_mag,
+                    errors_assume_unit_gain=errors_assume_unit_gain,
+                    session_zero_points=payload.get("all_session_zero_points", []),
+                ),
+                measurement_context,
+            )
+            self._record_science_context_measurements(request, result, measurement_context)
 
         from astrometricslib.pipelines.shared.applied_camera_profile import (
             camera_name_for_paths,
@@ -655,6 +737,44 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             or most_common_camera_name(target.frames),
         )
         return summary
+
+    def _record_science_context_measurements(
+        self, request: PipelineRequest, result: Result, measurement_context: PipelineRunContext
+    ) -> None:
+        """Store the noise model, the alias peaks and the target amplitude.
+
+        Each is stored in a step of its own, so a failure in one never drops
+        another's rows or fails the run (each step logs its own failure).
+
+        Parameters
+        ----------
+        request : `PipelineRequest`
+            The run's request: the target and the catalog access.
+        result : `Result`
+            The run's result: the stars and the payload.
+        measurement_context : `PipelineRunContext`
+            The run's shared facts.
+        """
+        from astrometricslib.foundation.config import get_configuration
+        from astrometricslib.pipelines.shared.target_center_hint import resolve_target_center_hint
+
+        target = request.target
+        payload = result.payload
+        run_paths = set(payload.get("image_paths") or [])
+        record_noise_budget_quality(
+            lambda: noise_budget_inputs(
+                payload.get("all_session_noise_inputs", []),
+                payload.get("all_session_zero_points", []),
+                [frame for frame in target.frames if frame.path in run_paths],
+                get_configuration(),
+            ),
+            measurement_context,
+        )
+        record_period_sensitivity_quality(result.stellar_objects, measurement_context)
+        center_ra, center_dec = resolve_target_center_hint(target)
+        record_target_amplitude_quality(
+            result.stellar_objects, target, center_ra, center_dec, request.catalog_access, measurement_context
+        )
 
     def to_result_dict(self, request: PipelineRequest, result: Result, summary: Any) -> dict[str, Any]:
         """Build the result dict photometry's callers expect back.

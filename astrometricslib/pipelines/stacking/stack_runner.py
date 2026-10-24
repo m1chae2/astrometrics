@@ -528,7 +528,9 @@ def _stack_exposure_groups(
         ``"recommended_exposure_seconds"``, and a ``"clipped_exposure_groups"``
         list of the groups whose raw frames are clipped at zero, and an
         ``"exposure_group_frame_zero_fractions"`` list with every group's
-        measured zero fraction (empty when the frames could not be read).
+        measured zero fraction (empty when the frames could not be read), and
+        an ``"exposure_group_weights"`` list with the weight, frame count and
+        frame paths of each group that was combined.
     """
     import numpy as np
 
@@ -860,6 +862,21 @@ def _stack_exposure_groups(
     merged_diagnostics["clipped_exposure_groups"] = clipped_groups
     merged_diagnostics["exposure_group_frame_zero_fractions"] = measured_zero_fractions
     merged_diagnostics["exposure_group_summaries"] = summaries
+    # What each combined group counted for: the group weight and the frames it
+    # holds, so the quality record can give every frame its share (the weight
+    # is per pixel in the combine only where a group is saturated or empty).
+    merged_diagnostics["exposure_group_weights"] = [
+        {
+            "paths": [
+                str(path)
+                for frame in results[index][0].frames
+                if (path := frame.get("path") if isinstance(frame, dict) else getattr(frame, "path", None))
+            ],
+            "weight": float(weights[index]),
+            "frame_count": int(counts[index]),
+        }
+        for index in used
+    ]
     if stacked_fwhm is not None:
         merged_diagnostics["stacked_fwhm_px"] = stacked_fwhm
     merged_diagnostics["recommended_exposure_seconds"] = recommended_exposure_for_groups(

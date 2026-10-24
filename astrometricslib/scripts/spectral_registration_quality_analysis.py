@@ -5,7 +5,7 @@ production spectral stacking path in siril_interface.py) against a
 target's Star Analyzer 200 ("SPEC") frames, then parses the resulting
 .seq registration summary and per-frame .lst star lists to flag
 frames where registration looks untrustworthy: too few matched star
-pairs, elevated fit RMSE, or the zero-order star's position/amplitude
+pairs, or the zero-order star's position/amplitude
 drifting sharply frame-to-frame.
 
 The registration-quality check alone only registers frames -- it does
@@ -243,7 +243,7 @@ def run_filter_sweep(astrometrics: Astrometrics, target, spec_frames: list[Any])
             continue
 
         row["zero_order_fwhm"] = measure_zero_order_stacked_fwhm(astrometrics, stacked_path)
-        row["rejected_fraction"] = astrometrics.processing.diagnostics.stack_quality(
+        row["rejected_fraction"] = astrometrics.quality.measure_stack(
             stacked_path, include=["rejected_fraction"]
         ).rejected_fraction
         print(
@@ -278,7 +278,7 @@ def run_analysis() -> None:
     Parses CLI arguments, symlinks the target's matching SPEC frames
     into a scratch Siril work directory, runs Siril's shift-only
     registration, then parses the resulting .seq and .lst outputs to
-    flag frames with too few matched star pairs, elevated fit RMSE,
+    flag frames with too few matched star pairs,
     or a zero-order star whose position or amplitude jumps sharply
     frame-to-frame. Writes the full per-frame results to a JSON file
     under the configured logs path, then removes the scratch work
@@ -372,8 +372,7 @@ def run_analysis() -> None:
             f"for {len(spec_frames)} input frames -- some frames may have failed registration."
         )
 
-    nb_stars = [f["nb_stars"] for f in seq_frames]
-    rmse_values = [f["rmse"] for f in seq_frames]
+    nb_stars = [f["star_count"] for f in seq_frames]
     peak_to_background_ratios = [s["peak_to_background_ratio"] if s else None for s in zero_order_stars]
 
     position_jumps: list[float | None] = [None]
@@ -383,15 +382,12 @@ def run_analysis() -> None:
         else:
             position_jumps.append(float(np.hypot(curr["x"] - prev["x"], curr["y"] - prev["y"])))
 
-    thresholds = astrometrics.processing.diagnostics.spectral_registration_thresholds
+    thresholds = astrometrics.quality.spectral_registration_thresholds
     low_star_count_flags = [n < thresholds["min_matched_star_pairs"] for n in nb_stars]
-    high_rmse_flags = astrometrics.processing.diagnostics.flag_value_outliers(
-        rmse_values, thresholds["rmse_outlier_sigma"]
-    )
-    dim_zero_order_flags = astrometrics.processing.diagnostics.flag_value_outliers(
+    dim_zero_order_flags = astrometrics.quality.flag_value_outliers(
         peak_to_background_ratios, thresholds["zero_order_amplitude_outlier_sigma"], low_is_bad=True
     )
-    position_jump_flags = astrometrics.processing.diagnostics.flag_value_outliers(
+    position_jump_flags = astrometrics.quality.flag_value_outliers(
         position_jumps, thresholds["zero_order_position_jump_outlier_sigma"]
     )
 
@@ -399,7 +395,7 @@ def run_analysis() -> None:
     print("\n==========================================")
     print("SPECTRAL REGISTRATION QUALITY SUMMARY")
     print("==========================================")
-    print(f"{'frame':>5} {'nb_stars':>9} {'rmse':>10} {'zo_ratio':>10} {'zo_jump':>9}  flags")
+    print(f"{'frame':>5} {'nb_stars':>9} {'background':>10} {'zo_ratio':>10} {'zo_jump':>9}  flags")
     for i, frame in enumerate(spec_frames):
         seq_entry = seq_frames[i] if i < len(seq_frames) else {}
         zero_order = zero_order_stars[i] if i < len(zero_order_stars) else None
@@ -407,8 +403,6 @@ def run_analysis() -> None:
         flags = []
         if i < len(low_star_count_flags) and low_star_count_flags[i]:
             flags.append("low_star_count")
-        if i < len(high_rmse_flags) and high_rmse_flags[i]:
-            flags.append("high_rmse")
         if i < len(dim_zero_order_flags) and dim_zero_order_flags[i]:
             flags.append("dim_zero_order")
         if i < len(position_jump_flags) and position_jump_flags[i]:
@@ -416,8 +410,8 @@ def run_analysis() -> None:
 
         row = {
             "path": frame.path,
-            "nb_stars": seq_entry.get("nb_stars"),
-            "rmse": seq_entry.get("rmse"),
+            "nb_stars": seq_entry.get("star_count"),
+            "background_level": seq_entry.get("background_level"),
             "roundness": seq_entry.get("roundness"),
             "zero_order_peak_to_background_ratio": (
                 zero_order["peak_to_background_ratio"] if zero_order else None
@@ -428,7 +422,7 @@ def run_analysis() -> None:
         }
         results.append(row)
 
-        rmse_str = f"{row['rmse']:.5f}" if row["rmse"] is not None else "n/a"
+        background_str = f"{row['background_level']:.5f}" if row["background_level"] is not None else "n/a"
         ratio_str = (
             f"{row['zero_order_peak_to_background_ratio']:.1f}"
             if row["zero_order_peak_to_background_ratio"] is not None
@@ -440,7 +434,7 @@ def run_analysis() -> None:
             else "n/a"
         )
         print(
-            f"{i:>5} {row['nb_stars']!s:>9} {rmse_str:>10} {ratio_str:>10} "
+            f"{i:>5} {row['nb_stars']!s:>9} {background_str:>10} {ratio_str:>10} "
             f"{jump_str:>9}  {','.join(flags) or '-'}"
         )
 

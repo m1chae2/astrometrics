@@ -140,7 +140,7 @@ Symbols follow the architecture paper's [list of symbols](../Astrometrics_Librar
 
 - **Stage 1 (`process_input`).** A no-op that returns an empty `Result`.
 - **Stage 2 (`run`).** Finds the stars with `AstrometryPipeline` (no solve), names them from the target's solved stack, and runs `SpectroscopyPipeline.process`. Each spectrum carries four quality checkpoints, in order: `raw_frame`, `pre_processing`, `processing` and `post_processing`. Each checkpoint is a set of measured values (metrics), some with a limit. The `processing` checkpoint judges the classification: a poor match, an ambiguous match, and a type from line strengths that is more than 20 subtype steps from the template-fit type.
-- **Stage 3 (`validate_output`).** Builds the summary, records the eight `spectroscopy_run_gates`, then `gaia_xp_agreement` (9 run gates in all).
+- **Stage 3 (`validate_output`).** Builds the summary, records the eight `spectroscopy_run_gates`, then `gaia_xp_agreement` (9 run gates in all). It then stores the run totals, the per-stage medians and the gates as quality measurements (`record_spectroscopy_quality`).
 - **Stage 4 (`to_result_dict`).** Returns only `context` and `stellar_objects`.
 
 A session of raw frames runs through `batch.py` instead. It names the stars in one reference frame, follows them through the session's other frames in parallel workers, and builds the same gates from the same plain counts.
@@ -154,13 +154,13 @@ The count covers only these run gates. Some quality tests are not gates. Two tra
 | Gate | Role | Defined in | What it checks |
 | --- | --- | --- | --- |
 | `gaia_xp_agreement` | run gate | `post_processing/compare_to_gaia_xp.py` | Fails when the median tilt of observed / Gaia XP spectra (low-resolution spectra from the Gaia space mission) is above `GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM`. Not checked with too few stars. |
-| `spectra_extracted` | run gate | `post_processing/run_gates.py` | Fails when no star produced a spectrum. |
-| `zero_order_saturation` | run gate | `post_processing/run_gates.py` | Fails when, for the worst star, at least `DEFAULT_SATURATION_FLAG_THRESHOLD` (0.1%) of the pixels around its zero order (its undispersed point image beside the spectrum) are saturated: at or above the camera's saturation threshold, where pixels clip. Not checked when no zero order was measured. |
-| `spectral_classification` | run gate | `post_processing/run_gates.py` | Fails when a classification is a poor match (best misfit, the relative RMS of Eq. 4, above `NO_GOOD_MATCH_RMS`) or ambiguous at the class level (misfit gap to the best reference of another spectral class below `AMBIGUOUS_RMS_GAP`). A tie between neighboring subtypes alone does not fail it; such ties are counted in the detail. |
-| `catalog_agreement` | run gate | `post_processing/run_gates.py` | Fails when a measured spectral type is more than `DIFFERS_FROM_CATALOG_SUBTYPES` subtype steps from the type a catalog lists for the star. |
-| `feature_significance` | run gate | `post_processing/run_gates.py` | Fails when a star's feature p-values (the chance that noise alone makes a feature this strong) could not be calibrated against control windows (stretches of its own spectrum used as a noise reference). |
-| `resolution_measured` | run gate | `post_processing/run_gates.py` | Not checked when no spectrum had its resolution (smallest wavelength detail it can separate) measured. |
-| `processing_quality` | run gate | `post_processing/run_gates.py` | Fails when more than `PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION` of classified spectra fail a limit of the processing checkpoint, the second of four quality checkpoints on each spectrum. Its limits judge the classification: a poor match, an ambiguous match, or a type from line strengths far from the template-fit type (Section 4). |
+| `spectra_extracted` | run gate | `post_processing/record_quality.py` | Fails when no star produced a spectrum. |
+| `zero_order_saturation` | run gate | `post_processing/record_quality.py` | Fails when, for the worst star, at least `DEFAULT_SATURATION_FLAG_THRESHOLD` (0.1%) of the pixels around its zero order (its undispersed point image beside the spectrum) are saturated: at or above the camera's saturation threshold, where pixels clip. Not checked when no zero order was measured. |
+| `spectral_classification` | run gate | `post_processing/record_quality.py` | Fails when a classification is a poor match (best misfit, the relative RMS of Eq. 4, above `NO_GOOD_MATCH_RMS`) or ambiguous at the class level (misfit gap to the best reference of another spectral class below `AMBIGUOUS_RMS_GAP`). A tie between neighboring subtypes alone does not fail it; such ties are counted in the detail. |
+| `catalog_agreement` | run gate | `post_processing/record_quality.py` | Fails when a measured spectral type is more than `DIFFERS_FROM_CATALOG_SUBTYPES` subtype steps from the type a catalog lists for the star. |
+| `feature_significance` | run gate | `post_processing/record_quality.py` | Fails when a star's feature p-values (the chance that noise alone makes a feature this strong) could not be calibrated against control windows (stretches of its own spectrum used as a noise reference). |
+| `resolution_measured` | run gate | `post_processing/record_quality.py` | Not checked when no spectrum had its resolution (smallest wavelength detail it can separate) measured. |
+| `processing_quality` | run gate | `post_processing/record_quality.py` | Fails when more than `PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION` of classified spectra fail a limit of the processing checkpoint, the second of four quality checkpoints on each spectrum. Its limits judge the classification: a poor match, an ambiguous match, or a type from line strengths far from the template-fit type (Section 4). |
 | `wavelength_scale` | run gate | `post_processing/wavelength_scale.py` | Fails when the run's wavelength zero points (offsets of each spectrum's wavelength scale) scatter by more than `WAVELENGTH_SCALE_LIMIT_ANGSTROM` after correction. |
 
 ## 5. Tuned calibration parameters
@@ -209,7 +209,7 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `target_session_breakdown` | `list[astrometricslib.models.quality.quality_summary.TargetSessionContribution]` | For each session, how many frames it had and how many the run used. |
 | `upstream_quality_summary_reference` | `str \| None` | Name of the pipeline that had to run first, if any. |
 | `resolved_parameters` | `dict[str, Any]` | The settings the run actually used, after defaults were filled in. |
-| `camera_profile` | `astrometricslib.models.quality.quality_summary.AppliedCameraProfile \| None` | The camera settings applied, such as the gain (e-/ADU) and the level at which pixels clip. |
+| `camera_profile` | `astrometricslib.models.applied_camera_profile.AppliedCameraProfile \| None` | The camera settings applied, such as the gain (e-/ADU) and the level at which pixels clip. |
 | `quality_processing_applied` | `bool` | Whether the quality gates were run. |
 | `flagged` | `bool` | True if one or more quality gates failed, so a person should look at the run. |
 | `flag_reasons` | `list[str]` | One plain sentence for each reason the run was flagged. |

@@ -54,6 +54,7 @@ export_doc() {
 }
 
 export_doc "$DOC_DIR/Astrometrics_Library_Architecture.md"
+export_doc "$DOC_DIR/Astrometrics_Quality_Measurements.md"
 export_doc "$DOC_DIR/Wayfinding_Library_Architecture.md"
 
 echo "Done."

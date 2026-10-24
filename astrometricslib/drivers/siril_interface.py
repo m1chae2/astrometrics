@@ -25,7 +25,9 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from astrometricslib.drivers.calibration_library import (
+    BIAS_FRAME_PATHS_KEY,
     CALIBRATION_MATCH_BLOCKING_FLAGS_KEY,
+    FLAT_FRAME_PATHS_KEY,
     CalibrationSelection,
     format_binning,
     header_binning,
@@ -1529,6 +1531,10 @@ class ImageProcessing:
                     try:
                         os.symlink(item, os.path.join(target_folder, "biases", f"bias_{bias_idx:05d}.fits"))
                         bias_idx += 1
+                        # The library file behind the link, for the quality
+                        # step (the flat-to-light match reads the bias level
+                        # from these).
+                        self.last_run_diagnostics.setdefault(BIAS_FRAME_PATHS_KEY, []).append(item)
                     except OSError as e:
                         log(f"Error symlinking bias {item}: {e}")
 
@@ -1554,6 +1560,10 @@ class ImageProcessing:
                     try:
                         os.symlink(item, os.path.join(target_folder, "flats", f"flat_{flat_idx:05d}.fits"))
                         flat_idx += 1
+                        # The library file behind the link, so the quality
+                        # step can rebuild the flat's dust map from it (the
+                        # master flat is not kept).
+                        self.last_run_diagnostics.setdefault(FLAT_FRAME_PATHS_KEY, []).append(item)
                     except OSError as e:
                         log(f"Error symlinking flat {item}: {e}")
 
@@ -1956,6 +1966,7 @@ class ImageProcessing:
         generate_rejmap: bool | None = None,
         spectral_star_detection: str = "standard",
         steps: PipelineSteps | None = None,
+        reference_frame_path: str | None = None,
     ) -> str | None:
         """Calibrate, register, and stack a target's frames via Siril.
 
@@ -2014,6 +2025,13 @@ class ImageProcessing:
             assessment and the phase-correlation alignment. If `None`
             (default), the flats are not checked or smoothed, and a
             phase-correlation run fails.
+        reference_frame_path : `str`, optional
+            The frame to line the others up with. When it is among the
+            frames stacked (and the frames are not spectral), the script
+            sets it as the sequence's reference (``setref``) before the
+            two-pass registration, so Siril does not choose its own. If it
+            is not among them, nothing is set and Siril chooses. Default
+            is `None` (Siril chooses).
 
         Returns
         -------
@@ -2471,6 +2489,16 @@ class ImageProcessing:
                     # registered nothing, even with detection fixed.
                     # Two-pass chose a different reference and stacked
                     # 21 of 22 frames.
+                    if reference_frame_path is not None:
+                        # The caller names the reference (the half-difference
+                        # job needs both halves on the library stack's
+                        # reference). Siril counts sequence images from 1,
+                        # in the order of the symlinked light frames.
+                        light_paths = self.last_run_diagnostics.get("symlinked_light_paths", [])
+                        if reference_frame_path in light_paths:
+                            register_commands.append(
+                                f"setref {seq} {light_paths.index(reference_frame_path) + 1}"
+                            )
                     register_commands.append(f"register {seq} -2pass")
                     # -2pass computes the transforms without applying
                     # them, so the registered sequence only exists once

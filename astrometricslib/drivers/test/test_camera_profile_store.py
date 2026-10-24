@@ -7,9 +7,11 @@ that the shipped config holds exactly the numbers the code used before.
 """
 
 import logging
+import threading
 from pathlib import Path
 
 import pytest
+import tomlkit
 
 from astrometricslib.drivers import camera_profile_store
 from astrometricslib.drivers.camera_profile_store import (
@@ -17,9 +19,11 @@ from astrometricslib.drivers.camera_profile_store import (
     load_camera_profiles,
     record_name_for_camera,
     resolve_camera_profile,
+    save_sensor_setting_noise,
 )
-from astrometricslib.foundation.config import _TomlSectionedConfig
+from astrometricslib.foundation.config import AppConfiguration, _TomlSectionedConfig
 from astrometricslib.foundation.errors import ConfigurationError
+from astrometricslib.models.camera_profile import ProvenancedValue, SensorSettingNoise, ValueProvenance
 
 EXAMPLE_CONFIG_PATH = Path(__file__).resolve().parents[2] / "astrometrics.config.example.toml"
 
@@ -109,22 +113,25 @@ def test_the_shipped_config_loads_and_has_one_generic_fallback() -> None:
 
 
 def test_the_shipped_asi533_profile_carries_its_detector_noise_terms() -> None:
-    """Gain and read noise load from the camera section as provenanced values.
+    """Gain and read noise load per setting as provenanced values.
 
-    The photometric error budget needs both. Without them the pipeline
-    assumes unit gain and no read noise, so the shipped example must set
-    them for the camera the sample frames came from.
+    The photometric error budget needs both. The shipped example records
+    them for the setting they were measured at (gain 0, offset 10, 1x1).
     """
     profiles = {profile.camera_name: profile for profile in load_camera_profiles(_shipped_config())}
     asi533 = profiles["ZWO ASI533MM Pro"]
-    assert asi533.gain_e_per_adu is not None
-    assert asi533.read_noise_e is not None
+    entry = asi533.sensor_noise_for("0.0", "10", "1x1")
+    assert entry is not None
+    assert entry.gain_e_per_adu is not None
+    assert entry.read_noise_e is not None
     # In stored 16-bit ADU. The old 3.6 e-/ADU was in 14-bit ADU and made the
     # error bars about 2 times too small.
-    assert asi533.gain_e_per_adu.value == pytest.approx(0.783)
-    assert asi533.read_noise_e.value == pytest.approx(3.8)
-    assert asi533.gain_e_per_adu.provenance.kind.value == "measured"
-    assert profiles["Nikon D5300"].gain_e_per_adu is None
+    assert entry.gain_e_per_adu.value == pytest.approx(0.783)
+    assert entry.read_noise_e.value == pytest.approx(3.8)
+    assert entry.gain_e_per_adu.provenance.kind.value == "measured"
+    assert entry.temperature_c == pytest.approx(-10.0)
+    assert asi533.sensor_noise_for("100", "10", "1x1") is None
+    assert profiles["Nikon D5300"].sensor_noise == ()
 
 
 @pytest.mark.parametrize(
@@ -344,3 +351,218 @@ def test_different_cameras_have_different_identities() -> None:
     assert camera_identity("ZWO ASI 533MM Pro", config) != camera_identity("Nikon D5300", config)
     assert camera_identity("Acme Imager 9000", config) != camera_identity("Acme Imager 9001", config)
     assert camera_identity("Acme Imager 9000", config) == camera_identity("acme-imager 9000", config)
+
+
+# ---- Gain and read noise keyed by camera setting ---------------------------
+
+NOISE_SECTION_NAME = "Observatory.Camera.Test Camera"
+
+
+def _measured(value: float) -> ProvenancedValue:
+    """Wrap a number as a measured profile value.
+
+    Returns
+    -------
+    value : `ProvenancedValue`
+        The number with a ``measured`` provenance.
+    """
+    return ProvenancedValue(value=value, provenance=ValueProvenance(kind="measured", source="a test"))
+
+
+def _entry(gain_setting: str, gain: float, read_noise: float) -> SensorSettingNoise:
+    """Build a noise entry at offset 10 and 1x1 binning.
+
+    Returns
+    -------
+    entry : `SensorSettingNoise`
+        The entry for the given gain setting.
+    """
+    return SensorSettingNoise(
+        gain_setting=gain_setting,
+        offset="10",
+        binning="1x1",
+        gain_e_per_adu=_measured(gain),
+        read_noise_e=_measured(read_noise),
+        temperature_c=-10.0,
+    )
+
+
+def _real_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, profile_text: str) -> AppConfiguration:
+    """Build a real `AppConfiguration` whose file is a temporary copy.
+
+    Returns
+    -------
+    config : `AppConfiguration`
+        A configuration reading and writing only the temporary file.
+    """
+    config_path = tmp_path / "astrometrics.config.toml"
+    config_path.write_text(write_profile("Fallback", generic=True) + profile_text, encoding="utf-8")
+    # The shared test fixtures point every settings object at one shared
+    # file, so this test points them at its own file instead.
+    monkeypatch.setattr(AppConfiguration, "_find_config_file", lambda self: config_path)
+    camera_profile_store._load_profiles_from_config.cache_clear()
+    return AppConfiguration()
+
+
+def test_the_old_single_value_layout_loads_but_is_never_applied(caplog: pytest.LogCaptureFixture) -> None:
+    """Old single values load, are flagged and are never applied."""
+    camera_profile_store._warn_once_about_unkeyed_noise.cache_clear()
+    old_text = write_profile("Old Camera") + (
+        'gain_e_per_adu = { value = 0.783, kind = "measured", source = "a test" }\n'
+        'read_noise_e = { value = 3.8, kind = "measured", source = "a test" }\n'
+    )
+    config = _config_from_text(write_profile("Fallback", generic=True) + old_text)
+    with caplog.at_level(logging.WARNING):
+        profiles = {profile.camera_name: profile for profile in load_camera_profiles(config)}
+    profile = profiles["Old Camera"]
+    assert profile.has_unkeyed_noise_values
+    assert profile.sensor_noise == ()
+    assert profile.sensor_noise_for("0", "10", "1x1") is None
+    assert profile.sensor_noise_gap_reason("0", "10", "1x1") == (
+        "camera profile has no setting-keyed gain and read noise; run the profile migration"
+    )
+    assert sum("Old Camera" in record.getMessage() for record in caplog.records) == 1
+
+
+def test_a_saved_entry_loads_back_and_replacing_keeps_the_others(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Round trip: load what save wrote; same key replaces, others stay."""
+    config = _real_config(tmp_path, monkeypatch, write_profile("Test Camera"))
+    config_path = Path(config.config_file_path)
+
+    first_backup = save_sensor_setting_noise(config, "test camera", _entry("0", 0.78, 3.8))
+    save_sensor_setting_noise(config, "Test Camera", _entry("100", 0.2, 1.5))
+    save_sensor_setting_noise(config, "Test Camera", _entry("0.0", 0.9, 3.9))
+
+    assert first_backup is not None and first_backup.is_file()
+    assert first_backup.name.endswith(".bak")
+    assert len(list(tmp_path.glob("*.bak"))) == 3
+    reloaded = AppConfiguration()
+    profile = next(p for p in load_camera_profiles(reloaded) if p.camera_name == "Test Camera")
+    assert [entry.gain_setting for entry in profile.sensor_noise] == ["0", "100"]
+    assert profile.sensor_noise_for("0", "10", "1x1").gain_e_per_adu.value == pytest.approx(0.9)
+    assert profile.sensor_noise_for("100", "10", "1x1").read_noise_e.value == pytest.approx(1.5)
+    assert tomlkit.parse(config_path.read_text(encoding="utf-8"))[NOISE_SECTION_NAME]["sensor_noise"]
+
+
+def test_saving_into_an_old_layout_section_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Old and new values are never mixed in one section."""
+    old_text = write_profile("Test Camera") + (
+        'gain_e_per_adu = { value = 0.783, kind = "measured", source = "a test" }\n'
+    )
+    config = _real_config(tmp_path, monkeypatch, old_text)
+    with pytest.raises(ConfigurationError, match="migration"):
+        save_sensor_setting_noise(config, "Test Camera", _entry("0", 0.78, 3.8))
+    with pytest.raises(ConfigurationError, match="no camera profile"):
+        save_sensor_setting_noise(config, "Missing Camera", _entry("0", 0.78, 3.8))
+
+
+def test_the_spread_pair_values_and_robust_read_noise_survive_a_save(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The extra fields of a measured entry round-trip through the file."""
+    config = _real_config(tmp_path, monkeypatch, write_profile("Test Camera"))
+    entry = SensorSettingNoise(
+        gain_setting="0",
+        offset="10",
+        binning="1x1",
+        gain_e_per_adu=_measured(0.783),
+        read_noise_e=_measured(3.1),
+        gain_spread_e_per_adu=0.0004,
+        pair_gains_e_per_adu=(0.7826, 0.7831, 0.7829),
+        read_noise_adu_robust=3.95,
+        pair_read_noises_adu=(3.97, 4.02),
+    )
+
+    save_sensor_setting_noise(config, "Test Camera", entry)
+
+    reloaded = AppConfiguration()
+    profile = next(p for p in load_camera_profiles(reloaded) if p.camera_name == "Test Camera")
+    saved = profile.sensor_noise_for("0", "10", "1x1")
+    assert saved.gain_spread_e_per_adu == pytest.approx(0.0004)
+    assert saved.pair_gains_e_per_adu == pytest.approx((0.7826, 0.7831, 0.7829))
+    assert saved.read_noise_adu_robust == pytest.approx(3.95)
+    assert saved.pair_read_noises_adu == pytest.approx((3.97, 4.02))
+    assert saved == entry
+
+
+def test_an_entry_without_the_extra_fields_still_loads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An entry saved before these fields existed loads with empty values."""
+    config = _real_config(tmp_path, monkeypatch, write_profile("Test Camera"))
+    save_sensor_setting_noise(config, "Test Camera", _entry("0", 0.78, 3.8))
+
+    profile = next(p for p in load_camera_profiles(AppConfiguration()) if p.camera_name == "Test Camera")
+    saved = profile.sensor_noise_for("0", "10", "1x1")
+
+    assert saved.gain_spread_e_per_adu is None
+    assert saved.pair_gains_e_per_adu == ()
+    assert saved.read_noise_adu_robust is None
+    assert saved.pair_read_noises_adu == ()
+
+
+def test_only_the_newest_config_backups_are_kept(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Older backups beyond the limit are deleted; the newest stay."""
+    monkeypatch.setattr(camera_profile_store, "MAXIMUM_CONFIG_BACKUPS", 2)
+    config = _real_config(tmp_path, monkeypatch, write_profile("Test Camera"))
+
+    backups = [
+        save_sensor_setting_noise(config, "Test Camera", _entry(str(index), 0.78, 3.8)) for index in range(4)
+    ]
+
+    remaining = sorted(path.name for path in tmp_path.glob("*.bak"))
+    assert remaining == sorted(backup.name for backup in backups[-2:])
+
+
+def test_a_failed_write_leaves_the_config_whole_and_no_temporary_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The new text goes to a temporary file first; a failure loses nothing."""
+    config = _real_config(tmp_path, monkeypatch, write_profile("Test Camera"))
+    config_path = Path(config.config_file_path)
+    before = config_path.read_text(encoding="utf-8")
+
+    def fail_halfway(configfile: object) -> None:
+        """Write a few characters and then fail.
+
+        Raises
+        ------
+        OSError
+            Always, as a full disk would.
+        """
+        configfile.write("garbage")
+        raise OSError("disk full")
+
+    monkeypatch.setattr(config.app_config, "write", fail_halfway)
+
+    with pytest.raises(OSError, match="disk full"):
+        save_sensor_setting_noise(config, "Test Camera", _entry("0", 0.78, 3.8))
+
+    assert config_path.read_text(encoding="utf-8") == before
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_two_threads_saving_different_settings_both_keep_their_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The write lock makes each read-modify-write finish before the next."""
+    config = _real_config(tmp_path, monkeypatch, write_profile("Test Camera"))
+    gain_settings = [str(100 * index) for index in range(6)]
+
+    threads = [
+        threading.Thread(
+            target=save_sensor_setting_noise, args=(config, "Test Camera", _entry(gain_setting, 0.78, 3.8))
+        )
+        for gain_setting in gain_settings
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(60)
+
+    profile = next(p for p in load_camera_profiles(AppConfiguration()) if p.camera_name == "Test Camera")
+    assert sorted(entry.gain_setting for entry in profile.sensor_noise) == sorted(gain_settings)

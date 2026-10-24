@@ -25,7 +25,9 @@ The matching rules, all of them shaped by what the live services returned:
   entry is stored as `NO_GAIA_MATCH`, which says nothing about variability.
 """
 
+import math
 from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 import astropy.units as u
@@ -165,6 +167,146 @@ def vsx_types_from_matches(star_ids: Sequence[str], matches: Table | None) -> di
         else:
             result[star_id] = NOT_IN_VSX
     return result
+
+
+@dataclass(frozen=True)
+class VsxEntry:
+    """What VSX lists about one variable star's brightness range and period.
+
+    Parameters
+    ----------
+    variability_type : `str`
+        The VSX type text of the entry (``"EA"``, ``"DCEP"``).
+    bright_magnitude : `float` or `None`
+        The magnitude at maximum light (the smaller number), or `None` when
+        the entry gives none or gives its range as an amplitude.
+    faint_magnitude : `float` or `None`
+        The magnitude at minimum light (the larger number), or `None` when
+        the entry gives none or gives its range as an amplitude.
+    amplitude_mag : `float` or `None`
+        The size of the range in magnitudes: the faint magnitude minus the
+        bright one, or the amplitude itself when VSX lists the range that
+        way (a ``(`` in its minimum flag column). `None` when neither is given.
+    period_days : `float` or `None`
+        The period, in days, or `None` when VSX gives none.
+    band : `str`
+        The photometric band VSX names for the maximum, such as ``"V"`` or
+        ``"p"`` (photographic). Empty when it names none. The band is as
+        VSX writes it and has not been converted to this telescope's band.
+    """
+
+    variability_type: str
+    bright_magnitude: float | None
+    faint_magnitude: float | None
+    amplitude_mag: float | None
+    period_days: float | None
+    band: str
+
+
+# The flag VSX writes in the column beside the minimum when the number in the
+# minimum column is an amplitude and not a magnitude.
+_VSX_AMPLITUDE_FLAG = "("
+
+
+def _number(value: Any) -> float | None:
+    """Read a table cell as a finite number, treating masked cells as missing.
+
+    Returns
+    -------
+    number : `float` or `None`
+        The number, or `None` for a masked, empty or non-numeric cell.
+    """
+    text = _text(value)
+    if not text:
+        return None
+    try:
+        number = float(text)
+    except ValueError:
+        return None
+    # The table stores single-precision numbers; the text carries the digits
+    # VSX wrote, so reading it back as text keeps 2.09 and not
+    # 2.0899999141693115.
+    return number if math.isfinite(number) else None
+
+
+def _cell(row: Any, column: str) -> Any:
+    """Read one column of a match row, or `None` when the table lacks it.
+
+    Returns
+    -------
+    value : `Any`
+        The cell, or `None` when the column does not exist.
+    """
+    return row[column] if column in row.colnames else None
+
+
+def vsx_entries_from_matches(star_ids: Sequence[str], matches: Table | None) -> dict[str, VsxEntry | None]:
+    """Read the brightness range and period VSX lists for each star.
+
+    The entry is the one `vsx_types_from_matches` takes the type from: the
+    nearest entry within the match radius that has a real type (not blank and
+    not ``CST``).
+
+    Parameters
+    ----------
+    star_ids : `Sequence` [`str`]
+        The ids that were matched.
+    matches : `astropy.table.Table` or `None`
+        The cross-match result, with ``id``, ``Type`` and ``angDist``, and
+        the VSX columns ``max``, ``min``, ``f_min``, ``n_max``, ``n_min`` and
+        ``Period``
+        when VSX gave them.
+
+    Returns
+    -------
+    entries : `dict` [`str`, `VsxEntry` or `None`]
+        For each id, the entry, or `None` when no typed variable matched.
+    """
+    nearest: dict[str, tuple[float, VsxEntry]] = {}
+    if matches is not None:
+        for row in matches:
+            text = _text(row["Type"])
+            if text in _UNTYPED_VSX_TYPES or text in (VSX_CONSTANT_TYPE, VSX_UNCERTAIN_CONSTANT_TYPE):
+                continue
+            star_id = str(row["id"])
+            distance = float(row["angDist"])
+            if star_id in nearest and nearest[star_id][0] <= distance:
+                continue
+            bright = _number(_cell(row, "max"))
+            minimum_column = _number(_cell(row, "min"))
+            if _text(_cell(row, "f_min")) == _VSX_AMPLITUDE_FLAG:
+                faint, amplitude = None, minimum_column
+            else:
+                faint = minimum_column
+                if bright is not None and faint is not None and faint < bright:
+                    # A "minimum" brighter than the maximum is not a magnitude.
+                    # VSX sometimes writes an amplitude there without the flag
+                    # (live check 2026-10-23: IC 1396 and NGC 1893 stars gave
+                    # 0.028 and 0.24 beside maxima of 9.7 and 15.3), so neither
+                    # is trusted.
+                    faint = None
+                amplitude = None if bright is None or faint is None else round(faint - bright, 4)
+            # A range is the faint magnitude minus the bright one only when
+            # both are in the same band. When VSX names a different band for
+            # the minimum (n_min), the two numbers are not comparable, so
+            # neither the faint magnitude nor the range is kept.
+            minimum_band = _text(_cell(row, "n_min"))
+            maximum_band = _text(_cell(row, "n_max"))
+            if minimum_band and maximum_band and minimum_band != maximum_band:
+                faint, amplitude = None, None
+            period = _number(_cell(row, "Period"))
+            nearest[star_id] = (
+                distance,
+                VsxEntry(
+                    variability_type=text,
+                    bright_magnitude=bright,
+                    faint_magnitude=faint,
+                    amplitude_mag=amplitude if amplitude is not None and amplitude >= 0 else None,
+                    period_days=period if period is not None and period > 0 else None,
+                    band=_text(_cell(row, "n_max")),
+                ),
+            )
+    return {star_id: nearest[star_id][1] if star_id in nearest else None for star_id in star_ids}
 
 
 def gaia_flags_from_matches(

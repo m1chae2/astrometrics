@@ -22,7 +22,7 @@ from astrometricslib.pipelines.pipeline_base import PipelineRequest, Result
 from astrometricslib.pipelines.shared.quality.saturation import DEFAULT_SATURATION_FLAG_THRESHOLD
 from astrometricslib.pipelines.shared.star_recording import StarIdentificationBreakdown
 from astrometricslib.pipelines.spectroscopy import batch, runner
-from astrometricslib.pipelines.spectroscopy.post_processing import run_gates as rg
+from astrometricslib.pipelines.spectroscopy.post_processing import record_quality as rg
 from astrometricslib.pipelines.spectroscopy.post_processing.wavelength_scale import (
     MINIMUM_SPECTRA_FOR_WAVELENGTH_SCALE,
     WAVELENGTH_SCALE_GATE_NAME,
@@ -34,7 +34,7 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.assess_input_quality 
     assess_input_quality,
     input_quality_checkpoint,
 )
-from astrometricslib.pipelines.spectroscopy.test.post_processing.test_run_gates import make_star
+from astrometricslib.pipelines.spectroscopy.test.post_processing.test_record_quality import make_star
 from astrometricslib.pipelines.spectroscopy.test.test_spectroscopy_batch_tasks import _make_session
 from astrometricslib.utilities import parallel_batch
 

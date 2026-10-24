@@ -24,7 +24,7 @@ BRANCH_PREFIXES = {
     "targets": "target",
     "stars": "star",
     "processing": "processing",
-    "processing.diagnostics": "diagnostics",
+    "quality": "quality",
     "processing.calibration": "calibration",
     "visualization": "visualization",
     "jobs": "jobs",

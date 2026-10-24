@@ -15,6 +15,7 @@ import textwrap
 import time
 from pathlib import Path
 
+import matplotlib
 import pytest
 from pytest_mock import MockerFixture
 
@@ -166,7 +167,7 @@ _SUBPROCESS_WORKER = textwrap.dedent(
 
     if role == "slow":
         open(sentinel_dir + "/slow_loaded", "w").close()
-        deadline = time.time() + 10
+        deadline = time.time() + 60
         while not __import__("os").path.exists(sentinel_dir + "/fast_done"):
             if time.time() > deadline:
                 raise TimeoutError("timed out waiting for fast worker")
@@ -174,7 +175,7 @@ _SUBPROCESS_WORKER = textwrap.dedent(
         astrometrics.targets.save()
         open(sentinel_dir + "/slow_done", "w").close()
     else:
-        deadline = time.time() + 10
+        deadline = time.time() + 60
         while not __import__("os").path.exists(sentinel_dir + "/slow_loaded"):
             if time.time() > deadline:
                 raise TimeoutError("timed out waiting for slow worker to load")
@@ -226,6 +227,15 @@ def test_concurrent_processes_do_not_clobber_each_others_target_edits(tmp_path: 
     env["ASTROMETRICS_CONFIG_PATH"] = str(config_path)
     env["ASTROMETRICS_TESTING"] = "1"
     env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(repo_root), env.get("PYTHONPATH")]))
+    # Share this process's Matplotlib folder, which already holds the font
+    # cache. Without it each child builds the cache from scratch, which is
+    # slow when other tests are running at the same time. A folder under
+    # tmp_path would be empty, so every child would pay that cost again.
+    env["MPLCONFIGDIR"] = matplotlib.get_configdir()
+    # The race is set up by marker files, not by timing, so these limits only
+    # catch a hung worker. They are generous because starting Python and
+    # importing the library takes much longer when tests run in parallel.
+    worker_timeout_seconds = 60
 
     slow_proc = subprocess.Popen(
         [sys.executable, str(worker_script), "slow", "Target Alpha", "Alpha Mutated", str(sentinel_dir)],
@@ -237,7 +247,7 @@ def test_concurrent_processes_do_not_clobber_each_others_target_edits(tmp_path: 
     # Give the slow worker a head start so it snapshots the catalog before
     # the fast worker's edit lands, deterministically reproducing the race
     # window rather than relying on OS scheduling luck.
-    deadline = time.time() + 10
+    deadline = time.time() + worker_timeout_seconds
     while not (sentinel_dir / "slow_loaded").exists():
         if slow_proc.poll() is not None:
             out, err = slow_proc.communicate()
@@ -258,8 +268,8 @@ def test_concurrent_processes_do_not_clobber_each_others_target_edits(tmp_path: 
         text=True,
     )
 
-    fast_out, fast_err = fast_proc.communicate(timeout=15)
-    slow_out, slow_err = slow_proc.communicate(timeout=15)
+    fast_out, fast_err = fast_proc.communicate(timeout=worker_timeout_seconds)
+    slow_out, slow_err = slow_proc.communicate(timeout=worker_timeout_seconds)
 
     assert fast_proc.returncode == 0, f"fast worker failed:\nSTDOUT:\n{fast_out}\nSTDERR:\n{fast_err}"
     assert slow_proc.returncode == 0, f"slow worker failed:\nSTDOUT:\n{slow_out}\nSTDERR:\n{slow_err}"

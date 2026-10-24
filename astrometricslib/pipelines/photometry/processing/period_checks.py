@@ -100,6 +100,33 @@ _WINDOW_PEAKS_TRIED = 3
 _VERDICT_ORDER = (VERDICT_NOT_DETECTED, VERDICT_POSSIBLE, VERDICT_DETECTED)
 
 
+def window_power(time_days: np.ndarray, frequency_per_day: np.ndarray) -> np.ndarray:
+    """Find the window function of a set of observing times.
+
+    The window function is the Lomb-Scargle power of a constant signal
+    sampled at the observing times. It lives here, beside the alias check
+    that uses it, and `observing_window` re-exports it for the run-wide
+    question, so there is one definition.
+
+    Parameters
+    ----------
+    time_days : `numpy.ndarray`
+        The observing times, in days.
+    frequency_per_day : `numpy.ndarray`
+        The frequencies to evaluate, in cycles per day.
+
+    Returns
+    -------
+    power : `numpy.ndarray`
+        The Lomb-Scargle power of a constant signal sampled at these times,
+        without removing the mean, from 0 to 1.
+    """
+    times = np.asarray(time_days, dtype=float)
+    return LombScargle(times, np.ones_like(times), fit_mean=False, center_data=False).power(
+        np.asarray(frequency_per_day, dtype=float)
+    )
+
+
 def split_into_nights(time_days: np.ndarray, gap_days: float = NIGHT_GAP_DAYS) -> list[np.ndarray]:
     """Group measurement indices into nights.
 
@@ -391,9 +418,7 @@ def alias_check(time_days: np.ndarray, flux: np.ndarray, period_days: float) -> 
     best = 1.0 / period_days
     frequency = np.linspace(max(best * 0.2, 1.0 / span), best * 1.8, 6000)
     power = LombScargle(time_days, flux).power(frequency)
-    window = LombScargle(time_days, np.ones_like(time_days), fit_mean=False, center_data=False).power(
-        frequency
-    )
+    window = window_power(time_days, frequency)
     best_power = float(np.interp(best, frequency, power))
     resolution = 1.0 / span
     strongest = float(window.max()) or 1.0

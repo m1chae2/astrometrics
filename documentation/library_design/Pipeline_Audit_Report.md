@@ -4,11 +4,11 @@
 
 ## 1. Executive Summary
 
-- **Implementation References Checked:** 221
-- **Resolved Code Symbols:** 221
+- **Implementation References Checked:** 251
+- **Resolved Code Symbols:** 251
 - **Broken / Stale Implementation Links:** 0
 - **Analysis Pipelines Audited:** 4 (plus stacking, which has no adapter)
-- **Documented Tuned Parameters:** 72
+- **Documented Tuned Parameters:** 74
 
 ---
 
@@ -44,6 +44,7 @@ Traceability audit of embedded `<!-- impl: ... -->` symbols from `Astrometrics_L
 | `astrometricslib.drivers.siril_interface.build_flat_master_commands` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.drivers.siril_interface.build_single_light_commands` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.drivers.siril_interface.calibration_count_flags` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.pre_processing.sensor_noise.measure_sensor_noise` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.utilities.rejection_thresholds.rejection_bounds` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.utilities.rejection_thresholds.chauvenet_sigma` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.scripts.rejection_small_n_check` | RESOLVED | Resolves; a script run by hand |
@@ -88,9 +89,9 @@ Traceability audit of embedded `<!-- impl: ... -->` symbols from `Astrometrics_L
 | `astrometricslib.pipelines.astrometry.processing.star_identifier.propagate_gaia_positions` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier._move_gaia_coords_to_observation_epoch` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.drivers.astrometry_net_driver.read_corr_fit_statistics` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.astrometry.post_processing.run_gates.astrometry_run_gates` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.astrometry.post_processing.record_quality.astrometry_run_gates` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier.get_catalog_match_separation_rms_arcsec` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.astrometry.post_processing.run_gates._residual_and_basis` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.astrometry.post_processing.record_quality._residual_and_basis` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.astrometry.processing.wcs_refinement.refine_wcs_with_gaia` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier._refine_wcs_against_gaia` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier.process_image` | RESOLVED | Resolves; used by library code |
@@ -129,7 +130,7 @@ Traceability audit of embedded `<!-- impl: ... -->` symbols from `Astrometrics_L
 | `astrometricslib.pipelines.photometry.processing.periodicity_search.correlation_block_length` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.photometry.processing.period_checks.apply_verdict_checks` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.photometry.processing.family_wise_correction.apply_family_wise_correction` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.photometry.post_processing.run_gates.photometry_run_gates` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.post_processing.record_quality.photometry_run_gates` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.measure_sky` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.SpectrumExtractor._sum_aperture_minus_sky` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.box_pixel_weights` | RESOLVED | Resolves; used by library code |
@@ -152,7 +153,7 @@ Traceability audit of embedded `<!-- impl: ... -->` symbols from `Astrometrics_L
 | `astrometricslib.models.stellar_source.is_rms_gap_ambiguous` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.models.stellar_source.NO_GOOD_MATCH_RMS` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.models.stellar_source.AMBIGUOUS_RMS_GAP` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.spectroscopy.post_processing.run_gates.spectroscopy_run_gates` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.post_processing.record_quality.spectroscopy_run_gates` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.ExtractionDiagnostics.contaminated_sky_fraction` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.spectroscopy.post_processing.wavelength_scale.wavelength_scale_gate` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp.GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM` | RESOLVED | Resolves; used by library code |
@@ -170,8 +171,37 @@ Traceability audit of embedded `<!-- impl: ... -->` symbols from `Astrometrics_L
 | `astrometricslib.pipelines.asteroid_detection.ephemeris.EphemerisCrossMatcher.cross_match_candidates` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.asteroid_detection.mpc_report.mpc_lines_for_candidate` | RESOLVED | Resolves; present and tested, not called by any pipeline step |
 | `astrometricslib.pipelines.asteroid_detection.rotation_period.find_rotation_period` | RESOLVED | Resolves; present and tested, not called by any pipeline step |
-| `astrometricslib.pipelines.asteroid_detection.run_gates.asteroid_run_gates` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.asteroid_detection.record_quality.asteroid_run_gates` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.scripts.validate_asteroid_detection` | RESOLVED | Resolves; a script run by hand |
+| `astrometricslib.pipelines.stacking.post_processing.record_quality.record_stacking_quality` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.shared.quality.frame_measurement.FRAME_MEASUREMENT_TIME_BUDGET_SECONDS` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_GRID_CELL_COUNT` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_CANDIDATES_PER_CELL` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_FIT_BOX_HALF_WIDTH_PX` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_ISOLATION_RADIUS_PX` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_SATURATION_MARGIN_FRACTION` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_SUBPIXEL_FACTOR` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_BETA_MINIMUM` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_BETA_MAXIMUM` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_BETA_START` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_MINIMUM_R_SQUARED` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_MAXIMUM_CENTER_SHIFT_PX` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_MINIMUM_FWHM_PX` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_MAXIMUM_FWHM_PX` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_MINIMUM_STAR_COUNT` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.shared.quality.frame_measurement.MOMENT_APERTURE_FWHM_MULTIPLE` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.shared.quality.frame_measurement.MOMENT_APERTURE_MINIMUM_RADIUS_PX` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.shared.quality.frame_measurement.BOOTSTRAP_RESAMPLE_COUNT` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.shared.quality.frame_measurement.STAR_FINDER_EXPECTED_FWHM_PX` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.shared.quality.frame_measurement.STAR_FINDER_THRESHOLD_SIGMA` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.shared.quality.frame_measurement.STAR_FINDER_BOX_FRACTION` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.frame_measurement_run.MEASUREMENT_WORKER_COUNT` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.frame_measurement_run.BIAS_FRAMES_FOR_LEVEL` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.frame_measurement_run.STACKING_STAGE_MEASUREMENT_LIMIT` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.pre_processing.sensor_noise.MINIMUM_FLAT_PAIRS` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.pre_processing.sensor_noise.MINIMUM_BIAS_PAIRS` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.pre_processing.sensor_noise.MAXIMUM_TEMPERATURE_SPREAD_C` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.pre_processing.sensor_noise.CENTRAL_REGION_SHAPE_PIXELS` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.drivers.calibration_library.DEFAULT_DARK_TEMPERATURE_TOLERANCE_C` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.utilities.stack_filter_floor.DEFAULT_MINIMUM_SURVIVING_FRAMES` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.stacking.processing.exposure_groups.GAIN_MID_RANGE_PERCENTILES` | RESOLVED | Resolves; used by library code |
@@ -193,9 +223,9 @@ Traceability audit of embedded `<!-- impl: ... -->` symbols from `Astrometrics_L
 | `astrometricslib.pipelines.astrometry.pre_processing.source_detection.SourceDetector` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.drivers.astrometry_net_driver.MINIMUM_SOURCES_FOR_LOCAL_SOLVE` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.shared.catalog_star_identity.CATALOG_MATCH_RADIUS_ARCSEC` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.astrometry.post_processing.run_gates.MINIMUM_MATCHED_STARS` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.astrometry.post_processing.run_gates.MAXIMUM_RESIDUAL_FRACTION_OF_FWHM` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.astrometry.post_processing.run_gates.MAXIMUM_FAILED_LOOKUP_FRACTION` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.astrometry.post_processing.record_quality.MINIMUM_MATCHED_STARS` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.astrometry.post_processing.record_quality.MAXIMUM_RESIDUAL_FRACTION_OF_FWHM` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.astrometry.post_processing.record_quality.MAXIMUM_FAILED_LOOKUP_FRACTION` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.astrometry.processing.wcs_refinement.MINIMUM_MATCHED_STARS` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.astrometry.processing.wcs_refinement.MAXIMUM_SHIFT_ARCSEC` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.astrometry.processing.wcs_refinement.INITIAL_MATCH_RADIUS_PIXELS` | RESOLVED | Resolves; used by library code |
@@ -235,8 +265,8 @@ Traceability audit of embedded `<!-- impl: ... -->` symbols from `Astrometrics_L
 | `astrometricslib.pipelines.photometry.processing.variability_analyzer.MINIMUM_LONG_TERM_AMPLITUDE_MAG` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.photometry.processing.variability_analyzer.DEFAULT_LONG_TERM_SIGNIFICANCE_THRESHOLD` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.photometry.post_processing.variability_skill.MINIMUM_DISCRIMINATION_AUC` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.photometry.post_processing.run_gates.MAXIMUM_DETECTABLE_AMPLITUDE_MAG` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.photometry.post_processing.run_gates.MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.post_processing.record_quality.MAXIMUM_DETECTABLE_AMPLITUDE_MAG` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.post_processing.record_quality.MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.photometry.processing.variability_analyzer.DEFAULT_VARIABILITY_SIGMA_THRESHOLD` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.photometry.processing.periodicity_search.FALSE_ALARM_FOR_DETECTION` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.APERTURE_SIGMA_MULTIPLIER` | RESOLVED | Resolves; used by library code |
@@ -251,7 +281,7 @@ Traceability audit of embedded `<!-- impl: ... -->` symbols from `Astrometrics_L
 | `astrometricslib.models.stellar_source.UNRELIABLE_MATCH_RMS` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.models.stellar_source.DIFFERS_FROM_CATALOG_SUBTYPES` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.spectroscopy.post_processing.wavelength_scale.WAVELENGTH_SCALE_LIMIT_ANGSTROM` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.spectroscopy.post_processing.run_gates.PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.post_processing.record_quality.PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.models.moving_object_config.MovingObjectConfig` | RESOLVED | Resolves; used by library code |
 
 ---
@@ -265,6 +295,8 @@ Parameters and validation declarations from the tuned-parameter tables of `Astro
 | Stacking | Floor on the high rejection cutoff | 2.5σ | Partly measured ([STK-08](validation/stacking.md#stk-08)); simulation only | §3.2 |
 | Stacking | Margin of the low cutoff above the high one | 0.5σ | Partly measured ([STK-08](validation/stacking.md#stk-08)); simulation only | §3.2 |
 | Stacking | Minimum frames per master calibration frame | 3 | Design estimate ([stacking table](validation/stacking.md#design-estimates)) | §3.2 |
+| Stacking | Gain and read noise measurement: fewest flat pairs; fewest bias pairs; temperature spread; region | 5; 3; 1 °C; central 1000 by 1000 px | Measured ([STK-35](validation/stacking.md#stk-35)) | §3.2 |
+| Stacking | Frame measurement: CPU time; fit grid cells | 60 s; 196 | Design estimate ([AST-17](validation/astrometry.md#ast-17)) | §2.1 |
 | Stacking | Frame screening: session gap | 4 h | Design estimate ([stacking table](validation/stacking.md#design-estimates)) | §3.4.1 |
 | Stacking | Frame screening: fewest frames to judge | 8 | Partly measured ([STK-01](validation/stacking.md#stk-01)) | §3.4.1 |
 | Stacking | Clouded frame star count; trailed frame roundness | below 0.5 of session median; below 0.80 and 0.15 under median | Partly measured ([STK-01](validation/stacking.md#stk-01)) | §3.4.1 |

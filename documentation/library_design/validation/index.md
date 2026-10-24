@@ -111,7 +111,7 @@ Table 3 lists what each register file covers.
 
 | Pipeline | Register file | What was checked |
 | --- | --- | --- |
-| Stacking | [stacking.md](stacking.md) | Frame screening and quarantine, calibration masters, pixel rejection, exposure groups and their brightness scale, the after-stacking checks, color calibration and the preview stretch |
+| Stacking | [stacking.md](stacking.md) | Frame screening and quarantine, calibration masters, pixel rejection, exposure groups and their brightness scale, the after-stacking checks, color calibration, the preview stretch and the noise of a stack |
 | Astrometry | [astrometry.md](astrometry.md) | Solver residuals against an independent Gaia check, the Gaia refit, the solution checks, star detection, catalog matching radii and the Gaia service limits |
 | Photometry | [photometry.md](photometry.md) | The comparison ensemble, the error model and camera noise, frame alignment, the variability indices and cutoffs, the period search and cross-session matching |
 | Spectroscopy | [spectroscopy.md](spectroscopy.md) | Sky subtraction, the reading box, resolution and errors, wavelength calibration, the instrument response, classification limits and the Gaia XP comparison |
@@ -132,6 +132,10 @@ The following target types are recommended for future testing:
 1. **Eclipsing Binary or Exoplanet Transit Target (Photometry):** Observations of a star that dims on a known period, to test the pipeline's ability to detect a periodic dimming pattern and measure its depth on real data. The period search is so far checked only on synthetic light curves ([PHO-12](photometry.md#pho-12)). An eclipsing binary (two stars orbiting each other, each passing in front of the other) such as *Algol / $\beta$ Persei* dims by more than a magnitude in each eclipse and tests the period search on a large, sharp dip. A star with a transiting planet such as *WASP-12* (host of the planet WASP-12b) dims by only about $\Delta m \approx 0.015\text{ mag}$ (about 1.4%) and tests the faint end.
 2. **Emission-Line Nebula Target (Spectroscopy):** A planetary nebula (e.g., *Ring Nebula / M 57* or *Dumbbell Nebula / M 27*) to test wavelength calibration against bright emission lines: $[\mathrm{OIII}]$ ($500.7\text{ nm}$; doubly ionized oxygen, where the brackets mark a "forbidden" line seen only in very thin gas) and $\mathrm{H}\alpha$ ($656.3\text{ nm}$). These lines are tested alongside Vega's absorption-line spectrum. The library already holds grating stacks of both nebulae, but the wavelength calibration uses only absorption lines and has not been tested on their emission lines.
 3. **Asteroid Field Near the Ecliptic (Moving Object Detection):** A field along the ecliptic (the sky path the planets and most asteroids follow) containing known, cataloged asteroids, to test matching against an official minor-planet catalog alongside SkyBoT. The real fields checked so far lie far from the ecliptic, where almost no known asteroid is expected ([MOV-04](asteroid_detection.md#mov-04)).
+
+### 6.4 History fill of the quality store
+
+The script `astrometricslib/scripts/backfill_quality_measurements.py` copies the latest saved quality summary of each pipeline on each target into the quality store, marked as backfilled. It measures nothing, so it has no register entry of its own. It was run on 2026-10-23 on a copy of the database: 56 targets and 4,847 rows (stacking 1,480, spectral stacking 679, astrometry 802, photometry 768, spectroscopy 1,118). The read-back check, which compares the stored rows with the plan for each target and pipeline, passed, and a second apply wrote 0 rows. The script's own tests are in `astrometricslib/scripts/test/test_backfill_quality_measurements.py`. The rows hold only what the saved summaries held, so numbers that were never saved (stack noise, effective frame counts, frame weights) have no history.
 
 ## 7. Data sets
 

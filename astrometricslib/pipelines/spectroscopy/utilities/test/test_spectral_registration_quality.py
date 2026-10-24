@@ -48,8 +48,8 @@ def test_evaluate_spectral_registration_quality_flags_zero_order_position_jump()
     """
     n = 20
     paths = [f"frame_{i}.fits" for i in range(n)]
-    seq_frames = [{"nb_stars": 120, "rmse": 0.0043} for _ in range(n)]
-    seq_frames[13]["nb_stars"] = 99  # real session's star-count drop on its anomalous frame
+    seq_frames = [{"star_count": 120, "background_level": 0.0043} for _ in range(n)]
+    seq_frames[13]["star_count"] = 99  # real session's star-count drop on its anomalous frame
 
     zero_order_stars = [
         {"x": 2018.0 + i * 0.3, "y": 1563.0 + i * 0.2, "peak_to_background_ratio": 150.0} for i in range(n)
@@ -69,8 +69,8 @@ def test_evaluate_spectral_registration_quality_flags_low_star_count() -> None:
     """Verify a frame with a matched-star-count below minimum is flagged."""
     n = 15
     paths = [f"frame_{i}.fits" for i in range(n)]
-    seq_frames = [{"nb_stars": 120, "rmse": 0.004} for _ in range(n)]
-    seq_frames[5]["nb_stars"] = 3  # below MIN_MATCHED_STAR_PAIRS
+    seq_frames = [{"star_count": 120, "background_level": 0.004} for _ in range(n)]
+    seq_frames[5]["star_count"] = 3  # below MIN_MATCHED_STAR_PAIRS
     zero_order_stars = [{"x": 100.0, "y": 100.0, "peak_to_background_ratio": 150.0} for _ in range(n)]
 
     flagged = evaluate_spectral_registration_quality(paths, seq_frames, zero_order_stars)
@@ -79,6 +79,21 @@ def test_evaluate_spectral_registration_quality_flags_low_star_count() -> None:
     assert "low matched star count" in next(f["reason"] for f in flagged if f["path"] == "frame_5.fits")
 
 
+def test_unusual_background_level_is_not_flagged() -> None:
+    """Verify a frame with an odd sky background level is not flagged.
+
+    Siril's "rmse" column is the frame's sky background level, not a
+    registration error, so the check no longer tests it.
+    """
+    n = 15
+    paths = [f"frame_{i}.fits" for i in range(n)]
+    seq_frames = [{"star_count": 120, "background_level": 0.004} for _ in range(n)]
+    seq_frames[7]["background_level"] = 0.5  # far outside the other frames
+    zero_order_stars = [{"x": 100.0, "y": 100.0, "peak_to_background_ratio": 150.0} for _ in range(n)]
+
+    assert evaluate_spectral_registration_quality(paths, seq_frames, zero_order_stars) == []
+
+
 def test_evaluate_spectral_registration_quality_handles_mismatched_lengths() -> None:
     """Verifies misaligned input lists return no flags rather than raising."""
-    assert evaluate_spectral_registration_quality(["a.fits"], [{"nb_stars": 1}], []) == []
+    assert evaluate_spectral_registration_quality(["a.fits"], [{"star_count": 1}], []) == []

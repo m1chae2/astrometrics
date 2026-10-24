@@ -13,6 +13,7 @@ Each kind of content has one home, so a fact is written once.
 | Content | Home | Reader |
 | --- | --- | --- |
 | Theory: what each step does and why, and its equations | `library_design/<Library>_Library_Architecture.md` (Astrometrics and Wayfinding) | Anyone learning the methods |
+| Theory of the quality measurements, the numbers the Astrometrics library derives from data | `library_design/Astrometrics_Quality_Measurements.md` | Anyone learning how the numbers are measured |
 | Definitions of terms, for the whole site | `Glossary.md` | Everyone |
 | Code names, tuned values and their status | `library_design/<Library>_Library_Implementation.md` | Developers and reviewers |
 | Evidence: data sets, dates, results, and the library calls to repeat each check | `library_design/validation/` (the validation register) | Reviewers and anyone tuning the tool |
@@ -25,7 +26,7 @@ Each kind of content has one home, so a fact is written once.
 
 Rules:
 
-- An architecture paper names no code and states no tuned values. It explains the idea behind each setting.
+- An architecture paper names no code and states no tuned values. It explains the idea behind each setting. The quality measurements paper follows the same rule.
 - A README or review guide gives a tuned value with its status label and a link to its register entry. It does not repeat the evidence.
 - Generated files are never edited by hand. The review guides come from `build/documentation/generate_pipeline_review_docs.py` and `library_design/Pipeline_Audit_Report.md` from `build/documentation/audit_pipelines.py`. Edit the generator and run it again.
 
@@ -88,7 +89,7 @@ H1, a purpose sentence, the glossary line, then one bullet per file or file grou
 
 Papers follow `.claude/skills/documentation-style/SKILL.md`: title, metadata line, Abstract, numbered sections, Acknowledgments, References, Appendices. An architecture paper puts the glossary line under its abstract and points to its notation appendix. The glossary is the site's own page, not part of a paper.
 
-**Length.** An architecture paper has at most 10,000 words and an implementation paper at most 3,500, not counting references or hidden comments. A journal paper on scientific software runs 5,000 to 10,000 words, and an implementation paper is an index into the code, not a second paper. When a paper reaches its limit, tighten it or move detail to the review guides, the READMEs or the glossary; do not raise the limit. Register files follow the entry template in `library_design/validation/index.md`.
+**Length.** An architecture paper has at most 10,000 words, the quality measurements paper at most 8,000, and an implementation paper at most 4,500, not counting references or hidden comments. A journal paper on scientific software runs 5,000 to 10,000 words, and an implementation paper is an index into the code, not a second paper. When a paper reaches its limit, tighten it or move detail to the review guides, the READMEs or the glossary; do not raise the limit. Register files follow the entry template in `library_design/validation/index.md`.
 
 ### 3.5 Site pages
 

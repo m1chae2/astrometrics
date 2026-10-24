@@ -12,6 +12,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from astrometricslib.models.applied_camera_profile import AppliedCameraProfile
 from astrometricslib.models.quality.gaia_xp_comparison import GaiaXpRunSummary
 from astrometricslib.models.quality.gate_result import GateResult, GateStatus
 from astrometricslib.models.quality.spectroscopy_quality import StageQualityRollup
@@ -81,6 +82,46 @@ class ExposureGroupSummary(BaseModel):
     gain_nonlinear: bool = Field(default=False, alias="gainNonlinear")
     # Why the group is not in the combined image, or `None` if it is.
     left_out_reason: str | None = Field(default=None, alias="leftOutReason")
+    # How close the brightest star is to the camera's ceiling at this exposure
+    # (see `pipelines/stacking/post_processing/exposure_group_report.py`,
+    # `GroupPeak`). The values come from up to 3 raw frames spread through the
+    # group. All are `None` or 0 in a summary saved before they were made.
+    # The median over those frames of the peak above the sky divided by the
+    # room between the sky and the ceiling (1 is the ceiling; no unit).
+    brightest_star_peak_fraction: float | None = Field(default=None, alias="brightestStarPeakFraction")
+    # The median of those peaks, in ADU.
+    brightest_star_peak_above_sky_adu: float | None = Field(
+        default=None, alias="brightestStarPeakAboveSkyAdu"
+    )
+    # The median sky level of the frames that gave a peak, in ADU.
+    peak_sky_adu: float | None = Field(default=None, alias="peakSkyAdu")
+    # The median ceiling those frames were compared with, in ADU.
+    peak_clip_ceiling_adu: float | None = Field(default=None, alias="peakClipCeilingAdu")
+    # The camera profile's photometric linearity limit in ADU, or `None`.
+    peak_linearity_limit_adu: float | None = Field(default=None, alias="peakLinearityLimitAdu")
+    # How many sampled frames gave a peak, how many of those peaks were
+    # estimated from the wings of a clipped star, how many sampled frames had
+    # a clipped star at all, and how many frames were read.
+    peak_frames_with_peak: int = Field(default=0, alias="peakFramesWithPeak")
+    peak_frames_estimated: int = Field(default=0, alias="peakFramesEstimated")
+    peak_frames_clipped: int = Field(default=0, alias="peakFramesClipped")
+    peak_frames_sampled: int = Field(default=0, alias="peakFramesSampled")
+    # How many of the frames that gave a peak took their ceiling from the
+    # camera profile (their star is not clipped).
+    peak_frames_on_profile_ceiling: int = Field(default=0, alias="peakFramesOnProfileCeiling")
+    # The largest peak-to-room ratio among the estimated peaks (no unit), or
+    # `None` when no peak was estimated.
+    peak_largest_estimate_to_room_ratio: float | None = Field(
+        default=None, alias="peakLargestEstimateToRoomRatio"
+    )
+    # How the camera profile's clip ceiling and linearity limit were obtained
+    # ("measured", "datasheet" or "assumed"), or `None` when unknown.
+    peak_clip_ceiling_provenance: str | None = Field(default=None, alias="peakClipCeilingProvenance")
+    peak_linearity_limit_provenance: str | None = Field(default=None, alias="peakLinearityLimitProvenance")
+    # The largest estimated peak, in multiples of the room between the sky and
+    # the ceiling, whose growth with the exposure was checked for this group's
+    # camera (no unit). 0 when the camera has no checked range.
+    peak_checked_range_room_multiples: float = Field(default=0.0, alias="peakCheckedRangeRoomMultiples")
 
 
 class TargetSessionContribution(BaseModel):
@@ -109,41 +150,6 @@ class StarIdentificationMetrics(BaseModel):
     catalog_matched_star_count: int = Field(default=0, alias="catalogMatchedStarCount")
     position_only_star_count: int = Field(default=0, alias="positionOnlyStarCount")
     unresolved_star_count: int = Field(default=0, alias="unresolvedStarCount")
-
-
-class AppliedCameraProfile(BaseModel):
-    """Which camera profile a pipeline run used, and the numbers from it.
-
-    A camera profile holds facts about one camera model (see
-    `astrometricslib.models.camera_profile`). Recording it on each summary
-    lets a reader see which assumptions a result rests on, in particular
-    whether the camera was recognised at all.
-    """
-
-    model_config = ConfigDict(populate_by_name=True)
-
-    # The camera name as the frames spell it, or `None` when the run could not
-    # tell which camera took its frames.
-    camera_name: str | None = Field(default=None, alias="cameraName")
-    # The profile that was used. For a camera with no profile of its own this
-    # is the generic stand-in.
-    profile_name: str = Field(alias="profileName")
-    # `True` when the camera has no profile and the generic stand-in was used.
-    # Every number below is then an assumption about a made-up camera.
-    is_generic_fallback: bool = Field(alias="isGenericFallback")
-    # The pixel value at which this camera's frames clip, and where that
-    # number came from: "datasheet", "measured" or "assumed".
-    clip_ceiling_adu: float = Field(alias="clipCeilingAdu")
-    clip_ceiling_source: str = Field(alias="clipCeilingSource")
-    # A pixel at or above this value counts as saturated in a raw frame.
-    saturation_threshold_adu: float = Field(alias="saturationThresholdAdu")
-    saturation_threshold_source: str = Field(alias="saturationThresholdSource")
-    # `False` when the threshold is above the ceiling, so a saturated raw frame
-    # could never be counted as saturated.
-    saturation_threshold_can_be_reached: bool = Field(alias="saturationThresholdCanBeReached")
-    # Whether the profile has a sensitivity curve, so spectra can be corrected
-    # for the sensor's sensitivity.
-    has_quantum_efficiency_curve: bool = Field(alias="hasQuantumEfficiencyCurve")
 
 
 class PipelineQualitySummaryBase(BaseModel):
@@ -722,6 +728,18 @@ class AsteroidDetectionPipelineQualityMetrics(BaseModel):
     # every real mover seem unknown.
     ephemeris_queries_attempted: int = Field(default=0, alias="ephemerisQueriesAttempted")
     ephemeris_queries_failed: int = Field(default=0, alias="ephemerisQueriesFailed")
+    # How the straight-line (residual) test went. The pipeline has always
+    # counted these; they were dropped here because the class had no fields
+    # for them. A summary saved before they were kept reads them as None.
+    residual_chains_tested: int | None = Field(default=None, alias="residualChainsTested")
+    residual_chains_rejected: int | None = Field(default=None, alias="residualChainsRejected")
+    residual_chains_non_monotonic: int | None = Field(default=None, alias="residualChainsNonMonotonic")
+    residual_assumed_error_detections: int | None = Field(
+        default=None, alias="residualAssumedErrorDetections"
+    )
+    # The largest RMS-to-position-error ratio among the accepted tracks; the
+    # pipeline gives 0.0 when no track was accepted.
+    residual_worst_accepted_ratio: float | None = Field(default=None, alias="residualWorstAcceptedRatio")
 
 
 class AsteroidDetectionQualitySummary(PipelineQualitySummaryBase):

@@ -14,13 +14,19 @@ from typing import Any
 import numpy as np
 from astropy.stats import SigmaClip, sigma_clipped_stats
 from photutils.background import Background2D, MedianBackground
-from photutils.detection import DAOStarFinder
 from scipy.ndimage import zoom
 
 from astrometricslib.drivers.fits_access import collapse_to_2d
+from astrometricslib.pipelines.shared.star_finding import find_sources_above_background
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
+
+# The roundness window of the detector. Real stars are round and nebular
+# filaments are not, so a source outside (-0.6, 0.6) is dropped. Tightened from
+# DAOStarFinder's (-1, 1) default on the Veil Nebula frame (AST-16). The frame
+# measurement passes no window, because it must keep trailed stars.
+SOURCE_DETECTOR_ROUNDNESS_RANGE = (-0.6, 0.6)
 
 # Below this pixel count, background stats are computed on the full
 # array -- subsampling only pays off once the full-array cost is
@@ -222,6 +228,11 @@ class SourceDetector:
         """
         self.fwhm = fwhm
         self.threshold_sigma = threshold_sigma
+        # The background noise (standard deviation of the sky pixels) of the
+        # picture the last `detect` call searched, in the picture's units, or
+        # `None` before any call. The expected position error of a star needs
+        # it: a star's peak over this noise is its signal-to-noise ratio.
+        self.last_background_noise: float | None = None
 
     def detect(
         self, data: np.ndarray, mask: np.ndarray | None = None, with_radius: bool = True
@@ -299,29 +310,23 @@ class SourceDetector:
                 "Source detection: global background, mean=%.2f, median=%.2f, std=%.2f", mean, median, std
             )
 
-        # 2. Initialize finder. roundness_range is tightened from
+        self.last_background_noise = float(std)
+
+        # 2. Find the sources. roundness_range is tightened from
         # DAOStarFinder's full (-1.0, 1.0) default to reject elongated
         # nebular filament structure that the background subtraction
         # alone doesn't catch -- real stars are round, filaments aren't.
-        star_finder = DAOStarFinder(
-            fwhm=self.fwhm,
-            threshold=self.threshold_sigma * std,
-            exclude_border=True,
-            sharpness_range=(0.2, 1.0),
-            roundness_range=(-0.6, 0.6),
+        # The finder itself is shared with the frame measurement
+        # (`pipelines/shared/star_finding.py`), which leaves the range open.
+        # 3. Detect sources (subtract the background estimate for SNR).
+        detected = find_sources_above_background(
+            data - background_map,
+            noise=std,
+            expected_fwhm_px=self.fwhm,
+            threshold_sigma=self.threshold_sigma,
+            roundness_range=SOURCE_DETECTOR_ROUNDNESS_RANGE,
+            mask=mask,
         )
-
-        # 3. Detect sources (subtract the background estimate for SNR)
-        sources = star_finder(data - background_map, mask=mask)
-
-        if sources is None:
-            return []
-
-        # Convert QTable to list of dicts and sort by flux descending
-        sources.sort("flux")
-        sources.reverse()
-
-        detected = [dict(zip(sources.colnames, row, strict=False)) for row in sources]
         if not with_radius:
             return detected
         for source in detected:

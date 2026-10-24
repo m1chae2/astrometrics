@@ -266,6 +266,10 @@ class TargetService:
         for k, v in updates.items():
             if hasattr(target, k):
                 setattr(target, k, v)
+        # A position typed in by a person is trusted: it is no longer a
+        # guess taken from a frame center.
+        if ("ra" in updates or "dec" in updates) and "position_unverified" not in updates:
+            target.position_unverified = False
         self.astrometrics.targets.save()
         return target
 

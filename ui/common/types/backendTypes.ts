@@ -95,7 +95,11 @@ export interface FrameMeasurements {
   measuredFwhmPx?: number | null;
   registrationFwhmXPx?: number | null;
   registrationFwhmYPx?: number | null;
+  registrationWeightedFwhmPx?: number | null;
   registrationRoundness?: number | null;
+  registrationQuality?: number | null;
+  registrationBackgroundLevel?: number | null;
+  registrationRotationDeg?: number | null;
   registrationRmse?: number | null;
   registrationStarCount?: number | null;
   registrationDxPx?: number | null;
@@ -128,6 +132,9 @@ export interface FrameRecord {
   focuserTemperatureC?: number | null;
   fileSize?: number | null;
   fileModifiedNs?: number | null;
+  qualityMeasuredFileSize?: number | null;
+  qualityMeasuredFileModifiedNs?: number | null;
+  qualityMeasuredMetricSet?: string | null;
   measurements?: FrameMeasurements;
 }
 
@@ -223,6 +230,7 @@ export interface TargetObject {
   imageType?: ImageType;
   ra?: string;
   dec?: string;
+  positionUnverified?: boolean;
   fieldOfView?: string;
   mainCamera?: string;
   mainScope?: string;
@@ -307,6 +315,12 @@ export interface Spectrum {
   gaiaVariableFlag?: string;
   gaiaDr3SourceId?: number | null;
   vsxVariabilityType?: string;
+  vsxBrightMagnitude?: number | null;
+  vsxFaintMagnitude?: number | null;
+  vsxAmplitudeMag?: number | null;
+  vsxPeriodDays?: number | null;
+  vsxMagnitudeBand?: string;
+  vsxRangeChecked?: boolean;
   catalogMatchQuality?: CatalogMatchQuality | null;
   /** How much this star's brightness jumps around, on a display scale. */
   variabilityScore?: number | null;
@@ -1798,6 +1812,20 @@ export interface ExposureGroupSummary {
   gainDisagreement?: number | null;
   gainNonlinear?: boolean;
   leftOutReason?: string | null;
+  brightestStarPeakFraction?: number | null;
+  brightestStarPeakAboveSkyAdu?: number | null;
+  peakSkyAdu?: number | null;
+  peakClipCeilingAdu?: number | null;
+  peakLinearityLimitAdu?: number | null;
+  peakFramesWithPeak?: number;
+  peakFramesEstimated?: number;
+  peakFramesClipped?: number;
+  peakFramesSampled?: number;
+  peakFramesOnProfileCeiling?: number;
+  peakLargestEstimateToRoomRatio?: number | null;
+  peakClipCeilingProvenance?: string | null;
+  peakLinearityLimitProvenance?: string | null;
+  peakCheckedRangeRoomMultiples?: number;
 }
 
 /**
@@ -2228,6 +2256,11 @@ export interface AsteroidDetectionPipelineQualityMetrics {
   candidatesEphemerisMatched: number;
   ephemerisQueriesAttempted?: number;
   ephemerisQueriesFailed?: number;
+  residualChainsTested?: number | null;
+  residualChainsRejected?: number | null;
+  residualChainsNonMonotonic?: number | null;
+  residualAssumedErrorDetections?: number | null;
+  residualWorstAcceptedRatio?: number | null;
 }
 
 /**
@@ -2265,6 +2298,481 @@ export interface WeatherSample {
   ambientTemperatureC?: number | null;
   humidityPercent?: number | null;
   dewPointC?: number | null;
+}
+
+/**
+ * What a measurement describes. There is no night or target level.
+ */
+export enum SubjectLevel {
+  FRAME = "frame",
+  STACK = "stack",
+  RUN = "run"
+}
+
+/**
+ * Whether a value was measured, assumed, or not measured at all.
+ */
+export enum MeasurementStatus {
+  MEASURED = "measured",
+  ASSUMED = "assumed",
+  NOT_MEASURED = "not_measured"
+}
+
+/**
+ * How a stored row came to exist.
+ */
+export enum MeasurementOrigin {
+  MEASURED = "measured",
+  BACKFILLED = "backfilled"
+}
+
+/**
+ * How a limit was obtained, from most fixed to most data-driven.
+ */
+export enum LimitTier {
+  GEOMETRY = "geometry",
+  SENSOR_PROFILE = "sensor_profile",
+  PHYSICAL_BUDGET = "physical_budget",
+  DESIGN_ESTIMATE = "design_estimate",
+  OWN_BASELINE = "own_baseline",
+  VALIDATED_DATASET = "validated_dataset"
+}
+
+/**
+ * The point in processing where a metric is measured.
+ */
+export enum Checkpoint {
+  FRAME = "frame",
+  CALIBRATION = "calibration",
+  STACKING = "stacking",
+  ASTROMETRY = "astrometry",
+  PHOTOMETRY = "photometry",
+  SPECTROSCOPY = "spectroscopy",
+  ASTEROID_DETECTION = "asteroid_detection"
+}
+
+/**
+ * Which direction of a metric is better.
+ */
+export enum Direction {
+  LOWER = "lower",
+  HIGHER = "higher",
+  NONE = "none"
+}
+
+/**
+ * What kind of uncertainty a metric reports.
+ *
+ * ``MODEL_DERIVED`` marks a value that adds a term from a model (such as the
+ * blur of a square pixel) to a measured value. Its uncertainty carries only
+ * the statistical error of the measured part. The error of the model term
+ * is not included, so the value must be read as model-derived.
+ */
+export enum UncertaintyKind {
+  STATISTICAL_1_SIGMA = "statistical_1_sigma",
+  SYSTEMATIC_BOUND = "systematic_bound",
+  MODEL_DERIVED = "model_derived",
+  NONE = "none"
+}
+
+/**
+ * Why a metric exists.
+ */
+export enum MetricPurpose {
+  DECISION = "decision",
+  CONTEXT = "context",
+  EXPLORATORY = "exploratory"
+}
+
+/**
+ * The thing a measurement is about.
+ *
+ * Parameters
+ * ----------
+ * level : `SubjectLevel`
+ * Whether the subject is a frame, a stack or a run.
+ * subject_id : `str`
+ * A stable id: target plus relative frame path, stack id or run id.
+ * Never a mount path.
+ * target_id : `str` or `None`
+ * The target the subject belongs to.
+ * observing_night_id : `str` or `None`
+ * A plain time label for the observing night.
+ * capture_setting_id : `int` or `None`
+ * Row in the capture-setting table.
+ * channel : `str` or `None`
+ * The color channel for a one-shot-color camera, else ``None``.
+ * variant : `str` or `None`
+ * ``None`` for a library stack (and for every frame and run). For a
+ * subset stack made from some of a library stack's frames, the subset's
+ * label. A reader filters on this field; it never has to parse the
+ * subject id for ``_subsets/``.
+ */
+export interface QualitySubject {
+  level: SubjectLevel;
+  subjectId: string;
+  targetId?: string | null;
+  observingNightId?: string | null;
+  captureSettingId?: number | null;
+  channel?: string | null;
+  variant?: string | null;
+}
+
+/**
+ * One limit that a measurement can be compared with.
+ *
+ * Parameters
+ * ----------
+ * value : `float` or `None`
+ * The limit itself. ``None`` when the limit could not be computed.
+ * unit : `str`
+ * The unit of `value`, such as ``"arcsec"``.
+ * tier : `LimitTier`
+ * How the limit was obtained.
+ * derivation : `str`
+ * A plain-language statement of how the value was found.
+ * sample_count : `int` or `None`
+ * The number of samples behind the limit, when it comes from data.
+ * register_entry : `str` or `None`
+ * The validation register entry that holds the evidence, such as
+ * ``"STK-07"``. Required when `tier` is ``validated_dataset``.
+ */
+export interface QualityLimit {
+  value: number | null;
+  unit: string;
+  tier: LimitTier;
+  derivation: string;
+  sampleCount?: number | null;
+  registerEntry?: string | null;
+}
+
+/**
+ * One combination of equipment and exposure settings.
+ *
+ * Parameters
+ * ----------
+ * camera : `str`
+ * The camera model name.
+ * telescope : `str` or `None`
+ * The telescope or lens name.
+ * focal_length_mm : `float` or `None`
+ * The focal length in millimeters.
+ * pixel_scale_arcsec : `float` or `None`
+ * The size of one pixel on the sky, in arcseconds per pixel.
+ * filter_name : `str` or `None`
+ * The filter in the light path, such as ``"L"`` or ``"Ha"``.
+ * exposure_seconds : `float` or `None`
+ * The exposure time of one frame, in seconds.
+ * gain_setting : `int` or `None`
+ * The camera's gain setting (a unitless number in the FITS ``GAIN``
+ * card, not electrons per ADU).
+ * offset : `int` or `None`
+ * The constant the camera adds to every pixel.
+ * binning : `int` or `None`
+ * The binning factor (1 means no binning).
+ */
+export interface CaptureSetting {
+  camera: string;
+  telescope?: string | null;
+  focalLengthMm?: number | null;
+  pixelScaleArcsec?: number | null;
+  filterName?: string | null;
+  exposureSeconds?: number | null;
+  gainSetting?: number | null;
+  offset?: number | null;
+  binning?: number | null;
+}
+
+/**
+ * Points at one per-star result, which has no row id of its own.
+ *
+ * Parameters
+ * ----------
+ * star_id : `str`
+ * The star's identifier.
+ * run_id : `str`
+ * The run that produced the result.
+ * metric : `str`
+ * A registered metric name.
+ */
+export interface StarResultReference {
+  starId: string;
+  runId: string;
+  metric: string;
+}
+
+/**
+ * Points at the exact measurement a judgment or report used.
+ *
+ * Exactly one of `row_id` and `star_result` is set.
+ *
+ * Parameters
+ * ----------
+ * row_id : `int` or `None`
+ * A row in the measurement store.
+ * star_result : `StarResultReference` or `None`
+ * A per-star result.
+ */
+export interface MeasurementReference {
+  rowId?: number | null;
+  starResult?: StarResultReference | null;
+}
+
+/**
+ * One measured fact about a subject.
+ *
+ * Parameters
+ * ----------
+ * metric : `str`
+ * A registered metric name, such as ``"frame.star_width_moffat_arcsec"``.
+ * definition_version : `int`
+ * The registered definition version of that metric.
+ * subject : `QualitySubject`
+ * What the measurement is about.
+ * status : `MeasurementStatus`
+ * Measured, assumed or not measured.
+ * value : `float` or `None`
+ * The value. ``None`` exactly when the status is ``not_measured``.
+ * uncertainty : `float` or `None`
+ * The uncertainty of the value, in the same unit.
+ * sample_count : `int` or `None`
+ * The number of samples behind the value, such as the number of stars.
+ * reason : `str`
+ * Why the value is missing or assumed. Required for ``not_measured``.
+ * check_outcome : `GateStatus` or `None`
+ * For a self-check, whether it passed, failed or was not checked.
+ * check_limit : `QualityLimit` or `None`
+ * For a self-check, the limit it used.
+ * action_taken : `str` or `None`
+ * For a processing decision, what was done, such as
+ * ``"frame moved to _excluded/"``.
+ * origin : `MeasurementOrigin`
+ * Whether a pipeline run wrote the row or it was backfilled.
+ * pipeline_version : `str` or `None`
+ * The pipeline version. ``None`` when a backfilled row did not record it.
+ * run_id : `str`
+ * The job id, or a generated id when there was no job.
+ * job_id : `str` or `None`
+ * A soft link to the activity record of the job.
+ * measured_at : `datetime`
+ * When the measurement was made. It must carry a time zone.
+ * row_id : `int` or `None`
+ * The store's row id. Filled only when the measurement is read back.
+ */
+export interface QualityMeasurement {
+  metric: string;
+  definitionVersion: number;
+  subject: QualitySubject;
+  status: MeasurementStatus;
+  value?: number | null;
+  uncertainty?: number | null;
+  sampleCount?: number | null;
+  reason?: string;
+  checkOutcome?: GateStatus | null;
+  checkLimit?: QualityLimit | null;
+  actionTaken?: string | null;
+  origin: MeasurementOrigin;
+  pipelineVersion?: string | null;
+  runId: string;
+  jobId?: string | null;
+  measuredAt: string;
+  rowId?: number | null;
+}
+
+/**
+ * The declaration of one registered metric.
+ *
+ * Parameters
+ * ----------
+ * name : `str`
+ * The metric name, such as ``"frame.star_width_moffat_arcsec"``.
+ * definition_version : `int`
+ * Raised whenever the estimator, sample or constants change.
+ * unit : `str`
+ * The unit every measurement of this metric must use.
+ * checkpoint : `Checkpoint`
+ * Where in processing the metric is measured.
+ * levels : `tuple` of `SubjectLevel`
+ * The subject levels the metric applies to. Stored sorted by value
+ * with no repeats, so the JSON form is always the same.
+ * better : `Direction`
+ * Which direction is better.
+ * meaning : `str`
+ * One line in plain words.
+ * decisions : `tuple` of `str`
+ * The decisions the metric informs. Documentation only.
+ * estimator : `str`
+ * How the value is estimated.
+ * sample_definition : `str`
+ * What is sampled, such as which stars.
+ * band : `str`
+ * The filter or color channel the metric applies to.
+ * computed_by : `str`
+ * Dotted path of the function that computes it, relative to
+ * ``astrometricslib``.
+ * uncertainty_kind : `UncertaintyKind`
+ * The kind of uncertainty reported.
+ * uncertainty_method : `str`
+ * How the uncertainty is found.
+ * register_entry : `str` or `None`
+ * The validation register entry an auditor checks.
+ * purpose : `MetricPurpose`
+ * Why the metric exists.
+ * purpose_reason : `str`
+ * Required for a decision or context metric.
+ * exploratory_question : `str`
+ * The question an exploratory metric answers. Required for exploratory.
+ * review_date : `datetime.date` or `None`
+ * When an exploratory metric must be promoted or removed. Required for
+ * exploratory.
+ */
+export interface MetricSpec {
+  name: string;
+  definitionVersion: number;
+  unit: string;
+  checkpoint: Checkpoint;
+  levels: SubjectLevel[];
+  better: Direction;
+  meaning: string;
+  decisions?: string[];
+  estimator: string;
+  sampleDefinition: string;
+  band: string;
+  computedBy: string;
+  uncertaintyKind: UncertaintyKind;
+  uncertaintyMethod: string;
+  registerEntry?: string | null;
+  purpose: MetricPurpose;
+  purposeReason?: string;
+  exploratoryQuestion?: string;
+  reviewDate?: string | null;
+}
+
+/**
+ * The short form of a `MetricSpec`, for listings.
+ *
+ * A full `MetricSpec` is long. About 170 metrics are registered, and even a
+ * one-line meaning for each makes a listing of all of them too long for an
+ * MCP reply (the limit is 40,000 bytes). This record keeps only what a
+ * reader needs to find a metric. Ask for the meaning and the rest with
+ * ``detail="full"``, usually together with a ``checkpoint``.
+ *
+ * Parameters
+ * ----------
+ * name : `str`
+ * The metric name.
+ * unit : `str`
+ * The unit every measurement of this metric uses.
+ * checkpoint : `Checkpoint`
+ * Where in processing the metric is measured.
+ * levels : `tuple` of `SubjectLevel`
+ * The subject levels the metric applies to, sorted by value.
+ * purpose : `MetricPurpose`
+ * Why the metric exists.
+ */
+export interface MetricSummary {
+  name: string;
+  unit: string;
+  checkpoint: Checkpoint;
+  levels: SubjectLevel[];
+  purpose: MetricPurpose;
+}
+
+/**
+ * Gain and read noise measured at one camera setting.
+ *
+ * Gain and read noise change with the camera's gain setting, offset and
+ * binning, so a measurement belongs to exactly one setting. A measurement
+ * that could not be made has the status ``not_measured`` and a reason, and
+ * holds no numbers.
+ *
+ * Attributes
+ * ----------
+ * status : `MeasurementStatus`
+ * ``measured`` or ``not_measured``.
+ * reason : `str` or `None`
+ * Why nothing was measured. `None` when ``status`` is ``measured``.
+ * camera_id : `str`
+ * The camera the frames came from.
+ * gain_setting : `str`
+ * The camera's gain setting (or the ISO of a DSLR), in standard form.
+ * offset : `str`
+ * The camera offset, in standard form.
+ * binning : `str`
+ * The binning, such as ``"1x1"``.
+ * temperature_c : `float` or `None`
+ * The mean sensor temperature of the frames, in degrees C.
+ * exposure_seconds : `float` or `None`
+ * The exposure of the flat frames, in seconds.
+ * gain_e_per_adu : `float` or `None`
+ * The conversion gain: the median over the flat pairs.
+ * gain_spread_e_per_adu : `float` or `None`
+ * The sample standard deviation of the gain over the flat pairs. It
+ * says how steady the pairs agree, not how accurate the gain is.
+ * read_noise_adu : `float` or `None`
+ * The read noise in ADU (RMS, root mean square): the median over the
+ * bias pairs. This is the figure the noise model uses.
+ * read_noise_adu_robust : `float` or `None`
+ * The same noise from the median absolute deviation, which ignores hot
+ * pixels and cosmic-ray hits. Kept for the record only.
+ * read_noise_e : `float` or `None`
+ * The read noise in electrons: ``read_noise_adu`` times the gain.
+ * signal_level_adu : `float` or `None`
+ * The mean flat signal, bias removed, in ADU. A gain from one signal
+ * level cannot show whether the sensor is linear (a full photon
+ * transfer curve uses many levels), so the level is recorded.
+ * region_shape_pixels : `list` [`int`] or `None`
+ * The height and width, in pixels, of the central region measured
+ * (two numbers).
+ * flat_pair_count : `int`
+ * Flat pairs that gave a gain.
+ * bias_pair_count : `int`
+ * Bias pairs that gave a read noise.
+ * pair_gains_e_per_adu : `list` [`float`]
+ * The gain of each flat pair.
+ * pair_read_noises_adu : `list` [`float`]
+ * The read noise of each bias pair, in ADU.
+ * flat_frame_count : `int`
+ * Flat frames read.
+ * bias_frame_count : `int`
+ * Bias frames read.
+ * provenance : `str` or `None`
+ * A sentence for the camera profile: the method, frames, region and
+ * date. `None` when nothing was measured.
+ * saved : `bool`
+ * `True` when the values were written to the camera profile.
+ * backup_path : `str` or `None`
+ * The config backup made before the write, if one was made.
+ * notes : `list` [`str`]
+ * Plain sentences about choices the measurement made, such as other
+ * flat groups that were not used.
+ */
+export interface SensorNoiseMeasurement {
+  status: MeasurementStatus;
+  reason?: string | null;
+  cameraId: string;
+  gainSetting: string;
+  offset: string;
+  binning: string;
+  temperatureC?: number | null;
+  exposureSeconds?: number | null;
+  gainEPerAdu?: number | null;
+  gainSpreadEPerAdu?: number | null;
+  readNoiseAdu?: number | null;
+  readNoiseAduRobust?: number | null;
+  readNoiseE?: number | null;
+  signalLevelAdu?: number | null;
+  regionShapePixels?: number[] | null;
+  flatPairCount?: number;
+  biasPairCount?: number;
+  pairGainsEPerAdu?: number[];
+  pairReadNoisesAdu?: number[];
+  flatFrameCount?: number;
+  biasFrameCount?: number;
+  provenance?: string | null;
+  saved?: boolean;
+  backupPath?: string | null;
+  notes?: string[];
 }
 
 /**
@@ -2357,6 +2865,12 @@ export const RPC_METHODS = [
   "processing:delete_job",
   "processing:jobs_for_target",
   "processing:job_log_tail",
+  "processing:record_frame_measurements",
+  "processing:measure_half_difference_noise",
+  "processing:measure_noise_growth",
+  "processing:measure_night_contributions",
+  "quality:query",
+  "quality:metrics",
   "analysis:analyze_image",
   "analysis:get_results",
   "analysis:cancel",
@@ -2404,6 +2918,7 @@ export const RPC_METHODS = [
   "images:delete",
   "images:last",
   "calibration:get_stats",
+  "calibration:measure_sensor_noise",
   "mosaic:preview",
   "mosaic:create",
   "execution:list_sessions",
@@ -2422,6 +2937,38 @@ export const RPC_METHODS = [
 
 /** The name of one RPC method the backend serves. */
 export type RpcMethod = (typeof RPC_METHODS)[number];
+
+/**
+ * Every event the backend pushes to the app over the events WebSocket,
+ * from backend/public_interface.py.
+ */
+export const UI_EVENTS = {
+  /** The stellar catalog was written to somewhere, so cached star lists are stale. */
+  "catalog:changed": "catalog:changed",
+  /** A frame measurement job stored new quality rows. The payload is {targetId, framesMeasured, rowsWritten, observingNightIds}. */
+  "quality:measured": "quality:measured",
+  /** The mount, processing jobs or health status changed. */
+  "system_state_update": "system_state_update",
+  /** A backend log line, for the app's log panel. */
+  "log": "log",
+  /** The shared workspace state changed, such as the selected target. */
+  "handoff": "handoff",
+  /** Another client asked the app to switch to a screen. */
+  "navigate-mode": "navigate-mode",
+  /** Another client asked the terminal to show a variable. */
+  "inspect-variable": "inspect-variable",
+  /** A device needs attention; shown on a paired phone. */
+  "device_alert": "device_alert",
+  /** An AI agent ran code in the terminal. */
+  "terminal:agent_exec": "terminal:agent_exec",
+  /** The terminal made a plot to show. */
+  "terminal:plot_generated": "terminal:plot_generated",
+  /** The script editor's text was replaced by another client. */
+  "editor:sync": "editor:sync",
+} as const;
+
+/** The name of one event the backend pushes to the app. */
+export type UiEvent = (typeof UI_EVENTS)[keyof typeof UI_EVENTS];
 
 /**
  * The path of every other route the backend serves, by name, from

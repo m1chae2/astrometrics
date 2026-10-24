@@ -100,14 +100,14 @@ The Gaia XP metrics are filled for classified and unclassified spectra alike, be
 
 For a classified spectrum, checkpoint 3 also raises one flag for each failed verdict: `poor_match`, `subtype_ambiguous`, `class_ambiguous`, `catalog_disagrees` (the measured type is too far from the catalog type), `colour_disagrees` (the B-V color disagrees with the catalog) and `not_trustworthy`. The `trustworthy` verdict is `not (poor_match or subtype_ambiguous or catalog_disagrees)`. Class ambiguity and color disagreement raise their own flags but do not change it.
 
-`run_gates.py` also rolls the four checkpoints of all spectra up into the run summary's `stage_quality_summary` and builds the `processing_quality` gate. `wavelength_scale.py` reads the wavelength zero-point metrics from the pre-processing checkpoints and builds the run-level `wavelength_scale_summary` and the `wavelength_scale` gate. The [pipeline README](../README.md) describes all three.
+`record_quality.py` also rolls the four checkpoints of all spectra up into the run summary's `stage_quality_summary` and builds the `processing_quality` gate. `wavelength_scale.py` reads the wavelength zero-point metrics from the pre-processing checkpoints and builds the run-level `wavelength_scale_summary` and the `wavelength_scale` gate. The [pipeline README](../README.md) describes all three.
 
 ## Files
 
 - `compare_to_catalog.py`: compares the measured type and color with the catalog values (step 1).
 - `assess_output_quality.py`: builds the output quality assessment, the checkpoint 3 record, and the list of classifications a reviewer should look at.
 - `compare_to_gaia_xp.py`: compares the calibrated spectrum with Gaia XP (step 4).
-- `run_gates.py`: builds the run-level gates and the `stage_quality_summary`.
+- `record_quality.py`: builds the run-level gates and the `stage_quality_summary`, and turns the run's numbers and gates into quality measurements (`spectroscopy_run_measurements`) and stores them (`record_spectroscopy_quality`).
 - `wavelength_scale.py`: builds the run-level wavelength zero-point summary and the `wavelength_scale` gate.
 
 For exact behavior, read the code.

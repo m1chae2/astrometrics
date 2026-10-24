@@ -187,15 +187,30 @@ clip_ceiling_adu = { value = 65532.0, kind = "measured", source = "Maximum of sa
 saturation_threshold_adu = { value = 65000.0, kind = "assumed", source = "Long-standing pipeline default for raw frames: just under the 16-bit maximum of 65535. Never measured per camera." }
 photometric_linearity_limit_adu = { value = 60000.0, kind = "measured", source = "Antonov 2026: the response turns non-linear above about 60,000 ADU at Gain 0 / Offset 10, before hard clipping." }
 # Optional. Detector noise terms, used for the photometric error budget (the
-# CCD equation). Without them the pipeline assumes 1 e-/ADU and no read noise
-# and marks the errors as a guide. The gain is in electrons per STORED ADU: the
-# sensor is 14-bit but the files are 16-bit in steps of 4, so the datasheet's
-# figure of about 3.1 e-/ADU is 0.78 here. (This file used to give 3.6, a
-# datasheet figure in 14-bit ADU, which made the error bars about 2 times too
-# small.) Measure your own copy of the camera: take pairs of flats and bias
-# frames at your gain and offset.
-gain_e_per_adu = { value = 0.783, kind = "measured", source = "Photon transfer on 15 flat pairs (gain 0, offset 10, 0.55 s, -10 C), central 1000 x 1000 pixels, in stored 16-bit ADU. Measured 2026-10-11." }
-read_noise_e = { value = 3.8, kind = "measured", source = "Root-mean-square noise of 5 bias-frame pairs (gain 0, offset 10, -10 C), 4.88 ADU times the gain. The ZWO datasheet gives 3.8 e- at Gain 0 and the median-based estimate 3.3 e-. Measured 2026-10-11." }
+# CCD equation), recorded for each camera setting they were measured at: the
+# gain setting, the offset and the binning. A frame uses the entry for its own
+# setting only. A frame whose setting has no entry gets no gain or read noise
+# from this profile (the pipeline then tries the image header, then assumes 1
+# e-/ADU and no read noise, and says so). It never borrows a nearby setting.
+# Each entry is one inline table:
+#   gain_setting   the camera's gain setting (or the ISO of a DSLR), as the
+#                  header's GAIN card writes it; 0.0 and 0 are the same
+#   offset         the camera's offset
+#   binning        for example "1x1"
+#   temperature_c  optional; the sensor temperature of the measurement
+#   gain_e_per_adu, read_noise_e   optional inline tables of the form
+#                  { value, kind, source }; an entry needs at least one
+# The gain is in electrons per STORED ADU: the sensor is 14-bit but the files
+# are 16-bit in steps of 4, so the datasheet's figure of about 3.1 e-/ADU is
+# 0.78 here. (This file used to give 3.6, a datasheet figure in 14-bit ADU,
+# which made the error bars about 2 times too small.) Measure your own copy of
+# the camera: take pairs of flats and bias frames at your gain and offset, and
+# add an entry for each setting you use. Files from before this layout, with a
+# single gain_e_per_adu and read_noise_e per camera, are ignored until you run
+# astrometricslib/scripts/migrate_camera_profiles.py.
+sensor_noise = [
+    { gain_setting = "0", offset = "10", binning = "1x1", temperature_c = -10.0, gain_e_per_adu = { value = 0.783, kind = "measured", source = "Photon transfer on 15 flat pairs (gain 0, offset 10, 0.55 s, -10 C), central 1000 x 1000 pixels, in stored 16-bit ADU. Measured 2026-10-11." }, read_noise_e = { value = 3.8, kind = "measured", source = "Root-mean-square noise of 5 bias-frame pairs (gain 0, offset 10, -10 C), 4.88 ADU times the gain. The ZWO datasheet gives 3.8 e- at Gain 0 and the median-based estimate 3.3 e-. Measured 2026-10-11." } },
+]
 quantum_efficiency = { wavelength_nm = [400.0, 420.0, 440.0, 460.0, 480.0, 500.0, 520.0, 550.0, 600.0, 650.0, 700.0, 750.0, 800.0, 850.0, 900.0, 950.0, 1000.0], quantum_efficiency_fraction = [0.7, 0.82, 0.88, 0.91, 0.92, 0.9, 0.89, 0.88, 0.78, 0.62, 0.48, 0.36, 0.27, 0.19, 0.13, 0.08, 0.06], kind = "datasheet", source = "Read off the sensitivity graph published by ZWO." }
 # Optional. The wavelength, in nm, that calibration treats as the start of
 # the spectrum. Leave it out to use the default of 380.
@@ -378,6 +393,12 @@ trim_noisy_stack_edges_enabled = "true"
 # stacks of the target. To rebuild anyway, pass --force-restack to the batch
 # script or force=True to run_stacking. Set "false" to rebuild every time.
 skip_unchanged_stacks_enabled = "true"
+# Seconds (the default is 300): the most time the flat-to-light match may spend
+# reading frames after a stack is made. It reads up to 16 flat and 24 light
+# frames and checks the clock before each one. If the limit is reached the match
+# is stored as "not measured" with the number of frames read. The stack itself is
+# not affected.
+flat_match_time_limit_seconds = "300"
 
 ["Processing.Parallelism"]
 target_workers = "auto"

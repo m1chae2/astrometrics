@@ -131,7 +131,7 @@ Symbols follow the architecture paper's [list of symbols](../Astrometrics_Librar
 
 - **Stage 1 (`process_input`).** A no-op that returns an empty `Result`.
 - **Stage 2 (`run`).** Runs `AsteroidDetectionPipeline.process` on the light frames that have a timestamp. Only straight-line movers and matched bodies are kept on the target.
-- **Stage 3 (`validate_output`).** Builds the summary and records `asteroid_run_gates` (5 run gates).
+- **Stage 3 (`validate_output`).** Builds the summary, records `asteroid_run_gates` (5 run gates) and stores the run's counts and gates as quality measurements (`record_asteroid_quality`).
 - **Stage 4 (`to_result_dict`).** Returns the status, stage counts and surviving candidates.
 
 `mpc_report.py` can write Minor Planet Center (MPC, the clearing house for asteroid observations) reports from detections, in its 80-column and ADES text formats, but no pipeline step calls it. A run does not produce MPC records. `rotation_period.py` builds a light curve from a track for the period search; the pipeline does not call it either.
@@ -144,11 +144,11 @@ A failed gate here does not always mean the run went wrong. `unmatched_movers` f
 
 | Gate | Role | Defined in | What it checks |
 | --- | --- | --- | --- |
-| `search_frames` | run gate | `run_gates.py` | Not checked when fewer frames could be searched than a track (a chain of detections of one object) needs, so no mover could have been found. |
-| `pointing_metadata` | run gate | `run_gates.py` | Fails when any frame was left out for missing `RA`, `DEC` or `NAXIS` cards. |
-| `ephemeris_cross_match` | run gate | `run_gates.py` | Fails when SkyBoT (the online service listing known solar-system bodies) could not be reached for confirmed movers. Not checked when no mover reached it. |
-| `unmatched_movers` | run gate | `run_gates.py` | Fails when a confirmed straight-line mover matched no known solar-system body. The failure is a prompt, not an error: it flags the run so a person checks what may be a new object. Not checked when no mover was confirmed. |
-| `track_residuals` | run gate | `run_gates.py` | Fails when any chain that reached the straight-line test used the assumed position error (`astrometric_error_default_arcsec`) for a detection, since the verdict then rests on a number nobody measured. Passes otherwise, and its detail counts the chains tested and rejected. Not checked when no chain reached the test. |
+| `search_frames` | run gate | `record_quality.py` | Not checked when fewer frames could be searched than a track (a chain of detections of one object) needs, so no mover could have been found. |
+| `pointing_metadata` | run gate | `record_quality.py` | Fails when any frame was left out for missing `RA`, `DEC` or `NAXIS` cards. |
+| `ephemeris_cross_match` | run gate | `record_quality.py` | Fails when SkyBoT (the online service listing known solar-system bodies) could not be reached for confirmed movers. Not checked when no mover reached it. |
+| `unmatched_movers` | run gate | `record_quality.py` | Fails when a confirmed straight-line mover matched no known solar-system body. The failure is a prompt, not an error: it flags the run so a person checks what may be a new object. Not checked when no mover was confirmed. |
+| `track_residuals` | run gate | `record_quality.py` | Fails when any chain that reached the straight-line test used the assumed position error (`astrometric_error_default_arcsec`) for a detection, since the verdict then rests on a number nobody measured. Passes otherwise, and its detail counts the chains tested and rejected. Not checked when no chain reached the test. |
 
 ## 5. Tuned calibration parameters
 
@@ -199,7 +199,7 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `target_session_breakdown` | `list[astrometricslib.models.quality.quality_summary.TargetSessionContribution]` | For each session, how many frames it had and how many the run used. |
 | `upstream_quality_summary_reference` | `str \| None` | Name of the pipeline that had to run first, if any. |
 | `resolved_parameters` | `dict[str, Any]` | The settings the run actually used, after defaults were filled in. |
-| `camera_profile` | `astrometricslib.models.quality.quality_summary.AppliedCameraProfile \| None` | The camera settings applied, such as the gain (e-/ADU) and the level at which pixels clip. |
+| `camera_profile` | `astrometricslib.models.applied_camera_profile.AppliedCameraProfile \| None` | The camera settings applied, such as the gain (e-/ADU) and the level at which pixels clip. |
 | `quality_processing_applied` | `bool` | Whether the quality gates were run. |
 | `flagged` | `bool` | True if one or more quality gates failed, so a person should look at the run. |
 | `flag_reasons` | `list[str]` | One plain sentence for each reason the run was flagged. |
@@ -221,3 +221,8 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `candidates_ephemeris_matched` | `int` | Candidates matched to known asteroids by SkyBoT (an online list of known solar-system bodies). |
 | `ephemeris_queries_attempted` | `int` | Number of SkyBoT requests sent. |
 | `ephemeris_queries_failed` | `int` | Number of SkyBoT requests that failed or timed out. |
+| `residual_chains_tested` | `int \| None` | Quality metric attribute. |
+| `residual_chains_rejected` | `int \| None` | Quality metric attribute. |
+| `residual_chains_non_monotonic` | `int \| None` | Quality metric attribute. |
+| `residual_assumed_error_detections` | `int \| None` | Quality metric attribute. |
+| `residual_worst_accepted_ratio` | `float \| None` | Quality metric attribute. |

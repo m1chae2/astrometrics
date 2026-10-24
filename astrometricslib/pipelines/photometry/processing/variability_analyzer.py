@@ -83,6 +83,10 @@ from astrometricslib.pipelines.photometry.pre_processing.observation_times impor
     barycentric_julian_dates,
     time_basis_for,
 )
+from astrometricslib.pipelines.photometry.processing.catalog_zero_point import (
+    SessionZeroPoints,
+    session_zero_points,
+)
 from astrometricslib.pipelines.photometry.processing.comparison_ensemble import (
     DEFAULT_MAXIMUM_COMPARISON_STARS,
     MINIMUM_COMPARISON_STARS,
@@ -760,6 +764,19 @@ class VariabilityAnalyzer:
         # The airmass slope the optional correction removed, as a fractional
         # change of flux per unit of airmass. `None` when it was not applied.
         self.ensemble_airmass_slope: float | None = None
+        # The catalog zero point of every frame measured by `process()`, taken
+        # from the raw fluxes before any frame is dropped as an outlier. `None`
+        # before `process()` runs or when it measured nothing. The session id
+        # is left empty; the runner fills it in.
+        self.session_zero_points: SessionZeroPoints | None = None
+        # What the zero point needs beyond the light curves, filled during
+        # `process()`: the path of each measured frame in the order the light
+        # curves hold them (the reference frame first), the largest raw pixel
+        # of each star's aperture in each frame (in the same order, NaN where
+        # unknown), and the camera profile's photometric linearity limit.
+        self.frame_paths_in_order: list[str] = []
+        self.star_peak_adu: dict[str, list[float]] = {}
+        self.photometric_linearity_limit_adu: float | None = None
         # The noise model and the thresholds of the last
         # `identify_variable_stars()`. `None` before it runs, and when the
         # field was too small for a noise model.
@@ -827,10 +844,21 @@ class VariabilityAnalyzer:
                 reference_header.get("INSTRUME", reference_header.get("CAMERA"))
             )
             saturation_threshold_adu = camera_profile.saturation_threshold_adu.value
-            # The gain and read noise behind the flux errors. Every later
-            # frame is assumed to come from the same camera at the same
-            # settings, like the saturation threshold above.
+            self.photometric_linearity_limit_adu = (
+                float(camera_profile.photometric_linearity_limit_adu.value)
+                if camera_profile.photometric_linearity_limit_adu is not None
+                else None
+            )
+            # The gain and read noise behind the flux errors, for the reference
+            # frame's own gain, offset and binning. Every later frame is
+            # assumed to come from the same camera at the same settings, like
+            # the saturation threshold above.
             self.detector_noise = resolve_detector_noise(camera_profile, reference_header)
+            if self.detector_noise.profile_gap_reason:
+                logger.warning(
+                    "The camera profile gave no gain or read noise for the reference frame: %s.",
+                    self.detector_noise.profile_gap_reason,
+                )
             try:
                 reference_timestamp = read_observation_time(reference_header)
             except ObservationTimeError as error:
@@ -854,6 +882,7 @@ class VariabilityAnalyzer:
             # against, so it has no computed offset of its own -- its
             # drift is zero by definition.
             self.frame_registration_drift[reference_timestamp] = (0.0, 0.0)
+            self.frame_paths_in_order.append(reference_path)
 
         # Retry with different parameters if detection fails
         detector = None
@@ -950,6 +979,7 @@ class VariabilityAnalyzer:
                     airmasses=[reference_airmass],
                 )
                 self.stellar_objects.append(seed_star)
+                self.star_peak_adu[seed_star.id] = [reference_measurement.peak_adu]
                 reference_stars_minimal.append((seed_star.id, x_ref, y_ref))
             if seed_stars_without_signal:
                 logger.info(
@@ -988,6 +1018,7 @@ class VariabilityAnalyzer:
                     airmasses=[reference_airmass],
                 )
                 self.stellar_objects.append(new_star)
+                self.star_peak_adu[new_star.id] = [reference_measurement.peak_adu]
                 reference_stars_minimal.append((new_star.id, x_ref, y_ref))
 
         logger.info("  Initialized %s reference stars.", len(self.stellar_objects))
@@ -1052,7 +1083,9 @@ class VariabilityAnalyzer:
                     star_positions,
                     exposure_seconds,
                     frame_alignment,
+                    *extra_items,
                 ) = data
+                peaks_by_star = extra_items[0] if extra_items else {}
                 for star_id, star_position in star_positions.items():
                     if not star_position.is_refined:
                         previous_count = self.centroid_fallback_counts.get(star_id, 0)
@@ -1066,6 +1099,7 @@ class VariabilityAnalyzer:
                     1 for star_id in star_positions if star_id in reference_positions
                 )
                 self.timestamp_to_path[timestamp] = path
+                self.frame_paths_in_order.append(path)
                 self.frame_registration_drift[timestamp] = (float(delta_x), float(delta_y))
                 self.frame_exposure_seconds[timestamp] = float(exposure_seconds)
 
@@ -1079,10 +1113,39 @@ class VariabilityAnalyzer:
                         star.photometry.flux_errors.append(float(flux_error))
                         star.photometry.is_saturated.append(is_saturated)
                         star.photometry.airmasses.append(float(airmass))
+                        self.star_peak_adu[star_id].append(float(peaks_by_star.get(star_id, math.nan)))
 
             logger.info("Parallel processing complete.")
 
+        self._record_catalog_zero_points((reference_data.shape[0], reference_data.shape[1]))
         self._record_barycentric_times(target_position_deg, observer_site)
+
+    def _record_catalog_zero_points(self, frame_shape: tuple[int, int]) -> None:
+        """Find the catalog zero point of every frame measured so far.
+
+        This reads the raw fluxes, so it runs right after the measurement and
+        before the normalization drops any frame. A failure here is logged
+        and leaves `session_zero_points` empty; it never fails the run.
+
+        Parameters
+        ----------
+        frame_shape : `tuple` [`int`, `int`]
+            The shape of the reference frame's pixel array,
+            ``(height, width)``.
+        """
+        try:
+            self.session_zero_points = session_zero_points(
+                "",
+                self.stellar_objects,
+                self.frame_paths_in_order,
+                frame_shape,
+                photometric_linearity_limit_adu=self.photometric_linearity_limit_adu,
+                peak_adu_by_star_id=self.star_peak_adu,
+                errors_assume_unit_gain=self.detector_noise.gain_is_assumed,
+            )
+        except (*DATA_ERRORS, np.linalg.LinAlgError) as zero_point_error:
+            logger.warning("Catalog zero points could not be computed: %s", zero_point_error)
+            self.session_zero_points = None
 
     def centroid_shift_summary(self) -> CentroidShiftSummary | None:
         """Summarize how far star centroids sat from their shifted positions.

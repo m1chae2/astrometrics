@@ -11,6 +11,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
 from astrometricslib.pipelines.shared.quarantine_path import QUARANTINE_FOLDER_NAME, is_quarantined_path
 from astrometricslib.pipelines.stacking.pre_processing import frame_quarantine
 from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import (
@@ -407,3 +409,24 @@ def test_input_quality_counts_quarantined_frames_and_says_so() -> None:
     assert quality.frames_excluded_for_gain == 1
     assert quality.is_flagged
     assert any("2 frame(s) with clouds or trailed stars" in reason for reason in quality.flag_reasons)
+
+
+def test_the_report_keeps_the_measurements_of_kept_frames_as_well_as_moved_ones(tmp_path: Path) -> None:
+    """Every readable frame of a judged batch is in `report.measurements`."""
+    frames = [make_frame(tmp_path / f"k{index}.fits", float(index)) for index in range(12)]
+    bad_path = frames[3].path
+
+    def measure(path: str) -> dict[str, Any]:
+        if path.endswith("k7.fits"):
+            raise OSError("truncated file")
+        return make_measurement(path, roundness=0.4 if path == bad_path else 0.97)
+
+    report = find_frames_to_quarantine(frames, measure=measure)
+
+    assert [decision.path for decision in report.moved] == [bad_path]
+    assert len(report.measurements) == 11
+    assert {entry["path"] for entry in report.measurements} == {
+        frame.path for frame in frames if not frame.path.endswith("k7.fits")
+    }
+    roundness_by_path = {entry["path"]: entry["roundness"] for entry in report.measurements}
+    assert roundness_by_path[bad_path] == pytest.approx(0.4)

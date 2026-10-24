@@ -71,7 +71,7 @@ print(analyzer.comparison_set.scatter_mag, analyzer.comparison_set.expected_erro
 
 - **Claim:** On a clear night the comparison stars scatter only a little more than the CCD equation predicts, while a night with patchy cloud or tracking loss gives a ratio about ten times larger. A limit of 5 separates the two. The predicted per-point errors run about one fifth smaller than the real scatter.
 - **Settings it supports:**
-  - Code constant `MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED` = 5.0 in `astrometricslib/pipelines/photometry/post_processing/run_gates.py` (changing it means editing the code). Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.photometry.post_processing.run_gates.MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED -->
+  - Code constant `MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED` = 5.0 in `astrometricslib/pipelines/photometry/post_processing/record_quality.py` (changing it means editing the code). Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.photometry.post_processing.record_quality.MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED -->
 - **Status:** Partly measured. Three fields; the limit sits between them, but no false-positive rate was measured.
 - **Data you need:** At least three single-night photometry sessions of fields with 20 or more unsaturated stars, from one camera with a known gain, including at least one night you know was clear and, if possible, one you know had passing cloud.
 - **Procedure:**
@@ -89,7 +89,7 @@ for target_id in ("M 13", "M 81", "NGC 2403"):
     print(target_id, ensemble.status, ensemble.measured_value, ensemble.detail)
     print(target_id, errors.status, errors.measured_value, errors.detail)
 ```
-<!-- impl: astrometricslib.Astrometrics --> <!-- impl: astrometricslib.pipelines.photometry.post_processing.run_gates.photometry_run_gates -->
+<!-- impl: astrometricslib.Astrometrics --> <!-- impl: astrometricslib.pipelines.photometry.post_processing.record_quality.photometry_run_gates -->
   1. The `comparison_ensemble` detail quotes the ensemble scatter in magnitudes next to the scatter the errors predict. Their ratio is the number the limit judges.
   2. For a night with a large ratio, look at each session's `ensembleMedianFlux` over the pictures and at the faint stars' normalized scatter, to tell cloud or tracking loss from a bad comparison set.
 
@@ -107,7 +107,7 @@ for target_id in ("M 13", "M 81", "NGC 2403"):
 - **Verdict:** Not judged.
 - **Limits:** Three fields from one camera. The gap between 1.3 and 1.7 on clear nights is explained by noise sources the CCD equation leaves out (flat-field residuals and centroid error), but nothing here shows how it splits between them. With the gain assumed to be 1 e-/ADU, `flux_uncertainty` is `not_checked` and quotes its error as a guide only.
 - **To tune for your setup:** Collect the ratio on several nights you know were clear. Set `MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED` a comfortable margin above the clear-night values and below any known cloudy night. A camera without a measured gain gives ratios of the wrong size; measure the gain first ([PHO-03](#pho-03)).
-- **Regenerate with:** No script; read from the run gates by hand on 2026-10-11. `astrometricslib/scripts/report_gate_limits.py` reports the spread of saved photometry values across all targets (`python -m astrometricslib.scripts.report_gate_limits`).
+- **Regenerate with:** No script; read from the run gates by hand on 2026-10-11. `astrometricslib/scripts/report_gate_limits.py` reports the spread of saved photometry values across all targets (`python -m astrometricslib.scripts.report_gate_limits`). Each run now also stores the ratio as the metric `photometry.comparison_scatter_over_predicted_worst` (worst session; <!-- impl: astrometricslib.pipelines.photometry.post_processing.record_quality.worst_comparison_scatter_ratio -->) and the median per-point error as the value of `photometry.gate_flux_uncertainty`. Read them with `QualityStore.query(metric=...)` instead of `summary.gate(...)`.
 - **Guarded by tests:** None.
 - **Raw record:** None kept.
 
@@ -117,10 +117,10 @@ for target_id in ("M 13", "M 81", "NGC 2403"):
 
 - **Claim:** In the stored 16-bit files the camera's gain at gain setting 0 is 0.783 electrons per ADU and its read noise is 3.8 electrons. A datasheet gain quoted for the sensor's own 14-bit ADU (3.6 e-/ADU) is wrong for these files.
 - **Settings it supports:**
-  - Config key `[Observatory.Camera.ZWO ASI533MM Pro] gain_e_per_adu` (default 0.783, kind `measured`) and `[Observatory.Camera.ZWO ASI533MM Pro] read_noise_e` (default 3.8, kind `measured`) in the configuration file (`astrometricslib/astrometrics.config.example.toml` ships them). The pipeline reads them through the camera profile. Relation: derived from this entry. <!-- impl: astrometricslib.models.camera_profile.CameraProfile --> <!-- impl: astrometricslib.pipelines.photometry.pre_processing.detector_noise.resolve_detector_noise -->
+  - Config key `[Observatory.Camera.ZWO ASI533MM Pro] sensor_noise` in the configuration file: an entry for gain setting 0, offset 10, binning 1x1 holding `gain_e_per_adu` (0.783, kind `measured`) and `read_noise_e` (3.8, kind `measured`) (`astrometricslib/astrometrics.config.example.toml` ships it). The values are now keyed by camera setting: a frame at another gain, offset or binning does not use them. The pipeline reads them through the camera profile. Relation: derived from this entry. <!-- impl: astrometricslib.models.camera_profile.CameraProfile --> <!-- impl: astrometricslib.pipelines.photometry.pre_processing.detector_noise.resolve_detector_noise -->
 - **Status:** Partly measured. One signal level; no full photon-transfer curve.
 - **Data you need:** For your camera, at one gain setting, offset and sensor temperature: 15 or more pairs of flat frames taken back to back at one exposure (a signal near half of full scale), and 5 or more pairs of bias frames (zero-length exposures).
-- **Procedure:** No library function measures gain; the steps use NumPy and Astropy directly.
+- **Procedure:** `astrometrics.processing.calibration.measure_sensor_noise(camera_id, gain, offset, binning)` runs these steps on the flats and bias frames in the calibration library (see [STK-35](stacking.md#stk-35); it reproduced these values on 2026-10-22). The steps, and the code that does them by hand with NumPy and Astropy, are:
   1. For each flat pair, take the central region of both frames, subtract the bias level, and form their difference. Half the variance of the difference is the random noise of one frame, because the difference cancels the fixed pixel-to-pixel pattern.
   2. For each bias pair, half the variance of the difference is the read variance in ADU squared.
   3. The gain is the mean signal divided by (the single-frame variance minus the read variance), all in ADU. The read noise in electrons is the read noise in ADU times the gain.
@@ -156,7 +156,7 @@ for a, b in flat_pairs:
 - **Verdict:** Not judged.
 - **Limits:** One signal level, so no photon-transfer curve was fitted. A flat panel that flickers between frames adds variance and lowers the gain, so 0.783 is more likely too low than too high. The values hold only at gain setting 0.
 - **To tune for your setup:** Measure your own camera at the gain setting you observe with. If your files store sensor ADU scaled up (as here), use the gain in stored ADU. Then re-run [PHO-02](#pho-02): the ensemble ratio should move toward 1.
-- **Regenerate with:** No script; measured by hand on 2026-10-11.
+- **Regenerate with:** `astrometrics.processing.calibration.measure_sensor_noise(camera_id, gain, offset, binning)` (add `save=True` to write the camera profile). The 2026-10-11 values were measured by hand with the code above.
 - **Guarded by tests:** None.
 - **Raw record:** None kept.
 
@@ -166,7 +166,7 @@ for a, b in flat_pairs:
 
 - **Claim:** A field can turn enough during a night that a shift alone leaves far stars outside the centroid box's reach. Fitting a rotation and scale change brings them back. The corner displacement the fit reports is small on steady nights and near 2 pixels on a field that turned; the per-star offsets left after the fit are centroid noise and do not track the rotation.
 - **Settings it supports:**
-  - Code constants `MAXIMUM_CORNER_DISPLACEMENT_PX` = 1.0 <!-- impl: astrometricslib.pipelines.photometry.post_processing.run_gates.MAXIMUM_CORNER_DISPLACEMENT_PX --> and `MAXIMUM_CENTROID_FALLBACK_FRACTION` = 0.20 <!-- impl: astrometricslib.pipelines.photometry.post_processing.run_gates.MAXIMUM_CENTROID_FALLBACK_FRACTION --> in `astrometricslib/pipelines/photometry/post_processing/run_gates.py` (changing them means editing the code). Relation: sanity check only.
+  - Code constants `MAXIMUM_CORNER_DISPLACEMENT_PX` = 1.0 <!-- impl: astrometricslib.pipelines.photometry.post_processing.record_quality.MAXIMUM_CORNER_DISPLACEMENT_PX --> and `MAXIMUM_CENTROID_FALLBACK_FRACTION` = 0.20 <!-- impl: astrometricslib.pipelines.photometry.post_processing.record_quality.MAXIMUM_CENTROID_FALLBACK_FRACTION --> in `astrometricslib/pipelines/photometry/post_processing/record_quality.py` (changing them means editing the code). Relation: sanity check only.
   - `ALIGNMENT_ANCHOR_REACH_PX` = 4.0 <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.ALIGNMENT_ANCHOR_REACH_PX -->, `MAX_CENTROID_SHIFT_PX` = 1.5 <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.MAX_CENTROID_SHIFT_PX --> and `ALIGNMENT_REFINEMENT_PASSES` = 3 <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.ALIGNMENT_REFINEMENT_PASSES --> in `astrometricslib/pipelines/photometry/pre_processing/frame_photometry.py` (changing them means editing the code). Relation: sanity check only.
   - The gate's choice to judge the corner displacement and not the per-star offset. Relation: derived from this entry.
 - **Status:** Partly measured. Three fields; the limits are not set from a measured false-positive rate.
@@ -215,8 +215,8 @@ if summary is not None:
 - **Verdict:** Not judged.
 - **Limits:** Three fields and one camera. The 1 pixel and 20% limits are design estimates set with these values in view, not from a false-positive rate. The 0.6 px independent fit was done by hand.
 - **To tune for your setup:** If your steady nights show a corner displacement near 1 pixel, the scale term between the two centroid methods may dominate; check it on a night with no rotation before raising `MAXIMUM_CORNER_DISPLACEMENT_PX`. For larger star images (FWHM above about 4 px), the 11 px re-centering box is too small; widen `CENTROID_BOX_HALF_WIDTH_PX` and re-run this procedure.
-- **Regenerate with:** No script; measured by hand on 2026-10-11.
-- **Guarded by tests:** The gate logic is pinned by `astrometricslib/pipelines/photometry/test/post_processing/test_run_gates.py` and `astrometricslib/pipelines/photometry/test/pre_processing/test_centroid_shift_summary.py`.
+- **Regenerate with:** No script; measured by hand on 2026-10-11. Each run now also stores the 95th-percentile corner displacement and the fallback share (worst session) as `photometry.corner_displacement_p95_worst_px` and `photometry.centroid_fallback_worst_fraction`.
+- **Guarded by tests:** The gate logic is pinned by `astrometricslib/pipelines/photometry/test/post_processing/test_record_quality.py` and `astrometricslib/pipelines/photometry/test/pre_processing/test_centroid_shift_summary.py`.
 - **Raw record:** None kept.
 
 ### PHO-05
@@ -414,7 +414,7 @@ print("beats chance above", required_auc(len(listed), len(unlisted)))
 
 - **Claim:** On M 13 the rule flags half of the injected signals at about 0.04 mag peak to peak on the brightest quarter of stars, and only at 0.16 mag on the faintest quarter. It finds nothing below 0.02 mag and flags none of the untouched stars.
 - **Settings it supports:**
-  - The candidate rule as a whole: `FALSE_DISCOVERY_LEVEL` = 0.01, `EXCESS_SCATTER_THRESHOLD` = 1.5 and `CALIBRATION_SIGMAS` = 2.326 (see [PHO-06](#pho-06)). It gives the measured counterpart of the `detectable_amplitude` gate's estimate, whose limit is code constant `MAXIMUM_DETECTABLE_AMPLITUDE_MAG` = 0.3 in `astrometricslib/pipelines/photometry/post_processing/run_gates.py`. Relation: sanity check only. <!-- impl: astrometricslib.pipelines.photometry.post_processing.run_gates.MAXIMUM_DETECTABLE_AMPLITUDE_MAG -->
+  - The candidate rule as a whole: `FALSE_DISCOVERY_LEVEL` = 0.01, `EXCESS_SCATTER_THRESHOLD` = 1.5 and `CALIBRATION_SIGMAS` = 2.326 (see [PHO-06](#pho-06)). It gives the measured counterpart of the `detectable_amplitude` gate's estimate, whose limit is code constant `MAXIMUM_DETECTABLE_AMPLITUDE_MAG` = 0.3 in `astrometricslib/pipelines/photometry/post_processing/record_quality.py`. Relation: sanity check only. <!-- impl: astrometricslib.pipelines.photometry.post_processing.record_quality.MAXIMUM_DETECTABLE_AMPLITUDE_MAG -->
 - **Status:** Partly measured. One field; the signals are added to light curves, not pixels.
 - **Data you need:** A target already run through the photometry stage, with at least 60 stars whose light curves have 25 or more points and stored catalog answers ([PHO-08](#pho-08), step 1).
 - **Procedure:**
@@ -652,6 +652,221 @@ print(counts, result.results["photometry"]["crossSessionMatchCount"])
 - **Guarded by tests:** Matching is pinned by `astrometricslib/pipelines/photometry/test/test_merge_errors_and_times.py`.
 - **Raw record:** None kept.
 
+### PHO-15
+
+**Differential catalog zero point of one frame (M 57, one night)**
+
+- **Claim:** The zero point of a frame, found from one fixed set of catalog stars, is steady from frame to frame to within about 0.0013 mag from the star counts alone, and it falls by the same amount for every star when cloud passes. It is exploratory: the observatory has no night labeled photometric, so no truth exists to check its absolute level. The level carries a star-sample error of 0.04 mag and systematic effects that are not removed (color, the L filter against the catalog band, aperture loss as the stars widen, an unflattened frame, mixed SIMBAD sources).
+- **Settings it supports:**
+  - code constant `CENTRAL_RADIUS_HALF_DIAGONAL_FRACTION` = 0.5 in `astrometricslib/pipelines/photometry/processing/catalog_zero_point.py`. Relation: sanity check only. The region keeps about 39 percent of a square frame's area. The corner region was never measured. <!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.CENTRAL_RADIUS_HALF_DIAGONAL_FRACTION -->
+  - code constant `MINIMUM_STARS_FOR_ZERO_POINT` = 10, which also decides the band: Gaia G is used when its fixed set has at least this many stars. Relation: sanity check only. The M 57 night had 59 Gaia G and 89 SIMBAD V stars in the central region; Gaia G wins. <!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.MINIMUM_STARS_FOR_ZERO_POINT -->
+  - code constant `SESSION_STAR_FRAME_SHARE` = 0.8. Relation: sanity check only. All 59 Gaia G stars passed the cuts in all 61 frames, cloud frames included, so the share did not bind on this night. <!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.SESSION_STAR_FRAME_SHARE -->
+  - code constant `MINIMUM_SIGNAL_TO_NOISE` = 20. Relation: sanity check only. The flux errors come from the CCD equation with the camera profile's gain (0.783 e-/ADU for this camera), so they are not the unit-gain guess; a session whose gain is unknown stores its zero points as assumed. <!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.MINIMUM_SIGNAL_TO_NOISE -->
+  - the camera profile's photometric linearity limit (60,000 ADU for the ASI 533MM Pro) as the cut on a star's peak pixel, not the 65,000 ADU saturation threshold. Relation: sanity check only. With no limit in the profile nothing is measured.
+  - the choice not to apply a color term to the stored value. Relation: derived from this entry (the first version of it measured the SIMBAD V stars of the same night): a color slope of -0.18 mag per mag of B-V did not shrink the star-to-star scatter (0.189 mag before, 0.191 after) and did not steady the frames. The slope is stored only for SIMBAD V sessions. The Gaia G session of this entry stores none, because Gaia G stars carry no B-V color in this library.
+- **Status:** Partly measured. One target, one camera, one night of 61 frames, 59 Gaia G stars. Repeatability was measured in-sample, and the absolute level has no truth to check against.
+- **Data you need:** One night of 30 or more light frames of a field with at least 30 catalog stars of one band in the central region, with a plate solution or a catalog identification for the reference frame, from one camera and filter, and a camera profile with a photometric linearity limit.
+- **Procedure:**
+  1. Run the photometry stage on one night of frames. The record step stores a zero point for every measured frame (before any frame is dropped as an outlier) and the star-sample error of its level, and for a SIMBAD V session the color slope.
+
+```python
+from datetime import datetime
+
+from astrometricslib import Astrometrics
+from astrometricslib.drivers.quality_store import QualityStore
+
+astrometrics = Astrometrics()
+target = astrometrics.targets.get("M 57")
+night = "2026-10-03"
+frames = [
+    frame
+    for frame in target.frames
+    if frame.role == "LIGHT"
+    and "533" in frame.camera
+    and datetime.fromtimestamp(frame.timestamp - 43200).strftime("%Y-%m-%d") == night
+]
+astrometrics.processing.process_target(
+    "M 57", stages=["photometry"], photometry={"frames": frames}, register_job=False
+)
+rows = QualityStore.from_configuration(astrometrics.config).query(
+    metric="photometry.catalog_zero_point_gaia_g_mag", target_id="M 57"
+)
+print([(row.value, row.uncertainty, row.sample_count) for row in rows])
+```
+<!-- impl: astrometricslib.Astrometrics --> <!-- impl: astrometricslib.drivers.quality_store.QualityStore -->
+
+  1. For repeatability, split the fixed star set into two random halves, find each half's zero point in every frame with `differential_frame_estimates` <!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.differential_frame_estimates -->, and take the robust spread of the differences. Repeat for 50 random splits. For the error, compare `standard_error_of_median` <!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.standard_error_of_median --> with `bootstrap_median_error` <!-- impl: astrometricslib.pipelines.shared.quality.frame_statistics.bootstrap_median_error --> on the same differences. For the dependence on seeing, regress the steady frames' zero points on `frame.star_width_moffat_px`. The scripts are in the session's scratch folder (`science/s2/`): `run_s2.py` and `evidence_s2b.py`.
+
+- **Acceptance criterion:** Not recorded (set after the result).
+- **What to look at:** The frame zero points in magnitudes (higher is more sensitive; a drop is cloud, haze or dew, or a sharp loss of focus). Their standard error (the frame-to-frame precision, small because the same stars are used each time), against the star-sample error of the level (large, because the stars differ from each other). The slope against star width.
+- **Our result:** 2026-10-23, M 57, night of 2026-10-03, 61 luminance frames (all 60 s, read from EXPTIME; the first version of this entry said 30 s) of the ASI 533MM Pro on the Apertura 75Q, run on a scratch copy of the library with the frames read only. SIMBAD is matched before Gaia, so the ambiguity filter removes only SIMBAD stars; of the 355 stars with a catalog magnitude, 59 Gaia G and 89 SIMBAD V stars lay in the central region and the session used Gaia G. All 59 passed the cuts in every frame. Code version: the working tree of this change.
+  - Level and cloud. The 53 steady frames have a median zero point of 19.37 mag in Gaia G. Eight frames fell as low as 18.52 mag, 0.85 mag below the steady median, and all 61 frames still have a value (59 stars each).
+  - Frame-to-frame precision. Two independent halves of the stars differ by a robust sigma of 0.0025 mag, which makes each half good to 0.0018 mag and the full set to about 0.0012 mag. The stored analytic error has a median of 0.0013 mag (0.0009 to 0.015 over the frames; the largest are cloud frames). Against a bootstrap on three steady frames the analytic error was 0.0023, 0.0043 and 0.0013 mag against 0.0026, 0.0031 and 0.0008 mag, so it is the right size but not exact. The steady frames still wander by a robust sigma of 0.013 mag, ten times the noise, so something other than counting noise moves them.
+  - Absolute level. The star-sample error of the level is 0.039 mag (analytic); a bootstrap gives 0.057 mag, so the analytic value is about 30 percent low where the stars have heavy tails.
+  - Seeing. Over the 53 steady frames the star width (Moffat FWHM) ran from 1.6 to 2.9 px. The zero point changes by -0.010 +/- 0.009 mag per pixel of width (r = -0.15), so no dependence is resolved over that range. The expected loss of a tenth to two tenths of a magnitude at 3.3 px is therefore not seen here; no aperture correction is added.
+  - Color slope. None: a Gaia G session stores no slope.
+  - Cost. The copy's NGC 2244 night of 2026-01-17 tracks only 492 stars (the stage caps the tracked stars), and the zero point step took 0.001 to 0.002 s there for 17 and 1 frames (two sessions); the whole stage took 37 s. At the full scale of about 11,700 stars, 60 frames and one band (synthetic stars through `session_zero_points`, nothing else), the step took 0.23 s. The extra memory is four arrays of stars times frames (11,700 by 60, about 5.6 MB each). The cost is negligible next to the aperture photometry.
+  - Uncertainty and sample size: 61 frames, one night. Data split: in-sample.
+- **Verdict:** Not judged.
+- **Limits:** One night, one camera. The night was not labeled photometric. Photometry measures raw frames with no flat field, so the level carries whatever vignetting is left in the central region. The L filter and the sensor are not a catalog band, so the level depends on star color. The aperture is fixed at 4 px with no aperture correction. The flux errors assume a gain taken from the profile. The stored standard error is the frame-to-frame precision, not the error of the absolute level. Very cloudy frames of other nights may leave fewer than 10 stars and then have no value. The SIMBAD V band was not exercised on this run (the first version of this entry measured it on the same frames).
+- **To tune for your setup:** Change `CENTRAL_RADIUS_HALF_DIAGONAL_FRACTION` after measuring the offset of the inner and outer stars on frames flat-fielded with your own master flat. Change `MINIMUM_SIGNAL_TO_NOISE` if your faint stars bias the median. Then repeat the procedure above.
+- **Regenerate with:** The procedure above; no script in `astrometricslib/scripts/`.
+- **Guarded by tests:** `astrometricslib/pipelines/photometry/test/processing/test_catalog_zero_point.py` (an injected zero point and an injected cloud are recovered with star offsets in place; the band rule, fixed set, region and cuts; the linearity limit; the color slope; paths and ordering) and `astrometricslib/pipelines/photometry/test/post_processing/test_record_zero_point.py` (including `validate_output` with two sessions).
+- **Raw record:** None kept.
+
+### PHO-16
+
+**Spread of a night's frame zero points, as evidence for the night-summary helper**
+
+- **Claim:** One number (the robust spread of a session's frame zero points) can summarize how much the transparency wandered on a night: 0.0139 mag over the 61 frames of one night of M 57, and 0.0129 mag over its 53 steady frames. The helper `zero_point_scatter` computes it; the pipeline does not store it. A night summary is made when it is read, on the observatory side (use case UC15). It is exploratory: no night here is labeled photometric, so no spread separates a steady night from a cloudy one.
+- **Settings it supports:**
+  - code constant `MINIMUM_FRAMES_FOR_SCATTER` = 10 in `astrometricslib/pipelines/photometry/processing/catalog_zero_point.py`. Relation: sanity check only. With 61 frames the bootstrap error of the spread is 0.0030 mag (22 percent); with 53 it is 0.0018 mag (14 percent). <!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.MINIMUM_FRAMES_FOR_SCATTER -->
+- **Status:** Partly measured. One night of 61 frames; the spread has no truth to check against.
+- **Data you need:** One night of 10 or more frames with frame zero points ([PHO-15](#pho-15)).
+- **Procedure:**
+  1. Read the stored zero points of a run and pass them to the helper.
+
+```python
+from astrometricslib.drivers.quality_store import QualityStore
+from astrometricslib.pipelines.photometry.processing.catalog_zero_point import zero_point_scatter
+
+rows = QualityStore.from_configuration(astrometrics.config).query(
+    metric="photometry.catalog_zero_point_gaia_g_mag", target_id="M 57"
+)
+print(zero_point_scatter([row.value for row in rows if row.value is not None]))
+```
+<!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.zero_point_scatter --> <!-- impl: astrometricslib.drivers.quality_store.QualityStore -->
+
+- **Acceptance criterion:** Not recorded (set after the result).
+- **What to look at:** The spread in magnitudes, with its frame count and bootstrap error. Compare it with the frame-to-frame precision of [PHO-15](#pho-15) (0.0013 mag): the difference is real wander.
+- **Our result:** 2026-10-23, the same 61 frames of M 57 as [PHO-15](#pho-15), differential Gaia G zero points. Spread of all 61 frame zero points: 0.0139 +/- 0.0030 mag; of the 53 steady frames: 0.0129 +/- 0.0018 mag. The eight cloud frames (down to 0.85 mag below the steady median) raise the spread by only 8 percent because the spread is robust. The precision from the star counts alone is 0.0013 mag, so the steady frames wander by about 0.013 mag beyond measurement noise. Airmass is no longer stored by this stage, so no extinction slope is attempted; the airmass range of the night (1.08 to 1.19) was too small to see one in the first version of this entry. Sample size: 61 frames, one night. Data split: in-sample.
+- **Verdict:** Not judged.
+- **Limits:** The spread leaves out frames with no zero point (heavy cloud), so it flatters a night with solid cloud. It treats the frames as independent, which neighboring frames in slow cloud are not, so its error is too small. One night. The metric that would use it has a review date of 2027-04-30.
+- **To tune for your setup:** Raise `MINIMUM_FRAMES_FOR_SCATTER` if you want a tighter error on the spread; its error falls about as one over the square root of the frame count.
+- **Regenerate with:** The procedure above; no script in `astrometricslib/scripts/`.
+- **Guarded by tests:** `astrometricslib/pipelines/photometry/test/processing/test_catalog_zero_point.py` (the spread is the robust sigma and ignores a cloudy outlier; too few frames give no spread).
+- **Raw record:** None kept.
+
+### PHO-17
+
+**Noise model by source: photon, sky, read and scintillation, for stars of stated magnitudes**
+
+- **Claim:** The noise of one measurement can be written as four separate parts for a star of any catalog magnitude. Photon, sky and read noise come from the saved flux errors: the photometry made each error with the CCD equation, so the squared error in electrons minus the star's own electrons is exactly the background term (a unit test recovers it to 1e-9), and the read part is the camera's read noise squared times the geometry of the circle and the sky ring. Scintillation is Young's formula and is model-derived. On the M 57 night the model reproduces the scatter of the stars of magnitude 11 to 13 to within 8 percent and falls below the scatter of the brightest stars (9 to 11) by a third or more. The brightest stars' excess is mostly saturation: of the 67 stars of magnitude 9 to 11, the 9 whose peak pixel reaches the clip (about 65,500 ADU) scatter a median 31 mmag, while the 58 below 55,000 ADU scatter 4.7 to 5.1 mmag, still 1.3 to 1.4 times the model with scintillation. This check does not say what the rest of that gap is.
+- **Settings it supports:**
+  - code constants `YOUNG_COEFFICIENT` = 0.09, `YOUNG_AIRMASS_POWER` = 1.75 and `SCINTILLATION_SCALE_HEIGHT_M` = 8000 in `astrometricslib/pipelines/photometry/processing/noise_budget.py`. Relation: sanity check only. They are literature values; the M 57 night is consistent with them within the limits of the check below ([PHO-D27](#design-estimates)). <!-- impl: astrometricslib.pipelines.photometry.processing.noise_budget.YOUNG_COEFFICIENT -->
+  - code constant `NOISE_MODEL_MAGNITUDES` = (10, 12, 14) in `astrometricslib/pipelines/photometry/metrics.py`. Relation: sanity check only. They span the stars of the M 57 field that have 40 or more points. <!-- impl: astrometricslib.pipelines.photometry.metrics.NOISE_MODEL_MAGNITUDES -->
+- **Status:** Partly measured. One night of one target, 366 stars; the photon, sky and read parts are checked against the scatter of those stars, scintillation is a model whose site height is unknown.
+- **Data you need:** One photometry run with a camera gain and read noise known for its setting, a catalog zero point, an optic with a focal length and ratio in the configuration and frames whose headers give an airmass.
+- **Procedure:**
+  1. Run the photometry stage on one night. The record step stores the rows in a step of their own.
+  2. Compare the model's total noise at a stated magnitude with the robust scatter (1.4826 times the median absolute deviation, times 1.0857) of the normalized light curves of the stars of that magnitude.
+
+```python
+from datetime import datetime
+
+from astrometricslib import Astrometrics
+
+astrometrics = Astrometrics()
+target = astrometrics.targets.get("M 57")
+frames = [
+    frame
+    for frame in target.frames
+    if frame.role == "LIGHT"
+    and "533" in frame.camera
+    and datetime.fromtimestamp(frame.timestamp - 43200).strftime("%Y-%m-%d") == "2026-10-03"
+]
+astrometrics.processing.process_target(
+    "M 57", stages=["photometry"], photometry={"frames": frames}, register_job=False
+)
+for part in ("photon", "sky", "read"):
+    for row in astrometrics.quality.query(
+        metric=f"photometry.model_noise_{part}_at_mag12_mag", target_id="M 57"
+    ):
+        print(part, row.status, row.value)
+```
+
+- **Acceptance criterion:** Not recorded (set after the result).
+- **What to look at:** At each stated magnitude, the three electron parts and scintillation, in magnitudes, against the measured scatter of stars of that magnitude. The sum in quadrature is the model's floor: the measured scatter should lie at or above it.
+- **Our result:** 2026-10-23, M 57, night of 2026-10-03, 61 frames of 60 s (ASI 533MM Pro, Apertura 75Q, gain 0.783 e-/ADU, read noise 3.8 e-), run on a scratch copy; Gaia G zero point; the frame headers gave airmasses 1.07 to 1.08. Model rows (mmag), photon / sky / read at G 10: 2.10, 0.78, 0.12; at G 12: 5.27, 4.94, 0.75; at G 14: 13.2, 31.2, 4.7. Scintillation (75 mm, airmass about 1.07, 60 s, sea level assumed): 2.83 mmag, against 2.24 mmag from the electrons at G 10. The measured scatter of the normalized light curves (`science/s5/check_noise_model.py`): G 9 to 11, 62 stars, median 5.1 mmag (16 to 84 percent: 4.2 to 31.5), model 2.2 mmag from electrons alone and 3.6 with scintillation; G 11 to 13, 271 stars, median 7.2 mmag (5.6 to 9.6), model 7.3 and 7.8; G 13 to 15, one star with 40 points. Split of the G 9 to 11 bin by each star's median peak pixel in the 61 frames (`science/s5/bright_split.py`, which captures the peaks the photometry measures in memory): peak under 40,000 ADU, 46 stars, median scatter 5.05 mmag (16 to 84 percent: 4.19 to 6.13), median G 10.75; peak 40,000 to 55,000 ADU, 12 stars, 4.71 mmag (4.04 to 5.13), median G 9.94; peak above 55,000 ADU, 9 stars, 30.98 mmag (7.24 to 39.17), all at or near the 65,532 ADU clip. The 266 stars of G 11 to 13 that have peaks scatter 7.27 mmag with peaks no higher than 24,160 ADU. Sample: 24,291 light-curve points behind the background term. Data split: in-sample (no value is fitted).
+- **Verdict:** Not judged.
+- **Limits:** One night, one camera and one target. The measured scatter holds the comparison ensemble's noise, any real variability and cloud, and the model has no term for them. The brightest stars scatter more than the model. The split by peak shows the large excess belongs to stars at the clip (saturation or the nonlinearity above about 60,000 ADU), and it shows no rise between the stars under 40,000 ADU and those at 40,000 to 55,000 ADU. For the unsaturated stars the scatter stays 1.3 to 1.4 times the model with scintillation (about 3.5 mmag in quadrature). Candidates the data are consistent with, and this check cannot separate: a scintillation coefficient 1.5 times Young's (the factor Osborn et al. 2015, MNRAS 452, 1707, measured on average) would make scintillation about 4.3 mmag and the total about 4.8 mmag; no flat field (the frames are not flat-fielded) combined with the pointing wander of the stars across the sensor; and noise from the comparison ensemble. The faint bin has one star, because stars need 40 points. Scintillation is ASSUMED: it uses a sea-level site and the literature coefficient 0.09, and no bound is claimed. The site's real height would lower it (by about 12 percent for each kilometer, from the exp(-h/8000) factor), while measured coefficients run about 1.5 times Young's (Osborn et al. 2015), so the true value may lie on either side. The star-to-star correlation of scintillation that the normalization removes is not modeled. The dark current is assumed to be zero, as the photometry assumes. The noise is that of one star in one frame, not of a differential light curve.
+- **To tune for your setup:** Set the site height in the configuration (`elevation` in `[Observatory.Location]`) so the height is no longer assumed (the coefficient stays a literature value); list the optic with its focal ratio. Then repeat the procedure.
+- **Regenerate with:** The procedure above and `science/s5/check_noise_model.py` in the session's scratch folder; no script in `astrometricslib/scripts/`.
+- **Guarded by tests:** `astrometricslib/pipelines/photometry/test/processing/test_noise_budget.py` (Young's formula by hand, the exact recovery of the background term from the CCD equation, the sum of the sources) and `astrometricslib/pipelines/photometry/test/post_processing/test_record_science_outcomes.py` with `test_runner_science_outcomes.py` (assumed gain, read noise and site height, missing airmass, the runner storing the rows).
+- **Raw record:** None kept.
+
+### PHO-18
+
+**Window function of the observing times: the strongest alias peaks of a run**
+
+- **Claim:** The window function of a run's frame times is stored as the frequency and power of its three strongest peaks. Two periods whose frequencies differ by one of these frequencies cannot be told apart by the run. A run of one night has no daily echo and stores nothing. The function is the same Lomb-Scargle call the alias check uses.
+- **Settings it supports:**
+  - code constant `ALIAS_PEAK_COUNT` = 3 in `astrometricslib/pipelines/photometry/processing/observing_window.py`. Relation: sanity check only. On the real runs checked here the first three peaks all have power near 1, so three is not shown to be enough. <!-- impl: astrometricslib.pipelines.photometry.processing.observing_window.ALIAS_PEAK_COUNT -->
+  - code constant `MAXIMUM_ALIAS_FREQUENCY_PER_DAY` = 2 in the same file. Relation: sanity check only. <!-- impl: astrometricslib.pipelines.photometry.processing.observing_window.MAXIMUM_ALIAS_FREQUENCY_PER_DAY -->
+- **Status:** Partly measured. The peaks follow from the times alone, so they are exact for the times used; what has not been checked is that they predict which periods a real light curve confuses.
+- **Data you need:** Any run of two or more nights.
+- **Procedure:**
+  1. Collect the distinct frame times of the run and call `strongest_window_peaks` <!-- impl: astrometricslib.pipelines.photometry.processing.observing_window.strongest_window_peaks -->, or read the six `photometry.window_alias_*` rows of a run.
+
+```python
+from astrometricslib import Astrometrics
+
+astrometrics = Astrometrics()
+for rank in (1, 2, 3):
+    for quantity in ("frequency_per_day", "power_fraction"):
+        for row in astrometrics.quality.query(
+            metric=f"photometry.window_alias_{rank}_{quantity}", target_id="Vega"
+        ):
+            print(rank, quantity, row.value, row.reason)
+```
+
+- **Acceptance criterion:** Not recorded (set after the result).
+- **What to look at:** The frequencies of the peaks (cycles per day) and their power from 0 to 1. A power near 1 means the schedule cannot separate periods that differ by that frequency.
+- **Our result:** 2026-10-23, the stored light curves of the scratch copy, frame times taken from the five stars nearest each target (`science/s5/real_outcomes.py`). Nightly schedules give the daily echo: M 106, 2 nights, 1.019 per day (power 1.00); M 81, 3 nights, 0.950 and 1.901 per day; NGC 2244, 3 nights, 0.983 per day (power 1.00) and 1.310 (0.90). Albireo, 2 nights 3 days apart, 0.986, 1.314 and 1.643 per day, all of power 1.00 (a spacing of 0.329 per day, one over the 3.04 days between the nights). Vega, 2 nights months apart, 0.024, 0.032 and 0.040 per day (a spacing of one over 42 days). With two clusters of identical nights every peak of the series has power near 1, so their order is decided by small differences and the set of frequencies, not the rank, is what to read. The 26 targets with one night store nothing, and the M 57 run on 2026-10-03 stored six not-measured rows with the reason. The last run of all 38 targets with light curves used the final code and gave the same peaks. Sample: the number of distinct frame times, 9 to 299. Data split: not applicable.
+- **Verdict:** Not judged.
+- **Limits:** Frame times are taken from the stars' light curves, which leave out frames dropped as outliers. A window made of a few clusters of nights has many equal peaks, so the first three are not the only ones that matter. The window says nothing about the star's own brightness changes. The peaks are listed only up to 2 cycles per day; a period shorter than 12 hours is not searched for aliases.
+- **To tune for your setup:** Change `ALIAS_PEAK_COUNT` to store more peaks; a new rank also needs two metric declarations in `photometry/metrics.py`.
+- **Regenerate with:** The procedure above; no script in `astrometricslib/scripts/`.
+- **Guarded by tests:** `astrometricslib/pipelines/photometry/test/processing/test_observing_window.py` (the window is 1 at zero frequency and equals the alias check's call, nightly sampling puts the peak at one per day, a single night stores nothing) and `astrometricslib/pipelines/photometry/test/post_processing/test_record_science_outcomes.py`.
+- **Raw record:** None kept.
+
+### PHO-19
+
+**Target amplitude, from its own light curve or from the VSX catalog, each with its source**
+
+- **Claim:** The amplitude of the target star is stored twice and the two are never mixed. From the light curve it is the difference between the faintest and brightest of ten phase-bin medians, once at least eight bins hold three points each; the period is the star's own periodogram result when it is detected or possible, else the VSX period. From the catalog it is the VSX magnitude range. On an injected sine of 0.40 mag with 600 points over 12 cycles the fold gives 0.40 within 8 percent (the ten bins smooth the extremes). Only a target that is a single star by its name gets an amplitude, and its star is the one carrying the target's catalog name, not the nearest star. On the 38 targets with light curves in the scratch copy none gives a light-curve amplitude: 27 are clusters, galaxies, nebulae or solar system bodies by name, 7 have no catalog-identified star carrying their name, 3 have a named star 726 to 1,005 arcsec from the target position (the cross-check refuses them), and 1 (Mirach) has its star but neither a period from its periodogram nor a VSX period.
+- **Settings it supports:**
+  - code constants `PHASE_BIN_COUNT` = 10, `MINIMUM_POINTS_PER_BIN` = 3 and `MINIMUM_FILLED_BIN_FRACTION` = 0.8 in `astrometricslib/pipelines/photometry/processing/target_amplitude.py`. Relation: sanity check only ([PHO-D28](#design-estimates)). <!-- impl: astrometricslib.pipelines.photometry.processing.target_amplitude.PHASE_BIN_COUNT -->
+  - code constant `MAXIMUM_TARGET_DISTANCE_ARCSEC` = 30 in the same file. Relation: sanity check only. The distance is a cross-check only: the star is found by its name, and one farther than this from the target's position is refused, not used. <!-- impl: astrometricslib.pipelines.photometry.processing.target_amplitude.MAXIMUM_TARGET_DISTANCE_ARCSEC -->
+- **Status:** Design estimate. The fold is tested on injected light curves only; no stored run has a target star with a period and a covered cycle.
+- **Data you need:** A run whose target is a periodic variable with a light curve covering most of a cycle, and VSX answers saved on the star (`backfill_variable_star_flags.py --refresh-vsx-ranges`).
+- **Procedure:**
+  1. Run the photometry stage, then read the three `photometry.target_*` rows.
+  2. For the catalog value, fetch it with `vsx_entries_from_matches` <!-- impl: astrometricslib.pipelines.shared.variable_star_catalogs.vsx_entries_from_matches --> (the backfill script saves it on the star).
+
+```python
+from astrometricslib import Astrometrics
+
+astrometrics = Astrometrics()
+for metric in (
+    "photometry.target_light_curve_amplitude_mag",
+    "photometry.target_phase_coverage_fraction",
+    "photometry.target_catalog_amplitude_mag",
+):
+    for row in astrometrics.quality.query(metric=metric, target_id="Mirach"):
+        print(metric, row.status, row.value, row.reason)
+```
+
+- **Acceptance criterion:** Not recorded (set after the result).
+- **What to look at:** The light-curve amplitude with its error and its phase coverage, beside the catalog amplitude and its band. Where both exist, a light curve far below the catalog value is a smoothed or partly covered cycle, or a different band.
+- **Our result:** 2026-10-23. Injection: a 0.40 mag sine, 600 points over 12 cycles, gave an amplitude within 8 percent of 0.40; a fold on a wrong period (1.37 times) gave under 0.2; 3 days of a 10-day period filled too few bins and gave none. Stored runs, rerun on 2026-10-24 with the star found by its catalog name (`science/s5/real_outcomes.py`, 38 targets): 27 are not stars by name, 7 have no star carrying their name, 3 have a named star 726 to 1,005 arcsec from the target position, and Mirach (`* bet And`, 2 arcsec from the target position, 79 points) has neither a periodogram period (not detected) nor a saved VSX period, so no run had a light-curve amplitude. The earlier nearest-star rule had found a star within 30 arcsec for 7 targets, including clusters and a galaxy (M 13, M 31, M 42, M 81, NGC 2244, M 45), which are not single stars; that rule is gone. VSX asked live for Mirach: type LB, 2.01 to 2.10 V, amplitude 0.09 mag, no period. The ranges VSX listed for IC 1396 and NGC 1893 stars had a minimum brighter than the maximum (an amplitude written without the flag) and are dropped; a minimum in a different band than the maximum (`n_min` differs from `n_max`) also gives no range. Stars saved before VSX ranges were kept carry `vsx_range_checked` false and the catalog row says "saved before VSX ranges were kept; run backfill with --refresh-vsx-ranges". Sample: 38 targets. Data split: not applicable.
+- **Verdict:** Not judged.
+- **Limits:** The folded amplitude is smoothed by the bins; a narrow eclipse reads low. The fold assumes a strictly periodic star. The target star is found by its catalog name, so a target whose name SIMBAD does not give to any star in the run (a common name SIMBAD stores under another id) gets nothing; that is deliberate (not measured over a guess). The VSX range is for the band VSX names (stored beside it), often from visual or old data, and is not converted to this telescope's band. The saved VSX entries are not refreshed by a run; they come from the backfill script.
+- **To tune for your setup:** Change `MAXIMUM_TARGET_DISTANCE_ARCSEC` if your pointing catalog is less accurate; change the bin settings in the same file for sharper minima, and the comparison is then not with the earlier rows.
+- **Regenerate with:** The procedure above; no script for the stored comparison in `astrometricslib/scripts/` (`backfill_variable_star_flags.py` saves the VSX values).
+- **Guarded by tests:** `astrometricslib/pipelines/photometry/test/processing/test_target_amplitude.py`, `astrometricslib/pipelines/photometry/test/post_processing/test_record_science_outcomes.py`, `astrometricslib/pipelines/shared/test/test_variable_star_catalogs.py` and `astrometricslib/scripts/test/test_backfill_variable_star_flags.py`.
+- **Raw record:** None kept.
+
 ## Design estimates
 
 These tuned values have not been measured. They are reasoned choices.
@@ -666,14 +881,14 @@ These tuned values have not been measured. They are reasoned choices.
 | PHO-D06 | Minimum and cap of comparison stars | 5 and 20 | `MINIMUM_COMPARISON_STARS`, `DEFAULT_MAXIMUM_COMPARISON_STARS` in `comparison_ensemble.py` | A noisy ensemble, or no gain from extra stars. | Re-run [PHO-02](#pho-02) with `VariabilityAnalyzer(maximum_comparison_stars=...)` and watch the ensemble error stop falling. |
 | PHO-D07 | Vetting consistency limit; usable-frame share | 3σ; one half | `EXCESS_SCATTER_SIGMA`, `MINIMUM_USABLE_FRAME_FRACTION` in `comparison_ensemble.py` | Variable stars kept as comparison stars, or good ones dropped. | Plant a known variable among the comparison candidates of a real session, as [PHO-01](#pho-01) does on synthetic ones. |
 | PHO-D08 | Frame outlier clip; per-star outlier clip | 3σ (at least 5 frames); 5σ | `VariabilityAnalyzer._reject_outlier_frames`, `_reject_outlier_measurements_for_star` | Good points clipped, or bad points kept. | Count clipped points on constant stars against the share a normal distribution predicts. |
-| PHO-D09 | Share of frames rejected before the run is flagged | 25% (and at least 5 frames) | `MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG`, `MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG` in `run_gates.py` | Bad nights pass, or good nights are flagged. | Run `report_gate_limits.py` over the library and set the limit above the rejection share of known-good nights. |
+| PHO-D09 | Share of frames rejected before the run is flagged | 25% (and at least 5 frames) | `MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG`, `MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG` in `record_quality.py` | Bad nights pass, or good nights are flagged. | Run `report_gate_limits.py` over the library and set the limit above the rejection share of known-good nights. |
 | PHO-D10 | Noise model sizes | 20 stars; 10 per bin; 10 bins | `MINIMUM_STARS_FOR_NOISE_MODEL`, `MINIMUM_STARS_PER_NOISE_BIN`, `MAXIMUM_NOISE_BINS` in `variability_indices.py` | A poor noise model on small fields. | Vary them in [PHO-06](#pho-06) with a field size like yours and watch the AUC. |
 | PHO-D11 | Thresholds | excess scatter 1.5; chi-square and J at median + 2.326 robust sigma | `EXCESS_SCATTER_THRESHOLD`, `CALIBRATION_SIGMAS` in `variability_indices.py` | Missed variables or false candidates. | Checked only on synthetic fields ([PHO-06](#pho-06)); run [PHO-09](#pho-09) on your field at several values. |
 | PHO-D12 | False discovery level | 0.01 | `FALSE_DISCOVERY_LEVEL` in `variability_indices.py` | More false candidates, or fewer true ones. | Count untouched stars flagged in [PHO-09](#pho-09) at several levels. |
-| PHO-D13 | Fewest usable stars for a scatter population | 10 | `MINIMUM_STARS_FOR_SCATTER_POPULATION` in `run_gates.py` | The gate judged on too few stars. | Run [PHO-06](#pho-06) with very small fields and see where the AUC collapses. |
+| PHO-D13 | Fewest usable stars for a scatter population | 10 | `MINIMUM_STARS_FOR_SCATTER_POPULATION` in `record_quality.py` | The gate judged on too few stars. | Run [PHO-06](#pho-06) with very small fields and see where the AUC collapses. |
 | PHO-D14 | Discrimination AUC floor | 0.7 | `MINIMUM_DISCRIMINATION_AUC` in `variability_skill.py` | Poor fields pass the gate, or good fields fail it. | Collect the gate's AUC over many fields ([PHO-08](#pho-08)) and compare runs you trust with runs you do not. |
-| PHO-D15 | Largest acceptable detectable amplitude | 0.3 mag peak to peak | `MAXIMUM_DETECTABLE_AMPLITUDE_MAG` in `run_gates.py` | Fields that cannot see small variables pass. | Compare the gate's estimate with the 50% depth of `validate_photometry_injection.py` ([PHO-09](#pho-09)) on the same field. |
-| PHO-D16 | Corner displacement; centroid fallback share; tracking drift | 1 px; 20%; 20 px | `MAXIMUM_CORNER_DISPLACEMENT_PX`, `MAXIMUM_CENTROID_FALLBACK_FRACTION` in `run_gates.py`; `UNSTABLE_TRACKING_DRIFT_PX` in `pre_processing/assess_input_quality.py` | Bad alignment passes, or good nights are flagged. | Collect the `registration_drift` values over many nights ([PHO-04](#pho-04)) and set each limit above the nights you trust. |
+| PHO-D15 | Largest acceptable detectable amplitude | 0.3 mag peak to peak | `MAXIMUM_DETECTABLE_AMPLITUDE_MAG` in `record_quality.py` | Fields that cannot see small variables pass. | Compare the gate's estimate with the 50% depth of `validate_photometry_injection.py` ([PHO-09](#pho-09)) on the same field. |
+| PHO-D16 | Corner displacement; centroid fallback share; tracking drift | 1 px; 20%; 20 px | `MAXIMUM_CORNER_DISPLACEMENT_PX`, `MAXIMUM_CENTROID_FALLBACK_FRACTION` in `record_quality.py`; `UNSTABLE_TRACKING_DRIFT_PX` in `pre_processing/assess_input_quality.py` | Bad alignment passes, or good nights are flagged. | Collect the `registration_drift` values over many nights ([PHO-04](#pho-04)) and set each limit above the nights you trust. |
 | PHO-D17 | Low coverage; low confidence margin | 0.5; 1 MAD | `LOW_COVERAGE_THRESHOLD` in `assess_input_quality.py`; `LOW_CONFIDENCE_MARGIN` in `post_processing/assess_output_quality.py` | Verdicts that flip between nights. | Re-measure stars near the limit on a second night and count how often their verdict flips. |
 | PHO-D18 | Between-session flag | significance above 3; amplitude at least 0.02 mag | `DEFAULT_LONG_TERM_SIGNIFICANCE_THRESHOLD`, `MINIMUM_LONG_TERM_AMPLITUDE_MAG` in `processing/variability_analyzer.py` | False between-session flags, or missed ones. | Count flags on stars a catalog calls constant over a multi-session target ([PHO-14](#pho-14)). |
 | PHO-D19 | Period checks: alias rival share; agreeing nights | 90% of the best peak; more than half | `_RIVAL_ALIAS_POWER_SHARE`, `_AGREEING_SHARE` in `processing/period_checks.py` | Alias periods reported as real. | Run `holdout_cycle` and `alias_check` on a star of known period observed on several nights. |
@@ -681,3 +896,9 @@ These tuned values have not been measured. They are reasoned choices.
 | PHO-D21 | Shuffles when a search is slow | 150 above 400,000 point-periods | `_REDUCED_SHUFFLE_COUNT`, `_SLOW_SEARCH_WORK_LIMIT` in `periodicity_search.py` | A less precise false-alarm probability. | Repeat [PHO-12](#pho-12) at 150 shuffles. |
 | PHO-D22 | Frequency grid cap; refined peaks | 20,000 points; 20 peaks, 3 coarse steps | `_MAXIMUM_SEARCH_GRID_POINTS`, `_CANDIDATE_PEAK_COUNT`, `_REFINE_HALF_WIDTH_COARSE_STEPS` in `periodicity_search.py` | A real period missed on long baselines. | Inject a known period into a long, multi-month light curve and check it is recovered. |
 | PHO-D23 | Hold-out period search: window and step | 25% of the frequency either side; step 1/(5 T) for training span T | `_FREQUENCY_WINDOW`, `_SAMPLES_PER_PEAK` in `processing/period_checks.py` | A period that the other nights would recover is missed, or a wrong peak is accepted as the same period. | Run `holdout_cycle` on a star of known period observed on several nights with the window at 10%, 25% and 50% and the step at 1/(3 T), 1/(5 T) and 1/(10 T), and see where the result stops changing. |
+| PHO-D24 | Catalog zero point: central region; stars needed (also the band rule); signal-to-noise cut; share of frames for the fixed star set | 0.5 of the half-diagonal; 10 stars; 20; 80 percent | `CENTRAL_RADIUS_HALF_DIAGONAL_FRACTION`, `MINIMUM_STARS_FOR_ZERO_POINT`, `MINIMUM_SIGNAL_TO_NOISE`, `SESSION_STAR_FRAME_SHARE` in `processing/catalog_zero_point.py` | Vignetting leaks into the zero point, too few stars are left in a thin frame, or a faint star that vanishes in cloud moves the level. The band rule: Gaia G whenever its fixed set has at least 10 stars, else SIMBAD V; a wrong rule mixes a worse band into the zero point. | Flat-field the frames with the master flat and compare the inner and outer stars ([PHO-15](#pho-15)); repeat with the share at 60 and 95 percent on a night with more cloud. |
+| PHO-D25 | Catalog zero point: color slope needs stars; color spread | 20 stars; 0.4 mag | `MINIMUM_STARS_FOR_COLOR_SLOPE`, `MINIMUM_COLOR_RANGE_MAG` in `processing/catalog_zero_point.py` | A slope fitted to noise, or a real slope not reported. | Inject a known slope into frames and find the smallest color spread that recovers it. |
+| PHO-D26 | Night-summary helper: frames needed | 10 | `MINIMUM_FRAMES_FOR_SCATTER` in `processing/catalog_zero_point.py` | A spread with an error too large to read. | Bootstrap the spread of a steady night at 10, 20 and 40 frames ([PHO-16](#pho-16)). |
+| PHO-D27 | Scintillation formula: coefficient; airmass power; scale height; no site factor | 0.09; 1.75; 8000 m; 1 | `YOUNG_COEFFICIENT`, `YOUNG_AIRMASS_POWER`, `SCINTILLATION_SCALE_HEIGHT_M` in `processing/noise_budget.py` <!-- impl: astrometricslib.pipelines.photometry.processing.noise_budget.YOUNG_COEFFICIENT --> | Scintillation off by tens of percent; sites scatter around the formula. | Compare the model with the scatter of bright, unsaturated stars on several nights at known airmass and site height ([PHO-17](#pho-17)). |
+| PHO-D28 | Target amplitude: phase bins; points per bin; filled share; target distance | 10; 3; 80 percent; 30 arcsec | `PHASE_BIN_COUNT`, `MINIMUM_POINTS_PER_BIN`, `MINIMUM_FILLED_BIN_FRACTION`, `MAXIMUM_TARGET_DISTANCE_ARCSEC` in `processing/target_amplitude.py` <!-- impl: astrometricslib.pipelines.photometry.processing.target_amplitude.PHASE_BIN_COUNT --> | A sharp minimum smoothed away, a part-covered cycle taken as covered, or the wrong star taken as the target. | Inject eclipses of several widths and depths into a real light curve and see where the folded amplitude stops recovering them ([PHO-19](#pho-19)). |
+| PHO-D29 | Noise model magnitudes; alias peaks stored | G 10, 12, 14; 3 | `NOISE_MODEL_MAGNITUDES` in `metrics.py`; `ALIAS_PEAK_COUNT` in `processing/observing_window.py` <!-- impl: astrometricslib.pipelines.photometry.metrics.NOISE_MODEL_MAGNITUDES --> | A reader needing another magnitude or more peaks has none stored. | Compare the stored values with the stars and schedules the observatory really has ([PHO-17](#pho-17), [PHO-18](#pho-18)). |

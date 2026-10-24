@@ -8,11 +8,18 @@ be measured accurately.
 `resolve_saturation_threshold` finds the level at which a raw frame's pixels
 count as saturated, from the camera's profile. The raw frame check and the
 spectral frame check both use it, so they agree on the level.
+
+`clip_and_linearity_levels` gives the two levels the target-clipping check
+counts pixels against: the clip ceiling (less a small tolerance) and the
+photometric linearity limit.
 """
+
+from dataclasses import dataclass
 
 import numpy as np
 
 from astrometricslib.foundation.errors import AstrometricsError
+from astrometricslib.models.camera_profile import CameraProfile, ProvenanceKind
 
 SATURATION_ADU = 65000
 """Pixels at or above this value count as saturated when no camera profile
@@ -228,3 +235,75 @@ def resolve_saturation_threshold(camera_name: str | None) -> tuple[float, str]:
             f"(its saturation threshold of {threshold:g} ADU is above the ceiling and no pixel can reach it)"
         )
     return threshold, f"{profile.camera_name} profile saturation threshold, {threshold:g} ADU"
+
+
+# A pixel is at the clip ceiling when it is within this fraction of it. Frames
+# that saturate pile up at exactly one value, so a small tolerance only allows
+# for the last count or two.
+CLIP_CEILING_TOLERANCE_FRACTION = 0.02
+
+
+@dataclass(frozen=True)
+class ClipAndLinearityLevels:
+    """The two pixel levels a camera profile gives for the target check.
+
+    Attributes
+    ----------
+    clip_level_adu : `float`
+        A pixel at or above this value counts as clipped: the profile's clip
+        ceiling less `CLIP_CEILING_TOLERANCE_FRACTION` of it.
+    linearity_level_adu : `float` or `None`
+        A pixel at or above this value is outside the sensor's linear range
+        (the profile's photometric linearity limit), or `None` when the
+        profile has none.
+    notes : `tuple` of `str`
+        A sentence for each number that is not a measured one, or for a
+        profile that is the generic fallback. The rows built from these levels
+        are assumed, not measured, when this is not empty.
+    """
+
+    clip_level_adu: float
+    linearity_level_adu: float | None
+    notes: tuple[str, ...]
+
+    @property
+    def is_assumed(self) -> bool:
+        """`bool`: Whether any level rests on a non-measured number."""
+        return bool(self.notes)
+
+
+def clip_and_linearity_levels(profile: CameraProfile) -> ClipAndLinearityLevels:
+    """Read the clip level and the linearity limit from a camera profile.
+
+    Parameters
+    ----------
+    profile : `CameraProfile`
+        The camera's profile.
+
+    Returns
+    -------
+    levels : `ClipAndLinearityLevels`
+        The clip level (the ceiling less the tolerance), the linearity limit
+        and a note for every level that is a datasheet value or an assumption.
+        The generic fallback profile (used for a camera that is not listed)
+        adds a note, so rows built from it are assumed.
+    """
+    notes: list[str] = []
+    if profile.is_generic_fallback:
+        notes.append("the camera is not listed, so the generic fallback camera profile's levels are used")
+    ceiling = profile.clip_ceiling_adu
+    if ceiling.provenance.kind != ProvenanceKind.MEASURED:
+        notes.append(f"the camera profile's clip ceiling is {ceiling.provenance.kind.value}, not measured")
+    limit = profile.photometric_linearity_limit_adu
+    linearity_level = None
+    if limit is not None:
+        linearity_level = float(limit.value)
+        if limit.provenance.kind != ProvenanceKind.MEASURED:
+            notes.append(
+                f"the camera profile's linearity limit is {limit.provenance.kind.value}, not measured"
+            )
+    return ClipAndLinearityLevels(
+        clip_level_adu=float(ceiling.value) * (1.0 - CLIP_CEILING_TOLERANCE_FRACTION),
+        linearity_level_adu=linearity_level,
+        notes=tuple(notes),
+    )

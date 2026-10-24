@@ -17,6 +17,7 @@ brightness change and a reader can judge whether it is real.
 
 import logging
 import math
+from collections.abc import Sequence
 from typing import Any
 
 from astrometricslib.drivers.catalog_access import POSITION_ONLY_STAR_ID_PREFIX
@@ -626,6 +627,127 @@ def _separation_degrees(
     return math.degrees(2.0 * math.asin(math.sqrt(min(1.0, haversine))))
 
 
+def find_target_star(
+    stellar_objects: list[StellarObject], center_ra: float | None, center_dec: float | None
+) -> StellarObject | None:
+    """Find the target's own star: the identified star nearest its position.
+
+    Stars known only by their position (ids starting with ``FIELD_J``) are
+    never chosen.
+
+    Parameters
+    ----------
+    stellar_objects : `list` [`StellarObject`]
+        The stars to choose from.
+    center_ra : `float` or `None`
+        The target's right ascension in degrees, if known.
+    center_dec : `float` or `None`
+        The target's declination in degrees, if known.
+
+    Returns
+    -------
+    target_star : `StellarObject` or `None`
+        The nearest identified star, or `None` when the target's position is
+        unknown or no star is identified. The star may lie far from the
+        target; the caller judges the distance (see `separation_arcsec`).
+    """
+    if center_ra is None or center_dec is None:
+        return None
+    identified = [
+        star
+        for star in stellar_objects
+        if star.is_catalog_identified
+        and not star.id.startswith(POSITION_ONLY_STAR_ID_PREFIX)
+        and star.right_ascension not in (None, "")
+        and star.declination not in (None, "")
+    ]
+    if not identified:
+        return None
+    return min(
+        identified,
+        key=lambda star: _separation_degrees(
+            float(star.right_ascension), float(star.declination), center_ra, center_dec
+        ),
+    )
+
+
+def _normalized_name(name: str) -> str:
+    """Make a star or target name comparable.
+
+    Parameters
+    ----------
+    name : `str`
+        A name such as ``"Mirach"``, ``"* bet And"`` or ``"NAME Mirach"``.
+
+    Returns
+    -------
+    key : `str`
+        The name in lower case, with a leading catalog prefix (``NAME `` or
+        ``* ``) removed and every run of spaces and underscores turned into
+        one space.
+    """
+    key = " ".join(name.replace("_", " ").replace("\u00a0", " ").split()).casefold()
+    for prefix in ("name ", "* "):
+        if key.startswith(prefix):
+            key = key[len(prefix) :]
+    return key
+
+
+def find_star_named(
+    stellar_objects: list[StellarObject], target_names: Sequence[str]
+) -> StellarObject | None:
+    """Find the catalog-identified star that carries a target's name.
+
+    A target that is a star is matched by its catalog identity, not by how
+    near a star lies to the target's position, so a bright neighbor cannot
+    stand in for it. The match compares the target's id and common name with
+    each star's id and name (SIMBAD's common name when it has one, else its
+    main identifier). Stars known only by their position (ids starting with
+    ``FIELD_J``) are never chosen.
+
+    Parameters
+    ----------
+    stellar_objects : `list` [`StellarObject`]
+        The stars to choose from.
+    target_names : `Sequence` [`str`]
+        The names the target is known by: its id and common name.
+
+    Returns
+    -------
+    star : `StellarObject` or `None`
+        The first star whose id or name equals one of the names, or `None`.
+    """
+    wanted = {_normalized_name(name) for name in target_names if name}
+    if not wanted:
+        return None
+    for star in stellar_objects:
+        if not star.is_catalog_identified or star.id.startswith(POSITION_ONLY_STAR_ID_PREFIX):
+            continue
+        if {_normalized_name(star.id), _normalized_name(star.name)} & wanted:
+            return star
+    return None
+
+
+def separation_arcsec(star: StellarObject, center_ra: float, center_dec: float) -> float:
+    """Find how far a star lies from a position on the sky.
+
+    Parameters
+    ----------
+    star : `StellarObject`
+        A star with a right ascension and a declination, in degrees.
+    center_ra, center_dec : `float`
+        The position, in degrees.
+
+    Returns
+    -------
+    separation : `float`
+        The angular distance, in arcseconds.
+    """
+    return 3600.0 * _separation_degrees(
+        float(star.right_ascension), float(star.declination), center_ra, center_dec
+    )
+
+
 def select_period_search_stars(
     stellar_objects: list[StellarObject],
     center_ra: float | None,
@@ -664,24 +786,7 @@ def select_period_search_stars(
         stars from brightest to faintest.
     """
     searchable = [star for star in stellar_objects if star.can_run_period_search]
-
-    target_star = None
-    if center_ra is not None and center_dec is not None:
-        identified = [
-            star
-            for star in searchable
-            if star.is_catalog_identified
-            and not star.id.startswith(POSITION_ONLY_STAR_ID_PREFIX)
-            and star.right_ascension not in (None, "")
-            and star.declination not in (None, "")
-        ]
-        if identified:
-            target_star = min(
-                identified,
-                key=lambda star: _separation_degrees(
-                    float(star.right_ascension), float(star.declination), center_ra, center_dec
-                ),
-            )
+    target_star = find_target_star(searchable, center_ra, center_dec)
 
     brightest = sorted(
         (star for star in searchable if star is not target_star and (star.photometry.mean_flux or 0.0) > 0.0),

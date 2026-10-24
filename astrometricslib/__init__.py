@@ -91,6 +91,7 @@ from astrometricslib.foundation.storage import (
     require_mounted_storage,
     safe_json_dumps,
 )
+from astrometricslib.models.applied_camera_profile import AppliedCameraProfile
 from astrometricslib.models.catalog_queries import (
     CalibrationQueryResult,
     OverlayStar,
@@ -127,7 +128,27 @@ from astrometricslib.models.provenance import (
     WasConfiguredBy,
     WasGeneratedBy,
 )
+from astrometricslib.models.quality.capture_setting import CaptureSetting
 from astrometricslib.models.quality.excluded_frames import QuarantinePreview, RestoreReport, SetAsideFrame
+from astrometricslib.models.quality.frame_measurement_summary import FrameMeasurementSummary
+from astrometricslib.models.quality.limit import LimitTier, QualityLimit
+from astrometricslib.models.quality.measurement import (
+    MeasurementOrigin,
+    MeasurementReference,
+    MeasurementStatus,
+    QualityMeasurement,
+    QualitySubject,
+    StarResultReference,
+    SubjectLevel,
+)
+from astrometricslib.models.quality.metric_spec import (
+    Checkpoint,
+    Direction,
+    MetricPurpose,
+    MetricSpec,
+    MetricSummary,
+    UncertaintyKind,
+)
 from astrometricslib.models.quality.quality_reports import (
     InputQualityReport,
     RawFrameCheckReport,
@@ -136,11 +157,17 @@ from astrometricslib.models.quality.quality_reports import (
     StackSummary,
 )
 from astrometricslib.models.quality.quality_summary import (
-    AppliedCameraProfile,
     AstrometryPipelineQualityMetrics,
     AstrometryQualitySummary,
     ExposureGroupSummary,
     TargetSessionContribution,
+)
+from astrometricslib.models.quality.subset_stacks import (
+    HalfDifferenceNoiseResult,
+    NightContribution,
+    NightContributionResult,
+    NoiseGrowthResult,
+    SubsetStackResult,
 )
 from astrometricslib.models.stellar_source import (
     AnalysisResult,
@@ -177,7 +204,7 @@ from astrometricslib.utilities.parallel_batch import BatchRunSummary
 if TYPE_CHECKING:
     from astrometricslib.api.jobs import Jobs
     from astrometricslib.api.processing import CalibrationCatalog, ProcessingPipelines
-    from astrometricslib.api.quality import QualityDiagnostics
+    from astrometricslib.api.quality import QualityRecords
     from astrometricslib.api.stars import StellarCatalog
     from astrometricslib.api.targets import TargetCatalog
     from astrometricslib.api.visualization import Visualization
@@ -213,7 +240,7 @@ _DEFERRED_EXPORTS = {
     "ImageProcessing": "astrometricslib.drivers.siril_interface",
     "CalibrationCatalog": "astrometricslib.api.processing",
     "ProcessingPipelines": "astrometricslib.api.processing",
-    "QualityDiagnostics": "astrometricslib.api.quality",
+    "QualityRecords": "astrometricslib.api.quality",
     "Jobs": "astrometricslib.api.jobs",
     "FrameSelection": "astrometricslib.pipelines.shared.quality.frame_selection",
     "parse_iso_time": "astrometricslib.pipelines.shared.quality.frame_selection",
@@ -265,9 +292,9 @@ class Astrometrics:
     This class only builds the sub-APIs and holds them. It has no methods
     of its own: stacking, preview pictures and the analysis stages live on
     `processing`, the target list on `targets`, the star catalog on
-    `stars`, pictures and plots on `visualization`, and the job history on
-    `jobs`. Each sub-API is built once here and shared, so they all read
-    and write the same storage.
+    `stars`, pictures and plots on `visualization`, the job history on
+    `jobs`, and quality reads on `quality`. Each sub-API is built once
+    here and shared, so they all read and write the same storage.
 
     Parameters
     ----------
@@ -303,6 +330,9 @@ class Astrometrics:
     jobs : `Jobs`
         Read-only tracking of running and completed processing jobs
         and lineage.
+    quality : `QualityRecords`
+        The start of every quality read: stored measurements, the metric
+        list, and live checks of raw frames and stacks.
 
     Notes
     -----
@@ -324,6 +354,7 @@ class Astrometrics:
     ) -> None:
         from astrometricslib.api.jobs import Jobs
         from astrometricslib.api.processing import ProcessingPipelines
+        from astrometricslib.api.quality import QualityRecords
         from astrometricslib.api.stars import StellarCatalog
         from astrometricslib.api.targets import TargetCatalog
         from astrometricslib.api.visualization import Visualization
@@ -350,6 +381,7 @@ class Astrometrics:
         self.visualization = Visualization(
             self.config, self.catalog_access, targets=self.targets, stars=self.stars
         )
+        self.quality = QualityRecords(self.config, self.catalog_access, targets=self.targets)
         self.jobs = Jobs(self.config, self.catalog_access)
 
 
@@ -379,7 +411,9 @@ __all__ = [
     "Butler",
     "CalibrationCatalog",
     "CalibrationQueryResult",
+    "CaptureSetting",
     "CatalogAccess",
+    "Checkpoint",
     "Collection",
     "ConfigFile",
     "ConfigFileDescription",
@@ -390,6 +424,7 @@ __all__ = [
     "DatasetSpec",
     "DbLogHandler",
     "DeviceInUseError",
+    "Direction",
     "Entity",
     "EntityDescription",
     "ErrorInfo",
@@ -398,18 +433,30 @@ __all__ = [
     "FileItem",
     "FilterType",
     "FitsHeaderEntry",
+    "FrameMeasurementSummary",
     "FrameRecord",
     "FrameSelection",
     "GaiaXpDriver",
     "GenerationDescription",
     "GroupedFrameStat",
+    "HalfDifferenceNoiseResult",
     "HardwareError",
     "ImageProcessing",
     "InputQualityReport",
     "InvalidArgumentError",
     "JobStore",
     "Jobs",
+    "LimitTier",
+    "MeasurementOrigin",
+    "MeasurementReference",
+    "MeasurementStatus",
+    "MetricPurpose",
+    "MetricSpec",
+    "MetricSummary",
     "MovingObjectConfig",
+    "NightContribution",
+    "NightContributionResult",
+    "NoiseGrowthResult",
     "NotFoundError",
     "NumpyEncoder",
     "OverlayStar",
@@ -427,7 +474,10 @@ __all__ = [
     "ProcessingJob",
     "ProcessingPipelines",
     "ProvenanceStore",
-    "QualityDiagnostics",
+    "QualityLimit",
+    "QualityMeasurement",
+    "QualityRecords",
+    "QualitySubject",
     "QuarantinePreview",
     "RawFrameCheckReport",
     "ReddeningDriver",
@@ -446,10 +496,13 @@ __all__ = [
     "StackSummary",
     "StackingDriver",
     "StarQueryResult",
+    "StarResultReference",
     "StellarCatalog",
     "StellarObject",
     "StorageError",
     "StorageNotMountedError",
+    "SubjectLevel",
+    "SubsetStackResult",
     "Target",
     "TargetCatalog",
     "TargetFilesResponse",
@@ -457,6 +510,7 @@ __all__ = [
     "TargetReindexChange",
     "TargetSessionContribution",
     "TargetStarCount",
+    "UncertaintyKind",
     "UsageDescription",
     "Used",
     "ValueDescription",

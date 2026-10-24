@@ -73,9 +73,9 @@ def serialize_rpc_result(obj: Any) -> Any:
         if math.isnan(obj) or math.isinf(obj):
             return None
         return obj
-    from datetime import datetime
+    from datetime import date, datetime
 
-    if isinstance(obj, datetime):
+    if isinstance(obj, (datetime, date)):
         return obj.isoformat()
 
     # NumPy scalars and arrays are not JSON-serializable. Convert them to

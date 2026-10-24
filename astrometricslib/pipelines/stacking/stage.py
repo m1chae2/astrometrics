@@ -6,6 +6,7 @@ and checking the quality of the final stacked images.
 
 import logging
 import os
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from astrometricslib.drivers.camera_profile_store import camera_identity
@@ -20,6 +21,7 @@ from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 if TYPE_CHECKING:
     from astrometricslib.models.quality.quality_summary import StackQualitySummary
+    from astrometricslib.pipelines.stacking.frame_measurement_run import FrameQualityRecording
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +60,8 @@ def stack_frames(
     force: bool = False,
     preview_settings: Any | None = None,
     drivers: Drivers | None = None,
+    measured_at: datetime | None = None,
+    quality_recording: FrameQualityRecording | None = None,
 ) -> str | None:
     """Run the main stacking process using the ImageProcessing driver.
 
@@ -105,6 +109,15 @@ def stack_frames(
         settings (see `stack_preview.PreviewSettings`).
     drivers : `Drivers` or `None`, optional
         The stacking program to use. Left out, it is Siril.
+    measured_at : `datetime` or `None`, optional
+        When the stack started, with a time zone. The frame quality rows the
+        stage stores carry it. Pipeline code does not read the clock, so the
+        caller supplies it.
+    quality_recording : `FrameQualityRecording` or `None`, optional
+        The configuration and the shared calibration library, from the caller,
+        for the frame quality rows. The stage stores them only for an imaging
+        stack with the quarantine step turned on, and only when both this and
+        ``measured_at`` are given. Left out (tests), none are stored.
 
     Returns
     -------
@@ -112,6 +125,64 @@ def stack_frames(
         The location of the new stacked image, or None if it failed. For a
         stack that was skipped as unchanged, the location of the stack that
         is already there.
+
+    Notes
+    -----
+    A `ConflictError` is raised when the target has no frames to stack, mixes
+    spectral and standard imaging frames, has frames from more than one
+    camera, or has a subset-stack job running (see `target_stack_guard.py`).
+    A `ProcessingError` is raised when no usable frames are left after
+    filtering out mismatched or bad frames.
+    """
+    from astrometricslib.pipelines.stacking.target_stack_guard import library_stack_guard
+
+    with library_stack_guard(target.id):
+        return _stack_frames_guarded(
+            target,
+            log_file,
+            frames_to_stack,
+            filter_type,
+            rejection_sigma,
+            filter_wfwhm,
+            filter_round,
+            stack_weight,
+            generate_rejmap,
+            output_file,
+            job_id,
+            force,
+            preview_settings,
+            drivers,
+            measured_at,
+            quality_recording,
+        )
+
+
+def _stack_frames_guarded(
+    target: Target,
+    log_file: str | None = None,
+    frames_to_stack: list[Any] | None = None,
+    filter_type: Any | None = None,
+    rejection_sigma: tuple[float, float] | None = None,
+    filter_wfwhm: str | None = None,
+    filter_round: str | None = None,
+    stack_weight: str | None = None,
+    generate_rejmap: bool | None = None,
+    output_file: str | None = None,
+    job_id: str | None = None,
+    force: bool = False,
+    preview_settings: Any | None = None,
+    drivers: Drivers | None = None,
+    measured_at: datetime | None = None,
+    quality_recording: FrameQualityRecording | None = None,
+) -> str | None:
+    """Do the work of `stack_frames` while the target's guard is held.
+
+    Takes the same parameters as `stack_frames`.
+
+    Returns
+    -------
+    stacked_path : `str` or `None`
+        What `stack_frames` returns.
 
     Raises
     ------
@@ -293,7 +364,16 @@ def stack_frames(
             quarantine_gate,
         )
 
+        frames_checked_by_quarantine = target_frames
         target_frames, quarantine_report = quarantine_bad_frames(target, target_frames)
+        _record_frame_quality(
+            target,
+            target_frames,
+            quarantine_report,
+            frames_checked_by_quarantine,
+            measured_at,
+            quality_recording,
+        )
         excluded_frames.extend(
             ExcludedFrame(path=path, reason=reason)
             for path, reason in quarantine_report.reasons_by_path().items()
@@ -391,12 +471,10 @@ def stack_frames(
     from astrometricslib.pipelines.stacking.stack_runner import run_stack
 
     engine = (drivers or Drivers()).stacking_or_default()
-    from astrometricslib.pipelines.stacking.pre_processing.exposure_weighting import choose_stack_weight
+    from astrometricslib.pipelines.stacking.stack_settings import choose_weight_for_frames
 
-    stack_weight = choose_stack_weight(
-        [float(frame.exposure) for frame in target_frames if frame.exposure],
-        stack_weight if stack_weight is not None else get_configuration().get_stack_weight(),
-        is_spectral=has_spectral,
+    stack_weight = choose_weight_for_frames(
+        target_frames, stack_weight, get_configuration(), is_spectral=has_spectral
     )
 
     # Skip a stack that would come out the same: the same frames, the same
@@ -474,10 +552,9 @@ def stack_frames(
     # are covered by fewer frames and are noisier. Trim them off. The check
     # leaves a stack with clean edges as it is. It runs before the stack is
     # measured and pictured, so both describe the trimmed stack.
-    if stacked_path and not has_spectral and get_configuration().get_trim_noisy_stack_edges_enabled():
-        from astrometricslib.pipelines.stacking.post_processing.stack_crop import crop_stack_edges
+    from astrometricslib.pipelines.stacking.stack_settings import trim_noisy_stack_edges
 
-        crop_stack_edges(stacked_path)
+    crop_offset = trim_noisy_stack_edges(stacked_path, get_configuration(), is_spectral=has_spectral)
     excluded_frames.extend(
         ExcludedFrame(path=path, reason="corrupt or unreadable FITS file")
         for path in diagnostics.get("corrupt_frames_skipped", [])
@@ -512,6 +589,10 @@ def stack_frames(
             record_pipeline_run,
             stacked_image_entity_id,
         )
+        from astrometricslib.pipelines.shared.registration_record import (
+            build_registration_record,
+            write_registration_record,
+        )
 
         entity_id = stacked_image_entity_id(target.id, stacked_path)
         record_pipeline_run(
@@ -525,6 +606,39 @@ def stack_frames(
                     id=entity_id, location=stacked_path, entity_description="entitydesc:stacked-image"
                 )
             },
+        )
+        # Siril's transform for each frame, kept beside the stack for the
+        # astrometry run, which finds the target on each frame with it once the
+        # stack has a plate solution. A failure to write it never fails the
+        # stack.
+        registration_record = build_registration_record(
+            diagnostics,
+            crop_offset,
+            summary.stacking_metrics.registration_reference_frame,
+            is_spectral=summary.stacking_metrics.is_spectral,
+        )
+        if registration_record is not None:
+            write_registration_record(stacked_path, registration_record)
+        # The same summary, the stack's noise in empty sky and the frames
+        # that went in, stored as measurements. A failure here never fails
+        # the stack. The flat-to-light match in it reads up to 16 flat, 24
+        # light and 5 bias frames again from storage, which can take a while
+        # on a network mount (the job's time limit is in the configuration),
+        # so the job's progress says so first.
+        _report_stage(
+            75, "Measuring the stack's quality (reads up to 16 flat, 24 light and 5 bias frames again)"
+        )
+        _record_stack_quality(
+            summary,
+            target.id,
+            stacked_path,
+            target_frames,
+            diagnostics,
+            stack_weight,
+            crop_offset,
+            job_id,
+            measured_at,
+            quality_recording,
         )
         # A picture for people to look at. It never changes the stack and a
         # failure to make it is logged, not raised. The image viewer shows it
@@ -551,6 +665,145 @@ def stack_frames(
         )
 
     return stacked_path
+
+
+def _record_frame_quality(
+    target: Target,
+    kept_frames: list[Any],
+    quarantine_report: Any,
+    frames_checked: list[Any],
+    measured_at: datetime | None,
+    quality_recording: FrameQualityRecording | None,
+) -> None:
+    """Store the quarantine step's frame numbers and any missing measurements.
+
+    This never stops a stack. Any failure, whatever its cause (a storage
+    error, or an unexpected error such as a ``RuntimeError`` or
+    ``MemoryError`` from the image libraries), is logged with its traceback and
+    the stack goes on, because the stack does not depend on these numbers.
+
+    The hook runs only for imaging stacks with the quarantine step turned on,
+    because it sits inside that step. It does not read the global
+    configuration: the caller supplies the configuration and the shared
+    calibration library in ``quality_recording``.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target being stacked.
+    kept_frames : `list`
+        The frames that stay in the stack.
+    quarantine_report : `QuarantineReport`
+        What the quarantine step measured and moved.
+    frames_checked : `list`
+        Every frame given to the quarantine step, moved ones included.
+    measured_at : `datetime` or `None`
+        When the stack started, passed in by the caller because pipeline code
+        does not read the clock. Nothing is stored when it is `None`.
+    quality_recording : `FrameQualityRecording` or `None`
+        The configuration and calibration library to store with. Nothing is
+        stored when it is `None`.
+    """
+    from astrometricslib.pipelines.stacking.frame_measurement_run import record_stage_frame_quality
+
+    if measured_at is None or quality_recording is None:
+        logger.warning(
+            "No measurement time or recording context was given, so frame quality of '%s' is not stored. "
+            "A caller of the stacking stage should pass measured_at and quality_recording.",
+            target.id,
+        )
+        return
+    try:
+        summary = record_stage_frame_quality(
+            target,
+            kept_frames,
+            quarantine_report.measurements,
+            frames_checked,
+            quality_recording,
+            measured_at,
+        )
+    except Exception:  # frame quality is a by-product: no failure here may fail the stack
+        logger.exception("Frame quality measurements of target '%s' were not stored", target.id)
+        return
+    if summary.rows_written or summary.frames_failed or summary.already_running:
+        logger.info(
+            "Stored %d frame quality row(s) for target '%s' (%d frame(s) measured, %d failed%s).",
+            summary.rows_written,
+            target.id,
+            summary.frames_measured,
+            summary.frames_failed,
+            "; the full measurement was skipped because another run has the turn"
+            if summary.already_running
+            else "",
+        )
+
+
+def _record_stack_quality(
+    summary: StackQualitySummary,
+    target_id: str,
+    stacked_path: str,
+    target_frames: list[Any],
+    diagnostics: dict[str, Any],
+    stack_weight: str | None,
+    crop_offset: tuple[int, int],
+    job_id: str | None,
+    measured_at: datetime | None,
+    quality_recording: FrameQualityRecording | None,
+) -> None:
+    """Store the finished stack's quality measurements.
+
+    This never stops a stack. The measurements are written next to the quality
+    summary, which stays as it is. Nothing is stored when the caller gave no
+    measurement time, because pipeline code does not read the clock.
+
+    Parameters
+    ----------
+    summary : `StackQualitySummary`
+        The finished summary.
+    target_id : `str`
+        The target's id.
+    stacked_path : `str`
+        The finished stack.
+    target_frames : `list`
+        The frames given to the stacking program.
+    diagnostics : `dict`
+        What the stacking run reported.
+    stack_weight : `str` or `None`
+        The Siril weighting mode the stack used.
+    crop_offset : `tuple` [`int`, `int`]
+        The (columns, rows) trimmed from the stack's left and top edges.
+    job_id : `str` or `None`
+        The tracked job, if any.
+    measured_at : `datetime` or `None`
+        When the stack started, with a time zone, from the caller.
+    quality_recording : `FrameQualityRecording` or `None`
+        The caller's configuration, which says where the quality store lives.
+    """
+    from astrometricslib.models.quality.quality_summary import STACKING_PIPELINE_VERSION
+    from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
+    from astrometricslib.pipelines.stacking.post_processing.record_quality import record_stacking_quality
+
+    if measured_at is None:
+        logger.warning(
+            "No measurement time was given, so the quality measurements of the stack of '%s' are not stored.",
+            target_id,
+        )
+        return
+    context = PipelineRunContext.from_options(
+        target_id, "stacking", STACKING_PIPELINE_VERSION, {"job_id": job_id, "measured_at": measured_at}
+    )
+    if context is None:
+        return
+    record_stacking_quality(
+        summary,
+        context,
+        stacked_path,
+        target_frames,
+        diagnostics,
+        stack_weight,
+        crop_offset,
+        config=None if quality_recording is None else quality_recording.configuration,
+    )
 
 
 def _record_unchanged_stack(
@@ -972,37 +1225,22 @@ def _update_frame_registration_results(
     identity (no shift of its own) -- and records it onto
     `summary.stacking_metrics`.
     """
+    from astrometricslib.pipelines.stacking.post_processing.stack_membership import (
+        registration_reference_from_diagnostics,
+    )
+
     registration_frames = diagnostics.get("registration_frames", [])
     registration_frame_paths = diagnostics.get("symlinked_light_paths", [])
 
-    # Siril aligns every frame to one reference, so a poor
-    # reference fails the whole stack -- M 42 aborted with "Found
-    # 0 stars in reference" and nothing recorded which frame that
-    # was. The reference is the frame whose transform is the
-    # identity, i.e. the one with no shift of its own.
-    #
-    # Guarded the same way the pairing loop below is, and for
-    # the same reason: a registration_frame_paths/
-    # registration_frames length mismatch means the positional
-    # correspondence between the two lists cannot be trusted, so
-    # indexing into registration_frame_paths here would risk
-    # naming the wrong frame as the reference. Also require
-    # exactly one zero-shift frame -- a legacy `r_` sequence
-    # (already-aligned frames, every one recording an identity
-    # transform; see the preserved-sequence fix elsewhere in
-    # this file) has no single frame identifiable as "the"
-    # reference, and recording the first such frame would be
-    # fabricated rather than measured.
-    zero_shift_indices = [
-        index for index, facts in enumerate(registration_frames) if not facts["dx"] and not facts["dy"]
-    ]
-    reference_lists_align = len(registration_frame_paths) == len(registration_frames)
-    if len(zero_shift_indices) == 1 and reference_lists_align:
-        reference_index = zero_shift_indices[0]
-        summary.stacking_metrics.registration_reference_frame = registration_frame_paths[reference_index]
-        summary.stacking_metrics.registration_reference_star_count = registration_frames[reference_index][
-            "nb_stars"
-        ]
+    # Siril aligns every frame to one reference, so a poor reference fails the
+    # whole stack -- M 42 aborted with "Found 0 stars in reference" and
+    # nothing recorded which frame that was. The reference is the frame whose
+    # transform is the identity; `registration_reference_from_diagnostics`
+    # names it only when it is certain.
+    reference = registration_reference_from_diagnostics(diagnostics)
+    if reference is not None:
+        summary.stacking_metrics.registration_reference_frame = reference[0]
+        summary.stacking_metrics.registration_reference_star_count = reference[1]
 
     if len(registration_frame_paths) == len(registration_frames):
         frame_by_path = {frame.path: frame for frame in target_frames}
@@ -1031,14 +1269,57 @@ def _update_frame_registration_results(
             )
             run_offers_real_shift = bool(registration_facts["dx"] or registration_facts["dy"])
             if has_existing_facts and not (stored_shift_is_degenerate and run_offers_real_shift):
+                # A frame stacked before these fields existed keeps its
+                # first-run facts. Its empty fields are filled, so a restack
+                # records them.
+                _fill_empty_registration_fields(frame.measurements, registration_facts)
                 continue
-            frame.measurements.registration_fwhm_x_px = registration_facts["fwhm_x"]
-            frame.measurements.registration_fwhm_y_px = registration_facts["fwhm_y"]
+            # `registration_fwhm_y_px` and `registration_rmse` are no longer
+            # filled: their old values were the weighted FWHM and the sky
+            # background level (see `FrameMeasurements`). The field named
+            # `..._fwhm_x_px` holds Siril's plain FWHM.
+            frame.measurements.registration_fwhm_x_px = registration_facts["fwhm_px"]
+            frame.measurements.registration_weighted_fwhm_px = registration_facts["weighted_fwhm_px"]
             frame.measurements.registration_roundness = registration_facts["roundness"]
-            frame.measurements.registration_rmse = registration_facts["rmse"]
-            frame.measurements.registration_star_count = registration_facts["nb_stars"]
+            frame.measurements.registration_quality = registration_facts["quality"]
+            frame.measurements.registration_background_level = registration_facts["background_level"]
+            frame.measurements.registration_rotation_deg = registration_facts["rotation_deg"]
+            frame.measurements.registration_star_count = registration_facts["star_count"]
             frame.measurements.registration_dx_px = registration_facts["dx"]
             frame.measurements.registration_dy_px = registration_facts["dy"]
+
+
+# The registration fields that later versions added to a frame's record, and
+# the key of Siril's per-frame facts that fills each. The first-run fields
+# (`registration_fwhm_x_px`, `registration_dx_px` and `registration_dy_px`) are
+# not in this list because a restack never overwrites them.
+_LATER_REGISTRATION_FIELDS: dict[str, str] = {
+    "registration_weighted_fwhm_px": "weighted_fwhm_px",
+    "registration_roundness": "roundness",
+    "registration_quality": "quality",
+    "registration_background_level": "background_level",
+    "registration_rotation_deg": "rotation_deg",
+    "registration_star_count": "star_count",
+}
+
+
+def _fill_empty_registration_fields(measurements: Any, registration_facts: dict[str, Any]) -> None:
+    """Fill a frame's empty later registration fields, and no others.
+
+    Frames stacked before the later fields existed keep their first-run
+    shift and width. A restack gives them the new fields, because it is the
+    only time Siril measures them again.
+
+    Parameters
+    ----------
+    measurements : `FrameMeasurements`
+        The frame's measurements. Only fields that are `None` change.
+    registration_facts : `dict`
+        Siril's facts for the frame in this run, as `parse_seq_file` returns.
+    """
+    for field_name, fact_key in _LATER_REGISTRATION_FIELDS.items():
+        if getattr(measurements, field_name) is None and registration_facts.get(fact_key) is not None:
+            setattr(measurements, field_name, registration_facts[fact_key])
 
 
 def _measure_one_frame_fwhm(path: str) -> float | None:

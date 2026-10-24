@@ -72,13 +72,27 @@ class FrameMeasurements(BaseModel):
     # Alignment data. When the pipeline aligns the images (registration),
     # it calculates these values (like how far the stars shifted).
     # They stay None until that pipeline runs.
+    # Siril's plain FWHM in pixels. The name says "x" for history; Siril
+    # reports one FWHM, not one per axis.
     registration_fwhm_x_px: float | None = Field(default=None, alias="registrationFwhmXPx")
+    # No longer filled. Stored values written before the fix were Siril's
+    # weighted FWHM, not a width along y. Removal belongs to issue #97.
     registration_fwhm_y_px: float | None = Field(default=None, alias="registrationFwhmYPx")
+    # Siril's weighted FWHM in pixels (stars counted by fit quality).
+    registration_weighted_fwhm_px: float | None = Field(default=None, alias="registrationWeightedFwhmPx")
     # How round the stars look after alignment (1.0 is a perfect circle).
     # A lower number can mean the telescope drifted during the photo.
     registration_roundness: float | None = Field(default=None, alias="registrationRoundness")
-    # How far off, on average, the alignment was when lining this
-    # picture up with the others, in pixels. Lower is better.
+    # Siril's registration quality score for this picture.
+    registration_quality: float | None = Field(default=None, alias="registrationQuality")
+    # Sky background level in the picture, normalized to 0 to 1.
+    registration_background_level: float | None = Field(default=None, alias="registrationBackgroundLevel")
+    # Rotation of this picture relative to the reference, in degrees,
+    # from the registration transform.
+    registration_rotation_deg: float | None = Field(default=None, alias="registrationRotationDeg")
+    # No longer filled. Stored values written before the fix were the sky
+    # background level (0.02 or so), not an alignment error in pixels.
+    # Removal belongs to issue #97.
     registration_rmse: float | None = Field(default=None, alias="registrationRmse")
     registration_star_count: int | None = Field(default=None, alias="registrationStarCount")
     registration_dx_px: float | None = Field(default=None, alias="registrationDxPx")
@@ -132,6 +146,22 @@ class FrameRecord(BaseModel):
     # Records saved before these existed have None and are read once.
     file_size: int | None = Field(default=None, alias="fileSize")
     file_modified_ns: int | None = Field(default=None, alias="fileModifiedNs")
+
+    # The file size and last-change time the frame had when its quality
+    # measurements were last recorded (`record_frame_measurements`). A frame
+    # whose file still matches these has nothing new to measure. Both are None
+    # for a frame that was never measured; they are kept apart from
+    # `file_size` and `file_modified_ns` because a header re-read and a pixel
+    # measurement happen at different times.
+    quality_measured_file_size: int | None = Field(default=None, alias="qualityMeasuredFileSize")
+    quality_measured_file_modified_ns: int | None = Field(default=None, alias="qualityMeasuredFileModifiedNs")
+    # A short fingerprint of the frame metrics (their names and definition
+    # versions) the frame's last measurement covered
+    # (`frame_metric_set_fingerprint`). A frame whose fingerprint differs from
+    # the current one was measured before a metric was added or redefined, so
+    # it is measured again. None for a frame measured before this field
+    # existed.
+    quality_measured_metric_set: str | None = Field(default=None, alias="qualityMeasuredMetricSet")
 
     # Everything our own code calculated from this frame's pixels
     # (background level, registration facts), as opposed to the fields
@@ -294,8 +324,16 @@ class Target(BaseModel):
     id: str = Field(default="", alias="id")
     common_name: str = Field(default="", alias="commonName")
     image_type: ImageType = Field(default=ImageType.TARGET_IMAGE, alias="imageType")
+    # The object's position as ICRS coordinates at epoch J2000 (what SIMBAD
+    # gives). A double star holds its primary; a companion needs a target id
+    # of its own. Setting `ra` or `dec` by hand clears `position_unverified`.
     ra: str = Field(default="0h 0m 0s", alias="ra")
     dec: str = Field(default="0° 0′ 0′′", alias="dec")
+    # True when `ra`/`dec` came from the center of a solved image because
+    # the target's name could not be trusted in a catalog (not found, found
+    # outside the image, or its id and common name disagreed). That point is
+    # where the camera looked, not necessarily where the object is.
+    position_unverified: bool = Field(default=False, alias="positionUnverified")
     field_of_view: str = Field(default="0′", alias="fieldOfView")
     main_camera: str = Field(default="", alias="mainCamera")
     main_scope: str = Field(default="", alias="mainScope")

@@ -20,8 +20,10 @@ from astropy.io import fits
 
 from astrometricslib.drivers import siril_interface
 from astrometricslib.drivers.calibration_library import (
+    BIAS_FRAME_PATHS_KEY,
     CALIBRATION_MATCH_BLOCKING_FLAGS_KEY,
     DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+    FLAT_FRAME_PATHS_KEY,
     CalibrationLibrary,
     calibration_setting_key,
     dark_temperature_flag,
@@ -655,6 +657,42 @@ def test_staging_a_binned_light_applies_no_unbinned_dark_and_records_a_blocking_
     assert len(blocking) == 3
     assert all("2x2" in flag and "1x1" in flag for flag in blocking)
     assert processor.last_run_diagnostics["calibration_mismatch_flags"] == []
+
+
+def test_staging_records_the_flat_and_bias_files_it_linked(tmp_path: Path) -> None:
+    """The diagnostics name the library files of the staged flats and biases.
+
+    The quality step rebuilds the flat's dust map from them, so they are
+    recorded where the selection is made, under the module's keys.
+    """
+    library = make_library(tmp_path)
+    flats = [
+        write_frame(tmp_path / f"flat_{index}.fits", flat_filter="Luminance", binning=1) for index in range(2)
+    ]
+    for flat in flats:
+        library.add_flat_frame(flat, telescope="T")
+    bias = write_frame(tmp_path / "bias.fits", exposure=0.0, binning=1)
+    library.add_bias_frame(bias)
+
+    processor = stage_batch(tmp_path, library, light_binning=1, light_temperature_c=-10.0)
+
+    assert sorted(processor.last_run_diagnostics[FLAT_FRAME_PATHS_KEY]) == sorted(flats)
+    assert processor.last_run_diagnostics[BIAS_FRAME_PATHS_KEY] == [bias]
+    assert len(staged(processor, "flats")) == 2
+
+
+def test_a_binned_light_records_no_flat_or_bias_files(tmp_path: Path) -> None:
+    """Frames that were not linked (a binning mismatch) are not recorded."""
+    library = make_library(tmp_path)
+    library.add_bias_frame(write_frame(tmp_path / "bias.fits", exposure=0.0, binning=1))
+    library.add_flat_frame(
+        write_frame(tmp_path / "flat.fits", flat_filter="Luminance", binning=1), telescope="T"
+    )
+
+    processor = stage_batch(tmp_path, library, light_binning=2, light_temperature_c=-10.0)
+
+    assert FLAT_FRAME_PATHS_KEY not in processor.last_run_diagnostics
+    assert BIAS_FRAME_PATHS_KEY not in processor.last_run_diagnostics
 
 
 def test_a_truncated_frame_is_not_added_to_the_library(tmp_path: Path) -> None:

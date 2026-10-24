@@ -210,6 +210,18 @@ STACKING_GROUP_CLIPPED_FRAME_COUNT = "stacking.group_clipped_frame_count"
 # the stacking run).
 STACKING_FRAME_REGISTRATION_ROTATION_DEG = "stacking.frame_registration_rotation_deg"
 
+# Whether the flats' dust shadows still match the dust in the raw lights.
+STACKING_FLAT_DUST_SHADOW_COUNT = "stacking.flat_dust_shadow_count"
+STACKING_FLAT_LIGHT_DUST_CORRELATION_AT_ZERO_OFFSET = "stacking.flat_light_dust_correlation_at_zero_offset"
+STACKING_FLAT_LIGHT_CORRELATION_OUTSIDE_SHADOWS = "stacking.flat_light_correlation_outside_shadows"
+STACKING_FLAT_LIGHT_SEARCH_EXCESS_SIGMAS = "stacking.flat_light_search_excess_sigmas"
+STACKING_FLAT_LIGHT_BEST_CORRELATION = "stacking.flat_light_best_correlation"
+STACKING_FLAT_LIGHT_BEST_SHIFT_X_PX = "stacking.flat_light_best_shift_x_px"
+STACKING_FLAT_LIGHT_BEST_SHIFT_Y_PX = "stacking.flat_light_best_shift_y_px"
+STACKING_FLAT_LIGHT_BEST_ROTATION_DEG = "stacking.flat_light_best_rotation_deg"
+STACKING_FLAT_LIGHT_DISPLACED_CORRELATION_STD = "stacking.flat_light_displaced_correlation_std"
+STACKING_LIGHT_DUST_SPLIT_HALF_CORRELATION = "stacking.light_dust_split_half_correlation"
+
 # The self-checks. The key is the gate's name in the stack summary; the value
 # is the metric that stores it. Each is named ``stacking.gate_<gate name>``.
 STACKING_GATE_GAIN_HOMOGENEITY = "stacking.gate_gain_homogeneity"
@@ -1687,6 +1699,239 @@ _FRAME_SHAPE_METRICS: tuple[MetricSpec, ...] = (
     ),
 )
 
+_FLAT_MATCH_REVIEW_DATE = datetime.date(2027, 4, 30)
+_FLAT_MATCH_QUESTION = (
+    "Do the flats' dust shadows still match the lights (has dust moved, been added or been cleaned "
+    "since the flats were taken)? Does the correlation of the dust shadows between the mean of the "
+    "raw flats and the raw lights fall when the dust has changed, and does the best shift and "
+    "rotation of the shadow pattern recover the change? The shadows come from dust on the camera's "
+    "window, which turns with the sensor, so this cannot show a rotation of the camera relative to "
+    "the optics."
+)
+_FLAT_MATCH_MAP = (
+    "Both maps are built from raw frames, because the stacking step keeps neither the master flat nor "
+    "the calibrated lights. Each frame is averaged into cells of 8 x 8 raw pixels (a color camera's 2 x 2 "
+    "groups are merged first); a light frame has the bias level (from the stack's bias frames) subtracted, "
+    "and every frame is divided by its median. A disc of 25 cells (200 pixels) around the frame centre, "
+    "where the target sits, is set aside in every frame. The flat map is the mean of up to 16 raw flat "
+    "frames (not the master flat the stack used, which is not kept). "
+    "The light map is the pixelwise median of up to 24 raw, unregistered light frames that went into the "
+    "stack, each with a sky of at least 10 times the read noise above the bias (from the camera profile), "
+    "after the cells "
+    "more than 4 robust standard deviations above the local sky (with their wings, and 2 cells around "
+    "them) are set aside in each frame, and the cells more than 3 deviations above their neighbors on "
+    "the median map are set aside in every frame (faint stars sit at the same pixels in every frame). "
+    "Each map is then band-passed: a polynomial of degree 4 (the vignetting) is divided out, then the "
+    "map smoothed with a Gaussian of 2 cells (16 pixels) is divided by the map smoothed with 30 cells "
+    "(240 pixels), minus 1, so the dust shadows stay. Cells within 16 cells (128 pixels) of the edge "
+    "are left out."
+)
+_FLAT_MATCH_SAMPLE = (
+    "Up to 16 of the flat frames the stack was calibrated with and up to 24 of the frames that went into "
+    "the stack (not the frames skipped as corrupt or left out at registration; when the member list "
+    "could not be worked out, the submitted frames without the corrupt ones), sorted by time and path "
+    "and spread evenly through the set (the first and last included). Light frames of another size "
+    "than the first readable one are skipped, and so are those with a sky under 10 times the read "
+    "noise above the bias (counted in the not-measured reason). At least 8 usable light frames are "
+    "needed. The stack's bias frames and the camera profile's gain and read noise for the frames' "
+    "setting are needed; without them nothing is measured. "
+    "A spectral stack is not measured (its lights carry the grating's spectra). Reading is "
+    "limited by a time limit from the configuration (default 300 s); when it is reached nothing is "
+    "measured."
+)
+_FLAT_MATCH_UNCERTAINTY = (
+    "No uncertainty is reported. `stacking.light_dust_split_half_correlation` says how repeatable "
+    "the light map is, which limits the correlation any flat can reach."
+)
+_FLAT_MATCH_BASE = {
+    "checkpoint": Checkpoint.STACKING,
+    "levels": (SubjectLevel.STACK,),
+    "decisions": ("take or retake flat frames",),
+    "band": _BAND,
+    "uncertainty_kind": UncertaintyKind.NONE,
+    "uncertainty_method": _FLAT_MATCH_UNCERTAINTY,
+    "register_entry": "STK-46",
+    "purpose": MetricPurpose.EXPLORATORY,
+    "exploratory_question": _FLAT_MATCH_QUESTION,
+    "review_date": _FLAT_MATCH_REVIEW_DATE,
+    "sample_definition": _FLAT_MATCH_SAMPLE,
+    "definition_version": 1,
+}
+_FLAT_MATCH_SEARCH = (
+    "The shift and rotation of the shadow pattern (not of the camera) are found by cross-correlating the "
+    "maps by fast Fourier transform at every rotation from -3 to +3 degrees in steps of 0.25 degree, then "
+    "refining the angle in steps of 0.05 degree, with a parabola fit for the sub-step shift and angle. "
+    "The shift is searched over plus or minus 160 pixels. A pattern point of the flat appears in the "
+    "lights moved by the shift first and then turned about the sensor centre (positive angles turn "
+    "clockwise with the array drawn row 0 at the top)."
+)
+_FLAT_MATCH_ONLY_IF_FOUND = (
+    " It is given only when the best score stands at least 3.1 null spreads (see "
+    "`stacking.flat_light_search_excess_sigmas`; the limit is the 99th percentile of that statistic on "
+    "unrelated dust, register entry STK-46) above the best score of the same search at 8 displaced "
+    "placements, and the peak is not at the edge of the search; otherwise it is not measured, with the "
+    "reason."
+)
+_FLAT_MATCH_PLACEMENT_UNCERTAINTY = (
+    "Not a statistical 1 sigma. The square root of the sum of two squares: half the absolute difference "
+    "between the value found with the odd frames' light map and with the even frames' (one split pair, "
+    "so noise only and a rough size; each half has twice the noise variance of the whole sample), and a "
+    "constant method error (1.1 pixel, 0.2 degree) from injecting known displacements at real shadow "
+    "depths (0.15 to 0.4%) and real noise (register entry STK-46). Not given when either half found "
+    "no placement or its peak was "
+    "at the edge of the search. The dust shadows are broad, so the correlation changes slowly with the "
+    "placement and the uncertainty can be large."
+)
+_FLAT_MATCH_PLACEMENT = {
+    **_FLAT_MATCH_BASE,
+    "uncertainty_kind": UncertaintyKind.SYSTEMATIC_BOUND,
+    "uncertainty_method": _FLAT_MATCH_PLACEMENT_UNCERTAINTY,
+}
+
+_FLAT_MATCH_METRICS: tuple[MetricSpec, ...] = (
+    MetricSpec(
+        name=STACKING_FLAT_DUST_SHADOW_COUNT,
+        unit="count",
+        better=Direction.NONE,
+        meaning="How many dust shadows (donuts) the flat shows (a diagnostic).",
+        estimator=(
+            _FLAT_MATCH_MAP + " Dust shadows are the connected groups (neighbors on a side or a corner) of "
+            "at least 25 cells (40 x 40 pixels) of the flat's band-passed map that dip below the larger of "
+            "5 standard deviations of the map's noise (half the standard deviation of the difference "
+            "between the maps of the odd and the even flats; with one flat, the robust spread of the map "
+            "itself) and 0.15% of the level. The count depends on these three limits, so it counts the "
+            "shadows above them, not all the dust. It is a diagnostic: no other row waits on it. The "
+            "control correlation uses the shadows it finds."
+        ),
+        computed_by="pipelines.stacking.post_processing.flat_match.count_dust_shadows",
+        **{
+            **_FLAT_MATCH_BASE,
+            "sample_definition": "Up to 16 of the flat frames the stack was calibrated with.",
+        },
+    ),
+    MetricSpec(
+        name=STACKING_FLAT_LIGHT_DUST_CORRELATION_AT_ZERO_OFFSET,
+        unit="",
+        better=Direction.HIGHER,
+        meaning="Correlation of the flat's dust pattern with the lights', with no shift or rotation.",
+        estimator=(
+            _FLAT_MATCH_MAP + " The value is the Pearson correlation coefficient of the two band-passed maps "
+            "over the cells that both can use (at least 16 cells, 128 pixels, from the edge), at zero shift "
+            "and rotation. 1 is the same pattern in the same place, 0 is no relation."
+        ),
+        computed_by="pipelines.stacking.post_processing.flat_match.match_dust_maps",
+        **_FLAT_MATCH_BASE,
+    ),
+    MetricSpec(
+        name=STACKING_FLAT_LIGHT_CORRELATION_OUTSIDE_SHADOWS,
+        unit="",
+        better=Direction.NONE,
+        meaning="The same correlation with the flat's shadows masked out: a control for non-dust structure.",
+        estimator=(
+            _FLAT_MATCH_MAP + " The value is the Pearson correlation coefficient at zero shift and rotation "
+            "over the cells that both maps can use, after the flat's dust shadows (see "
+            "`stacking.flat_dust_shadow_count`) are enlarged by 4 cells (32 pixels) and left out. "
+            "If it stays near the value with the shadows, the correlation does not come from the shadows' "
+            "cores: either something other than dust is shared by the flat and the lights (a leftover of "
+            "the vignetting, a fixed pattern), or the dust is deep enough that the faint halo the band "
+            "pass leaves around each shadow (which the mask does not cover) correlates by itself. "
+            "Not measured when fewer than 100 cells remain."
+        ),
+        computed_by="pipelines.stacking.post_processing.flat_match.measure_flat_match",
+        **_FLAT_MATCH_BASE,
+    ),
+    MetricSpec(
+        name=STACKING_FLAT_LIGHT_SEARCH_EXCESS_SIGMAS,
+        unit="",
+        better=Direction.HIGHER,
+        meaning="How far the best match stands above what the same search finds at displaced placements.",
+        estimator=(
+            _FLAT_MATCH_MAP + " " + _FLAT_MATCH_SEARCH + " The search takes the best of 25 angles and "
+            "41 x 41 shifts, so a high score happens by chance. The same search is run with the lights' map "
+            "moved by 60 cells along and across the axes and diagonally (8 placements, where the two "
+            "patterns cannot be the same dust). The value is the best coarse score of the real search minus "
+            "the mean of those 8 best scores, over their sample standard deviation. It gates the shift and "
+            "rotation rows (limit 3.1, the 99th percentile on unrelated dust, register entry STK-46)."
+        ),
+        computed_by="pipelines.stacking.post_processing.flat_match.match_dust_maps",
+        **_FLAT_MATCH_BASE,
+    ),
+    MetricSpec(
+        name=STACKING_FLAT_LIGHT_BEST_CORRELATION,
+        unit="",
+        better=Direction.HIGHER,
+        meaning="Correlation of the two dust patterns after the best shift and rotation of the lights.",
+        estimator=(
+            _FLAT_MATCH_MAP + " " + _FLAT_MATCH_SEARCH + " The value is the Pearson correlation coefficient "
+            "of the flat map and the light map sampled at the best placement (bilinear interpolation)."
+        ),
+        computed_by="pipelines.stacking.post_processing.flat_match.match_dust_maps",
+        **_FLAT_MATCH_BASE,
+    ),
+    MetricSpec(
+        name=STACKING_FLAT_LIGHT_BEST_SHIFT_X_PX,
+        unit="px",
+        better=Direction.NONE,
+        meaning="How far along the columns the lights' dust sits from the flat's, in sensor pixels.",
+        estimator=_FLAT_MATCH_MAP + " " + _FLAT_MATCH_SEARCH + _FLAT_MATCH_ONLY_IF_FOUND,
+        computed_by="pipelines.stacking.post_processing.flat_match.measure_flat_match",
+        **_FLAT_MATCH_PLACEMENT,
+    ),
+    MetricSpec(
+        name=STACKING_FLAT_LIGHT_BEST_SHIFT_Y_PX,
+        unit="px",
+        better=Direction.NONE,
+        meaning="How far along the rows the lights' dust sits from the flat's, in sensor pixels.",
+        estimator=_FLAT_MATCH_MAP + " " + _FLAT_MATCH_SEARCH + _FLAT_MATCH_ONLY_IF_FOUND,
+        computed_by="pipelines.stacking.post_processing.flat_match.measure_flat_match",
+        **_FLAT_MATCH_PLACEMENT,
+    ),
+    MetricSpec(
+        name=STACKING_FLAT_LIGHT_BEST_ROTATION_DEG,
+        unit="deg",
+        better=Direction.NONE,
+        meaning="How far the lights' dust pattern is turned about the sensor centre from the flat's.",
+        estimator=_FLAT_MATCH_MAP + " " + _FLAT_MATCH_SEARCH + _FLAT_MATCH_ONLY_IF_FOUND,
+        computed_by="pipelines.stacking.post_processing.flat_match.measure_flat_match",
+        **_FLAT_MATCH_PLACEMENT,
+    ),
+    MetricSpec(
+        name=STACKING_FLAT_LIGHT_DISPLACED_CORRELATION_STD,
+        unit="",
+        better=Direction.NONE,
+        meaning="The chance spread of the correlation: its variation when the lights' map is moved far off.",
+        estimator=(
+            _FLAT_MATCH_MAP + " " + _FLAT_MATCH_SEARCH + " The value is the standard deviation of the "
+            "normalized correlation (the search score: sum of the products over the sum of squares, which "
+            "is the Pearson coefficient when the maps' means are 0) at every shift with the larger axis "
+            "between 40 and 100 cells (320 to 800 pixels) and no rotation, where the two patterns cannot be "
+            "the same dust (the shadows are about 40 cells across). Two maps of a few broad shadows "
+            "correlate "
+            "by chance with a spread of 0.1 to 0.3, so a correlation means little until it is read against "
+            "this. Not measured when the maps are too small for shifts that far."
+        ),
+        computed_by="pipelines.stacking.post_processing.flat_match.match_dust_maps",
+        **_FLAT_MATCH_BASE,
+    ),
+    MetricSpec(
+        name=STACKING_LIGHT_DUST_SPLIT_HALF_CORRELATION,
+        unit="",
+        better=Direction.HIGHER,
+        meaning="How repeatable the lights' dust map is: the odd frames' map against the even frames'.",
+        estimator=(
+            _FLAT_MATCH_MAP + " The light map is built twice, from the 1st, 3rd, ... and from the 2nd, "
+            "4th, ... frames of the sample. The value is the Pearson correlation coefficient of the two "
+            "band-passed maps. The light map holds the dust and whatever else repeats from frame to frame "
+            "(the sensor's fixed pattern, stars too faint to find), so the value limits how much of the "
+            "light map any flat could explain: it is not a measure of dust. The correlation with the flat "
+            "(`stacking.flat_light_best_correlation`) uses the median of all the frames, which is a little "
+            "more repeatable than a half."
+        ),
+        computed_by="pipelines.stacking.post_processing.flat_match.measure_flat_match",
+        **_FLAT_MATCH_BASE,
+    ),
+)
+
 STACKING_METRICS: tuple[MetricSpec, ...] = (
     *_DECLARED_BEFORE_PHASE_3,
     *_VALUE_METRICS,
@@ -1695,6 +1940,7 @@ STACKING_METRICS: tuple[MetricSpec, ...] = (
     *_HALF_DIFFERENCE_METRICS,
     *_SCIENCE_METRICS,
     *_FRAME_SHAPE_METRICS,
+    *_FLAT_MATCH_METRICS,
     *_GATE_METRICS,
 )
 

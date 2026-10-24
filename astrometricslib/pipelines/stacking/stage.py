@@ -621,7 +621,13 @@ def _stack_frames_guarded(
             write_registration_record(stacked_path, registration_record)
         # The same summary, the stack's noise in empty sky and the frames
         # that went in, stored as measurements. A failure here never fails
-        # the stack.
+        # the stack. The flat-to-light match in it reads up to 16 flat, 24
+        # light and 5 bias frames again from storage, which can take a while
+        # on a network mount (the job's time limit is in the configuration),
+        # so the job's progress says so first.
+        _report_stage(
+            75, "Measuring the stack's quality (reads up to 16 flat, 24 light and 5 bias frames again)"
+        )
         _record_stack_quality(
             summary,
             target.id,

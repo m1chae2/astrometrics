@@ -30,6 +30,7 @@ import time
 from collections.abc import Sequence
 from typing import Any
 
+from astrometricslib.drivers.calibration_library import BIAS_FRAME_PATHS_KEY, FLAT_FRAME_PATHS_KEY
 from astrometricslib.models.quality.gate_result import GateResult
 from astrometricslib.models.quality.limit import LimitTier
 from astrometricslib.models.quality.measurement import (
@@ -84,6 +85,7 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_ZERO_PIXEL_FRACTION,
 )
 from astrometricslib.pipelines.stacking.post_processing.field_rotation import field_rotation_measurements
+from astrometricslib.pipelines.stacking.post_processing.flat_match import flat_match_rows
 from astrometricslib.pipelines.stacking.post_processing.record_science import (
     StackScience,
     compute_stack_science,
@@ -860,4 +862,23 @@ def record_stacking_quality(
         new_count += record_run_measurements(geometry, config=config)
     except Exception:  # a by-product of the stack: no failure here may fail it
         logger.exception("The frame geometry rows of the stack %s were not stored", stack_path)
+    # The flat-to-light match reads raw frames, so it too goes in its own call.
+    # It samples only the frames that went into the stack.
+    try:
+        match_rows = flat_match_rows(
+            os.path.basename(stack_path),
+            context,
+            diagnostics.get(FLAT_FRAME_PATHS_KEY),
+            target_frames,
+            is_spectral=summary.stacking_metrics.is_spectral,
+            bias_paths=diagnostics.get(BIAS_FRAME_PATHS_KEY),
+            member_paths=None
+            if membership is None
+            else [str(member.frame.path) for member in membership.members],
+            corrupt_paths=diagnostics.get("corrupt_frames_skipped", []),
+            configuration=config,
+        )
+        new_count += record_run_measurements(match_rows, config=config)
+    except Exception:  # a by-product of the stack: no failure here may fail it
+        logger.exception("The flat-to-light match rows of the stack %s were not stored", stack_path)
     return new_count

@@ -1275,7 +1275,8 @@ _STACKING_GATES: tuple[GateMapping, ...] = gate_mappings_from_sources(STACKING_G
 # for a datasheet ceiling), and a backfill that copied the numbers could not
 # make that judgment, so they are not backfilled either. The per-frame
 # rotation comes from Siril's registration table, which a stored summary does
-# not hold.
+# not hold. The flat-to-light match is measured on the raw flat and light
+# frames, which a summary does not hold.
 _STACKING_NOT_HELD: tuple[str, ...] = (
     "stacking.empty_aperture_noise_stack_unit",
     "stacking.noise_reference_flux_stack_unit",
@@ -1314,6 +1315,16 @@ _STACKING_NOT_HELD: tuple[str, ...] = (
     "stacking.group_peak_estimated_frame_count",
     "stacking.group_clipped_frame_count",
     "stacking.frame_registration_rotation_deg",
+    "stacking.flat_dust_shadow_count",
+    "stacking.flat_light_dust_correlation_at_zero_offset",
+    "stacking.flat_light_correlation_outside_shadows",
+    "stacking.flat_light_search_excess_sigmas",
+    "stacking.flat_light_best_correlation",
+    "stacking.flat_light_best_shift_x_px",
+    "stacking.flat_light_best_shift_y_px",
+    "stacking.flat_light_best_rotation_deg",
+    "stacking.flat_light_displaced_correlation_std",
+    "stacking.light_dust_split_half_correlation",
 )
 
 # The astrometry metrics a stored summary cannot give. The share of the

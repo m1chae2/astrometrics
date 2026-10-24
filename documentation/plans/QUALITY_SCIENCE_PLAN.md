@@ -110,6 +110,28 @@ degrades 53 high-signal-to-noise spectra of 15 fields: the class gap reaches the
 0.02 in half of the cases from a signal-to-noise of 20, and the subtype is confidence-limited at this
 resolution. The line signal-to-noise is on the same scatter scale as the table. Evidence is in `AST-21`, `PHO-17` to `PHO-19` and `SPE-30` of the validation register.
 
+Status on 2026-10-24, batch S6 (branch `94-science-s6-flat-match`): built and run on the scratch
+copy, revised after the change control board. Section 2.2: the flat-to-light match for a stack,
+stored as parts in a call of its own. The question is whether the flats' dust shadows still match the
+lights (dust moved, added or cleaned); the shadows sit on the camera window, so the metric cannot see
+camera rotation. The stacking step keeps neither the master flat nor the calibrated lights, so both
+dust maps are rebuilt from the mean of up to 16 raw flats and up to 24 raw lights of the stack's
+members (8-pixel cells, bias subtracted from the lights, frames under 10 times the read noise left
+out, a disc around the target set aside, vignetting removed, stars set aside in two passes, a band
+pass of 16 and 240 pixels). Stored: the correlation at zero offset and with the flat's shadows masked
+(a control), the best shift, rotation and correlation, the search excess over a null built from the
+same search at displaced placements, the chance spread, the shadow count (a diagnostic only) and the
+lights' split-half repeatability. At real shadow depth (0.15 to 0.4%) the shift is recovered to 1.1
+pixel and the rotation to 0.19 degree (root mean square), and the placement limit of 3.1 null spreads
+is the 99th percentile on 101 unrelated pairs (1 above it). The flats and bias frames are recorded
+where the library selects them, a time limit (300 s) is checked before each frame, and the progress
+report says the step re-reads up to 45 frames. On 15 real groups five ASI groups give a placement
+within 2.3 pixels of zero; a Nikon correlation of 0.83 is carried by structure other than dust (the
+control and a flipped flat both score 0.8). The metrics are exploratory (review 2027-04-30), no group
+has a known displacement, and a gap remains: the ASI profile holds read noise only for gain 0, offset
+10 and the Nikon has none, so those stacks are stored as not measured. Evidence is in `STK-46` of the
+validation register.
+
 The second review of 2026-10-17 moved the observing values (guide error, pointing error, dew,
 Moon and airmass) out of the `astrometricslib` tables into `wayfindinglib` (section 2.5). It added
 the undersampling term, the spectroscopy class gap against SNR, the flat-noise check and the
@@ -192,7 +214,7 @@ channel, and the channel is part of the measurement's subject.
 
 | Metric | Definition | Decision it informs | Depends on | Data |
 | :--- | :--- | :--- | :--- | :--- |
-| Flat-to-light match | Correlation of dust-shadow positions between the master flat and the calibrated lights; camera rotation since the flats | Retake flats | Plate solution for the rotation | None |
+| Flat-to-light match | Do the flats' dust shadows still match the lights (dust moved, added or cleaned)? Correlation of the dust shadows between the mean of up to 16 raw flats and up to 24 raw lights, with the best shift and rotation of the shadow pattern. The shadows sit on the camera window, which turns with the sensor, so this cannot see camera rotation relative to the optics. | Take or retake flat frames (Calibration) | Raw flats and raw lights, the stack's bias frames and the camera profile's read noise; no plate solution | None |
 | Fixed pattern left after calibration | Fine-scale noise of the calibrated, undithered frames that repeats from frame to frame | Calibration or dithering | None | Undithered frame runs |
 | Master flat noise contribution | The noise the master flat adds to a calibrated stack, stored beside the stack's empty-aperture noise. A rule in `wayfindinglib` compares the two. | More flats | Master flat; empty-aperture stack noise | None |
 

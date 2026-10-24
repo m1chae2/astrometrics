@@ -32,6 +32,10 @@ from astrometricslib.pipelines.stacking.post_processing.expected_noise import (
     ExpectedNoise,
     ExpectedNoiseOutcome,
 )
+from astrometricslib.pipelines.stacking.post_processing.flat_match import (
+    FlatMatchOutcome,
+    flat_match_measurements,
+)
 from astrometricslib.pipelines.stacking.post_processing.flat_noise_contribution import (
     FlatNoiseContribution,
     FlatNoiseOutcome,
@@ -272,6 +276,29 @@ def stacking_emitted_measurements() -> list[QualityMeasurement]:
     )
     frame = FrameRecord(path="/frames/lights/M 99/Scope/Cam/a.fits", camera="Cam", exposure="60")
     measurements.extend(fixture_frame_geometry_rows(context))
+    measurements.extend(
+        flat_match_measurements(
+            FlatMatchOutcome(
+                flat_frame_count=16,
+                light_frame_count=24,
+                flat_shadow_count=9,
+                correlation_at_zero=0.31,
+                correlation_outside_shadows=0.12,
+                search_excess_sigmas=9.0,
+                best_correlation=0.35,
+                shift_x_px=-2.1,
+                shift_y_px=2.1,
+                rotation_deg=-0.17,
+                shift_x_uncertainty_px=0.2,
+                shift_y_uncertainty_px=0.1,
+                rotation_uncertainty_deg=0.01,
+                displaced_correlation_std=0.046,
+                split_half_correlation=0.81,
+            ),
+            context,
+            context.stack_subject("M99_Stacked.fits"),
+        )
+    )
     measurements.extend(
         night_measurements(
             context,

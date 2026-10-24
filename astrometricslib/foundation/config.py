@@ -514,6 +514,10 @@ class AppConfiguration:
                 "keep_previous_stack_enabled": "true",
                 "trim_noisy_stack_edges_enabled": "true",
                 "skip_unchanged_stacks_enabled": "true",
+                # Five minutes: the flat-to-light match read 16 flats and 24
+                # lights in 6 to 30 s from local disk (STK-46), so this is
+                # ten times the slowest local run, for a slow network mount.
+                "flat_match_time_limit_seconds": "300",
                 "auto_open_gui": "false",
             },
             "Processing": {
@@ -921,6 +925,28 @@ class AppConfiguration:
         """
         val = self.get_value("Processing.Siril", "skip_unchanged_stacks_enabled", fallback="true")
         return str(val).lower() == "true"
+
+    def get_flat_match_time_limit_seconds(self) -> float:
+        """Return how long the flat-to-light match may spend reading frames.
+
+        The match reads up to 16 flat and 24 light frames after a stack is
+        made (see ``pipelines/stacking/post_processing/flat_match.py``). The
+        limit is checked before each frame is read. When it is reached the
+        match is stored as not measured, with the number of frames read, and
+        the stack is not affected.
+
+        Returns
+        -------
+        seconds : `float`
+            The limit in seconds. 300 if the setting is missing or is not a
+            positive number.
+        """
+        raw = self.get_value("Processing.Siril", "flat_match_time_limit_seconds", fallback="300")
+        try:
+            seconds = float(raw)
+        except TypeError, ValueError:
+            return 300.0
+        return seconds if seconds > 0 else 300.0
 
     def get_prefetch_frames(self) -> bool:
         """Return whether frames are read into the mount's cache before Siril.

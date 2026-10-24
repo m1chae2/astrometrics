@@ -393,6 +393,12 @@ trim_noisy_stack_edges_enabled = "true"
 # stacks of the target. To rebuild anyway, pass --force-restack to the batch
 # script or force=True to run_stacking. Set "false" to rebuild every time.
 skip_unchanged_stacks_enabled = "true"
+# Seconds (the default is 300): the most time the flat-to-light match may spend
+# reading frames after a stack is made. It reads up to 16 flat and 24 light
+# frames and checks the clock before each one. If the limit is reached the match
+# is stored as "not measured" with the number of frames read. The stack itself is
+# not affected.
+flat_match_time_limit_seconds = "300"
 
 ["Processing.Parallelism"]
 target_workers = "auto"

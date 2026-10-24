@@ -25,7 +25,9 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from astrometricslib.drivers.calibration_library import (
+    BIAS_FRAME_PATHS_KEY,
     CALIBRATION_MATCH_BLOCKING_FLAGS_KEY,
+    FLAT_FRAME_PATHS_KEY,
     CalibrationSelection,
     format_binning,
     header_binning,
@@ -1529,6 +1531,10 @@ class ImageProcessing:
                     try:
                         os.symlink(item, os.path.join(target_folder, "biases", f"bias_{bias_idx:05d}.fits"))
                         bias_idx += 1
+                        # The library file behind the link, for the quality
+                        # step (the flat-to-light match reads the bias level
+                        # from these).
+                        self.last_run_diagnostics.setdefault(BIAS_FRAME_PATHS_KEY, []).append(item)
                     except OSError as e:
                         log(f"Error symlinking bias {item}: {e}")
 
@@ -1554,6 +1560,10 @@ class ImageProcessing:
                     try:
                         os.symlink(item, os.path.join(target_folder, "flats", f"flat_{flat_idx:05d}.fits"))
                         flat_idx += 1
+                        # The library file behind the link, so the quality
+                        # step can rebuild the flat's dust map from it (the
+                        # master flat is not kept).
+                        self.last_run_diagnostics.setdefault(FLAT_FRAME_PATHS_KEY, []).append(item)
                     except OSError as e:
                         log(f"Error symlinking flat {item}: {e}")
 

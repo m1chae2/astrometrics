@@ -16,7 +16,7 @@ from astrometricslib.pipelines.stacking.post_processing.flat_noise_contribution 
     flat_noise_contribution,
     smoothed_noise_factor,
 )
-from astrometricslib.pipelines.stacking.post_processing.stack_noise import signed_aperture_sum
+from astrometricslib.pipelines.stacking.post_processing.stack_image import signed_aperture_sum
 
 # The simulated spread of about 1500 sums has a relative error of 3%. The
 # sums include the sky ring's median, which the model leaves out and which adds

@@ -30,7 +30,7 @@ from astrometricslib.pipelines.stacking.post_processing.expected_noise import (
     gather_frame_noise_inputs,
     measure_stack_sky_level,
 )
-from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
+from astrometricslib.pipelines.stacking.post_processing.stack_image import (
     MAD_TO_SIGMA,
     signed_aperture_sum,
     sky_level_of_plane,

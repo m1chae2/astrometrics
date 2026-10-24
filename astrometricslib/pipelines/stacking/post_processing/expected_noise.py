@@ -83,7 +83,7 @@ from photutils.aperture import CircularAnnulus, CircularAperture
 from astrometricslib.drivers.fits_access import collapse_to_2d, read_data
 from astrometricslib.models.camera_profile import ProvenancedValue, ProvenanceKind
 from astrometricslib.models.quality.measurement import MeasurementStatus, QualityMeasurement
-from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
+from astrometricslib.pipelines.stacking.post_processing.stack_image import (
     APERTURE_RADIUS_PX,
     MEDIAN_ERROR_FACTOR,
     RING_INNER_PX,

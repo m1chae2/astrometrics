@@ -439,8 +439,9 @@ The systems engineer settled the findings; the user reviews those choices in the
 | The acceptance bound was set after the first run. | Astronomer | Derived from the stated errors (`STK-42`) |
 | Uncovered pixels inside an aperture read low. | Astronomer | Such apertures are dropped |
 
-Deferred: moving aperture placement and difference measurement out of `stack_noise.py` into their
-own modules (the file is about 2,400 lines). No findings were rejected.
+Deferred, then done as the issue's last step: aperture placement, the stack-image helpers and the
+difference measurement moved out of `stack_noise.py` into `empty_apertures.py`, `stack_image.py` and
+`difference_noise.py`, with no change of behavior. No findings were rejected.
 
 ## Appendix E. Review board changes, batch S3
 

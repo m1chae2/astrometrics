@@ -49,16 +49,16 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_HALF_DIFFERENCE_VARIANCE_FACTOR,
     STACKING_HALF_SHARED_FINE_SCALE_VARIANCE_RATIO,
 )
+from astrometricslib.pipelines.stacking.post_processing.difference_noise import (
+    measure_difference_noise,
+    save_noise_sums,
+)
+from astrometricslib.pipelines.stacking.post_processing.empty_apertures import APERTURE_FILE_NAME
 from astrometricslib.pipelines.stacking.post_processing.expected_noise import FrameNoiseInput
 from astrometricslib.pipelines.stacking.post_processing.half_pattern import PATTERN_ROW_NAMES
+from astrometricslib.pipelines.stacking.post_processing.stack_image import signed_aperture_sum
 from astrometricslib.pipelines.stacking.post_processing.stack_membership import effective_frame_count
-from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
-    APERTURE_FILE_NAME,
-    measure_difference_noise,
-    measure_stack_noise,
-    save_noise_sums,
-    signed_aperture_sum,
-)
+from astrometricslib.pipelines.stacking.post_processing.stack_noise import measure_stack_noise
 from astrometricslib.pipelines.stacking.subset_noise_run import (
     HALF_DIFFERENCE_MINIMUM_FRAMES_PER_HALF,
     difference_variance_factor,
@@ -672,11 +672,11 @@ def test_a_failure_building_the_pattern_rows_leaves_the_nine_difference_rows(
 
 def test_each_half_is_read_once_as_32_bit_and_shared(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The difference noise and the pattern use the same two planes."""
-    from astrometricslib.pipelines.stacking.post_processing import stack_noise
+    from astrometricslib.pipelines.stacking.post_processing import difference_noise
 
     reads: list[str] = []
     types: list[type] = []
-    real = stack_noise.read_stack_plane
+    real = difference_noise.read_stack_plane
 
     def counting(stack_path: str, dtype: type = np.float64) -> np.ndarray | None:
         """Read a plane and note the call.
@@ -690,7 +690,7 @@ def test_each_half_is_read_once_as_32_bit_and_shared(tmp_path: Path, monkeypatch
         types.append(dtype)
         return real(stack_path, dtype)
 
-    monkeypatch.setattr(stack_noise, "read_stack_plane", counting)
+    monkeypatch.setattr(difference_noise, "read_stack_plane", counting)
     monkeypatch.setattr(subset_noise_run, "read_stack_plane", counting)
     library = _Library(tmp_path)
     library.record_library_count(float(FRAME_COUNT))

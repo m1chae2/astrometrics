@@ -124,6 +124,15 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_NOISE_WITHOUT_NIGHT,
     STACKING_SUBSET_EXPECTED_NOISE_RATIO,
 )
+from astrometricslib.pipelines.stacking.post_processing.difference_noise import (
+    load_noise_sums,
+    measure_difference_noise,
+    paired_noise_difference,
+)
+from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
+    APERTURE_FILE_NAME,
+    load_apertures_with_reason,
+)
 from astrometricslib.pipelines.stacking.post_processing.expected_noise import ExpectedNoiseOutcome
 from astrometricslib.pipelines.stacking.post_processing.half_pattern import (
     PATTERN_ROW_NAMES,
@@ -144,6 +153,7 @@ from astrometricslib.pipelines.stacking.post_processing.record_science import (
     stack_sky_level_measurements,
 )
 from astrometricslib.pipelines.stacking.post_processing.registration_shifts import drift_of_runs
+from astrometricslib.pipelines.stacking.post_processing.stack_image import read_stack_plane
 from astrometricslib.pipelines.stacking.post_processing.stack_membership import (
     StackMembership,
     determine_stack_members,
@@ -151,15 +161,7 @@ from astrometricslib.pipelines.stacking.post_processing.stack_membership import 
     effective_frame_count,
     normalized_weights,
 )
-from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
-    APERTURE_FILE_NAME,
-    StackNoiseOutcome,
-    load_apertures_with_reason,
-    load_noise_sums,
-    measure_difference_noise,
-    paired_noise_difference,
-    read_stack_plane,
-)
+from astrometricslib.pipelines.stacking.post_processing.stack_noise import StackNoiseOutcome
 from astrometricslib.pipelines.stacking.pre_processing.stack_inputs import read_stack_inputs
 from astrometricslib.pipelines.stacking.subset_stack import (
     MINIMUM_SUBSET_FRAMES,
@@ -462,7 +464,8 @@ class LibraryRun:
     noise_sums : `tuple` or `None`
         The library stack's per-aperture noise sums, the reference flux they
         are read against and the identity of the apertures they were
-        measured in (see `stack_noise.load_noise_sums`); `None` when not saved.
+        measured in (see `difference_noise.load_noise_sums`); `None` when not
+        saved.
     store : `QualityStore` or `None`
         The quality store the run read, so later steps (the expected noise of
         each subset) read from it instead of opening their own.
@@ -1971,7 +1974,7 @@ def run_half_difference_noise(
     target's ``_subsets`` folder with the library stack's weighting and
     rejection, without the edge trim and the frame quarantine. The noise of
     the difference of the two stacks is measured in the target's stored empty
-    apertures (`stack_noise.measure_difference_noise`), and the rows are
+    apertures (`difference_noise.measure_difference_noise`), and the rows are
     stored on the library stack's own subject: the difference noise in stack
     units and normalized, the reference flux the normalized value divides by,
     each half's effective frame count, the variance factor, the variance

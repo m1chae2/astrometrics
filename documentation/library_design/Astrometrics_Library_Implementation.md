@@ -79,9 +79,9 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 - **Frame geometry (Quality §5.3).** `post_processing/field_rotation.py` (`field_rotation_measurements`) stores frame rotations. `shared/registration_record.py` keeps `<stack>_registration_frames.json` for astrometry (§4.2) and the one registration reader (`is_already_registered`). `record_quality.FrameGeometryRows` keeps rotation and pointing rows apart. Evidence: [STK-43](validation/stacking.md#stk-43).
 - **Input screening (§3.4.1).** `pre_processing/frame_quarantine.py`, `frame_homogeneity.py`, `background_homogeneity.py`, `camera_selection.py`, `assess_input_quality.py`.
 - **Output checks (§3.4.2).** `post_processing/assess_output_quality.py`, `stack_quality.py`, `exposure_group_report.py`, `stack_quality_report.py`.
-- **Stack measurements (Quality §4).** `stage._record_stack_quality` calls `record_stacking_quality` (`post_processing/record_quality.py`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.record_quality.record_stacking_quality --> The noise and weights come from `post_processing/stack_noise.py`, `stack_membership.py`, `expected_noise.py`, `flat_noise_contribution.py`, `record_science.py`. Evidence: [STK-36](validation/stacking.md#stk-36), [STK-07](validation/stacking.md#stk-07), [STK-38](validation/stacking.md#stk-38), [STK-39](validation/stacking.md#stk-39), [STK-40](validation/stacking.md#stk-40), [STK-41](validation/stacking.md#stk-41).
+- **Stack measurements (Quality §4).** `stage._record_stack_quality` calls `record_stacking_quality` (`post_processing/record_quality.py`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.record_quality.record_stacking_quality --> The noise and weights come from `post_processing/stack_noise.py`, `empty_apertures.py`, `difference_noise.py`, `stack_image.py`, `stack_membership.py`, `expected_noise.py`, `flat_noise_contribution.py`, `record_science.py`. Evidence: [STK-36](validation/stacking.md#stk-36), [STK-07](validation/stacking.md#stk-07), [STK-38](validation/stacking.md#stk-38), [STK-39](validation/stacking.md#stk-39), [STK-40](validation/stacking.md#stk-40), [STK-41](validation/stacking.md#stk-41).
 - **Subset stacks (Quality §4).** `subset_noise_run.py`, `subset_stack.stack_frame_subset`. Evidence: [STK-37](validation/stacking.md#stk-37).
-- **Half-difference noise (Quality §4.5).** Job `measure_half_difference_noise` runs `subset_noise_run.run_half_difference_noise`, which calls `stack_noise.measure_difference_noise` and stores nine metrics. Each half needs `HALF_DIFFERENCE_MINIMUM_FRAMES_PER_HALF` frames. Evidence: [STK-42](validation/stacking.md#stk-42).
+- **Half-difference noise (Quality §4.5).** Job `measure_half_difference_noise` runs `subset_noise_run.run_half_difference_noise`, which calls `difference_noise.measure_difference_noise` and stores nine metrics. Each half needs `HALF_DIFFERENCE_MINIMUM_FRAMES_PER_HALF` frames. Evidence: [STK-42](validation/stacking.md#stk-42).
 - **Half-stack pattern (Quality §4.6).** `post_processing/half_pattern.py`, called by `subset_noise_run._half_pattern_safely`. It adds eight rows to the difference's nine; `read_stack_plane` reads each half once for `measure_difference_noise`. Evidence: [STK-45](validation/stacking.md#stk-45).
 - **Registration step and drift (Quality §5.5).** `post_processing/registration_shifts.py`, called by `frame_geometry_measurements`. Evidence: [STK-44](validation/stacking.md#stk-44).
 
@@ -210,12 +210,12 @@ Tables 4 to 8 list each pipeline's tuned values and the section that explains it
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.half_pattern.WALKING_LAG_PX -->
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.half_pattern.MINIMUM_EXTENT_IN_LAGS -->
 
-<!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.FAINT_SOURCE_THRESHOLD_SIGMAS -->
-<!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.FAINT_SOURCE_SMOOTHING_SIGMAS_PX -->
-<!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.FAINT_SOURCE_HIGH_PASS_SIGMA_PX -->
-<!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.FAINT_SOURCE_CLEARANCE_PX -->
-<!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.MINIMUM_USABLE_APERTURES -->
-<!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.APERTURE_FILE_VERSION -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.FAINT_SOURCE_THRESHOLD_SIGMAS -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.FAINT_SOURCE_SMOOTHING_SIGMAS_PX -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.FAINT_SOURCE_HIGH_PASS_SIGMA_PX -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.FAINT_SOURCE_CLEARANCE_PX -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.MINIMUM_USABLE_APERTURES -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.APERTURE_FILE_VERSION -->
 <!-- impl: astrometricslib.pipelines.stacking.subset_noise_run.HALF_DIFFERENCE_MINIMUM_FRAMES_PER_HALF -->
 <!-- impl: astrometricslib.utilities.rejection_thresholds.rejection_bounds -->
 <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.FRAME_MEASUREMENT_TIME_BUDGET_SECONDS -->

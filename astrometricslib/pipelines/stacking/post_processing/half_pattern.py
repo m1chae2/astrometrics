@@ -1,11 +1,12 @@
 """Measures the fine-scale pattern that two half stacks of one target share.
 
-The half-stack difference (`stack_noise.measure_difference_noise`) subtracts
-one half stack from the other. It cancels everything the frames of both halves
-share, among them a pattern that is fixed on the sensor and that calibration
-did not remove, and it keeps the random noise. This file measures the other
-side: what the two halves have in common at the scale of a few pixels, in
-sky that holds no star or faint source. Nothing here repeats the difference.
+The half-stack difference (`difference_noise.measure_difference_noise`)
+subtracts one half stack from the other. It cancels everything the frames of
+both halves share, among them a pattern that is fixed on the sensor and that
+calibration did not remove, and it keeps the random noise. This file measures
+the other side: what the two halves have in common at the scale of a few
+pixels, in sky that holds no star or faint source. Nothing here repeats the
+difference.
 
 Why the common part can be a fixed pattern. Two halves hold different
 exposures, so their random noise is independent. A pattern that sits at the
@@ -24,14 +25,14 @@ the random noise.
 
 What else is shared. Sky structure at the same scale (very faint stars, fine
 nebula) is also common to the two halves. Sources found by the faint-source
-mask (`stack_noise.analyze_faint_sources`) are masked, but faint ones below its
-threshold stay. So the covariance is the part of any fixed pattern that stays
-coherent in both halves, plus faint sky; it is not a measurement of the sensor
-pattern. Sky structure does not move with the pointing; a sensor pattern is
-smeared along it. The walking-noise rows tell the two apart: they compare the
-correlation of the halves at one lag along the drift with the correlation at
-the same lag across it. A smeared sensor pattern is correlated along the drift
-and not across it. Sky structure is correlated the same way in both
+mask (`empty_apertures.analyze_faint_sources`) are masked, but faint ones below
+its threshold stay. So the covariance is the part of any fixed pattern that
+stays coherent in both halves, plus faint sky; it is not a measurement of the
+sensor pattern. Sky structure does not move with the pointing; a sensor pattern
+is smeared along it. The walking-noise rows tell the two apart: they compare
+the correlation of the halves at one lag along the drift with the correlation
+at the same lag across it. A smeared sensor pattern is correlated along the
+drift and not across it. Sky structure is correlated the same way in both
 directions, except that stars elongated along the drift (a trail) are also
 correlated more along it and add a positive excess.
 
@@ -83,7 +84,7 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_WALKING_NOISE_ALONG_CORRELATION,
     STACKING_WALKING_NOISE_CORRELATION_EXCESS,
 )
-from astrometricslib.pipelines.stacking.post_processing.stack_noise import analyze_faint_sources
+from astrometricslib.pipelines.stacking.post_processing.empty_apertures import analyze_faint_sources
 
 logger = logging.getLogger(__name__)
 

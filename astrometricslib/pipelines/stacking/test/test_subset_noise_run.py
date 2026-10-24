@@ -45,10 +45,8 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_NOISE_WITHOUT_NIGHT,
     STACKING_SUBSET_EXPECTED_NOISE_RATIO,
 )
-from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
-    APERTURE_FILE_NAME,
-    measure_stack_noise,
-)
+from astrometricslib.pipelines.stacking.post_processing.empty_apertures import APERTURE_FILE_NAME
+from astrometricslib.pipelines.stacking.post_processing.stack_noise import measure_stack_noise
 from astrometricslib.pipelines.stacking.subset_noise_run import (
     GrowthStep,
     expected_noise_ratio,
@@ -955,7 +953,7 @@ def test_each_subset_stores_its_expected_ratio_and_assumed_weights_make_it_assum
 
 def test_the_night_difference_is_paired_with_the_library_stacks_sums(tmp_path: Path) -> None:
     """With the library's sums saved, the difference has a paired error."""
-    from astrometricslib.pipelines.stacking.post_processing.stack_noise import save_noise_sums
+    from astrometricslib.pipelines.stacking.post_processing.difference_noise import save_noise_sums
 
     library = _Library(tmp_path, nights=3)
     library.record_library_weights({0: 1.0, 1: 1.0, 2: 1.0})
@@ -1034,7 +1032,7 @@ def test_a_version_two_aperture_file_is_refused_by_the_subsets_and_left_alone(tm
 
 def test_sums_saved_in_other_apertures_are_not_paired_with_a_subset(tmp_path: Path) -> None:
     """The guard compares identities, not names."""
-    from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
+    from astrometricslib.pipelines.stacking.post_processing.difference_noise import (
         noise_sums_path,
         save_noise_sums,
     )

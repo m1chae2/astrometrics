@@ -683,7 +683,7 @@ _NOISE_SAMPLE = (
     "sky rings share a pixel. A stack needs at least 20 usable apertures; with fewer clean apertures the "
     "noise is not measured. Sky structure too faint to flag (unresolved stars, a faint halo) stays in the "
     "apertures. The target keeps one set of "
-    "apertures for each camera and optic (see `stack_noise.reset_apertures`)."
+    "apertures for each camera and optic (see `empty_apertures.reset_apertures`)."
 )
 _NOISE_UNCERTAINTY = (
     "Statistical, 1 sigma: 1.1664 times the spread divided by sqrt(n) for n usable apertures. This is the "
@@ -928,7 +928,7 @@ _NIGHT_METRICS: tuple[MetricSpec, ...] = (
             "or belongs to other apertures."
         ),
         _NIGHT_SAMPLE + " Only the apertures usable on both stacks.",
-        "pipelines.stacking.post_processing.stack_noise.paired_noise_difference",
+        "pipelines.stacking.post_processing.difference_noise.paired_noise_difference",
         better=Direction.NONE,
         purpose_reason=_NIGHT_PURPOSE_REASON,
         uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
@@ -1020,7 +1020,7 @@ _HALF_DIFFERENCE_METRICS: tuple[MetricSpec, ...] = (
             "and every part of it is stored."
         ),
         _HALF_DIFFERENCE_SAMPLE,
-        "pipelines.stacking.post_processing.stack_noise.measure_difference_noise",
+        "pipelines.stacking.post_processing.difference_noise.measure_difference_noise",
         better=Direction.LOWER,
         purpose_reason=_HALF_DIFFERENCE_PURPOSE_REASON,
         uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
@@ -1041,7 +1041,7 @@ _HALF_DIFFERENCE_METRICS: tuple[MetricSpec, ...] = (
             + _HALF_DIFFERENCE_CANCELS
         ),
         _HALF_DIFFERENCE_SAMPLE,
-        "pipelines.stacking.post_processing.stack_noise.measure_difference_noise",
+        "pipelines.stacking.post_processing.difference_noise.measure_difference_noise",
         better=Direction.LOWER,
         purpose_reason=_HALF_DIFFERENCE_PURPOSE_REASON,
         uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
@@ -1087,7 +1087,7 @@ _HALF_DIFFERENCE_METRICS: tuple[MetricSpec, ...] = (
             "halves on the library stack's scale."
         ),
         "The fixed reference stars of the target that fall on the odd half stack and are not saturated.",
-        "pipelines.stacking.post_processing.stack_noise.measure_difference_noise",
+        "pipelines.stacking.post_processing.difference_noise.measure_difference_noise",
         better=Direction.NONE,
         purpose_reason=_HALF_DIFFERENCE_PURPOSE_REASON,
         uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
@@ -1422,7 +1422,7 @@ _SCIENCE_METRICS: tuple[MetricSpec, ...] = (
             "averaged over 16 places of the circle's centre inside a pixel: about 59 px for the stack's "
             "aperture. The pi / 2 assumes Gaussian noise in the ring."
         ),
-        "The one aperture shape of `stack_noise.py` (radius 4 px, ring 7 to 12 px).",
+        "The one aperture shape of `stack_image.py` (radius 4 px, ring 7 to 12 px).",
         "pipelines.stacking.post_processing.expected_noise.effective_aperture_area_px",
         purpose_reason=_EXPECTED_NOISE_PURPOSE_REASON,
         register_entry="STK-38",
@@ -1472,7 +1472,7 @@ _SCIENCE_METRICS: tuple[MetricSpec, ...] = (
             "noise is multiplied by, and it checks the unit scale against the sky the frames predict."
         ),
         "Every finite, nonzero pixel of the stack (a color stack has its channels averaged).",
-        "pipelines.stacking.post_processing.stack_noise.sky_level_of_plane",
+        "pipelines.stacking.post_processing.stack_image.sky_level_of_plane",
         purpose_reason=(
             "A part of `stacking.flat_noise_in_aperture_stack_unit` (the flat's noise is multiplied by the "
             "signal) and of the unit check; no decision uses the level itself."

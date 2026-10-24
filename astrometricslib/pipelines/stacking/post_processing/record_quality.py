@@ -84,6 +84,14 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_STACKED_FWHM_PX,
     STACKING_ZERO_PIXEL_FRACTION,
 )
+from astrometricslib.pipelines.stacking.post_processing.difference_noise import (
+    discard_noise_sums,
+    save_noise_sums,
+)
+from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
+    APERTURE_FILE_NAME,
+    StackDepth,
+)
 from astrometricslib.pipelines.stacking.post_processing.field_rotation import (
     MULTI_GROUP_REASON,
     UNMATCHED_REASON,
@@ -105,13 +113,9 @@ from astrometricslib.pipelines.stacking.post_processing.stack_membership import 
     registration_reference_from_diagnostics,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
-    APERTURE_FILE_NAME,
     NO_WCS_REASON,
-    StackDepth,
     StackNoiseOutcome,
-    discard_noise_sums,
     measure_stack_noise,
-    save_noise_sums,
 )
 
 logger = logging.getLogger(__name__)
@@ -871,7 +875,8 @@ def record_stacking_quality(
             membership_reason = f"the member frames could not be worked out: {type(error).__name__}"
         # The members are worked out first: their effective frame count says
         # how deep this stack is, which decides whether the stored apertures
-        # are kept or replaced (see `stack_noise.REPLACEMENT_DEPTH_FACTOR`).
+        # are kept or replaced (see
+        # `empty_apertures.REPLACEMENT_DEPTH_FACTOR`).
         noise = measure_noise_safely(
             stack_path,
             summary.stacking_metrics.registration_reference_frame,

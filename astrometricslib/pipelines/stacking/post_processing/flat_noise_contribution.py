@@ -52,7 +52,7 @@ import numpy as np
 from photutils.aperture import CircularAperture
 from scipy.ndimage import gaussian_filter
 
-from astrometricslib.pipelines.stacking.post_processing.stack_noise import APERTURE_RADIUS_PX
+from astrometricslib.pipelines.stacking.post_processing.stack_image import APERTURE_RADIUS_PX
 
 logger = logging.getLogger(__name__)
 
@@ -189,7 +189,7 @@ def flat_noise_contribution(
         it was. A width that is not a finite number gives no result.
     sky_level : `float` or `None`
         The stack's signal level in the stack's units (see
-        `stack_noise.sky_level_of_plane`).
+        `stack_image.sky_level_of_plane`).
 
     Returns
     -------

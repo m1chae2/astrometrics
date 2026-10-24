@@ -25,6 +25,7 @@ mapfile -t FILES < <(git ls-files \
     ':(glob)documentation/*.md' \
     ':(glob)documentation/how_to/*.md' \
     'documentation/library_design/*_Library_*.md' \
+    'documentation/library_design/Astrometrics_Quality_Measurements.md' \
     'documentation/user_interface/**/*.md' \
     'documentation/library_design/pipelines/*.md' \
     'documentation/library_design/validation/*.md')

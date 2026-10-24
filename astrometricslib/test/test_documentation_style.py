@@ -38,6 +38,7 @@ LIBRARY = REPO_ROOT / "astrometricslib"
 DESIGN_DIR = REPO_ROOT / "documentation" / "library_design"
 ARCHITECTURE = DESIGN_DIR / "Astrometrics_Library_Architecture.md"
 IMPLEMENTATION = DESIGN_DIR / "Astrometrics_Library_Implementation.md"
+QUALITY_MEASUREMENTS = DESIGN_DIR / "Astrometrics_Quality_Measurements.md"
 REGISTER_DIR = DESIGN_DIR / "validation"
 
 GLOSSARY_SENTENCE = "This document also defines each term the first time it appears."
@@ -156,6 +157,7 @@ def _documentation_files() -> list[Path]:
     files.update(docs.glob("*.md"))
     files.update((docs / "how_to").glob("*.md"))
     files.update(DESIGN_DIR.glob("Astrometrics_Library_*.md"))
+    files.add(QUALITY_MEASUREMENTS)
     files.update((DESIGN_DIR / "pipelines").glob("*.md"))
     files.update(REGISTER_DIR.glob("*.md"))
     return sorted(files)
@@ -300,15 +302,42 @@ def test_register_values_match_the_code() -> None:
     )
 
 
+def _numbered_sections(paper: Path) -> set[str]:
+    """List the section numbers a paper has.
+
+    Parameters
+    ----------
+    paper : `pathlib.Path`
+        A paper whose headings start with a number, such as ``## 3.2 Title``.
+
+    Returns
+    -------
+    sections : `set` [`str`]
+        The numbers of its second-, third- and fourth-level headings.
+    """
+    text = paper.read_text(encoding="utf-8")
+    return set(re.findall(r"^#{2,4} (\d+(?:\.\d+)*)\.? ", text, re.MULTILINE))
+
+
 def test_implementation_section_references_exist_in_the_architecture_paper() -> None:
-    """Each "§n" in the implementation document names a real section."""
-    architecture = ARCHITECTURE.read_text(encoding="utf-8")
-    sections = set(re.findall(r"^#{2,4} (\d+(?:\.\d+)*)\.? ", architecture, re.MULTILINE))
+    """Each "§n" in the implementation document names a real section.
+
+    A "§n" after the word "Quality" names a section of the quality
+    measurements paper. Every other "§n" names a section of the architecture
+    paper.
+    """
     text = IMPLEMENTATION.read_text(encoding="utf-8")
-    references = set(re.findall(r"§(\d+(?:\.\d+)*)", text))
-    unknown = sorted(reference for reference in references if reference not in sections)
-    assert references, "The implementation document cites no architecture sections"
+    quality_references = set(re.findall(r"Quality §(\d+(?:\.\d+)*)", text))
+    architecture_references = set(re.findall(r"(?<!Quality )§(\d+(?:\.\d+)*)", text))
+    architecture_sections = _numbered_sections(ARCHITECTURE)
+    quality_sections = _numbered_sections(QUALITY_MEASUREMENTS)
+    unknown = sorted(architecture_references - architecture_sections)
+    unknown_quality = sorted(quality_references - quality_sections)
+    assert architecture_references, "The implementation document cites no architecture sections"
     assert not unknown, f"Architecture sections cited by the implementation document do not exist: {unknown}"
+    assert not unknown_quality, (
+        f"Quality measurements sections cited by the implementation document do not exist: {unknown_quality}"
+    )
 
 
 def test_relative_links_and_anchors_resolve() -> None:
@@ -422,7 +451,11 @@ def test_numbered_equations_have_a_drawable_shape(path: Path) -> None:
     assert not problems, f"{path.relative_to(REPO_ROOT)}: {problems}"
 
 
-@pytest.mark.parametrize("path", sorted(DESIGN_DIR.glob("*_Library_*.md")), ids=lambda path: path.name)
+@pytest.mark.parametrize(
+    "path",
+    sorted([*DESIGN_DIR.glob("*_Library_*.md"), QUALITY_MEASUREMENTS]),
+    ids=lambda path: path.name,
+)
 def test_paper_equation_numbers_run_in_order(path: Path) -> None:
     """A paper numbers its equations 1, 2, 3 and so on, with no gaps."""
     numbers = EQUATION_TAG.findall(path.read_text(encoding="utf-8"))

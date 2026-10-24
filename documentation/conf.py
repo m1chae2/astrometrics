@@ -4,7 +4,7 @@ Includes PyData Sphinx Theme, numpydoc, sphinx-automodapi,
 MyST-NB notebook execution, and InterSphinx mappings to
 Astropy, NumPy, SciPy, and Matplotlib. It also sets up the site features a
 reader expects on Read the Docs: an "Edit on GitHub" button, the date each page
-last changed, a sitemap, a 404 page, and a PDF of the four papers.
+last changed, a sitemap, a 404 page, and a PDF of the five papers.
 """
 
 import json
@@ -140,7 +140,7 @@ latex_engine = "xelatex"
 # makeindex builds the index everywhere; xindy needs language modules that not
 # every TeX installation ships.
 latex_use_xindy = False
-# The PDF holds the four papers only (papers.rst), not the whole site: the API
+# The PDF holds the five papers only (papers.rst), not the whole site: the API
 # reference, the register and the guides are meant to be searched online.
 latex_documents = [("papers", "astrometrics-papers.tex", "Astrometrics papers", author, "manual")]
 
@@ -331,7 +331,7 @@ def _numbered_equations_unwrapped(app: Sphinx, doctree: nodes.document, docname:
 def _papers_page_for_print_only(app: Sphinx, env: BuildEnvironment, docnames: list[str]) -> None:
     """Leave the PDF's starting page out of every build except the PDF.
 
-    ``papers.rst`` lists the four papers so the PDF holds only them. The
+    ``papers.rst`` lists the five papers so the PDF holds only them. The
     website already lists the papers in its sections, so it must not read
     this page.
 

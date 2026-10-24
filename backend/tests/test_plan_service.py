@@ -230,3 +230,51 @@ async def test_a_stale_revision_is_a_conflict_and_announces_nothing(
     assert error["data"]["details"]["current_revision"] == 3
     assert "revision" in error["message"]
     assert sockets.events == []
+
+
+@pytest.mark.anyio
+async def test_a_malformed_tick_time_is_an_invalid_argument(plan_setup: tuple[_Planning, _Sockets]) -> None:
+    """A tick time that is not ISO 8601 is refused and nothing is announced."""
+    planning, sockets = plan_setup
+    response = await rpc_router.handle_rpc(
+        RPCRequest(
+            method="plan:tick_checklist_item",
+            params={"session_id": "night-1", "item_id": "item-1", "ticked_at": "last night"},
+            id=8,
+        )
+    )
+    error = json.loads(response.body)["error"]
+    assert error["data"]["code"] == "invalid_argument"
+    assert "ISO 8601" in error["message"]
+    assert planning.calls == []
+    assert sockets.events == []
+
+
+def test_a_write_that_changed_nothing_announces_nothing() -> None:
+    """When the revision did not move, no event is sent."""
+    sockets = _Sockets()
+    planning = _Planning()
+
+    def unchanged(session_id: str, **arguments: Any) -> PlanChange:
+        """Answer as the library does for an edit with nothing to change.
+
+        Returns
+        -------
+        change : `PlanChange`
+            A change whose revision equals the previous one.
+        """
+        return PlanChange(
+            session_id="night-1",
+            previous_revision=3,
+            revision=3,
+            changes=[PlanChangeItem(kind="checklist_already_present")],
+            session=planning._session(),
+        )
+
+    planning.edit_queue = unchanged
+    service = PlanService(SimpleNamespace(planning=planning), sockets)
+
+    change = service.edit_plan("night-1", add_checklist=[{"rule": "focus"}])
+
+    assert change.revision == 3
+    assert sockets.events == []

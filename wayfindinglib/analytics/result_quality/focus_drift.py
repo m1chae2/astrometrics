@@ -21,6 +21,17 @@ is fitted. Each autofocus run starts a new segment with its own best width;
 all segments share one slope. Frames before the first autofocus run are not
 used, because their best focus is not known.
 
+The slope here is the slope of the defocus blur added in quadrature, not the
+slope of a straight line through width against temperature. Far from best
+focus the two agree, because the width then approaches
+``slope * |T - T_start|``.
+Near best focus, where the allowed 5% increase lies, the width grows only as
+the square of the temperature change, so a straight-line fit of width against
+temperature over that range gives a smaller number than `slope`
+(``(sqrt(best^2 + slope^2 dT^2) - best) / dT`` at the change dT). Compare the
+two only with that in mind; the validation of this fit against a linear
+px/degC slope is in the validation register.
+
 The allowed width increase comes from an efficiency budget. For a faint star
 in a sky-limited frame, the time needed to reach a depth grows as the square
 of the star width, so an efficiency of at least 0.9 allows the width to grow
@@ -88,15 +99,27 @@ ALLOWED_WIDTH_RATIO = MINIMUM_SEEING_EFFICIENCY**-0.5
 # airmass to the power 1.2. Design estimate, register entry WAY-D11.
 SEEING_SQUARED_AIRMASS_EXPONENT = 1.2
 
-# The number of resamples of the frames used for the error of the slope, and
-# the seed that makes the error repeat. 200 resamples give the error to about
-# 5% of itself. Design estimate, register entry WAY-D10.
+# The number of resamples used for the error of the slope, and the seed that
+# makes the error repeat. 200 resamples give the error to about 5% of itself.
+# Design estimate, register entry WAY-D10.
 BOOTSTRAP_RESAMPLES = 200
 BOOTSTRAP_SEED = 20261024
 
-# A slope counts as found only when it is this many times its error. Two
-# standard errors is the usual level for "not noise". Design estimate,
-# register entry WAY-D10.
+# Frames of one segment are not independent: the temperature, the seeing and
+# the focus all change slowly, so neighboring frames resemble each other.
+# Resampling single frames would give an error that is too small. The
+# bootstrap therefore resamples blocks. With at least this many segments, whole
+# segments are the blocks. With fewer, there are too few segments to draw
+# from, so blocks of `BOOTSTRAP_BLOCK_LENGTH` consecutive frames inside each
+# segment are drawn. Design estimate, register entry WAY-D10.
+MINIMUM_SEGMENTS_FOR_SEGMENT_BOOTSTRAP = 3
+BOOTSTRAP_BLOCK_LENGTH = 5
+
+# The squared slope counts as found only when it is this many times its error.
+# The fit is linear in the squared slope, so its error is well behaved near
+# zero; the slope itself is a square root and is not. The test is one-sided
+# (the squared slope cannot be negative), so two standard errors is a false
+# alarm of about 2.3%. Design estimate, register entry WAY-D10.
 SIGNIFICANCE_SIGMAS = 2.0
 
 # The share of bootstrap resamples that must give a usable fit. With
@@ -281,6 +304,51 @@ def _fit_squared_width(
     return coefficients, int(rank)
 
 
+def _resample_blocks(
+    segment_index: np.ndarray, segment_count: int, generator: np.random.Generator
+) -> tuple[np.ndarray, np.ndarray]:
+    """Draw one block-bootstrap resample of the frames.
+
+    Parameters
+    ----------
+    segment_index : `numpy.ndarray`
+        The segment number of each frame. Frames of one segment are next to
+        each other and in time order.
+    segment_count : `int`
+        The number of segments.
+    generator : `numpy.random.Generator`
+        The random source.
+
+    Returns
+    -------
+    pick, segments : `tuple` [`numpy.ndarray`, `numpy.ndarray`]
+        The frame positions drawn and the segment number each drawn frame
+        belongs to. With at least `MINIMUM_SEGMENTS_FOR_SEGMENT_BOOTSTRAP`
+        segments, whole segments are drawn with replacement and a segment drawn
+        twice becomes two segments (each with its own best width). With
+        fewer, runs of `BOOTSTRAP_BLOCK_LENGTH` consecutive frames are drawn
+        inside each segment, which keeps their segment number.
+    """
+    members = [np.flatnonzero(segment_index == number) for number in range(segment_count)]
+    if segment_count >= MINIMUM_SEGMENTS_FOR_SEGMENT_BOOTSTRAP:
+        drawn = generator.integers(0, segment_count, size=segment_count)
+        pick = np.concatenate([members[number] for number in drawn])
+        segments = np.concatenate([
+            np.full(len(members[number]), position) for position, number in enumerate(drawn)
+        ])
+        return pick, segments
+    picks = []
+    segments_list = []
+    for number, frames in enumerate(members):
+        length = min(BOOTSTRAP_BLOCK_LENGTH, len(frames))
+        block_count = math.ceil(len(frames) / length)
+        starts = generator.integers(0, len(frames) - length + 1, size=block_count)
+        chosen = np.concatenate([frames[start : start + length] for start in starts])
+        picks.append(chosen)
+        segments_list.append(np.full(len(chosen), number))
+    return np.concatenate(picks), np.concatenate(segments_list)
+
+
 def fit_focus_drift(
     samples: Sequence[FocusFrameSample], autofocus_times: Sequence[datetime]
 ) -> FocusDriftResult:
@@ -341,10 +409,10 @@ def fit_focus_drift(
             largest_change = max(largest_change, abs(change))
             segment_index.append(position)
             temperature_term.append(change**2)
-            if airmass_used:
+            if frame.airmass is not None and start.airmass is not None:
                 airmass_term.append(
-                    frame.airmass**SEEING_SQUARED_AIRMASS_EXPONENT  # type: ignore[operator]
-                    - start.airmass**SEEING_SQUARED_AIRMASS_EXPONENT  # type: ignore[operator]
+                    frame.airmass**SEEING_SQUARED_AIRMASS_EXPONENT
+                    - start.airmass**SEEING_SQUARED_AIRMASS_EXPONENT
                 )
             squared_width.append(frame.star_width_px**2)
             used_samples.append(frame)
@@ -375,18 +443,21 @@ def fit_focus_drift(
 
     generator = np.random.default_rng(BOOTSTRAP_SEED)
     boot_slopes: list[float] = []
+    boot_squared_slopes: list[float] = []
     for _ in range(BOOTSTRAP_RESAMPLES):
-        pick = generator.integers(0, len(widths), size=len(widths))
+        pick, boot_segments = _resample_blocks(indices, segment_count, generator)
         boot = _fit_squared_width(
-            indices[pick],
-            segment_count,
+            boot_segments,
+            int(boot_segments.max()) + 1,
             temperature[pick],
             airmass[pick] if airmass is not None else None,
             widths[pick],
         )
         if boot is None or boot[1] < column_count:
             continue
-        boot_slopes.append(math.sqrt(max(float(boot[0][segment_count]), 0.0)))
+        boot_squared = float(boot[0][int(boot_segments.max()) + 1])
+        boot_squared_slopes.append(boot_squared)
+        boot_slopes.append(math.sqrt(max(boot_squared, 0.0)))
     if len(boot_slopes) < MINIMUM_VALID_BOOTSTRAP_SHARE * BOOTSTRAP_RESAMPLES:
         return _insufficient(
             f"Only {len(boot_slopes)} of {BOOTSTRAP_RESAMPLES} resamples of the frames gave a usable fit, "
@@ -394,6 +465,7 @@ def fit_focus_drift(
             dropped,
         )
     slope_error = float(np.std(boot_slopes, ddof=1))
+    squared_slope_error = float(np.std(boot_squared_slopes, ddof=1))
 
     best_squared = [float(value) for value in coefficients[:segment_count] if value > 0.0]
     best_width = math.sqrt(statistics.median(best_squared)) if best_squared else None
@@ -422,12 +494,13 @@ def fit_focus_drift(
         "airmass_used": airmass_used,
         "evidence": evidence,
     }
-    if squared_slope <= 0.0 or slope < SIGNIFICANCE_SIGMAS * slope_error or best_width is None:
+    if squared_slope < SIGNIFICANCE_SIGMAS * squared_slope_error or best_width is None:
         return FocusDriftResult(
             status=FocusDriftStatus.NO_DRIFT_DETECTED,
             reason=(
-                f"The width grows by {slope:.2f} px per degree C, which is less than "
-                f"{SIGNIFICANCE_SIGMAS:g} times its error of {slope_error:.2f}: no drift beyond the noise."
+                f"The squared slope is {squared_slope:.3f} px^2 per degree C squared, which is less than "
+                f"{SIGNIFICANCE_SIGMAS:g} times its error of {squared_slope_error:.3f}: no drift beyond "
+                f"the noise (the slope would be {slope:.2f} px per degree C)."
             ),
             **common,
         )

@@ -13,6 +13,9 @@ taken on one target, and what to take next (`QUALITY_METRICS_PLAN.md` section
 * the checklist items the user ticked, returned when the measurements taken
   since show the fix did not work.
 
+What the whole library knows (site, references, sky models, frame
+observations) is read by the shared builder, ``library_inputs``.
+
 Missing data is said, never skipped: a rule that could not be checked gives an
 ``insufficient_data`` statement with its reason. All reading is done in
 ``target_report_inputs``; this module only decides and assembles.
@@ -45,25 +48,41 @@ from astrometricslib import (
     MeasurementReference,
     QualityMeasurement,
     Target,
+    frame_is_spectral,
     observing_night_id,
+    resolve_camera_profile,
 )
 from wayfindinglib.analytics.result_quality.aggregates import (
     MeasuredNoiseCheck,
     capture_setting_summaries,
     loss_account,
 )
-from wayfindinglib.analytics.result_quality.capture_overheads import estimate_capture_overheads
+from wayfindinglib.analytics.result_quality.capture_overheads import (
+    AUTOFOCUS_RUNS_PER_HOUR,
+    DITHER_EVERY_FRAMES,
+    estimate_capture_overheads,
+    wall_clock_estimate,
+)
 from wayfindinglib.analytics.result_quality.efficiency import (
     READ_NOISE_METRIC,
     SKY_RATE_METRIC,
     STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC,
     FrameObservation,
     assess_efficiency,
+    baseline_key,
 )
 from wayfindinglib.analytics.result_quality.judge_results import (
     judge_results,
     needs_attention,
     order_statements,
+)
+from wayfindinglib.analytics.result_quality.library_inputs import (
+    UNKNOWN_SETTING_CAMERA,
+    LibraryInputs,
+    build_target_observations,
+    dominant_setting,
+    set_aside_reasons,
+    target_direction,
 )
 from wayfindinglib.analytics.result_quality.noise_growth import (
     APERTURE_NOISE_ERROR_FACTOR,
@@ -74,15 +93,16 @@ from wayfindinglib.analytics.result_quality.noise_growth import (
 )
 from wayfindinglib.analytics.result_quality.reply_budget import (
     EVIDENCE_STEPS,
-    MAXIMUM_REPLY_CHARACTERS,
+    fit_reply,
     limit_statement_evidence,
-    reply_characters,
+    reply_budget,
 )
 from wayfindinglib.analytics.result_quality.report_rules import (
     AltitudeSample,
     LightFrameGroup,
     altitude_cost_statement,
     calibration_gap_statement,
+    duration_text,
     find_altitude_cost,
     find_calibration_gaps,
     find_sharpness_tradeoff,
@@ -99,6 +119,7 @@ from wayfindinglib.analytics.result_quality.rules import (
     MINIMUM_SKY_TO_READ_NOISE_RATIO,
     STAR_WIDTH_MOFFAT_ARCSEC_METRIC,
 )
+from wayfindinglib.analytics.result_quality.science_goal import science_goal_for_target
 from wayfindinglib.analytics.result_quality.starting_point import (
     StartingPointInputs,
     build_starting_point,
@@ -120,19 +141,14 @@ from wayfindinglib.models.quality.statements import (
 )
 from wayfindinglib.tasks.planning_tasks.target_report_inputs import (
     QUARANTINE_METRICS,
-    LibraryContext,
     TargetRows,
     assign_stacks_to_settings,
-    build_observations,
     frame_altitudes,
     frame_sensor_temperatures,
     median_or_none,
     read_calibration_rows,
-    read_set_aside_frames,
     read_target_rows,
-    science_goal_for,
     sessions_of_target,
-    target_direction,
 )
 
 logger = logging.getLogger(__name__)
@@ -153,10 +169,6 @@ STARTING_POINT_MINIMUM_ALTITUDE_DEG = 30.0
 """The starting point uses the moonless sky at times the target stands at least
 this high (about an airmass of 2), because that is when it would be imaged.
 Design estimate, register row WAY-D67."""
-
-UNKNOWN_SETTING_CAMERA = "unknown capture setting"
-"""The camera name `frame_observations_from_measurements` gives a frame whose
-rows carry no capture setting. A copy of its private constant."""
 
 SPECTRUM_RULE_NAME = "spectrum_snr"
 PHOTOMETRY_RULE_NAME = "photometry_precision"
@@ -341,9 +353,7 @@ def context_readings(
     return readings
 
 
-def fit_report_to_budget(
-    report: TargetDatasetReport, budget: int = MAXIMUM_REPLY_CHARACTERS
-) -> TargetDatasetReport:
+def fit_report_to_budget(report: TargetDatasetReport, budget: int | None = None) -> TargetDatasetReport:
     """Shrink the report until its JSON fits the reply budget.
 
     Two things can go, in this order. First the context section, which is only
@@ -358,7 +368,8 @@ def fit_report_to_budget(
     report : `TargetDatasetReport`
         The finished report.
     budget : `int`, optional
-        The most characters its compact JSON may have.
+        The most characters its JSON may have, measured the way the MCP tool
+        registry measures a reply. `reply_budget` when omitted.
 
     Returns
     -------
@@ -366,23 +377,40 @@ def fit_report_to_budget(
         The same report when it fits. Otherwise a smaller copy; when even the
         smallest step does not fit, that smallest copy.
     """
-    if reply_characters(report) <= budget:
-        return report
-    fitted = report.model_copy(
-        update={
-            "context": [],
-            "context_omitted_reason": (
-                "The context readings were left out so the report fits the reply budget of "
-                f"{budget:,} characters. The statements still cite the rows they used; read "
-                "any metric with QualityRecords.query."
-            ),
-        }
-    )
-    for keep in EVIDENCE_STEPS:
-        if reply_characters(fitted) <= budget:
-            break
-        fitted = fitted.model_copy(update={"statements": limit_statement_evidence(fitted.statements, keep)})
-    return fitted
+    limit = reply_budget() if budget is None else budget
+
+    def shrink(current: TargetDatasetReport, round_number: int) -> TargetDatasetReport | None:
+        """Make the report one step smaller.
+
+        Parameters
+        ----------
+        current : `TargetDatasetReport`
+            The report so far.
+        round_number : `int`
+            0 drops the context; later rounds cut the evidence lists.
+
+        Returns
+        -------
+        smaller : `TargetDatasetReport` or `None`
+            The smaller report, or ``None`` when nothing is left to cut.
+        """
+        if round_number == 0:
+            return current.model_copy(
+                update={
+                    "context": [],
+                    "context_omitted_reason": (
+                        "The context readings were left out so the report fits the reply budget of "
+                        f"{limit:,} characters. The statements still cite the rows they used; read "
+                        "any metric with QualityRecords.query."
+                    ),
+                }
+            )
+        if round_number > len(EVIDENCE_STEPS):
+            return None
+        keep = EVIDENCE_STEPS[round_number - 1]
+        return current.model_copy(update={"statements": limit_statement_evidence(current.statements, keep)})
+
+    return fit_reply(report, shrink, limit)
 
 
 def _measured_noise_checks(
@@ -464,61 +492,51 @@ def _weight_effective_seconds(
 
 
 def _set_aside_parts(
-    target: Target,
-    set_aside_frames: Sequence[Any],
+    reasons_by_frame: Mapping[str, str],
     observations: Sequence[FrameObservation],
     rows: Sequence[QualityMeasurement],
 ) -> tuple[
-    dict[str, str],
     dict[CaptureSetting, Counter],
     dict[CaptureSetting, list[MeasurementReference]],
     Counter,
 ]:
-    """Match the set-aside frames with the frames that were measured.
+    """Match the set-aside frames with the measured frames.
 
     Parameters
     ----------
-    target : `Target`
-        The target.
-    set_aside_frames : `Sequence` [`SetAsideFrame`]
-        The frames the stacker moved out of the stack.
+    reasons_by_frame : `Mapping` [`str`, `str`]
+        The reason of each set-aside frame, by frame subject id
+        (`set_aside_reasons`).
     observations : `Sequence` [`FrameObservation`]
-        The frames with stored measurements (before they were marked).
+        The frames with stored measurements.
     rows : `Sequence` [`QualityMeasurement`]
         The target's stored rows.
 
     Returns
     -------
-    reasons_by_frame, reasons_by_setting, evidence_by_setting, unassigned
-        : `tuple`
-        The reason of each matched frame; the reasons counted for each
-        setting; the stored quarantine rows of the matched frames for each
-        setting; and the reasons counted for frames no stored measurement
-        could place.
+    reasons_by_setting, evidence_by_setting, unassigned : `tuple`
+        The reasons counted for each setting; the stored quarantine rows of
+        the matched frames for each setting; and the reasons counted for
+        frames no stored measurement could place.
     """
-    from astrometricslib import frame_subject_id
-
     by_id = {observation.frame_id: observation for observation in observations}
     quarantine_rows: dict[str, list[QualityMeasurement]] = defaultdict(list)
     for row in rows:
         if row.metric in QUARANTINE_METRICS:
             quarantine_rows[row.subject.subject_id].append(row)
-    reasons_by_frame: dict[str, str] = {}
     reasons_by_setting: dict[CaptureSetting, Counter] = defaultdict(Counter)
     evidence_by_setting: dict[CaptureSetting, list[MeasurementReference]] = defaultdict(list)
     unassigned: Counter = Counter()
-    for frame in set_aside_frames:
-        frame_id = frame_subject_id(frame.original_path, target.id)
+    for frame_id, reason in reasons_by_frame.items():
         observation = by_id.get(frame_id)
         if observation is None or observation.capture_setting.camera == UNKNOWN_SETTING_CAMERA:
-            unassigned[frame.kind] += 1
+            unassigned[reason] += 1
             continue
-        reasons_by_frame[frame_id] = frame.kind
-        reasons_by_setting[observation.capture_setting][frame.kind] += 1
+        reasons_by_setting[observation.capture_setting][reason] += 1
         evidence_by_setting[observation.capture_setting].extend(
             _references(quarantine_rows.get(frame_id, []))
         )
-    return reasons_by_frame, reasons_by_setting, evidence_by_setting, unassigned
+    return reasons_by_setting, evidence_by_setting, unassigned
 
 
 def _stack_frames(
@@ -609,7 +627,11 @@ def _more_frames_for_setting(
         if problems:
             reason += " First problem: " + problems[0]
         return [insufficient("more_frames", reason, setting)]
-    mode = predict_weighting_mode(configured_weight, [frame.exposure_seconds for frame in frames])
+    mode = predict_weighting_mode(
+        configured_weight,
+        [frame.exposure_seconds for frame in frames],
+        is_spectral=frame_is_spectral({"filter": setting.filter_name}),
+    )
     if mode == WeightingMode.WFWHM and any(frame.star_width is None for frame in frames):
         return [
             insufficient(
@@ -646,30 +668,61 @@ def _more_frames_for_setting(
         if row.subject.subject_id in used_ids and row.metric in (SKY_RATE_METRIC, READ_NOISE_METRIC)
     ])
     statement = more_frames_statement(result, setting, overheads, evidence, exposure_note=note)
-    if statement is None:
+    if statement is None or result.frames_needed is None or result.new_exposure_seconds is None:
         return [
             insufficient("more_frames", result.reason or "The number of frames could not be found.", setting)
         ]
-    return [statement]
+    return [_with_full_wall_clock(statement, result.frames_needed, result.new_exposure_seconds, overheads)]
 
 
-def _dominant_setting(summaries: Sequence[Any]) -> CaptureSetting | None:
-    """Find the setting that holds the most captured time.
+def _with_full_wall_clock(
+    statement: TargetStatement, frame_count: int, exposure_seconds: float, overheads: Any
+) -> TargetStatement:
+    """Price the new frames with their dithers and autofocus runs as well.
+
+    The rule that builds the statement prices downloads only. Tonight's
+    ranking also prices dithers and autofocus runs, with the cadence of
+    `DITHER_EVERY_FRAMES` and `AUTOFOCUS_RUNS_PER_HOUR`. The two must price an
+    hour of imaging the same way, so the wall-clock time and the sentence that
+    states it are redone here with the same cadence.
 
     Parameters
     ----------
-    summaries : `Sequence` [`CaptureSettingSummary`]
-        The setting summaries.
+    statement : `TargetStatement`
+        The "take N more" recommendation.
+    frame_count : `int`
+        Frames to take.
+    exposure_seconds : `float`
+        Exposure of each.
+    overheads : `CaptureOverheads`
+        Download, settle and autofocus times.
 
     Returns
     -------
-    setting : `CaptureSetting` or `None`
-        The setting with the most captured seconds, or ``None`` with no
-        summaries.
+    statement : `TargetStatement`
+        A copy with the full wall-clock time in its message and effect.
     """
-    if not summaries:
-        return None
-    return max(summaries, key=lambda summary: summary.captured_seconds).capture_setting
+    downloads_only = wall_clock_estimate(frame_count, exposure_seconds, overheads)
+    without_focus = wall_clock_estimate(
+        frame_count, exposure_seconds, overheads, dither_every_frames=DITHER_EVERY_FRAMES
+    )
+    # One autofocus run for each hour of imaging, counting a part hour as one.
+    focus_runs = max(1, math.ceil(without_focus.total_seconds / 3600.0 * AUTOFOCUS_RUNS_PER_HOUR))
+    full = wall_clock_estimate(
+        frame_count,
+        exposure_seconds,
+        overheads,
+        dither_every_frames=DITHER_EVERY_FRAMES,
+        autofocus_runs=focus_runs,
+    )
+    old_text = duration_text(downloads_only.total_seconds) + " with downloads"
+    new_text = duration_text(full.total_seconds) + " with downloads, dithers and refocusing"
+    update: dict[str, Any] = {"message": statement.message.replace(old_text, new_text)}
+    if statement.expected_effect is not None:
+        update["expected_effect"] = statement.expected_effect.model_copy(
+            update={"wall_clock_seconds": full.total_seconds}
+        )
+    return statement.model_copy(update=update)
 
 
 def _quality_statements_of_settings(
@@ -680,7 +733,7 @@ def _quality_statements_of_settings(
     summaries: Sequence[Any],
     runs: Sequence[Any],
     stack_settings: Mapping[str, int],
-    context: LibraryContext,
+    context: LibraryInputs,
     config: Any,
     contexts_for_overheads: Sequence[Any],
 ) -> list[TargetStatement]:
@@ -705,7 +758,7 @@ def _quality_statements_of_settings(
         The target's library stack runs.
     stack_settings : `Mapping` [`str`, `int`]
         The setting id of each stack.
-    context : `LibraryContext`
+    context : `LibraryInputs`
         Library-wide references.
     config : `AppConfiguration`
         The configuration, for the stacker's weight mode.
@@ -724,7 +777,7 @@ def _quality_statements_of_settings(
     configured_weight = config.get_stack_weight() if hasattr(config, "get_stack_weight") else None
     stopped = False
     signal = target_stop_signal(runs) if runs else None
-    dominant = _dominant_setting(summaries)
+    dominant = dominant_setting(observations)
     if signal is not None and signal.stopped:
         stopped = True
         evidence = [
@@ -764,7 +817,11 @@ def _quality_statements_of_settings(
         frames, used, _problems = _stack_frames(setting_observations)
         widths = [_width_row_value(target_rows.rows, observation.frame_id) for observation in used]
         if frames and all(width is not None for width in widths):
-            mode = predict_weighting_mode(configured_weight, [frame.exposure_seconds for frame in frames])
+            mode = predict_weighting_mode(
+                configured_weight,
+                [frame.exposure_seconds for frame in frames],
+                is_spectral=frame_is_spectral({"filter": setting.filter_name}),
+            )
             tradeoff = find_sharpness_tradeoff(frames, [float(w) for w in widths if w is not None], mode)
             if tradeoff is not None:
                 statements.append(
@@ -1024,21 +1081,101 @@ def _camera_spellings(camera_name: str, config: Any) -> list[str]:
     return list(dict.fromkeys(name for name in names if name))
 
 
-def _starting_point(target: Target, context: LibraryContext, config: Any, at: datetime) -> StartingPoint:
+def _provenance_text(value: Any) -> str:
+    """Say where a camera profile value came from.
+
+    Parameters
+    ----------
+    value : `ProvenancedValue`
+        A profile value that carries its provenance.
+
+    Returns
+    -------
+    text : `str`
+        The kind (measured, datasheet, assumed) and the source.
+    """
+    return f"{value.provenance.kind}: {value.provenance.source}"
+
+
+def _clipping_note(camera_name: str, config: Any, goal: ScienceGoal) -> str:
+    """Write what is known about the camera's limits and the star's peak.
+
+    The numbers come from the camera's stored profile and are never typed in
+    here: the clip ceiling (where a saturated pixel tops out), the saturation
+    threshold (where a raw frame counts a pixel as saturated) and the
+    photometric linearity limit (where brightness stops being proportional to
+    light), each with its source.
+
+    Parameters
+    ----------
+    camera_name : `str`
+        The active camera.
+    config : `AppConfiguration`
+        The configuration that holds the camera profiles.
+    goal : `ScienceGoal`
+        The target's goal. A slitless spectrum is capped by its zero-order
+        image, a different star peak, and says so.
+
+    Returns
+    -------
+    note : `str`
+        Why no cap is computed, and the camera's limits.
+    """
+    if goal == ScienceGoal.SLITLESS_SPECTRAL_RESOLUTION:
+        note = (
+            "Not computed. A slitless spectrum is capped by the zero-order image of the brightest star, "
+            "which keeps a share of the star's light in one point. That share depends on the grating, "
+            "and no stored measurement gives it, so the zero-order peak cannot be predicted."
+        )
+    else:
+        note = (
+            "Not computed. No photometric zero point that is not exploratory exists, so the star's peak "
+            "cannot be predicted."
+        )
+    try:
+        profile = resolve_camera_profile(camera_name, config)
+    except AstrometricsError:
+        return note + " The camera's saturation limits are not known."
+    clip, saturation = profile.clip_ceiling_adu, profile.saturation_threshold_adu
+    note += (
+        f" The camera's pixels top out at {clip.value:.0f} ADU ({_provenance_text(clip)}); a raw frame "
+        f"counts a pixel as saturated at or above {saturation.value:.0f} ADU "
+        f"({_provenance_text(saturation)})."
+    )
+    if not profile.saturation_threshold_can_be_reached:
+        note += (
+            " The threshold is above the ceiling, so no pixel can reach it and saturation would go unseen."
+        )
+    linearity = profile.photometric_linearity_limit_adu
+    if linearity is not None:
+        note += (
+            f" Brightness stops being proportional to light above {linearity.value:.0f} ADU "
+            f"({_provenance_text(linearity)})."
+        )
+    return note
+
+
+def _starting_point(
+    target: Target, goal: ScienceGoal, context: LibraryInputs, config: Any, at: datetime
+) -> StartingPoint:
     """Build the starting point of a target with no frames.
 
-    The equipment is the active camera and telescope. The sky rate is the
-    sky model's moonless prediction at the times in the next day when the
-    target stands above `STARTING_POINT_MINIMUM_ALTITUDE_DEG`; without a model
-    it is the median of the library's own sky rates for that equipment, which
-    includes the Moon. The read noise is the median measured read noise of the
-    equipment's library frames.
+    The equipment is the active camera. The capture setting is the one the
+    camera's library frames use most among those that suit the goal (the
+    spectroscopy filter for a spectrum, any other filter otherwise). The sky
+    rate is the sky model's moonless prediction at the times in the next day
+    when the target stands above `STARTING_POINT_MINIMUM_ALTITUDE_DEG`;
+    without a model it is the median of the library's own sky rates for that
+    equipment, which includes the Moon. The read noise is the median measured
+    read noise of the equipment's library frames.
 
     Parameters
     ----------
     target : `Target`
         The target.
-    context : `LibraryContext`
+    goal : `ScienceGoal`
+        The target's goal, read from its type.
+    context : `LibraryInputs`
         Library-wide frames and sky model.
     config : `AppConfiguration`
         The configuration, for the active equipment.
@@ -1050,8 +1187,6 @@ def _starting_point(target: Target, context: LibraryContext, config: Any, at: da
     starting_point : `StartingPoint`
         The starting point. It is labeled a design estimate.
     """
-    from wayfindinglib.analytics.envelope_assembly import sensor_limits_for_camera
-    from wayfindinglib.analytics.result_quality.efficiency import baseline_key
     from wayfindinglib.analytics.result_quality.observing_values import sky_geometry
     from wayfindinglib.analytics.result_quality.sky_model import predict_sky_rate
     from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
@@ -1089,7 +1224,20 @@ def _starting_point(target: Target, context: LibraryContext, config: Any, at: da
             f"The library holds no measured frames from the camera {camera.name}, so the sky and the "
             "read noise are not known for it."
         )
-    best_setting = Counter(o.capture_setting for o in observations).most_common(1)[0][0]
+    wants_spectral = goal == ScienceGoal.SLITLESS_SPECTRAL_RESOLUTION
+    suited = [
+        o
+        for o in observations
+        if frame_is_spectral({"filter": o.capture_setting.filter_name}) == wants_spectral
+    ]
+    goal_note = ""
+    if not suited:
+        suited = observations
+        goal_note = (
+            f" The camera has no {'spectroscopy' if wants_spectral else 'imaging'} frames in the library, "
+            "so the setting does not suit the target's goal."
+        )
+    best_setting = Counter(o.capture_setting for o in suited).most_common(1)[0][0]
     key = baseline_key(best_setting)
     same_equipment = [o for o in observations if baseline_key(o.capture_setting) == key]
     read_noise = median_or_none(o.read_noise_e for o in same_equipment)
@@ -1145,27 +1293,16 @@ def _starting_point(target: Target, context: LibraryContext, config: Any, at: da
             )
         elif not sky_note:
             sky_note = f"No measured sky rate exists for {key}."
-    clipping_note = (
-        "No photometric zero point that is not exploratory exists, so the star's peak cannot be predicted."
-    )
-    try:
-        limits = sensor_limits_for_camera(camera.name, config)
-        clipping_note += (
-            f" The camera clips at {limits.clip_ceiling_adu:.0f} ADU ({limits.clip_ceiling_source}), "
-            f"below its saturation threshold of {limits.saturation_threshold_adu:.0f} ADU."
-        )
-    except AstrometricsError:
-        clipping_note += " The camera's saturation limits are not known."
     return build_starting_point(
         StartingPointInputs(
             capture_setting=best_setting,
             sky_rate_e_per_s_per_px=sky_rate,
-            sky_note=sky_note,
+            sky_note=sky_note + goal_note,
             read_noise_e=read_noise,
             read_noise_note=read_note,
             peak_rate_adu_per_s=None,
             room_adu=None,
-            clipping_note=clipping_note,
+            clipping_note=_clipping_note(camera.name, config, goal),
         )
     )
 
@@ -1217,9 +1354,11 @@ def build_target_dataset_report(
     now = at or datetime.now(UTC)
     target_rows = read_target_rows(astrometrics, target.id)
     rows = target_rows.rows
-    goal, _goal_reason = science_goal_for(target)
-    context = LibraryContext(astrometrics, butler, config)
+    goal = science_goal_for_target(target)
+    context = LibraryInputs(astrometrics, butler, config)
     statements: list[TargetStatement] = []
+    notes: list[str] = []
+    configured_weight = config.get_stack_weight() if hasattr(config, "get_stack_weight") else None
 
     # Stack history: the stop signal, the forecast checks and the stack map.
     stack_rows: list[QualityMeasurement] = []
@@ -1237,15 +1376,23 @@ def build_target_dataset_report(
     target_rows.notes.extend(assignment_notes)
     stack_setting_by_subject = dict(stack_settings)
 
-    # Set-aside frames and the frames' observations.
-    set_aside_frames, set_aside_problem = read_set_aside_frames(astrometrics, target.id)
-    unmarked = build_observations(target, target_rows, {})
-    reasons_by_frame, reasons_by_setting, evidence_by_setting, unassigned = _set_aside_parts(
-        target, set_aside_frames, unmarked, rows
+    # Set-aside frames (the rows that say so) and the frames' observations.
+    reasons_by_frame = set_aside_reasons(rows)
+    observations = build_target_observations(target, rows, target_rows.settings, reasons_by_frame)
+    reasons_by_setting, evidence_by_setting, unassigned = _set_aside_parts(
+        reasons_by_frame, observations, rows
     )
-    observations = build_observations(target, target_rows, reasons_by_frame)
-    if set_aside_problem is not None:
-        statements.append(insufficient(FRAMES_LOST_RULE_NAME, set_aside_problem))
+    if reasons_by_frame:
+        notes.append(
+            f"{len(reasons_by_frame)} frames are recorded as moved to the _excluded folder. The stored row "
+            "says they were set aside but not why (clouded or trailed), so the reason shown is the row's own "
+            "words."
+        )
+    else:
+        notes.append(
+            "No frame is recorded as set aside in the stored rows. The stacker does not store set-aside "
+            "frames one by one, so the set-aside time may be higher than shown."
+        )
 
     # Summaries.
     moonless = context.moonless_sky_rates(observations)
@@ -1280,8 +1427,14 @@ def build_target_dataset_report(
             summary.model_copy(update={"loss_account": result.account}) if result is not None else summary
         )
     summaries = refreshed
+    notes.extend(
+        context.reference_notes([summary.capture_setting for summary in summaries], observations, goal)
+    )
     for note in context.notes:
-        statements.append(insufficient(EFFICIENCY_RULE_NAME, note))
+        if note.startswith("No efficiency reference"):
+            statements.append(insufficient(EFFICIENCY_RULE_NAME, note))
+        else:
+            notes.append(note)
 
     # Plain rules, then the rules that need a join or a fit.
     statements.extend(
@@ -1328,10 +1481,14 @@ def build_target_dataset_report(
     statements = _checklist_returns(statements, sessions_of_target(butler, target.id), rows)
 
     starting_point = None
-    if not observations and not set_aside_frames:
-        starting_point = _starting_point(target, context, config, now)
+    if not observations:
+        starting_point = _starting_point(target, goal, context, config, now)
 
-    forecast_checks: list[ForecastCheck] = forecast_check(runs, observations) if len(runs) >= 2 else []
+    forecast_checks: list[ForecastCheck] = (
+        forecast_check(runs, observations, configured_stack_weight=configured_weight)
+        if len(runs) >= 2
+        else []
+    )
     ordered = order_statements(statements)
     report = TargetDatasetReport(
         targetId=target.id,
@@ -1339,6 +1496,7 @@ def build_target_dataset_report(
         statements=ordered,
         needsAttention=needs_attention(ordered),
         startingPoint=starting_point,
+        notes=notes,
         forecastChecks=forecast_checks,
         scienceOutcomes=_science_outcomes(target, rows),
         context=context_readings(

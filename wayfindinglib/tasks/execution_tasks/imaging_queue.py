@@ -143,8 +143,8 @@ def imaging_dependencies(control: ObservatoryControl, butler: DiskButler) -> Ses
     """
 
     def checkpoint(session: ObservationSession) -> None:
-        """Save the session."""
-        butler.put(session, "observation_session", {"session_id": session.id})
+        """Save the session, keeping what Planning changed meanwhile."""
+        butler.put_session_from_execution(session)
 
     def actions(entry: QueuedObservationPackage) -> list[ActionDisposition]:
         """Return the one action of an entry: slew to its target.

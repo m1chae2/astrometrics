@@ -206,7 +206,7 @@ def _rotation_samples(
         epoch = START + 3 * 3600 + index * span_hours * 3600 / (count - 1)
         hour = math.radians(hour_angle_deg(300.0, location, Time(epoch, format="unix", scale="utc")))
         rotation = 0.3 + math.degrees(
-            math.cos(math.radians(dec)) * (altitude_error * math.sin(hour) - east_west_error * math.cos(hour))
+            (altitude_error * math.sin(hour) - east_west_error * math.cos(hour)) / math.cos(math.radians(dec))
         )
         out.append(
             ov.RotationSample(
@@ -216,14 +216,17 @@ def _rotation_samples(
     return out
 
 
-def test_polar_alignment_fit_recovers_the_error_over_a_long_span() -> None:
-    """Over 5 hours both parts are separated.
+@pytest.mark.parametrize("dec", [33.0, 60.0])
+def test_polar_alignment_fit_recovers_the_error_over_a_long_span(dec: float) -> None:
+    """Over 5 hours both parts are separated, at declination 33 and 60 degrees.
 
-    The total matches (exploratory).
+    The rotation rate goes as 1/cos(dec), so a model with cos(dec) in the
+    numerator recovers the wrong size at these declinations. The total
+    matches (exploratory).
     """
     altitude, east_west = math.radians(20 / 60), math.radians(30 / 60)
-    samples = _rotation_samples(altitude, east_west, 5.0) + _rotation_samples(
-        altitude, east_west, 4.0, run="r2"
+    samples = _rotation_samples(altitude, east_west, 5.0, dec=dec) + _rotation_samples(
+        altitude, east_west, 4.0, run="r2", dec=dec
     )
     estimate = ov.polar_alignment_from_rotation(samples, LATITUDE, LONGITUDE, ELEVATION)
     assert estimate.exploratory
@@ -233,11 +236,12 @@ def test_polar_alignment_fit_recovers_the_error_over_a_long_span() -> None:
     assert estimate.azimuth_error_arcmin == pytest.approx(30 / math.cos(math.radians(LATITUDE)), rel=0.05)
 
 
-def test_polar_alignment_over_a_short_span_is_only_a_lower_bound() -> None:
+@pytest.mark.parametrize("dec", [33.0, 60.0])
+def test_polar_alignment_over_a_short_span_is_only_a_lower_bound(dec: float) -> None:
     """A one-hour run gives a lower bound that does not exceed the truth."""
     altitude, east_west = math.radians(20 / 60), math.radians(30 / 60)
     estimate = ov.polar_alignment_from_rotation(
-        _rotation_samples(altitude, east_west, 1.0), LATITUDE, LONGITUDE, ELEVATION
+        _rotation_samples(altitude, east_west, 1.0, dec=dec), LATITUDE, LONGITUDE, ELEVATION
     )
     assert estimate.kind == "lower_bound"
     assert 0.0 < estimate.total_error_arcmin <= math.hypot(20, 30) * 1.02
@@ -249,3 +253,40 @@ def test_polar_alignment_with_too_few_samples_says_insufficient() -> None:
         _rotation_samples(0.01, 0.01, 3.0, count=4), LATITUDE, LONGITUDE, ELEVATION
     )
     assert estimate.kind == "insufficient_data"
+
+
+def test_moon_phase_function_follows_krisciunas_and_schaefer() -> None:
+    """The phase function is 1 at full Moon and about 0.09 at quarter phase."""
+    assert sm.moon_phase_function(0.0) == pytest.approx(1.0)
+    assert sm.moon_phase_function(90.0) == pytest.approx(0.091, abs=0.003)
+    assert sm.moon_phase_function(90.0) > sm.moon_phase_function(150.0)
+    assert sm.moon_phase_angle_deg(1.0) == pytest.approx(0.0)
+    assert sm.moon_phase_angle_deg(0.5) == pytest.approx(90.0)
+
+
+def test_moon_term_uses_the_moons_own_extinction_and_phase() -> None:
+    """A low Moon is dimmer than a high one, a quarter Moon than full."""
+
+    def term(altitude: float, illumination: float) -> float:
+        """Give the Moon term for a Moon at an altitude and lit fraction.
+
+        Returns
+        -------
+        term : `float`
+            The third model feature.
+        """
+        geometry = ov.SkyGeometry(
+            epoch_seconds=0.0,
+            altitude_deg=60.0,
+            airmass=ov.airmass_from_altitude(60.0),
+            moon_altitude_deg=altitude,
+            moon_separation_deg=60.0,
+            moon_illumination_fraction=illumination,
+        )
+        features = sm.sky_features(geometry)
+        assert features is not None
+        return features[2]
+
+    assert term(-5.0, 1.0) == pytest.approx(0.0)
+    assert term(10.0, 1.0) < term(70.0, 1.0)
+    assert term(70.0, 0.5) / term(70.0, 1.0) == pytest.approx(0.091, abs=0.003)

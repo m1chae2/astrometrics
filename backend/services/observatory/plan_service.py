@@ -10,7 +10,9 @@ connected app window, so any open screen can read the plan again.
 The event payload is ``{sessionId, revision, changed}``. ``revision`` is the
 plan revision now stored. ``changed`` lists the kind of each change the write
 made, such as ``queue_added`` or ``checklist_ticked``. Reads send no event.
-A write that names an out-of-date revision stores nothing and sends no event;
+A write that changes nothing (for example, adding a checklist item that is
+already on the list) keeps the revision and sends no event. A write that
+names an out-of-date revision stores nothing and sends no event;
 the library raises a conflict error, and this service lets it pass up so the
 caller gets the ``conflict`` error code with the current revision in its
 details.
@@ -23,6 +25,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
+from astrometricslib import InvalidArgumentError
 from wayfindinglib import PlanChange
 
 logger = logging.getLogger(__name__)
@@ -141,8 +144,19 @@ class PlanService:
         -------
         change : `PlanChange`
             The new revision and the tick.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If `ticked_at` is not an ISO 8601 time.
         """
-        moment = datetime.fromisoformat(ticked_at) if ticked_at else None
+        try:
+            moment = datetime.fromisoformat(ticked_at) if ticked_at else None
+        except ValueError as error:
+            raise InvalidArgumentError(
+                f"ticked_at must be an ISO 8601 time, such as 2026-10-24T22:30:00+00:00; got {ticked_at!r}.",
+                details={"ticked_at": ticked_at},
+            ) from error
         change = self.wayfinder.planning.tick_checklist_item(
             session_id,
             item_id,
@@ -162,6 +176,9 @@ class PlanService:
             What the library returned for the write.
         """
         if self._socket_manager is None:
+            return
+        if change.revision == change.previous_revision:
+            # Nothing was stored, so there is nothing to announce.
             return
         self._socket_manager.broadcast_ui_event_sync(
             "plan:changed",

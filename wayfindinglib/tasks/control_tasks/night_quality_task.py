@@ -15,6 +15,13 @@ the science library, the recorded guiding runs and Ekos sessions, and the
 configuration. It asks the mount for nothing, starts no job and copies no log.
 Nothing is stored.
 
+The inputs (site, references, sky models, frame observations) come from the
+shared builder, ``library_inputs``, the same one the target report and
+tonight's ranking use. The reviewed night is left out of its own efficiency
+baseline. The focus drift (luminance frames, with the autofocus runs of the
+stored Ekos records) and an exploratory polar-alignment estimate (from the
+field rotation, grouped by guiding run) are worked out for the whole night.
+
 Three honest limits are written into the result:
 
 * A frame the stacker set aside is counted only when a stored row says it was
@@ -28,148 +35,79 @@ Three honest limits are written into the result:
 
 from __future__ import annotations
 
+import bisect
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from astrometricslib import (
     CaptureSetting,
+    FilterType,
+    MeasurementReference,
+    MeasurementStatus,
     NotFoundError,
     QualityMeasurement,
     SubjectLevel,
     Target,
 )
 from wayfindinglib.analytics.result_quality.aggregates import DataSummary, SetAsideInput, night_summary
-from wayfindinglib.analytics.result_quality.efficiency import (
-    PINNED_METRIC_VERSIONS,
-    SKY_RATE_METRIC,
-    FrameObservation,
-    ReferenceOutcome,
-    baseline_key,
-    baseline_reference,
-    build_baseline_nights,
-    frame_observations_from_measurements,
-    physical_reference,
+from wayfindinglib.analytics.result_quality.allowed_capture_values import filter_names_match
+from wayfindinglib.analytics.result_quality.efficiency import frame_observations_from_measurements
+from wayfindinglib.analytics.result_quality.focus_drift import (
+    FocusFrameSample,
+    fit_focus_drift,
+    focus_drift_statement,
 )
 from wayfindinglib.analytics.result_quality.judge_results import (
     judge_results,
     needs_attention,
     order_statements,
 )
+from wayfindinglib.analytics.result_quality.library_inputs import (
+    LibraryInputs,
+    set_aside_reasons,
+    times_and_directions,
+)
+from wayfindinglib.analytics.result_quality.observing_values import (
+    FrameObservingInputs,
+    PolarAlignmentEstimate,
+    RotationSample,
+    observing_values,
+    polar_alignment_from_rotation,
+)
 from wayfindinglib.analytics.result_quality.reply_budget import (
     EVIDENCE_STEPS,
-    MAXIMUM_REPLY_CHARACTERS,
+    fit_reply,
     limit_statement_evidence,
-    reply_characters,
+    reply_budget,
 )
+from wayfindinglib.analytics.result_quality.rules import FOCUSER_TEMPERATURE_METRIC, STAR_WIDTH_PIXELS_METRIC
 from wayfindinglib.analytics.result_quality.science_goal import science_goal_for_target
-from wayfindinglib.analytics.result_quality.sky_samples import (
-    collect_sky_samples,
-    fit_sky_models,
-    frame_times,
-    moonless_sky_rates,
-    target_direction,
-)
-from wayfindinglib.data_access.site_profile_reader import configured_observer_location
-from wayfindinglib.models.quality.efficiency import EfficiencyReference
 from wayfindinglib.models.quality.statements import TargetStatement
-from wayfindinglib.models.session.night_quality import GuidingNightSummary, NightQuality, NightTargetQuality
+from wayfindinglib.models.session.ekos_session import EkosSessionContext
+from wayfindinglib.models.session.guiding_run import GuidingRunSummary
+from wayfindinglib.models.session.night_quality import (
+    GuidingNightSummary,
+    NightFocusDrift,
+    NightPolarAlignment,
+    NightQuality,
+    NightTargetQuality,
+)
 from wayfindinglib.tasks.control_tasks import night_analysis
 
 if TYPE_CHECKING:
     from wayfindinglib.api.control.context import ControlContext
 
-SET_ASIDE_MARKER = "_excluded"
-"""Text in a row's ``action_taken`` that says the stacker moved the frame to
-its ``_excluded`` folder (``"frame moved to _excluded/"``). Design estimate,
-register row WAY-D75."""
-
 NIGHT_QUALITY_ENTRY = "WAY-74"
 """Register entry behind the night review."""
 
+ROTATION_METRIC = "stacking.frame_registration_rotation_deg"
+"""The exploratory frame metric that the polar-alignment estimate reads."""
 
-def set_aside_reasons(rows: Iterable[QualityMeasurement]) -> dict[str, str]:
-    """Find the frames that stored rows say were set aside.
-
-    Parameters
-    ----------
-    rows : `Iterable` [`QualityMeasurement`]
-        Frame-level rows of the night.
-
-    Returns
-    -------
-    reasons : `dict` [`str`, `str`]
-        The reason by frame id: the row's own words.
-    """
-    reasons: dict[str, str] = {}
-    for row in rows:
-        if (
-            row.subject.level == SubjectLevel.FRAME
-            and row.action_taken
-            and SET_ASIDE_MARKER in row.action_taken
-        ):
-            reasons.setdefault(row.subject.subject_id, row.action_taken)
-    return reasons
-
-
-def make_reference_provider(
-    observations: Sequence[FrameObservation],
-    aperture_mm: float | None,
-    typical_seeing_fwhm_arcsec: float | None,
-) -> Callable[[CaptureSetting], EfficiencyReference | None]:
-    """Build the function that gives the efficiency reference for a setting.
-
-    The reference is the user's own baseline for the equipment (the 10th
-    percentile of the per-night medians over all measured nights, needing at
-    least 3 nights). When there are too few nights, it is the physical
-    reference of the telescope, when the telescope's aperture and the pixel
-    scale are known. Otherwise there is no reference, and the setting is named
-    in the summary's notes. This choice is a design estimate (register row
-    WAY-D76).
-
-    Parameters
-    ----------
-    observations : `Sequence` [`FrameObservation`]
-        The measured frames of every night.
-    aperture_mm : `float` or `None`
-        The imaging telescope's clear aperture, in millimeters.
-    typical_seeing_fwhm_arcsec : `float` or `None`
-        The site's typical good-night star width, if the site profile has it.
-
-    Returns
-    -------
-    reference_for : `Callable`
-        Gives the reference of a capture setting, or ``None``.
-    """
-    by_key: dict[str, list[FrameObservation]] = defaultdict(list)
-    for observation in observations:
-        by_key[baseline_key(observation.capture_setting)].append(observation)
-    cache: dict[str, EfficiencyReference | None] = {}
-
-    def reference_for(setting: CaptureSetting) -> EfficiencyReference | None:
-        """Give the reference for a capture setting.
-
-        Parameters
-        ----------
-        setting : `CaptureSetting`
-            The setting.
-
-        Returns
-        -------
-        reference : `EfficiencyReference` or `None`
-            The baseline, else the physical reference, else ``None``.
-        """
-        key = baseline_key(setting)
-        if key not in cache:
-            outcome: ReferenceOutcome = baseline_reference(build_baseline_nights(by_key.get(key, [])), key)
-            if outcome.reference is None:
-                outcome = physical_reference(
-                    aperture_mm, setting.pixel_scale_arcsec, typical_seeing_fwhm_arcsec
-                )
-            cache[key] = outcome.reference
-        return cache[key]
-
-    return reference_for
+FOCUS_FILTER = FilterType.L
+"""The filter whose frames the focus drift is fitted to. Each filter has its
+own best focus, so frames of different filters must not share one fit."""
 
 
 def _guiding_summary(context: ControlContext, night_id: str) -> GuidingNightSummary:
@@ -314,9 +252,7 @@ def _target_quality(
     )
 
 
-def fit_night_quality_to_budget(
-    quality: NightQuality, budget: int = MAXIMUM_REPLY_CHARACTERS
-) -> NightQuality:
+def fit_night_quality_to_budget(quality: NightQuality, budget: int | None = None) -> NightQuality:
     """Shorten the evidence lists until the review fits the reply budget.
 
     Parameters
@@ -324,7 +260,8 @@ def fit_night_quality_to_budget(
     quality : `NightQuality`
         The finished review.
     budget : `int`, optional
-        The most characters its compact JSON may have.
+        The most characters its JSON may have, measured the way the MCP tool
+        registry measures a reply. `reply_budget` when omitted.
 
     Returns
     -------
@@ -333,27 +270,237 @@ def fit_night_quality_to_budget(
         fewer references each (``EVIDENCE_STEPS``, in turn) and count what
         they lost; a note says it was done. No statement is removed.
     """
-    if reply_characters(quality) <= budget:
-        return quality
-    fitted = quality
-    for keep in EVIDENCE_STEPS:
-        targets = [
-            entry.model_copy(update={"statements": limit_statement_evidence(entry.statements, keep)})
-            for entry in quality.targets
-        ]
-        fitted = quality.model_copy(
+    limit = reply_budget() if budget is None else budget
+    note = (
+        f"The evidence lists of the statements were cut to fit the reply budget of {limit:,} characters. "
+        "Read the rows with QualityRecords.query."
+    )
+
+    def shrink(current: NightQuality, round_number: int) -> NightQuality | None:
+        """Cut the evidence lists one step shorter.
+
+        Parameters
+        ----------
+        current : `NightQuality`
+            The review so far.
+        round_number : `int`
+            Which step of ``EVIDENCE_STEPS`` to apply.
+
+        Returns
+        -------
+        smaller : `NightQuality` or `None`
+            The shorter review, or ``None`` when no step is left.
+        """
+        if round_number >= len(EVIDENCE_STEPS):
+            return None
+        keep = EVIDENCE_STEPS[round_number]
+        return current.model_copy(
             update={
-                "targets": targets,
-                "notes": [
-                    *quality.notes,
-                    "The evidence lists of the statements were cut to fit the reply budget of "
-                    f"{budget:,} characters. Read the rows with QualityRecords.query.",
+                "targets": [
+                    entry.model_copy(update={"statements": limit_statement_evidence(entry.statements, keep)})
+                    for entry in current.targets
                 ],
+                "night_statements": limit_statement_evidence(current.night_statements, keep),
+                "notes": current.notes if note in current.notes else [*current.notes, note],
             }
         )
-        if reply_characters(fitted) <= budget:
-            break
-    return fitted
+
+    return fit_reply(quality, shrink, limit)
+
+
+def _latest_values(rows: Iterable[QualityMeasurement], metric: str) -> dict[str, QualityMeasurement]:
+    """Pick the newest measured row of a metric for each frame.
+
+    Parameters
+    ----------
+    rows : `Iterable` [`QualityMeasurement`]
+        Frame rows.
+    metric : `str`
+        The metric.
+
+    Returns
+    -------
+    latest : `dict` [`str`, `QualityMeasurement`]
+        The newest row with a value, by frame subject id.
+    """
+    latest: dict[str, QualityMeasurement] = {}
+    for row in rows:
+        if (
+            row.metric != metric
+            or row.subject.level != SubjectLevel.FRAME
+            or row.status != MeasurementStatus.MEASURED
+            or row.value is None
+        ):
+            continue
+        current = latest.get(row.subject.subject_id)
+        if current is None or (row.measured_at, row.row_id or 0) >= (
+            current.measured_at,
+            current.row_id or 0,
+        ):
+            latest[row.subject.subject_id] = row
+    return latest
+
+
+def _focus_drift_for_night(
+    night_rows: Sequence[QualityMeasurement],
+    settings: Mapping[int, CaptureSetting],
+    epochs: Mapping[str, float],
+    directions: Mapping[str, tuple[float, float]],
+    contexts: Sequence[EkosSessionContext],
+    inputs: LibraryInputs,
+) -> tuple[Any, list[TargetStatement]]:
+    """Fit the focus drift of the night's luminance frames.
+
+    The frames are those with a star width in pixels, a focuser temperature
+    and a time. The autofocus runs are the successful runs of the stored Ekos
+    records of the night (those through the luminance filter, else those that
+    name no filter).
+
+    Parameters
+    ----------
+    night_rows : `Sequence` [`QualityMeasurement`]
+        The night's rows.
+    settings : `Mapping` [`int`, `CaptureSetting`]
+        Every capture setting by id.
+    epochs, directions : `Mapping`
+        The middle of each frame's exposure and where it points, by frame id.
+    contexts : `Sequence` [`EkosSessionContext`]
+        The night's stored Ekos records.
+    inputs : `LibraryInputs`
+        Gives the observing site (for the airmass).
+
+    Returns
+    -------
+    result, statements : `tuple`
+        The fit result and the statement it makes (empty when the data show
+        no drift).
+    """
+    widths = _latest_values(night_rows, STAR_WIDTH_PIXELS_METRIC)
+    temperatures = _latest_values(night_rows, FOCUSER_TEMPERATURE_METRIC)
+    frame_ids = [
+        frame_id
+        for frame_id, row in widths.items()
+        if frame_id in temperatures
+        and frame_id in epochs
+        and row.subject.capture_setting_id in settings
+        and settings[row.subject.capture_setting_id].filter_name
+        and filter_names_match(settings[row.subject.capture_setting_id].filter_name, FOCUS_FILTER)
+    ]
+    airmass_by_frame: dict[str, float] = {}
+    if frame_ids and all(frame_id in directions for frame_id in frame_ids):
+        site = inputs.site
+        values = observing_values(
+            [
+                FrameObservingInputs(
+                    frame_id=frame_id,
+                    start_epoch_seconds=epochs[frame_id],
+                    requested_ra_deg=directions[frame_id][0],
+                    requested_dec_deg=directions[frame_id][1],
+                )
+                for frame_id in frame_ids
+            ],
+            site.latitude_deg,
+            site.longitude_deg,
+            site.elevation_m,
+        )
+        airmass_by_frame = {
+            value.frame_id: value.geometry.airmass
+            for value in values
+            if value.geometry is not None and value.geometry.airmass is not None
+        }
+    samples = [
+        FocusFrameSample(
+            captured_at=datetime.fromtimestamp(epochs[frame_id], tz=UTC),
+            focuser_temperature_degc=temperatures[frame_id].value,
+            star_width_px=widths[frame_id].value,
+            airmass=airmass_by_frame.get(frame_id),
+            evidence=MeasurementReference(row_id=widths[frame_id].row_id)
+            if widths[frame_id].row_id is not None
+            else None,
+        )
+        for frame_id in frame_ids
+        if widths[frame_id].value and widths[frame_id].value > 0.0
+    ]
+    runs = [run for record in contexts for run in record.autofocus_runs if run.succeeded]
+    through_filter = [
+        run for run in runs if run.filter_name and filter_names_match(run.filter_name, FOCUS_FILTER)
+    ]
+    chosen = through_filter or [run for run in runs if not run.filter_name]
+    times = [datetime.fromtimestamp(run.timestamp, tz=UTC) for run in chosen]
+    result = fit_focus_drift(samples, times)
+    statement = focus_drift_statement(result)
+    return result, [statement] if statement is not None else []
+
+
+def _polar_alignment_for_night(
+    night_rows: Sequence[QualityMeasurement],
+    epochs: Mapping[str, float],
+    directions: Mapping[str, tuple[float, float]],
+    runs: Sequence[GuidingRunSummary],
+    inputs: LibraryInputs,
+    target_by_frame: Mapping[str, str],
+) -> tuple[PolarAlignmentEstimate | None, list[str]]:
+    """Estimate the polar-alignment error from the field rotation of the night.
+
+    Each frame belongs to the guiding run that was running at its time, and
+    each run (of each target) has its own rotation zero point. The estimate is
+    exploratory and no rule uses it.
+
+    Parameters
+    ----------
+    night_rows : `Sequence` [`QualityMeasurement`]
+        The night's rows.
+    epochs, directions : `Mapping`
+        The middle of each frame's exposure and where it points, by frame id.
+    runs : `Sequence` [`GuidingRunSummary`]
+        The night's stored guiding runs.
+    inputs : `LibraryInputs`
+        Gives the observing site.
+    target_by_frame : `Mapping` [`str`, `str`]
+        The target of each frame.
+
+    Returns
+    -------
+    estimate, notes : `tuple`
+        The estimate, or ``None`` when no frame has a rotation row, and the
+        notes about frames that could not be used.
+    """
+    rotations = _latest_values(night_rows, ROTATION_METRIC)
+    if not rotations:
+        return None, ["No frame of the night has a stored field rotation, so no polar-alignment estimate."]
+    ordered = sorted(runs, key=lambda run: run.started_at)
+    starts = [run.started_at for run in ordered]
+    samples: list[RotationSample] = []
+    unplaced = 0
+    for frame_id, row in rotations.items():
+        if frame_id not in epochs or frame_id not in directions:
+            unplaced += 1
+            continue
+        index = bisect.bisect_right(starts, epochs[frame_id]) - 1
+        run = ordered[index] if index >= 0 else None
+        if run is None or (run.ended_at is not None and epochs[frame_id] > run.ended_at):
+            unplaced += 1
+            continue
+        samples.append(
+            RotationSample(
+                guiding_run_id=f"{run.id}|{target_by_frame.get(frame_id, '')}",
+                epoch_seconds=epochs[frame_id],
+                rotation_deg=row.value,
+                ra_deg=directions[frame_id][0],
+                dec_deg=directions[frame_id][1],
+            )
+        )
+    notes = (
+        [f"{unplaced} frames with a field rotation have no guiding run, time or position and were left out."]
+        if unplaced
+        else []
+    )
+    if not samples:
+        return None, [*notes, "No frame with a field rotation falls inside a recorded guiding run."]
+    site = inputs.site
+    return polar_alignment_from_rotation(
+        samples, site.latitude_deg, site.longitude_deg, site.elevation_m
+    ), notes
 
 
 def build_night_quality(context: ControlContext, night_id: str) -> NightQuality:
@@ -373,7 +520,8 @@ def build_night_quality(context: ControlContext, night_id: str) -> NightQuality:
     -------
     quality : `NightQuality`
         The targets imaged (those that need attention first), the count of
-        warnings over all of them, the guiding summary and notes.
+        warnings over all of them, the guiding summary, the night's focus drift
+        and polar-alignment estimate, and notes.
 
     Raises
     ------
@@ -389,74 +537,38 @@ def build_night_quality(context: ControlContext, night_id: str) -> NightQuality:
             f"Night {night_id} has no frame measurements and no guiding data.", details={"night_id": night_id}
         )
 
+    inputs = LibraryInputs(astrometrics, context.butler, context.config)
     rows_by_target: dict[str, list[QualityMeasurement]] = defaultdict(list)
     for row in night_rows:
         if row.subject.target_id:
             rows_by_target[row.subject.target_id].append(row)
-    targets: dict[str, Target] = {target.id: target for target in astrometrics.targets.list()}
+    targets: dict[str, Target] = inputs.targets()
 
-    frame_rows: list[QualityMeasurement] = []
-    for metric in PINNED_METRIC_VERSIONS:
-        frame_rows.extend(astrometrics.quality.query(metric=metric, level="frame", library_only=True))
     night_frame_rows = [row for row in night_rows if row.subject.level == SubjectLevel.FRAME]
     reasons = set_aside_reasons(night_frame_rows)
-    epochs: dict[str, float] = {}
-    directions: dict[str, tuple[float, float]] = {}
-    for target_id in rows_by_target:
-        target = targets.get(target_id)
-        direction = target_direction(target) if target else None
-        if target is None or direction is None:
-            continue
-        for frame_id, epoch in frame_times(target).items():
-            epochs[frame_id] = epoch
-            directions[frame_id] = direction
-    observations = frame_observations_from_measurements(
-        frame_rows,
+    epochs, directions = times_and_directions(targets[t] for t in rows_by_target if t in targets)
+    night_observations = frame_observations_from_measurements(
+        night_frame_rows,
         capture_settings,
         start_epoch_by_frame=epochs,
         direction_by_frame=directions,
         set_aside_reason_by_frame=reasons,
     )
-
-    location = configured_observer_location(context.config)
+    # The reviewed night is not part of its own baseline.
+    reference_for = inputs.reference_provider(exclude_night_id=night_id)
+    moonless = inputs.moonless_sky_rates(night_observations)
     notes: list[str] = []
-    models: dict[str, Any] = {}
-    if location is not None:
-        sky_rows = [row for row in frame_rows if row.metric == SKY_RATE_METRIC]
-        samples = collect_sky_samples(targets.values(), sky_rows, capture_settings)
-        models, unavailable = fit_sky_models(
-            samples, location["latitude"], location["longitude"], location["elevation"]
-        )
-        notes.extend(f"Sky model not made, so no Moon share for {line}" for line in unavailable)
-    else:
-        notes.append(
-            "The observer's location is not configured, so the Moon's share of the sky loss is not given."
-        )
-
-    telescope = context.active_telescope()
-    site_profiles = context.butler.get_all("site_profile")
-    seeing = next(
-        (site.typical_seeing_fwhm_arcsec for site in site_profiles if site.typical_seeing_fwhm_arcsec), None
-    )
-    reference_for = make_reference_provider(
-        observations, telescope.aperture_mm if telescope else None, seeing
-    )
-
-    night_observations = [o for o in observations if o.night_id == night_id]
+    for setting in {o.capture_setting for o in night_observations}:
+        model, reason = inputs.sky_model_for(setting)
+        if model is None:
+            notes.append(f"Sky model not made, so no Moon share for {reason}")
     observed_ids = {o.frame_id for o in night_observations}
-    moonless: dict[str, float] = (
-        moonless_sky_rates(
-            night_observations, models, location["latitude"], location["longitude"], location["elevation"]
-        )
-        if location is not None and models
-        else {}
-    )
 
     entries: list[NightTargetQuality] = []
     all_statements: list[TargetStatement] = []
     for target_id in sorted(rows_by_target):
         target = targets.get(target_id)
-        goal = science_goal_for_target(target) if target else science_goal_for_target(Target(id=target_id))
+        goal = science_goal_for_target(target if target else Target(id=target_id))
         target_observations = [o for o in night_observations if o.target_id == target_id]
         set_aside = _unobserved_set_aside(
             night_frame_rows, target_id, night_id, reasons, observed_ids, capture_settings
@@ -475,13 +587,34 @@ def build_night_quality(context: ControlContext, night_id: str) -> NightQuality:
             target_night_rows, stack_rows, capture_settings, _main_setting_id(target_night_rows)
         )
         all_statements.extend(statements)
-        entries.append(_target_quality(target_id, summary, statements, target, goal))
+        entry = _target_quality(target_id, summary, statements, target, goal)
+        reference_notes = inputs.reference_notes(
+            {o.capture_setting for o in target_observations}, target_observations, goal, night_id
+        )
+        entries.append(entry.model_copy(update={"notes": [*entry.notes, *reference_notes]}))
+
+    night_contexts = [
+        record for record in context.butler.get_all("ekos_session_context") if record.session_id == night_id
+    ]
+    night_runs = [run for run in context.butler.get_all("guiding_run") if run.session_id == night_id]
+    target_by_frame = {
+        row.subject.subject_id: row.subject.target_id for row in night_frame_rows if row.subject.target_id
+    }
+    focus_result, focus_statements = _focus_drift_for_night(
+        night_rows, capture_settings, epochs, directions, night_contexts, inputs
+    )
+    polar, polar_notes = _polar_alignment_for_night(
+        night_rows, epochs, directions, night_runs, inputs, target_by_frame
+    )
+    notes.extend(polar_notes)
+    all_statements.extend(focus_statements)
 
     if not reasons:
         notes.append(
             "No frame is recorded as set aside. The stacker does not store set-aside frames one by one, so "
             "the set-aside time may be higher than shown."
         )
+    notes.extend(inputs.notes)
     entries.sort(key=lambda entry: (-entry.needs_attention.warning_count, entry.target_id))
     return fit_night_quality_to_budget(
         NightQuality(
@@ -489,6 +622,11 @@ def build_night_quality(context: ControlContext, night_id: str) -> NightQuality:
             targets=entries,
             needs_attention=needs_attention(all_statements),
             guiding=guiding,
+            night_statements=order_statements(focus_statements),
+            focus_drift=NightFocusDrift.model_validate(focus_result, from_attributes=True),
+            polar_alignment=NightPolarAlignment.model_validate(polar, from_attributes=True)
+            if polar is not None
+            else None,
             notes=notes,
         )
     )
@@ -554,6 +692,4 @@ __all__ = [
     "NIGHT_QUALITY_ENTRY",
     "build_night_quality",
     "fit_night_quality_to_budget",
-    "make_reference_provider",
-    "set_aside_reasons",
 ]

@@ -362,12 +362,12 @@ class GuidingControl(ControlChild):
         ConfigurationError
             If no guide camera and guide optics are configured.
         """
+        from wayfindinglib.analytics import envelope_assembly
         from wayfindinglib.analytics.guide_exposure_ladder import analyze_guide_exposure_ladder
         from wayfindinglib.tasks.control_tasks import (
             guide_exposure_ladder_tasks,
             hardware_operations,
             night_analysis,
-            performance_envelope_tasks,
             remote_transfer_tasks,
         )
 
@@ -382,7 +382,7 @@ class GuidingControl(ControlChild):
             raise ConfigurationError("No guide camera and guide optics are configured.")
         contexts, runs = night_analysis.recorded_sessions(context)
         envelope = night_analysis.performance_envelope(context, None, None, contexts, runs, {})
-        ceiling = performance_envelope_tasks.sensor_limits_for_camera(
+        ceiling = envelope_assembly.sensor_limits_for_camera(
             guide_camera.name, context.config
         ).clip_ceiling_adu
         frames = guide_exposure_ladder_tasks.capture_guide_ladder(

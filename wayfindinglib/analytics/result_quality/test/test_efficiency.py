@@ -116,14 +116,35 @@ def test_physical_reference_adds_diffraction_seeing_and_pixel_in_quadrature() ->
     assert outcome.reference.factors[eff.STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC] == pytest.approx(expected)
     assert "sky_brightness" in outcome.reference.not_included
     assert "transparency" in outcome.reference.not_included
-    assert "site_seeing" not in outcome.reference.not_included
+    assert eff.STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC not in outcome.reference.not_included
 
 
-def test_physical_reference_without_seeing_says_so() -> None:
-    """Without site seeing the reference uses diffraction alone."""
+def test_physical_reference_without_seeing_has_no_width() -> None:
+    """Without site seeing the seeing factor is not included, with a reason.
+
+    The old reference used diffraction and pixel blur alone, a width no real
+    night reaches, so every frame looked poor.
+    """
     outcome = eff.physical_reference(100.0, 1.5)
     assert outcome.reference is not None
-    assert "site_seeing" in outcome.reference.not_included
+    assert eff.STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC not in outcome.reference.factors
+    assert eff.STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC in outcome.reference.not_included
+    result = eff.frame_efficiency(_observation(), ScienceGoal.FAINT_POINT_SOURCE, outcome.reference)
+    assert result is not None
+    seeing = next(factor for factor in result.factors if factor.cause == eff.CAUSE_SEEING)
+    assert not seeing.included and seeing.value is None
+    assert "seeing" in (seeing.not_included_reason or "")
+
+
+def test_slitless_spectra_are_not_charged_sky_or_read_noise() -> None:
+    """A source-limited slitless spectrum has no sky or read-noise factor."""
+    reference = eff.physical_reference(100.0, 1.5, 2.0).reference
+    assert reference is not None
+    result = eff.frame_efficiency(_observation(), ScienceGoal.SLITLESS_SPECTRAL_RESOLUTION, reference)
+    assert result is not None
+    by_cause = {factor.cause: factor for factor in result.factors}
+    assert not by_cause[eff.CAUSE_SKY].included
+    assert not by_cause[eff.CAUSE_READ_NOISE].included
 
 
 @pytest.mark.parametrize(("aperture", "scale"), [(None, 1.0), (0.0, 1.0), (100.0, None)])

@@ -21,6 +21,12 @@ from the evidence behind it (plan section 3.7 and 6.7, decisions S12 and S13):
 * every item of the decision catalog has a rule or a deferred entry with a
   reason.
 
+Every check that applies to a rule walks `ALL_RULES`, the one list that joins
+both rule tables (the data-quality table and the per-star result table), so a
+new table cannot escape the checks. The module of each rule that another module
+computes (``computed_by``) is also scanned as text: a metric name it reads must
+not be an exploratory metric, even when no rule row requires it.
+
 The register files are read from disk, so a rule whose entry has not been
 written yet fails here until the entry exists.
 """
@@ -32,6 +38,7 @@ from pathlib import Path
 import pytest
 
 from astrometricslib import Astrometrics, MetricPurpose, MetricSpec
+from wayfindinglib.analytics.result_quality.all_rules import ALL_RULES
 from wayfindinglib.analytics.result_quality.judge_results import PLAIN_RULE_NAMES
 from wayfindinglib.analytics.result_quality.rules import DEFERRED_RULES, RESULT_QUALITY_RULES
 from wayfindinglib.models.quality.statements import ActionClass, Confidence, StatementKind
@@ -172,7 +179,7 @@ def register_statuses() -> dict[str, Confidence]:
 
 def test_rule_names_are_unique() -> None:
     """No two rules, and no rule and deferred entry, share a name."""
-    names = [rule.name for rule in RESULT_QUALITY_RULES] + [deferred.name for deferred in DEFERRED_RULES]
+    names = [rule.name for rule in ALL_RULES] + [deferred.name for deferred in DEFERRED_RULES]
     assert len(names) == len(set(names))
 
 
@@ -180,7 +187,7 @@ def test_every_requirement_names_a_registered_metric_at_its_current_version(
     registry: dict[str, MetricSpec],
 ) -> None:
     """A requirement pins the version the registry holds now (decision S13)."""
-    for rule in RESULT_QUALITY_RULES:
+    for rule in ALL_RULES:
         for requirement in rule.requires:
             assert requirement.name in registry, f"{rule.name} reads unregistered {requirement.name}"
             current = registry[requirement.name].definition_version
@@ -192,7 +199,7 @@ def test_every_requirement_names_a_registered_metric_at_its_current_version(
 
 def test_no_requirement_is_an_exploratory_metric(registry: dict[str, MetricSpec]) -> None:
     """An exploratory metric never drives a rule (decision S12)."""
-    for rule in RESULT_QUALITY_RULES:
+    for rule in ALL_RULES:
         for requirement in rule.requires:
             assert registry[requirement.name].purpose != MetricPurpose.EXPLORATORY, (
                 f"{rule.name} reads the exploratory metric {requirement.name}"
@@ -201,19 +208,20 @@ def test_no_requirement_is_an_exploratory_metric(registry: dict[str, MetricSpec]
 
 def test_action_classes_fit_the_statement_kind() -> None:
     """Warnings and recommendations name a class; the others name none."""
-    for rule in RESULT_QUALITY_RULES:
+    for rule in ALL_RULES:
         if rule.statement_kind in (StatementKind.WARNING, StatementKind.RECOMMENDATION):
             assert rule.action_class in set(ActionClass), rule.name
         else:
             assert rule.action_class is None, rule.name
-        assert rule.statement_kind != StatementKind.INSUFFICIENT_DATA, "missing data is made by the judge"
+        if rule in RESULT_QUALITY_RULES:
+            assert rule.statement_kind != StatementKind.INSUFFICIENT_DATA, "missing data is made by the judge"
 
 
 def test_every_rule_register_entry_exists_and_confidence_matches(
     register_statuses: dict[str, Confidence],
 ) -> None:
     """A rule's confidence is the status label of its register entry."""
-    for rule in RESULT_QUALITY_RULES:
+    for rule in ALL_RULES:
         assert rule.register_entry in register_statuses, (
             f"{rule.name}: register entry {rule.register_entry} is not in the validation register"
         )
@@ -225,7 +233,7 @@ def test_every_rule_register_entry_exists_and_confidence_matches(
 
 def test_every_limit_register_entry_exists(register_statuses: dict[str, Confidence]) -> None:
     """A limit that names a register entry names one that exists."""
-    for rule in RESULT_QUALITY_RULES:
+    for rule in ALL_RULES:
         for limit in rule.limits:
             if limit.register_entry:
                 assert limit.register_entry in register_statuses, f"{rule.name}: {limit.register_entry}"
@@ -233,9 +241,53 @@ def test_every_limit_register_entry_exists(register_statuses: dict[str, Confiden
 
 def test_computed_by_names_a_known_module() -> None:
     """A rule that another module computes names that module."""
-    for rule in RESULT_QUALITY_RULES:
+    for rule in ALL_RULES:
         if rule.computed_by is not None:
             assert rule.computed_by in KNOWN_COMPUTING_MODULES, rule.name
+
+
+def _module_source(module_name: str) -> str:
+    """Read the source text of one library module, found by its file name.
+
+    Parameters
+    ----------
+    module_name : `str`
+        The module's file name without ``.py``, such as ``"focus_drift"``.
+
+    Returns
+    -------
+    source : `str`
+        The text of the one non-test file of that name under ``wayfindinglib``.
+    """
+    paths = [
+        path
+        for path in (REPO_ROOT / "wayfindinglib").rglob(f"{module_name}.py")
+        if "test" not in path.relative_to(REPO_ROOT).parts
+    ]
+    assert len(paths) == 1, f"{module_name}: expected one file, found {paths}"
+    return paths[0].read_text()
+
+
+def test_computing_modules_read_no_exploratory_metric(registry: dict[str, MetricSpec]) -> None:
+    """A module that makes a rule statement reads no exploratory metric (S12).
+
+    The rule row lists the metrics it requires, but a module can read another
+    one in its code. This check finds every registered metric name written as
+    a string in the module and fails for an exploratory one.
+    """
+    pattern = re.compile(r"[\"']([a-z]+\.[a-z0-9_]+)[\"']")
+    for rule in ALL_RULES:
+        if rule.computed_by is None:
+            continue
+        names_in_code = {
+            match.group(1)
+            for match in pattern.finditer(_module_source(rule.computed_by))
+            if match.group(1) in registry
+        }
+        for name in sorted(names_in_code):
+            assert registry[name].purpose != MetricPurpose.EXPLORATORY, (
+                f"{rule.computed_by} (rule {rule.name}) reads the exploratory metric {name}"
+            )
 
 
 def test_plain_rules_are_the_judged_rules() -> None:
@@ -288,7 +340,7 @@ def test_every_exploratory_metric_has_a_question_and_a_future_review_date(
 
 def test_every_catalog_item_has_a_rule_or_a_deferred_entry() -> None:
     """Each catalog item is a rule or is deferred with a reason."""
-    rule_names = {rule.name for rule in RESULT_QUALITY_RULES}
+    rule_names = {rule.name for rule in ALL_RULES}
     deferred = {entry.name: entry for entry in DEFERRED_RULES}
     for item, name in DECISION_CATALOG.items():
         assert name in rule_names or name in deferred, f"catalog item {item!r} has no rule or deferred entry"

@@ -26,6 +26,7 @@ from wayfindinglib.analytics.result_quality.efficiency import FrameObservation
 from wayfindinglib.analytics.result_quality.noise_growth import (
     StackFrame,
     WeightingMode,
+    fit_noise_floor,
     forecast_stack_noise,
     frame_weights,
 )
@@ -252,7 +253,7 @@ def test_equal_frames_give_the_planned_gain() -> None:
     """Doubling identical frames under equal weights cuts the noise by 29%."""
     runs, observations = _history(_dark(20, "a"), _dark(20, "b"), WeightingMode.EQUAL)
 
-    (check,) = fc.forecast_check(runs, observations)
+    (check,) = fc.forecast_check(runs, observations, configured_stack_weight=None)
 
     assert check.outcome == ForecastOutcome.AS_FORECAST
     assert check.forecast_when_planned.noise_change_fraction == pytest.approx(-0.2929, abs=1e-3)
@@ -267,7 +268,7 @@ def test_tolerance_is_the_unpaired_aperture_error() -> None:
     """With 1000 apertures each, the ratio error is 1.17/sqrt(1000) twice."""
     runs, observations = _history(_dark(20, "a"), _dark(20, "b"), WeightingMode.EQUAL)
 
-    (check,) = fc.forecast_check(runs, observations)
+    (check,) = fc.forecast_check(runs, observations, configured_stack_weight=None)
 
     ratio = 0.7071
     expected = ratio * (1.17 / 1000**0.5) * 2**0.5
@@ -279,7 +280,9 @@ def test_paired_error_replaces_the_unpaired_one() -> None:
     """A paired relative error is used and the check says it is paired."""
     runs, observations = _history(_dark(20, "a"), _dark(20, "b"), WeightingMode.EQUAL)
 
-    (check,) = fc.forecast_check(runs, observations, paired_relative_error_by_run={"run2": 0.05})
+    (check,) = fc.forecast_check(
+        runs, observations, paired_relative_error_by_run={"run2": 0.05}, configured_stack_weight=None
+    )
 
     assert check.paired
     assert check.measured.tolerance == pytest.approx(0.7071 * 0.05, rel=0.02)
@@ -291,7 +294,7 @@ def test_moonlit_frames_under_equal_weights_are_a_known_reason() -> None:
     moonlit = _dark(20, "b", sky=6.0)
     runs, observations = _history(old, moonlit, WeightingMode.EQUAL)
 
-    (check,) = fc.forecast_check(runs, observations)
+    (check,) = fc.forecast_check(runs, observations, configured_stack_weight=None)
 
     assert check.outcome == ForecastOutcome.SHORT_KNOWN_REASON
     planned = check.forecast_when_planned.noise_change_fraction
@@ -306,7 +309,7 @@ def test_a_shortfall_the_frames_do_not_explain_is_unknown() -> None:
     """Same-quality frames that gained little leave the cause unknown."""
     runs, observations = _history(_dark(20, "a"), _dark(20, "b"), WeightingMode.EQUAL, measured_ratio=0.97)
 
-    (check,) = fc.forecast_check(runs, observations)
+    (check,) = fc.forecast_check(runs, observations, configured_stack_weight=None)
 
     assert check.outcome == ForecastOutcome.SHORT_UNKNOWN_REASON
     assert "not known" in check.reason
@@ -316,7 +319,7 @@ def test_a_better_than_planned_gain_counts_as_forecast() -> None:
     """A noise that fell further than planned does not raise a warning."""
     runs, observations = _history(_dark(20, "a"), _dark(20, "b"), WeightingMode.EQUAL, measured_ratio=0.5)
 
-    (check,) = fc.forecast_check(runs, observations)
+    (check,) = fc.forecast_check(runs, observations, configured_stack_weight=None)
 
     assert check.outcome == ForecastOutcome.AS_FORECAST
 
@@ -327,7 +330,7 @@ def test_star_width_weights_are_modeled() -> None:
     new = [_observation(f"b{i}", width=2.6 + 0.1 * i) for i in range(10)]
     runs, observations = _history(old, new, WeightingMode.WFWHM)
 
-    (check,) = fc.forecast_check(runs, observations)
+    (check,) = fc.forecast_check(runs, observations, configured_stack_weight=None)
 
     assert check.weighting_mode == "wfwhm"
     assert check.outcome == ForecastOutcome.AS_FORECAST
@@ -343,12 +346,30 @@ def test_a_weighting_mode_that_was_not_recorded_is_not_checkable() -> None:
     rows += _run_rows("run2", 5, [o.frame_id for o in old + new], [None] * 20, 0.007, row_id=2)
     runs = fc.stack_runs_from_measurements(rows)
 
-    (check,) = fc.forecast_check(runs, old + new)
+    (check,) = fc.forecast_check(runs, old + new, configured_stack_weight=None)
 
     assert check.outcome == ForecastOutcome.NOT_CHECKABLE
-    assert "weighting mode" in check.reason
+    assert "weights were not recorded" in check.reason
     assert check.forecast_given_frames_taken.noise_change_fraction is None
     assert check.measured.noise_change_fraction == pytest.approx(-0.3)
+
+
+def test_recorded_weights_are_used_directly_even_when_no_mode_matches() -> None:
+    """Odd recorded weights give the forecast given the frames taken.
+
+    The old code needed the weights to match a known mode, else it gave up.
+    """
+    old, new = _dark(10, "a"), _dark(10, "b")
+    uneven = [1.0 + 0.3 * (i % 4) for i in range(20)]
+    rows = _run_rows("run1", 0, [o.frame_id for o in old], uneven[:10], 0.01)
+    rows += _run_rows("run2", 5, [o.frame_id for o in old + new], uneven, 0.0071, row_id=2)
+    runs = fc.stack_runs_from_measurements(rows)
+
+    (check,) = fc.forecast_check(runs, old + new, configured_stack_weight=None)
+
+    assert check.outcome != ForecastOutcome.NOT_CHECKABLE
+    assert check.weighting_mode == "recorded_weights"
+    assert check.forecast_given_frames_taken.noise_change_fraction is not None
 
 
 def test_missing_normalized_noise_is_not_checkable() -> None:
@@ -357,7 +378,9 @@ def test_missing_normalized_noise_is_not_checkable() -> None:
     rows = _run_rows("run1", 0, [o.frame_id for o in old], [1.0] * 10, 0.01)
     rows += _run_rows("run2", 5, [o.frame_id for o in old + new], [1.0] * 20, None, row_id=2)
 
-    (check,) = fc.forecast_check(fc.stack_runs_from_measurements(rows), old + new)
+    (check,) = fc.forecast_check(
+        fc.stack_runs_from_measurements(rows), old + new, configured_stack_weight=None
+    )
 
     assert check.outcome == ForecastOutcome.NOT_CHECKABLE
     assert "run2" in check.reason
@@ -369,7 +392,7 @@ def test_a_frame_without_read_noise_is_not_checkable() -> None:
     new = [_observation(f"b{i}", read_noise=None) for i in range(10)]
     runs, observations = _history(_dark(10, "a"), _dark(10, "b"), WeightingMode.EQUAL)
 
-    (check,) = fc.forecast_check(runs, old + new)
+    (check,) = fc.forecast_check(runs, old + new, configured_stack_weight=None)
 
     assert check.outcome == ForecastOutcome.NOT_CHECKABLE
     assert "read noise" in check.reason
@@ -380,7 +403,10 @@ def test_fewer_than_two_runs_have_nothing_to_check() -> None:
     """One run has no forecast to compare with."""
     rows = _run_rows("run1", 0, ["a0", "a1"], [1.0, 1.0], 0.01)
 
-    assert fc.forecast_check(fc.stack_runs_from_measurements(rows), _dark(2, "a")) == []
+    assert (
+        fc.forecast_check(fc.stack_runs_from_measurements(rows), _dark(2, "a"), configured_stack_weight=None)
+        == []
+    )
 
 
 def test_runs_ignore_subset_stacks_and_old_definitions() -> None:
@@ -449,3 +475,33 @@ def test_pinned_versions_match_the_registry() -> None:
     registry = {spec.name: spec for spec in Astrometrics().quality.metrics(detail="full")}
     for metric, version in fc.PINNED_STACK_METRICS.items():
         assert registry[metric].definition_version == version, metric
+
+
+def test_floor_fit_divides_each_stack_by_its_reference_flux() -> None:
+    """Stacks with different pixel scales are fitted on the normalized scale.
+
+    Two runs have the same true noise but different stack units (flux 1000
+    and 3000). Without the division the second would look three times
+    noisier and the fit would invent a floor.
+    """
+    runs = []
+    for index, (flux, expected) in enumerate([(1000.0, 8.0), (3000.0, 4.0), (1000.0, 2.0), (3000.0, 1.0)]):
+        base = (expected**2 + 36.0) ** 0.5
+        runs.append(
+            fc.StackRunRecord(
+                run_id=f"r{index}",
+                stack_subject_id=f"s{index}",
+                measured_at=datetime(2026, 10, 1 + index, tzinfo=UTC),
+                noise=base * flux / 1000.0,
+                expected_noise=expected * flux / 1000.0,
+                reference_flux=flux,
+                aperture_count=400,
+            )
+        )
+    steps = fc.noise_steps_from_runs(runs)
+    assert all(step.normalized for step in steps)
+    fit = fit_noise_floor(steps)
+    assert fit.normalized
+    assert fit.floor_variance == pytest.approx(36.0 / 1000.0**2, rel=1e-3)
+    without = [run.model_copy(update={"reference_flux": None}) for run in runs]
+    assert not any(step.normalized for step in fc.noise_steps_from_runs(without))

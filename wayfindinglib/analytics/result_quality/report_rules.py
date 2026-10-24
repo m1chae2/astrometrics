@@ -51,6 +51,7 @@ from wayfindinglib.analytics.result_quality.efficiency import (
     CAUSE_SKY,
     CAUSE_SKY_MOON,
     STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC,
+    STAR_WIDTH_NIGHTLY_SPREAD_KEY,
     FrameObservation,
 )
 from wayfindinglib.analytics.result_quality.noise_growth import (
@@ -433,8 +434,14 @@ def seeing_limit_statements(
 
     * The goal is an extended object or a slitless spectrum, where the
       efficiency model leaves seeing out of the time loss because more time
-      does not repair it, and the median star width is wider than the
-      reference width (the seeing factor would be below 1).
+      does not repair it, and the median star width exceeds the reference
+      width by more than the margin. The margin is the one-standard-deviation
+      spread of the baseline's nightly median widths
+      (`STAR_WIDTH_NIGHTLY_SPREAD_KEY`), so ordinary night-to-night change is
+      not called a limit; the physical reference has no such spread, so it
+      uses `SEEING_AT_REFERENCE_TOLERANCE` of the reference width. A physical
+      reference whose site seeing is not set has no width, so no statement
+      is made.
     * The goal is a point source, and the median star width is within
       `SEEING_AT_REFERENCE_TOLERANCE` of the physical reference (diffraction
       plus typical seeing), so only better seeing would sharpen the stars.
@@ -484,7 +491,9 @@ def seeing_limit_statements(
             continue
         median_width = statistics.median(width for _frame_id, width in widths)
         if goal in detail_goals:
-            fires = median_width > reference_width
+            spread = reference.factors.get(STAR_WIDTH_NIGHTLY_SPREAD_KEY)
+            margin = spread if spread is not None else reference_width * SEEING_AT_REFERENCE_TOLERANCE
+            fires = median_width > reference_width + margin
         else:
             fires = reference.kind == EfficiencyReferenceKind.PHYSICAL and median_width <= reference_width * (
                 1.0 + SEEING_AT_REFERENCE_TOLERANCE
@@ -811,9 +820,11 @@ def _as_float(value: object) -> float | None:
     number : `float` or `None`
         The number.
     """
+    if not isinstance(value, int | float | str):
+        return None
     try:
-        return float(value)  # type: ignore[arg-type]
-    except TypeError, ValueError:
+        return float(value)
+    except ValueError:
         return None
 
 

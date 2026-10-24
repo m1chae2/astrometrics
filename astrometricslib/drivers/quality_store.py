@@ -38,6 +38,7 @@ order. A naive time is refused.
 Every database problem is raised as `StorageError`.
 """
 
+import json
 import logging
 import os
 import sqlite3
@@ -702,19 +703,14 @@ class QualityStore:
             if capture_setting_ids is None:
                 rows = connection.execute("SELECT * FROM quality_capture_setting").fetchall()
             else:
-                rows = []
-                identifiers = [int(identifier) for identifier in capture_setting_ids]
-                # 500 per query stays below old SQLite's 999 limit.
-                for start in range(0, len(identifiers), 500):
-                    chunk = identifiers[start : start + 500]
-                    placeholders = ", ".join("?" for _ in chunk)
-                    rows.extend(
-                        connection.execute(
-                            "SELECT * FROM quality_capture_setting "  # ruff: ignore[hardcoded-sql-expression]
-                            f"WHERE capture_setting_id IN ({placeholders})",
-                            chunk,
-                        ).fetchall()
-                    )
+                # One fixed statement: SQLite unpacks the JSON list into rows,
+                # so there is no limit on the number of ids and no SQL text is
+                # built.
+                rows = connection.execute(
+                    "SELECT * FROM quality_capture_setting "
+                    "WHERE capture_setting_id IN (SELECT value FROM json_each(?))",
+                    (json.dumps([int(identifier) for identifier in capture_setting_ids]),),
+                ).fetchall()
         return {
             int(row["capture_setting_id"]): CaptureSetting(**{
                 name: row[name] for name in _CAPTURE_SETTING_FIELDS

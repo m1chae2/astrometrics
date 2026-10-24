@@ -124,7 +124,7 @@ def test_cause_unknown_exists_only_with_a_noise_check() -> None:
 
     An agreeing one gets 0.
     """
-    noisy = agg.MeasuredNoiseCheck(variance_ratio=1.5, variance_ratio_error=0.1)
+    noisy = agg.MeasuredNoiseCheck(variance_ratio=2.0, variance_ratio_error=0.1)
     agreeing = agg.MeasuredNoiseCheck(variance_ratio=1.05, variance_ratio_error=0.1)
     with_noise = agg.loss_account(
         _frames(), [], ScienceGoal.FAINT_POINT_SOURCE, _reference_for, measured_noise_check=noisy
@@ -135,6 +135,20 @@ def test_cause_unknown_exists_only_with_a_noise_check() -> None:
         _frames(), [], ScienceGoal.FAINT_POINT_SOURCE, _reference_for, measured_noise_check=agreeing
     )
     assert with_match.account.cause_unknown_seconds == pytest.approx(0.0)
+
+
+def test_cause_unknown_allows_for_the_expected_noise_models_own_error() -> None:
+    """A ratio of 1.5 is inside the model's own error, so it is not a loss.
+
+    With the aperture error alone it would be 5 standard errors out.
+    """
+    check = agg.MeasuredNoiseCheck(variance_ratio=1.5, variance_ratio_error=0.1)
+    assert check.total_variance_ratio_error > 0.3
+    result = agg.loss_account(
+        _frames(), [], ScienceGoal.FAINT_POINT_SOURCE, _reference_for, measured_noise_check=check
+    )
+    assert result is not None
+    assert result.account.cause_unknown_seconds == pytest.approx(0.0)
 
 
 def test_loss_account_passed_set_aside_frames_are_added() -> None:

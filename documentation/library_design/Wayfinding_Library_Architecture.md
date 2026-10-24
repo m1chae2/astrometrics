@@ -218,7 +218,7 @@ The observation session is the one object with shared ownership. Planning writes
 
 - **Configuration, not telemetry.** A running session never writes equipment, enclosure, site, calibration or policy records.
 - **One source of site position for planning.** Planning and the live-status tools read the site's position from the site settings, never from a device.
-- **Session field ownership.** Only planning writes the queue and its placement diagnostics. Only execution writes statuses, outcomes, divergence and fault records, and telemetry.
+- **Session field ownership.** Only planning writes the queue and its placement diagnostics. Only execution writes statuses, outcomes, divergence and fault records, and telemetry. Execution saves its copy of the session by merging, not by overwriting. At each save it reads the stored session again, in the same database transaction as the write, and keeps what Planning wrote: the checklist, the framing, the revision, and any queue entry added, removed, reordered or edited since Execution loaded the session. Execution's own fields (statuses, outcomes, telemetry, divergence and fault records) come from its copy. An entry Planning removed stays if Execution has already started it. Execution never changes the revision.
 - **Template and instance separation.** A package is a reusable template. A queue entry is a frozen copy with every value needed to run it, so editing the template cannot change what a session recorded.
 - **Live target resolution.** A package names its target by identifier only. The position is read when the package is placed.
 - **Reference-only science link.** A session refers to its science-side target session by identifier only. The reference may be empty and is attached after the fact.

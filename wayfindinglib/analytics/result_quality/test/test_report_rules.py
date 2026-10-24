@@ -20,6 +20,7 @@ from wayfindinglib.analytics.result_quality.efficiency import (
     CAUSE_SKY,
     CAUSE_SKY_MOON,
     STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC,
+    STAR_WIDTH_NIGHTLY_SPREAD_KEY,
     FrameObservation,
 )
 from wayfindinglib.analytics.result_quality.noise_growth import (
@@ -520,6 +521,36 @@ def test_seeing_limit_fires_for_a_point_source_at_the_physical_reference() -> No
         _width_observations(2.1), ScienceGoal.FAINT_POINT_SOURCE, lambda _setting: reference, _evidence()
     )
     assert [statement.kind for statement in statements] == [StatementKind.CONSTRAINT]
+
+
+def test_seeing_limit_needs_a_width_beyond_the_baseline_spread() -> None:
+    """A width inside the baseline nights' spread is ordinary, not a limit.
+
+    The same width beyond the spread gives the constraint.
+    """
+    reference = _reference(EfficiencyReferenceKind.BASELINE).model_copy(
+        update={"factors": {STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC: 2.0, STAR_WIDTH_NIGHTLY_SPREAD_KEY: 0.5}}
+    )
+    inside = rr.seeing_limit_statements(
+        _width_observations(2.4), ScienceGoal.EXTENDED_OBJECT, lambda _setting: reference, _evidence()
+    )
+    beyond = rr.seeing_limit_statements(
+        _width_observations(2.6), ScienceGoal.EXTENDED_OBJECT, lambda _setting: reference, _evidence()
+    )
+    assert inside == []
+    assert [statement.kind for statement in beyond] == [StatementKind.CONSTRAINT]
+
+
+def test_seeing_limit_says_nothing_for_a_physical_reference_without_site_seeing() -> None:
+    """With no site seeing there is no reference width, so no statement."""
+    from wayfindinglib.analytics.result_quality.efficiency import physical_reference
+
+    reference = physical_reference(100.0, 1.5).reference
+    assert reference is not None
+    statements = rr.seeing_limit_statements(
+        _width_observations(9.0), ScienceGoal.EXTENDED_OBJECT, lambda _setting: reference, _evidence()
+    )
+    assert statements == []
 
 
 def test_seeing_limit_says_nothing_when_it_cannot_be_evaluated() -> None:

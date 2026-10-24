@@ -22,7 +22,6 @@ import threading
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, date, datetime
-from types import SimpleNamespace
 from typing import Any, Literal
 
 from astropy.time import Time
@@ -1222,7 +1221,8 @@ class ObservationPlanning:
             request = QueueRequest.model_validate(item)
             package = self._package(request.package_id)
             placements.append((package, request.start_time_mode, request.requested_start_time))
-            if package.quality_weighting_enabled:
+            # One report for each target, however many packages name it.
+            if package.quality_weighting_enabled and package.target_id not in target_reports:
                 target_reports[package.target_id] = build_target_dataset_report(
                     self._target(package.target_id),
                     astrometrics=self._astrometrics,
@@ -1254,29 +1254,14 @@ class ObservationPlanning:
             The measured settings from the camera profile and the filters
             seen on that camera's library frames.
         """
-        from astrometricslib import ConfigurationError, resolve_camera_profile
-        from wayfindinglib.analytics.result_quality.allowed_capture_values import allowed_capture_values
+        from wayfindinglib.analytics.result_quality.allowed_capture_values import (
+            allowed_capture_values_for_camera,
+        )
 
-        try:
-            profile = resolve_camera_profile(session.camera_id, self._config)
-        except ConfigurationError:
-            # A configuration with no camera profiles cannot say what was
-            # measured. Treat the camera as unprofiled: requests are accepted
-            # and marked.
-            profile = SimpleNamespace(
-                camera_name=session.camera_id, is_generic_fallback=True, sensor_noise=()
-            )
         # A library with no quality records gives an empty dictionary.
-        library_settings = self._astrometrics.quality.capture_settings().values()
-        camera_key = "".join(character for character in session.camera_id.casefold() if character.isalnum())
-        library_filters = [
-            setting.filter_name
-            for setting in library_settings
-            if setting.filter_name
-            and "".join(character for character in setting.camera.casefold() if character.isalnum())
-            == camera_key
-        ]
-        return allowed_capture_values(profile, (), library_filters)
+        return allowed_capture_values_for_camera(
+            session.camera_id, self._config, self._astrometrics.quality.capture_settings().values()
+        )
 
     def edit_queue(
         self,

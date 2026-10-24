@@ -89,6 +89,17 @@ class _Butler:
         """Keep a session."""
         self.saved[key["session_id"]] = session.model_copy(deep=True)
 
+    def put_session_from_execution(self, session: ObservationSession) -> ObservationSession:
+        """Keep a session, as the real butler's Execution save does.
+
+        Returns
+        -------
+        session : `ObservationSession`
+            The same session.
+        """
+        self.saved[session.id] = session.model_copy(deep=True)
+        return session
+
     def get(self, kind: str, key: dict[str, str]) -> ObservationSession | None:
         """Return a kept session.
 

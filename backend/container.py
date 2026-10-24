@@ -253,8 +253,6 @@ class Container:
 
         self.indi_diagnostics_service = IndiDiagnosticsService(observatory_api=self.wayfinder.control)
 
-        self.target_imaging_executor = TargetImagingExecutor(wayfinder=self.wayfinder)
-
         # Adapter over wayfindinglib's Observation Execution astrometrics,
         # which had no route into the application at all before this.
         from backend.services.observatory.execution_service import ExecutionService
@@ -268,6 +266,9 @@ class Container:
         from backend.services.observatory.plan_service import PlanService
 
         self.plan_service = PlanService(wayfinder=self.wayfinder, socket_manager=self.socket_manager)
+        self.target_imaging_executor = TargetImagingExecutor(
+            wayfinder=self.wayfinder, plan_service=self.plan_service
+        )
 
         from backend.services.processing.ingestion_service import IngestionService
 

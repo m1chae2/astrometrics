@@ -263,3 +263,45 @@ def test_stop_signal_follows_the_floor() -> None:
     assert ng.stop_signal(no_floor, current_expected_variance=0.5).stopped is False
     too_few = ng.fit_noise_floor(_steps(1.0, count=1))
     assert ng.stop_signal(too_few, current_expected_variance=0.5).stopped is None
+
+
+def test_noise_weights_with_no_sky_and_no_read_noise_give_a_reason_not_a_crash() -> None:
+    """A frame with zero variance has no inverse-variance weight."""
+    frames = [_frame(0, sky=0.0, read=0.0), _frame(1)]
+    forecast = ng.forecast_stack_noise(frames, WeightingMode.NOISE)
+    assert forecast.noise is None
+    assert "no sky noise and no read noise" in forecast.reason
+    assert ng.frame_weights(frames, WeightingMode.NOISE) is None
+
+
+def test_forecast_from_recorded_weights_uses_them_directly() -> None:
+    """The recorded weights, not a mode, set the variance."""
+    frames = [_frame(0, sky=1.0), _frame(1, sky=4.0)]
+    forecast = ng.forecast_noise_with_weights(frames, [1.0, 3.0])
+    expected = (frames[0].rate_variance + 9.0 * frames[1].rate_variance) / 16.0
+    assert forecast.variance == pytest.approx(expected)
+    assert ng.forecast_noise_with_weights(frames, [1.0]).noise is None
+
+
+def test_two_steps_have_zero_degrees_of_freedom_and_the_fit_says_so() -> None:
+    """With 2 steps and 2 terms the line passes through both points."""
+    fit = ng.fit_noise_floor(_steps(1.0, count=2))
+    assert fit.degrees_of_freedom == 0
+    assert "zero degrees of freedom" in fit.reason
+    assert ng.fit_noise_floor(_steps(1.0, count=5)).degrees_of_freedom == 3
+
+
+def test_normalized_steps_are_reported_and_unnormalized_ones_say_so() -> None:
+    """The fit says whether its steps were divided by the reference flux."""
+    normalized = [step.model_copy(update={"normalized": True}) for step in _steps(1.0)]
+    assert ng.fit_noise_floor(normalized).normalized
+    unnormalized = ng.fit_noise_floor(_steps(1.0))
+    assert not unnormalized.normalized
+    assert "not normalized" in unnormalized.reason
+
+
+def test_normalized_steps_win_over_unnormalized_ones() -> None:
+    """When some steps are normalized, only those are fitted together."""
+    steps = _steps(1.0, count=6)
+    mixed = [step.model_copy(update={"normalized": index < 4}) for index, step in enumerate(steps)]
+    assert ng.fit_noise_floor(mixed).steps_used == 4

@@ -1,12 +1,10 @@
-"""Purpose: Score the sky for tracking risk, and re-export the envelope inputs.
+"""Purpose: Score the sky for tracking risk.
 
 Description: The performance envelope is assembled in Foundation
 (`wayfindinglib.analytics.envelope_assembly`), so Planning can read it too.
 What stays here is the one part that needs the Control context: reading every
 recorded plate solve to score the sky for tracking risk
-(`tracking_risk_map`). `sensor_limits_for_camera` is re-exported because the
-guide-exposure ladder in `api/control/guiding.py` reads the guide camera's
-clip ceiling through this module.
+(`tracking_risk_map`).
 """
 
 from __future__ import annotations
@@ -15,7 +13,6 @@ import math
 from typing import TYPE_CHECKING
 
 from wayfindinglib.analytics.alignment_sessions import group_alignment_attempts
-from wayfindinglib.analytics.envelope_assembly import sensor_limits_for_camera
 from wayfindinglib.analytics.tracking_risk import TrackedTarget, build_tracking_risk_map
 
 if TYPE_CHECKING:
@@ -23,7 +20,7 @@ if TYPE_CHECKING:
     from wayfindinglib.models.equipment_and_site.performance_envelope import TrackingRiskMap
     from wayfindinglib.models.session.telemetry import AlignmentTargetSession
 
-__all__ = ["sensor_limits_for_camera", "tracking_risk_map"]
+__all__ = ["tracking_risk_map"]
 
 
 def _mount_hour_angles_deg(

@@ -14,8 +14,9 @@ found. All are changes in noise as a fraction, so a fall of 29% is -0.29.
   look like the target's past frames (`noise_growth.noise_ratio_after_adding`),
   in the number and exposure the user actually took.
 * Given the frames taken. The forecast again, using the real new frames' own
-  sky rates and star widths and the weighting mode the stacker really used. A
-  moonlit frame lowers it fairly.
+  sky rates and the weights the stacker really recorded for each frame
+  (`stacking.frame_weight`). No weighting mode is guessed or needed. A moonlit
+  frame lowers it fairly.
 * Measured. The ratio of the two stacks' normalized empty-aperture noise
   (`stacking.empty_aperture_noise_normalized`). Only the normalized value is
   compared, because the stack's own units differ from stack to stack.
@@ -23,16 +24,19 @@ found. All are changes in noise as a fraction, so a fall of 29% is -0.29.
 Each number carries a tolerance of one standard error. The error of an
 empty-aperture noise is 1.17 / sqrt(n) of the noise for n apertures
 (`noise_growth.aperture_noise_relative_error`). The error of the ratio of two
-unpaired stacks adds the two relative errors in quadrature. A caller that has a
-paired error (both stacks measured in the same apertures) passes it, and the
-check then says it is paired. Two numbers "agree" when they differ by no more
-than two tolerances (design estimate, register row WAY-D70).
+unpaired stacks adds the two relative errors in quadrature. The two stacks
+usually reuse the same apertures, which makes their errors partly shared, so
+the
+unpaired error is larger than the true one and the check is conservative. A
+caller that has a paired error passes it, and the check then says it is paired.
+Two numbers "agree" when they differ by no more than two tolerances, one-sided,
+a false alarm of about 2.3 percent (design estimate, register row WAY-D70).
 
 The outcome is one of four. The gain arrived as forecast. It fell short for
 a known reason, which means the forecast given the frames taken already fell
 short of the planned one and the measured value agrees with it. It fell short
 for no known reason. Or the check could not be made, and the reason says why
-(a weighting mode that was not recorded, a frame with no sky rate, a stack
+(weights that were not recorded, a frame with no sky rate, a stack
 with no normalized noise). Nothing is guessed in that last case.
 
 The module also turns the run history into the steps of the noise-floor fit
@@ -40,11 +44,15 @@ The module also turns the run history into the steps of the noise-floor fit
 (`target_stop_signal`), so the target report and tonight's ranking use the same
 history. A floor is reported only from two or more steps (`noise_growth`).
 
-Weighting by star width needs each frame's weighted star width. The check
-uses the frame's effective star width in arcseconds
-(`frame.star_width_effective_arcsec`) as the stand-in, because the two move
-together. That is a design estimate (register row WAY-D70) and is tested only
-on made-up stacks.
+The planned forecast is made before the frames exist, so it must assume a
+weighting mode. When that mode weights by star width, the check uses the
+frame's effective star width in arcseconds
+(`frame.star_width_effective_arcsec`)
+as the stand-in for the weighted width, because the two move together. That
+stand-in is a design estimate (register row WAY-D70), is used only for the
+planned forecast, and is tested only on made-up stacks. The mode is the one the
+earlier run recorded, or else the configured stack weight that the caller
+passes (`forecast_check`).
 """
 
 import math
@@ -66,6 +74,7 @@ from wayfindinglib.analytics.result_quality.noise_growth import (
     WeightingMode,
     aperture_noise_relative_error,
     fit_noise_floor,
+    forecast_noise_with_weights,
     forecast_stack_noise,
     identify_weighting_mode,
     noise_ratio_after_adding,
@@ -84,8 +93,9 @@ FORECAST_CHECK_ROW = "WAY-D70"
 
 AGREEMENT_TOLERANCES = 2.0
 """Two changes in noise agree when they differ by no more than this many
-tolerances. A tolerance is one standard error, so two of them is a
-one-in-twenty false alarm. It is the same width as the model-agreement test of
+tolerances. A tolerance is one standard error, and the test is one-sided (only
+a shortfall counts), so two of them is a false alarm of about 2.3 percent. It
+is the same width as the model-agreement test of
 the loss account (`MODEL_AGREEMENT_SIGMAS`). Design estimate, register row
 WAY-D70."""
 
@@ -93,12 +103,14 @@ NOISE_METRIC = "stacking.empty_aperture_noise_stack_unit"
 NORMALIZED_NOISE_METRIC = "stacking.empty_aperture_noise_normalized"
 EXPECTED_NOISE_METRIC = "stacking.expected_empty_aperture_noise_stack_unit"
 FRAME_WEIGHT_METRIC = "stacking.frame_weight"
+REFERENCE_FLUX_METRIC = "stacking.noise_reference_flux_stack_unit"
 
 PINNED_STACK_METRICS = {
     NOISE_METRIC: 3,
     NORMALIZED_NOISE_METRIC: 3,
     EXPECTED_NOISE_METRIC: 1,
     FRAME_WEIGHT_METRIC: 1,
+    REFERENCE_FLUX_METRIC: 3,
 }
 """The metrics read, and the definition version each is pinned to (decision
 S13). A row of another version is not used. A test fails when the registry
@@ -125,6 +137,12 @@ class StackRunRecord(BaseModel):
         The empty-aperture noise in the stack's own units.
     expected_noise : `float` or `None`
         The noise the stack's frames predict, in the same units as `noise`.
+    reference_flux : `float` or `None`
+        The brightness of the fixed reference stars in the stack's own units
+        (`stacking.noise_reference_flux_stack_unit`). Dividing the noise by it
+        puts stacks with different pixel scales on one scale. When the row is
+        missing but the noise and the normalized noise are both known, it is
+        their ratio.
     aperture_count : `int` or `None`
         How many empty apertures the noise came from.
     noise_row_id, normalized_row_id : `int` or `None`
@@ -149,6 +167,7 @@ class StackRunRecord(BaseModel):
     normalized_noise_error: float | None = None
     noise: float | None = None
     expected_noise: float | None = None
+    reference_flux: float | None = None
     aperture_count: int | None = None
     noise_row_id: int | None = None
     normalized_row_id: int | None = None
@@ -288,6 +307,11 @@ def stack_runs_from_measurements(measurements: Iterable[QualityMeasurement]) -> 
         )
         if expected is None:
             problems["expected_noise"] = expected_reason or "The expected noise is missing."
+        flux, _flux_reason = _usable_value(
+            grouped.get((stack_id, REFERENCE_FLUX_METRIC), []), REFERENCE_FLUX_METRIC
+        )
+        if (flux is None or flux <= 0.0) and noise and normalized:
+            flux = noise / normalized
         normalized_rows = grouped.get((stack_id, NORMALIZED_NOISE_METRIC), [])
         noise_rows = grouped.get((stack_id, NOISE_METRIC), [])
         first_normalized = normalized_rows[0] if normalized_rows else None
@@ -315,6 +339,7 @@ def stack_runs_from_measurements(measurements: Iterable[QualityMeasurement]) -> 
                 normalized_noise_error=error,
                 noise=noise,
                 expected_noise=expected,
+                reference_flux=flux if flux and flux > 0.0 else None,
                 aperture_count=apertures,
                 noise_row_id=first_noise.row_id if first_noise is not None else None,
                 normalized_row_id=first_normalized.row_id if first_normalized is not None else None,
@@ -497,6 +522,7 @@ def _check_pair(
     current: StackRunRecord,
     observations: Mapping[str, FrameObservation],
     paired_relative_error: float | None,
+    configured_stack_weight: str | None,
 ) -> ForecastCheck:
     """Check the forecast for one pair of neighbouring stack runs.
 
@@ -509,6 +535,9 @@ def _check_pair(
     paired_relative_error : `float` or `None`
         The relative error of the noise ratio when both stacks were measured in
         the same apertures; ``None`` for the unpaired error.
+    configured_stack_weight : `str` or `None`
+        The ``Processing.Siril.stack_weight`` setting, used only for the
+        planned forecast when the earlier run's mode is not known.
 
     Returns
     -------
@@ -574,24 +603,29 @@ def _check_pair(
             paired=paired,
         )
 
-    current_mode = identify_weighting_mode(current_frames, current.recorded_weights)
-    mode_name = current_mode.mode.value
-    if current_mode.mode == WeightingMode.UNKNOWN:
+    # The frames' real weights are the recorded ones. The mode is named for the
+    # reader when the weights match one, but nothing depends on it.
+    if any(weight is None for weight in [*previous.recorded_weights, *current.recorded_weights]):
         return _not_checkable(
             current,
-            f"The weighting mode the stacker used is not known: {current_mode.reason}",
+            "The stacker's weights were not recorded for every frame (Siril does not report them in its "
+            "noise mode), so the forecast given the frames taken cannot be made. Nothing is guessed.",
             mode_name,
             evidence,
             measured=measured,
             tolerance=tolerance,
             paired=paired,
         )
+    current_weights = [float(weight or 0.0) for weight in current.recorded_weights]
+    previous_weights = [float(weight or 0.0) for weight in previous.recorded_weights]
+    current_mode = identify_weighting_mode(current_frames, current.recorded_weights)
+    mode_name = current_mode.mode.value if current_mode.mode != WeightingMode.UNKNOWN else "recorded_weights"
     previous_mode = identify_weighting_mode(previous_frames, previous.recorded_weights)
     planned_mode = (
         previous_mode.mode
         if previous_mode.mode != WeightingMode.UNKNOWN
         else predict_weighting_mode(
-            None, [frame.exposure_seconds for frame in [*previous_frames, *new_frames]]
+            configured_stack_weight, [frame.exposure_seconds for frame in [*previous_frames, *new_frames]]
         )
     )
 
@@ -600,8 +634,8 @@ def _check_pair(
     planned_after = noise_ratio_after_adding(
         previous_frames, previous_frames, len(new_frames), planned_mode, planned_exposure
     )
-    given_after = forecast_stack_noise(current_frames, current_mode.mode)
-    given_before = forecast_stack_noise(previous_frames, current_mode.mode)
+    given_after = forecast_noise_with_weights(current_frames, current_weights)
+    given_before = forecast_noise_with_weights(previous_frames, previous_weights)
     if (
         before.noise is None
         or planned_after is None
@@ -673,6 +707,7 @@ def forecast_check(
     runs: Sequence[StackRunRecord],
     observations: Iterable[FrameObservation],
     *,
+    configured_stack_weight: str | None = None,
     paired_relative_error_by_run: Mapping[str, float] | None = None,
 ) -> list[ForecastCheck]:
     """Check each stack run's gain against the forecast from the run before.
@@ -685,6 +720,11 @@ def forecast_check(
     observations : `Iterable` [`FrameObservation`]
         The measurements of the frames in the runs
         (`frame_observations_from_measurements`).
+    configured_stack_weight : `str` or `None`
+        The configured ``Processing.Siril.stack_weight`` (``None`` when none
+        is set). Real callers pass the configured value; the planned forecast
+        uses it when the earlier run's recorded weights match no known mode.
+        The forecast given the frames taken never uses it.
     paired_relative_error_by_run : `Mapping` [`str`, `float`], optional
         For a run whose noise was compared with the run before in the same
         apertures, the relative error of the ratio. The check then uses it and
@@ -701,7 +741,7 @@ def forecast_check(
     checks = []
     for previous, current in pairwise(ordered):
         paired = (paired_relative_error_by_run or {}).get(current.run_id)
-        checks.append(_check_pair(previous, current, by_id, paired))
+        checks.append(_check_pair(previous, current, by_id, paired, configured_stack_weight))
     return checks
 
 
@@ -717,9 +757,12 @@ def noise_steps_from_runs(runs: Sequence[StackRunRecord]) -> list[NoiseStep]:
     -------
     steps : `list` [`NoiseStep`]
         One step for each run that has a measured noise, an expected noise and
-        at least 2 apertures. The errors are unpaired.
+        at least 2 apertures. The errors are unpaired. Noise and expected noise
+        are divided by the stack's reference flux, so stacks with different
+        pixel scales can be fitted together; runs without a flux are left out
+        when any run has one.
     """
-    steps = []
+    candidates = []
     for record in sorted(runs, key=lambda item: (item.measured_at, item.run_id)):
         if (
             record.noise is None
@@ -730,12 +773,23 @@ def noise_steps_from_runs(runs: Sequence[StackRunRecord]) -> list[NoiseStep]:
             or record.aperture_count < 2
         ):
             continue
+        candidates.append(record)
+    normalizable = [record for record in candidates if record.reference_flux]
+    # Each stack has its own pixel scale, so stacks are fitted together only on
+    # the normalized scale. Without a flux for any run, the raw values are used
+    # and the fit says they are not normalized.
+    chosen = normalizable if normalizable else candidates
+    steps = []
+    for record in chosen:
+        flux = record.reference_flux if normalizable else None
+        divisor = flux if flux else 1.0
         steps.append(
             NoiseStep(
                 label=record.run_id,
-                expected_variance=record.expected_noise**2,
-                measured_noise=record.noise,
-                apertures=record.aperture_count,
+                expected_variance=(record.expected_noise or 0.0) ** 2 / divisor**2,
+                measured_noise=(record.noise or 0.0) / divisor,
+                apertures=record.aperture_count or 2,
+                normalized=flux is not None,
             )
         )
     return steps

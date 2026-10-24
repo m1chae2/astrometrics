@@ -38,7 +38,7 @@ Planning code: this module reads only through the public root of the science
 library and never imports Control.
 """
 
-from collections import Counter, defaultdict
+from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
@@ -50,18 +50,17 @@ from astrometricslib import (
     CaptureSetting,
     MeasurementReference,
     Target,
-    frame_is_spectral,
 )
 from wayfindinglib.analytics.result_quality.capture_overheads import (
+    AUTOFOCUS_RUNS_PER_HOUR,
+    DITHER_EVERY_FRAMES,
     CaptureOverheads,
     estimate_capture_overheads,
     wall_clock_estimate,
 )
 from wayfindinglib.analytics.result_quality.efficiency import (
-    SKY_RATE_METRIC,
     FrameObservation,
     baseline_key,
-    frame_observations_from_measurements,
 )
 from wayfindinglib.analytics.result_quality.forecast import (
     FRAME_WEIGHT_METRIC,
@@ -69,6 +68,12 @@ from wayfindinglib.analytics.result_quality.forecast import (
     stack_frames_from_observations,
     stack_runs_from_measurements,
     target_stop_signal,
+)
+from wayfindinglib.analytics.result_quality.library_inputs import (
+    LibraryInputs,
+    build_target_observations,
+    dominant_setting,
+    target_direction,
 )
 from wayfindinglib.analytics.result_quality.noise_growth import (
     WeightingMode,
@@ -78,14 +83,9 @@ from wayfindinglib.analytics.result_quality.noise_growth import (
     predict_weighting_mode,
 )
 from wayfindinglib.analytics.result_quality.observing_values import sky_geometry
-from wayfindinglib.analytics.result_quality.reply_budget import MAXIMUM_REPLY_CHARACTERS, reply_characters
+from wayfindinglib.analytics.result_quality.reply_budget import fit_reply, reply_budget
+from wayfindinglib.analytics.result_quality.science_goal import science_goal_for_target
 from wayfindinglib.analytics.result_quality.sky_model import SkyModel, predict_sky_rate_at
-from wayfindinglib.analytics.result_quality.sky_samples import (
-    collect_sky_samples,
-    fit_sky_models,
-    frame_times,
-    target_direction,
-)
 from wayfindinglib.astronomy.coordinate_transforms import compute_altaz, earth_location
 from wayfindinglib.models.equipment_and_site.equipment import Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
@@ -98,6 +98,7 @@ from wayfindinglib.models.planning.tonight_ranking import (
     TonightRanking,
     TonightSkyModel,
 )
+from wayfindinglib.models.quality.efficiency import ScienceGoal
 from wayfindinglib.tasks.planning_tasks.visibility_tasks import effective_altitude_floor, visibility_state_at
 
 TONIGHT_SKY_ENTRY = "WAY-71"
@@ -113,16 +114,6 @@ THIN_DATASET_SECONDS = 2.0 * 3600.0
 """A target with less exposure than this is "thin". One more hour then adds at
 least half as much again as it has, so its gain per hour is large because its
 history is short, not because it is a better target tonight. Design estimate,
-register row WAY-D71."""
-
-DITHER_EVERY_FRAMES = 3
-"""Frames between dithers assumed in the hour. It is the cadence the plan uses
-in its wall-clock example (60 frames of 30 s with a dither every 3 frames).
-Design estimate, register row WAY-D71."""
-
-AUTOFOCUS_RUNS_PER_HOUR = 1
-"""Autofocus runs assumed in one hour. Ekos refocuses on a filter change or a
-temperature change, about once an hour on a cooling night. Design estimate,
 register row WAY-D71."""
 
 GAIN_DESCRIPTIONS = {
@@ -152,10 +143,11 @@ _NEVER_RANKED_TYPES = {
 def classify_use(target: Target) -> RankedUse | None:
     """Say which ranked list a target belongs to.
 
-    Spectral frames make a spectroscopy target. Otherwise a target that has a
-    photometry quality record is a photometry target. All others are imaging
-    targets. Solar-system targets, comets, calibration folders and targets
-    with asteroid-search results are never ranked (``None``).
+    The list follows the target's science goal (`science_goal_for_target`):
+    a spectroscopy goal is the spectroscopy list, a photometry goal the
+    photometry list, and all others the imaging list. Solar-system targets,
+    comets, calibration folders and targets with asteroid-search results are
+    never ranked (``None``).
 
     Parameters
     ----------
@@ -172,10 +164,10 @@ def classify_use(target: Target) -> RankedUse | None:
     detection = target.asteroid_detection
     if detection.candidates or detection.quality_summary is not None:
         return None
-    lights = [frame for frame in target.frames if frame.role.upper() == "LIGHT"]
-    if lights and sum(frame_is_spectral(frame) for frame in lights) > len(lights) / 2:
+    goal = science_goal_for_target(target)
+    if goal == ScienceGoal.SLITLESS_SPECTRAL_RESOLUTION:
         return RankedUse.SPECTROSCOPY
-    if target.quality.photometry is not None:
+    if goal in (ScienceGoal.BRIGHT_STAR_PHOTOMETRY, ScienceGoal.PERIOD_DETECTION):
         return RankedUse.PHOTOMETRY
     return RankedUse.IMAGING
 
@@ -219,27 +211,6 @@ def _no_forecast(
     )
 
 
-def _dominant_setting(observations: Sequence[FrameObservation]) -> CaptureSetting | None:
-    """Find the capture setting with the most exposure time.
-
-    Parameters
-    ----------
-    observations : `Sequence` [`FrameObservation`]
-        The target's frames.
-
-    Returns
-    -------
-    setting : `CaptureSetting` or `None`
-        The setting, or ``None`` when no frame has an exposure time.
-    """
-    totals: dict[CaptureSetting, float] = defaultdict(float)
-    for observation in observations:
-        seconds = observation.effective_exposure_seconds
-        if seconds:
-            totals[observation.capture_setting] += seconds
-    return max(totals, key=lambda setting: totals[setting]) if totals else None
-
-
 def score_candidate(
     target_id: str,
     use: RankedUse,
@@ -252,6 +223,7 @@ def score_candidate(
     site: SiteProfile,
     sky_models: Mapping[str, SkyModel],
     overheads_for: Callable[[CaptureSetting], CaptureOverheads],
+    configured_weight: str | None = None,
 ) -> RankedCandidate:
     """Find the gain from one clock hour on one target.
 
@@ -280,6 +252,9 @@ def score_candidate(
         The fitted sky models by equipment key.
     overheads_for : `Callable`
         Gives the capture overheads for a capture setting.
+    configured_weight : `str` or `None`, optional
+        The configured ``Processing.Siril.stack_weight``, which decides how
+        the stacker will weight the new frames. ``None`` when none is set.
 
     Returns
     -------
@@ -294,7 +269,7 @@ def score_candidate(
             altitude_deg,
             "No frame of this target has been measured yet, so it has no noise history.",
         )
-    setting = _dominant_setting(observations)
+    setting = dominant_setting(observations)
     if setting is None:
         return _no_forecast(
             target_id, use, altitude_deg, "No measured frame of this target has an exposure time."
@@ -334,7 +309,11 @@ def score_candidate(
             "The target has no stack yet; the forecast assumes every measured frame will be stacked."
         )
     if mode == WeightingMode.UNKNOWN:
-        mode = predict_weighting_mode(None, [frame.exposure_seconds for frame in existing])
+        mode = predict_weighting_mode(
+            configured_weight,
+            [frame.exposure_seconds for frame in existing],
+            is_spectral=use == RankedUse.SPECTROSCOPY,
+        )
     current = forecast_stack_noise(existing, mode)
     if current.noise is None:
         return _no_forecast(
@@ -494,15 +473,16 @@ def build_lists(candidates: Iterable[RankedCandidate]) -> tuple[list[RankedList]
     return lists, notes
 
 
-def fit_ranking_to_budget(ranking: TonightRanking, budget: int = MAXIMUM_REPLY_CHARACTERS) -> TonightRanking:
+def fit_ranking_to_budget(ranking: TonightRanking, budget: int | None = None) -> TonightRanking:
     """Leave out the lowest candidates until the ranking fits the reply budget.
 
     Parameters
     ----------
     ranking : `TonightRanking`
-        The finished ranking.
+        The finished ranking, with all its notes already in it.
     budget : `int`, optional
-        The most characters its compact JSON may have.
+        The most characters its JSON may have, measured the way the MCP tool
+        registry measures a reply. `reply_budget` when omitted.
 
     Returns
     -------
@@ -510,36 +490,47 @@ def fit_ranking_to_budget(ranking: TonightRanking, budget: int = MAXIMUM_REPLY_C
         The same ranking when it fits. Otherwise a copy that drops the last
         candidate of the longest list again and again (the unranked, then the
         stopped, then the lowest gains), with a note for each list that says
-        how many targets were left out.
+        how many targets were left out. The notes are part of each copy, so
+        the length that is checked includes them.
     """
-    if reply_characters(ranking) <= budget:
-        return ranking
-    kept = {ranked_list.use: list(ranked_list.candidates) for ranked_list in ranking.lists}
-    left_out: Counter[RankedUse] = Counter()
-    fitted = ranking
-    while reply_characters(fitted) > budget:
-        longest = max(kept, key=lambda use: len(kept[use]))
-        if not kept[longest]:
-            break
+    limit = reply_budget() if budget is None else budget
+    original_counts = {ranked_list.use: len(ranked_list.candidates) for ranked_list in ranking.lists}
+
+    def shrink(current: TonightRanking, _round_number: int) -> TonightRanking | None:
+        """Drop the lowest candidates of the longest list.
+
+        Parameters
+        ----------
+        current : `TonightRanking`
+            The ranking so far.
+        _round_number : `int`
+            Not used.
+
+        Returns
+        -------
+        smaller : `TonightRanking` or `None`
+            The smaller ranking, or ``None`` when every list is empty.
+        """
+        longest = max(current.lists, key=lambda ranked_list: len(ranked_list.candidates), default=None)
+        if longest is None or not longest.candidates:
+            return None
         # Trim several at a time: the cut is large when the library is large.
-        for _ in range(max(1, len(kept[longest]) // 10)):
-            if kept[longest]:
-                kept[longest].pop()
-                left_out[longest] += 1
-        fitted = ranking.model_copy(
-            update={
-                "lists": [
-                    ranked_list.model_copy(update={"candidates": kept[ranked_list.use]})
-                    for ranked_list in ranking.lists
-                ],
-            }
-        )
-    notes = [
-        f"{count} {use.value} targets ranked lowest were left out to fit the reply budget "
-        f"of {budget:,} characters."
-        for use, count in left_out.items()
-    ]
-    return fitted.model_copy(update={"notes": [*ranking.notes, *notes]})
+        cut = max(1, len(longest.candidates) // 10)
+        lists = [
+            ranked_list.model_copy(update={"candidates": ranked_list.candidates[:-cut]})
+            if ranked_list.use == longest.use
+            else ranked_list
+            for ranked_list in current.lists
+        ]
+        notes = [
+            f"{original_counts[ranked_list.use] - len(ranked_list.candidates)} {ranked_list.use.value} "
+            f"targets ranked lowest were left out to fit the reply budget of {limit:,} characters."
+            for ranked_list in lists
+            if original_counts[ranked_list.use] > len(ranked_list.candidates)
+        ]
+        return ranking.model_copy(update={"lists": lists, "notes": [*ranking.notes, *notes]})
+
+    return fit_reply(ranking, shrink, limit)
 
 
 def summarize_sky(
@@ -635,9 +626,9 @@ def rank_tonight(
         The science library handle (keyword only). Its ``targets`` and
         ``quality`` are read.
     site_profile : `SiteProfile`, optional
-        The observing site. When omitted it is read from `butler`
-        (``wayfindinglib.data_access.site_profile_reader``), which needs
-        `butler`.
+        The observing site. When omitted it is read from `butler` (the
+        stored default site, else the configured one, in memory). It is never
+        stored, and a note says when no site is stored.
     telescope : `Telescope`, optional
         The imaging telescope, for its altitude limits. When omitted, the
         active telescope of `config` is used if `config` is given.
@@ -671,30 +662,24 @@ def rank_tonight(
 
     when = _aware_utc(at, now)
     epoch_seconds = when.timestamp()
-    if site_profile is None:
-        if butler is None:
-            raise ConfigurationError(
-                "rank_tonight needs a site_profile, or a butler to read the default site from."
-            )
-        from wayfindinglib.data_access.site_profile_reader import get_or_seed_default_site_profile
-
-        site_profile = get_or_seed_default_site_profile(butler, config)
+    if site_profile is None and butler is None:
+        raise ConfigurationError(
+            "rank_tonight needs a site_profile, or a butler to read the default site from."
+        )
     if telescope is None and config is not None:
         from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
 
         telescope = get_equipment_catalog(config).active_telescope()
     if ekos_contexts is None:
         ekos_contexts = butler.get_all("ekos_session_context") if butler is not None else []
+    configured_weight = config.get_stack_weight() if hasattr(config, "get_stack_weight") else None
 
-    targets = list(astrometrics.targets.list())
+    # The site is only read here: a ranking never stores anything.
+    inputs = LibraryInputs(astrometrics, butler, config, known_site=site_profile)
+    site_profile = inputs.site
+    targets = list(inputs.targets().values())
     capture_settings = astrometrics.quality.capture_settings()
-    sky_rows = astrometrics.quality.query(metric=SKY_RATE_METRIC, level="frame", library_only=True)
-    models, unavailable = fit_sky_models(
-        collect_sky_samples(targets, sky_rows, capture_settings),
-        site_profile.latitude_deg,
-        site_profile.longitude_deg,
-        site_profile.elevation_m,
-    )
+    models, unavailable = inputs.all_sky_models()
 
     location = earth_location(site_profile.latitude_deg, site_profile.longitude_deg, site_profile.elevation_m)
     floor = (
@@ -750,12 +735,7 @@ def rank_tonight(
             skipped["targets not visible at that time"] += 1
             continue
         frame_rows = astrometrics.quality.query(target_id=target.id, level="frame", library_only=True)
-        observations = frame_observations_from_measurements(
-            frame_rows,
-            capture_settings,
-            start_epoch_by_frame=frame_times(target),
-            direction_by_frame=dict.fromkeys(frame_times(target), direction),
-        )
+        observations = build_target_observations(target, frame_rows, capture_settings)
         history = [
             *astrometrics.quality.query(
                 target_id=target.id, level="stack", library_only=True, latest_only=False
@@ -781,6 +761,7 @@ def rank_tonight(
                 site=site_profile,
                 sky_models=models,
                 overheads_for=overheads_for,
+                configured_weight=configured_weight,
             )
         )
     lists, notes = build_lists(candidates)
@@ -791,7 +772,7 @@ def rank_tonight(
             at=when,
             lists=lists,
             sky=summarize_sky(epoch_seconds, site_profile, models, unavailable),
-            notes=notes,
+            notes=[*inputs.notes, *notes],
         )
     )
 

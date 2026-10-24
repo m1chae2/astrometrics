@@ -18,6 +18,7 @@ Otherwise it is "not measured".
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Iterable, Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -49,8 +50,18 @@ there is none."""
 
 MODEL_AGREEMENT_SIGMAS = 2.0
 """The measured stack noise is said to disagree with the model only when its
-variance ratio exceeds 1 by this many standard errors. Two standard errors is a
-one-in-twenty false alarm. Design estimate, register row WAY-D34."""
+variance ratio exceeds 1 by this many standard errors. The test is one-sided
+(only a noisier stack counts), so two standard errors is a false alarm of
+about 2.3 percent, not 5. Design estimate, register row WAY-D34."""
+
+EXPECTED_NOISE_MODEL_RELATIVE_ERROR = 0.11
+"""The relative error of the expected noise itself, as noise. On M 57 the real
+subsets measured 9 to 31 percent below the prediction (validation register
+entry STK-36); half of that spread, 11 percent, is taken as the model's own
+one-standard-error. Doubled, it is the relative error of the variance. It is
+added in quadrature to the aperture error before "cause unknown" is reported,
+so the model's own error is not counted as an unexplained loss. Design
+estimate from STK-36, register row WAY-D34."""
 
 
 class MeasuredNoiseCheck(BaseModel):
@@ -68,14 +79,31 @@ class MeasuredNoiseCheck(BaseModel):
         (measured noise / expected noise) squared. Above 1 means the stack is
         noisier than its frames explain.
     variance_ratio_error : `float`
-        One standard error of that ratio. For unpaired apertures it is
-        ``2 * 1.17 / sqrt(n)`` times the ratio.
+        One standard error of that ratio from the apertures alone. For
+        unpaired apertures it is ``2 * 1.17 / sqrt(n)`` times the ratio.
+    expected_noise_relative_error : `float`
+        The expected-noise model's own relative error, as noise. It is added
+        in quadrature (doubled for the variance) to `variance_ratio_error`.
     """
 
     model_config = _MODEL_CONFIG
 
     variance_ratio: float = Field(gt=0.0)
     variance_ratio_error: float = Field(ge=0.0)
+    expected_noise_relative_error: float = Field(default=EXPECTED_NOISE_MODEL_RELATIVE_ERROR, ge=0.0)
+
+    @property
+    def total_variance_ratio_error(self) -> float:
+        """Give the error of the ratio with the model's own error included.
+
+        Returns
+        -------
+        error : `float`
+            The aperture error and ``2 * expected_noise_relative_error *
+            variance_ratio`` added in quadrature.
+        """
+        model_part = 2.0 * self.expected_noise_relative_error * self.variance_ratio
+        return math.hypot(self.variance_ratio_error, model_part)
 
 
 class SetAsideInput(BaseModel):
@@ -177,7 +205,9 @@ def _unknown_part(effective_by_factors: float, check: MeasuredNoiseCheck | None)
     times the variance its frames explain, its effective time is the
     factors' effective time divided by `r`, so the unexplained part is
     ``E (1 - 1 / r)``. It is reported only when ``r - 1`` exceeds
-    `MODEL_AGREEMENT_SIGMAS` standard errors.
+    `MODEL_AGREEMENT_SIGMAS` standard errors, one-sided. The standard error
+    includes the expected-noise model's own error (STK-36), added in
+    quadrature to the aperture error.
 
     Parameters
     ----------
@@ -195,7 +225,7 @@ def _unknown_part(effective_by_factors: float, check: MeasuredNoiseCheck | None)
     if check is None:
         return None, "Not measured: no stack noise was measured against the noise its frames explain."
     excess = check.variance_ratio - 1.0
-    if excess <= MODEL_AGREEMENT_SIGMAS * check.variance_ratio_error:
+    if excess <= MODEL_AGREEMENT_SIGMAS * check.total_variance_ratio_error:
         return 0.0, "The stack's measured noise agrees with the noise its frames explain, within error."
     return (
         effective_by_factors * (1.0 - 1.0 / check.variance_ratio),

@@ -13,8 +13,19 @@ The model for one capture setting is
 
 where X is the airmass and
 
-    moon_term = illumination * max(0, sin(moon altitude)) * scatter(separation)
-    * X
+    moon_term = phase(alpha) * scatter(separation) * 10^(-0.4 k X_moon) * X
+
+where ``alpha`` is the Moon's phase angle (0 at full Moon, 90 degrees at
+quarter), ``phase`` is the Krisciunas and Schaefer phase function scaled to 1
+at full Moon, and ``X_moon`` is the airmass of the Moon. The Moon's light is
+dimmed by its own path through the air, ``10^(-0.4 k X_moon)``, and the term
+is 0 when the Moon is below the horizon. The factor ``X`` is the target's path
+length through the air that scatters the light.
+
+The phase function is ``10^(-0.4 (3.84 + 0.026 |alpha| + 4e-9 alpha^4))``
+(Krisciunas and Schaefer 1991). At quarter phase it is about 0.09 of its
+full-Moon value. The model has no twilight term: frames taken while the Sun
+is above -18 degrees see a brighter sky than it predicts.
 
 The scatter function has the shape of Krisciunas and Schaefer (1991, PASP
 103, 1033): ``1.06 + cos^2(rho) + 10^(0.79 - rho / 40)`` with the Moon
@@ -26,8 +37,10 @@ cannot darken the sky. The constant c0 holds the dark sky, the airglow and,
 because no dark frame is subtracted, the sensor's dark current.
 
 The model is model-derived and labeled so. It has not been checked on a
-photometric night; extinction is not modeled separately (decision S16). The
-fit reports its error on nights held out of the fit. With fewer than
+photometric night; the target's own extinction is not modeled separately
+(decision S16). The fit reports its error on nights held out of the fit, as
+the median over nights of each night's root-mean-square relative error, so
+that one odd night does not set the number. With fewer than
 `MINIMUM_NIGHTS_FOR_SKY_MODEL` nights no model is made.
 """
 
@@ -41,7 +54,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 from scipy.optimize import nnls
 
-from wayfindinglib.analytics.result_quality.observing_values import SkyGeometry, sky_geometry
+from wayfindinglib.analytics.result_quality.observing_values import (
+    SkyGeometry,
+    airmass_from_altitude,
+    sky_geometry,
+)
 
 _MODEL_CONFIG = ConfigDict(populate_by_name=True, alias_generator=to_camel)
 
@@ -63,8 +80,22 @@ held at 0 and the model says so. Design estimate, register row WAY-D29."""
 
 MOON_TERM_MINIMUM = 0.02
 """A frame counts as moonlit for the check above when its Moon term is at least
-this. The term runs up to about 5 for a full Moon high in the sky, close to the
-target, so 0.02 is a faint Moon. Design estimate, register row WAY-D29."""
+this. The term runs up to about 3 for a full Moon high in the sky, 30 degrees
+from the target, and 0.02 is about 0.7 percent of that: a thin crescent or a
+Moon near the horizon. Design estimate, register row WAY-D29."""
+
+MOON_PHASE_MAGNITUDE_OFFSET = 3.84
+MOON_PHASE_LINEAR_COEFFICIENT = 0.026
+MOON_PHASE_QUARTIC_COEFFICIENT = 4.0e-9
+"""Constants of the Krisciunas and Schaefer (1991) lunar phase function,
+``10^(-0.4 (3.84 + 0.026 |alpha| + 4e-9 alpha^4))`` with the phase angle alpha
+in degrees. Published values; register row WAY-D29."""
+
+MOON_EXTINCTION_PER_AIRMASS = 0.2
+"""The extinction coefficient k, in magnitudes per airmass, used for the Moon's
+own light on its way to the air above the target. A typical V-band value for a
+dry mountain site (0.15 to 0.25). Design estimate; the true value changes from
+night to night. Register row WAY-D29."""
 
 MIE_EXPONENT_OFFSET = 0.79
 MIE_ANGLE_SCALE_DEG = 40.0
@@ -211,6 +242,44 @@ def moon_scatter_shape(separation_deg: float) -> float:
     return RAYLEIGH_OFFSET + cosine**2 + 10.0 ** (MIE_EXPONENT_OFFSET - separation_deg / MIE_ANGLE_SCALE_DEG)
 
 
+def moon_phase_angle_deg(illumination_fraction: float) -> float:
+    """Give the Moon's phase angle from its lit fraction.
+
+    Parameters
+    ----------
+    illumination_fraction : `float`
+        The lit fraction of the disc, 0 to 1. It equals
+        ``(1 + cos(alpha)) / 2``.
+
+    Returns
+    -------
+    phase_angle_deg : `float`
+        The angle alpha at the Moon between the Earth and the Sun, in degrees.
+        0 at full Moon, 90 at quarter, 180 at new Moon.
+    """
+    cosine = min(1.0, max(-1.0, 2.0 * illumination_fraction - 1.0))
+    return math.degrees(math.acos(cosine))
+
+
+def moon_phase_function(phase_angle_deg: float) -> float:
+    """Give the Moon's brightness at a phase angle, relative to full Moon.
+
+    Parameters
+    ----------
+    phase_angle_deg : `float`
+        The phase angle, in degrees.
+
+    Returns
+    -------
+    relative_brightness : `float`
+        The Krisciunas and Schaefer phase function divided by its value at
+        phase angle 0. 1 at full Moon, about 0.09 at quarter phase.
+    """
+    angle = abs(phase_angle_deg)
+    magnitudes = MOON_PHASE_LINEAR_COEFFICIENT * angle + MOON_PHASE_QUARTIC_COEFFICIENT * angle**4
+    return 10.0 ** (-0.4 * magnitudes)
+
+
 def sky_features(geometry: SkyGeometry) -> tuple[float, float, float] | None:
     """Give the three model features of one moment.
 
@@ -227,13 +296,16 @@ def sky_features(geometry: SkyGeometry) -> tuple[float, float, float] | None:
     """
     if geometry.airmass is None:
         return None
-    moon_up = max(0.0, math.sin(math.radians(geometry.moon_altitude_deg)))
-    moon_term = (
-        geometry.moon_illumination_fraction
-        * moon_up
-        * moon_scatter_shape(geometry.moon_separation_deg)
-        * geometry.airmass
-    )
+    moon_airmass = airmass_from_altitude(geometry.moon_altitude_deg)
+    if moon_airmass is None:
+        moon_term = 0.0
+    else:
+        moon_term = (
+            moon_phase_function(moon_phase_angle_deg(geometry.moon_illumination_fraction))
+            * moon_scatter_shape(geometry.moon_separation_deg)
+            * 10.0 ** (-0.4 * MOON_EXTINCTION_PER_AIRMASS * moon_airmass)
+            * geometry.airmass
+        )
     return 1.0, geometry.airmass - 1.0, moon_term
 
 
@@ -358,7 +430,7 @@ def fit_sky_model(
             features[~held], rates[~held], fit_moon=len(others_moonlit) >= MINIMUM_MOON_NIGHTS
         )
         held_out_errors.append(_relative_errors(partial, features[held], rates[held]))
-    held_out = float(math.sqrt(np.mean(np.concatenate(held_out_errors) ** 2)))
+    held_out = float(np.median([math.sqrt(np.mean(errors**2)) for errors in held_out_errors]))
     return SkyModelOutcome(
         model=SkyModel(
             setting_key=setting_key,

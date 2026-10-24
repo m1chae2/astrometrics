@@ -548,24 +548,20 @@ def mountain_time() -> Iterator[None]:
     """Pin the process time zone to the observatory's, then restore it.
 
     The observing night is named in local time, so a test that expects a
-    night name needs the same zone on every machine.
+    night name needs the same zone on every machine. A private monkeypatch
+    context sets ``TZ`` and puts the old value back when it closes; the C
+    library then reads the restored value with a second `time.tzset` call.
 
     Yields
     ------
     None
         Control to the test, with the zone set to Mountain time.
     """
-    previous = os.environ.get("TZ")
-    os.environ["TZ"] = "America/Denver"
-    time.tzset()
-    try:
-        yield
-    finally:
-        if previous is None:
-            os.environ.pop("TZ", None)
-        else:
-            os.environ["TZ"] = previous
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("TZ", "America/Denver")
         time.tzset()
+        yield
+    time.tzset()
 
 
 @pytest.mark.usefixtures("mountain_time")

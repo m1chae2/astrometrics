@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from astrometricslib import FrameRecord, NotFoundError
+from astrometricslib import AppConfiguration, FrameRecord, NotFoundError
 from wayfindinglib.analytics.result_quality.efficiency import STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC
 from wayfindinglib.analytics.result_quality.judge_results import needs_attention
 from wayfindinglib.analytics.test.night_quality_helpers import (
@@ -37,20 +37,39 @@ from wayfindinglib.models.session.session_quality import (
 )
 from wayfindinglib.tasks.control_tasks import night_analysis, night_quality_task
 
+_CONFIG: dict[str, AppConfiguration] = {}
+"""The isolated configuration of the running test."""
 
-def _context(library: FakeLibrary) -> Any:
+
+@pytest.fixture(autouse=True)
+def _isolated_config(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point the configuration at an empty file in a temporary folder."""
+    config_path = tmp_path / "astrometrics.config.toml"
+    monkeypatch.setattr(AppConfiguration, "_find_config_file", lambda self: config_path)
+    _CONFIG["config"] = AppConfiguration()
+
+
+def _context(library: FakeLibrary, stored: dict[str, list[Any]] | None = None) -> Any:
     """Build a stand-in for the Control context.
+
+    Parameters
+    ----------
+    library : `FakeLibrary`
+        The science library stand-in.
+    stored : `dict` [`str`, `list`], optional
+        Stored records by kind (``ekos_session_context``, ``guiding_run``).
 
     Returns
     -------
     context : `SimpleNamespace`
         Has what the night review reads.
     """
+    records = stored or {}
     return SimpleNamespace(
         astrometrics=library,
-        config=SimpleNamespace(app_config=None),
+        config=_CONFIG["config"],
         active_telescope=lambda: None,
-        butler=SimpleNamespace(get_all=lambda kind: []),
+        butler=SimpleNamespace(get_all=lambda kind: records.get(kind, []), get=lambda kind, key=None: None),
     )
 
 
@@ -87,7 +106,8 @@ def test_the_loss_account_is_stated_against_the_users_own_baseline() -> None:
     assert account is not None
     assert account.reference_name.startswith("baseline:")
     causes = {share.cause for share in account.kept_frame_deficit}
-    assert {"seeing", "sky_brightness"} <= causes
+    assert "seeing" in causes
+    assert any(cause.startswith("sky_brightness") for cause in causes)
     assert entry.efficiency_effective_seconds is not None
     assert entry.efficiency_effective_seconds < entry.captured_seconds
     assert account.transparency_included is False
@@ -164,13 +184,13 @@ def test_too_few_nights_fall_back_to_no_reference_and_say_so() -> None:
     assert any("No reference" in note for note in entry.notes)
 
 
-def test_the_moon_share_needs_five_nights_and_a_configured_site() -> None:
-    """Without a configured site the review says why it has no Moon share."""
+def test_a_missing_stored_site_is_said_and_never_stored() -> None:
+    """With no stored site the review names where its site came from."""
     target = make_target(STAR, 5)
 
     quality = _review(FakeLibrary([target], make_rows(target, REVIEWED)))
 
-    assert any("location is not configured" in note for note in quality.notes)
+    assert any("No observing site is stored" in note for note in quality.notes)
 
 
 def test_an_empty_night_is_not_found() -> None:
@@ -270,3 +290,62 @@ def test_a_review_with_long_evidence_lists_is_cut_to_fit_the_reply_budget() -> N
         assert len(entry.statements[0].evidence) + entry.statements[0].evidence_omitted_count == 700
     assert fitted.needs_attention == review.needs_attention
     assert any("cut to fit" in note for note in fitted.notes)
+
+
+def test_the_night_review_fits_focus_drift_and_estimates_polar_alignment() -> None:
+    """Focus drift and polar alignment are worked out for the night."""
+    from astrometricslib import frame_subject_id
+    from wayfindinglib.models.session.ekos_session import EkosAutofocusRun, EkosSessionContext
+    from wayfindinglib.models.session.guiding_run import GuidingRunSummary
+
+    target = make_target(STAR, 4, frames_per_night=40)
+    rows = make_rows(target, REVIEWED)
+    night_frames = [
+        frame
+        for frame in target.frames
+        if datetime.fromtimestamp(frame.timestamp or 0.0, tz=UTC).date().isoformat() == REVIEWED
+    ]
+    for index, frame in enumerate(night_frames):
+        drop = 0.15 * index
+        rows.append(make_row("frame.focuser_temperature_degc", 1, 10.0 - drop, target, frame))
+        rows.append(
+            make_row("frame.star_width_moffat_px", 1, (2.5**2 + (0.5 * drop) ** 2) ** 0.5, target, frame)
+        )
+        rows.append(make_row("stacking.frame_registration_rotation_deg", 1, 0.01 * index, target, frame))
+    start = night_frames[0].timestamp - 600.0
+    contexts = [
+        EkosSessionContext(
+            id="ctx",
+            session_id=REVIEWED,
+            started_at=start,
+            ended_at=start + 7200.0,
+            autofocus_runs=[EkosAutofocusRun(timestamp=start, succeeded=True, filter_name="L")],
+        )
+    ]
+    runs = [
+        GuidingRunSummary(
+            id="g#1", session_id=REVIEWED, source_file_name="g", written_by_ekos=True, started_at=start
+        )
+    ]
+    context = _context(FakeLibrary([target], rows), {"ekos_session_context": contexts, "guiding_run": runs})
+
+    quality = night_quality_task.build_night_quality(context, REVIEWED)
+
+    assert quality.focus_drift is not None
+    assert quality.focus_drift.frames_used > 10
+    assert quality.polar_alignment is not None
+    assert quality.polar_alignment.exploratory is True
+    assert quality.polar_alignment.sample_count == len(night_frames)
+    assert frame_subject_id(night_frames[0].path, target.id)
+
+
+def test_a_night_without_rotation_or_focus_rows_says_so() -> None:
+    """Missing inputs give an explicit reason, never a default."""
+    target = make_target(STAR, 5)
+
+    quality = _review(FakeLibrary([target], make_rows(target, REVIEWED)))
+
+    assert quality.polar_alignment is None
+    assert any("polar-alignment" in note for note in quality.notes)
+    assert quality.focus_drift is not None
+    assert quality.focus_drift.status == "insufficient_data"

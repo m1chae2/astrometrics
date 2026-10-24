@@ -27,8 +27,8 @@ The library never advises hardware (decision 11). When only new hardware
 would help, a row makes a ``constraint`` statement and proposes nothing.
 
 Every number below carries the place it comes from. Numbers that are design
-estimates are listed in the validation register (``WAY-D05`` to ``WAY-D12``)
-with a way to measure them on your own data.
+estimates are listed in the validation register (``WAY-D05`` to ``WAY-D09``,
+and ``WAY-D60`` to ``WAY-D68``) with a way to measure them on your own data.
 """
 
 from pydantic import BaseModel, ConfigDict
@@ -103,6 +103,50 @@ FLAT_VARIANCE_SHARE_TARGET = 0.01
 MASTER_FLAT_NOISE_FRACTION_LIMIT = 0.005
 
 
+def build_limit(
+    value: float,
+    unit: str,
+    tier: LimitTier,
+    derivation: str,
+    register_entry: str,
+    sample_count: int | None = None,
+) -> QualityLimit:
+    """Build a limit that cites its register entry.
+
+    This is the one helper every rule table uses to make a limit, so each
+    limit carries the same fields in the same way.
+
+    Parameters
+    ----------
+    value : `float`
+        The limit.
+    unit : `str`
+        Its unit.
+    tier : `LimitTier`
+        How well the value is known.
+    derivation : `str`
+        How the value was found, in plain words.
+    register_entry : `str`
+        The register entry or design-estimate row that lists it, such as
+        ``"WAY-D05"`` or ``"SPE-16"``.
+    sample_count : `int`, optional
+        The number of samples behind it (``None`` for a reasoned choice).
+
+    Returns
+    -------
+    limit : `QualityLimit`
+        The limit.
+    """
+    return QualityLimit(
+        value=value,
+        unit=unit,
+        tier=tier,
+        derivation=derivation,
+        sample_count=sample_count,
+        register_entry=register_entry,
+    )
+
+
 def _design_limit(
     value: float, unit: str, derivation: str, register_entry: str, sample_count: int | None = None
 ) -> QualityLimit:
@@ -126,14 +170,7 @@ def _design_limit(
     limit : `QualityLimit`
         A limit of tier ``design_estimate``.
     """
-    return QualityLimit(
-        value=value,
-        unit=unit,
-        tier=LimitTier.DESIGN_ESTIMATE,
-        derivation=derivation,
-        sample_count=sample_count,
-        register_entry=register_entry,
-    )
+    return build_limit(value, unit, LimitTier.DESIGN_ESTIMATE, derivation, register_entry, sample_count)
 
 
 class DeferredRule(BaseModel):

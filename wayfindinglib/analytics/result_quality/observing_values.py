@@ -68,9 +68,12 @@ of a run needs its own offset and a slope; five samples leave three degrees of
 freedom to judge the scatter. Design estimate, register row WAY-D28."""
 
 MINIMUM_COS_DECLINATION = 0.17
-"""Field rotation from a polar error scales with cos(declination). Below cos =
-0.17 (about 80 degrees of declination) the signal is too small to fit. Derived
-from the scale; register row WAY-D28."""
+"""The guided field rotation rate from a polar error scales with
+1/cos(declination), so the signal is largest near the pole. The limit is not
+there to save signal. Below cos = 0.17 (about 80 degrees of declination) the
+rate grows without bound, the small-angle model no longer holds, and the
+rotation that plate solving reports is poorly defined because every star is
+close to the pole. Design estimate, register row WAY-D28."""
 
 ARCMIN_PER_RADIAN = 180.0 * 60.0 / math.pi
 """Arcminutes in one radian."""
@@ -489,18 +492,20 @@ def polar_alignment_from_rotation(
     (east-west, equal to the azimuth error times cos(latitude)), the field
     rotates against the sky by
 
-        theta(H) = theta_0 + cos(dec) (a sin H - b cos H)
+        theta(H) = theta_0 + (a sin H - b cos H) / cos(dec)
 
     where H is the hour angle. The derivation: the camera turns about the
-    mount's axis instead of the pole's, so it turns against the sky at the
-    sidereal rate times the axis offset, and only the part along the line of
-    sight rotates the field. Each guiding run has its own ``theta_0``.
+    mount's axis instead of the pole's, so a guided field rotates against the
+    sky at the sidereal rate omega times the axis offset along the line of
+    sight, divided by cos(dec): d theta / d H = (a cos H + b sin H) / cos(dec).
+    The rotation is largest near the pole. Each guiding run has its own
+    ``theta_0``.
 
     The fit solves for ``a``, ``b`` and one ``theta_0`` per run by least
     squares. When the widest hour-angle span of any run is below
     `MINIMUM_HOUR_ANGLE_SPAN_DEG`, ``a`` and ``b`` cannot be told apart, and
     only a lower bound is given: the largest slope of any run, which is
-    ``|d theta / d H| / cos(dec)``, never exceeds the axis offset.
+    ``|d theta / d H| * cos(dec)``, never exceeds the axis offset.
 
     Parameters
     ----------
@@ -549,7 +554,7 @@ def polar_alignment_from_rotation(
             cos_dec = np.cos(np.radians([item.dec_deg for item in items]))
             rotation = np.radians([item.rotation_deg for item in items])
             slope = float(np.polyfit(hour, rotation, 1)[0])
-            lower = max(lower, abs(slope) / float(np.mean(cos_dec)))
+            lower = max(lower, abs(slope) * float(np.mean(cos_dec)))
         return PolarAlignmentEstimate(
             kind="lower_bound",
             total_error_arcmin=lower * ARCMIN_PER_RADIAN,
@@ -569,7 +574,7 @@ def polar_alignment_from_rotation(
             cos_dec = math.cos(math.radians(item.dec_deg))
             row = [0.0] * len(names)
             row[column] = 1.0
-            rows.append([*row, cos_dec * math.sin(hour), -cos_dec * math.cos(hour)])
+            rows.append([*row, math.sin(hour) / cos_dec, -math.cos(hour) / cos_dec])
             targets.append(math.radians(item.rotation_deg))
     design = np.asarray(rows)
     observed = np.asarray(targets)

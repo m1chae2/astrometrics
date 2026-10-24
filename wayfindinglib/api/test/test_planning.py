@@ -737,10 +737,10 @@ def test_a_measured_camera_refuses_an_unmeasured_setting(
     isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A gain setting the profile never measured is refused."""
-    import astrometricslib
+    from wayfindinglib.analytics.result_quality import allowed_capture_values
 
     monkeypatch.setattr(
-        astrometricslib, "resolve_camera_profile", lambda name, config=None: _measured_profile()
+        allowed_capture_values, "resolve_camera_profile", lambda name, config=None: _measured_profile()
     )
     planning = _planning(isolated_butler, _target("M 81"))
     session = _session(planning)

@@ -38,9 +38,9 @@ from typing import Any
 from astrometricslib import (
     LimitTier,
     MeasurementReference,
-    QualityLimit,
     StarResultReference,
 )
+from wayfindinglib.analytics.result_quality.rules import build_limit
 from wayfindinglib.models.quality.rule import QualityRule
 from wayfindinglib.models.quality.statements import (
     ActionClass,
@@ -89,32 +89,7 @@ PERIOD_NOT_TESTABLE = "period_not_testable"
 NO_STAR_RESULT = "no_star_result"
 
 
-def _limit(
-    value: float,
-    unit: str,
-    tier: LimitTier,
-    derivation: str,
-    register_entry: str,
-    sample_count: int | None = None,
-) -> QualityLimit:
-    """Build a limit that cites its register entry.
-
-    Returns
-    -------
-    limit : `QualityLimit`
-        The limit.
-    """
-    return QualityLimit(
-        value=value,
-        unit=unit,
-        tier=tier,
-        derivation=derivation,
-        sample_count=sample_count,
-        register_entry=register_entry,
-    )
-
-
-_POOR_MATCH_LIMIT = _limit(
+_POOR_MATCH_LIMIT = build_limit(
     POOR_MATCH_RMS,
     "relative RMS",
     LimitTier.VALIDATED_DATASET,
@@ -126,7 +101,7 @@ _POOR_MATCH_LIMIT = _limit(
     "SPE-16",
     14,
 )
-_AMBIGUOUS_GAP_LIMIT = _limit(
+_AMBIGUOUS_GAP_LIMIT = build_limit(
     AMBIGUOUS_RMS_GAP,
     "relative RMS",
     LimitTier.VALIDATED_DATASET,
@@ -136,14 +111,12 @@ _AMBIGUOUS_GAP_LIMIT = _limit(
     ),
     "SPE-18",
 )
-_CYCLES_LIMIT = QualityLimit(
-    value=MINIMUM_CYCLES_FOR_PERIOD,
-    unit="cycles",
-    tier=LimitTier.DESIGN_ESTIMATE,
-    derivation=(
-        "One cycle shows a pattern once. Two show that it repeats. The usual minimum for a period claim."
-    ),
-    register_entry=STAR_RESULT_ROW,
+_CYCLES_LIMIT = build_limit(
+    MINIMUM_CYCLES_FOR_PERIOD,
+    "cycles",
+    LimitTier.DESIGN_ESTIMATE,
+    "One cycle shows a pattern once. Two show that it repeats. The usual minimum for a period claim.",
+    STAR_RESULT_ROW,
 )
 
 STAR_RESULT_RULES: tuple[QualityRule, ...] = (

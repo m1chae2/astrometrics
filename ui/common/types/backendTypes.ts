@@ -2924,6 +2924,10 @@ export interface NeedsAttention {
  * The count and worst severity of the warnings.
  * starting_point : `StartingPoint` or `None`
  * A first setting, for a target with no frames.
+ * notes : `list` [`str`]
+ * Remarks on how the report was made: which efficiency reference each
+ * setting uses (and the other one), where the observing site came from,
+ * and whether the set-aside frames are recorded.
  * forecast_checks : `list` [`ForecastCheck`]
  * How earlier forecasts compare with what was measured.
  * science_outcomes : `ScienceOutcomeSummary`
@@ -2943,6 +2947,7 @@ export interface TargetDatasetReport {
   statements?: TargetStatement[];
   needsAttention: NeedsAttention;
   startingPoint?: StartingPoint | null;
+  notes?: string[];
   forecastChecks?: ForecastCheck[];
   scienceOutcomes?: ScienceOutcomeSummary;
   context?: ContextReading[];
@@ -2989,6 +2994,18 @@ export interface TonightRanking {
  * The count and worst severity of the warnings of every target.
  * guiding : `GuidingNightSummary`
  * The guiding summary.
+ * night_statements : `list` [`TargetStatement`]
+ * Statements about the whole night that belong to no one target, such
+ * as the focus drift (one focuser serves every target), in priority
+ * order. They count in `needs_attention`.
+ * focus_drift : `NightFocusDrift` or `None`
+ * How star width changed with focuser temperature over the night's
+ * luminance frames, with the refocus interval. ``None`` when the night
+ * has no frames to fit; `notes` says why.
+ * polar_alignment : `NightPolarAlignment` or `None`
+ * The polar-alignment error that the field rotation shows. Always
+ * labeled exploratory: no rule uses it. ``None`` when there is no
+ * rotation data.
  * notes : `list` [`str`]
  * Remarks for the whole night, such as set-aside frames that are not
  * recorded per frame.
@@ -3000,6 +3017,9 @@ export interface NightQuality {
   targets?: NightTargetQuality[];
   needsAttention: NeedsAttention;
   guiding: GuidingNightSummary;
+  nightStatements?: TargetStatement[];
+  focusDrift?: NightFocusDrift | null;
+  polarAlignment?: NightPolarAlignment | null;
   notes?: string[];
   generatedAt?: string;
 }
@@ -3584,6 +3604,90 @@ export interface GuidingNightSummary {
   lostFraction?: number | null;
   excursionCount?: number | null;
   runs?: GuidingRunPerformance[];
+}
+
+/**
+ * How star width followed the focuser temperature over a night.
+ *
+ * This is the plain form of the focus drift fit (`fit_focus_drift`), kept
+ * here so the model layer imports no analytics code.
+ *
+ * Parameters
+ * ----------
+ * status : `str`
+ * ``"drift_found"``, ``"no_drift_detected"`` or ``"insufficient_data"``.
+ * reason : `str`
+ * Why, in one sentence.
+ * slope_px_per_degc, slope_error_px_per_degc : `float` or `None`
+ * Pixels of width added per degree Celsius once the star is well out of
+ * focus, and its error (see `FocusDriftResult` for how the fit finds it).
+ * best_focus_width_px : `float` or `None`
+ * The star width at best focus, in pixels.
+ * allowed_width_increase_fraction : `float`
+ * How much widening the rule accepts before a refocus.
+ * refocus_interval_degc, interval_tolerance_degc : `float` or `None`
+ * Refocus after this much temperature change, and its tolerance.
+ * interval_resolvable : `bool` or `None`
+ * Whether one frame's width error is small enough to see the limit.
+ * frames_used, segments_used : `int`
+ * Frames and autofocus segments in the fit.
+ * temperature_change_degc : `float` or `None`
+ * The temperature range the fit covers.
+ * evidence : `list` [`MeasurementReference`]
+ * The rows the fit used.
+ */
+export interface NightFocusDrift {
+  status: string;
+  reason: string;
+  slopePxPerDegc?: number | null;
+  slopeErrorPxPerDegc?: number | null;
+  bestFocusWidthPx?: number | null;
+  allowedWidthIncreaseFraction?: number | null;
+  refocusIntervalDegc?: number | null;
+  intervalToleranceDegc?: number | null;
+  intervalResolvable?: boolean | null;
+  framesUsed?: number;
+  segmentsUsed?: number;
+  temperatureChangeDegc?: number | null;
+  evidence?: MeasurementReference[];
+}
+
+/**
+ * The polar-alignment error that the field rotation of a night shows.
+ *
+ * This is the plain form of `PolarAlignmentEstimate`. It is exploratory:
+ * its input metric is exploratory and no rule uses it.
+ *
+ * Parameters
+ * ----------
+ * exploratory : `bool`
+ * Always true.
+ * kind : `str`
+ * ``"fit"``, ``"lower_bound"`` or ``"insufficient_data"``.
+ * total_error_arcmin : `float` or `None`
+ * The angle between the mount's polar axis and the pole, in arcminutes
+ * (the least it can be, for a lower bound).
+ * altitude_error_arcmin, azimuth_error_arcmin : `float` or `None`
+ * The two parts, only for a fit.
+ * uncertainty_arcmin : `float` or `None`
+ * One standard error of the total, only for a fit.
+ * hour_angle_span_deg : `float` or `None`
+ * The widest hour-angle span of any guiding run.
+ * sample_count : `int`
+ * Frames used.
+ * reason : `str`
+ * Why the kind is what it is.
+ */
+export interface NightPolarAlignment {
+  exploratory?: boolean;
+  kind: string;
+  totalErrorArcmin?: number | null;
+  altitudeErrorArcmin?: number | null;
+  azimuthErrorArcmin?: number | null;
+  uncertaintyArcmin?: number | null;
+  hourAngleSpanDeg?: number | null;
+  sampleCount?: number;
+  reason: string;
 }
 
 /**

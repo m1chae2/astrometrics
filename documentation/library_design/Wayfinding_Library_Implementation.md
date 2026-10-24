@@ -338,7 +338,7 @@ All in `tasks/control_tasks/` unless noted.
 | Analysis | Modules | Results and entry |
 | --- | --- | --- |
 | Guiding (exposure length in `processing/measure_exposure_feasibility.py`) | `session_analysis/guiding/` | `GuidingSessionAnalysis`, `GuidingPerformance` (`models/session/session_quality.py`); `kind="guiding"` |
-| Capture | `session_analysis/capture/`, `capture_analysis_tasks.py` | `CaptureSessionAnalysis`, `CapturePerformance` (`models/session/capture_quality.py`); `kind="capture"` |
+| Capture | `session_analysis/capture/`, `wayfindinglib/analytics/capture_history.py` | `CaptureSessionAnalysis`, `CapturePerformance` (`models/session/capture_quality.py`); `kind="capture"` |
 | Guide exposure test | `analytics/guide_exposure_ladder.py`, `guide_exposure_ladder_tasks.py` | `GuideExposureLadder`; `control.guiding.run_exposure_test`. Tested only against a simulated camera. |
 | Sky position | `session_analysis/sky/` | `SkyAnalysis`, `SkySample`; `kind="sky_coverage"` |
 | Recurring issues; live status; frame and guide error; alignment history | `recurring_issues.py`, `live_status.py`, `frame_guiding.py`, `alignment_history.py` | `RecurringIssue`; `get_live_session_status`; `frame_guiding`; `kind="alignment"` |
@@ -362,9 +362,10 @@ Planning and Control share one statement vocabulary in `models/quality/statement
 
 The result-quality work adds more entries to the validation register. These are short pointers. A full description is still to be written.
 
-- The rule table and its constants are listed in [WAY-05](validation/wayfinding.md#way-05) and WAY-D05 to WAY-D12.
+- The rule table and its constants are listed in [WAY-05](validation/wayfinding.md#way-05) and WAY-D05 to WAY-D09 (and WAY-D60 to WAY-D68 for the report rules).
 - The efficiency factors, goal exponents and loss split are in [WAY-20](validation/wayfinding.md#way-20), and the noise-growth forward model and noise floor fit are in [WAY-21](validation/wayfinding.md#way-21). Their constants are WAY-D20 to WAY-D34.
 - The performance envelope limits are in [WAY-40](validation/wayfinding.md#way-40), [WAY-41](validation/wayfinding.md#way-41), [WAY-42](validation/wayfinding.md#way-42), [WAY-43](validation/wayfinding.md#way-43) and [WAY-44](validation/wayfinding.md#way-44), and the rules that read the guiding, capture and sky pipelines are in [WAY-45](validation/wayfinding.md#way-45), [WAY-46](validation/wayfinding.md#way-46) and [WAY-47](validation/wayfinding.md#way-47). Their constants are WAY-D40 to WAY-D48.
+- `DiskButler.put_session_from_execution` <!-- impl: wayfindinglib.drivers.butler.DiskButler.put_session_from_execution --> is the one write Execution uses: the recorder's checkpoint, the imaging queue's checkpoint, post-session reconciliation and `abort_session`. A plan edit that changes nothing stores nothing, keeps the revision and sends no `plan:changed` event. The sequencer methods `sequencer:add`, `sequencer:remove`, `sequencer:reorder` and `sequencer:modify` edit the queue through the plan service, so each one sends `plan:changed` like `plan:edit`. `performance_envelope_tasks.py` no longer re-exports `sensor_limits_for_camera`; callers import it from `wayfindinglib.analytics.envelope_assembly`.
 - The stored night plan, allowed capture values, sequence summary, mosaic rotation and checklist are in [WAY-50](validation/wayfinding.md#way-50), [WAY-51](validation/wayfinding.md#way-51), [WAY-52](validation/wayfinding.md#way-52), [WAY-53](validation/wayfinding.md#way-53) and [WAY-54](validation/wayfinding.md#way-54), with constants WAY-D50 to WAY-D54.
 - Target-change detection is in [WAY-55](validation/wayfinding.md#way-55), the monitor-mode guarantee is in [WAY-56](validation/wayfinding.md#way-56), and the night list is in [WAY-57](validation/wayfinding.md#way-57). Their constants are WAY-D55 to WAY-D58.
 - The target dataset report (its joins, rules and the size limit of its reply) is in [WAY-60](validation/wayfinding.md#way-60), with constants WAY-D60, WAY-D61, WAY-D62, WAY-D63, WAY-D64, WAY-D65, WAY-D66, WAY-D67, WAY-D68, WAY-D69 and WAY-D77.

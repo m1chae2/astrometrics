@@ -17,12 +17,19 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from astrometricslib import MeasurementReference
 from wayfindinglib.models.quality.capture_summary import CaptureSettingSummary
 from wayfindinglib.models.quality.efficiency import LossAccount, ScienceGoal
 from wayfindinglib.models.quality.statements import NeedsAttention, TargetStatement
 from wayfindinglib.models.session.session_quality import GuidingRunPerformance
 
-__all__ = ["GuidingNightSummary", "NightQuality", "NightTargetQuality"]
+__all__ = [
+    "GuidingNightSummary",
+    "NightFocusDrift",
+    "NightPolarAlignment",
+    "NightQuality",
+    "NightTargetQuality",
+]
 
 
 class NightTargetQuality(BaseModel):
@@ -113,6 +120,94 @@ class GuidingNightSummary(BaseModel):
     runs: list[GuidingRunPerformance] = Field(default_factory=list)
 
 
+class NightFocusDrift(BaseModel):
+    """How star width followed the focuser temperature over a night.
+
+    This is the plain form of the focus drift fit (`fit_focus_drift`), kept
+    here so the model layer imports no analytics code.
+
+    Parameters
+    ----------
+    status : `str`
+        ``"drift_found"``, ``"no_drift_detected"`` or ``"insufficient_data"``.
+    reason : `str`
+        Why, in one sentence.
+    slope_px_per_degc, slope_error_px_per_degc : `float` or `None`
+        Pixels of width added per degree Celsius once the star is well out of
+        focus, and its error (see `FocusDriftResult` for how the fit finds it).
+    best_focus_width_px : `float` or `None`
+        The star width at best focus, in pixels.
+    allowed_width_increase_fraction : `float`
+        How much widening the rule accepts before a refocus.
+    refocus_interval_degc, interval_tolerance_degc : `float` or `None`
+        Refocus after this much temperature change, and its tolerance.
+    interval_resolvable : `bool` or `None`
+        Whether one frame's width error is small enough to see the limit.
+    frames_used, segments_used : `int`
+        Frames and autofocus segments in the fit.
+    temperature_change_degc : `float` or `None`
+        The temperature range the fit covers.
+    evidence : `list` [`MeasurementReference`]
+        The rows the fit used.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    status: str
+    reason: str
+    slope_px_per_degc: float | None = Field(default=None, alias="slopePxPerDegc")
+    slope_error_px_per_degc: float | None = Field(default=None, alias="slopeErrorPxPerDegc")
+    best_focus_width_px: float | None = Field(default=None, alias="bestFocusWidthPx")
+    allowed_width_increase_fraction: float | None = Field(default=None, alias="allowedWidthIncreaseFraction")
+    refocus_interval_degc: float | None = Field(default=None, alias="refocusIntervalDegc")
+    interval_tolerance_degc: float | None = Field(default=None, alias="intervalToleranceDegc")
+    interval_resolvable: bool | None = Field(default=None, alias="intervalResolvable")
+    frames_used: int = Field(default=0, alias="framesUsed")
+    segments_used: int = Field(default=0, alias="segmentsUsed")
+    temperature_change_degc: float | None = Field(default=None, alias="temperatureChangeDegc")
+    evidence: list[MeasurementReference] = Field(default_factory=list)
+
+
+class NightPolarAlignment(BaseModel):
+    """The polar-alignment error that the field rotation of a night shows.
+
+    This is the plain form of `PolarAlignmentEstimate`. It is exploratory:
+    its input metric is exploratory and no rule uses it.
+
+    Parameters
+    ----------
+    exploratory : `bool`
+        Always true.
+    kind : `str`
+        ``"fit"``, ``"lower_bound"`` or ``"insufficient_data"``.
+    total_error_arcmin : `float` or `None`
+        The angle between the mount's polar axis and the pole, in arcminutes
+        (the least it can be, for a lower bound).
+    altitude_error_arcmin, azimuth_error_arcmin : `float` or `None`
+        The two parts, only for a fit.
+    uncertainty_arcmin : `float` or `None`
+        One standard error of the total, only for a fit.
+    hour_angle_span_deg : `float` or `None`
+        The widest hour-angle span of any guiding run.
+    sample_count : `int`
+        Frames used.
+    reason : `str`
+        Why the kind is what it is.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    exploratory: bool = True
+    kind: str
+    total_error_arcmin: float | None = Field(default=None, alias="totalErrorArcmin")
+    altitude_error_arcmin: float | None = Field(default=None, alias="altitudeErrorArcmin")
+    azimuth_error_arcmin: float | None = Field(default=None, alias="azimuthErrorArcmin")
+    uncertainty_arcmin: float | None = Field(default=None, alias="uncertaintyArcmin")
+    hour_angle_span_deg: float | None = Field(default=None, alias="hourAngleSpanDeg")
+    sample_count: int = Field(default=0, alias="sampleCount")
+    reason: str
+
+
 class NightQuality(BaseModel):
     """The quality of one observing night.
 
@@ -126,6 +221,18 @@ class NightQuality(BaseModel):
         The count and worst severity of the warnings of every target.
     guiding : `GuidingNightSummary`
         The guiding summary.
+    night_statements : `list` [`TargetStatement`]
+        Statements about the whole night that belong to no one target, such
+        as the focus drift (one focuser serves every target), in priority
+        order. They count in `needs_attention`.
+    focus_drift : `NightFocusDrift` or `None`
+        How star width changed with focuser temperature over the night's
+        luminance frames, with the refocus interval. ``None`` when the night
+        has no frames to fit; `notes` says why.
+    polar_alignment : `NightPolarAlignment` or `None`
+        The polar-alignment error that the field rotation shows. Always
+        labeled exploratory: no rule uses it. ``None`` when there is no
+        rotation data.
     notes : `list` [`str`]
         Remarks for the whole night, such as set-aside frames that are not
         recorded per frame.
@@ -139,5 +246,8 @@ class NightQuality(BaseModel):
     targets: list[NightTargetQuality] = Field(default_factory=list)
     needs_attention: NeedsAttention = Field(alias="needsAttention")
     guiding: GuidingNightSummary
+    night_statements: list[TargetStatement] = Field(default_factory=list, alias="nightStatements")
+    focus_drift: NightFocusDrift | None = Field(default=None, alias="focusDrift")
+    polar_alignment: NightPolarAlignment | None = Field(default=None, alias="polarAlignment")
     notes: list[str] = Field(default_factory=list)
     generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC), alias="generatedAt")

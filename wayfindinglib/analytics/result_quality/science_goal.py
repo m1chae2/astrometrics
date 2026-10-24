@@ -12,6 +12,9 @@ from the target itself, never asked of the user (decision S6):
 
 The rule is a design estimate (register row WAY-D74): a catalog number does not
 say whether the user imaged the whole galaxy or one star in it.
+
+This is the one place the goal is chosen. The target report, tonight's ranking
+and the night review all call `science_goal_for_target`.
 """
 
 from astrometricslib import Target, frame_is_spectral
@@ -34,7 +37,7 @@ def science_goal_for_target(target: Target) -> ScienceGoal:
     goal : `ScienceGoal`
         The goal its efficiency is judged for.
     """
-    lights = [frame for frame in target.frames if frame.role.upper() == "LIGHT"]
+    lights = [frame for frame in target.frames if str(frame.role).upper().endswith("LIGHT")]
     if lights and sum(frame_is_spectral(frame) for frame in lights) > len(lights) / 2:
         return ScienceGoal.SLITLESS_SPECTRAL_RESOLUTION
     if target.quality.photometry is not None:

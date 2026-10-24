@@ -24,6 +24,12 @@ Two kinds of RPC method send commands:
 
 The allowed methods (``telescope:connect``, ``telescope:set_indi_property``)
 are checked to still work.
+
+Every method in the RPC table must also be named in one of the lists below
+(read-only, local writes, stops, allowed, or command-tested).
+`test_every_rpc_method_is_classified` fails on a method in none of them, so a
+new method cannot join the table without someone saying whether it can send
+a command to a device.
 """
 
 import threading
@@ -55,6 +61,166 @@ BACKGROUND_COMMANDS: dict[str, dict[str, Any]] = {
 """RPC methods that start a thread. The thread logs a refusal instead of
 replying with it, so the test waits for the thread and checks that no
 driver got a command."""
+
+
+BACKGROUND_COMMANDS_STARTED_BY_QUEUE = frozenset({"sequencer:begin"})
+"""RPC methods that run the night plan's queue on a thread. They get their
+own test below, because the queue needs a stored session first."""
+
+READ_ONLY_METHODS = frozenset({
+    "analysis:get_results",
+    "astronomy:analyze_periodicity",
+    "astronomy:count",
+    "astronomy:get",
+    "astronomy:get_overlay_stars",
+    "astronomy:get_status",
+    "astronomy:get_stellar_objects",
+    "astronomy:list",
+    "astronomy:spectral_class_summary",
+    "astronomy:stars_by_spectral_class",
+    "astronomy:target_data_availability",
+    "astronomy:visible",
+    "calibration:get_stats",
+    "calibration:measure_sensor_noise",
+    "docs:get_topic",
+    "docs:list_topics",
+    "docs:search_topics",
+    "execution:get_session",
+    "execution:list_sessions",
+    "guiding:status",
+    "handoff:get_state",
+    "handoff:list_devices",
+    "images:get_fits_header",
+    "images:get_light_frame_data",
+    "images:get_target_frame",
+    "images:last",
+    "imaging:get_active_jobs",
+    "ingestion:list_files",
+    "ingestion:scan",
+    "ingestion:stats",
+    "ingestion:status",
+    "mosaic:preview",
+    "observatory:get_equipment_configuration",
+    "observatory:list_cameras",
+    "plan:get",
+    "planetarium:get_catalog_sources",
+    "planetarium:get_constellation_lines",
+    "planetarium:get_deep_catalog_status",
+    "planetarium:get_observer_location",
+    "planetarium:get_sources",
+    "planetarium:get_targets",
+    "planetarium:get_visibility",
+    "planetarium:list_catalog_drivers",
+    "processing:active_jobs",
+    "processing:get_job",
+    "processing:job_log_tail",
+    "processing:jobs_for_target",
+    "processing:list_jobs",
+    "processing:status",
+    "quality:metrics",
+    "quality:query",
+    "sequencer:create_plan",
+    "sequencer:get_queue",
+    "system:cameras",
+    "system:completions",
+    "system:filters",
+    "system:get_config",
+    "system:health",
+    "system:introspection",
+    "system:notifications",
+    "system:pulse",
+    "target:get",
+    "target:get_camera_index",
+    "target:get_files",
+    "target:get_frame_header",
+    "target:get_frames",
+    "target:get_frames_grouped",
+    "target:get_targets",
+    "target:list",
+    "telescope:get_cumulative_tracking_data",
+    "telescope:get_focuser_position",
+    "telescope:get_guiding_spectrum",
+    "telescope:get_performance_envelope",
+    "telescope:get_pointing_model",
+    "telescope:get_session_alignment",
+    "telescope:indi_devices",
+    "telescope:indi_properties",
+    "telescope:is_syncing",
+    "telescope:list_alignment_sessions",
+    "telescope:status",
+    "terminal:completions",
+    "terminal:get_recipe",
+    "terminal:get_workspace",
+    "terminal:list_recipes",
+    "terminal:list_scripts",
+    "terminal:read_script",
+    "ui:editor_get",
+})
+"""RPC methods that only read or compute. They change nothing and command
+no device."""
+
+LOCAL_WRITE_METHODS = frozenset({
+    "analysis:analyze_image",
+    "analysis:cancel",
+    "astronomy:delete",
+    "astronomy:save",
+    "execution:abort_session",
+    "execution:reconcile_session",
+    "execution:record_divergence",
+    "handoff:beam",
+    "handoff:send_alert",
+    "handoff:share_file",
+    "handoff:update_state",
+    "images:convert_fits",
+    "images:delete",
+    "ingestion:reindex",
+    "ingestion:start",
+    "mosaic:create",
+    "observatory:enter_controller_mode",
+    "observatory:enter_monitoring_mode",
+    "observatory:set_active_camera",
+    "plan:edit",
+    "telescope:apply_promotion_decision",
+    "plan:tick_checklist_item",
+    "processing:cancel",
+    "processing:delete_job",
+    "processing:measure_half_difference_noise",
+    "processing:measure_night_contributions",
+    "processing:measure_noise_growth",
+    "processing:record_frame_measurements",
+    "processing:siril_open",
+    "processing:stack",
+    "sequencer:add",
+    "sequencer:modify",
+    "sequencer:remove",
+    "sequencer:reorder",
+    "system:frontend_log",
+    "system:save",
+    "system:save_config",
+    "target:add_data",
+    "target:create",
+    "target:delete",
+    "target:refresh",
+    "target:send_to_phone",
+    "target:update",
+    "telescope:sync",
+    "telescope:sync_logs",
+    "terminal:execute",
+    "terminal:reset_workspace",
+    "terminal:save_script",
+    "ui:editor_set",
+    "ui:inspect_variable",
+    "ui:navigate",
+})
+"""RPC methods that change the app's own data, files, settings or screens,
+or copy files from the telescope computer. None sends a command to a device.
+``terminal:execute`` runs a user script, and a script reaches hardware only
+through the library calls that the monitor-mode guard already refuses."""
+
+STOP_ONLY_METHODS = frozenset({"guiding:stop", "telescope:alignment_stop"})
+"""RPC methods that end a loop the app started. They move nothing and take no
+exposure; they only stop. They stay allowed so the user can always end a
+run."""
 
 
 def _direct_command_methods() -> dict[str, str]:
@@ -220,3 +386,52 @@ async def test_connect_and_device_settings_stay_allowed_in_monitor_mode(
 def test_the_named_allowed_rpc_methods_exist_in_the_rpc_table() -> None:
     """The allowed list names real RPC methods, so a rename cannot hide one."""
     assert support.ALLOWED_RPC_IN_MONITOR_MODE <= set(rpc_router._HANDLERS)
+
+
+def test_every_rpc_method_is_classified() -> None:
+    """Each RPC method is read-only, a local write, a stop, allowed or tested.
+
+    A method in none of the lists fails here, so nobody can add a method
+    that might send a command and leave it out of the monitor-mode proof.
+    """
+    command_tested = (
+        set(_direct_command_methods())
+        | set(SERVICE_COMMANDS)
+        | set(BACKGROUND_COMMANDS)
+        | set(BACKGROUND_COMMANDS_STARTED_BY_QUEUE)
+    )
+    buckets = {
+        "read only": set(READ_ONLY_METHODS),
+        "local write": set(LOCAL_WRITE_METHODS),
+        "stop only": set(STOP_ONLY_METHODS),
+        "allowed": set(support.ALLOWED_RPC_IN_MONITOR_MODE),
+        "command tested": command_tested,
+    }
+    served = set(rpc_router._HANDLERS)
+
+    classified = set().union(*buckets.values())
+    assert sorted(served - classified) == [], "RPC methods in no list: say whether they can send a command"
+    assert sorted(classified - served) == [], "lists name RPC methods that no longer exist"
+    names = list(buckets)
+    for position, first in enumerate(names):
+        for second in names[position + 1 :]:
+            assert buckets[first] & buckets[second] == set(), f"in both {first} and {second}"
+
+
+async def test_sequencer_begin_sends_no_command_in_monitor_mode(
+    monitor_mode: support.RecordingDrivers, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Starting the queue in monitor mode commands no device."""
+    executor = container.target_imaging_executor
+    session = support.make_night_session(container.wayfinder)
+    support.force_safe_assessment(container.wayfinder, monkeypatch)
+    monkeypatch.setattr(executor, "_session_id", session.id)
+    await _enter_monitor_mode()
+
+    reply = await _call("sequencer:begin", {})
+    if executor._thread is not None:
+        executor._thread.join(timeout=10.0)
+    executor.pause_imaging()
+
+    assert "error" not in reply
+    assert monitor_mode.commands_sent() == []

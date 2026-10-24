@@ -110,8 +110,8 @@ error is sqrt(1.364) = 1.17 sigma / sqrt(n). Derived; register entry WAY-21."""
 
 FLOOR_SIGMAS = 2.0
 """A floor is reported only when its fitted size is above 0 by this many
-standard
-errors. Two standard errors is a one-in-twenty false alarm. Design estimate,
+standard errors. The test is one-sided (a floor cannot be negative), so two
+standard errors is a false alarm of about 2.3 percent, not 5. Design estimate,
 register row WAY-D32."""
 
 MINIMUM_GAIN_FRACTION = 0.10
@@ -248,11 +248,15 @@ def frame_weights(frames: Sequence[StackFrame], mode: WeightingMode) -> list[flo
     -------
     weights : `list` [`float`] or `None`
         One weight per frame, not normalized. ``None`` for the ``unknown``
-        mode, or for ``wfwhm`` when a frame has no star width.
+        mode, for ``wfwhm`` when a frame has no star width, and for ``noise``
+        when a frame has no sky and no read noise (its variance is 0, so its
+        inverse is undefined).
     """
     if mode == WeightingMode.EQUAL:
         return [1.0] * len(frames)
     if mode == WeightingMode.NOISE:
+        if any(frame.rate_variance <= 0.0 for frame in frames):
+            return None
         return [1.0 / frame.rate_variance for frame in frames]
     if mode == WeightingMode.WFWHM:
         widths = [frame.star_width for frame in frames]
@@ -292,10 +296,42 @@ def forecast_stack_noise(frames: Sequence[StackFrame], mode: WeightingMode) -> N
         )
     weights = frame_weights(frames, mode)
     if weights is None:
+        why = (
+            "Some frames have no sky noise and no read noise, so the noise weights are undefined."
+            if mode == WeightingMode.NOISE
+            else "Some frames have no star width, which the width weights need."
+        )
+        return NoiseForecast(mode=mode, frame_count=len(frames), reason=why)
+    return forecast_noise_with_weights(frames, weights, mode)
+
+
+def forecast_noise_with_weights(
+    frames: Sequence[StackFrame], weights: Sequence[float], mode: WeightingMode = WeightingMode.UNKNOWN
+) -> NoiseForecast:
+    """Predict the noise of a stack from the weights the stacker really used.
+
+    This is the same sum as `forecast_stack_noise`, but the weights are given,
+    not rebuilt from a mode. Use it when the run recorded its weights
+    (``stacking.frame_weight``): nothing about the mode needs to be guessed.
+
+    Parameters
+    ----------
+    frames : `Sequence` [`StackFrame`]
+        All frames of the stack.
+    weights : `Sequence` [`float`]
+        One recorded weight per frame, in the same order.
+    mode : `WeightingMode`, optional
+        The mode to label the forecast with (informational only).
+
+    Returns
+    -------
+    forecast : `NoiseForecast`
+        The variance ``sum(w^2 v) / sum(w)^2`` in rate units, or ``None`` with
+        a reason when the lists differ in length or all weights are 0.
+    """
+    if len(weights) != len(frames):
         return NoiseForecast(
-            mode=mode,
-            frame_count=len(frames),
-            reason="Some frames have no star width, which the width weights need.",
+            mode=mode, frame_count=len(frames), reason="The weights and the frames do not match up."
         )
     total_weight = sum(weights)
     if total_weight <= 0.0:
@@ -647,6 +683,13 @@ class NoiseStep(BaseModel):
     relative_error : `float` or `None`
         The relative error of the noise when it is not the unpaired
         ``1.17 / sqrt(n)``.
+    normalized : `bool`
+        True when `expected_variance`, `expected_read_noise_variance` and
+        `measured_noise` were all divided by the reference flux of the stack
+        (``stacking.noise_reference_flux_stack_unit``) and its square. Each
+        stack has its own pixel scale (Siril's), so stacks can be fitted
+        together only after this division. The relative errors are unchanged
+        by it (the small error of the flux itself is not included).
     """
 
     model_config = _MODEL_CONFIG
@@ -658,6 +701,7 @@ class NoiseStep(BaseModel):
     apertures: int = Field(ge=2)
     paired: bool = False
     relative_error: float | None = Field(default=None, gt=0.0)
+    normalized: bool = False
 
     @property
     def noise_relative_error(self) -> float:
@@ -697,6 +741,14 @@ class NoiseFloorFit(BaseModel):
     error_kind : `str`
         ``"unpaired"``, ``"paired"`` or ``"mixed"``: how the step errors were
         found. The unpaired error is larger, so the fit is cautious.
+    normalized : `bool`
+        Whether the fit was made on noise divided by the reference flux.
+        Then `floor_variance` and `floor_noise` are fractions of the
+        reference stars' brightness, not stack units.
+    degrees_of_freedom : `int`
+        Steps minus fitted terms. With 0 the line passes through every point
+        exactly, so the floor's error comes only from the assumed aperture
+        errors and has no check from scatter.
     reason : `str`
         What happened, in one sentence.
     """
@@ -711,6 +763,8 @@ class NoiseFloorFit(BaseModel):
     floor_detected: bool = False
     floor_noise: float | None = None
     error_kind: str = "unpaired"
+    normalized: bool = False
+    degrees_of_freedom: int = 0
     reason: str
 
 
@@ -720,7 +774,18 @@ def fit_noise_floor(steps: Sequence[NoiseStep], *, read_noise_term_free: bool = 
     The model is ``measured_variance = alpha * expected_variance + b``.
 
     The fit is a weighted least squares. Each stack's measured variance has a
-    relative error of twice its noise error (variance is noise squared).
+    relative error of twice its noise error (variance is noise squared). The
+    weights come from the model, not from the measured variance alone: a
+    first fit with the measured values gives a predicted variance for each
+    stack, and the fit is repeated with the errors scaled to those predicted
+    values. (Weights taken from the measured values pull the line toward the
+    stacks that happened to measure low.)
+
+    The stacks must be on one scale. Steps flagged `NoiseStep.normalized` are
+    fitted together; if some steps are normalized and some are not, only the
+    normalized ones are used. With 2 steps and 2 terms there are zero degrees
+    of freedom: the line goes through both points, and nothing in the data
+    checks the model.
     With the read-noise term free, the model is
     ``alpha * (expected - read_part) + c * read_part + b`` and needs at least
     3 stacks; without it, at least 2. A floor is never inferred from one
@@ -741,6 +806,9 @@ def fit_noise_floor(steps: Sequence[NoiseStep], *, read_noise_term_free: bool = 
         ("not enough stack steps") when there are too few.
     """
     parameter_count = 3 if read_noise_term_free else 2
+    if any(step.normalized for step in steps):
+        steps = [step for step in steps if step.normalized]
+    normalized = bool(steps) and all(step.normalized for step in steps)
     kinds = {"paired" if step.paired else "unpaired" for step in steps}
     error_kind = kinds.pop() if len(kinds) == 1 else "mixed"
     if len(steps) < parameter_count:
@@ -764,10 +832,21 @@ def fit_noise_floor(steps: Sequence[NoiseStep], *, read_noise_term_free: bool = 
             columns.append([step.expected_variance, 1.0])
     design = np.asarray(columns, dtype=float)
     measured_variance = np.asarray([step.measured_noise**2 for step in steps], dtype=float)
-    errors = np.asarray([2.0 * step.noise_relative_error * step.measured_noise**2 for step in steps])
+    relative_errors = np.asarray([2.0 * step.noise_relative_error for step in steps])
+    errors = relative_errors * measured_variance
     weighted_design = design / errors[:, None]
-    weighted_target = measured_variance / errors
-    solution, _residual, rank, _singular = np.linalg.lstsq(weighted_design, weighted_target, rcond=None)
+    solution, _residual, rank, _singular = np.linalg.lstsq(
+        weighted_design, measured_variance / errors, rcond=None
+    )
+    if rank >= parameter_count:
+        # Second pass: errors scaled to the model's predicted variance.
+        predicted = design @ solution
+        if np.all(predicted > 0.0):
+            errors = relative_errors * predicted
+            weighted_design = design / errors[:, None]
+            solution, _residual, rank, _singular = np.linalg.lstsq(
+                weighted_design, measured_variance / errors, rcond=None
+            )
     if rank < parameter_count:
         return NoiseFloorFit(
             steps_used=len(steps),
@@ -790,10 +869,23 @@ def fit_noise_floor(steps: Sequence[NoiseStep], *, read_noise_term_free: bool = 
         floor_detected=detected,
         floor_noise=math.sqrt(floor) if detected else None,
         error_kind=error_kind,
+        normalized=normalized,
+        degrees_of_freedom=len(steps) - parameter_count,
         reason=(
-            "A noise floor was found."
-            if detected
-            else "No floor: the fitted constant is not above 0 by two standard errors."
+            (
+                "A noise floor was found."
+                if detected
+                else "No floor: the fitted constant is not above 0 by two standard errors."
+            )
+            + (
+                (
+                    " The fit has zero degrees of freedom (the line passes through every step),"
+                    " so the data do not check the model."
+                )
+                if len(steps) == parameter_count
+                else ""
+            )
+            + ("" if normalized else " The steps are not normalized by the reference flux.")
         ),
     )
 

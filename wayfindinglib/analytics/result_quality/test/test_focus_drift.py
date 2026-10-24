@@ -18,6 +18,7 @@ from wayfindinglib.analytics.result_quality.focus_drift import (
     ALLOWED_WIDTH_RATIO,
     FocusDriftStatus,
     FocusFrameSample,
+    _resample_blocks,
     fit_focus_drift,
     focus_drift_statement,
 )
@@ -34,6 +35,7 @@ def _night(
     end_temperature: float = 18.3,
     hours: float = 4.0,
     refocus_hour: float | None = None,
+    extra_refocus_hours: tuple[float, ...] = (),
     noise: float = 0.03,
     uncertainty: float | None = 0.05,
     with_airmass: bool = False,
@@ -51,6 +53,7 @@ def _night(
     runs = [_START - timedelta(minutes=1)]
     if refocus_hour is not None:
         runs.append(_START + timedelta(hours=refocus_hour))
+    runs.extend(_START + timedelta(hours=hour) for hour in extra_refocus_hours)
     samples = []
     for number in range(frame_count):
         fraction = number / (frame_count - 1)
@@ -175,3 +178,41 @@ def test_interval_below_the_width_error_is_insufficient_data() -> None:
     statement = focus_drift_statement(result)
     assert statement.kind == StatementKind.INSUFFICIENT_DATA
     assert "error" in statement.reason
+
+
+def test_bootstrap_draws_whole_segments_when_there_are_several() -> None:
+    """With three or more segments, a resample is made of whole segments.
+
+    Each drawn segment gets its own number, so a segment drawn twice has two
+    best widths. Neighboring frames are never split.
+    """
+    indices = np.repeat([0, 1, 2, 3], 10)
+    generator = np.random.default_rng(3)
+    for _ in range(20):
+        pick, segments = _resample_blocks(indices, 4, generator)
+        assert len(pick) == len(segments)
+        for number in np.unique(segments):
+            drawn = pick[segments == number]
+            assert len(np.unique(indices[drawn])) == 1
+            assert len(drawn) == 10
+            assert np.all(np.diff(drawn) == 1)
+
+
+def test_bootstrap_draws_runs_of_frames_inside_few_segments() -> None:
+    """With one or two segments, a resample is made of runs of frames."""
+    indices = np.repeat([0], 40)
+    pick, segments = _resample_blocks(indices, 1, np.random.default_rng(4))
+    assert len(pick) == 40
+    assert set(segments) == {0}
+    runs = pick.reshape(-1, 5)
+    assert np.all(np.diff(runs, axis=1) == 1)
+
+
+def test_four_segment_night_recovers_the_slope_with_a_block_error() -> None:
+    """Four autofocus runs give four segments, and the slope is still found."""
+    samples, runs = _night(hours=8.0, refocus_hour=2.0, extra_refocus_hours=(4.0, 6.0), end_temperature=14.3)
+    result = fit_focus_drift(samples, runs)
+    assert result.segments_used == 4
+    assert result.status == FocusDriftStatus.DRIFT_FOUND
+    assert result.slope_px_per_degc == pytest.approx(0.7, rel=0.25)
+    assert result.slope_error_px_per_degc > 0.0

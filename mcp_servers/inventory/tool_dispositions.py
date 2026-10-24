@@ -371,7 +371,7 @@ DECISIONS = {
     # ---- Keep ----
     "observatory_history_query": ToolDecision(
         "keep",
-        "Built 2026-10-03. Reads the recorded nights and calculates the analyses, in replies under 30,000 "
+        "Built 2026-10-03. Reads the recorded nights and calculates the analyses, in replies under 40,000 "
         "characters. The recorded-data tables are read through the butler, which creates a missing table. "
         "Kind night_quality needs session_id (the night) and returns a typed review.",
     ),

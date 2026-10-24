@@ -154,6 +154,13 @@ source's own noise is as large as the sky's. Design estimate, register row
 WAY-D24."""
 
 # --- Baseline
+STAR_WIDTH_NIGHTLY_SPREAD_KEY = "frame.star_width_effective_arcsec.nightly_spread"
+"""Key, in a baseline reference's factors, of the one-standard-deviation spread
+of the nightly median star widths (sample standard deviation, in arcseconds).
+It is not a factor of eta. It tells a reader how far a night's width may sit
+from the baseline by ordinary night-to-night change. Present only when the
+width baseline is. Register row WAY-D22."""
+
 BASELINE_PERCENTILE = 10.0
 """The baseline takes this percentile of the per-night medians, so it describes
 the equipment's good nights (a night with the sharpest stars or the darkest
@@ -445,8 +452,11 @@ def physical_reference(
     """Build the physical reference (best star width).
 
     The reference width is the effective width a perfect frame would have:
-    the diffraction limit of the aperture, the site's typical seeing (when
-    known) and the pixel blur, added in quadrature (as squared widths). The
+    the diffraction limit of the aperture, the site's typical seeing and the
+    pixel blur, added in quadrature (as squared widths). When the site's
+    seeing is not set, the reference has no width at all: diffraction and pixel
+    blur alone are not a width a real night could reach, so the seeing factor
+    is "not included" with that reason. The
     sky brightness and the transparency are "not included": the library has
     no dark-sky value and no throughput it could use without inventing
     numbers (decision S2).
@@ -462,9 +472,8 @@ def physical_reference(
         includes the pixel blur, so the reference must too.
     typical_seeing_fwhm_arcsec : `float` or `None`, optional
         The site's typical good-night star width
-        (`SiteProfile.typical_seeing_fwhm_arcsec`). ``None`` leaves seeing
-        out, and the reference is then the diffraction limit alone (register
-        row WAY-D01).
+        (`SiteProfile.typical_seeing_fwhm_arcsec`). ``None`` or 0 leaves the
+        seeing factor "not included" (register row WAY-D01).
     wavelength_nm : `float`, optional
         The wavelength for the diffraction limit.
 
@@ -481,23 +490,26 @@ def physical_reference(
     if not pixel_scale_arcsec or pixel_scale_arcsec <= 0.0:
         return ReferenceOutcome(reason="The imaging pixel scale is unknown.")
     diffraction = diffraction_fwhm_arcsec(aperture_mm, wavelength_nm)
-    seeing = typical_seeing_fwhm_arcsec or 0.0
-    pixel_term_squared = PIXEL_BLUR_FWHM_SQUARED_FACTOR * pixel_scale_arcsec**2
-    width = math.sqrt(diffraction**2 + seeing**2 + pixel_term_squared)
     not_included = {
         CAUSE_SKY: "No dark-sky value exists that is not an exploratory estimate, so none is invented.",
         CAUSE_TRANSPARENCY: TRANSPARENCY_NOT_INCLUDED_REASON,
     }
-    if typical_seeing_fwhm_arcsec is None:
-        not_included["site_seeing"] = (
-            "The site's typical seeing is not set, so the reference uses the diffraction limit alone."
+    factors: dict[str, float] = {}
+    if typical_seeing_fwhm_arcsec and typical_seeing_fwhm_arcsec > 0.0:
+        pixel_term_squared = PIXEL_BLUR_FWHM_SQUARED_FACTOR * pixel_scale_arcsec**2
+        factors[STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC] = math.sqrt(
+            diffraction**2 + typical_seeing_fwhm_arcsec**2 + pixel_term_squared
+        )
+    else:
+        not_included[STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC] = (
+            "The site's typical seeing is not set, so there is no best star width to compare against."
         )
     return ReferenceOutcome(
         reference=EfficiencyReference(
             name=PHYSICAL_REFERENCE_NAME,
             version=PHYSICAL_REFERENCE_VERSION,
             kind=EfficiencyReferenceKind.PHYSICAL,
-            factors={STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC: width},
+            factors=factors,
             not_included=not_included,
             register_entry=PHYSICAL_REFERENCE_ENTRY,
         )
@@ -644,6 +656,8 @@ def baseline_reference(nights: Sequence[BaselineNight], key: str) -> ReferenceOu
     ):
         if len(values) >= MINIMUM_NIGHTS_FOR_BASELINE:
             factors[name] = float(np.percentile(values, BASELINE_PERCENTILE))
+            if name == STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC:
+                factors[STAR_WIDTH_NIGHTLY_SPREAD_KEY] = float(np.std(values, ddof=1))
         else:
             not_included[name] = (
                 f"Only {len(values)} night(s) with a {label}; a baseline needs {MINIMUM_NIGHTS_FOR_BASELINE}."
@@ -770,6 +784,9 @@ _NO_TIME_FACTORS_GOALS = {
     ),
     ScienceGoal.PERIOD_DETECTION: (
         "The window function of the nights, not the exposure time, limits the period search."
+    ),
+    ScienceGoal.SLITLESS_SPECTRAL_RESOLUTION: (
+        "A slitless spectrum is source-limited, so sky brightness and read noise are not charged against it."
     ),
 }
 """Goals for which the sky and read-noise factors are also left out. Design

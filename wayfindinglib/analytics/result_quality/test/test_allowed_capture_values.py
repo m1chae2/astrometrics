@@ -94,3 +94,30 @@ def test_unknown_filters_are_accepted_with_a_note() -> None:
     verdict = allowed_capture_values(_profile()).check(filter_name=FilterType.Ha)
     assert verdict.accepted
     assert any("not checked" in note for note in verdict.notes)
+
+
+def test_camera_names_match_through_every_spelling() -> None:
+    """Case, spaces and punctuation are ignored; other cameras do not match."""
+    from wayfindinglib.analytics.result_quality.allowed_capture_values import camera_names_match
+
+    assert camera_names_match("ASI533MM Pro", "asi533mm-pro")
+    assert not camera_names_match("ASI533MM Pro", "Nikon D5100")
+
+
+def test_the_filters_for_a_camera_come_from_that_cameras_library_settings() -> None:
+    """Only settings of the named camera give filters."""
+    from astrometricslib import CaptureSetting
+    from wayfindinglib.analytics.result_quality.allowed_capture_values import (
+        allowed_capture_values_for_camera,
+    )
+
+    settings = [
+        CaptureSetting(camera="Cam A", filter_name="L"),
+        CaptureSetting(camera="cam-a", filter_name="Ha"),
+        CaptureSetting(camera="Other", filter_name="OIII"),
+    ]
+
+    allowed = allowed_capture_values_for_camera("Cam A", None, settings)
+
+    assert allowed.filters == ["Ha", "L"]
+    assert allowed.filter_source == "library"

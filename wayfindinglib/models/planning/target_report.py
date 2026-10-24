@@ -221,6 +221,10 @@ class TargetDatasetReport(BaseModel):
         The count and worst severity of the warnings.
     starting_point : `StartingPoint` or `None`
         A first setting, for a target with no frames.
+    notes : `list` [`str`]
+        Remarks on how the report was made: which efficiency reference each
+        setting uses (and the other one), where the observing site came from,
+        and whether the set-aside frames are recorded.
     forecast_checks : `list` [`ForecastCheck`]
         How earlier forecasts compare with what was measured.
     science_outcomes : `ScienceOutcomeSummary`
@@ -242,6 +246,7 @@ class TargetDatasetReport(BaseModel):
     statements: list[TargetStatement] = Field(default_factory=list)
     needs_attention: NeedsAttention = Field(alias="needsAttention")
     starting_point: StartingPoint | None = Field(default=None, alias="startingPoint")
+    notes: list[str] = Field(default_factory=list)
     forecast_checks: list[ForecastCheck] = Field(default_factory=list, alias="forecastChecks")
     science_outcomes: ScienceOutcomeSummary = Field(
         default_factory=ScienceOutcomeSummary, alias="scienceOutcomes"

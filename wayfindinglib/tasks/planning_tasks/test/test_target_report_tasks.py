@@ -26,7 +26,6 @@ from astrometricslib import (
     MeasurementStatus,
     QualityMeasurement,
     QualitySubject,
-    RestoreReport,
     SetAsideFrame,
     SubjectLevel,
     Target,
@@ -63,6 +62,7 @@ SETTING = CaptureSetting(
 )
 NIGHT_STARTS = [datetime(2026, 10, day, 4, 0, tzinfo=UTC) for day in (1, 2, 3)]
 STACK_ID = "T/T_stack.fits"
+MOVED = "frame moved to _excluded/"
 
 
 class _FakeQuality:
@@ -165,9 +165,6 @@ class _Library:
         self.quality = _FakeQuality(self.rows, {1: SETTING})
         self.targets = SimpleNamespace(get=lambda target_id: self.target if target_id == "T" else None)
         self.processing = SimpleNamespace(
-            restore_excluded_frames=lambda target, apply=False: RestoreReport(
-                targetId="T", applied=False, frames=self.set_aside
-            ),
             calibration=SimpleNamespace(
                 query=lambda **_arguments: CalibrationQueryResult(
                     detail="counts", darks=darks or [], biases=[], flats=flats or []
@@ -188,6 +185,7 @@ class _Library:
         run_id: str = "frame-run",
         sample_count: int | None = None,
         at: datetime = NOW,
+        action_taken: str | None = None,
     ) -> QualityMeasurement:
         """Build one stored row with a fresh row id.
 
@@ -210,6 +208,7 @@ class _Library:
             status=MeasurementStatus.MEASURED,
             value=value,
             sample_count=sample_count,
+            action_taken=action_taken,
             origin=MeasurementOrigin.MEASURED,
             run_id=run_id,
             measured_at=at,
@@ -291,7 +290,15 @@ class _Library:
                 ("frame.quarantine_sky_median_adu", 900.0),
                 ("frame.detected_region_count", 3.0),
             ):
-                self.rows.append(self._row(metric, value, subject_id, night="2026-10-03"))
+                self.rows.append(
+                    self._row(
+                        metric,
+                        value,
+                        subject_id,
+                        night="2026-10-03",
+                        action_taken=MOVED if metric == "frame.quarantine_roundness" else None,
+                    )
+                )
             moved.append(
                 SetAsideFrame(
                     file=f"f{index:03d}.fits",
@@ -425,7 +432,7 @@ def test_frames_lost_cites_the_quarantine_rows(isolated_butler: DiskButler) -> N
     report = _report(library, isolated_butler)
     lost = _of_rule(report, "frames_lost")
     assert len(lost) == 1
-    assert lost[0].message == "2 of 32 frames were set aside (clouded 2)."
+    assert lost[0].message == "2 of 32 frames were set aside (frame moved to _excluded/ 2)."
     quarantine_ids = {
         row.row_id
         for row in library.rows
@@ -691,16 +698,15 @@ def _framed_target(target_id: str, filters: list[str]) -> Target:
 
 def test_the_science_goal_follows_the_filters_and_the_catalog_type() -> None:
     """Spectral frames, a Messier id and a plain star give three goals."""
+    from wayfindinglib.analytics.result_quality.science_goal import science_goal_for_target
     from wayfindinglib.models.quality.efficiency import ScienceGoal
-    from wayfindinglib.tasks.planning_tasks.target_report_inputs import science_goal_for
 
-    spectral, _ = science_goal_for(_framed_target("Vega", ["SPEC", "SPEC", "Luminance"]))
-    extended, _ = science_goal_for(_framed_target("M 81", ["Luminance", "Luminance"]))
-    star, reason = science_goal_for(_framed_target("Vega", ["Luminance", "Luminance"]))
+    spectral = science_goal_for_target(_framed_target("Vega", ["SPEC", "SPEC", "Luminance"]))
+    extended = science_goal_for_target(_framed_target("M 81", ["Luminance", "Luminance"]))
+    star = science_goal_for_target(_framed_target("Vega", ["Luminance", "Luminance"]))
     assert spectral == ScienceGoal.SLITLESS_SPECTRAL_RESOLUTION
     assert extended == ScienceGoal.EXTENDED_OBJECT
     assert star == ScienceGoal.FAINT_POINT_SOURCE
-    assert "faint point source" in reason
 
 
 def test_the_natural_goals_say_what_is_missing_when_no_calibration_exists() -> None:
@@ -819,3 +825,58 @@ def test_the_context_section_goes_first_and_then_the_long_evidence_lists(
     for kept, original in zip(tight.statements, full.statements, strict=True):
         assert len(kept.evidence) + kept.evidence_omitted_count == len(original.evidence)
         assert len(kept.evidence) <= 1
+
+
+def test_take_more_prices_dithers_and_refocusing_like_the_ranking(isolated_butler: DiskButler) -> None:
+    """The time of "take N more" counts dithers and autofocus runs."""
+    from wayfindinglib.analytics.result_quality.capture_overheads import (
+        AUTOFOCUS_RUNS_PER_HOUR,
+        DITHER_EVERY_FRAMES,
+        estimate_capture_overheads,
+        wall_clock_estimate,
+    )
+
+    report = _report(_Library(), isolated_butler)
+    (more,) = _of_rule(report, "more_frames")
+    action, effect = more.proposed_action, more.expected_effect
+    overheads = estimate_capture_overheads([], action.exposure_seconds, SETTING.filter_name)
+    downloads_only = wall_clock_estimate(action.frame_count, action.exposure_seconds, overheads)
+    assert effect.wall_clock_seconds > downloads_only.total_seconds
+    without_focus = wall_clock_estimate(
+        action.frame_count, action.exposure_seconds, overheads, dither_every_frames=DITHER_EVERY_FRAMES
+    )
+    assert effect.wall_clock_seconds >= without_focus.total_seconds
+    assert AUTOFOCUS_RUNS_PER_HOUR >= 1
+    assert "dithers and refocusing" in more.message
+
+
+def test_the_report_states_both_references_and_never_stores_the_site(isolated_butler: DiskButler) -> None:
+    """Notes name the reference in use and the unstored site."""
+    report = _report(_Library(), isolated_butler)
+
+    assert any("measured against the baseline" in note for note in report.notes)
+    assert any(
+        "physical reference is not available" in note or "physical reference" in note for note in report.notes
+    )
+    assert any("No observing site is stored" in note for note in report.notes)
+    assert isolated_butler.get("site_profile", {"id": "default"}) is None
+
+
+def test_set_aside_frames_come_from_stored_rows_not_the_frames_folder(isolated_butler: DiskButler) -> None:
+    """The report never calls the folder-walking restore listing."""
+    library = _Library()
+
+    def forbidden(*_arguments: Any, **_keywords: Any) -> None:
+        """Fail if the report walks the frames tree.
+
+        Raises
+        ------
+        AssertionError
+            Always.
+        """
+        raise AssertionError("restore_excluded_frames must not be called")
+
+    library.processing.restore_excluded_frames = forbidden
+    report = _report(library, isolated_butler)
+    assert report.capture_settings[0].frames_set_aside == 2
+    assert any("not why" in note for note in report.notes)

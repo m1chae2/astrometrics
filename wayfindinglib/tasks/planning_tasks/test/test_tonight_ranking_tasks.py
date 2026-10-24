@@ -209,7 +209,7 @@ class FakeLibrary:
         """
         self.rows = rows
         self.targets = SimpleNamespace(list=lambda: targets)
-        self.quality = SimpleNamespace(query=self._query, capture_settings=lambda: {1: SETTING})
+        self.quality = SimpleNamespace(query=self._query, capture_settings=lambda ids=None: {1: SETTING})
 
     def _query(
         self,
@@ -447,7 +447,8 @@ def test_lists_are_kept_apart_by_use() -> None:
 def test_asteroid_searches_are_never_ranked() -> None:
     """A target with asteroid-search results is left out."""
     target = _target(M81, 5)
-    target.asteroid_detection.candidates = [SimpleNamespace(cascade_stage=SimpleNamespace(value="x"))]  # type: ignore[list-item]
+    candidates: list[Any] = [SimpleNamespace(cascade_stage=SimpleNamespace(value="x"))]
+    target.asteroid_detection.candidates = candidates
 
     assert tr.classify_use(target) is None
 
@@ -502,3 +503,30 @@ def test_a_long_ranking_leaves_out_its_lowest_candidates_to_fit_the_reply_budget
     assert [candidate.target_id for candidate in kept] == [c.target_id for c in candidates[: len(kept)]]
     assert any("left out" in note for note in fitted.notes)
     assert tr.fit_ranking_to_budget(fitted) is fitted
+
+
+def test_ranking_never_stores_a_site_and_says_where_its_site_came_from(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no stored site the ranking stores nothing."""
+    from astrometricslib import AppConfiguration
+    from wayfindinglib.drivers.butler import DiskButler
+
+    config_path = tmp_path / "astrometrics.config.toml"
+    monkeypatch.setattr(AppConfiguration, "_find_config_file", lambda self: config_path)
+    config = AppConfiguration()
+    config.update_config({"Wayfinding Library": {"path": str(tmp_path / "wayfinding_library")}})
+    butler = DiskButler(app_config=config)
+
+    ranking = tr.rank_tonight(TONIGHT, astrometrics=_library(), butler=butler, config=config)
+
+    assert butler.get_all("site_profile") == []
+    assert any("No observing site is stored" in note for note in ranking.notes)
+
+
+def test_the_hour_uses_the_cadence_of_the_capture_overheads_module() -> None:
+    """The ranking and the report share one dither and focus cadence."""
+    from wayfindinglib.analytics.result_quality import capture_overheads
+
+    assert tr.DITHER_EVERY_FRAMES == capture_overheads.DITHER_EVERY_FRAMES
+    assert tr.AUTOFOCUS_RUNS_PER_HOUR == capture_overheads.AUTOFOCUS_RUNS_PER_HOUR

@@ -28,11 +28,13 @@ was not checked.
 """
 
 from collections.abc import Collection, Iterable, Sequence
+from types import SimpleNamespace
 from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from astrometricslib import FilterType
+from astrometricslib import CaptureSetting, ConfigurationError, FilterType, resolve_camera_profile
+from wayfindinglib.analytics.capture_history import normalize_name
 
 NOT_MEASURED_NOTE = "setting not measured"
 """The note added when the camera profile has no measured setting."""
@@ -233,6 +235,25 @@ def _filter_spellings(filter_name: str | FilterType) -> set[str]:
     return spellings
 
 
+def filter_names_match(first: str | FilterType, second: str | FilterType) -> bool:
+    """Say whether two filter names are the same filter.
+
+    FITS headers write "Luminance", "L" or "Lum" for one filter, so the
+    comparison goes through every spelling a filter has.
+
+    Parameters
+    ----------
+    first, second : `str` or `FilterType`
+        The two filter names.
+
+    Returns
+    -------
+    same : `bool`
+        `True` when a spelling of one equals a spelling of the other.
+    """
+    return bool(_filter_spellings(first) & _filter_spellings(second))
+
+
 def _filter_is_listed(filter_name: str | FilterType, listed: Collection[str]) -> bool:
     """Say whether a filter matches one of the listed names.
 
@@ -329,3 +350,82 @@ def allowed_capture_values(
         filters=filters,
         filter_source=filter_source,
     )
+
+
+def camera_names_match(first: str, second: str, config: Any = None) -> bool:
+    """Say whether two camera names are the same camera.
+
+    This is the one camera-name matcher of the quality code. The catalog name,
+    the FITS header name and the library record name of a camera can all
+    differ, so the comparison uses every spelling the camera profile lists
+    (case, spaces and punctuation are ignored).
+
+    Parameters
+    ----------
+    first, second : `str`
+        The two camera names.
+    config : `AppConfiguration`, optional
+        The configuration that holds the camera profiles. Without it, or for
+        a camera with no profile, the names are compared as written.
+
+    Returns
+    -------
+    same : `bool`
+        `True` when the names refer to one camera.
+    """
+    spellings: set[str] = set()
+    for name in (first, second):
+        spellings_of_name = {normalize_name(name)}
+        try:
+            profile = resolve_camera_profile(name, config)
+            spellings_of_name.update(
+                normalize_name(alias)
+                for alias in (profile.camera_name, profile.record_name, *profile.name_aliases)
+                if alias and not profile.is_generic_fallback
+            )
+        except ConfigurationError:
+            pass
+        if spellings and not (spellings & spellings_of_name):
+            return False
+        spellings |= spellings_of_name
+    return True
+
+
+def allowed_capture_values_for_camera(
+    camera_name: str, config: Any, library_settings: Iterable[CaptureSetting]
+) -> AllowedCaptureValues:
+    """Collect what the camera of a night plan may be asked to do.
+
+    The measured settings come from the camera profile. The equipment catalog
+    lists no filters today, so the filters are the ones seen on the camera's
+    frames in the library (and `allowed_capture_values` takes a catalog list
+    first as soon as the catalog has one).
+
+    Parameters
+    ----------
+    camera_name : `str`
+        The camera named in the plan.
+    config : `AppConfiguration`
+        The configuration that holds the camera profiles.
+    library_settings : `Iterable` [`CaptureSetting`]
+        Every capture setting in the measurement store. Those of this camera
+        give the filters.
+
+    Returns
+    -------
+    allowed : `AllowedCaptureValues`
+        The allowed values, with a `check` method for a request.
+    """
+    try:
+        profile = resolve_camera_profile(camera_name, config)
+    except ConfigurationError:
+        # A configuration with no camera profiles cannot say what was
+        # measured. Treat the camera as unprofiled: requests are accepted and
+        # marked.
+        profile = SimpleNamespace(camera_name=camera_name, is_generic_fallback=True, sensor_noise=())
+    library_filters = [
+        setting.filter_name
+        for setting in library_settings
+        if setting.filter_name and camera_names_match(setting.camera, camera_name, config)
+    ]
+    return allowed_capture_values(profile, (), library_filters)

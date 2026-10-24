@@ -54,6 +54,19 @@ DEFAULT_AUTOFOCUS_SECONDS = 120.0
 points of 3 to 5 s frames and moves takes 1.5 to 3 minutes. Design estimate,
 register row WAY-D33."""
 
+DITHER_EVERY_FRAMES = 3
+"""Frames between dithers, when a run of frames is priced and the plan says
+nothing else. It is the cadence of the plan's wall-clock example (60 frames of
+30 s with a dither every 3 frames). The target report and tonight's ranking
+both use it, so they price the same hour. Design estimate, register row
+WAY-D71."""
+
+AUTOFOCUS_RUNS_PER_HOUR = 1
+"""Autofocus runs per hour of imaging, when a run of frames is priced and the
+plan says nothing else. Ekos refocuses on a filter change or a temperature
+change, about once an hour on a cooling night. The target report and tonight's
+ranking both use it. Design estimate, register row WAY-D71."""
+
 DOWNLOAD_PERCENTILE = 10.0
 """The download time is this percentile of the plain gaps: the quickest gaps
 hold

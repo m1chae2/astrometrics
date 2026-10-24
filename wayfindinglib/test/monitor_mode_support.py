@@ -363,14 +363,14 @@ class RecordingDrivers:
             )
         )
 
-        async def run_cycle(  # ruff: ignore[unused-async] -- the driver method is async
-            exposure_seconds: float, gain: float | None, commands: Any
-        ) -> None:
+        def run_cycle(exposure_seconds: float, gain: float | None, commands: Any) -> None:
             """Behave like a real guiding driver: use the cycle's commands.
 
             Real drivers expose and pulse only through `commands`, which
             call the guarded `hardware_operations` functions. A refusal
             therefore stops this cycle the same way it stops a real one.
+            `AsyncMock` awaits the result of a plain function used as its
+            side effect, so the mock still behaves as an async method.
             """
             commands.expose(exposure_seconds, gain)
             commands.pulse("north", 100.0)

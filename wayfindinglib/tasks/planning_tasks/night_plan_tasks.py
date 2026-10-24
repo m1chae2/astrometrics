@@ -10,8 +10,9 @@ their work to the functions here. They do four jobs:
 * Store the session with a revision check. The check and the write are one
   database statement, so two windows cannot overwrite each other.
 
-A write that names an old revision raises `PlanRevisionConflictError`, which
-names the revision now stored.
+An edit that changes nothing (every item was already on the list) stores
+nothing and keeps the revision. A write that names an old revision raises
+`PlanRevisionConflictError`, which names the revision now stored.
 """
 
 from collections.abc import Iterable
@@ -229,15 +230,27 @@ def store_session_change(
     Returns
     -------
     result : `PlanChange` or `PlanRevisionConflictError`
-        The new revision and what changed. When the stored revision is not
-        the one the caller expected, nothing is written and the error is
-        returned (not raised) for the caller to raise.
+        The new revision and what changed. When every change is an
+        "already present" skip, nothing is written and the revision is
+        unchanged (`revision == previous_revision`). When the stored revision
+        is not the one the caller expected, nothing is written and the error
+        is returned (not raised) for the caller to raise.
     """
     wanted = loaded_revision if expected_revision is None else expected_revision
     if wanted != loaded_revision:
         return PlanRevisionConflictError(
             f"The plan is at revision {loaded_revision}, not {wanted}. Read it again and redo the edit.",
             details={"current_revision": loaded_revision, "expected_revision": wanted},
+        )
+    if all(change.kind.endswith("_already_present") for change in changes):
+        # Nothing was changed, so nothing is stored and the revision stays.
+        return PlanChange(
+            session_id=session.id,
+            previous_revision=loaded_revision,
+            revision=loaded_revision,
+            changes=changes,
+            setting_notes=setting_notes,
+            session=session,
         )
     session.revision = loaded_revision + 1
     if not butler.put_session_if_revision(session, loaded_revision):

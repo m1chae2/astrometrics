@@ -1041,11 +1041,46 @@ def test_the_region_rows_give_counts_and_errors_per_region(tmp_path: Path) -> No
     assert corner.sample_count is not None and corner.sample_count >= 5
     # The lattice has no noise and identical stars per block, so the stars'
     # widths agree to rounding and the bootstrap error is zero or a few 1e-15,
-    # depending on the CPU. Only "not negative" holds on every machine.
-    assert corner.uncertainty is not None and corner.uncertainty >= 0.0
+    # depending on the CPU. "Below 1e-9" holds on every machine and still
+    # fails if the error is real but wrong (see the jitter test below).
+    assert corner.uncertainty is not None and corner.uncertainty < 1e-9
     assert "lie in this region" in corner.reason
     for name in FRAME_STAR_WIDTH_REGION_PX.values():
         check_measurement_against_registry(rows[name][0])
+
+
+def test_a_region_of_jittered_widths_has_an_error_near_the_standard_error_of_the_median() -> None:
+    """Scattered star widths give a bootstrap error near the expected one.
+
+    The noiseless lattice cannot tell a working bootstrap from one that always
+    returns zero. Here 40 stars in the center region have widths drawn from a
+    seeded normal distribution with a spread of 0.15 px. The standard error
+    of a median of n values from a normal distribution is about
+    1.2533 * spread / sqrt(n), which is 0.030 px here.
+    """
+    generator = np.random.default_rng(20261024)
+    spread_px = 0.15
+    star_count = 40
+    samples = tuple(
+        StarWidthSample(
+            float(generator.uniform(255.0, 445.0)),
+            float(generator.uniform(255.0, 445.0)),
+            float(3.0 + generator.normal(0.0, spread_px)),
+        )
+        for _ in range(star_count)
+    )
+    result = StarProfileResult(
+        width_px=3.0, star_count=star_count, samples=samples, field_shape_px=(700, 700)
+    )
+
+    center = next(region for region in measure_field_region_widths(result) if region.region == "center")
+
+    expected_error = 1.2533 * spread_px / math.sqrt(star_count)
+    assert center.star_count == star_count
+    assert center.width_px_uncertainty is not None and center.width_px_uncertainty > 0.0
+    assert center.width_px_uncertainty == pytest.approx(
+        expected_error, rel=1.0
+    )  # within a factor of two: one seeded draw
 
 
 def test_a_region_with_too_few_stars_is_not_measured_but_still_counted() -> None:

@@ -9,13 +9,13 @@ from typing import Any
 
 import pytest
 
+from wayfindinglib.analytics.capture_history import exposure_lengths_in_use
 from wayfindinglib.models.session.session_quality import (
     GuidingInputQuality,
     GuidingPerformance,
     GuidingRunPerformance,
     GuidingSessionAnalysis,
 )
-from wayfindinglib.tasks.control_tasks.capture_analysis_tasks import exposure_lengths_in_use
 from wayfindinglib.tasks.control_tasks.sky_analysis_tasks import (
     sky_samples_from_frames,
     sky_samples_from_guiding,

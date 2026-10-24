@@ -30,7 +30,7 @@ changed_python() {
 case "$mode" in
   tests)
     [ $# -gt 0 ] || { echo "give pytest targets" >&2; exit 2; }
-    heavy "$PY/pytest" "$@" -n 3 -q -p no:cacheprovider ;;
+    heavy "$PY/pytest" "$@" -n 3 -q -p no:cacheprovider -o tmp_path_retention_policy=failed ;;
   lint)
     files=$(changed_python)
     rc=0
@@ -45,12 +45,12 @@ case "$mode" in
     [ -n "$files" ] && "$PY/ruff" format $files && "$PY/ruff" check --fix $files
     exit 0 ;;
   doctests)
-    "$PY/pytest" "${DOC_TESTS[@]}" -q -p no:cacheprovider ;;
+    "$PY/pytest" "${DOC_TESTS[@]}" -q -p no:cacheprovider -o tmp_path_retention_policy=failed ;;
   docs)
-    heavy "$PY/pytest" "${DOC_TESTS[@]}" -n 3 -q -p no:cacheprovider || exit 1
+    heavy "$PY/pytest" "${DOC_TESTS[@]}" -n 3 -q -p no:cacheprovider -o tmp_path_retention_policy=failed || exit 1
     build/documentation/lint_docs.sh ;;
   golden)
-    heavy "$PY/pytest" -m golden -q -p no:cacheprovider astrometricslib ;;
+    heavy "$PY/pytest" -m golden -q -p no:cacheprovider -o tmp_path_retention_policy=failed astrometricslib ;;
   *)
     echo "mode must be tests, lint, format, doctests, docs or golden" >&2
     exit 2 ;;

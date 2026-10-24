@@ -15,6 +15,7 @@ import {
 import { useOptionalTargetContext } from '../../common/context/TargetContext';
 import { emitToast } from '../../common/utils/emitToast';
 import { navigateToElement } from '../../common/utils/displayCoordinator';
+import { QualityChip } from '../../common/components/quality/QualityChip';
 
 export interface StarSummaryCardProps {
     /** Detailed astronomy/stellar object data. */
@@ -139,6 +140,11 @@ export const StarSummaryCard: React.FC<StarSummaryCardProps> = ({
     const typeBadges = describeStarTypeBadges(spectralType, astronomyData);
     const patternBadges = describePatternBadges(astronomyData?.photometry);
     const targetIds: string[] = Array.isArray(astronomyData?.targetIds) ? astronomyData.targetIds : [];
+    // The star's own record names the targets it belongs to. Use the target the user
+    // already selected when the star belongs to it; otherwise the first one listed.
+    const selectedTargetId = targetContext?.selectedTarget ?? '';
+    const qualityTargetId = targetIds.includes(selectedTargetId) ? selectedTargetId : (targetIds[0] ?? null);
+    const qualityObjectId = astronomyData?.id ? String(astronomyData.id) : null;
 
     return (
         <div className="star-summary-card">
@@ -209,6 +215,12 @@ export const StarSummaryCard: React.FC<StarSummaryCardProps> = ({
                     </span>
                 )}
             </div>
+
+            {qualityTargetId && qualityObjectId && (
+                <div className="star-summary-card__quality">
+                    <QualityChip targetId={qualityTargetId} objectId={qualityObjectId} />
+                </div>
+            )}
         </div>
     );
 };

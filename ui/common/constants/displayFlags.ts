@@ -20,6 +20,7 @@ export const DISPLAY_DEFINITIONS: DisplayDefinition[] = [
   { mode: 'Planetarium', flag: 'enable_planetarium' },
   { mode: 'Observatory Manager', flag: 'enable_observatory' },
   { mode: 'Observation Manager', flag: 'enable_observation' },
+  { mode: 'Observation Execution', flag: 'enable_execution' },
 ];
 
 /**

@@ -21,6 +21,7 @@ const APP_MODE_NAMES = [
     'Image Processing',
     'Observatory Manager',
     'Observation Manager',
+    'Observation Execution',
     'Command Console',
 ] as const;
 

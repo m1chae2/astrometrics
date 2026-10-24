@@ -7,9 +7,28 @@
 
 import React from 'react';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render as baseRender, screen, fireEvent, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StarSummaryCard } from '../components/StarSummaryCard';
 import { TargetProvider, useTargetContext } from '../../common/context/TargetContext';
+import { Confidence, Severity, StatementKind } from '../../common/types/backendTypes';
+
+const callBackendMock = vi.fn();
+
+vi.mock('../../common/services/backendApi', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../common/services/backendApi')>()),
+  callBackend: (...args: unknown[]) => callBackendMock(...args),
+}));
+
+/**
+ * Renders inside a fresh query client, as the app does.
+ * @param ui The element to render.
+ * @returns The render result.
+ */
+function render(ui: React.ReactElement) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return baseRender(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+}
 
 /**
  * Test helper component that displays current TargetContext values alongside StarSummaryCard.
@@ -27,6 +46,8 @@ const TargetContextWatcher: React.FC<{ astronomyData: any }> = ({ astronomyData 
 
 describe('StarSummaryCard Target Navigation', () => {
   beforeEach(() => {
+    callBackendMock.mockReset();
+    callBackendMock.mockResolvedValue([]);
     window.localStorage.clear();
   });
 
@@ -109,5 +130,41 @@ describe('StarSummaryCard Target Navigation', () => {
 
     window.removeEventListener('astrometrics:targetSelected', targetSelectedSpy);
     window.removeEventListener('astrometrics:modeChange', modeChangeSpy);
+  });
+
+  /**
+   * Verifies the quality chip asks about this star under its first target and shows the first statement.
+   */
+  it('shows the quality chip for the star under its first target', async () => {
+    callBackendMock.mockResolvedValue([
+      {
+        rule: 'rule_a',
+        kind: StatementKind.WARNING,
+        severity: Severity.WARNING,
+        message: 'Spectrum is noisy.',
+        confidence: Confidence.MEASURED,
+      },
+    ]);
+    render(
+      <TargetProvider>
+        <StarSummaryCard astronomyData={{ id: 'Vega', name: 'Vega', targetIds: ['M 13', 'NGC 6205'] }} starId="Vega" />
+      </TargetProvider>
+    );
+
+    await waitFor(() => expect(screen.getByText('Spectrum is noisy.')).toBeInTheDocument());
+    expect(callBackendMock).toHaveBeenCalledWith('advisory:result', { target: 'M 13', object_id: 'Vega' });
+  });
+
+  /**
+   * Verifies a star with no target shows no chip and asks nothing.
+   */
+  it('shows no quality chip and does not fetch when the star has no target', () => {
+    render(
+      <TargetProvider>
+        <StarSummaryCard astronomyData={{ id: 'Vega', name: 'Vega' }} starId="Vega" />
+      </TargetProvider>
+    );
+    expect(callBackendMock).not.toHaveBeenCalled();
+    expect(document.querySelector('.quality-chip')).toBeNull();
   });
 });

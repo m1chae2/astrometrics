@@ -6,9 +6,9 @@
 import React from 'react';
 import { TargetListPanel } from './TargetListPanel';
 import { TargetPlanner } from './TargetPlanner';
-import { ExecutionQueue } from './ExecutionQueue';
+import { ExecutionQueue } from '../observationExecution/ExecutionQueue';
 import { TargetListStatus } from './TargetListStatus';
-import { useExecutionQueue, SequenceObject } from './hooks/useExecutionQueue';
+import { useExecutionQueue, SequenceObject } from '../observationExecution/hooks/useExecutionQueue';
 import { useTargetContext } from '../common/context/TargetContext';
 import { usePlanningContext } from './context/PlanningContext';
 import { AddTargetModal } from '../common/components/AddTargetModal';

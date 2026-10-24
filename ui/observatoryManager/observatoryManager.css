@@ -49,3 +49,23 @@
 .guiding-trends__legend-item--dec {
     color: var(--status-red-bright);
 }
+
+/* Calibration library (moved from the Observation Manager) */
+.calibration-controls { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 13px; color: var(--text-muted); }
+.calibration-table-container { overflow-y: auto; border: 1px solid var(--border-color); border-radius: 4px; background: rgba(0, 0, 0, 0.1); }
+.calibration-table-container--tall { max-height: 260px; }
+.calibration-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.calibration-table th { text-align: left; color: var(--text-muted); border-bottom: 1px solid var(--border-color); padding: 4px 8px; font-weight: 500; }
+.calibration-table td { padding: 2px 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); color: var(--text-bright); }
+.calibration-row--highlight td { background: rgba(255, 255, 255, 0.12); outline: 1px solid var(--accent-blue); font-weight: 600; }
+.calibration-no-match { display: flex; gap: 8px; align-items: center; border: 1px solid var(--danger-red); border-radius: 4px; padding: 4px 8px; margin-bottom: 8px; font-size: 13px; }
+
+/* Equipment settings, camera profiles and sensor noise */
+.equipment-block { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.equipment-block__row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.equipment-block__label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-muted); }
+.equipment-block__reason { color: var(--text-muted); font-size: 12px; margin: 4px 0; }
+.equipment-block__form { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+.equipment-block__confirm { border: 1px solid var(--border-color); border-radius: 4px; padding: 6px 8px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.equipment-block__actions button:focus-visible, .equipment-block__form button:focus-visible, .equipment-block__confirm button:focus-visible, .equipment-block select:focus-visible, .equipment-block input:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
+.control-mode-banner { font-size: 13px; padding: 6px 8px; border: 1px solid var(--border-color); border-radius: 4px; margin-bottom: 6px; }

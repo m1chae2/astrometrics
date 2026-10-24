@@ -7,12 +7,13 @@ export interface DirectionalControlProps {
     onStartMove: (direction: string) => void;
     onStopMove: (direction: string) => void;
     onSetSlewRate: (rate: number) => void;
+    /** True when the app may not command the mount. Every control is then disabled. */
+    disabled?: boolean;
 }
 
 /**
  * DirectionalControl Component
  *
- * Renders a compass-pad style interface for manual telescope slewing.
  * Renders a compass-pad style interface for manual telescope slewing.
  * Supports touch and mouse interactions for continuous movement relative to press duration.
  * REQ: OBS-2: Manual Telescope Movement
@@ -21,11 +22,13 @@ export const DirectionalControl: React.FC<DirectionalControlProps> = ({
     onStop,
     onStartMove,
     onStopMove,
-    onSetSlewRate
+    onSetSlewRate,
+    disabled = false
 }) => {
     const [activeDirection, setActiveDirection] = React.useState<string | null>(null);
 
     const handleStart = (direction: string) => {
+        if (disabled) return;
         setActiveDirection(direction);
         onStartMove(direction);
     };
@@ -38,6 +41,7 @@ export const DirectionalControl: React.FC<DirectionalControlProps> = ({
     };
 
     const handleRateChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        if (disabled) return;
         const value = parseInt(event.target.value, 10);
         onSetSlewRate(value);
     };
@@ -54,6 +58,8 @@ export const DirectionalControl: React.FC<DirectionalControlProps> = ({
                     onTouchStart={(e) => { e.preventDefault(); handleStart('NW'); }}
                     onTouchEnd={(e) => { e.preventDefault(); handleEnd('NW'); }}
                     type="button"
+                    disabled={disabled}
+                    aria-disabled={disabled}
                 >
                     ↖
                 </button>
@@ -68,6 +74,8 @@ export const DirectionalControl: React.FC<DirectionalControlProps> = ({
                     onTouchStart={(e) => { e.preventDefault(); handleStart('N'); }}
                     onTouchEnd={(e) => { e.preventDefault(); handleEnd('N'); }}
                     type="button"
+                    disabled={disabled}
+                    aria-disabled={disabled}
                 >
                     ↑
                 </button>
@@ -79,6 +87,8 @@ export const DirectionalControl: React.FC<DirectionalControlProps> = ({
                     onTouchStart={(e) => { e.preventDefault(); handleStart('NE'); }}
                     onTouchEnd={(e) => { e.preventDefault(); handleEnd('NE'); }}
                     type="button"
+                    disabled={disabled}
+                    aria-disabled={disabled}
                 >
                     ↗
                 </button>
@@ -91,13 +101,18 @@ export const DirectionalControl: React.FC<DirectionalControlProps> = ({
                     onTouchStart={(e) => { e.preventDefault(); handleStart('W'); }}
                     onTouchEnd={(e) => { e.preventDefault(); handleEnd('W'); }}
                     type="button"
+                    disabled={disabled}
+                    aria-disabled={disabled}
                 >
                     ←
                 </button>
                 <button
                     id="btn-manual-stop"
                     className="navigator__stop"
+                    disabled={disabled}
+                    aria-disabled={disabled}
                     onClick={() => {
+                        if (disabled) return;
                         setActiveDirection(null);
                         onStop();
                     }}
@@ -114,6 +129,8 @@ export const DirectionalControl: React.FC<DirectionalControlProps> = ({
                     onTouchStart={(e) => { e.preventDefault(); handleStart('E'); }}
                     onTouchEnd={(e) => { e.preventDefault(); handleEnd('E'); }}
                     type="button"
+                    disabled={disabled}
+                    aria-disabled={disabled}
                 >
                     →
                 </button>
@@ -126,6 +143,8 @@ export const DirectionalControl: React.FC<DirectionalControlProps> = ({
                     onTouchStart={(e) => { e.preventDefault(); handleStart('SW'); }}
                     onTouchEnd={(e) => { e.preventDefault(); handleEnd('SW'); }}
                     type="button"
+                    disabled={disabled}
+                    aria-disabled={disabled}
                 >
                     ↙
                 </button>
@@ -137,6 +156,8 @@ export const DirectionalControl: React.FC<DirectionalControlProps> = ({
                     onTouchStart={(e) => { e.preventDefault(); handleStart('S'); }}
                     onTouchEnd={(e) => { e.preventDefault(); handleEnd('S'); }}
                     type="button"
+                    disabled={disabled}
+                    aria-disabled={disabled}
                 >
                     ↓
                 </button>
@@ -148,6 +169,8 @@ export const DirectionalControl: React.FC<DirectionalControlProps> = ({
                     onTouchStart={(e) => { e.preventDefault(); handleStart('SE'); }}
                     onTouchEnd={(e) => { e.preventDefault(); handleEnd('SE'); }}
                     type="button"
+                    disabled={disabled}
+                    aria-disabled={disabled}
                 >
                     ↘
                 </button>
@@ -167,6 +190,8 @@ export const DirectionalControl: React.FC<DirectionalControlProps> = ({
                     step="1"
                     defaultValue="2"
                     onChange={handleRateChange}
+                    disabled={disabled}
+                    aria-disabled={disabled}
                     className="slew-rate__slider"
                 />
             </div>

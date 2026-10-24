@@ -12,6 +12,8 @@ import '../../common/styles/button.css';
 export interface FilterWheelControlProps {
     activeFilter: string;
     onSelectFilter: (filter: string) => void;
+    /** True when the app may not command the filter wheel. The buttons are then disabled. */
+    disabled?: boolean;
 }
 
 const FILTERS = ['L', 'R', 'G', 'B', 'Ha', 'OIII', 'SII', 'Spect'];
@@ -23,7 +25,7 @@ const FILTERS = ['L', 'R', 'G', 'B', 'Ha', 'OIII', 'SII', 'Spect'];
  * based on feedback from the device.
  * REQ: OBS-6: Filter Wheel Control
  */
-export const FilterWheelControl: React.FC<FilterWheelControlProps> = ({ activeFilter, onSelectFilter }) => {
+export const FilterWheelControl: React.FC<FilterWheelControlProps> = ({ activeFilter, onSelectFilter, disabled = false }) => {
     const [pendingFilter, setPendingFilter] = React.useState<string | null>(null);
 
     React.useEffect(() => {
@@ -34,6 +36,7 @@ export const FilterWheelControl: React.FC<FilterWheelControlProps> = ({ activeFi
     }, [activeFilter, pendingFilter]);
 
     const handleSelect = (filter: string) => {
+        if (disabled) return;
         setPendingFilter(filter);
         onSelectFilter(filter);
     };
@@ -69,6 +72,8 @@ export const FilterWheelControl: React.FC<FilterWheelControlProps> = ({ activeFi
                         className={`btn filter-wheel__btn ${isActive ? 'filter-wheel__btn--active' : ''} ${isPending && !isActive ? 'filter-wheel__btn--pending' : ''}`}
                         // REQ: OBS-6.2: The display SHALL allow selection of a new filter from a predefined list.
                         onClick={() => handleSelect(filter)}
+                        disabled={disabled}
+                        aria-disabled={disabled}
                         type="button"
                     >
                         {filter}

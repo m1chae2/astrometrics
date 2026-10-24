@@ -38,7 +38,7 @@ describe('Electron Platform Adapters', () => {
     });
 
     /** Verifies Windows user tasks (Jump List) registration */
-    it('registers user tasks for Planetarium, Observatory, and Image Processing', () => {
+    it('registers user tasks for Planetarium, Observatory, Observation Execution, and Image Processing', () => {
       const mockApp = {
         setUserTasks: vi.fn()
       } as any;
@@ -46,10 +46,11 @@ describe('Electron Platform Adapters', () => {
       platform.setupUserTasks(mockApp);
       expect(mockApp.setUserTasks).toHaveBeenCalledTimes(1);
       const tasks = mockApp.setUserTasks.mock.calls[0][0];
-      expect(tasks).toHaveLength(3);
+      expect(tasks).toHaveLength(4);
       expect(tasks[0].title).toBe('Open Planetarium');
       expect(tasks[1].title).toBe('Observatory Manager');
-      expect(tasks[2].title).toBe('Image Processing');
+      expect(tasks[2].title).toBe('Observation Execution');
+      expect(tasks[3].title).toBe('Image Processing');
     });
 
     /** Verifies notification option adapting for Windows Toast */

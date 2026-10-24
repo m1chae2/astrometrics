@@ -498,9 +498,10 @@ async def tool_terminal_inspect_api(target: str) -> dict[str, Any]:
                 "type": "string",
                 "enum": [
                     "Planetarium",
-                    "Observatory",
+                    "Observatory Manager",
                     "Image Processing",
                     "Observation Manager",
+                    "Observation Execution",
                     "Command Console",
                 ],
                 "description": "Target workspace mode.",
@@ -965,9 +966,10 @@ async def _active_jobs() -> Any:
                 "type": "string",
                 "enum": [
                     "Planetarium",
-                    "Observatory",
+                    "Observatory Manager",
                     "Image Processing",
                     "Observation Manager",
+                    "Observation Execution",
                     "Command Console",
                 ],
                 "description": "For navigate: the view to show.",

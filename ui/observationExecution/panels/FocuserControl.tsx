@@ -11,6 +11,8 @@ import React, { useState } from 'react';
 export interface FocuserControlProps {
     position: number;
     onMoveFocuser: (steps: number) => void;
+    /** True when the app may not command the focuser. The buttons are then disabled. */
+    disabled?: boolean;
 }
 
 /**
@@ -20,7 +22,7 @@ export interface FocuserControlProps {
  * incremental movements in/out with variable step sizes.
  * REQ: OBS-5: Focuser Control
  */
-export const FocuserControl: React.FC<FocuserControlProps> = ({ position, onMoveFocuser }) => {
+export const FocuserControl: React.FC<FocuserControlProps> = ({ position, onMoveFocuser, disabled = false }) => {
     const [stepSize, setStepSize] = useState<number>(100);
 
     const stepSizes = [10, 50, 100, 500, 1000];
@@ -37,7 +39,9 @@ export const FocuserControl: React.FC<FocuserControlProps> = ({ position, onMove
                 <button
                     id="btn-focus-in"
                     className="btn btn--control btn--primary"
-                    onClick={() => onMoveFocuser(-stepSize)}
+                    onClick={() => !disabled && onMoveFocuser(-stepSize)}
+                    disabled={disabled}
+                    aria-disabled={disabled}
                     type="button"
                 >
                     Focus IN (-)
@@ -45,7 +49,9 @@ export const FocuserControl: React.FC<FocuserControlProps> = ({ position, onMove
                 <button
                     id="btn-focus-out"
                     className="btn btn--control btn--primary"
-                    onClick={() => onMoveFocuser(stepSize)}
+                    onClick={() => !disabled && onMoveFocuser(stepSize)}
+                    disabled={disabled}
+                    aria-disabled={disabled}
                     type="button"
                 >
                     Focus OUT (+)
@@ -62,6 +68,8 @@ export const FocuserControl: React.FC<FocuserControlProps> = ({ position, onMove
                         key={size}
                         id={`btn-focus-step-${size}`}
                         onClick={() => setStepSize(size)}
+                        disabled={disabled}
+                        aria-disabled={disabled}
                         className={`focuser__step ${stepSize === size ? 'focuser__step--active' : ''}`}
                         type="button"
                     >

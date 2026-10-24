@@ -22,11 +22,10 @@ import { usePlanningTime } from '../common/context/PlanningTimeContext';
 import { useConstellationLines } from './hooks/useConstellationLines';
 import { useObserverLocation } from './hooks/useObserverLocation';
 import { useOverlayToggles } from './hooks/useOverlayToggles';
-import { useEquipmentConfiguration } from './hooks/useEquipmentConfiguration';
+import { useEquipmentConfiguration } from '../common/hooks/useEquipmentConfiguration';
 import { useAlignmentSessionData } from './hooks/useAlignmentSessionData';
 import { useTrackingRiskMap } from './hooks/useTrackingRiskMap';
 import { useSourceMerging } from './hooks/useSourceMerging';
-import { EquipmentConfigPanel } from './components/EquipmentConfigPanel';
 import { PlanetariumSource } from '../common/types/planetariumTypes';
 import { callBackend } from '../common/services/backendApi';
 import { useTargetContext } from '../common/context/TargetContext';
@@ -144,7 +143,7 @@ export const PlanetariumDisplay: React.FC = () => {
   );
 
   const { location } = useObserverLocation();
-  const { configuration: equipmentConfig, availableCameras, setActiveCamera } = useEquipmentConfiguration();
+  const { configuration: equipmentConfig } = useEquipmentConfiguration();
 
   const {
     selectedTarget: selectedTargetId,
@@ -613,12 +612,6 @@ export const PlanetariumDisplay: React.FC = () => {
         onCenterChange={handleCenterChange}
         sensorFovWidthDeg={equipmentConfig?.fovWidthDeg}
         sensorFovHeightDeg={equipmentConfig?.fovHeightDeg}
-      />
-
-      <EquipmentConfigPanel
-        configuration={equipmentConfig}
-        availableCameras={availableCameras}
-        onSelectCamera={setActiveCamera}
       />
 
       <DeepCatalogPrompt status={deepCatalogStatus} />

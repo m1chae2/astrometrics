@@ -10,12 +10,9 @@ import { ImageList } from './ImageList';
 import { TargetDetails } from './TargetDetails';
 import { DitherSettings } from './DitherSettings';
 import { MosaicPlanner } from './MosaicPlanner';
-import { CalibrationPanel } from './CalibrationPanel';
 import { DataQualityPanel } from '../common/components/quality/DataQualityPanel';
 import { usePlanningContext, PlanItem } from './context/PlanningContext';
 import { SectionPanel } from '../common/components/SectionPanel';
-import { captureTestFrame } from '../common/services/imaging/captureService';
-import { emitToast } from '../common/utils/emitToast';
 import '../common/styles/panels.css';
 
 interface TargetPlannerProps {
@@ -88,25 +85,6 @@ export const TargetPlanner: React.FC<TargetPlannerProps> = ({
         setEditingItem(null);
     };
 
-    const handleTestImage = async (type: string, count: number, exposure: number, filter: string, delay: number) => {
-        if (!selectedTargetId) {
-            emitToast('Select a target before capturing a test frame', 'error');
-            return;
-        }
-
-        emitToast(`Capturing test frame: ${exposure}s ${filter || ''} ${type}`.replace(/\s+/g, ' '), 'info');
-        const jobId = await captureTestFrame({
-            targetId: selectedTargetId,
-            exposureSeconds: exposure,
-            imageType: type,
-            filterName: filter || undefined,
-        });
-        emitToast(
-            jobId ? 'Test frame capture started' : 'Test frame capture failed',
-            jobId ? 'success' : 'error'
-        );
-    };
-
     const handleMosaicCreated = (items: PlanItem[]) => {
         addItems(items);
     };
@@ -120,7 +98,6 @@ export const TargetPlanner: React.FC<TargetPlannerProps> = ({
                             onAdd={handleUpdate}
                             editingItem={editingItem}
                             onCancel={handleCancelEdit}
-                            onTestImage={handleTestImage}
                             // Controlled props
                             values={{
                                 type: imgType,
@@ -169,7 +146,6 @@ export const TargetPlanner: React.FC<TargetPlannerProps> = ({
                         </SectionPanel>
                     </div>
                     <div className="target-planner__row">
-                        <CalibrationPanel />
                         <SectionPanel title="Target Status">
                             <TargetDetails selectedTargetId={selectedTargetId} />
                         </SectionPanel>

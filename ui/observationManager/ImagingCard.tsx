@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { SequenceObject } from './hooks/useExecutionQueue';
+import { SequenceObject } from '../observationExecution/hooks/useExecutionQueue';
 import { ConfirmDialog } from '../common/components/ConfirmDialog';
 
 interface Props extends React.HTMLAttributes<HTMLDivElement> {

@@ -9,8 +9,8 @@
  */
 
 import { useCallback, useMemo, useState } from 'react';
-import { useBackendFetch } from '../../common/hooks/useBackendFetch';
-import { callBackend, EquipmentCameraProfile, EquipmentConfigurationResult } from '../../common/services/backendApi';
+import { useBackendFetch } from './useBackendFetch';
+import { callBackend, EquipmentCameraProfile, EquipmentConfigurationResult } from '../services/backendApi';
 
 export type { EquipmentCameraProfile, EquipmentConfigurationResult };
 export type CameraProfile = EquipmentCameraProfile;
@@ -33,6 +33,8 @@ export interface UseEquipmentConfigurationResult {
    * @returns {Promise<void>}
    */
   setActiveCamera: (cameraName: string) => Promise<void>;
+  /** Reads the configuration and cameras again (for a "Try again" button). */
+  reload: () => void;
 }
 
 interface FetchedEquipment {
@@ -74,5 +76,7 @@ export const useEquipmentConfiguration = (): UseEquipmentConfigurationResult => 
     }
   }, []);
 
-  return { configuration, availableCameras, loading, error, setActiveCamera };
+  const reload = useCallback(() => setReloadKey((key) => key + 1), []);
+
+  return { configuration, availableCameras, loading, error, setActiveCamera, reload };
 };

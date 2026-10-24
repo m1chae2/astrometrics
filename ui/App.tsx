@@ -54,6 +54,11 @@ const ObservationManager = React.lazy(() =>
     default: m.ObservationManager,
   }))
 );
+const ObservationExecution = React.lazy(() =>
+  import('./observationExecution/ObservationExecution').then((m) => ({
+    default: m.ObservationExecution,
+  }))
+);
 const PlanetariumDisplay = React.lazy(() =>
   import('./planetariumDisplay/PlanetariumDisplay').then((m) => ({
     default: m.PlanetariumDisplay,
@@ -113,6 +118,7 @@ const MODE_PANELS: { mode: string; id: string; Component: React.ComponentType }[
   { mode: 'Image Processing', id: 'ImageProcessingDisplay', Component: ImageProcessingDisplay },
   { mode: 'Observatory Manager', id: 'ObservatoryManager', Component: ObservatoryManager },
   { mode: 'Observation Manager', id: 'ObservationManager', Component: ObservationManager },
+  { mode: 'Observation Execution', id: 'ObservationExecution', Component: ObservationExecution },
   { mode: 'Command Console', id: 'CommandConsole', Component: CommandConsole },
 ];
 

@@ -21,6 +21,11 @@ export interface TrackingSettingsProps {
     guidingGain?: number;
     onGuidingExposureChange?: (value: number) => void;
     onGuidingGainChange?: (value: number) => void;
+
+    /** When true every input is unavailable (the app is not allowed to command the device). */
+    disabled?: boolean;
+    /** The id of the visible text that says why the inputs are unavailable. */
+    disabledReasonId?: string;
 }
 
 /**
@@ -42,7 +47,14 @@ export const TrackingSettings: React.FC<TrackingSettingsProps> = ({
     guidingGain = 100,
     onGuidingExposureChange,
     onGuidingGainChange,
+    disabled = false,
+    disabledReasonId,
 }) => {
+    const unavailable = {
+        disabled,
+        'aria-disabled': disabled || undefined,
+        'aria-describedby': disabled ? disabledReasonId : undefined,
+    };
     return (
         <ControlContainer>
             {/* Left: Alignment Settings */}
@@ -50,33 +62,36 @@ export const TrackingSettings: React.FC<TrackingSettingsProps> = ({
                 <SectionLabel>Alignment</SectionLabel>
                 <ParameterRow label="Accuracy:">
                     <input
+                        {...unavailable}
                         id="input-tracking-accuracy"
                         name="accuracy"
                         type="number"
                         value={accuracy}
-                        onChange={(e) => onAccuracyChange?.(parseInt(e.target.value, 10))}
+                        onChange={(e) => !disabled && onAccuracyChange?.(parseInt(e.target.value, 10))}
                         className="input input--short"
                         aria-label="Alignment Accuracy"
                     />
                 </ParameterRow>
                 <ParameterRow label="Settle:">
                     <input
+                        {...unavailable}
                         id="input-tracking-settle"
                         name="settleTime"
                         type="number"
                         value={settleTime}
-                        onChange={(e) => onSettleTimeChange?.(parseInt(e.target.value, 10))}
+                        onChange={(e) => !disabled && onSettleTimeChange?.(parseInt(e.target.value, 10))}
                         className="input input--short"
                         aria-label="Settle Time"
                     />
                 </ParameterRow>
                 <ParameterRow label="Exposure (s):">
                     <input
+                        {...unavailable}
                         id="input-tracking-expose"
                         name="alignmentExposure"
                         type="number"
                         value={alignmentExposure}
-                        onChange={(e) => onAlignmentExposureChange?.(parseFloat(e.target.value))}
+                        onChange={(e) => !disabled && onAlignmentExposureChange?.(parseFloat(e.target.value))}
                         className="input input--short"
                         step="0.1"
                         aria-label="Alignment Exposure Seconds"
@@ -91,6 +106,7 @@ export const TrackingSettings: React.FC<TrackingSettingsProps> = ({
                 <SectionLabel>Guiding</SectionLabel>
                 <ParameterRow label="Exposure (s):">
                     <input
+                        {...unavailable}
                         id="input-guiding-expose"
                         name="guidingExposure"
                         type="number"
@@ -98,12 +114,13 @@ export const TrackingSettings: React.FC<TrackingSettingsProps> = ({
                         min="0.1"
                         className="input input--short"
                         value={guidingExposure}
-                        onChange={(e) => onGuidingExposureChange?.(parseFloat(e.target.value))}
+                        onChange={(e) => !disabled && onGuidingExposureChange?.(parseFloat(e.target.value))}
                         aria-label="Guiding Exposure Seconds"
                     />
                 </ParameterRow>
                 <ParameterRow label="Gain:">
                     <input
+                        {...unavailable}
                         id="input-guiding-gain"
                         name="guidingGain"
                         type="number"
@@ -112,7 +129,7 @@ export const TrackingSettings: React.FC<TrackingSettingsProps> = ({
                         max="1000"
                         className="input input--short"
                         value={guidingGain}
-                        onChange={(e) => onGuidingGainChange?.(parseInt(e.target.value, 10))}
+                        onChange={(e) => !disabled && onGuidingGainChange?.(parseInt(e.target.value, 10))}
                         aria-label="Guiding Gain"
                     />
                 </ParameterRow>

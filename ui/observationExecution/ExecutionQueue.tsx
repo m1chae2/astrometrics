@@ -1,20 +1,41 @@
+/**
+ * @fileoverview The execution queue: the planned sequences waiting to be run,
+ * with drag-and-drop ordering and "Start Imaging Session".
+ */
 import React, { useState } from 'react';
-import { useExecutionQueue, SequenceObject } from './hooks/useExecutionQueue';
-import { ImagingCard } from './ImagingCard';
+import { SequenceObject } from './hooks/useExecutionQueue';
+import { ImagingCard } from '../observationManager/ImagingCard';
 import { SectionPanel } from '../common/components/SectionPanel';
 import { beginImagingSession } from '../common/services/sequencerService';
 import '../common/styles/panels.css';
 import './executionQueue.css';
 
+/** The props of the execution queue. */
 interface Props {
     queue: SequenceObject[];
     removeFromQueue: (id: string) => void;
     onEdit: (sequence: SequenceObject) => void;
     reorderQueue: (queue: SequenceObject[]) => void;
+    /** True when the app may not command the equipment. "Start Imaging Session" is then disabled. */
+    commandsDisabled?: boolean;
+    /** The id of the visible text that says why commands are disabled. */
+    disabledReasonId?: string;
 }
 
-// REQ: OBM-4: Execution Queue Management
-export const ExecutionQueue: React.FC<Props> = ({ queue, removeFromQueue, onEdit, reorderQueue }) => {
+/**
+ * Lists the queued sequences and starts the imaging session.
+ * REQ: OBM-4: Execution Queue Management
+ * @param props The queue, its edit callbacks and whether commands are disabled.
+ * @return The queue panel.
+ */
+export const ExecutionQueue: React.FC<Props> = ({
+    queue,
+    removeFromQueue,
+    onEdit,
+    reorderQueue,
+    commandsDisabled = false,
+    disabledReasonId,
+}) => {
     const [expandedId, setExpandedId] = useState<string | null>(null);
     const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
     const [localQueue, setLocalQueue] = useState<SequenceObject[]>(queue);
@@ -80,7 +101,7 @@ export const ExecutionQueue: React.FC<Props> = ({ queue, removeFromQueue, onEdit
         e.dataTransfer.dropEffect = "move";
     };
     const handleStartSession = async () => {
-        if (queue.length === 0) return;
+        if (queue.length === 0 || commandsDisabled) return;
         setIsStarting(true);
         try {
             await beginImagingSession();
@@ -130,7 +151,9 @@ export const ExecutionQueue: React.FC<Props> = ({ queue, removeFromQueue, onEdit
                 <button
                     className="btn btn--primary btn--full-width"
                     onClick={handleStartSession}
-                    disabled={isStarting || queue.length === 0}
+                    disabled={commandsDisabled || isStarting || queue.length === 0}
+                    aria-disabled={commandsDisabled || isStarting || queue.length === 0}
+                    aria-describedby={commandsDisabled ? disabledReasonId : undefined}
                 >
                     {isStarting ? 'Starting...' : 'Start Imaging Session'}
                 </button>

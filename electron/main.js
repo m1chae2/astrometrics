@@ -773,6 +773,7 @@ function updateTrayMenu(status = {}) {
         { label: 'Image Processing', click: () => navigateTo('Image Processing') },
         { label: 'Observatory Manager', click: () => navigateTo('Observatory Manager') },
         { label: 'Observation Manager', click: () => navigateTo('Observation Manager') },
+        { label: 'Observation Execution', click: () => navigateTo('Observation Execution') },
         { label: 'Command Console', click: () => navigateTo('Command Console') }
       ]
     },

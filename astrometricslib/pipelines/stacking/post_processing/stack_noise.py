@@ -110,6 +110,7 @@ __all__ = [
     "load_apertures",
     "load_apertures_with_reason",
     "load_noise_sums",
+    "measure_difference_noise",
     "measure_stack_noise",
     "noise_sums_path",
     "paired_noise_difference",
@@ -832,8 +833,9 @@ def signed_aperture_sum(
     -------
     value : `float` or `None`
         The sky-subtracted sum, or `None` when the circle or its ring reaches
-        outside the image, or the ring holds non-finite pixels or exactly-zero
-        pixels (the empty edge of a stack).
+        outside the image, or the ring or the circle holds non-finite pixels or
+        exactly-zero pixels (the empty edge of a stack, or the pixels of a
+        difference image that one of its two stacks does not cover).
     """
     height, width = plane.shape
     reach = ring_outer + 1.0
@@ -848,7 +850,7 @@ def signed_aperture_sum(
     if not np.all(np.isfinite(ring_values)) or np.any(ring_values == 0):
         return None
     aperture_values = aperture.to_mask(method="exact").get_values(plane)
-    if not np.all(np.isfinite(aperture_values)):
+    if not np.all(np.isfinite(aperture_values)) or np.any(aperture_values == 0):
         return None
     return float(aperture_values.sum() - aperture.area * np.median(ring_values))
 
@@ -1864,6 +1866,65 @@ def measure_stack_noise(
     return replace(outcome, stack_sky_level=sky_level_of_plane(plane))
 
 
+def measure_difference_noise(
+    first_stack_path: str,
+    second_stack_path: str,
+    reference_frame_path: str | None,
+    apertures_path: str,
+) -> StackNoiseOutcome:
+    """Measure the noise of the difference of two stacks in empty sky.
+
+    The two stacks must be on one pixel grid: stacked from disjoint sets of
+    frames that were all registered to the same reference frame, and not
+    trimmed. Subtracting one from the other cancels everything the frames
+    share (sky structure, faint stars, nebula) and keeps the random noise of
+    both stacks. The apertures are the target's stored ones and are never
+    chosen here. The estimator, the uncertainty and the flux scale are those
+    of `measure_stack_noise`: the sums are taken on the difference image, and
+    the reference stars are read from the first stack. The result is the noise
+    of the difference, not of either stack; for two halves of equal weight the
+    stack's own random noise is half of it.
+
+    Parameters
+    ----------
+    first_stack_path : `str`
+        The first stack. The apertures are moved onto its stars.
+    second_stack_path : `str`
+        The second stack, on the same pixel grid.
+    reference_frame_path : `str` or `None`
+        The registration reference frame both stacks share.
+    apertures_path : `str`
+        Where the target's apertures are kept.
+
+    Returns
+    -------
+    outcome : `StackNoiseOutcome`
+        The measurement of the difference, or the reason there is none (a
+        stack with no pixels, stacks on different grids, or any reason
+        `measure_stack_noise` gives).
+    """
+    first_plane = _stack_plane(first_stack_path)
+    second_plane = _stack_plane(second_stack_path)
+    if first_plane is None or second_plane is None:
+        return StackNoiseOutcome(None, "a half stack file holds no pixels")
+    if first_plane.shape != second_plane.shape:
+        return StackNoiseOutcome(
+            None,
+            f"the two stacks are on different pixel grids ({first_plane.shape} and {second_plane.shape})",
+        )
+    outcome = _measure_noise_in_plane(
+        first_plane,
+        first_stack_path,
+        reference_frame_path,
+        apertures_path,
+        (0, 0),
+        False,
+        None,
+        subtracted_plane=second_plane,
+    )
+    return replace(outcome, stack_sky_level=sky_level_of_plane(first_plane))
+
+
 def _measure_noise_in_plane(
     plane: np.ndarray,
     stack_path: str,
@@ -1872,6 +1933,7 @@ def _measure_noise_in_plane(
     crop_offset: tuple[int, int],
     may_choose_apertures: bool,
     depth: StackDepth | None,
+    subtracted_plane: np.ndarray | None = None,
 ) -> StackNoiseOutcome:
     """Measure a stack's noise in the target's fixed apertures on its plane.
 
@@ -1891,6 +1953,12 @@ def _measure_noise_in_plane(
         See `measure_stack_noise`.
     depth : `StackDepth` or `None`
         See `measure_stack_noise`.
+    subtracted_plane : `numpy.ndarray`, optional
+        A second stack on the same pixel grid. When given, the apertures are
+        put on ``plane`` (which holds the stars the positions are checked
+        against) and the sums are taken on ``plane`` minus this image, with
+        every pixel that is exactly zero in either image left at zero (the
+        empty edge). See `measure_difference_noise`.
 
     Returns
     -------
@@ -1965,7 +2033,11 @@ def _measure_noise_in_plane(
             return StackNoiseOutcome(None, reason)
         position_note = alignment.describe() if alignment is not None else ""
     position_note = " ".join(part for part in (position_note, keep_note) if part)
-    all_sums = _sums_at(plane, wcs, aperture_set.aperture_sky)
+    summed_plane = plane
+    if subtracted_plane is not None:
+        summed_plane = plane - subtracted_plane
+        summed_plane[(plane == 0) | (subtracted_plane == 0)] = 0.0
+    all_sums = _sums_at(summed_plane, wcs, aperture_set.aperture_sky)
     sums = all_sums[np.isfinite(all_sums)]
     if sums.size < MINIMUM_USABLE_APERTURES:
         return StackNoiseOutcome(None, f"only {sums.size} of the stored apertures fall on this stack")

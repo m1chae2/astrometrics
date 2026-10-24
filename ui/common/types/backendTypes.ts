@@ -2852,6 +2852,7 @@ export const RPC_METHODS = [
   "processing:jobs_for_target",
   "processing:job_log_tail",
   "processing:record_frame_measurements",
+  "processing:measure_half_difference_noise",
   "processing:measure_noise_growth",
   "processing:measure_night_contributions",
   "quality:query",

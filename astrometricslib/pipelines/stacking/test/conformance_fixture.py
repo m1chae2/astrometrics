@@ -5,8 +5,8 @@ pipeline that records measurements to show that its record step emits each
 metric the pipeline declares. This file builds one finished stack summary whose
 every number is filled, with two exposure groups, all sixteen gates, a noise
 measurement and two member frames, and runs the stacking record step on it.
-It adds the two rows of one leave-one-night-out stack, which the subset jobs
-store (`subset_noise_run.py`).
+It adds the two rows of one leave-one-night-out stack and the nine rows of the
+half-difference noise, which the subset jobs store (`subset_noise_run.py`).
 The two quarantine metrics are frame metrics that the frame measurement run
 (`frame_measurement_run.py`) stores, so the fixture adds the rows it would add.
 """
@@ -47,6 +47,7 @@ from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
 )
 from astrometricslib.pipelines.stacking.subset_noise_run import (
     expected_ratio_measurement,
+    half_difference_measurements,
     night_measurements,
 )
 
@@ -251,6 +252,20 @@ def stacking_emitted_measurements() -> list[QualityMeasurement]:
                 targetId="M 99", label="M99_L_Stacked.without-2026-10-01", effectiveFrameCount=9.0
             ),
             "",
+        )
+    )
+    measurements.extend(
+        half_difference_measurements(
+            context,
+            context.stack_subject("M99_L_Stacked.fits"),
+            fixture_noise_outcome(),
+            "",
+            "",
+            (9.0, 9.5),
+            "",
+            0.2,
+            (0.1, 0.12),
+            1.5,
         )
     )
     measurements.extend(

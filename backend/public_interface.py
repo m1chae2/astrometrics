@@ -126,6 +126,7 @@ RPC_METHODS: tuple[str, ...] = (
     "processing:record_frame_measurements",
     # Stacks some of a target's frames apart from its library stack and
     # measures the noise of each result (writes).
+    "processing:measure_half_difference_noise",
     "processing:measure_noise_growth",
     "processing:measure_night_contributions",
     # Quality measurements: the stored ones, and what each metric means.

@@ -14,6 +14,7 @@ They raise an error from `astrometricslib.foundation.errors` when a request
 cannot be met, and return a typed result otherwise.
 """
 
+import logging
 import os
 from collections.abc import Callable
 from contextlib import AbstractContextManager
@@ -35,6 +36,7 @@ from astrometricslib.models.quality.quality_reports import (
 )
 from astrometricslib.models.quality.quality_summary import STACKING_PIPELINE_VERSION
 from astrometricslib.models.quality.subset_stacks import (
+    HalfDifferenceNoiseResult,
     NightContributionResult,
     NoiseGrowthResult,
     SubsetStackResult,
@@ -63,6 +65,8 @@ from astrometricslib.utilities.parallel_batch import BatchRunSummary
 
 if TYPE_CHECKING:
     from astrometricslib.api.targets import TargetCatalog
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["CalibrationCatalog", "ProcessingPipelines"]
 
@@ -735,6 +739,7 @@ class ProcessingPipelines:
         *,
         maximum_steps: int = 4,
         include_night_contributions: bool = False,
+        include_half_difference: bool = True,
         register_job: bool = True,
     ) -> NoiseGrowthResult:
         """Stack growing subsets of a target and measure each one's noise.
@@ -757,8 +762,11 @@ class ProcessingPipelines:
         record are never changed.
 
         Cost: one stack for each subset, four by default, each with fewer
-        frames than the library stack. Expect the time of about one to three
-        library stacks (a design estimate, not a measurement). The target must
+        frames than the library stack, plus the half-difference noise (two
+        stacks of half the frames each, about one library stack's time and
+        Siril's temporary disk). Expect the time of about two to four library
+        stacks (a design estimate, not a measurement). This job does not
+        start by itself after a stack; a caller starts it. The target must
         already have the noise apertures that its library stack stored, so
         stack it once first if it was stacked before they were recorded. A
         target with no stack, or a stack with no ``_inputs.json``, raises
@@ -773,6 +781,12 @@ class ProcessingPipelines:
         include_night_contributions : `bool`, optional
             Also run `measure_night_contributions` in the same job. Defaults
             to `False`, because it costs one more stack for every night.
+        include_half_difference : `bool`, optional
+            Also run `measure_half_difference_noise` in the same job, under
+            the same lock, after the series. Defaults to `True`: it costs
+            about one library stack's time, and it is the noise measure that
+            ignores structure the frames share. Its result is in
+            ``half_difference`` and its rows are counted there.
         register_job : `bool`, optional
             Record the run in the job list. Defaults to `True`.
 
@@ -787,6 +801,7 @@ class ProcessingPipelines:
             If ``maximum_steps`` is below 1.
         """
         from astrometricslib.pipelines.stacking.subset_noise_run import (
+            run_half_difference_noise,
             run_night_contributions,
             run_noise_growth,
         )
@@ -820,6 +835,21 @@ class ProcessingPipelines:
                     drivers=self._drivers,
                     stacking_slot=self.acquire_stacking_slot,
                 )
+            if include_half_difference:
+                try:
+                    result.half_difference = run_half_difference_noise(
+                        resolved,
+                        library_stack_path,
+                        context=context,
+                        configuration=self._config,
+                        drivers=self._drivers,
+                        stacking_slot=self.acquire_stacking_slot,
+                    )
+                except Exception as error:  # the series is already stored; report, do not lose it
+                    logger.exception("The half-difference noise of %s failed", resolved.id)
+                    result.notes.append(
+                        f"The half-difference noise was not measured ({type(error).__name__}: {error})."
+                    )
             return result
 
     @background_job("stacking", grace_period_seconds=8.0)
@@ -873,6 +903,77 @@ class ProcessingPipelines:
                 configuration=self._config,
                 drivers=self._drivers,
                 stacking_slot=self.acquire_stacking_slot,
+            )
+
+    @background_job("stacking", grace_period_seconds=8.0)
+    def measure_half_difference_noise(
+        self, target: str | Target, *, keep_halves: bool = False, register_job: bool = True
+    ) -> HalfDifferenceNoiseResult:
+        """Measure a library stack's random noise from two halves.
+
+        The library stack's frames are put in order of capture time and split
+        into two disjoint halves, the 1st, 3rd, ... and the 2nd, 4th, ...
+        frame. The library stack's registration reference frame goes into
+        both, and it is handed to the stacker as the frame to line up with,
+        so a half cannot choose its own and the two half stacks have the same
+        pixel grid. Each half is stacked into the target's ``_subsets``
+        folder (normal settings, without the edge trim and the frame
+        quarantine), the difference is taken, and its noise is measured in
+        the library stack's stored empty apertures. The difference cancels
+        what the frames share (sky structure, faint stars, nebula) and keeps
+        their random noise, so it is the more honest noise of a deep or
+        crowded field. Nine rows are stored on the library stack at level
+        ``stack``, beside its ``stacking.empty_aperture_noise_*`` rows and
+        never replacing them: the noise (``..._stack_unit`` and
+        ``..._normalized``), the reference flux the normalized value divides
+        by, the two halves' effective frame counts, the variance factor, the
+        variance ratio with each frame's modeled noise, and the shared
+        frame's two weight shares (all ``stacking.half_difference_*``). The
+        halves are deleted afterwards.
+
+        Cost: two stacks of half the frames each, about one library stack's
+        time in all, plus the temporary disk space Siril needs for each
+        (its converted and registered frames, deleted after each stack).
+        Neither this job nor `measure_noise_growth` starts by itself after a
+        stack, and neither runs inside the stack's own process. While it runs,
+        no library stack and no other subset job of the target can run.
+        When the measurement cannot be made (a half with under 8 frames, no
+        recorded registration reference, other apertures than the library
+        stack's, a Siril failure), the rows are stored as not measured with
+        the reason, and the result says why. A target with no stack, or a
+        stack with no recorded frames, raises `NotFoundError`.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target.
+        keep_halves : `bool`, optional
+            Keep the two half stacks in the ``_subsets`` folder. Defaults to
+            `False`.
+        register_job : `bool`, optional
+            Record the run in the job list. Defaults to `True`.
+
+        Returns
+        -------
+        result : `HalfDifferenceNoiseResult`
+            The difference noise, the halves' effective frame counts and the
+            library stack's own noise that the difference implies, or the
+            reason there are none.
+        """
+        from astrometricslib.pipelines.stacking.subset_noise_run import run_half_difference_noise
+
+        resolved = self._resolve(target)
+        library_stack_path = self._library_stack_path(resolved, "imaging")
+        with registered_job(enabled=register_job, job_type="stacking", target_id=resolved.id) as job:
+            context = self._subset_context(resolved, job.job_id)
+            return run_half_difference_noise(
+                resolved,
+                library_stack_path,
+                context=context,
+                configuration=self._config,
+                drivers=self._drivers,
+                stacking_slot=self.acquire_stacking_slot,
+                keep_halves=keep_halves,
             )
 
     def _library_stack_path(self, target: Target, kind: StackKind, *, must_exist: bool = True) -> str:

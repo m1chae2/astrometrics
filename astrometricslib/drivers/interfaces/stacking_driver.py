@@ -46,6 +46,9 @@ class StackSettings:
         How frames are weighted when combined.
     generate_rejmap : `bool` or `None`
         Whether to save a picture of which pixels were thrown out.
+    reference_frame_path : `str` or `None`
+        The frame to line the others up with. `None` lets the engine choose
+        its own. A frame that is not among the frames stacked is ignored.
     """
 
     rejection_sigma: tuple[float, float] | None = None
@@ -53,6 +56,7 @@ class StackSettings:
     filter_round: str | None = None
     stack_weight: str | None = None
     generate_rejmap: bool | None = None
+    reference_frame_path: str | None = None
 
     def as_options(self) -> dict[str, Any]:
         """List the settings that were given as keyword options.

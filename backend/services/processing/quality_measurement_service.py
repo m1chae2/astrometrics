@@ -9,11 +9,15 @@ It does three small things.
 
 - When the app asks for a measurement, it starts the library call on a
   background thread (so the request returns at once) and announces the result.
-- When the app asks for the noise-against-frame-count series or each night's
-  contribution (`astrometrics.processing.measure_noise_growth` and
-  `measure_night_contributions`), it starts that library call the same way.
-  Both stack some of a target's frames into the target's ``_subsets`` folder,
-  never over the library stack, so they take minutes and run only when asked.
+- When the app asks for the noise-against-frame-count series, each night's
+  contribution or the half-difference noise
+  (`astrometrics.processing.measure_noise_growth`,
+  `measure_night_contributions` and `measure_half_difference_noise`), it
+  starts that library call the same way. All of them stack some of a target's
+  frames into the target's ``_subsets`` folder, never over the library
+  stack, so they take minutes and run only when asked. None starts by itself
+  after a stack. The series includes the half-difference noise unless the
+  caller turns it off.
 - When a frame sync or an ingestion has already measured the frames it added,
   it announces the summaries of those runs.
 
@@ -130,9 +134,15 @@ class QualityMeasurementService:
         return {"started": True, "target_id": target_id}
 
     def start_noise_growth(
-        self, target_id: str, maximum_steps: int = 4, include_night_contributions: bool = False
+        self,
+        target_id: str,
+        maximum_steps: int = 4,
+        include_night_contributions: bool = False,
+        include_half_difference: bool = True,
     ) -> dict[str, Any]:
         """Start the noise-against-frame-count series in the background.
+
+        Nothing starts this by itself after a stack; a caller asks for it.
 
         Parameters
         ----------
@@ -143,6 +153,10 @@ class QualityMeasurementService:
         include_night_contributions : `bool`, optional
             Also stack the library stack's frames without each night. Costs
             one more stack per night.
+        include_half_difference : `bool`, optional
+            Also measure the noise of the difference of two halves of the
+            library stack's frames. Costs about one library stack's time.
+            Defaults to `True`.
 
         Returns
         -------
@@ -164,15 +178,53 @@ class QualityMeasurementService:
                 target_id,
                 maximum_steps=maximum_steps,
                 include_night_contributions=include_night_contributions,
+                include_half_difference=include_half_difference,
             )
             rows = result.rows_written
             nights = {night for subset in result.subsets for night in subset.observing_night_ids}
             if result.night_contributions is not None:
                 rows += result.night_contributions.rows_written
                 nights.update(entry.night_id for entry in result.night_contributions.nights)
+            if result.half_difference is not None:
+                rows += result.half_difference.rows_written
             return rows, sorted(nights)
 
         return self._start_subset_job(target_id, "noise-growth", work)
+
+    def start_half_difference_noise(self, target_id: str) -> dict[str, Any]:
+        """Start the half-difference noise measurement in the background.
+
+        The library stack's frames are split into two halves, each half is
+        stacked, and the noise of their difference is stored beside the
+        stack's own noise. It costs about one library stack's time. Nothing
+        starts it by itself after a stack; a caller asks for it.
+
+        Parameters
+        ----------
+        target_id : `str`
+            The target whose library stack to take frames from.
+
+        Returns
+        -------
+        result : `dict` [`str`, `Any`]
+            ``started`` (always `True`: the thread was started) and
+            ``target_id``. A failure is logged. The rows the run stored are
+            announced as the ``quality:measured`` event.
+        """
+
+        def work() -> tuple[int, list[str]]:
+            """Run the measurement and count what it stored.
+
+            Returns
+            -------
+            counts : `tuple` [`int`, `list` [`str`]]
+                The rows written and the observing nights they belong to (the
+                rows belong to the library stack, so no night is listed).
+            """
+            result = self._astrometrics.processing.measure_half_difference_noise(target_id)
+            return result.rows_written, []
+
+        return self._start_subset_job(target_id, "half-difference", work)
 
     def start_night_contributions(self, target_id: str) -> dict[str, Any]:
         """Start each night's contribution measurement in the background.

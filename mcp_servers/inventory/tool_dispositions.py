@@ -540,6 +540,15 @@ DECISIONS = {
         "so it reads the stored numbers with quality_query instead.",
         "change-data",
     ),
+    "processing_measure_half_difference_noise": ToolDecision(
+        "withhold",
+        "Stacks two halves of a target's frames into the target's _subsets folder (about one library "
+        "stack's time in all), subtracts them, and writes the noise of the difference into the quality "
+        "database. The halves are deleted afterwards, and the library stack, its previews and its "
+        "records are never changed. The AI is read-only, so it reads the stored numbers with "
+        "quality_query instead.",
+        "change-data",
+    ),
     **dict.fromkeys(
         (
             "processing_stack_subset",

@@ -71,6 +71,7 @@ from astrometricslib.pipelines.stacking.metrics import (
 )
 from astrometricslib.pipelines.stacking.post_processing.expected_noise import (
     ExpectedNoiseOutcome,
+    FrameNoiseInput,
     expected_stack_noise,
     gather_frame_noise_inputs,
     measure_stack_sky_level,
@@ -98,6 +99,7 @@ __all__ = [
     "compute_stack_science",
     "expected_noise_measurements",
     "flat_noise_measurements",
+    "frame_noise_inputs_from_store",
     "group_peak_measurements",
     "resolve_stack_sky_level",
     "science_measurements",
@@ -231,29 +233,37 @@ def compute_expected_noise(
     return outcome
 
 
-def _expected_noise_from_store(
-    membership: StackMembership, target_id: str, configuration: object, store: QualityStore | None
-) -> ExpectedNoiseOutcome:
-    """Join the members' stored sky measurements with their camera profiles.
+def frame_noise_inputs_from_store(
+    members: list[Any],
+    weights: Sequence[float | None],
+    target_id: str,
+    configuration: object,
+    store: QualityStore | None,
+    weights_reason: str = "",
+) -> ExpectedNoiseOutcome | list[FrameNoiseInput]:
+    """Join frames' stored sky measurements with their camera profiles.
 
     Parameters
     ----------
-    membership : `StackMembership`
-        The stack's members and weights (it has members).
+    members : `list`
+        The frame records.
+    weights : `Sequence` [`float` or `None`]
+        Each frame's weight, in the order of ``members``. `None` means unknown.
     target_id : `str`
         The target.
     configuration : `AppConfiguration` or `None`
         Where the store and the camera profiles live.
     store : `QualityStore` or `None`
         The store to read, or `None` to open the configured one.
+    weights_reason : `str`, optional
+        Why the weights are unknown.
 
     Returns
     -------
-    outcome : `ExpectedNoiseOutcome`
-        The expected noise or the reason there is none.
+    inputs : `list` [`FrameNoiseInput`] or `ExpectedNoiseOutcome`
+        One entry for each frame (its sky, read noise, gain and weight), or
+        the reason there is none (see `gather_frame_noise_inputs`).
     """
-    weights = normalized_weights(membership)
-    members = [member.frame for member in membership.members]
     try:
         if store is None:
             store = QualityStore.from_configuration(configuration)
@@ -282,12 +292,43 @@ def _expected_noise_from_store(
         """
         return look_up_frame_sensor_noise(resolve_camera_profile(frame.camera, configuration), frame)
 
-    inputs = gather_frame_noise_inputs(
+    return gather_frame_noise_inputs(
         members,
         weights,
         sky_rows,
         lambda frame: frame_subject_id(frame.path, target_id),
         noise_setting,
+        weights_reason,
+    )
+
+
+def _expected_noise_from_store(
+    membership: StackMembership, target_id: str, configuration: object, store: QualityStore | None
+) -> ExpectedNoiseOutcome:
+    """Join the members' stored sky measurements with their camera profiles.
+
+    Parameters
+    ----------
+    membership : `StackMembership`
+        The stack's members and weights (it has members).
+    target_id : `str`
+        The target.
+    configuration : `AppConfiguration` or `None`
+        Where the store and the camera profiles live.
+    store : `QualityStore` or `None`
+        The store to read, or `None` to open the configured one.
+
+    Returns
+    -------
+    outcome : `ExpectedNoiseOutcome`
+        The expected noise or the reason there is none.
+    """
+    inputs = frame_noise_inputs_from_store(
+        [member.frame for member in membership.members],
+        normalized_weights(membership),
+        target_id,
+        configuration,
+        store,
         membership.weights_reason,
     )
     if isinstance(inputs, ExpectedNoiseOutcome):

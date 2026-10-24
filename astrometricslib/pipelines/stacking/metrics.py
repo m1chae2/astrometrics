@@ -171,6 +171,19 @@ STACKING_NIGHT_WEIGHT_SHARE = "stacking.night_weight_fraction"
 STACKING_NOISE_WITHOUT_NIGHT = "stacking.noise_without_night"
 STACKING_NOISE_DIFFERENCE_WITHOUT_NIGHT = "stacking.noise_difference_without_night"
 STACKING_SUBSET_EXPECTED_NOISE_RATIO = "stacking.subset_expected_noise_ratio"
+STACKING_HALF_DIFFERENCE_NOISE_STACK_UNIT = "stacking.half_difference_noise_stack_unit"
+STACKING_HALF_DIFFERENCE_NOISE_NORMALIZED = "stacking.half_difference_noise_normalized"
+STACKING_HALF_DIFFERENCE_REFERENCE_FLUX_STACK_UNIT = "stacking.half_difference_reference_flux_stack_unit"
+STACKING_HALF_DIFFERENCE_VARIANCE_FACTOR = "stacking.half_difference_variance_factor"
+STACKING_HALF_DIFFERENCE_MODEL_VARIANCE_RATIO = "stacking.half_difference_model_variance_ratio"
+STACKING_HALF_DIFFERENCE_ODD_EFFECTIVE_FRAME_COUNT = "stacking.half_difference_odd_effective_frame_count"
+STACKING_HALF_DIFFERENCE_EVEN_EFFECTIVE_FRAME_COUNT = "stacking.half_difference_even_effective_frame_count"
+STACKING_HALF_DIFFERENCE_SHARED_ODD_WEIGHT_FRACTION = (
+    "stacking.half_difference_shared_frame_odd_weight_fraction"
+)
+STACKING_HALF_DIFFERENCE_SHARED_EVEN_WEIGHT_FRACTION = (
+    "stacking.half_difference_shared_frame_even_weight_fraction"
+)
 
 # The expected empty-aperture noise and its parts, the stack's sky level, the
 # master flat's noise, and the brightest star's peak of each exposure group.
@@ -917,6 +930,224 @@ _NIGHT_METRICS: tuple[MetricSpec, ...] = (
     ),
 )
 
+_HALF_DIFFERENCE_PURPOSE_REASON = (
+    "The empty-aperture noise of a deep or crowded field still holds structure that every frame "
+    "shares and that averaging never removes (STK-38). The difference of two disjoint halves "
+    "cancels that structure, so it is the measure of the random noise that more frames do remove. "
+    "The forecast check reads it next to the empty-aperture noise and the noise the frames predict. "
+    "Nothing decides from it yet."
+)
+_HALF_DIFFERENCE_SAMPLE = (
+    "The same empty apertures as the library stack's noise (see `stacking.empty_aperture_noise_stack_unit`), "
+    "never chosen here; the job refuses, with a reason, when the halves were measured in other apertures "
+    "than the library stack. The subject is the library stack, because the numbers describe its frames. "
+    "The library stack's frames are put in order of capture time and split into two disjoint halves, the "
+    "1st, 3rd, 5th, ... frame (odd) and the 2nd, 4th, 6th, ... (even), so both halves span the whole "
+    "night. The library stack's registration reference frame goes into both halves and is handed to the "
+    "stacker as the frame to line up with, so a half cannot choose its own and the pixels of the two "
+    "halves coincide; the job still refuses when either half reports another reference frame. Each "
+    "half is stacked with the target's normal settings except "
+    "that the edges are not trimmed and no frame is quarantined. At least 8 frames per half, counting the "
+    "shared one, are needed (a design choice, not a measurement); with fewer the rows are not measured. "
+    "A Siril failure or a missing registration reference is stored as not measured, with the reason, and "
+    "no other number is put in its place."
+)
+_HALF_DIFFERENCE_CANCELS = (
+    "The difference A - B of the two half stacks cancels what both halves hold: sky structure, faint "
+    "stars, nebula, a fixed pattern from the calibration frames (the master dark, bias and flat are "
+    "the same in both halves, so their noise cancels; the master flat's random noise is 4.8% of the "
+    "measured noise on M 57, STK-39), and the one shared frame, whose share differs a little between "
+    "the halves. It keeps the "
+    "random noise of both halves: photon noise, read noise, and the correlation between neighboring "
+    "pixels that registration adds, because each frame is resampled on its own and the two halves "
+    "hold different frames. It does NOT include structure common to both halves, so it is a lower "
+    "limit of the empty-aperture noise, not a replacement for it."
+)
+
+_HALF_DIFFERENCE_METRICS: tuple[MetricSpec, ...] = (
+    _context_metric(
+        STACKING_HALF_DIFFERENCE_NOISE_STACK_UNIT,
+        "stack_unit",
+        "The noise of the difference of two half stacks in an empty patch of sky, in the stack's own units.",
+        (
+            "The robust spread of the sky-subtracted sums of the empty apertures taken on the image A - B: "
+            "1.4826 times the median absolute deviation of the sums, each sum formed as for "
+            "`stacking.empty_aperture_noise_stack_unit`. "
+            + _HALF_DIFFERENCE_CANCELS
+            + " If every frame had the same noise sigma, a half with normalized weights a (adding "
+            "up to 1) would have the variance sigma^2 x sum(a^2) = sigma^2 / N_eff, the difference "
+            "sigma^2 x F, with F = sum((a - b)^2) over the frames of both halves "
+            "(`stacking.half_difference_variance_factor`), and the library stack "
+            "sigma^2 / N_eff,library. The library stack's own random noise would then be the difference "
+            "divided by sqrt(N_eff,library x F), which for two disjoint halves of N equal frames is the "
+            "difference divided by 2. Frames differ in noise, and the star-width weights are not noise "
+            "weights, so this is an estimate and is not stored as a value; the job's result reports it "
+            "and every part of it is stored."
+        ),
+        _HALF_DIFFERENCE_SAMPLE,
+        "pipelines.stacking.post_processing.stack_noise.measure_difference_noise",
+        better=Direction.LOWER,
+        purpose_reason=_HALF_DIFFERENCE_PURPOSE_REASON,
+        uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
+        uncertainty_method=_NOISE_UNCERTAINTY,
+        register_entry="STK-42",
+    ),
+    _context_metric(
+        STACKING_HALF_DIFFERENCE_NOISE_NORMALIZED,
+        "",
+        "The noise of the difference of two half stacks as a fraction of the reference stars' brightness.",
+        (
+            "`stacking.half_difference_noise_stack_unit` divided by the reference flux of the first half "
+            "(the 10 fixed reference stars, as for `stacking.noise_reference_flux_stack_unit`; the "
+            "denominator is stored as `stacking.half_difference_reference_flux_stack_unit`. Siril "
+            "normalizes every frame of both halves to the same reference frame, so they share a flux "
+            "scale, which STK-42 checks on real halves). The stack's scale "
+            "cancels, so it can be read against `stacking.empty_aperture_noise_normalized`. "
+            + _HALF_DIFFERENCE_CANCELS
+        ),
+        _HALF_DIFFERENCE_SAMPLE,
+        "pipelines.stacking.post_processing.stack_noise.measure_difference_noise",
+        better=Direction.LOWER,
+        purpose_reason=_HALF_DIFFERENCE_PURPOSE_REASON,
+        uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
+        uncertainty_method=(
+            "Statistical, 1 sigma: as for `stacking.empty_aperture_noise_normalized` (the relative error of "
+            "the spread, 1.1664 / sqrt(n), and of the zero point, added in quadrature). The stacker's "
+            "run-to-run differences and the choice of which frames fall in which half are not included."
+        ),
+        register_entry="STK-42",
+    ),
+    _context_metric(
+        STACKING_HALF_DIFFERENCE_VARIANCE_FACTOR,
+        "",
+        (
+            "How many times a single frame's variance the difference of the two half stacks would have "
+            "if every frame had the same noise."
+        ),
+        (
+            "F = sum over all frames of (a - b)^2, where a and b are the frame's normalized weights in "
+            "the odd and the even half (each half's weights add up to 1; a frame in one half only has 0 "
+            "in the other). For disjoint halves it is sum(a^2) + sum(b^2) = 1 / N_eff,odd + 1 / N_eff,even. "
+            "The one frame in both halves, the registration reference frame, has the largest star-width "
+            "weight and lowers F by twice the product of its two shares, because its noise cancels in "
+            "the difference. Not stored when a half's weights "
+            "cannot be rebuilt."
+        ),
+        "The frames of both halves.",
+        "pipelines.stacking.subset_noise_run.difference_variance_factor",
+        better=Direction.NONE,
+        purpose_reason=_HALF_DIFFERENCE_PURPOSE_REASON,
+        register_entry="STK-42",
+    ),
+    _context_metric(
+        STACKING_HALF_DIFFERENCE_REFERENCE_FLUX_STACK_UNIT,
+        "stack_unit",
+        "The brightness of the fixed reference stars on the first half stack, in the stack's own units.",
+        (
+            "The number `stacking.half_difference_noise_normalized` divides by: the zero point times the "
+            "median brightness the 10 fixed reference stars had on the stack that chose them, read on the "
+            "odd half stack (see `stacking.noise_reference_flux_stack_unit`). It is stored so the "
+            "normalized value can be turned back into stack units, and so a reader can check that it "
+            "is near the library stack's own reference flux, as it should be when Siril puts both "
+            "halves on the library stack's scale."
+        ),
+        "The fixed reference stars of the target that fall on the odd half stack and are not saturated.",
+        "pipelines.stacking.post_processing.stack_noise.measure_difference_noise",
+        better=Direction.NONE,
+        purpose_reason=_HALF_DIFFERENCE_PURPOSE_REASON,
+        uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
+        uncertainty_method=(
+            "Statistical, 1 sigma: as for `stacking.noise_reference_flux_stack_unit` (the standard error "
+            "of the median of the stars' brightness ratios, times the first stack's median star "
+            "brightness)."
+        ),
+        register_entry="STK-42",
+    ),
+    _context_metric(
+        STACKING_HALF_DIFFERENCE_MODEL_VARIANCE_RATIO,
+        "",
+        (
+            "How many times the library stack's variance the difference of the two half stacks should have, "
+            "when each frame has the noise the sky and the camera predict for it."
+        ),
+        (
+            "R = sum over all frames of (a - b)^2 v, divided by sum over all frames of s^2 v. Here a and b "
+            "are the frame's normalized weights in the odd and the even half, s its normalized weight in "
+            "the library stack, and v = (sky electrons + read noise^2) / gain^2 the frame's own variance in "
+            "ADU squared, from its stored sky rate, exposure and camera profile (the model of "
+            "`stacking.expected_sky_noise_stack_unit`). Unlike `stacking.half_difference_variance_factor` it "
+            "lets frames differ in noise (the sky changes through a night). The library stack's own random "
+            "noise is then the difference divided by sqrt(R). Not stored when a frame has no stored sky "
+            "rate, gain or read noise, or a weight is unknown."
+        ),
+        "The frames of both halves, with the library stack's weights.",
+        "pipelines.stacking.subset_noise_run.model_variance_ratio",
+        better=Direction.NONE,
+        purpose_reason=_HALF_DIFFERENCE_PURPOSE_REASON,
+        register_entry="STK-42",
+    ),
+    _context_metric(
+        STACKING_HALF_DIFFERENCE_SHARED_ODD_WEIGHT_FRACTION,
+        "fraction",
+        "The share of the odd half stack's weight that the one shared frame has.",
+        (
+            "The shared frame's weight in the odd half divided by the half's total weight. The shared "
+            "frame is the library stack's registration reference. With the even half's share and the two "
+            "effective frame counts it lets a reader rebuild the variance factor: "
+            "F = 1 / N_eff,odd + 1 / N_eff,even - 2 a b, where a and b are the two shares."
+        ),
+        "The one frame that is in both halves.",
+        "pipelines.stacking.subset_noise_run.half_difference_measurements",
+        purpose_reason=_HALF_DIFFERENCE_PURPOSE_REASON,
+        register_entry="STK-42",
+    ),
+    _context_metric(
+        STACKING_HALF_DIFFERENCE_SHARED_EVEN_WEIGHT_FRACTION,
+        "fraction",
+        "The share of the even half stack's weight that the one shared frame has.",
+        (
+            "The shared frame's weight in the even half divided by the half's total weight (see "
+            "`stacking.half_difference_shared_frame_odd_weight_fraction`)."
+        ),
+        "The one frame that is in both halves.",
+        "pipelines.stacking.subset_noise_run.half_difference_measurements",
+        purpose_reason=_HALF_DIFFERENCE_PURPOSE_REASON,
+        register_entry="STK-42",
+    ),
+    _context_metric(
+        STACKING_HALF_DIFFERENCE_ODD_EFFECTIVE_FRAME_COUNT,
+        "count",
+        "How many equally weighted frames would give the same noise as the odd half stack.",
+        (
+            "N_eff = (sum of w)^2 / (sum of w^2) for the frames of the odd half (see "
+            "`stacking.effective_frame_count`), with the weights Siril's star-width weighting gives that "
+            "half alone. Not stored when the weights cannot be rebuilt. It is a part of the half-difference "
+            "noise: with `stacking.half_difference_even_effective_frame_count` it says how much "
+            "random noise each half holds."
+        ),
+        "The frames of the odd half: the 1st, 3rd, ... by capture time, and the shared reference frame.",
+        "pipelines.stacking.post_processing.stack_membership.effective_frame_count",
+        better=Direction.HIGHER,
+        purpose_reason=_HALF_DIFFERENCE_PURPOSE_REASON,
+        register_entry="STK-42",
+    ),
+    _context_metric(
+        STACKING_HALF_DIFFERENCE_EVEN_EFFECTIVE_FRAME_COUNT,
+        "count",
+        "How many equally weighted frames would give the same noise as the even half stack.",
+        (
+            "N_eff = (sum of w)^2 / (sum of w^2) for the frames of the even half (see "
+            "`stacking.effective_frame_count`), with the weights Siril's star-width weighting gives that "
+            "half alone. Not stored when the weights cannot be rebuilt."
+        ),
+        "The frames of the even half: the 2nd, 4th, ... by capture time, and the shared reference frame.",
+        "pipelines.stacking.post_processing.stack_membership.effective_frame_count",
+        better=Direction.HIGHER,
+        purpose_reason=_HALF_DIFFERENCE_PURPOSE_REASON,
+        register_entry="STK-42",
+    ),
+)
+
 _ASSESS = "pipelines.stacking.pre_processing.assess_input_quality.calibration_gates"
 _OUTPUT = "pipelines.stacking.post_processing.assess_output_quality.output_quality_gates"
 _GROUP_GATES = "pipelines.stacking.post_processing.exposure_group_report"
@@ -1392,6 +1623,7 @@ STACKING_METRICS: tuple[MetricSpec, ...] = (
     *_VALUE_METRICS,
     *_NOISE_AND_WEIGHT_METRICS,
     *_NIGHT_METRICS,
+    *_HALF_DIFFERENCE_METRICS,
     *_SCIENCE_METRICS,
     *_GATE_METRICS,
 )

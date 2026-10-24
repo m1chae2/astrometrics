@@ -754,6 +754,34 @@ print([abs(a - b) / abs(a) for a, b in zip(full, sample)])
 - **Guarded by tests:** `astrometricslib/pipelines/astrometry/test/pre_processing/test_source_detection_background_sample.py` and `astrometricslib/pipelines/astrometry/test/pre_processing/test_fast_background_map.py` check the mechanics, not the values.
 - **Raw record:** None kept.
 
+### AST-20
+
+**A target's stored position against its catalog position**
+
+- **Claim:** A target's RA/Dec should come from the catalog position of its name, not from the center of a solved frame. Copying the first solved frame's center left many targets tens of arcminutes from the object.
+- **Settings it supports:**
+  - code constant `POSITION_TOLERANCE_FLOOR_ARCMIN` = 15 arcmin in `astrometricslib/pipelines/shared/target_position.py` (changing it means editing the code). Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.shared.target_position.POSITION_TOLERANCE_FLOOR_ARCMIN -->
+  - code constant `EXTENT_TOLERANCE_FACTOR` = 1.0 in the same file (changing it means editing the code). Relation: sanity check only. <!-- impl: astrometricslib.pipelines.shared.target_position.EXTENT_TOLERANCE_FACTOR -->
+- **Status:** Partly measured. One library (56 targets), one day, and SIMBAD gave a size for few of the objects, so the extent factor was not exercised.
+- **Data you need:** A library database of targets with stored RA/Dec, and a network connection to SIMBAD.
+- **Procedure:**
+  1. Run the audit on a copy of the database. It opens the database read-only and creates no file.
+  2. For each listed target, decide by eye whether the framing or the stored position is wrong.
+
+```bash
+.venv/bin/python -m astrometricslib.scripts.audit_target_positions /path/to/astrometrics.db
+```
+
+- **Acceptance criterion:** Not recorded (set after the result).
+- **What to look at:** The separation in arcminutes between the stored and the SIMBAD position. The camera's field is 96 arcmin (1.60 degrees) across, so the floor of 15 arcmin is about one sixth of the field.
+- **Our result:** 2026-10-23, the user's library (56 targets), audited read-only. 21 targets were more than 15 arcmin from their SIMBAD position: M 57 (37.8 arcmin), corrected first, and NGC 2024 (103.1), NGC 6823 (89.1), NGC 6888 (70.8), NGC 1499 (60.7), NGC 7023 (57.4), M 27 (53.2), M 106 (51.0), IC 1805 (49.1), IC 1396 (47.5), NGC 2403 (42.3), M 51 (41.9), M 31 (41.3), M 101 (34.6), NGC 7000 (31.2), Altair (29.4), M 1 (26.9), NGC 2903 (21.4), M 16 (18.1), Albireo (16.8) and Algol (16.7). All 21 were set to their SIMBAD positions by the user's decision the same day, after a backup. The audit ran before the newer checks: on a scratch copy that still holds the old values, the current audit lists 18 of them and not IC 1396, M 31 or M 16; why it leaves those three out was not checked.
+- **Verdict:** Not judged.
+- **Limits:** One library. Albireo is a double star, and SIMBAD gives its primary. The extended objects NGC 7000 and IC 1805 are framed away from their center on purpose, so some listed targets may be correct.
+- **To tune for your setup:** Set the floor to about one sixth of your camera's field across. Run the audit again.
+- **Regenerate with:** `astrometricslib/scripts/audit_target_positions.py`.
+- **Guarded by tests:** `astrometricslib/scripts/test/test_audit_target_positions.py` and `astrometricslib/pipelines/shared/test/test_target_position.py` check the mechanics, not the values.
+- **Raw record:** None kept.
+
 ## Design estimates
 
 These values have not been measured. Each is a code constant unless the table says otherwise; changing a code constant means editing the code. Paths are relative to `astrometricslib/`.
@@ -774,3 +802,4 @@ These values have not been measured. Each is a code constant unless the table sa
 | AST-D12 | Gaia rows per cone search | 50,000 | `GAIA_ROW_LIMIT` in `pipelines/astrometry/processing/star_identifier.py` <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.GAIA_ROW_LIMIT --> | Truncated Gaia lists in dense fields. | Count how often runs record `gaia_row_limit_reached` in `astrometry_flags`. |
 | AST-D13 | Gaia refit: fewest matched stars | 40 | `MINIMUM_MATCHED_STARS` in `pipelines/astrometry/processing/wcs_refinement.py` <!-- impl: astrometricslib.pipelines.astrometry.processing.wcs_refinement.MINIMUM_MATCHED_STARS --> | An unreliable refit, or a good refit refused. | Refit a rich field with random subsets of 20 to 100 stars (`refine_wcs_with_gaia`) and see when the error on the left-out stars grows. |
 | AST-D14 | Warning distance between the center star and the position hint | 30 arcsec | `HINT_MATCH_WARNING_ARCSEC` in `pipelines/astrometry/processing/star_identifier.py` <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.HINT_MATCH_WARNING_ARCSEC --> | Wrong center-star matches pass without a warning. | Lies between one correct match (Vega, 25 arcsec from the solved center) and one wrong one (145 arcsec); log the distance on more spectral stacks with the procedure of [AST-09](#ast-09). |
+| AST-D15 | Margin around the solved frame for a catalog position | 15 arcmin | `FOOTPRINT_MARGIN_ARCMIN` in `pipelines/shared/target_position.py` <!-- impl: astrometricslib.pipelines.shared.target_position.FOOTPRINT_MARGIN_ARCMIN --> | A catalog answer for the wrong object is accepted, or a right one (a mosaic panel, an offset spectral frame) is rejected. | Log the distance from each solved frame's center to its target's catalog position and look at the largest ones by eye. |

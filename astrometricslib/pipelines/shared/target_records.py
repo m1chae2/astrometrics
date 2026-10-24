@@ -384,6 +384,11 @@ def update_target(api: Any, target_id: str, updates: dict) -> Any | None:
                 value = value.replace("_", " ")
             setattr(target, key, value)
 
+    # A position typed in by a person is trusted: it is no longer a guess
+    # taken from a frame center.
+    if ("ra" in updates or "dec" in updates) and "position_unverified" not in updates:
+        target.position_unverified = False
+
     save_targets(api)
     return target
 

@@ -8,11 +8,13 @@ saves the identified stars into the shared star catalog.
 import logging
 from typing import Any
 
+import numpy as np
 from astropy import units as u
 from astropy.coordinates import SkyCoord
 
 from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
+from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.models.quality.gate_result import failed_gate, passed_gate
 from astrometricslib.models.quality.quality_summary import (
     AstrometryPipelineQualityMetrics,
@@ -32,13 +34,44 @@ from astrometricslib.pipelines.shared.star_recording import (
     merge_astrometry_stellar_object,
     record_pipeline_stars,
 )
-from astrometricslib.pipelines.shared.target_position import fill_target_position, parse_target_position
-from astrometricslib.utilities.exceptions import DATA_ERRORS
+from astrometricslib.pipelines.shared.target_position import (
+    fill_target_position,
+    has_no_fixed_position,
+    parse_target_position,
+)
+from astrometricslib.utilities.exceptions import DATA_ERRORS, ONLINE_QUERY_ERRORS
 
 # The name the plate-solve check goes by in an astrometry run's gate record.
 PLATE_SOLVE_GATE_NAME = "plate_solve"
 
 logger = logging.getLogger(__name__)
+
+
+def _footprint_radius_arcmin(wcs: Any) -> float | None:
+    """Return half the diagonal of a solved image on the sky.
+
+    Parameters
+    ----------
+    wcs : `astropy.wcs.WCS`
+        The solved sky map.
+
+    Returns
+    -------
+    radius_arcmin : `float` or `None`
+        Half the image diagonal in arcminutes, or `None` when the map does
+        not know the image size.
+    """
+    pixel_shape = getattr(wcs, "pixel_shape", None)
+    if not pixel_shape:
+        return None
+    try:
+        from astropy.wcs.utils import proj_plane_pixel_scales
+
+        scale_degrees = float(sum(proj_plane_pixel_scales(wcs)) / 2.0)
+        half_diagonal_pixels = 0.5 * float(np.hypot(pixel_shape[0], pixel_shape[1]))
+    except DATA_ERRORS:
+        return None
+    return half_diagonal_pixels * scale_degrees * 60.0
 
 
 def _fill_target_position(target: Any, context: Any, drivers: Any = None) -> None:
@@ -47,8 +80,11 @@ def _fill_target_position(target: Any, context: Any, drivers: Any = None) -> Non
     A target created before its position was known starts with empty or
     all-zero coordinates. The position is looked up from the target's name
     in SIMBAD. The solved image's center is only a fallback for a name
-    SIMBAD cannot resolve, and the target is then marked unverified (see
-    `fill_target_position`). A position already set is never changed.
+    SIMBAD cannot resolve or whose answer lies outside the image, and the
+    target is then marked unverified (see `fill_target_position`). A
+    position already set is never changed. Moving bodies and calibration
+    targets never get a fixed position. A SIMBAD failure never stops the
+    run: it is logged and the fallback applies.
 
     Parameters
     ----------
@@ -60,9 +96,12 @@ def _fill_target_position(target: Any, context: Any, drivers: Any = None) -> Non
     drivers : `Drivers`, optional
         Supplies the SIMBAD driver. The built-in one is used when absent.
     """
+    if has_no_fixed_position(target.id):
+        return
     if parse_target_position(target) is not None and not target.position_unverified:
         return
     frame_center = None
+    footprint_radius = None
     if context.wcs is not None:
         try:
             frame_center = SkyCoord(
@@ -70,12 +109,16 @@ def _fill_target_position(target: Any, context: Any, drivers: Any = None) -> Non
                 dec=float(context.wcs.wcs.crval[1]) * u.deg,
                 frame="icrs",
             )
+            footprint_radius = _footprint_radius_arcmin(context.wcs)
         except DATA_ERRORS as wcs_error:
             logger.warning(
                 "Failed to extract center coordinate from WCS for target %s: %s", target.id, wcs_error
             )
-    simbad = (drivers or Drivers()).simbad_or_default()
-    fill_target_position(target, simbad, frame_center)
+    try:
+        simbad = (drivers or Drivers()).simbad_or_default()
+        fill_target_position(target, simbad, frame_center, footprint_radius)
+    except (ExternalServiceError, *ONLINE_QUERY_ERRORS) as lookup_error:
+        logger.warning("Could not look up the position of target %s: %s", target.id, lookup_error)
 
 
 def _write_solved_wcs_to_fits_header(path: str | None, context: Any) -> None:

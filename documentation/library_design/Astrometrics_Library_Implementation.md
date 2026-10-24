@@ -87,6 +87,7 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 - **Gaia refit (§4.2).** `processing/wcs_refinement.py`.
 - **WCS header (§4.3).** `astrometricslib/pipelines/shared/session_identification.py` (`write_wcs_to_fits_header`).
 - **Checks (§4.4).** `post_processing/run_gates.py`, `assess_match_quality.py`.
+- **Target position.** `astrometricslib/pipelines/shared/target_position.py` takes a target's RA/Dec from its SIMBAD position (ICRS, epoch J2000), not from a frame center; `astrometricslib/scripts/audit_target_positions.py` checks the stored ones.
 
 ### 4.3 Photometry (Architecture §5)
 
@@ -224,11 +225,16 @@ Tables 4 to 8 list each pipeline's tuned values and the architecture section tha
 | Minimum catalog-matched stars | 20 | Partly measured ([AST-05](validation/astrometry.md#ast-05)) | §4.4.2 |
 | Residual limit | 0.5 of a star width | Partly measured ([AST-04](validation/astrometry.md#ast-04)) | §4.4.2 |
 | Failed catalog lookups allowed | under 50% | Design estimate ([astrometry table](validation/astrometry.md#design-estimates)) | §4.4.2 |
+| Target position tolerance: floor; extent factor | 15 arcmin; 1.0 of the object's radius | Partly measured ([AST-20](validation/astrometry.md#ast-20)) | §4.2 |
+| Margin around the solved frame for a catalog position | 15 arcmin | Design estimate ([astrometry table](validation/astrometry.md#design-estimates)) | §4.2 |
 
 <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.source_detection.SourceDetector -->
 <!-- impl: astrometricslib.drivers.astrometry_net_driver.MINIMUM_SOURCES_FOR_LOCAL_SOLVE -->
 <!-- impl: astrometricslib.pipelines.shared.catalog_star_identity.CATALOG_MATCH_RADIUS_ARCSEC -->
 <!-- impl: astrometricslib.pipelines.astrometry.post_processing.run_gates.MINIMUM_MATCHED_STARS -->
+<!-- impl: astrometricslib.pipelines.shared.target_position.POSITION_TOLERANCE_FLOOR_ARCMIN -->
+<!-- impl: astrometricslib.pipelines.shared.target_position.EXTENT_TOLERANCE_FACTOR -->
+<!-- impl: astrometricslib.pipelines.shared.target_position.FOOTPRINT_MARGIN_ARCMIN -->
 <!-- impl: astrometricslib.pipelines.astrometry.post_processing.run_gates.MAXIMUM_RESIDUAL_FRACTION_OF_FWHM -->
 <!-- impl: astrometricslib.pipelines.astrometry.post_processing.run_gates.MAXIMUM_FAILED_LOOKUP_FRACTION -->
 <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.MAXIMUM_PLATE_SOLVE_SOURCES -->

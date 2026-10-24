@@ -168,8 +168,8 @@ class AstroquerySimbadDriver(SimbadDriver):
         """
         with SIMBAD_LOCK:
             client = _get_client()
-            _configure(client, votable_fields, row_limit)
             try:
+                _configure(client, votable_fields, row_limit)
                 return client.query_region(coordinates, radius=radius)
             except ONLINE_QUERY_ERRORS as query_error:
                 raise ExternalServiceError(
@@ -198,8 +198,10 @@ class AstroquerySimbadDriver(SimbadDriver):
         """
         with SIMBAD_LOCK:
             client = _get_client()
-            _configure(client, votable_fields, None)
             try:
+                # Inside the `try`: adding a column can itself ask the
+                # server which columns exist, and that can fail offline.
+                _configure(client, votable_fields, None)
                 return client.query_object(object_name)
             except ONLINE_QUERY_ERRORS as query_error:
                 raise ExternalServiceError(

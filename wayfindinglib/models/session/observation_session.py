@@ -21,13 +21,24 @@ session recorded (`Wayfinding_Library_Architecture.md` Section 3.3,
 `QueueEntryStatus` has no `INFEASIBLE` value: unplaced packages never
 enter the queue, so no entry could ever hold it -- infeasibility is
 reported on `unplaced_package_diagnostics`, a separate channel.
+
+The session is also the stored night plan (issue #95, register entry
+WAY-50). It carries a checklist of fixes the user means to try, the
+framing of the field (center, camera rotation and mosaic panels), and a
+revision number. Every plan write adds 1 to the revision, and a write that
+names an older revision is refused, so two windows cannot overwrite each
+other. A session stored before these fields existed loads with an empty
+checklist, no framing and revision 0.
 """
 
 from datetime import UTC, date, datetime
 from enum import StrEnum
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from astrometricslib import CaptureSetting, ConflictError
+from wayfindinglib.models.planning.mosaic import MosaicPanel
 from wayfindinglib.models.planning.observation_package import DitherConfig, ExposureRequest
 from wayfindinglib.models.policy.recovery import FaultRecord
 from wayfindinglib.models.session.divergence import DivergenceRecord
@@ -134,6 +145,49 @@ class QueuedObservationPackage(BaseModel):
     status_detail: str = Field(default="", alias="statusDetail")
 
 
+class ChecklistItem(BaseModel):
+    """One fix the user means to try, kept with the night plan.
+
+    The rule name and capture setting say what the fix is about. Ticking
+    the item records when the user did it. Whether a ticked item comes back
+    is never stored: the library works that out from the measurements taken
+    since the tick.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    item_id: str = Field(default_factory=lambda: str(uuid4()), alias="itemId")
+    rule: str = Field(alias="rule", description="The name of the quality rule that raised the item.")
+    capture_setting: CaptureSetting | None = Field(
+        default=None, alias="captureSetting", description="The capture setting the item is about."
+    )
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), alias="createdAt")
+    ticked_at: datetime | None = Field(
+        default=None, alias="tickedAt", description="When the user last ticked the item. None: not ticked."
+    )
+    tick_history: list[datetime] = Field(
+        default_factory=list,
+        alias="tickHistory",
+        description="Every time the item was ticked, oldest first. The last one equals `ticked_at`.",
+    )
+    note: str = Field(default="", alias="note")
+
+
+class Framing(BaseModel):
+    """Where the camera points and how it is turned, with any mosaic panels.
+
+    The rotation is in degrees east of north, the way Ekos and KStars give
+    it. The first version shows the numbers only.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    center_ra_deg: float = Field(ge=0.0, lt=360.0, alias="centerRaDeg")
+    center_dec_deg: float = Field(ge=-90.0, le=90.0, alias="centerDecDeg")
+    rotation_deg: float = Field(default=0.0, alias="rotationDeg")
+    panels: list[MosaicPanel] = Field(default_factory=list, alias="panels")
+
+
 class ObservationSession(BaseModel):
     """One observing night's full record: plan, placement, and outcome."""
 
@@ -158,6 +212,49 @@ class ObservationSession(BaseModel):
     weather_samples: list[WeatherSample] = Field(default_factory=list, alias="weatherSamples")
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), alias="createdAt")
     closed_at: datetime | None = Field(default=None, alias="closedAt")
+    checklist: list[ChecklistItem] = Field(default_factory=list, alias="checklist")
+    framing: Framing | None = Field(default=None, alias="framing")
+    revision: int = Field(
+        default=0, ge=0, alias="revision", description="Counts the plan writes. Starts at 0."
+    )
+
+
+class PlanRevisionConflictError(ConflictError):
+    """A plan write named a revision that is no longer the stored one.
+
+    `details["current_revision"]` holds the revision now stored, so the
+    caller can read the plan again and redo its edit.
+    """
+
+
+class PlanChangeItem(BaseModel):
+    """One thing a plan write changed."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    kind: str = Field(alias="kind", description="What changed, such as queue_added or checklist_ticked.")
+    detail: str = Field(default="", alias="detail")
+    entry_id: str | None = Field(default=None, alias="entryId")
+
+
+class PlanChange(BaseModel):
+    """What a plan write returns: the new revision and what changed.
+
+    The backend sends the plan-changed event from this record.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    session_id: str = Field(alias="sessionId")
+    previous_revision: int = Field(ge=0, alias="previousRevision")
+    revision: int = Field(ge=0, alias="revision", description="The revision now stored.")
+    changes: list[PlanChangeItem] = Field(default_factory=list, alias="changes")
+    setting_notes: list[str] = Field(
+        default_factory=list,
+        alias="settingNotes",
+        description="Notes on accepted capture settings, such as 'setting not measured'.",
+    )
+    session: ObservationSession = Field(alias="session", description="The session as now stored.")
 
 
 class QueueRequest(BaseModel):
@@ -185,6 +282,11 @@ class QueueRequest(BaseModel):
     )
     computed_end_time: datetime | None = Field(
         default=None, alias="computedEndTime", description="An end worked out by hand. Manual entries only."
+    )
+    exposure_requests: list[ExposureRequest] | None = Field(
+        default=None,
+        alias="exposureRequests",
+        description="Exposures for this entry instead of the package's own. None: use the package's.",
     )
 
 

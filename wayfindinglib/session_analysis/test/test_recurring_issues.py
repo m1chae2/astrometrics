@@ -7,6 +7,7 @@ and that the most frequent and most serious come first.
 
 import pytest
 
+from wayfindinglib.models.quality.statements import Confidence
 from wayfindinglib.models.session.session_quality import (
     Recommendation,
     RecommendationKind,
@@ -25,7 +26,9 @@ def _finding(
     recommendation : `Recommendation`
         A recommendation of the given kind and severity.
     """
-    return Recommendation(kind=kind, severity=severity, message=message, confidence="high")
+    return Recommendation(
+        kind=kind, severity=severity, message=message, confidence=Confidence.PARTLY_MEASURED
+    )
 
 
 def test_a_finding_on_two_nights_is_recurring() -> None:

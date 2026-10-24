@@ -1110,64 +1110,6 @@ export interface MountPointingModel {
 }
 
 /**
- * How a limit was obtained, from most to least direct.
- *
- * `GEOMETRY` limits follow from the equipment's dimensions or from
- * physics alone. `SENSOR_PROFILE` limits come from the camera's stored
- * profile. `PHYSICAL_BUDGET` limits are the amount of an error the
- * equipment's own measured image quality can absorb. `OWN_BASELINE` limits
- * come from how this same equipment has behaved in the past.
- */
-export enum ThresholdTier {
-  GEOMETRY = "geometry",
-  SENSOR_PROFILE = "sensor_profile",
-  PHYSICAL_BUDGET = "physical_budget",
-  OWN_BASELINE = "own_baseline"
-}
-
-/**
- * Whether a limit could be worked out.
- */
-export enum ThresholdStatus {
-  DERIVED = "derived",
-  INSUFFICIENT_DATA = "insufficient_data"
-}
-
-/**
- * One limit, with the record of how it was obtained.
- *
- * Attributes
- * ----------
- * name : `str`
- * The limit's name.
- * value : `float` or `None`
- * The limit. `None` when `status` is `INSUFFICIENT_DATA`.
- * unit : `str`
- * Unit of `value`, for example ``"arcsec"``.
- * tier : `ThresholdTier`
- * How the limit was obtained.
- * status : `ThresholdStatus`
- * Whether it could be worked out.
- * derivation : `str`
- * Plain-language statement of how the value follows from the inputs,
- * or, for a limit with insufficient data, what is missing.
- * inputs : `dict` [`str`, `float` or `str` or `None`]
- * The numbers the value was worked out from, so anyone can redo it.
- * sample_count : `int` or `None`
- * How many measurements a measured input rests on, if any.
- */
-export interface PerformanceThreshold {
-  name: string;
-  value?: number | null;
-  unit: string;
-  tier: ThresholdTier;
-  status: ThresholdStatus;
-  derivation: string;
-  inputs?: Record<string, number | string | null>;
-  sampleCount?: number | null;
-}
-
-/**
  * How risky each part of the sky is for the mount's tracking.
  *
  * A grid of scores from 0 (safe) to 1 (likely to trail) over hour angle
@@ -1228,8 +1170,12 @@ export interface TrackingRiskMap {
  * The one policy choice behind the physical-budget limits: the most
  * that guiding error and trailing may widen a star image, as a
  * fraction of its width.
- * thresholds : `dict` [`str`, `PerformanceThreshold`]
- * Every limit, by name.
+ * thresholds : `dict` [`str`, `QualityLimit`]
+ * Every limit, by name. A limit whose value is `None` could not be
+ * worked out; its derivation says why.
+ * limit_inputs : `dict` [`str`, `dict` [`str`, `float` or `str` or `None`]]
+ * For each limit, by name, the numbers it was worked out from, so
+ * anyone can redo it. `QualityLimit` has no place for them.
  * tracking_risk : `TrackingRiskMap` or `None`
  * How risky each part of the sky is for tracking with this
  * equipment. Filled in by `control.history.get_performance_envelope`;
@@ -1238,7 +1184,8 @@ export interface TrackingRiskMap {
 export interface PerformanceEnvelope {
   equipmentFingerprint: string;
   blurToleranceFraction: number;
-  thresholds?: Record<string, PerformanceThreshold>;
+  thresholds?: Record<string, QualityLimit>;
+  limitInputs?: Record<string, Record<string, number | string | null>>;
   trackingRisk?: TrackingRiskMap | null;
 }
 
@@ -1580,6 +1527,8 @@ export interface MosaicPanel {
   dec_deg: number;
   /** Short panel name such as "P1_2" (row 1, column 2). */
   panel_id: string;
+  /** How far the camera is turned, in degrees east of north (the way Ekos and KStars give it). 0 puts the grid rows along declination and the columns along right ascension. */
+  rotation_deg?: number;
 }
 
 /**

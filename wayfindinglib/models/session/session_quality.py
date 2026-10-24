@@ -22,7 +22,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from wayfindinglib.models.quality.statements import Severity
+from astrometricslib import MeasurementReference, QualityLimit
+from wayfindinglib.models.quality.statements import Confidence, Severity
 
 GUIDING_ANALYSIS_VERSION = "1.0.0"
 """Bumped whenever the guiding analysis changes what it measures or reports."""
@@ -72,14 +73,24 @@ class Recommendation(BaseModel):
         How much attention it needs.
     message : `str`
         What was found and what to do, in plain language.
-    evidence : `dict` [`str`, `float` or `str` or `None`]
-        The measured values the recommendation rests on.
-    compared_to : `dict` [`str`, `float` or `str` or `None`]
-        The equipment-derived limits the evidence was compared with.
-    confidence : `str`
-        ``"high"``, ``"medium"`` or ``"low"``: how far the evidence alone
-        supports the conclusion. A recommendation that depends on a proxy,
-        or on limits from different equipment, is never ``"high"``.
+    evidence : `list` [`MeasurementReference`]
+        The stored measurements the recommendation rests on, each pointing
+        at its row in the measurement store. Empty when the numbers come
+        from somewhere else (guide logs, Ekos records), which `values`
+        holds instead.
+    values : `dict` [`str`, `float` or `str` or `None`]
+        The numbers the recommendation rests on that are not rows of the
+        measurement store, such as guide-log values and counts. The
+        keys are plain names.
+    compared_to : `list` [`QualityLimit`]
+        The equipment-derived limits the evidence was compared with, each
+        with its value, tier and derivation. Empty when none applies.
+    confidence : `Confidence`
+        How well the rule behind the recommendation is backed, in the
+        validation register's status labels (see
+        `wayfindinglib.session_analysis.rule_confidence`). A
+        recommendation that depends on a proxy, or on limits from different
+        equipment, is stepped down one label.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -87,9 +98,10 @@ class Recommendation(BaseModel):
     kind: RecommendationKind
     severity: RecommendationSeverity
     message: str
-    evidence: dict[str, float | str | None] = Field(default_factory=dict)
-    compared_to: dict[str, float | str | None] = Field(default_factory=dict, alias="comparedTo")
-    confidence: str
+    evidence: list[MeasurementReference] = Field(default_factory=list)
+    values: dict[str, float | str | None] = Field(default_factory=dict)
+    compared_to: list[QualityLimit] = Field(default_factory=list, alias="comparedTo")
+    confidence: Confidence
 
 
 class GuidingInputQuality(BaseModel):

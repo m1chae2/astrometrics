@@ -11,7 +11,7 @@ Applied in this order:
 3. Frames missing measurements: advise re-scanning them and checking the camera's FITS header.
 4. More cancelled exposures than 90 percent of this equipment's earlier nights: advise checking the session log.
 5. Sensor temperatures too far apart for one set of darks: information, with advice to take darks at several temperatures.
-6. A spectroscopy star that clips: advise a shorter exposure. If every length tried clipped, go below the shortest. If some did not, name the longest that stayed clear and how many frames were spent on lengths that clipped. The science library's recommended exposure is quoted when it has one. The message adds "if that star is the target", because in a nebula field the clipped star may be a foreground star. Confidence is `high` when the verdict is the science library's and `medium` when it came from frame counts.
+6. A spectroscopy star that clips: advise a shorter exposure. If every length tried clipped, go below the shortest. If some did not, name the longest that stayed clear and how many frames were spent on lengths that clipped. The stored saturated-pixel rows of the group are cited as evidence. The message adds "if that star is the target", because in a nebula field the clipped star may be a foreground star. Confidence is the register status of the capture rules (WAY-46).
 7. Star width above, or roundness below, the equipment's earlier nights: warn. The message lists the usual causes (seeing, focus drift, tracking error, trailing) and points to the autofocus record and the guiding analysis, because the frames cannot tell which applies. With too few earlier nights, it states the width and says so.
 8. If none of the above applied: a note that the night was within limits.
 

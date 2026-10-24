@@ -52,6 +52,24 @@ class ExposureRequest(BaseModel):
     exposure_sec: float = Field(..., gt=0.0, alias="exposureSec")
     count: int = Field(..., gt=0, alias="count")
     delay_sec: float = Field(default=0.0, ge=0.0, alias="delaySec")
+    gain_setting: int | None = Field(
+        default=None,
+        ge=0,
+        alias="gainSetting",
+        description="The camera's gain setting (a unitless index, not electrons per ADU). None: not set.",
+    )
+    offset: int | None = Field(
+        default=None,
+        ge=0,
+        alias="offset",
+        description="The constant the camera adds to every pixel. None: not set.",
+    )
+    binning: int | None = Field(
+        default=None,
+        ge=1,
+        alias="binning",
+        description="The binning factor (1 means no binning). None: not set.",
+    )
 
     def total_exposure_sec(self) -> float:
         """Total wall-clock time this request occupies, exposures plus pacing.

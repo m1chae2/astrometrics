@@ -216,6 +216,7 @@ if TYPE_CHECKING:
         resolve_target,
         to_epoch_seconds,
     )
+    from astrometricslib.pipelines.shared.quality.frame_measurement import frame_subject_id
     from astrometricslib.pipelines.shared.quality.frame_selection import (
         FrameSelection,
         parse_iso_time,
@@ -244,6 +245,7 @@ _DEFERRED_EXPORTS = {
     "Jobs": "astrometricslib.api.jobs",
     "FrameSelection": "astrometricslib.pipelines.shared.quality.frame_selection",
     "parse_iso_time": "astrometricslib.pipelines.shared.quality.frame_selection",
+    "frame_subject_id": "astrometricslib.pipelines.shared.quality.frame_measurement",
     "check_choice": "astrometricslib.pipelines.shared.api_arguments",
     "check_include": "astrometricslib.pipelines.shared.api_arguments",
     "reject_unused_arguments": "astrometricslib.pipelines.shared.api_arguments",
@@ -537,6 +539,7 @@ __all__ = [
     "export_target_lineage_as_prov_xml",
     "file_lock",
     "frame_is_spectral",
+    "frame_subject_id",
     "get_configuration",
     "get_current_job",
     "get_log_context",

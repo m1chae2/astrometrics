@@ -20,9 +20,15 @@ Saturation advice covers spectroscopy only. In a deep imaging field the
 brightest stars clip at any useful exposure, and avoiding that would make the
 exposure too short for the faint target, so clipping is reported for imaging
 frames but never recommended against.
+
+Statements that rest on stored measurements cite them in `evidence`, as
+references to the exact rows. Counts and values that are not rows go in
+`values`. Confidence is the register status of the capture rules (WAY-46).
 """
 
+from astrometricslib import DEFAULT_DARK_TEMPERATURE_TOLERANCE_C, SATURATED_BLOB_MINIMUM_PIXELS
 from wayfindinglib.analytics.performance_envelope import MINIMUM_FRAMES_PER_NIGHT
+from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
 from wayfindinglib.models.session.capture_quality import (
     CaptureInputQuality,
     CapturePerformance,
@@ -33,6 +39,7 @@ from wayfindinglib.models.session.session_quality import (
     RecommendationKind,
     RecommendationSeverity,
 )
+from wayfindinglib.session_analysis.rule_support import design_limit, envelope_limits, rule_confidence
 
 _SEVERITY_ORDER = {
     RecommendationSeverity.WARNING: 0,
@@ -56,9 +63,16 @@ def _insufficient_frames(input_quality: CaptureInputQuality) -> Recommendation:
             f"Only {input_quality.light_frames} light frames from this equipment exist for this "
             f"night; at least {MINIMUM_FRAMES_PER_NIGHT} are needed to judge it."
         ),
-        evidence={"light_frames": float(input_quality.light_frames)},
-        compared_to={"minimum_frames": float(MINIMUM_FRAMES_PER_NIGHT)},
-        confidence="high",
+        values={"light_frames": float(input_quality.light_frames)},
+        compared_to=[
+            design_limit(
+                float(MINIMUM_FRAMES_PER_NIGHT),
+                "frames",
+                "Fewest light frames a night needs for its medians to rest on more than a few frames.",
+                "WAY-D45",
+            )
+        ],
+        confidence=rule_confidence("capture"),
     )
 
 
@@ -88,14 +102,21 @@ def _captures_not_in_library(input_quality: CaptureInputQuality) -> Recommendati
             f"({input_quality.light_frames} frames are there). Download or sort the missing frames, "
             f"or this analysis describes only part of the night.{caveat}"
         ),
-        evidence={
+        values={
             "captures_without_frame": float(missing),
             "unclassified_captures_without_frame": float(unknown_kind),
             "ekos_light_captures": float(input_quality.ekos_light_captures or 0),
             "library_frames": float(input_quality.light_frames),
         },
-        compared_to={"match_window_seconds": input_quality.match_window_seconds},
-        confidence="high",
+        compared_to=[
+            design_limit(
+                input_quality.match_window_seconds,
+                "s",
+                "Farthest apart an Ekos exposure and a frame may start and still be the same exposure.",
+                "WAY-D47",
+            )
+        ],
+        confidence=rule_confidence("capture"),
     )
 
 
@@ -120,13 +141,17 @@ def _missing_measurements(input_quality: CaptureInputQuality) -> Recommendation 
             f"Some frames lack measurements that later steps use: {described}. Re-scan the frames, "
             "and check that the camera writes these fields into the FITS header."
         ),
-        evidence={name: float(count) for name, count in input_quality.frames_missing_measurements.items()},
-        compared_to={"light_frames": float(input_quality.light_frames)},
-        confidence="high",
+        values={
+            **{name: float(count) for name, count in input_quality.frames_missing_measurements.items()},
+            "light_frames": float(input_quality.light_frames),
+        },
+        confidence=rule_confidence("capture"),
     )
 
 
-def _frequent_aborts(input_quality: CaptureInputQuality) -> Recommendation | None:
+def _frequent_aborts(
+    input_quality: CaptureInputQuality, envelope: PerformanceEnvelope | None
+) -> Recommendation | None:
     """Advise when an unusual share of exposures was cancelled.
 
     Returns
@@ -145,12 +170,16 @@ def _frequent_aborts(input_quality: CaptureInputQuality) -> Recommendation | Non
             "earlier nights. Ekos cancels an exposure when the guider loses its star, focusing "
             "starts, or the operator stops the sequence; check the session log for the cause."
         ),
-        evidence={
+        values={
             "aborted_captures": float(input_quality.aborted_captures or 0),
             "abort_fraction": input_quality.abort_fraction,
         },
-        compared_to={"abort_fraction_limit": input_quality.abort_fraction_limit},
-        confidence="medium",
+        compared_to=envelope_limits(
+            envelope,
+            ("capture_abort_fraction_high_limit",),
+            applies=input_quality.limits_equipment_match != "none",
+        ),
+        confidence=rule_confidence("capture", degraded=True),
     )
 
 
@@ -175,12 +204,20 @@ def _temperature_spread(input_quality: CaptureInputQuality) -> Recommendation | 
             "frame calibrates a light well only within that range, so take darks at several "
             "temperatures, or let the sensor settle before imaging."
         ),
-        evidence={
+        values={
             "frames_outside_tolerance": float(input_quality.frames_outside_dark_tolerance),
             "temperature_spread_c": input_quality.sensor_temperature_spread_c,
         },
-        compared_to={"dark_temperature_tolerance_c": input_quality.dark_temperature_tolerance_c},
-        confidence="high",
+        compared_to=[
+            design_limit(
+                input_quality.dark_temperature_tolerance_c,
+                "degC",
+                "How far a dark frame's temperature may differ from a light frame's and still calibrate it "
+                f"(the library default is {DEFAULT_DARK_TEMPERATURE_TOLERANCE_C:g}).",
+                "WAY-D47",
+            )
+        ],
+        confidence=rule_confidence("capture"),
     )
 
 
@@ -221,15 +258,6 @@ def _spectral_star_clipped(performance: CapturePerformance) -> list[Recommendati
         unclipped = [group for group in groups if not group.is_clipped]
         frames_total = sum(group.frames for group in groups)
         frames_clipped = sum(group.frames for group in clipped)
-        science_recommended = next(
-            (
-                g.science_recommended_exposure_seconds
-                for g in groups
-                if g.science_recommended_exposure_seconds
-            ),
-            None,
-        )
-        rests_on_science = all(group.basis == "science_stack" for group in clipped)
         if unclipped:
             longest_clear = max(group.exposure_seconds for group in unclipped)
             message = (
@@ -243,34 +271,37 @@ def _spectral_star_clipped(performance: CapturePerformance) -> list[Recommendati
                 f"{target_id}: a star clipped at every exposure length tried, the shortest being "
                 f"{_format_exposure(shortest)}. If that star is the target, try a shorter exposure."
             )
-        if science_recommended:
-            message += (
-                f" The stacking analysis estimates that {_format_exposure(science_recommended)} keeps "
-                "the brightest star below the ceiling."
-            )
         recommendations.append(
             Recommendation(
                 kind=RecommendationKind.SPECTRAL_STAR_CLIPPED,
                 severity=RecommendationSeverity.ADVICE,
                 message=message,
-                evidence={
+                evidence=[reference for group in clipped for reference in group.evidence],
+                values={
                     "target": target_id,
                     "exposure_lengths_clipped": float(len(clipped)),
                     "exposure_lengths_tried": float(len(groups)),
                     "frames_at_clipped_lengths": float(frames_clipped),
                     "frames_total": float(frames_total),
                 },
-                compared_to={
-                    "science_recommended_exposure_seconds": science_recommended,
-                    "verdict_basis": "science_stack" if rests_on_science else "frame_pixel_count",
-                },
-                confidence="high" if rests_on_science else "medium",
+                compared_to=[
+                    design_limit(
+                        float(SATURATED_BLOB_MINIMUM_PIXELS),
+                        "px",
+                        "Fewest saturated pixels that make a frame's star count as clipped; an exposure "
+                        "length clips when at least half its frames do.",
+                        "WAY-D48",
+                    )
+                ],
+                confidence=rule_confidence("capture"),
             )
         )
     return recommendations
 
 
-def _star_shape(input_quality: CaptureInputQuality, performance: CapturePerformance) -> list[Recommendation]:
+def _star_shape(
+    input_quality: CaptureInputQuality, performance: CapturePerformance, envelope: PerformanceEnvelope | None
+) -> list[Recommendation]:
     """Compare the night's star width and roundness with earlier nights.
 
     Returns
@@ -281,6 +312,7 @@ def _star_shape(input_quality: CaptureInputQuality, performance: CapturePerforma
         the equipment has too little history.
     """
     quality = performance.star_quality
+    applies = input_quality.limits_equipment_match != "none"
     recommendations = []
     if quality.median_star_width_arcsec is None:
         return recommendations
@@ -296,9 +328,9 @@ def _star_shape(input_quality: CaptureInputQuality, performance: CapturePerforma
                     f"{quality.frames} frames, but this equipment has too few earlier nights to say "
                     "whether that is usual."
                 ),
-                evidence={"median_star_width_arcsec": quality.median_star_width_arcsec},
-                compared_to={},
-                confidence="high",
+                evidence=quality.width_evidence,
+                values={"median_star_width_arcsec": quality.median_star_width_arcsec},
+                confidence=rule_confidence("capture"),
             )
         )
         return recommendations
@@ -317,12 +349,13 @@ def _star_shape(input_quality: CaptureInputQuality, performance: CapturePerforma
                     "tracking error can each cause it; compare the autofocus record and the guiding "
                     "analysis for this night."
                 ),
-                evidence={
+                evidence=quality.width_evidence,
+                values={
                     "median_star_width_arcsec": quality.median_star_width_arcsec,
                     "frames": float(quality.frames),
                 },
-                compared_to={"night_star_width_high_limit": quality.star_width_limit_arcsec},
-                confidence="medium",
+                compared_to=envelope_limits(envelope, ("night_star_width_high_limit",), applies),
+                confidence=rule_confidence("capture", degraded=True),
             )
         )
     if (
@@ -340,16 +373,19 @@ def _star_shape(input_quality: CaptureInputQuality, performance: CapturePerforma
                     "unusual for this equipment. Trailing from guiding error or polar misalignment "
                     "elongates stars in one direction; compare the guiding analysis for this night."
                 ),
-                evidence={"median_roundness": quality.median_roundness},
-                compared_to={"night_star_roundness_low_limit": quality.roundness_limit},
-                confidence="medium",
+                evidence=quality.roundness_evidence,
+                values={"median_roundness": quality.median_roundness},
+                compared_to=envelope_limits(envelope, ("night_star_roundness_low_limit",), applies),
+                confidence=rule_confidence("capture", degraded=True),
             )
         )
     return recommendations
 
 
 def recommend_for_capture(
-    input_quality: CaptureInputQuality, performance: CapturePerformance
+    input_quality: CaptureInputQuality,
+    performance: CapturePerformance,
+    envelope: PerformanceEnvelope | None = None,
 ) -> list[Recommendation]:
     """Recommend what, if anything, to change after a night of capture.
 
@@ -359,6 +395,9 @@ def recommend_for_capture(
         The pre-processing result.
     performance : `CapturePerformance`
         The processing result.
+    envelope : `PerformanceEnvelope` or `None`, optional
+        The equipment-derived limits. The statements list the ones they
+        were compared with; without it they list none.
 
     Returns
     -------
@@ -370,10 +409,10 @@ def recommend_for_capture(
     found = [
         _captures_not_in_library(input_quality),
         _missing_measurements(input_quality),
-        _frequent_aborts(input_quality),
+        _frequent_aborts(input_quality, envelope),
         _temperature_spread(input_quality),
         *_spectral_star_clipped(performance),
-        *_star_shape(input_quality, performance),
+        *_star_shape(input_quality, performance, envelope),
     ]
     recommendations = [item for item in found if item is not None]
     if not recommendations:
@@ -385,9 +424,8 @@ def recommend_for_capture(
                     f"All {input_quality.light_frames} light frames are in the library and none of the "
                     "checks found a problem."
                 ),
-                evidence={"light_frames": float(input_quality.light_frames)},
-                compared_to={},
-                confidence="medium",
+                values={"light_frames": float(input_quality.light_frames)},
+                confidence=rule_confidence("capture", degraded=True),
             )
         )
     return sorted(recommendations, key=lambda recommendation: _SEVERITY_ORDER[recommendation.severity])

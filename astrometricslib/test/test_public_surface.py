@@ -192,6 +192,7 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "export_target_lineage_as_prov_xml",
     "file_lock",
     "frame_is_spectral",
+    "frame_subject_id",
     "get_configuration",
     "get_current_job",
     "get_log_context",

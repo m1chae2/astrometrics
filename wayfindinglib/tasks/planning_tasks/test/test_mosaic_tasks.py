@@ -116,3 +116,78 @@ def test_create_mosaic_can_skip_the_packages() -> None:
     plan = create_mosaic(astrometrics, _parent(), panels, None, None, packages=False)
     assert plan.packages == []
     assert len(plan.target_ids) == 2
+
+
+def _grid_offsets_deg(
+    panels: list, center_ra_deg: float, center_dec_deg: float
+) -> dict[str, tuple[float, float]]:
+    """Give each panel's offset from the grid center, in degrees.
+
+    Parameters
+    ----------
+    panels : `list` [`MosaicPanel`]
+        The panels.
+    center_ra_deg, center_dec_deg : `float`
+        The grid center.
+
+    Returns
+    -------
+    offsets : `dict` [`str`, `tuple` [`float`, `float`]]
+        (east, north) offsets by panel id. East is scaled by cos(dec).
+    """
+    import math
+
+    return {
+        panel.panel_id: (
+            (panel.ra_deg - center_ra_deg) * math.cos(math.radians(panel.dec_deg)),
+            panel.dec_deg - center_dec_deg,
+        )
+        for panel in panels
+    }
+
+
+def test_zero_rotation_leaves_the_grid_unchanged() -> None:
+    """A rotation of 0 gives the same panels as leaving the rotation out."""
+    plain = calculate_panels(object(), "10:00:00", "+30:00:00", 2, 3, 10.0, _equipment())
+    turned = calculate_panels(object(), "10:00:00", "+30:00:00", 2, 3, 10.0, _equipment(), rotation_deg=0.0)
+    assert [(p.ra_deg, p.dec_deg) for p in plain] == [(p.ra_deg, p.dec_deg) for p in turned]
+
+
+def test_ninety_degrees_swaps_the_grid_axes() -> None:
+    """At 90 degrees the columns run along declination, not right ascension."""
+    equipment = _equipment()
+    plain = calculate_panels(object(), "10:00:00", "+0:00:00", 1, 3, 0.0, equipment)
+    turned = calculate_panels(object(), "10:00:00", "+0:00:00", 1, 3, 0.0, equipment, rotation_deg=90.0)
+    plain_offsets = _grid_offsets_deg(plain, 150.0, 0.0)
+    turned_offsets = _grid_offsets_deg(turned, 150.0, 0.0)
+    # A single row of three columns: east-west before, north-south after.
+    assert plain_offsets["P1_3"][0] > 0.5 and abs(plain_offsets["P1_3"][1]) < 1e-6
+    assert abs(turned_offsets["P1_3"][0]) < 1e-6
+    assert turned_offsets["P1_3"][1] == pytest.approx(-plain_offsets["P1_3"][0], abs=1e-6)
+    assert all(panel.rotation_deg == pytest.approx(90.0) for panel in turned)
+
+
+def test_rotated_panel_centers_round_trip() -> None:
+    """Turning the offsets back by the rotation recovers the plain grid."""
+    import math
+
+    equipment = _equipment()
+    plain = calculate_panels(object(), "10:00:00", "+20:00:00", 3, 3, 20.0, equipment)
+    turned = calculate_panels(object(), "10:00:00", "+20:00:00", 3, 3, 20.0, equipment, rotation_deg=37.0)
+    plain_offsets = _grid_offsets_deg(plain, 150.0, 20.0)
+    turned_offsets = _grid_offsets_deg(turned, 150.0, 20.0)
+    angle = math.radians(37.0)
+    for panel_id, (east, north) in turned_offsets.items():
+        recovered_column = east * math.cos(angle) - north * math.sin(angle)
+        recovered_row = east * math.sin(angle) + north * math.cos(angle)
+        # The east scale differs slightly with dec; allow a small tolerance.
+        assert recovered_column == pytest.approx(plain_offsets[panel_id][0], abs=0.05)
+        assert recovered_row == pytest.approx(plain_offsets[panel_id][1], abs=0.05)
+
+
+def test_a_non_finite_rotation_is_refused() -> None:
+    """A rotation that is not a number raises InvalidArgumentError."""
+    with pytest.raises(InvalidArgumentError, match="rotation_deg"):
+        calculate_panels(
+            object(), "10:00:00", "+30:00:00", 1, 1, 0.0, _equipment(), rotation_deg=float("nan")
+        )

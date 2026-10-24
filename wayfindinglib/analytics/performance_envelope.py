@@ -8,7 +8,7 @@ or a database; the caller supplies the inputs, so the same inputs always
 give the same limits and a change of equipment shows up as a change of
 inputs.
 
-Four kinds of limit are derived (see `ThresholdTier`):
+Four kinds of limit are derived (see `LimitTier`):
 
 * Geometry: plate scales, the size of the guide camera's field, and the
   fastest guide speed a mount can have.
@@ -27,13 +27,36 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from astrometricslib import LimitTier, QualityLimit
 from wayfindinglib.models.equipment_and_site.equipment import Camera, EquipmentConfiguration, GuideScope
-from wayfindinglib.models.equipment_and_site.performance_envelope import (
-    PerformanceEnvelope,
-    PerformanceThreshold,
-    ThresholdStatus,
-    ThresholdTier,
-)
+from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
+
+REGISTER_ENTRY_BY_LIMIT = {
+    "imaging_plate_scale": "WAY-40",
+    "guide_plate_scale": "WAY-40",
+    "max_credible_guide_error": "WAY-40",
+    "max_credible_guide_speed": "WAY-40",
+    "clip_ceiling": "WAY-40",
+    "saturation_threshold": "WAY-40",
+    "guiding_rms_limit": "WAY-41",
+    "trailing_limit": "WAY-41",
+    "guide_excursion_limit": "WAY-41",
+    "minimum_star_measurement_exposure": "WAY-43",
+    "guide_snr_low_limit": "WAY-42",
+    "guiding_rms_high_limit": "WAY-42",
+    "guide_star_mass_low_limit": "WAY-42",
+    "night_star_width_high_limit": "WAY-42",
+    "night_star_roundness_low_limit": "WAY-42",
+    "guide_lost_fraction_high_limit": "WAY-42",
+    "guide_excursion_fraction_high_limit": "WAY-42",
+    "capture_abort_fraction_high_limit": "WAY-42",
+}
+"""The validation register entry that backs each limit, by limit name.
+
+Every limit in the envelope names the entry that holds its evidence
+(`validation/wayfinding.md`). The limit's tier tells how it was obtained; the
+entry tells how well that way has been checked.
+"""
 
 DEFAULT_BLUR_TOLERANCE_FRACTION = 0.10
 """Most that guiding error or trailing may widen a star image, as a fraction.
@@ -207,68 +230,91 @@ def robust_median_and_spread(values: Sequence[float]) -> tuple[float, float]:
     return median, float(MAD_TO_SIGMA * np.median(np.abs(array - median)))
 
 
+@dataclass(frozen=True)
+class _DerivedLimit:
+    """One limit with the numbers it was worked out from.
+
+    Attributes
+    ----------
+    name : `str`
+        The limit's name.
+    limit : `QualityLimit`
+        The limit. Its value is `None` when it could not be worked out.
+    inputs : `dict` [`str`, `float` or `str` or `None`]
+        The numbers the value was worked out from. `QualityLimit` has no
+        place for them, so the envelope keeps them beside it.
+    """
+
+    name: str
+    limit: QualityLimit
+    inputs: dict[str, float | str | None]
+
+
 def _derived(
     name: str,
     value: float,
     unit: str,
-    tier: ThresholdTier,
+    tier: LimitTier,
     derivation: str,
     inputs: dict[str, float | str | None],
     sample_count: int | None = None,
-) -> PerformanceThreshold:
+) -> _DerivedLimit:
     """Build a limit that could be worked out.
 
     Returns
     -------
-    threshold : `PerformanceThreshold`
-        The limit, marked as derived.
+    derived : `_DerivedLimit`
+        The limit with its inputs.
     """
-    return PerformanceThreshold(
-        name=name,
-        value=value,
-        unit=unit,
-        tier=tier,
-        status=ThresholdStatus.DERIVED,
-        derivation=derivation,
-        inputs=inputs,
-        sample_count=sample_count,
+    return _DerivedLimit(
+        name,
+        QualityLimit(
+            value=value,
+            unit=unit,
+            tier=tier,
+            derivation=derivation,
+            sample_count=sample_count,
+        ),
+        inputs,
     )
 
 
 def _insufficient(
     name: str,
     unit: str,
-    tier: ThresholdTier,
+    tier: LimitTier,
     reason: str,
     inputs: dict[str, float | str | None] | None = None,
     sample_count: int | None = None,
-) -> PerformanceThreshold:
+) -> _DerivedLimit:
     """Build a limit that could not be worked out, and say why.
 
     Returns
     -------
-    threshold : `PerformanceThreshold`
-        The limit, with no value and marked as lacking data.
+    derived : `_DerivedLimit`
+        The limit, with no value. Its derivation holds the reason.
     """
-    return PerformanceThreshold(
-        name=name,
-        unit=unit,
-        tier=tier,
-        status=ThresholdStatus.INSUFFICIENT_DATA,
-        derivation=reason,
-        inputs=inputs or {},
-        sample_count=sample_count,
+    return _DerivedLimit(
+        name,
+        QualityLimit(
+            value=None,
+            unit=unit,
+            tier=tier,
+            derivation=reason,
+            sample_count=sample_count,
+        ),
+        inputs or {},
     )
 
 
 def _geometry_thresholds(
     equipment: EquipmentConfiguration, guide_scope: GuideScope | None, guide_camera: Camera | None
-) -> list[PerformanceThreshold]:
+) -> list[_DerivedLimit]:
     """Derive the limits that follow from dimensions and physics alone.
 
     Returns
     -------
-    thresholds : `list` [`PerformanceThreshold`]
+    thresholds : `list` [`_DerivedLimit`]
         Plate scales, the guide field size, and the fastest guide speed.
     """
     imaging_scale = equipment.plate_scale_arcsec_per_px
@@ -282,7 +328,7 @@ def _geometry_thresholds(
             "imaging_plate_scale",
             imaging_scale,
             "arcsec/px",
-            ThresholdTier.GEOMETRY,
+            LimitTier.GEOMETRY,
             "206.265 x pixel size (um) / focal length (mm)",
             {
                 "pixel_size_um": equipment.camera.pixel_size_um,
@@ -293,7 +339,7 @@ def _geometry_thresholds(
             "guide_plate_scale",
             guide_scale,
             "arcsec/px",
-            ThresholdTier.GEOMETRY,
+            LimitTier.GEOMETRY,
             "206.265 x guide camera pixel size (um) / guide scope focal length (mm)",
             {"pixel_size_um": guide_pixel_size, "focal_length_mm": guide_focal_length},
         ),
@@ -301,7 +347,7 @@ def _geometry_thresholds(
             "max_credible_guide_error",
             half_field,
             "arcsec",
-            ThresholdTier.GEOMETRY,
+            LimitTier.GEOMETRY,
             "Half the guide camera's frame width. The guide star stays near the centre, "
             "so a measured offset larger than this cannot be the same star moving; "
             "the guider has locked onto a different one.",
@@ -311,7 +357,7 @@ def _geometry_thresholds(
             "max_credible_guide_speed",
             SIDEREAL_RATE_ARCSEC_PER_SECOND,
             "arcsec/s",
-            ThresholdTier.GEOMETRY,
+            LimitTier.GEOMETRY,
             "A mount's guide speed is a fraction of the sidereal rate, which is how fast "
             "the sky turns (360 degrees in 86164.0905 s). A calibration that measures a "
             "faster speed cannot be right.",
@@ -320,20 +366,20 @@ def _geometry_thresholds(
     ]
 
 
-def _sensor_thresholds(sensor_limits: SensorLimits | None) -> list[PerformanceThreshold]:
+def _sensor_thresholds(sensor_limits: SensorLimits | None) -> list[_DerivedLimit]:
     """Derive the saturation limits from the camera's stored profile.
 
     Returns
     -------
-    thresholds : `list` [`PerformanceThreshold`]
+    thresholds : `list` [`_DerivedLimit`]
         The clip ceiling and the saturation threshold, or limits marked as
         lacking data when no profile is given.
     """
     if sensor_limits is None:
         reason = "No camera profile was supplied."
         return [
-            _insufficient("clip_ceiling", "ADU", ThresholdTier.SENSOR_PROFILE, reason),
-            _insufficient("saturation_threshold", "ADU", ThresholdTier.SENSOR_PROFILE, reason),
+            _insufficient("clip_ceiling", "ADU", LimitTier.SENSOR_PROFILE, reason),
+            _insufficient("saturation_threshold", "ADU", LimitTier.SENSOR_PROFILE, reason),
         ]
     fallback_note = (
         " These are the generic stand-in numbers: this camera has no profile of its own."
@@ -345,7 +391,7 @@ def _sensor_thresholds(sensor_limits: SensorLimits | None) -> list[PerformanceTh
             "clip_ceiling",
             sensor_limits.clip_ceiling_adu,
             "ADU",
-            ThresholdTier.SENSOR_PROFILE,
+            LimitTier.SENSOR_PROFILE,
             f"From the camera profile for {sensor_limits.camera_name}: {sensor_limits.clip_ceiling_source}"
             + fallback_note,
             {"camera": sensor_limits.camera_name},
@@ -354,7 +400,7 @@ def _sensor_thresholds(sensor_limits: SensorLimits | None) -> list[PerformanceTh
             "saturation_threshold",
             sensor_limits.saturation_threshold_adu,
             "ADU",
-            ThresholdTier.SENSOR_PROFILE,
+            LimitTier.SENSOR_PROFILE,
             f"From the camera profile for {sensor_limits.camera_name}: "
             f"{sensor_limits.saturation_threshold_source}" + fallback_note,
             {"camera": sensor_limits.camera_name},
@@ -366,7 +412,7 @@ def _budget_thresholds(
     measured_image_quality: MeasuredImageQuality | None,
     blur_tolerance_fraction: float,
     minimum_samples: int,
-) -> list[PerformanceThreshold]:
+) -> list[_DerivedLimit]:
     """Derive the guiding-error and trailing limits from measured star width.
 
     Adding a blur of width ``b`` to a star of width ``w`` (both as FWHM,
@@ -379,14 +425,14 @@ def _budget_thresholds(
 
     Returns
     -------
-    thresholds : `list` [`PerformanceThreshold`]
+    thresholds : `list` [`_DerivedLimit`]
         The per-axis guiding RMS limit and the trailing limit, or limits
         marked as lacking data.
     """
     names = (("guiding_rms_limit", "arcsec"), ("trailing_limit", "arcsec"))
     if measured_image_quality is None:
         reason = "No frames have been measured for this equipment yet, so its star width is unknown."
-        return [_insufficient(name, unit, ThresholdTier.PHYSICAL_BUDGET, reason) for name, unit in names]
+        return [_insufficient(name, unit, LimitTier.PHYSICAL_BUDGET, reason) for name, unit in names]
     if measured_image_quality.sample_count < minimum_samples:
         reason = (
             f"Star width rests on {measured_image_quality.sample_count} frames; "
@@ -396,7 +442,7 @@ def _budget_thresholds(
             _insufficient(
                 name,
                 unit,
-                ThresholdTier.PHYSICAL_BUDGET,
+                LimitTier.PHYSICAL_BUDGET,
                 reason,
                 {"fwhm_arcsec": measured_image_quality.fwhm_arcsec},
                 measured_image_quality.sample_count,
@@ -416,7 +462,7 @@ def _budget_thresholds(
             "guiding_rms_limit",
             budget / SIGMA_TO_FWHM,
             "arcsec",
-            ThresholdTier.PHYSICAL_BUDGET,
+            LimitTier.PHYSICAL_BUDGET,
             f"Star width x sqrt((1 + {blur_tolerance_fraction:g})^2 - 1) / 2.3548: the per-axis "
             f"guiding error that widens a {fwhm:.2f} arcsec star by no more than "
             f"{blur_tolerance_fraction:.0%}.",
@@ -427,7 +473,7 @@ def _budget_thresholds(
             "trailing_limit",
             budget,
             "arcsec",
-            ThresholdTier.PHYSICAL_BUDGET,
+            LimitTier.PHYSICAL_BUDGET,
             f"Star width x sqrt((1 + {blur_tolerance_fraction:g})^2 - 1): the length of trailing "
             f"during one exposure that widens a {fwhm:.2f} arcsec star by no more than "
             f"{blur_tolerance_fraction:.0%}.",
@@ -437,7 +483,7 @@ def _budget_thresholds(
     ]
 
 
-def _exposure_threshold(guide_cadence_seconds: float | None) -> PerformanceThreshold:
+def _exposure_threshold(guide_cadence_seconds: float | None) -> _DerivedLimit:
     """Derive the shortest exposure whose star measurements count.
 
     Parameters
@@ -448,7 +494,7 @@ def _exposure_threshold(guide_cadence_seconds: float | None) -> PerformanceThres
 
     Returns
     -------
-    threshold : `PerformanceThreshold`
+    derived : `_DerivedLimit`
         The shortest exposure long enough to span a few guide cycles, or a
         limit marked as lacking data if the guide cycle is not known.
     """
@@ -457,23 +503,21 @@ def _exposure_threshold(guide_cadence_seconds: float | None) -> PerformanceThres
         return _insufficient(
             name,
             "s",
-            ThresholdTier.OWN_BASELINE,
+            LimitTier.OWN_BASELINE,
             "The equipment's guide cycle is not known yet: no guiding session has been recorded for it.",
         )
     return _derived(
         name,
         MINIMUM_GUIDE_CYCLES_PER_EXPOSURE * guide_cadence_seconds,
         "s",
-        ThresholdTier.OWN_BASELINE,
+        LimitTier.OWN_BASELINE,
         f"{MINIMUM_GUIDE_CYCLES_PER_EXPOSURE} guide cycles of this equipment's own guider: the "
         "shortest exposure in which guiding error has time to vary.",
         {"guide_cadence_seconds": guide_cadence_seconds},
     )
 
 
-def _excursion_threshold(
-    guide_plate_scale: float, guiding_rms_limit: PerformanceThreshold
-) -> PerformanceThreshold:
+def _excursion_threshold(guide_plate_scale: float, guiding_rms_limit: _DerivedLimit) -> _DerivedLimit:
     """Derive the size of a guide error that is an event, not noise.
 
     The limit is the larger of two sizes. One is `EXCURSION_SIGMA_MULTIPLE`
@@ -485,37 +529,37 @@ def _excursion_threshold(
 
     Returns
     -------
-    threshold : `PerformanceThreshold`
+    derived : `_DerivedLimit`
         The excursion limit, in arcseconds.
     """
     pixel = guide_plate_scale
-    if guiding_rms_limit.value is None:
+    if guiding_rms_limit.limit.value is None:
         return _derived(
             "guide_excursion_limit",
             pixel,
             "arcsec",
-            ThresholdTier.GEOMETRY,
+            LimitTier.GEOMETRY,
             "One guide pixel. The acceptable guiding error is not yet known, so the "
             "size of a statistical excursion cannot be worked out.",
             {"guide_plate_scale": guide_plate_scale},
         )
-    statistical = EXCURSION_SIGMA_MULTIPLE * guiding_rms_limit.value
+    statistical = EXCURSION_SIGMA_MULTIPLE * guiding_rms_limit.limit.value
     return _derived(
         "guide_excursion_limit",
         max(statistical, pixel),
         "arcsec",
-        ThresholdTier.PHYSICAL_BUDGET,
+        LimitTier.PHYSICAL_BUDGET,
         f"The larger of {EXCURSION_SIGMA_MULTIPLE:g} x the acceptable guiding error "
         f"({statistical:.2f} arcsec) and one guide pixel ({pixel:.2f} arcsec). An error "
         "this large is an event, not noise.",
-        {"guiding_rms_limit": guiding_rms_limit.value, "guide_plate_scale": guide_plate_scale},
-        guiding_rms_limit.sample_count,
+        {"guiding_rms_limit": guiding_rms_limit.limit.value, "guide_plate_scale": guide_plate_scale},
+        guiding_rms_limit.limit.sample_count,
     )
 
 
 def _baseline_thresholds(
     baseline_values: Mapping[str, Sequence[float]], minimum_sessions: int
-) -> list[PerformanceThreshold]:
+) -> list[_DerivedLimit]:
     """Derive the limits that rest on this equipment's own session history.
 
     Every quantity (guide-star SNR, guiding error, a night's star width and
@@ -529,7 +573,7 @@ def _baseline_thresholds(
 
     Returns
     -------
-    thresholds : `list` [`PerformanceThreshold`]
+    thresholds : `list` [`_DerivedLimit`]
         A lower limit for guide-star SNR and star roundness and an upper
         limit for guiding error and star width, each marked as lacking data
         until enough sessions exist.
@@ -569,7 +613,7 @@ def _baseline_thresholds(
                 _insufficient(
                     limit_name,
                     unit,
-                    ThresholdTier.OWN_BASELINE,
+                    LimitTier.OWN_BASELINE,
                     f"Rests on {len(values)} sessions with this equipment; at least "
                     f"{minimum_sessions} are needed before anything is called unusual.",
                     sample_count=len(values),
@@ -583,7 +627,7 @@ def _baseline_thresholds(
                 limit_name,
                 limit,
                 unit,
-                ThresholdTier.OWN_BASELINE,
+                LimitTier.OWN_BASELINE,
                 f"Median of this equipment's sessions times exp({direction * BASELINE_SPREAD_MULTIPLIER:+g} "
                 f"x the robust spread of their logarithms): {meaning} this is unusual for this equipment.",
                 {"median": math.exp(log_median), "log_spread": log_spread},
@@ -595,12 +639,12 @@ def _baseline_thresholds(
 
 def _percentile_baseline_thresholds(
     baseline_values: Mapping[str, Sequence[float]], minimum_sessions: int
-) -> list[PerformanceThreshold]:
+) -> list[_DerivedLimit]:
     """Derive upper limits for fractions that are zero on most good nights.
 
     Returns
     -------
-    thresholds : `list` [`PerformanceThreshold`]
+    thresholds : `list` [`_DerivedLimit`]
         An upper limit each for the share of lost guide frames, the share
         of guide-error excursions and the share of cancelled exposures,
         each marked as lacking data until enough sessions exist.
@@ -628,7 +672,7 @@ def _percentile_baseline_thresholds(
                 _insufficient(
                     limit_name,
                     "fraction",
-                    ThresholdTier.OWN_BASELINE,
+                    LimitTier.OWN_BASELINE,
                     f"Rests on {len(values)} sessions with this equipment; at least "
                     f"{minimum_sessions} are needed before anything is called unusual.",
                     sample_count=len(values),
@@ -641,7 +685,7 @@ def _percentile_baseline_thresholds(
                 limit_name,
                 limit,
                 "fraction",
-                ThresholdTier.OWN_BASELINE,
+                LimitTier.OWN_BASELINE,
                 f"The {BASELINE_FRACTION_PERCENTILE}th percentile of {meaning} across this "
                 "equipment's sessions: a session above it is worse than 90 percent of the earlier ones.",
                 {"percentile": float(BASELINE_FRACTION_PERCENTILE)},
@@ -707,7 +751,7 @@ def derive_performance_envelope(
     budget = _budget_thresholds(
         measured_image_quality, blur_tolerance_fraction, minimum_image_quality_samples
     )
-    guide_plate_scale = next(t.value for t in geometry if t.name == "guide_plate_scale")
+    guide_plate_scale = next(t.limit.value for t in geometry if t.name == "guide_plate_scale")
     guiding_rms_limit = next(t for t in budget if t.name == "guiding_rms_limit")
     thresholds = [
         *geometry,
@@ -721,5 +765,11 @@ def derive_performance_envelope(
     return PerformanceEnvelope(
         equipment_fingerprint=equipment_fingerprint,
         blur_tolerance_fraction=blur_tolerance_fraction,
-        thresholds={threshold.name: threshold for threshold in thresholds},
+        thresholds={
+            derived.name: derived.limit.model_copy(
+                update={"register_entry": REGISTER_ENTRY_BY_LIMIT.get(derived.name)}
+            )
+            for derived in thresholds
+        },
+        limit_inputs={derived.name: derived.inputs for derived in thresholds if derived.inputs},
     )

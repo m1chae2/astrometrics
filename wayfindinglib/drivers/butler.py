@@ -20,10 +20,11 @@ the same ``wayfinding.db`` file. `DiskButler.control_records` gives the
 """
 
 import configparser
+import sqlite3
 from pathlib import Path
 from typing import Any
 
-from astrometricslib import AbstractButler, DatasetSpec, InvalidArgumentError
+from astrometricslib import AbstractButler, DatasetSpec, InvalidArgumentError, connect_db, safe_json_dumps
 from astrometricslib import Butler as _GenericButler
 from wayfindinglib.drivers.control_record_store import ControlRecordStore
 from wayfindinglib.models.equipment_and_site.calibration import CalibrationStats
@@ -267,3 +268,45 @@ class DiskButler(AbstractButler):
         if dataset_type not in _DATASET_TYPES:
             raise InvalidArgumentError(f"Unknown dataset type: {dataset_type}")
         return self.get(dataset_type, selector) is not None
+
+    def put_session_if_revision(self, session: ObservationSession, expected_revision: int) -> bool:
+        """Write a night plan only if it has not changed since it was read.
+
+        The check and the write are one SQLite ``UPDATE`` statement, so they
+        happen together: a second writer that read the same revision finds
+        the revision already moved and writes nothing. The stored revision
+        is read from the record's own JSON. A record stored before plans had
+        a revision counts as revision 0.
+
+        Parameters
+        ----------
+        session : `ObservationSession`
+            The session to store, already carrying its new revision.
+        expected_revision : `int`
+            The revision the caller read. The write happens only if the
+            stored revision is still this one.
+
+        Returns
+        -------
+        written : `bool`
+            `True` when the session was stored. `False` when the stored
+            revision was no longer `expected_revision`, or no such session is
+            stored. Nothing is changed in that case.
+        """
+        # Reading first makes sure the table exists.
+        self._generic.get("observation_session", {"id": session.id})
+        payload = safe_json_dumps(session.model_dump(mode="json", by_alias=True))
+        connection = connect_db(str(self.library_path / "wayfinding.db"))
+        try:
+            cursor = connection.execute(
+                "UPDATE wayfinding_observation_sessions SET data_json = ? WHERE id = ? "
+                "AND COALESCE(json_extract(data_json, '$.revision'), 0) = ?",
+                (payload, session.id, expected_revision),
+            )
+            connection.commit()
+            return cursor.rowcount == 1
+        except sqlite3.OperationalError:
+            # No sessions table yet, so no such session is stored.
+            return False
+        finally:
+            connection.close()

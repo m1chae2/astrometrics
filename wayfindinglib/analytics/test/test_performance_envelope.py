@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 
+from astrometricslib import LimitTier
 from wayfindinglib.analytics.performance_envelope import (
     DEFAULT_BLUR_TOLERANCE_FRACTION,
     SIDEREAL_RATE_ARCSEC_PER_SECOND,
@@ -28,8 +29,6 @@ from wayfindinglib.models.equipment_and_site.equipment import (
 )
 from wayfindinglib.models.equipment_and_site.performance_envelope import (
     PerformanceEnvelope,
-    ThresholdStatus,
-    ThresholdTier,
 )
 
 
@@ -221,7 +220,7 @@ def test_budget_limits_say_so_when_no_frames_have_been_measured() -> None:
 
     for name in ("guiding_rms_limit", "trailing_limit"):
         threshold = envelope.thresholds[name]
-        assert threshold.status == ThresholdStatus.INSUFFICIENT_DATA
+        assert threshold.value is None
         assert threshold.value is None
         assert "unknown" in threshold.derivation
 
@@ -231,7 +230,7 @@ def test_budget_limits_need_enough_frames() -> None:
     envelope = _envelope(measured_image_quality=MeasuredImageQuality(5.5, 3))
 
     threshold = envelope.thresholds["guiding_rms_limit"]
-    assert threshold.status == ThresholdStatus.INSUFFICIENT_DATA
+    assert threshold.value is None
     assert threshold.sample_count == 3
     assert "at least 20" in threshold.derivation
 
@@ -249,7 +248,7 @@ def test_sensor_limits_come_from_the_profile_with_their_provenance() -> None:
     envelope = _envelope(sensor_limits=limits)
 
     assert envelope.value("clip_ceiling") == pytest.approx(65532.0)
-    assert envelope.thresholds["clip_ceiling"].tier == ThresholdTier.SENSOR_PROFILE
+    assert envelope.thresholds["clip_ceiling"].tier == LimitTier.SENSOR_PROFILE
     assert "measured: maximum of saturated raw frames" in envelope.thresholds["clip_ceiling"].derivation
     assert "assumed" in envelope.thresholds["saturation_threshold"].derivation
 
@@ -266,7 +265,7 @@ def test_sensor_limits_say_so_when_no_profile_is_supplied() -> None:
     """Verify an absent profile gives no saturation value."""
     envelope = _envelope()
 
-    assert envelope.thresholds["saturation_threshold"].status == ThresholdStatus.INSUFFICIENT_DATA
+    assert envelope.thresholds["saturation_threshold"].value is None
 
 
 def test_baseline_limits_are_not_judged_until_there_are_enough_sessions() -> None:
@@ -274,7 +273,7 @@ def test_baseline_limits_are_not_judged_until_there_are_enough_sessions() -> Non
     envelope = _envelope(baseline_values={"guide_snr": [300.0, 310.0, 290.0, 305.0]})
 
     threshold = envelope.thresholds["guide_snr_low_limit"]
-    assert threshold.status == ThresholdStatus.INSUFFICIENT_DATA
+    assert threshold.value is None
     assert threshold.sample_count == 4
 
 
@@ -328,8 +327,10 @@ def test_every_limit_records_how_it_was_obtained() -> None:
 
     for threshold in envelope.thresholds.values():
         assert threshold.derivation
-        assert isinstance(threshold.tier, ThresholdTier)
-    assert envelope.thresholds["guiding_rms_limit"].inputs["fwhm_arcsec"] == pytest.approx(5.5)
+        assert isinstance(threshold.tier, LimitTier)
+        # Every limit names the register entry that holds its evidence.
+        assert threshold.register_entry and threshold.register_entry.startswith("WAY-")
+    assert envelope.limit_inputs["guiding_rms_limit"]["fwhm_arcsec"] == pytest.approx(5.5)
     assert envelope.thresholds["guiding_rms_limit"].sample_count == 100
 
 
@@ -364,7 +365,7 @@ def test_image_quality_records_the_exposure_cut_it_used() -> None:
     quality = MeasuredImageQuality(5.6, 361, minimum_exposure_seconds=9.6)
     envelope = _envelope(measured_image_quality=quality)
 
-    assert envelope.thresholds["guiding_rms_limit"].inputs["minimum_exposure_seconds"] == pytest.approx(9.6)
+    assert envelope.limit_inputs["guiding_rms_limit"]["minimum_exposure_seconds"] == pytest.approx(9.6)
 
 
 def test_the_excursion_limit_is_the_larger_of_five_sigma_and_one_guide_pixel() -> None:
@@ -390,7 +391,7 @@ def test_the_excursion_limit_falls_back_to_one_pixel_without_a_star_width() -> N
     envelope = _envelope()
 
     assert envelope.value("guide_excursion_limit") == pytest.approx(envelope.value("guide_plate_scale"))
-    assert envelope.thresholds["guide_excursion_limit"].tier == ThresholdTier.GEOMETRY
+    assert envelope.thresholds["guide_excursion_limit"].tier == LimitTier.GEOMETRY
 
 
 def test_the_excursion_limit_follows_the_guide_optics() -> None:
@@ -430,7 +431,7 @@ def test_fraction_limits_are_not_judged_without_enough_nights() -> None:
     envelope = _envelope(baseline_values={"guide_excursion_fraction": [0.0, 0.1, 0.0, 0.0]})
 
     threshold = envelope.thresholds["guide_excursion_fraction_high_limit"]
-    assert threshold.status == ThresholdStatus.INSUFFICIENT_DATA
+    assert threshold.value is None
     assert threshold.value is None
 
 
@@ -442,8 +443,8 @@ def test_the_night_star_width_limit_is_above_the_equipments_usual_width() -> Non
         "night_star_width_high_limit"
     ]
 
-    assert threshold.status == ThresholdStatus.DERIVED
-    assert threshold.tier == ThresholdTier.OWN_BASELINE
+    assert threshold.value is not None
+    assert threshold.tier == LimitTier.OWN_BASELINE
     assert threshold.value > max(widths)
     assert threshold.value < 3 * max(widths)
 
@@ -463,7 +464,7 @@ def test_star_quality_limits_are_not_judged_without_enough_nights() -> None:
     """Verify four nights of star measurements are not enough."""
     envelope = _envelope(baseline_values={"night_star_width": [5.0, 5.2, 5.1, 5.3]})
 
-    assert envelope.thresholds["night_star_width_high_limit"].status == ThresholdStatus.INSUFFICIENT_DATA
+    assert envelope.thresholds["night_star_width_high_limit"].value is None
     assert envelope.value("night_star_roundness_low_limit") is None
 
 
@@ -486,14 +487,14 @@ def test_the_shortest_exposure_that_shows_guiding_error_is_a_few_guide_cycles() 
     assert slow.value == pytest.approx(18.0)
     assert fast.value == pytest.approx(6.0)
     assert slow.unit == "s"
-    assert slow.tier == ThresholdTier.OWN_BASELINE
+    assert slow.tier == LimitTier.OWN_BASELINE
 
 
 def test_the_shortest_exposure_is_not_guessed_before_the_equipment_has_guided() -> None:
     """Verify a missing guide cycle gives a limit marked as lacking data."""
     threshold = _envelope().thresholds["minimum_star_measurement_exposure"]
 
-    assert threshold.status == ThresholdStatus.INSUFFICIENT_DATA
+    assert threshold.value is None
     assert threshold.value is None
 
 
@@ -501,16 +502,17 @@ def test_the_guide_star_brightness_limit_is_below_the_equipments_usual_brightnes
     """Verify a much fainter night is unusual and the limit stays positive."""
     masses = [250000.0, 300000.0, 280000.0, 320000.0, 290000.0, 310000.0]
 
-    threshold = _envelope(baseline_values={"guide_star_mass": masses}).thresholds["guide_star_mass_low_limit"]
+    envelope = _envelope(baseline_values={"guide_star_mass": masses})
+    threshold = envelope.thresholds["guide_star_mass_low_limit"]
 
-    assert threshold.status == ThresholdStatus.DERIVED
+    assert threshold.value is not None
     assert 0.0 < threshold.value < min(masses)
     assert threshold.unit == "counts"
-    assert threshold.inputs["median"] == pytest.approx(295000.0, rel=0.05)
+    assert envelope.limit_inputs["guide_star_mass_low_limit"]["median"] == pytest.approx(295000.0, rel=0.05)
 
 
 def test_the_guide_star_brightness_limit_needs_enough_nights() -> None:
     """Verify four nights are not enough to call a night dim."""
     envelope = _envelope(baseline_values={"guide_star_mass": [250000.0, 300000.0, 280000.0, 320000.0]})
 
-    assert envelope.thresholds["guide_star_mass_low_limit"].status == ThresholdStatus.INSUFFICIENT_DATA
+    assert envelope.thresholds["guide_star_mass_low_limit"].value is None

@@ -161,7 +161,7 @@ def measure_guiding_performance(
 
     widening = None
     if applies and rms_per_axis is not None:
-        star_width = envelope.thresholds["guiding_rms_limit"].inputs.get("fwhm_arcsec")
+        star_width = envelope.limit_inputs.get("guiding_rms_limit", {}).get("fwhm_arcsec")
         if isinstance(star_width, float) and star_width > 0.0:
             widening = math.hypot(1.0, SIGMA_TO_FWHM * rms_per_axis / star_width) - 1.0
 

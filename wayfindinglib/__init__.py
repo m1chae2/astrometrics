@@ -66,6 +66,7 @@ if TYPE_CHECKING:
     )
     from wayfindinglib.models.planning.quality_advisory import TargetQualityAdvisory
     from wayfindinglib.models.planning.sequence_plan import SequenceItem, SequencePlan
+    from wayfindinglib.models.planning.sequence_summary import SequenceSummary
     from wayfindinglib.models.planning.sky_source import SkySource
     from wayfindinglib.models.planning.visibility import (
         HorizonZone,
@@ -77,9 +78,16 @@ if TYPE_CHECKING:
     )
     from wayfindinglib.models.policy.delegation import ObservatoryCapability
     from wayfindinglib.models.session.capture_result import CaptureResult
+    from wayfindinglib.models.session.live_session_status import LiveSessionStatus
+    from wayfindinglib.models.session.night_list import NightListEntry, TargetChange
     from wayfindinglib.models.session.observation_session import (
+        ChecklistItem,
+        Framing,
         ObservationSession,
         ObservationSessionSummary,
+        PlanChange,
+        PlanChangeItem,
+        PlanRevisionConflictError,
         QueueRequest,
         StartTimeMode,
     )
@@ -145,6 +153,16 @@ _LAZY_EXPORTS = {
     "ObservationSessionSummary": "wayfindinglib.models.session.observation_session",
     "QueueRequest": "wayfindinglib.models.session.observation_session",
     "StartTimeMode": "wayfindinglib.models.session.observation_session",
+    "ChecklistItem": "wayfindinglib.models.session.observation_session",
+    "Framing": "wayfindinglib.models.session.observation_session",
+    "PlanChange": "wayfindinglib.models.session.observation_session",
+    "PlanChangeItem": "wayfindinglib.models.session.observation_session",
+    "PlanRevisionConflictError": "wayfindinglib.models.session.observation_session",
+    "SequenceSummary": "wayfindinglib.models.planning.sequence_summary",
+    # Models that `control.history` returns.
+    "NightListEntry": "wayfindinglib.models.session.night_list",
+    "TargetChange": "wayfindinglib.models.session.night_list",
+    "LiveSessionStatus": "wayfindinglib.models.session.live_session_status",
     "DeepCatalogStatus": "wayfindinglib.models.planning.deep_catalog",
     "SkySource": "wayfindinglib.models.planning.sky_source",
     "DeepCatalogEstimate": "wayfindinglib.models.planning.deep_catalog",

@@ -24,6 +24,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from astrometricslib import MeasurementReference
 from wayfindinglib.models.session.session_quality import Recommendation
 
 CAPTURE_ANALYSIS_VERSION = "1.0.0"
@@ -141,18 +142,14 @@ class ExposureClipping(BaseModel):
     clipped_fraction : `float`
         `clipped_frames` divided by `frames`.
     is_clipped : `bool`
-        Whether a star clips at this exposure length. It is the science
-        library's verdict for the target and exposure when there is one.
-        Otherwise it is whether at least half the frames clipped, the rule the
-        science library uses too, because one clipped frame in a group can be
-        a cosmic ray or a satellite trail and says nothing about the exposure
-        length.
-    basis : `str`
-        ``"science_stack"`` when `is_clipped` is the science library's
-        verdict, ``"frame_pixel_count"`` when it was worked out here.
-    science_recommended_exposure_seconds : `float` or `None`
-        The exposure the science library says would keep the brightest star
-        below the ceiling, when it has a verdict for this target.
+        Whether a star clips at this exposure length: whether at least half
+        the frames clipped. One clipped frame in a group can be a cosmic ray
+        or a satellite trail and says nothing about the exposure length.
+        It is worked out here from the stored saturated-pixel measurements
+        of the frames, not taken from the stacking summary.
+    evidence : `list` [`MeasurementReference`]
+        The stored saturated-pixel measurements of the frames counted in
+        `frames`.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -164,18 +161,15 @@ class ExposureClipping(BaseModel):
     clipped_frames: int = Field(alias="clippedFrames")
     clipped_fraction: float = Field(alias="clippedFraction")
     is_clipped: bool = Field(alias="isClipped")
-    basis: str = "frame_pixel_count"
-    science_recommended_exposure_seconds: float | None = Field(
-        default=None, alias="scienceRecommendedExposureSeconds"
-    )
+    evidence: list[MeasurementReference] = Field(default_factory=list)
 
 
 class StarQuality(BaseModel):
     """How sharp and round the night's stars were.
 
     Only imaging frames long enough for guiding error to show in them are
-    used, and only those the science library registered, since registration
-    is what measures the stars.
+    used, and only those whose stars were measured (the stored star width and
+    star shape measurements).
 
     Attributes
     ----------
@@ -191,6 +185,10 @@ class StarQuality(BaseModel):
         Median roundness, from 0 to 1, where 1 is a circle.
     roundness_limit : `float` or `None`
         The roundness below which a night is unusual for this equipment.
+    width_evidence : `list` [`MeasurementReference`]
+        The stored star-width measurements the median width rests on.
+    roundness_evidence : `list` [`MeasurementReference`]
+        The stored star-shape measurements the median roundness rests on.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -201,6 +199,8 @@ class StarQuality(BaseModel):
     star_width_limit_arcsec: float | None = Field(default=None, alias="starWidthLimitArcsec")
     median_roundness: float | None = Field(default=None, alias="medianRoundness")
     roundness_limit: float | None = Field(default=None, alias="roundnessLimit")
+    width_evidence: list[MeasurementReference] = Field(default_factory=list, alias="widthEvidence")
+    roundness_evidence: list[MeasurementReference] = Field(default_factory=list, alias="roundnessEvidence")
 
 
 class CaptureEfficiency(BaseModel):

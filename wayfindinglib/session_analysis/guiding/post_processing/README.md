@@ -6,8 +6,8 @@ Each recommendation has:
 
 - a **kind** and a **severity**: `info` (a finding, nothing to do), `advice` (a change that would improve results) or `warning` (the night's data is unreliable or the equipment is misconfigured);
 - a plain-language **message**;
-- the **evidence** it rests on and the **limit** it was compared with, so a reader can check it;
-- a **confidence**: `high`, `medium` or `low`. It is `medium` when the limits come from equipment that only partly matches the night's. It is `low` for a guiding-error conclusion when the guide signal was poor, because then the error numbers describe a bad measurement, not the mount.
+- the **evidence** (references to stored measurement rows), the other **values** it rests on, and the **limits** it was compared with (each a `QualityLimit` with its tier and derivation), so a reader can check it;
+- a **confidence**: `measured`, `partly_measured` or `design_estimate`, the status of the register entry behind the guiding rules (WAY-45). It steps down one label when the limits come from equipment that only partly matches the night's, when the guide signal was poor, or when the advice rests on a proxy such as the guide log.
 
 ## Rules
 

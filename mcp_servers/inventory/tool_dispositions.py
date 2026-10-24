@@ -537,6 +537,7 @@ DECISIONS = {
             "planning_create_mosaic",
             "planning_create_plan",
             "planning_edit_queue",
+            "planning_tick_checklist_item",
         ),
         ToolDecision("withhold", READ_ONLY_NOTE),
     ),

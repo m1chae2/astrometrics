@@ -17,12 +17,19 @@ Rules applied, in order:
 5. Guiding error against the acceptable guiding error.
 6. The longest exposure length in use against how often guiding stayed clean
    for a whole exposure of that length.
-Confidence is never "high" when the limits come from equipment that only
-partly matches the night's, or when the recommendation rests on a proxy.
+Every recommendation lists the stored limits it was compared with
+(`compared_to`) and the numbers it rests on (`values`). The guiding data comes
+from guide logs, not from the measurement store, so `evidence` is empty here.
+Confidence is the register status of the guiding rules (WAY-45), stepped down
+one label when the limits come from equipment that only partly matches the
+night's, when the guide signal was poor, or when the recommendation rests on a
+proxy.
 """
 
+from astrometricslib import QualityLimit
 from wayfindinglib.analytics.performance_envelope import MINIMUM_SAMPLES_PER_SESSION
 from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
+from wayfindinglib.models.quality.statements import Confidence
 from wayfindinglib.models.session.session_quality import (
     GuidingInputQuality,
     GuidingPerformance,
@@ -33,6 +40,7 @@ from wayfindinglib.models.session.session_quality import (
 from wayfindinglib.session_analysis.guiding.processing.measure_exposure_feasibility import (
     RELIABLE_CLEAN_FRACTION,
 )
+from wayfindinglib.session_analysis.rule_support import design_limit, envelope_limits, rule_confidence
 
 _SEVERITY_ORDER = {
     RecommendationSeverity.WARNING: 0,
@@ -57,6 +65,19 @@ def _applicable_limit(
     return envelope.value(name)
 
 
+def _limits(
+    envelope: PerformanceEnvelope | None, input_quality: GuidingInputQuality, *names: str
+) -> list[QualityLimit]:
+    """List the named envelope limits that apply to this night's equipment.
+
+    Returns
+    -------
+    limits : `list` [`QualityLimit`]
+        The limits, empty if the night's equipment does not match the envelope.
+    """
+    return envelope_limits(envelope, names, applies=input_quality.limits_equipment_match != "none")
+
+
 def _insufficient_data(input_quality: GuidingInputQuality) -> Recommendation:
     """Say that the night has too little data to judge.
 
@@ -72,9 +93,16 @@ def _insufficient_data(input_quality: GuidingInputQuality) -> Recommendation:
             f"Only {input_quality.samples_analyzed} measured guide samples exist for this night; "
             f"at least {MINIMUM_SAMPLES_PER_SESSION} are needed to judge it."
         ),
-        evidence={"samples": float(input_quality.samples_analyzed)},
-        compared_to={"minimum_samples": float(MINIMUM_SAMPLES_PER_SESSION)},
-        confidence="high",
+        values={"samples": float(input_quality.samples_analyzed)},
+        compared_to=[
+            design_limit(
+                float(MINIMUM_SAMPLES_PER_SESSION),
+                "samples",
+                "Fewest measured guide samples a night needs: about six minutes of guiding.",
+                "WAY-D45",
+            )
+        ],
+        confidence=rule_confidence("guiding"),
     )
 
 
@@ -98,11 +126,9 @@ def _recalibrate_guider(
             "corrections were wrong. Recalibrate under a clear sky with a bright, "
             "well-focused guide star. " + " ".join(input_quality.calibration_problems)
         ),
-        evidence={"problem_count": float(len(input_quality.calibration_problems))},
-        compared_to={
-            "max_credible_guide_speed": _applicable_limit(envelope, "max_credible_guide_speed", input_quality)
-        },
-        confidence="high",
+        values={"problem_count": float(len(input_quality.calibration_problems))},
+        compared_to=_limits(envelope, input_quality, "max_credible_guide_speed"),
+        confidence=rule_confidence("guiding"),
     )
 
 
@@ -135,7 +161,9 @@ def _dim_star_text(input_quality: GuidingInputQuality) -> str:
     return text
 
 
-def _check_guide_signal(input_quality: GuidingInputQuality) -> Recommendation | None:
+def _check_guide_signal(
+    input_quality: GuidingInputQuality, envelope: PerformanceEnvelope | None
+) -> Recommendation | None:
     """Warn when the guide star was weak, often lost, or often jumped.
 
     Returns
@@ -173,20 +201,22 @@ def _check_guide_signal(input_quality: GuidingInputQuality) -> Recommendation | 
             "focus, dew or an obstruction on the guide scope, haze or cloud, or a dim guide star. "
             "Guiding error numbers from this night describe a poor measurement, not the mount."
         ),
-        evidence={
+        values={
             "median_snr": input_quality.median_snr,
             "median_star_mass": input_quality.median_star_mass,
             "lost_fraction": input_quality.lost_fraction,
             "excursion_fraction": input_quality.excursion_fraction,
-        },
-        compared_to={
-            "snr_limit": input_quality.snr_limit,
-            "star_mass_limit": input_quality.star_mass_limit,
             "typical_star_mass": input_quality.typical_star_mass,
-            "lost_fraction_limit": input_quality.lost_fraction_limit,
-            "excursion_fraction_limit": input_quality.excursion_fraction_limit,
         },
-        confidence="high" if input_quality.limits_equipment_match == "exact" else "medium",
+        compared_to=_limits(
+            envelope,
+            input_quality,
+            "guide_snr_low_limit",
+            "guide_star_mass_low_limit",
+            "guide_lost_fraction_high_limit",
+            "guide_excursion_fraction_high_limit",
+        ),
+        confidence=rule_confidence("guiding", degraded=input_quality.limits_equipment_match != "exact"),
     )
 
 
@@ -209,25 +239,28 @@ def _update_guide_optics(
             "The guide log's plate scale differs from the configured guide equipment. Update the "
             "configured guide scope or guide camera so the limits and calibration use the real optics."
         ),
-        evidence={"logged_guide_scale_arcsec_per_px": logged_scale},
-        compared_to={"configured_guide_scale_arcsec_per_px": configured_scale},
-        confidence="high",
+        values={
+            "logged_guide_scale_arcsec_per_px": logged_scale,
+            "configured_guide_scale_arcsec_per_px": configured_scale,
+        },
+        confidence=rule_confidence("guiding"),
     )
 
 
-def _confidence(input_quality: GuidingInputQuality, signal_problem: bool) -> str:
+def _confidence(input_quality: GuidingInputQuality, signal_problem: bool) -> Confidence:
     """Decide how far a guiding-error conclusion can be trusted.
 
     Returns
     -------
-    confidence : `str`
-        ``"low"`` when the guide signal was poor (the error numbers describe
-        a bad measurement), ``"medium"`` when the limits come from equipment
-        that only partly matches the night's, otherwise ``"high"``.
+    confidence : `Confidence`
+        The register status of the guiding rules, one step lower when the
+        guide signal was poor (the error numbers then describe a bad
+        measurement) or when the limits come from equipment that only partly
+        matches the night's.
     """
-    if signal_problem:
-        return "low"
-    return "high" if input_quality.limits_equipment_match == "exact" else "medium"
+    return rule_confidence(
+        "guiding", degraded=signal_problem or input_quality.limits_equipment_match != "exact"
+    )
 
 
 def _guiding_against_limit(
@@ -264,8 +297,8 @@ def _guiding_against_limit(
         kind=kind,
         severity=severity,
         message=f"Guiding error was {error:.2f} arcsec per axis, {verdict}",
-        evidence={"rms_per_axis_arcsec": error, "expected_star_widening_fraction": widening},
-        compared_to={"guiding_rms_limit": limit},
+        values={"rms_per_axis_arcsec": error, "expected_star_widening_fraction": widening},
+        compared_to=_limits(envelope, input_quality, "guiding_rms_limit"),
         confidence=_confidence(input_quality, signal_problem),
     )
 
@@ -315,7 +348,7 @@ def _exposure_length_limited(
             f"had clean guiding for their whole length. The main reason was that {main_cause} "
             f"({main_share:.0%} of the windows). {alternative}"
         ),
-        evidence={
+        values={
             "exposure_seconds": longest.exposure_seconds,
             "clean_fraction": longest.clean_fraction,
             "lost_fraction": longest.lost_fraction,
@@ -323,12 +356,18 @@ def _exposure_length_limited(
             "wobble_fraction": longest.wobble_fraction,
             "windows": float(longest.windows),
         },
-        compared_to={
-            "reliable_clean_fraction": RELIABLE_CLEAN_FRACTION,
-            "guiding_rms_limit": _applicable_limit(envelope, "guiding_rms_limit", input_quality),
-            "guide_excursion_limit": _applicable_limit(envelope, "guide_excursion_limit", input_quality),
-        },
-        confidence="low" if signal_problem else "medium",
+        compared_to=[
+            design_limit(
+                RELIABLE_CLEAN_FRACTION,
+                "fraction",
+                "An exposure length is reliable when at least this share of start times had clean guiding.",
+                "WAY-D46",
+            ),
+            *_limits(envelope, input_quality, "guiding_rms_limit", "guide_excursion_limit"),
+        ],
+        # This rule rests on a proxy (the guide log stands in for the star
+        # shape in the frame), so it is always one label lower.
+        confidence=rule_confidence("guiding", degraded=True),
     )
 
 
@@ -364,7 +403,7 @@ def recommend_for_guiding(
     if not input_quality.has_enough_samples:
         return [_insufficient_data(input_quality)]
 
-    signal = _check_guide_signal(input_quality)
+    signal = _check_guide_signal(input_quality, envelope)
     signal_problem = signal is not None
     candidates = [
         _recalibrate_guider(input_quality, envelope),

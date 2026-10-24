@@ -4,9 +4,9 @@ Description: `Wayfinder.planning` is an `ObservationPlanning`. It answers
 where objects are in the sky (`get_visibility`), advises on targets and
 calibration frames (`get_advisory`), lays out mosaics
 (`calculate_panels`, `create_mosaic`), writes plans (`create_plan`,
-`edit_queue`) and reads them back (`get_plan`). It also browses the
-library and online catalogs around a point in the sky and reports on the
-downloaded deep-star catalog.
+`edit_queue`, `tick_checklist_item`) and reads them back (`get_plan`). It
+also browses the library and online catalogs around a point in the sky and
+reports on the downloaded deep-star catalog.
 
 Planning never talks to hardware. A plan made by hand (`create_plan`
 with ``kind="empty_session"``, then `edit_queue`) and a plan placed
@@ -22,6 +22,7 @@ import threading
 import uuid
 from collections.abc import Sequence
 from datetime import date, datetime
+from types import SimpleNamespace
 from typing import Any, Literal
 
 from astropy.time import Time
@@ -61,8 +62,13 @@ from wayfindinglib.models.planning.sequence_plan import SequencePlan
 from wayfindinglib.models.planning.sky_source import SkySource
 from wayfindinglib.models.planning.visibility import HorizonZone, VisibilityReport
 from wayfindinglib.models.session.observation_session import (
+    ChecklistItem,
+    Framing,
     ObservationSession,
     ObservationSessionSummary,
+    PlanChange,
+    PlanChangeItem,
+    PlanRevisionConflictError,
     QueuedObservationPackage,
     QueueEntryStatus,
     QueueRequest,
@@ -817,6 +823,7 @@ class ObservationPlanning:
         cols: int,
         overlap_percent: float,
         equipment: EquipmentConfiguration | None = None,
+        rotation_deg: float = 0.0,
     ) -> list[MosaicPanel]:
         """Work out the center of each panel of a mosaic grid.
 
@@ -838,15 +845,21 @@ class ObservationPlanning:
         equipment : `EquipmentConfiguration`, optional
             The telescope and camera whose field of view sets the spacing.
             The configured sensor and focal length are used when omitted.
+        rotation_deg : `float`, optional
+            How far the camera is turned, in degrees east of north, as
+            Ekos and KStars give it. At 0 the grid rows run along
+            declination; at 90 the two grid axes swap. Defaults to 0.
 
         Returns
         -------
         panels : `list` [`MosaicPanel`]
-            One panel per grid cell, row by row.
+            One panel per grid cell, row by row. Each carries the rotation.
         """
         from wayfindinglib.tasks.planning_tasks.mosaic_tasks import calculate_panels
 
-        return calculate_panels(self._config, center_ra, center_dec, rows, cols, overlap_percent, equipment)
+        return calculate_panels(
+            self._config, center_ra, center_dec, rows, cols, overlap_percent, equipment, rotation_deg
+        )
 
     def create_mosaic(
         self,
@@ -1119,53 +1132,163 @@ class ObservationPlanning:
             planning_config=self._planning_config,
         )
 
+    def _allowed_capture_values(self, session: ObservationSession) -> Any:
+        """Work out what the session's camera may be asked to do.
+
+        Parameters
+        ----------
+        session : `ObservationSession`
+            The session; its camera id is the camera's name.
+
+        Returns
+        -------
+        allowed : `AllowedCaptureValues`
+            The measured settings from the camera profile and the filters
+            seen on that camera's library frames.
+        """
+        from astrometricslib import ConfigurationError, resolve_camera_profile
+        from wayfindinglib.analytics.result_quality.allowed_capture_values import allowed_capture_values
+
+        try:
+            profile = resolve_camera_profile(session.camera_id, self._config)
+        except ConfigurationError:
+            # A configuration with no camera profiles cannot say what was
+            # measured. Treat the camera as unprofiled: requests are accepted
+            # and marked.
+            profile = SimpleNamespace(
+                camera_name=session.camera_id, is_generic_fallback=True, sensor_noise=()
+            )
+        # A library with no quality records gives an empty dictionary.
+        library_settings = self._astrometrics.quality.capture_settings().values()
+        camera_key = "".join(character for character in session.camera_id.casefold() if character.isalnum())
+        library_filters = [
+            setting.filter_name
+            for setting in library_settings
+            if setting.filter_name
+            and "".join(character for character in setting.camera.casefold() if character.isalnum())
+            == camera_key
+        ]
+        return allowed_capture_values(profile, (), library_filters)
+
     def edit_queue(
         self,
         session_id: str,
         add: list[QueueRequest | dict[str, Any]] | None = None,
         order: list[str] | None = None,
         remove: list[str] | None = None,
-    ) -> ObservationSession:
-        """Change an observing session's queue by hand.
+        *,
+        set_exposures: dict[str, list[ExposureRequest | dict[str, Any]]] | None = None,
+        add_checklist: list[ChecklistItem | dict[str, Any]] | None = None,
+        framing: Framing | dict[str, Any] | None = None,
+        expected_revision: int | None = None,
+    ) -> PlanChange:
+        """Change an observing session's night plan by hand.
 
         Added entries freeze a copy of their package (exposures,
         dithering, altitude limit and priority), the same way automatic
         placement does, so a session built by hand and one placed
-        automatically run the same way. The changes apply in this order:
-        `remove`, then `order`, then `add` (new entries go at the end).
+        automatically run the same way. The queue changes apply in this
+        order: `remove`, then `order`, then `add` (new entries go at the
+        end), then `set_exposures`.
+
+        Every exposure request is checked against the camera: a gain
+        setting, offset or binning the camera profile did not measure is
+        refused with the reason, and a camera with no measured setting
+        accepts the request and notes "setting not measured". Exact
+        duplicate requests in one entry merge (their counts add);
+        requests that differ only in delay are refused.
+
+        The write is one database step. When `expected_revision` is given,
+        it must be the revision last read, or nothing is written.
 
         Parameters
         ----------
         session_id : `str`
             The session to change.
         add : `list` [`QueueRequest`], optional
-            Recorded packages to append, each with its start mode and any
-            start and end worked out by hand.
+            Recorded packages to append, each with its start mode, any
+            start and end worked out by hand, and optionally its own
+            exposure requests instead of the package's.
         order : `list` [`str`], optional
             Every entry id left after `remove`, in the new order.
         remove : `list` [`str`], optional
             Ids of entries to take out of the queue. An entry that is
             running cannot be removed.
+        set_exposures : `dict` [`str`, `list` [`ExposureRequest`]], optional
+            New exposure requests for existing entries, by entry id. An
+            entry that is running or done cannot change.
+        add_checklist : `list` [`ChecklistItem`], optional
+            Checklist items to add. An item with the same rule and capture
+            setting as one already on the list is not added again.
+        framing : `Framing`, optional
+            The field center, camera rotation and mosaic panels to store.
+        expected_revision : `int`, optional
+            The plan revision the caller last read. Leave out to write
+            over whatever is stored.
 
         Returns
         -------
-        session : `ObservationSession`
-            The changed, recorded session.
+        change : `PlanChange`
+            The new revision, what changed, notes on accepted settings and
+            the stored session.
 
         Raises
         ------
         InvalidArgumentError
-            If none of `add`, `order` and `remove` is given, a request is
-            malformed, or `order` does not name exactly the entries in the
-            queue.
+            If nothing to change is given, a request is malformed, `order`
+            does not name exactly the entries in the queue, or an exposure
+            request is refused.
         NotFoundError
-            If `remove` names an entry that is not in the queue.
+            If `remove` or `set_exposures` names an entry that is not in
+            the queue.
         ConflictError
             If `remove` names an entry that is running.
+        PlanRevisionConflictError
+            If the stored revision is not `expected_revision`. Its details
+            hold the current revision.
         """
-        if add is None and order is None and remove is None:
-            raise InvalidArgumentError("Give add, order or remove.")
+        from wayfindinglib.tasks.planning_tasks.night_plan_tasks import (
+            add_checklist_items,
+            check_exposure_requests,
+            merge_exposure_requests,
+            store_session_change,
+        )
+
+        if (
+            add is None
+            and order is None
+            and remove is None
+            and set_exposures is None
+            and add_checklist is None
+            and framing is None
+        ):
+            raise InvalidArgumentError("Give add, order, remove, set_exposures, add_checklist or framing.")
         session = self._session(session_id)
+        loaded_revision = session.revision
+        changes: list[PlanChangeItem] = []
+        allowed = None
+        notes: list[str] = []
+
+        def checked_requests(requests: list[ExposureRequest]) -> list[ExposureRequest]:
+            """Merge duplicates and check the camera allows each request.
+
+            Parameters
+            ----------
+            requests : `list` [`ExposureRequest`]
+                The requests of one entry.
+
+            Returns
+            -------
+            requests : `list` [`ExposureRequest`]
+                The merged requests.
+            """
+            nonlocal allowed
+            merged = merge_exposure_requests(requests)
+            if allowed is None:
+                allowed = self._allowed_capture_values(session)
+            notes.extend(note for note in check_exposure_requests(merged, allowed) if note not in notes)
+            return merged
+
         if remove:
             from astrometricslib import ConflictError
 
@@ -1179,6 +1302,7 @@ class ObservationPlanning:
             if running:
                 raise ConflictError("A running entry cannot be removed.", details={"running": running})
             session.queue = [entry for entry in session.queue if entry.id not in set(remove)]
+            changes.extend(PlanChangeItem(kind="queue_removed", entry_id=entry_id) for entry_id in remove)
         if order is not None:
             entries_by_id = {entry.id: entry for entry in session.queue}
             if sorted(order) != sorted(entries_by_id):
@@ -1187,6 +1311,7 @@ class ObservationPlanning:
                     details={"order": list(order), "entries": sorted(entries_by_id)},
                 )
             session.queue = [entries_by_id[entry_id] for entry_id in order]
+            changes.append(PlanChangeItem(kind="queue_reordered"))
         for item in add or []:
             try:
                 request = QueueRequest.model_validate(item)
@@ -1195,23 +1320,131 @@ class ObservationPlanning:
                     "Each entry to add needs a package_id.", details={"error": str(error)}
                 ) from error
             package = self._package(request.package_id)
-            session.queue.append(
-                QueuedObservationPackage(
-                    id=str(uuid.uuid4()),
-                    observation_package_id=package.id,
-                    target_id=package.target_id,
-                    exposure_requests=list(package.exposure_requests),
-                    dither_config=package.dither_config,
-                    minimum_altitude_deg=package.minimum_altitude_deg,
-                    priority=package.priority,
-                    start_time_mode=request.start_time_mode,
-                    requested_start_time=request.requested_start_time,
-                    computed_start_time=request.computed_start_time,
-                    computed_end_time=request.computed_end_time,
+            requests = checked_requests(
+                list(
+                    package.exposure_requests
+                    if request.exposure_requests is None
+                    else request.exposure_requests
                 )
             )
-        self._butler.put(session, "observation_session", {"session_id": session.id})
-        return session
+            entry = QueuedObservationPackage(
+                id=str(uuid.uuid4()),
+                observation_package_id=package.id,
+                target_id=package.target_id,
+                exposure_requests=requests,
+                dither_config=package.dither_config,
+                minimum_altitude_deg=package.minimum_altitude_deg,
+                priority=package.priority,
+                start_time_mode=request.start_time_mode,
+                requested_start_time=request.requested_start_time,
+                computed_start_time=request.computed_start_time,
+                computed_end_time=request.computed_end_time,
+            )
+            session.queue.append(entry)
+            changes.append(PlanChangeItem(kind="queue_added", detail=package.id, entry_id=entry.id))
+        for entry_id, raw_requests in (set_exposures or {}).items():
+            entry = next((candidate for candidate in session.queue if candidate.id == entry_id), None)
+            if entry is None:
+                raise NotFoundError("That entry is not in the queue.", details={"set_exposures": entry_id})
+            if entry.status != QueueEntryStatus.PENDING:
+                from astrometricslib import ConflictError
+
+                raise ConflictError(
+                    "Only an entry that has not started can change its exposures.",
+                    details={"entry_id": entry_id, "status": entry.status.value},
+                )
+            try:
+                requests = [ExposureRequest.model_validate(raw) for raw in raw_requests]
+            except ValidationError as error:
+                raise InvalidArgumentError(
+                    "Each exposure request needs frame_type, exposure_sec and count.",
+                    details={"error": str(error)},
+                ) from error
+            entry.exposure_requests = checked_requests(requests)
+            changes.append(PlanChangeItem(kind="exposures_set", entry_id=entry_id))
+        if add_checklist is not None:
+            try:
+                items = [ChecklistItem.model_validate(item) for item in add_checklist]
+            except ValidationError as error:
+                raise InvalidArgumentError(
+                    "Each checklist item needs a rule.", details={"error": str(error)}
+                ) from error
+            changes.extend(add_checklist_items(session, items))
+        if framing is not None:
+            try:
+                session.framing = Framing.model_validate(framing)
+            except ValidationError as error:
+                raise InvalidArgumentError(
+                    "Framing needs center_ra_deg and center_dec_deg.", details={"error": str(error)}
+                ) from error
+            changes.append(PlanChangeItem(kind="framing_set"))
+        result = store_session_change(
+            self._butler, session, loaded_revision, expected_revision, changes, notes
+        )
+        if isinstance(result, PlanRevisionConflictError):
+            raise PlanRevisionConflictError(str(result), details=result.details) from result
+        return result
+
+    def tick_checklist_item(
+        self,
+        session_id: str,
+        item_id: str,
+        *,
+        expected_revision: int | None = None,
+        note: str | None = None,
+        ticked_at: datetime | None = None,
+    ) -> PlanChange:
+        """Record that the user did one item of the night plan's checklist.
+
+        Whether the tick holds is not decided here. A later advisory read
+        compares the tick time with the measurements taken since and says
+        when an item comes back.
+
+        Parameters
+        ----------
+        session_id : `str`
+            The session whose checklist holds the item.
+        item_id : `str`
+            The item to tick.
+        expected_revision : `int`, optional
+            The plan revision the caller last read. Leave out to write
+            over whatever is stored.
+        note : `str`, optional
+            A note to keep with the item.
+        ticked_at : `datetime`, optional
+            When the user did it. Now when omitted.
+
+        Returns
+        -------
+        change : `PlanChange`
+            The new revision and the tick.
+
+        Raises
+        ------
+        NotFoundError
+            If the session or the item does not exist.
+        PlanRevisionConflictError
+            If the stored revision is not `expected_revision`.
+        """
+        from wayfindinglib.tasks.planning_tasks.night_plan_tasks import (
+            find_checklist_item,
+            store_session_change,
+            tick_item,
+        )
+
+        session = self._session(session_id)
+        item = find_checklist_item(session, item_id)
+        if item is None:
+            raise NotFoundError(
+                f"No checklist item {item_id!r} in session {session_id!r}.",
+                details={"item_id": item_id, "session_id": session_id},
+            )
+        loaded_revision = session.revision
+        change = tick_item(item, ticked_at, note)
+        result = store_session_change(self._butler, session, loaded_revision, expected_revision, [change], [])
+        if isinstance(result, PlanRevisionConflictError):
+            raise PlanRevisionConflictError(str(result), details=result.details) from result
+        return result
 
     def get_plan(self, session_id: str | None = None) -> ObservationSession | list[ObservationSessionSummary]:
         """Read one recorded observing session, or list them all.

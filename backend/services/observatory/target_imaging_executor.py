@@ -111,8 +111,8 @@ class TargetImagingExecutor:
         package = planning.create_plan(
             "package", target=sequence["target_name"], plan_items=sequence["items"]
         )
-        session = planning.edit_queue(self._session().id, add=[self._request(package.id, timing)])
-        return session.queue[-1].id
+        change = planning.edit_queue(self._session().id, add=[self._request(package.id, timing)])
+        return change.session.queue[-1].id
 
     def enqueue_sequence(self, sequence: dict[str, Any], timing: dict[str, Any]) -> dict[str, str]:
         """Add one sequence to the queue.

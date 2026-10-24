@@ -8,6 +8,9 @@ its evidence, limit and confidence.
 
 import pytest
 
+from astrometricslib import LimitTier, MeasurementReference, QualityLimit
+from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
+from wayfindinglib.models.quality.statements import Confidence
 from wayfindinglib.models.session.capture_quality import (
     CaptureEfficiency,
     CaptureInputQuality,
@@ -45,8 +48,7 @@ def _group(
     clipped: bool = True,
     frames: int = 30,
     spectral: bool = True,
-    basis: str = "science_stack",
-    recommended: float | None = None,
+    first_row: int = 1,
 ) -> ExposureClipping:
     """Build one clipping result.
 
@@ -63,8 +65,31 @@ def _group(
         clipped_frames=frames if clipped else 0,
         clipped_fraction=1.0 if clipped else 0.0,
         is_clipped=clipped,
-        basis=basis,
-        science_recommended_exposure_seconds=recommended,
+        evidence=[MeasurementReference(row_id=first_row + index) for index in range(frames)],
+    )
+
+
+def _envelope(**limit_values: float) -> PerformanceEnvelope:
+    """Build an envelope holding the named limits.
+
+    Returns
+    -------
+    envelope : `PerformanceEnvelope`
+        An envelope with one own-baseline limit per keyword.
+    """
+    return PerformanceEnvelope(
+        equipment_fingerprint="test",
+        blur_tolerance_fraction=0.1,
+        thresholds={
+            name: QualityLimit(
+                value=value,
+                unit="",
+                tier=LimitTier.OWN_BASELINE,
+                derivation="Made up for the test.",
+                register_entry="WAY-42",
+            )
+            for name, value in limit_values.items()
+        },
     )
 
 
@@ -119,8 +144,8 @@ def test_exposures_missing_from_the_library_are_advised() -> None:
 
     (recommendation,) = recommendations
     assert recommendation.kind == RecommendationKind.CAPTURES_NOT_IN_LIBRARY
-    assert recommendation.evidence["captures_without_frame"] == pytest.approx(7.0)
-    assert recommendation.confidence == "high"
+    assert recommendation.values["captures_without_frame"] == pytest.approx(7.0)
+    assert recommendation.confidence == Confidence.PARTLY_MEASURED
 
 
 def test_unclassified_captures_are_mentioned_but_not_counted_as_missing() -> None:
@@ -154,11 +179,14 @@ def test_frequent_aborts_are_advised_with_the_limit() -> None:
             abort_fraction_limit=0.05,
         ),
         _performance(),
+        _envelope(capture_abort_fraction_high_limit=0.05),
     )
 
     (recommendation,) = recommendations
     assert recommendation.kind == RecommendationKind.FREQUENT_ABORTED_CAPTURES
-    assert recommendation.compared_to["abort_fraction_limit"] == pytest.approx(0.05)
+    (limit,) = recommendation.compared_to
+    assert limit.value == pytest.approx(0.05)
+    assert limit.register_entry == "WAY-42"
 
 
 def test_temperature_spread_is_information_only() -> None:
@@ -186,7 +214,7 @@ def test_a_spectral_star_clipped_at_every_length_asks_for_a_shorter_exposure() -
     assert recommendation.kind == RecommendationKind.SPECTRAL_STAR_CLIPPED
     assert "every exposure length" in recommendation.message
     assert "1 s" in recommendation.message
-    assert recommendation.confidence == "high"
+    assert recommendation.confidence == Confidence.PARTLY_MEASURED
 
 
 def test_a_spectral_star_clipped_at_some_lengths_names_the_longest_clear_one() -> None:
@@ -200,27 +228,27 @@ def test_a_spectral_star_clipped_at_some_lengths_names_the_longest_clear_one() -
     (recommendation,) = recommend_for_capture(_input(), performance)
 
     assert "0.5 s" in recommendation.message
-    assert recommendation.evidence["frames_at_clipped_lengths"] == pytest.approx(30.0)
-    assert recommendation.evidence["frames_total"] == pytest.approx(50.0)
+    assert recommendation.values["frames_at_clipped_lengths"] == pytest.approx(30.0)
+    assert recommendation.values["frames_total"] == pytest.approx(50.0)
 
 
-def test_the_science_librarys_recommended_exposure_is_quoted() -> None:
-    """Verify the stacking analysis's own exposure estimate is passed on."""
-    performance = _performance([_group(exposure=2.0, recommended=0.55)])
-
-    (recommendation,) = recommend_for_capture(_input(), performance)
-
-    assert "0.55 s" in recommendation.message
-    assert recommendation.compared_to["science_recommended_exposure_seconds"] == pytest.approx(0.55)
-
-
-def test_a_verdict_worked_out_from_frame_counts_is_only_medium_confidence() -> None:
-    """Verify the fallback verdict is weaker than the science library's."""
-    performance = _performance([_group(basis="frame_pixel_count")])
+def test_the_clipped_frames_stored_measurements_are_cited() -> None:
+    """Verify the advice points at the exact measurement rows it rests on."""
+    performance = _performance([_group(exposure=2.0, frames=3, first_row=40)])
 
     (recommendation,) = recommend_for_capture(_input(), performance)
 
-    assert recommendation.confidence == "medium"
+    assert [reference.row_id for reference in recommendation.evidence] == [40, 41, 42]
+
+
+def test_no_stacking_summary_estimate_is_quoted() -> None:
+    """Verify the stacking summary's exposure estimate is not passed on."""
+    performance = _performance([_group(exposure=2.0)])
+
+    (recommendation,) = recommend_for_capture(_input(), performance)
+
+    assert "stacking" not in recommendation.message
+    assert "science" not in " ".join(recommendation.values)
 
 
 def test_imaging_frames_are_never_advised_against_clipping() -> None:
@@ -243,20 +271,30 @@ def test_each_clipped_target_gets_its_own_recommendation() -> None:
 
     recommendations = recommend_for_capture(_input(), performance)
 
-    assert [r.evidence["target"] for r in recommendations] == ["Albireo", "Vega"]
+    assert [r.values["target"] for r in recommendations] == ["Albireo", "Vega"]
 
 
 def test_wide_stars_are_a_warning_against_earlier_nights() -> None:
     """Verify a width above the earlier-night limit is a warning."""
     performance = _performance(
-        frames=40, median_star_width_arcsec=9.0, star_width_limit_arcsec=7.0, roundness_limit=0.7
+        frames=40,
+        median_star_width_arcsec=9.0,
+        star_width_limit_arcsec=7.0,
+        roundness_limit=0.7,
+        width_evidence=[MeasurementReference(row_id=5), MeasurementReference(row_id=6)],
     )
 
-    (recommendation,) = recommend_for_capture(_input(), performance)
+    (recommendation,) = recommend_for_capture(
+        _input(), performance, _envelope(night_star_width_high_limit=7.0)
+    )
 
     assert recommendation.kind == RecommendationKind.STAR_WIDTH_ABOVE_BASELINE
     assert recommendation.severity == RecommendationSeverity.WARNING
-    assert recommendation.compared_to["night_star_width_high_limit"] == pytest.approx(7.0)
+    assert [reference.row_id for reference in recommendation.evidence] == [5, 6]
+    (limit,) = recommendation.compared_to
+    assert limit.value == pytest.approx(7.0)
+    # Judged against the night's own history, so stepped down one label.
+    assert recommendation.confidence == Confidence.DESIGN_ESTIMATE
 
 
 def test_elongated_stars_are_a_warning_against_earlier_nights() -> None:
@@ -329,5 +367,5 @@ def test_every_recommendation_carries_evidence_and_a_confidence() -> None:
     quality = _input(captures_without_frame=3, ekos_light_captures=15)
 
     for recommendation in recommend_for_capture(quality, performance):
-        assert recommendation.evidence
-        assert recommendation.confidence in {"high", "medium", "low"}
+        assert recommendation.evidence or recommendation.values
+        assert isinstance(recommendation.confidence, Confidence)

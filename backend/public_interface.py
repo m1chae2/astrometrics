@@ -201,8 +201,19 @@ RPC_METHODS: tuple[str, ...] = (
     # Night plan: read it, edit it, tick a checklist item. Each write sends
     # the `plan:changed` event.
     "plan:get",
+    "plan:create",
     "plan:edit",
     "plan:tick_checklist_item",
+    # Quality advice and night history (all reads)
+    "advisory:target_report",
+    "advisory:tonight",
+    "advisory:result",
+    "history:nights",
+    "history:night_quality",
+    "history:target_changes",
+    "history:live_session_status",
+    "observatory:safety_status",
+    "calibration:query",
     # Sequencer queue
     "sequencer:get_queue",
     "sequencer:create_plan",

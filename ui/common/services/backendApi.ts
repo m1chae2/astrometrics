@@ -119,6 +119,8 @@ export interface TargetCameraIndex {
 export interface HandoffState {
     active_mode: string;
     selected_target: string | null;
+    /** The moment the planning screens work at (ISO 8601 with a UTC offset), or null for Now. */
+    planning_time: string | null;
     coordinates: Record<string, any>;
     telemetry: Record<string, any>;
     origin_device: string;
@@ -165,7 +167,7 @@ export interface ActionRegistry {
     "astronomy:stars_by_spectral_class": { payload: { spectral_class: string }; response: { id: string; name: string; ra: number | null; dec: number | null; magnitude: number | null; spectralType: string; hasSpectra: boolean; hasPhotometry: boolean; selfDeterminedSpectralTypeRms: number | null }[] };
     "planetarium:get_sources": { payload: { ra: number; dec: number; radius: number; limiting_magnitude?: number; include_stars_without_catalog_magnitude?: boolean }; response: PlanetariumSource[] };
     "planetarium:get_targets": { payload: Record<string, never>; response: PlanetariumTarget[] };
-    "planetarium:get_visibility": { payload: { objects: Array<{ id: string; type?: string }>; time?: string }; response: ObjectVisibility[] };
+    "planetarium:get_visibility": { payload: { objects: Array<{ id: string; type?: string }>; time?: string; end?: string; include?: string[] }; response: ObjectVisibility[] };
     "planetarium:get_observer_location": { payload: Record<string, never>; response: ObserverLocation };
     "planetarium:get_catalog_sources": { payload: { ra: number; dec: number; radius: number; enabled_drivers: string[]; limiting_magnitude?: number }; response: PlanetariumSource[] };
     "planetarium:get_deep_catalog_status": { payload: Record<string, never>; response: DeepCatalogStatus };
@@ -252,6 +254,7 @@ export interface ActionRegistry {
     // `conflict` error (current revision in its details) when
     // `expected_revision` is out of date.
     "plan:get": { payload: { session_id?: string }; response: import('../types/backendTypes').ObservationSession | ObservationSessionSummary[] };
+    "plan:create": { payload: { night_id?: string }; response: import('../types/backendTypes').ObservationSession };
     "plan:edit": { payload: { session_id: string; add?: Array<Record<string, any>>; order?: string[]; remove?: string[]; set_exposures?: Record<string, Array<Record<string, any>>>; add_checklist?: Array<Record<string, any>>; framing?: Record<string, any>; expected_revision?: number }; response: import('../types/backendTypes').PlanChange };
     "plan:tick_checklist_item": { payload: { session_id: string; item_id: string; expected_revision?: number; note?: string; ticked_at?: string }; response: import('../types/backendTypes').PlanChange };
 
@@ -315,7 +318,7 @@ export interface ActionRegistry {
 
 
     // Mosaic
-    "mosaic:preview": { payload: { center_ra: number; center_dec: number; grid: any }; response: MosaicPanel[] };
+    "mosaic:preview": { payload: { center_ra: number; center_dec: number; grid: any; rotation_deg?: number }; response: MosaicPanel[] };
     "mosaic:create": { payload: { parent_target_id: string; grid: any; panels: any[]; image_config: any; dither_config: any }; response: string[] };
 
     // Sequencer
@@ -345,9 +348,20 @@ export interface ActionRegistry {
     "ui:navigate": { payload: { mode: string; target?: string | null }; response: void };
     "ui:inspect_variable": { payload: { variable_name: string }; response: void };
 
+    // Quality advice and night history (reads)
+    "advisory:target_report": { payload: { target: string }; response: import('../types/backendTypes').TargetDatasetReport };
+    "advisory:tonight": { payload: { at?: string }; response: import('../types/backendTypes').TonightRanking };
+    "advisory:result": { payload: { target: string; object_id: string }; response: import('../types/backendTypes').TargetStatement[] };
+    "history:nights": { payload: { limit?: number }; response: import('../types/backendTypes').NightListEntry[] };
+    "history:night_quality": { payload: { session_id: string }; response: import('../types/backendTypes').NightQuality };
+    "history:target_changes": { payload: { session_id?: string; limit?: number }; response: import('../types/backendTypes').TargetChange[] };
+    "history:live_session_status": { payload: { window_minutes?: number; include?: string[]; limit?: number }; response: import('../types/backendTypes').LiveSessionStatus };
+    "observatory:safety_status": { payload: Record<string, never>; response: import('../types/backendTypes').SafetyStatus };
+    "calibration:query": { payload: { kind?: 'dark' | 'bias' | 'flat'; detail?: 'counts' | 'target_match' | 'target_frames'; target?: string; camera_id?: string; refresh?: boolean }; response: import('../types/backendTypes').CalibrationQueryResult };
+
     // Hand-off of the workspace to a paired phone
     "handoff:get_state": { payload: Record<string, never>; response: HandoffState };
-    "handoff:update_state": { payload: { active_mode?: string; selected_target?: string; coordinates?: Record<string, any>; telemetry?: Record<string, any>; origin_device?: string }; response: HandoffState };
+    "handoff:update_state": { payload: { active_mode?: string; selected_target?: string; coordinates?: Record<string, any>; telemetry?: Record<string, any>; origin_device?: string; planning_time?: string; clear_planning_time?: boolean }; response: HandoffState };
     "handoff:beam": { payload: { target?: string; mode?: string }; response: Record<string, any> };
     "handoff:list_devices": { payload: Record<string, never>; response: Array<Record<string, any>> };
     "handoff:send_alert": { payload: { title: string; message: string; priority?: string; ring_device?: boolean; device_id?: string }; response: Record<string, any> };
@@ -489,6 +503,15 @@ const IDEMPOTENT_READ_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
     'telescope:list_alignment_sessions',
     'execution:list_sessions',
     'plan:get',
+    'advisory:target_report',
+    'advisory:tonight',
+    'advisory:result',
+    'history:nights',
+    'history:night_quality',
+    'history:target_changes',
+    'history:live_session_status',
+    'observatory:safety_status',
+    'calibration:query',
     'telescope:get_session_alignment',
     'telescope:get_cumulative_tracking_data',
     'telescope:get_performance_envelope',

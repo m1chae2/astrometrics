@@ -63,6 +63,7 @@ class Container:
         self.alignment_service = None
         self.mosaic_service = None
         self.plan_service = None
+        self.advisory_service = None
         self.analysis_orchestrator = None
         self.job_repository = None
         self.job_service = None
@@ -266,6 +267,10 @@ class Container:
         from backend.services.observatory.plan_service import PlanService
 
         self.plan_service = PlanService(wayfinder=self.wayfinder, socket_manager=self.socket_manager)
+
+        from backend.services.observatory.advisory_service import AdvisoryService
+
+        self.advisory_service = AdvisoryService(wayfinder=self.wayfinder)
         self.target_imaging_executor = TargetImagingExecutor(
             wayfinder=self.wayfinder, plan_service=self.plan_service
         )

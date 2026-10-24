@@ -834,7 +834,13 @@ class StellarService:
         """
         return self.wayfinder.planning.get_constellation_lines()
 
-    def get_visibility(self, objects: list[dict], time: str | None = None) -> list[dict]:
+    def get_visibility(
+        self,
+        objects: list[dict],
+        time: str | None = None,
+        end: str | None = None,
+        include: list[str] | None = None,
+    ) -> list[dict]:
         """Say where objects are in the sky, for the Planetarium's details.
 
         Parameters
@@ -845,6 +851,11 @@ class StellarService:
             library, then SIMBAD.
         time : `str`, optional
             ISO 8601 moment. Defaults to now.
+        end : `str`, optional
+            ISO 8601 end of a span. With it the library reports over the
+            whole span instead of one moment.
+        include : `list` [`str`], optional
+            Report sections to add. ``["meridian"]`` when left out.
 
         Returns
         -------
@@ -862,7 +873,9 @@ class StellarService:
                 resolved.append(object_entry.get("id"))
         if not resolved:
             return []
-        report = self.wayfinder.planning.get_visibility(resolved, time=time, include=["meridian"])
+        report = self.wayfinder.planning.get_visibility(
+            resolved, time=time, end_time=end, include=include if include is not None else ["meridian"]
+        )
         return [entry.model_dump(mode="json") for entry in report.objects]
 
     def get_target_status(self, target_id: str) -> dict:

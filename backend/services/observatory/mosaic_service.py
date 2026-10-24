@@ -26,7 +26,9 @@ class MosaicService:
         """
         self.wayfinder = wayfinder
 
-    def preview_mosaic(self, center_ra: float, center_dec: float, grid: dict) -> list[Any]:
+    def preview_mosaic(
+        self, center_ra: float, center_dec: float, grid: dict, rotation_deg: float = 0.0
+    ) -> list[Any]:
         """Work out the panel centers of a grid around a point.
 
         Parameters
@@ -38,6 +40,9 @@ class MosaicService:
         grid : `dict`
             ``rows``, ``cols`` and ``overlap`` (percent); each defaults
             to 1, 1 and 0.
+        rotation_deg : `float`, optional
+            How far the camera is turned, in degrees east of north, as Ekos
+            and KStars give it. The library defines the convention.
 
         Returns
         -------
@@ -50,6 +55,7 @@ class MosaicService:
             rows=grid.get("rows", 1),
             cols=grid.get("cols", 1),
             overlap_percent=float(grid.get("overlap", 0.0)),
+            rotation_deg=float(rotation_deg),
         )
 
     def create_mosaic(

@@ -243,8 +243,20 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # current revision in its details. Writes, so the AI's read-only profile
     # withholds them.
     "plan:get": ("plan_service", "get_plan"),
+    "plan:create": ("plan_service", "create_plan"),
     "plan:edit": ("plan_service", "edit_plan"),
     "plan:tick_checklist_item": ("plan_service", "tick_checklist_item"),
+    # Quality advice and night history. Reads only; each kind has its own
+    # method so each reply has one type. The history reads register no job.
+    "advisory:target_report": ("advisory_service", "get_target_report"),
+    "advisory:tonight": ("advisory_service", "get_tonight_ranking"),
+    "advisory:result": ("advisory_service", "get_result_statements"),
+    "history:nights": ("advisory_service", "list_nights"),
+    "history:night_quality": ("advisory_service", "get_night_quality"),
+    "history:target_changes": ("advisory_service", "list_target_changes"),
+    "history:live_session_status": ("advisory_service", "get_live_session_status"),
+    "observatory:safety_status": ("advisory_service", "get_safety_status"),
+    "calibration:query": ("astrometrics.processing.calibration", "query"),
     # Sequencer queue
     "sequencer:get_queue": ("target_imaging_executor", "get_queue"),
     "sequencer:create_plan": ("target_imaging_executor", "create_plan"),

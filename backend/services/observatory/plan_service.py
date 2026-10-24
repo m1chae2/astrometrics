@@ -63,6 +63,22 @@ class PlanService:
         """
         return self.wayfinder.planning.get_plan(session_id)
 
+    def create_plan(self, night_id: str | None = None) -> Any:
+        """Create an empty night plan to fill by hand.
+
+        Parameters
+        ----------
+        night_id : `str`, optional
+            The night the plan is for, named for the local date on which it
+            begins. The library chooses when left out.
+
+        Returns
+        -------
+        plan : `ObservationSession`
+            The new, empty session.
+        """
+        return self.wayfinder.planning.create_plan(kind="empty_session", night_id=night_id)
+
     def edit_plan(
         self,
         session_id: str,

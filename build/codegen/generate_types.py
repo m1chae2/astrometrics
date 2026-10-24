@@ -22,7 +22,7 @@ from astrometricslib import ErrorInfo, FilterType
 from astrometricslib.foundation.jobs.models import ProcessingJob, ProcessStatus
 from astrometricslib.models.applied_camera_profile import AppliedCameraProfile
 from astrometricslib.models.calibration_inventory import CalibrationEntry, CalibrationStats
-from astrometricslib.models.catalog_queries import OverlayStar, TargetStarCount
+from astrometricslib.models.catalog_queries import CalibrationQueryResult, OverlayStar, TargetStarCount
 from astrometricslib.models.measured_line_spread import MeasuredLineSpread
 from astrometricslib.models.moving_object import (
     AsteroidDetectionCandidate,
@@ -136,6 +136,7 @@ from backend.services.infrastructure.system_status_service import (
     TelescopePulse,
 )
 from wayfindinglib.drivers.indi_interface import TelescopeStatus
+from wayfindinglib.models.control_status import SafetyStatus
 from wayfindinglib.models.equipment_and_site.performance_envelope import (
     PerformanceEnvelope,
     TrackingRiskMap,
@@ -157,6 +158,8 @@ from wayfindinglib.models.planning.visibility import (
     VisibilitySpan,
 )
 from wayfindinglib.models.quality.statements import NeedsAttention, TargetStatement
+from wayfindinglib.models.session.live_session_status import LiveSessionStatus
+from wayfindinglib.models.session.night_list import NightListEntry, TargetChange
 from wayfindinglib.models.session.night_quality import NightQuality
 from wayfindinglib.models.session.observation_session import (
     ChecklistItem,
@@ -603,7 +606,9 @@ def render_types() -> str:
     ]
 
     # The night plan, its change record, the sequence summary and the target
-    # dataset report, with every model and enum they hold (#95).
+    # dataset report, with every model and enum they hold (#95), and the
+    # replies of the nights, live-status, safety-status and calibration-query
+    # reads (#96).
     written = {block.split("export ", 1)[1].split(" ", 2)[1].split("{")[0] for block in interfaces}
     interfaces.extend(
         generate_closure(
@@ -620,6 +625,11 @@ def render_types() -> str:
                 TargetDatasetReport,
                 TonightRanking,
                 NightQuality,
+                NightListEntry,
+                TargetChange,
+                LiveSessionStatus,
+                SafetyStatus,
+                CalibrationQueryResult,
             ],
             written,
         )

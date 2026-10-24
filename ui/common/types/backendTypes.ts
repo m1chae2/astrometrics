@@ -3031,6 +3031,187 @@ export interface NightQuality {
 }
 
 /**
+ * One recorded observing night and what data it has.
+ *
+ * Attributes
+ * ----------
+ * night_id : `str`
+ * The night, named for the local date on which it began, such as
+ * ``"2026-09-24"``. Pass it as ``session_id`` to the other history
+ * questions.
+ * night_date : `datetime.date`
+ * The same date as a date.
+ * targets_imaged : `list` [`str`]
+ * Ids of the library targets with light frames from the active
+ * equipment on this night, sorted. Empty when there are no frames.
+ * frame_count : `int`
+ * Light frames from the active equipment on this night.
+ * has_frame_data : `bool`
+ * Whether the night has light frames from the active equipment.
+ * has_guiding_data : `bool`
+ * Whether at least one guiding run is recorded for the night.
+ * has_sky_data : `bool`
+ * Whether at least one of the night's frames has a stored sky
+ * background measurement. Sky brightness and transparency checks
+ * need it.
+ * has_ekos_record : `bool`
+ * Whether an Ekos session record is stored for the night.
+ */
+export interface NightListEntry {
+  nightId: string;
+  nightDate: string;
+  targetsImaged?: string[];
+  frameCount?: number;
+  hasFrameData?: boolean;
+  hasGuidingData?: boolean;
+  hasSkyData?: boolean;
+  hasEkosRecord?: boolean;
+}
+
+/**
+ * A slew that ended in tracking at a new place in the sky.
+ *
+ * Attributes
+ * ----------
+ * time : `float`
+ * When the mount began tracking after the slew.
+ * night_id : `str`
+ * The observing night of the Ekos session it came from.
+ * ra_deg, dec_deg : `float` or `None`
+ * Where the mount pointed, in degrees. `None` when the position could
+ * not be worked out; `note` says why.
+ * target_id : `str` or `None`
+ * The nearest library target inside the match radius. `None` when no
+ * library target is that close.
+ * separation_deg : `float` or `None`
+ * How far the pointing is from `target_id`'s position, in degrees.
+ * `None` when there is no matched target.
+ * source : `str`
+ * The id of the Ekos session record the change was read from.
+ * note : `str` or `None`
+ * Why a field is missing, in plain words. `None` when nothing is
+ * missing.
+ */
+export interface TargetChange {
+  time: number;
+  nightId: string;
+  raDeg?: number | null;
+  decDeg?: number | null;
+  targetId?: string | null;
+  separationDeg?: number | null;
+  source: string;
+  note?: string | null;
+}
+
+/**
+ * The state of the current observing session.
+ *
+ * Attributes
+ * ----------
+ * analyze_file, kstars_log_file : `str` or `None`
+ * The files the status was read from.
+ * as_of : `float`
+ * Time of the latest record in the analyze file.
+ * seconds_since_last_record : `float` or `None`
+ * How long ago that was by the wall clock. A large value means Ekos
+ * has stopped writing (or the file was not refreshed).
+ * guider_state : `str` or `None`
+ * The guider's latest state, such as ``"Guiding"``.
+ * guider_state_since : `float` or `None`
+ * When it entered that state.
+ * declination_degrees : `float` or `None`
+ * The mount's latest declination.
+ * temperature_c : `float` or `None`
+ * The latest camera sensor temperature Ekos logged, in degrees C.
+ * pier_side : `str` or `None`
+ * The side of the pier the mount was on at the latest position
+ * record: ``"East"`` or ``"West"``.
+ * captures_completed, captures_aborted : `int`
+ * Exposures that finished and exposures that were cancelled, in the
+ * session this analyze file records.
+ * dither_settings : `DitherSettings`
+ * How the session has been dithering, worked out from the dithers
+ * in the KStars log. These are observed values, not the Ekos setting.
+ * unavailable : `list` [`str`]
+ * Things the app cannot report from these logs, so a client does not
+ * have to guess.
+ * details : `dict` [`str`, `Any`]
+ * The Ekos record sections the caller asked for (autofocus runs,
+ * aborted captures, state events and so on), empty if none were.
+ * recent_guiding : `GuidingWindowSummary`
+ * Guiding accuracy over the requested window.
+ * exposures : `list` [`ExposureSummary`]
+ * The most recent finished exposures, oldest first.
+ * excursions : `list` [`GuidingExcursion`]
+ * Every excursion in the file.
+ * dithers : `list` [`DitherEvent`]
+ * Every dither in the KStars log.
+ * last_autofocus_at : `float` or `None`
+ * When the latest successful autofocus ended.
+ * last_autofocus_temperature_c : `float` or `None`
+ * The temperature at that time.
+ * flags : `list` [`str`]
+ * The session-level problems, one sentence each, most recent first.
+ */
+export interface LiveSessionStatus {
+  analyze_file: string;
+  kstars_log_file?: string | null;
+  as_of: number;
+  seconds_since_last_record?: number | null;
+  guider_state?: string | null;
+  guider_state_since?: number | null;
+  declination_degrees?: number | null;
+  temperature_c?: number | null;
+  pier_side?: string | null;
+  captures_completed?: number;
+  captures_aborted?: number;
+  dither_settings?: DitherSettings;
+  unavailable?: string[];
+  details?: Record<string, any>;
+  recent_guiding: GuidingWindowSummary;
+  exposures?: ExposureSummary[];
+  excursions?: GuidingExcursion[];
+  dithers?: DitherEvent[];
+  last_autofocus_at?: number | null;
+  last_autofocus_temperature_c?: number | null;
+  flags?: string[];
+}
+
+/**
+ * The weather verdict, the enclosure and who may command the hardware.
+ */
+export interface SafetyStatus {
+  /** The sections that were read. */
+  sections?: string[];
+  /** Saved safety rules. */
+  rule_set?: SafetyRuleSet | null;
+  /** Verdict from a fresh weather reading. */
+  assessment?: SafetyAssessment | null;
+  /** The configured enclosure. */
+  enclosure?: Enclosure | null;
+  /** The enclosure's live motion state. */
+  enclosure_state?: EnclosureState | null;
+  /** Which capabilities this app may command. */
+  delegation_policy?: DelegationPolicy | null;
+  /** Agreement between this app's advice and what the incumbent did. */
+  divergence?: Record<string, any> | null;
+}
+
+/**
+ * The answer of `CalibrationCatalog.query`.
+ */
+export interface CalibrationQueryResult {
+  detail: string;
+  kind?: string | null;
+  target_id?: string | null;
+  darks?: Record<string, any>[] | null;
+  biases?: Record<string, any>[] | null;
+  flats?: Record<string, any>[] | null;
+  groups?: Record<string, any>[] | null;
+  lights?: Record<string, any>[] | null;
+}
+
+/**
  * One observation session's overall lifecycle state.
  *
  * `SUSPENDED` means an unsafe verdict halted advancement without ending
@@ -3703,6 +3884,217 @@ export interface NightPolarAlignment {
 }
 
 /**
+ * How a session has been dithering, as seen in the KStars log.
+ *
+ * Attributes
+ * ----------
+ * dither_count, failed_count : `int`
+ * Dithers started, and how many gave up.
+ * last_amplitude_px, median_amplitude_px : `float` or `None`
+ * The latest and the typical requested move, in guide-camera pixels.
+ * exposures_per_dither : `float` or `None`
+ * Finished exposures divided by dithers: roughly how many frames
+ * between dithers. `None` with no dithers.
+ */
+export interface DitherSettings {
+  dither_count?: number;
+  failed_count?: number;
+  last_amplitude_px?: number | null;
+  median_amplitude_px?: number | null;
+  exposures_per_dither?: number | null;
+}
+
+/**
+ * Guiding accuracy over a recent stretch of time.
+ *
+ * Attributes
+ * ----------
+ * window_seconds : `float`
+ * The length of the stretch, ending at the latest record.
+ * sample_count : `int`
+ * Guiding measurements inside it.
+ * ra_rms_arcsec, dec_rms_arcsec, total_rms_arcsec : `float` or `None`
+ * Root-mean-square guide error along RA, along Dec, and combined.
+ * `None` when there are no samples.
+ */
+export interface GuidingWindowSummary {
+  window_seconds: number;
+  sample_count: number;
+  ra_rms_arcsec?: number | null;
+  dec_rms_arcsec?: number | null;
+  total_rms_arcsec?: number | null;
+}
+
+/**
+ * One finished exposure and how guiding behaved during it.
+ *
+ * Attributes
+ * ----------
+ * frame_name : `str`
+ * The saved file's name.
+ * completed_at : `float`
+ * When the exposure finished.
+ * exposure_seconds : `float`
+ * Its length.
+ * star_count : `int`
+ * Stars Ekos found in the frame.
+ * half_flux_radius_px : `float` or `None`
+ * Median star half-flux radius, in pixels.
+ * eccentricity : `float` or `None`
+ * Median star eccentricity (0 is round).
+ * guide_rms_first_seconds_arcsec : `float` or `None`
+ * Guide error (total, root-mean-square) in the first stretch of the
+ * exposure, where a dither's after-effects show.
+ * guide_rms_rest_arcsec : `float` or `None`
+ * Guide error over the rest of the exposure.
+ * follows_dither : `bool`
+ * Whether a dither finished shortly before this exposure began.
+ * flags : `list` [`str`]
+ * One sentence per problem found. Empty for a clean frame.
+ */
+export interface ExposureSummary {
+  frame_name: string;
+  completed_at: number;
+  exposure_seconds: number;
+  star_count: number;
+  half_flux_radius_px?: number | null;
+  eccentricity?: number | null;
+  guide_rms_first_seconds_arcsec?: number | null;
+  guide_rms_rest_arcsec?: number | null;
+  follows_dither?: boolean;
+  flags?: string[];
+}
+
+/**
+ * A stretch where the guide error ran far above its normal level.
+ *
+ * Attributes
+ * ----------
+ * started_at, ended_at : `float`
+ * First and last measurement of the excursion.
+ * peak_error_arcsec : `float`
+ * The largest total guide error inside it.
+ * axis : `str`
+ * ``"RA"`` or ``"Dec"``, whichever carried the larger error.
+ * kind : `str`
+ * ``"jump"`` if the error arrived at full size in one step (the
+ * field moved suddenly), ``"drift"`` if it built up over time.
+ * drift_rate_arcsec_per_second : `float` or `None`
+ * How fast the error grew along that axis, from a straight-line fit.
+ * `None` with fewer than three measurements.
+ * matches_stopped_ra_axis : `bool` or `None`
+ * For an RA excursion: whether the drift rate is within 25% of the
+ * rate a motionless mount drifts at the current declination
+ * (15.04 arcsec per second times the cosine of the declination).
+ * `None` for Dec excursions or when the declination is unknown.
+ * reacquire_count : `int`
+ * How many times the guider re-locked during the excursion.
+ */
+export interface GuidingExcursion {
+  started_at: number;
+  ended_at: number;
+  peak_error_arcsec: number;
+  axis: string;
+  kind?: string;
+  drift_rate_arcsec_per_second?: number | null;
+  matches_stopped_ra_axis?: boolean | null;
+  reacquire_count?: number;
+}
+
+/**
+ * One dither, read from the KStars log.
+ *
+ * Attributes
+ * ----------
+ * timestamp : `float`
+ * When the dither began.
+ * amplitude_px : `float`
+ * The requested move, in guide-camera pixels.
+ * succeeded : `bool` or `None`
+ * `True` if the guide star reached its new position, `False` if the
+ * guider gave up after its allowed tries, `None` if the log ends
+ * before the dither does.
+ * settle_seconds : `float` or `None`
+ * The wait the guider applied after the move, before the next
+ * exposure could start.
+ * duration_seconds : `float` or `None`
+ * Time from the start of the dither to its completion message.
+ */
+export interface DitherEvent {
+  timestamp: number;
+  amplitude_px: number;
+  succeeded?: boolean | null;
+  settle_seconds?: number | null;
+  duration_seconds?: number | null;
+}
+
+/**
+ * The full configured set of environmental safety rules.
+ */
+export interface SafetyRuleSet {
+  id: string;
+  rules?: SafetyRule[];
+  /** Duration conditions must remain continuously safe before the enclosure may reopen. */
+  settling_period_sec?: number;
+}
+
+/**
+ * The current verdict, which rule produced it, and its freshness.
+ */
+export interface SafetyAssessment {
+  verdict: SafetyVerdict;
+  triggering_rule_id?: string | null;
+  assessed_at?: string;
+  oldest_reading_at?: string | null;
+}
+
+/**
+ * The observatory's roof or dome and its mechanical interlock envelope.
+ *
+ * `present=False` distinguishes an observatory with no enclosure from
+ * one whose enclosure is offline -- a distinction that matters because
+ * the first permits unattended operation under the remaining safety
+ * actions while the second is a fault.
+ */
+export interface Enclosure {
+  id: string;
+  enclosure_type: EnclosureType;
+  present?: boolean;
+  park_azimuth_deg: number;
+  park_altitude_deg: number;
+  clearance_tolerance_deg?: number;
+  motion_timeout_sec?: number;
+  /** Hardware-control protocol driving this enclosure. */
+  protocol?: string;
+}
+
+/**
+ * A device's motion state, published uniformly for the interlock.
+ *
+ * `UNKNOWN` is treated as unsafe for both mount motion and enclosure
+ * motion, per `Wayfinding_Library_Architecture.md` Section 6.6 (an
+ * unknown enclosure state blocks mount motion; see also Section 6.5,
+ * "Absence of information is not safety").
+ */
+export enum EnclosureState {
+  OPEN = "open",
+  OPENING = "opening",
+  CLOSED = "closed",
+  CLOSING = "closing",
+  UNKNOWN = "unknown",
+  FAULT = "fault"
+}
+
+/**
+ * The delegation state of every capability -- the observatory phase.
+ */
+export interface DelegationPolicy {
+  id: string;
+  capability_delegations?: CapabilityDelegation[];
+  updated_at?: string;
+}
+
+/**
  * A package-level dithering cadence, applied across a package's run.
  */
 export interface DitherConfig {
@@ -4026,6 +4418,56 @@ export interface GuidingRunPerformance {
 }
 
 /**
+ * One environmental threshold the safety monitor evaluates.
+ *
+ * `comparison` names how `unsafe_threshold` is applied to the named
+ * measurement -- e.g. ``"greater_than"``, ``"less_than"`` -- rather
+ * than being hardcoded per measurement, so a new sensor is
+ * configuration, not a new evaluation path
+ * (`Wayfinding_Library_Architecture.md` Section 6.5).
+ */
+export interface SafetyRule {
+  id: string;
+  measurement: string;
+  comparison: string;
+  unsafe_threshold: number;
+  marginal_threshold?: number | null;
+  staleness_bound_sec?: number;
+}
+
+/**
+ * The current environmental judgment.
+ *
+ * `UNKNOWN` is not a lesser-severity middle ground between `SAFE` and
+ * `UNSAFE` -- it is treated identically to `UNSAFE` by
+ * `permits_observing()`.
+ */
+export enum SafetyVerdict {
+  SAFE = "SAFE",
+  MARGINAL = "MARGINAL",
+  UNSAFE = "UNSAFE",
+  UNKNOWN = "UNKNOWN"
+}
+
+/**
+ * The physical form of the observatory's protective structure.
+ */
+export enum EnclosureType {
+  ROLL_OFF_ROOF = "roll_off_roof",
+  DOME = "dome"
+}
+
+/**
+ * The delegation state of one capability, and since when.
+ */
+export interface CapabilityDelegation {
+  capability: ObservatoryCapability;
+  state: DelegationState;
+  effective_since?: string;
+  promotion_evidence_note?: string;
+}
+
+/**
  * The time lost to one cause.
  *
  * Parameters
@@ -4059,6 +4501,20 @@ export enum CandidateStatus {
   STOPPED = "stopped",
   NEW = "new",
   NO_FORECAST = "no_forecast"
+}
+
+/**
+ * Which system currently performs a capability.
+ *
+ * `SHADOWED` is not a valid state for `OBSERVATORY_SAFETY`
+ * (`Wayfinding_Library_Architecture.md` Section 2.3, "Safety is never
+ * shadowed") -- enforced by the delegation policy reader, not by this
+ * enum, since the restriction is per-capability rather than global.
+ */
+export enum DelegationState {
+  DELEGATED = "DELEGATED",
+  SHADOWED = "SHADOWED",
+  AUTHORITATIVE = "AUTHORITATIVE"
 }
 
 /**
@@ -4213,8 +4669,18 @@ export const RPC_METHODS = [
   "execution:reconcile_session",
   "execution:record_divergence",
   "plan:get",
+  "plan:create",
   "plan:edit",
   "plan:tick_checklist_item",
+  "advisory:target_report",
+  "advisory:tonight",
+  "advisory:result",
+  "history:nights",
+  "history:night_quality",
+  "history:target_changes",
+  "history:live_session_status",
+  "observatory:safety_status",
+  "calibration:query",
   "sequencer:get_queue",
   "sequencer:create_plan",
   "sequencer:add",

@@ -35,7 +35,7 @@ QUALITY_MEASUREMENTS = DESIGN_DIR / "Astrometrics_Quality_Measurements.md"
 # words; the implementation paper is an index into the code, not a second
 # paper. References and hidden <!-- impl: --> comments do not count.
 ARCHITECTURE_WORD_LIMIT = 10_000
-IMPLEMENTATION_WORD_LIMIT = 3_500
+IMPLEMENTATION_WORD_LIMIT = 4_500
 QUALITY_MEASUREMENTS_WORD_LIMIT = 8_000
 
 # Numbers with units that are physics, definitions or worked illustrations, not

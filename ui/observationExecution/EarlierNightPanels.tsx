@@ -22,6 +22,7 @@ import { StatementList } from '../common/components/quality/StatementList';
 import { StatementTypeIcon } from '../common/components/quality/StatementTypeIcon';
 import { formatSeconds, formatValue, severityWord } from '../common/components/quality/statementLabels';
 import { OBSERVATION_PLANNER_MODE } from '../common/components/quality/useStatementActions';
+import { ExecutionPanel } from './ExecutionPanel';
 import { formatMoment } from './utils/formatDisplay';
 
 /**
@@ -190,24 +191,24 @@ export const EarlierNightPanels: React.FC<EarlierNightPanelsProps> = ({ nightId 
         const statements = night.data.nightStatements ?? [];
         review = (
             <>
-                <section className="execution-section" aria-label="Night statements">
-                    <h3 className="execution-section__title">Night statements</h3>
+                <section className="night-subsection" aria-label="Night statements">
+                    <h4 className="night-subsection__title">Night statements</h4>
                     {statements.length === 0 ? (
                         <p className="quality-state">No statements about the whole night.</p>
                     ) : (
                         <StatementList statements={statements} label="Night statements" />
                     )}
                 </section>
-                <section className="execution-section" aria-label="Targets of the night">
-                    <h3 className="execution-section__title">Targets of the night</h3>
+                <section className="night-subsection" aria-label="Targets of the night">
+                    <h4 className="night-subsection__title">Targets of the night</h4>
                     <ul className="night-targets">
                         {targets.map((target) => (
                             <NightTargetRow key={target.targetId} target={target} />
                         ))}
                     </ul>
                 </section>
-                <section className="execution-section" aria-label="Night guiding summary">
-                    <h3 className="execution-section__title">Guiding</h3>
+                <section className="night-subsection" aria-label="Night guiding summary">
+                    <h4 className="night-subsection__title">Guiding</h4>
                     <GuidingSummaryView summary={night.data.guiding} />
                 </section>
             </>
@@ -215,15 +216,15 @@ export const EarlierNightPanels: React.FC<EarlierNightPanelsProps> = ({ nightId 
     }
 
     return (
-        <div className="earlier-night">
+        <ExecutionPanel title="Night review" grow className="earlier-night execution-region--grow-more">
             <p className="quality-state" data-testid="no-live-record">
                 No live record for an earlier night
             </p>
             {review}
-            <section className="execution-section" aria-label="Target changes of the night">
-                <h3 className="execution-section__title">Target changes</h3>
+            <section className="night-subsection" aria-label="Target changes of the night">
+                <h4 className="night-subsection__title">Target changes</h4>
                 <TargetChangesTimeline nightId={nightId} />
             </section>
-        </div>
+        </ExecutionPanel>
     );
 };

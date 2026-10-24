@@ -4,6 +4,7 @@
  * night, the tabs, and the disabled control panels.
  */
 
+import { formatClockTime, formatDayLabel } from '../utils/formatDisplay';
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -180,15 +181,32 @@ describe('header', () => {
 });
 
 describe('live session body', () => {
-    /** The panels appear in the planned order: strip, verdict, candidates, frames. */
-    it('orders the strip, verdict, candidates and frames', async () => {
+    /** The panels sit in three columns in the planned order, and the page itself does not scroll. */
+    it('puts the panels in the left, center and right columns in order', async () => {
         renderDisplay();
+        const container = document.body;
         await screen.findByRole('region', { name: 'Candidates now' });
-        const names = ['Quality strip', 'Live session verdict', 'Candidates now', 'Frames of the night'];
-        const positions = names.map((name) => screen.getByRole('region', { name }));
-        for (let index = 1; index < positions.length; index += 1) {
-            expect(positions[index - 1].compareDocumentPosition(positions[index]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-        }
+        const columnNames = (selector: string): string[] =>
+            Array.from(container.querySelectorAll(`${selector} .execution-region`)).map(
+                (region) => region.getAttribute('aria-label') ?? '',
+            );
+        expect(columnNames('.layout__panel--left')).toEqual(['Night', 'Quality', 'Live session verdict']);
+        expect(columnNames('.layout__panel--center')).toEqual(['Frames of the night']);
+        expect(columnNames('.layout__panel--right')).toEqual(['Candidates now', 'Equipment']);
+        expect(container.querySelector('.observation-execution__body')).toBeNull();
+    });
+
+    /** For an earlier night the left column holds Night, Quality and the night review; the candidates are gone. */
+    it('puts the night review in the left column for an earlier night', async () => {
+        const user = renderDisplay();
+        await screen.findByRole('option', { name: /2026-10-23/ });
+        await user.selectOptions(screen.getByRole('combobox'), '2026-10-23');
+        await screen.findByTestId('no-live-record');
+        const names = Array.from(document.querySelectorAll('.layout__panel--left .execution-region')).map((region) =>
+            region.getAttribute('aria-label'),
+        );
+        expect(names).toEqual(['Night', 'Quality', 'Night review']);
+        expect(document.querySelector('.layout__panel--right .execution-region')?.getAttribute('aria-label')).toBe('Equipment');
     });
 
     /** The verdict, the loss summary, the sync times and the frames each carry the example badge. */
@@ -226,6 +244,9 @@ describe('live session body', () => {
     it('lists the example frames with status words', async () => {
         renderDisplay();
         const frames = await screen.findByRole('region', { name: 'Frames of the night' });
+        // Rows show clock time only; the date appears once in the panel header.
+        expect(within(frames).getByText(formatClockTime('2026-10-23T22:10:00-06:00'))).toBeTruthy();
+        expect(within(frames).getByText(formatDayLabel('2026-10-23T22:10:00-06:00'))).toBeTruthy();
         expect(within(frames).getByText('Flagged')).toBeTruthy();
         expect(within(frames).getByText('In stack')).toBeTruthy();
         expect(within(frames).getByText('Not yet judged')).toBeTruthy();
@@ -280,7 +301,7 @@ describe('candidates', () => {
         const user = renderDisplay();
         const list = await screen.findByRole('region', { name: 'Imaging candidates' });
         await user.click(within(list).getByRole('button', { name: 'Switch to M 82' }));
-        const header = screen.getByRole('banner');
+        const header = screen.getByRole('region', { name: 'Night' });
         await waitFor(() => expect(within(header).getByText('M 82')).toBeTruthy());
     });
 

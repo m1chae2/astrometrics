@@ -2,13 +2,14 @@
  * @fileoverview Observation Execution: the display for watching the night
  * while Ekos runs it.
  *
- * Layout (UI_DISPLAY_PLAN 3.2): a pinned header (night selector, current
- * target, "Working at Now", staleness and "Sync now"); for the live session
- * the quality strip, the live verdict, the re-ranked candidates and the frame
- * list; for an earlier night the same data from storage; then the tabs
- * "Guiding" and "Control". The display always works at Now: it does not use
- * the shared planning time. The control panels are disabled while Ekos is in
- * charge.
+ * Layout (UI_DISPLAY_PLAN 3.2), three columns like the other displays, and the
+ * page never scrolls. Left: the Night panel (selector, "Working at Now", sync
+ * lines, "Sync now"), the Quality panel, then the live verdict (or, for an
+ * earlier night, the night review from storage). Center: the frame list.
+ * Right: the re-ranked candidates (live session only) and a panel with the
+ * "Guiding" and "Control" tabs. A panel with long content scrolls inside
+ * itself. The display always works at Now: it does not use the shared
+ * planning time. The control panels are disabled while Ekos is in charge.
  */
 
 import React, { useId, useRef, useState } from 'react';
@@ -17,7 +18,10 @@ import { callBackend } from '../common/services/backendApi';
 import { qualityQueryKeys } from '../common/queries/qualityQueryKeys';
 import { useTargetContext } from '../common/context/TargetContext';
 import { useReportModeReady } from '../common/utils/appBootReadiness';
+import { GenericDisplayLayout } from '../common/components/GenericDisplayLayout';
+import '../common/components/tabView.css';
 import { QualityStrip } from '../common/components/quality/QualityStrip';
+import { ExecutionPanel } from './ExecutionPanel';
 import { EarlierNightPanels } from './EarlierNightPanels';
 import { ExecutionHeader, LIVE_SESSION_VALUE } from './ExecutionHeader';
 import { ControlTab } from './ControlTab';
@@ -70,8 +74,8 @@ export const ObservationExecution: React.FC = () => {
 
     const tabLabels: Record<TabName, string> = { guiding: 'Guiding', control: controlLabel };
 
-    return (
-        <div className="observation-execution">
+    const leftPanel = (
+        <div className="panel-group">
             <ExecutionHeader
                 nights={nights.data ?? []}
                 nightsLoading={nights.isLoading}
@@ -80,19 +84,25 @@ export const ObservationExecution: React.FC = () => {
                 onSelectNight={setSelectedNightId}
                 currentTarget={selectedTarget}
             />
-            <div className="observation-execution__body">
+            <ExecutionPanel title="Quality" grow>
                 <QualityStrip targetId={selectedTarget} nightId={isLive ? undefined : selectedNightId} />
-                {isLive ? (
-                    <>
-                        <LiveVerdictPanel />
-                        <TonightCandidatesPanel />
-                    </>
-                ) : (
-                    <EarlierNightPanels nightId={selectedNightId} />
-                )}
-                <NightFrameList />
+            </ExecutionPanel>
+            {isLive ? <LiveVerdictPanel /> : <EarlierNightPanels nightId={selectedNightId} />}
+        </div>
+    );
+
+    const centerPanel = (
+        <div className="panel-group">
+            <NightFrameList />
+        </div>
+    );
+
+    const rightPanel = (
+        <div className="panel-group">
+            {isLive && <TonightCandidatesPanel />}
+            <ExecutionPanel label="Equipment" grow>
                 <div className="execution-tabs">
-                    <div role="tablist" aria-label="Equipment" className="execution-tabs__list">
+                    <div role="tablist" aria-label="Equipment" className="tab-view__header execution-tabs__list">
                         {TABS.map((tab) => (
                             <button
                                 key={tab}
@@ -105,7 +115,7 @@ export const ObservationExecution: React.FC = () => {
                                 aria-selected={activeTab === tab}
                                 aria-controls={`${idPrefix}-panel-${tab}`}
                                 tabIndex={activeTab === tab ? 0 : -1}
-                                className="execution-tabs__tab"
+                                className={`tab-view__tab ${activeTab === tab ? 'tab-view__tab--active' : ''}`}
                                 onClick={() => setActiveTab(tab)}
                                 onKeyDown={(event) => onTabKeyDown(event, tab)}
                             >
@@ -117,11 +127,18 @@ export const ObservationExecution: React.FC = () => {
                         role="tabpanel"
                         id={`${idPrefix}-panel-${activeTab}`}
                         aria-labelledby={`${idPrefix}-tab-${activeTab}`}
+                        className="execution-tabs__panel"
                     >
                         {activeTab === 'guiding' ? <GuidingTab /> : <ControlTab policy={policy} />}
                     </div>
                 </div>
-            </div>
+            </ExecutionPanel>
+        </div>
+    );
+
+    return (
+        <div className="observation-execution">
+            <GenericDisplayLayout className="execution-layout" leftPanel={leftPanel} centerPanel={centerPanel} rightPanel={rightPanel} />
         </div>
     );
 };

@@ -1,5 +1,5 @@
 /**
- * @fileoverview The pinned header of Observation Execution: the night
+ * @fileoverview The Night panel of Observation Execution: the night
  * selector, the current target, "Working at Now", how stale the data is and
  * "Sync now".
  *
@@ -13,6 +13,7 @@ import React from 'react';
 import type { NightListEntry } from '../common/types/backendTypes';
 import { exampleSyncStatus } from '../common/examples';
 import { ExampleDataBadge } from '../common/components/quality/ExampleDataBadge';
+import { ExecutionPanel } from './ExecutionPanel';
 import { useNow } from './hooks/useNow';
 import { formatNightLabel, formatSyncLine } from './utils/formatDisplay';
 
@@ -38,9 +39,9 @@ export interface ExecutionHeaderProps {
 }
 
 /**
- * The header.
+ * The Night panel.
  * @param props The nights, the selection and the current target.
- * @return The header.
+ * @return The Night panel.
  */
 export const ExecutionHeader: React.FC<ExecutionHeaderProps> = ({
     nights,
@@ -52,51 +53,53 @@ export const ExecutionHeader: React.FC<ExecutionHeaderProps> = ({
 }) => {
     const now = useNow();
     return (
-        <header className="execution-header" aria-label="Observation Execution header">
-            <label className="execution-header__field">
-                <span>Night</span>
-                <select
-                    className="dropdown"
-                    value={selectedNightId}
-                    onChange={(event) => onSelectNight(event.target.value)}
-                    aria-busy={nightsLoading}
-                >
-                    <option value={LIVE_SESSION_VALUE}>Live session</option>
-                    {nights.map((night) => (
-                        <option key={night.nightId} value={night.nightId}>
-                            {formatNightLabel(night.nightDate, night.targetsImaged?.length ?? 0)}
-                        </option>
-                    ))}
-                </select>
-            </label>
-            {nightsLoading && <span className="execution-header__note">Loading nights…</span>}
-            {nightsFailed && <span className="execution-header__note" role="alert">Could not load the night list</span>}
-            <span className="execution-header__field">
-                <span>Current target</span>
-                <strong>{currentTarget || 'No target chosen'}</strong>
-            </span>
-            <span className="execution-header__field">
-                <strong>Working at Now</strong>
-            </span>
-            <span className="execution-header__sync" data-example="true">
-                <ExampleDataBadge />
-                <span>{formatSyncLine('Logs', exampleSyncStatus.lastLogSync, now)}</span>
-                <span>{formatSyncLine('Frames', exampleSyncStatus.lastFrameSync, now)}</span>
-            </span>
-            <span className="execution-header__sync-action">
-                <button
-                    type="button"
-                    className="btn btn--tiny"
-                    disabled
-                    aria-disabled="true"
-                    aria-describedby="execution-sync-reason"
-                >
-                    Sync now
-                </button>
-                <span id="execution-sync-reason" className="execution-header__note">
-                    {SYNC_UNAVAILABLE_TEXT}
+        <ExecutionPanel title="Night">
+            <div className="execution-night">
+                <label className="execution-header__field">
+                    <span>Night</span>
+                    <select
+                        className="dropdown"
+                        value={selectedNightId}
+                        onChange={(event) => onSelectNight(event.target.value)}
+                        aria-busy={nightsLoading}
+                    >
+                        <option value={LIVE_SESSION_VALUE}>Live session</option>
+                        {nights.map((night) => (
+                            <option key={night.nightId} value={night.nightId}>
+                                {formatNightLabel(night.nightDate, night.targetsImaged?.length ?? 0)}
+                            </option>
+                        ))}
+                    </select>
+                </label>
+                {nightsLoading && <span className="execution-header__note">Loading nights…</span>}
+                {nightsFailed && <span className="execution-header__note" role="alert">Could not load the night list</span>}
+                <span className="execution-header__field">
+                    <span>Current target</span>
+                    <strong>{currentTarget || 'No target chosen'}</strong>
                 </span>
-            </span>
-        </header>
+                <span className="execution-header__field">
+                    <strong>Working at Now</strong>
+                </span>
+                <span className="execution-header__sync" data-example="true">
+                    <ExampleDataBadge />
+                    <span>{formatSyncLine('Logs', exampleSyncStatus.lastLogSync, now)}</span>
+                    <span>{formatSyncLine('Frames', exampleSyncStatus.lastFrameSync, now)}</span>
+                </span>
+                <span className="execution-header__sync-action">
+                    <button
+                        type="button"
+                        className="btn btn--tiny"
+                        disabled
+                        aria-disabled="true"
+                        aria-describedby="execution-sync-reason"
+                    >
+                        Sync now
+                    </button>
+                    <span id="execution-sync-reason" className="execution-header__note">
+                        {SYNC_UNAVAILABLE_TEXT}
+                    </span>
+                </span>
+            </div>
+        </ExecutionPanel>
     );
 };

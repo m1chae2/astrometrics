@@ -18,6 +18,28 @@ export function formatMoment(isoText: string, now: Date = new Date()): string {
 }
 
 /**
+ * Writes the local clock time only, for rows that sit under one date.
+ * @param isoText A time as ISO 8601 text.
+ * @return Text such as `22:10`, or an empty string for text that is not a time.
+ */
+export function formatClockTime(isoText: string): string {
+    const moment = new Date(isoText);
+    if (Number.isNaN(moment.getTime())) return '';
+    return `${String(moment.getHours()).padStart(2, '0')}:${String(moment.getMinutes()).padStart(2, '0')}`;
+}
+
+/**
+ * Writes the local date of a time, to show once above rows that show clock times.
+ * @param isoText A time as ISO 8601 text.
+ * @return Text such as `Oct 23`, or an empty string for text that is not a time.
+ */
+export function formatDayLabel(isoText: string): string {
+    const moment = new Date(isoText);
+    if (Number.isNaN(moment.getTime())) return '';
+    return moment.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+/**
  * Writes how long ago a time was.
  * @param isoText A time as ISO 8601 text.
  * @param now The current moment.

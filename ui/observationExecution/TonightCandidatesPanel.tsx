@@ -12,6 +12,7 @@ import React from 'react';
 import { useTonightRanking } from '../common/queries/qualityAdvisoryQueries';
 import { useTargetContext } from '../common/context/TargetContext';
 import { navigateToElement } from '../common/utils/displayCoordinator';
+import { ExecutionPanel } from './ExecutionPanel';
 import { TonightRankingBody } from '../common/components/quality/RankedCandidates';
 import { OBSERVATION_PLANNER_MODE } from '../common/components/quality/useStatementActions';
 
@@ -33,14 +34,16 @@ export const TonightCandidatesPanel: React.FC = () => {
     };
 
     return (
-        <section className="execution-section" aria-label="Candidates now">
-            <h3 className="execution-section__title">
-                Candidates now
+        <ExecutionPanel
+            title="Candidates now"
+            grow
+            headerContent={
                 <button type="button" className="btn btn--tiny" onClick={() => void ranking.refetch()}>
                     Refresh
                 </button>
-            </h3>
+            }
+        >
             <TonightRankingBody query={ranking} onSwitch={setSelectedTarget} onOpenInPlanner={openInPlanner} />
-        </section>
+        </ExecutionPanel>
     );
 };

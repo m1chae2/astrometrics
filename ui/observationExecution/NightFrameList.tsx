@@ -13,7 +13,8 @@ import type { ExampleNightFrame } from '../common/examples';
 import { ExampleDataBadge } from '../common/components/quality/ExampleDataBadge';
 import { QualityPanelState } from '../common/components/quality/QualityPanelState';
 import { formatValue } from '../common/components/quality/statementLabels';
-import { formatMoment } from './utils/formatDisplay';
+import { ExecutionPanel } from './ExecutionPanel';
+import { formatClockTime, formatDayLabel } from './utils/formatDisplay';
 
 /** How many rows show before "Show all N". */
 const TOP_FRAME_COUNT = 10;
@@ -80,58 +81,68 @@ export const NightFrameList: React.FC<NightFrameListProps> = ({ label = 'Frames 
     const shown = showAll ? frames : frames.slice(0, TOP_FRAME_COUNT);
 
     return (
-        <section className="execution-section" aria-label={label} data-example="true">
-            <h3 className="execution-section__title">
-                Frames <ExampleDataBadge />
-            </h3>
-            {frames.length === 0 ? (
-                <QualityPanelState state="empty" />
-            ) : (
-                <>
-                    <div className="frame-list__scroll" role="region" aria-label="Frame rows" tabIndex={0}>
-                        <table className="frame-list">
-                            <thead>
-                                <tr>
-                                    <th scope="col">Time</th>
-                                    <th scope="col">Target</th>
-                                    <th scope="col">Setting</th>
-                                    <th scope="col">Star width (arcsec)</th>
-                                    <th scope="col">Sky rate (e/s/px)</th>
-                                    <th scope="col">Status</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {shown.map((frame) => (
-                                    <tr key={frame.frameId} data-status={frame.status}>
-                                        <td>{formatMoment(frame.time)}</td>
-                                        <td>{frame.target}</td>
-                                        <td>{frame.captureSetting}</td>
-                                        <td>{frame.starWidthArcsec === null ? 'not measured' : formatValue(frame.starWidthArcsec)}</td>
-                                        <td>{frame.skyRate === null ? 'not measured' : formatValue(frame.skyRate)}</td>
-                                        <td>
-                                            <FrameStatusIcon status={frame.status} /> {frameStatusWord(frame.status)}
-                                        </td>
+        <ExecutionPanel
+            title="Frames"
+            label={label}
+            headerContent={
+                <span className="frame-list__header-note">
+                    {frames.length > 0 && <span>{formatDayLabel(frames[0].time)}</span>}
+                    <ExampleDataBadge />
+                </span>
+            }
+            example
+            grow
+        >
+            <div className="execution-panel-body">
+                {frames.length === 0 ? (
+                    <QualityPanelState state="empty" />
+                ) : (
+                    <>
+                        <div className="frame-list__scroll" role="region" aria-label="Frame rows" tabIndex={0}>
+                            <table className="frame-list">
+                                <thead>
+                                    <tr>
+                                        <th scope="col">Time</th>
+                                        <th scope="col">Target</th>
+                                        <th scope="col">Setting</th>
+                                        <th scope="col">Star width (arcsec)</th>
+                                        <th scope="col">Sky rate (e/s/px)</th>
+                                        <th scope="col">Status</th>
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                    {frames.length > TOP_FRAME_COUNT && (
-                        <button
-                            ref={toggleReference}
-                            type="button"
-                            className="btn btn--tiny"
-                            aria-expanded={showAll}
-                            onClick={() => {
-                                setShowAll((value) => !value);
-                                toggleReference.current?.focus();
-                            }}
-                        >
-                            {showAll ? 'Show fewer' : `Show all ${frames.length}`}
-                        </button>
-                    )}
-                </>
-            )}
-        </section>
+                                </thead>
+                                <tbody>
+                                    {shown.map((frame) => (
+                                        <tr key={frame.frameId} data-status={frame.status}>
+                                            <td>{formatClockTime(frame.time)}</td>
+                                            <td>{frame.target}</td>
+                                            <td>{frame.captureSetting}</td>
+                                            <td>{frame.starWidthArcsec === null ? 'not measured' : formatValue(frame.starWidthArcsec)}</td>
+                                            <td>{frame.skyRate === null ? 'not measured' : formatValue(frame.skyRate)}</td>
+                                            <td>
+                                                <FrameStatusIcon status={frame.status} /> {frameStatusWord(frame.status)}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                        {frames.length > TOP_FRAME_COUNT && (
+                            <button
+                                ref={toggleReference}
+                                type="button"
+                                className="btn btn--tiny"
+                                aria-expanded={showAll}
+                                onClick={() => {
+                                    setShowAll((value) => !value);
+                                    toggleReference.current?.focus();
+                                }}
+                            >
+                                {showAll ? 'Show fewer' : `Show all ${frames.length}`}
+                            </button>
+                        )}
+                    </>
+                )}
+            </div>
+        </ExecutionPanel>
     );
 };

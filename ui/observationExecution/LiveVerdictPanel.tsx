@@ -17,6 +17,7 @@ import { exampleLiveVerdict } from '../common/examples';
 import { Confidence } from '../common/types/backendTypes';
 import { ConfidenceChip } from '../common/components/quality/ConfidenceChip';
 import { ExampleDataBadge } from '../common/components/quality/ExampleDataBadge';
+import { ExecutionPanel } from './ExecutionPanel';
 import { QualityPanelState } from '../common/components/quality/QualityPanelState';
 
 /**
@@ -65,10 +66,7 @@ export const LiveVerdictPanel: React.FC = () => {
     }
 
     return (
-        <section className="execution-section live-verdict" aria-label="Live session verdict" data-example="true">
-            <h3 className="execution-section__title">
-                Live session verdict <ExampleDataBadge />
-            </h3>
+        <ExecutionPanel title="Live session verdict" headerContent={<ExampleDataBadge />} example className="live-verdict">
             <div className="live-verdict__line" aria-live="polite">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true" focusable="false">
                     <circle cx="12" cy="12" r="9" />
@@ -95,6 +93,6 @@ export const LiveVerdictPanel: React.FC = () => {
                 </button>
             </div>
             {details}
-        </section>
+        </ExecutionPanel>
     );
 };

@@ -11,11 +11,14 @@ Terms are defined in the [glossary](../../../../documentation/Glossary.md). This
 3. Flag crowded matches. If the pipeline picked the star out from two or more catalog entries that were too close together to tell apart, it records that too, so the uncertainty is visible later rather than hidden.
 4. Build the run gates. `record_quality.py` builds four of the run's pass/fail quality entries (gates) from the session summary. `source_detection` asks whether any star was detected. `astrometric_residual` asks whether the solution misses its stars by more than half a star's width. `catalog_matches` asks whether at least 20 stars were matched. `catalog_lookup` asks whether the catalog lookups worked. The [astrometry README](../README.md#quality-outputs) lists when each gate passes, fails or is not checked.
 
+5. Count the target's clipped pixels. `target_clipping.py` (`target_clipping_measurements`) runs after a successful solve of a stack. It turns the target's catalog position into a pixel on the stack with this run's plate solution. It requires a source there: the brightest pixel of the disc must stand at least `MINIMUM_PEAK_SIGMA` (5) times the sky noise above the local sky. The commanded pointing in a frame header is never used. It then moves the pixel onto each raw frame with the inverse of Siril's transform, read from the stack's registration record (`<stack name>_registration_frames.json`, written by the stacking run). For each frame it stores the share of the pixels in a disc of `TARGET_REGION_RADIUS_ARCSEC` (30 arcsec) that reach the clip ceiling (`astrometry.frame_target_clipped_fraction`) or the camera's linearity limit (`astrometry.frame_target_nonlinear_fraction`). It reads at most `MAXIMUM_FRAMES_READ` (200) frames, for at most `MAXIMUM_READ_SECONDS` (120) seconds; the others get not-measured rows with a reason. A stack made before the registration record existed, or a run without a plate solution, gets not-measured rows, so an existing stack needs a restack to get these rows. A high share means the target itself is clipped and its brightness is wrong. The photometry and review readers use it. Partly measured; see [AST-19](../../../../documentation/library_design/validation/astrometry.md#ast-19).
+
 ## Settings
 
 | Setting | Default | Effect |
 | --- | --- | --- |
 | Residual limit in `record_quality.py` | Half a star's width (partly measured; see [AST-04](../../../../documentation/library_design/validation/astrometry.md#ast-04)) | Sets when `astrometric_residual` fails |
+| Disc radius, frame cap, read time and least peak in `target_clipping.py` | 30 arcsec, 200 frames, 120 s, 5σ (partly measured; see [AST-19](../../../../documentation/library_design/validation/astrometry.md#ast-19)) | Sets which pixels and frames the target clipping counts |
 | Matched-star limit in `record_quality.py` | 20 stars (partly measured; see [AST-05](../../../../documentation/library_design/validation/astrometry.md#ast-05)) | Sets when `catalog_matches` fails |
 
 ## Quality metrics
@@ -32,6 +35,7 @@ This stage produces one quality record per identified star, made up of the first
 ## Files
 
 - `assess_match_quality.py`: the per-star match record.
+- `target_clipping.py`: `target_clipping_measurements`, the target's clipped and nonlinear pixel shares for each frame. `record_target_clipping_quality` in `record_quality.py` stores them.
 - `record_quality.py`: the four run gates and their limits, and the step that stores the run's numbers and all five gates as quality measurements (`record_astrometry_quality`). The metrics it stores are declared in `../metrics.py`.
 
 This record travels with the star from this point on. A scientist checking a specific star, or a report summarizing a whole session, can see exactly how confident the identification was, instead of trusting the match blindly or repeating the lookup.

@@ -43,6 +43,7 @@ is checked between the steps; when it has run out, the remaining slow steps
 header and background metrics are still returned.
 """
 
+import hashlib
 import logging
 import math
 import os
@@ -50,6 +51,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import datetime
+from functools import cache
 
 import numpy as np
 from astropy.io import fits
@@ -80,9 +82,17 @@ from astrometricslib.pipelines.shared.quality.metrics import (
     FRAME_SKY_RATE_E_PER_S_PER_PX,
     FRAME_STAR_ELONGATION,
     FRAME_STAR_ELONGATION_ANGLE_DEG,
+    FRAME_STAR_WIDTH_EFFECTIVE_ARCSEC,
+    FRAME_STAR_WIDTH_EFFECTIVE_PX,
     FRAME_STAR_WIDTH_GAUSSIAN_BRIGHTEST_PX,
     FRAME_STAR_WIDTH_MOFFAT_ARCSEC,
     FRAME_STAR_WIDTH_MOFFAT_PX,
+    FRAME_STAR_WIDTH_REGION_PX,
+    REGION_CENTER,
+    REGION_XHIGH_YHIGH,
+    REGION_XHIGH_YLOW,
+    REGION_XLOW_YHIGH,
+    REGION_XLOW_YLOW,
 )
 from astrometricslib.pipelines.shared.quality.raw_frame_check import detect_stars
 from astrometricslib.pipelines.shared.quality.saturation import compute_saturated_pixel_fraction
@@ -213,6 +223,44 @@ BOOTSTRAP_RESAMPLE_COUNT = 1000
 # value itself is arbitrary.
 BOOTSTRAP_SEED = 20261022
 
+# The blur a square pixel adds to a star, as a multiple of the pixel side
+# squared (the "c" of the effective star width). A star is the sky's image
+# convolved (smeared) with the pixel's square sensitive area. The variance of
+# a position spread evenly over a side p is p^2 / 12, and variances add under
+# convolution, so for a Gaussian-like core of width sigma the effective
+# sigma^2 is sigma^2 + p^2 / 12 along each axis. The FWHM of a Gaussian is
+# 2 sqrt(2 ln 2) sigma, so FWHM_eff^2 = FWHM^2 + 8 ln 2 * p^2 / 12 =
+# FWHM^2 + (2 ln 2 / 3) * p^2, and the multiple is 2 ln 2 / 3 = 0.4621 (the
+# decimal 2.3548^2 / 12 gives the same). It is a theoretical value, not fitted
+# (user decision of 2026-10-23, science plan section 2.1); the register entry
+# AST-18 states what the Gaussian-core assumption leaves out.
+PIXEL_BLUR_FWHM_SQUARED_FACTOR = 2.0 * math.log(2.0) / 3.0
+
+# The star-width regions of the field. The field is cut into the same 14 x 14
+# cells the stars are chosen from (`MOFFAT_GRID_CELL_COUNT`). The center region
+# is the middle 4 x 4 cells and each corner region is the 4 x 4 cells at that
+# corner, so the five regions have the same area (16 of 196 cells, 8 percent
+# of the frame each) and hold about the same number of stars. Four cells is
+# the smallest block that holds enough stars to give a median with a
+# bootstrap error (the grid takes at most one star per cell, so a block holds
+# at most 16 and usually 5 to 12 in a sparse field). In every name below, x is
+# the column and y is the array row, with row 0 first (see
+# `metrics.REGION_XLOW_YLOW`).
+FIELD_GRID_CELLS_PER_SIDE = 14
+FIELD_REGION_CELLS_PER_SIDE = 4
+
+# The names of the five regions, in the order the metrics are emitted. A corner
+# is named by whether it lies at the low or the high end of the x axis (the
+# columns) and of the y axis (the rows), counted from the first pixel, so the
+# name does not depend on how a viewer flips the image.
+FIELD_REGION_NAMES = (
+    REGION_CENTER,
+    REGION_XLOW_YLOW,
+    REGION_XHIGH_YLOW,
+    REGION_XLOW_YHIGH,
+    REGION_XHIGH_YHIGH,
+)
+
 # What the reason of a pixel metric starts with when the frame could not be
 # read at all. The measurement job tests for it so that an unreadable frame (a
 # network mount that dropped out, a file still being written) is retried on the
@@ -236,6 +284,28 @@ _COLOR_PLANE_NAMES = {3: ("R", "G", "B")}
 BAYER_CELL_SIZE_PX = 2
 
 _DEFINITION_VERSIONS = {spec.name: spec.definition_version for spec in FRAME_METRICS}
+
+
+@cache
+def frame_metric_set_fingerprint() -> str:
+    """Summarize which frame metrics a measurement covers, and how defined.
+
+    A frame is measured once and then skipped while its file is unchanged. When
+    a metric is added to the frame registry, or an existing one is redefined
+    (its ``definition_version`` is raised), the frames measured earlier lack
+    the new numbers. The measurement job stores this fingerprint on every
+    frame it measures and measures a frame again when its stored fingerprint
+    differs.
+
+    Returns
+    -------
+    fingerprint : `str`
+        The first 12 hexadecimal digits of the SHA-256 hash of the sorted
+        ``name:definition_version`` lines of `FRAME_METRICS`. It does not
+        change when the order of the declarations changes.
+    """
+    lines = sorted(f"{spec.name}:{spec.definition_version}" for spec in FRAME_METRICS)
+    return hashlib.sha256("\n".join(lines).encode()).hexdigest()[:12]
 
 
 class _Stopwatch:
@@ -335,6 +405,26 @@ class CandidateRefusals:
 
 
 @dataclass(frozen=True)
+class StarWidthSample:
+    """The width of one fitted star and where it sits in the frame.
+
+    Attributes
+    ----------
+    x_px, y_px : `float`
+        The star's detected position in original pixels (the column and the
+        row, counted from 0). For a raw color mosaic the position found on the
+        super-pixels is given back in original pixels.
+    width_px : `float`
+        The star's Moffat FWHM (the geometric mean of the two axes) in original
+        pixels, as it enters the frame's median.
+    """
+
+    x_px: float
+    y_px: float
+    width_px: float
+
+
+@dataclass(frozen=True)
 class StarProfileResult:
     """The star widths, elongations and angles of one plane of one frame.
 
@@ -369,6 +459,12 @@ class StarProfileResult:
         How many detected sources each cut refused.
     reason : `str`
         Why the values are missing, or a note on how they were found.
+    samples : `tuple` of `StarWidthSample`
+        The position and width of every star behind the medians, from the same
+        second-pass fits (no second fit is made for the regions).
+    field_shape_px : `tuple` of `int`, or `None`
+        The (rows, columns) of the measured plane in original pixels, for the
+        star-width regions. `None` when nothing was measured.
     """
 
     width_px: float | None = None
@@ -383,6 +479,8 @@ class StarProfileResult:
     median_beta: float | None = None
     refusals: CandidateRefusals = field(default_factory=CandidateRefusals)
     reason: str = ""
+    samples: tuple[StarWidthSample, ...] = ()
+    field_shape_px: tuple[int, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -437,8 +535,7 @@ class _Context:
     job_id: str | None
     measured_at: datetime
     capture_setting_id: int | None
-    subject_id: str
-    night_id: str | None
+    path: str
     measurements: list[QualityMeasurement] = field(default_factory=list)
 
     def add(
@@ -483,11 +580,10 @@ class _Context:
             QualityMeasurement(
                 metric=metric,
                 definition_version=_DEFINITION_VERSIONS[metric],
-                subject=QualitySubject(
-                    level=SubjectLevel.FRAME,
-                    subject_id=self.subject_id,
-                    target_id=self.target_id,
-                    observing_night_id=self.night_id,
+                subject=frame_subject(
+                    self.path,
+                    self.target_id,
+                    self.frame.timestamp,
                     capture_setting_id=self.capture_setting_id,
                     channel=channel,
                 ),
@@ -546,6 +642,50 @@ def frame_subject_id(path: str, target_id: str) -> str:
     ]
     relative_parts = parts[lights_positions[-1] + 2 :] if lights_positions else parts[-1:]
     return "/".join([target_id, *relative_parts])
+
+
+def frame_subject(
+    path: str,
+    target_id: str,
+    timestamp: float | None,
+    *,
+    capture_setting_id: int | None = None,
+    channel: str | None = None,
+) -> QualitySubject:
+    """Describe one frame as the subject of a measurement.
+
+    Every row about a frame is built here: the frame job's rows, the
+    quarantine rows, the stacking run's frame weight and rotation rows and the
+    astrometry run's target-clipping rows. One builder means they all share
+    one subject id, so a reader can join them.
+
+    Parameters
+    ----------
+    path : `str`
+        The frame's path.
+    target_id : `str`
+        The target's id.
+    timestamp : `float` or `None`
+        The frame's start time (the frame record's ``timestamp``), which names
+        its observing night. `None` leaves the night out.
+    capture_setting_id : `int` or `None`, optional
+        The frame's capture setting row, when the caller has it.
+    channel : `str` or `None`, optional
+        The color plane, for a row about one plane.
+
+    Returns
+    -------
+    subject : `QualitySubject`
+        Level ``frame``, with the id of `frame_subject_id`.
+    """
+    return QualitySubject(
+        level=SubjectLevel.FRAME,
+        subject_id=frame_subject_id(path, target_id),
+        target_id=target_id,
+        observing_night_id=observing_night_id(timestamp) if timestamp is not None else None,
+        capture_setting_id=capture_setting_id,
+        channel=channel,
+    )
 
 
 def _read_planes(path: str) -> tuple[list[tuple[str | None, np.ndarray]], np.ndarray, fits.Header]:
@@ -1185,6 +1325,7 @@ def measure_star_profiles(
     """
     factor = BAYER_CELL_SIZE_PX if bayer_mosaic else 1
     expected_fwhm_px = STAR_FINDER_EXPECTED_FWHM_PX / factor
+    field_shape_px = (plane.shape[0] - plane.shape[0] % factor, plane.shape[1] - plane.shape[1] % factor)
     if bayer_mosaic:
         plane = _sum_bayer_cells(plane)
         sources = None
@@ -1241,6 +1382,7 @@ def measure_star_profiles(
         np.clip(np.median([fit.beta for _, fit in first_pass]), MOFFAT_BETA_MINIMUM, MOFFAT_BETA_MAXIMUM)
     )
     widths: list[float] = []
+    samples: list[StarWidthSample] = []
     elongations: list[float] = []
     first_components: list[float] = []
     second_components: list[float] = []
@@ -1255,6 +1397,10 @@ def measure_star_profiles(
         if shape is None:
             continue
         widths.append(factor * math.sqrt(fit.fwhm_major_px * fit.fwhm_minor_px))
+        # A super-pixel's center is at its first pixel plus (factor - 1) / 2
+        # original pixels, so (x + 0.5) * factor - 0.5 puts the star back on
+        # the original pixel grid (it is x itself when the factor is 1).
+        samples.append(StarWidthSample((x + 0.5) * factor - 0.5, (y + 0.5) * factor - 0.5, widths[-1]))
         elongations.append(shape[0])
         first_components.append(shape[1])
         second_components.append(shape[2])
@@ -1287,7 +1433,146 @@ def measure_star_profiles(
         candidate_count=candidate_count,
         median_beta=shared_beta,
         refusals=refusals,
+        samples=tuple(samples),
+        field_shape_px=field_shape_px,
     )
+
+
+@dataclass(frozen=True)
+class RegionWidth:
+    """The median star width in one region of the field.
+
+    Attributes
+    ----------
+    region : `str`
+        One of `FIELD_REGION_NAMES`.
+    star_count : `int`
+        How many fitted stars lie in the region.
+    width_px : `float` or `None`
+        Their median Moffat FWHM in original pixels, or `None` when the region
+        holds fewer than `MOFFAT_MINIMUM_STAR_COUNT` stars.
+    width_px_uncertainty : `float` or `None`
+        The bootstrap standard error of that median.
+    """
+
+    region: str
+    star_count: int
+    width_px: float | None = None
+    width_px_uncertainty: float | None = None
+
+
+def _field_region_of(column_cell: int, row_cell: int) -> str | None:
+    """Name the region a grid cell belongs to.
+
+    Parameters
+    ----------
+    column_cell, row_cell : `int`
+        The cell's index along x and along y, from 0 to
+        `FIELD_GRID_CELLS_PER_SIDE` - 1.
+
+    Returns
+    -------
+    region : `str` or `None`
+        One of `FIELD_REGION_NAMES`, or `None` for a cell outside all five
+        regions.
+    """
+    side = FIELD_GRID_CELLS_PER_SIDE
+    block = FIELD_REGION_CELLS_PER_SIDE
+    middle_start = (side - block) // 2
+
+    def band(cell: int) -> str | None:
+        """Name the part of the grid axis that a cell index falls in.
+
+        Returns
+        -------
+        band : `str` or `None`
+            ``"low"``, ``"middle"``, ``"high"`` or `None`.
+        """
+        if cell < block:
+            return "low"
+        if cell >= side - block:
+            return "high"
+        if middle_start <= cell < middle_start + block:
+            return "middle"
+        return None
+
+    column_band, row_band = band(column_cell), band(row_cell)
+    if column_band == "middle" and row_band == "middle":
+        return REGION_CENTER
+    corner_by_bands = {
+        ("low", "low"): REGION_XLOW_YLOW,
+        ("high", "low"): REGION_XHIGH_YLOW,
+        ("low", "high"): REGION_XLOW_YHIGH,
+        ("high", "high"): REGION_XHIGH_YHIGH,
+    }
+    return corner_by_bands.get((column_band, row_band))
+
+
+def measure_field_region_widths(result: StarProfileResult) -> list[RegionWidth]:
+    """Give the median star width of the center and of each corner.
+
+    The stars are those the frame's width already rests on (their fits are not
+    repeated). Each is put in one of the five equal regions described at
+    `FIELD_REGION_NAMES`; a star between the regions is left out.
+
+    Parameters
+    ----------
+    result : `StarProfileResult`
+        The frame's star profile result, with its samples and field shape.
+
+    Returns
+    -------
+    regions : `list` of `RegionWidth`
+        One entry for each region, in `FIELD_REGION_NAMES` order. The width and
+        its error are `None` for a region with fewer than
+        `MOFFAT_MINIMUM_STAR_COUNT` stars; the count is always given.
+    """
+    members: dict[str, list[float]] = {name: [] for name in FIELD_REGION_NAMES}
+    if result.field_shape_px is not None:
+        rows, columns = result.field_shape_px
+        side = FIELD_GRID_CELLS_PER_SIDE
+        for sample in result.samples:
+            column_cell = min(side - 1, max(0, int(sample.x_px / columns * side)))
+            row_cell = min(side - 1, max(0, int(sample.y_px / rows * side)))
+            region = _field_region_of(column_cell, row_cell)
+            if region is not None:
+                members[region].append(sample.width_px)
+    regions = []
+    for name in FIELD_REGION_NAMES:
+        widths = np.array(members[name])
+        if len(widths) < MOFFAT_MINIMUM_STAR_COUNT:
+            regions.append(RegionWidth(name, len(widths)))
+            continue
+        generator = np.random.default_rng(BOOTSTRAP_SEED)
+        regions.append(
+            RegionWidth(
+                name,
+                len(widths),
+                float(np.median(widths)),
+                bootstrap_median_error(widths, generator),
+            )
+        )
+    return regions
+
+
+def effective_star_width_px(width_px: float) -> float:
+    """Add the blur of one square pixel to a star's intrinsic width.
+
+    Parameters
+    ----------
+    width_px : `float`
+        The star's fitted Moffat FWHM in original pixels. The fit integrates
+        the profile over each pixel, so this is the width before the pixel's
+        blur.
+
+    Returns
+    -------
+    effective_width_px : `float`
+        ``sqrt(width_px ** 2 + c)`` with ``c`` equal to
+        `PIXEL_BLUR_FWHM_SQUARED_FACTOR`, in original pixels (the pixel side
+        is 1 in these units).
+    """
+    return math.sqrt(width_px**2 + PIXEL_BLUR_FWHM_SQUARED_FACTOR)
 
 
 def _provenance_text(label: str, value: ProvenancedValue) -> str:
@@ -1487,6 +1772,9 @@ def _emit_star_profile_measurements(
         FRAME_STAR_WIDTH_MOFFAT_ARCSEC,
         FRAME_STAR_ELONGATION,
         FRAME_STAR_ELONGATION_ANGLE_DEG,
+        FRAME_STAR_WIDTH_EFFECTIVE_PX,
+        FRAME_STAR_WIDTH_EFFECTIVE_ARCSEC,
+        *FRAME_STAR_WIDTH_REGION_PX.values(),
     )
     if result.width_px is None:
         context.add_not_measured(star_metrics, result.reason, channel)
@@ -1538,6 +1826,104 @@ def _emit_star_profile_measurements(
         ),
         channel=channel,
     )
+    _emit_effective_width_measurements(context, result, channel, fit_note)
+    _emit_field_region_measurements(context, result, channel, mosaic_note)
+
+
+def _emit_effective_width_measurements(
+    context: _Context, result: StarProfileResult, channel: str | None, fit_note: str
+) -> None:
+    """Add the pixel's blur to the frame's star width and store it twice.
+
+    Parameters
+    ----------
+    context : `_Context`
+        The measurement under way.
+    result : `StarProfileResult`
+        The result for one plane, with a width.
+    channel : `str` or `None`
+        The plane's name.
+    fit_note : `str`
+        The sentence that says how many stars the width rests on.
+    """
+    width = result.width_px
+    effective = effective_star_width_px(width)
+    uncertainty = None
+    if result.width_px_uncertainty is not None:
+        # d(effective) / d(width) = width / effective: the pixel term is a
+        # constant, so only the width's own error passes through.
+        uncertainty = result.width_px_uncertainty * width / effective
+    model_note = (
+        f"model-derived: sqrt(FWHM^2 + c p^2) with c = 2 ln 2 / 3 = {PIXEL_BLUR_FWHM_SQUARED_FACTOR:.4f} "
+        "(theory for a Gaussian core and a square pixel, not fitted) and p one original pixel; "
+        "the error carries the width's bootstrap error only"
+    )
+    context.add(
+        FRAME_STAR_WIDTH_EFFECTIVE_PX,
+        value=effective,
+        uncertainty=uncertainty,
+        sample_count=result.star_count,
+        reason=f"{fit_note}; {model_note}",
+        channel=channel,
+    )
+    pixel_scale = context.frame.pixel_scale_arcsec
+    if pixel_scale is None or not math.isfinite(pixel_scale) or pixel_scale <= 0.0:
+        context.add(
+            FRAME_STAR_WIDTH_EFFECTIVE_ARCSEC,
+            reason="the frame record has no pixel scale, so the width cannot be given in arcseconds",
+            channel=channel,
+        )
+        return
+    context.add(
+        FRAME_STAR_WIDTH_EFFECTIVE_ARCSEC,
+        value=effective * pixel_scale,
+        uncertainty=None if uncertainty is None else uncertainty * pixel_scale,
+        sample_count=result.star_count,
+        reason=f"{fit_note}; {model_note}; {_pixel_scale_note(context.frame)}",
+        channel=channel,
+    )
+
+
+def _emit_field_region_measurements(
+    context: _Context, result: StarProfileResult, channel: str | None, mosaic_note: str
+) -> None:
+    """Store the median star width of the center and of each corner.
+
+    Parameters
+    ----------
+    context : `_Context`
+        The measurement under way.
+    result : `StarProfileResult`
+        The result for one plane, with a width.
+    channel : `str` or `None`
+        The plane's name.
+    mosaic_note : `str`
+        Text added to the reasons for a raw mosaic, else empty.
+    """
+    for region in measure_field_region_widths(result):
+        metric = FRAME_STAR_WIDTH_REGION_PX[region.region]
+        if region.width_px is None:
+            context.add(
+                metric,
+                reason=(
+                    f"only {region.star_count} fitted stars lie in this region of the field; "
+                    f"at least {MOFFAT_MINIMUM_STAR_COUNT} are needed"
+                ),
+                channel=channel,
+            )
+            continue
+        context.add(
+            metric,
+            value=region.width_px,
+            uncertainty=region.width_px_uncertainty,
+            sample_count=region.star_count,
+            reason=(
+                f"{region.star_count} of the frame's {result.star_count} fitted stars lie in this region "
+                f"(a block of {FIELD_REGION_CELLS_PER_SIDE} x {FIELD_REGION_CELLS_PER_SIDE} of the "
+                f"{FIELD_GRID_CELLS_PER_SIDE} x {FIELD_GRID_CELLS_PER_SIDE} grid cells){mosaic_note}"
+            ),
+            channel=channel,
+        )
 
 
 def _emit_sky_measurements(
@@ -1659,7 +2045,6 @@ def measure_frame(
         metrics of a frame stored as color planes).
     """
     stopwatch = _Stopwatch(time_budget_seconds)
-    night_id = observing_night_id(frame.timestamp) if frame.timestamp is not None else None
     context = _Context(
         frame=frame,
         target_id=target_id,
@@ -1667,8 +2052,7 @@ def measure_frame(
         job_id=job_id,
         measured_at=measured_at,
         capture_setting_id=capture_setting_id,
-        subject_id=frame_subject_id(path, target_id),
-        night_id=night_id,
+        path=path,
     )
     _emit_header_measurements(context)
 
@@ -1681,6 +2065,9 @@ def measure_frame(
         FRAME_STAR_WIDTH_MOFFAT_ARCSEC,
         FRAME_STAR_ELONGATION,
         FRAME_STAR_ELONGATION_ANGLE_DEG,
+        FRAME_STAR_WIDTH_EFFECTIVE_PX,
+        FRAME_STAR_WIDTH_EFFECTIVE_ARCSEC,
+        *FRAME_STAR_WIDTH_REGION_PX.values(),
         FRAME_SKY_RATE_E_PER_S_PER_PX,
         FRAME_SKY_NOISE_E,
     )

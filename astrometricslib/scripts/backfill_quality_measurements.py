@@ -1261,7 +1261,9 @@ _STACKING_GATES: tuple[GateMapping, ...] = gate_mappings_from_sources(STACKING_G
 # newer summaries, but their rows are judged when they are recorded (assumed
 # for an estimate inside the checked range, not measured beyond it, assumed
 # for a datasheet ceiling), and a backfill that copied the numbers could not
-# make that judgment, so they are not backfilled either.
+# make that judgment, so they are not backfilled either. The per-frame
+# rotation comes from Siril's registration table, which a stored summary does
+# not hold.
 _STACKING_NOT_HELD: tuple[str, ...] = (
     "stacking.empty_aperture_noise_stack_unit",
     "stacking.noise_reference_flux_stack_unit",
@@ -1290,6 +1292,16 @@ _STACKING_NOT_HELD: tuple[str, ...] = (
     "stacking.group_linearity_limit_adu",
     "stacking.group_peak_estimated_frame_count",
     "stacking.group_clipped_frame_count",
+    "stacking.frame_registration_rotation_deg",
+)
+
+# The astrometry metrics a stored summary cannot give. The share of the
+# target's own pixels that reach the clip ceiling or the linearity limit comes
+# from the raw frames and Siril's registration records, which a summary does
+# not hold.
+_ASTROMETRY_NOT_HELD: tuple[str, ...] = (
+    "astrometry.frame_target_clipped_fraction",
+    "astrometry.frame_target_nonlinear_fraction",
 )
 
 _ASTROMETRY_VALUES: tuple[ValueMapping, ...] = (
@@ -1558,6 +1570,7 @@ SUMMARY_KINDS: tuple[SummaryKind, ...] = (
         stack_image_paths=_IMAGING_STACK_PATHS,
         values=_ASTROMETRY_VALUES,
         gates=_ASTROMETRY_GATES,
+        not_held=_ASTROMETRY_NOT_HELD,
         gate_adjuster=_astrometry_gate,
     ),
     SummaryKind(

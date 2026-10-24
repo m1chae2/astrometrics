@@ -28,11 +28,17 @@ from astrometricslib.models.target import FrameRecord
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_fwhm_from_data
 from astrometricslib.pipelines.shared.quality.frame_measurement import (
     FRAME_MEASUREMENT_TIME_BUDGET_SECONDS,
+    PIXEL_BLUR_FWHM_SQUARED_FACTOR,
+    RegionWidth,
+    StarProfileResult,
+    StarWidthSample,
     _mean_ellipticity_angle,
     _Stopwatch,
+    effective_star_width_px,
     frame_subject_id,
     look_up_frame_sensor_noise,
     measure_clipped_mean_adu,
+    measure_field_region_widths,
     measure_frame,
     measure_sky_electrons,
     measure_star_profiles,
@@ -50,9 +56,12 @@ from astrometricslib.pipelines.shared.quality.metrics import (
     FRAME_SKY_RATE_E_PER_S_PER_PX,
     FRAME_STAR_ELONGATION,
     FRAME_STAR_ELONGATION_ANGLE_DEG,
+    FRAME_STAR_WIDTH_EFFECTIVE_ARCSEC,
+    FRAME_STAR_WIDTH_EFFECTIVE_PX,
     FRAME_STAR_WIDTH_GAUSSIAN_BRIGHTEST_PX,
     FRAME_STAR_WIDTH_MOFFAT_ARCSEC,
     FRAME_STAR_WIDTH_MOFFAT_PX,
+    FRAME_STAR_WIDTH_REGION_PX,
 )
 from astrometricslib.pipelines.shared.quality.record_measurements import (
     check_measurement_against_registry,
@@ -936,3 +945,132 @@ def test_a_real_golden_frame_runs_and_returns_finite_values() -> None:
             if measurement.status != MeasurementStatus.NOT_MEASURED:
                 assert measurement.value is not None and math.isfinite(measurement.value)
     assert by_metric[FRAME_STAR_WIDTH_MOFFAT_PX][0].status == MeasurementStatus.MEASURED
+
+
+def test_the_pixel_blur_constant_is_the_theoretical_value() -> None:
+    """The constant c is 2 ln 2 / 3, a unit Gaussian's FWHM^2 over 12."""
+    fwhm_of_unit_gaussian = 2.0 * math.sqrt(2.0 * math.log(2.0))
+    assert PIXEL_BLUR_FWHM_SQUARED_FACTOR == pytest.approx(fwhm_of_unit_gaussian**2 / 12.0)
+    assert PIXEL_BLUR_FWHM_SQUARED_FACTOR == pytest.approx(0.4621, abs=1e-4)
+
+
+def test_the_effective_width_adds_the_pixel_blur_in_quadrature() -> None:
+    """The formula adds c p^2 to the squared width, with p = 1 pixel."""
+    assert effective_star_width_px(3.0) == pytest.approx(math.sqrt(9.0 + PIXEL_BLUR_FWHM_SQUARED_FACTOR))
+    # Near the Nyquist limit (2 px) the pixel term is a 6 percent widening.
+    assert effective_star_width_px(2.0) / 2.0 == pytest.approx(1.0562, abs=1e-3)
+
+
+def test_the_effective_width_rows_carry_the_model_label_and_the_propagated_error(
+    round_frame_result: dict[str, list[QualityMeasurement]],
+) -> None:
+    """Both effective-width rows follow from the Moffat width and say so."""
+    moffat = round_frame_result[FRAME_STAR_WIDTH_MOFFAT_PX][0]
+    effective_px = round_frame_result[FRAME_STAR_WIDTH_EFFECTIVE_PX][0]
+    effective_arcsec = round_frame_result[FRAME_STAR_WIDTH_EFFECTIVE_ARCSEC][0]
+    expected = effective_star_width_px(moffat.value)
+    assert effective_px.value == pytest.approx(expected)
+    assert effective_px.uncertainty == pytest.approx(moffat.uncertainty * moffat.value / expected)
+    assert effective_arcsec.value == pytest.approx(expected * PIXEL_SCALE_ARCSEC)
+    assert effective_arcsec.uncertainty == pytest.approx(effective_px.uncertainty * PIXEL_SCALE_ARCSEC)
+    assert "model-derived" in effective_px.reason
+    assert "not fitted" in effective_px.reason
+    assert effective_px.sample_count == moffat.sample_count
+
+
+def test_the_effective_width_in_arcseconds_needs_a_pixel_scale(round_frame_path: str) -> None:
+    """Without a pixel scale only the arcsecond row is not measured."""
+    rows = _by_metric(_run(round_frame_path, frame=_frame_record(round_frame_path, pixelScaleArcsec=None)))
+    assert rows[FRAME_STAR_WIDTH_EFFECTIVE_PX][0].status == MeasurementStatus.MEASURED
+    assert rows[FRAME_STAR_WIDTH_EFFECTIVE_ARCSEC][0].status == MeasurementStatus.NOT_MEASURED
+
+
+def _lattice_frame(wide_corner_width_px: float, narrow_width_px: float = 3.0) -> np.ndarray:
+    """Draw a lattice of stars that are wider in the high-x, high-y corner.
+
+    Parameters
+    ----------
+    wide_corner_width_px : `float`
+        The width of the stars whose cell lies in the high-x, high-y corner
+        block (cells 10 to 13 of 14 along both axes).
+    narrow_width_px : `float`, optional
+        The width of all other stars.
+
+    Returns
+    -------
+    pixels : `numpy.ndarray`
+        The frame in ADU with a flat sky, no noise and a bias level.
+    """
+    size = FRAME_SIZE
+    image = np.full((size, size), BIAS_LEVEL_ADU + SKY_ABOVE_BIAS_ADU)
+    spacing = 35
+    for center_y in range(spacing // 2 + 10, size - 20, spacing):
+        for center_x in range(spacing // 2 + 10, size - 20, spacing):
+            in_corner = int(center_x / size * 14) >= 10 and int(center_y / size * 14) >= 10
+            width = wide_corner_width_px if in_corner else narrow_width_px
+            scale = 2.0 * math.sqrt(2.0 ** (1.0 / 3.0) - 1.0)
+            alpha = width / scale
+            rows, columns = np.mgrid[center_y - 15 : center_y + 16, center_x - 15 : center_x + 16]
+            profile = (1.0 + ((columns - center_x) ** 2 + (rows - center_y) ** 2) / alpha**2) ** (-3.0)
+            image[rows, columns] += 20000.0 * profile
+    return image
+
+
+def test_the_corner_widths_find_a_wider_corner_and_keep_the_parts() -> None:
+    """Stars 50 percent wider in one corner read wider there only."""
+    result = measure_star_profiles(_lattice_frame(4.5), SATURATION_ADU)
+    regions = {region.region: region for region in measure_field_region_widths(result)}
+    assert set(regions) == set(FRAME_STAR_WIDTH_REGION_PX)
+    assert regions["xhigh_yhigh"].width_px == pytest.approx(4.5, rel=0.05)
+    for name in ("center", "xlow_ylow", "xhigh_ylow", "xlow_yhigh"):
+        assert regions[name].width_px == pytest.approx(3.0, rel=0.05)
+        assert regions[name].star_count >= 5
+    assert regions["xhigh_yhigh"].width_px_uncertainty is not None
+    assert sum(region.star_count for region in regions.values()) <= result.star_count
+
+
+def test_the_region_rows_give_counts_and_errors_per_region(tmp_path: Path) -> None:
+    """The five region rows hold the median, its error and the star count."""
+    path = _write_frame(tmp_path, _lattice_frame(4.5))
+    rows = _by_metric(_run(path))
+    corner = rows[FRAME_STAR_WIDTH_REGION_PX["xhigh_yhigh"]][0]
+    center = rows[FRAME_STAR_WIDTH_REGION_PX["center"]][0]
+    assert corner.status == MeasurementStatus.MEASURED
+    assert corner.value == pytest.approx(4.5, rel=0.05)
+    assert corner.value > 1.3 * center.value
+    assert corner.sample_count is not None and corner.sample_count >= 5
+    assert corner.uncertainty is not None and corner.uncertainty > 0.0
+    assert "lie in this region" in corner.reason
+    for name in FRAME_STAR_WIDTH_REGION_PX.values():
+        check_measurement_against_registry(rows[name][0])
+
+
+def test_a_region_with_too_few_stars_is_not_measured_but_still_counted() -> None:
+    """Four stars in a region give no median, only the count."""
+    samples = tuple(StarWidthSample(10.0 + index, 10.0, 3.0) for index in range(4))
+    result = StarProfileResult(width_px=3.0, star_count=4, samples=samples, field_shape_px=(700, 700))
+    regions = {region.region: region for region in measure_field_region_widths(result)}
+    assert regions["xlow_ylow"] == RegionWidth("xlow_ylow", 4)
+    assert regions["center"].star_count == 0
+
+
+def test_a_star_between_the_regions_belongs_to_none() -> None:
+    """A star at the middle of an edge, outside every block, is left out."""
+    samples = tuple(StarWidthSample(350.0, 100.0, 3.0) for _ in range(6))
+    result = StarProfileResult(width_px=3.0, star_count=6, samples=samples, field_shape_px=(700, 700))
+    assert all(region.star_count == 0 for region in measure_field_region_widths(result))
+
+
+def test_the_mosaic_star_positions_are_given_in_original_pixels() -> None:
+    """A mosaic's stars lie across the whole frame, not its half-size copy."""
+    result = measure_star_profiles(_make_mosaic_pixels(fwhm_px=4.0), SATURATION_ADU, bayer_mosaic=True)
+    assert result.field_shape_px == (FRAME_SIZE, FRAME_SIZE)
+    assert max(sample.x_px for sample in result.samples) > 0.75 * FRAME_SIZE
+    assert max(sample.y_px for sample in result.samples) > 0.75 * FRAME_SIZE
+
+
+def test_the_samples_hold_the_stars_behind_the_median() -> None:
+    """Every accepted star is a sample; the median is over their widths."""
+    result = measure_star_profiles(_make_frame_pixels(), SATURATION_ADU)
+    assert len(result.samples) == result.star_count
+    assert float(np.median([sample.width_px for sample in result.samples])) == pytest.approx(result.width_px)

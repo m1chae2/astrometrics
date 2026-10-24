@@ -11,6 +11,7 @@ The two quarantine metrics are frame metrics that the frame measurement run
 (`frame_measurement_run.py`) stores, so the fixture adds the rows it would add.
 """
 
+import math
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
@@ -35,7 +36,10 @@ from astrometricslib.pipelines.stacking.post_processing.flat_noise_contribution 
     FlatNoiseContribution,
     FlatNoiseOutcome,
 )
-from astrometricslib.pipelines.stacking.post_processing.record_quality import stacking_measurements
+from astrometricslib.pipelines.stacking.post_processing.record_quality import (
+    frame_geometry_measurements,
+    stacking_measurements,
+)
 from astrometricslib.pipelines.stacking.post_processing.record_science import StackScience
 from astrometricslib.pipelines.stacking.post_processing.stack_membership import (
     StackMember,
@@ -211,6 +215,43 @@ def fixture_membership() -> StackMembership:
     return StackMembership((StackMember(frames[0], 1.0), StackMember(frames[1], 2.0)))
 
 
+def fixture_frame_geometry_rows(context: PipelineRunContext) -> list[QualityMeasurement]:
+    """Run the rotation step on two small frame records.
+
+    Parameters
+    ----------
+    context : `PipelineRunContext`
+        The run's shared facts.
+
+    Returns
+    -------
+    measurements : `list` of `QualityMeasurement`
+        The rotation row of each of two frames. Siril's transform for the
+        first is the identity and the second is turned by 0.004 degrees.
+    """
+    frames = [
+        SimpleNamespace(
+            path=f"/frames/lights/M 99/Scope/Cam/{name}",
+            camera="Cam",
+            exposure="60",
+            timestamp=1_792_000_000.0,
+        )
+        for name in ("a.fits", "b.fits")
+    ]
+    turn = math.radians(0.004)
+    identity = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+    turned = [math.cos(turn), -math.sin(turn), 1.0, math.sin(turn), math.cos(turn), 0.0, 0.0, 0.0, 1.0]
+    diagnostics = {
+        "symlinked_light_paths": [frame.path for frame in frames],
+        "registration_included": [True, True],
+        "registration_frames": [
+            {"dx": 0.0, "dy": 0.0, "star_count": 120, "homography": identity},
+            {"dx": 1.0, "dy": 0.0, "star_count": 118, "homography": turned},
+        ],
+    }
+    return frame_geometry_measurements(fixture_summary(), context, frames, diagnostics, "")
+
+
 def stacking_emitted_measurements() -> list[QualityMeasurement]:
     """Run the stacking record step on a fixed, fully measured stack.
 
@@ -229,6 +270,7 @@ def stacking_emitted_measurements() -> list[QualityMeasurement]:
         science=fixture_science(),
     )
     frame = FrameRecord(path="/frames/lights/M 99/Scope/Cam/a.fits", camera="Cam", exposure="60")
+    measurements.extend(fixture_frame_geometry_rows(context))
     measurements.extend(
         night_measurements(
             context,

@@ -22,6 +22,7 @@ from astrometricslib.pipelines.astrometry.post_processing.record_quality import 
     PLATE_SOLVE_GATE_NAME,
     astrometry_run_gates,
     record_astrometry_quality,
+    record_target_clipping_quality,
 )
 from astrometricslib.pipelines.pipeline_base import (
     AnalysisPipeline,
@@ -36,6 +37,7 @@ from astrometricslib.pipelines.shared.star_recording import (
     merge_astrometry_stellar_object,
     record_pipeline_stars,
 )
+from astrometricslib.pipelines.shared.target_center_hint import resolve_target_center_hint
 from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
@@ -307,6 +309,11 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
         gaia_statistics = get_gaia_query_statistics()
         plate_solve_attempts = get_plate_solve_attempt_count()
 
+        # The target's catalog position as the record held it before this run:
+        # the backfill below may fill an empty position from the solve, which
+        # is the image center and not the target (see `target_clipping.py`).
+        target_center_deg = resolve_target_center_hint(target)
+
         _backfill_target_ra_dec_from_wcs(target, context)
         _write_solved_wcs_to_fits_header(path, context)
 
@@ -331,6 +338,7 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
                 "simbad_matched_count": simbad_matched_count,
                 "gaia_statistics": gaia_statistics,
                 "plate_solve_attempts": plate_solve_attempts,
+                "target_center_deg": target_center_deg,
             },
         )
 
@@ -397,6 +405,17 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
                 measurement_context,
                 Path(image_path).name if image_path else None,
             )
+            # The share of the target's own pixels that are clipped in each
+            # frame of the stack. It needs this run's own plate solution (not
+            # the header's) and the registration record the stacking run wrote.
+            if image_path:
+                record_target_clipping_quality(
+                    image_path,
+                    list(request.target.frames),
+                    measurement_context,
+                    solved_wcs=None if result.context.wcs_is_header_fallback else result.context.wcs,
+                    target_center_deg=result.payload["target_center_deg"],
+                )
 
         from astrometricslib.pipelines.shared.applied_camera_profile import (
             camera_name_from_header,

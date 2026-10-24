@@ -56,6 +56,7 @@ STACK_COMPANION_SUFFIXES = (
     "_preview.jpg",
     "_processed.fits",
     "_inputs.json",
+    "_registration_frames.json",
 )
 
 # The start of the folder where a restack's old files wait until the new stack

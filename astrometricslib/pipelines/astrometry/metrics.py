@@ -5,9 +5,10 @@ self-check it already made. Nothing here measures anything: the `computed_by`
 field points at the code that does, and `post_processing/record_quality.py`
 emits the values next to the quality summary, which stays as it is.
 
-There are three kinds. The counts of what the run did (solver uploads and
-catalog lookups) and the self-checks are about the run. Every other value is
-read from the one stacked image, so it is about that stack:
+There are four kinds. The counts of what the run did (solver uploads and
+catalog lookups) and the self-checks are about the run. The target's clipped
+share is about each raw frame of the stack. Every other value is read from the
+one stacked image, so it is about that stack:
 
 - Counts of stars and of catalog lookups (unit ``count``).
 - Distances and sizes: the three position-error numbers (the catalog match
@@ -16,6 +17,11 @@ read from the one stacked image, so it is about that stack:
   keeps its current estimator under a name that says which one it is. In
   particular `astrometry.catalog_match_separation_rms_arcsec` is not the
   plate-solve fit residual (see validation register entry AST-01).
+- The share of the target's own pixels that are clipped or nonlinear in each
+  frame of the stack (``frame_target_*_fraction``), counted after a successful
+  solve of the stack. It needs the plate solution, which a fresh stack does not
+  have, so it is measured here and not by the stacking run (validation register
+  entry AST-19).
 - The run's five self-checks (``gate_*``), stored with their outcome (passed,
   failed or not checked) and the limit each used. They stay self-checks: they
   flag the run for a look and say nothing about the sky.
@@ -56,6 +62,12 @@ ASTROMETRY_WCS_REFINEMENT_SHIFT_ARCSEC = "astrometry.wcs_refinement_shift_arcsec
 ASTROMETRY_PLATE_SCALE_ARCSEC_PER_PIXEL = "astrometry.plate_scale_arcsec_per_pixel"
 ASTROMETRY_STAR_WIDTH_GAUSSIAN_PX = "astrometry.star_width_gaussian_px"
 
+# The share of the target's own pixels, in each frame of the stack, that reach
+# the clip ceiling or leave the sensor's linear range. Counts are not stored:
+# a count is the share times the row's sample count (the pixels of the disc).
+ASTROMETRY_FRAME_TARGET_CLIPPED_FRACTION = "astrometry.frame_target_clipped_fraction"
+ASTROMETRY_FRAME_TARGET_NONLINEAR_FRACTION = "astrometry.frame_target_nonlinear_fraction"
+
 ASTROMETRY_GATE_PLATE_SOLVE = "astrometry.gate_plate_solve"
 ASTROMETRY_GATE_SOURCE_DETECTION = "astrometry.gate_source_detection"
 ASTROMETRY_GATE_CATALOG_MATCHES = "astrometry.gate_catalog_matches"
@@ -67,6 +79,10 @@ ASTROMETRY_GATE_CATALOG_LOOKUP = "astrometry.gate_catalog_lookup"
 # online lookups) and each self-check belong to the run (plan section 3.1).
 _STACK_ONLY = (SubjectLevel.STACK,)
 _RUN_ONLY = (SubjectLevel.RUN,)
+_FRAME_BAND = (
+    "Each frame's own filter, as recorded. A color frame's planes are reduced to their maximum at each "
+    "position."
+)
 _NO_UNCERTAINTY = "No uncertainty is reported. The value is an exact count."
 _BAND = "Not applicable: the run works on one stacked image, whatever its filter."
 _ADAPTER = "pipelines.astrometry.runner.AstrometryPipelineAdapter"
@@ -264,6 +280,98 @@ def _gate_metric(
     )
 
 
+_TARGET_CLIPPING_ESTIMATOR = (
+    "The target is located by its catalog position (the target record's right ascension and "
+    "declination, as the record held them before the run) through this run's own plate solution of "
+    "the stack. A run that did not solve the stack gets not-measured rows: the registration reference "
+    "frame's solution is the mount's commanded pointing and was 157 arcsec off on the M 57 night "
+    "checked (AST-19), and the pixel center is never used instead. A position outside the stack is "
+    "not measured. Before counting, a source must stand in the disc: its brightest pixel on the "
+    "stack must be at least 5 sky sigma above the median of a ring around it (the sigma is 1.4826 "
+    "times the ring's median absolute deviation); otherwise the rows are not measured, with the "
+    "right ascension, declination and pixel used. In a crowded field any star passes, so this finds a "
+    "position on blank sky and not a wrong star. The position on the stack is moved onto each "
+    "frame by the inverse of Siril's registration transform for the frame, kept beside the stack by "
+    "the stacking run. The region is the disc around that position with a radius of the larger of "
+    "30 arcseconds (about 16 px at 1.9 arcsec/px, which holds a point source and its seeing disc "
+    "many times over and allows a position error of several pixels) and the target's semi-major "
+    "axis when a size is stored (none is today, so a target larger than 30 arcseconds is examined "
+    "in its core only). Every pixel of the disc counts as a target pixel, so in a crowded field the "
+    "clipped pixels of field stars in the disc are counted too. The pixels are the raw frame's own "
+    "values, with a color frame's planes reduced to their maximum at each position."
+)
+
+_TARGET_CLIPPING_SAMPLE = (
+    "The target's disc in each frame of the stack, for up to 200 frames spread evenly through the run "
+    "and for at most 120 seconds of reading. The sample count of a row is the number of disc pixels "
+    "inside the frame, so a count is the share times it. One row for each frame in the stack's "
+    "registration record, in the frame's own subject (the same subject as `stacking.frame_weight`). A "
+    "frame Siril could not register, a frame not sampled, a frame not read in time, a stack without a "
+    "registration record (stacked before the record existed) and a spectral stack give rows that are "
+    "not measured, with the reason, or none when there is no record."
+)
+
+_TARGET_CLIPPING_PURPOSE = (
+    "It tells whether the target's own pixels were clipped or left the sensor's linear range in a "
+    "frame, which would flatten the target in the stack or bend its brightness. Nothing decides from it yet."
+)
+
+_TARGET_CLIPPING_METRICS: tuple[MetricSpec, ...] = (
+    MetricSpec(
+        name=ASTROMETRY_FRAME_TARGET_CLIPPED_FRACTION,
+        definition_version=1,
+        unit="fraction",
+        checkpoint=Checkpoint.ASTROMETRY,
+        levels=(SubjectLevel.FRAME,),
+        better=Direction.LOWER,
+        meaning=(
+            "The share of the pixels in the target's disc, in one raw frame, that reach the camera's "
+            "clip ceiling."
+        ),
+        decisions=("exposure length",),
+        estimator=(
+            "Pixels of the target's disc at or above 98 percent of the camera profile's clip ceiling "
+            "(the same 2 percent tolerance the saturation check uses), divided by the number of disc "
+            "pixels that lie inside the frame. " + _TARGET_CLIPPING_ESTIMATOR
+        ),
+        sample_definition=_TARGET_CLIPPING_SAMPLE,
+        band=_FRAME_BAND,
+        computed_by="pipelines.astrometry.post_processing.target_clipping.target_clipping_measurements",
+        uncertainty_kind=UncertaintyKind.NONE,
+        uncertainty_method="No uncertainty is reported. The value is a count divided by a count.",
+        register_entry="AST-19",
+        purpose=MetricPurpose.CONTEXT,
+        purpose_reason=_TARGET_CLIPPING_PURPOSE,
+    ),
+    MetricSpec(
+        name=ASTROMETRY_FRAME_TARGET_NONLINEAR_FRACTION,
+        definition_version=1,
+        unit="fraction",
+        checkpoint=Checkpoint.ASTROMETRY,
+        levels=(SubjectLevel.FRAME,),
+        better=Direction.LOWER,
+        meaning=(
+            "The share of the pixels in the target's disc, in one raw frame, that reach the camera's "
+            "photometric linearity limit (clipped pixels included)."
+        ),
+        decisions=("exposure length",),
+        estimator=(
+            "Pixels of the target's disc at or above the camera profile's photometric linearity limit, "
+            "divided by the number of disc pixels that lie inside the frame; not measured when the "
+            "profile has no limit. A limit from a datasheet or an assumption, or the generic fallback "
+            "profile of a camera that is not listed, stores the row as assumed. " + _TARGET_CLIPPING_ESTIMATOR
+        ),
+        sample_definition=_TARGET_CLIPPING_SAMPLE,
+        band=_FRAME_BAND,
+        computed_by="pipelines.astrometry.post_processing.target_clipping.target_clipping_measurements",
+        uncertainty_kind=UncertaintyKind.NONE,
+        uncertainty_method="No uncertainty is reported. The value is a count divided by a count.",
+        register_entry="AST-19",
+        purpose=MetricPurpose.CONTEXT,
+        purpose_reason=_TARGET_CLIPPING_PURPOSE,
+    ),
+)
+
 ASTROMETRY_METRICS: tuple[MetricSpec, ...] = (
     _count_metric(
         ASTROMETRY_SOURCES_DETECTED,
@@ -455,6 +563,7 @@ ASTROMETRY_METRICS: tuple[MetricSpec, ...] = (
         purpose=MetricPurpose.DECISION,
         decisions=("run flag",),
     ),
+    *_TARGET_CLIPPING_METRICS,
     _gate_metric(
         ASTROMETRY_GATE_PLATE_SOLVE,
         "count",

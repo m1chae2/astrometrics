@@ -1689,6 +1689,52 @@ Every Python example assumes the library is installed and configured with your o
 - **Guarded by tests:** `test_group_peak.py` (the range by camera) and `test_record_science.py` (assumed inside the range, not measured beyond it, with its reason). The real-data run has no test.
 - **Raw record:** `science/peak_recheck/pairs.jsonl` in the session's scratch folder holds every matched star pair (5,604 lines); not kept in the repository.
 
+### STK-43
+
+**Rotation of each frame about the registration reference**
+
+- **Claim:** The rotation angle of the polar decomposition of the transform Siril fits for each frame, read from its registration table, agrees with an angle fitted independently from the matched stars to 0.0005 degrees (rms), and the angle drifts steadily through a night. Whether the drift tracks the polar-alignment error is not known.
+- **Settings it supports:** None. This entry sets no tuned value.
+- **Status:** Partly measured. One night, 61 frames; the one known polar-alignment error is that same night, which is not enough to check a conversion.
+- **Data you need:** A stacking run in which Siril registered the frames with its transform (not a sequence already registered), and for the conversion, nights with a known polar-alignment error and the direction of the error.
+- **Procedure:**
+  1. Stack the frames. The record step stores a row for each frame: `stacking.frame_registration_rotation_deg`, in the frame's own subject.
+  2. Read the rows with the frame times (the `timestamp` of each frame record, joined by the subject id), fit a straight line, and compare the angle with the one fitted from the stars.
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  rows = astro.quality.query(metric="stacking.frame_registration_rotation_deg", target_id="M 57")
+  for row in rows:
+      print(row.subject.subject_id, row.subject.observing_night_id, row.value, row.status.value)
+  ```
+
+  `field_rotation_measurements` <!-- impl: astrometricslib.pipelines.stacking.post_processing.field_rotation.field_rotation_measurements --> builds the rows from the registration table that `parse_seq_file` <!-- impl: astrometricslib.drivers.siril_output_parsing.parse_seq_file --> reads, and `rotation_from_homography` <!-- impl: astrometricslib.pipelines.stacking.post_processing.field_rotation.rotation_from_homography --> takes the angle out of each transform. `record_stacking_quality` stores the rows in their own call, after the stack's rows, so a failure while building or storing them cannot undo the stack's rows.
+- **Acceptance criterion:** Not recorded. A conversion to a polar-alignment error needs several nights with known errors and directions.
+- **What to look at:** The rows against time within a night: a steady slope is a drift of the field. A jump is a meridian flip or a re-centering. The reference frame reads 0 by construction.
+- **Our result:** 2026-10-23, M 57, night of 2026-10-03 to 04, 61 frames over 1.20 hours (ASI533MM Pro), registered by Siril to frame 39 of the sequence. The angle ran from -0.0075 to +0.0092 degrees. A straight line against the frame times (DATE-OBS) gave +0.01221 degrees per hour (residual rms 0.00122 degrees); the angle rose from the first frame to the last without a jump. The scale ran from 0.99996 to 1.00017.
+
+  Which angle: the first version of this entry used `atan2(h10, h00)`; the stored angle is now the rotation of the polar decomposition of the 2 x 2 part, `atan2(h10 - h01, h00 + h11)`, which a small shear in the fit does not move. On these frames the two differ by a mean of -0.00015 degrees, an rms of 0.00057 degrees and at most 0.0018 degrees (the transforms' off-diagonal sum is under 3e-5). The slope was +0.01153 degrees per hour with `atan2(h10, h00)`.
+
+  An independent angle: the reference frame's 60 brightest stars were moved onto each frame by Siril's transform, matched to the detected stars (all 60 matched in the frames tested), and the rotation that best turns the frame's stars into the reference's was fitted. Against the polar angle the difference had a mean of -0.00001 degrees, an rms of 0.00050 degrees and a largest size of 0.0018 degrees (the `atan2(h10, h00)` angle gave 0.00067 and 0.0021); the formal error of the star-based angle had a median of 0.00054 degrees. Its straight-line slope was +0.01191 degrees per hour. The drift (0.017 degrees over the night) is therefore about 30 times the precision of one angle.
+
+  Sign: the angle is `atan2(h10, h00)` of the transform that moves the frame onto the reference, in Siril's coordinates (x along the columns, y counted up from the last row of the array: y = height - 1 - row). It was confirmed on these frames: with that axis and the inverse transform, all 60 reference stars land within 2.5 px of a detected star in every frame tested. A positive angle turns the frame's x axis toward +y, which is counterclockwise when the array is drawn with its first row at the top. The frame's orientation relative to the reference is the opposite sign.
+
+  The one polar-alignment error the observatory holds is 34 arcminutes 25 arcseconds, from the Ekos log of 2026-10-03, the same night. The data point is recorded here beside the drift: +0.0115 degrees per hour at the declination of M 57 (33 degrees), against a polar-alignment error of 0.574 degrees. No conversion is made (it belongs to `wayfindinglib`), and one night with no direction for the error is insufficient evidence.
+
+  The sign and the wrap. The angle lies in (-180, 180] degrees. A meridian flip turns the field by about 180 degrees, so the stored series jumps by about 360 degrees at the wrap; a reader unwraps it before fitting a drift. The night above has no flip.
+
+  What a row says about itself. The reason of a measured row names the registration reference frame and the image parity (the sign of the determinant of the CD matrix of the stack's plate solution, or unknown when the stack header has none; the scratch stack's is unknown). The angle depends on which frame is the reference, so values compare only within one run (`run_id`): a restack that picks another reference changes them. The frame's time is the frame header's DATE-OBS (DATE when there is none), the start of the exposure by the FITS convention; the row holds no time and the reader joins it by the subject id.
+
+  To repeat: `science/s3/evidence_rotation_polar.py` and `science/s3/real_rotation_polar.py` in the session's scratch folder, or the call in the procedure.
+- **Verdict:** Not judged.
+- **Limits:** One night and one camera. The row holds no uncertainty (Siril saves none); the precision above is from this night only. A sequence already registered, a spectral stack (shift only), a frame Siril dropped or never read, and a transform that mirrors the image give not-measured rows with the reason. A restack with the same frames gives a new row, so a reader takes the latest run, and compares angles only within one run.  The frame's time is not in the row.
+- **To tune for your setup:** None.
+- **Regenerate with:** The call in the procedure.
+- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/post_processing/test_frame_rotation.py` checks the rows, the polar angle against a stretch, the wrap, the parity, the not-measured cases (including a frame missing from Siril's table), the shared frame subject and that `record_stacking_quality` stores the rows in their own call.
+- **Raw record:** None kept.
+
 ## Design estimates
 
 These tuned values have not been measured. Each is a reasoned choice; the last column says how you could measure it on your data.

@@ -24,6 +24,8 @@ def _frame(path: str, size: int | None = None, modified_ns: int | None = None, *
     frame = FrameRecord(path=path, **fields)
     frame.quality_measured_file_size = size
     frame.quality_measured_file_modified_ns = modified_ns
+    if size is not None:
+        frame.quality_measured_metric_set = "abc123abc123"
     return frame
 
 
@@ -48,6 +50,7 @@ def test_only_the_stamps_are_copied_onto_the_stored_target() -> None:
     by_path = {frame.path: frame for frame in merged.frames}
     assert by_path["/a.fits"].quality_measured_file_size == 10
     assert by_path["/a.fits"].quality_measured_file_modified_ns == 111
+    assert by_path["/a.fits"].quality_measured_metric_set == "abc123abc123"
     # Not overwritten by the in-memory copy's stale value.
     assert by_path["/a.fits"].camera == "Stored Camera"
     assert by_path["/b.fits"].quality_measured_file_size is None

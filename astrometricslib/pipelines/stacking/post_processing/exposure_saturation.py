@@ -23,6 +23,7 @@ import numpy as np
 from scipy.ndimage import binary_dilation, label, minimum_filter
 
 from astrometricslib.foundation.camera_names import normalize_camera_name
+from astrometricslib.pipelines.shared.quality.saturation import CLIP_CEILING_TOLERANCE_FRACTION
 
 # A star counts as saturated when at least this many connected pixels sit at
 # the frame's ceiling. Single pixels at the ceiling are common and are not
@@ -35,7 +36,7 @@ SATURATED_BLOB_MINIMUM_PIXELS = 4
 # A pixel is at the ceiling when it is within this fraction of it. Saturated
 # frames pile up at exactly one value, so a small tolerance only allows for the
 # last count or two.
-CEILING_TOLERANCE_FRACTION = 0.02
+CEILING_TOLERANCE_FRACTION = CLIP_CEILING_TOLERANCE_FRACTION
 
 # A frame is described as saturated when a star clips in at least this share of
 # the frames sampled from an exposure group. One clipped frame in three can be

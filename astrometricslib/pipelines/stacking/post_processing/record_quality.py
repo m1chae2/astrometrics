@@ -36,11 +36,10 @@ from astrometricslib.models.quality.measurement import (
     MeasurementStatus,
     QualityMeasurement,
     QualitySubject,
-    SubjectLevel,
 )
 from astrometricslib.models.quality.metric_spec import MetricSpec
 from astrometricslib.models.quality.quality_summary import ExposureGroupSummary, StackQualitySummary
-from astrometricslib.pipelines.shared.quality.frame_measurement import frame_subject_id
+from astrometricslib.pipelines.shared.quality.frame_measurement import frame_subject
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
     GateLimitSource,
     PipelineRunContext,
@@ -84,6 +83,7 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_STACKED_FWHM_PX,
     STACKING_ZERO_PIXEL_FRACTION,
 )
+from astrometricslib.pipelines.stacking.post_processing.field_rotation import field_rotation_measurements
 from astrometricslib.pipelines.stacking.post_processing.record_science import (
     StackScience,
     compute_stack_science,
@@ -104,13 +104,13 @@ from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
     measure_stack_noise,
     save_noise_sums,
 )
-from astrometricslib.utilities.observing_night import observing_night_id
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "GATE_LIMIT_SOURCES",
     "exposure_group_subject",
+    "frame_geometry_measurements",
     "gate_for_measurement",
     "measure_noise_safely",
     "membership_count_measurements",
@@ -517,12 +517,7 @@ def _membership_measurements(
     weight_spec = _SPEC_BY_NAME[STACKING_FRAME_WEIGHT]
     for member, weight in zip(membership.members, weights, strict=True):
         frame = member.frame
-        subject = QualitySubject(
-            level=SubjectLevel.FRAME,
-            subjectId=frame_subject_id(frame.path, context.target_id),
-            targetId=context.target_id,
-            observingNightId=observing_night_id(frame.timestamp) if frame.timestamp is not None else None,
-        )
+        subject = frame_subject(frame.path, context.target_id, frame.timestamp)
         if weight is None:
             reason = unknown_reason
             if uncertain:
@@ -637,6 +632,42 @@ def stacking_measurements(
     )
     measurements.extend(_membership_measurements(membership, membership_reason, context, stack_subject))
     return measurements
+
+
+def frame_geometry_measurements(
+    summary: StackQualitySummary,
+    context: PipelineRunContext,
+    target_frames: Sequence[Any],
+    diagnostics: dict[str, Any],
+    stack_path: str,
+) -> list[QualityMeasurement]:
+    """Build the per-frame geometry rows of a stack (each frame's rotation).
+
+    Parameters
+    ----------
+    summary : `StackQualitySummary`
+        The finished summary (it says whether the stack is spectral).
+    context : `PipelineRunContext`
+        The run's shared facts.
+    target_frames : `Sequence`
+        The frames given to the stacking program.
+    diagnostics : `dict`
+        What the stacking run reported (Siril's registration results).
+    stack_path : `str`
+        The finished stack, whose header gives the image parity.
+
+    Returns
+    -------
+    measurements : `list` of `QualityMeasurement`
+        The rotation of each frame about the registration reference.
+    """
+    return field_rotation_measurements(
+        target_frames,
+        diagnostics,
+        context,
+        is_spectral=summary.stacking_metrics.is_spectral,
+        stack_path=stack_path,
+    )
 
 
 def measure_noise_safely(
@@ -762,7 +793,15 @@ def record_stacking_quality(
         measurements = stacking_measurements(
             summary, context, os.path.basename(stack_path), noise, membership, membership_reason, science
         )
-        return record_run_measurements(measurements, config=config)
+        new_count = record_run_measurements(measurements, config=config)
     except Exception:  # quality rows must never stop a stack
         logger.exception("The quality measurements of the stack %s were not stored", stack_path)
         return 0
+    # The frames' geometry rows go in their own call, after the stack rows, so
+    # a failure while building or storing them cannot undo the rows above.
+    try:
+        geometry = frame_geometry_measurements(summary, context, target_frames, diagnostics, stack_path)
+        new_count += record_run_measurements(geometry, config=config)
+    except Exception:  # a by-product of the stack: no failure here may fail it
+        logger.exception("The frame geometry rows of the stack %s were not stored", stack_path)
+    return new_count

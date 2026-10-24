@@ -251,6 +251,7 @@ def build_measurement(
     check_outcome: GateStatus | None = None,
     check_limit: QualityLimit | None = None,
     action_taken: str | None = None,
+    provenance: str = "",
 ) -> QualityMeasurement:
     """Build one measurement of a declared metric.
 
@@ -286,6 +287,11 @@ def build_measurement(
         For a self-check, the limit it used.
     action_taken : `str` or `None`, optional
         For a processing decision, what was done.
+    provenance : `str`, optional
+        For a ``measured`` value that is not a self-check, a note on how the
+        value was found (which frame it was lined up with, which position was
+        used). It is stored as the row's reason, which would otherwise be left
+        empty. It is ignored for any other row.
 
     Returns
     -------
@@ -300,7 +306,7 @@ def build_measurement(
         uncertainty = None
     final_status = MeasurementStatus.NOT_MEASURED if value is None else status
     if final_status == MeasurementStatus.MEASURED and check_outcome is None:
-        reason = ""
+        reason = provenance
     return QualityMeasurement(
         metric=spec.name,
         definitionVersion=spec.definition_version,

@@ -18,6 +18,8 @@ from astrometricslib.models.quality.limit import LimitTier
 from astrometricslib.models.quality.measurement import MeasurementOrigin, MeasurementStatus, SubjectLevel
 from astrometricslib.models.quality.quality_summary import AstrometryPipelineQualityMetrics
 from astrometricslib.pipelines.astrometry.metrics import (
+    ASTROMETRY_FRAME_TARGET_CLIPPED_FRACTION,
+    ASTROMETRY_FRAME_TARGET_NONLINEAR_FRACTION,
     ASTROMETRY_GATE_ASTROMETRIC_RESIDUAL,
     ASTROMETRY_GATE_CATALOG_LOOKUP,
     ASTROMETRY_GATE_CATALOG_MATCHES,
@@ -272,15 +274,23 @@ def test_a_good_gaia_fit_passes_even_when_the_catalog_separation_is_large() -> N
 MEASURED_AT = datetime(2026, 10, 22, tzinfo=UTC)
 
 
+# The two target-clipping metrics have their own record step
+# (`record_target_clipping_quality`), tested in test_target_clipping.py.
+_FRAME_TARGET_METRICS = {
+    ASTROMETRY_FRAME_TARGET_CLIPPED_FRACTION,
+    ASTROMETRY_FRAME_TARGET_NONLINEAR_FRACTION,
+}
+
+
 def _declared_names() -> set[str]:
-    """Name every metric the astrometry pipeline declares.
+    """Name every metric the main record step stores.
 
     Returns
     -------
     names : `set` [`str`]
         The declared metric names.
     """
-    return {spec.name for spec in ASTROMETRY_METRICS}
+    return {spec.name for spec in ASTROMETRY_METRICS} - _FRAME_TARGET_METRICS
 
 
 def _context(job_id: str | None = "job-1") -> PipelineRunContext:
@@ -312,7 +322,7 @@ def _all_gates(metrics: AstrometryPipelineQualityMetrics) -> list:
 
 def test_the_record_step_emits_every_declared_metric_once() -> None:
     """A fully measured run gives one measurement per declared metric."""
-    measurements = astrometry_emitted_measurements()
+    measurements = [m for m in astrometry_emitted_measurements() if m.metric not in _FRAME_TARGET_METRICS]
 
     assert [m.metric for m in measurements].count(ASTROMETRY_GATE_PLATE_SOLVE) == 1
     assert {m.metric for m in measurements} == _declared_names()

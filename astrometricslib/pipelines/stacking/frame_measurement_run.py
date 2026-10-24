@@ -94,15 +94,14 @@ from astrometricslib.models.quality.measurement import (
     MeasurementOrigin,
     MeasurementStatus,
     QualityMeasurement,
-    QualitySubject,
-    SubjectLevel,
 )
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.frame_scanning import file_state_matches
 from astrometricslib.pipelines.shared.quality.frame_measurement import (
     TIME_BUDGET_REASON_PREFIX,
     UNREADABLE_FRAME_REASON_PREFIX,
-    frame_subject_id,
+    frame_metric_set_fingerprint,
+    frame_subject,
     measure_clipped_mean_adu,
     measure_frame,
 )
@@ -309,10 +308,15 @@ def frame_needs_measuring(frame: FrameRecord, file_state: os.stat_result | None)
     Returns
     -------
     needs_measuring : `bool`
-        `True` unless the frame has a stamp and the file still matches it,
-        by the same rule the header scan uses (`file_state_matches`). A frame
-        never measured has no stamp, so it needs measuring.
+        `True` unless the frame has a stamp, the file still matches it (by the
+        same rule the header scan uses, `file_state_matches`) and the frame
+        was measured with the current set of frame metrics
+        (`frame_metric_set_fingerprint`). A frame never measured has no stamp,
+        so it needs measuring. A frame measured before a metric was added or
+        redefined, or before the set was recorded, is measured again.
     """
+    if frame.quality_measured_metric_set != frame_metric_set_fingerprint():
+        return True
     return not file_state_matches(
         file_state, frame.quality_measured_file_size, frame.quality_measured_file_modified_ns
     )
@@ -331,6 +335,7 @@ def _stamp_frame_as_measured(frame: FrameRecord, file_state: os.stat_result) -> 
     """
     frame.quality_measured_file_size = file_state.st_size
     frame.quality_measured_file_modified_ns = file_state.st_mtime_ns
+    frame.quality_measured_metric_set = frame_metric_set_fingerprint()
 
 
 def _whole_number(text: object) -> int | None:
@@ -841,13 +846,7 @@ def quarantine_measurements_for_frame(
         One roundness row and one sky median row. The roundness row is
         ``not_measured`` with a reason when the frame had no measurable star.
     """
-    subject = QualitySubject(
-        level=SubjectLevel.FRAME,
-        subject_id=frame_subject_id(frame.path, target_id),
-        target_id=target_id,
-        observing_night_id=observing_night_id(frame.timestamp) if frame.timestamp is not None else None,
-        capture_setting_id=capture_setting_id,
-    )
+    subject = frame_subject(frame.path, target_id, frame.timestamp, capture_setting_id=capture_setting_id)
     common = {
         "definition_version": 1,
         "subject": subject,

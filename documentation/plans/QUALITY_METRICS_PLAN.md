@@ -386,6 +386,10 @@ A `MetricSpec` holds:
 - its purpose: decision, context or exploratory, with a reason, or a question and a review date
   (section 6.7).
 
+The uncertainty kind is `statistical_1_sigma`, `systematic_bound`, `model_derived` (the value adds a
+term from a model, such as a pixel's blur, and its uncertainty carries only the measured part's
+error) or `none`.
+
 A change to a metric's estimator, sample or constants raises its `definition_version`, which is
 stored on every row. `pipeline_version` changes for unrelated reasons, so it cannot show this. A
 renamed metric gets no alias: every reader is updated and the stored rows are migrated once, as

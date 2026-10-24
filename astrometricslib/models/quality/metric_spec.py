@@ -40,10 +40,17 @@ class Direction(StrEnum):
 
 
 class UncertaintyKind(StrEnum):
-    """What kind of uncertainty a metric reports."""
+    """What kind of uncertainty a metric reports.
+
+    ``MODEL_DERIVED`` marks a value that adds a term from a model (such as the
+    blur of a square pixel) to a measured value. Its uncertainty carries only
+    the statistical error of the measured part. The error of the model term
+    is not included, so the value must be read as model-derived.
+    """
 
     STATISTICAL_1_SIGMA = "statistical_1_sigma"
     SYSTEMATIC_BOUND = "systematic_bound"
+    MODEL_DERIVED = "model_derived"
     NONE = "none"
 
 

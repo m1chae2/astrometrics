@@ -54,6 +54,7 @@ def validate_with_options(
         wcs_refinement=None,
         astrometry_flags=[],
         wcs=wcs,
+        wcs_is_header_fallback=False,
         image=SimpleNamespace(header={}),
     )
     for name, value in context_fields.items():
@@ -68,6 +69,7 @@ def validate_with_options(
             "simbad_matched_count": 0,
             "gaia_statistics": gaia,
             "plate_solve_attempts": 1,
+            "target_center_deg": (None, None),
         },
     )
     request = PipelineRequest(

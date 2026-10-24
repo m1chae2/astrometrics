@@ -821,6 +821,126 @@ print([abs(a - b) / abs(a) for a, b in zip(full, sample)])
 - **Guarded by tests:** `astrometricslib/pipelines/shared/quality/test/test_frame_measurement.py` checks the recovered widths, elongations and angles on synthetic frames, and `astrometricslib/pipelines/stacking/test/test_frame_measurement_run.py` checks the job around it.
 - **Raw record:** None kept.
 
+### AST-18
+
+**Effective star width, and star width in the center and the corners of the field**
+
+- **Claim:** The effective star width adds the blur of one square pixel to the fitted Moffat width, with a fixed theoretical term (`FWHM_eff^2 = FWHM^2 + c p^2`, `c` = 2 ln 2 / 3 = 0.4621). The width of the stars in the center and in each corner of the field comes from the same fits as the frame's width, with no second fit. Neither has been checked against a known tilt or against a known seeing. The 61 frames of the night are not 61 independent results: they are undithered, so each region holds the same 16 stars in every frame.
+- **Settings it supports:**
+  - code constant `PIXEL_BLUR_FWHM_SQUARED_FACTOR` (the exact value 2 ln 2 / 3, about 0.462) in `pipelines/shared/quality/frame_measurement.py`. Relation: sanity check only. It is theory (the user's decision of 2026-10-23: no fitted value), not a tuned number. The check below shows what the Gaussian-core assumption leaves out. <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.PIXEL_BLUR_FWHM_SQUARED_FACTOR -->
+  - code constants `FIELD_GRID_CELLS_PER_SIDE` = 14 and `FIELD_REGION_CELLS_PER_SIDE` = 4 in the same file. Relation: sanity check only. A block of 4 by 4 of the 14 by 14 cells is 8 percent of the frame and holds 16 stars when every cell has one, which is more than the 5 a median needs. <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.FIELD_GRID_CELLS_PER_SIDE --> <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.FIELD_REGION_CELLS_PER_SIDE -->
+- **Status:** Design estimate. The blur term is theory, checked on a computed star only. The region widths are measured on one night and have no known tilt to compare with.
+- **Data you need:** Light frames of one camera setting, and for the tilt question a session where the camera plane is known to be tilted or square (no such session is held).
+- **Procedure:**
+  1. Measure the frames with the frame measurement job.
+  2. Read the effective width rows and the five region rows, and compare each corner with the center, frame by frame, using the bootstrap errors.
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  for metric in (
+      "frame.star_width_moffat_px",
+      "frame.star_width_effective_px",
+      "frame.star_width_center_px",
+      "frame.star_width_corner_xhigh_ylow_px",
+  ):
+      for row in astro.quality.query(metric=metric, target_id="M 57"):
+          print(metric, row.subject.subject_id, row.value, row.uncertainty, row.sample_count)
+  ```
+
+  `measure_frame` <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.measure_frame --> stores the rows. A frame measured before the rows existed is measured again by the job, because the job stores a fingerprint of the frame metrics (`frame_metric_set_fingerprint`) on every frame it measures and compares it with the current one; `measure_star_profiles` <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.measure_star_profiles --> and `measure_field_region_widths` <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.measure_field_region_widths --> give the same numbers on one plane.
+- **Acceptance criterion:** Not recorded. A tilt claim needs a session with a known tilt, or a session before and after the camera plane was changed, which the observatory does not hold.
+- **What to look at:** The size of each corner minus the center against the bootstrap errors, the same sign in the same corner in most frames of a night, and the same pattern on another night. A pattern that follows the seeing and not the corner is not a tilt.
+- **Our result:** 2026-10-23, M 57, night of 2026-10-03, 61 frames of 60 s (ASI533MM Pro, 1.915 arcsec/px), read only.
+
+  The pixel blur term. A Moffat star was sampled finely, smeared over a 1 px square, and its FWHM read. The formula reads low when the star has wings (smeared width, formula, difference):
+
+  | Moffat beta | FWHM 1.6 px | 2.0 px | 3.0 px | 4.5 px |
+  | --- | --- | --- | --- | --- |
+  | 2 | 1.853, 1.738, -6.2% | 2.207, 2.112, -4.3% | 3.141, 3.076, -2.1% | 4.595, 4.551, -1.0% |
+  | 3 | 1.818, 1.738, -4.4% | 2.177, 2.112, -3.0% | 3.119, 3.076, -1.4% | 4.580, 4.551, -0.6% |
+  | 5 | 1.791, 1.738, -2.9% | 2.153, 2.112, -1.9% | 3.103, 3.076, -0.9% | 4.569, 4.551, -0.4% |
+  | 20 | 1.760, 1.738, -1.2% | 2.127, 2.112, -0.7% | 3.084, 3.076, -0.3% | 4.556, 4.551, -0.1% |
+
+  For the real frames the fitted width had a median of 1.953 px (range 1.62 to 2.87, bootstrap error 0.004 px), and the effective width a median of 2.068 px (3.96 arcsec); the effective width is 1.059 times the fitted one at the median. At this width the formula is about 3 percent below a computed beta 3 star, so the effective width is a little low, by 0.06 px.
+
+  The center and the corners, over the 61 frames (every region held 16 stars in every frame; the median bootstrap error of a region is 0.008 to 0.014 px; the corner is named by the low or high end of x, the columns, and of y, the rows):
+
+  | Region | Median width (px) | Corner minus center (median) | Frames where the corner is wider | Median of corner minus center over its error |
+  | --- | --- | --- | --- | --- |
+  | center | 1.946 | | | |
+  | x low, y low | 1.960 | +0.007 px (+0.3%) | 39 of 61 | 1.1 |
+  | x high, y low | 1.995 | +0.061 px (+3.3%) | 61 of 61 | 4.4 |
+  | x low, y high | 1.963 | +0.028 px (+1.4%) | 50 of 61 | 2.0 |
+  | x high, y high | 2.003 | +0.041 px (+2.0%) | 59 of 61 | 2.4 |
+
+  The 16 stars of a region are the same stars in every frame. The 61 frames are undithered and the grid takes the brightest star in each cell, so a region's 16 stars are 16 grid cells' brightest stars each frame. Siril's transform for each frame was used to put every frame's stars on the reference frame's grid and match them to the reference frame's 196 stars (within 3 px). A reference star was found in a median of 59 of the 61 frames; each of the five regions holds 16 stars in the reference frame. So a corner's median rests on 16 stars measured 61 times, not on 61 independent samples, and the bootstrap errors in the table above (which resample stars within a frame) do not cover the fact that the frames repeat.
+
+  Leaving out one star. With the matched stars, the median corner minus center over the frames is +0.006 px (x low, y low), +0.054 px (x high, y low), +0.025 px (x low, y high) and +0.043 px (x high, y high). Dropping each one of the 16 stars of a corner in turn, and then each of the 16 center stars in turn, the corner minus center moved by at most 0.005 px in every corner. The sign did not change for any single star. The x low, y low corner is the weakest: +0.004 to +0.008 px, 38 percent of its value for the worst single star. The x high, y low corner is the firmest: +0.047 to +0.056 px, 5 percent. So no one star makes the pattern, but 16 stars per region is a small set and the same stars stand behind every frame.
+
+  The causes of the pattern the data cannot separate: a tilt, field curvature, coma, the coarse sampling, the choice of stars (one brightest star in each of the 4 by 4 cells of a region, the same ones every frame), and the brightness of the stars (the corners of a vignetted field hold fainter stars, and a fit to a fainter star is noisier and can be wider). A second field or a second night is needed before any tilt reading.
+
+  The largest corner over the center had a median of 1.035 (range 1.005 to 1.082). The difference of the x high, y high corner from the center does not follow the frame's width (correlation -0.08). The pattern is steady through the night, but a width 3 percent larger in one corner could be a small tilt, field curvature, coma or the coarse sampling (the stars are 1.95 px wide, near Nyquist); the data cannot tell them apart.
+
+  To repeat: `python science/s3/evidence_frames.py` then `science/s3/analyse_regions.py`, `science/s3/check_pixel_blur.py` and `science/s3/leave_one_star_out.py` in the session's scratch folder, or the call in the procedure.
+- **Verdict:** Not judged.
+- **Limits:** The blur term is theory with a Gaussian core and reads about 3 percent low for beta 3 at 2 px (the effective width's uncertainty method states this bias: about -3 percent at 2 px for beta 3, up to -6 percent at 1.6 px for beta 2). The regions are measured on one night and one camera, and on one field: in undithered frames each region's stars are the same 16 in every frame, so the number of frames is not the number of independent results. A corner is named by x (the column) and y (the array row, row 0 first); a viewer that draws row 0 at the bottom shows the same corner on the other side. A raw color mosaic is fitted on 2 by 2 super-pixels and its blur term still uses the original pixel. The stars must lie 10 px from the edge, so the corners are not the extreme corners. A frame measured before the rows existed has none until the job measures it again, which it does on its next run.
+- **To tune for your setup:** None for the blur term (it is theory; a fitted value was not chosen). A smaller or larger region block means changing `FIELD_REGION_CELLS_PER_SIDE`.
+- **Regenerate with:** The call in the procedure.
+- **Guarded by tests:** `astrometricslib/pipelines/shared/quality/test/test_frame_measurement.py` checks the constant, the formula and its error, a wider corner on a drawn lattice of stars, the minimum count and the mosaic positions. `astrometricslib/pipelines/stacking/test/test_frame_measurement_run.py` checks that a frame measured before the metric set changed is measured again.
+- **Raw record:** `science/s3/frames.pkl` in the session's scratch folder holds each frame's widths, regions and star positions; not kept in the repository.
+
+### AST-19
+
+**Share of the target's own pixels at the clip ceiling or the linearity limit, frame by frame**
+
+- **Claim:** The target is found on each raw frame through this run's plate solution of the stack and Siril's registration transforms, and the share of the pixels of a 30 arcsecond disc around it that reach the clip level or the linearity limit is stored. The mount's commanded pointing is not a usable solution for this. A source must stand in the disc on the stack, which finds a target record placed on blank sky but not a wrong star in a crowded field.
+- **Settings it supports:**
+  - code constant `TARGET_REGION_RADIUS_ARCSEC` = 30 in `pipelines/astrometry/post_processing/target_clipping.py`. Relation: sanity check only. The commanded pointing of the M 57 night was 157 arcsec from the plate solution, so the disc would have to be many times larger to cover that error. <!-- impl: astrometricslib.pipelines.astrometry.post_processing.target_clipping.TARGET_REGION_RADIUS_ARCSEC -->
+  - code constants `MAXIMUM_FRAMES_READ` = 200 and `MAXIMUM_READ_SECONDS` = 120 in the same file. Relation: sanity check only. One real run read a frame in 0.014 s, so 200 frames take about 3 s on a local disk; the time limit allows 40 times that for a network mount. <!-- impl: astrometricslib.pipelines.astrometry.post_processing.target_clipping.MAXIMUM_FRAMES_READ --> <!-- impl: astrometricslib.pipelines.astrometry.post_processing.target_clipping.MAXIMUM_READ_SECONDS -->
+  - code constant `MINIMUM_PEAK_SIGMA` = 5 in the same file. Relation: sanity check only. On the M 57 stack the blank discs sat at 1.5 to 4.5σ, so 5 lies above blank sky. <!-- impl: astrometricslib.pipelines.astrometry.post_processing.target_clipping.MINIMUM_PEAK_SIGMA -->
+- **Status:** Partly measured. The chain was checked end to end on one clipped star of the M 57 frames; the Ring Nebula itself never clips on this night. The source check was measured on one crowded field.
+- **Data you need:** A stack whose registration record the stacking run wrote (a stack made before the record existed has none and gets no rows), the stack's plate solution from the astrometry run, its raw frames and the target's catalog position.
+- **Procedure:**
+  1. Stack the target. The stacking run writes `<stack name>_registration_frames.json` beside the stack (Siril's transform for each frame, the frame list in Siril's order and the trimmed columns and rows).
+  2. Run the astrometry pipeline on the stack. After a successful solve it stores `astrometry.frame_target_clipped_fraction` and `astrometry.frame_target_nonlinear_fraction` for each frame read. The row's sample count is the number of disc pixels inside the frame, so a count is the share times it.
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  for metric in (
+      "astrometry.frame_target_clipped_fraction",
+      "astrometry.frame_target_nonlinear_fraction",
+  ):
+      for row in astro.quality.query(metric=metric, target_id="M 57"):
+          print(metric, row.subject.subject_id, row.value, row.sample_count, row.status.value, row.reason[:80])
+  ```
+
+  `target_clipping_measurements` <!-- impl: astrometricslib.pipelines.astrometry.post_processing.target_clipping.target_clipping_measurements --> builds the rows and `record_target_clipping_quality` <!-- impl: astrometricslib.pipelines.astrometry.post_processing.record_quality.record_target_clipping_quality --> stores them.
+- **Acceptance criterion:** Not recorded.
+- **What to look at:** A frame where the share is not zero, and the reason on a not-measured row (no plate solution of this run, no source at the position, a frame not sampled or not read in time).
+- **Our result:** 2026-10-23, M 57, night of 2026-10-03 to 04, 61 frames of 60 s (ASI533MM Pro, clip ceiling 65532 ADU), read only. The scratch stack has no coordinate solution of its own and no registration record, so the local solver (`solve-field`) solved it (1.919 arcsec/px) and the record was written from the stack's `_inputs.json` and `_Registration.seq` (the trimmed columns and rows are 0).
+
+  Pointing: the reference frame's header holds the commanded pointing (18 53 29.33, +33 05 00.43). Through it, the SIMBAD position of M 57 (18 53 35.08, +33 01 45) fell at stack pixel (row 1608, column 1496); through the plate solution it fell at (row 1534, column 1528). The difference is 81.6 px, 156.5 arcseconds. The brightest smoothed spot of the reference frame lay 9 px from the plate-solved position (the ring is brighter than its center), so the plate solution places the nebula to about 10 px. A disc of 30 arcseconds around the commanded position would have missed the nebula, so the step uses only this run's own solution (rows are not measured without one).
+
+  Counts: with the plate solution and the SIMBAD position, 0 clipped and 0 nonlinear pixels in the 769 px disc in all 61 frames (the camera profile's linearity limit applies). The nebula's brightest smoothed value is about 1,800 ADU against a sky of 800 ADU, far from the ceiling.
+
+  The source check. At the SIMBAD position the disc's brightest pixel stood 421.8σ above the local sky on the stack. At 2,000 random positions of the stack, 0.4 percent of the discs stood under 3σ, 1.2 percent under 4, 2.2 percent under 5, 5.2 percent under 8 and 20 percent under 20; the lowest was 1.47σ and the 1st percentile 3.7. So blank discs sit at about 1.5 to 4.5σ and the bar of 5 lies above them. But 97.8 percent of all discs passed, because M 57 lies in the Milky Way and nearly every disc holds a star. The target record in the copy database holds 18 55 54.17, +32 37 45.85 for M 57, which is 38 arcminutes from the Ring Nebula; at that position the disc holds a star (324.7σ) and the step measured it (0 clipped pixels). The check does not catch that wrong record; it catches a record that points at blank sky. Fixing the record is the remedy.
+
+  Check of the chain on real pixels: the step was pointed at the clipped star in the reference frame (65532 ADU, at row 9, column 2772; 11,055σ), placed through the plate solution and moved onto each frame by the inverse of Siril's transform. All 61 frames showed clipped pixels (share 0.0030 to 0.0159, median 0.0107, of 543 disc pixels inside the frame) and nonlinear pixels (up to 0.0175). The transform convention was checked separately: with the inverse transform and y = height - 1 - row (the frames are stored top-down), all 60 reference stars landed on detected stars in every frame tested; the other three choices landed 0 or 1 of 60 in the four frames tested whose shifts exceeded 2 px in both axes (they agree with it when the shift is small).
+
+  Time: 61 frames took 0.86 s in all (0.014 s a frame, the stack read and 9 progress messages included) on the local disk of the scratch copy. 200 frames would take about 3 s.
+
+  To repeat: `science/s3/real_target_clipping.py` and `science/s3/peak_sigma_tail.py` in the session's scratch folder (run through `realrun.sh`).
+- **Verdict:** Not judged.
+- **Limits:** The disc is the larger of 30 arcseconds and the target's semi-major axis; no size is stored today, so a larger target is examined in its core only. Every pixel of the disc counts as a target pixel, so in a crowded field the clipped pixels of field stars in the disc are counted too. The source check does not tell the target from a field star in a crowded field. The step needs the stack's registration record (a stack made before it existed gets no rows until it is stacked again) and a plate solution found by this run (not the header's own). The target record's position is trusted. The step reads at most 200 frames, spread evenly, and for at most 120 seconds; the others get not-measured rows that say so. A color frame clips when any plane clips.
+- **To tune for your setup:** If your targets are larger than 30 arcseconds, change `TARGET_REGION_RADIUS_ARCSEC`; with a stored target size the step uses it. Slow storage may need a longer `MAXIMUM_READ_SECONDS`.
+- **Regenerate with:** The scripts in the procedure.
+- **Guarded by tests:** `astrometricslib/pipelines/astrometry/test/post_processing/test_target_clipping.py` checks the transform, the counts in the disc, the source check on noise and on a star, the crop offset, the assumed and not-measured cases, the cap, the time limit and the shared frame subject; `test_runner_target_clipping.py` checks that the runner hands over the target's position from before the run and this run's own solution; `astrometricslib/pipelines/shared/test/test_registration_record.py` checks the record.
+- **Raw record:** None kept.
+
 ## Design estimates
 
 These values have not been measured. Each is a code constant unless the table says otherwise; changing a code constant means editing the code. Paths are relative to `astrometricslib/`.

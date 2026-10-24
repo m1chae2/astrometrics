@@ -16,6 +16,8 @@ for every light frame it checks, so the stacking stage records them for kept
 frames as well as for the frames it moves aside.
 """
 
+import datetime
+
 from astrometricslib.models.quality.measurement import SubjectLevel
 from astrometricslib.models.quality.metric_spec import (
     Checkpoint,
@@ -190,6 +192,10 @@ STACKING_GROUP_CLIP_CEILING_ADU = "stacking.group_clip_ceiling_adu"
 STACKING_GROUP_LINEARITY_LIMIT_ADU = "stacking.group_linearity_limit_adu"
 STACKING_GROUP_PEAK_ESTIMATED_FRAME_COUNT = "stacking.group_peak_estimated_frame_count"
 STACKING_GROUP_CLIPPED_FRAME_COUNT = "stacking.group_clipped_frame_count"
+
+# The rotation of each frame about the registration reference (per frame, from
+# the stacking run).
+STACKING_FRAME_REGISTRATION_ROTATION_DEG = "stacking.frame_registration_rotation_deg"
 
 # The self-checks. The key is the gate's name in the stack summary; the value
 # is the metric that stores it. Each is named ``stacking.gate_<gate name>``.
@@ -1373,12 +1379,76 @@ _SCIENCE_METRICS: tuple[MetricSpec, ...] = (
     ),
 )
 
+# Six months after the metrics below were first measured (2026-10-23): the
+# science plan's default review date for an exploratory metric.
+_FRAME_SHAPE_REVIEW_DATE = datetime.date(2027, 4, 30)
+
+_FRAME_ROW_SAMPLE = (
+    "One row for each frame the run gave to the stacking program, in the frame's own subject (the same "
+    "subject as `stacking.frame_weight`). The frame's time is the timestamp of its frame record, joined "
+    "by the subject id: the frame header's DATE-OBS (DATE when there is none), which by the FITS "
+    "convention is the start of the exposure. The angle depends on which frame is the registration "
+    "reference, so values compare only within one `run_id`: a restack that picks another reference "
+    "changes them. The reason of a measured row names the reference frame and the image parity (the "
+    "sign of det(CD) of the stack's plate solution, or unknown). A frame Siril could not register or "
+    "never read, and every frame of a spectral stack, gets a row that is not measured, with the reason."
+)
+
+_FRAME_SHAPE_METRICS: tuple[MetricSpec, ...] = (
+    MetricSpec(
+        name=STACKING_FRAME_REGISTRATION_ROTATION_DEG,
+        definition_version=1,
+        unit="deg",
+        checkpoint=Checkpoint.STACKING,
+        levels=(SubjectLevel.FRAME,),
+        better=Direction.NONE,
+        meaning=(
+            "The rotation of one frame about the registration reference, from the transform Siril "
+            "fitted to line the frame's stars up with the reference frame's."
+        ),
+        decisions=("polar alignment",),
+        estimator=(
+            "The rotation of the polar decomposition of the 2 x 2 part of the 3 x 3 homography Siril "
+            "saves for the frame in its registration table (the transform that moves the frame onto the "
+            "reference): atan2(h10 - h01, h00 + h11) in degrees, which a small shear in the fit does not "
+            "change. It is given only when the determinant of the 2 x 2 part is positive. Siril's image "
+            "coordinates have x along the columns and y counted up from the last row of the array "
+            "(y = height - 1 - row), so a positive angle turns the frame's x axis toward +y "
+            "(counterclockwise when the array is drawn with its first row at the top). It is the "
+            "rotation of the transform, so the frame's own orientation relative to the reference is "
+            "the opposite sign. The angle lies in (-180, 180] degrees: a meridian flip turns the field "
+            "by about 180 degrees, so the stored series jumps by about 360 degrees at the wrap and a "
+            "reader unwraps it. It is not a polar-alignment error: the conversion belongs to the "
+            "`wayfindinglib` library. The reference frame reads 0 by construction. A sequence whose "
+            "frames are all the identity transform (already registered) is not measured. A spectral "
+            "stack is registered by shift only, so it has no rotation."
+        ),
+        sample_definition=_FRAME_ROW_SAMPLE,
+        band=_BAND,
+        computed_by="pipelines.stacking.post_processing.field_rotation.field_rotation_measurements",
+        uncertainty_kind=UncertaintyKind.NONE,
+        uncertainty_method=(
+            "No uncertainty is reported. Siril does not save the error of its fit. The register entry "
+            "gives the spread of the angle over a night, which is an upper bound on the precision."
+        ),
+        register_entry="STK-43",
+        purpose=MetricPurpose.EXPLORATORY,
+        exploratory_question=(
+            "Does the rotation of the frames about the reference drift through a night by an amount "
+            "that tracks the polar-alignment error, once it is converted in `wayfindinglib`, and is "
+            "Siril's angle precise enough to see it?"
+        ),
+        review_date=_FRAME_SHAPE_REVIEW_DATE,
+    ),
+)
+
 STACKING_METRICS: tuple[MetricSpec, ...] = (
     *_DECLARED_BEFORE_PHASE_3,
     *_VALUE_METRICS,
     *_NOISE_AND_WEIGHT_METRICS,
     *_NIGHT_METRICS,
     *_SCIENCE_METRICS,
+    *_FRAME_SHAPE_METRICS,
     *_GATE_METRICS,
 )
 

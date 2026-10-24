@@ -38,6 +38,7 @@ from astrometricslib.models.quality.measurement import (
     SubjectLevel,
 )
 from astrometricslib.models.target import FrameRecord, Target
+from astrometricslib.pipelines.shared.quality.frame_measurement import frame_metric_set_fingerprint
 from astrometricslib.pipelines.shared.quality.frame_measurement import measure_frame as real_measure_frame
 from astrometricslib.pipelines.shared.quality.metrics import (
     FRAME_BACKGROUND_LEVEL,
@@ -269,6 +270,61 @@ def test_a_changed_file_is_measured_again(target: Target, store: QualityStore, b
     assert summary.frames_measured == 1
     assert summary.frames_skipped_unchanged == 2
     assert frame_needs_measuring(touched, os.stat(touched.path)) is False
+
+
+def test_a_frame_measured_with_an_older_metric_set_is_measured_again(
+    target: Target, store: QualityStore, biases: list[str]
+) -> None:
+    """A frame with an older metric set is measured again."""
+    record_frame_measurements_for_target(target, _session(store, biases))
+    unchanged = target.frames[0]
+    older = target.frames[1]
+    assert unchanged.quality_measured_metric_set == frame_metric_set_fingerprint()
+    older.quality_measured_metric_set = "000000000000"
+
+    assert frame_needs_measuring(unchanged, os.stat(unchanged.path)) is False
+    assert frame_needs_measuring(older, os.stat(older.path)) is True
+    summary = record_frame_measurements_for_target(target, _session(store, biases))
+
+    assert summary.frames_measured == 1
+    assert summary.frames_skipped_unchanged == 2
+    assert older.quality_measured_metric_set == frame_metric_set_fingerprint()
+
+
+def test_a_frame_measured_before_the_metric_set_was_recorded_is_measured_again(
+    target: Target, store: QualityStore, biases: list[str]
+) -> None:
+    """A stamp with no metric set counts as older."""
+    record_frame_measurements_for_target(target, _session(store, biases))
+    legacy = target.frames[0]
+    legacy.quality_measured_metric_set = None
+
+    assert frame_needs_measuring(legacy, os.stat(legacy.path)) is True
+
+
+def test_the_metric_set_fingerprint_follows_the_registry() -> None:
+    """The fingerprint follows definition versions, not declaration order."""
+    from astrometricslib.pipelines.shared.quality import frame_measurement as module
+
+    first = frame_metric_set_fingerprint()
+    assert first == frame_metric_set_fingerprint()
+    assert len(first) == 12
+    specs = module.FRAME_METRICS
+    redefined = (
+        specs[0].model_copy(update={"definition_version": specs[0].definition_version + 1}),
+        *specs[1:],
+    )
+    original_specs = module.FRAME_METRICS
+    module.frame_metric_set_fingerprint.cache_clear()
+    try:
+        module.FRAME_METRICS = tuple(reversed(specs))
+        assert module.frame_metric_set_fingerprint() == first
+        module.frame_metric_set_fingerprint.cache_clear()
+        module.FRAME_METRICS = redefined
+        assert module.frame_metric_set_fingerprint() != first
+    finally:
+        module.FRAME_METRICS = original_specs
+        module.frame_metric_set_fingerprint.cache_clear()
 
 
 def test_the_newest_frames_come_first_under_a_limit(

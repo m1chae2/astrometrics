@@ -9,6 +9,8 @@ The registry (`metric_registry.py`) collects these with the metrics that each
 pipeline declares in its own ``metrics.py``.
 """
 
+import datetime
+
 from astrometricslib.models.quality.measurement import SubjectLevel
 from astrometricslib.models.quality.metric_spec import (
     Checkpoint,
@@ -28,6 +30,29 @@ FRAME_STAR_WIDTH_MOFFAT_PX = "frame.star_width_moffat_px"
 FRAME_STAR_WIDTH_MOFFAT_ARCSEC = "frame.star_width_moffat_arcsec"
 FRAME_STAR_ELONGATION = "frame.star_elongation"
 FRAME_STAR_ELONGATION_ANGLE_DEG = "frame.star_elongation_angle_deg"
+FRAME_STAR_WIDTH_EFFECTIVE_PX = "frame.star_width_effective_px"
+FRAME_STAR_WIDTH_EFFECTIVE_ARCSEC = "frame.star_width_effective_arcsec"
+FRAME_STAR_WIDTH_CENTER_PX = "frame.star_width_center_px"
+# The names of the five regions of the field. A corner is named by whether it
+# lies at the low or the high end of the x axis (the columns) and of the y axis
+# (the array rows), counted from the first pixel: x is the column and y is the
+# array row, with row 0 first. A viewer that draws row 0 at the bottom (as
+# Matplotlib's lower origin does) shows the same corner at the other side, so
+# the name does not depend on how an image is displayed.
+REGION_CENTER = "center"
+REGION_XLOW_YLOW = "xlow_ylow"
+REGION_XHIGH_YLOW = "xhigh_ylow"
+REGION_XLOW_YHIGH = "xlow_yhigh"
+REGION_XHIGH_YHIGH = "xhigh_yhigh"
+
+# The center and the four corner regions of the field, by region name.
+FRAME_STAR_WIDTH_REGION_PX = {
+    REGION_CENTER: FRAME_STAR_WIDTH_CENTER_PX,
+    REGION_XLOW_YLOW: "frame.star_width_corner_xlow_ylow_px",
+    REGION_XHIGH_YLOW: "frame.star_width_corner_xhigh_ylow_px",
+    REGION_XLOW_YHIGH: "frame.star_width_corner_xlow_yhigh_px",
+    REGION_XHIGH_YHIGH: "frame.star_width_corner_xhigh_yhigh_px",
+}
 FRAME_SKY_RATE_E_PER_S_PER_PX = "frame.sky_rate_e_per_s_per_px"
 FRAME_SKY_NOISE_E = "frame.sky_noise_e"
 FRAME_READ_NOISE_E = "frame.read_noise_e"
@@ -59,6 +84,83 @@ _MOFFAT_SAMPLE = (
     "elongation and angle need no factor. The sum rounds the stars a little, so a mosaic's "
     "elongation reads a few percent low (1.39 for a true 1.5 at a width of 4 px)."
 )
+
+# The review date of the exploratory field-shape metrics: six months after they
+# were first measured (2026-10-23), the plan's default.
+_FIELD_SHAPE_REVIEW_DATE = datetime.date(2027, 4, 30)
+
+_EFFECTIVE_WIDTH_ESTIMATOR = (
+    "sqrt(FWHM^2 + c p^2) with FWHM the frame's median Moffat width (`frame.star_width_moffat_px`), "
+    "p one original pixel and c = 2 ln 2 / 3 = 0.4621. A star is the sky's image smeared over the "
+    "pixel's square sensitive area, which adds a variance p^2 / 12 along each axis; for a Gaussian "
+    "core, FWHM^2 is 8 ln 2 times the variance, which gives c. The Moffat fit integrates its profile "
+    "over each pixel, so its width is the width before that smearing and the term is added back. c is "
+    "theory, not fitted (user decision of 2026-10-23). It assumes a Gaussian core; a Moffat core with "
+    "wings differs a little, and a star near the Nyquist limit (about 2 px) is where the pixel term "
+    "matters most. For a raw color mosaic the fit runs on 2 x 2 super-pixels, but p is still the "
+    "original pixel of the frame's pixel scale, not the super-pixel and not the 2 px pitch of one "
+    "color."
+)
+
+
+_REGION_SAMPLE = (
+    "The stars of `frame.star_width_moffat_px` that lie in one of five equal regions of the field, "
+    "each a block of 4 x 4 of the 14 x 14 grid cells the stars are chosen from (8 percent of the "
+    "frame): the center, and the four corners. A star between the regions is left out. Because a "
+    "star's fit box must lie inside the frame, no star sits within 10 px of the edge. At least 5 "
+    "stars are needed in a region. The reason of each row gives the count. For a raw color mosaic "
+    "the positions are given back in original pixels."
+)
+
+
+def _region_spec(region: str, meaning: str) -> MetricSpec:
+    """Declare the star width of one region of the field.
+
+    Parameters
+    ----------
+    region : `str`
+        A key of `FRAME_STAR_WIDTH_REGION_PX`.
+    meaning : `str`
+        One line saying which region it is.
+
+    Returns
+    -------
+    spec : `MetricSpec`
+        The declaration, which differs between regions only in its name and
+        meaning.
+    """
+    return MetricSpec(
+        name=FRAME_STAR_WIDTH_REGION_PX[region],
+        definition_version=1,
+        unit="px",
+        checkpoint=Checkpoint.FRAME,
+        levels=_FRAME_ONLY,
+        better=Direction.LOWER,
+        meaning=meaning,
+        decisions=("tilt", "field curvature", "collimation"),
+        estimator=(
+            "Median over the stars in the region of the pixel-integrated Moffat FWHM, the same fit and "
+            "the same per-star width as `frame.star_width_moffat_px` (no second fit). The ratio of a "
+            "corner to the center is not stored; the parts are."
+        ),
+        sample_definition=_REGION_SAMPLE,
+        band=_PER_PLANE_BAND,
+        computed_by="pipelines.shared.quality.frame_measurement.measure_field_region_widths",
+        uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
+        uncertainty_method=(
+            "Standard deviation of the median over 1000 bootstrap resamples of the region's stars (fixed "
+            "seed). It covers the star-to-star scatter, not a bias of the Moffat model."
+        ),
+        register_entry="AST-18",
+        purpose=MetricPurpose.EXPLORATORY,
+        exploratory_question=(
+            "Do the star widths in the four corners differ from the center by more than their "
+            "bootstrap errors, and does that pattern stay the same from night to night (tilt, field "
+            "curvature or collimation) rather than follow the seeing?"
+        ),
+        review_date=_FIELD_SHAPE_REVIEW_DATE,
+    )
+
 
 FRAME_METRICS: tuple[MetricSpec, ...] = (
     MetricSpec(
@@ -363,6 +465,70 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         ),
     ),
     MetricSpec(
+        name=FRAME_STAR_WIDTH_EFFECTIVE_PX,
+        definition_version=1,
+        unit="px",
+        checkpoint=Checkpoint.FRAME,
+        levels=_FRAME_ONLY,
+        better=Direction.LOWER,
+        meaning=(
+            "The width (FWHM) of the stars as the sensor records them: the fitted width with the blur of "
+            "the square pixel added. Model-derived."
+        ),
+        decisions=("seeing", "undersampling"),
+        estimator=_EFFECTIVE_WIDTH_ESTIMATOR,
+        sample_definition=_MOFFAT_SAMPLE,
+        band=_PER_PLANE_BAND,
+        computed_by="pipelines.shared.quality.frame_measurement.effective_star_width_px",
+        uncertainty_kind=UncertaintyKind.MODEL_DERIVED,
+        uncertainty_method=(
+            "The bootstrap error of `frame.star_width_moffat_px` carried through the formula (times "
+            "FWHM / FWHM_eff). The value adds a theoretical term, and that term's own error (the Gaussian "
+            "core assumption) is not in the uncertainty. That error is a bias, not a scatter: the formula "
+            "reads low for a star with wings, by about 3 percent at 2 px for a Moffat beta of 3 and up to "
+            "6 percent at 1.6 px for a beta of 2 (validation register AST-18)."
+        ),
+        register_entry="AST-18",
+        purpose=MetricPurpose.CONTEXT,
+        purpose_reason=(
+            "The efficiency model's seeing factor (phase 4) reads the width in this form, and the "
+            "pixel scale it was recorded at travels with it."
+        ),
+    ),
+    MetricSpec(
+        name=FRAME_STAR_WIDTH_EFFECTIVE_ARCSEC,
+        definition_version=1,
+        unit="arcsec",
+        checkpoint=Checkpoint.FRAME,
+        levels=_FRAME_ONLY,
+        better=Direction.LOWER,
+        meaning=(
+            "The effective star width in arcseconds: the fitted width with the blur of the square pixel "
+            "added, times the frame's pixel scale. Model-derived."
+        ),
+        decisions=("seeing", "undersampling"),
+        estimator=(
+            "`frame.star_width_effective_px` times the frame's pixel scale "
+            "(`FrameRecord.pixel_scale_arcsec`). " + _EFFECTIVE_WIDTH_ESTIMATOR
+        ),
+        sample_definition=_MOFFAT_SAMPLE,
+        band=_PER_PLANE_BAND,
+        computed_by="pipelines.shared.quality.frame_measurement.effective_star_width_px",
+        uncertainty_kind=UncertaintyKind.MODEL_DERIVED,
+        uncertainty_method=(
+            "The error of `frame.star_width_effective_px` times the pixel scale. The pixel scale is taken "
+            "as exact, and the theoretical term's own error is not included. That error is a bias of "
+            "about -3 percent at 2 px for a Moffat beta of 3 and up to -6 percent at 1.6 px for a beta "
+            "of 2 (validation register AST-18)."
+        ),
+        register_entry="AST-18",
+        purpose=MetricPurpose.CONTEXT,
+        purpose_reason=(
+            "A width in arcseconds that includes the pixel's blur lets nights and cameras at different "
+            "pixel scales be compared; the efficiency model's seeing factor (phase 4) will read it."
+        ),
+    ),
+    MetricSpec(
         name=FRAME_SKY_RATE_E_PER_S_PER_PX,
         definition_version=2,
         unit="e-/s/px",
@@ -453,5 +619,28 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         purpose_reason=(
             "Read noise against sky noise decides whether an exposure is long enough for the sky to dominate."
         ),
+    ),
+    _region_spec(
+        REGION_CENTER, "The median star width in the center of the field (the middle block of cells)."
+    ),
+    _region_spec(
+        REGION_XLOW_YLOW,
+        "The median star width in the corner at the low x (first columns) and low y (first array rows, "
+        "row 0 first) end of the field.",
+    ),
+    _region_spec(
+        REGION_XHIGH_YLOW,
+        "The median star width in the corner at the high x (last columns) and low y (first array rows, "
+        "row 0 first) end of the field.",
+    ),
+    _region_spec(
+        REGION_XLOW_YHIGH,
+        "The median star width in the corner at the low x (first columns) and high y (last array rows, "
+        "row 0 first) end of the field.",
+    ),
+    _region_spec(
+        REGION_XHIGH_YHIGH,
+        "The median star width in the corner at the high x (last columns) and high y (last array rows, "
+        "row 0 first) end of the field.",
     ),
 )

@@ -35,6 +35,28 @@ peak as a fraction of the ceiling for each exposure group, and the flat noise ne
 noise (parts only). `recommended_exposure_seconds` and the flat gate stay until #97. Evidence is in
 `STK-38`, `STK-39` and `STK-40` of the validation register.
 
+Status on 2026-10-23, batch S3 (branch `94-science-s3-shape`): built and run on the M 57 scratch
+stack and frames, then changed after the change control board's review. Section 2.1: the effective
+star width (model-derived, a new uncertainty kind, with its bias stated), the star width in the
+center and the four corners with counts and errors (exploratory; the 16 stars of a region are the
+same in every frame of an undithered night, so a second field or night is needed before any tilt
+reading), and the rotation of each frame about the registration reference from the polar
+decomposition of Siril's transform (exploratory, no conversion to a polar-alignment error). The
+target's clipped and nonlinear pixels are measured by the astrometry pipeline (checkpoint
+`astrometry`, as two shares per frame), not by the stacking run: they need this run's own plate
+solution of the stack, which a fresh stack does not have, and the reference frame's commanded
+pointing was 157 arcseconds off on the night checked. The stacking run keeps Siril's transforms in a
+registration record beside the stack for it. A source must stand in the target's disc on the stack;
+in a crowded field that finds a position on blank sky, not a wrong star. The frame measurement job
+now measures a frame again when the set of frame metrics changed. Evidence is in `AST-18`, `AST-19`
+and `STK-43` of the validation register.
+
+Decision of 2026-10-23: the effective star width uses a theoretical pixel term, not a fitted one. A
+square pixel adds a variance of p²/12 along each axis, so for a Gaussian core FWHM_eff² = FWHM² +
+(2 ln 2 / 3)·p². The Moffat fit integrates over the pixel, so its width is the one before this term.
+The value is labeled model-derived. A computed Moffat star reads 1 to 4 percent wider than the
+formula at 2 px (`AST-18`).
+
 The second review of 2026-10-17 moved the observing values (guide error, pointing error, dew,
 Moon and airmass) out of the `astrometricslib` tables into `wayfindinglib` (section 2.5). It added
 the undersampling term, the spectroscopy class gap against SNR, the flat-noise check and the
@@ -102,7 +124,7 @@ in section 2.4, the later items of section 6 and the deferred items of section 7
 | :--- | :--- | :--- | :--- | :--- |
 | Catalog zero point | Instrumental magnitudes of matched stars against Gaia G, or Gaia-XP magnitudes synthesized in the frame's filter, with a fitted color term. Corrected for airmass with a fitted extinction coefficient. | Transparency, cloud | Plate solution; Gaia access | A few photometric nights to fit the extinction coefficient |
 | Zero-point scatter within a night | Robust spread of the airmass-corrected zero point across the night's frames | Whether the night suits photometry. This backs the use case "Is tonight photometric?" (UC15 in `QUALITY_USE_CASES.md`). | Catalog zero point | None |
-| Effective star width | The star width with the pixel's own blur added: FWHM_eff² ≈ FWHM² + c·p², with p the pixel size and c fitted on this setup. Efficiency's seeing factor uses it, and the physical reference states the pixel scale. | Undersampling; seeing loss | The corrected star width; plate scale | Frames over a range of seeing, to fit c |
+| Effective star width | The star width with the pixel's own blur added: FWHM_eff² = FWHM² + c·p², with p the pixel size and c = 2 ln 2 / 3 = 0.4621 from theory (decision of 2026-10-23, not fitted). Efficiency's seeing factor uses it, and the physical reference states the pixel scale. | Undersampling; seeing loss | The corrected star width; plate scale | None |
 | Background gradient | Size and direction of a fitted plane or low-order surface across the background, with stars masked | Moon, horizon or a light source; flats | None | None |
 | Target clipped | Whether pixels of the target itself reach the saturation level, with the target located through the WCS | Exposure too long for the target | Plate solution; camera saturation level | None |
 | Center-to-corner star width | Star width (the phase 2 estimator) in the center against each corner region, with the counts per region | Tilt, field curvature, collimation | The corrected star width | None |
@@ -296,3 +318,23 @@ half-stacks (`STK-38`).
 
 No findings were rejected. The architect also suggested dropping the stored aperture area and
 linearity limit; both stay, as inputs to the expected noise and the peak.
+
+## Appendix E. Review board changes, batch S3
+
+The board reviewed batch S3 on 2026-10-23, and all three reviewers approved it with changes. The
+systems engineer settled every finding; the user reviews those choices in the pull request.
+
+| Finding | Raised by | Where it landed |
+| :--- | :--- | :--- |
+| A zero clipping count could come from empty sky when the target record is wrong (M 57's record was 38 arcmin off). | Astronomer | A 5-sigma source check in the disc; otherwise not measured with the position used (`AST-19`) |
+| Target clipping needs a plate solution that a fresh stack lacks, and depended on the noise step. | Astronomer, architect | Moved to the astrometry pipeline, which solves the stack; `located_wcs` removed |
+| Frames already measured never got the new frame metrics. | Engineer | The frame stamp holds a fingerprint of the frame metric set; frames re-measure once when it changes |
+| One bad geometry row would drop every row of the stack. | Engineer | Rotation rows have their own record call |
+| Wrong reason on the nonlinear rows. | All three | Fixed and tested |
+| Rotation rows lacked the reference frame, the image parity and the frame-time convention; values compare only within one run. | Astronomer, architect | Recorded in the row; polar decomposition for the angle (`STK-43`) |
+| The corner widths come from the same 16 stars in every undithered frame. | Astronomer | Leave-one-star-out check added (`AST-18`); a second field or night is needed before any tilt reading |
+| A fourth clip-level rule, a duplicate subject builder, counts stored beside fractions. | Architect | One shared level helper and subject builder; fractions only |
+| Frames beyond the read cap or missing from Siril's list got no rows. | Engineer | Not-measured rows with reasons |
+
+No findings were rejected. The real M 57 target record was corrected in the user's database on
+2026-10-23 with the user's approval, after a backup.

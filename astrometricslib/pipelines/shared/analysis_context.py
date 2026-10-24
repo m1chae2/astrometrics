@@ -39,6 +39,10 @@ class AnalysisContext:
     image: AstrometricsImage
     stellar_objects: list[StellarObject]
     wcs: WCS | None = None
+    # True when `wcs` is the image header's own coordinate solution, used
+    # because this pass found none. Such a solution is whatever the header
+    # held (a commanded pointing, an earlier solve), not a solve of this pass.
+    wcs_is_header_fallback: bool = False
     extended_target: StellarObject | None = None
     extended_source_hint: ExtendedSourceHint | None = None
     sources_detected: int = 0

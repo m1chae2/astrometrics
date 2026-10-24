@@ -480,13 +480,15 @@ def merge_quality_stamps(existing_target: Target | None, updated_target: Target)
 
     The frame measurement job stamps each frame it measures with the size and
     change time its file had (``quality_measured_file_size`` and
-    ``quality_measured_file_modified_ns``). Another program, or another part of
-    this one, may have changed the stored target since the job loaded it: new
-    frames, a new stack, edited settings. Saving the whole in-memory target
-    would overwrite those changes. This merge function takes the stored target
-    as it is and sets only the two stamp fields on its frames, matching frames
-    by path. A frame the stored target does not hold is ignored. A frame whose
-    in-memory stamp is empty leaves the stored stamp alone.
+    ``quality_measured_file_modified_ns``) and with the fingerprint of the
+    frame metrics it covered (``quality_measured_metric_set``). Another
+    program, or another part of this one, may have changed the stored target
+    since the job loaded it: new frames, a new stack, edited settings. Saving
+    the whole in-memory target would overwrite those changes. This merge
+    function takes the stored target as it is and sets only the three stamp
+    fields on its frames, matching frames by path. A frame the stored target
+    does not hold is ignored. A frame whose in-memory stamp is empty leaves
+    the stored stamp alone.
 
     Parameters
     ----------
@@ -511,6 +513,7 @@ def merge_quality_stamps(existing_target: Target | None, updated_target: Target)
         if stamped is not None:
             frame.quality_measured_file_size = stamped.quality_measured_file_size
             frame.quality_measured_file_modified_ns = stamped.quality_measured_file_modified_ns
+            frame.quality_measured_metric_set = stamped.quality_measured_metric_set
     return existing_target
 
 

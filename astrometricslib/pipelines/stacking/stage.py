@@ -589,6 +589,10 @@ def _stack_frames_guarded(
             record_pipeline_run,
             stacked_image_entity_id,
         )
+        from astrometricslib.pipelines.shared.registration_record import (
+            build_registration_record,
+            write_registration_record,
+        )
 
         entity_id = stacked_image_entity_id(target.id, stacked_path)
         record_pipeline_run(
@@ -603,6 +607,18 @@ def _stack_frames_guarded(
                 )
             },
         )
+        # Siril's transform for each frame, kept beside the stack for the
+        # astrometry run, which finds the target on each frame with it once the
+        # stack has a plate solution. A failure to write it never fails the
+        # stack.
+        registration_record = build_registration_record(
+            diagnostics,
+            crop_offset,
+            summary.stacking_metrics.registration_reference_frame,
+            is_spectral=summary.stacking_metrics.is_spectral,
+        )
+        if registration_record is not None:
+            write_registration_record(stacked_path, registration_record)
         # The same summary, the stack's noise in empty sky and the frames
         # that went in, stored as measurements. A failure here never fails
         # the stack.

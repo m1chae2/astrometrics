@@ -155,6 +155,13 @@ class FrameRecord(BaseModel):
     # measurement happen at different times.
     quality_measured_file_size: int | None = Field(default=None, alias="qualityMeasuredFileSize")
     quality_measured_file_modified_ns: int | None = Field(default=None, alias="qualityMeasuredFileModifiedNs")
+    # A short fingerprint of the frame metrics (their names and definition
+    # versions) the frame's last measurement covered
+    # (`frame_metric_set_fingerprint`). A frame whose fingerprint differs from
+    # the current one was measured before a metric was added or redefined, so
+    # it is measured again. None for a frame measured before this field
+    # existed.
+    quality_measured_metric_set: str | None = Field(default=None, alias="qualityMeasuredMetricSet")
 
     # Everything our own code calculated from this frame's pixels
     # (background level, registration facts), as opposed to the fields

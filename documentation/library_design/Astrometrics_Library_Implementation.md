@@ -6,17 +6,17 @@
 
 This paper maps the design in `Astrometrics_Library_Architecture.md` to the Python source in `astrometricslib/`. It names the layers and the rule that keeps them apart, the model classes, the modules of each of the five pipelines, and the scripts and tests that check them. It lists each pipeline's tuned values with a status label and a link to the register entry that holds the evidence. It is written for developers who review or change the algorithms.
 
-Terms are defined in the [glossary](../Glossary.md). This document also defines each term the first time it appears.
+The [glossary](../Glossary.md) defines the terms, and this document defines each at first use.
 
 ## 1. Scope
 
-**Statement of need.** This paper indexes the theory to the code. Theory is in [Astrometrics_Library_Architecture.md](./Astrometrics_Library_Architecture.md). Evidence is in the validation register, [validation/index.md](./validation/index.md). Module paths are relative to `astrometricslib/`. Stage detail is in the [pipeline review guides](./pipelines/index.md) and the READMEs.
+**Statement of need.** This paper indexes the theory to the code. Theory is in [Astrometrics_Library_Architecture.md](./Astrometrics_Library_Architecture.md). Evidence is in the validation register, [validation/index.md](./validation/index.md). Module paths are relative to `astrometricslib/`. Stage detail is in the [review guides](./pipelines/index.md) and the READMEs.
 
-The one supported entry point is the package root (`from astrometricslib import Astrometrics`, names in `astrometricslib.__all__`). It re-exports the facade from `api/`, the driver interfaces (Section 4.7), the job framework (Section 4.9), and the error types. The package builds on Astropy [1]. `wayfindinglib`, the backend and the MCP servers [2] use the library. The settings each pipeline uses are listed in Section 5.
+The one supported entry point is the package root (`from astrometricslib import Astrometrics`). It re-exports the `api/` facade, the driver interfaces (Section 4.7), the job framework (Section 4.9) and the error types. The package builds on Astropy [1]. `wayfindinglib`, the backend and the MCP servers [2] use the library. Section 5 lists each pipeline's settings.
 
 ## 2. Package layering
 
-The package has six layers. Each layer may import only from the layers below it. Table 1 lists them, and the ratchet test in Appendix A enforces the rule.
+The package has six layers. Each may import only from the layers below it. Table 1 lists them, and the ratchet test in Appendix A enforces the rule.
 
 **Table 1.** The six layers, from the top.
 
@@ -29,7 +29,7 @@ The package has six layers. Each layer may import only from the layers below it.
 | 5. Drivers | External tool wrappers, FITS access, SQLite stores | Layer 6 | `drivers/` |
 | 6. Shared vocabulary | Models, configuration, logging, jobs, storage | No layer | `models/`, `foundation/`, `utilities/` |
 
-`visualization/` sits outside the layers (Table 9).
+`visualization/` sits outside the layers.
 
 **Table 2.** Public entry point and outside services of each pipeline.
 
@@ -41,11 +41,11 @@ The package has six layers. Each layer may import only from the layers below it.
 | Spectroscopy | `process_target`, `stages=["spectroscopy"]` | Gaia XP spectra; Gaia DR3 reddening |
 | Asteroid detection | `process_target`, `stages=["asteroids"]` | IMCCE SkyBoT, through astroquery in `ephemeris.py` |
 
-`process_target` (`api/processing.py`) runs the chosen stages in a fixed order through `pipelines.tasks.run_target_stages`. For a list of targets it runs the full sequence per target in its own process (`pipelines.target_batch.process_targets_in_parallel`).
+`process_target` (`api/processing.py`) runs the chosen stages in a fixed order through `pipelines.tasks.run_target_stages`. For a list of targets it runs each target in its own process (`pipelines.target_batch.process_targets_in_parallel`).
 
 ## 3. Data models
 
-Pydantic classes in `models/` hold fields and validation only (see `models/README.md`). Table 3 maps each record of Architecture §2 to its classes.
+Pydantic classes in `models/` hold fields and validation only. Table 3 maps each record of Architecture §2 to its classes.
 
 **Table 3.** Records of the architecture paper and the classes that hold them.
 
@@ -58,7 +58,7 @@ Pydantic classes in `models/` hold fields and validation only (see `models/READM
 | Camera profile (§2.3) | `CameraProfile` (schema 2), `SensorSettingNoise` (gain and read noise per gain setting, offset and binning), `ProvenancedValue`, `QuantumEfficiencyRecord`, `AppliedCameraProfile` | `models/camera_profile.py`, `models/applied_camera_profile.py` |
 | Provenance (§2.3) | IVOA Provenance Data Model [7] classes such as `Agent`, `Entity`, `Used`, `WasGeneratedBy` | `models/provenance.py` |
 
-Camera profiles: `drivers/camera_profile_store.py` (`resolve_camera_profile`, `save_sensor_setting_noise`), `drivers/camera_profile_migration.py` (`migrate_camera_profiles`), `pipelines/shared/applied_camera_profile.py` (`record_camera_profile`). Provenance: `pipelines/shared/provenance_recording.py` (`record_pipeline_run`), `drivers/provenance_store.py` (`ProvenanceStore`, `export_target_lineage_as_prov_xml`).
+Camera profiles: `drivers/camera_profile_store.py`, `drivers/camera_profile_migration.py`, `pipelines/shared/applied_camera_profile.py` (`record_camera_profile`). Provenance: `pipelines/shared/provenance_recording.py` (`record_pipeline_run`), `drivers/provenance_store.py` (`ProvenanceStore`).
 
 ## 4. Pipelines
 
@@ -68,17 +68,18 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 
 *Located in:* `astrometricslib/pipelines/stacking/`
 
-- **Interfaces (§3.1).** `stack_request.py` (`choose_frames_to_stack`, `run_stack`), `stage.py` (`stack_frames`), `stack_runner.py` (engine run, `PIPELINE_STEPS`). Batch dispatch is in `astrometricslib/pipelines/tasks.py` and `target_batch.py`.
+- **Interfaces (§3.1).** `stack_request.py` (`choose_frames_to_stack`, `run_stack`), `stage.py` (`stack_frames`), `stack_runner.py`.
 - **Calibration frames (§3.2).** `calibration_ingest.py`, `astrometricslib/drivers/calibration_library.py`, `pre_processing/flat_calibration.py`.
-- **Gain and read noise (§3.2).** `CalibrationCatalog.measure_sensor_noise` (`astrometricslib/api/processing.py`) calls `sensor_noise_run.py`, which finds a setting's flats and bias frames and calls `pre_processing/sensor_noise.py` (`measure_sensor_noise`). With `save=True` it writes the camera profile. The RPC is `calibration:measure_sensor_noise`; the MCP server withholds it. Evidence: [STK-35](validation/stacking.md#stk-35).
+- **Gain and read noise (§3.2).** `CalibrationCatalog.measure_sensor_noise` (`astrometricslib/api/processing.py`) calls `sensor_noise_run.py`, which calls `pre_processing/sensor_noise.py`. With `save=True` it writes the camera profile. The MCP server withholds the RPC `calibration:measure_sensor_noise`. Evidence: [STK-35](validation/stacking.md#stk-35).
 - **Rejection and filtering (§3.2).** `astrometricslib/utilities/rejection_thresholds.py`, `astrometricslib/utilities/stack_filter_floor.py`.
 - **Exposure groups and weights (§3.2).** `processing/exposure_groups.py`, `group_alignment.py`, `group_derotation.py`, `star_pattern_candidates.py`, `spectral_frame_alignment.py`; `pre_processing/exposure_weighting.py`.
 - **Sequence and restacks (§3.3).** `pre_processing/stack_inputs.py`; `post_processing/previous_stack.py`, `stack_comparison.py`, `interrupted_jobs.py`.
 - **Previews (§3.3).** `post_processing/stack_preview.py`, `colour_calibration.py`, `starnet_stretch.py`, `sky_level.py`, `star_tone.py`, `bright_object.py`, `stack_crop.py`, `preview_remake.py`.
-- **Frame measurement (§2.1).** `ProcessingPipelines.record_frame_measurements` (`frame_measurement_run.py`) measures each light frame with `measure_frame`.
+- **Frame measurement (§2.1).** `ProcessingPipelines.record_frame_measurements` (`frame_measurement_run.py`) measures each light frame with `measure_frame`, which also calls `measure_star_profiles` and `measure_field_region_widths`. Evidence: [AST-17](validation/astrometry.md#ast-17), [AST-18](validation/astrometry.md#ast-18).
+- **Frame geometry (§3.4.2).** `post_processing/field_rotation.py` (`field_rotation_measurements`) stores each frame's rotation. `shared/registration_record.py` keeps `<stack>_registration_frames.json`, which the astrometry pipeline reads (§4.2). Evidence: [STK-43](validation/stacking.md#stk-43).
 - **Input screening (§3.4.1).** `pre_processing/frame_quarantine.py`, `frame_homogeneity.py`, `background_homogeneity.py`, `camera_selection.py`, `assess_input_quality.py`.
 - **Output checks (§3.4.2).** `post_processing/assess_output_quality.py`, `stack_quality.py`, `exposure_group_report.py`, `stack_quality_report.py`.
-- **Stack measurements (§3.4.2).** `stage._record_stack_quality` calls `post_processing/record_quality.py` (`record_stacking_quality`), which stores the summary, gates, noise and weights. <!-- impl: astrometricslib.pipelines.stacking.post_processing.record_quality.record_stacking_quality -->
+- **Stack measurements (§3.4.2).** `stage._record_stack_quality` calls `record_stacking_quality` (`post_processing/record_quality.py`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.record_quality.record_stacking_quality -->
 - **Stack noise and weights (§3.4.2).** `post_processing/stack_noise.py`, `stack_membership.py`, `expected_noise.py`, `flat_noise_contribution.py`, `record_science.py`. Evidence: [STK-36](validation/stacking.md#stk-36), [STK-07](validation/stacking.md#stk-07), [STK-38](validation/stacking.md#stk-38), [STK-39](validation/stacking.md#stk-39), [STK-40](validation/stacking.md#stk-40), [STK-41](validation/stacking.md#stk-41).
 - **Subset stacks (§3.4.2).** `subset_noise_run.py` and `subset_stack.stack_frame_subset` stack parts of the library stack into `_subsets/`. Evidence: [STK-36](validation/stacking.md#stk-36), [STK-37](validation/stacking.md#stk-37).
 
@@ -86,12 +87,13 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 
 *Located in:* `astrometricslib/pipelines/astrometry/`
 
-- **Interfaces (§4.1).** `pipeline.py`; `runner.py` is the `AnalysisPipeline` adapter (four-step contract in `pipelines/pipeline_base.py`).
+- **Interfaces (§4.1).** `pipeline.py`; `runner.py` is the `AnalysisPipeline` adapter.
 - **Detection and centroids (§4.2).** `processing/star_identifier.py`, `pre_processing/source_detection.py`, `pre_processing/fwhm.py`.
 - **Plate solving and Gaia (§4.2).** `astrometricslib/drivers/astrometry_net_driver.py`, `gaia_cone_driver.py`, `catalog_store.py`; `utilities/catalog_seeding.py`.
 - **Gaia refit (§4.2).** `processing/wcs_refinement.py`.
 - **WCS header (§4.3).** `astrometricslib/pipelines/shared/session_identification.py` (`write_wcs_to_fits_header`).
 - **Checks (§4.4).** `post_processing/record_quality.py`, `assess_match_quality.py`.
+- **Target clipping (§3.4.2).** `post_processing/target_clipping.py` (`target_clipping_measurements`) counts clipped and nonlinear pixels near the target on each raw frame. It needs this run's plate solution, the registration record and a source in the disc. Evidence: [AST-19](validation/astrometry.md#ast-19).
 
 ### 4.3 Photometry (Architecture §5)
 
@@ -107,10 +109,10 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 
 *Located in:* `astrometricslib/pipelines/spectroscopy/`
 
-- **Interfaces (§6.1).** `pipeline.py` (`SpectroscopyPipeline`), `runner.py` (adapter), `record_and_flag_spectroscopy_stars.py`, `frame_analysis.py`, `batch.py`.
+- **Interfaces (§6.1).** `pipeline.py`, `runner.py` (adapter), `record_and_flag_spectroscopy_stars.py`, `frame_analysis.py`, `batch.py`.
 - **Star identification (§6.2).** `pre_processing/spectral_star_registration.py`.
 - **Extraction (§6.2).** `pre_processing/spectrum_extractor.py`, `_extractor_c.c`, `neighbor_trail_deblending.py`, `neighbor_wing_correction.py`.
-- **Wavelength calibration (§6.2).** `pre_processing/spectrum_calibrator.py`, `optics_physics.py`, `differential_refraction.py`, `atmospheric_refraction.py`, `wavelength_zero_point.py`; `utilities/calibration_tuner.py`.
+- **Wavelength calibration (§6.2).** `pre_processing/spectrum_calibrator.py`, `optics_physics.py`, `differential_refraction.py`, `atmospheric_refraction.py`, `wavelength_zero_point.py`.
 - **Flux and resolution (§6.2).** `pre_processing/quantum_efficiency_correction.py`, `instrument_response.py`, `atmospheric_extinction.py`, `measured_line_spread.py`, `spectral_resolution.py`.
 - **Classification and features (§6.2).** `processing/spectral_classifier.py`, `spectrum_analysis.py`, `star_reddening.py`, `interstellar_extinction.py`.
 - **Stack registration quality (§6.3).** `utilities/registration_quality.py`.
@@ -123,29 +125,27 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 - **Interfaces (§7.1).** `pipeline.py`; `runner.py` (adapter).
 - **Detection (§7.2).** `detection.py` (blink analysis, tracking), `frame_wcs_composer.py` (per-frame WCS), `ephemeris.py` (IMCCE SkyBoT).
 - **Checks (§7.4).** `record_quality.py`.
-- **Unused by any pipeline step.** `mpc_report.py` (MPC report formats [8]) and `rotation_period.py`. Both are tested.
+- **Unused by any step.** `mpc_report.py` (MPC report formats [8]) and `rotation_period.py`.
 
 ### 4.6 Shared pipeline code
 
 *Located in:* `astrometricslib/pipelines/shared/`
 
 - **Frames and targets.** `frame_grouping.py`, `quality/frame_selection.py`, `frame_scanning.py`, `target_records.py`, `target_sessions.py`.
-- **Images.** `image_conversions.py`, `image_scaling.py`.
-- **Stars.** `star_recording.py`; `catalog_star_identity.py`.
+- **Images and stars.** `image_conversions.py`, `image_scaling.py`, `star_recording.py`, `catalog_star_identity.py`.
 - **Solving and state.** `session_identification.py`, `analysis_context.py`.
 - **Recording.** `provenance_recording.py`, `applied_camera_profile.py`.
 - **Quality primitives.** `quality/saturation.py`, `quality_metrics.py`, `frame_statistics.py`, `background_measurement.py`, `raw_frame_check.py`, `frame_measurement.py`.
-- **Run measurements.** Each pipeline's `record_quality.py` stores its run's numbers and gates as the metrics declared in its `metrics.py`.
 
 ### 4.7 Drivers and pixel-level primitives
 
 *Located in:* `astrometricslib/drivers/`
 
-- **Interfaces.** `interfaces/` holds `StackingDriver`, `PlateSolveDriver`, `SimbadDriver`, `GaiaXpDriver`, `ReddeningDriver` and the types that cross them (`StackSettings`, `StackRunResult`, `PipelineSteps`, `PlateSolveHeader`, `ReddeningEstimate`). `driver_set.py` (`Drivers`) fills empty slots with the built-in drivers.
-- **Siril.** `siril_stacking_driver.py` (`SirilStackingDriver`), `siril_interface.py` (`ImageProcessing`), `siril_output_parsing.py`.
-- **Catalogs and services.** `astrometry_net_driver.py` (`AstrometryNetPlateSolveDriver`), `gaia_cone_driver.py`, `catalog_store.py`, `gaia_xp_driver.py`, `astroquery_gaia_reddening_driver.py`, `astroquery_simbad_driver.py`.
-- **Stores.** `calibration_library.py`, `camera_profile_store.py`, `provenance_store.py`, `local_database.py`, `catalog_access.py` (`CatalogAccess`).
-- **Images.** `fits_access.py`, `image.py` (`AstrometricsImage`), `filter_detection.py`, `frame_prefetch.py`.
+- **Interfaces.** `interfaces/` holds `StackingDriver`, `PlateSolveDriver`, `SimbadDriver`, `GaiaXpDriver`, `ReddeningDriver` and the types that cross them (`StackSettings`, `StackRunResult`). `driver_set.py` (`Drivers`) fills empty slots with the built-in drivers.
+- **Siril.** `siril_stacking_driver.py`, `siril_interface.py`, `siril_output_parsing.py`.
+- **Catalogs and services.** `astrometry_net_driver.py`, `gaia_cone_driver.py`, `catalog_store.py`, `gaia_xp_driver.py`, `astroquery_gaia_reddening_driver.py`, `astroquery_simbad_driver.py`.
+- **Stores.** `calibration_library.py`, `camera_profile_store.py`, `provenance_store.py`, `local_database.py`, `catalog_access.py`.
+- **Images.** `fits_access.py`, `image.py`, `filter_detection.py`, `frame_prefetch.py`.
 
 `catalog_access.py` runs no SQL itself. It uses the Butler, a keyed-record SQLite store shared with wayfindinglib and modeled on the Rubin data butler [9] (Section 4.8).
 
@@ -155,11 +155,11 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 
 ### 4.9 Job framework
 
-*Located in:* `astrometricslib/foundation/jobs/`, shared by both libraries, the backend and the MCP servers: `store.py` (`JobStore`, `DbLogHandler`), `runner.py` (`registered_job`, `capture_job_logs`, `background_job`, `run_as_background_job`, `close_interrupted_jobs`), `models.py` (`ProcessingJob`), `process_identity.py`.
+*Located in:* `astrometricslib/foundation/jobs/`, shared by both libraries, the backend and the MCP servers: `store.py` (`JobStore`, `DbLogHandler`), `runner.py` (`registered_job`, `background_job`, `close_interrupted_jobs`), `models.py` (`ProcessingJob`), `process_identity.py`.
 
 ## 5. Tuned parameters and validation status
 
-Tables 4 to 8 list each pipeline's tuned values and the architecture section that explains each. Each status label (*Measured*, *Partly measured*, *Design estimate*; defined in the [register](./validation/index.md#3-status-labels)) links to its evidence entry or design-estimate table. A hidden link after each table names the code that holds each value, and a test checks it.
+Tables 4 to 8 list each pipeline's tuned values and the architecture section that explains it. Each status label (*Measured*, *Partly measured*, *Design estimate*; defined in the [register](./validation/index.md#3-status-labels)) links to its evidence entry or design-estimate table. A hidden link after each table names the code that holds each value, and a test checks it.
 
 ### 5.1 Stacking settings
 
@@ -172,6 +172,7 @@ Tables 4 to 8 list each pipeline's tuned values and the architecture section tha
 | Minimum frames per master calibration frame | 3 | Design estimate ([stacking table](validation/stacking.md#design-estimates)) | §3.2 |
 | Gain and read noise measurement: fewest flat pairs; fewest bias pairs; temperature spread; region | 5; 3; 1 °C; central 1000 by 1000 px | Measured ([STK-35](validation/stacking.md#stk-35)) | §3.2 |
 | Frame measurement: CPU time; fit grid cells | 60 s; 196 | Design estimate ([AST-17](validation/astrometry.md#ast-17)) | §2.1 |
+| Pixel blur factor $c$; field grid and region cells per side | 2 ln 2 / 3; 14 and 4 | Design estimate ([AST-18](validation/astrometry.md#ast-18)) | §3.4.2 |
 | Frame screening: session gap | 4 h | Design estimate ([stacking table](validation/stacking.md#design-estimates)) | §3.4.1 |
 | Frame screening: fewest frames to judge | 8 | Partly measured ([STK-01](validation/stacking.md#stk-01)) | §3.4.1 |
 | Clouded frame star count; trailed frame roundness | below 0.5 of session median; below 0.80 and 0.15 under median | Partly measured ([STK-01](validation/stacking.md#stk-01)) | §3.4.1 |
@@ -210,6 +211,9 @@ Tables 4 to 8 list each pipeline's tuned values and the architecture section tha
 <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.STAR_FINDER_EXPECTED_FWHM_PX -->
 <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.STAR_FINDER_THRESHOLD_SIGMA -->
 <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.STAR_FINDER_BOX_FRACTION -->
+<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.PIXEL_BLUR_FWHM_SQUARED_FACTOR -->
+<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.FIELD_GRID_CELLS_PER_SIDE -->
+<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.FIELD_REGION_CELLS_PER_SIDE -->
 <!-- impl: astrometricslib.pipelines.stacking.frame_measurement_run.MEASUREMENT_WORKER_COUNT -->
 <!-- impl: astrometricslib.pipelines.stacking.frame_measurement_run.BIAS_FRAMES_FOR_LEVEL -->
 <!-- impl: astrometricslib.pipelines.stacking.frame_measurement_run.STACKING_STAGE_MEASUREMENT_LIMIT -->
@@ -260,6 +264,7 @@ Tables 4 to 8 list each pipeline's tuned values and the architecture section tha
 | Minimum catalog-matched stars | 20 | Partly measured ([AST-05](validation/astrometry.md#ast-05)) | §4.4.2 |
 | Residual limit | 0.5 of a star width | Partly measured ([AST-04](validation/astrometry.md#ast-04)) | §4.4.2 |
 | Failed catalog lookups allowed | under 50% | Design estimate ([astrometry table](validation/astrometry.md#design-estimates)) | §4.4.2 |
+| Target clipping: disc radius; frame cap; read time limit; least peak above sky | 30 arcsec; 200; 120 s; 5σ | Partly measured ([AST-19](validation/astrometry.md#ast-19)) | §3.4.2 |
 
 <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.source_detection.SourceDetector -->
 <!-- impl: astrometricslib.drivers.astrometry_net_driver.MINIMUM_SOURCES_FOR_LOCAL_SOLVE -->
@@ -267,6 +272,10 @@ Tables 4 to 8 list each pipeline's tuned values and the architecture section tha
 <!-- impl: astrometricslib.pipelines.astrometry.post_processing.record_quality.MINIMUM_MATCHED_STARS -->
 <!-- impl: astrometricslib.pipelines.astrometry.post_processing.record_quality.MAXIMUM_RESIDUAL_FRACTION_OF_FWHM -->
 <!-- impl: astrometricslib.pipelines.astrometry.post_processing.record_quality.MAXIMUM_FAILED_LOOKUP_FRACTION -->
+<!-- impl: astrometricslib.pipelines.astrometry.post_processing.target_clipping.TARGET_REGION_RADIUS_ARCSEC -->
+<!-- impl: astrometricslib.pipelines.astrometry.post_processing.target_clipping.MAXIMUM_FRAMES_READ -->
+<!-- impl: astrometricslib.pipelines.astrometry.post_processing.target_clipping.MAXIMUM_READ_SECONDS -->
+<!-- impl: astrometricslib.pipelines.astrometry.post_processing.target_clipping.MINIMUM_PEAK_SIGMA -->
 <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.MAXIMUM_PLATE_SOLVE_SOURCES -->
 <!-- impl: astrometricslib.pipelines.astrometry.processing.wcs_refinement.MINIMUM_MATCHED_STARS -->
 <!-- impl: astrometricslib.pipelines.astrometry.processing.wcs_refinement.MAXIMUM_SHIFT_ARCSEC -->
@@ -394,12 +403,12 @@ Tables 4 to 8 list each pipeline's tuned values and the architecture section tha
 
 ## 6. Validation tooling
 
-Evidence is in the [validation register](./validation/index.md). This section maps behaviors the [validation sessions](./validation/index.md#6-validation-sessions) rely on to code.
+This section maps behaviors the [validation sessions](./validation/index.md#6-validation-sessions) rely on to code.
 
-- **Scripts** in `astrometricslib/scripts/`: `run_empirical_validation.py` (campaign through the public API), `run_all_target_processing.py` (batch), `seed_local_star_catalog.py`, `benchmark_siril_concurrency.py`, `backfill_focal_length.py`.
+- **Scripts** in `astrometricslib/scripts/`: `run_empirical_validation.py` (campaign), `run_all_target_processing.py` (batch), `seed_local_star_catalog.py`, `benchmark_siril_concurrency.py`, `backfill_focal_length.py`.
 - **History fill.** `scripts/backfill_quality_measurements.py` copies saved summaries into the quality store. Record: [Section 6.4](./validation/index.md#64-history-fill-of-the-quality-store).
-- **Per-session photometry.** `analyze_target(pipeline_type="photometry")` runs `VariabilityAnalyzer` once per `TargetSession` ([PHO-14](./validation/photometry.md#pho-14)).
-- **Cross-session star matching** (Architecture §5.2, concept 6): `_match_and_merge_across_sessions` in `pipelines/photometry/batch.py`. It uses `search_around_sky`, backed by a KD-tree [10]. Photometry passes its own `StarIdentifier()` to `resolve_frame_wcs`, so SIMBAD is not queried per star. `sessions_missing_wcs` isolates a session that lacks a WCS.
+- **Per-session photometry.** `analyze_target(pipeline_type="photometry")` runs `VariabilityAnalyzer` per `TargetSession` ([PHO-14](./validation/photometry.md#pho-14)).
+- **Cross-session star matching** (Architecture §5.2, concept 6): `_match_and_merge_across_sessions` in `pipelines/photometry/batch.py`. It uses `search_around_sky`, backed by a KD-tree [10]. `sessions_missing_wcs` isolates a session that lacks a WCS.
 - **Track linking.** `MovingObjectDetector._chain_detections_by_persistence` in `pipelines/asteroid_detection/detection.py` filters pairs with a vectorized RA/Dec box before computing separations. The search is still $O(N \times M)$ ([MOV-07](./validation/asteroid_detection.md#mov-07)).
 
 ## Appendix A. Ratchets and import contracts
@@ -416,9 +425,9 @@ A ratchet is a test whose list of known exceptions may only shrink. `test_no_new
 | `pipelines/<name>/` | `pipelines.tasks`, `pipelines.target_batch`, `api`, the package root |
 | `pipelines/tasks.py`, `pipelines/target_batch.py` | `api`, the package root |
 
-Not checked: `visualization/`, `api/`, the package root, test modules, and imports within one layer.
+Not checked: `visualization/`, `api/`, the package root, tests, and imports within one layer.
 
-The same test file holds three more ratchets with shrink-only allowlists (a stale entry also fails):
+The same file holds three more shrink-only ratchets (a stale entry also fails):
 
 - **Raw FITS access** (`KNOWN_FITS_ACCESS_SITES`). New code reads FITS through `drivers/fits_access.py` or `drivers/image.py`, which apply the HDU0/HDU1 rule.
 - **Wall clock** (`KNOWN_WALL_CLOCK_SITES`). Nothing under `pipelines/` calls `datetime.now()` or `datetime.utcnow()`. A frame's time comes from its header.

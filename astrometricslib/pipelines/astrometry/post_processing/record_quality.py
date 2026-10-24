@@ -26,7 +26,9 @@ to them.
 
 import logging
 from collections.abc import Sequence
+from typing import Any
 
+from astrometricslib.foundation.jobs.runner import get_current_job
 from astrometricslib.models.quality.gate_result import (
     GateResult,
     GateStatus,
@@ -63,6 +65,7 @@ from astrometricslib.pipelines.astrometry.metrics import (
     ASTROMETRY_UNRESOLVED_STAR_COUNT,
     ASTROMETRY_WCS_REFINEMENT_SHIFT_ARCSEC,
 )
+from astrometricslib.pipelines.astrometry.post_processing.target_clipping import target_clipping_measurements
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
     GateLimitSource,
     PipelineRunContext,
@@ -531,5 +534,62 @@ def record_astrometry_quality(
     return build_and_record_measurements(
         lambda: astrometry_run_measurements(metrics, gates, context, stack_file_name),
         f"astrometry run on {context.target_id}",
+        config=config,
+    )
+
+
+def record_target_clipping_quality(
+    stack_path: str,
+    target_frames: Sequence[Any],
+    context: PipelineRunContext,
+    *,
+    solved_wcs: Any,
+    target_center_deg: tuple[float | None, float | None],
+    config: object = None,
+) -> int:
+    """Count the target's clipped pixels in the stack's frames and store them.
+
+    This is a separate call from `record_astrometry_quality`, so a failure
+    while reading frames cannot undo the run's other rows, and no failure here
+    ever fails the run. The rows need the stack's registration record (written
+    by the stacking run) and this run's plate solution of the stack.
+
+    Parameters
+    ----------
+    stack_path : `str`
+        The stack this run analyzed.
+    target_frames : `Sequence`
+        The target's frame records.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    solved_wcs : `astropy.wcs.WCS` or `None`
+        The coordinate solution this run found for the stack. Pass `None` when
+        the run did not solve it (including when it fell back to the image
+        header's own coordinates): the rows are then not measured, with the
+        reason.
+    target_center_deg : `tuple` of `float` or `None`
+        The target's right ascension and declination in degrees as the target
+        record held them before the run, or `None` for the placeholder.
+    config : `AppConfiguration`, optional
+        Where the quality store and the camera profiles live.
+
+    Returns
+    -------
+    new_count : `int`
+        How many rows were new. It is 0 when anything went wrong or the stack
+        has no registration record.
+    """
+    job = get_current_job()
+    return build_and_record_measurements(
+        lambda: target_clipping_measurements(
+            stack_path,
+            target_frames,
+            context,
+            solved_wcs=solved_wcs,
+            target_center_deg=target_center_deg,
+            configuration=config,
+            report_progress=None if job is None else job.info,
+        ),
+        f"target clipping of the astrometry run on {context.target_id}",
         config=config,
     )

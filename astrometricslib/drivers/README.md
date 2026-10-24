@@ -116,6 +116,8 @@ Each call returns the frames and two lists of one-sentence flags. The driver cop
 
 The stacking pipeline reads both lists and fails its `calibration_metadata` gate (see the stacking README).
 
+The driver also records the flat and bias files it chose and linked into the work folder (the ones that were readable). They go into `last_run_diagnostics` as lists of paths under `flat_frame_paths` and `bias_frame_paths` (`FLAT_FRAME_PATHS_KEY` and `BIAS_FRAME_PATHS_KEY`). Recording them where `select_flat_frames` and `select_bias_frames` pick them spares the quality step from guessing from the work folder. The stacking pipeline's flat-to-light match reads both lists (see the stacking README). A run that applied no flats or no biases leaves the key out.
+
 A kind of calibration frame that the library does not hold at all raises neither flag, because both flags describe frames that do not match, and there is no frame to compare. The run records which kinds it applied in `last_run_diagnostics["calibration_applied"]`. When no kind was applied, the `calibration_metadata` gate reads `not_checked`.
 
 ### Frame counts

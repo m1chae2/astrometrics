@@ -20,16 +20,16 @@ Each of the six layers may import only from the layers below it; the ratchet tes
 
 **Table 1.** The six layers.
 
-| Layer | Holds | Key modules |
-| --- | --- | --- |
-| 1. Public API | The `Astrometrics` facade and the root exports | `api/`, `astrometricslib/__init__.py` |
-| 2. Pipeline runners | Stage dispatcher; batch runner | `pipelines/tasks.py`, `pipelines/target_batch.py` |
-| 3. Pipelines | Stacking, astrometry, photometry, spectroscopy, asteroid detection | `pipelines/<name>/` |
-| 4. Shared pipeline code | Frame scanning, target records, image conversion, quality primitives, run recording | `pipelines/shared/`, `pipelines/pipeline_base.py` |
-| 5. Drivers | External tool wrappers, FITS access, SQLite stores | `drivers/` |
-| 6. Shared vocabulary | Models, configuration, logging, jobs, storage | `models/`, `foundation/`, `utilities/` |
+| Layer | Holds | Calls into | Key modules |
+| --- | --- | --- | --- |
+| 1. Public API | The `Astrometrics` facade and the root exports | Layers 2 to 5 | `api/`, `astrometricslib/__init__.py` |
+| 2. Pipeline runners | Stage dispatcher; batch runner | Layer 3 | `pipelines/tasks.py`, `pipelines/target_batch.py` |
+| 3. Pipelines | Stacking, astrometry, photometry, spectroscopy, asteroid detection | Layers 4 to 6; sideways between pipelines | `pipelines/<name>/` |
+| 4. Shared pipeline code | Frame scanning, target records, image conversion, quality primitives, run recording | Layers 5 and 6 | `pipelines/shared/`, `pipelines/pipeline_base.py` |
+| 5. Drivers | External tool wrappers, FITS access, SQLite stores | Layer 6 | `drivers/` |
+| 6. Shared vocabulary | Models, configuration, logging, jobs, storage | No layer | `models/`, `foundation/`, `utilities/` |
 
-Pipelines also call each other sideways; `visualization/` sits outside the layers.
+`visualization/` sits outside the layers.
 
 **Table 2.** Entry point and outside services of each pipeline.
 
@@ -83,6 +83,7 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 - **Subset stacks (Quality §4).** `subset_noise_run.py`, `subset_stack.stack_frame_subset`. Evidence: [STK-37](validation/stacking.md#stk-37).
 - **Half-difference noise (Quality §4.5).** Job `measure_half_difference_noise` runs `subset_noise_run.run_half_difference_noise`, which calls `difference_noise.measure_difference_noise` and stores nine metrics. Each half needs `HALF_DIFFERENCE_MINIMUM_FRAMES_PER_HALF` frames. Evidence: [STK-42](validation/stacking.md#stk-42).
 - **Half-stack pattern (Quality §4.6).** `post_processing/half_pattern.py`, called by `subset_noise_run._half_pattern_safely`. It adds eight rows to the difference's nine; `read_stack_plane` reads each half once for `measure_difference_noise`. Evidence: [STK-45](validation/stacking.md#stk-45).
+- **Flat-to-light match (Quality §4.7).** `post_processing/flat_match.py` (`flat_match_rows`) stores ten rows. `drivers/calibration_library.py` selects the flats and biases (`select_flat_frames`, `select_bias_frames`), and the staging step records them under `flat_frame_paths` and `bias_frame_paths`. Config key `flat_match_time_limit_seconds`. Evidence: [STK-46](validation/stacking.md#stk-46).
 - **Registration step and drift (Quality §5.5).** `post_processing/registration_shifts.py`, called by `frame_geometry_measurements`. Evidence: [STK-44](validation/stacking.md#stk-44).
 
 ### 4.2 Astrometry (Architecture §4)
@@ -193,6 +194,7 @@ Tables 4 to 8 list each pipeline's tuned values and the section that explains it
 | Half-difference noise: fewest frames per half | 8 | Design estimate (STK-D25) | Quality §4.5 |
 | Registration step: degenerate above; unmeasured above degenerate, identity shares; jump; fewest steps, frames; drift significance; axis agreement | 50 px; 10%, 50%; median + 5 x max(1.4826 MAD, 0.1 px); 5, 5; 3 errors; 0.5 | Partly measured ([STK-44](validation/stacking.md#stk-44)) | Quality §5.5 |
 | Half-stack pattern: filter; clearance; tile; resamples; lag; least extent | 3 px; 10 px; 64 px; 400; 6 px; 12 px | Partly measured ([STK-45](validation/stacking.md#stk-45)) | Quality §4.6 |
+| Flat-to-light match: cell; band pass; trend degree; flats; lights, fewest; sky; target disc; shadow limits; placement limit; search; time limit | 8 px; 2 and 30 cells; 4; 16; 24, 8; 10 times read noise; 25 cells; 5σ, 0.15%, 25 cells; 3.1 null spreads; ±160 px, ±3°; 300 s | Partly measured ([STK-46](validation/stacking.md#stk-46)) | Quality §4.7 |
 
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.registration_shifts.MAXIMUM_PLAUSIBLE_STEP_PX -->
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.registration_shifts.MAXIMUM_DEGENERATE_SHARE -->
@@ -210,6 +212,24 @@ Tables 4 to 8 list each pipeline's tuned values and the section that explains it
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.half_pattern.WALKING_LAG_PX -->
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.half_pattern.MINIMUM_EXTENT_IN_LAGS -->
 
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.flat_match.MAP_CELL_PX -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.flat_match.LOW_PASS_SIGMA_CELLS -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.flat_match.HIGH_PASS_SIGMA_CELLS -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.flat_match.TREND_DEGREE -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.flat_match.MAXIMUM_FLAT_FRAMES -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.flat_match.MAXIMUM_LIGHT_FRAMES -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.flat_match.MINIMUM_LIGHT_FRAMES -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.flat_match.SKY_READ_NOISE_FACTOR -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.flat_match.TARGET_MASK_RADIUS_CELLS -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.flat_match.SHADOW_MINIMUM_SIGMAS -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.flat_match.SHADOW_MINIMUM_DEPTH_FRACTION -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.flat_match.SHADOW_MINIMUM_AREA_CELLS -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.flat_match.PLACEMENT_LIMIT_SIGMAS -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.flat_match.MAXIMUM_SHIFT_CELLS -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.flat_match.COARSE_ANGLE_RANGE_DEG -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.flat_match.DEFAULT_TIME_LIMIT_SECONDS -->
+<!-- impl: astrometricslib.drivers.calibration_library.FLAT_FRAME_PATHS_KEY -->
+<!-- impl: astrometricslib.drivers.calibration_library.BIAS_FRAME_PATHS_KEY -->
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.FAINT_SOURCE_THRESHOLD_SIGMAS -->
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.FAINT_SOURCE_SMOOTHING_SIGMAS_PX -->
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.FAINT_SOURCE_HIGH_PASS_SIGMA_PX -->

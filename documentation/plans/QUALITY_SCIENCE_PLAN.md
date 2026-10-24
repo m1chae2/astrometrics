@@ -527,3 +527,24 @@ batch S4.)
 | The centroid term is a lower bound; correlated stack noise. | Astronomer | Labelled; the remainder called provisional (`AST-21`) |
 
 No findings were rejected.
+
+## Appendix H. Review board changes, batch S6
+
+The criteria audit of 2026-10-24 found the flat-to-light match (section 2.2) not built; batch S6 built
+it the same day. The board reviewed it, and all three reviewers approved it with changes. The systems
+engineer settled every finding under the user's instruction to finish the issue without stopping;
+the user reviews those choices in the pull request.
+
+| Finding | Raised by | Where it landed |
+| :--- | :--- | :--- |
+| Dust ~6 mm in front of the sensor sits on the camera window and turns with it, so the match cannot show camera rotation. | Astronomer | The question is now "do the flats' dust shadows still match the lights?" (section 2.2); the shift and rotation are the shadow pattern's |
+| The raw light map held bias pattern, star halos and extended targets. | Astronomer | Bias subtracted, sky at least 10 times the read noise, the target set aside, a control correlation outside the shadows |
+| The injection used shadows ten times deeper than real ones. | Astronomer | Repeated at real depths: about 1 px and 0.2 degree (`STK-46`) |
+| The placement limit had no stated false-alarm rate. | Astronomer | A null from 101 mismatched pairs; limit 3.1, a 1% false-alarm rate |
+| The uncertainty was labelled statistical and left out the method error. | Astronomer | A bound with the method error in quadrature |
+| The flat list was rebuilt from the staging folder after the run. | Architect | Recorded where the flats and biases are chosen |
+| No time limit for raw reads from slow storage. | Engineer, architect | A configurable time limit, progress reporting |
+| The shadow count gated the match and depended on its thresholds. | All three | A diagnostic only |
+
+No findings were rejected. In production today most groups are not measured: the camera profile holds
+read noise only for gain 0 and offset 10 and no bias level, so the run's bias frames are needed.

@@ -759,7 +759,12 @@ export async function callBackend<A extends keyof ActionRegistry>(
         let existingPromise = inFlightRequests.get(cacheKey);
 
         if (!existingPromise) {
-            existingPromise = callBackendInternal(action, params, options)
+            // The shared fetch must not carry one caller's abort signal: if the
+            // first caller cancels (for example a React effect that re-runs),
+            // every caller joined to it would be cancelled too and get no data.
+            // Each caller's own signal is honoured below, for that caller only.
+            const sharedOptions = options ? { ...options, signal: undefined } : options;
+            existingPromise = callBackendInternal(action, params, sharedOptions)
                 .finally(() => {
                     inFlightRequests.delete(cacheKey);
                 });

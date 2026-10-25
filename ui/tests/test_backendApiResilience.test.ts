@@ -69,6 +69,35 @@ describe('backendApi resilience and deduplication', () => {
   });
 
   /**
+   * Tests that one caller cancelling does not cancel a shared read for the
+   * callers joined to it (a React effect that runs twice in development).
+   */
+  it('gives joined callers the data when the first caller cancels', async () => {
+    global.fetch = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      if (init?.signal?.aborted) {
+        throw new DOMException('The operation was aborted.', 'AbortError');
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          jsonrpc: '2.0',
+          id: '124',
+          result: { status: 'success', data: { sessions: ['2026-10-25'] } },
+        }),
+      } as Response;
+    });
+
+    const first = new AbortController();
+    const firstCall = callBackend('telescope:list_alignment_sessions', {}, { signal: first.signal });
+    const secondCall = callBackend('telescope:list_alignment_sessions', {}, { signal: new AbortController().signal });
+    first.abort();
+
+    await expect(firstCall).rejects.toBeDefined();
+    await expect(secondCall).resolves.toEqual({ sessions: ['2026-10-25'] });
+  });
+
+  /**
    * Tests that transient fetch failures on idempotent reads are retried automatically.
    */
   it('retries idempotent reads on transient network failure before succeeding', async () => {

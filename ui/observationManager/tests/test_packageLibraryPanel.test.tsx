@@ -1,6 +1,6 @@
 /**
  * @file test_packageLibraryPanel.test.tsx
- * @description Tests of the package library panel: tabs with counts, rows, the loading, empty and
+ * @description Tests of the package library panel: tabs with counts, cards, the loading, empty and
  * error states, and the New package search.
  */
 import React from 'react';
@@ -52,18 +52,27 @@ describe('PackageLibraryPanel', () => {
         expect(screen.getByRole('tab', { name: /Complete \(0\)/ })).toBeInTheDocument();
     });
 
-    it('shows a planned row with its exposures in short form and selects it on click', async () => {
+    it('shows a planned card with only the target name and selects it on click', async () => {
         const props = renderPanel();
-        expect(screen.getByText('L 20 x 60 s, Ha 10 x 300 s')).toBeInTheDocument();
-        await userEvent.click(screen.getByRole('button', { name: 'Package for M 81' }));
+        expect(screen.queryByText(/60 s/)).not.toBeInTheDocument();
+        expect(screen.queryByText('No exposures yet')).not.toBeInTheDocument();
+        await userEvent.click(screen.getByRole('button', { name: 'M 81, planned package' }));
         expect(props.onSelectPackage).toHaveBeenCalledWith(plannedPackage);
     });
 
-    it('shows the reason and the confidence word for a suggestion', async () => {
+    it('marks the selected card', () => {
+        renderPanel({ selectedPackageId: 'p1' });
+        const card = screen.getByRole('button', { name: 'M 81, planned package' });
+        expect(card).toHaveAttribute('data-selected', 'true');
+        expect(card).toHaveClass('card--selected');
+    });
+
+    it('shows only the confidence chip for a suggestion, not the reason', async () => {
         renderPanel();
         await userEvent.click(screen.getByRole('tab', { name: /Suggested/ }));
-        expect(screen.getByText('Needs more frames to reach the noise goal.')).toBeInTheDocument();
+        expect(screen.queryByText('Needs more frames to reach the noise goal.')).not.toBeInTheDocument();
         expect(screen.getByText('Tentative')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'M 13, suggested package, Tentative confidence' })).toBeInTheDocument();
     });
 
     it('shows the empty state of a tab', async () => {

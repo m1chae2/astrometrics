@@ -11,6 +11,8 @@ interface Props {
     queue: SequenceObject[];
     removeFromQueue: (id: string) => void;
     onEdit: (sequence: SequenceObject) => void;
+    /** Id of the queued sequence picked for editing, or null. Only this card shows the selected look. */
+    selectedId?: string | null;
     reorderQueue: (queue: SequenceObject[]) => void;
 }
 
@@ -18,7 +20,7 @@ interface Props {
  * The Execution Queue strip: the session's packages as cards in a row, with Start Imaging Session.
  * REQ: OBM-4: Execution Queue Management
  */
-export const ExecutionQueue: React.FC<Props> = ({ queue, removeFromQueue, onEdit, reorderQueue }) => {
+export const ExecutionQueue: React.FC<Props> = ({ queue, removeFromQueue, onEdit, reorderQueue, selectedId = null }) => {
     const [expandedId, setExpandedId] = useState<string | null>(null);
     const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
     const [localQueue, setLocalQueue] = useState<SequenceObject[]>(queue);
@@ -126,6 +128,7 @@ export const ExecutionQueue: React.FC<Props> = ({ queue, removeFromQueue, onEdit
                         onEdit={() => onEdit(item)}
                         // REQ: OBM-4.5: The display SHALL indicate the execution status of each sequence (Pending, Running, Completed, Failed).
                         // REQ: OBM-4.6: The display SHALL visualize the progress of the active sequence.
+                        isSelected={selectedId === item.id}
                         isExpanded={expandedId === item.id}
                         onToggle={() => toggleExpand(item.id)}
                         draggable

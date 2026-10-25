@@ -46,9 +46,10 @@
     border-color: var(--highlight-blue, #4a9eff);
 }
 
-.imaging-card.expanded {
-    border-color: var(--highlight-blue, #4a9eff);
-    box-shadow: 0 0 0 1px var(--highlight-blue, #4a9eff);
+/* Expanded only opens the details; the outline is reserved for the one selected card. */
+.imaging-card--selected {
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 0 1px var(--accent-blue);
 }
 
 .card-header {

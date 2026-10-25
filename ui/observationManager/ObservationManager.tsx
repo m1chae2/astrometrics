@@ -112,6 +112,9 @@ export const ObservationManager: React.FC = () => {
 
     /** Loads a queued sequence into the editor for modification. */
     const handleEditSequence = (sequence: SequenceObject) => {
+        // One selection for the whole display: choosing a queue card clears the library choice.
+        setSelectedPackageId(null);
+        setPickedSnapshot(null);
         setQueueEditId(sequence.id);
         setQueueEditPackage(packageFromSequence(sequence.id, sequence.target_name, sequence.items));
     };
@@ -119,6 +122,12 @@ export const ObservationManager: React.FC = () => {
     const handleCancelEdit = () => {
         setQueueEditId(null);
         setQueueEditPackage(null);
+    };
+
+    /** Removes a queued sequence; if it was the selected one, the selection is cleared too. */
+    const handleRemoveFromQueue = (id: string) => {
+        if (id === queueEditId) handleCancelEdit();
+        removeFromQueue(id);
     };
 
     /** Adds the package as edited to the sequencer queue, or modifies the queued sequence. */
@@ -142,7 +151,8 @@ export const ObservationManager: React.FC = () => {
             <div className="observation-manager__queue">
                 <ExecutionQueue
                     queue={queue}
-                    removeFromQueue={removeFromQueue}
+                    removeFromQueue={handleRemoveFromQueue}
+                    selectedId={queueEditId}
                     onEdit={handleEditSequence}
                     reorderQueue={reorderQueue}
                 />

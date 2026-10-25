@@ -1,8 +1,8 @@
 /**
  * @file PackageLibraryPanel.tsx
  * @description The observation package library, in the left column of the Observation Manager.
- * Tabs Suggested, Planned and Complete (with counts); each row shows the target, the exposures in
- * short form and, for a suggestion, the plain reason with a confidence chip. "New package" opens a
+ * Tabs Suggested, Planned and Complete (with counts); each card shows only the target name on one
+ * line and, for a suggestion, a small confidence chip. Picking a card loads the editor. "New package" opens a
  * target search; "Add Target" adds a target to the library. A presentational component: the lists,
  * the loading and error state and every action come in as props.
  */
@@ -15,7 +15,7 @@ import { EmptyState } from '../common/components/EmptyState';
 import { ObservationPackage } from '../common/types/backendTypes';
 import { PackageLibraryLists } from './hooks/usePackageLibrary';
 import { NewPackageSearch } from './NewPackageSearch';
-import { confidenceLabel, formatExposureSummary } from './packageModel';
+import { confidenceLabel } from './packageModel';
 import './packageLibrary.css';
 
 /** The three tabs, in display order, with the words shown when a tab has no packages. */
@@ -118,6 +118,7 @@ export const PackageLibraryPanel: React.FC<PackageLibraryPanelProps> = ({
                                 <PackageRow
                                     key={observationPackage.id}
                                     observationPackage={observationPackage}
+                                    statusWord={definition.id}
                                     selected={observationPackage.id === selectedPackageId}
                                     onSelect={() => onSelectPackage(observationPackage)}
                                 />
@@ -132,33 +133,31 @@ export const PackageLibraryPanel: React.FC<PackageLibraryPanelProps> = ({
 
 interface PackageRowProps {
     observationPackage: ObservationPackage;
+    /** The tab the package is listed under, used in the accessible name. */
+    statusWord: TabId;
     selected: boolean;
     onSelect: () => void;
 }
 
 /**
- * One package in the list: target, exposures in short form, and the reason for a suggestion.
+ * One package card: the target name on a single line, and for a suggestion a confidence chip.
  * @param props See {@link PackageRowProps}.
- * @return The row element.
+ * @return The card element.
  */
-const PackageRow: React.FC<PackageRowProps> = ({ observationPackage, selected, onSelect }) => {
-    const summary = formatExposureSummary(observationPackage);
+const PackageRow: React.FC<PackageRowProps> = ({ observationPackage, statusWord, selected, onSelect }) => {
     const suggestion = observationPackage.suggestion;
+    const confidenceWord = suggestion ? confidenceLabel(suggestion.confidence) : null;
+    const accessibleName = confidenceWord
+        ? `${observationPackage.target_id}, ${statusWord} package, ${confidenceWord} confidence`
+        : `${observationPackage.target_id}, ${statusWord} package`;
     return (
         <Card
             title={observationPackage.target_id}
+            headerContent={confidenceWord ? <StatusChip status="info" label={confidenceWord} /> : undefined}
             selected={selected}
             onClick={onSelect}
-            ariaLabel={`Package for ${observationPackage.target_id}`}
+            ariaLabel={accessibleName}
             className="package-row"
-        >
-            <div className="package-row__summary">{summary || 'No exposures yet'}</div>
-            {suggestion?.reason && (
-                <div className="package-row__reason">
-                    <span>{suggestion.reason}</span>
-                    <StatusChip status="info" label={confidenceLabel(suggestion.confidence)} />
-                </div>
-            )}
-        </Card>
+        />
     );
 };

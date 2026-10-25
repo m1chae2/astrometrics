@@ -5,12 +5,14 @@ import { ConfirmDialog } from '../common/components/ConfirmDialog';
 interface Props extends React.HTMLAttributes<HTMLDivElement> {
     sequence: SequenceObject;
     isExpanded: boolean;
+    /** True when this card is the one picked for editing (the display's single selection). */
+    isSelected?: boolean;
     onToggle: () => void;
     onRemove: (id: string) => void;
     onEdit: () => void;
 }
 
-export const ImagingCard: React.FC<Props> = ({ sequence, isExpanded, onToggle, onRemove, onEdit, ...divProps }) => {
+export const ImagingCard: React.FC<Props> = ({ sequence, isExpanded, isSelected = false, onToggle, onRemove, onEdit, ...divProps }) => {
     const [showConfirm, setShowConfirm] = useState(false);
 
     const totalExposure = sequence.items.reduce((acc: number, item: any) => acc + (item.count * (item.exposure || 0)), 0);
@@ -30,7 +32,8 @@ export const ImagingCard: React.FC<Props> = ({ sequence, isExpanded, onToggle, o
     return (
         <div
             {...divProps}
-            className={`imaging-card ${isExpanded ? 'expanded' : 'collapsed'} ${divProps.className || ''}`}
+            className={`imaging-card ${isExpanded ? 'expanded' : 'collapsed'} ${isSelected ? 'imaging-card--selected' : ''} ${divProps.className || ''}`}
+            data-selected={isSelected ? 'true' : undefined}
             onClick={onToggle}
         >
             <div className="card-header">

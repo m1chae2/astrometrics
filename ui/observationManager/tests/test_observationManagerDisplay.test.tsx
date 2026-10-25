@@ -19,9 +19,10 @@ vi.mock('../../common/services/backendApi', async (importOriginal) => ({
     ...(await importOriginal<object>()),
     callBackend: (...args: unknown[]) => callBackendMock(...args),
 }));
+const queueState = vi.hoisted(() => ({ queue: [] as unknown[], removeFromQueue: vi.fn() }));
 vi.mock('../hooks/useExecutionQueue', () => ({
     useExecutionQueue: () => ({
-        queue: [], addToQueue: vi.fn(), removeFromQueue: vi.fn(), updateQueueItem: vi.fn(), reorderQueue: vi.fn(),
+        queue: queueState.queue, removeFromQueue: queueState.removeFromQueue, addToQueue: vi.fn(), updateQueueItem: vi.fn(), reorderQueue: vi.fn(),
     }),
 }));
 vi.mock('../../common/queries/useExecutionQueueQuery', () => ({
@@ -64,7 +65,7 @@ function renderDisplay() {
 }
 
 describe('ObservationManager display', () => {
-    beforeEach(() => { callBackendMock.mockReset(); localStorage.clear(); });
+    beforeEach(() => { callBackendMock.mockReset(); localStorage.clear(); queueState.queue = []; });
 
     it('puts the Execution Queue above the columns and drops the removed panels', async () => {
         answerBackend();
@@ -78,14 +79,13 @@ describe('ObservationManager display', () => {
         expect(screen.queryByText(/Calibration Library/)).not.toBeInTheDocument();
         expect(screen.getByText('Visible Targets')).toBeInTheDocument();
         expect(screen.getByText('Last Image stub')).toBeInTheDocument();
-        await screen.findByText('L 20 x 60 s');
     });
 
     it('lists the library packages and opens one in the editor', async () => {
         answerBackend();
         renderDisplay();
         expect(screen.getAllByText('Choose a package or New package').length).toBeGreaterThan(0);
-        await userEvent.click(await screen.findByRole('button', { name: 'Package for M 81' }));
+        await userEvent.click(await screen.findByRole('button', { name: 'M 81, planned package' }));
         expect(screen.queryByText('Choose a package or New package')).not.toBeInTheDocument();
         expect(callBackendMock).toHaveBeenCalledWith('plan:list_packages', { status: 'PLANNED' }, expect.anything());
     });
@@ -93,7 +93,7 @@ describe('ObservationManager display', () => {
     it('saves a row edit through plan:edit_package with the expected revision', async () => {
         answerBackend();
         renderDisplay();
-        await userEvent.click(await screen.findByRole('button', { name: 'Package for M 81' }));
+        await userEvent.click(await screen.findByRole('button', { name: 'M 81, planned package' }));
         await userEvent.click(screen.getByTitle('Remove Item'));
         await waitFor(() => expect(callBackendMock).toHaveBeenCalledWith(
             'plan:edit_package',
@@ -105,7 +105,7 @@ describe('ObservationManager display', () => {
     it('shows a refused save as an alert', async () => {
         answerBackend({ 'plan:edit_package': () => { throw new Error('revision conflict'); } });
         renderDisplay();
-        await userEvent.click(await screen.findByRole('button', { name: 'Package for M 81' }));
+        await userEvent.click(await screen.findByRole('button', { name: 'M 81, planned package' }));
         await userEvent.click(screen.getByTitle('Remove Item'));
         expect(await screen.findByRole('alert')).toHaveTextContent('revision conflict');
     });
@@ -134,7 +134,7 @@ describe('ObservationManager display', () => {
                 params.status === 'PLANNED' ? [planned] : params.status === 'SUGGESTED' ? [suggested] : [],
         });
         renderDisplay();
-        await screen.findByRole('button', { name: 'Package for M_31' });
+        await screen.findByRole('button', { name: 'M_31, planned package' });
         await userEvent.click(screen.getByText('M 31', { selector: 'td' }));
         await waitFor(() => expect(screen.queryByText('Choose a package or New package')).not.toBeInTheDocument());
         expect(callBackendMock.mock.calls.some(([action]) => action === 'plan:create_package')).toBe(false);
@@ -152,7 +152,7 @@ describe('ObservationManager display', () => {
         });
         renderDisplay();
         await userEvent.click(await screen.findByRole('tab', { name: /Suggested/ }));
-        await screen.findByRole('button', { name: 'Package for m 31' });
+        await screen.findByRole('button', { name: 'm 31, suggested package' });
         await userEvent.click(screen.getByText('M 31', { selector: 'td' }));
         await waitFor(() => expect(screen.queryByText('Choose a package or New package')).not.toBeInTheDocument());
         expect(callBackendMock.mock.calls.some(([action]) => action === 'plan:create_package')).toBe(false);
@@ -161,17 +161,73 @@ describe('ObservationManager display', () => {
     it('creates a package for a target that has none', async () => {
         answerBackend();
         renderDisplay();
-        await screen.findByRole('button', { name: 'Package for M 81' });
+        await screen.findByRole('button', { name: 'M 81, planned package' });
         await userEvent.click(screen.getByText('M 31', { selector: 'td' }));
         await waitFor(() => expect(callBackendMock).toHaveBeenCalledWith(
             'plan:create_package', { target: 'M 31' }, expect.anything()
         ));
     });
 
+    describe('single selection', () => {
+        const queuedSequence = {
+            id: 's1', target_name: 'M 51', total_duration: 600, status: 'pending',
+            items: [{ count: 5, exposure: 30, filter: 'L', delay: 0 }],
+        };
+
+        /** Elements that currently show the selected state. */
+        const selectedElements = (container: HTMLElement) => container.querySelectorAll('[data-selected="true"]');
+
+        it('selecting a queue card unselects the library card and shows it in the editor', async () => {
+            queueState.queue = [queuedSequence];
+            answerBackend();
+            const { container } = renderDisplay();
+            await userEvent.click(await screen.findByRole('button', { name: 'M 81, planned package' }));
+            expect(selectedElements(container)).toHaveLength(1);
+            await userEvent.click(screen.getByTitle('Edit Sequence'));
+            const selected = selectedElements(container);
+            expect(selected).toHaveLength(1);
+            expect(selected[0]).toHaveClass('imaging-card');
+            expect(screen.getByRole('button', { name: 'M 81, planned package' })).not.toHaveAttribute('data-selected');
+            expect(screen.queryByText('Choose a package or New package')).not.toBeInTheDocument();
+        });
+
+        it('selecting a library package unselects the queue card', async () => {
+            queueState.queue = [queuedSequence];
+            answerBackend();
+            const { container } = renderDisplay();
+            await userEvent.click(screen.getByTitle('Edit Sequence'));
+            expect(selectedElements(container)[0]).toHaveClass('imaging-card');
+            await userEvent.click(await screen.findByRole('button', { name: 'M 81, planned package' }));
+            const selected = selectedElements(container);
+            expect(selected).toHaveLength(1);
+            expect(selected[0]).toHaveAttribute('aria-label', 'M 81, planned package');
+        });
+
+        it('expanding a queue card does not mark it selected', async () => {
+            queueState.queue = [queuedSequence];
+            answerBackend();
+            const { container } = renderDisplay();
+            await userEvent.click(screen.getByText('M 51'));
+            expect(selectedElements(container)).toHaveLength(0);
+        });
+
+        it('removing the selected queue card clears the selection', async () => {
+            queueState.queue = [queuedSequence];
+            answerBackend();
+            const { container } = renderDisplay();
+            await userEvent.click(screen.getByTitle('Edit Sequence'));
+            await userEvent.click(screen.getByTitle('Remove Sequence'));
+            await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
+            expect(queueState.removeFromQueue).toHaveBeenCalledWith('s1');
+            expect(selectedElements(container)).toHaveLength(0);
+            expect(screen.getAllByText('Choose a package or New package').length).toBeGreaterThan(0);
+        });
+    });
+
     describe('Delete', () => {
         /** Opens the library package and clicks Delete in the editor. */
         async function openAndClickDelete() {
-            await userEvent.click(await screen.findByRole('button', { name: 'Package for M 81' }));
+            await userEvent.click(await screen.findByRole('button', { name: 'M 81, planned package' }));
             await userEvent.click(screen.getByRole('button', { name: 'Delete' }));
         }
 

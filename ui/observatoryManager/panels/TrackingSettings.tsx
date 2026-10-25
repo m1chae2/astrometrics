@@ -1,11 +1,26 @@
-import React from 'react';
+/**
+ * @file TrackingSettings.tsx
+ * @description The Tracking Settings panel body: the alignment settings
+ * (accuracy, settle time, exposure) and the guiding camera settings (exposure,
+ * gain) on two tabs, "Alignment" and "Guiding". The tabs follow the WAI-ARIA
+ * tab pattern. The values live in the parent, so they survive a tab switch.
+ */
+
+import React, { useState } from 'react';
+import { TabPanel, Tabs, type TabDefinition } from '../../common/components/Tabs';
 import {
-    ControlContainer,
     ControlColumn,
-    SectionLabel,
-    ParameterRow,
-    VerticalDivider
+    ParameterRow
 } from '../../common/components/ControlLayoutComponents';
+
+/** The two tabs of the panel. */
+const TRACKING_TABS: TabDefinition[] = [
+    { id: 'alignment', label: 'Alignment' },
+    { id: 'guiding', label: 'Guiding' },
+];
+
+/** Prefix that keeps the tab element ids unique on the page. */
+const TRACKING_TABS_ID_PREFIX = 'tracking-settings';
 
 export interface TrackingSettingsProps {
     // Alignment settings
@@ -31,9 +46,8 @@ export interface TrackingSettingsProps {
 /**
  * TrackingSettings Component
  *
- * Displays and allows editing of telescope tracking configurations, including
- * Displays and allows editing of telescope tracking configurations, including
- * alignment parameters and guiding camera settings.
+ * Displays and allows editing of telescope tracking configurations: the
+ * alignment parameters on one tab and the guiding camera settings on the other.
  */
 export const TrackingSettings: React.FC<TrackingSettingsProps> = ({
     accuracy = 30,
@@ -54,11 +68,18 @@ export const TrackingSettings: React.FC<TrackingSettingsProps> = ({
         'aria-disabled': disabled || undefined,
         'aria-describedby': disabled ? disabledReasonId : undefined,
     };
+    const [selectedTab, setSelectedTab] = useState('alignment');
     return (
-        <ControlContainer className="tracking-settings">
-            {/* Left: Alignment Settings */}
+        <div className="tracking-settings">
+            <Tabs
+                tabs={TRACKING_TABS}
+                selectedId={selectedTab}
+                onChange={setSelectedTab}
+                ariaLabel="Tracking setting groups"
+                idPrefix={TRACKING_TABS_ID_PREFIX}
+            />
+            <TabPanel idPrefix={TRACKING_TABS_ID_PREFIX} tabId="alignment" selected={selectedTab === 'alignment'}>
             <ControlColumn>
-                <SectionLabel>Alignment</SectionLabel>
                 <ParameterRow label="Accuracy:">
                     <input
                         {...unavailable}
@@ -97,12 +118,9 @@ export const TrackingSettings: React.FC<TrackingSettingsProps> = ({
                     />
                 </ParameterRow>
             </ControlColumn>
-
-            <VerticalDivider />
-
-            {/* Right: Guide Settings */}
+            </TabPanel>
+            <TabPanel idPrefix={TRACKING_TABS_ID_PREFIX} tabId="guiding" selected={selectedTab === 'guiding'}>
             <ControlColumn>
-                <SectionLabel>Guiding</SectionLabel>
                 <ParameterRow label="Exposure (s):">
                     <input
                         {...unavailable}
@@ -133,6 +151,7 @@ export const TrackingSettings: React.FC<TrackingSettingsProps> = ({
                     />
                 </ParameterRow>
             </ControlColumn>
-        </ControlContainer>
+            </TabPanel>
+        </div>
     );
 };

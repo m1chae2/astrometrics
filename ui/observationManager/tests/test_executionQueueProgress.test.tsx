@@ -10,6 +10,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, within, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ExecutionQueue } from '../ExecutionQueue';
+import { formatTotalTime } from '../ImagingCard';
 import { beginImagingSession } from '../../common/services/sequencerService';
 import { SequenceObject } from '../hooks/useExecutionQueue';
 import { ObservationSessionWithProgress, RunState } from '../../common/types/backendTypes';
@@ -197,14 +198,33 @@ describe('ExecutionQueue monitor mode and keyboard', () => {
         expect(props.reorderQueue).toHaveBeenLastCalledWith(queue);
     });
 
-    it('opens a card from the keyboard and names the edit and remove buttons', async () => {
+    it('shows only the minimal items on a card', () => {
         renderQueue();
-        const toggle = screen.getByRole('button', { name: 'M 81, show details' });
-        toggle.focus();
-        await userEvent.keyboard('{Enter}');
-        expect(screen.getByRole('button', { name: 'M 81, hide details' })).toHaveAttribute('aria-expanded', 'true');
-        expect(screen.getByRole('button', { name: 'Edit M 81' })).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Remove M 81' })).toBeInTheDocument();
+        const card = screen.getByText('M 81').closest('.imaging-card') as HTMLElement;
+        expect(within(card).getByText('20 min')).toBeInTheDocument();
+        expect(within(card).getByText('Imaging now')).toBeInTheDocument();
+        expect(within(card).getByText('12 of 20 frames')).toBeInTheDocument();
+        expect(within(card).getByRole('button', { name: 'Edit M 81' })).toBeInTheDocument();
+        expect(within(card).getByRole('button', { name: 'Remove M 81' })).toBeInTheDocument();
+        expect(within(card).getByRole('button', { name: 'Move M 81 later' })).toBeInTheDocument();
+        expect(card.querySelector('table, .mini-table, .card-body')).toBeNull();
+        expect(screen.queryByText(/Timing point/)).not.toBeInTheDocument();
+        expect(screen.queryByText(/TTL/)).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /show details|hide details/ })).not.toBeInTheDocument();
+    });
+
+    it('formats the total time in minutes and hours', () => {
+        expect(formatTotalTime(180)).toBe('3 min');
+        expect(formatTotalTime(3600)).toBe('1 h');
+        expect(formatTotalTime(4800)).toBe('1 h 20 min');
+    });
+
+    it('loads a package into the editor from the pencil or a click on the card', async () => {
+        const props = renderQueue();
+        await userEvent.click(screen.getByRole('button', { name: 'Edit M 81' }));
+        expect(props.onEdit).toHaveBeenLastCalledWith(queue[0]);
+        await userEvent.click(screen.getByText('M 13'));
+        expect(props.onEdit).toHaveBeenLastCalledWith(queue[1]);
     });
 
     it('keeps Tab inside the checklist dialog', async () => {

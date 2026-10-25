@@ -16,6 +16,7 @@ export interface DirectionalControlProps {
  *
  * Renders a compass-pad style interface for manual telescope slewing.
  * Supports touch and mouse interactions for continuous movement relative to press duration.
+ * The 3x3 pad is compact and the slew-speed slider sits beside it.
  */
 export const DirectionalControl: React.FC<DirectionalControlProps> = ({
     onStop,
@@ -46,7 +47,7 @@ export const DirectionalControl: React.FC<DirectionalControlProps> = ({
     };
 
     return (
-        <div id="manual-guide-controls" className="navigator">
+        <div id="manual-guide-controls" className="navigator navigator--side">
             <div id="directional-button-grid" className="navigator__grid">
                 <button
                     id="btn-move-nw"

@@ -19,7 +19,7 @@ The display only shows what the library returns. The library chooses which packa
 ## What each file is for
 
 - `ObservationManager.tsx` puts the display together. It owns the one selection and handles New package, Delete, Dismiss, Undo and Refresh suggestions.
-- `ExecutionQueue.tsx` and `ImagingCard.tsx` draw the queue. A card shows a run-state chip and a progress bar such as "12 of 20 frames". `ChecklistDialog.tsx` is the Checklist (N) list with its tick boxes. Each item shows the plain-words label the library gives it.
+- `ExecutionQueue.tsx` and `ImagingCard.tsx` draw the queue. A card is kept minimal. It shows the target name, the total run time (such as "3 min"), a run-state chip, a progress bar such as "12 of 20 frames", and the Move earlier, Move later, Edit and Remove buttons. It does not repeat the exposure rows; the Image List in the editor shows them. The strip is as tall as one card, so it never scrolls up and down. It scrolls sideways only when there are more cards than fit the window. `ChecklistDialog.tsx` is the Checklist (N) list with its tick boxes. Each item shows the plain-words label the library gives it.
 - `PackageLibraryPanel.tsx` draws the three tabs, the buttons and the cards. `NewPackageSearch.tsx` is the search box behind New package.
 - `PackageEditor.tsx` holds the Image Planner (`ImagePlanner.tsx`), Dither Settings (`DitherSettings.tsx`), Image List (`ImageList.tsx`) and Last Image (`LastImageViewer.tsx`) for the open package.
 - `TargetListStatus.tsx` is the Visible Targets table. A click on a row opens the target's package.

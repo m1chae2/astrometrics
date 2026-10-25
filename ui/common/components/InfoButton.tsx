@@ -1,10 +1,17 @@
 /**
  * @fileoverview InfoButton: a small "i" button that shows an explanation on hover, on keyboard
- * focus and on click, so touch and keyboard users can read it too.
+ * focus and on click, so touch and keyboard users can read it too. The explanation is drawn on
+ * the page body, placed under the button, so a panel that clips its contents cannot cut it off.
  */
 
-import React, { useId, useState } from 'react';
+import React, { useId, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import './sharedComponents.css';
+
+/** Gap in pixels between the button and its explanation. */
+const TEXT_GAP_PX = 4;
+/** Closest the explanation may come to the window edge, in pixels. */
+const EDGE_MARGIN_PX = 8;
 
 export interface InfoButtonProps {
     /** The explanation to show. */
@@ -29,6 +36,32 @@ export const InfoButton: React.FC<InfoButtonProps> = ({ text, label = 'More info
     const [isFocused, setIsFocused] = useState(false);
     const [isPinned, setIsPinned] = useState(false);
     const isShown = isHovered || isFocused || isPinned;
+    const triggerRef = useRef<HTMLButtonElement>(null);
+    const [position, setPosition] = useState<{ top: number; right: number } | null>(null);
+
+    // Place the explanation under the button, right edges lined up, and follow the button while
+    // the page scrolls or the window is resized.
+    useLayoutEffect(() => {
+        if (!isShown) {
+            setPosition(null);
+            return undefined;
+        }
+        const place = () => {
+            const rect = triggerRef.current?.getBoundingClientRect();
+            if (!rect) return;
+            setPosition({
+                top: rect.bottom + TEXT_GAP_PX,
+                right: Math.max(EDGE_MARGIN_PX, window.innerWidth - rect.right),
+            });
+        };
+        place();
+        window.addEventListener('scroll', place, true);
+        window.addEventListener('resize', place);
+        return () => {
+            window.removeEventListener('scroll', place, true);
+            window.removeEventListener('resize', place);
+        };
+    }, [isShown]);
 
     return (
         <span
@@ -37,6 +70,7 @@ export const InfoButton: React.FC<InfoButtonProps> = ({ text, label = 'More info
             onMouseLeave={() => setIsHovered(false)}
         >
             <button
+                ref={triggerRef}
                 type="button"
                 className="info-button__trigger"
                 aria-label={label}
@@ -55,8 +89,16 @@ export const InfoButton: React.FC<InfoButtonProps> = ({ text, label = 'More info
             >
                 <span aria-hidden="true">i</span>
             </button>
-            {isShown && (
-                <span id={textId} role="note" className="info-button__text">{text}</span>
+            {isShown && createPortal(
+                <span
+                    id={textId}
+                    role="note"
+                    className="info-button__text"
+                    style={position ? { top: position.top, right: position.right } : { visibility: 'hidden' }}
+                >
+                    {text}
+                </span>,
+                document.body,
             )}
         </span>
     );

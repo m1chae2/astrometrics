@@ -13,7 +13,7 @@
 
 .observation-manager__queue {
     flex: 0 0 auto;
-    height: 240px;
+    height: auto;
     padding: var(--layout-padding) var(--layout-padding) 0;
     box-sizing: border-box;
 }
@@ -63,15 +63,12 @@
         --layout-left-col-width: 210px;
         --layout-right-col-width: 280px;
     }
-
-    .observation-manager__queue {
-        height: 220px;
-    }
 }
 
-/* Execution Queue strip: cards in one row that scrolls sideways inside the panel. */
+/* Execution Queue strip: cards in one row. The strip is as tall as a card, so nothing scrolls
+   vertically; the row scrolls sideways only when the cards are wider than the window. */
 .execution-queue-strip {
-    height: 100%;
+    height: auto;
 }
 
 .execution-queue-strip .panel__content {
@@ -83,18 +80,14 @@
     flex-direction: row;
     align-items: stretch;
     gap: var(--space-2);
-    height: 100%;
+    height: auto;
     overflow-x: auto;
     overflow-y: hidden;
     padding-bottom: var(--space-1);
 }
 
 .execution-queue-strip .imaging-card {
-    flex: 0 0 280px;
-    width: 280px;
     margin-bottom: 0;
-    max-height: 100%;
-    overflow-y: auto;
 }
 
 .execution-queue-strip .queue-empty {

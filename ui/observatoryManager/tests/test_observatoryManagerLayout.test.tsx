@@ -9,6 +9,7 @@
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import userEvent from '@testing-library/user-event';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 
 const callBackendMock = vi.fn();
@@ -82,6 +83,16 @@ beforeEach(() => {
 });
 
 describe('ObservatoryManager layout', () => {
+    /** The Calibration Library is in the top row beside Tracking Settings, with Ingest frames in its header. */
+    it('puts the Calibration Library in the top row with Ingest frames in its header', async () => {
+        renderDisplay();
+        const library = document.getElementById('calibrationLibrary') as HTMLElement;
+        expect(library.parentElement?.classList.contains('observatory-top-row')).toBe(true);
+        expect(library.previousElementSibling?.textContent).toContain('Tracking Settings');
+        expect(library.querySelector('.panel__header')?.textContent).toContain('Ingest frames');
+        await screen.findByText('Darks:');
+    });
+
     /** The Focuser and Filter Wheel panels are removed; the new panels are shown. */
     it('drops Focuser and Filter Wheel and shows the library and camera panels', async () => {
         renderDisplay();
@@ -90,11 +101,11 @@ describe('ObservatoryManager layout', () => {
         expect(screen.getByText('Telescope Control')).toBeTruthy();
         expect(screen.getByText('Manual Guide')).toBeTruthy();
         expect(screen.getByText('Safety Limits')).toBeTruthy();
-        expect(screen.getByText('Alignment Status')).toBeTruthy();
+        expect(screen.getByText('Alignment and Guiding')).toBeTruthy();
         expect(screen.getByText('Camera Profiles')).toBeTruthy();
         expect(screen.getByText('Calibration Library')).toBeTruthy();
         expect(screen.queryByTestId('camera-noise-example')).toBeNull();
-        expect(await screen.findByText('Darks')).toBeTruthy();
+        expect(await screen.findByText('Darks:')).toBeTruthy();
     });
 
     /** Command controls are disabled; hover reason and aria-describedby carry the reason. */
@@ -121,6 +132,7 @@ describe('ObservatoryManager layout', () => {
 
         const minimumAltitude = document.getElementById('input-limit-min-alt') as HTMLInputElement;
         expect(minimumAltitude.disabled).toBe(true);
+        await userEvent.click(screen.getByRole('tab', { name: 'Hour angle' }));
         const flipInput = document.getElementById('input-meridian-flip-ha') as HTMLInputElement;
         expect(flipInput.disabled).toBe(true);
         expect(flipInput.getAttribute('aria-describedby')).toBeTruthy();
@@ -129,6 +141,30 @@ describe('ObservatoryManager layout', () => {
         expect(slew.disabled).toBe(true);
         expect(slew.getAttribute('aria-disabled')).toBe('true');
         expect(within(slew.closest('[data-testid="command-gate"]') as HTMLElement).getByText(/Checking|Equipment commands are off/)).toBeTruthy();
+    });
+
+    /** Tracking Settings and the alignment panel use tabs that follow the WAI-ARIA tab pattern. */
+    it('shows the tracking and alignment tabs with keyboard arrow selection', async () => {
+        renderDisplay();
+        const user = userEvent.setup();
+        const trackingTabs = within(screen.getByRole('tablist', { name: 'Tracking setting groups' }));
+        const alignmentTab = trackingTabs.getByRole('tab', { name: 'Alignment', selected: true });
+        expect(screen.getByLabelText('Alignment Accuracy')).toBeTruthy();
+        expect(screen.queryByLabelText('Guiding Gain')).toBeNull();
+        alignmentTab.focus();
+        await user.keyboard('{ArrowRight}');
+        const guidingTab = trackingTabs.getByRole('tab', { name: 'Guiding', selected: true });
+        expect(document.activeElement).toBe(guidingTab);
+        expect(screen.getByLabelText('Guiding Gain')).toBeTruthy();
+        expect(screen.queryByLabelText('Alignment Accuracy')).toBeNull();
+
+        // The shared alignment panel: Alignment table first, Guiding target on the second tab.
+        expect(screen.getByText('No alignment attempts')).toBeTruthy();
+        const sharedTabs = within(screen.getByRole('tablist', { name: 'Alignment and guiding views' }));
+        expect(sharedTabs.getByRole('tab', { name: 'Alignment' }).getAttribute('aria-selected')).toBe('true');
+        await user.click(sharedTabs.getByRole('tab', { name: 'Guiding target' }));
+        expect(screen.getByText('target')).toBeTruthy();
+        expect(screen.queryByText('No alignment attempts')).toBeNull();
     });
 
     /** Adding a target is not an equipment command and stays enabled. */
@@ -140,7 +176,7 @@ describe('ObservatoryManager layout', () => {
     /** A request that arrives while the display is open highlights its row. */
     it('highlights the requested calibration row', async () => {
         renderDisplay();
-        await screen.findByText('Darks');
+        await screen.findByText('Darks:');
         act(() => {
             window.dispatchEvent(new CustomEvent('astrometrics:showCalibrationRow', {
                 detail: { calibrationKey: 'dark', captureSetting: { camera: 'ZWO ASI533MM Pro', gainSetting: 100, offset: 10, binning: 1 }, rule: 'r' },

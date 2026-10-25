@@ -46,7 +46,7 @@
     border-color: var(--highlight-blue, #4a9eff);
 }
 
-/* Expanded only opens the details; the outline is reserved for the one selected card. */
+/* The outline is reserved for the one selected card. */
 .imaging-card--selected {
     border-color: var(--accent-blue);
     box-shadow: 0 0 0 1px var(--accent-blue);
@@ -57,7 +57,6 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    cursor: pointer;
     background-color: rgba(255, 255, 255, 0.04);
     border-bottom: 1px solid transparent;
     transition: all 0.2s;
@@ -67,23 +66,12 @@
     background-color: rgba(255, 255, 255, 0.07);
 }
 
-.imaging-card.expanded .card-header {
-    background-color: var(--background-tertiary, #2a2a2a);
-    border-bottom: 1px solid var(--grey-light, #444);
-}
-
 .card-title {
     font-weight: bold;
     font-size: 1.1rem;
     color: var(--white);
-    background: none;
-    border: none;
-    padding: 0;
-    cursor: pointer;
-    text-align: left;
 }
 
-.card-title:focus-visible,
 .card-edit-btn:focus-visible,
 .card-remove-btn:focus-visible {
     outline: 2px solid var(--accent-blue);
@@ -138,52 +126,6 @@
 .card-remove-btn:hover {
     color: var(--accent-red, #ff4444);
     background-color: rgba(255, 68, 68, 0.1);
-}
-
-.card-body {
-    padding: 8px 12px;
-    background-color: rgba(0, 0, 0, 0.1);
-}
-
-.card-timing {
-    margin-bottom: 8px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 12px;
-    color: var(--text-secondary);
-}
-
-.card-timing select {
-    background: var(--input-background, #333);
-    color: var(--text-primary, #eee);
-    border: 1px solid var(--border-color, #555);
-    border-radius: 4px;
-    padding: 2px 6px;
-}
-
-.mini-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.9rem;
-}
-
-.mini-table th {
-    text-align: left;
-    color: var(--text-muted);
-    border-bottom: 1px solid var(--grey-light, #444);
-    padding: 6px;
-    font-weight: 600;
-}
-
-.mini-table td {
-    padding: 6px;
-    border-bottom: 1px solid var(--grey-dark, #333);
-    color: var(--text-primary);
-}
-
-.mini-table tr:last-child td {
-    border-bottom: none;
 }
 
 /* View Transition Animations */

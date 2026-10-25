@@ -15,6 +15,19 @@
     height: 100%;
 }
 
+/* Alignment table: time and target on the left, status symbol, then the deltas lined up on the right. */
+.alignment__header--time { width: 96px; }
+.alignment__header--status { width: 48px; text-align: center; }
+.alignment__header--number { width: 66px; text-align: right; }
+.alignment__cell--time { color: var(--text-muted); white-space: nowrap; padding-left: 4px; padding-right: 4px; }
+.alignment__cell--target { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.alignment__cell--number { text-align: right; font-variant-numeric: tabular-nums; }
+.alignment__symbol { width: auto; font-size: var(--control-font-size); }
+/* On a narrow panel the Time column gives way, so the target name keeps its room. */
+@container (max-width: 400px) {
+    .alignment__header--time, .alignment__cell--time { display: none; }
+}
+
 .alignment__cell--empty {
     text-align: center;
     color: var(--text-muted);
@@ -51,20 +64,23 @@
 }
 
 /* Calibration library (moved from the Observation Manager) */
-.calibration-controls { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.calibration-controls { display: flex; flex-direction: column; align-items: stretch; gap: var(--space-2); margin-bottom: var(--space-2); }
 .calibration-camera-select { display: flex; align-items: center; gap: 6px; flex: 0 1 360px; min-width: 0; font-size: var(--compact-font-size); color: var(--text-muted); }
-.calibration-camera-select select { flex: 1; min-width: 140px; height: 32px; font-size: var(--compact-font-size); }
+.calibration-camera-select select { flex: 1; min-width: 0; height: 32px; font-size: var(--compact-font-size); }
 .calibration-section { display: flex; flex-direction: column; gap: 8px; }
-.calibration-header { font-weight: 600; color: var(--text-bright); font-size: var(--compact-font-size); border-bottom: 1px solid var(--border-color); padding-bottom: 4px; margin-bottom: 4px; }
-.calibration-table-container { max-height: 120px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--surface-inset); }
-.calibration-table { width: 100%; border-collapse: collapse; font-size: var(--section-label-size); }
+.calibration-table-container { max-height: 100px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--surface-inset); }
+.calibration-table { width: 100%; border-collapse: collapse; font-size: var(--compact-font-size); }
 .calibration-table th { text-align: left; color: var(--text-muted); border-bottom: 1px solid var(--border-color); padding: 4px 8px; font-weight: 500; }
 .calibration-table td { padding: 2px 8px; border-bottom: 1px solid var(--divider-subtle); color: var(--text-bright); }
+/* Number columns line up on the right, headers included (the plain th rule above would
+   otherwise pull their headers left), with equal-width digits so values stack neatly. */
+.calibration-table th.data-table-cell-right,
+.calibration-table td.data-table-cell-right { text-align: right; width: 30%; font-variant-numeric: tabular-nums; }
 .calibration-table tr:last-child td { border-bottom: none; }
 .calibration-row--highlight td { background: var(--surface-highlight); outline: 1px solid var(--accent-blue); font-weight: 600; }
 .calibration-no-data { color: var(--text-muted); font-style: italic; text-align: center; padding: 12px; }
-.calibration-summary { margin-top: 8px; display: flex; justify-content: space-between; padding: 4px 8px; background: var(--surface-inset-strong); border-radius: var(--radius-sm); }
-.calibration-summary-item { display: flex; align-items: center; gap: 8px; padding: 0 4px; border-radius: var(--radius-sm); }
+.calibration-summary { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); background: var(--surface-inset-strong); border-radius: var(--radius-sm); }
+.calibration-summary-item { display: flex; align-items: center; gap: 4px; padding: 0 4px; border-radius: var(--radius-sm); }
 .calibration-summary-item--highlight { background: var(--surface-highlight); outline: 1px solid var(--accent-blue); }
 .calibration-label { color: var(--text-muted); font-size: var(--compact-font-size); }
 .calibration-value { color: var(--text-bright); font-weight: 600; font-size: var(--compact-font-size); }
@@ -95,28 +111,35 @@
     overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
 }
 
-/* The Calibration Library row stays short so the guiding plots keep their height; the table scrolls. */
-.observatory-library-row { flex-wrap: nowrap; }
-.observatory-library-row > * { flex: 1 1 0; min-width: 0; max-height: 190px; overflow: hidden; }
-/* Camera Profiles in the middle row is no taller than its neighbors; it scrolls inside itself. */
-.observatory-middle-row { align-items: stretch; }
-.observatory-middle-row > :first-child { min-width: 0; max-height: 300px; overflow: hidden; }
-
 /*
  * Row budget. The page never scrolls: the panel group has a fixed height and each panel scrolls inside itself.
- * Top row (Telescope Control, Tracking Settings): fixed, about 150px; it never shrinks.
- * Middle row: wants up to 300px (Camera Profiles caps there), may shrink down to 90px and then scrolls inside.
- * Calibration row: wants up to 190px, may shrink down to 70px and scrolls inside.
- * Guiding row: takes all the space that is left and never goes below 150px, enough to read the plots.
- * At 1024x700 (about 560px for the group) the middle and calibration rows give way first, because they
- * shrink three times and four times faster than the guiding row can grow; at 1870x1040 every row has its
- * full height and the guiding row gets the extra.
+ * The group is about 900px tall at 1870x1040 and about 560px at 1024x700.
+ *   Top row (Telescope Control, Tracking Settings, Calibration Library): fixed, about 150px (Telescope Control's three
+ *     button rows set it); never shrinks. Telescope Control and Tracking Settings are as wide as their content; the
+ *     Calibration Library takes the rest; its Darks table fills the row's height and scrolls inside itself, never growing the row.
+ *   Middle row (Camera Profiles, Manual Guide, Safety Limits): wants up to 290px (Safety Limits needs about 280px), may shrink to 90px, then scrolls inside.
+ *     Safety Limits needs about 200px: header with Apply, telescope line, tab strip, a checkbox and two fields.
+ *   Guiding row (Guiding Trends, Alignment and Guiding): takes all that is left and never goes below 150px.
+ * At 1870x1040: 900 - 150 - 230 - 2 gaps of 8px = about 500px for the guiding row, up from about 260px
+ * before the panels were condensed, and the Apply button, plots and tables are never clipped.
+ * At 1024x700 the middle row gives way first (it shrinks three times faster than the guiding row).
  */
-.observatory-guiding-row { flex: 1 1 150px; min-height: 150px; }
-.observatory-middle-row { flex: 0 3 auto; min-height: 90px; flex-wrap: nowrap; overflow: hidden; }
-/* Each panel clips its own content (its body scrolls inside), so nothing draws over another row. */
-.observatory-middle-row > * { min-height: 0; overflow: hidden; }
-.observatory-library-row { flex: 0 4 auto; min-height: 70px; overflow: hidden; }
+.observatory-middle-row { align-items: stretch; flex: 0 3 290px; min-height: 90px; max-height: 290px; flex-wrap: nowrap; overflow: hidden; }
+.observatory-middle-row > * { flex: 1 1 0; min-width: 0; min-height: 0; overflow: hidden; }
+.observatory-top-row { flex-wrap: nowrap; overflow: hidden; }
+.observatory-top-row > * { min-height: 0; overflow: hidden; }
+/* Shares of the top row: Telescope Control 3, Tracking Settings 2 (about half its old width),
+   Calibration Library 3. "Size to content" does not work here: the shared buttons stretch to fill
+   any width they are given, so the first panel would take the whole row. */
+.observatory-top-row > .observatory-top-row__fit { flex: 3 1 0; min-width: 0; }
+.observatory-top-row > .observatory-top-row__fit + .observatory-top-row__fit { flex: 2 1 0; }
+.observatory-top-row > .calibration-panel { flex: 3 1 0; min-width: 240px; }
+/* The Darks table keeps room for its header and four rows (about Telescope Control's height, so neither
+   panel has much empty space), grows into any extra height the row has, and scrolls inside itself. */
+.calibration-panel > .panel__content { display: flex; flex-direction: column; overflow: hidden; flex: 1 0 auto; }
+.calibration-panel .calibration-section { flex: 1 0 auto; }
+.calibration-panel .calibration-table-container { flex: 1 1 0; height: 0; min-height: 110px; max-height: none; }
+.observatory-guiding-row { flex: 1 1 150px; min-height: 150px; flex-wrap: nowrap; }
 
 /* The guiding panels fill the row's height and pass it down to the plots (percent heights alone collapse). */
 .observatory-guiding-row { overflow: hidden; }
@@ -124,23 +147,78 @@
 .observatory-guiding-row .panel__content { display: flex; flex-direction: column; overflow: hidden; }
 .observatory-guiding-row .guiding-status__plot { flex: 1 1 0; min-height: 0; height: auto; }
 .guiding-status__plot--trends { display: flex; flex-direction: column; }
+.guiding-trends__plot-fill { flex: 1 1 0; min-height: 0; }
+.guiding-trends__empty { flex: 1 1 0; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: var(--compact-font-size); }
+/* Guiding Trends takes three shares of the row and the tabbed panel two, so the Alignment table has room for target names. */
+.observatory-guiding-trends { flex: 3 1 0; }
+.observatory-guiding-tabbed { flex: 2 1 0; }
+.observatory-guiding-tabbed__body { flex: 1 1 0; min-height: 0; overflow: auto; container-type: inline-size; }
+.observatory-guiding-tabbed__body > [role='tabpanel'] { height: 100%; }
+.observatory-guiding-tabbed__body .alignment { max-height: none; }
+/* The guiding target plot fills its tab exactly, so the tab never scrolls. */
+.observatory-guiding-tabbed__body .guiding-status__plot { height: 100%; overflow: hidden; }
+/* The trace checkboxes and the History slider live in the panel header; they wrap on a narrow panel. */
+.observatory-guiding-row .panel__header { flex-wrap: wrap; gap: var(--space-1) var(--space-3); }
+.guiding-trends__controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); font-size: var(--small-font-size); font-weight: normal; }
+.guiding-trends__history { margin-left: 0; }
+.guiding-trends__controls :is(input[type='checkbox'], input[type='range']):focus-visible { outline: var(--focus-outline); outline-offset: 2px; }
 
-/* Calibration controls: normal-size buttons (the shared .btn is full width) and a square refresh button. */
+/* Calibration controls: two lines (camera and refresh; the counts), then the Darks table, which is always shown. Normal-size buttons (the shared .btn is full width) and a small square refresh button. */
+.calibration-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); min-width: 0; }
+.calibration-line .calibration-camera-select { flex: 1 1 0; }
+.calibration-line .calibration-summary { flex: 1 1 auto; }
+.calibration-line .calibration-summary-item { flex: 1 1 0; justify-content: center; }
 .calibration-controls .btn { width: auto; flex: 0 0 auto; }
-.calibration-controls .btn--square { width: 36px; min-width: 36px; height: 36px; padding: 0; display: flex; align-items: center; justify-content: center; font-size: var(--control-font-size); }
+.calibration-controls .btn--square { width: 32px; min-width: 32px; height: 32px; padding: 0; display: flex; align-items: center; justify-content: center; font-size: var(--control-font-size); }
 
-/* Tracking Settings: shorter labels, and the Alignment and Guiding columns wrap instead of colliding. */
-.tracking-settings { flex-wrap: wrap; --parameter-label-width: 88px; }
-.tracking-settings > .controls__column { flex: 1 1 190px; }
-.tracking-settings > .vertical-divider { display: none; }
+/* Tracking Settings: shorter labels; the two tabs share the panel body. */
+.tracking-settings { --parameter-label-width: 88px; display: flex; flex-direction: column; gap: var(--space-2); }
 
-/* Safety Limits labels wrap instead of being cut off. */
-.parameter .limit-settings__label { white-space: normal; text-align: left; width: auto; flex: 1 1 110px; min-width: 0; }
+/* Manual Guide: the pad fills the panel height; the slew-speed slider sits beside it (below it on a narrow panel). */
+.command-gate:has(> .navigator--side) { height: 100%; }
+.navigator--side { height: 100%; container-type: size; flex-direction: row; flex-wrap: wrap; align-items: center; align-content: center; justify-content: center; gap: var(--space-2) var(--space-3); }
+.navigator--side .navigator__grid {
+    --pad-size: min(100cqh, 64cqw, 260px);
+    flex: 0 0 auto; width: var(--pad-size); height: var(--pad-size);
+    grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); gap: var(--space-1);
+}
+.navigator--side .navigator__btn, .navigator--side .navigator__stop { width: 100%; height: 100%; min-width: 0; font-size: var(--control-font-size); }
+.navigator--side .navigator__stop { font-size: var(--compact-font-size); }
+.navigator--side .slew-rate { flex: 1 1 90px; min-width: 0; margin-top: 0; padding-top: 0; border-top: none; justify-content: center; }
+.navigator--side :is(button, input):focus-visible { outline: var(--focus-outline); outline-offset: 2px; }
+/* A container query cannot restyle the container itself, so on a narrow panel the slider takes the
+   full width and wraps onto its own line below the pad. */
+@container (max-width: 260px) {
+    .navigator--side .navigator__grid { --pad-size: min(72cqh, 100cqw, 260px); }
+    .navigator--side .slew-rate { flex: 0 0 auto; width: 100%; }
+}
 
+/* Safety Limits: FormRow rows share one label column, with room around the tabs and checkboxes. */
+.limit-settings { --parameter-label-width: 150px; gap: var(--space-2); }
+.limit-settings .form-row__label { text-align: left; }
+.limit-settings__rows { display: flex; flex-direction: column; gap: var(--space-2); padding-top: var(--space-1); }
+.limit-settings__checkbox { display: flex; align-items: center; gap: var(--space-2); min-height: 24px; font-size: var(--compact-font-size); }
+.limit-settings__fields { display: flex; flex-direction: column; gap: var(--space-2); padding-left: var(--space-1); }
+.limit-settings__fields .input { width: 90px; }
 .limit-settings__telescope { margin: 0; font-size: var(--compact-font-size); color: var(--text-muted); }
-.limit-settings__hint { font-size: var(--compact-font-size); color: var(--text-muted); }
+.limit-settings__hint { margin: 0; font-size: var(--compact-font-size); color: var(--text-muted); }
 .limit-settings__refusal {
-    display: flex; align-items: center; gap: 8px;
-    padding: 6px 8px; border: 1px solid var(--border-color); border-radius: var(--radius-sm);
+    display: flex; align-items: center; gap: var(--space-2);
+    padding: var(--space-2); border: 1px solid var(--border-color); border-radius: var(--radius-sm);
     font-size: var(--compact-font-size);
 }
+.limit-settings__refusal .btn, .limit-settings__footer .btn { width: auto; white-space: nowrap; }
+.limit-settings__footer { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.limit-settings__apply { width: auto; white-space: nowrap; }
+.limit-settings__apply:focus-visible { outline: var(--focus-outline); outline-offset: 2px; }
+.limit-settings__header-actions { display: inline-flex; align-items: center; gap: var(--space-2); }
+
+/* Camera Profiles: a compact noise table that fits the panel; the measure button sits in the header. */
+.camera-profiles__measure-button { width: auto; white-space: nowrap; }
+.camera-profiles__measure-button:focus-visible { outline: var(--focus-outline); outline-offset: 2px; }
+.camera-profiles__table { table-layout: auto; }
+.camera-profiles__table td, .camera-profiles__table th { vertical-align: middle; }
+.camera-profiles__value { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.camera-profiles__camera { display: block; white-space: nowrap; }
+.camera-profiles__setting { display: block; color: var(--text-muted); font-size: var(--section-label-size); }
+.camera-profiles__missing { margin: var(--space-2) 0 0; font-size: var(--compact-font-size); color: var(--text-muted); }

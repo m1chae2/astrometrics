@@ -40,12 +40,13 @@ const savedTelescope = {
 /**
  * Renders the panel inside a fresh query client.
  * @param disabled Whether the app may not command the equipment.
+ * @param reason Why the equipment is unavailable.
  * @return The render result and the client.
  */
-function renderPanel(disabled = false) {
+function renderPanel(disabled = false, reason = '') {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const view = render(
-        <QueryClientProvider client={client}><LimitSettings disabled={disabled} /></QueryClientProvider>,
+        <QueryClientProvider client={client}><LimitSettings disabled={disabled} reason={reason} /></QueryClientProvider>,
     );
     return { client, ...view };
 }
@@ -67,9 +68,43 @@ describe('Safety Limits panel', () => {
         expect(((await screen.findByLabelText('Minimum altitude')) as HTMLInputElement).value).toBe('25');
         expect((screen.getByLabelText('Maximum altitude') as HTMLInputElement).value).toBe('85');
         expect((screen.getByLabelText('Enable altitude limits') as HTMLInputElement).checked).toBe(true);
+        expect(screen.getByText('Telescope: Refractor')).toBeTruthy();
+        fireEvent.click(screen.getByRole('tab', { name: 'Hour angle' }));
         expect((screen.getByLabelText('Enable hour angle limit') as HTMLInputElement).checked).toBe(false);
         expect((screen.getByLabelText('Meridian flip after (hour angle)') as HTMLInputElement).value).toBe('5');
         expect(screen.getByText('hours')).toBeTruthy();
+        expect(screen.queryByLabelText('Minimum altitude')).toBeNull();
+    });
+
+    /** The two tabs follow the tab pattern, and Apply sits in the panel header, like Measure noise in Camera Profiles. */
+    it('has Altitude and Hour angle tabs and Apply in the header', async () => {
+        renderPanel();
+        const user = userEvent.setup();
+        const altitudeTab = await screen.findByRole('tab', { name: 'Altitude' });
+        expect(altitudeTab.getAttribute('aria-selected')).toBe('true');
+        expect(screen.getByRole('tab', { name: 'Hour angle' }).getAttribute('tabindex')).toBe('-1');
+        const apply = screen.getByRole('button', { name: 'Apply safety limits' });
+        expect(apply.closest('.panel__header')).toBeTruthy();
+        expect(apply.closest('[role="tabpanel"]')).toBeNull();
+        altitudeTab.focus();
+        await user.keyboard('{ArrowRight}');
+        expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Hour angle' }));
+        expect(screen.getByRole('tabpanel').getAttribute('aria-labelledby')).toBe(document.activeElement?.id);
+        await user.keyboard('{Home}');
+        expect(screen.getByLabelText('Minimum altitude')).toBeTruthy();
+    });
+
+    /** An edit on a hidden tab still counts as a change and is sent. */
+    it('keeps edits when switching tabs and enables Apply for them', async () => {
+        renderPanel();
+        fireEvent.click(await screen.findByRole('tab', { name: 'Hour angle' }));
+        fireEvent.change(screen.getByLabelText('Meridian flip after (hour angle)'), { target: { value: '9' } });
+        fireEvent.click(screen.getByRole('tab', { name: 'Altitude' }));
+        const apply = screen.getByRole('button', { name: 'Apply safety limits' }) as HTMLButtonElement;
+        expect(apply.disabled).toBe(false);
+        fireEvent.click(apply);
+        await waitFor(() => expect(callBackendMock).toHaveBeenCalledWith('observatory:set_active_telescope',
+            expect.objectContaining({ limits: expect.objectContaining({ flip_hour_angle_deg: 9 }) })));
     });
 
     /** A new read replaces what the user typed. */
@@ -127,10 +162,11 @@ describe('Safety Limits panel', () => {
 
     /** While commands are off, Apply is greyed even after a change, but inputs stay readable. */
     it('greys Apply while commands are off and keeps inputs readable', async () => {
-        renderPanel(true);
+        renderPanel(true, 'Ekos controls.');
         const apply = (await screen.findByRole('button', { name: 'Apply safety limits' })) as HTMLButtonElement;
         expect(apply.disabled).toBe(true);
         expect(apply.getAttribute('aria-disabled')).toBe('true');
+        expect(apply.getAttribute('title')).toBe('Ekos controls.');
         expect((screen.getByLabelText('Minimum altitude') as HTMLInputElement).value).toBe('25');
     });
 });

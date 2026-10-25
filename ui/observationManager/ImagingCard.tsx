@@ -1,8 +1,9 @@
 /**
  * @file ImagingCard.tsx
- * @description One package in the Execution Queue: target name (a real button that opens and
- * closes the details, so the keyboard works), total time, progress, Edit, Remove and, for the
- * keyboard, Move earlier and Move later. Dragging also reorders, from the Execution Queue.
+ * @description One package in the Execution Queue, kept minimal: target name, total time, run
+ * state, frame progress, and the Move earlier, Move later, Edit and Remove buttons. The exposure
+ * rows are not repeated here; Edit loads them into the editor, where the Image List shows them.
+ * Dragging also reorders, from the Execution Queue.
  */
 import React, { useState } from 'react';
 import { SequenceObject } from './hooks/useExecutionQueue';
@@ -15,10 +16,8 @@ import './queueProgress.css';
 
 interface Props extends React.HTMLAttributes<HTMLDivElement> {
     sequence: SequenceObject;
-    isExpanded: boolean;
     /** True when this card is the one picked for editing (the display's single selection). */
     isSelected?: boolean;
-    onToggle: () => void;
     onRemove: (id: string) => void;
     onEdit: () => void;
     /** What the library counted for this entry tonight, or null when it has no progress yet. */
@@ -30,16 +29,27 @@ interface Props extends React.HTMLAttributes<HTMLDivElement> {
 }
 
 /**
+ * Writes a run time in seconds as a short phrase: "3 min", or "1 h 20 min" from one hour on.
+ * @param seconds Total run time in seconds.
+ * @return The short phrase.
+ */
+export function formatTotalTime(seconds: number): string {
+    const minutes = Math.max(1, Math.round((seconds || 0) / 60));
+    if (minutes < 60) return `${minutes} min`;
+    const hours = Math.floor(minutes / 60);
+    const rest = minutes % 60;
+    return rest === 0 ? `${hours} h` : `${hours} h ${rest} min`;
+}
+
+/**
  * Shows one queued package as a card.
  * @param props See {@link Props}.
  * @return The card element.
  */
-export const ImagingCard: React.FC<Props> = ({ sequence, isExpanded, isSelected = false, onToggle, onRemove, onEdit, progress = null, onMoveEarlier, onMoveLater, ...divProps }) => {
+export const ImagingCard: React.FC<Props> = ({ sequence, isSelected = false, onRemove, onEdit, progress = null, onMoveEarlier, onMoveLater, ...divProps }) => {
     const [showConfirm, setShowConfirm] = useState(false);
 
-    const totalExposure = sequence.items.reduce((acc: number, item: any) => acc + (item.count * (item.exposure || 0)), 0);
-    const totalExposureMins = (totalExposure / 60).toFixed(1);
-    const totalExecMins = (sequence.total_duration / 60).toFixed(1);
+    const totalTimeText = formatTotalTime(sequence.total_duration);
 
     const handleRemoveClick = (e: React.MouseEvent) => {
         e.stopPropagation();
@@ -51,6 +61,11 @@ export const ImagingCard: React.FC<Props> = ({ sequence, isExpanded, isSelected 
         setShowConfirm(false);
     };
 
+    /** A click on the card loads it in the editor. A click inside the open confirm dialog does not. */
+    const handleCardClick = () => {
+        if (!showConfirm) onEdit();
+    };
+
     const runState = progress ? runStateDisplay(progress.state) : null;
     const isImagingNow = !!progress && (progress.imagingNow ?? false);
 
@@ -58,21 +73,14 @@ export const ImagingCard: React.FC<Props> = ({ sequence, isExpanded, isSelected 
         <div
             {...divProps}
             aria-current={isImagingNow ? 'step' : undefined}
-            className={`imaging-card ${isExpanded ? 'expanded' : 'collapsed'} ${isSelected ? 'imaging-card--selected' : ''} ${divProps.className || ''}`}
+            className={`imaging-card ${isSelected ? 'imaging-card--selected' : ''} ${divProps.className || ''}`}
             data-selected={isSelected ? 'true' : undefined}
-            onClick={onToggle}
+            onClick={handleCardClick}
         >
             <div className="card-header">
-                <button
-                    type="button"
-                    className="card-title"
-                    aria-expanded={isExpanded}
-                    aria-label={`${sequence.target_name}, ${isExpanded ? 'hide' : 'show'} details`}
-                >
-                    {sequence.target_name}
-                </button>
+                <span className="card-title">{sequence.target_name}</span>
                 <div className="card-meta">
-                    <span className="card-duration">TTL: {totalExposureMins}m / {totalExecMins}m</span>
+                    <span className="card-duration">{totalTimeText}</span>
                     {onMoveEarlier && (
                         <button
                             type="button"
@@ -125,36 +133,6 @@ export const ImagingCard: React.FC<Props> = ({ sequence, isExpanded, isSelected 
                         label={`Frames captured for ${sequence.target_name}`}
                     />
                     {progress.note && <span className="card-progress__note">{progress.note}</span>}
-                </div>
-            )}
-            {isExpanded && (
-                <div className="card-body" onClick={(e) => e.stopPropagation()}>
-                    <div className="card-timing">
-                        {/* Read-only: the sequencer sets timing when an entry is added and has no call to change it. */}
-                        <span>Timing point: {sequence.timing?.mode === 'at' ? 'Start at a set time' : 'Soonest'}</span>
-                    </div>
-                    <div className="card-items">
-                        <table className="mini-table">
-                            <thead>
-                                <tr>
-                                    <th>Count</th>
-                                    <th>Exposure</th>
-                                    <th>Delay</th>
-                                    <th>Filter</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {sequence.items.map((item: any, idx: number) => (
-                                    <tr key={idx}>
-                                        <td>{item.count}</td>
-                                        <td>{item.exposure}s</td>
-                                        <td>{item.delay || 0}s</td>
-                                        <td>{item.filter}</td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
                 </div>
             )}
             <ConfirmDialog

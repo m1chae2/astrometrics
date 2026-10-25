@@ -204,12 +204,14 @@ describe('ObservationManager display', () => {
             expect(selected[0]).toHaveAttribute('aria-label', 'M 81, planned package');
         });
 
-        it('expanding a queue card does not mark it selected', async () => {
+        it('clicking a queue card loads it in the editor and selects only that card', async () => {
             queueState.queue = [queuedSequence];
             answerBackend();
             const { container } = renderDisplay();
             await userEvent.click(screen.getByText('M 51'));
-            expect(selectedElements(container)).toHaveLength(0);
+            const selected = selectedElements(container);
+            expect(selected).toHaveLength(1);
+            expect(selected[0]).toHaveClass('imaging-card');
         });
 
         it('removing the selected queue card clears the selection', async () => {

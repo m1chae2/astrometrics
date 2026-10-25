@@ -26,7 +26,7 @@ vi.mock('../../common/context/AstrometricsContext', () => ({ useAstrometrics: ()
 vi.mock('../../common/utils/appBootReadiness', () => ({ useReportModeReady: () => undefined }));
 
 import { CameraProfilesPanel } from '../equipment/CameraProfilesPanel';
-import { CalibrationLibraryPanel } from '../calibration/CalibrationLibraryPanel';
+import { CalibrationLibraryPanel, formatExposure } from '../calibration/CalibrationLibraryPanel';
 
 const cameras = [{ name: 'ZWO ASI533MM Pro', pixelSizeUm: 3.76, sensorWidthPx: 3008, sensorHeightPx: 3008 }];
 const libraryReply = {
@@ -102,8 +102,12 @@ describe('CameraProfilesPanel', () => {
         const table = screen.getByRole('table', { name: 'Recorded camera noise' });
         expect(table.textContent).toContain('0.783');
         expect(table.textContent).toContain('3.80');
+        expect(table.textContent).toContain('Gain 0 · Offset 10 · 1x1 · −10 °C');
+        expect(table.textContent).toContain('Measured');
         expect(table.textContent).toContain('Tentative');
-        expect(table.textContent).toContain('Partly measured');
+        expect(table.textContent).not.toContain('MEASURED');
+        expect(screen.queryByText('Recorded noise')).toBeNull();
+        expect(table.querySelectorAll('.status-chip').length).toBe(2);
         expect(screen.queryByTestId('example-data-badge')).toBeNull();
         expect(screen.queryByText('Example data')).toBeNull();
         expect(screen.queryByTestId('camera-noise-not-measured')).toBeNull();
@@ -113,7 +117,7 @@ describe('CameraProfilesPanel', () => {
     /** A camera with no entry says it is not measured. */
     it('says "Not measured" for a camera with no recorded noise', () => {
         render(<CameraProfilesPanel cameras={cameras} loading={false} error={null} onRetry={() => undefined} />);
-        expect(screen.getByTestId('camera-noise-not-measured').textContent).toContain('Not measured');
+        expect(screen.getByTestId('camera-noise-not-measured').textContent).toMatch(/^Not measured: /);
         expect(screen.queryByRole('table', { name: 'Recorded camera noise' })).toBeNull();
     });
 
@@ -143,7 +147,8 @@ describe('CameraProfilesPanel', () => {
             saved: params.save,
         }));
         render(<CameraProfilesPanel cameras={cameras} loading={false} error={null} onRetry={() => undefined} />);
-        const measureButton = screen.getByRole('button', { name: 'Measure noise' }) as HTMLButtonElement;
+        await user.click(screen.getByRole('button', { name: 'Measure noise' }));
+        const measureButton = screen.getByRole('button', { name: 'Measure' }) as HTMLButtonElement;
         expect(measureButton.disabled).toBe(true);
         await user.type(screen.getByLabelText('Gain'), '100');
         await user.type(screen.getByLabelText('Offset'), '10');
@@ -167,6 +172,47 @@ describe('CameraProfilesPanel', () => {
         expect(savedText.getAttribute('role')).toBeNull();
         expect(document.activeElement).toBe(screen.getByTestId('noise-measurement'));
     });
+
+    /** The measurement form is closed until the header button opens it, and closing returns focus. */
+    it('opens the measurement form on demand and returns focus to the button on close', async () => {
+        const user = userEvent.setup();
+        render(<CameraProfilesPanel cameras={cameras} loading={false} error={null} onRetry={() => undefined} />);
+        const opener = screen.getByRole('button', { name: 'Measure noise' });
+        expect(opener.getAttribute('aria-expanded')).toBe('false');
+        expect(screen.queryByLabelText('Gain')).toBeNull();
+        await user.click(opener);
+        expect(opener.getAttribute('aria-expanded')).toBe('true');
+        expect(document.activeElement).toBe(screen.getByLabelText(/^Camera/));
+        await user.click(screen.getByRole('button', { name: 'Close' }));
+        expect(opener.getAttribute('aria-expanded')).toBe('false');
+        expect(screen.queryByLabelText('Gain')).toBeNull();
+        expect(document.activeElement).toBe(opener);
+        // Escape closes it too, and focus returns again.
+        await user.click(opener);
+        await user.keyboard('{Escape}');
+        expect(screen.queryByLabelText('Gain')).toBeNull();
+        expect(document.activeElement).toBe(opener);
+    });
+
+    /** The opener is reachable with the keyboard alone. */
+    it('opens the measurement form from the keyboard', async () => {
+        const user = userEvent.setup();
+        render(<CameraProfilesPanel cameras={cameras} loading={false} error={null} onRetry={() => undefined} />);
+        await user.tab();
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Measure noise' }));
+        await user.keyboard('{Enter}');
+        expect(screen.getByLabelText('Gain')).toBeTruthy();
+    });
+});
+
+describe('formatExposure', () => {
+    /** Sub-second exposures read in milliseconds and longer ones in seconds. */
+    it('picks milliseconds or seconds', () => {
+        expect(formatExposure(0.01)).toBe('10 ms');
+        expect(formatExposure(0.00025)).toBe('0.25 ms');
+        expect(formatExposure(30)).toBe('30 s');
+        expect(formatExposure(null)).toBe('—');
+    });
 });
 
 describe('CalibrationLibraryPanel', () => {
@@ -174,16 +220,19 @@ describe('CalibrationLibraryPanel', () => {
     it('shows the camera picker, the Darks table and the totals', async () => {
         callBackendMock.mockResolvedValue(libraryReply);
         renderWithQuery(<CalibrationLibraryPanel />);
-        await screen.findByText('Darks');
+        await screen.findByText('Darks:');
         const picker = screen.getByLabelText('Camera:') as HTMLSelectElement;
         expect(picker.value).toBe('ZWO ASI533MM Pro');
+        // The Darks table is always shown; there is no Show darks toggle.
+        expect(screen.queryByRole('button', { name: 'Show darks' })).toBeNull();
         const table = screen.getByRole('table', { name: 'Darks' });
         const headers = within(table).getAllByRole('columnheader').map((header) => header.textContent);
         expect(headers).toEqual(['Exposure', 'Offset', 'Count']);
         expect(within(table).getAllByRole('row')).toHaveLength(3);
-        expect(within(table).getAllByText('60s')).toHaveLength(2);
+        expect(within(table).getAllByText('60 s')).toHaveLength(2);
+        expect(screen.getByText('Darks:').nextSibling?.textContent).toBe('25');
         expect(screen.getByText('Biases:').nextSibling?.textContent).toBe('30');
-        expect(screen.getByText('Flat Frames:').nextSibling?.textContent).toBe('0');
+        expect(screen.getByText('Flats:').nextSibling?.textContent).toBe('0');
     });
 
     /** Choosing another camera shows only that camera's rows. */
@@ -198,12 +247,12 @@ describe('CalibrationLibraryPanel', () => {
             ],
         });
         renderWithQuery(<CalibrationLibraryPanel />);
-        await screen.findByText('Darks');
+        await screen.findByText('Darks:');
         await userEvent.selectOptions(screen.getByLabelText('Camera:'), 'Nikon D5300');
         const table = screen.getByRole('table', { name: 'Darks' });
         expect(within(table).getAllByRole('row')).toHaveLength(2);
-        expect(within(table).getByText('30s')).toBeTruthy();
-        expect(screen.getByText('Flat Frames:').nextSibling?.textContent).toBe('4');
+        expect(within(table).getByText('30 s')).toBeTruthy();
+        expect(screen.getByText('Flats:').nextSibling?.textContent).toBe('4');
         expect(screen.getByText('Biases:').nextSibling?.textContent).toBe('0');
     });
 
@@ -211,7 +260,7 @@ describe('CalibrationLibraryPanel', () => {
     it('refreshes the library from the refresh button', async () => {
         callBackendMock.mockResolvedValue(libraryReply);
         renderWithQuery(<CalibrationLibraryPanel />);
-        await screen.findByText('Darks');
+        await screen.findByText('Darks:');
         const before = callBackendMock.mock.calls.length;
         await userEvent.click(screen.getByRole('button', { name: 'Refresh calibration library' }));
         await waitFor(() => expect(callBackendMock.mock.calls.length).toBeGreaterThan(before));
@@ -228,7 +277,7 @@ describe('CalibrationLibraryPanel', () => {
             ],
         });
         renderWithQuery(<CalibrationLibraryPanel />);
-        await screen.findByText('Darks');
+        await screen.findByText('Darks:');
         const keyWarnings = errorSpy.mock.calls.filter((call) => String(call[0]).includes('same key'));
         errorSpy.mockRestore();
         expect(keyWarnings).toHaveLength(0);
@@ -238,7 +287,7 @@ describe('CalibrationLibraryPanel', () => {
     it('highlights the Biases total for a bias request', async () => {
         callBackendMock.mockImplementation(answerCalibration(['bias-a']));
         renderWithQuery(<CalibrationLibraryPanel />);
-        await screen.findByText('Darks');
+        await screen.findByText('Darks:');
         act(() => {
             window.dispatchEvent(new CustomEvent('astrometrics:showCalibrationRow', {
                 detail: { calibrationKey: 'bias', captureSetting: { camera: 'ZWO ASI533MM Pro' }, rule: 'r' },
@@ -273,7 +322,7 @@ describe('CalibrationLibraryPanel', () => {
     it('highlights the rows a request matches', async () => {
         callBackendMock.mockImplementation(answerCalibration(['dark-a']));
         renderWithQuery(<CalibrationLibraryPanel />);
-        await screen.findByText('Darks');
+        await screen.findByText('Darks:');
         act(() => {
             window.dispatchEvent(new CustomEvent('astrometrics:showCalibrationRow', {
                 detail: { calibrationKey: 'dark', captureSetting: { camera: 'ZWO ASI533MM Pro', gainSetting: 100, offset: 10, binning: 1 }, rule: 'r' },
@@ -290,7 +339,7 @@ describe('CalibrationLibraryPanel', () => {
     it('says "No calibration row matches" when nothing matches', async () => {
         callBackendMock.mockImplementation(answerCalibration([]));
         renderWithQuery(<CalibrationLibraryPanel />);
-        await screen.findByText('Darks');
+        await screen.findByText('Darks:');
         act(() => {
             window.dispatchEvent(new CustomEvent('astrometrics:showCalibrationRow', {
                 detail: { calibrationKey: 'flat', captureSetting: { camera: 'ZWO ASI533MM Pro', gainSetting: 100 }, rule: 'r' },

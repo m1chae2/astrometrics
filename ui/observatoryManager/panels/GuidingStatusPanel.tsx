@@ -2,10 +2,13 @@
  * Description: Guiding Status Display Panels.
  * Implements KStars/Ekos-style autoguiding monitoring including 2D bullseye target plots
  * and real-time interactive multi-trace time-series tracking for error drift, star SNR,
- * rolling RMS, and pulse corrections.
+ * rolling RMS, and pulse corrections. The Guiding Trends panel keeps its trace
+ * checkboxes and its History slider in the panel header, so the plot gets the whole body.
+ * With no samples yet it shows a short message instead of an empty plot.
  */
 
 import React, { useState, useMemo } from 'react';
+import { SectionPanel } from '../../common/components/SectionPanel';
 import { GuidingSample } from '../../common/types/backendTypes';
 import { TimeSeriesPlot } from '../../common/components/plotting/TimeSeriesPlot';
 import { ScatterPlot } from '../../common/components/plotting/ScatterPlot';
@@ -18,9 +21,9 @@ export interface GuidingStatusProps {
 /**
  * GuidingTrendsPlot Component
  *
- * Visualizes the history of guiding corrections (dRA, dDEC), guide star SNR,
+ * The Guiding Trends panel: the history of guiding corrections (dRA, dDEC), guide star SNR,
  * rolling RMS, and pulse corrections over a dynamically selectable history window.
- * Features an interactive toolbar for toggling individual metrics and scaling plot history.
+ * The panel header holds the checkboxes that toggle each trace and the History slider.
  *
  */
 export const GuidingTrendsPlot: React.FC<GuidingStatusProps> = ({ history }) => {
@@ -115,86 +118,87 @@ export const GuidingTrendsPlot: React.FC<GuidingStatusProps> = ({ history }) => 
             if (rDec != null) maxVal = Math.max(maxVal, Math.abs(rDec));
         }
         const limit = Math.max(1.5, Math.min(5.0, Math.ceil(maxVal * 1.3 * 2) / 2));
-        return [-limit, limit];
+        // A little room past the outer ticks, so the bottom tick label never sits on the first time label.
+        const padded = limit * 1.08;
+        return [-padded, padded];
     }, [slicedHistory]);
 
+    const headerControls = (
+        <span className="guiding-trends__controls">
+            <label className="guiding-controls__label guiding-controls__label--ra">
+                <input
+                    type="checkbox"
+                    className="guiding-controls__checkbox"
+                    checked={showRA}
+                    onChange={(e) => setShowRA(e.target.checked)}
+                />
+                dRA
+            </label>
+            <label className="guiding-controls__label guiding-controls__label--dec">
+                <input
+                    type="checkbox"
+                    className="guiding-controls__checkbox"
+                    checked={showDEC}
+                    onChange={(e) => setShowDEC(e.target.checked)}
+                />
+                dDEC
+            </label>
+            <label className="guiding-controls__label guiding-controls__label--snr">
+                <input
+                    type="checkbox"
+                    className="guiding-controls__checkbox"
+                    checked={showSNR}
+                    onChange={(e) => setShowSNR(e.target.checked)}
+                />
+                SNR
+            </label>
+            <label className="guiding-controls__label guiding-controls__label--rms">
+                <input
+                    type="checkbox"
+                    className="guiding-controls__checkbox"
+                    checked={showRMS}
+                    onChange={(e) => setShowRMS(e.target.checked)}
+                />
+                RMS
+            </label>
+            <label className="guiding-controls__label guiding-controls__label--corr">
+                <input
+                    type="checkbox"
+                    className="guiding-controls__checkbox"
+                    checked={showCorr}
+                    onChange={(e) => setShowCorr(e.target.checked)}
+                />
+                Pulses
+            </label>
+            <label className="guiding-controls__slider-container guiding-trends__history">
+                <span>History:</span>
+                <input
+                    type="range"
+                    className="guiding-controls__slider"
+                    min="10"
+                    max="100"
+                    step="5"
+                    value={maxSamples}
+                    onChange={(e) => setMaxSamples(parseInt(e.target.value))}
+                />
+                <span className="guiding-controls__slider-val">{maxSamples} pts</span>
+            </label>
+        </span>
+    );
+
     return (
-        <div id="guiding-trends-plot" className="guiding-status__plot guiding-status__plot--trends">
-            <div style={{ flex: 1, minHeight: 0 }}>
-                <TimeSeriesPlot data={data} yLabel="arcsec / seconds" yRange={yRange} />
+        <SectionPanel title="Guiding Trends" className="observatory-guiding-trends" headerContent={headerControls}>
+            <div id="guiding-trends-plot" className="guiding-status__plot guiding-status__plot--trends">
+                {slicedHistory.length === 0 ? (
+                    // With no samples the time axis would only read 00:00:00, so say so in words instead.
+                    <div className="guiding-trends__empty">No guiding data yet. The trends appear once guiding starts.</div>
+                ) : (
+                    <div className="guiding-trends__plot-fill">
+                        <TimeSeriesPlot data={data} yLabel="arcsec / seconds" yRange={yRange} />
+                    </div>
+                )}
             </div>
-
-            {/* Interactive Control Panel */}
-            <div className="guiding-controls">
-                <div className="guiding-controls__group">
-                    <label className="guiding-controls__label guiding-controls__label--ra">
-                        <input
-                            type="checkbox"
-                            className="guiding-controls__checkbox"
-                            checked={showRA}
-                            onChange={(e) => setShowRA(e.target.checked)}
-                        />
-                        dRA
-                    </label>
-
-                    <label className="guiding-controls__label guiding-controls__label--dec">
-                        <input
-                            type="checkbox"
-                            className="guiding-controls__checkbox"
-                            checked={showDEC}
-                            onChange={(e) => setShowDEC(e.target.checked)}
-                        />
-                        dDEC
-                    </label>
-
-                    <div className="guiding-controls__divider" />
-
-                    <label className="guiding-controls__label guiding-controls__label--snr">
-                        <input
-                            type="checkbox"
-                            className="guiding-controls__checkbox"
-                            checked={showSNR}
-                            onChange={(e) => setShowSNR(e.target.checked)}
-                        />
-                        SNR
-                    </label>
-
-                    <label className="guiding-controls__label guiding-controls__label--rms">
-                        <input
-                            type="checkbox"
-                            className="guiding-controls__checkbox"
-                            checked={showRMS}
-                            onChange={(e) => setShowRMS(e.target.checked)}
-                        />
-                        RMS
-                    </label>
-
-                    <label className="guiding-controls__label guiding-controls__label--corr">
-                        <input
-                            type="checkbox"
-                            className="guiding-controls__checkbox"
-                            checked={showCorr}
-                            onChange={(e) => setShowCorr(e.target.checked)}
-                        />
-                        Pulses
-                    </label>
-                </div>
-
-                <div className="guiding-controls__slider-container">
-                    <span>History:</span>
-                    <input
-                        type="range"
-                        className="guiding-controls__slider"
-                        min="10"
-                        max="100"
-                        step="5"
-                        value={maxSamples}
-                        onChange={(e) => setMaxSamples(parseInt(e.target.value))}
-                    />
-                    <span className="guiding-controls__slider-val">{maxSamples} pts</span>
-                </div>
-            </div>
-        </div>
+        </SectionPanel>
     );
 };
 

@@ -3,8 +3,8 @@ import { DirectionalControl } from './panels/DirectionalControl';
 import { TelescopeControl } from './panels/TelescopeControl';
 import { TrackingSettings } from './panels/TrackingSettings';
 import { LimitSettings } from './panels/LimitSettings';
-import { GuidingTrendsPlot, GuidingTargetPlot } from './panels/GuidingStatusPanel';
-import { AlignmentStatus } from './panels/AlignmentStatus';
+import { GuidingTrendsPlot } from './panels/GuidingStatusPanel';
+import { AlignmentGuidingTabs } from './panels/AlignmentGuidingTabs';
 import { GuidingSample, AlignmentAttempt } from '../common/types/backendTypes';
 import { SectionPanel } from '../common/components/SectionPanel';
 import { CommandGate, WhyUnavailableButton } from './CommandGate';
@@ -104,9 +104,9 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
 }) => {
     return (
         <div className="panel-group">
-            {/* Top Row: Telescope Control | Alignment */}
-            <div className="panel__row flex-auto">
-                <SectionPanel title="Telescope Control" headerContent={<WhyUnavailableButton disabled={commandsDisabled} reason={commandsDisabledReason} />}>
+            {/* Top Row: Telescope Control | Tracking Settings | Calibration Library */}
+            <div className="panel__row flex-auto observatory-top-row">
+                <SectionPanel title="Telescope Control" className="observatory-top-row__fit" headerContent={<WhyUnavailableButton disabled={commandsDisabled} reason={commandsDisabledReason} />}>
                     <CommandGate disabled={commandsDisabled} reason={commandsDisabledReason}>
                         <TelescopeControl
                             disabled={commandsDisabled}
@@ -122,7 +122,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                     </CommandGate>
                 </SectionPanel>
 
-                <SectionPanel title="Tracking Settings" headerContent={<WhyUnavailableButton disabled={commandsDisabled} reason={commandsDisabledReason} />}>
+                <SectionPanel title="Tracking Settings" className="observatory-top-row__fit" headerContent={<WhyUnavailableButton disabled={commandsDisabled} reason={commandsDisabledReason} />}>
                     <CommandGate
                         disabled={commandsDisabled}
                         reason={commandsDisabledReason}
@@ -144,9 +144,12 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                         )}
                     />
                 </SectionPanel>
+
+                {/* Calibration Library takes the rest of the row. The Darks table scrolls inside it. */}
+                <CalibrationLibraryPanel />
             </div>
 
-            {/* Horizontal Middle Row: Camera Profiles | Manual Guide | Safety Limits | Alignment Status */}
+            {/* Middle Row: Camera Profiles | Manual Guide | Safety Limits */}
             <div className="panel__row flex-auto observatory-middle-row">
                 {/* Camera Profiles, where Focuser used to be. It scrolls inside itself. */}
                 <CameraProfilesPanel
@@ -169,51 +172,14 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                     </CommandGate>
                 </SectionPanel>
 
-                {/* Safety Limits */}
-                <SectionPanel title="Safety Limits" headerContent={<WhyUnavailableButton disabled={commandsDisabled} reason={commandsDisabledReason} />}>
-                    <CommandGate
-                        disabled={commandsDisabled}
-                        reason={commandsDisabledReason}
-                        renderChildren={(reasonId) => (
-                            <LimitSettings
-                                disabled={commandsDisabled}
-                                disabledReasonId={reasonId}
-                            />
-                        )}
-                    />
-                </SectionPanel>
-
-                {/* Alignment Status */}
-                <SectionPanel title="Alignment Status">
-                    <AlignmentStatus alignmentAttempts={alignmentAttempts} />
-                </SectionPanel>
+                {/* Safety Limits: owns its panel, because Apply sits in the panel header. */}
+                <LimitSettings disabled={commandsDisabled} reason={commandsDisabledReason} />
             </div>
 
-            {/* Horizontal Guiding Row: Trends | Target */}
+            {/* Guiding Row: Trends | Alignment and Guiding (two tabs) */}
             <div className="panel__row flex-fill observatory-guiding-row">
-                {/* Guiding Trends Panel */}
-                <SectionPanel
-                    title="Guiding Trends"
-                    className="panel--guiding-trends"
-                    headerContent={
-                        <span className="guiding-trends__legend">
-                            <span className="guiding-trends__legend-item guiding-trends__legend-item--ra">— dRA</span>
-                            <span className="guiding-trends__legend-item guiding-trends__legend-item--dec">— dDEC</span>
-                        </span>
-                    }
-                >
-                    <GuidingTrendsPlot history={guidingHistory} />
-                </SectionPanel>
-
-                {/* Guiding Target Panel */}
-                <SectionPanel title="Guiding Target" className="panel--guiding-target">
-                    <GuidingTargetPlot history={guidingHistory} />
-                </SectionPanel>
-            </div>
-
-            {/* Calibration Library, in the short bottom row Filter Wheel used to have. It scrolls inside itself. */}
-            <div className="panel__row flex-auto observatory-library-row">
-                <CalibrationLibraryPanel />
+                <GuidingTrendsPlot history={guidingHistory} />
+                <AlignmentGuidingTabs alignmentAttempts={alignmentAttempts} guidingHistory={guidingHistory} />
             </div>
         </div>
     );

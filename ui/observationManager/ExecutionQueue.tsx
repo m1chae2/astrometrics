@@ -54,7 +54,6 @@ export const ExecutionQueue: React.FC<Props> = ({
         window.setTimeout(() => checklistButtonRef.current?.focus(), 0);
     }, []);
 
-    const [expandedId, setExpandedId] = useState<string | null>(null);
     const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
     const [localQueue, setLocalQueue] = useState<SequenceObject[]>(queue);
     const [isStarting, setIsStarting] = useState(false);
@@ -70,10 +69,6 @@ export const ExecutionQueue: React.FC<Props> = ({
             setLocalQueue(queue);
         }
     }, [queue, draggedIdx]);
-
-    const toggleExpand = (id: string) => {
-        setExpandedId(prev => (prev === id ? null : id));
-    };
 
     const handleDragStart = (e: React.DragEvent, index: number) => {
         setDraggedIdx(index);
@@ -211,14 +206,12 @@ export const ExecutionQueue: React.FC<Props> = ({
                         onMoveEarlier={idx > 0 ? () => moveEntry(idx, -1) : undefined}
                         onMoveLater={idx < localQueue.length - 1 ? () => moveEntry(idx, 1) : undefined}
                         isSelected={selectedId === item.id}
-                        isExpanded={expandedId === item.id}
-                        onToggle={() => toggleExpand(item.id)}
                         draggable
                         onDragStart={(e) => handleDragStart(e, idx)}
                         onDragEnd={handleDragEnd}
                         onDragEnter={(e) => handleDragEnter(e, idx)}
                         onDragOver={handleDragOver}
-                        className={`imaging-card ${expandedId === item.id ? 'expanded' : 'collapsed'} ${draggedIdx === idx ? 'dragging' : ''}`}
+                        className={`imaging-card ${draggedIdx === idx ? 'dragging' : ''}`}
                         style={{
                             viewTransitionName: item.id.replace(/[^a-zA-Z0-9]/g, '_')
                         } as React.CSSProperties}

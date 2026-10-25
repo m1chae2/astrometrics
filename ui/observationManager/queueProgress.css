@@ -105,15 +105,15 @@
     outline: var(--focus-outline);
 }
 
-/* Queue strip cards: a fixed width so the target, TTL and actions fit on one header line. The strip
-   scrolls sideways when there are many cards. These rules load last and win over older card rules. */
+/* Queue strip cards: wide enough that the target, time and four buttons share one line. The strip
+   scrolls sideways only when there are more cards than fit; it never scrolls vertically. These rules
+   load last and win over older card rules. */
 .execution-queue-strip .queue-list > .imaging-card {
-    flex: 0 0 232px;
-    width: 232px;
-    min-width: 232px;
+    flex: 0 0 300px;
+    width: 300px;
     box-sizing: border-box;
     max-height: none;
-    overflow-y: auto;
+    overflow: hidden;
 }
 
 .execution-queue-strip .imaging-card .card-header {
@@ -123,9 +123,9 @@
 }
 
 .execution-queue-strip .imaging-card .card-title {
-    /* The target name keeps its width (most names are short, like "M 106"); the TTL text gives way. */
-    flex: 0 1 auto;
-    min-width: 4em;
+    /* The name takes the free room and shortens with an ellipsis only for a very long name. */
+    flex: 1 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -133,17 +133,12 @@
 }
 
 .execution-queue-strip .imaging-card .card-meta {
-    flex: 1 1 auto;
-    min-width: 0;
-    justify-content: flex-end;
+    flex: 0 0 auto;
     gap: var(--space-1);
     white-space: nowrap;
 }
 
 .execution-queue-strip .imaging-card .card-duration {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
     white-space: nowrap;
     font-size: var(--small-font-size);
 }

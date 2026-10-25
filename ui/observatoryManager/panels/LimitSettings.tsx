@@ -1,17 +1,23 @@
 /**
  * @file LimitSettings.tsx
  * @description The Safety Limits panel. It shows the active telescope's saved
- * limits (the altitude window, the hour angle limit and the meridian flip
- * point) and saves changes through the library. The form fills in when the
- * read arrives. "Apply safety limits" is enabled only when something changed,
- * and, like every equipment control, it is greyed while the app may not
- * command the equipment. The inputs stay readable when greyed.
+ * limits and saves changes through the library. The limits sit on two tabs:
+ * "Altitude" (the altitude window) and "Hour angle" (the hour angle limit and
+ * the meridian flip point). The form fills in when the read arrives. "Apply
+ * safety limits" sits at the bottom of the panel body, in view without
+ * scrolling. It is enabled only when something changed, and, like every equipment control, it
+ * is greyed while the app may not command the equipment. The inputs stay
+ * readable when greyed.
  */
 
 import React, { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { callBackend } from '../../common/services/backendApi';
 import { emitToast } from '../../common/utils/emitToast';
+import { SectionPanel } from '../../common/components/SectionPanel';
+import { FormRow } from '../../common/components/FormRow';
+import { TabPanel, Tabs, type TabDefinition } from '../../common/components/Tabs';
+import { CommandGate, WhyUnavailableButton } from '../CommandGate';
 import type { Telescope } from '../../common/types/backendTypes';
 
 /** The React Query key of the active telescope read. */
@@ -63,19 +69,32 @@ function limitsFromFormValues(values: LimitFormValues): Record<string, number | 
     };
 }
 
+/** The two tabs of the panel. */
+const LIMIT_TABS: TabDefinition[] = [
+    { id: 'altitude', label: 'Altitude' },
+    { id: 'hour-angle', label: 'Hour angle' },
+];
+
+/** Prefix that keeps the tab element ids unique on the page. */
+const LIMIT_TABS_ID_PREFIX = 'safety-limits';
+
+/** The id of the hidden text that says why Apply is greyed. */
+const APPLY_REASON_ID = 'limit-settings-apply-reason';
+
 export interface LimitSettingsProps {
     /** True when the app may not command the equipment. Apply and the checkboxes are then greyed. */
     disabled?: boolean;
-    /** The id of the hidden text that says why the controls are unavailable. */
-    disabledReasonId?: string;
+    /** Why the controls are unavailable; shown by the "Why unavailable?" button and on hover. */
+    reason?: string;
 }
 
 /**
- * The Safety Limits panel body.
+ * The Safety Limits panel, with its header (the "Why unavailable?" button and
+ * "Apply safety limits") and its two tabs.
  * @param props See {@link LimitSettingsProps}.
- * @return The limits form.
+ * @return The panel.
  */
-export const LimitSettings: React.FC<LimitSettingsProps> = ({ disabled = false, disabledReasonId }) => {
+export const LimitSettings: React.FC<LimitSettingsProps> = ({ disabled = false, reason = '' }) => {
     const queryClient = useQueryClient();
     const telescopeQuery = useQuery({
         queryKey: ACTIVE_TELESCOPE_QUERY_KEY,
@@ -85,6 +104,7 @@ export const LimitSettings: React.FC<LimitSettingsProps> = ({ disabled = false, 
     const telescope = telescopeQuery.data ?? null;
     const [values, setValues] = useState<LimitFormValues | null>(null);
     const [refusal, setRefusal] = useState<string | null>(null);
+    const [selectedTab, setSelectedTab] = useState('altitude');
     // Stays on screen after a save, because a toast fades and Ekos's copy stays old.
     const [showEkosCopyNote, setShowEkosCopyNote] = useState(false);
 
@@ -109,26 +129,34 @@ export const LimitSettings: React.FC<LimitSettingsProps> = ({ disabled = false, 
         },
     });
 
+    const whyButton = <WhyUnavailableButton disabled={disabled} reason={reason} />;
+
     if (telescopeQuery.isPending) {
-        return <p aria-busy="true">Loading…</p>;
+        return <SectionPanel title="Safety Limits" headerContent={whyButton}><p aria-busy="true">Loading…</p></SectionPanel>;
     }
     if (telescopeQuery.isError) {
         return (
-            <div role="alert">
-                <p>Could not load the safety limits.</p>
-                <button type="button" className="btn" onClick={() => void telescopeQuery.refetch()}>Try again</button>
-            </div>
+            <SectionPanel title="Safety Limits" headerContent={whyButton}>
+                <div role="alert">
+                    <p>Could not load the safety limits.</p>
+                    <button type="button" className="btn" onClick={() => void telescopeQuery.refetch()}>Try again</button>
+                </div>
+            </SectionPanel>
         );
     }
     if (!telescope || !values) {
-        return <p>No active telescope. Choose a telescope in the equipment settings to set its limits.</p>;
+        return (
+            <SectionPanel title="Safety Limits" headerContent={whyButton}>
+                <p>No active telescope. Choose a telescope in the equipment settings to set its limits.</p>
+            </SectionPanel>
+        );
     }
 
     const saved = formValuesFromTelescope(telescope);
     const hasChanged = (Object.keys(saved) as (keyof LimitFormValues)[]).some((key) => saved[key] !== values[key]);
     const numbersValid = [values.minimumAltitude, values.maximumAltitude, values.maximumHourAngle, values.flipHourAngle]
         .every((text) => text.trim() !== '' && Number.isFinite(Number(text)));
-    const unavailable = { 'aria-describedby': disabled ? disabledReasonId : undefined };
+    const applyDisabled = disabled || !hasChanged || !numbersValid || saveMutation.isPending;
 
     /**
      * Saves the limits, unless the app may not command the equipment.
@@ -149,126 +177,150 @@ export const LimitSettings: React.FC<LimitSettingsProps> = ({ disabled = false, 
      */
     const update = (changes: Partial<LimitFormValues>) => setValues({ ...values, ...changes });
 
-    return (
-        <div id="safety-limits-group" className="controls__group">
-            <p className="limit-settings__telescope">Telescope: {telescope.name}</p>
-            <div className="controls__group">
-                <div className="checkbox-container">
-                    <input
-                        id="checkbox-enable-alt-limits"
-                        type="checkbox"
-                        checked={values.altitudeEnabled}
-                        onChange={(event) => update({ altitudeEnabled: event.target.checked })}
-                        disabled={disabled}
-                        {...unavailable}
-                        className="checkbox"
-                    />
-                    <label htmlFor="checkbox-enable-alt-limits">Enable altitude limits</label>
-                </div>
-                <div id="row-limit-min-alt" className="parameter">
-                    <label htmlFor="input-limit-min-alt" className="parameter__label limit-settings__label">Minimum altitude</label>
-                    <div className="controls__group-row limit-settings__group-row--auto">
-                        <input
-                            id="input-limit-min-alt"
-                            type="number"
-                            step="0.01"
-                            className="input input--short"
-                            value={values.minimumAltitude}
-                            onChange={(event) => update({ minimumAltitude: event.target.value })}
-                            disabled={disabled || !values.altitudeEnabled}
-                            {...unavailable}
-                        />
-                        <span className="limit-settings__unit">°</span>
-                    </div>
-                </div>
-                <div id="row-limit-max-alt" className="parameter">
-                    <label htmlFor="input-limit-max-alt" className="parameter__label limit-settings__label">Maximum altitude</label>
-                    <div className="controls__group-row limit-settings__group-row--auto">
-                        <input
-                            id="input-limit-max-alt"
-                            type="number"
-                            step="0.01"
-                            className="input input--short"
-                            value={values.maximumAltitude}
-                            onChange={(event) => update({ maximumAltitude: event.target.value })}
-                            disabled={disabled || !values.altitudeEnabled}
-                            {...unavailable}
-                        />
-                        <span className="limit-settings__unit">°</span>
-                    </div>
-                </div>
-            </div>
+    // Apply sits in the panel header, where Camera Profiles keeps its Measure noise button.
+    const applyHeaderButton = (
+        <button
+            type="button"
+            className="btn btn--tiny quality-button limit-settings__apply"
+            onClick={handleApply}
+            disabled={applyDisabled}
+            aria-disabled={applyDisabled}
+            title={disabled ? reason : undefined}
+            aria-describedby={refusal ? 'limit-settings-refusal' : (disabled ? APPLY_REASON_ID : undefined)}
+        >
+            Apply safety limits
+        </button>
+    );
 
-            <div className="controls__group limit-settings__group--margined">
-                <div className="checkbox-container">
-                    <input
-                        id="checkbox-enable-ha-limits"
-                        type="checkbox"
-                        checked={values.hourAngleEnabled}
-                        onChange={(event) => update({ hourAngleEnabled: event.target.checked })}
-                        disabled={disabled}
-                        {...unavailable}
-                        className="checkbox"
-                    />
-                    <label htmlFor="checkbox-enable-ha-limits">Enable hour angle limit</label>
-                </div>
-                <div id="row-limit-max-ha" className="parameter">
-                    <label htmlFor="input-limit-max-ha" className="parameter__label limit-settings__label">Maximum hour angle</label>
-                    <div className="controls__group-row limit-settings__group-row--auto">
-                        <input
-                            id="input-limit-max-ha"
-                            type="number"
-                            step="0.01"
-                            className="input input--short"
-                            value={values.maximumHourAngle}
-                            onChange={(event) => update({ maximumHourAngle: event.target.value })}
-                            disabled={disabled || !values.hourAngleEnabled}
-                            {...unavailable}
-                        />
-                        <span className="limit-settings__unit">hours</span>
-                    </div>
-                </div>
-                <div id="row-meridian-flip-ha" className="parameter">
-                    <label htmlFor="input-meridian-flip-ha" className="parameter__label limit-settings__label">
-                        Meridian flip after (hour angle)
-                    </label>
-                    <div className="controls__group-row limit-settings__group-row--auto">
-                        <input
-                            id="input-meridian-flip-ha"
-                            type="number"
-                            step="0.01"
-                            className="input input--short"
-                            value={values.flipHourAngle}
-                            onChange={(event) => update({ flipHourAngle: event.target.value })}
-                            disabled={disabled}
-                            {...unavailable}
-                        />
-                        <span className="limit-settings__unit">°</span>
-                    </div>
-                </div>
-            </div>
-
-            {refusal && (
-                <div role="alert" id="limit-settings-refusal" className="limit-settings__refusal">
-                    <span>{refusal}</span>
-                    <button type="button" className="btn" onClick={() => setRefusal(null)}>Dismiss</button>
-                </div>
+    const applyButton = (
+        <div className="limit-settings__footer">
+            {(hasChanged || !numbersValid) && (
+                <p className="limit-settings__hint">
+                    {hasChanged && <span>Unsaved changes</span>}
+                    {hasChanged && !numbersValid && ' '}
+                    {!numbersValid && <span>Enter a number in every field.</span>}
+                </p>
             )}
-            {showEkosCopyNote && <p id="limit-settings-ekos-note" className="limit-settings__hint">{EKOS_COPY_WARNING}</p>}
-            <div className="controls__group-row">
-                <button
-                    type="button"
-                    className="btn btn--primary"
-                    onClick={handleApply}
-                    disabled={disabled || !hasChanged || !numbersValid || saveMutation.isPending}
-                    aria-disabled={disabled || !hasChanged || !numbersValid || saveMutation.isPending}
-                    aria-describedby={refusal ? 'limit-settings-refusal' : unavailable['aria-describedby']}
-                >
-                    Apply safety limits
-                </button>
-                {hasChanged && <span className="limit-settings__hint">Unsaved changes</span>}
-                {!numbersValid && <span className="limit-settings__hint">Enter a number in every field.</span>}
-            </div>
+            {disabled && <span id={APPLY_REASON_ID} className="command-gate__reason">{reason}</span>}
         </div>
+    );
+
+    return (
+        <SectionPanel
+            title="Safety Limits"
+            headerContent={<span className="limit-settings__header-actions">{whyButton}{applyHeaderButton}</span>}
+        >
+            <CommandGate
+                disabled={disabled}
+                reason={reason}
+                renderChildren={(reasonId) => {
+                    const unavailable = { 'aria-describedby': disabled ? reasonId : undefined };
+                    return (
+                        <div id="safety-limits-group" className="controls__group limit-settings">
+                            <p className="limit-settings__telescope">Telescope: {telescope.name}</p>
+                            <Tabs
+                                tabs={LIMIT_TABS}
+                                selectedId={selectedTab}
+                                onChange={setSelectedTab}
+                                ariaLabel="Safety limit groups"
+                                idPrefix={LIMIT_TABS_ID_PREFIX}
+                            />
+                            <TabPanel idPrefix={LIMIT_TABS_ID_PREFIX} tabId="altitude" selected={selectedTab === 'altitude'}>
+                                <div className="limit-settings__rows">
+                                    <div className="limit-settings__checkbox">
+                                        <input
+                                            id="checkbox-enable-alt-limits"
+                                            type="checkbox"
+                                            checked={values.altitudeEnabled}
+                                            onChange={(event) => update({ altitudeEnabled: event.target.checked })}
+                                            disabled={disabled}
+                                            {...unavailable}
+                                            className="checkbox"
+                                        />
+                                        <label htmlFor="checkbox-enable-alt-limits">Enable altitude limits</label>
+                                    </div>
+                                    <div className="limit-settings__fields">
+                                        <FormRow label="Minimum altitude" htmlFor="input-limit-min-alt" unit="°">
+                                            <input
+                                                id="input-limit-min-alt"
+                                                type="number"
+                                                step="0.01"
+                                                className="input input--short"
+                                                value={values.minimumAltitude}
+                                                onChange={(event) => update({ minimumAltitude: event.target.value })}
+                                                disabled={disabled || !values.altitudeEnabled}
+                                                {...unavailable}
+                                            />
+                                        </FormRow>
+                                        <FormRow label="Maximum altitude" htmlFor="input-limit-max-alt" unit="°">
+                                            <input
+                                                id="input-limit-max-alt"
+                                                type="number"
+                                                step="0.01"
+                                                className="input input--short"
+                                                value={values.maximumAltitude}
+                                                onChange={(event) => update({ maximumAltitude: event.target.value })}
+                                                disabled={disabled || !values.altitudeEnabled}
+                                                {...unavailable}
+                                            />
+                                        </FormRow>
+                                    </div>
+                                </div>
+                            </TabPanel>
+                            <TabPanel idPrefix={LIMIT_TABS_ID_PREFIX} tabId="hour-angle" selected={selectedTab === 'hour-angle'}>
+                                <div className="limit-settings__rows">
+                                    <div className="limit-settings__checkbox">
+                                        <input
+                                            id="checkbox-enable-ha-limits"
+                                            type="checkbox"
+                                            checked={values.hourAngleEnabled}
+                                            onChange={(event) => update({ hourAngleEnabled: event.target.checked })}
+                                            disabled={disabled}
+                                            {...unavailable}
+                                            className="checkbox"
+                                        />
+                                        <label htmlFor="checkbox-enable-ha-limits">Enable hour angle limit</label>
+                                    </div>
+                                    <div className="limit-settings__fields">
+                                        <FormRow label="Maximum hour angle" htmlFor="input-limit-max-ha" unit="hours">
+                                            <input
+                                                id="input-limit-max-ha"
+                                                type="number"
+                                                step="0.01"
+                                                className="input input--short"
+                                                value={values.maximumHourAngle}
+                                                onChange={(event) => update({ maximumHourAngle: event.target.value })}
+                                                disabled={disabled || !values.hourAngleEnabled}
+                                                {...unavailable}
+                                            />
+                                        </FormRow>
+                                        <FormRow label="Meridian flip after (hour angle)" htmlFor="input-meridian-flip-ha" unit="°">
+                                            <input
+                                                id="input-meridian-flip-ha"
+                                                type="number"
+                                                step="0.01"
+                                                className="input input--short"
+                                                value={values.flipHourAngle}
+                                                onChange={(event) => update({ flipHourAngle: event.target.value })}
+                                                disabled={disabled}
+                                                {...unavailable}
+                                            />
+                                        </FormRow>
+                                    </div>
+                                </div>
+                            </TabPanel>
+                            {refusal && (
+                                <div role="alert" id="limit-settings-refusal" className="limit-settings__refusal">
+                                    <span>{refusal}</span>
+                                    <button type="button" className="btn" onClick={() => setRefusal(null)}>Dismiss</button>
+                                </div>
+                            )}
+                            {showEkosCopyNote && <p id="limit-settings-ekos-note" className="limit-settings__hint">{EKOS_COPY_WARNING}</p>}
+                            {applyButton}
+                        </div>
+                    );
+                }}
+            />
+        </SectionPanel>
     );
 };

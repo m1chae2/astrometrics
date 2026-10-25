@@ -96,3 +96,23 @@ def test_only_plate_solved_frames_are_recorded(tmp_path: Path) -> None:
     (attempt,) = context.records.record_alignment_attempt.call_args.args
     assert attempt["target_name"] == "M 81"
     assert attempt["timestamp"] == pytest.approx(1790287200.0)
+    assert attempt["source_frame"] == "solved.fits"
+
+
+def test_a_frame_brought_in_twice_is_recorded_once(tmp_path: Path) -> None:
+    """Syncing a frame again, re-solved, leaves one record: the newer solve."""
+    from wayfindinglib.drivers.control_record_store import ControlRecordStore
+
+    store = ControlRecordStore(db_path=str(tmp_path / "wayfinding.db"))
+    context = SimpleNamespace(records=store)
+    (tmp_path / "first").mkdir()
+    (tmp_path / "again").mkdir()
+    when = {"OBJECT": "NGC 6888", "DATE_OBS": "2024-08-05T04:22:14.142", "RA": 303.40, "DEC": 37.20}
+    first = _frame(tmp_path / "first" / "NGC_6888_Light_001.fits", CRVAL1=303.47394, CRVAL2=37.22973, **when)
+    frame_pointing.record_frame_pointing_errors(context, [first])
+    again = _frame(tmp_path / "again" / "NGC_6888_Light_001.fits", CRVAL1=303.47376, CRVAL2=37.22939, **when)
+    frame_pointing.record_frame_pointing_errors(context, [again])
+
+    (row,) = store.get_alignment_attempts()
+    assert row["mount_ra"] == pytest.approx(303.47376)
+    assert row["source_frame"] == "NGC_6888_Light_001.fits"

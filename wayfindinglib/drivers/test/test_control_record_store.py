@@ -2,8 +2,9 @@
 
 Description: Checks that the store keeps alignment attempts, guiding
 samples and polar alignment runs in ``wayfinding.db``, files each record
-under its observing night, and reads them back with target, night, time
-and source filters.
+under its observing night, reads them back with target, night, time
+and source filters, keeps one row per alignment attempt when the same
+attempt is recorded again, and removes repeated rows only on request.
 """
 
 from pathlib import Path
@@ -354,3 +355,122 @@ def test_target_telemetry_uses_guiding_samples_near_the_frames(store: ControlRec
     guided = [attempt for attempt in attempts if attempt["targetName"] == "M 13"]
     assert [attempt["pointingErrorArcsec"] for attempt in guided] == [pytest.approx(5.0)]
     assert [attempt["deltaRaArcsec"] for attempt in attempts if attempt["targetName"] == "M 92"] == [0.0]
+
+
+def _frame_attempt(**changes: Any) -> dict[str, Any]:
+    """Build an alignment attempt worked out from a frame.
+
+    Parameters
+    ----------
+    **changes : `Any`
+        Fields to replace.
+
+    Returns
+    -------
+    attempt : `dict` [`str`, `Any`]
+        The attempt.
+    """
+    attempt: dict[str, Any] = {
+        "timestamp": 1722853334.0,
+        "target_name": "NGC 6888",
+        "status": "warning",
+        "delta_ra_arcsec": 1290.61,
+        "delta_dec_arcsec": -4072.98,
+        "ra": 303.47394,
+        "dec": 37.22973,
+        "source_frame": "NGC_6888_Light_001.fits",
+    }
+    attempt.update(changes)
+    return attempt
+
+
+def test_the_same_frame_keeps_one_row_with_its_latest_solve(store: ControlRecordStore) -> None:
+    """A frame recorded again with a new solve replaces its own row."""
+    store.record_alignment_attempt(_frame_attempt())
+    store.record_alignment_attempt(_frame_attempt(delta_ra_arcsec=1277.01, ra=303.47376))
+
+    (row,) = store.get_alignment_attempts()
+    assert row["delta_ra_arcsec"] == pytest.approx(1277.01)
+    assert row["mount_ra"] == pytest.approx(303.47376)
+
+
+def test_different_frames_in_the_same_second_keep_their_own_rows(store: ControlRecordStore) -> None:
+    """Two short exposures with the same whole-second time are two attempts."""
+    store.record_alignment_attempt(_frame_attempt())
+    store.record_alignment_attempt(_frame_attempt(source_frame="NGC_6888_Light_002.fits"))
+
+    assert len(store.get_alignment_attempts()) == 2
+
+
+def test_a_frame_adopts_its_row_stored_before_frames_were_named(store: ControlRecordStore) -> None:
+    """An unnamed older row with the frame's target and time is its row."""
+    store.record_alignment_attempt(_frame_attempt(source_frame=None))
+    store.record_alignment_attempt(_frame_attempt(delta_ra_arcsec=1277.01))
+
+    (row,) = store.get_alignment_attempts()
+    assert row["source_frame"] == "NGC_6888_Light_001.fits"
+    assert row["delta_ra_arcsec"] == pytest.approx(1277.01)
+
+
+def test_an_identical_unnamed_attempt_is_stored_once(store: ControlRecordStore) -> None:
+    """A round reported twice with the same time and offsets is one row."""
+    attempt = _frame_attempt(source_frame=None)
+    store.record_alignment_attempt(attempt)
+    store.record_alignment_attempt(attempt)
+    store.record_alignment_attempt(_frame_attempt(source_frame=None, timestamp=1722853400.0))
+
+    assert len(store.get_alignment_attempts()) == 2
+
+
+def test_an_older_database_gets_the_frame_column(tmp_path: Path) -> None:
+    """An older database gains an empty source_frame column; rows stay."""
+    import sqlite3
+
+    db_file = tmp_path / "old.db"
+    connection = sqlite3.connect(db_file)
+    connection.execute(
+        "CREATE TABLE alignment_attempts (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, "
+        "target_name TEXT, timestamp REAL NOT NULL, status TEXT NOT NULL, delta_ra_arcsec REAL, "
+        "delta_dec_arcsec REAL, pointing_error_arcsec REAL, mount_ra REAL, mount_dec REAL)"
+    )
+    connection.execute("INSERT INTO alignment_attempts (timestamp, status) VALUES (1.0, 'aligned')")
+    connection.commit()
+    connection.close()
+
+    store = ControlRecordStore(db_path=str(db_file))
+
+    (row,) = store.get_alignment_attempts()
+    assert row["source_frame"] is None
+
+
+def test_repeated_attempts_are_reported_and_removed_only_on_request(tmp_path: Path) -> None:
+    """The cleanup reports first, deletes only with apply, keeps newest."""
+    import sqlite3
+
+    store = ControlRecordStore(db_path=str(tmp_path / "repeats.db"))
+    # Rows as an older version wrote them: no frame name, no repeat check.
+    connection = sqlite3.connect(store.db_path)
+    rows = [
+        ("NGC 6888", 1722853334.0, 1290.61),
+        ("NGC 6888", 1722853334.0, 1277.01),
+        ("M 81", 1706780004.0, -1861.31),
+        ("M 81", 1706780004.0, -1861.31),
+        ("M 81", 1706790000.0, -1800.00),
+    ]
+    connection.executemany(
+        "INSERT INTO alignment_attempts (target_name, timestamp, status, delta_ra_arcsec) "
+        "VALUES (?, ?, 'warning', ?)",
+        rows,
+    )
+    connection.commit()
+    connection.close()
+
+    report = store.remove_repeated_alignment_attempts()
+    assert report == {"groups": 2, "repeated_ids": [1, 3], "removed": 0}
+    assert len(store.get_alignment_attempts()) == 5
+
+    report = store.remove_repeated_alignment_attempts(apply=True)
+    assert report["removed"] == 2
+    kept = {(row["target_name"], row["delta_ra_arcsec"]) for row in store.get_alignment_attempts()}
+    assert kept == {("NGC 6888", 1277.01), ("M 81", -1861.31), ("M 81", -1800.00)}
+    assert store.remove_repeated_alignment_attempts()["groups"] == 0

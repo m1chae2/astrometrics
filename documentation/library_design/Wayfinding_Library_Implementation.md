@@ -122,7 +122,7 @@ The architecture's Table 3 operations are exposed by `ObservatoryControl` (Secti
 
 - **Equipment catalog.** `data_access/equipment_catalog_reader.py` builds the `EquipmentCatalog`. `equipment_activation.py` validates an id before recording the active choice. `EquipmentConfiguration` uses `PLATE_SCALE_CONSTANT` (206.265, Architecture Equation (1)).
 - **Site.** `data_access/site_profile_reader.py` reads `[Observatory.Location]`, falls back to `FALLBACK_SITE` (Denver: 39.7392, -104.9903, 1600 m) with a warning, and seeds the default `SiteProfile`. Control uses `hardware_operations.observer_location` (mount first), so the single-source rule holds for planning only.
-- **Storage.** `drivers/butler.py` holds `DiskButler`, the one storage path: `AbstractButler` from `astrometricslib`, one table per dataset type in `wayfinding.db`. `ControlRecordStore` keeps `alignment_attempts`, `guiding_samples` and `polar_alignments`.
+- **Storage.** `drivers/butler.py` holds `DiskButler`, the one storage path: `AbstractButler` from `astrometricslib`, one table per dataset type in `wayfinding.db`. `ControlRecordStore` keeps `alignment_attempts`, `guiding_samples` and `polar_alignments`. An alignment attempt worked out from a frame names it in `source_frame`, so the same frame brought in again, or solved again, updates its one row; `remove_repeated_alignment_attempts` reports, and with `apply=True` deletes, rows stored twice by older versions. When the store opens, it adds the `source_frame` column to an older database.
 
 <!-- impl: wayfindinglib.data_access.equipment_catalog_reader.get_equipment_catalog -->
 <!-- impl: wayfindinglib.tasks.control_tasks.equipment_activation.set_active_telescope -->
@@ -321,7 +321,7 @@ All in `tasks/control_tasks/` unless noted.
 
 ### 6.8 Incumbent logs and the performance envelope
 
-`ekos_log_ingestion.py` downloads guide and analyze logs (`control.remote.sync_logs`) and ties each session to its equipment (`attribute_session_equipment`). Parsers: `drivers/phd2/guide_log_parser.py`, `drivers/ekos/analyze_log_parser.py`. `MEASURED_GUIDING_SAMPLE_SOURCES` lists the samples a refit may read. `frame_pointing.py` records each solved frame's pointing error.
+`ekos_log_ingestion.py` downloads guide and analyze logs (`control.remote.sync_logs`) and ties each session to its equipment (`attribute_session_equipment`). Parsers: `drivers/phd2/guide_log_parser.py`, `drivers/ekos/analyze_log_parser.py`. `MEASURED_GUIDING_SAMPLE_SOURCES` lists the samples a refit may read. `frame_pointing.py` records each solved frame's pointing error, one record per frame file name.
 
 `derive_performance_envelope` (`analytics/performance_envelope.py`) is the pure derivation (Architecture Equations (10) to (12)); `performance_envelope_tasks.py` gathers its inputs; the entry is `control.history.get_performance_envelope`. Constants: `SIGMA_TO_FWHM` (2.3548), `SIDEREAL_RATE_ARCSEC_PER_SECOND` (15.041), `MAD_TO_SIGMA` (1.4826). `analytics/tracking_risk.py` (`build_tracking_risk_map`) builds `tracking_risk`.
 

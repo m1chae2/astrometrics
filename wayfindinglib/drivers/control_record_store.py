@@ -5,7 +5,10 @@ wayfindinglib's own database, ``wayfinding.db``, which `DiskButler` places
 in wayfindinglib's library folder:
 
 * ``alignment_attempts``: one row per plate-solve sync or centering round,
-  with the pointing error it measured.
+  with the pointing error it measured. A row worked out from a frame's
+  header names that frame in ``source_frame``, so the same frame brought
+  into the library again, or solved again, updates its row instead of
+  adding another (see `ControlRecordStore.record_alignment_attempt`).
 * ``guiding_samples``: one row per guide-camera frame: the star's drift,
   the guide pulses sent, the signal-to-noise ratio, and where the sample
   came from (``source``, see `GuidingSampleSource`).
@@ -63,7 +66,8 @@ _SCHEMA = (
         delta_dec_arcsec REAL,
         pointing_error_arcsec REAL,
         mount_ra REAL,
-        mount_dec REAL
+        mount_dec REAL,
+        source_frame TEXT
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_alignment_attempts_time ON alignment_attempts(timestamp)",
@@ -105,6 +109,27 @@ _SCHEMA = (
 )
 """The tables and indexes the store creates when they are missing."""
 
+_ADDED_COLUMNS = (("alignment_attempts", "source_frame", "TEXT"),)
+"""Columns added after a table was first created: (table, column, SQL type).
+
+A database made before a column existed gets it, empty, when the store
+opens. Nothing else in the table changes.
+"""
+
+_ALIGNMENT_VALUE_COLUMNS = (
+    "session_id",
+    "target_name",
+    "timestamp",
+    "status",
+    "delta_ra_arcsec",
+    "delta_dec_arcsec",
+    "pointing_error_arcsec",
+    "mount_ra",
+    "mount_dec",
+    "source_frame",
+)
+"""The alignment attempt columns a record writes, in order of its values."""
+
 _INSERT_GUIDING_SAMPLE_SQL = """
     INSERT INTO guiding_samples (
         session_id, target_name, timestamp, dra, ddec,
@@ -145,6 +170,13 @@ class ControlRecordStore:
         try:
             for statement in _SCHEMA:
                 connection.execute(statement)
+            for table, column, sql_type in _ADDED_COLUMNS:
+                existing = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
+                if column not in existing:
+                    connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}")
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_alignment_attempts_frame ON alignment_attempts(source_frame)"
+            )
             connection.commit()
         except sqlite3.Error as schema_error:
             raise StorageError(f"Could not set up the control records in {db_path}.") from schema_error
@@ -201,14 +233,23 @@ class ControlRecordStore:
         set. A record that cannot be stored is logged and dropped, so a
         database problem never stops the hardware loop that reported it.
 
+        Recording the same attempt twice keeps one row:
+
+        * An attempt with ``source_frame`` (the file name of the frame it
+          was worked out from) replaces the row of that frame, so the
+          frame's latest plate solve wins. A row stored before frames were
+          named, with the same target and time, counts as that frame's row.
+        * Any other attempt is skipped when a row with the same target,
+          time, status and offsets is already stored.
+
         Parameters
         ----------
         attempt : `dict` [`str`, `Any`]
             The attempt: ``timestamp`` (or ``time``), ``status``,
             ``delta_ra_arcsec``, ``delta_dec_arcsec``,
             ``pointing_error_arcsec`` (worked out from the two offsets when
-            missing), ``target_name``, ``session_id``, and the mount
-            position as ``ra`` and ``dec`` in degrees. Optional
+            missing), ``target_name``, ``session_id``, the mount position as
+            ``ra`` and ``dec`` in degrees, and ``source_frame``. Optional
             ``force_record`` stores even a tiny error.
         """
         d_ra = attempt.get("delta_ra_arcsec")
@@ -224,35 +265,113 @@ class ControlRecordStore:
             logger.debug("Ignoring a tracking-loop echo of %.3f arcsec.", pointing_error)
             return
         timestamp = attempt.get("timestamp", attempt.get("time", datetime.now().timestamp()))
+        target_name = attempt.get("target_name")
+        status = attempt.get("status", "unknown")
+        source_frame = attempt.get("source_frame")
+        values = (
+            attempt.get("session_id") or observing_night_id(timestamp),
+            target_name,
+            timestamp,
+            status,
+            d_ra,
+            d_dec,
+            pointing_error,
+            attempt.get("ra", attempt.get("mount_ra")),
+            attempt.get("dec", attempt.get("mount_dec")),
+            source_frame,
+        )
         connection = None
         try:
             connection = self._connect()
-            connection.execute(
-                """
-                INSERT INTO alignment_attempts (
-                    session_id, target_name, timestamp, status,
-                    delta_ra_arcsec, delta_dec_arcsec, pointing_error_arcsec,
-                    mount_ra, mount_dec
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    attempt.get("session_id") or observing_night_id(timestamp),
-                    attempt.get("target_name"),
-                    timestamp,
-                    attempt.get("status", "unknown"),
-                    d_ra,
-                    d_dec,
-                    pointing_error,
-                    attempt.get("ra", attempt.get("mount_ra")),
-                    attempt.get("dec", attempt.get("mount_dec")),
-                ),
-            )
+            if source_frame:
+                existing = connection.execute(
+                    "SELECT id FROM alignment_attempts WHERE source_frame = ? "
+                    "OR (source_frame IS NULL AND target_name IS ? AND timestamp = ?) "
+                    "ORDER BY id DESC LIMIT 1",
+                    (source_frame, target_name, timestamp),
+                ).fetchone()
+            else:
+                existing = connection.execute(
+                    "SELECT id FROM alignment_attempts WHERE target_name IS ? AND timestamp = ? "
+                    "AND status = ? AND delta_ra_arcsec IS ? AND delta_dec_arcsec IS ? LIMIT 1",
+                    (target_name, timestamp, status, d_ra, d_dec),
+                ).fetchone()
+            if existing is None:
+                columns = ", ".join(_ALIGNMENT_VALUE_COLUMNS)
+                placeholders = ", ".join("?" for _ in _ALIGNMENT_VALUE_COLUMNS)
+                insert = f"INSERT INTO alignment_attempts ({columns}) VALUES ({placeholders})"
+                connection.execute(insert, values)
+            elif source_frame:
+                assignments = ", ".join(f"{column} = ?" for column in _ALIGNMENT_VALUE_COLUMNS)
+                connection.execute(
+                    f"UPDATE alignment_attempts SET {assignments} WHERE id = ?", (*values, existing["id"])
+                )
+            else:
+                logger.debug("Skipping an alignment attempt that is already stored.")
             connection.commit()
         except sqlite3.Error, StorageError:
             logger.exception("Could not store an alignment attempt.")
         finally:
             if connection is not None:
                 connection.close()
+
+    def remove_repeated_alignment_attempts(self, apply: bool = False) -> dict[str, Any]:
+        """Find, and on request delete, alignment attempts stored twice.
+
+        Rows with the same target and the same time are one attempt: a
+        frame brought into the library twice, or solved twice. The newest
+        row of each group (the latest solve) is kept and the others are
+        removed. Rows of different frames (different ``source_frame``) are
+        never grouped. Nothing is deleted unless ``apply`` is true, so a
+        first call shows what would go.
+
+        Parameters
+        ----------
+        apply : `bool`, optional
+            True to delete the repeated rows. Defaults to False (report only).
+
+        Returns
+        -------
+        report : `dict` [`str`, `Any`]
+            ``groups``: how many attempts were stored more than once.
+            ``repeated_ids``: the ids of the rows that are (or would be)
+            removed. ``removed``: how many rows were deleted (0 unless
+            ``apply``).
+
+        Raises
+        ------
+        StorageError
+            Raised if the database cannot be read or written.
+        """
+        grouping = (
+            "target_name IS a.target_name AND timestamp = a.timestamp AND source_frame IS a.source_frame"
+        )
+        query = (
+            "SELECT a.id FROM alignment_attempts AS a WHERE EXISTS ("
+            f"SELECT 1 FROM alignment_attempts WHERE {grouping} AND id > a.id) ORDER BY a.id"
+        )
+        group_query = (
+            "SELECT COUNT(*) FROM (SELECT 1 FROM alignment_attempts "
+            "GROUP BY target_name, timestamp, source_frame HAVING COUNT(*) > 1)"
+        )
+        connection = None
+        try:
+            connection = self._connect()
+            repeated_ids = [row["id"] for row in connection.execute(query)]
+            groups = connection.execute(group_query).fetchone()[0]
+            removed = 0
+            if apply and repeated_ids:
+                connection.executemany(
+                    "DELETE FROM alignment_attempts WHERE id = ?", [(row_id,) for row_id in repeated_ids]
+                )
+                connection.commit()
+                removed = len(repeated_ids)
+        except sqlite3.Error as error:
+            raise StorageError(f"Could not check the alignment attempts in {self.db_path}.") from error
+        finally:
+            if connection is not None:
+                connection.close()
+        return {"groups": groups, "repeated_ids": repeated_ids, "removed": removed}
 
     def get_alignment_attempts(
         self, target_name: str | None = None, limit: int = 100

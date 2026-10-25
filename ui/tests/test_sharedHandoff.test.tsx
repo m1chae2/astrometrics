@@ -83,7 +83,14 @@ function Probe({ label }: { label: string }): React.ReactElement {
             <span data-testid={`${label}-target`}>{selectedTarget}</span>
             <span data-testid={`${label}-time`}>{planningTime ?? 'null'}</span>
             <button onClick={() => setSelectedTarget('M 81')}>{`${label} pick`}</button>
-            <button onClick={() => setPlanningTime(new Date(2026, 9, 24, 22, 0, 0))}>{`${label} fix`}</button>
+            {/* Today at 22:00, so the indicator shows the clock time without a date on any day. */}
+            <button
+                onClick={() => {
+                    const tonight = new Date();
+                    tonight.setHours(22, 0, 0, 0);
+                    setPlanningTime(tonight);
+                }}
+            >{`${label} fix`}</button>
         </div>
     );
 }

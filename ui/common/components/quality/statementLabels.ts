@@ -19,6 +19,8 @@ export function statementKindWord(kind: StatementKind): string {
             return 'Warning';
         case StatementKind.RECOMMENDATION:
             return 'Recommendation';
+        case StatementKind.RESULT:
+            return 'Result';
         case StatementKind.CONSTRAINT:
             return 'Limit';
         case StatementKind.INSUFFICIENT_DATA:

@@ -56,7 +56,7 @@ export const TrackingSettings: React.FC<TrackingSettingsProps> = ({
         'aria-describedby': disabled ? disabledReasonId : undefined,
     };
     return (
-        <ControlContainer>
+        <ControlContainer className="tracking-settings">
             {/* Left: Alignment Settings */}
             <ControlColumn>
                 <SectionLabel>Alignment</SectionLabel>

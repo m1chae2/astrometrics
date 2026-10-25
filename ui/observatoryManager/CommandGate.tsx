@@ -9,6 +9,7 @@
  */
 
 import React, { useId } from 'react';
+import { InfoButton } from '../common/components/InfoButton';
 
 /** Properties of {@link CommandGate}. */
 export interface CommandGateProps {
@@ -48,4 +49,25 @@ export const CommandGate: React.FC<CommandGateProps> = ({ disabled, reason, chil
             <span id={reasonId} className="command-gate__reason">{reason}</span>
         </div>
     );
+};
+
+/** Properties of {@link WhyUnavailableButton}. */
+export interface WhyUnavailableButtonProps {
+    /** True when the controls of the panel are greyed. The button is drawn only then. */
+    disabled: boolean;
+    /** The reason shown on hover, on focus and on click. */
+    reason: string;
+}
+
+/**
+ * The "Why unavailable?" info button for a panel header. It can be reached from
+ * the keyboard and by touch, which the hover title on the gate cannot.
+ * @param props See {@link WhyUnavailableButtonProps}.
+ * @return The info button, or nothing while the controls are available.
+ */
+export const WhyUnavailableButton: React.FC<WhyUnavailableButtonProps> = ({ disabled, reason }) => {
+    if (!disabled) {
+        return null;
+    }
+    return <InfoButton label="Why unavailable?" text={reason} />;
 };

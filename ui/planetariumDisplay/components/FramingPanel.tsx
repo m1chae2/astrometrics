@@ -7,8 +7,8 @@
  * a grid around the chosen target, lists them as numbers with their units, and
  * hands the panel corners to the sky map to outline. The corners are example
  * values (`exampleFramingCorners`) until the library returns real ones, so the
- * panel shows the "Example data" badge. The UI does no framing math. "Send to
- * plan" writes the framing into a plan the user picks.
+ * panel shows the "Example data" badge. The UI does no framing math. "Send
+ * framing to package" writes the framing into the target's observation package.
  */
 
 import React, { useEffect, useId, useState } from 'react';
@@ -16,7 +16,7 @@ import { ExampleDataBadge } from '../../common/components/quality/ExampleDataBad
 import { exampleFramingCorners } from '../../common/examples/exampleFramingCorners';
 import type { FramingPanelCorners } from '../layers/FramingOverlay';
 import { useMosaicPreview } from '../hooks/useMosaicPreview';
-import { useSendFramingToPlan } from '../hooks/useSendFramingToPlan';
+import { useTargetPackage } from '../hooks/useTargetPackage';
 
 /** The words that name the rotation everywhere it is shown. */
 export const ROTATION_CONVENTION = 'degrees, east of north';
@@ -44,7 +44,7 @@ function parseNumber(text: string, fallback: number): number {
 }
 
 /**
- * The framing panel: grid inputs, panel numbers, and Send to plan.
+ * The framing panel: grid inputs, panel numbers, and Send framing to package.
  *
  * @param props The target, its center, and the callback for the corners to draw.
  * @returns The panel.
@@ -56,10 +56,9 @@ export const FramingPanel: React.FC<FramingPanelProps> = ({ targetName, center, 
   const [cols, setCols] = useState(2);
   const [overlap, setOverlap] = useState(20);
   const [rotationDeg, setRotationDeg] = useState(0);
-  const [planId, setPlanId] = useState('');
 
   const preview = useMosaicPreview(center, { rows, cols, overlap }, rotationDeg, isOpen);
-  const { plansQuery, outcome, sendToPlan, createPlan, dismissOutcome } = useSendFramingToPlan();
+  const { isWorking, refusal, sendFramingToPackage, dismissRefusal } = useTargetPackage(targetName, true);
 
   const panels = preview.data ?? [];
   const hasPanels = isOpen && center !== null && panels.length > 0;
@@ -69,31 +68,23 @@ export const FramingPanel: React.FC<FramingPanelProps> = ({ targetName, center, 
     onFramingPanelsChange(hasPanels ? exampleFramingCorners : []);
   }, [hasPanels, onFramingPanelsChange]);
 
-  const plans = plansQuery.data ?? [];
-  const sendBlockedReason = !center
+  const sendBlockedReason = !center || !targetName
     ? 'Choose a target first.'
     : !hasPanels
       ? 'There are no panels to send yet.'
-      : planId === ''
-        ? 'Pick a plan to send to.'
-        : null;
+      : null;
   const reasonId = `${idPrefix}-send-reason`;
+  const refusalId = `${idPrefix}-send-refusal`;
 
-  /** Writes the framing into the picked plan. */
+  /** Writes the framing into the target's package. */
   const handleSend = (): void => {
     if (sendBlockedReason !== null || center === null) return;
-    void sendToPlan(planId, {
+    void sendFramingToPackage({
       centerRaDeg: center.ra,
       centerDecDeg: center.dec,
       rotationDeg,
       panels,
     });
-  };
-
-  /** Makes a plan and picks it. */
-  const handleCreatePlan = async (): Promise<void> => {
-    const createdId = await createPlan();
-    if (createdId) setPlanId(createdId);
   };
 
   if (!isOpen) {
@@ -183,49 +174,21 @@ export const FramingPanel: React.FC<FramingPanelProps> = ({ targetName, center, 
       )}
 
       <div className="framing-panel__send">
-        {plansQuery.isError && <p className="framing-panel__state" role="alert">Could not load the plans.</p>}
-        {!plansQuery.isError && plans.length === 0 && !plansQuery.isLoading && (
-          <p className="framing-panel__state">
-            No plans yet.
-            <button type="button" onClick={() => void handleCreatePlan()}>Create a plan</button>
-          </p>
-        )}
-        {plans.length > 0 && (
-          <label>
-            Plan
-            <select value={planId} onChange={(event) => setPlanId(event.target.value)}>
-              <option value="">Pick a plan</option>
-              {plans.map((plan) => (
-                <option key={plan.id} value={plan.id}>{plan.nightDate} ({plan.entryCount} entries)</option>
-              ))}
-            </select>
-          </label>
-        )}
         <button
           type="button"
           onClick={handleSend}
-          disabled={sendBlockedReason !== null}
-          aria-disabled={sendBlockedReason !== null}
+          disabled={sendBlockedReason !== null || isWorking}
+          aria-disabled={sendBlockedReason !== null || isWorking}
           aria-describedby={sendBlockedReason !== null ? reasonId : undefined}
         >
-          Send to plan
+          Send framing to package
         </button>
         {sendBlockedReason !== null && <p id={reasonId} className="framing-panel__reason">{sendBlockedReason}</p>}
-
-        <div aria-live="polite">
-          {outcome?.kind === 'sending' && <p>Sending…</p>}
-          {outcome?.kind === 'sent' && <p>Framing sent to the plan.</p>}
-        </div>
-        {outcome?.kind === 'conflict' && (
-          <div role="alert" className="framing-panel__rejection">
-            The plan changed in another window. Nothing was sent.
-            <button type="button" onClick={dismissOutcome}>Dismiss</button>
-          </div>
-        )}
-        {outcome?.kind === 'rejected' && (
-          <div role="alert" className="framing-panel__rejection">
-            The plan did not accept the framing: {outcome.reason}
-            <button type="button" onClick={dismissOutcome}>Dismiss</button>
+        {isWorking && <p aria-busy="true">Sending…</p>}
+        {refusal !== null && (
+          <div role="alert" id={refusalId} className="framing-panel__rejection">
+            {refusal}
+            <button type="button" onClick={dismissRefusal}>Dismiss</button>
           </div>
         )}
       </div>

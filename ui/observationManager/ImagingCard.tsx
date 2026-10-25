@@ -1,6 +1,11 @@
 import React, { useState } from 'react';
 import { SequenceObject } from './hooks/useExecutionQueue';
 import { ConfirmDialog } from '../common/components/ConfirmDialog';
+import { ProgressBar } from '../common/components/ProgressBar';
+import { StatusChip } from '../common/components/StatusChip';
+import { EntryProgress } from '../common/types/backendTypes';
+import { runStateDisplay } from './packageModel';
+import './queueProgress.css';
 
 interface Props extends React.HTMLAttributes<HTMLDivElement> {
     sequence: SequenceObject;
@@ -10,9 +15,11 @@ interface Props extends React.HTMLAttributes<HTMLDivElement> {
     onToggle: () => void;
     onRemove: (id: string) => void;
     onEdit: () => void;
+    /** What the library counted for this entry tonight, or null when it has no progress yet. */
+    progress?: EntryProgress | null;
 }
 
-export const ImagingCard: React.FC<Props> = ({ sequence, isExpanded, isSelected = false, onToggle, onRemove, onEdit, ...divProps }) => {
+export const ImagingCard: React.FC<Props> = ({ sequence, isExpanded, isSelected = false, onToggle, onRemove, onEdit, progress = null, ...divProps }) => {
     const [showConfirm, setShowConfirm] = useState(false);
 
     const totalExposure = sequence.items.reduce((acc: number, item: any) => acc + (item.count * (item.exposure || 0)), 0);
@@ -29,9 +36,13 @@ export const ImagingCard: React.FC<Props> = ({ sequence, isExpanded, isSelected 
         setShowConfirm(false);
     };
 
+    const runState = progress ? runStateDisplay(progress.state) : null;
+    const isImagingNow = !!progress && (progress.imagingNow ?? false);
+
     return (
         <div
             {...divProps}
+            aria-current={isImagingNow ? 'step' : undefined}
             className={`imaging-card ${isExpanded ? 'expanded' : 'collapsed'} ${isSelected ? 'imaging-card--selected' : ''} ${divProps.className || ''}`}
             data-selected={isSelected ? 'true' : undefined}
             onClick={onToggle}
@@ -56,6 +67,18 @@ export const ImagingCard: React.FC<Props> = ({ sequence, isExpanded, isSelected 
                     </button>
                 </div>
             </div>
+            {progress && runState && (
+                <div className="card-progress">
+                    <StatusChip status={runState.status} label={isImagingNow ? 'Imaging now' : runState.word} />
+                    <ProgressBar
+                        value={progress.captured}
+                        max={progress.requested}
+                        unit="frames"
+                        label={`Frames captured for ${sequence.target_name}`}
+                    />
+                    {progress.note && <span className="card-progress__note">{progress.note}</span>}
+                </div>
+            )}
             {isExpanded && (
                 <div className="card-body" onClick={(e) => e.stopPropagation()}>
                     <div className="card-timing">

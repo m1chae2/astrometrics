@@ -681,6 +681,7 @@ export const PlanetariumDisplay: React.FC = () => {
           source={selectedSource}
           observerLocation={location}
           onClose={() => handleSelectSource(null)}
+          isLibraryTarget={libraryTargets.some((target) => target.id === selectedSource.id)}
         />
       )}
 

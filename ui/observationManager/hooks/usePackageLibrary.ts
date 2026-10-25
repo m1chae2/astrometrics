@@ -46,6 +46,7 @@ export const usePackageLibrary = () => {
     return {
         lists: query.data ?? { suggested: [], planned: [], complete: [] },
         isLoading: query.isLoading,
+        isFetching: query.isFetching,
         error: query.error ? (query.error as Error).message || 'Unknown error' : null,
         retry: () => { void query.refetch(); },
     };
@@ -57,8 +58,14 @@ export interface PackageEditFields {
     dither_config?: Record<string, any>;
 }
 
+/** Optional starting contents of a new package (used by "Save as planned package"). */
+export interface NewPackageFields {
+    exposure_requests?: Array<Record<string, any>>;
+    dither_config?: Record<string, any>;
+}
+
 /**
- * Creates, edits and deletes packages. A refusal (unknown target, revision conflict) is kept as text in
+ * Creates, edits, deletes, dismisses and reopens packages, and starts a suggestion refresh. A refusal (unknown target, revision conflict) is kept as text in
  * `actionError` until dismissed.
  * @return The three actions and the refusal text.
  */
@@ -67,10 +74,13 @@ export const usePackageActions = () => {
     const [actionError, setActionError] = useState<string | null>(null);
 
     /** Creates a package for a target. Resolves to the package, or null when refused. */
-    const createPackage = useCallback(async (target: string): Promise<ObservationPackage | null> => {
+    const createPackage = useCallback(async (
+        target: string,
+        fields: NewPackageFields = {}
+    ): Promise<ObservationPackage | null> => {
         setActionError(null);
         try {
-            const created = await callBackend('plan:create_package', { target }, { silent: true });
+            const created = await callBackend('plan:create_package', { target, ...fields }, { silent: true });
             void queryClient.invalidateQueries({ queryKey: PACKAGE_LIBRARY_QUERY_KEY });
             return created;
         } catch (error) {
@@ -120,5 +130,69 @@ export const usePackageActions = () => {
         }
     }, [queryClient]);
 
-    return { createPackage, editPackage, deletePackage, actionError, dismissActionError: () => setActionError(null) };
+    /**
+     * Sends a package write that needs only the revision (dismiss, undismiss, reopen). Resolves to the
+     * package the library returned, or null when refused (the refusal is kept in `actionError`).
+     */
+    const writePackageFlag = useCallback(async (
+        observationPackage: ObservationPackage,
+        flag: 'dismiss' | 'undismiss' | 'reopen',
+        failureText: string
+    ): Promise<ObservationPackage | null> => {
+        setActionError(null);
+        try {
+            const saved = await callBackend(
+                'plan:edit_package',
+                { package_id: observationPackage.id, [flag]: true, expected_revision: observationPackage.revision },
+                { silent: true }
+            );
+            void queryClient.invalidateQueries({ queryKey: PACKAGE_LIBRARY_QUERY_KEY });
+            return saved;
+        } catch (error) {
+            setActionError(`${failureText}: ${(error as Error).message}`);
+            return null;
+        }
+    }, [queryClient]);
+
+    /** Dismisses a whole suggested package. Resolves to the package, or null when refused. */
+    const dismissPackage = useCallback(
+        (observationPackage: ObservationPackage) =>
+            writePackageFlag(observationPackage, 'dismiss', `Could not dismiss the suggestion for ${observationPackage.target_id}`),
+        [writePackageFlag]
+    );
+
+    /** Takes back a dismissal (Undo). Resolves to the package, or null when refused. */
+    const undismissPackage = useCallback(
+        (observationPackage: ObservationPackage) =>
+            writePackageFlag(observationPackage, 'undismiss', `Could not undo the dismissal for ${observationPackage.target_id}`),
+        [writePackageFlag]
+    );
+
+    /** Reopens a complete package. Resolves to the package, or null when refused. */
+    const reopenPackage = useCallback(
+        (observationPackage: ObservationPackage) =>
+            writePackageFlag(observationPackage, 'reopen', `Could not reopen the package for ${observationPackage.target_id}`),
+        [writePackageFlag]
+    );
+
+    /** Asks the library to refresh the suggestions. Resolves to true when a refresh started. */
+    const refreshSuggestions = useCallback(async (): Promise<boolean> => {
+        setActionError(null);
+        try {
+            const reply = await callBackend('plan:refresh_suggestions', {}, { silent: true });
+            if (!reply?.started) {
+                setActionError('Could not start a refresh of the suggestions. Try again in a moment.');
+                return false;
+            }
+            return true;
+        } catch (error) {
+            setActionError(`Could not start a refresh of the suggestions: ${(error as Error).message}`);
+            return false;
+        }
+    }, []);
+
+    return {
+        createPackage, editPackage, deletePackage, dismissPackage, undismissPackage, reopenPackage,
+        refreshSuggestions, actionError, dismissActionError: () => setActionError(null),
+    };
 };

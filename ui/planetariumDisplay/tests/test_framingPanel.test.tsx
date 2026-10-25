@@ -1,21 +1,21 @@
 /**
  * @fileoverview Tests of the Planetarium framing panel: states, the example
  * badge, panel numbers with their unit and convention, the corners handed to
- * the map, and Send to plan.
+ * the map, and Send framing to package.
  */
 
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { BackendError } from '../../common/services/backendError';
 
 const callBackendMock = vi.fn();
 vi.mock('../../common/services/backendApi', () => ({
   callBackend: (...args: unknown[]) => callBackendMock(...args),
 }));
 
+import { ToastContext } from '../../common/hooks/useToast';
 import { FramingPanel } from '../components/FramingPanel';
 import { exampleFramingCorners } from '../../common/examples/exampleFramingCorners';
 
@@ -26,22 +26,14 @@ const panelReply = [
 
 /**
  * Sets what the fake backend answers.
- * @param options Overrides: the preview reply (or an error), the plan list, the plan editing outcome.
+ * @param options Overrides: the preview reply (or an error).
  */
-function setBackend(options: { preview?: unknown; plans?: unknown[]; editError?: Error } = {}): void {
-  callBackendMock.mockImplementation(async (method: string, params: Record<string, unknown>) => {
+function setBackend(options: { preview?: unknown } = {}): void {
+  callBackendMock.mockImplementation(async (method: string) => {
     if (method === 'mosaic:preview') {
       if (options.preview instanceof Error) throw options.preview;
       return options.preview ?? panelReply;
     }
-    if (method === 'plan:get') {
-      return params.session_id ? { id: params.session_id, revision: 4 } : (options.plans ?? []);
-    }
-    if (method === 'plan:edit') {
-      if (options.editError) throw options.editError;
-      return { revision: 5 };
-    }
-    if (method === 'plan:create') return { id: 'new-plan' };
     return undefined;
   });
 }
@@ -56,7 +48,9 @@ function renderPanel(center: { ra: number; dec: number } | null, onChange = vi.f
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
-      <FramingPanel targetName="M 81" center={center} onFramingPanelsChange={onChange} />
+      <ToastContext.Provider value={{ show: vi.fn() }}>
+        <FramingPanel targetName="M 81" center={center} onFramingPanelsChange={onChange} />
+      </ToastContext.Provider>
     </QueryClientProvider>,
   );
   return userEvent.setup();
@@ -108,60 +102,5 @@ describe('FramingPanel', () => {
     await user.click(screen.getByRole('button', { name: 'Framing' }));
     expect(await screen.findByText(/returned no panels/)).toBeTruthy();
     expect(onChange).toHaveBeenLastCalledWith([]);
-  });
-
-  /** Send to plan is disabled with a visible reason until a plan is picked. */
-  it('disables Send to plan with a visible reason', async () => {
-    setBackend({ plans: [{ id: 'plan-1', status: 'planned', nightDate: '2026-10-24', entryCount: 2 }] });
-    const user = renderPanel({ ra: 1, dec: 2 });
-    await user.click(screen.getByRole('button', { name: 'Framing' }));
-    await screen.findByText('P0_0');
-    const send = screen.getByRole('button', { name: 'Send to plan' });
-    expect((send as HTMLButtonElement).disabled).toBe(true);
-    const reason = screen.getByText('Pick a plan to send to.');
-    expect(send.getAttribute('aria-describedby')).toBe(reason.id);
-  });
-
-  /** Send to plan writes the framing with the plan's revision. */
-  it('writes the framing through plan:edit with expected_revision', async () => {
-    setBackend({ plans: [{ id: 'plan-1', status: 'planned', nightDate: '2026-10-24', entryCount: 2 }] });
-    const user = renderPanel({ ra: 148.9, dec: 69.1 });
-    await user.click(screen.getByRole('button', { name: 'Framing' }));
-    await screen.findByText('P0_0');
-    await user.selectOptions(await screen.findByRole('combobox', { name: /Plan/ }), 'plan-1');
-    await user.click(screen.getByRole('button', { name: 'Send to plan' }));
-    await waitFor(() => expect(screen.getByText('Framing sent to the plan.')).toBeTruthy());
-    const editCall = callBackendMock.mock.calls.find(([method]) => method === 'plan:edit');
-    expect(editCall?.[1]).toMatchObject({
-      session_id: 'plan-1',
-      expected_revision: 4,
-      framing: { centerRaDeg: 148.9, centerDecDeg: 69.1, rotationDeg: 0, panels: panelReply },
-    });
-  });
-
-  /** A rejection stays until dismissed and is an alert. */
-  it('keeps a rejection until dismissed', async () => {
-    setBackend({
-      plans: [{ id: 'plan-1', status: 'planned', nightDate: '2026-10-24', entryCount: 2 }],
-      editError: new BackendError({ code: 'invalid_argument', message: 'Framing is outside the sky.' }),
-    });
-    const user = renderPanel({ ra: 1, dec: 2 });
-    await user.click(screen.getByRole('button', { name: 'Framing' }));
-    await screen.findByText('P0_0');
-    await user.selectOptions(await screen.findByRole('combobox', { name: /Plan/ }), 'plan-1');
-    await user.click(screen.getByRole('button', { name: 'Send to plan' }));
-    const alert = await screen.findByRole('alert');
-    expect(alert.textContent).toContain('Framing is outside the sky.');
-    await user.click(screen.getByRole('button', { name: 'Dismiss' }));
-    expect(screen.queryByRole('alert')).toBeNull();
-  });
-
-  /** With no plans the panel offers to create one. */
-  it('offers to create a plan when there is none', async () => {
-    setBackend({ plans: [] });
-    const user = renderPanel({ ra: 1, dec: 2 });
-    await user.click(screen.getByRole('button', { name: 'Framing' }));
-    await user.click(await screen.findByRole('button', { name: 'Create a plan' }));
-    await waitFor(() => expect(callBackendMock.mock.calls.some(([method]) => method === 'plan:create')).toBe(true));
   });
 });

@@ -41,6 +41,8 @@ export interface PackageEditorProps {
     onDismissError?: () => void;
     /** Called after the user confirms Delete for the shown library package. Omit to hide Delete. */
     onDeletePackage?: (editedPackage: ObservationPackage) => void;
+    /** Set when the open suggestion was removed by a refresh: the notice text and the save action. */
+    removedNotice?: { text: string; onSave: () => void } | null;
 }
 
 /**
@@ -51,7 +53,7 @@ export interface PackageEditorProps {
 export const PackageEditor: React.FC<PackageEditorProps> = ({
     editedPackage, onAddExposure, onUpdateExposure, onRemoveExposure, onChangeDither,
     onAddToSequence, isEditingQueueEntry = false, onCancelEdit, errorMessage = null, onDismissError,
-    onDeletePackage,
+    onDeletePackage, removedNotice = null,
 }) => {
     /** Index of the exposure row being edited in the Image Planner, if any. */
     const [editingIndex, setEditingIndex] = useState<number | null>(null);
@@ -145,6 +147,14 @@ export const PackageEditor: React.FC<PackageEditorProps> = ({
                 <div className="package-library__error" role="alert">
                     <span>{errorMessage}</span>
                     <button type="button" className="btn btn--tiny" onClick={onDismissError}>Dismiss</button>
+                </div>
+            )}
+            {removedNotice && (
+                <div className="package-library__error" role="alert">
+                    <span>{removedNotice.text}</span>
+                    <button type="button" className="btn btn--tiny btn--primary" onClick={removedNotice.onSave}>
+                        Save as planned package
+                    </button>
                 </div>
             )}
             <div className="target-planner__top-row">

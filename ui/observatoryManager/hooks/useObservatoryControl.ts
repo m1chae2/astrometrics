@@ -6,16 +6,6 @@ import { createTarget } from '../../common/services/targetService';
 import { emitToast } from '../../common/utils/emitToast';
 
 export const useObservatoryControl = (forceReload: () => void) => {
-    // State for LimitSettings
-    const [limitsConfig, setLimitsConfig] = useState({
-        altitudeEnabled: false,
-        minimumAltitude: 0,
-        maximumAltitude: 90,
-        hourAngleEnabled: false,
-        maximumHourAngle: 2,
-        flipHourAngle: 1,
-    });
-
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
 
     // State for Guiding
@@ -73,25 +63,6 @@ export const useObservatoryControl = (forceReload: () => void) => {
         await unparkTelescope();
     };
 
-    const handleApplyLimits = (
-        enabled: boolean,
-        minimumAltitude: number,
-        maximumAltitude: number,
-        hourAngleEnabled: boolean,
-        maximumHourAngle: number,
-        flipHourAngle: number
-    ) => {
-        setLimitsConfig({
-            altitudeEnabled: enabled,
-            minimumAltitude,
-            maximumAltitude,
-            hourAngleEnabled,
-            maximumHourAngle,
-            flipHourAngle,
-        });
-        emitToast(`Limits updated: Alt ${enabled ? 'ON' : 'OFF'} (${minimumAltitude}°-${maximumAltitude}°), HA ${hourAngleEnabled ? 'ON' : 'OFF'} (max ${maximumHourAngle}h), Flip HA: ${flipHourAngle}°`, 'success');
-    };
-
     const handleAddTarget = () => {
         setIsAddModalOpen(true);
     };
@@ -131,7 +102,6 @@ export const useObservatoryControl = (forceReload: () => void) => {
     };
 
     return {
-        limitsConfig,
         isAddModalOpen,
         setIsAddModalOpen,
         guidingExposure,
@@ -148,7 +118,6 @@ export const useObservatoryControl = (forceReload: () => void) => {
             onSetTracking: handleSetTracking,
             onPark: handlePark,
             onUnpark: handleUnpark,
-            onApplyLimits: handleApplyLimits,
             onAddTarget: handleAddTarget,
             onGuideStart: handleGuideStart,
             onGuideStop: handleGuideStop,

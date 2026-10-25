@@ -2,8 +2,8 @@
  * @fileoverview The icon that tells a statement's type apart.
  *
  * The icon is paired with the type word in the screen, so type is never shown
- * by color alone. The shapes differ: a triangle, a lightbulb, a bar and a
- * dashed circle. Severity changes the outline: `info` is drawn thin, the
+ * by color alone. The shapes differ: a triangle, a lightbulb, a check mark
+ * in a circle (a result), a bar and a dashed circle. Severity changes the outline: `info` is drawn thin, the
  * others thick.
  */
 
@@ -40,6 +40,14 @@ export const StatementTypeIcon: React.FC<StatementTypeIconProps> = ({ kind, seve
                 <>
                     <path d="M9 18 H15 M10 21 H14" />
                     <path d="M12 3 A6 6 0 0 0 8 13.5 C8.7 14.3 9 15 9 16 H15 C15 15 15.3 14.3 16 13.5 A6 6 0 0 0 12 3 Z" />
+                </>
+            );
+            break;
+        case StatementKind.RESULT:
+            shape = (
+                <>
+                    <circle cx="12" cy="12" r="9" />
+                    <path d="M8 12.5 L11 15.5 L16.5 9" />
                 </>
             );
             break;

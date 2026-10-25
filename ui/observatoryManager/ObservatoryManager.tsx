@@ -65,7 +65,6 @@ export const ObservatoryManager: React.FC = () => {
 
     // Custom hook for control logic
     const {
-        limitsConfig,
         isAddModalOpen,
         setIsAddModalOpen,
         guidingExposure,
@@ -115,10 +114,6 @@ export const ObservatoryManager: React.FC = () => {
         <ControlPanel
             isTracking={trackingStatus === 'Tracking'}
             isParked={trackingStatus === 'Parked'}
-            minimumAltitudeLimit={limitsConfig.minimumAltitude}
-            maximumAltitudeLimit={limitsConfig.maximumAltitude}
-            maxHourAngle={limitsConfig.maximumHourAngle}
-            meridianFlipHourAngle={limitsConfig.flipHourAngle}
             onStartMove={handlers.onStartMove}
             onStopMove={handlers.onStopMove}
             onSetSlewRate={handlers.onSetSlewRate}
@@ -126,7 +121,6 @@ export const ObservatoryManager: React.FC = () => {
             onSetTracking={handlers.onSetTracking}
             onPark={handlers.onPark}
             onUnpark={handlers.onUnpark}
-            onApplyLimits={handlers.onApplyLimits}
             guidingHistory={telemetry.guidingHistory || []}
             onGuideStart={handlers.onGuideStart}
             onGuideStop={handlers.onGuideStop}

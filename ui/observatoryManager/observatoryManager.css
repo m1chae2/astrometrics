@@ -52,8 +52,8 @@
 
 /* Calibration library (moved from the Observation Manager) */
 .calibration-controls { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.calibration-camera-select { display: flex; align-items: center; gap: 6px; flex: 1; font-size: var(--compact-font-size); color: var(--text-muted); }
-.calibration-camera-select select { flex: 1; height: 32px; font-size: var(--compact-font-size); }
+.calibration-camera-select { display: flex; align-items: center; gap: 6px; flex: 0 1 360px; min-width: 0; font-size: var(--compact-font-size); color: var(--text-muted); }
+.calibration-camera-select select { flex: 1; min-width: 140px; height: 32px; font-size: var(--compact-font-size); }
 .calibration-section { display: flex; flex-direction: column; gap: 8px; }
 .calibration-header { font-weight: 600; color: var(--text-bright); font-size: var(--compact-font-size); border-bottom: 1px solid var(--border-color); padding-bottom: 4px; margin-bottom: 4px; }
 .calibration-table-container { max-height: 120px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--surface-inset); }
@@ -87,7 +87,8 @@
 .command-gate :disabled { pointer-events: none; }
 /* Grey every disabled control the same way, so none of them looks usable. */
 .command-gate { cursor: not-allowed; }
-.command-gate :is(button, input, select):disabled { opacity: 0.4; filter: grayscale(1); }
+/* Dim only buttons and toggles. Inputs stay readable so the user can still read the values. */
+.command-gate :is(button, input[type='checkbox'], input[type='radio']):disabled { opacity: 0.4; filter: grayscale(1); }
 /* The reason is read by screen readers and shown as the hover title only. */
 .command-gate__reason {
     position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
@@ -96,7 +97,50 @@
 
 /* The Calibration Library row stays short so the guiding plots keep their height; the table scrolls. */
 .observatory-library-row { flex-wrap: nowrap; }
-.observatory-library-row > * { flex: 1 1 0; min-width: 0; max-height: 190px; overflow-y: auto; }
+.observatory-library-row > * { flex: 1 1 0; min-width: 0; max-height: 190px; overflow: hidden; }
 /* Camera Profiles in the middle row is no taller than its neighbors; it scrolls inside itself. */
 .observatory-middle-row { align-items: stretch; }
-.observatory-middle-row > :first-child { min-width: 0; max-height: 300px; overflow-y: auto; }
+.observatory-middle-row > :first-child { min-width: 0; max-height: 300px; overflow: hidden; }
+
+/*
+ * Row budget. The page never scrolls: the panel group has a fixed height and each panel scrolls inside itself.
+ * Top row (Telescope Control, Tracking Settings): fixed, about 150px; it never shrinks.
+ * Middle row: wants up to 300px (Camera Profiles caps there), may shrink down to 90px and then scrolls inside.
+ * Calibration row: wants up to 190px, may shrink down to 70px and scrolls inside.
+ * Guiding row: takes all the space that is left and never goes below 150px, enough to read the plots.
+ * At 1024x700 (about 560px for the group) the middle and calibration rows give way first, because they
+ * shrink three times and four times faster than the guiding row can grow; at 1870x1040 every row has its
+ * full height and the guiding row gets the extra.
+ */
+.observatory-guiding-row { flex: 1 1 150px; min-height: 150px; }
+.observatory-middle-row { flex: 0 3 auto; min-height: 90px; flex-wrap: nowrap; overflow: hidden; }
+/* Each panel clips its own content (its body scrolls inside), so nothing draws over another row. */
+.observatory-middle-row > * { min-height: 0; overflow: hidden; }
+.observatory-library-row { flex: 0 4 auto; min-height: 70px; overflow: hidden; }
+
+/* The guiding panels fill the row's height and pass it down to the plots (percent heights alone collapse). */
+.observatory-guiding-row { overflow: hidden; }
+.observatory-guiding-row > .panel { height: auto; min-height: 0; }
+.observatory-guiding-row .panel__content { display: flex; flex-direction: column; overflow: hidden; }
+.observatory-guiding-row .guiding-status__plot { flex: 1 1 0; min-height: 0; height: auto; }
+.guiding-status__plot--trends { display: flex; flex-direction: column; }
+
+/* Calibration controls: normal-size buttons (the shared .btn is full width) and a square refresh button. */
+.calibration-controls .btn { width: auto; flex: 0 0 auto; }
+.calibration-controls .btn--square { width: 36px; min-width: 36px; height: 36px; padding: 0; display: flex; align-items: center; justify-content: center; font-size: var(--control-font-size); }
+
+/* Tracking Settings: shorter labels, and the Alignment and Guiding columns wrap instead of colliding. */
+.tracking-settings { flex-wrap: wrap; --parameter-label-width: 88px; }
+.tracking-settings > .controls__column { flex: 1 1 190px; }
+.tracking-settings > .vertical-divider { display: none; }
+
+/* Safety Limits labels wrap instead of being cut off. */
+.parameter .limit-settings__label { white-space: normal; text-align: left; width: auto; flex: 1 1 110px; min-width: 0; }
+
+.limit-settings__telescope { margin: 0; font-size: var(--compact-font-size); color: var(--text-muted); }
+.limit-settings__hint { font-size: var(--compact-font-size); color: var(--text-muted); }
+.limit-settings__refusal {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 8px; border: 1px solid var(--border-color); border-radius: var(--radius-sm);
+    font-size: var(--compact-font-size);
+}

@@ -15,6 +15,7 @@ import { PlanetariumSource, ObserverLocation } from '../../common/types/planetar
 import { safeParse, formatRA, formatDec, formatNumber } from '../utils/coordinateUtils';
 import { formatCatalogMagnitude } from '../layers/StarOverlay';
 import { navigateToElement } from '../../common/utils/displayCoordinator';
+import { useTargetPackage } from '../hooks/useTargetPackage';
 
 /**
  * Props for PlanetariumInfoCard.
@@ -26,6 +27,8 @@ interface Props {
   observerLocation: ObserverLocation | null;
   /** Callback to close and deselect the card. */
   onClose: () => void;
+  /** Whether the object is already a target in the library (changes the words of the toast). */
+  isLibraryTarget?: boolean;
 }
 
 /**
@@ -81,7 +84,9 @@ export const PlanetariumInfoCard: React.FC<Props> = ({
   source,
   observerLocation,
   onClose,
+  isLibraryTarget = false,
 }) => {
+  const { isWorking, refusal, addToPackage, dismissRefusal } = useTargetPackage(source.name, isLibraryTarget);
   const spectralClass = (source.spectralType || 'A').charAt(0).toUpperCase();
   const starGlowColor = spectralColors[spectralClass] || '#ffffff';
 
@@ -169,6 +174,22 @@ export const PlanetariumInfoCard: React.FC<Props> = ({
             </tr>
           </tbody>
         </table>
+
+        <button
+          type="button"
+          className="planetarium-info-card__add-package-btn"
+          onClick={() => void addToPackage()}
+          disabled={isWorking}
+          aria-disabled={isWorking}
+        >
+          Add to observation package
+        </button>
+        {refusal !== null && (
+          <div role="alert" className="planetarium-info-card__refusal">
+            {refusal}
+            <button type="button" onClick={dismissRefusal}>Dismiss</button>
+          </div>
+        )}
 
         {!isTarget && (source.hasSpectra || source.hasPhotometry) && (
           <button

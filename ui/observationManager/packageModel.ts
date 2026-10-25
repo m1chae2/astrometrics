@@ -6,13 +6,16 @@
  * sequencer's item rows. These functions only format or reshape values; they never rank,
  * group or decide anything (the library does that).
  */
+import { PackageRefreshCounts } from '../common/queries/packageLibraryQueryKeys';
 import {
     DitherConfig,
     ExposureRequest,
     FilterType,
     FrameType,
     ObservationPackage,
+    RunState,
 } from '../common/types/backendTypes';
+import type { StatusChipStatus } from '../common/components/StatusChip';
 
 /** One row of the sequencer's item list, as `addToQueue` expects it. */
 export interface SequenceItemRow {
@@ -177,4 +180,52 @@ export function findExistingPackage(
     const wanted = foldTargetId(targetId);
     const matches = (candidate: ObservationPackage) => foldTargetId(candidate.target_id) === wanted;
     return planned.find(matches) ?? suggested.find(matches) ?? null;
+}
+
+/**
+ * Writes the line shown after a suggestion refresh, for example "Suggestions updated: 1 added, 2 removed".
+ * Only the counts that are not zero are named.
+ * @param counts The counts the `packages:changed` refresh event carries.
+ * @return The line, or null when the refresh changed no package.
+ */
+export function refreshNoticeText(counts: PackageRefreshCounts): string | null {
+    const parts: string[] = [];
+    if (counts.added) parts.push(`${counts.added} added`);
+    if (counts.updated) parts.push(`${counts.updated} updated`);
+    if (counts.deleted) parts.push(`${counts.deleted} removed`);
+    if (counts.completed) parts.push(`${counts.completed} completed`);
+    if (counts.reverted) parts.push(`${counts.reverted} reopened`);
+    return parts.length > 0 ? `Suggestions updated: ${parts.join(', ')}` : null;
+}
+
+/** The word and chip look shown for each run state of a queue entry. */
+const RUN_STATE_DISPLAY: Record<RunState, { word: string; status: StatusChipStatus }> = {
+    [RunState.IMAGING]: { word: 'Imaging now', status: 'info' },
+    [RunState.UPCOMING]: { word: 'Not imaging', status: 'neutral' },
+    [RunState.IN_PROGRESS]: { word: 'Not imaging', status: 'neutral' },
+    [RunState.COMPLETE]: { word: 'Done', status: 'ok' },
+    [RunState.PARTLY_DONE]: { word: 'Partly done', status: 'warning' },
+    [RunState.NOT_RUN]: { word: 'Not run', status: 'neutral' },
+    [RunState.UNKNOWN]: { word: 'Progress unknown', status: 'warning' },
+};
+
+/**
+ * Turns the library's run state of a queue entry into the word and chip look to show.
+ * @param state The run state the library returned.
+ * @return The word ("Imaging now", "Not imaging", "Done", "Not run", ...) and the chip status.
+ */
+export function runStateDisplay(state: RunState): { word: string; status: StatusChipStatus } {
+    return RUN_STATE_DISPLAY[state] ?? { word: 'Progress unknown', status: 'warning' };
+}
+
+/**
+ * Formats the time of the progress read for the strip header, as local clock time.
+ * @param isoTime The `as_of` time the library returned (ISO 8601), if any.
+ * @return Text such as "22:41", or null when there is no valid time.
+ */
+export function formatAsOfTime(isoTime: string | undefined): string | null {
+    if (!isoTime) return null;
+    const parsed = new Date(isoTime);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }

@@ -122,7 +122,7 @@ export const GuidingTrendsPlot: React.FC<GuidingStatusProps> = ({ history }) => 
     }, [slicedHistory]);
 
     return (
-        <div id="guiding-trends-plot" className="guiding-status__plot" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <div id="guiding-trends-plot" className="guiding-status__plot guiding-status__plot--trends">
             <div style={{ flex: 1, minHeight: 0 }}>
                 <TimeSeriesPlot data={data} yLabel="arcsec / seconds" yRange={yRange} />
             </div>

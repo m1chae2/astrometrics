@@ -11,8 +11,6 @@
 .statement-item__setting { color: var(--text-dim); }
 .statement-item__message { margin: 6px 0 0; font-size: var(--label-font-size); line-height: 1.4; }
 .statement-item__buttons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.statement-item__reason-note { margin: 4px 0 0; color: var(--text-dim); font-size: var(--section-label-size); }
-.statement-item__rejection { display: flex; gap: 8px; align-items: center; margin-top: 4px; border: 1px solid var(--danger-red); padding: 4px 6px; border-radius: var(--radius-sm); }
 .data-quality__numbers dd { margin: 0; }
 .confidence-chip { border: 1px solid var(--border-color); border-radius: var(--radius-pill); padding: 0 8px; font-size: var(--section-label-size); }
 .confidence-chip--measured { border-color: var(--success-green); }

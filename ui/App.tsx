@@ -2,7 +2,12 @@ import React, { useState, useEffect, Suspense, Profiler, ProfilerOnRenderCallbac
 import { callBackend } from './common/services/backendApi';
 import { isAffectedByMeasurement, QualityMeasuredPayload } from './common/queries/qualityQueryKeys';
 import { UI_EVENTS } from './common/types/backendTypes';
-import { PACKAGE_LIBRARY_QUERY_KEY } from './common/queries/packageLibraryQueryKeys';
+import {
+  PACKAGE_LIBRARY_QUERY_KEY,
+  CURRENT_SESSION_QUERY_KEY,
+  PACKAGE_REFRESH_NOTICE_QUERY_KEY,
+  PackageRefreshCounts,
+} from './common/queries/packageLibraryQueryKeys';
 import { emergencyParkMount } from './common/services/telescope/emergencyPark';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StatusHeader } from './statusHeader/StatusHeader';
@@ -231,6 +236,7 @@ const AppContent: React.FC = () => {
           queryClient.invalidateQueries({ queryKey: ['starsBySpectralClass'] });
         } else if (action === UI_EVENTS['plan:changed']) {
           // A plan write happened (maybe in another window): read the plans again.
+          void queryClient.invalidateQueries({ queryKey: CURRENT_SESSION_QUERY_KEY });
           if (handlePlanChanged(queryClient, payload as PlanChangedPayload)) {
             setPlanNotice(PLAN_UPDATED_FROM_ANOTHER_WINDOW);
             if (planNoticeTimer) clearTimeout(planNoticeTimer);
@@ -239,6 +245,12 @@ const AppContent: React.FC = () => {
         } else if (action === UI_EVENTS['packages:changed']) {
           // A package was created, edited, reopened, deleted or promoted: read the library again.
           queryClient.invalidateQueries({ queryKey: PACKAGE_LIBRARY_QUERY_KEY });
+          queryClient.invalidateQueries({ queryKey: CURRENT_SESSION_QUERY_KEY });
+          const packagesPayload = payload as ({ kind?: string } & PackageRefreshCounts) | undefined;
+          if (packagesPayload?.kind === 'refreshed') {
+            // The library shows "Suggestions updated: ..." from the newest refresh result.
+            queryClient.setQueryData(PACKAGE_REFRESH_NOTICE_QUERY_KEY, { ...packagesPayload, receivedAt: Date.now() });
+          }
         } else if (action === UI_EVENTS['quality:measured']) {
           // A measurement job stored new quality rows (after a sync, an
           // ingestion, or when asked for): the stored quality queries for that

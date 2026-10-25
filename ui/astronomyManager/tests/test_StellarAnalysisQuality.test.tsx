@@ -61,6 +61,26 @@ describe('StellarAnalysisDetails Quality card', () => {
   });
 
   /**
+   * Verifies the card shows the plain sentence of a result and not the technical message.
+   */
+  it('shows the plain message of a result', async () => {
+    callBackendMock.mockResolvedValue([
+      {
+        rule: 'classification',
+        kind: StatementKind.RESULT,
+        message: 'Teff 4500 K from B-V 1.2.',
+        plainMessage: 'This star is a cool orange giant.',
+        confidence: Confidence.MEASURED,
+      },
+    ]);
+    render(<StellarAnalysisDetails astronomyData={{ id: 'Vega', name: 'Vega', targetIds: ['M 13'] }} />);
+
+    await waitFor(() => expect(screen.getByText('This star is a cool orange giant.')).toBeInTheDocument());
+    expect(screen.getByText('Result')).toBeInTheDocument();
+    expect(screen.queryByText(/Teff 4500/)).toBeNull();
+  });
+
+  /**
    * Verifies a star with no target shows no Quality card and asks nothing.
    */
   it('shows no Quality card and does not fetch when the star has no target', () => {

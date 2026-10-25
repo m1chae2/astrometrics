@@ -13,7 +13,7 @@
 
 .observation-manager__queue {
     flex: 0 0 auto;
-    height: 200px;
+    height: 240px;
     padding: var(--layout-padding) var(--layout-padding) 0;
     box-sizing: border-box;
 }
@@ -65,7 +65,7 @@
     }
 
     .observation-manager__queue {
-        height: 170px;
+        height: 220px;
     }
 }
 

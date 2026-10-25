@@ -73,6 +73,7 @@ beforeEach(() => {
     callBackendMock.mockReset();
     callBackendMock.mockImplementation(async (method: string) => {
         if (method === 'calibration:query') return libraryReply;
+        if (method === 'observatory:get_active_telescope') return { id: 't1', name: 'Scope', focal_length_mm: 500 };
         if (method === 'observatory:safety_status') return { delegation_policy: { id: 'p', capability_delegations: [] } };
         throw new Error(`unexpected ${method}`);
     });
@@ -95,8 +96,9 @@ describe('ObservatoryManager layout', () => {
     });
 
     /** Command controls are disabled; hover reason and aria-describedby carry the reason. */
-    it('greys out command controls and gives the reason on hover and to screen readers', () => {
+    it('greys out command controls and gives the reason on hover and to screen readers', async () => {
         renderDisplay();
+        await screen.findByLabelText('Minimum altitude');
         const gates = screen.getAllByTestId('command-gate');
         // Telescope Control, Tracking Settings, Manual Guide, Safety Limits, Slew to Target.
         expect(gates).toHaveLength(5);

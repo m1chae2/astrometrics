@@ -116,3 +116,59 @@ describe('PackageLibraryPanel', () => {
         expect(props.onAddTarget).toHaveBeenCalled();
     });
 });
+
+describe('PackageLibraryPanel suggestions and refresh', () => {
+    it('offers Dismiss on a suggestion card and not on a planned card', async () => {
+        const onDismissPackage = vi.fn();
+        renderPanel({ onDismissPackage });
+        expect(screen.queryByRole('button', { name: /Dismiss/ })).not.toBeInTheDocument();
+        await userEvent.click(screen.getByRole('tab', { name: /Suggested/ }));
+        await userEvent.click(screen.getByRole('button', { name: 'Dismiss M 13' }));
+        expect(onDismissPackage).toHaveBeenCalledWith(suggestedPackage);
+    });
+
+    it('shows the Undo notice and calls Undo', async () => {
+        const onUndo = vi.fn();
+        renderPanel({ undoNotice: { text: 'Dismissed the suggestion for M 13.', onUndo, onClose: vi.fn() } });
+        expect(screen.getByText('Dismissed the suggestion for M 13.')).toBeInTheDocument();
+        await userEvent.click(screen.getByRole('button', { name: 'Undo' }));
+        expect(onUndo).toHaveBeenCalled();
+    });
+
+    it('offers Reopen on a complete card', async () => {
+        const onReopenPackage = vi.fn();
+        const completePackage = { ...plannedPackage, id: 'p3', target_id: 'M 51' };
+        renderPanel({ lists: { suggested: [], planned: [], complete: [completePackage] }, onReopenPackage });
+        await userEvent.click(screen.getByRole('tab', { name: /Complete/ }));
+        await userEvent.click(screen.getByRole('button', { name: 'Reopen M 51' }));
+        expect(onReopenPackage).toHaveBeenCalledWith(completePackage);
+    });
+
+    it('shows the refresh line in a polite live region', () => {
+        renderPanel({ refreshNotice: 'Suggestions updated: 1 added, 2 removed' });
+        const line = screen.getByText('Suggestions updated: 1 added, 2 removed');
+        expect(line).toHaveAttribute('aria-live', 'polite');
+    });
+
+    it('calls onRefreshSuggestions from the Refresh suggestions button', async () => {
+        const onRefreshSuggestions = vi.fn();
+        renderPanel({ onRefreshSuggestions, refreshStartedText: 'Refresh started. Changes will appear here.' });
+        await userEvent.click(screen.getByRole('button', { name: 'Refresh suggestions' }));
+        expect(onRefreshSuggestions).toHaveBeenCalled();
+        expect(screen.getByText('Refresh started. Changes will appear here.')).toBeInTheDocument();
+    });
+
+    it('moves focus to the next card when the focused card goes away', async () => {
+        const second = { ...suggestedPackage, id: 'p4', target_id: 'M 92' };
+        const lists = { suggested: [suggestedPackage, second], planned: [], complete: [] };
+        const props: PackageLibraryPanelProps = {
+            lists, isLoading: false, error: null, onRetry: vi.fn(), selectedPackageId: null,
+            onSelectPackage: vi.fn(), onNewPackage: vi.fn(), onAddTarget: vi.fn(), onDismissPackage: vi.fn(),
+        };
+        const { rerender } = render(<PackageLibraryPanel {...props} />);
+        await userEvent.click(screen.getByRole('tab', { name: /Suggested/ }));
+        await userEvent.click(screen.getByRole('button', { name: 'Dismiss M 13' }));
+        rerender(<PackageLibraryPanel {...props} lists={{ ...lists, suggested: [second] }} />);
+        expect(screen.getByRole('button', { name: /^M 92, suggested package/ })).toHaveFocus();
+    });
+});

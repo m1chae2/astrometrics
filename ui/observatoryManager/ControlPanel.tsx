@@ -7,7 +7,7 @@ import { GuidingTrendsPlot, GuidingTargetPlot } from './panels/GuidingStatusPane
 import { AlignmentStatus } from './panels/AlignmentStatus';
 import { GuidingSample, AlignmentAttempt } from '../common/types/backendTypes';
 import { SectionPanel } from '../common/components/SectionPanel';
-import { CommandGate } from './CommandGate';
+import { CommandGate, WhyUnavailableButton } from './CommandGate';
 import { CalibrationLibraryPanel } from './calibration/CalibrationLibraryPanel';
 import { CameraProfilesPanel } from './equipment/CameraProfilesPanel';
 import type { CameraProfile } from '../common/hooks/useEquipmentConfiguration';
@@ -18,10 +18,6 @@ export interface ControlPanelProps {
     // Pass-through props
     isTracking: boolean;
     isParked: boolean;
-    minimumAltitudeLimit?: number;
-    maximumAltitudeLimit?: number;
-    maxHourAngle?: number;
-    meridianFlipHourAngle?: number;
 
     onStartMove: (direction: string) => void;
     onStopMove: (direction: string) => void;
@@ -30,14 +26,6 @@ export interface ControlPanelProps {
     onSetTracking: (enabled: boolean) => void;
     onPark: () => void;
     onUnpark: () => void;
-    onApplyLimits: (
-        enabled: boolean,
-        minimumAltitude: number,
-        maximumAltitude: number,
-        hourAngleEnabled: boolean,
-        maximumHourAngle: number,
-        flipHourAngle: number
-    ) => void;
     guidingHistory: GuidingSample[];
     alignmentAttempts?: AlignmentAttempt[];
 
@@ -88,10 +76,6 @@ export interface ControlPanelProps {
 export const ControlPanel: React.FC<ControlPanelProps> = ({
     isTracking,
     isParked,
-    minimumAltitudeLimit,
-    maximumAltitudeLimit,
-    maxHourAngle,
-    meridianFlipHourAngle,
     onStartMove,
     onStopMove,
     onSetSlewRate,
@@ -99,7 +83,6 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
     onSetTracking,
     onPark,
     onUnpark,
-    onApplyLimits,
     guidingHistory,
     alignmentAttempts = [],
     accuracy,
@@ -129,7 +112,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
         <div className="panel-group">
             {/* Top Row: Telescope Control | Alignment */}
             <div className="panel__row flex-auto">
-                <SectionPanel title="Telescope Control">
+                <SectionPanel title="Telescope Control" headerContent={<WhyUnavailableButton disabled={commandsDisabled} reason={commandsDisabledReason} />}>
                     <CommandGate disabled={commandsDisabled} reason={commandsDisabledReason}>
                         <TelescopeControl
                             disabled={commandsDisabled}
@@ -146,7 +129,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                 </SectionPanel>
 
                 {/* REQ: OBS-4: Tracking & Parking Control */}
-                <SectionPanel title="Tracking Settings">
+                <SectionPanel title="Tracking Settings" headerContent={<WhyUnavailableButton disabled={commandsDisabled} reason={commandsDisabledReason} />}>
                     {/* REQ: OBS-4.3: The display SHALL allow enabling and disabling of sidereal tracking. */}
                     <CommandGate
                         disabled={commandsDisabled}
@@ -183,7 +166,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
 
                 {/* Manual Guide */}
                 {/* REQ: OBS-2: Manual Telescope Movement */}
-                <SectionPanel title="Manual Guide">
+                <SectionPanel title="Manual Guide" headerContent={<WhyUnavailableButton disabled={commandsDisabled} reason={commandsDisabledReason} />}>
                     <CommandGate disabled={commandsDisabled} reason={commandsDisabledReason}>
                         <DirectionalControl
                             disabled={commandsDisabled}
@@ -197,7 +180,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
 
                 {/* Safety Limits */}
                 {/* REQ: OBS-8: Safety Limits */}
-                <SectionPanel title="Safety Limits">
+                <SectionPanel title="Safety Limits" headerContent={<WhyUnavailableButton disabled={commandsDisabled} reason={commandsDisabledReason} />}>
                     <CommandGate
                         disabled={commandsDisabled}
                         reason={commandsDisabledReason}
@@ -205,11 +188,6 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                             <LimitSettings
                                 disabled={commandsDisabled}
                                 disabledReasonId={reasonId}
-                                minAltitude={minimumAltitudeLimit}
-                                maxAltitude={maximumAltitudeLimit}
-                                maxHourAngle={maxHourAngle}
-                                meridianFlipHourAngle={meridianFlipHourAngle}
-                                onApplyLimits={onApplyLimits}
                             />
                         )}
                     />
@@ -222,7 +200,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             </div>
 
             {/* Horizontal Guiding Row: Trends | Target */}
-            <div className="panel__row flex-fill">
+            <div className="panel__row flex-fill observatory-guiding-row">
                 {/* Guiding Trends Panel */}
                 <SectionPanel
                     // REQ: OBS-7: Autoguiding Monitoring & Control

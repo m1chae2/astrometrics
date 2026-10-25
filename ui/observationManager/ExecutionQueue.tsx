@@ -1,11 +1,15 @@
 import React, { useState } from 'react';
 import { useExecutionQueue, SequenceObject } from './hooks/useExecutionQueue';
 import { ImagingCard } from './ImagingCard';
+import { ChecklistDialog } from './ChecklistDialog';
+import { formatAsOfTime } from './packageModel';
+import { ObservationSessionWithProgress } from '../common/types/backendTypes';
 import { SectionPanel } from '../common/components/SectionPanel';
 import { beginImagingSession } from '../common/services/sequencerService';
 import '../common/styles/panels.css';
 import './executionQueue.css';
 import './observationManagerLayout.css';
+import './queueProgress.css';
 
 interface Props {
     queue: SequenceObject[];
@@ -14,13 +18,40 @@ interface Props {
     /** Id of the queued sequence picked for editing, or null. Only this card shows the selected look. */
     selectedId?: string | null;
     reorderQueue: (queue: SequenceObject[]) => void;
+    /** Tonight's session with its progress, or null when none exists yet. */
+    session?: ObservationSessionWithProgress | null;
+    isSessionLoading?: boolean;
+    /** Text of a failed session read, or null. */
+    sessionError?: string | null;
+    onRetrySession?: () => void;
+    /** Called with the item id when the user ticks a checklist item. */
+    onTickChecklistItem?: (itemId: string) => void;
+    /** Text of a refused tick, or null. */
+    tickError?: string | null;
 }
 
 /**
  * The Execution Queue strip: the session's packages as cards in a row, with Start Imaging Session.
  * REQ: OBM-4: Execution Queue Management
  */
-export const ExecutionQueue: React.FC<Props> = ({ queue, removeFromQueue, onEdit, reorderQueue, selectedId = null }) => {
+export const ExecutionQueue: React.FC<Props> = ({
+    queue, removeFromQueue, onEdit, reorderQueue, selectedId = null,
+    session = null, isSessionLoading = false, sessionError = null, onRetrySession,
+    onTickChecklistItem, tickError = null,
+}) => {
+    const [isChecklistOpen, setIsChecklistOpen] = useState(false);
+    /** The Checklist button, so focus can return to it when the dialog closes. */
+    const checklistButtonRef = React.useRef<HTMLButtonElement>(null);
+    const progressByEntryId = new Map((session?.progress?.entries ?? []).map((entry) => [entry.entryId, entry]));
+    const asOfTime = formatAsOfTime(session?.progress?.asOf);
+    const checklist = session?.checklist ?? [];
+
+    /** Closes the checklist dialog and puts focus back on the button that opened it. */
+    const closeChecklist = React.useCallback(() => {
+        setIsChecklistOpen(false);
+        window.setTimeout(() => checklistButtonRef.current?.focus(), 0);
+    }, []);
+
     const [expandedId, setExpandedId] = useState<string | null>(null);
     const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
     const [localQueue, setLocalQueue] = useState<SequenceObject[]>(queue);
@@ -102,13 +133,33 @@ export const ExecutionQueue: React.FC<Props> = ({ queue, removeFromQueue, onEdit
             title="Execution Queue"
             className="execution-queue-panel execution-queue-strip"
             headerContent={
-                <button
-                    className="btn btn--tiny btn--primary"
-                    onClick={handleStartSession}
-                    disabled={isStarting || queue.length === 0}
-                >
-                    {isStarting ? 'Starting...' : 'Start Imaging Session'}
-                </button>
+                <span className="queue-header">
+                    {isSessionLoading && <span className="queue-header__status" aria-busy="true">Loading progress…</span>}
+                    {!isSessionLoading && sessionError && (
+                        <span className="queue-header__error" role="alert">
+                            Could not load progress.
+                            <button type="button" className="btn btn--tiny" onClick={onRetrySession}>Try again</button>
+                        </span>
+                    )}
+                    {!isSessionLoading && !sessionError && asOfTime && (
+                        <span className="queue-header__status">as of {asOfTime}</span>
+                    )}
+                    <button
+                        type="button"
+                        className="btn btn--tiny"
+                        ref={checklistButtonRef}
+                        onClick={() => setIsChecklistOpen(true)}
+                    >
+                        Checklist ({checklist.length})
+                    </button>
+                    <button
+                        className="btn btn--tiny btn--primary"
+                        onClick={handleStartSession}
+                        disabled={isStarting || queue.length === 0}
+                    >
+                        {isStarting ? 'Starting...' : 'Start Imaging Session'}
+                    </button>
+                </span>
             }
         >
             {/* REQ: OBM-4.1: The display SHALL present a queue of all planned sequences. */}
@@ -122,6 +173,7 @@ export const ExecutionQueue: React.FC<Props> = ({ queue, removeFromQueue, onEdit
                     <ImagingCard
                         key={item.id}
                         sequence={item}
+                        progress={progressByEntryId.get(item.id) ?? null}
                         // REQ: OBM-4.3: The display SHALL allow removal of sequences from the queue.
                         onRemove={removeFromQueue}
                         // REQ: OBM-4.4: The display SHALL allow editing of an existing sequence in the queue.
@@ -143,6 +195,15 @@ export const ExecutionQueue: React.FC<Props> = ({ queue, removeFromQueue, onEdit
                     />
                 ))}
             </div>
+            {isChecklistOpen && (
+                <ChecklistDialog
+                    items={checklist}
+                    hasSession={session !== null}
+                    onTick={(itemId) => onTickChecklistItem?.(itemId)}
+                    errorMessage={tickError}
+                    onClose={closeChecklist}
+                />
+            )}
         </SectionPanel>
     );
 };

@@ -84,3 +84,42 @@
 .package-search__result:focus-visible {
     outline: var(--focus-outline);
 }
+
+.package-library__actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.package-library__status {
+    color: var(--text-dim);
+    font-size: var(--small-font-size);
+}
+
+.package-library__status:empty {
+    display: none;
+}
+
+.package-library__undo {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-2);
+    background-color: var(--surface-inset-strong);
+    border-radius: var(--radius-sm);
+    font-size: var(--compact-font-size);
+}
+
+.package-library__undo > span {
+    flex: 1;
+}
+
+.package-row-wrap {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+}
+
+.package-row-wrap > .package-row {
+    flex: 1;
+    min-width: 0;
+}

@@ -947,3 +947,28 @@
 .planetarium-datetime-modal__reset-btn:hover {
   background: rgba(255, 255, 255, 0.12);
 }
+
+.planetarium-info-card__add-package-btn {
+  margin-top: var(--space-3);
+  padding: var(--space-1) var(--space-3);
+  background: var(--grey-dark);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.planetarium-info-card__add-package-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.planetarium-info-card__add-package-btn:focus-visible {
+  outline: 2px solid var(--primary-blue);
+  outline-offset: 2px;
+}
+
+.planetarium-info-card__refusal {
+  margin-top: var(--space-2);
+  color: var(--status-red);
+}

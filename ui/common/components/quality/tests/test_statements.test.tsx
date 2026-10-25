@@ -18,6 +18,7 @@ describe('StatementItem', () => {
     it.each([
         [StatementKind.WARNING, 'Warning'],
         [StatementKind.RECOMMENDATION, 'Recommendation'],
+        [StatementKind.RESULT, 'Result'],
         [StatementKind.CONSTRAINT, 'Limit'],
         [StatementKind.INSUFFICIENT_DATA, 'Not enough data'],
     ])('shows the %s kind with icon and word', (kind, word) => {
@@ -57,6 +58,47 @@ describe('StatementItem', () => {
         expect(screen.getAllByText('Measured').length).toBe(1);
         expect(screen.getAllByText('Partly measured').length).toBe(1);
         expect(screen.getAllByText('Tentative').length).toBe(1);
+    });
+
+    /** The plain sentence is shown; the technical message is not. */
+    it('shows the plain message and not the technical message', () => {
+        render(
+            <ul>
+                <StatementItem
+                    itemKey="k"
+                    statement={makeStatement({ message: 'FWHM 4.2 px exceeds 3.5 px.', plainMessage: 'Stars look soft.' })}
+                />
+            </ul>,
+        );
+        expect(screen.getByText('Stars look soft.')).toBeTruthy();
+        expect(screen.queryByText(/FWHM 4.2/)).toBeNull();
+        expect(screen.getByLabelText(/Stars look soft\./)).toBeTruthy();
+    });
+
+    /** An empty plain message falls back to the technical message. */
+    it('falls back to the message when the plain message is empty', () => {
+        render(
+            <ul>
+                <StatementItem itemKey="k" statement={makeStatement({ message: 'Technical only.', plainMessage: '' })} />
+            </ul>,
+        );
+        expect(screen.getByText('Technical only.')).toBeTruthy();
+    });
+
+    /** A result shows "Result" and no severity word, even if the statement carries a severity. */
+    it('shows a result with no severity word', () => {
+        render(
+            <ul>
+                <StatementItem
+                    itemKey="k"
+                    statement={makeStatement({ kind: StatementKind.RESULT, severity: Severity.INFO, plainMessage: 'A K giant.' })}
+                />
+            </ul>,
+        );
+        expect(screen.getByText('Result')).toBeTruthy();
+        expect(screen.queryByText(/Severity:/)).toBeNull();
+        expect(screen.queryByText('Recommendation')).toBeNull();
+        expect(screen.getByLabelText('Result, Measured: A K giant.')).toBeTruthy();
     });
 
     /** The reason, values and evidence stay in the API reply; the item offers no Details button. */

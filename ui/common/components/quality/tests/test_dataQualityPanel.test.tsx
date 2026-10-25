@@ -1,14 +1,13 @@
 /**
  * @fileoverview Tests of the Data Quality panel, the strip and the chip:
- * every state, the example badge, the actions and the Send to plan outcomes.
+ * every state, the example badge, and the actions.
  */
 
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { BackendError } from '../../../services/backendError';
 import { StatementKind } from '../../../types/backendTypes';
 
 const callBackendMock = vi.fn();
@@ -21,12 +20,9 @@ vi.mock('../../../utils/displayCoordinator', () => ({
     navigateToElement: (...args: unknown[]) => navigateMock(...args),
 }));
 
-import { planQueryKeys } from '../../../queries/qualityQueryKeys';
 import { DataQualityPanel } from '../DataQualityPanel';
 import { QualityStrip } from '../QualityStrip';
 import { QualityChip } from '../QualityChip';
-import { StatementItem } from '../StatementItem';
-import { useStatementActions } from '../useStatementActions';
 import { calibrationStatement, makeReport, makeStatement } from './qualityTestData';
 
 /**
@@ -151,101 +147,13 @@ describe('DataQualityPanel content', () => {
         expect(navigateMock).toHaveBeenCalledWith(expect.objectContaining({ action: 'showCalibrationRow' }));
     });
 
-    /** While the library cannot take statements, Send to plan is disabled with visible linked text. */
-    it('disables Send to plan with a visible reason', async () => {
+    /** Send to plan is retired: no button and no reason text. */
+    it('offers no Send to plan button', async () => {
         callBackendMock.mockResolvedValue(makeReport([calibrationStatement]));
         renderWithQuery(<DataQualityPanel targetId="M 81" />);
-        const button = await screen.findByRole('button', { name: 'Send to plan' });
-        expect((button as HTMLButtonElement).disabled).toBe(true);
-        const reasonId = button.getAttribute('aria-describedby') as string;
-        expect(document.getElementById(reasonId)?.textContent).toBe('Send to plan arrives with the library plan update');
-    });
-});
-
-/**
- * A test host that renders one statement with live Send to plan.
- * @return The host.
- */
-const SendHost: React.FC = () => {
-    const actions = useStatementActions('M 81', true);
-    return (
-        <ul>
-            <StatementItem itemKey="k" statement={calibrationStatement} actions={actions} />
-        </ul>
-    );
-};
-
-describe('Send to plan outcomes', () => {
-    /** Mocks plan:get (list and one session) and plan:edit. */
-    const mockPlan = (editResult: () => Promise<unknown>, plans: unknown[] = [{ id: 'S1' }]) => {
-        callBackendMock.mockImplementation((method: string, params: Record<string, unknown>) => {
-            if (method === 'plan:get') return Promise.resolve(params.session_id ? { id: 'S1', revision: 4 } : plans);
-            if (method === 'plan:edit') return editResult();
-            if (method === 'plan:create') return Promise.resolve({ id: 'S2', revision: 0 });
-            return Promise.reject(new Error(`unexpected ${method}`));
-        });
-    };
-
-    /** An accepted statement names the entry. */
-    it('adds and names the entry', async () => {
-        const user = userEvent.setup();
-        mockPlan(() => Promise.resolve({ changes: [{ kind: 'checklist_added', detail: 'Dark frames' }] }));
-        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-        client.setQueryData(planQueryKeys.list(), []);
-        client.setQueryData(planQueryKeys.session('S1'), { id: 'S1' });
-        render(
-            <QueryClientProvider client={client}>
-                <SendHost />
-            </QueryClientProvider>,
-        );
-        await user.click(screen.getByRole('button', { name: 'Send to plan' }));
-        expect(await screen.findByText(/Added to the plan: Dark frames/)).toBeTruthy();
-        expect(client.getQueryState(planQueryKeys.list())?.isInvalidated).toBe(true);
-        expect(client.getQueryState(planQueryKeys.session('S1'))?.isInvalidated).toBe(true);
-        const editCall = callBackendMock.mock.calls.find((call) => call[0] === 'plan:edit');
-        expect(editCall?.[1]).toMatchObject({ session_id: 'S1', expected_revision: 4 });
-    });
-
-    /** A repeat is reported as merged. */
-    it('reports a merge', async () => {
-        const user = userEvent.setup();
-        mockPlan(() => Promise.resolve({ changes: [{ kind: 'queue_merged', detail: 'L 60 s' }] }));
-        renderWithQuery(<SendHost />);
-        await user.click(screen.getByRole('button', { name: 'Send to plan' }));
-        expect(await screen.findByText(/Merged into the plan/)).toBeTruthy();
-    });
-
-    /** A rejection shows the library's reason as an alert that stays until dismissed. */
-    it('shows a rejection as an alert until dismissed', async () => {
-        const user = userEvent.setup();
-        mockPlan(() => Promise.reject(new BackendError({ code: 'invalid_argument', message: 'Gain 900 is not allowed.' })));
-        renderWithQuery(<SendHost />);
-        await user.click(screen.getByRole('button', { name: 'Send to plan' }));
-        const alert = await screen.findByRole('alert');
-        expect(alert.textContent).toContain('Gain 900 is not allowed.');
-        await user.click(screen.getByRole('button', { name: 'Dismiss' }));
-        expect(screen.queryByRole('alert')).toBeNull();
-    });
-
-    /** A revision conflict says so and keeps the statement. */
-    it('reports a revision conflict and keeps the statement', async () => {
-        const user = userEvent.setup();
-        mockPlan(() => Promise.reject(new BackendError({ code: 'conflict', message: 'stale' })));
-        renderWithQuery(<SendHost />);
-        await user.click(screen.getByRole('button', { name: 'Send to plan' }));
-        expect(await screen.findByText(/The plan changed in another window; reloaded\. Send again\?/)).toBeTruthy();
-        expect(screen.getByText('Take new darks.')).toBeTruthy();
-    });
-
-    /** With no plan, "Create tonight's plan" makes one and sends. */
-    it('offers to create a plan when there is none', async () => {
-        const user = userEvent.setup();
-        mockPlan(() => Promise.resolve({ changes: [{ kind: 'checklist_added', detail: 'Dark frames' }] }), []);
-        renderWithQuery(<SendHost />);
-        await user.click(screen.getByRole('button', { name: 'Send to plan' }));
-        await user.click(await screen.findByRole('button', { name: "Create tonight's plan" }));
-        await waitFor(() => expect(screen.getByText(/Added to the plan/)).toBeTruthy());
-        expect(callBackendMock.mock.calls.some((call) => call[0] === 'plan:create')).toBe(true);
+        await screen.findByRole('button', { name: 'Show in calibration library' });
+        expect(screen.queryByRole('button', { name: 'Send to plan' })).toBeNull();
+        expect(screen.queryByText(/Send to plan/)).toBeNull();
     });
 });
 

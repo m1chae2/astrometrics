@@ -2752,6 +2752,37 @@ export interface ObservationSession {
 }
 
 /**
+ * A stored session plus its progress, as `get_plan` returns it.
+ *
+ * The progress is worked out on each read and is not part of the stored
+ * session. Do not write this object back.
+ */
+export interface ObservationSessionWithProgress {
+  id: string;
+  nightDate: string;
+  status?: SessionStatus;
+  statusDetail?: string;
+  siteProfileId: string;
+  telescopeId: string;
+  cameraId: string;
+  queue?: QueuedObservationPackage[];
+  unplacedPackageDiagnostics?: InfeasibilityReason[];
+  divergenceRecords?: DivergenceRecord[];
+  faultRecords?: FaultRecord[];
+  meridianFlips?: MeridianFlipOutcome[];
+  targetSessionIds?: string[];
+  guidingSamples?: GuidingSample[];
+  weatherSamples?: WeatherSample[];
+  createdAt?: string;
+  closedAt?: string | null;
+  checklist?: ChecklistItem[];
+  framing?: Framing | null;
+  /** Counts the plan writes. Starts at 0. */
+  revision?: number;
+  progress?: SessionProgress | null;
+}
+
+/**
  * A reusable imaging request for one target.
  *
  * `target_id` references an existing `astrometricslib.models.target.Target`
@@ -2780,6 +2811,113 @@ export interface ObservationPackage {
   framing?: Framing | null;
   /** When the library last found every light row captured. None: not complete. */
   completed_at?: string | null;
+}
+
+/**
+ * What one suggestion refresh changed, as lists of package ids.
+ *
+ * Parameters
+ * ----------
+ * added : `list` [`str`]
+ * Suggested packages created.
+ * updated : `list` [`str`]
+ * Suggested packages whose rows or reason changed.
+ * deleted : `list` [`str`]
+ * Suggested packages removed (goal met, the rule stopped asking, or
+ * the night ended).
+ * completed : `list` [`str`]
+ * Planned packages found complete.
+ * reverted : `list` [`str`]
+ * Complete packages set back to planned because frames were set aside.
+ * checklist_item_ids : `list` [`str`]
+ * Checklist items added to tonight's session.
+ * notes : `list` [`str`]
+ * Plain sentences about anything skipped, such as a target whose report
+ * could not be built. Missing data never deletes a suggestion.
+ * as_of : `datetime`
+ * When the refresh ran (UTC).
+ */
+export interface PackageChange {
+  added?: string[];
+  updated?: string[];
+  deleted?: string[];
+  completed?: string[];
+  reverted?: string[];
+  checklistItemIds?: string[];
+  notes?: string[];
+  asOf?: string;
+}
+
+/**
+ * One line of the suggestion lifecycle log.
+ *
+ * Parameters
+ * ----------
+ * id : `str`
+ * A unique id for the line.
+ * time : `datetime`
+ * When it happened (UTC).
+ * event : `SuggestionEvent`
+ * What happened.
+ * package_id : `str`
+ * The package it happened to.
+ * target_id : `str`
+ * The package's target.
+ * rule_name : `str`
+ * The rule behind the suggestion, or ``"ranking"``.
+ * source_key : `str`
+ * What the suggestion came from. Empty for the whole package.
+ * cause : `str`
+ * Why it happened, such as ``"goal met"`` or ``"night ended"``.
+ * evidence_row_ids : `list` [`int`]
+ * The stored measurement rows behind the suggestion.
+ * values : `dict` [`str`, `float` or `str` or `None`]
+ * The numbers that mattered, such as the noise, the goal and the
+ * proposed frame count.
+ */
+export interface SuggestionLogEntry {
+  id?: string;
+  time?: string;
+  event: SuggestionEvent;
+  package_id: string;
+  target_id?: string;
+  rule_name?: string;
+  source_key?: string;
+  cause?: string;
+  evidence_row_ids?: number[];
+  values?: Record<string, number | string | null>;
+}
+
+/**
+ * A physical imaging rig's optics and safe pointing envelope.
+ *
+ * More than one may be configured in an `EquipmentCatalog`; exactly
+ * one is active. `flip_hour_angle_deg` is the single stored
+ * meridian-flip threshold; `meridian_flip_delay_min` is derived from
+ * it (`Wayfinding_Library_Architecture.md` Section 5.5, Equation (3)).
+ */
+export interface Telescope {
+  id: string;
+  name: string;
+  /** Effective focal length in millimetres. */
+  focal_length_mm: number;
+  /** Focal ratio (f/number). */
+  focal_ratio?: number;
+  altitude_limits_enabled?: boolean;
+  min_altitude_deg?: number;
+  max_altitude_deg?: number;
+  hour_angle_limits_enabled?: boolean;
+  max_hour_angle_hours?: number;
+  /** Hour angle past transit at which a meridian flip is triggered, in degrees. */
+  flip_hour_angle_deg?: number;
+  /** Hardware-control protocol driving this telescope's mount. */
+  mount_protocol?: string;
+  /** Hardware-control protocol driving this telescope's focuser. Lives here rather than on a standalone catalog entry because the focuser has no `EquipmentCatalog` entry of its own -- it is discovered heuristically off the same connection as the mount. */
+  focuser_protocol?: string;
+  /** Hardware-control protocol driving this telescope's filter wheel. Lives here rather than on a standalone catalog entry for the same reason as `focuser_protocol`. */
+  filter_wheel_protocol?: string;
+  /** Which guider guides this telescope: 'phd2' (PHD2), 'internal' (KStars/Ekos sends the mount its own guide pulses) or 'simulator' (a stand-in guide loop). */
+  guiding_protocol?: string;
 }
 
 /**
@@ -3364,6 +3502,30 @@ export interface MeridianFlipOutcome {
 }
 
 /**
+ * The progress of a whole session.
+ *
+ * Parameters
+ * ----------
+ * session_id : `str`
+ * The session.
+ * entries : `list` [`EntryProgress`]
+ * One per queue entry, in queue order.
+ * imaging_now_entry_id : `str` or `None`
+ * The entry being imaged now, or `None`.
+ * run_state : `RunState`
+ * Where the session stands.
+ * as_of : `datetime`
+ * When the counts were made (UTC).
+ */
+export interface SessionProgress {
+  sessionId: string;
+  entries?: EntryProgress[];
+  imagingNowEntryId?: string | null;
+  runState: RunState;
+  asOf?: string;
+}
+
+/**
  * A package-level dithering cadence, applied across a package's run.
  */
 export interface DitherConfig {
@@ -3411,6 +3573,20 @@ export interface PackageSuggestion {
   dismissedRows?: DismissedRow[];
   createdAt?: string;
   updatedAt?: string;
+}
+
+/**
+ * What happened to a suggestion or to a package the refresh looked at.
+ */
+export enum SuggestionEvent {
+  CREATED = "created",
+  UPDATED = "updated",
+  DELETED = "deleted",
+  DISMISSED = "dismissed",
+  UNDISMISSED = "undismissed",
+  COMPLETED = "completed",
+  REOPENED = "reopened",
+  PROMOTED = "promoted"
 }
 
 /**
@@ -4282,6 +4458,73 @@ export interface RecoveryAttempt {
 }
 
 /**
+ * The progress of one queue entry.
+ *
+ * Parameters
+ * ----------
+ * entry_id : `str`
+ * The queue entry id.
+ * target_id : `str`
+ * The entry's target.
+ * requested : `int`
+ * Light frames asked for, over all light rows.
+ * captured : `int`
+ * Light frames captured, each row capped at its request.
+ * flagged : `int`
+ * Flagged frames among them.
+ * not_judged : `int`
+ * Frames not judged yet.
+ * rows : `list` [`RowProgress`]
+ * The light rows, in order.
+ * newest_frame_time : `datetime` or `None`
+ * When the newest counted frame was taken. `None` when none was.
+ * state : `RunState`
+ * Where the entry stands.
+ * imaging_now : `bool`
+ * `True` when this is the entry being imaged now.
+ * note : `str`
+ * A plain sentence when the frames could not be read, else empty.
+ */
+export interface EntryProgress {
+  entryId: string;
+  targetId: string;
+  requested: number;
+  captured: number;
+  flagged: number;
+  notJudged: number;
+  rows?: RowProgress[];
+  newestFrameTime?: string | null;
+  state: RunState;
+  imagingNow?: boolean;
+  note?: string;
+}
+
+/**
+ * How far a session or one of its entries has got, from the frames.
+ *
+ * The library works it out from the frames that arrived (see
+ * `wayfindinglib.analytics.session_progress`). The value is typed so a
+ * screen never has to decide it.
+ *
+ * * `UPCOMING`: the night has not begun, or nothing has been captured yet.
+ * * `IMAGING`: a frame arrived a short while ago, so it is imaged now.
+ * * `IN_PROGRESS`: tonight, some frames are in, and nothing arrived lately.
+ * * `COMPLETE`: every light frame requested has been captured and judged.
+ * * `PARTLY_DONE`: the night is over and some, but not all, frames came in.
+ * * `NOT_RUN`: the night is over and no frame came in.
+ * * `UNKNOWN`: the frames could not be read, so the library cannot say.
+ */
+export enum RunState {
+  UPCOMING = "upcoming",
+  IMAGING = "imaging",
+  IN_PROGRESS = "in_progress",
+  COMPLETE = "complete",
+  PARTLY_DONE = "partly_done",
+  NOT_RUN = "not_run",
+  UNKNOWN = "unknown"
+}
+
+/**
  * A suggested row the user dismissed, kept so the dismissal can be undone.
  *
  * The row is taken out of the package's exposure list. The refresh does
@@ -4585,6 +4828,42 @@ export interface CapabilityDelegation {
 }
 
 /**
+ * The frames captured for one light row of an entry.
+ *
+ * Parameters
+ * ----------
+ * source_key : `str`
+ * The row's source key, when the library suggested it.
+ * filter_name : `str`
+ * The row's filter.
+ * exposure_sec : `float`
+ * The row's frame length in seconds.
+ * requested : `int`
+ * How many frames the row asks for.
+ * captured : `int`
+ * Matching frames that arrived, judged or not, and not set aside.
+ * judged : `int`
+ * How many of them have a stored quality judgment.
+ * flagged : `int`
+ * How many of the judged frames carry a quality flag. They still count.
+ * not_judged : `int`
+ * How many have no judgment yet. They do not complete the row.
+ * met : `bool`
+ * `True` when the judged frames reach the requested count.
+ */
+export interface RowProgress {
+  sourceKey?: string;
+  filterName?: string;
+  exposureSec: number;
+  requested: number;
+  captured: number;
+  judged: number;
+  flagged: number;
+  notJudged: number;
+  met: boolean;
+}
+
+/**
  * The time lost to one cause.
  *
  * Parameters
@@ -4706,6 +4985,8 @@ export const RPC_METHODS = [
   "observatory:list_cameras",
   "observatory:get_equipment_configuration",
   "observatory:set_active_camera",
+  "observatory:get_active_telescope",
+  "observatory:set_active_telescope",
   "observatory:enter_monitoring_mode",
   "observatory:enter_controller_mode",
   "ingestion:start",
@@ -4792,6 +5073,7 @@ export const RPC_METHODS = [
   "plan:create_package",
   "plan:edit",
   "plan:edit_package",
+  "plan:refresh_suggestions",
   "plan:tick_checklist_item",
   "advisory:target_report",
   "advisory:tonight",
@@ -4825,7 +5107,7 @@ export const UI_EVENTS = {
   "quality:measured": "quality:measured",
   /** A write changed the night plan. The payload is {sessionId, revision, changed}, where revision is the plan revision now stored and changed lists the kind of each change. */
   "plan:changed": "plan:changed",
-  /** A write created, edited, reopened, deleted or promoted an observation package. The payload is {packageId, targetId, kind, revision}; kind says which, and a promotion has no revision. */
+  /** A write created, edited, reopened, dismissed, brought back, re-framed, deleted or promoted an observation package, or a suggestion refresh ran. The payload is {packageId, targetId, kind, revision}; kind says which, and a promotion has no revision. After a refresh, kind is "refreshed", packageId and targetId are null, and the payload adds the counts added, updated, deleted, completed, reverted and checklistItemsAdded. */
   "packages:changed": "packages:changed",
   /** The mount, processing jobs or health status changed. */
   "system_state_update": "system_state_update",

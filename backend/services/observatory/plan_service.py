@@ -21,9 +21,12 @@ caller gets the ``conflict`` error code with the current revision in its
 details.
 
 The ``packages:changed`` payload is ``{packageId, targetId, kind, revision}``.
-``kind`` is ``created``, ``edited``, ``reopened``, ``deleted`` or ``promoted``
-(a suggested package added to the queue). The current session is tonight's:
-the night comes from the library's `observing_night_id`, never from the app.
+``kind`` is ``created``, ``edited``, ``reopened``, ``deleted``,
+``dismissed``, ``undismissed``, ``framing`` (only the framing changed) or
+``promoted`` (a suggested package added to the queue). The suggestion refresh
+sends ``refreshed`` instead (see `suggestion_refresh_worker`).
+The current session is tonight's: the night comes from the library's
+`observing_night_id`, never from the app.
 
 The event comes from the change record or the package the library returns,
 never from a second look at the database.
@@ -43,7 +46,7 @@ logger = logging.getLogger(__name__)
 class PlanService:
     """Read and change the night plan, and announce each change."""
 
-    def __init__(self, wayfinder: Any, socket_manager: Any = None) -> None:
+    def __init__(self, wayfinder: Any, socket_manager: Any = None, refresh_worker: Any = None) -> None:
         """Keep the Wayfinder that does the work and the event sender.
 
         Parameters
@@ -52,9 +55,13 @@ class PlanService:
             The shared Wayfinder.
         socket_manager : `SocketManager`, optional
             Sends events to the app windows. With none, nothing is announced.
+        refresh_worker : `SuggestionRefreshWorker`, optional
+            Runs the suggestion refresh. With none, `refresh_suggestions`
+            starts nothing.
         """
         self.wayfinder = wayfinder
         self._socket_manager = socket_manager
+        self._refresh_worker = refresh_worker
 
     def get_plan(self, session_id: str | None = None) -> Any:
         """Read one night plan, or list every recorded one.
@@ -71,7 +78,9 @@ class PlanService:
         """
         return self.wayfinder.planning.get_plan(session_id)
 
-    def list_packages(self, status: str | None = None, target: str | None = None) -> list[ObservationPackage]:
+    def list_packages(
+        self, status: str | None = None, target: str | None = None, include_dismissed: bool = False
+    ) -> list[ObservationPackage]:
         """List the observation package library, newest first.
 
         Parameters
@@ -80,24 +89,54 @@ class PlanService:
             Keep packages with this status.
         target : `str`, optional
             Keep packages for this target.
+        include_dismissed : `bool`, optional
+            Also list suggestions the user dismissed. They are left out by
+            default.
 
         Returns
         -------
         packages : `list` [`ObservationPackage`]
             The matching packages.
         """
-        return self.wayfinder.planning.get_plan(kind="packages", status=status, target=target)
+        return self.wayfinder.planning.get_plan(
+            kind="packages", status=status, target=target, include_dismissed=include_dismissed
+        )
 
     def current_session(self) -> Any:
         """Read tonight's session, the one session the app works with.
 
         Returns
         -------
-        session : `ObservationSession` or `None`
-            Tonight's session, or `None` if none was created yet. Reading
-            never creates one.
+        session : `ObservationSessionWithProgress` or `None`
+            Tonight's session with its progress (the frames requested and
+            captured for each entry), or `None` if none was created yet.
+            Reading never creates one.
         """
-        return self.wayfinder.planning.get_plan(night_id=observing_night_id(time.time()))
+        return self.wayfinder.planning.get_plan(
+            night_id=observing_night_id(time.time()), include=["progress"]
+        )
+
+    def refresh_suggestions(self, target_ids: list[str] | None = None) -> dict[str, Any]:
+        """Start a refresh of the suggested packages and the checklist.
+
+        The refresh runs in the background, one run at a time. Its result
+        arrives as a ``packages:changed`` event (kind ``refreshed``) and, if
+        the checklist grew, a ``plan:changed`` event.
+
+        Parameters
+        ----------
+        target_ids : `list` [`str`], optional
+            The targets whose data changed. Left out, every target.
+
+        Returns
+        -------
+        result : `dict`
+            ``{"started": True}`` when a worker took the request.
+        """
+        if self._refresh_worker is None:
+            return {"started": False}
+        self._refresh_worker.request(target_ids)
+        return {"started": True}
 
     def create_plan(self, night_id: str | None = None) -> Any:
         """Create an empty night plan to fill by hand.
@@ -175,11 +214,15 @@ class PlanService:
         priority: int | None = None,
         notes: str | None = None,
         name: str | None = None,
+        framing: dict[str, Any] | None = None,
         reopen: bool = False,
         delete: bool = False,
+        dismiss: bool = False,
+        undismiss: bool = False,
+        source_key: str | None = None,
         expected_revision: int | None = None,
     ) -> ObservationPackage:
-        """Change, reopen or delete one observation package and announce it.
+        """Change, reopen, dismiss or delete a package and announce it.
 
         Parameters
         ----------
@@ -197,10 +240,20 @@ class PlanService:
             The new free text.
         name : `str`, optional
             The new package name.
+        framing : `dict`, optional
+            The field center, camera rotation and mosaic panels to keep with
+            the package.
         reopen : `bool`, optional
             Set a complete package back to planned.
         delete : `bool`, optional
             Remove the package.
+        dismiss : `bool`, optional
+            Hide a suggested package (or one of its rows, with `source_key`)
+            until the evidence for it changes.
+        undismiss : `bool`, optional
+            Bring a dismissed suggestion back.
+        source_key : `str`, optional
+            The row of a suggestion to dismiss or bring back.
         expected_revision : `int`, optional
             The package revision the caller last read. A different stored
             revision raises `PlanRevisionConflictError`.
@@ -218,11 +271,29 @@ class PlanService:
             priority=priority,
             notes=notes,
             name=name,
+            framing=framing,
             reopen=reopen,
             delete=delete,
+            dismiss=dismiss,
+            undismiss=undismiss,
+            source_key=source_key,
             expected_revision=expected_revision,
         )
-        self._announce_package(package, "deleted" if delete else "reopened" if reopen else "edited")
+        if delete:
+            kind = "deleted"
+        elif reopen:
+            kind = "reopened"
+        elif dismiss:
+            kind = "dismissed"
+        elif undismiss:
+            kind = "undismissed"
+        elif framing is not None and not _changes_more_than_framing(
+            exposure_requests, dither_config, minimum_altitude_deg, priority, notes, name
+        ):
+            kind = "framing"
+        else:
+            kind = "edited"
+        self._announce_package(package, kind)
         return package
 
     def edit_plan(
@@ -378,7 +449,8 @@ class PlanService:
         package : `ObservationPackage`
             The package the library returned.
         kind : `str`
-            ``created``, ``edited``, ``reopened`` or ``deleted``.
+            ``created``, ``edited``, ``reopened``, ``deleted``, ``dismissed``,
+            ``undismissed`` or ``framing``.
         """
         if self._socket_manager is None:
             return
@@ -391,3 +463,19 @@ class PlanService:
                 "revision": package.revision,
             },
         )
+
+
+def _changes_more_than_framing(*values: Any) -> bool:
+    """Tell whether an edit set any value besides the framing.
+
+    Parameters
+    ----------
+    *values : `Any`
+        The other edit arguments. `None` means the caller left it out.
+
+    Returns
+    -------
+    more : `bool`
+        `True` if any of them was given.
+    """
+    return any(value is not None for value in values)

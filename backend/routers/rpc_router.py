@@ -128,6 +128,8 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "observatory:list_cameras": ("equipment_service", "list_camera_profiles"),
     "observatory:get_equipment_configuration": ("equipment_service", "get_equipment_configuration"),
     "observatory:set_active_camera": ("equipment_service", "set_active_camera"),
+    "observatory:get_active_telescope": ("equipment_service", "get_active_telescope"),
+    "observatory:set_active_telescope": ("equipment_service", "set_active_telescope"),
     "observatory:enter_monitoring_mode": ("equipment_service", "enter_monitoring_mode"),
     "observatory:enter_controller_mode": ("equipment_service", "enter_controller_mode"),
     # Ingestion of new frames
@@ -252,6 +254,7 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "plan:create_package": ("plan_service", "create_package"),
     "plan:edit": ("plan_service", "edit_plan"),
     "plan:edit_package": ("plan_service", "edit_package"),
+    "plan:refresh_suggestions": ("plan_service", "refresh_suggestions"),
     "plan:tick_checklist_item": ("plan_service", "tick_checklist_item"),
     # Quality advice and night history. Reads only; each kind has its own
     # method so each reply has one type. The history reads register no job.

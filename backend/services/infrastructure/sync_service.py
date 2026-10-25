@@ -10,6 +10,7 @@ it) and passes the log sync on, keeping the reply the app shows.
 
 import logging
 import threading
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from astrometricslib import AstrometricsError
@@ -21,12 +22,18 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+CALIBRATION_FOLDERS = frozenset({"Bias", "Dark", "Flat"})
+"""Sync names that are calibration folders, not targets."""
+
 
 class SyncService:
     """Run frame syncs in the background and pass log syncs on."""
 
     def __init__(
-        self, observatory_api: ObservatoryControl, measurement_announcer: MeasurementAnnouncer | None = None
+        self,
+        observatory_api: ObservatoryControl,
+        measurement_announcer: MeasurementAnnouncer | None = None,
+        suggestion_trigger: Callable[[list[str]], None] | None = None,
     ) -> None:
         """Keep the observatory control.
 
@@ -37,9 +44,14 @@ class SyncService:
         measurement_announcer : `MeasurementAnnouncer`, optional
             Told what the sync's measurement runs stored, so it can announce
             the quality rows. Nothing is announced without it.
+        suggestion_trigger : `Callable` [[`list` [`str`]], `None`], optional
+            Called with the synced target's id when a target sync finishes,
+            so the package suggestions can be refreshed (new frames change
+            what is complete). It must not raise; a failure is logged here too.
         """
         self._observatory = observatory_api
         self._measurement_announcer = measurement_announcer
+        self._suggestion_trigger = suggestion_trigger
 
     def start_sync(self, object_id: str) -> dict[str, Any]:
         """Start copying one target's (or calibration folder's) new frames.
@@ -60,6 +72,7 @@ class SyncService:
             try:
                 result = self._observatory.remote.sync_frames(object_id)
                 self._announce_measurements(object_id, result)
+                self._trigger_suggestions(object_id)
             except AstrometricsError as error:
                 logger.warning("Sync of %s failed (%s): %s", object_id, error.code, error.message)
             except Exception:  # the top of a background thread: log it, never lose it
@@ -69,6 +82,24 @@ class SyncService:
         sync_thread.start()
         thread_management._syncing[object_id] = sync_thread
         return {"started": True, "target_id": object_id}
+
+    def _trigger_suggestions(self, object_id: str) -> None:
+        """Ask for a suggestion refresh after a target's frames arrived.
+
+        Calibration folders (``Bias``, ``Dark``, ``Flat``) are not targets and
+        are skipped. A failure is logged and never changes the sync's result.
+
+        Parameters
+        ----------
+        object_id : `str`
+            The target (or calibration folder) that was synced.
+        """
+        if self._suggestion_trigger is None or object_id in CALIBRATION_FOLDERS:
+            return
+        try:
+            self._suggestion_trigger([object_id])
+        except Exception:  # a refresh trigger must never fail the sync: log it
+            logger.exception("Could not ask for a suggestion refresh after the %s sync", object_id)
 
     def _announce_measurements(self, object_id: str, sync_result: Any) -> None:
         """Tell the app which quality rows the sync stored.

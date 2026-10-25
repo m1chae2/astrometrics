@@ -137,6 +137,7 @@ from backend.services.infrastructure.system_status_service import (
 )
 from wayfindinglib.drivers.indi_interface import TelescopeStatus
 from wayfindinglib.models.control_status import SafetyStatus
+from wayfindinglib.models.equipment_and_site.equipment import Telescope
 from wayfindinglib.models.equipment_and_site.performance_envelope import (
     PerformanceEnvelope,
     TrackingRiskMap,
@@ -146,6 +147,7 @@ from wayfindinglib.models.planning.observation_package import ExposureRequest, O
 from wayfindinglib.models.planning.sequence_plan import SequenceItem, SequencePlan
 from wayfindinglib.models.planning.sequence_summary import SequenceSummary
 from wayfindinglib.models.planning.sky_source import SkySource
+from wayfindinglib.models.planning.suggestion_log import PackageChange, SuggestionLogEntry
 from wayfindinglib.models.planning.target_report import TargetDatasetReport
 from wayfindinglib.models.planning.tonight_ranking import TonightRanking
 from wayfindinglib.models.planning.visibility import (
@@ -169,6 +171,7 @@ from wayfindinglib.models.session.observation_session import (
     PlanChangeItem,
     WeatherSample,
 )
+from wayfindinglib.models.session.session_progress import ObservationSessionWithProgress
 from wayfindinglib.models.session.telemetry import (
     AlignmentAttempt,
     AlignmentSessionSummary,
@@ -614,7 +617,11 @@ def render_types() -> str:
         generate_closure(
             [
                 ObservationSession,
+                ObservationSessionWithProgress,
                 ObservationPackage,
+                PackageChange,
+                SuggestionLogEntry,
+                Telescope,
                 PlanChange,
                 PlanChangeItem,
                 ChecklistItem,

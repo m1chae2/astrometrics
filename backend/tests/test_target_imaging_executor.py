@@ -37,7 +37,9 @@ def executor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TargetImagingEx
     targets = {"M 81": Target(id="M 81", ra="09:55:33", dec="+69:03:55")}
     astrometrics = SimpleNamespace(
         targets=SimpleNamespace(get=lambda target_id, refresh=False: targets.get(target_id)),
-        quality=SimpleNamespace(capture_settings=lambda ids=None: {}),
+        # The library's frame counting also reads frame judgments; no target
+        # here has judged frames.
+        quality=SimpleNamespace(capture_settings=lambda ids=None: {}, query=lambda **kwargs: []),
     )
     telescope = Telescope(id="t1", name="Scope", focal_length_mm=450.0, focal_ratio=6.0)
     catalog = SimpleNamespace(

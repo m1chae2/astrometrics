@@ -82,11 +82,21 @@ class QualityMeasurementService:
         The science library, which does the measuring and the guarding.
     socket_manager : `SocketManager`, optional
         Sends events to the app windows. Nothing is announced without it.
+    suggestion_trigger : `Callable` [[`list` [`str`]], `None`], optional
+        Called with the target id after rows are announced, so the package
+        suggestions can be refreshed. It must not raise; a failure is logged
+        and ignored here too.
     """
 
-    def __init__(self, astrometrics: Any, socket_manager: Any = None) -> None:
+    def __init__(
+        self,
+        astrometrics: Any,
+        socket_manager: Any = None,
+        suggestion_trigger: Callable[[list[str]], None] | None = None,
+    ) -> None:
         self._astrometrics = astrometrics
         self._socket_manager = socket_manager
+        self._suggestion_trigger = suggestion_trigger
 
     def start_frame_measurements(self, target_id: str, limit: int | None = None) -> dict[str, Any]:
         """Start measuring a target's light frames in the background.
@@ -333,14 +343,20 @@ class QualityMeasurementService:
         observing_night_ids : `list` [`str`]
             The observing nights of the frames measured, sorted.
         """
-        if rows_written <= 0 or self._socket_manager is None:
+        if rows_written <= 0:
             return
-        self._socket_manager.broadcast_ui_event_sync(
-            "quality:measured",
-            {
-                "targetId": target_id,
-                "framesMeasured": frames_measured,
-                "rowsWritten": rows_written,
-                "observingNightIds": observing_night_ids,
-            },
-        )
+        if self._socket_manager is not None:
+            self._socket_manager.broadcast_ui_event_sync(
+                "quality:measured",
+                {
+                    "targetId": target_id,
+                    "framesMeasured": frames_measured,
+                    "rowsWritten": rows_written,
+                    "observingNightIds": observing_night_ids,
+                },
+            )
+        if self._suggestion_trigger is not None:
+            try:
+                self._suggestion_trigger([target_id])
+            except Exception:  # a refresh trigger must never fail an announcement: log it
+                logger.exception("Could not ask for a suggestion refresh after measuring %s", target_id)

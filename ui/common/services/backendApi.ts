@@ -179,6 +179,8 @@ export interface ActionRegistry {
     "observatory:get_equipment_configuration": { payload: Record<string, never>; response: EquipmentConfigurationResult | null };
     "telescope:slew_target": { payload: { target_name: string }; response: boolean };
     "observatory:set_active_camera": { payload: { camera_name: string }; response: boolean };
+    "observatory:get_active_telescope": { payload: Record<string, never>; response: import('../types/backendTypes').Telescope | null };
+    "observatory:set_active_telescope": { payload: { telescope_id: string; limits?: Record<string, number | boolean> }; response: boolean };
     "telescope:apply_promotion_decision": {
         payload: { capability: string; new_state: string; evidence_note?: string };
         response: Record<string, any>;
@@ -257,12 +259,13 @@ export interface ActionRegistry {
     // A write answers with the `conflict` error (current revision in its details) when
     // `expected_revision` is out of date.
     "plan:get": { payload: { session_id?: string }; response: import('../types/backendTypes').ObservationSession | ObservationSessionSummary[] };
-    "plan:current_session": { payload: Record<string, never>; response: import('../types/backendTypes').ObservationSession | null };
-    "plan:list_packages": { payload: { status?: string; target?: string }; response: import('../types/backendTypes').ObservationPackage[] };
+    "plan:current_session": { payload: Record<string, never>; response: import('../types/backendTypes').ObservationSessionWithProgress | null };
+    "plan:list_packages": { payload: { status?: string; target?: string; include_dismissed?: boolean }; response: import('../types/backendTypes').ObservationPackage[] };
     "plan:create": { payload: { night_id?: string }; response: import('../types/backendTypes').ObservationSession };
     "plan:create_package": { payload: { target: string; exposure_requests?: Array<Record<string, any>>; plan_items?: Array<Record<string, any>>; dither_config?: Record<string, any>; minimum_altitude_deg?: number; priority?: number; notes?: string }; response: import('../types/backendTypes').ObservationPackage };
     "plan:edit": { payload: { session_id: string; add?: Array<Record<string, any>>; order?: string[]; remove?: string[]; set_exposures?: Record<string, Array<Record<string, any>>>; add_checklist?: Array<Record<string, any>>; framing?: Record<string, any>; expected_revision?: number }; response: import('../types/backendTypes').PlanChange };
-    "plan:edit_package": { payload: { package_id: string; exposure_requests?: Array<Record<string, any>>; dither_config?: Record<string, any>; minimum_altitude_deg?: number; priority?: number; notes?: string; name?: string; reopen?: boolean; delete?: boolean; expected_revision?: number }; response: import('../types/backendTypes').ObservationPackage };
+    "plan:edit_package": { payload: { package_id: string; exposure_requests?: Array<Record<string, any>>; dither_config?: Record<string, any>; minimum_altitude_deg?: number; priority?: number; notes?: string; name?: string; framing?: Record<string, any>; reopen?: boolean; delete?: boolean; dismiss?: boolean; undismiss?: boolean; source_key?: string; expected_revision?: number }; response: import('../types/backendTypes').ObservationPackage };
+    "plan:refresh_suggestions": { payload: { target_ids?: string[] }; response: { started: boolean } };
     "plan:tick_checklist_item": { payload: { session_id: string; item_id: string; expected_revision?: number; note?: string; ticked_at?: string }; response: import('../types/backendTypes').PlanChange };
 
     // Ingestion
@@ -543,6 +546,7 @@ const IDEMPOTENT_READ_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
     'astronomy:spectral_class_summary',
     'astronomy:stars_by_spectral_class',
     'observatory:get_equipment_configuration',
+    'observatory:get_active_telescope',
     'observatory:list_cameras',
 ]);
 

@@ -112,6 +112,7 @@ READ_ONLY_METHODS = frozenset({
     "ingestion:status",
     "mosaic:preview",
     "observatory:get_equipment_configuration",
+    "observatory:get_active_telescope",
     "observatory:list_cameras",
     "observatory:safety_status",
     "plan:get",
@@ -194,9 +195,14 @@ LOCAL_WRITE_METHODS = frozenset({
     "observatory:enter_controller_mode",
     "observatory:enter_monitoring_mode",
     "observatory:set_active_camera",
+    # Saves the telescope's safety limits to the config file; no device
+    # command. The screen greys Apply while Ekos controls, but that is a
+    # screen rule (user decision), not a backend one.
+    "observatory:set_active_telescope",
     "plan:create",
     "plan:edit",
     "plan:edit_package",
+    "plan:refresh_suggestions",
     "plan:create_package",
     "telescope:apply_promotion_decision",
     "plan:tick_checklist_item",

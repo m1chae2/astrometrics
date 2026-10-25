@@ -102,6 +102,8 @@ RPC_METHODS: tuple[str, ...] = (
     "observatory:list_cameras",
     "observatory:get_equipment_configuration",
     "observatory:set_active_camera",
+    "observatory:get_active_telescope",
+    "observatory:set_active_telescope",
     "observatory:enter_monitoring_mode",
     "observatory:enter_controller_mode",
     # Ingestion of new frames
@@ -208,6 +210,7 @@ RPC_METHODS: tuple[str, ...] = (
     "plan:create_package",
     "plan:edit",
     "plan:edit_package",
+    "plan:refresh_suggestions",
     "plan:tick_checklist_item",
     # Quality advice and night history (all reads)
     "advisory:target_report",
@@ -265,8 +268,11 @@ UI_EVENTS: tuple[UiEvent, ...] = (
     ),
     UiEvent(
         "packages:changed",
-        "A write created, edited, reopened, deleted or promoted an observation package. The payload is "
-        "{packageId, targetId, kind, revision}; kind says which, and a promotion has no revision.",
+        "A write created, edited, reopened, dismissed, brought back, re-framed, deleted or promoted an "
+        "observation package, or a suggestion refresh ran. The payload is {packageId, targetId, kind, "
+        "revision}; kind says which, and a promotion has no revision. After a refresh, kind is "
+        '"refreshed", packageId and targetId are null, and the payload adds the counts added, updated, '
+        "deleted, completed, reverted and checklistItemsAdded.",
     ),
     UiEvent("system_state_update", "The mount, processing jobs or health status changed."),
     UiEvent("log", "A backend log line, for the app's log panel."),

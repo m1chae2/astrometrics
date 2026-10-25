@@ -112,7 +112,9 @@ def test_list_packages_passes_the_filters_through(setup: tuple[Any, _Sockets, Pl
     result = service.list_packages(status="planned", target="M 81")
 
     assert result[0].id == "pkg-1"
-    planning.get_plan.assert_called_once_with(kind="packages", status="planned", target="M 81")
+    planning.get_plan.assert_called_once_with(
+        kind="packages", status="planned", target="M 81", include_dismissed=False
+    )
     assert sockets.events == []
 
 
@@ -138,7 +140,7 @@ def test_current_session_reads_tonights_night_and_creates_nothing(
 
     assert service.current_session() is None
 
-    planning.get_plan.assert_called_once_with(night_id="2026-10-24")
+    planning.get_plan.assert_called_once_with(night_id="2026-10-24", include=["progress"])
     planning.create_plan.assert_not_called()
     assert sockets.events == []
 
@@ -210,6 +212,10 @@ def test_creating_a_session_still_asks_for_the_empty_session(
         ({"priority": 2}, "edited"),
         ({"reopen": True}, "reopened"),
         ({"delete": True}, "deleted"),
+        ({"dismiss": True, "source_key": "row-1"}, "dismissed"),
+        ({"undismiss": True}, "undismissed"),
+        ({"framing": {"ra_deg": 1.0}}, "framing"),
+        ({"framing": {"ra_deg": 1.0}, "notes": "x"}, "edited"),
     ],
 )
 def test_each_package_write_announces_once_with_its_kind(
@@ -277,3 +283,45 @@ def test_adding_a_suggested_package_to_the_queue_announces_the_promotion(
     assert [name for name, _ in sockets.events] == ["packages:changed", "plan:changed"]
     assert sockets.events[0][1]["packageId"] == "pkg-1"
     assert sockets.events[0][1]["kind"] == "promoted"
+
+
+def test_list_packages_can_include_dismissed_suggestions(setup: tuple[Any, _Sockets, PlanService]) -> None:
+    """`include_dismissed` reaches the library."""
+    planning, _, service = setup
+    planning.get_plan.return_value = []
+
+    service.list_packages(include_dismissed=True)
+
+    planning.get_plan.assert_called_once_with(
+        kind="packages", status=None, target=None, include_dismissed=True
+    )
+
+
+def test_edit_package_passes_the_suggestion_arguments_to_the_library(
+    setup: tuple[Any, _Sockets, PlanService],
+) -> None:
+    """Framing, dismiss, undismiss and source_key reach the library by name."""
+    planning, _, service = setup
+    planning.edit_package.return_value = _package(revision=2)
+
+    service.edit_package("pkg-1", framing={"ra_deg": 1.0}, dismiss=True, source_key="row-1")
+
+    kwargs = planning.edit_package.call_args.kwargs
+    assert kwargs["framing"] == {"ra_deg": 1.0}
+    assert kwargs["dismiss"] is True
+    assert kwargs["undismiss"] is False
+    assert kwargs["source_key"] == "row-1"
+
+
+def test_refresh_suggestions_hands_the_targets_to_the_worker() -> None:
+    """The RPC method only queues the work and reports that it started."""
+    worker = SimpleNamespace(requests=[])
+    worker.request = worker.requests.append
+    service = PlanService(
+        SimpleNamespace(planning=create_autospec(ObservationPlanning, instance=True)), None, worker
+    )
+
+    assert service.refresh_suggestions(["M 81"]) == {"started": True}
+    assert worker.requests == [["M 81"]]
+    assert PlanService(SimpleNamespace(), None).refresh_suggestions() == {"started": False}
+    assert rpc_registry._handlers["plan:refresh_suggestions"] == ("plan_service", "refresh_suggestions")

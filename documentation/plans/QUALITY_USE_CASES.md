@@ -287,19 +287,6 @@ The change control board reviewed it a second time on 2026-10-17, and its change
   the public quality calls and explains them. It cannot change settings, run the camera
   measurement of UC13, or command devices. When its tools cannot answer, it reports the gap.
 
-### UC15. Is tonight photometric?
-
-- **When:** during a night when the user is taking L frames for photometry, or the morning after.
-- **Where:** Observation Execution, beside the night's loss account.
-- **The user sees:** how much the zero point (the brightness scale set by catalog stars) varied
-  over the night, with its tolerance, and a plain answer: "Photometric: zero point steady within
-  0.02 mag over 3 h", "Not photometric: zero point varied by 0.15 mag from 23:10", or "Not enough
-  data: too few frames with catalog stars".
-- **Decisions it supports:** whether tonight's L frames can be used for photometry, or only for
-  imaging, and whether to switch to imaging targets for the rest of the night.
-- **Done right when:** the answer names the frames and stars it used, and nights the user knows
-  were clear and cloudy give the expected answer.
-
 ## 6. Points agreed
 
 Agreed with the user on 2026-10-17:

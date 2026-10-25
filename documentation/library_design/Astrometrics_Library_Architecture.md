@@ -16,7 +16,7 @@ Symbols and their units are listed in the [notation appendix](#appendix-a-notati
 
 **Approach.** One shared data model (Section 2) lets the five pipelines work on the same target and reuse each other's results. Each pipeline also checks its own input and output, and records each check as passed, failed, or not checked.
 
-**Scope.** This paper explains the theory: what each step does and why. It gives no tuned settings. Those are listed in `Astrometrics_Library_Implementation.md`, which also maps each idea to code. The theory of the quality measurements (noise, star shape, field rotation, clipping and the catalog zero point) is in the companion [quality measurements paper](Astrometrics_Quality_Measurements.md). The evidence behind each setting is in the validation register ([validation/index.md](validation/index.md)). The [API reference](../api/astrometricslib.rst) is generated from the source.
+**Scope.** This paper explains the theory: what each step does and why. It gives no tuned settings. Those are listed in `Astrometrics_Library_Implementation.md`, which also maps each idea to code. The evidence behind each setting is in the validation register ([validation/index.md](validation/index.md)). The [API reference](../api/astrometricslib.rst) is generated from the source.
 
 ### 1.1 Related work
 
@@ -99,9 +99,11 @@ Table 2 shows how each data model fills in as data moves through the pipelines.
 
 ## 3. Image stacking pipeline
 
-The stacking pipeline combines many exposures into one image. Combining boosts stellar signal and averages out noise and artifacts such as satellite streaks and cosmic ray hits. Evidence is in the [stacking register](validation/stacking.md).
+**In plain words.** This pipeline takes dozens of short, noisy photos, discards blurry frames and satellite streaks, and blends the rest into one deep, clean picture.
 
-### 3.1 Purpose and interfaces
+The stacking pipeline combines many exposures into one image. Combining boosts stellar signal and averages out noise and artifacts such as satellite streaks and cosmic ray hits. Evidence is in the [stacking register](validation/stacking.md). For a step-by-step review of its FITS headers, quality gates, and code flow, see the [Stacking review guide](pipelines/stacking.md).
+
+### 3.1 Inputs and outputs
 
 - **Inputs.** Raw light exposures and three master calibration frames ($M_{\text{bias}}, M_{\text{dark}}, M_{\text{flat}}$).
 - **Outputs.** A calibrated, stacked 2D image (broadband, or spectral, where each star is spread into a spectrum) and a quality record.
@@ -118,7 +120,7 @@ The numerator subtracts only the dark, a raw closed-shutter exposure that alread
 
 The masters are only as good as the frames chosen for them. Calibration frames must match the lights' gain and offset, and a binning mismatch blocks a frame, since binning merges pixels. Darks are sorted into temperature slots and never mixed, since dark current roughly doubles every few degrees. Every flat has its bias removed, even a master built from one flat. A master from very few frames is flagged. <!-- impl: astrometricslib.drivers.calibration_library.calibration_setting_key --> <!-- impl: astrometricslib.drivers.calibration_library.CalibrationLibrary.select_dark_frames --> <!-- impl: astrometricslib.drivers.calibration_library.temperature_slot_c --> <!-- impl: astrometricslib.drivers.siril_interface.build_flat_master_commands --> <!-- impl: astrometricslib.drivers.siril_interface.build_single_light_commands --> <!-- impl: astrometricslib.drivers.siril_interface.calibration_count_flags -->
 
-The same calibration frames give the camera's conversion gain and read noise, which the [quality measurements paper](Astrometrics_Quality_Measurements.md#3-camera-noise-from-calibration-frames) explains.
+The same calibration frames give the camera's conversion gain and read noise via photon transfer.
 
 Averaging $N$ calibrated exposures lowers random noise by about $\sqrt{N}$. A very bright value, such as a satellite streak, would pull the mean off, so at each pixel any value too far from the median is rejected. This is sigma clipping when the distance is measured in standard deviations ($\sigma$). The cutoff follows $N$, starting from Chauvenet's criterion [14], [15]: a value is an outlier when fewer than half of one such value is expected by chance among $N$ normal-noise samples:
 
@@ -140,7 +142,7 @@ $$
 **The floor trades one risk for another.** A higher floor protects good values but lets more weak outliers through.<!-- impl: astrometricslib.scripts.rejection_small_n_check -->
 :::
 
-Frames of different exposure lengths cannot be clipped together, since a long and a short frame hold very different light in the same pixel. Each length is stacked alone, then the groups are put on one brightness scale and combined with inverse-variance weights (one over the noise variance). A group's scale is the median ratio of its stars' fluxes to those of the reference group, the one with the most weight. Stars are used because faint pixels are mostly sky, which changes between nights. A group that is not one scale factor of the reference is left out. <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.combine_exposure_group_images --> <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.measure_group_gains_with_stars --> <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.measure_star_flux_ratios --> <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.measure_group_gains -->
+Stacking cannot clip exposures of different lengths together because pixels in long exposures accumulate more light than pixels in short exposures. The stacker groups frames by exposure length, stacks each group separately, scales the groups to match a reference brightness, and combines them using inverse-variance weights. To find the scale factor, the stacker calculates the median flux ratio of stars in each group against the reference group. The stacker measures stars rather than background sky because sky brightness varies across nights. The stacker discards any group that deviates from a single linear scale factor. <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.combine_exposure_group_images --> <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.measure_group_gains_with_stars --> <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.measure_star_flux_ratios --> <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.measure_group_gains -->
 
 A second weighting acts on single frames. For sky-limited frames, the squared signal-to-noise ratio grows with exposure, so equal weights waste the longer frames. The noise penalty $P$ of equal weights follows from the exposure times $\tau_j$:
 
@@ -150,23 +152,23 @@ $$
 
 $P$ is 1 for equal lengths. When it passes a tuned factor a little above one, each frame is weighted by its own measured noise. Spectral stacks use the group handling above. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.exposure_weighting.choose_stack_weight --> <!-- impl: astrometricslib.pipelines.stacking.pre_processing.exposure_weighting.equal_weight_noise_penalty -->
 
-### 3.3 Pipeline theory of operations
+### 3.3 Stacking procedure
 
-Frames are calibrated before they are aligned. Alignment puts each star on the same pixel in every frame. Ordinary images use full alignment (shift, rotation, stretch), but spectral images may only shift, so the axis along which the spectrum spreads is not distorted. Table 3 lists the steps.
+The stacker calibrates raw lights before aligning them. Alignment registers every star to the same pixel coordinate across all frames. Broad-band frames receive full alignment (shift, rotation, and stretch). Spectral frames receive shifts only, preventing distortion along the dispersion axis. Table 3 lists the steps.
 
-**Table 3.** Stacking pipeline execution sequence.
+**Table 3.** Stacking sequence.
 
-| Step | Pipeline phase | Description |
+| Step | Stage | Description |
 | --- | --- | --- |
-| 1 | Frame screening | Set aside frames that break the session's pattern (Section 3.4.1). |
-| 2 | Calibration | Match calibration frames to the lights and apply Equation (1). |
-| 3 | Quality safeguard | Keep the sharpest, roundest frames, but never fewer than a minimum. |
-| 4 | Alignment and outlier rejection | Align the frames and reject pixels with Equations (2) and (3). |
-| 5 | Combine | Average the surviving pixels, with exposure groups handled as in Section 3.2. |
+| 1 | Frame screening | Set aside frames that deviate from the session baseline (§3.4.1). |
+| 2 | Calibration | Apply dark, flat, and bias corrections using Equation (1). |
+| 3 | Frame selection | Keep the sharpest and roundest stars, preserving a minimum frame count. |
+| 4 | Alignment & rejection | Align frames and reject outlier pixels using Equations (2) and (3). |
+| 5 | Stacking | Average surviving pixels and combine exposure groups (§3.2). |
 
 <!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_homogeneity.find_dominant_gain_subset -->
 
-A stack request chooses the light frames, never mixing imaging and spectral frames or two cameras, and runs as a tracked job (a background task with recorded progress). When too few spectral frames register by star matching, the stack is retried with phase correlation [16], which finds the shift between two images from their overall patterns. Quarantined frames are moved, never deleted. A preview is stretched because linear data looks almost black, and StarNet [17] lets the stars be stretched separately. <!-- impl: astrometricslib.pipelines.stacking.stack_request.choose_frames_to_stack --> <!-- impl: astrometricslib.pipelines.stacking.stack_request.run_stack --> <!-- impl: astrometricslib.pipelines.stacking.stage.stack_frames --> <!-- impl: astrometricslib.pipelines.tasks.stack_frames_with_timeout --> <!-- impl: astrometricslib.pipelines.stacking.stack_runner.run_stack --> <!-- impl: astrometricslib.pipelines.stacking.calibration_ingest.build_ingest_report --> <!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.restore_quarantined_frames --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_preview.write_stack_preview --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.starnet_stretch.blend_stars --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.preview_remake.remake_stack_preview -->
+A stack run processes light frames from a single camera and optical mode (broadband or spectral). When star registration fails on spectral frames, the stacker falls back to phase correlation [16], which finds the shift between two images from their overall patterns. The stacker moves rejected frames to a separate folder without deleting raw files. To display the stacked linear data, the stacker applies a screen stretch, using StarNet [17] to stretch stars separately from the background. <!-- impl: astrometricslib.pipelines.stacking.stack_request.choose_frames_to_stack --> <!-- impl: astrometricslib.pipelines.stacking.stack_request.run_stack --> <!-- impl: astrometricslib.pipelines.stacking.stage.stack_frames --> <!-- impl: astrometricslib.pipelines.tasks.stack_frames_with_timeout --> <!-- impl: astrometricslib.pipelines.stacking.stack_runner.run_stack --> <!-- impl: astrometricslib.pipelines.stacking.calibration_ingest.build_ingest_report --> <!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.restore_quarantined_frames --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_preview.write_stack_preview --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.starnet_stretch.blend_stars --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.preview_remake.remake_stack_preview -->
 
 ### 3.4 Quality metrics and integration planning
 
@@ -183,7 +185,7 @@ $$
 $$
 
 A value clearly above 1 fails, since small misalignments blurred the stack. The other checks cover the share of rejected, saturated, zero (for example, a bias removed twice), and negative pixels, and whether a spectral stack's zero-order image jumps between frames. For several exposure lengths, each group must be one scale factor of the reference, no group may be missing, and raw frames must not be clipped at zero by a low camera offset. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_quality.expected_stack_fwhm --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_quality.zero_fraction_threshold --> <!-- impl: astrometricslib.pipelines.spectroscopy.utilities.registration_quality.evaluate_spectral_registration_quality --> <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.measure_exposure_group_gains --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_group_report.exposure_group_linearity_gate --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_group_report.exposure_groups_combined_gate --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_group_report.raw_frame_clipping_gate -->
-Besides gates, the pipelines store quality measurements. The [quality measurements paper](Astrometrics_Quality_Measurements.md) gives their theory: the noise a stack's frames predict in empty sky (its Section 4.1), the choice of empty apertures (Section 4.2), the master flat's pattern in an aperture (Section 4.3), the difference of two half stacks, which measures the random noise alone (Section 4.5), the effective width of the stars (Section 5.1), the star width across the field (Section 5.2), the rotation of each frame (Section 5.3), and the clipping of the target (Section 5.4).
+Besides gates, the pipelines store continuous quality measurements, such as noise in empty sky, aperture statistics, star shapes, and field rotation, as recorded in each pipeline's quality summary.
 
 The pipeline does not cross-check image quality against the telescope's reported state or judge the measured noise against the prediction or the $\sqrt{N}$ expectation (Section 9).
 
@@ -191,9 +193,11 @@ The pipeline does not cross-check image quality against the telescope's reported
 
 ## 4. Astrometry pipeline
 
-The astrometry pipeline finds exactly where a stacked image is pointed, a step called plate solving. It matches pixels to sky coordinates: Right Ascension $\alpha$ and Declination $\delta$, measured in degrees or arcseconds (1/3600 of a degree). The result is a World Coordinate System (WCS) [18], [19], a formula that converts any pixel position to a sky position and back. Evidence for its settings is in the [astrometry register](validation/astrometry.md).
+**In plain words.** This pipeline compares the star patterns in your photo to a star catalog to determine exactly where on the sky the telescope was pointing.
 
-### 4.1 Purpose and interfaces
+The astrometry pipeline finds exactly where a stacked image is pointed, a step called plate solving. It matches pixels to sky coordinates: Right Ascension $\alpha$ and Declination $\delta$, measured in degrees or arcseconds (1/3600 of a degree). The result is a World Coordinate System (WCS) [18], [19], a formula that converts any pixel position to a sky position and back. Evidence for its settings is in the [astrometry register](validation/astrometry.md). For a step-by-step review of its FITS headers, quality gates, and code flow, see the [Astrometry review guide](pipelines/astrometry.md).
+
+### 4.1 Inputs and outputs
 
 - **Inputs.** A stacked image and a rough estimate of the field's coordinates and pixel scale (arcseconds of sky per pixel).
 - **Outputs.** A WCS in the image's FITS header, a list of catalog-identified stars, and an astrometry quality record.
@@ -218,13 +222,13 @@ Plate solving connects pixel coordinates $(x,y)$ to sky coordinates $(\alpha, \d
 5. **Judging the fit.** Two numbers come from the solve. The *fit residual* is the root mean square (RMS) distance, in arcseconds, between each matched star's position under the fitted WCS and its position in the solver's index. An online solve returns no match table, so it has none. The *catalog match separation* is the RMS distance from each detected star to its nearest catalog star within the match radius. <!-- impl: astrometricslib.drivers.astrometry_net_driver.read_corr_fit_statistics --> <!-- impl: astrometricslib.pipelines.astrometry.post_processing.record_quality.astrometry_run_gates --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier.get_catalog_match_separation_rms_arcsec -->
 6. **Refitting to Gaia.** The solver fits a few dozen bright stars of its own index, which carry the index's errors, so a solution can be a pixel off and still agree with itself. The pipeline therefore fits a new low-order SIP solution to the detected stars matched to Gaia stars at the observation date. It drops stars far from the fit (blends, double stars, wrong matches) and repeats until the set is stable. The new solution replaces the solver's only when it fits better. The residual against Gaia is recorded either way, and it does not depend on the solver. The quality check judges the first available of three numbers: the RMS against Gaia, the solver's fit residual, and the catalog match separation. <!-- impl: astrometricslib.pipelines.astrometry.post_processing.record_quality._residual_and_basis --> <!-- impl: astrometricslib.pipelines.astrometry.processing.wcs_refinement.refine_wcs_with_gaia --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier._refine_wcs_against_gaia -->
 
-### 4.3 Pipeline theory of operations
+### 4.3 Astrometry procedure
 
 Table 4 lists the steps.
 
-**Table 4.** Astrometry pipeline execution sequence.
+**Table 4.** Astrometry sequence.
 
-| Step | Pipeline phase | Description |
+| Step | Stage | Description |
 | --- | --- | --- |
 | 1 | Source detection | Find stars. |
 | 2 | Quad pattern hashing | Turn each four-star shape into a numeric code (a hash) to look up in the index. |
@@ -250,9 +254,11 @@ The solver must find a WCS, and enough stars must match a catalog entry, or the 
 
 ## 5. Stellar photometry pipeline
 
-The photometry pipeline tracks how a star's brightness changes across a sequence of unstacked frames. It builds light curves and flags stars that vary. Evidence for its settings is in the [photometry register](validation/photometry.md).
+**In plain words.** This pipeline measures how much a star's brightness changes over time compared to steady neighboring stars, revealing flares, pulsations, or orbiting exoplanets.
 
-### 5.1 Purpose and interfaces
+The photometry pipeline tracks how a star's brightness changes across a sequence of unstacked frames. It builds light curves and flags stars that vary. Evidence for its settings is in the [photometry register](validation/photometry.md). For a step-by-step review of its FITS headers, quality gates, and code flow, see the [Photometry review guide](pipelines/photometry.md).
+
+### 5.1 Inputs and outputs
 
 - **Inputs.** Calibrated, unstacked light frames, the stars found on the session's first frame, and a solved WCS.
 - **Outputs.** Normalized light curves $\hat{F}_i(t)$ with a $1\sigma$ uncertainty and a mid-exposure time for every point, variable-star candidates, and a photometry quality record.
@@ -305,15 +311,15 @@ The photometry pipeline tracks how a star's brightness changes across a sequence
    $$
 
    A shuffle test with $N_{\text{sh}}$ shuffles cannot report a probability below $1/(N_{\text{sh}}+1)$, so searches that need it are repeated with more shuffles. <!-- impl: astrometricslib.pipelines.photometry.batch.search_periods_and_save --> <!-- impl: astrometricslib.pipelines.photometry.processing.periodicity_search.lomb_scargle_search --> <!-- impl: astrometricslib.pipelines.photometry.processing.periodicity_search.box_search --> <!-- impl: astrometricslib.pipelines.photometry.processing.periodicity_search.verdict_from_false_alarm --> <!-- impl: astrometricslib.pipelines.photometry.processing.periodicity_search.correlation_block_length --> <!-- impl: astrometricslib.pipelines.photometry.processing.period_checks.apply_verdict_checks --> <!-- impl: astrometricslib.pipelines.photometry.processing.family_wise_correction.apply_family_wise_correction -->
-9. **Catalog zero point of each frame.** Each frame also gets a catalog zero point, the offset between catalog and instrumental magnitudes, which cloud lowers. Its theory is in the [quality measurements paper](Astrometrics_Quality_Measurements.md#6-catalog-zero-point-of-a-frame).
+9. **Catalog zero point of each frame.** Each frame also gets a catalog zero point, the offset between catalog and instrumental magnitudes, which atmospheric extinction lowers.
 
-### 5.3 Pipeline theory of operations
+### 5.3 Photometry procedure
 
 Table 5 lists the steps.
 
-**Table 5.** Photometry pipeline execution sequence.
+**Table 5.** Photometry sequence.
 
-| Step | Pipeline phase | Description |
+| Step | Stage | Description |
 | --- | --- | --- |
 | 1 | Star tracking | Shift each star by the frame's drift and re-center it. |
 | 2 | Aperture photometry | Sum the light, subtract the sky, and compute the uncertainty (Equation (7)). |
@@ -339,9 +345,11 @@ The comparison set must hold a minimum number of stars, the same in every frame,
 
 ## 6. Stellar spectroscopy pipeline
 
-The spectroscopy pipeline extracts, calibrates, and classifies a star's spectrum from images taken through a transmission grating (a plate ruled with fine parallel lines, here a Star Analyser 200) in front of the camera. The grating spreads each star's light into a spectrum without a slit (slitless spectroscopy). Each star leaves an undispersed point image, the zero order, and beside it the first-order spectrum, which the pipeline measures. Evidence for its settings is in the [spectroscopy register](validation/spectroscopy.md).
+**In plain words.** This pipeline spreads starlight into a rainbow of colors to measure a star's surface temperature, chemical elements, and motion.
 
-### 6.1 Purpose and interfaces
+The spectroscopy pipeline extracts, calibrates, and classifies a star's spectrum from images taken through a transmission grating (a plate ruled with fine parallel lines, here a Star Analyser 200) in front of the camera. The grating spreads each star's light into a spectrum without a slit (slitless spectroscopy). Each star leaves an undispersed point image, the zero order, and beside it the first-order spectrum, which the pipeline measures. Evidence for its settings is in the [spectroscopy register](validation/spectroscopy.md). For a step-by-step review of its FITS headers, quality gates, and code flow, see the [Spectroscopy review guide](pipelines/spectroscopy.md).
+
+### 6.1 Inputs and outputs
 
 - **Inputs.** A stacked spectral image, the zero-order star position, the target's aperture size, the camera's quantum efficiency (QE) curve, the instrument response, and the airmass from the header.
 - **Outputs.** A wavelength-calibrated 1D spectrum $\Phi(\lambda)$, detected hydrogen (Balmer) lines, the dispersion angle, the closest spectral type with a measure of how clearly it wins, and a quality record.
@@ -378,13 +386,13 @@ The spectroscopy pipeline extracts, calibrates, and classifies a star's spectrum
 **A low score is not a correct type.** A wrong reference can also score low. The poor-match limit is only as good as the sample of stars used to place it. The gap limit is the smallest RMS distance between two neighboring references, so a smaller gap means the spectrum cannot prefer one over its neighbor even in principle. <!-- impl: astrometricslib.models.stellar_source.NO_GOOD_MATCH_RMS --> <!-- impl: astrometricslib.models.stellar_source.AMBIGUOUS_RMS_GAP -->
 :::
 
-### 6.3 Pipeline theory of operations
+### 6.3 Spectroscopy procedure
 
 Table 6 lists the steps.
 
-**Table 6.** Spectroscopy pipeline execution sequence.
+**Table 6.** Spectroscopy sequence.
 
-| Step | Pipeline phase | Description |
+| Step | Stage | Description |
 | --- | --- | --- |
 | 1 | Zero-order anchoring | Locate the undispersed position as the dispersion origin. |
 | 2 | Angle detection | Measure the dispersion tilt. |
@@ -409,9 +417,11 @@ The leftover zero-point offsets across the run must scatter by less than about o
 
 ## 7. Asteroid detection pipeline
 
-The asteroid detection pipeline finds, tracks, and identifies moving objects, meaning asteroids and comets, across unstacked frames. Stars stay fixed against each other, while a moving object shifts from frame to frame. Evidence for its settings is in the [asteroid detection register](validation/asteroid_detection.md).
+**In plain words.** This pipeline compares photos taken across a night to find dots of light that moved while the background stars stayed still.
 
-### 7.1 Purpose and interfaces
+The asteroid detection pipeline finds, tracks, and identifies moving objects, meaning asteroids and comets, across unstacked frames. Stars stay fixed against each other, while a moving object shifts from frame to frame. Evidence for its settings is in the [asteroid detection register](validation/asteroid_detection.md). For a step-by-step review of its FITS headers, quality gates, and code flow, see the [Asteroid detection review guide](pipelines/asteroid_detection.md).
+
+### 7.1 Inputs and outputs
 
 - **Inputs.** Unstacked light frames, their times $t_j$, and a WCS for each. A raw frame has no solved WCS, so one is estimated from the mount's reported pointing and shifted so the frame's stars line up with the stack's. <!-- impl: astrometricslib.pipelines.asteroid_detection.frame_wcs_composer.estimate_frame_wcs_from_mount_pointing --> <!-- impl: astrometricslib.pipelines.asteroid_detection.pipeline._estimate_bulk_pointing_correction_deg -->
 - **Outputs.** Straight-line tracks, each candidate's velocity $(\dot{\alpha}, \dot{\delta})$, ephemeris cross-matches (matches against predicted positions of known objects), and a quality record.
@@ -434,13 +444,13 @@ Stacking averages moving objects away, so detection works on single frames, in f
 
 Two further tools exist for a confirmed track, but no pipeline step calls either: a report in the Minor Planet Center (MPC) format [46] or as ADES text [47], and a rotation-period search with the period search of Section 5.2. <!-- impl: astrometricslib.pipelines.asteroid_detection.mpc_report.mpc_lines_for_candidate --> <!-- impl: astrometricslib.pipelines.asteroid_detection.rotation_period.find_rotation_period -->
 
-### 7.3 Pipeline theory of operations
+### 7.3 Asteroid detection procedure
 
 Table 7 lists the steps.
 
-**Table 7.** Asteroid detection pipeline execution sequence.
+**Table 7.** Asteroid detection sequence.
 
-| Step | Pipeline phase | Description |
+| Step | Stage | Description |
 | --- | --- | --- |
 | 1 | Single-frame detection | Detect point sources, each with a position error. |
 | 2 | Per-night chaining | Link dots and keep chains seen in at least $n_{\min}$ frames. |

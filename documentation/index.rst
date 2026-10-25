@@ -15,6 +15,48 @@ Astrometrics is a desktop application and a pair of Python libraries for astroph
 
 The documentation is grouped by what you want to do. :doc:`About_These_Docs` maps every document.
 
+Start by goal
+-------------
+
+.. grid:: 1 1 3 3
+    :gutter: 3
+
+    .. grid-item-card:: Using the desktop app
+        :link: Getting_Started
+        :link-type: doc
+
+        Set up and operate the telescope application:
+
+        * :doc:`Installation`
+        * :doc:`Getting_Started`
+        * :doc:`user_interface/user_guides/User_Manual`
+        * :doc:`user_interface/user_guides/Observatory_Control_and_Automation_Guide`
+
+    .. grid-item-card:: Developing with the codebase
+        :link: how_to/library_quick_start
+        :link-type: doc
+
+        Call or extend the Python libraries:
+
+        * :doc:`how_to/library_quick_start`
+        * :doc:`library_design/Astrometrics_Library_Implementation`
+        * :doc:`library_design/Wayfinding_Library_Implementation`
+        * :doc:`api/index`
+
+    .. grid-item-card:: Scientific methods and evidence
+        :link: library_design/Astrometrics_Pipeline_Dataflow
+        :link-type: doc
+
+        Explore the mathematics and validation:
+
+        * :doc:`library_design/Astrometrics_Pipeline_Dataflow`
+        * :doc:`library_design/Astrometrics_Library_Architecture`
+        * :doc:`library_design/Wayfinding_Quality_Judgment`
+        * :doc:`library_design/validation/index`
+
+Explore by section
+------------------
+
 .. grid:: 1 2 2 3
     :gutter: 3
 

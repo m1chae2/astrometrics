@@ -38,7 +38,6 @@ LIBRARY = REPO_ROOT / "astrometricslib"
 DESIGN_DIR = REPO_ROOT / "documentation" / "library_design"
 ARCHITECTURE = DESIGN_DIR / "Astrometrics_Library_Architecture.md"
 IMPLEMENTATION = DESIGN_DIR / "Astrometrics_Library_Implementation.md"
-QUALITY_MEASUREMENTS = DESIGN_DIR / "Astrometrics_Quality_Measurements.md"
 WAYFINDING_QUALITY_JUDGMENT = DESIGN_DIR / "Wayfinding_Quality_Judgment.md"
 REGISTER_DIR = DESIGN_DIR / "validation"
 
@@ -158,7 +157,6 @@ def _documentation_files() -> list[Path]:
     files.update(docs.glob("*.md"))
     files.update((docs / "how_to").glob("*.md"))
     files.update(DESIGN_DIR.glob("Astrometrics_Library_*.md"))
-    files.add(QUALITY_MEASUREMENTS)
     files.add(WAYFINDING_QUALITY_JUDGMENT)
     files.update((DESIGN_DIR / "pipelines").glob("*.md"))
     files.update(REGISTER_DIR.glob("*.md"))
@@ -324,22 +322,14 @@ def _numbered_sections(paper: Path) -> set[str]:
 def test_implementation_section_references_exist_in_the_architecture_paper() -> None:
     """Each "§n" in the implementation document names a real section.
 
-    A "§n" after the word "Quality" names a section of the quality
-    measurements paper. Every other "§n" names a section of the architecture
-    paper.
+    Every "§n" names a section of the architecture paper.
     """
     text = IMPLEMENTATION.read_text(encoding="utf-8")
-    quality_references = set(re.findall(r"Quality §(\d+(?:\.\d+)*)", text))
-    architecture_references = set(re.findall(r"(?<!Quality )§(\d+(?:\.\d+)*)", text))
+    architecture_references = set(re.findall(r"§(\d+(?:\.\d+)*)", text))
     architecture_sections = _numbered_sections(ARCHITECTURE)
-    quality_sections = _numbered_sections(QUALITY_MEASUREMENTS)
     unknown = sorted(architecture_references - architecture_sections)
-    unknown_quality = sorted(quality_references - quality_sections)
     assert architecture_references, "The implementation document cites no architecture sections"
     assert not unknown, f"Architecture sections cited by the implementation document do not exist: {unknown}"
-    assert not unknown_quality, (
-        f"Quality measurements sections cited by the implementation document do not exist: {unknown_quality}"
-    )
 
 
 def test_relative_links_and_anchors_resolve() -> None:
@@ -455,7 +445,7 @@ def test_numbered_equations_have_a_drawable_shape(path: Path) -> None:
 
 @pytest.mark.parametrize(
     "path",
-    sorted([*DESIGN_DIR.glob("*_Library_*.md"), QUALITY_MEASUREMENTS, WAYFINDING_QUALITY_JUDGMENT]),
+    sorted([*DESIGN_DIR.glob("*_Library_*.md"), WAYFINDING_QUALITY_JUDGMENT]),
     ids=lambda path: path.name,
 )
 def test_paper_equation_numbers_run_in_order(path: Path) -> None:

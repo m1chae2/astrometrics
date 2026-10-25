@@ -64,7 +64,6 @@ extensions = [
     "sphinx_last_updated_by_git",
     "ui_autodoc",
     "tutorial_indexer",
-    "audit_pipelines",
     "generate_pipeline_review_docs",
 ]
 

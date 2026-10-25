@@ -47,7 +47,6 @@ LLMS_REQUIRED = (
     "documentation/Glossary.md",
     "documentation/library_design/Astrometrics_Library_Architecture.md",
     "documentation/library_design/Astrometrics_Library_Implementation.md",
-    "documentation/library_design/Astrometrics_Quality_Measurements.md",
     "documentation/library_design/Wayfinding_Library_Architecture.md",
     "documentation/library_design/Wayfinding_Library_Implementation.md",
     "documentation/library_design/Wayfinding_Quality_Judgment.md",

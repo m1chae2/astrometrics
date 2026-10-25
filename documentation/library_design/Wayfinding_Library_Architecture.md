@@ -225,6 +225,8 @@ The observation session is the one object with shared ownership. Planning writes
 
 ## 4. Observation planning
 
+**In plain words.** Planning decides what targets to observe and when, creating an imaging schedule based on weather, moon phase, and telescope visibility limits.
+
 ### 4.1 Purpose and interfaces
 
 - **Inputs:** observation packages to attempt, a site profile, the active telescope specification, a target night, and optionally advice from the science-side archive.
@@ -242,7 +244,7 @@ A multi-panel request is a package *generator*, not a package field. A mosaic is
 <!-- impl: wayfindinglib.tasks.planning_tasks.mosaic_tasks.calculate_panels -->
 <!-- impl: wayfindinglib.tasks.planning_tasks.mosaic_tasks.create_mosaic -->
 
-Placing several packages in one night is a constrained scheduling problem. Each package has a visibility window shaped by the site's obstructions, the telescope's altitude range and its own altitude floor, and all compete for the same night. The architecture uses one stated rule: place whichever remaining package can start soonest, and break ties by priority. One justified rule is better than an under-validated tuned system when no past scheduling outcomes exist to check one against.
+Placing packages in one night is a constrained scheduling problem. Each package has a visibility window shaped by obstructions, telescope limits, and altitude floors. The scheduler uses one explicit rule: place whichever remaining package can start soonest, and break ties by priority.
 
 Placement checks visibility at sampled instants against the altitude floor, the telescope's upper altitude limit and the site's obstructions. The hour-angle bound and meridian flip are not placement constraints.
 
@@ -254,7 +256,7 @@ The Rubin scheduler also selects greedily, but it re-scores candidates continuou
 
 A package may start soonest or at a fixed clock time. Fixed-time requests are placed first, as anchors the others route around. Two overlapping fixed-time requests are both reported and neither is placed.
 
-A silent drop is not useful, so the operator is told *why* a package did not fit. Each outcome is one of a closed set of named reasons, on a channel separate from the queue: the target never clears the altitude floor; it clears the floor only inside a site obstruction; a clear window exists but is too short; a long enough window existed but earlier placements used it; or a fixed-time request cannot be met. Rubin instead gives an impossible candidate a score of negative infinity [6]. That suits a scheduler whose decisions no person reads one by one, but it loses the difference between "impossible" and "outscored", which an operator planning one night needs.
+The operator is told why unplaced packages did not fit, using a closed set of named reasons: never clearing the altitude floor, clearing only within obstructions, window too short, window consumed by earlier packages, or fixed-time conflict. Rubin assigns impossible candidates a score of negative infinity [6], but that loses the distinction between impossible and outscored needed by a single-night observer.
 
 <!-- impl: wayfindinglib.models.session.observation_session.InfeasibilityReasonCode -->
 <!-- impl: wayfindinglib.models.session.observation_session.InfeasibilityReason -->
@@ -297,6 +299,8 @@ Table 3 lists the steps of automatic package placement.
 - **Planning is hardware-free.** Placement reads equipment and site specifications as data and never contacts a device, so a night can be planned with nothing connected.
 
 ## 5. Observation execution
+
+**In plain words.** Execution carries out the night's scheduled queue step by step, driving the sequence and recording any faults or deviations.
 
 ### 5.1 Purpose and interfaces
 
@@ -425,6 +429,8 @@ Two related refits run inside control, not execution: the standing mount-mechani
 - **Recovery is bounded.** Every recovery sequence has an attempt count and a wait, and exhaustion escalates to the safe state.
 
 ## 6. Observatory control
+
+**In plain words.** Control directly operates the physical hardware (mount, camera, focuser, and dome) and automatically parks the equipment safely if conditions turn dangerous.
 
 ### 6.1 Purpose and interfaces
 

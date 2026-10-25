@@ -18,10 +18,10 @@ import { useExecutionQueue } from './hooks/useExecutionQueue';
 import type { SequenceObject } from './hooks/useExecutionQueue';
 import { useEquipmentCommands } from './hooks/useEquipmentCommands';
 import type { EquipmentCommandPolicy } from './hooks/useEquipmentCommandPolicy';
-import { DirectionalControl } from './panels/DirectionalControl';
-import { FilterWheelControl } from './panels/FilterWheelControl';
-import { FocuserControl } from './panels/FocuserControl';
-import { TelescopeControl } from './panels/TelescopeControl';
+import { DirectionalControl } from '../observatoryManager/panels/DirectionalControl';
+import { FilterWheelControl } from '../observatoryManager/panels/FilterWheelControl';
+import { FocuserControl } from '../observatoryManager/panels/FocuserControl';
+import { TelescopeControl } from '../observatoryManager/panels/TelescopeControl';
 import { ExecutionQueue } from './ExecutionQueue';
 import { TestFramePanel } from './TestFramePanel';
 

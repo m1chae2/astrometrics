@@ -6,7 +6,7 @@
 import React from 'react';
 import { SectionPanel } from '../common/components/SectionPanel';
 import { useTelescopeStatus } from '../common/hooks/useTelescopeStatus';
-import { GuidingTargetPlot, GuidingTrendsPlot } from './panels/GuidingStatusPanel';
+import { GuidingTargetPlot, GuidingTrendsPlot } from '../observatoryManager/panels/GuidingStatusPanel';
 
 /**
  * The guiding tab.

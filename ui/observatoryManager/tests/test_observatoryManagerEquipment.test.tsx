@@ -1,8 +1,7 @@
 /**
- * @fileoverview Tests of the Observatory Manager as the equipment display:
- * the setup panels render, no live control panel is present, device settings
- * are unavailable with a visible reason, the noise measurement asks before
- * saving, and the "Show in calibration library" listener.
+ * @fileoverview Tests of the camera profile and calibration library panels:
+ * the noise measurement asks before saving, and the "Show in calibration
+ * library" listener. The panels are not on the Observatory Manager for now.
  */
 
 import React from 'react';
@@ -26,7 +25,6 @@ vi.mock('../../common/hooks/useTelescopeStatus', () => ({
 vi.mock('../../common/context/AstrometricsContext', () => ({ useAstrometrics: () => ({ connected: true }) }));
 vi.mock('../../common/utils/appBootReadiness', () => ({ useReportModeReady: () => undefined }));
 
-import { ObservatoryManager } from '../ObservatoryManager';
 import { CameraProfilesPanel } from '../equipment/CameraProfilesPanel';
 import { CalibrationLibraryPanel } from '../calibration/CalibrationLibraryPanel';
 import { matchCalibrationRows, toLibraryRows } from '../calibration/calibrationRowMatch';
@@ -76,30 +74,6 @@ async function answer(method: string): Promise<unknown> {
 beforeEach(() => {
     callBackendMock.mockReset();
     callBackendMock.mockImplementation((method: string) => answer(method));
-});
-
-describe('ObservatoryManager', () => {
-    /** The setup panels are present and no live control panel remains. */
-    it('shows the setup panels and no live panel', async () => {
-        renderWithQuery(<ObservatoryManager />);
-        expect(await screen.findByText('Equipment Settings')).toBeTruthy();
-        expect(screen.getByText('Camera Profiles')).toBeTruthy();
-        expect(await screen.findByText('Calibration Library')).toBeTruthy();
-        expect(screen.getByText('Safety Limits')).toBeTruthy();
-        expect(screen.getByText('Alignment Status')).toBeTruthy();
-        for (const live of ['Telescope Control', 'Manual Guide', 'Focuser', 'Filter Wheel', 'Guiding Trends', 'Target List']) {
-            expect(screen.queryByText(live)).toBeNull();
-        }
-    });
-
-    /** Tracking settings are disabled with the reason as visible text. */
-    it('disables the tracking settings with a visible reason', async () => {
-        renderWithQuery(<ObservatoryManager />);
-        const input = await screen.findByLabelText('Alignment Accuracy');
-        expect((input as HTMLInputElement).disabled).toBe(true);
-        expect(input.getAttribute('aria-describedby')).toBe('observatory-command-reason');
-        expect(screen.getByTestId('control-mode-banner').textContent).toContain('Equipment commands are off');
-    });
 });
 
 describe('CameraProfilesPanel', () => {

@@ -1,7 +1,7 @@
 /**
  * @file usePackageLibrary.ts
  * @description Data hooks for the observation package library: `usePackageLibrary` reads the three
- * lists (Suggested, Planned, Complete) and `usePackageActions` creates and edits packages.
+ * lists (Suggested, Planned, Complete) and `usePackageActions` creates, edits and deletes packages.
  *
  * Backend calls: `plan:list_packages` (one call per status, in the order the library returns),
  * `plan:create_package` (a target name; the backend creates a missing catalog target and refuses an
@@ -58,9 +58,9 @@ export interface PackageEditFields {
 }
 
 /**
- * Creates and edits packages. A refusal (unknown target, revision conflict) is kept as text in
+ * Creates, edits and deletes packages. A refusal (unknown target, revision conflict) is kept as text in
  * `actionError` until dismissed.
- * @return The two actions and the refusal text.
+ * @return The three actions and the refusal text.
  */
 export const usePackageActions = () => {
     const queryClient = useQueryClient();
@@ -100,5 +100,25 @@ export const usePackageActions = () => {
         }
     }, [queryClient]);
 
-    return { createPackage, editPackage, actionError, dismissActionError: () => setActionError(null) };
+    /** Deletes a package with the revision the editor last saw. Resolves to true, or false when refused. */
+    const deletePackage = useCallback(async (
+        packageId: string,
+        expectedRevision: number | undefined
+    ): Promise<boolean> => {
+        setActionError(null);
+        try {
+            await callBackend(
+                'plan:edit_package',
+                { package_id: packageId, delete: true, expected_revision: expectedRevision },
+                { silent: true }
+            );
+            void queryClient.invalidateQueries({ queryKey: PACKAGE_LIBRARY_QUERY_KEY });
+            return true;
+        } catch (error) {
+            setActionError(`Could not delete the package: ${(error as Error).message}`);
+            return false;
+        }
+    }, [queryClient]);
+
+    return { createPackage, editPackage, deletePackage, actionError, dismissActionError: () => setActionError(null) };
 };

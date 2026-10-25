@@ -12,7 +12,7 @@ import { TargetListStatus } from './TargetListStatus';
 import { useExecutionQueue, SequenceObject } from './hooks/useExecutionQueue';
 import { usePackageLibrary, usePackageActions } from './hooks/usePackageLibrary';
 import { usePackageDraft } from './hooks/usePackageDraft';
-import { packageFromSequence, packageToSequenceItems } from './packageModel';
+import { findExistingPackage, packageFromSequence, packageToSequenceItems } from './packageModel';
 import { useTargetContext } from '../common/context/TargetContext';
 import { AddTargetModal } from '../common/components/AddTargetModal';
 import { createTarget } from '../common/services/targetService';
@@ -20,6 +20,7 @@ import { GenericDisplayLayout } from '../common/components/GenericDisplayLayout'
 import { useExecutionQueueQuery } from '../common/queries/useExecutionQueueQuery';
 import { useReportModeReady } from '../common/utils/appBootReadiness';
 import { ObservationPackage } from '../common/types/backendTypes';
+import { callBackend } from '../common/services/backendApi';
 import './observationManager.css';
 import './observationManagerLayout.css';
 
@@ -73,10 +74,40 @@ export const ObservationManager: React.FC = () => {
         setSelectedTarget(observationPackage.target_id);
     };
 
-    /** Starts a new package for a target (from the New package search or a Visible Targets row). */
+    /**
+     * Opens the target's planned package, else its suggested one, and creates a package only when it
+     * has neither. Uses the loaded lists; while they are not loaded, asks the library per target.
+     */
     const handleNewPackage = async (targetId: string) => {
+        let existing: ObservationPackage | null;
+        if (!library.isLoading && !library.error) {
+            existing = findExistingPackage(targetId, library.lists.planned, library.lists.suggested);
+        } else {
+            try {
+                const [planned, suggested] = await Promise.all(
+                    (['PLANNED', 'SUGGESTED'] as const).map((status) =>
+                        callBackend('plan:list_packages', { status, target: targetId }, { silent: true }))
+                );
+                existing = findExistingPackage(targetId, planned ?? [], suggested ?? []);
+            } catch {
+                existing = null;
+            }
+        }
+        if (existing) {
+            handleSelectPackage(existing);
+            return;
+        }
         const created = await libraryActions.createPackage(targetId);
         if (created) handleSelectPackage(created);
+    };
+
+    /** Deletes the shown library package (after the editor's confirmation) and clears the selection. */
+    const handleDeletePackage = async (shown: ObservationPackage) => {
+        const deleted = await editorActions.deletePackage(shown.id, shown.revision);
+        if (deleted) {
+            setSelectedPackageId(null);
+            setPickedSnapshot(null);
+        }
     };
 
     /** Loads a queued sequence into the editor for modification. */
@@ -144,6 +175,7 @@ export const ObservationManager: React.FC = () => {
                             onCancelEdit={handleCancelEdit}
                             errorMessage={editorActions.actionError}
                             onDismissError={editorActions.dismissActionError}
+                            onDeletePackage={handleDeletePackage}
                         />
                     }
                     rightPanel={

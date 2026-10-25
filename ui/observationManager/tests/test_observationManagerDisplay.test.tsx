@@ -6,7 +6,7 @@
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderWithProviders } from '../../common/tests/testUtils';
@@ -124,5 +124,87 @@ describe('ObservationManager display', () => {
         renderDisplay();
         await userEvent.click(await screen.findByText('M 31'));
         expect(await screen.findByRole('alert')).toHaveTextContent('unknown target');
+    });
+
+    it('opens the planned package of a clicked target and makes no create call', async () => {
+        const planned = { ...plannedPackage, id: 'pp', target_id: 'M_31', name: 'M 31 planned' };
+        const suggested = { ...plannedPackage, id: 'ps', target_id: 'M 31', name: 'M 31 suggested' };
+        answerBackend({
+            'plan:list_packages': (params) =>
+                params.status === 'PLANNED' ? [planned] : params.status === 'SUGGESTED' ? [suggested] : [],
+        });
+        renderDisplay();
+        await screen.findByRole('button', { name: 'Package for M_31' });
+        await userEvent.click(screen.getByText('M 31', { selector: 'td' }));
+        await waitFor(() => expect(screen.queryByText('Choose a package or New package')).not.toBeInTheDocument());
+        expect(callBackendMock.mock.calls.some(([action]) => action === 'plan:create_package')).toBe(false);
+        await userEvent.click(screen.getByRole('button', { name: 'Delete' }));
+        await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
+        await waitFor(() => expect(callBackendMock).toHaveBeenCalledWith(
+            'plan:edit_package', expect.objectContaining({ package_id: 'pp' }), expect.anything()
+        ));
+    });
+
+    it('opens the suggested package when the target has no planned one', async () => {
+        const suggested = { ...plannedPackage, id: 'ps', target_id: 'm 31', name: 'M 31 suggested' };
+        answerBackend({
+            'plan:list_packages': (params) => (params.status === 'SUGGESTED' ? [suggested] : []),
+        });
+        renderDisplay();
+        await userEvent.click(await screen.findByRole('tab', { name: /Suggested/ }));
+        await screen.findByRole('button', { name: 'Package for m 31' });
+        await userEvent.click(screen.getByText('M 31', { selector: 'td' }));
+        await waitFor(() => expect(screen.queryByText('Choose a package or New package')).not.toBeInTheDocument());
+        expect(callBackendMock.mock.calls.some(([action]) => action === 'plan:create_package')).toBe(false);
+    });
+
+    it('creates a package for a target that has none', async () => {
+        answerBackend();
+        renderDisplay();
+        await screen.findByRole('button', { name: 'Package for M 81' });
+        await userEvent.click(screen.getByText('M 31', { selector: 'td' }));
+        await waitFor(() => expect(callBackendMock).toHaveBeenCalledWith(
+            'plan:create_package', { target: 'M 31' }, expect.anything()
+        ));
+    });
+
+    describe('Delete', () => {
+        /** Opens the library package and clicks Delete in the editor. */
+        async function openAndClickDelete() {
+            await userEvent.click(await screen.findByRole('button', { name: 'Package for M 81' }));
+            await userEvent.click(screen.getByRole('button', { name: 'Delete' }));
+        }
+
+        it('does nothing when the confirmation is cancelled and returns focus to Delete', async () => {
+            answerBackend();
+            renderDisplay();
+            await openAndClickDelete();
+            await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+            expect(callBackendMock.mock.calls.some(([, params]) => params?.delete)).toBe(false);
+            await waitFor(() => expect(screen.getByRole('button', { name: 'Delete' })).toHaveFocus());
+            expect(screen.queryByText('Choose a package or New package')).not.toBeInTheDocument();
+        });
+
+        it('deletes with the expected revision and clears the selection', async () => {
+            answerBackend();
+            renderDisplay();
+            await openAndClickDelete();
+            await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
+            await waitFor(() => expect(callBackendMock).toHaveBeenCalledWith(
+                'plan:edit_package',
+                { package_id: 'p1', delete: true, expected_revision: 4 },
+                expect.anything()
+            ));
+            await waitFor(() => expect(screen.getAllByText('Choose a package or New package').length).toBeGreaterThan(0));
+        });
+
+        it('shows a refused delete as an alert and keeps the selection', async () => {
+            answerBackend({ 'plan:edit_package': () => { throw new Error('revision conflict'); } });
+            renderDisplay();
+            await openAndClickDelete();
+            await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
+            expect(await screen.findByRole('alert')).toHaveTextContent('revision conflict');
+            expect(screen.queryByText('Choose a package or New package')).not.toBeInTheDocument();
+        });
     });
 });

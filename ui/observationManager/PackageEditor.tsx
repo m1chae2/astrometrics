@@ -5,13 +5,14 @@
  * Image Planner adds rows, Dither Settings edits its dither and "Add to Sequence" adds the package
  * to the session. With no package picked, each panel says "Choose a package or New package".
  */
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { ImagePlanner } from './ImagePlanner';
 import { ImageList } from './ImageList';
 import { DitherSettings } from './DitherSettings';
 import { LastImageViewer } from './LastImageViewer';
 import { PlanItem } from './context/PlanningContext';
 import { SectionPanel } from '../common/components/SectionPanel';
+import { ConfirmDialog } from '../common/components/ConfirmDialog';
 import { EmptyState } from '../common/components/EmptyState';
 import { captureTestFrame } from '../common/services/imaging/captureService';
 import { emitToast } from '../common/utils/emitToast';
@@ -38,6 +39,8 @@ export interface PackageEditorProps {
     /** Text of a refused save (for example a revision conflict), or null. Stays until dismissed. */
     errorMessage?: string | null;
     onDismissError?: () => void;
+    /** Called after the user confirms Delete for the shown library package. Omit to hide Delete. */
+    onDeletePackage?: (editedPackage: ObservationPackage) => void;
 }
 
 /**
@@ -48,6 +51,7 @@ export interface PackageEditorProps {
 export const PackageEditor: React.FC<PackageEditorProps> = ({
     editedPackage, onAddExposure, onUpdateExposure, onRemoveExposure, onChangeDither,
     onAddToSequence, isEditingQueueEntry = false, onCancelEdit, errorMessage = null, onDismissError,
+    onDeletePackage,
 }) => {
     /** Index of the exposure row being edited in the Image Planner, if any. */
     const [editingIndex, setEditingIndex] = useState<number | null>(null);
@@ -58,6 +62,11 @@ export const PackageEditor: React.FC<PackageEditorProps> = ({
     const [imgExposure, setImgExposure] = useState(60);
     const [imgFilter, setImgFilter] = useState('L');
     const [imgDelay, setImgDelay] = useState(0);
+
+    /** True while the Delete confirmation is open. */
+    const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+    /** The Delete button, so focus can return to it when the dialog is cancelled. */
+    const deleteButtonRef = useRef<HTMLButtonElement>(null);
 
     const requests = editedPackage?.exposure_requests ?? [];
     const listItems: PlanItem[] = requests.map((request, index) => ({
@@ -108,10 +117,30 @@ export const PackageEditor: React.FC<PackageEditorProps> = ({
         );
     };
 
+    /** Closes the Delete dialog and puts focus back on the Delete button. */
+    const closeDeleteDialog = () => {
+        setIsConfirmingDelete(false);
+        window.setTimeout(() => deleteButtonRef.current?.focus(), 0);
+    };
+
+    /** Runs the delete after the user confirmed. */
+    const confirmDelete = () => {
+        setIsConfirmingDelete(false);
+        if (editedPackage && onDeletePackage) onDeletePackage(editedPackage);
+    };
+
     const canAdd = !!editedPackage && requests.length > 0;
 
     return (
         <div className="target-planner">
+            <ConfirmDialog
+                open={isConfirmingDelete}
+                title="Delete package"
+                message={`Delete the package for ${editedPackage?.target_id ?? ''}? This cannot be undone.`}
+                confirmLabel="Delete"
+                onCancel={closeDeleteDialog}
+                onConfirm={confirmDelete}
+            />
             {errorMessage && (
                 <div className="package-library__error" role="alert">
                     <span>{errorMessage}</span>
@@ -186,6 +215,16 @@ export const PackageEditor: React.FC<PackageEditorProps> = ({
                                             onClick={() => editedPackage && onAddToSequence(editedPackage)}
                                         >
                                             Add to Sequence
+                                        </button>
+                                    )}
+                                    {onDeletePackage && !isEditingQueueEntry && (
+                                        <button
+                                            type="button"
+                                            ref={deleteButtonRef}
+                                            className="btn btn--danger"
+                                            onClick={() => setIsConfirmingDelete(true)}
+                                        >
+                                            Delete
                                         </button>
                                     )}
                                 </div>

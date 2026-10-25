@@ -91,7 +91,7 @@ describe('ObservatoryManager layout', () => {
         expect(screen.getByText('Camera Profiles')).toBeTruthy();
         expect(screen.getByText('Calibration Library')).toBeTruthy();
         expect(screen.getByTestId('camera-noise-example')).toBeTruthy();
-        expect(await screen.findByText('Dark')).toBeTruthy();
+        expect(await screen.findByText('Darks')).toBeTruthy();
     });
 
     /** Command controls are disabled; hover reason and aria-describedby carry the reason. */
@@ -135,7 +135,7 @@ describe('ObservatoryManager layout', () => {
     /** A request that arrives while the display is open highlights its row. */
     it('highlights the requested calibration row', async () => {
         renderDisplay();
-        await screen.findByText('Dark');
+        await screen.findByText('Darks');
         act(() => {
             window.dispatchEvent(new CustomEvent('astrometrics:showCalibrationRow', {
                 detail: { calibrationKey: 'dark', captureSetting: { camera: 'ZWO ASI533MM Pro', gainSetting: 100, offset: 10, binning: 1 }, rule: 'r' },

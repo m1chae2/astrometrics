@@ -1,22 +1,6 @@
 @import "../common/styles/scrollbars.css";
 @import "../common/styles/animations.css";
 
-.observation-manager {
-    height: 100%;
-}
-
-.observation-manager__queue {
-    flex: 3;
-    min-height: 0;
-    overflow: hidden;
-}
-
-.observation-manager__status-wrapper {
-    flex: 1;
-    min-height: 0;
-    overflow: hidden;
-}
-
 /* Target Planner Layout */
 .target-planner {
     display: flex;
@@ -249,13 +233,6 @@
 
 .mosaic-planner__actions {
     margin-top: 8px;
-}
-
-.observation-manager__right-panel {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    height: 100%;
 }
 
 /* Target List Status */

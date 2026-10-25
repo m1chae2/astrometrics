@@ -5,6 +5,7 @@ import { SectionPanel } from '../common/components/SectionPanel';
 import { beginImagingSession } from '../common/services/sequencerService';
 import '../common/styles/panels.css';
 import './executionQueue.css';
+import './observationManagerLayout.css';
 
 interface Props {
     queue: SequenceObject[];
@@ -13,7 +14,10 @@ interface Props {
     reorderQueue: (queue: SequenceObject[]) => void;
 }
 
-// REQ: OBM-4: Execution Queue Management
+/**
+ * The Execution Queue strip: the session's packages as cards in a row, with Start Imaging Session.
+ * REQ: OBM-4: Execution Queue Management
+ */
 export const ExecutionQueue: React.FC<Props> = ({ queue, removeFromQueue, onEdit, reorderQueue }) => {
     const [expandedId, setExpandedId] = useState<string | null>(null);
     const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
@@ -92,9 +96,26 @@ export const ExecutionQueue: React.FC<Props> = ({ queue, removeFromQueue, onEdit
     };
 
     return (
-        <SectionPanel title="Execution Queue" className="execution-queue-panel flex-auto">
+        <SectionPanel
+            title="Execution Queue"
+            className="execution-queue-panel execution-queue-strip"
+            headerContent={
+                <button
+                    className="btn btn--tiny btn--primary"
+                    onClick={handleStartSession}
+                    disabled={isStarting || queue.length === 0}
+                >
+                    {isStarting ? 'Starting...' : 'Start Imaging Session'}
+                </button>
+            }
+        >
             {/* REQ: OBM-4.1: The display SHALL present a queue of all planned sequences. */}
             <div className="queue-list">
+                {localQueue.length === 0 && (
+                    <div className="queue-empty">
+                        No packages in this session yet. Pick a package and choose Add to Sequence.
+                    </div>
+                )}
                 {localQueue.map((item, idx) => (
                     <ImagingCard
                         key={item.id}
@@ -118,22 +139,6 @@ export const ExecutionQueue: React.FC<Props> = ({ queue, removeFromQueue, onEdit
                         } as React.CSSProperties}
                     />
                 ))}
-                {Array.from({ length: Math.max(0, 6 - localQueue.length) }).map((_, idx) => (
-                    <div key={`empty-${idx}`} className="imaging-card placeholder">
-                        <div className="card-header card-header--empty">
-                            <span className="card-title">Empty Slot</span>
-                        </div>
-                    </div>
-                ))}
-            </div>
-            <div className="execution-queue-footer">
-                <button
-                    className="btn btn--primary btn--full-width"
-                    onClick={handleStartSession}
-                    disabled={isStarting || queue.length === 0}
-                >
-                    {isStarting ? 'Starting...' : 'Start Imaging Session'}
-                </button>
             </div>
         </SectionPanel>
     );

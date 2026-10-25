@@ -11,11 +11,17 @@ import { SectionPanel } from '../common/components/SectionPanel';
 
 import { useTargetVisibility } from './hooks/useTargetVisibility';
 
+/** Props of the Visible Targets panel. */
+export interface TargetListStatusProps {
+    /** Called with the target id when the user clicks a row (starts a new package for it). */
+    onNewPackage?: (targetId: string) => void;
+}
+
 /**
- * Component to display a table of visible celestial targets.
+ * Component to display a table of visible celestial targets. A row click starts a new package.
  * REQ: OBM-1.5: The system SHALL display visibility status for targets.
  */
-export const TargetListStatus: React.FC = () => {
+export const TargetListStatus: React.FC<TargetListStatusProps> = ({ onNewPackage }) => {
     const { visibleTargets, loading } = useTargetVisibility();
     return (
         <SectionPanel title="Visible Targets" className="visible-targets-panel flex-auto">
@@ -31,7 +37,19 @@ export const TargetListStatus: React.FC = () => {
                     </thead>
                     <tbody>
                         {visibleTargets.map((target, idx) => (
-                            <tr key={idx}>
+                            <tr
+                                key={idx}
+                                className={onNewPackage ? 'visible-targets__row' : undefined}
+                                tabIndex={onNewPackage ? 0 : undefined}
+                                title={onNewPackage ? 'Start a new package for this target' : undefined}
+                                onClick={onNewPackage ? () => onNewPackage(target.id) : undefined}
+                                onKeyDown={onNewPackage ? (event) => {
+                                    if (event.key === 'Enter' || event.key === ' ') {
+                                        event.preventDefault();
+                                        onNewPackage(target.id);
+                                    }
+                                } : undefined}
+                            >
                                 <td>{target.id}</td>
                                 <td>{`${target.altitude_deg.toFixed(1)}°`}</td>
                                 <td>{`${target.azimuth_deg.toFixed(1)}°`}</td>

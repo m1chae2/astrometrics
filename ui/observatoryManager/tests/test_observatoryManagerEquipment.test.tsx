@@ -7,7 +7,7 @@
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MeasurementStatus } from '../../common/types/backendTypes';
 
@@ -134,6 +134,87 @@ describe('CameraProfilesPanel', () => {
 });
 
 describe('CalibrationLibraryPanel', () => {
+    /** The old calibration panel look: camera picker, Darks table, totals. */
+    it('shows the camera picker, the Darks table and the totals', async () => {
+        callBackendMock.mockResolvedValue(libraryReply);
+        renderWithQuery(<CalibrationLibraryPanel />);
+        await screen.findByText('Darks');
+        const picker = screen.getByLabelText('Camera:') as HTMLSelectElement;
+        expect(picker.value).toBe('ZWO ASI533MM Pro');
+        const table = screen.getByRole('table', { name: 'Darks' });
+        const headers = within(table).getAllByRole('columnheader').map((header) => header.textContent);
+        expect(headers).toEqual(['Exposure', 'Offset', 'Count']);
+        expect(within(table).getAllByRole('row')).toHaveLength(3);
+        expect(within(table).getAllByText('60s')).toHaveLength(2);
+        expect(screen.getByText('Biases:').nextSibling?.textContent).toBe('30');
+        expect(screen.getByText('Flat Frames:').nextSibling?.textContent).toBe('0');
+    });
+
+    /** Choosing another camera shows only that camera's rows. */
+    it('filters by the chosen camera', async () => {
+        callBackendMock.mockResolvedValue({
+            ...libraryReply,
+            darks: [...libraryReply.darks, { camera: 'Nikon D5300', iso: '800', offset: null, binning: '1x1', exposure: 30, count: 7 }],
+            flats: [{ camera: 'Nikon D5300', iso: '800', filter: 'L', count: 4 }],
+        });
+        renderWithQuery(<CalibrationLibraryPanel />);
+        await screen.findByText('Darks');
+        await userEvent.selectOptions(screen.getByLabelText('Camera:'), 'Nikon D5300');
+        const table = screen.getByRole('table', { name: 'Darks' });
+        expect(within(table).getAllByRole('row')).toHaveLength(2);
+        expect(within(table).getByText('30s')).toBeTruthy();
+        expect(screen.getByText('Flat Frames:').nextSibling?.textContent).toBe('4');
+        expect(screen.getByText('Biases:').nextSibling?.textContent).toBe('0');
+    });
+
+    /** Refresh reads the library again. */
+    it('refreshes the library from the refresh button', async () => {
+        callBackendMock.mockResolvedValue(libraryReply);
+        renderWithQuery(<CalibrationLibraryPanel />);
+        await screen.findByText('Darks');
+        const before = callBackendMock.mock.calls.length;
+        await userEvent.click(screen.getByRole('button', { name: 'Refresh calibration library' }));
+        await waitFor(() => expect(callBackendMock.mock.calls.length).toBeGreaterThan(before));
+    });
+
+    /** Rows that differ only by gain or binning still get unique keys. */
+    it('does not warn about duplicate React keys', async () => {
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        callBackendMock.mockResolvedValue({
+            ...libraryReply,
+            darks: [
+                { camera: 'ZWO ASI533MM Pro', iso: '100', offset: 10, binning: '1x1', exposure: 60, count: 20 },
+                { camera: 'ZWO ASI533MM Pro', iso: '100', offset: 10, binning: '2x2', exposure: 60, count: 5 },
+            ],
+        });
+        renderWithQuery(<CalibrationLibraryPanel />);
+        await screen.findByText('Darks');
+        const keyWarnings = errorSpy.mock.calls.filter((call) => String(call[0]).includes('same key'));
+        errorSpy.mockRestore();
+        expect(keyWarnings).toHaveLength(0);
+    });
+
+    /** A bias request highlights the Biases total. */
+    it('highlights the Biases total for a bias request', async () => {
+        callBackendMock.mockResolvedValue(libraryReply);
+        renderWithQuery(<CalibrationLibraryPanel />);
+        await screen.findByText('Darks');
+        act(() => {
+            window.dispatchEvent(new CustomEvent('astrometrics:showCalibrationRow', {
+                detail: { calibrationKey: 'bias', captureSetting: { camera: 'ZWO ASI533MM Pro' }, rule: 'r' },
+            }));
+        });
+        await waitFor(() => expect(document.querySelectorAll('[data-highlighted="true"]').length).toBe(1));
+        expect(document.querySelector('[data-highlighted="true"]')?.textContent).toContain('Biases:');
+    });
+
+    /** The loading state shows while the first read is pending. */
+    it('shows the loading state', () => {
+        callBackendMock.mockReturnValue(new Promise(() => undefined));
+        renderWithQuery(<CalibrationLibraryPanel />);
+        expect(screen.getByText('Loading…').getAttribute('aria-busy')).toBe('true');
+    });
+
     /** An empty library says what to do. */
     it('shows the empty state', async () => {
         callBackendMock.mockResolvedValue({ detail: 'counts', darks: [], biases: [], flats: [] });
@@ -152,7 +233,7 @@ describe('CalibrationLibraryPanel', () => {
     it('highlights the rows a request matches', async () => {
         callBackendMock.mockResolvedValue(libraryReply);
         renderWithQuery(<CalibrationLibraryPanel />);
-        await screen.findAllByText('Dark');
+        await screen.findByText('Darks');
         act(() => {
             window.dispatchEvent(new CustomEvent('astrometrics:showCalibrationRow', {
                 detail: { calibrationKey: 'dark', captureSetting: { camera: 'ZWO ASI533MM Pro', gainSetting: 100, offset: 10, binning: 1 }, rule: 'r' },
@@ -166,7 +247,7 @@ describe('CalibrationLibraryPanel', () => {
     it('says "No calibration row matches" when nothing matches', async () => {
         callBackendMock.mockResolvedValue(libraryReply);
         renderWithQuery(<CalibrationLibraryPanel />);
-        await screen.findAllByText('Dark');
+        await screen.findByText('Darks');
         act(() => {
             window.dispatchEvent(new CustomEvent('astrometrics:showCalibrationRow', {
                 detail: { calibrationKey: 'flat', captureSetting: { camera: 'ZWO ASI533MM Pro', gainSetting: 100 }, rule: 'r' },

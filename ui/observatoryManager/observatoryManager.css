@@ -51,13 +51,23 @@
 }
 
 /* Calibration library (moved from the Observation Manager) */
-.calibration-controls { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; font-size: var(--compact-font-size); color: var(--text-muted); }
-.calibration-table-container { overflow-y: auto; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--surface-inset); }
-.calibration-table-container--tall { max-height: 260px; }
+.calibration-controls { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.calibration-camera-select { display: flex; align-items: center; gap: 6px; flex: 1; font-size: var(--compact-font-size); color: var(--text-muted); }
+.calibration-camera-select select { flex: 1; height: 32px; font-size: var(--compact-font-size); }
+.calibration-section { display: flex; flex-direction: column; gap: 8px; }
+.calibration-header { font-weight: 600; color: var(--text-bright); font-size: var(--compact-font-size); border-bottom: 1px solid var(--border-color); padding-bottom: 4px; margin-bottom: 4px; }
+.calibration-table-container { max-height: 120px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--surface-inset); }
 .calibration-table { width: 100%; border-collapse: collapse; font-size: var(--section-label-size); }
 .calibration-table th { text-align: left; color: var(--text-muted); border-bottom: 1px solid var(--border-color); padding: 4px 8px; font-weight: 500; }
 .calibration-table td { padding: 2px 8px; border-bottom: 1px solid var(--divider-subtle); color: var(--text-bright); }
+.calibration-table tr:last-child td { border-bottom: none; }
 .calibration-row--highlight td { background: var(--surface-highlight); outline: 1px solid var(--accent-blue); font-weight: 600; }
+.calibration-no-data { color: var(--text-muted); font-style: italic; text-align: center; padding: 12px; }
+.calibration-summary { margin-top: 8px; display: flex; justify-content: space-between; padding: 4px 8px; background: var(--surface-inset-strong); border-radius: var(--radius-sm); }
+.calibration-summary-item { display: flex; align-items: center; gap: 8px; padding: 0 4px; border-radius: var(--radius-sm); }
+.calibration-summary-item--highlight { background: var(--surface-highlight); outline: 1px solid var(--accent-blue); }
+.calibration-label { color: var(--text-muted); font-size: var(--compact-font-size); }
+.calibration-value { color: var(--text-bright); font-weight: 600; font-size: var(--compact-font-size); }
 .calibration-no-match { display: flex; gap: 8px; align-items: center; border: 1px solid var(--danger-red); border-radius: var(--radius-sm); padding: 4px 8px; margin-bottom: 8px; font-size: var(--compact-font-size); }
 
 /* Equipment settings, camera profiles and sensor noise */

@@ -2,6 +2,7 @@ import React, { useState, useEffect, Suspense, Profiler, ProfilerOnRenderCallbac
 import { callBackend } from './common/services/backendApi';
 import { isAffectedByMeasurement, QualityMeasuredPayload } from './common/queries/qualityQueryKeys';
 import { UI_EVENTS } from './common/types/backendTypes';
+import { PACKAGE_LIBRARY_QUERY_KEY } from './common/queries/packageLibraryQueryKeys';
 import { emergencyParkMount } from './common/services/telescope/emergencyPark';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StatusHeader } from './statusHeader/StatusHeader';
@@ -234,6 +235,9 @@ const AppContent: React.FC = () => {
             if (planNoticeTimer) clearTimeout(planNoticeTimer);
             planNoticeTimer = setTimeout(() => setPlanNotice(''), 5000);
           }
+        } else if (action === UI_EVENTS['packages:changed']) {
+          // A package was created, edited, reopened, deleted or promoted: read the library again.
+          queryClient.invalidateQueries({ queryKey: PACKAGE_LIBRARY_QUERY_KEY });
         } else if (action === UI_EVENTS['quality:measured']) {
           // A measurement job stored new quality rows (after a sync, an
           // ingestion, or when asked for): the stored quality queries for that

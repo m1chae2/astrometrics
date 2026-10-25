@@ -1,0 +1,118 @@
+/*
+ * Page layout of the Observation Manager: the Execution Queue strip across the top and the three
+ * columns under it. The page never scrolls; each panel scrolls inside itself. Only tokens from
+ * ui/common/styles/theme.css are used for colors, font sizes and radii.
+ */
+.observation-manager {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+    background-color: var(--grey-darkest);
+}
+
+.observation-manager__queue {
+    flex: 0 0 auto;
+    height: 200px;
+    padding: var(--layout-padding) var(--layout-padding) 0;
+    box-sizing: border-box;
+}
+
+.observation-manager__body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+}
+
+.observation-manager__body > .layout {
+    flex: 1;
+    min-height: 0;
+    height: auto;
+}
+
+/* The package library needs room for its three tabs and header buttons; Visible Targets gives
+   width back. */
+.observation-manager__body > .layout {
+    --layout-left-col-width: 285px;
+    --layout-right-col-width: 290px;
+}
+
+@media (min-width: 1280px) {
+    .observation-manager__body > .layout {
+        --layout-left-col-width: 330px;
+        --layout-right-col-width: 380px;
+    }
+}
+
+.observation-manager__right-panel {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    height: 100%;
+    min-height: 0;
+}
+
+.observation-manager__right-panel > * {
+    flex: 1;
+    min-height: 0;
+}
+
+/* Narrow windows: give the center column more room. */
+@media (max-width: 1100px) {
+    .observation-manager {
+        --layout-left-col-width: 210px;
+        --layout-right-col-width: 280px;
+    }
+
+    .observation-manager__queue {
+        height: 170px;
+    }
+}
+
+/* Execution Queue strip: cards in one row that scrolls sideways inside the panel. */
+.execution-queue-strip {
+    height: 100%;
+}
+
+.execution-queue-strip .panel__content {
+    padding: var(--space-2);
+    overflow: hidden;
+}
+
+.execution-queue-strip .queue-list {
+    flex-direction: row;
+    align-items: stretch;
+    gap: var(--space-2);
+    height: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: var(--space-1);
+}
+
+.execution-queue-strip .imaging-card {
+    flex: 0 0 280px;
+    width: 280px;
+    margin-bottom: 0;
+    max-height: 100%;
+    overflow-y: auto;
+}
+
+.execution-queue-strip .queue-empty {
+    margin: auto;
+    color: var(--text-dim);
+    font-size: var(--compact-font-size);
+}
+
+/* Visible Targets: a row click starts a new package. */
+.visible-targets__row {
+    cursor: pointer;
+}
+
+.visible-targets__row:hover {
+    background-color: var(--surface-hover);
+}
+
+.visible-targets__row:focus-visible {
+    outline: var(--focus-outline);
+    outline-offset: -2px;
+}

@@ -1,7 +1,7 @@
 /**
  * @file ChecklistDialog.tsx
  * @description The dialog that lists tonight's session checklist, opened by the "Checklist (N)"
- * button in the Execution Queue header. Each item has a tick box; ticking sends the tick to the
+ * button in the Execution Queue header. Each item has a tick box; each item shows the library's plain-words `label`; ticking sends the tick to the
  * library (with the revision the window last read). Ticked items show when they were ticked.
  * Escape and Close shut it, Tab stays inside it while it is open, and the caller returns focus to
  * the button that opened it.
@@ -20,15 +20,6 @@ export interface ChecklistDialogProps {
     /** Text of a refused tick, or null. Stays until the dialog closes. */
     errorMessage: string | null;
     onClose: () => void;
-}
-
-/**
- * Writes the name of a checklist item: its note when it has one, else its rule name with spaces.
- * @param item The checklist item.
- * @return The text to show beside the tick box.
- */
-function itemLabel(item: ChecklistItem): string {
-    return item.note ? item.note : item.rule.replace(/_/g, ' ');
 }
 
 /**
@@ -104,7 +95,7 @@ export const ChecklistDialog: React.FC<ChecklistDialogProps> = ({ items, hasSess
                                         onChange={() => onTick(itemId)}
                                     />
                                     <label htmlFor={inputId}>
-                                        {itemLabel(item)}
+                                        {item.label ?? item.note ?? ''}
                                         {isTicked && item.tickedAt && (
                                             <span className="checklist-dialog__ticked-at">
                                                 {' '}(ticked {new Date(item.tickedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })})

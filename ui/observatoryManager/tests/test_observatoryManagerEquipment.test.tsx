@@ -27,18 +27,24 @@ vi.mock('../../common/utils/appBootReadiness', () => ({ useReportModeReady: () =
 
 import { CameraProfilesPanel } from '../equipment/CameraProfilesPanel';
 import { CalibrationLibraryPanel } from '../calibration/CalibrationLibraryPanel';
-import { matchCalibrationRows, toLibraryRows } from '../calibration/calibrationRowMatch';
 
 const cameras = [{ name: 'ZWO ASI533MM Pro', pixelSizeUm: 3.76, sensorWidthPx: 3008, sensorHeightPx: 3008 }];
 const libraryReply = {
     detail: 'counts',
     darks: [
-        { camera: 'ZWO ASI533MM Pro', iso: '100', offset: 10, binning: '1x1', exposure: 60, count: 20 },
-        { camera: 'ZWO ASI533MM Pro', iso: '0', offset: 10, binning: '1x1', exposure: 60, count: 5 },
+        { row_key: 'dark-a', camera: 'ZWO ASI533MM Pro', iso: '100', offset: 10, binning: '1x1', exposure: 60, count: 20 },
+        { row_key: 'dark-b', camera: 'ZWO ASI533MM Pro', iso: '0', offset: 10, binning: '1x1', exposure: 60, count: 5 },
     ],
-    biases: [{ camera: 'ZWO ASI533MM Pro', iso: '100', offset: 10, binning: '1x1', count: 30 }],
+    biases: [{ row_key: 'bias-a', camera: 'ZWO ASI533MM Pro', iso: '100', offset: 10, binning: '1x1', count: 30 }],
     flats: [],
+    camera_totals: [{ camera: 'ZWO ASI533MM Pro', dark_count: 25, bias_count: 30, flat_count: 0 }],
 };
+
+/** Answers `calibration:query`: the counts reply, or the matched keys when asked to match. */
+function answerCalibration(matchedRowKeys: string[], counts: Record<string, unknown> = libraryReply) {
+    return async (_method: string, params: { detail?: string }) =>
+        params?.detail === 'match' ? { detail: 'match', matched_row_keys: matchedRowKeys, camera_totals: [] } : counts;
+}
 
 /**
  * Renders a component inside a fresh query client.
@@ -184,8 +190,12 @@ describe('CalibrationLibraryPanel', () => {
     it('filters by the chosen camera', async () => {
         callBackendMock.mockResolvedValue({
             ...libraryReply,
-            darks: [...libraryReply.darks, { camera: 'Nikon D5300', iso: '800', offset: null, binning: '1x1', exposure: 30, count: 7 }],
-            flats: [{ camera: 'Nikon D5300', iso: '800', filter: 'L', count: 4 }],
+            darks: [...libraryReply.darks, { row_key: 'dark-n', camera: 'Nikon D5300', iso: '800', offset: null, binning: '1x1', exposure: 30, count: 7 }],
+            flats: [{ row_key: 'flat-n', camera: 'Nikon D5300', iso: '800', filter: 'L', count: 4 }],
+            camera_totals: [
+                ...libraryReply.camera_totals,
+                { camera: 'Nikon D5300', dark_count: 7, bias_count: 0, flat_count: 4 },
+            ],
         });
         renderWithQuery(<CalibrationLibraryPanel />);
         await screen.findByText('Darks');
@@ -213,8 +223,8 @@ describe('CalibrationLibraryPanel', () => {
         callBackendMock.mockResolvedValue({
             ...libraryReply,
             darks: [
-                { camera: 'ZWO ASI533MM Pro', iso: '100', offset: 10, binning: '1x1', exposure: 60, count: 20 },
-                { camera: 'ZWO ASI533MM Pro', iso: '100', offset: 10, binning: '2x2', exposure: 60, count: 5 },
+                { row_key: 'k1', camera: 'ZWO ASI533MM Pro', iso: '100', offset: 10, binning: '1x1', exposure: 60, count: 20 },
+                { row_key: 'k2', camera: 'ZWO ASI533MM Pro', iso: '100', offset: 10, binning: '2x2', exposure: 60, count: 5 },
             ],
         });
         renderWithQuery(<CalibrationLibraryPanel />);
@@ -226,7 +236,7 @@ describe('CalibrationLibraryPanel', () => {
 
     /** A bias request highlights the Biases total. */
     it('highlights the Biases total for a bias request', async () => {
-        callBackendMock.mockResolvedValue(libraryReply);
+        callBackendMock.mockImplementation(answerCalibration(['bias-a']));
         renderWithQuery(<CalibrationLibraryPanel />);
         await screen.findByText('Darks');
         act(() => {
@@ -247,7 +257,7 @@ describe('CalibrationLibraryPanel', () => {
 
     /** An empty library says what to do. */
     it('shows the empty state', async () => {
-        callBackendMock.mockResolvedValue({ detail: 'counts', darks: [], biases: [], flats: [] });
+        callBackendMock.mockResolvedValue({ detail: 'counts', darks: [], biases: [], flats: [], camera_totals: [] });
         renderWithQuery(<CalibrationLibraryPanel />);
         expect(await screen.findByText(/No calibration frames yet/)).toBeTruthy();
     });
@@ -261,7 +271,7 @@ describe('CalibrationLibraryPanel', () => {
 
     /** A matching request highlights exactly the matching rows. */
     it('highlights the rows a request matches', async () => {
-        callBackendMock.mockResolvedValue(libraryReply);
+        callBackendMock.mockImplementation(answerCalibration(['dark-a']));
         renderWithQuery(<CalibrationLibraryPanel />);
         await screen.findByText('Darks');
         act(() => {
@@ -271,11 +281,14 @@ describe('CalibrationLibraryPanel', () => {
         });
         await waitFor(() => expect(document.querySelectorAll('[data-highlighted="true"]').length).toBe(1));
         expect(document.querySelector('[data-highlighted="true"]')?.textContent).toContain('20');
+        expect(callBackendMock).toHaveBeenCalledWith('calibration:query', {
+            detail: 'match', camera_id: 'ZWO ASI533MM Pro', kind: 'dark', gain: 100, offset: 10, binning: 1,
+        });
     });
 
     /** A request nothing matches says so. */
     it('says "No calibration row matches" when nothing matches', async () => {
-        callBackendMock.mockResolvedValue(libraryReply);
+        callBackendMock.mockImplementation(answerCalibration([]));
         renderWithQuery(<CalibrationLibraryPanel />);
         await screen.findByText('Darks');
         act(() => {
@@ -284,21 +297,5 @@ describe('CalibrationLibraryPanel', () => {
             }));
         });
         expect(await screen.findByText('No calibration row matches')).toBeTruthy();
-    });
-});
-
-describe('matchCalibrationRows', () => {
-    const rows = [...toLibraryRows(libraryReply.darks, 'dark'), ...toLibraryRows(libraryReply.biases, 'bias')];
-
-    /** A value the statement leaves out is not compared. */
-    it('does not compare values the statement leaves out', () => {
-        const matches = matchCalibrationRows(rows, { calibrationKey: 'dark', captureSetting: { camera: 'ZWO ASI533MM Pro' }, rule: 'r' });
-        expect(matches).toHaveLength(2);
-    });
-
-    /** A different gain does not match, and neither does a statement with nothing to match on. */
-    it('is exact and refuses empty requests', () => {
-        expect(matchCalibrationRows(rows, { calibrationKey: 'dark', captureSetting: { camera: 'ZWO ASI533MM Pro', gainSetting: 50 }, rule: 'r' })).toHaveLength(0);
-        expect(matchCalibrationRows(rows, { calibrationKey: null, captureSetting: null, rule: 'r' })).toHaveLength(0);
     });
 });

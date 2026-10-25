@@ -42,8 +42,7 @@
 }
 
 .cited-frames__message,
-.cited-frames__missing,
-.cited-frames__open-note {
+.cited-frames__missing {
     margin: 8px 0 0;
 }
 
@@ -60,4 +59,8 @@
     align-items: center;
     padding: 4px 0;
     border-top: 1px solid var(--grey-light);
+}
+
+.cited-frames__reason {
+    max-width: 24ch;
 }

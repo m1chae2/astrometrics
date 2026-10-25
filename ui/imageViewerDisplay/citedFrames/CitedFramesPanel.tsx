@@ -2,7 +2,9 @@
  * @file CitedFramesPanel.tsx
  * @description The Image Viewer's Evidence view: a banner that says which
  * statement cited the rows, with "Back to <mode>" and "Clear", and a list of
- * the cited quality rows exactly as the library returned them.
+ * the cited quality rows exactly as the library returned them. A row whose
+ * picture file the library found has "Open image"; a row without one shows the
+ * library's reason as text.
  */
 
 import React, { useRef } from 'react';
@@ -22,13 +24,22 @@ function formatValue(value: number, unit: string | undefined): string {
   return unit ? `${text} ${unit}` : text;
 }
 
+/** Props of the cited-frames panel. */
+interface CitedFramesPanelProps {
+  /** Called with a frame's file path when the user presses "Open image". */
+  onOpenFrame?: (path: string) => void;
+  /** Called when the request is cleared, so the viewer can drop an opened frame. */
+  onClosed?: () => void;
+}
+
 /**
  * Shows the cited rows when a `showFrames` request is active; renders nothing
  * otherwise.
  *
+ * @param props The open and close callbacks.
  * @returns The banner and list, or null.
  */
-export const CitedFramesPanel: React.FC = () => {
+export const CitedFramesPanel: React.FC<CitedFramesPanelProps> = ({ onOpenFrame, onClosed }) => {
   const { request, clear } = useCitedFramesRequest();
   const rowIds = request?.rowIds ?? [];
   const query = useCitedFramesQuery(rowIds);
@@ -47,6 +58,7 @@ export const CitedFramesPanel: React.FC = () => {
       viewer?.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])') ?? [],
     ).find((element) => !sectionRef.current?.contains(element) && !(element as HTMLButtonElement).disabled);
     nextControl?.focus();
+    onClosed?.();
     clear();
   };
 
@@ -94,32 +106,39 @@ export const CitedFramesPanel: React.FC = () => {
               {missing} of {total} cited {frameWord} {missing === 1 ? 'is' : 'are'} no longer in the library.
             </p>
           ) : null}
-          <p className="cited-frames__open-note" id="cited-frames-open-note">
-            Opening frames arrives later
-          </p>
           <ul className="cited-frames__list">
-            {query.data?.rows.map((row) => (
-              <li key={row.rowId ?? `${row.subject.subjectId}-${row.metric}`} className="cited-frames__row">
-                <span className="cited-frames__subject">
-                  {row.subject.level}: {row.subject.subjectId}
-                </span>
-                <span className="cited-frames__metric">{row.metric}</span>
-                <span className="cited-frames__value">
-                  {row.value === null || row.value === undefined
-                    ? `${row.status.replace('_', ' ')}${row.reason ? `: ${row.reason}` : ''}`
-                    : formatValue(row.value, query.data?.unitByMetric[row.metric])}
-                </span>
-                <button
-                  type="button"
-                  className="cited-frames__button"
-                  disabled
-                  aria-disabled="true"
-                  aria-describedby="cited-frames-open-note"
-                >
-                  Open image
-                </button>
-              </li>
-            ))}
+            {query.data?.rows.map((row) => {
+              const file = row.rowId === null || row.rowId === undefined
+                ? undefined
+                : query.data?.filesByRowId[row.rowId];
+              const reasonId = `cited-frames-reason-${row.rowId}`;
+              return (
+                <li key={row.rowId ?? `${row.subject.subjectId}-${row.metric}`} className="cited-frames__row">
+                  <span className="cited-frames__subject">
+                    {row.subject.level}: {row.subject.subjectId}
+                  </span>
+                  <span className="cited-frames__metric">{row.metric}</span>
+                  <span className="cited-frames__value">
+                    {row.value === null || row.value === undefined
+                      ? `${row.status.replace('_', ' ')}${row.reason ? `: ${row.reason}` : ''}`
+                      : formatValue(row.value, row.unit ?? undefined)}
+                  </span>
+                  {file?.path ? (
+                    <button
+                      type="button"
+                      className="cited-frames__button"
+                      onClick={() => onOpenFrame?.(file.path as string)}
+                    >
+                      Open image
+                    </button>
+                  ) : (
+                    <span className="cited-frames__reason" id={reasonId}>
+                      {file?.reason || 'No picture for this row.'}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </>
       )}

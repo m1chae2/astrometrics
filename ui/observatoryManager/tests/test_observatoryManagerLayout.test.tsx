@@ -55,10 +55,12 @@ import { ObservatoryManager } from '../ObservatoryManager';
 
 const libraryReply = {
     detail: 'counts',
-    darks: [{ camera: 'ZWO ASI533MM Pro', iso: '100', offset: 10, binning: '1x1', exposure: 60, count: 20 }],
+    darks: [{ row_key: 'dark-a', camera: 'ZWO ASI533MM Pro', iso: '100', offset: 10, binning: '1x1', exposure: 60, count: 20 }],
     biases: [],
     flats: [],
+    camera_totals: [{ camera: 'ZWO ASI533MM Pro', dark_count: 20, bias_count: 0, flat_count: 0 }],
 };
+const matchReply = { detail: 'match', matched_row_keys: ['dark-a'], camera_totals: [] };
 
 /**
  * Renders the Observatory Manager inside a fresh query client.
@@ -71,8 +73,8 @@ function renderDisplay() {
 
 beforeEach(() => {
     callBackendMock.mockReset();
-    callBackendMock.mockImplementation(async (method: string) => {
-        if (method === 'calibration:query') return libraryReply;
+    callBackendMock.mockImplementation(async (method: string, params?: { detail?: string }) => {
+        if (method === 'calibration:query') return params?.detail === 'match' ? matchReply : libraryReply;
         if (method === 'observatory:get_active_telescope') return { id: 't1', name: 'Scope', focal_length_mm: 500 };
         if (method === 'observatory:safety_status') return { delegation_policy: { id: 'p', capability_delegations: [] } };
         throw new Error(`unexpected ${method}`);

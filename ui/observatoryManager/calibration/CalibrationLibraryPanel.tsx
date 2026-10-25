@@ -3,11 +3,12 @@
  * @description The calibration library, in the look of the Observation
  * Manager's old calibration panel: a camera picker with a refresh button, a
  * Darks table (Exposure, Offset, Count) and the Biases and Flat Frames totals.
- * The data is what the library reports (`calibration:query`). A quality
+ * The data is what the library reports (`calibration:query`): the cameras and
+ * their totals come from `camera_totals` in the order returned. A quality
  * statement can ask this panel to show a row ("Show in calibration library");
- * the panel switches to that camera, scrolls to and highlights the rows that
- * match exactly (a bias or flat match highlights its total), or says "No
- * calibration row matches".
+ * the panel asks the library which rows match (`detail: "match"`), switches to
+ * that camera, scrolls to and highlights those rows (a bias or flat match
+ * highlights its total), or says "No calibration row matches".
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -18,18 +19,19 @@ import { QualityPanelState } from '../../common/components/quality/QualityPanelS
 import { useIngestionManager } from '../../common/hooks/useIngestionManager';
 import { callBackend } from '../../common/services/backendApi';
 import {
-    matchCalibrationRows,
-    toLibraryRows,
-    type CalibrationLibraryRow,
-    type ShowCalibrationRowPayload,
-} from './calibrationRowMatch';
-import {
     clearCalibrationRowRequest,
     getCalibrationRowRequest,
     subscribeToCalibrationRows,
+    type ShowCalibrationRowPayload,
 } from './calibrationRowRequestStore';
 import '../../common/components/quality/quality.css';
 import '../observatoryManager.css';
+
+/** One row of a `calibration:query` list, as the library returns it. */
+type LibraryRow = Record<string, any>;
+
+/** The kinds of frame the library holds. */
+type CalibrationKind = 'dark' | 'bias' | 'flat';
 
 /** How often to read the library again in the background, in milliseconds. */
 const CALIBRATION_POLL_INTERVAL_MS = 10000;
@@ -52,39 +54,54 @@ export const CalibrationLibraryPanel: React.FC = () => {
         refetchInterval: CALIBRATION_POLL_INTERVAL_MS,
     });
 
-    const rows = useMemo<CalibrationLibraryRow[]>(() => {
-        if (!query.data) return [];
-        return [
-            ...toLibraryRows(query.data.darks, 'dark'),
-            ...toLibraryRows(query.data.biases, 'bias'),
-            ...toLibraryRows(query.data.flats, 'flat'),
-        ];
-    }, [query.data]);
-
-    // Cameras in the order the library first names them.
-    const cameras = useMemo(() => Array.from(new Set(rows.map((row) => row.camera))), [rows]);
+    // Cameras and totals as the library returned them.
+    const cameraTotals = useMemo(() => query.data?.camera_totals ?? [], [query.data]);
+    const cameras = useMemo(() => cameraTotals.map((entry) => String(entry.camera)), [cameraTotals]);
     const selectedCamera = chosenCamera !== null && cameras.includes(chosenCamera) ? chosenCamera : (cameras[0] ?? '');
-    const cameraRows = rows.filter((row) => row.camera === selectedCamera);
-    const darkRows = cameraRows.filter((row) => row.frameType === 'dark');
-    const biasCount = cameraRows.filter((row) => row.frameType === 'bias').reduce((sum, row) => sum + row.count, 0);
-    const flatCount = cameraRows.filter((row) => row.frameType === 'flat').reduce((sum, row) => sum + row.count, 0);
-    const biasHighlighted = cameraRows.some((row) => row.frameType === 'bias' && highlightedKeys.includes(row.rowKey));
-    const flatHighlighted = cameraRows.some((row) => row.frameType === 'flat' && highlightedKeys.includes(row.rowKey));
+    const selectedTotals = cameraTotals.find((entry) => entry.camera === selectedCamera);
+    const darkRows: LibraryRow[] = (query.data?.darks ?? []).filter((row) => row.camera === selectedCamera);
+    const biasCount = Number(selectedTotals?.bias_count ?? 0);
+    const flatCount = Number(selectedTotals?.flat_count ?? 0);
+    const keysOfCamera = (rows: LibraryRow[] | null | undefined): string[] =>
+        (rows ?? []).filter((row) => row.camera === selectedCamera).map((row) => String(row.row_key));
+    const biasHighlighted = keysOfCamera(query.data?.biases).some((key) => highlightedKeys.includes(key));
+    const flatHighlighted = keysOfCamera(query.data?.flats).some((key) => highlightedKeys.includes(key));
 
-    /** Finds, switches to and highlights the rows a request points at. */
+    /** Asks the library which rows a request matches, then shows them. */
     const showRequest = useCallback(
-        (request: ShowCalibrationRowPayload) => {
-            const matches = matchCalibrationRows(rows, request);
-            if (matches.length === 0) {
+        async (request: ShowCalibrationRowPayload) => {
+            const setting = request.captureSetting;
+            if (!setting) {
                 setHighlightedKeys([]);
                 setNoMatchMessage('No calibration row matches');
                 return;
             }
-            setNoMatchMessage(null);
-            setChosenCamera(matches[0].camera);
-            setHighlightedKeys(matches.map((row) => row.rowKey));
+            try {
+                const answer = await callBackend('calibration:query', {
+                    detail: 'match',
+                    camera_id: setting.camera,
+                    ...(request.calibrationKey ? { kind: request.calibrationKey as CalibrationKind } : {}),
+                    ...(setting.gainSetting != null ? { gain: setting.gainSetting } : {}),
+                    ...(setting.offset != null ? { offset: setting.offset } : {}),
+                    ...(setting.binning != null ? { binning: setting.binning } : {}),
+                });
+                const matchedKeys = answer?.matched_row_keys ?? [];
+                if (matchedKeys.length === 0) {
+                    setHighlightedKeys([]);
+                    setNoMatchMessage('No calibration row matches');
+                    return;
+                }
+                const everyRow = [...(query.data?.darks ?? []), ...(query.data?.biases ?? []), ...(query.data?.flats ?? [])];
+                const firstRow = everyRow.find((row) => row.row_key === matchedKeys[0]);
+                setNoMatchMessage(null);
+                setChosenCamera(firstRow ? String(firstRow.camera) : setting.camera);
+                setHighlightedKeys(matchedKeys);
+            } catch {
+                setHighlightedKeys([]);
+                setNoMatchMessage('Could not ask the library which row matches');
+            }
         },
-        [rows],
+        [query.data],
     );
 
     // Scroll to the first highlighted dark row once it is on screen.
@@ -98,12 +115,12 @@ export const CalibrationLibraryPanel: React.FC = () => {
         if (!query.isSuccess) return;
         const waiting = getCalibrationRowRequest();
         if (waiting) {
-            showRequest(waiting);
+            void showRequest(waiting);
             clearCalibrationRowRequest();
         }
         return subscribeToCalibrationRows((request) => {
             if (!request) return;
-            showRequest(request);
+            void showRequest(request);
             clearCalibrationRowRequest();
         });
     }, [query.isSuccess, showRequest]);
@@ -118,7 +135,7 @@ export const CalibrationLibraryPanel: React.FC = () => {
         body = <QualityPanelState state="loading" />;
     } else if (query.isError) {
         body = <QualityPanelState state="error" subject="calibration library" onRetry={() => void query.refetch()} />;
-    } else if (rows.length === 0) {
+    } else if (cameras.length === 0) {
         body = (
             <QualityPanelState
                 state="empty"
@@ -144,20 +161,21 @@ export const CalibrationLibraryPanel: React.FC = () => {
                                 </thead>
                                 <tbody>
                                     {darkRows.map((row) => {
-                                        const highlighted = highlightedKeys.includes(row.rowKey);
+                                        const rowKey = String(row.row_key);
+                                        const highlighted = highlightedKeys.includes(rowKey);
                                         return (
                                             <tr
-                                                key={row.rowKey}
+                                                key={rowKey}
                                                 ref={(element) => {
-                                                    if (element) rowElements.current.set(row.rowKey, element);
-                                                    else rowElements.current.delete(row.rowKey);
+                                                    if (element) rowElements.current.set(rowKey, element);
+                                                    else rowElements.current.delete(rowKey);
                                                 }}
                                                 className={highlighted ? 'calibration-row--highlight' : undefined}
                                                 data-highlighted={highlighted ? 'true' : undefined}
                                             >
-                                                <td>{row.exposure !== null ? `${row.exposure}s` : '—'}</td>
+                                                <td>{row.exposure != null ? `${row.exposure}s` : '—'}</td>
                                                 <td className="data-table-cell-right">{row.offset ?? '—'}</td>
-                                                <td className="data-table-cell-right">{row.count}</td>
+                                                <td className="data-table-cell-right">{row.count ?? 0}</td>
                                             </tr>
                                         );
                                     })}

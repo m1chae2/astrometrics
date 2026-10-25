@@ -88,7 +88,7 @@ Each view lives in its own folder.
 
 Other folders hold the title bar (`ui/titleBar/`), the status header with the settings panel (`ui/statusHeader/`) and the tray popover (`ui/trayPopover/`). The list of views and the setting that turns each on or off live in `ui/common/constants/displayFlags.ts`.
 
-`ui/common/` holds everything shared: components, hooks, services, queries, contexts and types. The shared components in `ui/common/components/` are described in [its README](../../../ui/common/components/README.md). Its files must not import from any other top-level `ui/` folder. ESLint enforces this, so a shared file never depends on one view.
+`ui/common/` holds everything shared: components, hooks, services, queries, contexts and types. The shared components in `ui/common/components/` are described in [its README](https://github.com/m1chae2/astrometrics/blob/main/ui/common/components/README.md). Its files must not import from any other top-level `ui/` folder. ESLint enforces this, so a shared file never depends on one view.
 
 ## Talking to the backend
 
@@ -183,7 +183,7 @@ Each window is a separate React tree. A shared current target and a shared plann
 
 ### Star Quality card
 
-The Stellar Analysis panel in the Astronomy Manager starts with a Quality card (`ui/common/components/quality/QualityChip.tsx`). It asks `advisory:result` for the statements about one star's result and draws them in the order returned. A statement has a kind word (Result, Warning, Recommendation, Limit or Not enough data), a confidence chip and the plain message. A statement with cited frames has an Evidence button, which opens the cited frames list in the Image Viewer (opening one frame there is not available yet). A calibration statement has Show in calibration library. Both come from `useStatementActions`.
+The Stellar Analysis panel in the Astronomy Manager starts with a Quality card (`ui/common/components/quality/QualityChip.tsx`). It asks `advisory:result` for the statements about one star's result and draws them in the order returned. A statement has a kind word (Result, Warning, Recommendation, Limit or Not enough data), a confidence chip and the plain message. A statement with cited frames has an Evidence button, which opens the cited frames list in the Image Viewer. A row with a picture file has Open image, which draws the frame with `images:convert_fits`; a row without one shows the library's reason (`quality:resolve_rows`). A calibration statement has Show in calibration library. Both come from `useStatementActions`.
 
 ## State
 

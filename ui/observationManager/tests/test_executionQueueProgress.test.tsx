@@ -36,8 +36,8 @@ const entry = (entryId: string, targetId: string, requested: number, captured: n
 const session: ObservationSessionWithProgress = {
     id: 's1', nightDate: '2026-10-25', siteProfileId: 'site', telescopeId: 't', cameraId: 'c', revision: 3,
     checklist: [
-        { itemId: 'c1', rule: 'flat_residual', note: 'Take new flats', createdAt: '2026-10-25T01:00:00Z' },
-        { itemId: 'c2', rule: 'bias_old', createdAt: '2026-10-25T01:00:00Z', tickedAt: '2026-10-25T02:00:00Z' },
+        { itemId: 'c1', rule: 'flat_residual', label: 'Take new flats', createdAt: '2026-10-25T01:00:00Z' },
+        { itemId: 'c2', rule: 'bias_old', label: 'Retake the old biases', createdAt: '2026-10-25T01:00:00Z', tickedAt: '2026-10-25T02:00:00Z' },
     ],
     progress: {
         sessionId: 's1',
@@ -121,7 +121,7 @@ describe('ExecutionQueue checklist', () => {
         const dialog = screen.getByRole('dialog', { name: 'Checklist for tonight' });
         const open = within(dialog).getByRole('checkbox', { name: /Take new flats/ });
         expect(open).not.toBeChecked();
-        expect(within(dialog).getByRole('checkbox', { name: /bias old/ })).toBeChecked();
+        expect(within(dialog).getByRole('checkbox', { name: /Retake the old biases/ })).toBeChecked();
         await userEvent.click(open);
         expect(props.onTickChecklistItem).toHaveBeenCalledWith('c1');
         await userEvent.keyboard('{Escape}');

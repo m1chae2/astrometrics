@@ -24,20 +24,6 @@ interface EnsuredPackage {
 }
 
 /**
- * Chooses the package to use from a target's packages: a planned one, else a suggested one.
- *
- * @param packages The target's packages, in the order the backend returned them.
- * @returns The first planned package, else the first suggested one, else null.
- */
-function pickExistingPackage(packages: ObservationPackage[]): ObservationPackage | null {
-  return (
-    packages.find((candidate) => candidate.status === PackageStatus.PLANNED) ??
-    packages.find((candidate) => candidate.status === PackageStatus.SUGGESTED) ??
-    null
-  );
-}
-
-/**
  * Provides the package actions for one target.
  *
  * @param targetName The chosen target's name, or null when none is chosen.
@@ -52,8 +38,7 @@ export function useTargetPackage(targetName: string | null, isLibraryTarget: boo
 
   /** Finds the target's package, or makes one. Throws what the backend refuses with. */
   const ensurePackage = useCallback(async (target: string): Promise<EnsuredPackage> => {
-    const packages = await callBackend('plan:list_packages', { target }, { silent: true });
-    const existing = pickExistingPackage(Array.isArray(packages) ? packages : []);
+    const existing = await callBackend('plan:package_for_target', { target }, { silent: true });
     if (existing) return { package: existing, wasCreated: false };
     const created = await callBackend('plan:create_package', { target }, { silent: true });
     void queryClient.invalidateQueries({ queryKey: PACKAGE_LIBRARY_QUERY_KEY });

@@ -128,15 +128,15 @@ describe('ObservationManager display', () => {
 
     it('opens the planned package of a clicked target and makes no create call', async () => {
         const planned = { ...plannedPackage, id: 'pp', target_id: 'M_31', name: 'M 31 planned' };
-        const suggested = { ...plannedPackage, id: 'ps', target_id: 'M 31', name: 'M 31 suggested' };
         answerBackend({
-            'plan:list_packages': (params) =>
-                params.status === 'PLANNED' ? [planned] : params.status === 'SUGGESTED' ? [suggested] : [],
+            'plan:list_packages': (params) => (params.status === 'PLANNED' ? [planned] : []),
+            'plan:package_for_target': () => planned,
         });
         renderDisplay();
         await screen.findByRole('button', { name: 'M_31, planned package' });
         await userEvent.click(screen.getByText('M 31', { selector: 'td' }));
         await waitFor(() => expect(screen.queryByText('Choose a package or New package')).not.toBeInTheDocument());
+        expect(callBackendMock).toHaveBeenCalledWith('plan:package_for_target', { target: 'M 31' }, expect.anything());
         expect(callBackendMock.mock.calls.some(([action]) => action === 'plan:create_package')).toBe(false);
         await userEvent.click(screen.getByRole('button', { name: 'Delete' }));
         await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
@@ -149,6 +149,7 @@ describe('ObservationManager display', () => {
         const suggested = { ...plannedPackage, id: 'ps', target_id: 'm 31', name: 'M 31 suggested' };
         answerBackend({
             'plan:list_packages': (params) => (params.status === 'SUGGESTED' ? [suggested] : []),
+            'plan:package_for_target': () => suggested,
         });
         renderDisplay();
         await userEvent.click(await screen.findByRole('tab', { name: /Suggested/ }));

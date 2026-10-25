@@ -6,7 +6,17 @@
  * and handed over when the calibration library appears.
  */
 
-import type { ShowCalibrationRowPayload } from './calibrationRowMatch';
+import type { CaptureSetting } from '../../common/types/backendTypes';
+
+/** What the `showCalibrationRow` action carries (see `useStatementActions`). */
+export interface ShowCalibrationRowPayload {
+    /** The frame type the statement's proposed action names, or null. */
+    calibrationKey: string | null;
+    /** The capture setting the statement is about, or null. */
+    captureSetting: CaptureSetting | null;
+    /** The rule that produced the statement. */
+    rule: string;
+}
 
 type Listener = (request: ShowCalibrationRowPayload | null) => void;
 

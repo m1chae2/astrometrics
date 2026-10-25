@@ -30,12 +30,12 @@ const panelReply = [
 
 /**
  * Sets what the fake backend answers.
- * @param options The packages listed for the target, the create outcome and the edit outcome.
+ * @param options The package the library returns for the target (the first one listed), the create outcome and the edit outcome.
  */
 function setBackend(options: { packages?: unknown[]; createError?: Error; editError?: Error } = {}): void {
   callBackendMock.mockImplementation(async (method: string) => {
     if (method === 'mosaic:preview') return panelReply;
-    if (method === 'plan:list_packages') return options.packages ?? [];
+    if (method === 'plan:package_for_target') return options.packages?.[0] ?? null;
     if (method === 'plan:create_package') {
       if (options.createError) throw options.createError;
       return { id: 'new-package', status: 'PLANNED', revision: 0 };
@@ -80,7 +80,7 @@ beforeEach(() => {
 describe('Add to observation package', () => {
   /** A target with a planned package gets a toast and no second package. */
   it('does not create a duplicate when a planned package exists', async () => {
-    setBackend({ packages: [{ id: 'p1', status: 'SUGGESTED' }, { id: 'p2', status: 'PLANNED' }] });
+    setBackend({ packages: [{ id: 'p2', status: 'PLANNED' }] });
     const user = renderWithProviders(
       <PlanetariumInfoCard source={source} observerLocation={null} onClose={vi.fn()} isLibraryTarget />,
     );

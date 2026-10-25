@@ -155,34 +155,6 @@ export function ditherValuesOf(dither: DitherConfig | null | undefined): DitherV
 }
 
 /**
- * Folds a target id the way the library does when it filters packages by target: underscores
- * count as spaces, and case and outer spaces do not matter.
- * @param targetId A target id.
- * @return The folded id.
- */
-export function foldTargetId(targetId: string): string {
-    return targetId.replace(/_/g, ' ').trim().toLowerCase();
-}
-
-/**
- * Picks the package to open for a target: the first planned one, else the first suggested one,
- * each in the order the library returned it.
- * @param targetId The target id to match.
- * @param planned The planned packages.
- * @param suggested The suggested packages.
- * @return The package, or null when the target has neither.
- */
-export function findExistingPackage(
-    targetId: string,
-    planned: ObservationPackage[],
-    suggested: ObservationPackage[]
-): ObservationPackage | null {
-    const wanted = foldTargetId(targetId);
-    const matches = (candidate: ObservationPackage) => foldTargetId(candidate.target_id) === wanted;
-    return planned.find(matches) ?? suggested.find(matches) ?? null;
-}
-
-/**
  * Writes the line shown after a suggestion refresh, for example "Suggestions updated: 1 added, 2 removed".
  * Only the counts that are not zero are named.
  * @param counts The counts the `packages:changed` refresh event carries.

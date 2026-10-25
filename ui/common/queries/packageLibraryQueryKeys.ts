@@ -23,4 +23,8 @@ export interface PackageRefreshCounts {
     deleted?: number;
     completed?: number;
     reverted?: number;
+    /** Ids of the suggestions the refresh removed. */
+    deletedPackageIds?: string[];
+    /** Ids of the packages the refresh marked complete. */
+    completedPackageIds?: string[];
 }

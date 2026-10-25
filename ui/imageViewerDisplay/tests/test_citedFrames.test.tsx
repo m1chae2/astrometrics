@@ -7,7 +7,7 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, renderHook, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -15,6 +15,7 @@ vi.mock('../../common/services/backendApi', () => ({ callBackend: vi.fn() }));
 
 import { callBackend } from '../../common/services/backendApi';
 import { CitedFramesPanel } from '../citedFrames/CitedFramesPanel';
+import { useOpenedFrame } from '../citedFrames/useOpenedFrame';
 import { clearCitedFramesRequest } from '../citedFrames/citedFramesStore';
 import { showFrames } from '../../common/utils/displayCoordinator';
 
@@ -29,6 +30,7 @@ function makeRow(rowId: number, subjectId: string, value: number | null) {
     status: value === null ? 'not_measured' : 'measured',
     value,
     reason: value === null ? 'no stars' : undefined,
+    unit: 'arcsec',
     origin: 'measured',
     runId: 'run',
     measuredAt: '2026-10-24T00:00:00Z',
@@ -64,8 +66,14 @@ describe('CitedFramesPanel', () => {
     mockedCallBackend.mockReset();
     act(() => clearCitedFramesRequest());
     mockedCallBackend.mockImplementation(async (action: string) => {
-      if (action === 'quality:metrics') {
-        return [{ name: 'frame.star_width_moffat_arcsec', unit: 'arcsec' }];
+      if (action === 'quality:resolve_rows') {
+        return {
+          rows: [
+            { rowId: 1, level: 'frame', targetId: 'M 81', subjectId: 'f1', path: '/frames/f1.fits', reason: '' },
+            { rowId: 2, level: 'frame', targetId: 'M 81', subjectId: 'f2', path: null, reason: 'frame file was moved' },
+          ],
+          notFoundRowIds: [],
+        };
       }
       return [makeRow(1, 'f1', 1.5), makeRow(2, 'f2', null)];
     });
@@ -86,14 +94,35 @@ describe('CitedFramesPanel', () => {
     await screen.findByText('1.5 arcsec');
     expect(mockedCallBackend).toHaveBeenCalledWith('quality:query', { row_ids: [1, 2] });
     expect(screen.getByText('not measured: no stars')).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: 'Open image' })[0]).toBeDisabled();
-    expect(screen.getAllByText('Opening frames arrives later').length).toBe(1);
+    expect(mockedCallBackend).toHaveBeenCalledWith('quality:resolve_rows', { row_ids: [1, 2] });
+    expect(mockedCallBackend).not.toHaveBeenCalledWith('quality:metrics', expect.anything());
+  });
+
+  /** A row with a file opens it; a row without one shows the library's reason. */
+  it('enables Open image only for rows with a path and shows the reason for the others', async () => {
+    const onOpenFrame = vi.fn();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <CitedFramesPanel onOpenFrame={onOpenFrame} />
+      </QueryClientProvider>,
+    );
+    await sendShowFrames([1, 2]);
+    await screen.findByText('1.5 arcsec');
+    const buttons = screen.getAllByRole('button', { name: 'Open image' });
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]).toBeEnabled();
+    expect(screen.getByText('frame file was moved')).toBeVisible();
+    await userEvent.click(buttons[0]);
+    expect(onOpenFrame).toHaveBeenCalledWith('/frames/f1.fits');
   });
 
   /** Rows the library no longer has are counted. */
   it('counts cited rows that are no longer in the library', async () => {
     mockedCallBackend.mockImplementation(async (action: string) =>
-      action === 'quality:metrics' ? [] : [makeRow(1, 'f1', 2)],
+      action === 'quality:resolve_rows'
+        ? { rows: [{ rowId: 1, level: 'frame', subjectId: 'f1', path: null, reason: '' }], notFoundRowIds: [2, 3] }
+        : [makeRow(1, 'f1', 2)],
     );
     renderPanel();
     await sendShowFrames([1, 2, 3]);
@@ -135,5 +164,21 @@ describe('CitedFramesPanel', () => {
     expect((modeChange.mock.calls[0][0] as CustomEvent).detail).toBe('Planetarium');
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull());
     window.removeEventListener('astrometrics:modeChange', modeChange);
+  });
+});
+
+describe('useOpenedFrame', () => {
+  /** Opening a path draws it with the viewer's FITS call and keeps the picture. */
+  it('opens a frame through images:convert_fits', async () => {
+    mockedCallBackend.mockResolvedValue({ min: 0, max: 1, imageData: 'data:image/png;base64,iVBORw0KGgo=' });
+    URL.createObjectURL = vi.fn(() => 'blob:frame');
+    URL.revokeObjectURL = vi.fn();
+    const { result } = renderHook(() => useOpenedFrame());
+    act(() => result.current.openFrame('/frames/f1.fits'));
+    expect(result.current.openedFrame?.loading).toBe(true);
+    await waitFor(() => expect(result.current.openedFrame?.imageUrl).toBe('blob:frame'));
+    expect(mockedCallBackend).toHaveBeenCalledWith('images:convert_fits', { path: '/frames/f1.fits', stretch: true });
+    act(() => result.current.closeFrame());
+    expect(result.current.openedFrame).toBeNull();
   });
 });

@@ -18,7 +18,7 @@ Controls that do not command a device, such as Add Target, stay on.
 - `ObservatoryManager.tsx` puts the display together. `ControlPanel.tsx` lays out the center column in rows.
 - `panels/` holds the control and information panels: `TelescopeControl.tsx`, `TrackingSettings.tsx`, `DirectionalControl.tsx` (Manual Guide), `LimitSettings.tsx` (Safety Limits), `AlignmentStatus.tsx`, `GuidingStatusPanel.tsx` and the `Indi*` files for devices and their properties.
 - `equipment/` holds `CameraProfilesPanel.tsx` (profiles, recorded noise and Measure noise).
-- `calibration/` holds `CalibrationLibraryPanel.tsx`. It shows the Darks table and the Biases and Flat Frames totals for one camera. A statement can ask it to show a row ("Show in calibration library"), and `calibrationRowMatch.ts` and `calibrationRowRequestStore.ts` carry that request.
+- `calibration/` holds `CalibrationLibraryPanel.tsx`. It shows the Darks table and the Biases and Flat Frames totals for one camera. The camera list and the totals come from the library's `camera_totals`, in the order returned. A statement can ask it to show a row ("Show in calibration library"). The panel asks the library which rows match (`calibration:query` with detail `match`) and highlights them. `calibrationRowRequestStore.ts` carries the request.
 - `IndiStatusPanel.tsx` is the right column. `hooks/useObservatoryControl.ts` holds the control handlers.
 - `tests/` holds the Vitest tests.
 

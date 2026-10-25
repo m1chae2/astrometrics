@@ -12,7 +12,7 @@ import { useExecutionQueue, SequenceObject } from './hooks/useExecutionQueue';
 import { usePackageLibrary, usePackageActions } from './hooks/usePackageLibrary';
 import { useCurrentSession } from './hooks/useCurrentSession';
 import { usePackageDraft } from './hooks/usePackageDraft';
-import { findExistingPackage, packageFromSequence, packageToSequenceItems, refreshNoticeText } from './packageModel';
+import { packageFromSequence, packageToSequenceItems, refreshNoticeText } from './packageModel';
 import { useTargetContext } from '../common/context/TargetContext';
 import { AddTargetModal } from '../common/components/AddTargetModal';
 import { createTarget } from '../common/services/targetService';
@@ -68,10 +68,10 @@ export const ObservationManager: React.FC = () => {
     const foundPackage = [...library.lists.suggested, ...library.lists.planned, ...library.lists.complete]
         .find((candidate) => candidate.id === selectedPackageId) ?? null;
     if (foundPackage && foundPackage !== lastSeenPackage) setLastSeenPackage(foundPackage);
-    // A suggestion open in the editor can be deleted by a refresh. The list has loaded, does not
-    // contain it, and it was a suggestion: keep the form and say so.
-    const isOpenSuggestionRemoved = !!selectedPackageId && !foundPackage && !queueEditPackage
-        && !library.isLoading && !library.isFetching && !library.error
+    // A suggestion open in the editor can be deleted by a refresh. The refresh event names the
+    // removed ids; when it names the open suggestion, keep the form and say so.
+    const isOpenSuggestionRemoved = !!selectedPackageId && !queueEditPackage
+        && (refreshResult?.deletedPackageIds ?? []).includes(selectedPackageId)
         && pickedSnapshot?.id === selectedPackageId && pickedSnapshot.status === PackageStatus.SUGGESTED;
     const keptPackage = lastSeenPackage?.id === selectedPackageId ? lastSeenPackage : null;
     const libraryPackage = foundPackage ?? (isOpenSuggestionRemoved ? keptPackage : null) ?? pickedSnapshot;
@@ -98,23 +98,15 @@ export const ObservationManager: React.FC = () => {
     };
 
     /**
-     * Opens the target's planned package, else its suggested one, and creates a package only when it
-     * has neither. Uses the loaded lists; while they are not loaded, asks the library per target.
+     * Opens the target's planned package, else its suggested one (the library finds it, matching
+     * names its own way), and creates a package only when it has neither.
      */
     const handleNewPackage = async (targetId: string) => {
         let existing: ObservationPackage | null;
-        if (!library.isLoading && !library.error) {
-            existing = findExistingPackage(targetId, library.lists.planned, library.lists.suggested);
-        } else {
-            try {
-                const [planned, suggested] = await Promise.all(
-                    (['PLANNED', 'SUGGESTED'] as const).map((status) =>
-                        callBackend('plan:list_packages', { status, target: targetId }, { silent: true }))
-                );
-                existing = findExistingPackage(targetId, planned ?? [], suggested ?? []);
-            } catch {
-                existing = null;
-            }
+        try {
+            existing = await callBackend('plan:package_for_target', { target: targetId }, { silent: true });
+        } catch {
+            existing = null;
         }
         if (existing) {
             handleSelectPackage(existing);

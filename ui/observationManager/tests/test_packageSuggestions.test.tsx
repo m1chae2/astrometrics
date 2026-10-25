@@ -132,7 +132,10 @@ describe('Observation Manager suggestions', () => {
         expect(screen.queryByText(/removed this suggestion/)).not.toBeInTheDocument();
 
         library.SUGGESTED = [];
-        await act(async () => { await client.invalidateQueries({ queryKey: PACKAGE_LIBRARY_QUERY_KEY }); });
+        await act(async () => {
+            client.setQueryData(PACKAGE_REFRESH_NOTICE_QUERY_KEY, { deleted: 1, deletedPackageIds: [suggestedPackage.id], receivedAt: 2 });
+            await client.invalidateQueries({ queryKey: PACKAGE_LIBRARY_QUERY_KEY });
+        });
 
         const alert = await screen.findByText(/removed this suggestion/);
         expect(alert.closest('[role="alert"]')).not.toBeNull();

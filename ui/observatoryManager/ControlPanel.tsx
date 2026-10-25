@@ -3,12 +3,14 @@ import { DirectionalControl } from './panels/DirectionalControl';
 import { TelescopeControl } from './panels/TelescopeControl';
 import { TrackingSettings } from './panels/TrackingSettings';
 import { LimitSettings } from './panels/LimitSettings';
-import { FocuserControl } from './panels/FocuserControl';
-import { FilterWheelControl } from './panels/FilterWheelControl';
 import { GuidingTrendsPlot, GuidingTargetPlot } from './panels/GuidingStatusPanel';
 import { AlignmentStatus } from './panels/AlignmentStatus';
 import { GuidingSample, AlignmentAttempt } from '../common/types/backendTypes';
 import { SectionPanel } from '../common/components/SectionPanel';
+import { CommandGate } from './CommandGate';
+import { CalibrationLibraryPanel } from './calibration/CalibrationLibraryPanel';
+import { CameraProfilesPanel } from './equipment/CameraProfilesPanel';
+import type { CameraProfile } from '../common/hooks/useEquipmentConfiguration';
 import '../common/styles/scrollbars.css';
 import '../common/styles/panels.css';
 
@@ -36,10 +38,6 @@ export interface ControlPanelProps {
         maximumHourAngle: number,
         flipHourAngle: number
     ) => void;
-    onMoveFocuser: (steps: number) => void;
-    focuserPosition: number;
-    activeFilter: string;
-    onSelectFilter: (filter: string) => void;
     guidingHistory: GuidingSample[];
     alignmentAttempts?: AlignmentAttempt[];
 
@@ -64,6 +62,20 @@ export interface ControlPanelProps {
     onStartAlignment?: () => void;
     onStopAlignment?: () => void;
     isAligningActive?: boolean;
+
+    /** True when the app may not command the equipment. The command controls are then greyed out. */
+    commandsDisabled?: boolean;
+    /** Why commands are off; shown when the user hovers a greyed control. */
+    commandsDisabledReason?: string;
+
+    /** The camera profiles shown in the Camera Profiles panel. */
+    cameras: CameraProfile[];
+    /** Whether the camera profiles are still loading. */
+    camerasLoading: boolean;
+    /** The error text of a failed camera read, or null. */
+    camerasError: string | null;
+    /** Reads the camera profiles again. */
+    onRetryCameras: () => void;
 }
 
 /**
@@ -88,10 +100,6 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
     onPark,
     onUnpark,
     onApplyLimits,
-    onMoveFocuser,
-    focuserPosition,
-    activeFilter,
-    onSelectFilter,
     guidingHistory,
     alignmentAttempts = [],
     accuracy,
@@ -110,70 +118,100 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
     onStartAlignment,
     onStopAlignment,
     isAligningActive = false,
+    commandsDisabled = false,
+    commandsDisabledReason = '',
+    cameras,
+    camerasLoading,
+    camerasError,
+    onRetryCameras,
 }) => {
     return (
         <div className="panel-group">
             {/* Top Row: Telescope Control | Alignment */}
             <div className="panel__row flex-auto">
                 <SectionPanel title="Telescope Control">
-                    <TelescopeControl
-                        isTracking={isTracking}
-                        isParked={isParked}
-                        onSetTracking={onSetTracking}
-                        onPark={onPark}
-                        onUnpark={onUnpark}
-                        onStartAlignment={onStartAlignment}
-                        onStopAlignment={onStopAlignment}
-                        isAligningActive={isAligningActive}
-                    />
+                    <CommandGate disabled={commandsDisabled} reason={commandsDisabledReason}>
+                        <TelescopeControl
+                            disabled={commandsDisabled}
+                            isTracking={isTracking}
+                            isParked={isParked}
+                            onSetTracking={onSetTracking}
+                            onPark={onPark}
+                            onUnpark={onUnpark}
+                            onStartAlignment={onStartAlignment}
+                            onStopAlignment={onStopAlignment}
+                            isAligningActive={isAligningActive}
+                        />
+                    </CommandGate>
                 </SectionPanel>
 
                 {/* REQ: OBS-4: Tracking & Parking Control */}
                 <SectionPanel title="Tracking Settings">
                     {/* REQ: OBS-4.3: The display SHALL allow enabling and disabling of sidereal tracking. */}
-                    <TrackingSettings
-                        accuracy={accuracy}
-                        settleTime={settleTime}
-                        alignmentExposure={alignmentExposure}
-                        onAccuracyChange={onAccuracyChange}
-                        onSettleTimeChange={onSettleTimeChange}
-                        onAlignmentExposureChange={onAlignmentExposureChange}
-                        guidingExposure={guidingExposure}
-                        guidingGain={guidingGain}
-                        onGuidingExposureChange={onGuidingExposureChange}
-                        onGuidingGainChange={onGuidingGainChange}
+                    <CommandGate
+                        disabled={commandsDisabled}
+                        reason={commandsDisabledReason}
+                        renderChildren={(reasonId) => (
+                            <TrackingSettings
+                                disabled={commandsDisabled}
+                                disabledReasonId={reasonId}
+                                accuracy={accuracy}
+                                settleTime={settleTime}
+                                alignmentExposure={alignmentExposure}
+                                onAccuracyChange={onAccuracyChange}
+                                onSettleTimeChange={onSettleTimeChange}
+                                onAlignmentExposureChange={onAlignmentExposureChange}
+                                guidingExposure={guidingExposure}
+                                guidingGain={guidingGain}
+                                onGuidingExposureChange={onGuidingExposureChange}
+                                onGuidingGainChange={onGuidingGainChange}
+                            />
+                        )}
                     />
                 </SectionPanel>
             </div>
 
-            {/* Horizontal Middle Row: Focuser | Manual Guide | Safety Limits | Guide Control */}
-            <div className="panel__row flex-auto">
-                {/* Focuser Control */}
-                {/* REQ: OBS-5: Focuser Control */}
-                <SectionPanel title="Focuser">
-                    <FocuserControl position={focuserPosition} onMoveFocuser={onMoveFocuser} />
-                </SectionPanel>
+            {/* Horizontal Middle Row: Camera Profiles | Manual Guide | Safety Limits | Alignment Status */}
+            <div className="panel__row flex-auto observatory-middle-row">
+                {/* Camera Profiles, where Focuser used to be. It scrolls inside itself. */}
+                <CameraProfilesPanel
+                    cameras={cameras}
+                    loading={camerasLoading}
+                    error={camerasError}
+                    onRetry={onRetryCameras}
+                />
 
                 {/* Manual Guide */}
                 {/* REQ: OBS-2: Manual Telescope Movement */}
                 <SectionPanel title="Manual Guide">
-                    <DirectionalControl
-                        onStartMove={onStartMove}
-                        onStopMove={onStopMove}
-                        onSetSlewRate={onSetSlewRate}
-                        onStop={onStop}
-                    />
+                    <CommandGate disabled={commandsDisabled} reason={commandsDisabledReason}>
+                        <DirectionalControl
+                            disabled={commandsDisabled}
+                            onStartMove={onStartMove}
+                            onStopMove={onStopMove}
+                            onSetSlewRate={onSetSlewRate}
+                            onStop={onStop}
+                        />
+                    </CommandGate>
                 </SectionPanel>
 
                 {/* Safety Limits */}
                 {/* REQ: OBS-8: Safety Limits */}
                 <SectionPanel title="Safety Limits">
-                    <LimitSettings
-                        minAltitude={minimumAltitudeLimit}
-                        maxAltitude={maximumAltitudeLimit}
-                        maxHourAngle={maxHourAngle}
-                        meridianFlipHourAngle={meridianFlipHourAngle}
-                        onApplyLimits={onApplyLimits}
+                    <CommandGate
+                        disabled={commandsDisabled}
+                        reason={commandsDisabledReason}
+                        renderChildren={(reasonId) => (
+                            <LimitSettings
+                                disabled={commandsDisabled}
+                                disabledReasonId={reasonId}
+                                minAltitude={minimumAltitudeLimit}
+                                maxAltitude={maximumAltitudeLimit}
+                                maxHourAngle={maxHourAngle}
+                                meridianFlipHourAngle={meridianFlipHourAngle}
+                                onApplyLimits={onApplyLimits}
+                            />
+                        )}
                     />
                 </SectionPanel>
 
@@ -207,11 +245,10 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                 </SectionPanel>
             </div>
 
-            {/* Filter Wheel */}
-            {/* REQ: OBS-6: Filter Wheel Control */}
-            <SectionPanel title="Filter Wheel" className="panel--filter-wheel flex-auto">
-                <FilterWheelControl activeFilter={activeFilter} onSelectFilter={onSelectFilter} />
-            </SectionPanel>
+            {/* Calibration Library, in the short bottom row Filter Wheel used to have. It scrolls inside itself. */}
+            <div className="panel__row flex-auto observatory-library-row">
+                <CalibrationLibraryPanel />
+            </div>
         </div>
     );
 };

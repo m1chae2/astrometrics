@@ -1,6 +1,6 @@
 /**
  * @fileoverview The commands that Observation Execution can send to the
- * equipment: slew, move, focus, filter, park, tracking, guiding and alignment.
+ * equipment: slew, move, park, tracking, guiding and alignment.
  *
  * This is the command half of the old Observatory Manager hook. Every command
  * is guarded: when `canCommand` is false (Ekos is in charge, or the policy is
@@ -17,7 +17,6 @@ import {
     moveTelescope,
     setTelescopeSlewRate,
 } from '../../common/services/telescope/motionService';
-import { moveFocuser, setFilterWheelPosition } from '../../common/services/telescope/deviceService';
 import { startGuiding, stopGuiding, captureGuideFrame } from '../../common/services/telescope/guidingService';
 import { startAlignment, stopAlignment } from '../../common/services/alignmentApi';
 import { emitToast } from '../../common/utils/emitToast';
@@ -70,14 +69,6 @@ export const useEquipmentCommands = (canCommand: boolean) => {
     const handleSetSlewRate = guarded(async (rate: number) => {
         emitToast(`Setting Slew Rate: ${rate}`, 'info');
         await setTelescopeSlewRate(rate);
-    });
-
-    const handleMoveFocuser = guarded(async (steps: number) => {
-        await moveFocuser(steps);
-    });
-
-    const handleSelectFilter = guarded(async (filter: string) => {
-        await setFilterWheelPosition(filter);
     });
 
     const handleSetTracking = guarded(async (enabled: boolean) => {
@@ -136,8 +127,6 @@ export const useEquipmentCommands = (canCommand: boolean) => {
             onStartMove: handleStartMove,
             onStopMove: handleStopMove,
             onSetSlewRate: handleSetSlewRate,
-            onMoveFocuser: handleMoveFocuser,
-            onSelectFilter: handleSelectFilter,
             onSetTracking: handleSetTracking,
             onPark: handlePark,
             onUnpark: handleUnpark,

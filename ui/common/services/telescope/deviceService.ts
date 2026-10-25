@@ -1,5 +1,5 @@
 /**
- * @fileoverview Service for querying and controlling INDI devices and telescope peripherals.
+ * @fileoverview Service for listing INDI devices and reading and setting their properties.
  * Communicates via JSON-RPC.
  * Aligns with the Google TypeScript Style Guide.
  */
@@ -54,45 +54,6 @@ export async function setIndiProperty(
             value,
             element
         });
-    } catch {
-        return false;
-    }
-}
-
-/**
- * Commands the telescope focuser to move by a relative number of steps.
- * @param steps Number of steps to move (positive or negative).
- * @return Success indicator.
- */
-export async function moveFocuser(steps: number): Promise<boolean> {
-    try {
-        return await callBackend("telescope:focus_move", { steps });
-    } catch {
-        return false;
-    }
-}
-
-/**
- * Queries the current position of the telescope focuser.
- * @return Object containing current position, or null if query fails.
- */
-export async function fetchFocuserStatus(): Promise<{ position: number } | null> {
-    try {
-        const position = await callBackend("telescope:get_focuser_position", {});
-        return typeof position === 'number' ? { position } : null;
-    } catch {
-        return null;
-    }
-}
-
-/**
- * Sets the active filter on the filter wheel.
- * @param filter Name of the target filter (e.g. 'Red', 'Luminance').
- * @return Success indicator.
- */
-export async function setFilterWheelPosition(filter: string): Promise<boolean> {
-    try {
-        return await callBackend("telescope:set_filter", { filter_name: filter });
     } catch {
         return false;
     }

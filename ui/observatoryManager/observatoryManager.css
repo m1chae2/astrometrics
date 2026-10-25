@@ -69,3 +69,24 @@
 .equipment-block__confirm { border: 1px solid var(--border-color); border-radius: 4px; padding: 6px 8px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .equipment-block__actions button:focus-visible, .equipment-block__form button:focus-visible, .equipment-block__confirm button:focus-visible, .equipment-block select:focus-visible, .equipment-block input:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
 .control-mode-banner { font-size: 13px; padding: 6px 8px; border: 1px solid var(--border-color); border-radius: 4px; margin-bottom: 6px; }
+
+/* Command gate: hover reason for controls the app may not command. */
+.command-gate { position: relative; display: block; width: 100%; }
+.command-gate--inline { display: inline-block; width: auto; }
+/* Let hover reach the wrapper, because disabled controls swallow mouse events. */
+.command-gate :disabled { pointer-events: none; }
+/* Grey every disabled control the same way, so none of them looks usable. */
+.command-gate { cursor: not-allowed; }
+.command-gate :is(button, input, select):disabled { opacity: 0.4; filter: grayscale(1); }
+/* The reason is read by screen readers and shown as the hover title only. */
+.command-gate__reason {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+    overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+/* The Calibration Library row stays short so the guiding plots keep their height; the table scrolls. */
+.observatory-library-row { flex-wrap: nowrap; }
+.observatory-library-row > * { flex: 1 1 0; min-width: 0; max-height: 190px; overflow-y: auto; }
+/* Camera Profiles in the middle row is no taller than its neighbors; it scrolls inside itself. */
+.observatory-middle-row { align-items: stretch; }
+.observatory-middle-row > :first-child { min-width: 0; max-height: 300px; overflow-y: auto; }

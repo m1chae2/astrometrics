@@ -14,6 +14,9 @@ import { useObservatoryControl } from './hooks/useObservatoryControl';
 import { useRemoteStatusContext } from '../common/context/RemoteStatusContext';
 import { useAstrometrics } from '../common/context/AstrometricsContext';
 import { useReportModeReady } from '../common/utils/appBootReadiness';
+import { useCommandAvailability } from './hooks/useCommandAvailability';
+import { useEquipmentConfiguration } from '../common/hooks/useEquipmentConfiguration';
+import { CommandGate } from './CommandGate';
 
 import './observatoryManager.css';
 
@@ -47,6 +50,9 @@ export const ObservatoryManager: React.FC = () => {
 
     // REQ: OBS-1.5: The display SHALL update position values at a minimum rate of 1Hz.
     const { trackingStatus, telemetry } = useTelescopeStatus();
+    // Equipment commands stay off until the library says this app may send them.
+    const availability = useCommandAvailability();
+    const equipment = useEquipmentConfiguration();
     // No fetch-once "loading" concept here (this view is live telemetry, not a
     // one-shot data load, and AstrometricsContext seeds `telescope` with a
     // placeholder object rather than null/undefined, so there's no clean
@@ -91,7 +97,15 @@ export const ObservatoryManager: React.FC = () => {
                     {/* REQ: OBS-3.3: The display SHALL provide an "Add Target" function */}
                     <button className="btn" onClick={handlers.onAddTarget}>Add Target</button>
                     {/* REQ: OBS-3.4: The display SHALL provide a "Slew to Target" command button */}
-                    <button className="btn btn--primary" onClick={() => handlers.onSlewToTarget(raShared, decShared)}>Slew to Target</button>
+                    <CommandGate disabled={!availability.canCommand} reason={availability.reason}>
+                        <button
+                            className="btn btn--primary"
+                            disabled={!availability.canCommand}
+                            onClick={() => handlers.onSlewToTarget(raShared, decShared)}
+                        >
+                            Slew to Target
+                        </button>
+                    </CommandGate>
                 </ListActions>
             }
         />
@@ -113,10 +127,6 @@ export const ObservatoryManager: React.FC = () => {
             onPark={handlers.onPark}
             onUnpark={handlers.onUnpark}
             onApplyLimits={handlers.onApplyLimits}
-            onMoveFocuser={handlers.onMoveFocuser}
-            focuserPosition={telemetry.focuserPosition || 0}
-            activeFilter={telemetry.filter}
-            onSelectFilter={handlers.onSelectFilter}
             guidingHistory={telemetry.guidingHistory || []}
             onGuideStart={handlers.onGuideStart}
             onGuideStop={handlers.onGuideStop}
@@ -129,6 +139,12 @@ export const ObservatoryManager: React.FC = () => {
             onStartAlignment={() => handlers.onStartAlignment(raShared, decShared)}
             onStopAlignment={handlers.onStopAlignment}
             isAligningActive={telemetry.alignmentActive}
+            commandsDisabled={!availability.canCommand}
+            commandsDisabledReason={availability.reason}
+            cameras={equipment.availableCameras}
+            camerasLoading={equipment.loading}
+            camerasError={equipment.error}
+            onRetryCameras={equipment.reload}
         />
     );
 

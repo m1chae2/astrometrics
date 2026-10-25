@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { parkTelescope, unparkTelescope, slewTelescope, abortTelescopeMotion, setTelescopeTracking, moveTelescope, setTelescopeSlewRate } from '../../common/services/telescope/motionService';
-import { moveFocuser, setFilterWheelPosition } from '../../common/services/telescope/deviceService';
 import { startGuiding, stopGuiding, captureGuideFrame } from '../../common/services/telescope/guidingService';
 import { startAlignment, stopAlignment } from '../../common/services/alignmentApi';
 import { createTarget } from '../../common/services/targetService';
@@ -57,14 +56,6 @@ export const useObservatoryControl = (forceReload: () => void) => {
     const handleSetSlewRate = async (rate: number) => {
         emitToast(`Setting Slew Rate: ${rate}`, 'info');
         await setTelescopeSlewRate(rate);
-    };
-
-    const handleMoveFocuser = async (steps: number) => {
-        await moveFocuser(steps);
-    };
-
-    const handleSelectFilter = async (filter: string) => {
-        await setFilterWheelPosition(filter);
     };
 
     const handleSetTracking = async (enabled: boolean) => {
@@ -154,8 +145,6 @@ export const useObservatoryControl = (forceReload: () => void) => {
             onStartMove: handleStartMove,
             onStopMove: handleStopMove,
             onSetSlewRate: handleSetSlewRate,
-            onMoveFocuser: handleMoveFocuser,
-            onSelectFilter: handleSelectFilter,
             onSetTracking: handleSetTracking,
             onPark: handlePark,
             onUnpark: handleUnpark,

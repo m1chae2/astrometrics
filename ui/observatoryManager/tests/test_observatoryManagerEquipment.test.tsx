@@ -1,7 +1,7 @@
 /**
  * @fileoverview Tests of the camera profile and calibration library panels:
  * the noise measurement asks before saving, and the "Show in calibration
- * library" listener. The panels are not on the Observatory Manager for now.
+ * library" listener.
  */
 
 import React from 'react';

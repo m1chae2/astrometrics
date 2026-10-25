@@ -424,100 +424,17 @@
     margin: 0;
 }
 
-/* Filter Wheel Selector Block */
-.filter-wheel {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 6px;
-    background-color: var(--grey-darkest);
-    padding: 8px;
-    border-radius: 4px;
-    border: 1px solid var(--grey-light);
-}
 
-.btn.filter-wheel__btn {
-    font-size: 13px;
-    padding: 6px 8px;
-    background-color: var(--grey-light);
-    border: 1px solid var(--grey-lighter);
-    color: var(--white);
-    font-weight: normal;
-    transition: all 0.2s ease;
-    height: 36px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
 
-.filter-wheel__btn--active {
-    background-color: var(--primary-blue);
-    border: 1px solid var(--primary-blue);
-    color: white;
-    font-weight: bold;
-}
 
-.filter-wheel__btn--pending {
-    background-color: var(--btn-green-active);
-    border: 1px solid var(--btn-green-active);
-    color: white;
-    font-weight: bold;
-}
 
-/* Focuser Control Block */
-.focuser {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
 
-.focuser__status {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 4px;
-}
 
-.focuser__label {
-    font-size: 12px;
-    color: var(--text-muted);
-}
 
-.focuser__value {
-    font-size: 15px;
-    font-weight: bold;
-}
 
-.focuser__actions {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
 
-.focuser__steps {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 4px;
-}
 
-.focuser__step {
-    padding: 6px 10px;
-    font-size: 13px;
-    background-color: var(--grey-light);
-    color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    margin: 0;
-}
 
-.focuser__step--active {
-    background-color: var(--primary-blue);
-}
 
 /* Guiding Status */
 .guiding-status__plot {
@@ -564,9 +481,6 @@
     min-height: 0;
 }
 
-.panel--filter-wheel {
-    flex: 0 0 auto !important;
-}
 
 .value-text {
     font-weight: bold;

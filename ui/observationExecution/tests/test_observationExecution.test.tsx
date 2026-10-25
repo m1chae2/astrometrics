@@ -24,7 +24,7 @@ vi.mock('../../common/utils/displayCoordinator', () => ({
 vi.mock('../../common/hooks/useTelescopeStatus', () => ({
     useTelescopeStatus: () => ({
         trackingStatus: 'Tracking',
-        telemetry: { focuserPosition: 100, filter: 'L', guidingHistory: [], alignmentAttempts: [], alignmentActive: false },
+        telemetry: { guidingHistory: [], alignmentAttempts: [], alignmentActive: false },
     }),
 }));
 vi.mock('../../common/components/plotting/TimeSeriesPlot', () => ({ TimeSeriesPlot: () => <div>time series</div> }));

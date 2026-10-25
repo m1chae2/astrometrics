@@ -1,6 +1,6 @@
 /**
  * @fileoverview The "Control" tab: telescope, manual guide, guiding commands,
- * focuser, filter wheel, execution queue and test frame.
+ * execution queue and test frame.
  *
  * Every control follows the command policy. While Ekos is in charge (or the
  * policy is still loading or failed) every control is disabled, the command
@@ -19,8 +19,6 @@ import type { SequenceObject } from './hooks/useExecutionQueue';
 import { useEquipmentCommands } from './hooks/useEquipmentCommands';
 import type { EquipmentCommandPolicy } from './hooks/useEquipmentCommandPolicy';
 import { DirectionalControl } from '../observatoryManager/panels/DirectionalControl';
-import { FilterWheelControl } from '../observatoryManager/panels/FilterWheelControl';
-import { FocuserControl } from '../observatoryManager/panels/FocuserControl';
 import { TelescopeControl } from '../observatoryManager/panels/TelescopeControl';
 import { ExecutionQueue } from './ExecutionQueue';
 import { TestFramePanel } from './TestFramePanel';
@@ -129,20 +127,6 @@ export const ControlTab: React.FC<ControlTabProps> = ({ policy }) => {
                             Capture guide frame
                         </button>
                     </div>
-                </SectionPanel>
-                <SectionPanel title="Focuser">
-                    <FocuserControl
-                        position={telemetry.focuserPosition || 0}
-                        onMoveFocuser={(steps) => void handlers.onMoveFocuser(steps)}
-                        disabled={disabled}
-                    />
-                </SectionPanel>
-                <SectionPanel title="Filter Wheel">
-                    <FilterWheelControl
-                        activeFilter={telemetry.filter}
-                        onSelectFilter={(filter) => void handlers.onSelectFilter(filter)}
-                        disabled={disabled}
-                    />
                 </SectionPanel>
                 <SectionPanel title="Test Frame">
                     <TestFramePanel targetId={selectedTarget} disabled={disabled} disabledReasonId={CONTROL_REASON_ID} />

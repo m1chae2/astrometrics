@@ -15,12 +15,10 @@ const motion = vi.hoisted(() => ({
     moveTelescope: vi.fn(),
     setTelescopeSlewRate: vi.fn(),
 }));
-const device = vi.hoisted(() => ({ moveFocuser: vi.fn(), setFilterWheelPosition: vi.fn() }));
 const guiding = vi.hoisted(() => ({ startGuiding: vi.fn(), stopGuiding: vi.fn(), captureGuideFrame: vi.fn() }));
 const alignment = vi.hoisted(() => ({ startAlignment: vi.fn(), stopAlignment: vi.fn() }));
 
 vi.mock('../../common/services/telescope/motionService', () => motion);
-vi.mock('../../common/services/telescope/deviceService', () => device);
 vi.mock('../../common/services/telescope/guidingService', () => guiding);
 vi.mock('../../common/services/alignmentApi', () => alignment);
 vi.mock('../../common/utils/emitToast', () => ({ emitToast: vi.fn() }));
@@ -28,7 +26,7 @@ vi.mock('../../common/utils/emitToast', () => ({ emitToast: vi.fn() }));
 import { useEquipmentCommands } from '../hooks/useEquipmentCommands';
 
 beforeEach(() => {
-    for (const group of [motion, device, guiding, alignment]) {
+    for (const group of [motion, guiding, alignment]) {
         for (const mock of Object.values(group)) mock.mockReset();
     }
 });
@@ -44,8 +42,6 @@ describe('useEquipmentCommands', () => {
             await handlers.onStartMove('N');
             await handlers.onStopMove('N');
             await handlers.onSetSlewRate(1);
-            await handlers.onMoveFocuser(10);
-            await handlers.onSelectFilter('L');
             await handlers.onSetTracking(true);
             await handlers.onPark();
             await handlers.onUnpark();
@@ -55,7 +51,7 @@ describe('useEquipmentCommands', () => {
             await handlers.onStartAlignment('1', '2');
             await handlers.onStopAlignment();
         });
-        for (const group of [motion, device, guiding, alignment]) {
+        for (const group of [motion, guiding, alignment]) {
             for (const mock of Object.values(group)) expect(mock).not.toHaveBeenCalled();
         }
     });
@@ -66,12 +62,10 @@ describe('useEquipmentCommands', () => {
         const { result } = renderHook(() => useEquipmentCommands(true));
         await act(async () => {
             await result.current.handlers.onPark();
-            await result.current.handlers.onMoveFocuser(-50);
             await result.current.handlers.onSlewToTarget('10', '20');
             await result.current.handlers.onGuideCapture();
         });
         expect(motion.parkTelescope).toHaveBeenCalledTimes(1);
-        expect(device.moveFocuser).toHaveBeenCalledWith(-50);
         expect(motion.slewTelescope).toHaveBeenCalledWith(10, 20);
         expect(guiding.captureGuideFrame).toHaveBeenCalledWith(1.0, 100);
     });

@@ -16,6 +16,9 @@ import { RemoteStatusProvider } from './common/context/RemoteStatusContext';
 import { AstrometricsProvider, useAstrometrics } from './common/context/AstrometricsContext';
 import { DISPLAY_DEFINITIONS, isDisplayEnabled } from './common/constants/displayFlags';
 import { normalizeAppMode } from './common/utils/normalizeAppMode';
+// Listens for "Show in calibration library" from the start, so a request sent
+// before the (lazy) Observatory Manager has loaded is kept for it.
+import './observatoryManager/calibration/calibrationRowRequestStore';
 import './App.css';
 
 // Single shared cache for all shared-resource queries (see ui/common/queries/),

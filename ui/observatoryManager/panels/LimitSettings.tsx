@@ -14,6 +14,10 @@ export interface LimitSettingsProps {
         maximumHourAngle: number,
         flipHourAngle: number
     ) => void;
+    /** True when the app may not command the mount. Every input is then disabled. */
+    disabled?: boolean;
+    /** The id of the hidden text that says why the inputs are unavailable. */
+    disabledReasonId?: string;
 }
 
 /**
@@ -30,7 +34,12 @@ export const LimitSettings: React.FC<LimitSettingsProps> = ({
     maxHourAngle = 2,
     meridianFlipHourAngle = 1,
     onApplyLimits,
+    disabled = false,
+    disabledReasonId,
 }) => {
+    const unavailable = {
+        'aria-describedby': disabled ? disabledReasonId : undefined,
+    };
     const [enableAltitudeLimits, setEnableAltitudeLimits] = React.useState(false);
     const [minimumAltitude, setMinimumAltitude] = React.useState(String(minAltitude));
     const [maximumAltitude, setMaximumAltitude] = React.useState(String(maxAltitude));
@@ -49,6 +58,8 @@ export const LimitSettings: React.FC<LimitSettingsProps> = ({
                         // REQ: OBS-8.1: The display SHALL allow enabling and disabling of altitude limits.
                         checked={enableAltitudeLimits}
                         onChange={(e) => setEnableAltitudeLimits(e.target.checked)}
+                        disabled={disabled}
+                        {...unavailable}
                         className="checkbox"
                     />
                     <label htmlFor="checkbox-enable-alt-limits">
@@ -66,7 +77,8 @@ export const LimitSettings: React.FC<LimitSettingsProps> = ({
                         // REQ: OBS-8.2: The display SHALL allow configuration of Minimum Altitude Limit.
                         value={minimumAltitude}
                         onChange={(e) => setMinimumAltitude(e.target.value)}
-                        disabled={!enableAltitudeLimits}
+                        disabled={disabled || !enableAltitudeLimits}
+                        {...unavailable}
                     />
                 </div>
 
@@ -79,7 +91,8 @@ export const LimitSettings: React.FC<LimitSettingsProps> = ({
                         className="input input--short"
                         value={maximumAltitude}
                         onChange={(e) => setMaximumAltitude(e.target.value)}
-                        disabled={!enableAltitudeLimits}
+                        disabled={disabled || !enableAltitudeLimits}
+                        {...unavailable}
                     />
                 </div>
             </div>
@@ -93,6 +106,8 @@ export const LimitSettings: React.FC<LimitSettingsProps> = ({
                         // REQ: OBS-8.3: The display SHALL allow enabling and disabling of hour angle limits.
                         checked={enableHourAngleLimits}
                         onChange={(e) => setEnableHourAngleLimits(e.target.checked)}
+                        disabled={disabled}
+                        {...unavailable}
                         className="checkbox"
                     />
                     <label htmlFor="checkbox-enable-ha-limits">
@@ -110,7 +125,8 @@ export const LimitSettings: React.FC<LimitSettingsProps> = ({
                         // REQ: OBS-8.4: The display SHALL allow configuration of Maximum Hour Angle Limit.
                         value={maximumHourAngle}
                         onChange={(e) => setMaximumHourAngle(e.target.value)}
-                        disabled={!enableHourAngleLimits}
+                        disabled={disabled || !enableHourAngleLimits}
+                        {...unavailable}
                     />
                 </div>
 
@@ -125,6 +141,8 @@ export const LimitSettings: React.FC<LimitSettingsProps> = ({
                             // REQ: OBS-8.5: The display SHALL allow configuration of Meridian Flip Hour Angle.
                             value={flipHourAngle}
                             onChange={(e) => setFlipHourAngle(e.target.value)}
+                            disabled={disabled}
+                            {...unavailable}
                         />
                         <span className="limit-settings__unit">deg</span>
                     </div>

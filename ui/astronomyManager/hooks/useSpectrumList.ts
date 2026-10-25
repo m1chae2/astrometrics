@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAstronomyListQuery } from '../../common/queries/useAstronomyListQuery';
-import { fetchAstronomyCount } from '../../common/services/astronomyService';
+import { useAstronomyCountQuery } from '../../common/queries/useAstronomyCountQuery';
 import { reportError } from '../../common/utils/reportError';
 import { SelectableItem } from '../../common/components/SelectableList';
 import { Spectrum } from '../../common/types/backendTypes';
@@ -66,16 +66,7 @@ export const useSpectrumList = (
     // Total match count for this scope, used to show "Page X / Y" instead of
     // just "Page X" -- a separate, unpaginated RPC since the list query
     // itself only ever sees one capped page of results.
-    const [totalCount, setTotalCount] = useState<number | undefined>(undefined);
-    useEffect(() => {
-        let cancelled = false;
-        fetchAstronomyCount({ targetId, search: debouncedFilterText }).then((count) => {
-            if (!cancelled) setTotalCount(count);
-        });
-        return () => {
-            cancelled = true;
-        };
-    }, [targetId, debouncedFilterText]);
+    const totalCount = useAstronomyCountQuery(targetId, debouncedFilterText).data;
     const totalPages = totalCount !== undefined
         ? Math.max(1, Math.ceil(totalCount / STARS_PER_PAGE))
         : undefined;
@@ -183,6 +174,8 @@ export const useSpectrumList = (
         hasMore,
         totalPages,
         isLoading: astronomyListQuery.isLoading,
+        isError: astronomyListQuery.isError,
+        retry: () => { void astronomyListQuery.refetch(); },
         hasPrevious: page > 1,
         nextPage: () => setPage((p) => p + 1),
         prevPage: () => setPage((p) => Math.max(1, p - 1)),

@@ -527,6 +527,9 @@ export const PlanetariumDisplay: React.FC = () => {
           isLoading={targetBrowser.isLoading}
           loadingMessage="Loading targets…"
           emptyMessage="No targets found."
+          isError={targetBrowser.isError}
+          errorMessage="Could not load the targets."
+          onRetry={targetBrowser.retry}
         />
       ) : (
         <RadioListManager
@@ -543,6 +546,9 @@ export const PlanetariumDisplay: React.FC = () => {
           isLoading={spectralClassBrowser.isLoading}
           loadingMessage="Scanning the catalog for spectral classes…"
           emptyMessage="No spectral classes found."
+          isError={spectralClassBrowser.isError}
+          errorMessage="Could not load the spectral classes."
+          onRetry={spectralClassBrowser.retry}
         />
       )}
 
@@ -573,6 +579,9 @@ export const PlanetariumDisplay: React.FC = () => {
         isLoading={scopedStarList.isLoading}
         loadingMessage="Loading stars…"
         emptyMessage="No stars found for this selection."
+        isError={scopedStarList.isError}
+        errorMessage="Could not load the stars."
+        onRetry={scopedStarList.retry}
         page={activeSpectralClass ? undefined : starsInScopedTarget.page}
         onPageChange={activeSpectralClass ? undefined : starsInScopedTarget.setPage}
         hasMore={activeSpectralClass ? false : starsInScopedTarget.hasMore}

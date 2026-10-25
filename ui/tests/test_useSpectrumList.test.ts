@@ -13,6 +13,10 @@ vi.mock('../common/queries/useAstronomyListQuery', () => ({
     useAstronomyListQuery: vi.fn(),
 }));
 
+vi.mock('../common/queries/useAstronomyCountQuery', () => ({
+    useAstronomyCountQuery: () => ({ data: undefined }),
+}));
+
 vi.mock('../common/hooks/useToast', () => ({
     useToast: () => ({ show: vi.fn() }),
 }));

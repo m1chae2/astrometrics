@@ -43,5 +43,8 @@ export const useSpectralClassBrowserItems = () => {
         ];
     }, [classes, filterText]);
 
-    return { items, filterText, setFilterText, isLoading: spectralClassSummaryQuery.isLoading };
+    return { items, filterText, setFilterText, isLoading: spectralClassSummaryQuery.isLoading,
+        isError: spectralClassSummaryQuery.isError,
+        retry: () => { void spectralClassSummaryQuery.refetch(); },
+    };
 };

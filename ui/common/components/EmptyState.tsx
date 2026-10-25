@@ -17,7 +17,7 @@ export interface EmptyStateProps {
 export const EmptyState: React.FC<EmptyStateProps> = ({ variant = 'empty', message, className = '' }) => (
     <div
         className={`empty-state empty-state--${variant} ${className}`}
-        role={variant === 'loading' ? 'status' : undefined}
+        role={variant === 'loading' ? 'status' : variant === 'error' ? 'alert' : undefined}
     >
         {variant === 'loading' && <LoadingSpinner size={16} />}
         <span className="empty-state__text">{message}</span>

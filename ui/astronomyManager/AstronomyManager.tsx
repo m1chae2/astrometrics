@@ -259,6 +259,9 @@ export const AstronomyManager: React.FC = () => {
           isLoading={targetBrowser.isLoading}
           loadingMessage="Loading targets…"
           emptyMessage="No targets found."
+          isError={targetBrowser.isError}
+          errorMessage="Could not load the targets."
+          onRetry={targetBrowser.retry}
         />
       ) : (
         <RadioListManager
@@ -275,6 +278,9 @@ export const AstronomyManager: React.FC = () => {
           isLoading={spectralClassBrowser.isLoading}
           loadingMessage="Scanning the catalog for spectral classes…"
           emptyMessage="No spectral classes found."
+          isError={spectralClassBrowser.isError}
+          errorMessage="Could not load the spectral classes."
+          onRetry={spectralClassBrowser.retry}
         />
       )}
 
@@ -299,6 +305,9 @@ export const AstronomyManager: React.FC = () => {
         isLoading={starList.isLoading}
         loadingMessage="Loading stars…"
         emptyMessage="No stars found for this selection."
+        isError={starList.isError}
+        errorMessage="Could not load the stars."
+        onRetry={starList.retry}
         page={isSpectralClassScoped ? undefined : starsByTarget.page}
         onPageChange={isSpectralClassScoped ? undefined : starsByTarget.setPage}
         hasMore={isSpectralClassScoped ? false : starsByTarget.hasMore}

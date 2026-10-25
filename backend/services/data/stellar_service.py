@@ -21,11 +21,13 @@ from typing import Any, TypeVar
 from astrometricslib import (
     Astrometrics,
     AstrometricsError,
+    ConflictError,
     InvalidArgumentError,
     StarQueryResult,
     StellarObject,
 )
 from backend.services.data.deletion_archive import archive_record_before_delete
+from backend.services.infrastructure.heavy_read_limiter import DEFAULT_SHARED_WAIT_SECONDS, HeavyReadLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +113,9 @@ class StellarService:
         # make one scan between them instead of racing two.
         self._catalog_compute_locks: dict[str, threading.Lock] = {}
         self._announced_catalog_version: int | None = None
+        # Caps slow catalog reads so abandoned requests cannot use every
+        # RPC worker thread, and shares identical concurrent ones.
+        self._heavy_reads = HeavyReadLimiter()
         self._socket_manager = None
 
     def set_socket_manager(self, socket_manager: Any) -> None:
@@ -171,13 +176,27 @@ class StellarService:
         -------
         answer : `Any`
             The cached or newly computed answer.
+
+        Raises
+        ------
+        ConflictError
+            If a scan of the same answer is still running after the wait.
         """
         with self._catalog_answers_lock:
             compute_lock = self._catalog_compute_locks.setdefault(key, threading.Lock())
 
         # A request that arrives while the same answer is being computed
         # waits here, then finds the finished answer in the cache.
-        with compute_lock:
+        # Wait for a running scan of the same answer only as long as a client
+        # would; after that the request is refused so it frees its thread.
+        if not compute_lock.acquire(timeout=DEFAULT_SHARED_WAIT_SECONDS):
+            logger.info("Catalog answer %r refused: the scan is still running", key)
+            raise ConflictError(
+                "The star catalog is busy with other large reads. Try again in a moment.",
+                details={"reason": "busy"},
+                retryable=True,
+            )
+        try:
             current_version = self.astrometrics.catalog_access.get_dataset_version("stellar_catalog")
             now = time.monotonic()
             with self._catalog_answers_lock:
@@ -190,12 +209,14 @@ class StellarService:
                     ):
                         return answer
 
-            answer = compute()
+            answer = self._heavy_reads.run(("catalog_answer", key), compute)
 
             with self._catalog_answers_lock:
                 self._catalog_answers[key] = (now, current_version, answer)
                 announce = self._announced_catalog_version != current_version
                 self._announced_catalog_version = current_version
+        finally:
+            compute_lock.release()
         if announce:
             self._notify_catalog_changed()
         return answer
@@ -336,6 +357,29 @@ class StellarService:
         answer : `StarQueryResult`
             The library's answer. A scoped, searched or filtered listing is
             sorted most useful first; a plain browse is in id order.
+        """
+        return self._heavy_reads.run(
+            ("listing", target_id, search, filter_type, detail, limit, offset),
+            lambda: self._run_listing_query(target_id, search, filter_type, detail, limit, offset),
+        )
+
+    def _run_listing_query(
+        self,
+        target_id: str | None,
+        search: str | None,
+        filter_type: str | None,
+        detail: str,
+        limit: int | None,
+        offset: int,
+    ) -> StarQueryResult:
+        """Ask the library for a star listing, without any limiting.
+
+        Parameters are those of `_query_listing`.
+
+        Returns
+        -------
+        answer : `StarQueryResult`
+            The library's answer.
         """
         needle = search.strip() if search and search.strip() else None
         normalized_filter = filter_type.strip().lower() if filter_type else ""

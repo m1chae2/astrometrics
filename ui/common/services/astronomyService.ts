@@ -53,7 +53,7 @@ async function getAstronomyList(optionsOrTargetId?: string | AstronomyListOption
         return Array.isArray(data) ? (data as Spectrum[]) : [];
     } catch (err: unknown) {
         reportError(err instanceof Error ? err : new Error(String(err)), 'backend');
-        return [];
+        throw err;
     }
 }
 
@@ -61,7 +61,7 @@ async function getAstronomyList(optionsOrTargetId?: string | AstronomyListOption
  * Fetches how many stars match a scope (target, search, and/or filter), unpaginated.
  * Used to compute how many pages a paginated star listing has.
  * @param optionsOrTargetId Optional target identifier or options object.
- * @return The total matching count, or 0 on failure.
+ * @return The total matching count. Throws on failure, so callers never cache a failure as 0.
  */
 export async function fetchAstronomyCount(optionsOrTargetId?: string | AstronomyListOptions): Promise<number> {
     try {
@@ -70,14 +70,14 @@ export async function fetchAstronomyCount(optionsOrTargetId?: string | Astronomy
         return typeof data === 'number' ? data : 0;
     } catch (err: unknown) {
         reportError(err instanceof Error ? err : new Error(String(err)), 'backend');
-        return 0;
+        throw err;
     }
 }
 
 /**
  * Fetches the list of available astronomy objects, optionally filtered by target ID, search, and category.
  * @param optionsOrTargetId Optional target identifier or options object.
- * @return List of Spectrum objects or strings.
+ * @return List of Spectrum objects or strings. Throws on failure, so callers never cache a failure as an empty list.
  */
 export const fetchAstronomyList = (optionsOrTargetId?: string | AstronomyListOptions): Promise<Spectrum[]> => {
     return getAstronomyList(optionsOrTargetId);
@@ -91,7 +91,7 @@ export type TargetDataAvailability = TargetStarCount;
 
 /**
  * Fetches, per target, whether any of its stars have spectra or photometry data.
- * @return A map from target ID to its data availability, or an empty map on failure.
+ * @return A map from target ID to its data availability. Throws on failure.
  */
 export async function fetchTargetDataAvailability(): Promise<Record<string, TargetDataAvailability>> {
     try {
@@ -99,7 +99,7 @@ export async function fetchTargetDataAvailability(): Promise<Record<string, Targ
         return (data as Record<string, TargetDataAvailability>) ?? {};
     } catch (err: unknown) {
         reportError(err instanceof Error ? err : new Error(String(err)), 'backend');
-        return {};
+        throw err;
     }
 }
 
@@ -112,7 +112,7 @@ export interface SpectralClassSummary {
 
 /**
  * Fetches the catalog spectral classes present in the library, with counts.
- * @return The spectral classes, sorted alphabetically, or an empty list on failure.
+ * @return The spectral classes, sorted alphabetically. Throws on failure.
  */
 export async function fetchSpectralClassSummary(): Promise<SpectralClassSummary[]> {
     try {
@@ -120,7 +120,7 @@ export async function fetchSpectralClassSummary(): Promise<SpectralClassSummary[
         return Array.isArray(data) ? (data as SpectralClassSummary[]) : [];
     } catch (err: unknown) {
         reportError(err instanceof Error ? err : new Error(String(err)), 'backend');
-        return [];
+        throw err;
     }
 }
 
@@ -140,7 +140,7 @@ export interface SpectralClassStar {
 /**
  * Fetches the stars in one catalog spectral class, best self-determined match first.
  * @param spectralClass The spectral class letter (or a full catalog string such as "G2V").
- * @return The matching stars, best match first, or an empty list on failure.
+ * @return The matching stars, best match first. Throws on failure.
  */
 export async function fetchStarsBySpectralClass(spectralClass: string): Promise<SpectralClassStar[]> {
     try {
@@ -148,7 +148,7 @@ export async function fetchStarsBySpectralClass(spectralClass: string): Promise<
         return Array.isArray(data) ? (data as SpectralClassStar[]) : [];
     } catch (err: unknown) {
         reportError(err instanceof Error ? err : new Error(String(err)), 'backend');
-        return [];
+        throw err;
     }
 }
 

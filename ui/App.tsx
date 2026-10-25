@@ -223,8 +223,9 @@ const AppContent: React.FC = () => {
         } else if (action === 'catalog:changed') {
           // The backend rescanned the stellar catalog (see StellarService's
           // dataset-version check) because a write happened somewhere --
-          // refetch now instead of waiting on these queries' own polling
-          // fallback (see useTargetDataAvailabilityQuery, useSpectralClassSummaryQuery).
+          // refetch now; these catalog queries have no polling timer (see catalogQueryPolicy).
+          queryClient.invalidateQueries({ queryKey: ['astronomyList'] });
+          queryClient.invalidateQueries({ queryKey: ['astronomyCount'] });
           queryClient.invalidateQueries({ queryKey: ['targetDataAvailability'] });
           queryClient.invalidateQueries({ queryKey: ['spectralClassSummary'] });
           queryClient.invalidateQueries({ queryKey: ['starsBySpectralClass'] });

@@ -44,5 +44,8 @@ export const useStarsBySpectralClassList = (spectralClass: string | undefined) =
         });
     }, [stars, filterText]);
 
-    return { items, filterText, setFilterText, isLoading: starsQuery.isLoading };
+    return { items, filterText, setFilterText, isLoading: starsQuery.isLoading,
+        isError: starsQuery.isError,
+        retry: () => { void starsQuery.refetch(); },
+    };
 };

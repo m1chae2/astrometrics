@@ -772,8 +772,7 @@ function updateTrayMenu(status = {}) {
         { label: 'Planetarium', click: () => navigateTo('Planetarium') },
         { label: 'Image Processing', click: () => navigateTo('Image Processing') },
         { label: 'Observatory Manager', click: () => navigateTo('Observatory Manager') },
-        { label: 'Observation Planner', click: () => navigateTo('Observation Planner') },
-        { label: 'Observation Execution', click: () => navigateTo('Observation Execution') },
+        { label: 'Observation Manager', click: () => navigateTo('Observation Manager') },
         { label: 'Command Console', click: () => navigateTo('Command Console') }
       ]
     },

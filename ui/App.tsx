@@ -8,6 +8,7 @@ import { StatusHeader } from './statusHeader/StatusHeader';
 import { TitleBar } from './titleBar/TitleBar';
 import { TargetProvider, DeferWhileHidden } from './common/context/TargetContext';
 import { HandoffProvider } from './common/context/HandoffContext';
+import { PlanningProvider } from './observationManager/context/PlanningContext';
 import { PlanningTimeProvider } from './common/context/PlanningTimeContext';
 import { CurrentTargetAnnouncer } from './common/components/CurrentTargetAnnouncer';
 import { handlePlanChanged, PLAN_UPDATED_FROM_ANOTHER_WINDOW, PlanChangedPayload } from './common/utils/planChanged';
@@ -52,14 +53,9 @@ const ObservatoryManager = React.lazy(() =>
     default: m.ObservatoryManager,
   }))
 );
-const ObservationPlanner = React.lazy(() =>
-  import('./observationPlanner/ObservationPlanner').then((m) => ({
-    default: m.ObservationPlanner,
-  }))
-);
-const ObservationExecution = React.lazy(() =>
-  import('./observationExecution/ObservationExecution').then((m) => ({
-    default: m.ObservationExecution,
+const ObservationManager = React.lazy(() =>
+  import('./observationManager/ObservationManager').then((m) => ({
+    default: m.ObservationManager,
   }))
 );
 const PlanetariumDisplay = React.lazy(() =>
@@ -120,8 +116,7 @@ const MODE_PANELS: { mode: string; id: string; Component: React.ComponentType }[
   { mode: 'Planetarium', id: 'PlanetariumDisplay', Component: PlanetariumDisplay },
   { mode: 'Image Processing', id: 'ImageProcessingDisplay', Component: ImageProcessingDisplay },
   { mode: 'Observatory Manager', id: 'ObservatoryManager', Component: ObservatoryManager },
-  { mode: 'Observation Planner', id: 'ObservationPlanner', Component: ObservationPlanner },
-  { mode: 'Observation Execution', id: 'ObservationExecution', Component: ObservationExecution },
+  { mode: 'Observation Manager', id: 'ObservationManager', Component: ObservationManager },
   { mode: 'Command Console', id: 'CommandConsole', Component: CommandConsole },
 ];
 
@@ -380,7 +375,9 @@ export const App: React.FC = () => {
           <HandoffProvider>
             <TargetProvider>
               <PlanningTimeProvider>
-                <AppContent />
+                <PlanningProvider>
+                  <AppContent />
+                </PlanningProvider>
               </PlanningTimeProvider>
             </TargetProvider>
           </HandoffProvider>

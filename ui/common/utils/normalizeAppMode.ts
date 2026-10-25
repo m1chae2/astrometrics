@@ -14,6 +14,7 @@
 export function normalizeAppMode(mode: string): string {
   if (mode === 'Astronomy Display') return 'Astronomy Manager';
   if (mode === 'Image Processing Display') return 'Image Processing';
-  if (mode === 'Observation Manager') return 'Observation Planner';
+  // This branch briefly split Observation Manager into these two displays.
+  if (mode === 'Observation Planner' || mode === 'Observation Execution') return 'Observation Manager';
   return mode;
 }

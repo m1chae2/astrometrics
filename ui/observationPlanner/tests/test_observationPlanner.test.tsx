@@ -515,59 +515,13 @@ describe('Open in Planner and the mode registry', () => {
         await waitFor(() => expect(document.activeElement?.id).toBe('data-quality-panel'));
     });
 
-    /** The mode list names the Planner with the `enable_observation` flag, and the old name maps to it. */
-    it('registers Observation Planner and maps the old name to it', () => {
-        expect(DISPLAY_DEFINITIONS).toContainEqual({ mode: 'Observation Planner', flag: 'enable_observation' });
-        expect(DISPLAY_DEFINITIONS.some((definition) => definition.mode === 'Observation Manager')).toBe(false);
-        expect(normalizeAppMode('Observation Manager')).toBe('Observation Planner');
-        expect(normalizeAppMode('Observation Planner')).toBe('Observation Planner');
-        expect(isDisplayEnabled({ Frontend: { enable_observation: 'false' } }, 'Observation Planner')).toBe(false);
-    });
-
-    /** The constant that "Open in Planner" uses is the Planner's registered name. */
-    it('uses the registered Planner name for Open in Planner', () => {
-        expect(OBSERVATION_PLANNER_MODE).toBe('Observation Planner');
-        expect(DISPLAY_DEFINITIONS.map((definition) => definition.mode)).toContain(OBSERVATION_PLANNER_MODE);
-    });
-
-    /** Real navigation to the Planner switches the mode to the registered name and reaches the display. */
-    it('lands on the Planner when navigation targets the constant', async () => {
-        renderPlanner();
-        await screen.findByText('Tonight');
-        const modes: string[] = [];
-        const listener = (event: Event) => modes.push(String((event as CustomEvent).detail));
-        window.addEventListener('astrometrics:modeChange', listener);
-        await act(async () => {
-            await navigateToElement({
-                targetDisplay: OBSERVATION_PLANNER_MODE,
-                targetElement: 'dataQuality',
-                action: 'openInPlanner',
-                payload: { targetId: 'M 51' },
-            });
-        });
-        window.removeEventListener('astrometrics:modeChange', listener);
-        expect(modes.map(normalizeAppMode)).toEqual(['Observation Planner']);
-        await waitFor(() => expect(within(screen.getByRole('banner')).getByText('M 51')).toBeTruthy());
-    });
-
-    /** "Open in Planner" in Observation Execution asks for the Planner's registered mode. */
-    it('sends the Execution button to the Planner', async () => {
-        window.localStorage.setItem('selectedTarget', 'M 81');
-        const modes: string[] = [];
-        const listener = (event: Event) => modes.push(String((event as CustomEvent).detail));
-        window.addEventListener('astrometrics:modeChange', listener);
-        const user = userEvent.setup();
-        render(
-            <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-                <TargetProvider>
-                    <TonightCandidatesPanel />
-                </TargetProvider>
-            </QueryClientProvider>,
-        );
-        const list = await screen.findByRole('region', { name: 'Imaging candidates' });
-        await user.click(within(list).getByRole('button', { name: 'Open in Planner: M 82' }));
-        window.removeEventListener('astrometrics:modeChange', listener);
-        expect(modes).toEqual(['Observation Planner']);
-        expect(DISPLAY_DEFINITIONS.map((definition) => definition.mode)).toContain(modes[0]);
+    /** Observation Manager is the registered display again; the branch's two names open it. */
+    it('registers Observation Manager and maps the Planner and Execution names to it', () => {
+        expect(DISPLAY_DEFINITIONS).toContainEqual({ mode: 'Observation Manager', flag: 'enable_observation' });
+        expect(DISPLAY_DEFINITIONS.some((definition) => definition.mode === 'Observation Planner')).toBe(false);
+        expect(DISPLAY_DEFINITIONS.some((definition) => definition.mode === 'Observation Execution')).toBe(false);
+        expect(normalizeAppMode('Observation Planner')).toBe('Observation Manager');
+        expect(normalizeAppMode('Observation Execution')).toBe('Observation Manager');
+        expect(OBSERVATION_PLANNER_MODE).toBe('Observation Manager');
     });
 });

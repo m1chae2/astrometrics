@@ -1,0 +1,23 @@
+
+.execution-queue-panel {
+  height: 100%;
+}
+.queue-list {
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+}
+.card-header--empty {
+  opacity: 0.3;
+  cursor: default;
+}
+.card-title--empty {
+  color: var(--text-muted);
+}
+.dither-settings__body {
+  display: flex;
+  flex-direction: column;
+}

@@ -51,14 +51,6 @@ export class WindowsPlatform extends BasePlatform {
         },
         {
           program: process.execPath,
-          arguments: '--mode="Observation Execution"',
-          title: 'Observation Execution',
-          description: 'Watch the night: live verdict, candidates, guiding and frames',
-          iconPath: process.execPath,
-          iconIndex: 0
-        },
-        {
-          program: process.execPath,
           arguments: '--mode="Image Processing"',
           title: 'Image Processing',
           description: 'FITS stacking, astrometry, and spectroscopy',

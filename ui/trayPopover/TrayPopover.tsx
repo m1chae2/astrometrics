@@ -22,8 +22,7 @@ const WORKSPACES: ReadonlyArray<{ label: string; mode: string }> = [
   { label: 'Planetarium',        mode: 'Planetarium' },
   { label: 'Image Processing',   mode: 'Image Processing' },
   { label: 'Observatory',        mode: 'Observatory Manager' },
-  { label: 'Planner',           mode: 'Observation Planner' },
-  { label: 'Execution',         mode: 'Observation Execution' },
+  { label: 'Observation Mgr',   mode: 'Observation Manager' },
 ];
 
 /**

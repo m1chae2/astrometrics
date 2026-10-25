@@ -281,7 +281,7 @@ describe('candidates', () => {
         const list = await screen.findByRole('region', { name: 'Imaging candidates' });
         await user.click(within(list).getByRole('button', { name: 'Open in Planner: M 82' }));
         expect(navigateMock).toHaveBeenCalledWith(
-            expect.objectContaining({ action: 'openInPlanner', payload: { targetId: 'M 82' }, targetDisplay: 'Observation Planner' }),
+            expect.objectContaining({ action: 'openInPlanner', payload: { targetId: 'M 82' }, targetDisplay: 'Observation Manager' }),
         );
     });
 
@@ -438,15 +438,5 @@ describe('tabs and controls', () => {
         await user.click(await screen.findByRole('tab', { name: /Control/ }));
         expect(await screen.findByText(/Could not check whether Ekos is in control/)).toBeTruthy();
         expect((screen.getByRole('button', { name: 'Slew to Target' }) as HTMLButtonElement).disabled).toBe(true);
-    });
-});
-
-describe('registry', () => {
-    /** The mode is listed with its own flag, and the flag enables it unless set to "false". */
-    it('registers Observation Execution with the enable_execution flag', async () => {
-        const { DISPLAY_DEFINITIONS, isDisplayEnabled } = await import('../../common/constants/displayFlags');
-        expect(DISPLAY_DEFINITIONS).toContainEqual({ mode: 'Observation Execution', flag: 'enable_execution' });
-        expect(isDisplayEnabled({}, 'Observation Execution')).toBe(true);
-        expect(isDisplayEnabled({ Frontend: { enable_execution: 'false' } }, 'Observation Execution')).toBe(false);
     });
 });

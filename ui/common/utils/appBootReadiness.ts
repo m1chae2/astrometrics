@@ -20,8 +20,7 @@ const APP_MODE_NAMES = [
     'Planetarium',
     'Image Processing',
     'Observatory Manager',
-    'Observation Planner',
-    'Observation Execution',
+    'Observation Manager',
     'Command Console',
 ] as const;
 

@@ -45,12 +45,6 @@ export class MacOSPlatform extends BasePlatform {
           }
         },
         {
-          label: 'Observation Execution',
-          click: () => {
-            app.emit('open-url', {}, 'astrometrics://mode/Observation%20Execution');
-          }
-        },
-        {
           label: 'Image Processing',
           click: () => {
             app.emit('open-url', {}, 'astrometrics://mode/Image%20Processing');

@@ -3,19 +3,19 @@
  * "not enough data" note.
  *
  * The statement's type is told by an icon AND a word, its severity by a word,
- * and its confidence by a text chip. The item expands to the reason, values,
- * evidence, limits, expected effect and checklist return, all as the library
- * gave them. Text is selectable.
+ * and its confidence by a text chip. The reason, values, limits and evidence
+ * behind a statement are not shown here; they are in the library's reply for
+ * anyone who reads it through the API. Text is selectable.
  */
 
-import React, { useId, useState } from 'react';
+import React, { useId } from 'react';
 import { ActionClass, StatementKind } from '../../types/backendTypes';
 import type { CaptureSetting, TargetStatement } from '../../types/backendTypes';
 import { ConfidenceChip } from './ConfidenceChip';
 import { StatementTypeIcon } from './StatementTypeIcon';
 import { SEND_TO_PLAN_UNAVAILABLE_TEXT } from './useStatementActions';
 import type { StatementActions } from './useStatementActions';
-import { confidenceWord, formatSeconds, formatValue, severityWord, statementKindWord } from './statementLabels';
+import { confidenceWord, formatValue, severityWord, statementKindWord } from './statementLabels';
 
 export interface StatementItemProps {
     /** The statement, as the library returned it. */
@@ -47,8 +47,6 @@ function describeCaptureSetting(setting: CaptureSetting): string {
  * @return The list item.
  */
 export const StatementItem: React.FC<StatementItemProps> = ({ statement, itemKey, actions }) => {
-    const [expanded, setExpanded] = useState(false);
-    const detailsId = useId();
     const reasonId = useId();
     const typeWord = statementKindWord(statement.kind);
     const severity = severityWord(statement.severity);
@@ -56,10 +54,12 @@ export const StatementItem: React.FC<StatementItemProps> = ({ statement, itemKey
     const rowIds = evidence.flatMap((reference) =>
         reference.rowId !== null && reference.rowId !== undefined ? [reference.rowId] : [],
     );
-    const starResults = evidence.flatMap((reference) => (reference.starResult ? [reference.starResult] : []));
     const outcome = actions?.outcomes[itemKey];
     const isCalibration = statement.actionClass === ActionClass.CALIBRATION;
     const canSend = Boolean(statement.proposedAction);
+    const showEvidence = Boolean(actions) && rowIds.length > 0;
+    const showCalibration = Boolean(actions) && isCalibration;
+    const showSend = Boolean(actions) && canSend;
     const accessibleName = [
         typeWord,
         severity ? `severity ${severity}` : '',
@@ -87,50 +87,43 @@ export const StatementItem: React.FC<StatementItemProps> = ({ statement, itemKey
             </div>
             <p className="statement-item__message">{statement.message}</p>
 
-            <div className="statement-item__buttons">
-                <button
-                    type="button"
-                    className="btn btn--tiny quality-button"
-                    aria-expanded={expanded}
-                    aria-controls={detailsId}
-                    onClick={() => setExpanded((value) => !value)}
-                >
-                    {expanded ? 'Hide details' : 'Details'}
-                </button>
-                {actions && rowIds.length > 0 && (
-                    <button
-                        type="button"
-                        className="btn btn--tiny quality-button"
-                        onClick={() => actions.showFrames(rowIds, statement.message)}
-                    >
-                        Evidence
-                    </button>
-                )}
-                {actions && isCalibration && (
-                    <button
-                        type="button"
-                        className="btn btn--tiny quality-button"
-                        onClick={() => actions.showCalibrationRow(statement)}
-                    >
-                        Show in calibration library
-                    </button>
-                )}
-                {actions && canSend && (
-                    <button
-                        type="button"
-                        className="btn btn--tiny quality-button"
-                        disabled={!actions.sendToPlanAvailable || outcome?.kind === 'sending'}
-                        aria-disabled={!actions.sendToPlanAvailable || outcome?.kind === 'sending'}
-                        aria-describedby={actions.sendToPlanAvailable ? undefined : reasonId}
-                        onClick={() => {
-                            if (!actions.sendToPlanAvailable) return;
-                            void actions.sendToPlan(itemKey, statement);
-                        }}
-                    >
-                        Send to plan
-                    </button>
-                )}
-            </div>
+            {(showEvidence || showCalibration || showSend) && (
+                <div className="statement-item__buttons">
+                    {actions && rowIds.length > 0 && (
+                        <button
+                            type="button"
+                            className="btn btn--tiny quality-button"
+                            onClick={() => actions.showFrames(rowIds, statement.message)}
+                        >
+                            Evidence
+                        </button>
+                    )}
+                    {actions && isCalibration && (
+                        <button
+                            type="button"
+                            className="btn btn--tiny quality-button"
+                            onClick={() => actions.showCalibrationRow(statement)}
+                        >
+                            Show in calibration library
+                        </button>
+                    )}
+                    {actions && canSend && (
+                        <button
+                            type="button"
+                            className="btn btn--tiny quality-button"
+                            disabled={!actions.sendToPlanAvailable || outcome?.kind === 'sending'}
+                            aria-disabled={!actions.sendToPlanAvailable || outcome?.kind === 'sending'}
+                            aria-describedby={actions.sendToPlanAvailable ? undefined : reasonId}
+                            onClick={() => {
+                                if (!actions.sendToPlanAvailable) return;
+                                void actions.sendToPlan(itemKey, statement);
+                            }}
+                        >
+                            Send to plan
+                        </button>
+                    )}
+                </div>
+            )}
             {actions && canSend && !actions.sendToPlanAvailable && (
                 <p id={reasonId} className="statement-item__reason-note">
                     {SEND_TO_PLAN_UNAVAILABLE_TEXT}
@@ -189,74 +182,6 @@ export const StatementItem: React.FC<StatementItemProps> = ({ statement, itemKey
                 </div>
             )}
 
-            {expanded && (
-                <div id={detailsId} className="statement-item__details">
-                    <p>
-                        <strong>Confidence:</strong> {confidenceWord(statement.confidence, true)}
-                    </p>
-                    {statement.reason && (
-                        <p>
-                            <strong>Reason:</strong> {statement.reason}
-                        </p>
-                    )}
-                    {statement.values && Object.keys(statement.values).length > 0 && (
-                        <dl className="statement-item__values">
-                            {Object.entries(statement.values).map(([name, value]) => (
-                                <React.Fragment key={name}>
-                                    <dt>{name}</dt>
-                                    <dd>{formatValue(value)}</dd>
-                                </React.Fragment>
-                            ))}
-                        </dl>
-                    )}
-                    {statement.proposedAction?.note && (
-                        <p>
-                            <strong>Proposed:</strong> {statement.proposedAction.note}
-                        </p>
-                    )}
-                    {statement.expectedEffect && (
-                        <p>
-                            <strong>Expected effect:</strong> {statement.expectedEffect.description}
-                            {statement.expectedEffect.effectiveTimeAddedSeconds !== null &&
-                                statement.expectedEffect.effectiveTimeAddedSeconds !== undefined &&
-                                ` (adds ${formatSeconds(statement.expectedEffect.effectiveTimeAddedSeconds)} of effective time)`}
-                        </p>
-                    )}
-                    {(statement.limits ?? []).length > 0 && (
-                        <ul className="statement-item__limits">
-                            {(statement.limits ?? []).map((limit, index) => (
-                                <li key={`${limit.tier}-${index}`}>
-                                    Limit {formatValue(limit.value)} {limit.unit} ({limit.tier}): {limit.derivation}
-                                </li>
-                            ))}
-                        </ul>
-                    )}
-                    {(rowIds.length > 0 || starResults.length > 0) && (
-                        <div className="statement-item__evidence">
-                            <strong>Evidence:</strong>
-                            {rowIds.length > 0 && <span> {rowIds.length} measurement rows.</span>}
-                            {starResults.length > 0 && (
-                                <ul>
-                                    {starResults.map((result) => (
-                                        <li key={`${result.runId}-${result.starId}-${result.metric}`}>
-                                            Star result: star {result.starId}, run {result.runId}, {result.metric}
-                                        </li>
-                                    ))}
-                                </ul>
-                            )}
-                        </div>
-                    )}
-                    {(statement.evidenceOmittedCount ?? 0) > 0 && (
-                        <p>{statement.evidenceOmittedCount} more not listed</p>
-                    )}
-                    {statement.checklistReturn && (
-                        <p>
-                            <strong>Returned checklist item:</strong> {statement.checklistReturn.reason} (ticked{' '}
-                            {statement.checklistReturn.tickedAt})
-                        </p>
-                    )}
-                </div>
-            )}
         </li>
     );
 };

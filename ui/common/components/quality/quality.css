@@ -1,6 +1,7 @@
 /* Styles of the quality components. Colors come from theme.css; type is never shown by color alone. */
-.statement-list__items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.statement-item { border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 8px; background: var(--grey-medium); user-select: text; }
+.statement-list { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.statement-list__items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; align-self: stretch; }
+.statement-item { border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 10px; background: var(--grey-medium); user-select: text; }
 .statement-item--insufficient_data { opacity: 0.7; border-style: dashed; }
 .statement-item[data-severity='warning'] { border-left: 4px solid var(--warning-amber); }
 .statement-item[data-severity='advice'] { border-left: 3px solid var(--accent-blue); }
@@ -8,13 +9,11 @@
 .statement-item__head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: var(--section-label-size); }
 .statement-item__type { font-weight: 600; }
 .statement-item__setting { color: var(--text-dim); }
-.statement-item__message { margin: 4px 0; font-size: var(--label-font-size); }
-.statement-item__buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+.statement-item__message { margin: 6px 0 0; font-size: var(--label-font-size); line-height: 1.4; }
+.statement-item__buttons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .statement-item__reason-note { margin: 4px 0 0; color: var(--text-dim); font-size: var(--section-label-size); }
 .statement-item__rejection { display: flex; gap: 8px; align-items: center; margin-top: 4px; border: 1px solid var(--danger-red); padding: 4px 6px; border-radius: 4px; }
-.statement-item__details { margin-top: 6px; font-size: var(--section-label-size); color: var(--text-lighter); }
-.statement-item__values { display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; margin: 4px 0; }
-.statement-item__values dd, .data-quality__numbers dd { margin: 0; }
+.data-quality__numbers dd { margin: 0; }
 .confidence-chip { border: 1px solid var(--border-color); border-radius: 10px; padding: 0 8px; font-size: var(--section-label-size); }
 .confidence-chip--measured { border-color: var(--success-green); }
 .confidence-chip--partly_measured { border-style: dashed; }

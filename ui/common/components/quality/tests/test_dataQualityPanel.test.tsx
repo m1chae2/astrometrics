@@ -140,8 +140,6 @@ describe('DataQualityPanel content', () => {
                 payload: { rowIds: [7, 9], targetId: 'M 81', statementText: 'Star width is high.' },
             }),
         );
-        await user.click(screen.getByRole('button', { name: 'Details' }));
-        expect(screen.getByText(/Star result: star S/)).toBeTruthy();
     });
 
     /** A calibration statement offers "Show in calibration library". */

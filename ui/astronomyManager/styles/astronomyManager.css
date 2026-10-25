@@ -331,11 +331,11 @@
 .stellar-analysis-details__section {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid rgba(255, 255, 255, 0.05);
     border-radius: 8px;
-    padding: 8px 12px;
+    padding: 10px 12px 12px;
 }
 
 .stellar-analysis-details__section-title {

@@ -45,9 +45,8 @@ describe('StatementItem', () => {
         expect(screen.getByText(text)).toBeTruthy();
     });
 
-    /** The three confidence labels, and the long form when expanded. */
-    it('shows the three confidence labels and the long form when expanded', async () => {
-        const user = userEvent.setup();
+    /** The three confidence labels. */
+    it('shows the three confidence labels', () => {
         render(
             <ul>
                 <StatementItem itemKey="a" statement={makeStatement({ confidence: Confidence.MEASURED })} />
@@ -58,14 +57,10 @@ describe('StatementItem', () => {
         expect(screen.getAllByText('Measured').length).toBe(1);
         expect(screen.getAllByText('Partly measured').length).toBe(1);
         expect(screen.getAllByText('Tentative').length).toBe(1);
-        const buttons = screen.getAllByRole('button', { name: 'Details' });
-        await user.click(buttons[2]);
-        expect(screen.getByText(/Tentative \(design estimate\)/)).toBeTruthy();
     });
 
-    /** Details show reason, values, omitted-evidence count, and star-result evidence as text. */
-    it('expands to reason, values, star-result evidence and the omitted count', async () => {
-        const user = userEvent.setup();
+    /** The reason, values and evidence stay in the API reply; the item offers no Details button. */
+    it('shows no Details button and no reason or values', () => {
         render(
             <ul>
                 <StatementItem
@@ -73,17 +68,14 @@ describe('StatementItem', () => {
                     statement={makeStatement({
                         reason: 'Because of wind.',
                         values: { fwhm: 3.14159 },
-                        evidence: [{ rowId: 5 }, { starResult: { starId: 'S1', runId: 'R1', metric: 'star.mag' } }],
-                        evidenceOmittedCount: 4,
+                        evidence: [{ starResult: { starId: 'S1', runId: 'R1', metric: 'star.mag' } }],
                     })}
                 />
             </ul>,
         );
-        await user.click(screen.getByRole('button', { name: 'Details' }));
-        expect(screen.getByText(/Because of wind/)).toBeTruthy();
-        expect(screen.getByText('3.142')).toBeTruthy();
-        expect(screen.getByText(/Star result: star S1, run R1, star.mag/)).toBeTruthy();
-        expect(screen.getByText('4 more not listed')).toBeTruthy();
+        expect(screen.queryByRole('button', { name: 'Details' })).toBeNull();
+        expect(screen.queryByText(/Because of wind/)).toBeNull();
+        expect(screen.queryByText('3.142')).toBeNull();
     });
 });
 

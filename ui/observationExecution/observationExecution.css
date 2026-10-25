@@ -22,7 +22,6 @@
 .night-subsection__title { margin: 0 0 6px; font-size: var(--label-font-size); }
 .live-verdict__line { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; user-select: text; }
 .live-verdict__chip, .live-verdict__alerts { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-.live-verdict__details { margin-top: 6px; font-size: var(--section-label-size); user-select: text; }
 .night-targets, .target-changes { list-style: none; margin: 0 0 6px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .target-changes { list-style: decimal inside; }
 .night-target { border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 8px; background: var(--grey-medium); user-select: text; }

@@ -220,24 +220,13 @@ describe('live session body', () => {
         expect(screen.getByRole('region', { name: 'Candidates now' }).getAttribute('data-example')).toBeNull();
     });
 
-    /** The verdict has the Tentative chip, a live region, and Details shows the raw flags. */
-    it('shows the Tentative chip and the raw flags behind Details', async () => {
-        const user = renderDisplay();
+    /** The verdict has the Tentative chip, two live regions, and no Details button. */
+    it('shows the Tentative chip and no Details button', async () => {
+        renderDisplay();
         const verdict = await screen.findByRole('region', { name: 'Live session verdict' });
         expect(within(verdict).getByText('Tentative')).toBeTruthy();
         expect(verdict.querySelectorAll('[aria-live="polite"]').length).toBe(2);
-        await user.click(within(verdict).getByRole('button', { name: 'Details' }));
-        expect(await within(verdict).findByText('Guiding was lost for 40 s.')).toBeTruthy();
-    });
-
-    /** The flags have an error state with Try again. */
-    it('shows an error state for the flags', async () => {
-        setBackend({ 'history:live_session_status': new Error('down') });
-        const user = renderDisplay();
-        const verdict = await screen.findByRole('region', { name: 'Live session verdict' });
-        await user.click(within(verdict).getByRole('button', { name: 'Details' }));
-        expect(await within(verdict).findByText('Could not load the live session status')).toBeTruthy();
-        expect(within(verdict).getByRole('button', { name: 'Try again' })).toBeTruthy();
+        expect(within(verdict).queryByRole('button', { name: 'Details' })).toBeNull();
     });
 
     /** The frame list is a scroll region of example rows with a word for each status. */

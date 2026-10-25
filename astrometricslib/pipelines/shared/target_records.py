@@ -356,6 +356,52 @@ def create_target(api: Any, target_id: str, ra: str | None = None, dec: str | No
     return new_target
 
 
+def create_target_from_catalog(api: Any, target_id: str, simbad: Any) -> Any:
+    """Create a target from a catalog name, with its position.
+
+    A target that already has the id is returned without a lookup. Otherwise
+    the name is looked up in SIMBAD and the position it gives is stored.
+
+    Parameters
+    ----------
+    api : `Any`
+        The system that manages the targets.
+    target_id : `str`
+        The catalog name, such as ``"M 57"``.
+    simbad : `SimbadDriver`
+        The SIMBAD driver to ask.
+
+    Returns
+    -------
+    target : `Target`
+        The new target, or the existing one.
+
+    Raises
+    ------
+    NotFoundError
+        If the name has no catalog position, or the target is a moving body
+        that never has a fixed one.
+    """
+    from astrometricslib.foundation.errors import NotFoundError
+    from astrometricslib.pipelines.shared.target_position import (
+        format_position,
+        has_no_fixed_position,
+        resolve_catalog_position,
+    )
+
+    normalized_id = target_id.replace("_", " ").strip()
+    existing = get_target(api, normalized_id)
+    if existing:
+        return existing
+    if not normalized_id or has_no_fixed_position(normalized_id):
+        raise NotFoundError(f"No catalog position for {target_id!r}.", details={"target_id": target_id})
+    position = resolve_catalog_position(normalized_id, simbad)
+    if position is None:
+        raise NotFoundError(f"The catalog does not know {target_id!r}.", details={"target_id": target_id})
+    ra_text, dec_text = format_position(position.coordinate)
+    return create_target(api, normalized_id, ra=ra_text, dec=dec_text)
+
+
 def update_target(api: Any, target_id: str, updates: dict) -> Any | None:
     """Change specific information about a target.
 

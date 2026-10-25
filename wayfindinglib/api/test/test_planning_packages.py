@@ -118,11 +118,29 @@ def test_a_package_can_have_no_exposures(isolated_butler: DiskButler) -> None:
     assert isolated_butler.get("observation_package", {"id": package.id}) is not None
 
 
-def test_a_package_for_a_target_not_in_the_library_says_to_add_it(isolated_butler: DiskButler) -> None:
-    """A target missing from the library is refused clearly."""
+def test_a_package_for_a_catalog_target_creates_the_target(isolated_butler: DiskButler) -> None:
+    """A target missing from the library is created from the catalog first."""
     planning = _planning_with_targets(isolated_butler)
-    with pytest.raises(NotFoundError, match="Add the target first"):
+    package = planning.create_plan("package", target="NGC 7331")
+    assert package.target_id == "NGC 7331"
+    assert planning._astrometrics.targets.created == ["NGC 7331"]
+    assert planning._astrometrics.targets.get("NGC 7331").ra == "01h 02m 03s"
+    assert isolated_butler.get("observation_package", {"id": package.id}) is not None
+
+
+def test_a_package_for_a_library_target_creates_nothing(isolated_butler: DiskButler) -> None:
+    """A target already in the library is reused, with no catalog lookup."""
+    planning = _planning_with_targets(isolated_butler)
+    planning.create_plan("package", target="M 81")
+    assert planning._astrometrics.targets.created == []
+
+
+def test_a_package_for_a_name_the_catalog_does_not_know_is_refused(isolated_butler: DiskButler) -> None:
+    """A name that is in neither the library nor the catalog is refused."""
+    planning = _planning_with_targets(isolated_butler)
+    with pytest.raises(NotFoundError, match="does not know"):
         planning.create_plan("package", target="NGC 9999")
+    assert planning._astrometrics.targets.get("NGC 9999") is None
 
 
 def test_packages_list_newest_first_and_filters(isolated_butler: DiskButler) -> None:

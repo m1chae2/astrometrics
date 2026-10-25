@@ -142,7 +142,7 @@ from wayfindinglib.models.equipment_and_site.performance_envelope import (
     TrackingRiskMap,
 )
 from wayfindinglib.models.planning.mosaic import MosaicPanel
-from wayfindinglib.models.planning.observation_package import ExposureRequest
+from wayfindinglib.models.planning.observation_package import ExposureRequest, ObservationPackage
 from wayfindinglib.models.planning.sequence_plan import SequenceItem, SequencePlan
 from wayfindinglib.models.planning.sequence_summary import SequenceSummary
 from wayfindinglib.models.planning.sky_source import SkySource
@@ -614,6 +614,7 @@ def render_types() -> str:
         generate_closure(
             [
                 ObservationSession,
+                ObservationPackage,
                 PlanChange,
                 PlanChangeItem,
                 ChecklistItem,

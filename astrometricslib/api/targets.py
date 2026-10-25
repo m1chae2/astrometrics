@@ -12,6 +12,7 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
+from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.jobs.runner import background_job, registered_job
@@ -74,10 +75,17 @@ class TargetCatalog:
         configured cameras.
     storage : `AbstractCatalogAccess`
         The database the target catalog is read from and saved to.
+    drivers : `Drivers`, optional
+        The outside services to use. `create` with ``from_catalog`` asks the
+        SIMBAD driver for a position. The built-in driver is used when
+        omitted.
     """
 
-    def __init__(self, config: AppConfiguration, storage: AbstractCatalogAccess) -> None:
+    def __init__(
+        self, config: AppConfiguration, storage: AbstractCatalogAccess, *, drivers: Drivers | None = None
+    ) -> None:
         self._config = config
+        self._drivers = drivers or Drivers()
         self.catalog_access = storage
         self._targets: list = storage.get("target_catalog", {}) or []
         self._touched_target_ids: set = set()
@@ -147,7 +155,7 @@ class TargetCatalog:
 
         return target_records.read_saved_target(self, target_id)
 
-    def create(self, target_id: str) -> Target:
+    def create(self, target_id: str, from_catalog: bool = False) -> Target:
         """Create a target, find its frames on disk, and save it.
 
         The frames folders are scanned for folders named after the target,
@@ -156,16 +164,29 @@ class TargetCatalog:
         Parameters
         ----------
         target_id : `str`
-            The id of the target to create.
+            The id of the target to create. With ``from_catalog``, a
+            catalog name such as ``"M 57"`` or ``"Vega"``.
+        from_catalog : `bool`, optional
+            Look the name up in the SIMBAD catalog and store the position
+            it gives (right ascension and declination, ICRS, J2000) on the
+            new target. A target that already has the id is returned as it
+            is, without a lookup. Defaults to `False`, which makes a bare
+            target with no position. Planets, the Moon, the Sun, comets and
+            asteroids have no fixed position, so they are refused. A name
+            the catalog does not know (or cannot reach, which logs a
+            warning) raises `NotFoundError`.
 
         Returns
         -------
         target : `Target`
             The new target, or the existing one if the id is taken.
+
         """
         from astrometricslib.pipelines.shared import target_records
 
-        return target_records.create_target(self, target_id)
+        if not from_catalog:
+            return target_records.create_target(self, target_id)
+        return target_records.create_target_from_catalog(self, target_id, self._drivers.simbad_or_default())
 
     def add(self, target: Target) -> None:
         """Add a `Target` object to the catalog and save it.

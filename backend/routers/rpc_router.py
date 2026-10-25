@@ -237,14 +237,21 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "execution:abort_session": ("execution_service", "abort_session"),
     "execution:reconcile_session": ("execution_service", "reconcile_session"),
     "execution:record_divergence": ("execution_service", "record_divergence"),
-    # Night plan. `plan:get` reads (no `session_id` lists all). `plan:edit`
-    # and `plan:tick_checklist_item` write and send the `plan:changed` event;
+    # Night plan and observation packages. `plan:get` reads (no `session_id`
+    # lists all), `plan:list_packages` lists the package library and
+    # `plan:current_session` reads tonight's session. `plan:edit` and
+    # `plan:tick_checklist_item` write and send the `plan:changed` event;
+    # `plan:edit_package` and `plan:create_package` send `packages:changed`;
     # a stale `expected_revision` answers with the `conflict` error and the
     # current revision in its details. Writes, so the AI's read-only profile
     # withholds them.
     "plan:get": ("plan_service", "get_plan"),
+    "plan:current_session": ("plan_service", "current_session"),
+    "plan:list_packages": ("plan_service", "list_packages"),
     "plan:create": ("plan_service", "create_plan"),
+    "plan:create_package": ("plan_service", "create_package"),
     "plan:edit": ("plan_service", "edit_plan"),
+    "plan:edit_package": ("plan_service", "edit_package"),
     "plan:tick_checklist_item": ("plan_service", "tick_checklist_item"),
     # Quality advice and night history. Reads only; each kind has its own
     # method so each reply has one type. The history reads register no job.

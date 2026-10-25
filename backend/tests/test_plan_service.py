@@ -105,7 +105,7 @@ class _Planning:
             session=self._session(),
         )
 
-    def get_plan(self, session_id: str | None = None) -> ObservationSession:
+    def get_plan(self, session_id: str | None = None, **filters: Any) -> ObservationSession:
         """Read the session.
 
         Returns

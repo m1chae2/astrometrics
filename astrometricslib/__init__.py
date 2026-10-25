@@ -398,7 +398,7 @@ class Astrometrics:
         # There is deliberately no in-memory copy of the star catalog here.
         # The database is the one copy, reached through `self.stars`, which
         # answers each question with a query for just the stars it needs.
-        self.targets = TargetCatalog(self.config, self.catalog_access)
+        self.targets = TargetCatalog(self.config, self.catalog_access, drivers=drivers)
         self.stars = StellarCatalog(self.config, self.catalog_access, drivers=drivers)
         self.processing = ProcessingPipelines(
             self.config, self.catalog_access, targets=self.targets, drivers=drivers

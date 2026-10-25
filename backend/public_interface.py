@@ -198,11 +198,16 @@ RPC_METHODS: tuple[str, ...] = (
     "execution:abort_session",
     "execution:reconcile_session",
     "execution:record_divergence",
-    # Night plan: read it, edit it, tick a checklist item. Each write sends
-    # the `plan:changed` event.
+    # Night plan and observation packages: read them, edit them, tick a
+    # checklist item. A session write sends the `plan:changed` event; a package
+    # write sends the `packages:changed` event.
     "plan:get",
+    "plan:current_session",
+    "plan:list_packages",
     "plan:create",
+    "plan:create_package",
     "plan:edit",
+    "plan:edit_package",
     "plan:tick_checklist_item",
     # Quality advice and night history (all reads)
     "advisory:target_report",
@@ -257,6 +262,11 @@ UI_EVENTS: tuple[UiEvent, ...] = (
         "plan:changed",
         "A write changed the night plan. The payload is {sessionId, revision, changed}, where "
         "revision is the plan revision now stored and changed lists the kind of each change.",
+    ),
+    UiEvent(
+        "packages:changed",
+        "A write created, edited, reopened, deleted or promoted an observation package. The payload is "
+        "{packageId, targetId, kind, revision}; kind says which, and a promotion has no revision.",
     ),
     UiEvent("system_state_update", "The mount, processing jobs or health status changed."),
     UiEvent("log", "A backend log line, for the app's log panel."),

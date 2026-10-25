@@ -1127,7 +1127,10 @@ class ObservationPlanning:
             If `kind` is unknown, an argument the kind does not use is
             given, or a required argument is missing.
         NotFoundError
-            If a package's target is not in the library.
+            If a package's target is neither in the library nor known to
+            the catalog. A catalog name that is not in the library yet is
+            added to the library, with its position, before the package
+            is recorded.
         """
         check_choice("kind", kind, tuple(PLAN_ARGUMENTS))
         arguments = {
@@ -1165,15 +1168,16 @@ class ObservationPlanning:
                 raise InvalidArgumentError("kind='package' takes exposure_requests or plan_items, not both.")
             try:
                 resolved = self._target(target)
-            except NotFoundError as error:
-                # astrometricslib's `targets.create(target_id)` makes a bare
-                # target from an id. It does not look the name up in a
-                # catalog or give a position, so it is not used here: a
-                # package needs a target the library already has.
-                raise NotFoundError(
-                    f"No target {target!r} in the library. Add the target first.",
-                    details=error.details,
-                ) from error
+            except NotFoundError:
+                # Not in the library: make it from the catalog, with its
+                # position. `create` raises NotFoundError when the catalog
+                # does not know the name.
+                try:
+                    resolved = self._astrometrics.targets.create(target, from_catalog=True)
+                except NotFoundError as error:
+                    raise NotFoundError(
+                        f"No target '{target}' in the library or the catalog: {error}"
+                    ) from error
             if plan_items is not None:
                 requests_for_package = exposure_requests_from_items(plan_items)
             else:

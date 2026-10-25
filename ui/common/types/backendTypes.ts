@@ -2752,6 +2752,35 @@ export interface ObservationSession {
 }
 
 /**
+ * A reusable imaging request for one target.
+ *
+ * `target_id` references an existing `astrometricslib.models.target.Target`
+ * by identifier only, never embedded -- resolved live at placement
+ * time, never cached (`Wayfinding_Library_Architecture.md` Section 3.3,
+ * "Live target resolution").
+ */
+export interface ObservationPackage {
+  id: string;
+  name: string;
+  target_id: string;
+  exposure_requests?: ExposureRequest[];
+  dither_config?: DitherConfig | null;
+  minimum_altitude_deg?: number | null;
+  priority?: number;
+  quality_weighting_enabled?: boolean;
+  notes?: string;
+  created_at?: string;
+  /** Planned, suggested by the library, or complete. */
+  status?: PackageStatus;
+  /** Counts the package writes. Starts at 0. A stale edit is refused. */
+  revision?: number;
+  /** Why the library suggested this package. None for one made by hand. */
+  suggestion?: PackageSuggestion | null;
+  /** Where the camera points for this package, with any mosaic panels. */
+  framing?: Framing | null;
+}
+
+/**
  * What a plan write returns: the new revision and what changed.
  *
  * The backend sends the plan-changed event from this record.
@@ -3307,6 +3336,47 @@ export interface MeridianFlipOutcome {
   guideReacquireAttempts?: number;
   resumed?: boolean;
   failureDetail?: string | null;
+}
+
+/**
+ * A package-level dithering cadence, applied across a package's run.
+ */
+export interface DitherConfig {
+  enabled?: boolean;
+  everyNFrames?: number;
+  pixels?: number;
+}
+
+/**
+ * Where an observation package stands in the package library.
+ */
+export enum PackageStatus {
+  PLANNED = "PLANNED",
+  SUGGESTED = "SUGGESTED",
+  COMPLETE = "COMPLETE"
+}
+
+/**
+ * Why the library suggested a package, kept with the package.
+ *
+ * Fields only. A later step fills them in when it makes or updates a
+ * suggested package.
+ */
+export interface PackageSuggestion {
+  /** "rule": a quality rule asked for more frames. "ranking": tonight's ranking picked it. */
+  sourceKind: any;
+  /** The rule that made the suggestion, if any. */
+  ruleName?: string;
+  /** Names what the suggestion came from, so a repeat is not added twice. */
+  sourceKey?: string;
+  /** The reason, in plain words. */
+  reason?: string;
+  /** How sure the library is, for example measured or design_estimate. */
+  confidence?: string;
+  /** A short code for the evidence. A dismissal lasts until it changes. */
+  evidenceFingerprint?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 /**
@@ -4095,15 +4165,6 @@ export interface DelegationPolicy {
 }
 
 /**
- * A package-level dithering cadence, applied across a package's run.
- */
-export interface DitherConfig {
-  enabled?: boolean;
-  everyNFrames?: number;
-  pixels?: number;
-}
-
-/**
  * A package placement request's starting disposition.
  */
 export enum StartTimeMode {
@@ -4669,8 +4730,12 @@ export const RPC_METHODS = [
   "execution:reconcile_session",
   "execution:record_divergence",
   "plan:get",
+  "plan:current_session",
+  "plan:list_packages",
   "plan:create",
+  "plan:create_package",
   "plan:edit",
+  "plan:edit_package",
   "plan:tick_checklist_item",
   "advisory:target_report",
   "advisory:tonight",
@@ -4704,6 +4769,8 @@ export const UI_EVENTS = {
   "quality:measured": "quality:measured",
   /** A write changed the night plan. The payload is {sessionId, revision, changed}, where revision is the plan revision now stored and changed lists the kind of each change. */
   "plan:changed": "plan:changed",
+  /** A write created, edited, reopened, deleted or promoted an observation package. The payload is {packageId, targetId, kind, revision}; kind says which, and a promotion has no revision. */
+  "packages:changed": "packages:changed",
   /** The mount, processing jobs or health status changed. */
   "system_state_update": "system_state_update",
   /** A backend log line, for the app's log panel. */

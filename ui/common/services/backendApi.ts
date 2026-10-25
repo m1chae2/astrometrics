@@ -250,12 +250,19 @@ export interface ActionRegistry {
     "execution:record_divergence": { payload: { record_id: string; observation_session_id: string; capability: string; comparison_input_id: string; intended_value: number; observed_value: number; tolerance: number; divergence_unit: string; queued_observation_package_id?: string | null; converged?: boolean | null; detail?: string }; response: Record<string, any> };
 
     // Night plan (#95). `plan:get` without a session id lists every session.
-    // The two writes send the `plan:changed` event and answer with the
-    // `conflict` error (current revision in its details) when
+    // `plan:list_packages` lists the package library;
+    // `plan:current_session` is tonight's session or null (never created by a
+    // read). Session writes send the `plan:changed` event; package writes
+    // (`plan:edit_package`, `plan:create_package`) send `packages:changed`.
+    // A write answers with the `conflict` error (current revision in its details) when
     // `expected_revision` is out of date.
     "plan:get": { payload: { session_id?: string }; response: import('../types/backendTypes').ObservationSession | ObservationSessionSummary[] };
+    "plan:current_session": { payload: Record<string, never>; response: import('../types/backendTypes').ObservationSession | null };
+    "plan:list_packages": { payload: { status?: string; target?: string }; response: import('../types/backendTypes').ObservationPackage[] };
     "plan:create": { payload: { night_id?: string }; response: import('../types/backendTypes').ObservationSession };
+    "plan:create_package": { payload: { target: string; exposure_requests?: Array<Record<string, any>>; plan_items?: Array<Record<string, any>>; dither_config?: Record<string, any>; minimum_altitude_deg?: number; priority?: number; notes?: string }; response: import('../types/backendTypes').ObservationPackage };
     "plan:edit": { payload: { session_id: string; add?: Array<Record<string, any>>; order?: string[]; remove?: string[]; set_exposures?: Record<string, Array<Record<string, any>>>; add_checklist?: Array<Record<string, any>>; framing?: Record<string, any>; expected_revision?: number }; response: import('../types/backendTypes').PlanChange };
+    "plan:edit_package": { payload: { package_id: string; exposure_requests?: Array<Record<string, any>>; dither_config?: Record<string, any>; minimum_altitude_deg?: number; priority?: number; notes?: string; name?: string; reopen?: boolean; delete?: boolean; expected_revision?: number }; response: import('../types/backendTypes').ObservationPackage };
     "plan:tick_checklist_item": { payload: { session_id: string; item_id: string; expected_revision?: number; note?: string; ticked_at?: string }; response: import('../types/backendTypes').PlanChange };
 
     // Ingestion
@@ -503,6 +510,8 @@ const IDEMPOTENT_READ_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
     'telescope:list_alignment_sessions',
     'execution:list_sessions',
     'plan:get',
+    'plan:current_session',
+    'plan:list_packages',
     'advisory:target_report',
     'advisory:tonight',
     'advisory:result',

@@ -50,6 +50,8 @@ class _FakeTargetCatalog:
             The library's targets.
         """
         self._targets = {target.id: target for target in targets}
+        self.catalog_names = {"NGC 7331"}
+        self.created: list[str] = []
 
     def get(self, target_id: str, refresh: bool = False) -> Target | None:
         """Find one target by id.
@@ -87,6 +89,35 @@ class _FakeTargetCatalog:
             The target.
         """
         self._targets[target.id] = target
+
+    def create(self, target_id: str, from_catalog: bool = False) -> Target:
+        """Stand in for catalog-based creation.
+
+        Parameters
+        ----------
+        target_id : `str`
+            The catalog name.
+        from_catalog : `bool`, optional
+            Must be `True`.
+
+        Returns
+        -------
+        target : `Target`
+            The new target, with a position, when `catalog_names` lists
+            the name.
+
+        Raises
+        ------
+        NotFoundError
+            If the name is not in `catalog_names`.
+        """
+        assert from_catalog
+        self.created.append(target_id)
+        if target_id not in self.catalog_names:
+            raise NotFoundError(f"The catalog does not know {target_id!r}.")
+        target = Target(id=target_id, ra="01h 02m 03s", dec="+10° 20′ 30″")
+        self._targets[target.id] = target
+        return target
 
     def save(self) -> None:
         """Do nothing; the stand-in keeps everything in memory."""

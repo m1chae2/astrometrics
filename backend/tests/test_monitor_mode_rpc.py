@@ -115,6 +115,8 @@ READ_ONLY_METHODS = frozenset({
     "observatory:list_cameras",
     "observatory:safety_status",
     "plan:get",
+    "plan:current_session",
+    "plan:list_packages",
     "planetarium:get_catalog_sources",
     "planetarium:get_constellation_lines",
     "planetarium:get_deep_catalog_status",
@@ -194,6 +196,8 @@ LOCAL_WRITE_METHODS = frozenset({
     "observatory:set_active_camera",
     "plan:create",
     "plan:edit",
+    "plan:edit_package",
+    "plan:create_package",
     "telescope:apply_promotion_decision",
     "plan:tick_checklist_item",
     "processing:cancel",
@@ -433,7 +437,9 @@ async def test_sequencer_begin_sends_no_command_in_monitor_mode(
     executor = container.target_imaging_executor
     session = support.make_night_session(container.wayfinder)
     support.force_safe_assessment(container.wayfinder, monkeypatch)
-    monkeypatch.setattr(executor, "_session_id", session.id)
+    # The sequencer uses tonight's session; point it at the prepared one.
+    monkeypatch.setattr(executor, "_existing_session", lambda: session)
+    monkeypatch.setattr(executor, "_session", lambda: session)
     await _enter_monitor_mode()
 
     reply = await _call("sequencer:begin", {})

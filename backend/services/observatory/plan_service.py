@@ -1,11 +1,14 @@
-"""Purpose: Serve the night plan's read, edit and tick methods.
+"""Purpose: Serve the night plan and package read and write methods.
 
 Description: The night plan is an observing session stored by the planning
 library. The app reads it with `Wayfinder.planning.get_plan`, edits it with
-`edit_queue` and ticks checklist items with `tick_checklist_item`. This
-service wraps those three calls for the RPC route and does one more thing:
-after each write that succeeds, it sends the ``plan:changed`` event to every
-connected app window, so any open screen can read the plan again.
+`edit_queue` and ticks checklist items with `tick_checklist_item`. The same
+`get_plan` lists the observation package library, `create_plan` records a
+package or the night's session, and `edit_package` changes, reopens or
+deletes a package. This service wraps those calls for the RPC route and does
+one more thing: after each write that succeeds, it sends the ``plan:changed``
+event (session writes) or the ``packages:changed`` event (package writes) to
+every connected app window, so any open screen can read again.
 
 The event payload is ``{sessionId, revision, changed}``. ``revision`` is the
 plan revision now stored. ``changed`` lists the kind of each change the write
@@ -17,16 +20,22 @@ the library raises a conflict error, and this service lets it pass up so the
 caller gets the ``conflict`` error code with the current revision in its
 details.
 
-The event comes from the change record the library returns, never from a
-second look at the database.
+The ``packages:changed`` payload is ``{packageId, targetId, kind, revision}``.
+``kind`` is ``created``, ``edited``, ``reopened``, ``deleted`` or ``promoted``
+(a suggested package added to the queue). The current session is tonight's:
+the night comes from the library's `observing_night_id`, never from the app.
+
+The event comes from the change record or the package the library returns,
+never from a second look at the database.
 """
 
 import logging
+import time
 from datetime import datetime
 from typing import Any
 
-from astrometricslib import InvalidArgumentError
-from wayfindinglib import PlanChange
+from astrometricslib import InvalidArgumentError, observing_night_id
+from wayfindinglib import DitherConfig, ExposureRequest, ObservationPackage, PlanChange
 
 logger = logging.getLogger(__name__)
 
@@ -58,10 +67,37 @@ class PlanService:
         Returns
         -------
         plan : `ObservationSession` or `list` [`ObservationSessionSummary`]
-            The whole session with its checklist, framing and revision, or
-            the list of summaries.
+            The whole session, or the list of summaries.
         """
         return self.wayfinder.planning.get_plan(session_id)
+
+    def list_packages(self, status: str | None = None, target: str | None = None) -> list[ObservationPackage]:
+        """List the observation package library, newest first.
+
+        Parameters
+        ----------
+        status : `str`, optional
+            Keep packages with this status.
+        target : `str`, optional
+            Keep packages for this target.
+
+        Returns
+        -------
+        packages : `list` [`ObservationPackage`]
+            The matching packages.
+        """
+        return self.wayfinder.planning.get_plan(kind="packages", status=status, target=target)
+
+    def current_session(self) -> Any:
+        """Read tonight's session, the one session the app works with.
+
+        Returns
+        -------
+        session : `ObservationSession` or `None`
+            Tonight's session, or `None` if none was created yet. Reading
+            never creates one.
+        """
+        return self.wayfinder.planning.get_plan(night_id=observing_night_id(time.time()))
 
     def create_plan(self, night_id: str | None = None) -> Any:
         """Create an empty night plan to fill by hand.
@@ -69,15 +105,125 @@ class PlanService:
         Parameters
         ----------
         night_id : `str`, optional
-            The night the plan is for, named for the local date on which it
-            begins. The library chooses when left out.
+            The night the plan is for. The library chooses when left out.
+            The night's existing session comes back if it has one.
 
         Returns
         -------
         plan : `ObservationSession`
-            The new, empty session.
+            The night's session.
         """
         return self.wayfinder.planning.create_plan(kind="empty_session", night_id=night_id)
+
+    def create_package(
+        self,
+        target: str,
+        exposure_requests: list[dict[str, Any]] | None = None,
+        plan_items: list[dict[str, Any]] | None = None,
+        dither_config: dict[str, Any] | None = None,
+        minimum_altitude_deg: float | None = None,
+        priority: int | None = None,
+        notes: str | None = None,
+    ) -> ObservationPackage:
+        """Record an observation package and announce it.
+
+        Parameters
+        ----------
+        target : `str`
+            The target's name.
+        exposure_requests : `list` [`dict`], optional
+            The exposures it asks for. None or empty gives a package with none.
+        plan_items : `list` [`dict`], optional
+            Sequence items instead of `exposure_requests`.
+        dither_config : `dict`, optional
+            How it dithers.
+        minimum_altitude_deg : `float`, optional
+            The lowest altitude it may be imaged at.
+        priority : `int`, optional
+            Higher is placed first.
+        notes : `str`, optional
+            Free text.
+
+        Returns
+        -------
+        package : `ObservationPackage`
+            The stored package.
+        """
+        package = self.wayfinder.planning.create_plan(
+            kind="package",
+            target=target,
+            plan_items=plan_items,
+            exposure_requests=(
+                None
+                if exposure_requests is None
+                else [ExposureRequest.model_validate(item) for item in exposure_requests]
+            ),
+            dither_config=None if dither_config is None else DitherConfig.model_validate(dither_config),
+            minimum_altitude_deg=minimum_altitude_deg,
+            priority=priority,
+            notes=notes,
+        )
+        self._announce_package(package, "created")
+        return package
+
+    def edit_package(
+        self,
+        package_id: str,
+        exposure_requests: list[dict[str, Any]] | None = None,
+        dither_config: dict[str, Any] | None = None,
+        minimum_altitude_deg: float | None = None,
+        priority: int | None = None,
+        notes: str | None = None,
+        name: str | None = None,
+        reopen: bool = False,
+        delete: bool = False,
+        expected_revision: int | None = None,
+    ) -> ObservationPackage:
+        """Change, reopen or delete one observation package and announce it.
+
+        Parameters
+        ----------
+        package_id : `str`
+            The package to change.
+        exposure_requests : `list` [`dict`], optional
+            The new full list of exposures.
+        dither_config : `dict`, optional
+            The new dithering.
+        minimum_altitude_deg : `float`, optional
+            The new lowest altitude.
+        priority : `int`, optional
+            The new priority.
+        notes : `str`, optional
+            The new free text.
+        name : `str`, optional
+            The new package name.
+        reopen : `bool`, optional
+            Set a complete package back to planned.
+        delete : `bool`, optional
+            Remove the package.
+        expected_revision : `int`, optional
+            The package revision the caller last read. A different stored
+            revision raises `PlanRevisionConflictError`.
+
+        Returns
+        -------
+        package : `ObservationPackage`
+            The stored package (as it was when removed, for a delete).
+        """
+        package = self.wayfinder.planning.edit_package(
+            package_id,
+            exposure_requests=exposure_requests,
+            dither_config=dither_config,
+            minimum_altitude_deg=minimum_altitude_deg,
+            priority=priority,
+            notes=notes,
+            name=name,
+            reopen=reopen,
+            delete=delete,
+            expected_revision=expected_revision,
+        )
+        self._announce_package(package, "deleted" if delete else "reopened" if reopen else "edited")
+        return package
 
     def edit_plan(
         self,
@@ -196,11 +342,52 @@ class PlanService:
         if change.revision == change.previous_revision:
             # Nothing was stored, so there is nothing to announce.
             return
+        self._announce_promotions(change)
         self._socket_manager.broadcast_ui_event_sync(
             "plan:changed",
             {
                 "sessionId": change.session_id,
                 "revision": change.revision,
                 "changed": [item.kind for item in change.changes],
+            },
+        )
+
+    def _announce_promotions(self, change: PlanChange) -> None:
+        """Announce each suggested package a write promoted.
+
+        Parameters
+        ----------
+        change : `PlanChange`
+            What the library returned for the write. A ``package_promoted``
+            item carries the package id in its detail.
+        """
+        if self._socket_manager is None:
+            return
+        for item in change.changes:
+            if item.kind != "package_promoted":
+                continue
+            self._socket_manager.broadcast_ui_event_sync(
+                "packages:changed", {"packageId": item.detail, "targetId": None, "kind": "promoted"}
+            )
+
+    def _announce_package(self, package: ObservationPackage, kind: str) -> None:
+        """Announce one successful package write.
+
+        Parameters
+        ----------
+        package : `ObservationPackage`
+            The package the library returned.
+        kind : `str`
+            ``created``, ``edited``, ``reopened`` or ``deleted``.
+        """
+        if self._socket_manager is None:
+            return
+        self._socket_manager.broadcast_ui_event_sync(
+            "packages:changed",
+            {
+                "packageId": package.id,
+                "targetId": package.target_id,
+                "kind": kind,
+                "revision": package.revision,
             },
         )

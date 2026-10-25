@@ -16,7 +16,6 @@
 .confidence-chip--measured { border-color: var(--success-green); }
 .confidence-chip--partly_measured { border-style: dashed; }
 .confidence-chip--design_estimate { border-style: dotted; }
-.example-data-badge { display: inline-flex; align-items: center; gap: 4px; border: 1px dashed var(--text-dim); border-radius: var(--radius-sm); padding: 0 6px; font-size: var(--section-label-size); color: var(--text-dim); }
 .data-quality__section { margin-bottom: 10px; }
 .data-quality__section h4 { margin: 4px 0; font-size: var(--label-font-size); }
 .data-quality__numbers { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 4px 0; font-size: var(--section-label-size); }

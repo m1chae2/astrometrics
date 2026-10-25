@@ -27,6 +27,7 @@ from astropy.coordinates import SkyCoord
 
 from astrometricslib import InvalidArgumentError, Target, parse_coordinate_string
 from wayfindinglib.models.equipment_and_site.equipment import EquipmentConfiguration
+from wayfindinglib.models.planning.framing import SkyCorner
 from wayfindinglib.models.planning.mosaic import MosaicPanel, MosaicPlan
 from wayfindinglib.models.planning.observation_package import (
     DitherConfig,
@@ -85,6 +86,50 @@ def _configured_field_of_view(config: Any) -> tuple[float, float]:
         2 * math.degrees(math.atan((width_mm / 2) / focal_length_mm)),
         2 * math.degrees(math.atan((height_mm / 2) / focal_length_mm)),
     )
+
+
+def _grid_offset_to_sky_position(
+    column_offset_deg: float,
+    row_offset_deg: float,
+    center_ra_deg: float,
+    center_dec_deg: float,
+    rotation_sin: float,
+    rotation_cos: float,
+) -> tuple[float, float]:
+    """Turn a grid offset into a right ascension and declination.
+
+    The grid is turned by the camera rotation (up is `rotation` degrees east
+    of north, and a larger column points 90 degrees clockwise from up). The
+    east offset is then divided by cos(declination) to become a right
+    ascension step. This flat-sky step is the one the panel centers use, so
+    corners and centers agree. It matches a true tangent-plane projection to
+    first order, which is accurate for offsets of a few degrees.
+
+    Parameters
+    ----------
+    column_offset_deg : `float`
+        Offset along the grid columns, in degrees.
+    row_offset_deg : `float`
+        Offset along the grid rows, in degrees.
+    center_ra_deg : `float`
+        Right ascension of the grid center, in degrees.
+    center_dec_deg : `float`
+        Declination of the grid center, in degrees.
+    rotation_sin : `float`
+        Sine of the camera rotation.
+    rotation_cos : `float`
+        Cosine of the camera rotation.
+
+    Returns
+    -------
+    ra_deg, dec_deg : `tuple` [`float`, `float`]
+        The sky position, with right ascension in [0, 360).
+    """
+    ra_offset = column_offset_deg * rotation_cos + row_offset_deg * rotation_sin
+    dec_offset = row_offset_deg * rotation_cos - column_offset_deg * rotation_sin
+    dec_deg = center_dec_deg + dec_offset
+    cos_dec = max(abs(math.cos(math.radians(dec_deg))), 1e-5)
+    return (center_ra_deg + ra_offset / cos_dec) % 360.0, dec_deg
 
 
 def calculate_panels(
@@ -160,15 +205,31 @@ def calculate_panels(
     panels = []
     for row, row_offset_deg in enumerate(dec_offsets):
         for column, column_offset_deg in enumerate(ra_offsets):
-            # Turn the grid offset into east and north offsets on the sky.
             # Up (a larger row) points rotation_deg east of north; a larger
             # column points a further 90 degrees clockwise. At 0 degrees
-            # this leaves the offsets unchanged.
-            ra_offset = column_offset_deg * rotation_cos + row_offset_deg * rotation_sin
-            dec_offset = row_offset_deg * rotation_cos - column_offset_deg * rotation_sin
-            panel_dec_deg = center_dec_deg + dec_offset
-            cos_dec = max(abs(math.cos(math.radians(panel_dec_deg))), 1e-5)
-            panel_ra_deg = (center_ra_deg + ra_offset / cos_dec) % 360.0
+            # the offsets are unchanged.
+            panel_ra_deg, panel_dec_deg = _grid_offset_to_sky_position(
+                column_offset_deg, row_offset_deg, center_ra_deg, center_dec_deg, rotation_sin, rotation_cos
+            )
+            # The four corners of the field of view, lower left first and
+            # then counterclockwise in the camera image.
+            corners = [
+                SkyCorner(
+                    ra_deg=corner_ra_deg,
+                    dec_deg=corner_dec_deg,
+                )
+                for corner_ra_deg, corner_dec_deg in (
+                    _grid_offset_to_sky_position(
+                        column_offset_deg + column_sign * fov_width_deg / 2.0,
+                        row_offset_deg + row_sign * fov_height_deg / 2.0,
+                        center_ra_deg,
+                        center_dec_deg,
+                        rotation_sin,
+                        rotation_cos,
+                    )
+                    for column_sign, row_sign in ((-1, -1), (1, -1), (1, 1), (-1, 1))
+                )
+            ]
             position = SkyCoord(ra=panel_ra_deg * u.deg, dec=panel_dec_deg * u.deg)
             panels.append(
                 MosaicPanel(
@@ -182,6 +243,7 @@ def calculate_panels(
                     dec_deg=panel_dec_deg,
                     panel_id=f"P{row + 1}_{column + 1}",
                     rotation_deg=rotation_deg,
+                    corners=corners,
                 )
             )
     return panels

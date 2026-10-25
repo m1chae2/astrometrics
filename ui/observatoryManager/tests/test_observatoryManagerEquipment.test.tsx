@@ -77,12 +77,38 @@ beforeEach(() => {
 });
 
 describe('CameraProfilesPanel', () => {
-    /** The example badge marks the noise table. */
-    it('labels the noise table as example data', () => {
+    /** The noise table shows the recorded values with their evidence words and no example badge. */
+    it('shows the recorded gain and read noise with their evidence words', () => {
+        const withNoise = [{
+            ...cameras[0],
+            sensorNoise: [{
+                cameraName: 'ZWO ASI533MM Pro',
+                gainSetting: '0',
+                offset: '10',
+                binning: '1x1',
+                temperatureC: -10,
+                gain: { value: 0.783, status: 'measured', kind: 'measured', source: 'flat pairs' },
+                readNoise: { value: 3.8, status: 'design_estimate', kind: 'datasheet', source: 'datasheet' },
+                status: 'partly_measured',
+            }],
+        }] as unknown as typeof cameras;
+        render(<CameraProfilesPanel cameras={withNoise} loading={false} error={null} onRetry={() => undefined} />);
+        const table = screen.getByRole('table', { name: 'Recorded camera noise' });
+        expect(table.textContent).toContain('0.783');
+        expect(table.textContent).toContain('3.80');
+        expect(table.textContent).toContain('Design estimate');
+        expect(table.textContent).toContain('Partly measured');
+        expect(screen.queryByTestId('example-data-badge')).toBeNull();
+        expect(screen.queryByText('Example data')).toBeNull();
+        expect(screen.queryByTestId('camera-noise-not-measured')).toBeNull();
+        expect(document.querySelector('[data-example="true"]')).toBeNull();
+    });
+
+    /** A camera with no entry says it is not measured. */
+    it('says "Not measured" for a camera with no recorded noise', () => {
         render(<CameraProfilesPanel cameras={cameras} loading={false} error={null} onRetry={() => undefined} />);
-        const example = screen.getByTestId('camera-noise-example');
-        expect(example.getAttribute('data-example')).toBe('true');
-        expect(screen.getByTestId('example-data-badge')).toBeTruthy();
+        expect(screen.getByTestId('camera-noise-not-measured').textContent).toContain('Not measured');
+        expect(screen.queryByRole('table', { name: 'Recorded camera noise' })).toBeNull();
     });
 
     /** Loading, error and empty states of the profile list. */

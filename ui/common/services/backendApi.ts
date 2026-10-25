@@ -73,6 +73,8 @@ export interface EquipmentCameraProfile {
     pixelSizeUm: number;
     sensorWidthPx: number;
     sensorHeightPx: number;
+    /** The gain and read noise recorded for each camera setting. Empty when none is recorded. */
+    sensorNoise?: import('../types/backendTypes').CameraNoiseSetting[];
 }
 
 /** Active equipment configuration with computed imaging geometry, from observatory:get_equipment_configuration. */

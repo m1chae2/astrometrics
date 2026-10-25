@@ -137,11 +137,13 @@ from backend.services.infrastructure.system_status_service import (
 )
 from wayfindinglib.drivers.indi_interface import TelescopeStatus
 from wayfindinglib.models.control_status import SafetyStatus
+from wayfindinglib.models.equipment_and_site.camera_noise import CameraNoiseSetting
 from wayfindinglib.models.equipment_and_site.equipment import Telescope
 from wayfindinglib.models.equipment_and_site.performance_envelope import (
     PerformanceEnvelope,
     TrackingRiskMap,
 )
+from wayfindinglib.models.planning.framing import SkyCorner
 from wayfindinglib.models.planning.mosaic import MosaicPanel
 from wayfindinglib.models.planning.observation_package import ExposureRequest, ObservationPackage
 from wayfindinglib.models.planning.sequence_plan import SequenceItem, SequencePlan
@@ -551,6 +553,7 @@ def render_types() -> str:
         generate_interface(SequencePlan, "SequencePlan"),
         generate_interface(CalibrationEntry, "CalibrationEntry"),
         generate_interface(CalibrationStats, "CalibrationStats"),
+        generate_interface(SkyCorner, "SkyCorner"),
         generate_interface(MosaicPanel, "MosaicPanel"),
         generate_interface(TimeSpan, "TimeSpan"),
         generate_interface(MeridianStatus, "MeridianStatus"),
@@ -637,6 +640,7 @@ def render_types() -> str:
                 TargetChange,
                 LiveSessionStatus,
                 SafetyStatus,
+                CameraNoiseSetting,
                 CalibrationQueryResult,
             ],
             written,

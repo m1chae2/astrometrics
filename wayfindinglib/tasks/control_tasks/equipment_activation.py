@@ -19,7 +19,7 @@ frontend's `observatory:list_cameras` and
 import logging
 from typing import Any
 
-from astrometricslib import AppConfiguration
+from astrometricslib import AppConfiguration, ConfigurationError, resolve_camera_profile
 from wayfindinglib.data_access.equipment_catalog_reader import (
     ACTIVE_CAMERA_KEY,
     ACTIVE_TELESCOPE_KEY,
@@ -30,6 +30,11 @@ from wayfindinglib.data_access.equipment_catalog_reader import (
     list_telescopes,
 )
 from wayfindinglib.data_access.equipment_catalog_writer import build_telescope_limits_update
+from wayfindinglib.models.equipment_and_site.camera_noise import (
+    CameraNoiseSetting,
+    CameraNoiseValue,
+    NoiseEvidenceStatus,
+)
 from wayfindinglib.models.equipment_and_site.equipment import Camera, EquipmentConfiguration
 
 logger = logging.getLogger(__name__)
@@ -123,8 +128,94 @@ def _camera_profile(camera: Camera) -> dict[str, Any]:
     }
 
 
+def _noise_value(recorded: Any) -> CameraNoiseValue | None:
+    """Turn one profile number into a noise value with its status word.
+
+    Parameters
+    ----------
+    recorded : `ProvenancedValue` or `None`
+        The profile's number, with a ``provenance`` that has a ``kind`` and a
+        ``source``.
+
+    Returns
+    -------
+    value : `CameraNoiseValue` or `None`
+        The number with its status, or `None` when nothing is recorded. Only
+        a number someone measured is "measured"; a datasheet or assumed
+        number is a design estimate.
+    """
+    if recorded is None:
+        return None
+    kind = str(recorded.provenance.kind)
+    status = NoiseEvidenceStatus.MEASURED if kind == "measured" else NoiseEvidenceStatus.DESIGN_ESTIMATE
+    return CameraNoiseValue(value=recorded.value, status=status, kind=kind, source=recorded.provenance.source)
+
+
+def _noise_status(values: list[CameraNoiseValue]) -> NoiseEvidenceStatus:
+    """Summarize how well a setting's recorded numbers are backed.
+
+    Parameters
+    ----------
+    values : `list` [`CameraNoiseValue`]
+        The numbers recorded for one setting (one or two).
+
+    Returns
+    -------
+    status : `NoiseEvidenceStatus`
+        Measured if all are measured, partly measured if some are, otherwise
+        a design estimate.
+    """
+    measured_count = sum(value.status == NoiseEvidenceStatus.MEASURED for value in values)
+    if measured_count == len(values):
+        return NoiseEvidenceStatus.MEASURED
+    return NoiseEvidenceStatus.PARTLY_MEASURED if measured_count else NoiseEvidenceStatus.DESIGN_ESTIMATE
+
+
+def list_camera_noise(config: Any, camera_name: str) -> list[CameraNoiseSetting]:
+    """Return the gain and read noise recorded for a camera.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The application configuration.
+    camera_name : `str`
+        The camera's name in the configuration.
+
+    Returns
+    -------
+    settings : `list` [`CameraNoiseSetting`]
+        One entry per gain setting, offset and binning in the camera's
+        profile, in the order the profile lists them. Empty when the camera
+        has no profile or no entries ("not measured").
+    """
+    try:
+        profile = resolve_camera_profile(camera_name, config)
+    except ConfigurationError:
+        logger.warning("Camera profiles could not be read for '%s'", camera_name, exc_info=True)
+        return []
+    if profile.is_generic_fallback:
+        return []
+    settings = []
+    for entry in profile.sensor_noise:
+        gain = _noise_value(entry.gain_e_per_adu)
+        read_noise = _noise_value(entry.read_noise_e)
+        settings.append(
+            CameraNoiseSetting(
+                camera_name=camera_name,
+                gain_setting=entry.gain_setting,
+                offset=entry.offset,
+                binning=entry.binning,
+                temperature_c=entry.temperature_c,
+                gain=gain,
+                read_noise=read_noise,
+                status=_noise_status([value for value in (gain, read_noise) if value is not None]),
+            )
+        )
+    return settings
+
+
 def list_camera_profiles(config: Any) -> list[dict[str, Any]]:
-    """Return every configured camera's sensor profile.
+    """Return every configured camera's sensor profile and recorded noise.
 
     Parameters
     ----------
@@ -135,9 +226,20 @@ def list_camera_profiles(config: Any) -> list[dict[str, Any]]:
     -------
     profiles : `list` [`dict`]
         One camera profile per configured camera, in the shape
-        `_camera_profile` gives.
+        `_camera_profile` gives, plus ``sensorNoise``: the camera's
+        `CameraNoiseSetting` entries as dictionaries with camelCase keys
+        (empty when nothing is recorded).
     """
-    return [_camera_profile(camera) for camera in list_cameras(config)]
+    return [
+        {
+            **_camera_profile(camera),
+            "sensorNoise": [
+                setting.model_dump(by_alias=True, mode="json")
+                for setting in list_camera_noise(config, camera.name)
+            ],
+        }
+        for camera in list_cameras(config)
+    ]
 
 
 def get_equipment_configuration(config: Any) -> dict[str, Any] | None:

@@ -1,21 +1,26 @@
 /**
  * @file CameraProfilesPanel.tsx
  * @description The camera profiles from the settings, the measured gain and
- * read noise of each camera setting, and the measurement call. Until the
- * library returns measured noise with the profiles, the noise table shows
- * typed example values with an "Example data" badge. A measurement is shown
- * first; saving it to the calibration library is a local write, so the panel
- * asks before it saves.
+ * read noise of each camera setting, and the measurement call. The noise
+ * table shows what the camera profile records for each setting, with the
+ * evidence word the library gives it (Measured, Partly measured or Design
+ * estimate), and says "Not measured" for a camera with no entry. A
+ * measurement is shown first; saving it to the calibration library is a local
+ * write, so the panel asks before it saves.
  */
 
 import React, { useState } from 'react';
 import { SectionPanel } from '../../common/components/SectionPanel';
-import { ExampleDataBadge } from '../../common/components/quality/ExampleDataBadge';
 import { QualityPanelState } from '../../common/components/quality/QualityPanelState';
-import { exampleCameraNoise } from '../../common/examples/exampleCameraNoise';
 import { callBackend } from '../../common/services/backendApi';
 import type { CameraProfile } from '../../common/hooks/useEquipmentConfiguration';
-import { MeasurementStatus, type SensorNoiseMeasurement } from '../../common/types/backendTypes';
+import {
+    MeasurementStatus,
+    NoiseEvidenceStatus,
+    type CameraNoiseSetting,
+    type CameraNoiseValue,
+    type SensorNoiseMeasurement,
+} from '../../common/types/backendTypes';
 import '../../common/components/quality/quality.css';
 import '../observatoryManager.css';
 
@@ -41,8 +46,30 @@ function formatNumber(value: number | null | undefined, digits: number): string 
     return typeof value === 'number' ? value.toFixed(digits) : '—';
 }
 
+/** The words for each evidence status, as the validation register spells them. */
+const EVIDENCE_WORDS: Record<NoiseEvidenceStatus, string> = {
+    [NoiseEvidenceStatus.MEASURED]: 'Measured',
+    [NoiseEvidenceStatus.PARTLY_MEASURED]: 'Partly measured',
+    [NoiseEvidenceStatus.DESIGN_ESTIMATE]: 'Design estimate',
+};
+
 /**
- * Shows camera profiles, example noise values and the noise measurement.
+ * Shows one gain or read noise with its evidence word, or a dash when none is recorded.
+ * @param recorded The recorded number, or nothing.
+ * @param digits Decimal places.
+ * @return The cell content.
+ */
+function noiseCell(recorded: CameraNoiseValue | null | undefined, digits: number): React.ReactNode {
+    if (!recorded) return '—';
+    return (
+        <>
+            {recorded.value.toFixed(digits)} <span className="equipment-block__label">{EVIDENCE_WORDS[recorded.status]}</span>
+        </>
+    );
+}
+
+/**
+ * Shows camera profiles, the recorded noise noise values and the noise measurement.
  * @param props See {@link CameraProfilesPanelProps}.
  * @return The panel.
  */
@@ -101,6 +128,9 @@ export const CameraProfilesPanel: React.FC<CameraProfilesPanelProps> = ({ camera
         }
     };
 
+    const noiseRows = cameras.flatMap((camera) => (camera.sensorNoise ?? []).map((setting: CameraNoiseSetting) => ({ camera, setting })));
+    const camerasWithoutNoise = cameras.filter((camera) => (camera.sensorNoise ?? []).length === 0);
+
     let profiles: React.ReactNode;
     if (loading) {
         profiles = <QualityPanelState state="loading" />;
@@ -136,32 +166,48 @@ export const CameraProfilesPanel: React.FC<CameraProfilesPanelProps> = ({ camera
             <div className="equipment-block">
                 {profiles}
 
-                <div data-example="true" data-testid="camera-noise-example">
-                    <div className="equipment-block__row">
-                        <strong>Measured noise</strong>
-                        <ExampleDataBadge />
+                {!loading && !error && cameras.length > 0 && (
+                    <div data-testid="camera-noise">
+                        <div className="equipment-block__row">
+                            <strong>Recorded noise</strong>
+                        </div>
+                        {noiseRows.length > 0 && (
+                            <table className="calibration-table" aria-label="Recorded camera noise">
+                                <thead>
+                                    <tr>
+                                        <th>Camera</th>
+                                        <th className="data-table-cell-right">Gain setting</th>
+                                        <th className="data-table-cell-right">Offset</th>
+                                        <th className="data-table-cell-right">Binning</th>
+                                        <th className="data-table-cell-right">Temperature (°C)</th>
+                                        <th className="data-table-cell-right">Gain (e⁻/ADU)</th>
+                                        <th className="data-table-cell-right">Read noise (e⁻)</th>
+                                        <th>Evidence</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {noiseRows.map(({ camera, setting }) => (
+                                        <tr key={`${camera.name}-${setting.gainSetting}-${setting.offset}-${setting.binning}`}>
+                                            <td>{camera.name}</td>
+                                            <td className="data-table-cell-right">{setting.gainSetting}</td>
+                                            <td className="data-table-cell-right">{setting.offset}</td>
+                                            <td className="data-table-cell-right">{setting.binning}</td>
+                                            <td className="data-table-cell-right">{formatNumber(setting.temperatureC, 1)}</td>
+                                            <td className="data-table-cell-right">{noiseCell(setting.gain, 3)}</td>
+                                            <td className="data-table-cell-right">{noiseCell(setting.readNoise, 2)}</td>
+                                            <td>{EVIDENCE_WORDS[setting.status]}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        )}
+                        {camerasWithoutNoise.map((camera) => (
+                            <p key={camera.name} className="equipment-block__reason" data-testid="camera-noise-not-measured">
+                                {camera.name}: Not measured. No gain or read noise is recorded for this camera. Use Measure noise below.
+                            </p>
+                        ))}
                     </div>
-                    <table className="calibration-table" aria-label="Measured camera noise (example data)">
-                        <thead>
-                            <tr>
-                                <th>Camera</th>
-                                <th className="data-table-cell-right">Gain setting</th>
-                                <th className="data-table-cell-right">Gain (e⁻/count)</th>
-                                <th className="data-table-cell-right">Read noise (e⁻)</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {exampleCameraNoise.map((row) => (
-                                <tr key={`${row.cameraId}-${row.gainSetting}`}>
-                                    <td>{row.cameraId}</td>
-                                    <td className="data-table-cell-right">{row.gainSetting}</td>
-                                    <td className="data-table-cell-right">{row.gainElectronsPerCount}</td>
-                                    <td className="data-table-cell-right">{row.readNoiseElectrons}</td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
+                )}
 
                 <form
                     className="equipment-block__form"

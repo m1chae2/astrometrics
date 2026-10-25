@@ -5,21 +5,16 @@
  *
  * It asks the library (`mosaic:preview`) for the panel centers and rotation of
  * a grid around the chosen target, lists them as numbers with their units, and
- * hands the panel corners to the sky map to outline. The corners are example
- * values (`exampleFramingCorners`) until the library returns real ones, so the
- * panel shows the "Example data" badge. The UI does no framing math. "Send
- * framing to package" writes the framing into the target's observation package.
+ * hands the panel corners the library returns to the sky map to outline. The
+ * words that say what the rotation means also come from the library. The UI
+ * does no framing math. "Send framing to package" writes the framing into the
+ * target's observation package.
  */
 
-import React, { useEffect, useId, useState } from 'react';
-import { ExampleDataBadge } from '../../common/components/quality/ExampleDataBadge';
-import { exampleFramingCorners } from '../../common/examples/exampleFramingCorners';
+import React, { useEffect, useId, useMemo, useState } from 'react';
 import type { FramingPanelCorners } from '../layers/FramingOverlay';
 import { useMosaicPreview } from '../hooks/useMosaicPreview';
 import { useTargetPackage } from '../hooks/useTargetPackage';
-
-/** The words that name the rotation everywhere it is shown. */
-export const ROTATION_CONVENTION = 'degrees, east of north';
 
 /** Props of the framing panel. */
 interface FramingPanelProps {
@@ -60,13 +55,25 @@ export const FramingPanel: React.FC<FramingPanelProps> = ({ targetName, center, 
   const preview = useMosaicPreview(center, { rows, cols, overlap }, rotationDeg, isOpen);
   const { isWorking, refusal, sendFramingToPackage, dismissRefusal } = useTargetPackage(targetName, true);
 
-  const panels = preview.data ?? [];
+  const panels = useMemo(() => preview.data ?? [], [preview.data]);
   const hasPanels = isOpen && center !== null && panels.length > 0;
 
-  // The sky map outlines the example corners while there are panels to show.
+  // The words that say what the rotation means, as the library gives them.
+  const rotationConvention = panels.find((panel) => panel.rotation_convention)?.rotation_convention ?? null;
+
+  // The corners the library returned, renamed to the names the sky map draws.
+  const outlines = useMemo<FramingPanelCorners[]>(
+    () => panels.map((panel) => ({
+      name: panel.panel_id,
+      corners: (panel.corners ?? []).map((corner) => ({ raDeg: corner.ra_deg, decDeg: corner.dec_deg })),
+    })),
+    [panels],
+  );
+
+  // The sky map outlines the returned corners while there are panels to show.
   useEffect(() => {
-    onFramingPanelsChange(hasPanels ? exampleFramingCorners : []);
-  }, [hasPanels, onFramingPanelsChange]);
+    onFramingPanelsChange(hasPanels ? outlines : []);
+  }, [hasPanels, outlines, onFramingPanelsChange]);
 
   const sendBlockedReason = !center || !targetName
     ? 'Choose a target first.'
@@ -101,12 +108,10 @@ export const FramingPanel: React.FC<FramingPanelProps> = ({ targetName, center, 
     <section
       className="framing-panel"
       aria-label="Framing"
-      data-example="true"
       data-testid="framing-panel"
     >
       <header className="framing-panel__header">
         <h3 className="framing-panel__title">Framing{targetName ? `: ${targetName}` : ''}</h3>
-        <ExampleDataBadge />
         <button type="button" className="framing-panel__toggle" onClick={() => setIsOpen(false)}>
           Close
         </button>
@@ -129,11 +134,15 @@ export const FramingPanel: React.FC<FramingPanelProps> = ({ targetName, center, 
             onChange={(event) => setOverlap(parseNumber(event.target.value, 0))} />
         </label>
         <label>
-          Rotation ({ROTATION_CONVENTION})
+          Rotation (degrees)
           <input type="number" min={-360} max={360} value={rotationDeg}
+            aria-describedby={rotationConvention !== null ? `${idPrefix}-convention` : undefined}
             onChange={(event) => setRotationDeg(parseNumber(event.target.value, 0))} />
         </label>
       </div>
+      {rotationConvention !== null && (
+        <p id={`${idPrefix}-convention`} className="framing-panel__state">{rotationConvention}</p>
+      )}
 
       {center === null && <p className="framing-panel__state">Choose a target</p>}
       {center !== null && preview.isLoading && (
@@ -151,13 +160,13 @@ export const FramingPanel: React.FC<FramingPanelProps> = ({ targetName, center, 
 
       {hasPanels && (
         <table className="framing-panel__table">
-          <caption>Panel centers (RA and Dec in degrees); rotation in {ROTATION_CONVENTION}</caption>
+          <caption>Panel centers (RA and Dec in degrees); rotation in degrees</caption>
           <thead>
             <tr>
               <th scope="col">Panel</th>
               <th scope="col">RA (degrees)</th>
               <th scope="col">Dec (degrees)</th>
-              <th scope="col">Rotation ({ROTATION_CONVENTION})</th>
+              <th scope="col">Rotation (degrees)</th>
             </tr>
           </thead>
           <tbody>

@@ -8,10 +8,11 @@ pattern.
 """
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
-from astrometricslib import AppConfiguration
+from astrometricslib import AppConfiguration, resolve_camera_profile
 from wayfindinglib.data_access import equipment_catalog_writer
 from wayfindinglib.data_access.equipment_catalog_reader import (
     get_active_camera_id,
@@ -21,6 +22,7 @@ from wayfindinglib.data_access.equipment_catalog_reader import (
 from wayfindinglib.data_access.equipment_catalog_writer import build_telescope_limits_update
 from wayfindinglib.tasks.control_tasks.equipment_activation import (
     get_equipment_configuration,
+    list_camera_noise,
     list_camera_profiles,
     set_active_camera,
     set_active_telescope,
@@ -288,3 +290,85 @@ def test_limits_use_the_temp_config_path_only(limits_config: AppConfiguration, t
     path = _config_path(limits_config)
     assert path.parent == tmp_path
     assert ".config/astrometrics" not in str(path)
+
+
+SHIPPED_CONFIG_PATH = (
+    Path(__file__).resolve().parents[4] / "astrometricslib" / "astrometrics.config.example.toml"
+)
+
+
+@pytest.fixture
+def shipped_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AppConfiguration:
+    """Build a configuration from a temporary copy of the shipped example file.
+
+    Returns
+    -------
+    config : `AppConfiguration`
+        A configuration holding the shipped camera profiles, with the file
+        in a temporary folder so the real configuration is never touched.
+    """
+    config_path = tmp_path / "astrometrics.config.toml"
+    config_path.write_text(SHIPPED_CONFIG_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+    monkeypatch.setattr(AppConfiguration, "_find_config_file", lambda self: config_path)
+    return AppConfiguration()
+
+
+def test_camera_noise_reports_the_measured_setting_with_its_status_word(
+    shipped_config: AppConfiguration,
+) -> None:
+    """The shipped ASI533 entry is measured, with its numbers and source."""
+    (setting,) = list_camera_noise(shipped_config, "ZWO ASI533MM Pro")
+    assert (setting.gain_setting, setting.offset, setting.binning) == ("0", "10", "1x1")
+    assert setting.status == "measured"
+    assert setting.temperature_c == pytest.approx(-10.0)
+    assert setting.gain.value == pytest.approx(0.783)
+    assert setting.gain.status == "measured"
+    assert setting.read_noise.value == pytest.approx(3.8)
+    assert "bias-frame pairs" in setting.read_noise.source
+
+
+def test_camera_noise_status_is_partly_measured_when_only_one_number_is(
+    shipped_config: AppConfiguration,
+) -> None:
+    """A measured gain with a datasheet read noise is partly measured."""
+    from astrometricslib.models.camera_profile import (
+        CameraProfile,
+        ProvenancedValue,
+        SensorSettingNoise,
+        ValueProvenance,
+    )
+
+    entry = SensorSettingNoise(
+        gain_setting="100",
+        gain_e_per_adu=ProvenancedValue(
+            value=0.9, provenance=ValueProvenance(kind="measured", source="flats")
+        ),
+        read_noise_e=ProvenancedValue(
+            value=1.6, provenance=ValueProvenance(kind="datasheet", source="sheet")
+        ),
+    )
+    base = resolve_camera_profile("ZWO ASI533MM Pro", shipped_config)
+    profile = CameraProfile(**{**dict(base), "sensor_noise": (entry,)})
+    with patch(
+        "wayfindinglib.tasks.control_tasks.equipment_activation.resolve_camera_profile", return_value=profile
+    ):
+        (setting,) = list_camera_noise(shipped_config, "ZWO ASI533MM Pro")
+    assert setting.status == "partly_measured"
+    assert setting.gain.status == "measured"
+    assert setting.read_noise.status == "design_estimate"
+
+
+def test_camera_without_a_profile_or_entries_reports_none(shipped_config: AppConfiguration) -> None:
+    """An unknown camera, or one with no entries, gives an empty list."""
+    assert list_camera_noise(shipped_config, "No Such Camera") == []
+    assert list_camera_noise(shipped_config, "Nikon D5300") == []
+
+
+def test_camera_profiles_carry_the_noise_in_camel_case(shipped_config: AppConfiguration) -> None:
+    """The profile list gives each camera its `sensorNoise` entries."""
+    profiles = {profile["name"]: profile for profile in list_camera_profiles(shipped_config)}
+    first = profiles["ZWO ASI533MM Pro"]["sensorNoise"][0]
+    assert first["gainSetting"] == "0"
+    assert first["readNoise"]["status"] == "measured"
+    assert first["gain"]["kind"] == "measured"
+    assert first["cameraName"] == "ZWO ASI533MM Pro"

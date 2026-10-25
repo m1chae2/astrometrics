@@ -1510,6 +1510,16 @@ export interface CalibrationStats {
 }
 
 /**
+ * One corner of a panel, as a point on the sky.
+ */
+export interface SkyCorner {
+  /** Right ascension, in degrees. */
+  ra_deg: number;
+  /** Declination, in degrees. */
+  dec_deg: number;
+}
+
+/**
  * One panel of a mosaic grid and where its center is.
  */
 export interface MosaicPanel {
@@ -1529,6 +1539,10 @@ export interface MosaicPanel {
   panel_id: string;
   /** How far the camera is turned, in degrees east of north (the way Ekos and KStars give it). 0 puts the grid rows along declination and the columns along right ascension. */
   rotation_deg?: number;
+  /** What `rotation_deg` means, in words, for display. */
+  rotation_convention?: string;
+  /** The four corners of the panel's field of view, in drawing order: lower left, lower right, upper right, upper left of the camera image. Empty when the field of view is not known. */
+  corners?: SkyCorner[];
 }
 
 /**
@@ -3390,6 +3404,28 @@ export interface SafetyStatus {
 }
 
 /**
+ * The gain and read noise of a camera at one setting.
+ */
+export interface CameraNoiseSetting {
+  /** The camera's name in the configuration. */
+  cameraName: string;
+  /** The camera's gain setting (an index, not electrons per ADU) or a DSLR's ISO. */
+  gainSetting: string;
+  /** The camera offset. */
+  offset: string;
+  /** The binning, such as "1x1". */
+  binning: string;
+  /** Sensor temperature of the measurement, in degrees C. */
+  temperatureC?: number | null;
+  /** The conversion gain in electrons per ADU, or None when only read noise is recorded. */
+  gain?: CameraNoiseValue | null;
+  /** The read noise in electrons (RMS), or None when only the gain is recorded. */
+  readNoise?: CameraNoiseValue | null;
+  /** Measured when every number recorded here is measured. Partly measured when some are. Design estimate when none is. */
+  status: NoiseEvidenceStatus;
+}
+
+/**
  * The answer of `CalibrationCatalog.query`.
  */
 export interface CalibrationQueryResult {
@@ -4379,6 +4415,29 @@ export interface DelegationPolicy {
   id: string;
   capability_delegations?: CapabilityDelegation[];
   updated_at?: string;
+}
+
+/**
+ * One gain or read noise number with where it came from.
+ */
+export interface CameraNoiseValue {
+  /** The number: electrons per ADU for a gain, electrons for a read noise. */
+  value: number;
+  /** Measured when someone measured it on frames. Design estimate when it comes from a datasheet or an assumption. A single number is never Partly measured. */
+  status: NoiseEvidenceStatus;
+  /** How the profile records its origin: "measured", "datasheet" or "assumed". */
+  kind: string;
+  /** Enough detail to find the origin again: a file, a paper or the frames. */
+  source: string;
+}
+
+/**
+ * How well a gain or read noise is backed, in the register's words.
+ */
+export enum NoiseEvidenceStatus {
+  MEASURED = "measured",
+  PARTLY_MEASURED = "partly_measured",
+  DESIGN_ESTIMATE = "design_estimate"
 }
 
 /**

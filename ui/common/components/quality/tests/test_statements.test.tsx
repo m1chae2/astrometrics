@@ -10,7 +10,6 @@ import userEvent from '@testing-library/user-event';
 import { Confidence, Severity, StatementKind } from '../../../types/backendTypes';
 import { StatementItem } from '../StatementItem';
 import { StatementList } from '../StatementList';
-import { ExampleDataBadge } from '../ExampleDataBadge';
 import { makeStatement } from './qualityTestData';
 
 describe('StatementItem', () => {
@@ -143,13 +142,5 @@ describe('StatementList', () => {
         const names = screen.getAllByRole('listitem').map((item) => item.getAttribute('aria-label'));
         expect(names[0]).toContain('Message 1');
         expect(names[2]).toContain('Message 3');
-    });
-});
-
-describe('ExampleDataBadge', () => {
-    /** The badge says "Example data". */
-    it('shows the words', () => {
-        render(<ExampleDataBadge />);
-        expect(screen.getByText('Example data')).toBeTruthy();
     });
 });

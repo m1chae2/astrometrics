@@ -1,7 +1,7 @@
 /**
- * @fileoverview Tests of the Planetarium framing panel: states, the example
- * badge, panel numbers with their unit and convention, the corners handed to
- * the map, and Send framing to package.
+ * @fileoverview Tests of the Planetarium framing panel: states, panel numbers
+ * with their unit, the rotation convention the library returns, the corners
+ * the library returns handed to the map, and Send framing to package.
  */
 
 import React from 'react';
@@ -17,11 +17,26 @@ vi.mock('../../common/services/backendApi', () => ({
 
 import { ToastContext } from '../../common/hooks/useToast';
 import { FramingPanel } from '../components/FramingPanel';
-import { exampleFramingCorners } from '../../common/examples/exampleFramingCorners';
+
+const CONVENTION = 'Degrees east of north, as the library states it.';
 
 const panelReply = [
-  { row: 0, col: 0, ra_str: '', dec_str: '', ra_deg: 148.8, dec_deg: 69.0, panel_id: 'P0_0', rotation_deg: 30 },
-  { row: 0, col: 1, ra_str: '', dec_str: '', ra_deg: 149.6, dec_deg: 69.0, panel_id: 'P0_1', rotation_deg: 30 },
+  {
+    row: 0, col: 0, ra_str: '', dec_str: '', ra_deg: 148.8, dec_deg: 69.0, panel_id: 'P0_0', rotation_deg: 30,
+    rotation_convention: CONVENTION,
+    corners: [
+      { ra_deg: 148.5, dec_deg: 68.8 }, { ra_deg: 149.1, dec_deg: 68.8 },
+      { ra_deg: 149.1, dec_deg: 69.2 }, { ra_deg: 148.5, dec_deg: 69.2 },
+    ],
+  },
+  {
+    row: 0, col: 1, ra_str: '', dec_str: '', ra_deg: 149.6, dec_deg: 69.0, panel_id: 'P0_1', rotation_deg: 30,
+    rotation_convention: CONVENTION,
+    corners: [
+      { ra_deg: 149.3, dec_deg: 68.8 }, { ra_deg: 149.9, dec_deg: 68.8 },
+      { ra_deg: 149.9, dec_deg: 69.2 }, { ra_deg: 149.3, dec_deg: 69.2 },
+    ],
+  },
 ];
 
 /**
@@ -68,8 +83,8 @@ describe('FramingPanel', () => {
     expect(callBackendMock.mock.calls.some(([method]) => method === 'mosaic:preview')).toBe(false);
   });
 
-  /** Panels show with unit and convention, the badge, data-example, and the example corners go to the map. */
-  it('shows panel numbers, the example badge and hands corners to the map', async () => {
+  /** Panels show with their unit; the map gets the returned corners; the convention is the library's. */
+  it('shows panel numbers, the library convention and hands the returned corners to the map', async () => {
     setBackend();
     const onChange = vi.fn();
     const user = renderPanel({ ra: 148.9, dec: 69.1 }, onChange);
@@ -77,10 +92,25 @@ describe('FramingPanel', () => {
     expect(await screen.findByText('P0_0')).toBeTruthy();
     expect(screen.getByText('148.8000')).toBeTruthy();
     expect(screen.getAllByText('30.0').length).toBe(2);
-    expect(screen.getAllByText(/degrees, east of north/).length).toBeGreaterThan(0);
-    expect(screen.getByTestId('example-data-badge')).toBeTruthy();
-    expect(screen.getByTestId('framing-panel').getAttribute('data-example')).toBe('true');
-    expect(onChange).toHaveBeenLastCalledWith(exampleFramingCorners);
+    expect(screen.getByText(CONVENTION)).toBeTruthy();
+    expect(screen.queryByTestId('example-data-badge')).toBeNull();
+    expect(screen.getByTestId('framing-panel').getAttribute('data-example')).toBeNull();
+    expect(onChange).toHaveBeenLastCalledWith([
+      {
+        name: 'P0_0',
+        corners: [
+          { raDeg: 148.5, decDeg: 68.8 }, { raDeg: 149.1, decDeg: 68.8 },
+          { raDeg: 149.1, decDeg: 69.2 }, { raDeg: 148.5, decDeg: 69.2 },
+        ],
+      },
+      {
+        name: 'P0_1',
+        corners: [
+          { raDeg: 149.3, decDeg: 68.8 }, { raDeg: 149.9, decDeg: 68.8 },
+          { raDeg: 149.9, decDeg: 69.2 }, { raDeg: 149.3, decDeg: 69.2 },
+        ],
+      },
+    ]);
     const previewCall = callBackendMock.mock.calls.find(([method]) => method === 'mosaic:preview');
     expect(previewCall?.[1]).toMatchObject({ center_ra: 148.9, center_dec: 69.1, rotation_deg: 0 });
   });
@@ -94,7 +124,7 @@ describe('FramingPanel', () => {
     expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
   });
 
-  /** An empty real reply shows the empty state, not the example. */
+  /** An empty real reply shows the empty state and no outlines. */
   it('shows the empty state for no panels', async () => {
     setBackend({ preview: [] });
     const onChange = vi.fn();

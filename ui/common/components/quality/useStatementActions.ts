@@ -10,9 +10,6 @@ import { useCallback } from 'react';
 import { navigateToElement } from '../../utils/displayCoordinator';
 import type { TargetStatement } from '../../types/backendTypes';
 
-/** The mode name of the display that plans observations (the Observation Manager). */
-export const OBSERVATION_PLANNER_MODE = 'Observation Manager';
-
 /** The controller a statement uses to show and run its actions. */
 export interface StatementActions {
     /** Opens the cited frames in the Image Viewer. */

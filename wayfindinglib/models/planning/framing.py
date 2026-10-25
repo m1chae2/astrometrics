@@ -10,6 +10,22 @@ mosaic module without an import cycle.
 
 from pydantic import BaseModel, ConfigDict, Field
 
+ROTATION_CONVENTION_TEXT = (
+    "Degrees east of north, the way Ekos and KStars give it. At 0 the camera's up direction points north, "
+    "so the grid rows run along declination and the columns along right ascension. "
+    "A positive angle turns the camera's up direction toward east."
+)
+"""What a rotation means, in words. Screens show it as returned."""
+
+
+class SkyCorner(BaseModel):
+    """One corner of a panel, as a point on the sky."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    ra_deg: float = Field(..., ge=0.0, lt=360.0, description="Right ascension, in degrees.")
+    dec_deg: float = Field(..., description="Declination, in degrees.")
+
 
 class MosaicPanel(BaseModel):
     """One panel of a mosaic grid and where its center is."""
@@ -28,6 +44,16 @@ class MosaicPanel(BaseModel):
         description=(
             "How far the camera is turned, in degrees east of north (the way Ekos and KStars give "
             "it). 0 puts the grid rows along declination and the columns along right ascension."
+        ),
+    )
+    rotation_convention: str = Field(
+        default=ROTATION_CONVENTION_TEXT, description="What `rotation_deg` means, in words, for display."
+    )
+    corners: list[SkyCorner] = Field(
+        default_factory=list,
+        description=(
+            "The four corners of the panel's field of view, in drawing order: lower left, lower right, "
+            "upper right, upper left of the camera image. Empty when the field of view is not known."
         ),
     )
 

@@ -91,7 +91,7 @@ describe('ObservatoryManager layout', () => {
         expect(screen.getByText('Alignment Status')).toBeTruthy();
         expect(screen.getByText('Camera Profiles')).toBeTruthy();
         expect(screen.getByText('Calibration Library')).toBeTruthy();
-        expect(screen.getByTestId('camera-noise-example')).toBeTruthy();
+        expect(screen.queryByTestId('camera-noise-example')).toBeNull();
         expect(await screen.findByText('Darks')).toBeTruthy();
     });
 

@@ -2,14 +2,18 @@
 
 Sets up logging, builds the app, adds the CORS middleware and the error
 handlers, mounts the routes declared in `backend.public_interface`, and
-wires the lifespan that starts and stops the services. The routes live in
+wires the lifespan that starts and stops the services, and registers the
+SIGUSR1 handler that dumps every thread's stack to the log. The routes live in
 `backend/routers/`, and the start-up work in `backend/startup.py`.
 """
 
 import asyncio
+import faulthandler
 import logging
 import os
 import queue
+import signal
+import sys
 import warnings
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -288,6 +292,32 @@ app.include_router(figures.router)
 app.include_router(websockets.router)
 
 
+def register_thread_dump_signal() -> bool:
+    """Let a developer dump every thread's stack with ``kill -USR1``.
+
+    When the backend hangs, a stack dump shows what each thread is waiting
+    on. Tools such as py-spy often cannot attach without ``sudo``, so the
+    process writes the dump to standard error (the backend log) when it
+    receives SIGUSR1. The ``dump`` command of ``build/linux/run_backend.sh``
+    sends the signal and prints the result.
+
+    Returns
+    -------
+    bool
+        True if the handler was registered. False where the signal does not
+        exist (Windows) or the registration failed.
+    """
+    signal_number = getattr(signal, "SIGUSR1", None)
+    if signal_number is None:
+        return False
+    try:
+        faulthandler.register(signal_number, file=sys.stderr, all_threads=True)
+    except AttributeError, OSError, RuntimeError, ValueError:
+        logger.warning("Could not register the thread-dump signal handler", exc_info=True)
+        return False
+    return True
+
+
 def main() -> None:
     """Run the backend with uvicorn.
 
@@ -297,6 +327,7 @@ def main() -> None:
     """
     host = os.environ.get("ASTROMETRICS_BIND_HOST", "127.0.0.1")
     port = int(os.environ.get("ASTROMETRICS_PORT", "5000"))
+    register_thread_dump_signal()
     logger.info("Starting Astrometrics backend on %s:%s", host, port)
     # Requests still running when a stop signal arrives (such as a hardware
     # poll the app window sent just before it closed) get a few seconds to

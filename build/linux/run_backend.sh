@@ -16,6 +16,8 @@ set -euo pipefail
 #   ./run_backend.sh foreground        - run backend in foreground (logs to stdout)
 #   ./run_backend.sh stop              - stop backgrounded backend
 #   ./run_backend.sh status            - show status
+#   ./run_backend.sh dump              - make a running backend write every thread's stack to its log, then
+#                                        print what was written (use when the backend hangs)
 #   ./run_backend.sh install           - install latest wheel (or editable) into the selected Python
 #                                        environment (does NOT start the backend)
 #   ./run_backend.sh --lan start       - start backend and bind to 0.0.0.0 so it's reachable on the LAN
@@ -303,6 +305,25 @@ status_backend() {
   fi
 }
 
+dump_backend() {
+  # Ask the running backend to write every thread's stack to its log (it
+  # registers a SIGUSR1 handler at start-up), then print the new log lines.
+  local pid=""
+  if [ -f "$PID_FILE" ]; then
+    pid=$(cat "$PID_FILE")
+  fi
+  if [ -z "$pid" ] || ! kill -0 "$pid" >/dev/null 2>&1; then
+    echo "Backend not running; nothing to dump." >&2
+    return 1
+  fi
+  local lines_before
+  lines_before=$(wc -l < "$LOG_FILE")
+  kill -USR1 "$pid"
+  sleep 2
+  echo "Thread dump from backend pid $pid (also in $LOG_FILE):"
+  tail -n +"$((lines_before + 1))" "$LOG_FILE"
+}
+
 case ${1:-start} in
   start)
     start_backend
@@ -328,6 +349,7 @@ Commands:
   stop                Stop backgrounded backend (uses PID file)
   restart             Stop and then start the backend
   status              Show backend status and log location
+  dump                Dump every thread's Python stack of the running backend (SIGUSR1) and print it
   install             Install the latest wheel from dist/ (or do editable install) into the selected Python environment
 
 Global OPTIONS:
@@ -343,6 +365,9 @@ EOF
   stop)
     stop_backend
     ;;
+  dump)
+    dump_backend
+    ;;
   status)
     status_backend
     ;;
@@ -352,7 +377,7 @@ EOF
     start_backend
     ;;
   *)
-    echo "Usage: $0 {start|launch|stop|restart|status|foreground|install}"
+    echo "Usage: $0 {start|launch|stop|restart|status|dump|foreground|install}"
     exit 2
     ;;
 esac

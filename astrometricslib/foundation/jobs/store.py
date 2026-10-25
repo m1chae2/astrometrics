@@ -15,6 +15,7 @@ registers one for each job with the job log router.
 import json
 import logging
 import sqlite3
+import threading
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -22,6 +23,13 @@ from pathlib import Path
 from astrometricslib.foundation.jobs.models import ProcessingJob
 
 logger = logging.getLogger(__name__)
+
+# First-time setup of a logs database (WAL mode, tables, column migrations)
+# runs once per database per process, one thread at a time. Two jobs that
+# start together would otherwise both set it up, and SQLite answers the
+# second "database is locked" at once instead of waiting.
+_SETUP_LOCK = threading.Lock()
+_SET_UP_DATABASES: set[str] = set()
 
 
 class JobStore:
@@ -50,7 +58,20 @@ class JobStore:
         self.db_path = db_path
         self.read_only = read_only
         if not read_only:
+            self._init_db_once()
+
+    def _init_db_once(self) -> None:
+        """Set the database up the first time this process opens it.
+
+        Later stores for the same file skip the setup. The lock makes threads
+        that start together wait for the first one instead of racing it.
+        """
+        database_key = str(Path(self.db_path).resolve())
+        with _SETUP_LOCK:
+            if database_key in _SET_UP_DATABASES and Path(self.db_path).exists():
+                return
             self._init_db()
+            _SET_UP_DATABASES.add(database_key)
 
     def _connect(self, timeout: float = 30.0) -> sqlite3.Connection:
         """Open a connection to astrometrics_log.db with WAL mode.
@@ -90,6 +111,12 @@ class JobStore:
         """
         try:
             conn = self._connect()
+            # Take the write lock before reading the schema. A plain (deferred)
+            # transaction reads first and upgrades later, and when another
+            # program holds the lock SQLite refuses the upgrade at once rather
+            # than waiting out the busy timeout.
+            conn.isolation_level = None
+            conn.execute("BEGIN IMMEDIATE")
             cursor = conn.cursor()
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS processing_jobs (
@@ -138,7 +165,7 @@ class JobStore:
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_log_entries_job_id ON log_entries(job_id, id)")
 
-            conn.commit()
+            conn.execute("COMMIT")
             conn.close()
         except sqlite3.Error:
             logger.exception("Error initializing job database at %s", self.db_path)

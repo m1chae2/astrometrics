@@ -38,7 +38,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field
 
 from astrometricslib import CaptureSetting, ConflictError
-from wayfindinglib.models.planning.mosaic import MosaicPanel
+from wayfindinglib.models.planning.framing import Framing
 from wayfindinglib.models.planning.observation_package import DitherConfig, ExposureRequest
 from wayfindinglib.models.policy.recovery import FaultRecord
 from wayfindinglib.models.session.divergence import DivergenceRecord
@@ -171,21 +171,6 @@ class ChecklistItem(BaseModel):
         description="Every time the item was ticked, oldest first. The last one equals `ticked_at`.",
     )
     note: str = Field(default="", alias="note")
-
-
-class Framing(BaseModel):
-    """Where the camera points and how it is turned, with any mosaic panels.
-
-    The rotation is in degrees east of north, the way Ekos and KStars give
-    it. The first version shows the numbers only.
-    """
-
-    model_config = ConfigDict(populate_by_name=True)
-
-    center_ra_deg: float = Field(ge=0.0, lt=360.0, alias="centerRaDeg")
-    center_dec_deg: float = Field(ge=-90.0, le=90.0, alias="centerDecDeg")
-    rotation_deg: float = Field(default=0.0, alias="rotationDeg")
-    panels: list[MosaicPanel] = Field(default_factory=list, alias="panels")
 
 
 class ObservationSession(BaseModel):

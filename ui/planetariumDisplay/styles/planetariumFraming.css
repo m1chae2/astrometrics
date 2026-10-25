@@ -1,0 +1,121 @@
+/* Framing panel of the Planetarium (replaces the Mosaic Planner). Tokens only; see theme.css. */
+.framing-panel {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  z-index: 100;
+  width: 320px;
+  max-height: 60%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--surface-floating);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  color: var(--text-primary);
+  font-size: var(--section-label-size);
+  font-family: var(--font-family-base);
+}
+
+.framing-panel--closed {
+  width: auto;
+  padding: 0;
+  background: none;
+  border: none;
+}
+
+.framing-panel__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.framing-panel__title {
+  margin: 0;
+  font-size: var(--compact-font-size);
+  flex: 1 1 auto;
+}
+
+.framing-panel__inputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.framing-panel__inputs label,
+.framing-panel__send label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--text-dim);
+}
+
+.framing-panel input,
+.framing-panel select {
+  background: var(--grey-dark);
+  border: 1px solid var(--border-control);
+  color: var(--text-primary);
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+}
+
+.framing-panel button {
+  background: var(--surface-control);
+  border: 1px solid var(--border-control);
+  color: var(--text-primary);
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.framing-panel button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.framing-panel button:focus-visible,
+.framing-panel input:focus-visible,
+.framing-panel select:focus-visible {
+  outline: 2px solid var(--status-cyan);
+  outline-offset: 2px;
+}
+
+.framing-panel__table {
+  border-collapse: collapse;
+  width: 100%;
+  user-select: text;
+}
+
+.framing-panel__table caption {
+  text-align: left;
+  color: var(--text-dim);
+  padding-bottom: 4px;
+}
+
+.framing-panel__table th,
+.framing-panel__table td {
+  text-align: left;
+  padding: 2px 4px;
+}
+
+.framing-panel__state,
+.framing-panel__reason {
+  margin: 0;
+  color: var(--text-dim);
+}
+
+.framing-panel__send {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.framing-panel__rejection {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--status-red);
+}

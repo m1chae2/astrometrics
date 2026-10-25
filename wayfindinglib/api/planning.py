@@ -43,7 +43,7 @@ from astrometricslib import (
     reject_unused_arguments,
     resolve_target,
 )
-from wayfindinglib.drivers.butler import DiskButler
+from wayfindinglib.drivers.butler import DiskButler, pick_session_for_night
 from wayfindinglib.models.equipment_and_site.calibration import CalibrationAdvisory
 from wayfindinglib.models.equipment_and_site.equipment import EquipmentConfiguration, Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
@@ -54,6 +54,7 @@ from wayfindinglib.models.planning.observation_package import (
     ExposureRequest,
     FrameType,
     ObservationPackage,
+    PackageStatus,
 )
 from wayfindinglib.models.planning.planning_config import PlanningConfig
 from wayfindinglib.models.planning.sequence_plan import SequencePlan
@@ -134,6 +135,15 @@ PLAN_REQUIRED_ARGUMENTS = {
     "scheduled_session": ("requests", "site_profile", "telescope", "camera_id", "night_id"),
 }
 """The arguments each plan kind cannot do without."""
+
+PlanListKind = Literal["sessions", "packages"]
+"""What `ObservationPlanning.get_plan` lists."""
+
+GET_PLAN_ARGUMENTS = {
+    "sessions": ("session_id", "night_id"),
+    "packages": ("status", "target"),
+}
+"""The arguments each `get_plan` kind uses."""
 
 DEEP_CATALOG_SECTIONS = ("estimate",)
 """Optional sections `ObservationPlanning.deep_catalog_status` can add."""
@@ -1116,6 +1126,8 @@ class ObservationPlanning:
         InvalidArgumentError
             If `kind` is unknown, an argument the kind does not use is
             given, or a required argument is missing.
+        NotFoundError
+            If a package's target is not in the library.
         """
         check_choice("kind", kind, tuple(PLAN_ARGUMENTS))
         arguments = {
@@ -1149,16 +1161,30 @@ class ObservationPlanning:
         if kind == "package":
             from wayfindinglib.tasks.planning_tasks.planning_operations import exposure_requests_from_items
 
-            if (exposure_requests is None) == (plan_items is None):
-                raise InvalidArgumentError(
-                    "kind='package' needs exactly one of exposure_requests and plan_items."
-                )
-            resolved = self._target(target)
+            if exposure_requests is not None and plan_items is not None:
+                raise InvalidArgumentError("kind='package' takes exposure_requests or plan_items, not both.")
+            try:
+                resolved = self._target(target)
+            except NotFoundError as error:
+                # astrometricslib's `targets.create(target_id)` makes a bare
+                # target from an id. It does not look the name up in a
+                # catalog or give a position, so it is not used here: a
+                # package needs a target the library already has.
+                raise NotFoundError(
+                    f"No target {target!r} in the library. Add the target first.",
+                    details=error.details,
+                ) from error
+            if plan_items is not None:
+                requests_for_package = exposure_requests_from_items(plan_items)
+            else:
+                # No exposures is allowed: "New package" and the
+                # Planetarium's "Add" start empty.
+                requests_for_package = list(exposure_requests or [])
             package = ObservationPackage(
                 id=str(uuid.uuid4()),
                 name=resolved.id,
                 target_id=resolved.id,
-                exposure_requests=exposure_requests or exposure_requests_from_items(plan_items),
+                exposure_requests=requests_for_package,
                 dither_config=dither_config,
                 minimum_altitude_deg=minimum_altitude_deg,
                 priority=priority or 0,
@@ -1168,21 +1194,103 @@ class ObservationPlanning:
             self._butler.put(package, "observation_package", {"id": package.id})
             return package
         if kind == "empty_session":
+            night = _night_date(night_id)
+            existing = self._session_for_night(night)
+            if existing is not None:
+                return existing
             site_profile, telescope, camera_id = self._session_equipment(site_profile, telescope, camera_id)
             session = ObservationSession(
                 id=str(uuid.uuid4()),
-                night_date=_night_date(night_id),
+                night_date=night,
                 status=SessionStatus.PLANNED,
                 site_profile_id=site_profile.id,
                 telescope_id=telescope.id,
                 camera_id=camera_id,
             )
-        else:
-            session = self._schedule_session(
-                requests, site_profile, telescope, camera_id, _night_date(night_id)
+            # Check and insert in one transaction: a second caller gets
+            # this session back.
+            return self._butler.insert_session_for_night(session)
+        night = _night_date(night_id)
+        placed = self._schedule_session(requests, site_profile, telescope, camera_id, night)
+        existing = self._session_for_night(night)
+        if existing is None:
+            existing = self._butler.insert_session_for_night(placed)
+            if existing is placed:
+                return placed
+        return self._replace_placement(existing, placed)
+
+    def _session_for_night(self, night: date) -> ObservationSession | None:
+        """Find the one session that stands for a night.
+
+        Parameters
+        ----------
+        night : `datetime.date`
+            The local date the night begins.
+
+        Returns
+        -------
+        session : `ObservationSession` or `None`
+            The session with the most queue entries, then the newest; `None`
+            when the night has none.
+        """
+        return pick_session_for_night([
+            session for session in self._butler.get_all("observation_session") if session.night_date == night
+        ])
+
+    def _replace_placement(
+        self, existing: ObservationSession, placed: ObservationSession
+    ) -> ObservationSession:
+        """Put a new automatic placement into a night's existing session.
+
+        The session keeps its id, checklist, framing and history. Its queue,
+        the reasons packages were left out, and its site, telescope and
+        camera come from `placed`.
+
+        Parameters
+        ----------
+        existing : `ObservationSession`
+            The night's recorded session.
+        placed : `ObservationSession`
+            The new placement, not stored.
+
+        Returns
+        -------
+        session : `ObservationSession`
+            The updated, stored session.
+
+        Raises
+        ------
+        ConflictError
+            If an entry of the existing queue has started, so re-placing
+            would lose its record.
+        PlanRevisionConflictError
+            If the session changed while this was running.
+        """
+        from astrometricslib import ConflictError
+
+        started = [entry.id for entry in existing.queue if entry.status != QueueEntryStatus.PENDING]
+        if started:
+            raise ConflictError(
+                "This night's session has entries that already started, so it cannot be placed again.",
+                details={"started": started},
             )
-        self._butler.put(session, "observation_session", {"session_id": session.id})
-        return session
+        loaded_revision = existing.revision
+        existing.queue = placed.queue
+        existing.unplaced_package_diagnostics = placed.unplaced_package_diagnostics
+        existing.site_profile_id = placed.site_profile_id
+        existing.telescope_id = placed.telescope_id
+        existing.camera_id = placed.camera_id
+        existing.revision = loaded_revision + 1
+        if not self._butler.put_session_if_revision(existing, loaded_revision):
+            stored = self._butler.get("observation_session", {"session_id": existing.id})
+            raise PlanRevisionConflictError(
+                "The plan changed while it was being placed. Read it again and redo the edit.",
+                details={
+                    "current_revision": stored.revision if stored is not None else None,
+                    "expected_revision": loaded_revision,
+                },
+            )
+        return existing
 
     def _schedule_session(
         self,
@@ -1361,6 +1469,7 @@ class ObservationPlanning:
         changes: list[PlanChangeItem] = []
         allowed = None
         notes: list[str] = []
+        promoted_package_ids: list[str] = []
 
         def checked_requests(requests: list[ExposureRequest]) -> list[ExposureRequest]:
             """Merge duplicates and check the camera allows each request.
@@ -1435,6 +1544,9 @@ class ObservationPlanning:
             )
             session.queue.append(entry)
             changes.append(PlanChangeItem(kind="queue_added", detail=package.id, entry_id=entry.id))
+            if package.status == PackageStatus.SUGGESTED and package.id not in promoted_package_ids:
+                promoted_package_ids.append(package.id)
+                changes.append(PlanChangeItem(kind="package_promoted", detail=package.id))
         for entry_id, raw_requests in (set_exposures or {}).items():
             entry = next((candidate for candidate in session.queue if candidate.id == entry_id), None)
             if entry is None:
@@ -1476,7 +1588,156 @@ class ObservationPlanning:
         )
         if isinstance(result, PlanRevisionConflictError):
             raise PlanRevisionConflictError(str(result), details=result.details) from result
+        for package_id in promoted_package_ids:
+            self._promote_suggested_package(package_id)
         return result
+
+    def _promote_suggested_package(self, package_id: str) -> None:
+        """Make a suggested package planned, with a revision-checked write.
+
+        A package that is no longer suggested (someone else already changed
+        it) is left as it is. A write that loses a race is retried against
+        the newly read package.
+
+        Parameters
+        ----------
+        package_id : `str`
+            The package that was added to a queue.
+        """
+        for _attempt in range(3):
+            package = self._butler.get("observation_package", {"id": package_id})
+            if package is None or package.status != PackageStatus.SUGGESTED:
+                return
+            loaded_revision = package.revision
+            package.status = PackageStatus.PLANNED
+            package.revision = loaded_revision + 1
+            if self._butler.put_package_if_revision(package, loaded_revision):
+                return
+
+    def edit_package(
+        self,
+        package_id: str,
+        *,
+        exposure_requests: list[ExposureRequest | dict[str, Any]] | None = None,
+        dither_config: DitherConfig | dict[str, Any] | None = None,
+        minimum_altitude_deg: float | None = None,
+        priority: int | None = None,
+        notes: str | None = None,
+        name: str | None = None,
+        reopen: bool = False,
+        delete: bool = False,
+        expected_revision: int | None = None,
+    ) -> ObservationPackage:
+        """Change, reopen or delete one observation package.
+
+        Values are checked the same way `create_plan` with ``kind="package"``
+        checks them. A change counts as one write and adds one to the
+        package's revision. A value left out (`None`) is not changed, so
+        this call cannot clear the dither or the altitude limit.
+
+        Parameters
+        ----------
+        package_id : `str`
+            The package to change.
+        exposure_requests : `list` [`ExposureRequest`], optional
+            The new full list of exposures, replacing the old list. An empty
+            list clears them.
+        dither_config : `DitherConfig`, optional
+            The new dithering.
+        minimum_altitude_deg : `float`, optional
+            The new lowest altitude the package may be imaged at.
+        priority : `int`, optional
+            The new priority.
+        notes : `str`, optional
+            The new free text.
+        name : `str`, optional
+            The new package name.
+        reopen : `bool`, optional
+            Set a complete package back to planned.
+        delete : `bool`, optional
+            Remove the package. Cannot be combined with any change.
+        expected_revision : `int`, optional
+            The package revision the caller last read. Leave out to write
+            over whatever is stored.
+
+        Returns
+        -------
+        package : `ObservationPackage`
+            The stored package. For ``delete=True``, the package as it was
+            when removed.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If nothing to change is given, `delete` is mixed with a change,
+            or a value is malformed.
+        NotFoundError
+            If no package has that id.
+        ConflictError
+            If `reopen` is asked for a package that is not complete.
+        PlanRevisionConflictError
+            If the stored revision is not `expected_revision`. Its details
+            hold the current revision.
+        """
+        from astrometricslib import ConflictError
+
+        changes = {
+            "exposure_requests": exposure_requests,
+            "dither_config": dither_config,
+            "minimum_altitude_deg": minimum_altitude_deg,
+            "priority": priority,
+            "notes": notes,
+            "name": name,
+        }
+        has_change = any(value is not None for value in changes.values()) or reopen
+        if delete and has_change:
+            raise InvalidArgumentError("delete cannot be combined with a change.")
+        if not delete and not has_change:
+            raise InvalidArgumentError(
+                "Give exposure_requests, dither_config, minimum_altitude_deg, priority, notes, name, "
+                "reopen or delete."
+            )
+        package = self._package(package_id)
+        loaded_revision = package.revision
+        wanted = loaded_revision if expected_revision is None else expected_revision
+        if wanted != loaded_revision:
+            raise PlanRevisionConflictError(
+                f"The package is at revision {loaded_revision}, not {wanted}. "
+                "Read it again and redo the edit.",
+                details={"current_revision": loaded_revision, "expected_revision": wanted},
+            )
+        if delete:
+            if not self._butler.delete_package(package_id):
+                raise NotFoundError(
+                    f"No observation package {package_id!r}.", details={"package_id": package_id}
+                )
+            return package
+        if reopen:
+            if package.status != PackageStatus.COMPLETE:
+                raise ConflictError(
+                    "Only a complete package can be reopened.",
+                    details={"package_id": package_id, "status": package.status.value},
+                )
+        updates = {name_: value for name_, value in changes.items() if value is not None}
+        if reopen:
+            updates["status"] = PackageStatus.PLANNED
+        try:
+            edited = ObservationPackage.model_validate({**package.model_dump(), **updates})
+        except ValidationError as error:
+            raise InvalidArgumentError(
+                "A package value is not valid.", details={"error": str(error)}
+            ) from error
+        edited.revision = loaded_revision + 1
+        if not self._butler.put_package_if_revision(edited, loaded_revision):
+            stored = self._butler.get("observation_package", {"id": package_id})
+            raise PlanRevisionConflictError(
+                "The package changed while this edit was being made. Read it again and redo the edit.",
+                details={
+                    "current_revision": stored.revision if stored is not None else None,
+                    "expected_revision": wanted,
+                },
+            )
+        return edited
 
     def tick_checklist_item(
         self,
@@ -1539,22 +1800,67 @@ class ObservationPlanning:
             raise PlanRevisionConflictError(str(result), details=result.details) from result
         return result
 
-    def get_plan(self, session_id: str | None = None) -> ObservationSession | list[ObservationSessionSummary]:
-        """Read one recorded observing session, or list them all.
+    def get_plan(
+        self,
+        session_id: str | None = None,
+        *,
+        kind: PlanListKind = "sessions",
+        night_id: str | None = None,
+        status: PackageStatus | str | None = None,
+        target: str | Target | None = None,
+    ) -> ObservationSession | list[ObservationSessionSummary] | list[ObservationPackage] | None:
+        """Read recorded observing sessions or observation packages.
 
         Parameters
         ----------
         session_id : `str`, optional
-            The session to read. When omitted, every session is listed.
+            ``kind="sessions"`` only. The session to read.
+        kind : `str`, optional
+            ``"sessions"`` (default): one session when `session_id` or
+            `night_id` is given, otherwise one line per session.
+            ``"packages"``: the package library, newest first, narrowed by
+            `status` and `target`.
+        night_id : `str`, optional
+            ``kind="sessions"`` only. The observing night, such as
+            ``"2026-09-24"``. Gives that night's session, or `None` when the
+            night has none. A night with several old sessions gives the one
+            with the most queue entries, then the newest.
+        status : `PackageStatus` or `str`, optional
+            ``kind="packages"`` only. Keep packages with this status.
+        target : `str` or `Target`, optional
+            ``kind="packages"`` only. Keep packages for this target.
 
         Returns
         -------
-        plan : `ObservationSession` or `list` [`ObservationSessionSummary`]
-            The whole session, or one line per session, newest night
-            first.
+        plan : `ObservationSession`, `list` or `None`
+            A whole session (or `None` for a night with none), one line per
+            session newest night first, or the packages newest first.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If `kind` or `status` is unknown, an argument the kind does not
+            use is given, or both `session_id` and `night_id` are given.
         """
+        check_choice("kind", kind, tuple(GET_PLAN_ARGUMENTS))
+        reject_unused_arguments(
+            kind,
+            GET_PLAN_ARGUMENTS,
+            {
+                "session_id": session_id is not None,
+                "night_id": night_id is not None,
+                "status": status is not None,
+                "target": target is not None,
+            },
+        )
+        if kind == "packages":
+            return self._list_packages(status, target)
+        if session_id is not None and night_id is not None:
+            raise InvalidArgumentError("Give session_id or night_id, not both.")
         if session_id is not None:
             return self._session(session_id)
+        if night_id is not None:
+            return self._session_for_night(_night_date(night_id))
         summaries = [
             ObservationSessionSummary(
                 id=session.id,
@@ -1566,6 +1872,65 @@ class ObservationPlanning:
         ]
         summaries.sort(key=lambda summary: summary.night_date, reverse=True)
         return summaries
+
+    def _list_packages(
+        self, status: PackageStatus | str | None, target: str | Target | None
+    ) -> list[ObservationPackage]:
+        """List the recorded packages, newest first.
+
+        Parameters
+        ----------
+        status : `PackageStatus` or `str` or `None`
+            Keep only this status, or every status when `None`.
+        target : `str` or `Target` or `None`
+            Keep only this target's packages, or every target when `None`.
+
+        Returns
+        -------
+        packages : `list` [`ObservationPackage`]
+            The matching packages, newest first.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If `status` is not a package status.
+        """
+        wanted_status = None
+        if status is not None:
+            try:
+                wanted_status = PackageStatus(status)
+            except ValueError as error:
+                raise InvalidArgumentError(
+                    f"status must be one of: {', '.join(item.value for item in PackageStatus)}.",
+                    details={"status": str(status)},
+                ) from error
+
+        def normalized(name: str) -> str:
+            """Fold a target id so spelling differences do not matter.
+
+            Parameters
+            ----------
+            name : `str`
+                The target id.
+
+            Returns
+            -------
+            folded : `str`
+                The id with underscores as spaces, in lower case.
+            """
+            return name.replace("_", " ").strip().casefold()
+
+        wanted_target = None
+        if target is not None:
+            wanted_target = normalized(target.id if isinstance(target, Target) else target)
+        packages = [
+            package
+            for package in self._butler.get_all("observation_package")
+            if (wanted_status is None or package.status == wanted_status)
+            and (wanted_target is None or normalized(package.target_id) == wanted_target)
+        ]
+        packages.sort(key=lambda package: package.created_at, reverse=True)
+        return packages
 
     # -- Deep-star catalog -------------------------------------------------
 

@@ -1,7 +1,7 @@
 /* Styles of the quality components. Colors come from theme.css; type is never shown by color alone. */
 .statement-list { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 .statement-list__items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; align-self: stretch; }
-.statement-item { border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 10px; background: var(--grey-medium); user-select: text; }
+.statement-item { border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 8px 10px; background: var(--grey-medium); user-select: text; }
 .statement-item--insufficient_data { opacity: 0.7; border-style: dashed; }
 .statement-item[data-severity='warning'] { border-left: 4px solid var(--warning-amber); }
 .statement-item[data-severity='advice'] { border-left: 3px solid var(--accent-blue); }
@@ -12,13 +12,13 @@
 .statement-item__message { margin: 6px 0 0; font-size: var(--label-font-size); line-height: 1.4; }
 .statement-item__buttons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .statement-item__reason-note { margin: 4px 0 0; color: var(--text-dim); font-size: var(--section-label-size); }
-.statement-item__rejection { display: flex; gap: 8px; align-items: center; margin-top: 4px; border: 1px solid var(--danger-red); padding: 4px 6px; border-radius: 4px; }
+.statement-item__rejection { display: flex; gap: 8px; align-items: center; margin-top: 4px; border: 1px solid var(--danger-red); padding: 4px 6px; border-radius: var(--radius-sm); }
 .data-quality__numbers dd { margin: 0; }
-.confidence-chip { border: 1px solid var(--border-color); border-radius: 10px; padding: 0 8px; font-size: var(--section-label-size); }
+.confidence-chip { border: 1px solid var(--border-color); border-radius: var(--radius-pill); padding: 0 8px; font-size: var(--section-label-size); }
 .confidence-chip--measured { border-color: var(--success-green); }
 .confidence-chip--partly_measured { border-style: dashed; }
 .confidence-chip--design_estimate { border-style: dotted; }
-.example-data-badge { display: inline-flex; align-items: center; gap: 4px; border: 1px dashed var(--text-dim); border-radius: 4px; padding: 0 6px; font-size: var(--section-label-size); color: var(--text-dim); }
+.example-data-badge { display: inline-flex; align-items: center; gap: 4px; border: 1px dashed var(--text-dim); border-radius: var(--radius-sm); padding: 0 6px; font-size: var(--section-label-size); color: var(--text-dim); }
 .data-quality__section { margin-bottom: 10px; }
 .data-quality__section h4 { margin: 4px 0; font-size: var(--label-font-size); }
 .data-quality__numbers { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 4px 0; font-size: var(--section-label-size); }
@@ -26,7 +26,7 @@
 .loss-account { font-size: var(--section-label-size); color: var(--text-lighter); }
 .loss-account p { margin: 2px 0; }
 .quality-state { color: var(--text-dim); padding: 8px; display: flex; gap: 8px; align-items: center; }
-.quality-state--error { border: 1px solid var(--danger-red); border-radius: 4px; }
+.quality-state--error { border: 1px solid var(--danger-red); border-radius: var(--radius-sm); }
 .quality-strip { display: flex; flex-direction: column; gap: 6px; }
 .quality-button:focus-visible, #data-quality-panel:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
 .data-quality { flex: 1; min-height: 0; }
@@ -35,7 +35,7 @@
 .candidate-list h4 { margin: 4px 0; }
 .candidate-list__gain, .candidates__times { margin: 2px 0 6px; color: var(--text-dim); font-size: var(--section-label-size); }
 .candidate-list__items { list-style: none; margin: 0 0 6px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.candidate { border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 8px; background: var(--grey-medium); user-select: text; }
+.candidate { border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 6px 8px; background: var(--grey-medium); user-select: text; }
 .candidate[data-status='stopped'] { opacity: 0.8; border-style: dashed; }
 .candidate[data-status='new'] { border-left: 4px solid var(--accent-blue); }
 .candidate__head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }

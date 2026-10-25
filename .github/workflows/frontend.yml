@@ -19,6 +19,7 @@ on:
       - 'package-lock.json'
       - 'vitest.config.ts'
       - 'eslint.config.js'
+      - 'stylelint.config.mjs'
       - 'tsconfig*.json'
       - '.github/actions/setup-python-env/**'
       - '.github/workflows/frontend.yml'
@@ -64,6 +65,9 @@ jobs:
 
       - name: Run TypeScript Type Check
         run: npm run type-check
+
+      - name: Lint Stylesheets (design tokens)
+        run: npm run lint:css
 
       - name: Run Unit Tests with Coverage
         run: npm run test:unit -- --coverage

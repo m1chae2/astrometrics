@@ -140,4 +140,50 @@
   --success-green: #26a269;
   --warning-amber: #f6d32d;
   --danger-red: #e01b24;
+
+  /* ------------------------------------------------------------------
+     Shared design tokens (issue #96, step L0).
+     Every value below was read from the Observation Manager panels
+     (ui/observationManager/*.css and common/styles/panels.css), the look the
+     user chose as the base. Stylesheets outside this file use these tokens
+     instead of raw values; `npm run lint:css` enforces it for colors, font
+     sizes and corner radii.
+     ------------------------------------------------------------------ */
+
+  /* Spacing scale. Panels use 8px gaps and 10-12px padding; 4px is the
+     small gap of button groups; 6px and 10px snap to 8px. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* Corner radii. Panels use 8px, cards 6px, buttons/inputs/tables 4px. */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-pill: 999px;
+
+  /* Small text. Notes, footers and coordinates use 11px; table text and the
+     field labels of the Observation Manager use 12px and 13px (12px is
+     --section-label-size above). */
+  --small-font-size: 11px;
+  --compact-font-size: 13px;
+
+  /* Named translucent surfaces (white or black over the panel color). */
+  --surface-subtle: rgba(255, 255, 255, 0.04);    /* card header at rest */
+  --surface-hover: rgba(255, 255, 255, 0.07);     /* card header on hover */
+  --surface-highlight: rgba(255, 255, 255, 0.12); /* highlighted table row */
+  --divider-subtle: rgba(255, 255, 255, 0.05);    /* line between table rows */
+  --surface-inset: rgba(0, 0, 0, 0.1);            /* table container, card body */
+  --surface-inset-strong: rgba(0, 0, 0, 0.2);     /* summary strip */
+  --surface-overlay: rgba(0, 0, 0, 0.4);          /* image area, dimming layer */
+  --shadow-card: 0 4px 6px rgba(0, 0, 0, 0.3);    /* panel and card shadow */
+  --shadow-card-lifted: 0 8px 16px rgba(0, 0, 0, 0.5); /* a card being dragged */
+  --surface-floating: rgba(10, 14, 22, 0.95);     /* panel floating over the sky map */
+  --surface-control: rgba(255, 255, 255, 0.08);   /* button on a floating panel */
+  --border-subtle: rgba(255, 255, 255, 0.08);     /* edge of a floating panel */
+  --border-control: rgba(255, 255, 255, 0.12);    /* edge of an input on a floating panel */
+  --focus-outline: 2px solid var(--accent-blue);  /* keyboard focus ring */
 }

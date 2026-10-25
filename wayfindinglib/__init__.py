@@ -65,6 +65,8 @@ if TYPE_CHECKING:
         ExposureRequest,
         FrameType,
         ObservationPackage,
+        PackageStatus,
+        PackageSuggestion,
     )
     from wayfindinglib.models.planning.sequence_plan import SequenceItem, SequencePlan
     from wayfindinglib.models.planning.sequence_summary import SequenceSummary
@@ -153,6 +155,8 @@ _LAZY_EXPORTS = {
     "SequenceItem": "wayfindinglib.models.planning.sequence_plan",
     "SequencePlan": "wayfindinglib.models.planning.sequence_plan",
     "ObservationPackage": "wayfindinglib.models.planning.observation_package",
+    "PackageStatus": "wayfindinglib.models.planning.observation_package",
+    "PackageSuggestion": "wayfindinglib.models.planning.observation_package",
     "ExposureRequest": "wayfindinglib.models.planning.observation_package",
     "DitherConfig": "wayfindinglib.models.planning.observation_package",
     "FrameType": "wayfindinglib.models.planning.observation_package",

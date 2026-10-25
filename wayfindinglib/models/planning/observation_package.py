@@ -17,10 +17,12 @@ against the science library.
 
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from astrometricslib import FilterType
+from wayfindinglib.models.planning.framing import Framing
 
 
 class FrameType(StrEnum):
@@ -86,6 +88,50 @@ class ExposureRequest(BaseModel):
         return self.count * self.exposure_sec + max(self.count - 1, 0) * self.delay_sec
 
 
+class PackageStatus(StrEnum):
+    """Where an observation package stands in the package library."""
+
+    PLANNED = "PLANNED"
+    SUGGESTED = "SUGGESTED"
+    COMPLETE = "COMPLETE"
+
+
+class PackageSuggestion(BaseModel):
+    """Why the library suggested a package, kept with the package.
+
+    Fields only. A later step fills them in when it makes or updates a
+    suggested package.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    source_kind: Literal["rule", "ranking"] = Field(
+        alias="sourceKind",
+        description='"rule": a quality rule asked for more frames. "ranking": tonight\'s ranking picked it.',
+    )
+    rule_name: str = Field(
+        default="", alias="ruleName", description="The rule that made the suggestion, if any."
+    )
+    source_key: str = Field(
+        default="",
+        alias="sourceKey",
+        description="Names what the suggestion came from, so a repeat is not added twice.",
+    )
+    reason: str = Field(default="", alias="reason", description="The reason, in plain words.")
+    confidence: str = Field(
+        default="",
+        alias="confidence",
+        description="How sure the library is, for example measured or design_estimate.",
+    )
+    evidence_fingerprint: str = Field(
+        default="",
+        alias="evidenceFingerprint",
+        description="A short code for the evidence. A dismissal lasts until it changes.",
+    )
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), alias="createdAt")
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC), alias="updatedAt")
+
+
 class ObservationPackage(BaseModel):
     """A reusable imaging request for one target.
 
@@ -107,6 +153,18 @@ class ObservationPackage(BaseModel):
     quality_weighting_enabled: bool = Field(default=False)
     notes: str = Field(default="")
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    status: PackageStatus = Field(
+        default=PackageStatus.PLANNED, description="Planned, suggested by the library, or complete."
+    )
+    revision: int = Field(
+        default=0, ge=0, description="Counts the package writes. Starts at 0. A stale edit is refused."
+    )
+    suggestion: PackageSuggestion | None = Field(
+        default=None, description="Why the library suggested this package. None for one made by hand."
+    )
+    framing: Framing | None = Field(
+        default=None, description="Where the camera points for this package, with any mosaic panels."
+    )
 
     def total_duration_sec(self) -> float:
         """Sum of every requested exposure's `total_exposure_sec`.

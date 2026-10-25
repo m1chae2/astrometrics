@@ -17,8 +17,8 @@ The app has seven views. You switch between them with the mode button in the sta
 | Command Console | Run Python commands and scripts, and read the documentation | [Command Console](#command-console) |
 | Astronomy Manager | Inspect the light curve and spectrum of each star | [Astronomy Manager](#astronomy-manager) |
 | Planetarium | See the sky, find objects, and send the telescope to them | [Planetarium](#planetarium) |
-| Observatory Manager | Run the mount, focuser and filter wheel, and watch guiding | [Observatory Manager](#observatory-manager) |
-| Observation Manager | Plan exposures and run a queue of them | [Observation Manager](#observation-manager) |
+| Observatory Manager | Set up the equipment: mount, camera profiles, safety limits and calibration library, and watch guiding | [Observatory Manager](#observatory-manager) |
+| Observation Manager | Keep a library of observation packages, plan tonight's session and follow its progress | [Observation Manager](#observation-manager) |
 
 A light frame is one camera exposure file of the sky. A stack is the one image made by combining many frames. FITS is the standard file format for astronomy images.
 
@@ -73,7 +73,7 @@ Several views use the same lists and dialogs.
 
 ### Target list
 
-The Image Viewer, Image Processing, Observatory Manager and Observation Manager each have a target list on the left. It is made of two panels.
+The Image Viewer, Image Processing and Observatory Manager each have a target list on the left. It is made of two panels.
 
 | Control | What it does |
 | --- | --- |
@@ -99,7 +99,7 @@ The Header Info buttons in Image Processing open this dialog. It lists the heade
 
 ### Ingest From Telescope dialog
 
-The Download Frames button in Image Processing and the refresh button in the Observation Manager calibration panel open this dialog. It copies frames from the telescope's storage to your image library.
+The Download Frames button in Image Processing and the refresh button in the Observatory Manager calibration library open this dialog. It copies frames from the telescope's storage to your image library.
 
 | Item | What it does |
 | --- | --- |
@@ -263,6 +263,7 @@ The terminal starts with these names ready: `targets` (target catalog), `stars` 
 | Photometry panel | Plots brightness over time. Brighter is up when the data are magnitudes |
 | Time Series and Phase-Folded | Appear when a period is known. Phase-Folded stacks the cycles on top of each other |
 | Timeline panel | Two sliders set the start and end of the time range. The plots show only that range. Text shows the range and how many time points it holds |
+| Quality card | The first card of the Stellar Analysis panel. It says in plain words how far to trust the star's result. A statement has a kind word (Result for a finding such as a star class, or Warning, Recommendation, Limit or Not enough data), a confidence chip (Measured, Partly measured or Tentative) and one or two plain sentences. A Show all button lists more statements. A statement with cited frames has an Evidence button. It opens the list of those frames in the Image Viewer. Opening a single frame from that list is not available yet. A calibration statement has Show in calibration library, which opens the [Observatory Manager](#observatory-manager) calibration row. Technical values are available through the library and the AI companion |
 | Stellar Analysis panel | Shows the results as sections: Light Curve, Stellar Classification, Glowing Gas, Emission Lines, Absorption Features and Repeating Patterns. Hover a result to read what it means |
 | Run period analysis | In the Period Search section. Searches the light curve for a regular rise and fall or a repeating dip. It shows only when the star has no result yet and has enough measurements |
 
@@ -294,8 +295,11 @@ A plot that has no data collapses to a one-line note. The notes read No spectrum
 | Mouse wheel | Zooms between 0.05° and 135° |
 | Arrow keys | Move the view by 10% of the field of view. Ctrl+Up and Ctrl+Down zoom |
 | Click on an object | Selects it and opens an information card |
-| Right-click on an object | Opens a menu with the star ID and coordinates. Open in Astronomy Manager appears when the object has a spectrum or photometry. Slew Telescope Here appears when a mount is connected |
+| Right-click on an object | Opens a menu with the star ID and coordinates. Open in Astronomy Manager appears when the object has a spectrum or photometry. Slew Telescope Here appears when a mount is connected. It is greyed while Ekos controls the equipment, with a Why unavailable? button beside it |
 | Information card | Lists Magnitude and Spectral Type for stars, then RA/Dec in degrees and in hours-minutes-seconds, Alt/Az, Hour Angle and Rise/Set. View in Astronomy Manager appears for stars with data |
+| Add to observation package | On the information card. Opens the chosen target's planned or suggested package in the Observation Manager library, or makes an empty one. It works for any catalog star. A message says what happened, and a refusal appears under the button |
+| Framing button and panel | Opens a panel for the chosen target with Rows, Columns, Overlap (%) and a rotation. The panel lists each panel's center and rotation, and the map outlines each panel. The library works out the numbers. The rotation is in degrees east of north, as Ekos and KStars give it |
+| Send framing to package | In the Framing panel. Saves the center, rotation and panels in the target's package. It is off, with the reason shown, until a target is chosen and the panel list has panels |
 | Time bar: play button | Starts and pauses the turning of the sky. While it plays, a menu sets the speed: 1x, 5x, 25x, 100x or 1000x |
 | Time bar: slider | Moves the time from 12 h before now to 12 h after. The label reads Live Time or the offset in hours |
 | Equipment button | Shows the camera name. It opens a panel with Telescope, Focal Length, Camera, Pixel Size, Sensor, `Plate Scale` and FOV. Only the camera can be changed there |
@@ -309,31 +313,36 @@ A plot that has no data collapses to a one-line note. The notes read No spectrum
 
 ![Observatory Manager](./assets/observatory_manager.png)
 
-**Purpose.** Run the mount, focuser and filter wheel by hand, and watch guiding and the connected INDI devices. INDI is the open standard that lets software talk to astronomy hardware.
+**Purpose.** Set up and watch the equipment: the mount, the camera profiles, the safety limits, guiding, the calibration library and the connected INDI devices. INDI is the open standard that lets software talk to astronomy hardware.
 
-**Layout.** The left column is the target list. The center column holds the control panels. The right column holds the Devices and Device Properties panels.
+**Layout.** The left column is the target list. The center column holds the control panels in rows: Telescope Control and Tracking Settings on top; then Camera Profiles, Manual Guide, Safety Limits and Alignment Status; then Guiding Trends and Guiding Target; and the Calibration Library at the bottom. The right column holds the Devices and Device Properties panels. The page does not scroll. A panel that is too small for its content scrolls inside itself.
+
+**Who controls the equipment.** Ekos (the KStars imaging program) captures the frames for now, and this app only watches. While Ekos is in control, the controls that send a command to a device are greyed out. The panels that hold such controls show a Why unavailable? button in the title bar. Hover over it, focus it with the keyboard, or click it to read the reason. The reason also appears as text when you hover over the greyed controls. Panels that only show information, such as Guiding Trends, stay as they are.
 
 **Controls.**
 
 | Control | What it does |
 | --- | --- |
-| Add Target | Opens the [Add New Target dialog](#add-new-target-dialog) |
-| Slew to Target | Moves the mount to the coordinates of the selected target. A message appears if the target has none |
-| Start Alignment and Stop Alignment | Start and stop centering on the selected target by plate solving. The run repeats up to 10 times. Plate solving matches the stars in an image to a star catalog |
-| Tracking ON and Tracking OFF | Turn the mount's star tracking on or off |
-| PARK and UNPARK | Send the mount to its parked position, or free it for use |
-| Alignment and Guiding fields in Tracking Settings | Alignment holds Accuracy, Settle and Exposure (s). Guiding holds Exposure (s) and Gain. The alignment run does not read the Alignment fields. This view has no button that starts guiding, so the Guiding fields are not used here |
-| Focuser | Shows the focuser Position. Focus IN (-) and Focus OUT (+) move it by the step chosen under Steps: 10, 50, 100, 500 or 1000 |
-| Manual Guide | Eight arrow buttons move the mount while you hold them, and stop when you let go. STOP halts all mount motion. The Slew Speed slider has four steps, from Min to Max: Guide, Centering, Find and Max |
-| Safety Limits | Has check boxes for Enable Altitude Limits and Enable Hour Angle Limits, and fields Min. Altitude, Max. Altitude, Max. Hour Angle and Flip if HA >. The panel has no Apply button, and no control sends these values to the mount in this version |
+| Add Target | Opens the [Add New Target dialog](#add-new-target-dialog). It is not a device command, so it stays on |
+| Slew to Target | Moves the mount to the coordinates of the selected target. Greyed while Ekos is in control |
+| Start Alignment and Stop Alignment | Start and stop centering on the selected target by plate solving. Plate solving matches the stars in an image to a star catalog. Greyed while Ekos is in control |
+| Tracking ON and Tracking OFF | Turn the mount's star tracking on or off. Greyed while Ekos is in control |
+| PARK and UNPARK | Send the mount to its parked position, or free it for use. Greyed while Ekos is in control |
+| Alignment and Guiding fields in Tracking Settings | Alignment holds Accuracy, Settle and Exposure (s). Guiding holds Exposure (s) and Gain. Greyed while Ekos is in control. This view has no button that starts guiding |
+| Camera Profiles | Lists each camera with its pixel size and sensor size. Under Recorded noise, a table gives the gain (electrons per analog-to-digital unit, one step of the stored pixel value) and the read noise (electrons) for each camera setting, with an Evidence word: Measured, Partly measured or Tentative (a datasheet or assumed value). A camera with no recorded noise reads Not measured |
+| Measure noise | In Camera Profiles. Pick a camera, type a Gain and an Offset, and click Measure noise. The library reads flat and bias frames and shows the result. Nothing is saved until you click Save measurement and confirm |
+| Manual Guide | Eight arrow buttons move the mount while you hold them, and stop when you let go. STOP halts all mount motion. The Slew Speed slider has four steps, from Min to Max: Guide, Centering, Find and Max. Greyed while Ekos is in control |
+| Safety Limits | Shows the active telescope's saved limits: Enable Altitude Limits, Min. Altitude, Max. Altitude, Enable Hour Angle Limits, Max. Hour Angle and Flip if HA >. Apply safety limits is on only after you change a value. It saves the limits for the active telescope, and a message reminds you to copy the session into Ekos again, because Ekos keeps its own copy. The library refuses limits that do not make sense, such as a minimum above the maximum, and the panel shows its reason. Apply is greyed while Ekos is in control. The panel reads No active telescope until you choose a telescope in the Settings Equipment tab |
 | Alignment Status | A table of centering rounds with Status, dRA and dDEC in arcseconds. The symbols are ⟳ solving, ✓ aligned, ⚠ warning, ✗ failed and — idle |
 | Guiding Trends | Plots guiding error over time. The check boxes dRA, dDEC, SNR, RMS and Pulses choose the lines. The History slider sets 10 to 100 points |
 | Guiding Target | A bullseye chart of dRA against dDEC. Points near the center mean good guiding |
-| Filter Wheel | One button for each of L, R, G, B, Ha, OIII, SII and Spect. The active filter is highlighted |
+| Calibration Library | The Camera box picks a camera. The refresh button opens the [Ingest From Telescope dialog](#ingest-from-telescope-dialog). The Darks table shows Exposure, Offset and Count. Below it are the totals of Biases and Flat Frames. A quality statement can send you here with Show in calibration library: the panel switches to that camera and highlights the matching row, or says that no row matches |
 | Devices | One button for each INDI device. It reads No INDI devices connected. when none are found |
 | Device Properties | Lists the properties of the chosen device, and lets you edit them |
 
-**Related settings.** The Observatory tab in Settings holds the Mount Hostname, the INDI Port, the Available Filters and the Allow Telescope Commands (Disable Safe Mode) box. Without that box ticked, the app only watches the telescope. See [Observatory tab](#observatory-tab).
+The view has no Focuser and no Filter Wheel panel. Ekos moves both.
+
+**Related settings.** The Observatory tab in Settings holds the Mount Hostname, the INDI Port and the Available Filters. The Equipment tab holds the cameras and telescopes. See [Observatory tab](#observatory-tab).
 
 **Related guides.** Every recipe for this view is in the [observatory control guide](Observatory_Control_and_Automation_Guide.md).
 
@@ -341,31 +350,65 @@ A plot that has no data collapses to a one-line note. The notes read No spectrum
 
 ![Observation Manager](./assets/observation_manager.png)
 
-**Purpose.** Plan the exposures for a target and run a queue of plans.
+**Purpose.** Plan what to image. You keep a library of observation packages, one for each target, and edit one package at a time. You place packages in tonight's session and watch how far the night got.
 
-**Layout.** The left column is the target list. The center area holds the planning panels and the Image List. The right column holds the Execution Queue and the Visible Targets table.
+An observation package is the plan for one target: a list of exposure rows (type, count, filter, exposure time and delay), the dither setting, and the framing sent from the Planetarium. An observation session is one night's list of packages, in order. There is one session for each night. Sessions are set up by hand, here and in Ekos, for now. The app copies nothing into Ekos for you.
 
-**Controls.**
+**Layout.** The page does not scroll, and panels scroll inside themselves.
+
+- Across the whole top: the Execution Queue.
+- Left column: the Observation Packages library.
+- Center: the package editor, made of Image Planner, Dither Settings, Image List and Last Image.
+- Right column: Visible Targets.
+
+You work on one thing at a time. Picking a package in the library, or a card in the Execution Queue, clears the other pick.
+
+**Execution Queue.**
 
 | Control | What it does |
 | --- | --- |
+| Queue cards | One card for each package in tonight's session, in order. A card shows the target name and TTL: the exposure minutes over the total run minutes. Click a card to open its rows. Drag cards to reorder them. The pencil loads the package into the editor for changes. The × removes it after you confirm. The card shows Timing point as read-only text: Soonest or Start at a set time. Move earlier and Move later buttons on each card change its place from the keyboard |
+| Run state | A chip on each card: Imaging now, Not imaging, Done, Partly done, Not run or Progress unknown. The card of the package being imaged is marked as the current step. A progress bar reads, for example, 12 of 20 frames. A short note can follow. The library counts the frames. The view only shows the counts |
+| as of | The time of the last progress read. The view reads again each minute, because frames arrive without any message |
+| Imaging now | A package counts as imaging now when a frame for it arrived in the last few minutes. This is read from the frames, because Ekos runs the queue (see the [validation register](../../library_design/validation/wayfinding.md), WAY-D84, Design estimate) |
+| Checklist (N) | Opens a list of things to do before or during the night, such as taking flat frames. The library adds the items. Tick an item when it is done. Ticks are saved |
+| Start Imaging Session | Runs the queue with the app's own sequencer. It is a device command, so it is greyed while Ekos controls the equipment, and a Why unavailable? button beside it gives the reason. It is also off when the queue is empty. Run the night in Ekos for now |
+
+**Observation Packages library.**
+
+| Control | What it does |
+| --- | --- |
+| Suggested, Planned and Complete tabs | The three lists, each with a count. Suggested packages come from the library. Planned packages are the ones you made or kept. A package is Complete when enough good frames have arrived for all its rows. If frames are later set aside and the rows are no longer met, it moves back to Planned |
+| New package | Opens a search box over the targets in the library. Pick a target to open its package. A target with a planned package opens that one. Else a suggested one opens. Only a target with neither gets a new, empty package. The library creates a target from a catalog name if it is not yet in the library, and refuses a name it cannot find |
 | Add Target | Opens the [Add New Target dialog](#add-new-target-dialog) |
+| Refresh suggestions | Asks the library to look again at which targets need more frames. A line under the buttons says that the refresh started, then reports what changed, for example Suggestions updated: 1 added. The app also refreshes after frames are measured and after a sync |
+| Package card | Shows the target name. A suggested card also shows a confidence chip: Measured, Partly measured or Tentative. Click a card to load it into the editor |
+| Dismiss and Undo | On a suggested card. Dismiss hides the suggestion until the evidence behind it changes. A notice follows with Undo and Close |
+| Reopen | On a complete card. Moves the package back to Planned, and it counts new frames only |
+| Delete | In the editor, for a library package. Asks you to confirm, and cannot be undone |
+
+Adding a package to the session makes it Planned. Suggestions update and delete themselves when the frames are no longer needed. If you have a suggestion open and a refresh removes it, your form stays open with a notice and a Save as planned package button.
+
+**Package editor.**
+
+| Control | What it does |
+| --- | --- |
 | Image Planner: Type | Light, Dark, Flat or Bias |
 | Image Planner: Count, Filter, Exposure and Delay | The number of frames, the filter (L, R, G, B, Ha, OIII or SII), the exposure time in seconds and the pause between frames in seconds |
-| Add to List | Adds the row to the Image List. While you edit a row, the button pair reads Update and Cancel |
-| Test Image | Takes one frame now with the current Type, Exposure and Filter. The Last Image panel then shows it |
-| Dither Settings | Dither shifts the pointing slightly between frames. The check box reads Enabled or Disabled. Every sets how many frames pass between shifts. Scale sets the size of the shift. The settings apply to the panels made by Create Mosaic |
-| Mosaic Planner | Grid Size sets rows and columns, from 1 to 10. Overlap sets how much neighboring panels overlap, up to 80. Create Mosaic adds one row to the Image List for each panel |
-| Calibration Library | The Camera box picks a camera. The refresh button opens the [Ingest From Telescope dialog](#ingest-from-telescope-dialog). Lists show the Darks with Exposure, Offset and Count, and the counts of Biases and Flat Frames |
-| Target Status | Shows RA, DEC, Altitude, Azimuth, Rise and Set for the selected target. Reindex Target scans the folders again for that target's files |
-| Image List | Lists planned rows with Type / Info, Count, Exposure, Delay, Filter and Actions. The Actions edit and remove a row |
-| Add to Sequence | Moves the Image List into the Execution Queue as one plan for the selected target. While you edit a queued plan, Cancel and Modify replace this button |
+| Add to List | Adds the row to the package. While you edit a row, the button pair reads Update and Cancel |
+| Test Image | Takes one frame now with the current Type, Exposure and Filter. The Last Image panel then shows it. It is a device command, so it is greyed while Ekos controls the equipment, with a Why unavailable? button beside it |
+| Dither Settings | Dither shifts the pointing slightly between frames. The check box reads Enabled or Disabled. Every sets how many frames pass between shifts. Scale sets the size of the shift |
+| Image List | Lists the package's rows with Type / Info, Count, Exposure, Delay, Filter and Actions. The Actions edit and remove a row |
+| Add to Sequence | Adds the package, as edited, to tonight's session at the end of the Execution Queue. While you edit a queued card, Cancel and Modify replace this button |
 | Last Image | Shows the newest captured frame. A button switches between the linear and the stretched view. The frame updates when a capture ends |
-| Execution Queue | One card for each plan, with the target name and TTL: the exposure minutes over the total run minutes. Click a card to open its rows. Drag cards to reorder them. The pencil edits a plan. The × removes it after you confirm. The Timing Point box shows Soonest or Start At..., and changing it does not change the queue |
-| Start Imaging Session | Runs the queue. The button is off when the queue is empty. The view has no pause or stop button |
-| Visible Targets | A table with Target, Alt, Az and Visible Until for the targets now above the horizon |
 
-**Related settings.** The Available Filters in Settings > Observatory should match the filters the wheel holds. The Allow Telescope Commands (Disable Safe Mode) box must be ticked for the app to run hardware.
+Each editor panel reads Choose a package or New package until you pick one. The editor has no framing controls. Framing comes from the Planetarium (see [Planetarium](#planetarium)).
+
+**Visible Targets.** A table with Target, Alt, Az and Visible Until for the targets now above the horizon. Click a row, or press Enter on it, to open that target's package. It works like New package: it opens the existing planned or suggested package, and makes an empty one only if the target has neither.
+
+**Not in this view.** Target quality statements are not shown here. They are for the library and the AI companion. The view also has no target status table, mosaic planner or calibration library. The calibration library is in the Observatory Manager.
+
+**Related settings.** The Available Filters in Settings > Observatory should match the filters the wheel holds.
 
 **Related guides.** The [observatory control guide](Observatory_Control_and_Automation_Guide.md) has the recipes for test frames and sequences.
 

@@ -42,8 +42,8 @@ The view list holds seven views. Next to each name is a small button that opens 
 | Command Console | Run Python commands and scripts inside the app. |
 | Astronomy Manager | Measure star brightness over time and work with star spectra. |
 | Planetarium | Explore an interactive sky map. |
-| Observatory Manager | Watch and control the mount, focuser and camera. |
-| Observation Manager | Plan the targets and exposure sequences for a session. |
+| Observatory Manager | Set up the equipment and watch the mount, guiding and calibration frames. |
+| Observation Manager | Keep observation packages for your targets and plan tonight's session. |
 
 ## Open a target
 
@@ -56,7 +56,7 @@ If the Targets list says "No targets in the catalog", your library has no frames
 ### Add a target
 
 1. Choose Observation Manager from the view list.
-2. Click Add Target under the target list.
+2. Click Add Target in the Observation Packages panel.
 3. In the "Add New Target" window, type a Target Name, such as `M42`. The RA and DEC boxes are optional.
 4. Click Add Target.
 

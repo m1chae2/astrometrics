@@ -718,7 +718,7 @@ print([(row.value, row.uncertainty, row.sample_count) for row in rows])
 
 **Spread of a night's frame zero points, as evidence for the night-summary helper**
 
-- **Claim:** One number (the robust spread of a session's frame zero points) can summarize how much the transparency wandered on a night: 0.0139 mag over the 61 frames of one night of M 57, and 0.0129 mag over its 53 steady frames. The helper `zero_point_scatter` computes it; the pipeline does not store it. A night summary is made when it is read, on the observatory side (use case UC15). It is exploratory: no night here is labeled photometric, so no spread separates a steady night from a cloudy one.
+- **Claim:** One number (the robust spread of a session's frame zero points) can summarize how much the transparency wandered on a night: 0.0139 mag over the 61 frames of one night of M 57, and 0.0129 mag over its 53 steady frames. The helper `zero_point_scatter` computes it; the pipeline does not store it. A night summary is made when it is read, on the observatory side. The use case that asked for it ("Is tonight photometric?") was removed on 2026-10-24. It is exploratory: no night here is labeled photometric, so no spread separates a steady night from a cloudy one.
 - **Settings it supports:**
   - code constant `MINIMUM_FRAMES_FOR_SCATTER` = 10 in `astrometricslib/pipelines/photometry/processing/catalog_zero_point.py`. Relation: sanity check only. With 61 frames the bootstrap error of the spread is 0.0030 mag (22 percent); with 53 it is 0.0018 mag (14 percent). <!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.MINIMUM_FRAMES_FOR_SCATTER -->
 - **Status:** Partly measured. One night of 61 frames; the spread has no truth to check against.

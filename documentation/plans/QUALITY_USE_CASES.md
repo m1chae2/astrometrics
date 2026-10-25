@@ -5,12 +5,11 @@ report and the new displays, step by step. It is the agreement the other plans b
 use case here is wrong, the plans are wrong too. Each "Done right when" line becomes an acceptance
 test.
 
-It is the user-facing companion of three plans:
+It is the user-facing companion of two plans:
 
 - `QUALITY_METRICS_PLAN.md`: the measurements, efficiency, and the target dataset report (its
   section 6);
-- `QUALITY_SCIENCE_PLAN.md`: the new science metrics;
-- `UI_DISPLAY_PLAN.md`: the displays where the user sees them.
+- `QUALITY_SCIENCE_PLAN.md`: the new science metrics.
 
 ## Status
 
@@ -68,10 +67,17 @@ The change control board reviewed it a second time on 2026-10-17, and its change
 
 ## 3. Reviewing observations
 
+Use cases UC1 to UC5 are met through the AI companion, which reads the library's reports with the
+same calls the screens would use. No display shows target-level quality. UC5 is also met on screen:
+the star Quality card in the Astronomy Manager's Stellar Analysis panel. The Observation Manager is
+for choosing what to image and following tonight's session (see the user manual). Each "Where"
+line below names how the use case is met. The real-data checklist of the quality-metrics epic tests
+them the same way.
+
 ### UC1. Review last night
 
 - **When:** the morning after a session.
-- **Where:** Observation Execution, with last night chosen in its night selector (section 6).
+- **How it is met:** ask the AI companion for a night's review. It reads the stored night review for the night you name (section 6).
 - **The user sees:**
   - each target imaged, with its loss account in two parts, against a stated goal and reference.
     Frames set aside are real lost time. Kept frames lose part of their value when they are less
@@ -83,10 +89,7 @@ The change control board reviewed it a second time on 2026-10-17, and its change
     Seeing is not counted as lost time for an extended object such as a galaxy, since a softer
     night still adds depth. Transparency shows as "not included" until the zero point from the
     science plan exists. The Moon's share comes from a sky model and is labeled model-derived;
-  - a "needs attention" badge on each target that has warnings, with the count and how serious the
-    top one is;
-  - "Open in Planner" on each target row, which makes it the current target and opens its Data
-    Quality panel (UC2);
+  - a "needs attention" count for each target that has warnings, and how serious the top one is;
   - guiding over the night, with the stretches where it failed;
   - focus against temperature;
   - warnings that repeat across nights ("guide star faint on 3 of the last 4 nights").
@@ -100,7 +103,7 @@ The change control board reviewed it a second time on 2026-10-17, and its change
 ### UC2. Review a target's data
 
 - **When:** before deciding what to do next with a target, often after UC1.
-- **Where:** Observation Planner, Data Quality panel, after selecting the target.
+- **How it is met:** ask the AI companion for the target's data report. It reads the target report from the library.
 - **The user sees:**
   - one row per capture setting (camera, filter, exposure, gain, offset, binning): frames, nights,
     frames set aside, captured and effective time;
@@ -117,7 +120,7 @@ The change control board reviewed it a second time on 2026-10-17, and its change
 ### UC3. Check whether more data helped
 
 - **When:** after new frames of a target are stacked.
-- **Where:** Observation Planner, Data Quality panel, forecast check.
+- **How it is met:** ask the AI companion for the forecast check of the target. It reads the target report from the library.
 - **The user sees:** three numbers, each with its tolerance: the forecast when the frames were
   planned, the forecast given the frames actually taken, and what the new stack measured. For
   example:
@@ -137,11 +140,10 @@ The change control board reviewed it a second time on 2026-10-17, and its change
 ### UC4. Look into a warning
 
 - **When:** a warning is surprising, or the user wants to see the frames.
-- **Where:** the warning's evidence, then the Image Viewer, often on the second monitor.
-- **The user sees:** the measurements behind the warning, frame by frame, the limit, where the limit
-  came from (equipment, own earlier nights, or a validated data set), and a link that opens the
-  Image Viewer showing only the cited frames. If an Image Viewer window is already open, the link
-  uses it.
+- **How it is met:** the statement's evidence, as returned by the library, names the cited frames. The AI companion lists them, and the Image Viewer can show them.
+- **The user sees:** the measurements behind the warning, frame by frame, the limit, and where the
+  limit came from (equipment, own earlier nights, or a validated data set), with the cited frames
+  named so the Image Viewer can show only them.
 - **Decisions it supports:** whether to trust the warning.
 - **Done right when:** the user can trace any warning to the frames and numbers that caused it.
 
@@ -149,8 +151,10 @@ The change control board reviewed it a second time on 2026-10-17, and its change
 
 - **When:** reviewing a spectrum's classification, a variable star's period, or an asteroid
   candidate.
-- **Where:** Astronomy Manager, with a quality chip beside the result. The chip opens the same
-  statement view used everywhere else (rule 8).
+- **How it is met:** on screen, the Quality card at the start of the Stellar Analysis panel in the
+  Astronomy Manager shows the plain statements about a star's result, with a kind word and a
+  confidence chip (rule 8). The AI companion gives the same statements with their numbers and
+  evidence.
 - **The user sees:** the raw statistic and its uncertainty (for example the fit's relative RMS and
   the gap to the next class), the judgment of whether it is good enough for its purpose, and that
   judgment's confidence. A probability appears only where it was validated on held-out data. For a
@@ -365,7 +369,7 @@ document. No findings were rejected.
 | Screen order: quality strip, one live verdict, frame list | UX | UC11 |
 | "Switch to" on re-ranked candidates | UX | UC12 |
 | The camera measurement is a write, kept from the read-only companion | Engineer | UC14 |
-| "Is tonight photometric?" for L photometry (decision D2) | Astronomer | UC15 |
+| "Is tonight photometric?" for L photometry (decision D2) | Astronomer | Removed on 2026-10-24 |
 | Starting point for a new target from sky, read noise and bright stars | Astronomer | Section 6, point 2 |
 | A returning checklist item says why it came back | Architect, UX | Section 6, point 5 |
 | No special night theme; access basics kept (decision D3) | UX | Sections 6 and 7 |

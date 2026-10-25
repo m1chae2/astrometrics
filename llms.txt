@@ -39,12 +39,18 @@ Paths are relative to the repository root. Theory is in the architecture papers,
 - [Wayfinding quality judgment](documentation/library_design/Wayfinding_Quality_Judgment.md): the theory of how the library judges quality and recommends the next observation. Scope: documentation/library_design/Wayfinding_Library_Architecture.md#611-judging-quality-and-recommending-the-next-observation. Statements, action classes, efficiency, the loss account, marginal value and the forecast check, tonight's ranking, the stored night plan and monitor mode. Code names: documentation/library_design/Wayfinding_Library_Implementation.md. Evidence: documentation/library_design/validation/wayfinding.md.
 - [Result-quality judgment](wayfindinglib/analytics/result_quality/README.md): the rule tables, efficiency, noise growth, sky model and plan helpers that Planning and Control share.
 - [Quality models](wayfindinglib/models/quality/README.md): the shapes of a statement, a rule, efficiency and the loss account.
+- [Wayfinding analytics](wayfindinglib/analytics/README.md): frame counting, session progress and package suggestions for the observation packages.
+- [Wayfinding models](wayfindinglib/models/README.md): packages, framing, the suggestion log, session progress and camera noise.
+- [Wayfinding data access](wayfindinglib/data_access/README.md): the readers of equipment, policy and site, and the writer of safety limits.
 - Reference: documentation/api/wayfindinglib.rst.
 
 ## Desktop app
 
 - [Desktop app architecture](documentation/user_interface/technical_reference/User_Interface_Architecture.md): Electron, React and how the app talks to the backend. Code: ui/, electron/, backend/, and the interface in backend/public_interface.py.
 - [User manual](documentation/user_interface/user_guides/User_Manual.md): every view and control.
+- [Observation Manager](ui/observationManager/README.md), [Observatory Manager](ui/observatoryManager/README.md) and [Planetarium](ui/planetariumDisplay/README.md): how each display is built and where its data comes from.
+- [Shared UI components](ui/common/components/README.md): Card, Tabs, InfoButton, StatusChip, ProgressBar, FormRow and the style rule.
+- [Backend services](backend/services/README.md): the services, the suggestion refresh worker and the heavy read limiter.
 - [Observatory control guide](documentation/user_interface/user_guides/Observatory_Control_and_Automation_Guide.md): task recipes for running the telescope from the app.
 - [Image processing tutorial](documentation/user_interface/user_guides/Image_Processing_and_Analysis_Tutorial.md): one guided path from raw frames to a result.
 - [Getting started](documentation/Getting_Started.md): a first session with the app.

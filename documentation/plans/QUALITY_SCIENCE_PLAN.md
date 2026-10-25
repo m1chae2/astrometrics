@@ -191,7 +191,7 @@ section 2 backs.
 | Metric (section) | Backs |
 | :--- | :--- |
 | Catalog zero point (2.1) | UC1 transparency in the loss account; UC6 tonight's sky model |
-| Zero-point scatter within a night (2.1; computed by `wayfindinglib` when read, not stored) | UC15 "Is tonight photometric?" |
+| Zero-point scatter within a night (2.1; computed by `wayfindinglib` when read, not stored) | No use case (the "Is tonight photometric?" use case was removed on 2026-10-24) |
 | Effective star width (2.1) | UC1 and UC6 seeing factor of efficiency |
 | Target clipped (2.1) | UC2 overexposed setting |
 | Center-to-corner star width (2.1) | UC10 tilt |
@@ -221,7 +221,7 @@ in section 2.4, the later items of section 6 and the deferred items of section 7
 | Metric | Definition | Decision it informs | Depends on | Data |
 | :--- | :--- | :--- | :--- | :--- |
 | Catalog zero point | Instrumental magnitudes of matched stars against Gaia G, or Gaia-XP magnitudes synthesized in the frame's filter, with a fitted color term. Corrected for airmass with a fitted extinction coefficient. | Transparency, cloud | Plate solution; Gaia access | A few photometric nights to fit the extinction coefficient |
-| Zero-point scatter within a night | Robust spread of the airmass-corrected zero point across the night's frames. `wayfindinglib` computes it when it is read, from the stored zero points (decision 18 of `QUALITY_METRICS_PLAN.md`), with the library helper `zero_point_scatter` (PHO-16). Nothing stores it. | Whether the night suits photometry. This backs the use case "Is tonight photometric?" (UC15 in `QUALITY_USE_CASES.md`). | Catalog zero point | None |
+| Zero-point scatter within a night | Robust spread of the airmass-corrected zero point across the night's frames. `wayfindinglib` computes it when it is read, from the stored zero points (decision 18 of `QUALITY_METRICS_PLAN.md`), with the library helper `zero_point_scatter` (PHO-16). Nothing stores it. | Whether the night suits photometry. The use case "Is tonight photometric?" was removed on 2026-10-24, so the helper has no screen behind it. | Catalog zero point | None |
 | Effective star width | The star width with the pixel's own blur added: FWHM_eff² = FWHM² + c·p², with p the pixel size and c = 2 ln 2 / 3 = 0.4621 from theory (decision of 2026-10-23, not fitted). Efficiency's seeing factor uses it, and the physical reference states the pixel scale. | Undersampling; seeing loss | The corrected star width; plate scale | None |
 | Background gradient | Size and direction of a fitted plane or low-order surface across the background, with stars masked | Moon, horizon or a light source; flats | None | None |
 | Target clipped | Whether pixels of the target itself reach the saturation level, with the target located through the WCS | Exposure too long for the target | Plate solution; camera saturation level | None |
@@ -424,7 +424,7 @@ systems engineer settled every finding; the user reviews those choices in the pu
 
 | Finding | Raised by | Where it landed |
 | :--- | :--- | :--- |
-| A stored night spread and a stored airmass contradict decision 18 of `QUALITY_METRICS_PLAN.md`. | Architect | Both metrics dropped; the spread stays a library helper for UC15 (`PHO-16`) |
+| A stored night spread and a stored airmass contradict decision 18 of `QUALITY_METRICS_PLAN.md`. | Architect | Both metrics dropped; the spread stays a library helper (`PHO-16`); its use case was removed on 2026-10-24 |
 | The median over a changing star set moves when stars join or leave, and faint stars leave first under cloud. | Astronomer | A fixed star set per session and a differential frame value (`PHO-15`) |
 | The bootstrap error was labelled as the absolute error and is about five times the frame-to-frame precision. | Astronomer | The frame value carries its own precision; the level's star-sample error is a separate metric |
 | Choosing the band by star count follows the catalog's state. | Astronomer, with the engineer | Gaia G preferred whenever it has enough stars (`PHO-D24`) |

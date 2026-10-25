@@ -26,13 +26,13 @@ export interface NewPackageSearchProps {
  */
 export const NewPackageSearch: React.FC<NewPackageSearchProps> = ({ onPick, onClose }) => {
     const noop = React.useCallback(() => undefined, []);
-    const { items, filterText, setFilterText, isLoading } = useTargetListLogic(
+    const { items, filterText, setFilterText, isLoading, isError, refetchTargets } = useTargetListLogic(
         undefined, '', '', noop, undefined, undefined, false, true
     );
     const shown = items.slice(0, MAX_SEARCH_RESULTS);
 
     return (
-        <div className="package-search" role="search">
+        <div className="package-search" role="search" aria-busy={isLoading}>
             <div className="package-search__bar">
                 <input
                     type="search"
@@ -47,7 +47,13 @@ export const NewPackageSearch: React.FC<NewPackageSearchProps> = ({ onPick, onCl
                 <button type="button" className="btn btn--tiny" onClick={onClose}>Cancel</button>
             </div>
             {isLoading && <EmptyState variant="loading" message="Loading targets…" />}
-            {!isLoading && shown.length === 0 && (
+            {!isLoading && isError && (
+                <div className="package-library__error" role="alert">
+                    <span>Could not load the target list.</span>
+                    <button type="button" className="btn btn--tiny" onClick={refetchTargets}>Try again</button>
+                </div>
+            )}
+            {!isLoading && !isError && shown.length === 0 && (
                 <EmptyState message="No library target matches. Use Add Target to add one." />
             )}
             <ul className="package-search__results">

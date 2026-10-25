@@ -3,7 +3,6 @@
  * Implements KStars/Ekos-style autoguiding monitoring including 2D bullseye target plots
  * and real-time interactive multi-trace time-series tracking for error drift, star SNR,
  * rolling RMS, and pulse corrections.
- * # REQ: OBS-7: Autoguiding Monitoring & Control
  */
 
 import React, { useState, useMemo } from 'react';
@@ -23,8 +22,6 @@ export interface GuidingStatusProps {
  * rolling RMS, and pulse corrections over a dynamically selectable history window.
  * Features an interactive toolbar for toggling individual metrics and scaling plot history.
  *
- * REQ: OBS-7: Autoguiding Monitoring & Control
- * REQ: OBS-7.3: The display SHALL visualize guiding errors (dRA, dDEC) over time.
  */
 export const GuidingTrendsPlot: React.FC<GuidingStatusProps> = ({ history }) => {
     const [showRA, setShowRA] = useState<boolean>(true);
@@ -205,7 +202,6 @@ export const GuidingTrendsPlot: React.FC<GuidingStatusProps> = ({ history }) => 
  * GuidingTargetPlot Component
  *
  * Visualizes the scatter of guiding corrections as a 2D bullseye plot.
- * REQ: OBS-7.4: The display SHALL provide a 2D scatter plot of guiding errors (Bullseye).
  */
 export const GuidingTargetPlot: React.FC<GuidingStatusProps> = ({ history }) => {
     // Map history to ScatterPlot data format

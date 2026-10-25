@@ -6,7 +6,6 @@ import { describe, expect, it } from 'vitest';
 import {
     isAffectedByMeasurement,
     PLAN_QUERY_KEY_PREFIX,
-    planQueryKeys,
     QUALITY_QUERY_KEY_PREFIX,
     qualityQueryKeys,
 } from '../common/queries/qualityQueryKeys';
@@ -72,12 +71,7 @@ describe('advisory, history and plan key builders', () => {
 
     it('keeps the tonight ranking and plan reads out of the measurement refresh', () => {
         expect(isAffectedByMeasurement(qualityQueryKeys.tonightRanking(null), payload)).toBe(false);
-        expect(isAffectedByMeasurement(planQueryKeys.list(), payload)).toBe(false);
+        expect(isAffectedByMeasurement([...PLAN_QUERY_KEY_PREFIX, 'list'], payload)).toBe(false);
         expect(qualityQueryKeys.tonightRanking('2026-10-24T22:00:00-06:00')).not.toEqual(qualityQueryKeys.tonightRanking(null));
-    });
-
-    it('starts every plan key with the plan prefix', () => {
-        expect(planQueryKeys.list().slice(0, 1)).toEqual([...PLAN_QUERY_KEY_PREFIX]);
-        expect(planQueryKeys.session('night-1').slice(0, 1)).toEqual([...PLAN_QUERY_KEY_PREFIX]);
     });
 });

@@ -29,6 +29,7 @@ from astrometricslib.models.quality.quality_reports import (
     SpectralFrameCheckReport,
     StackQualityReport,
 )
+from astrometricslib.models.quality.row_frames import QualityRowFile, QualityRowResolution
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.shared.api_arguments import (
     STACK_KINDS,
@@ -193,7 +194,7 @@ class QualityRecords:
             raise InvalidArgumentError("Give either variant or library_only, not both.")
         since_seconds = to_epoch_seconds(since, "since")
         since_time = None if since_seconds is None else datetime.fromtimestamp(since_seconds, tz=UTC)
-        return QualityStore(quality_database_path(self._config)).query(
+        rows = QualityStore(quality_database_path(self._config)).query(
             metric=metric,
             level=None if level is None else SubjectLevel(level),
             target_id=target_id,
@@ -205,6 +206,107 @@ class QualityRecords:
             latest_only=latest_only,
             variant=variant,
             library_only=library_only,
+        )
+        registry = get_metric_registry()
+        for row in rows:
+            row.unit = registry.get(row.metric).unit if row.metric in registry.names() else None
+        return rows
+
+    def resolve_rows(self, row_ids: list[int]) -> QualityRowResolution:
+        """Find the picture behind each stored quality row.
+
+        A stored row names its frame or stack by a stable id. This turns the
+        ids into file paths a viewer can open, and says which ids no row has.
+        Nothing is measured or written.
+
+        Parameters
+        ----------
+        row_ids : `list` [`int`]
+            The store's row ids, such as the ones a statement cites.
+
+        Returns
+        -------
+        resolution : `QualityRowResolution`
+            One `QualityRowFile` for each row found, in the order asked, and
+            the ids that no stored row has. A row whose picture cannot be
+            found has `path` set to `None` and a plain `reason`.
+        """
+        asked = list(dict.fromkeys(int(row_id) for row_id in row_ids))
+        found = {row.row_id: row for row in self.query(row_ids=asked, latest_only=False)}
+        frame_paths_by_target: dict[str, dict[str, str]] = {}
+        files = []
+        for row_id in asked:
+            row = found.get(row_id)
+            if row is not None:
+                files.append(self._row_file(row_id, row, frame_paths_by_target))
+        return QualityRowResolution(
+            rows=files, not_found_row_ids=[row_id for row_id in asked if row_id not in found]
+        )
+
+    def _row_file(
+        self, row_id: int, row: QualityMeasurement, frame_paths_by_target: dict[str, dict[str, str]]
+    ) -> QualityRowFile:
+        """Find the file of one row's subject.
+
+        Parameters
+        ----------
+        row_id : `int`
+            The row id.
+        row : `QualityMeasurement`
+            The stored row.
+        frame_paths_by_target : `dict` [`str`, `dict` [`str`, `str`]]
+            A cache, filled here: for each target, its frames' paths by
+            subject id.
+
+        Returns
+        -------
+        file : `QualityRowFile`
+            The row's file path, or the reason it has none.
+        """
+        import os
+
+        from astrometricslib.foundation.paths import resolve_mounted_path
+        from astrometricslib.pipelines.shared.quality.frame_measurement import frame_subject_id
+
+        subject = row.subject
+        path: str | None = None
+        reason = ""
+        if subject.level == SubjectLevel.RUN:
+            reason = "This measurement is about a processing run, so it has no picture."
+        elif subject.target_id is None or self._targets is None:
+            reason = "The measurement names no target in the library."
+        elif subject.level == SubjectLevel.STACK:
+            file_name = subject.subject_id.removeprefix(f"{subject.target_id}/")
+            candidate = resolve_mounted_path(
+                os.path.join(str(self._config.get_stacks_path()), "lights", subject.target_id, file_name)
+            )
+            if os.path.isfile(candidate):
+                path = candidate
+            else:
+                reason = "The stack file is no longer on disk."
+        else:
+            if subject.target_id not in frame_paths_by_target:
+                target = self._targets.get(subject.target_id)
+                frame_paths_by_target[subject.target_id] = (
+                    {}
+                    if target is None
+                    else {frame_subject_id(frame.path, target.id): frame.path for frame in target.frames}
+                )
+            candidate = frame_paths_by_target[subject.target_id].get(subject.subject_id)
+            candidate = None if candidate is None else resolve_mounted_path(candidate)
+            if candidate is None:
+                reason = "The frame is not in the target's frame list. It may have been set aside or deleted."
+            elif not os.path.isfile(candidate):
+                reason = "The frame file is no longer on disk."
+            else:
+                path = candidate
+        return QualityRowFile(
+            row_id=row_id,
+            level=subject.level.value,
+            target_id=subject.target_id,
+            subject_id=subject.subject_id,
+            path=path,
+            reason=reason,
         )
 
     def capture_settings(self, ids: list[int] | None = None) -> dict[int, CaptureSetting]:

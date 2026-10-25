@@ -1,5 +1,12 @@
+/**
+ * @file ImagePlanner.tsx
+ * @description The Image Planner panel: choose frame type, count, filter, exposure and delay, add the
+ * row to the package's list, or take one test image. Test image is a device command, so the
+ * parent can grey it (with a visible reason) while Ekos controls the equipment.
+ */
 import React, { useState, useEffect } from 'react';
 import { PlanItem } from './context/PlanningContext';
+import { InfoButton } from '../common/components/InfoButton';
 import { ControlColumn, ParameterRow } from '../common/components/ControlLayoutComponents';
 import '../common/styles/panels.css';
 
@@ -19,17 +26,23 @@ interface ImagePlannerProps {
     // Controlled props
     values?: ImageConfig;
     onChange?: (values: ImageConfig) => void;
+    /** Why Test image is unavailable (shown beside the button), or null when it may run. Omit for always available. */
+    testImageUnavailableReason?: string | null;
 }
 
-// REQ: OBM-2: Imaging Sequence Configuration
+/**
+ * Shows the Image Planner form.
+ * @param props See {@link ImagePlannerProps}.
+ * @return The planner element.
+ */
 export const ImagePlanner: React.FC<ImagePlannerProps> = ({
-    // REQ: OBM-2.7: The display SHALL allow adding configured items to a "Plan List" before committing to the queue.
     onAdd,
     editingItem,
     onCancel,
     onTestImage,
     values,
-    onChange
+    onChange,
+    testImageUnavailableReason = null,
 }) => {
     // Local state for independent usage or edit mode
     const [localType, setLocalType] = useState('Light');
@@ -104,7 +117,7 @@ export const ImagePlanner: React.FC<ImagePlannerProps> = ({
     };
 
     const handleTest = () => {
-        if (onTestImage) {
+        if (onTestImage && !testImageUnavailableReason) {
             onTestImage(type, count, exposure, filter, delay);
         }
     };
@@ -113,7 +126,6 @@ export const ImagePlanner: React.FC<ImagePlannerProps> = ({
         <div className="image-planner">
             <ControlColumn>
                 <ParameterRow label="Type">
-                    {/* REQ: OBM-2.1: The display SHALL allow configuration of Frame Type (Light, Dark, Flat, Bias). */}
                     <select
                         className="dropdown"
                         value={type}
@@ -128,7 +140,6 @@ export const ImagePlanner: React.FC<ImagePlannerProps> = ({
 
                 <div className="image-planner__grid">
                     <ParameterRow label="Count">
-                        {/* REQ: OBM-2.3: The display SHALL allow configuration of Frame Count. */}
                         <input
                             className="entry entry--short"
                             type="number"
@@ -139,7 +150,6 @@ export const ImagePlanner: React.FC<ImagePlannerProps> = ({
                     </ParameterRow>
 
                     <ParameterRow label="Filter">
-                        {/* REQ: OBM-2.4: The display SHALL allow configuration of Filter selection. */}
                         <select
                             className="dropdown"
                             value={filter}
@@ -156,7 +166,6 @@ export const ImagePlanner: React.FC<ImagePlannerProps> = ({
                     </ParameterRow>
 
                     <ParameterRow label="Exposure">
-                        {/* REQ: OBM-2.2: The display SHALL allow configuration of Exposure Time in seconds. */}
                         <input
                             className="entry entry--short"
                             type="number"
@@ -168,7 +177,6 @@ export const ImagePlanner: React.FC<ImagePlannerProps> = ({
                     </ParameterRow>
 
                     <ParameterRow label="Delay">
-                        {/* REQ: OBM-2.5: The display SHALL allow configuration of a Delay between frames. */}
                         <input
                             className="entry entry--short"
                             type="number"
@@ -208,14 +216,19 @@ export const ImagePlanner: React.FC<ImagePlannerProps> = ({
                     </button>
                 )}
 
-                {/* REQ: OBM-2.8: The display SHALL provide a "Test Image" function to capture a single frame with current settings immediately. */}
                 <button
                     className="btn btn--secondary btn--full-width"
                     onClick={handleTest}
                     type="button"
+                    disabled={!!testImageUnavailableReason}
+                    aria-disabled={!!testImageUnavailableReason}
+                    title={testImageUnavailableReason ?? undefined}
                 >
                     Test Image
                 </button>
+                {testImageUnavailableReason && (
+                    <InfoButton label="Why unavailable?" text={testImageUnavailableReason} />
+                )}
             </div>
         </div >
     );

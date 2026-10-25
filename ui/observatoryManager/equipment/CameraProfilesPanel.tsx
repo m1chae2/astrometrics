@@ -3,13 +3,12 @@
  * @description The camera profiles from the settings, the measured gain and
  * read noise of each camera setting, and the measurement call. The noise
  * table shows what the camera profile records for each setting, with the
- * evidence word the library gives it (Measured, Partly measured or Design
- * estimate), and says "Not measured" for a camera with no entry. A
+ * evidence word the library gives it (Measured, Partly measured or Tentative), and says "Not measured" for a camera with no entry. A
  * measurement is shown first; saving it to the calibration library is a local
  * write, so the panel asks before it saves.
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { SectionPanel } from '../../common/components/SectionPanel';
 import { QualityPanelState } from '../../common/components/quality/QualityPanelState';
 import { callBackend } from '../../common/services/backendApi';
@@ -50,7 +49,7 @@ function formatNumber(value: number | null | undefined, digits: number): string 
 const EVIDENCE_WORDS: Record<NoiseEvidenceStatus, string> = {
     [NoiseEvidenceStatus.MEASURED]: 'Measured',
     [NoiseEvidenceStatus.PARTLY_MEASURED]: 'Partly measured',
-    [NoiseEvidenceStatus.DESIGN_ESTIMATE]: 'Design estimate',
+    [NoiseEvidenceStatus.DESIGN_ESTIMATE]: 'Tentative',
 };
 
 /**
@@ -69,7 +68,7 @@ function noiseCell(recorded: CameraNoiseValue | null | undefined, digits: number
 }
 
 /**
- * Shows camera profiles, the recorded noise noise values and the noise measurement.
+ * Shows camera profiles, the recorded noise values and the noise measurement.
  * @param props See {@link CameraProfilesPanelProps}.
  * @return The panel.
  */
@@ -82,6 +81,17 @@ export const CameraProfilesPanel: React.FC<CameraProfilesPanelProps> = ({ camera
     const [measureError, setMeasureError] = useState<string | null>(null);
     const [isConfirmingSave, setIsConfirmingSave] = useState(false);
     const [saveResult, setSaveResult] = useState<string | null>(null);
+
+    const saveButtonRef = useRef<HTMLButtonElement>(null);
+    const measurementRef = useRef<HTMLDivElement>(null);
+    // Where focus goes after the confirm step closes: back to the save button, or to the result.
+    const [focusAfterConfirm, setFocusAfterConfirm] = useState<'saveButton' | 'result' | null>(null);
+
+    useEffect(() => {
+        if (focusAfterConfirm === 'saveButton') saveButtonRef.current?.focus();
+        else if (focusAfterConfirm === 'result') measurementRef.current?.focus();
+        if (focusAfterConfirm) setFocusAfterConfirm(null);
+    }, [focusAfterConfirm]);
 
     const chosenCamera = cameraId || cameras[0]?.name || '';
     const canMeasure = chosenCamera !== '' && gain.trim() !== '' && offset.trim() !== '' && !isMeasuring;
@@ -125,6 +135,7 @@ export const CameraProfilesPanel: React.FC<CameraProfilesPanelProps> = ({ camera
             setMeasureError(caught instanceof Error ? caught.message : 'The measurement could not be saved.');
         } finally {
             setIsMeasuring(false);
+            setFocusAfterConfirm('result');
         }
     };
 
@@ -246,7 +257,7 @@ export const CameraProfilesPanel: React.FC<CameraProfilesPanelProps> = ({ camera
                     </div>
                 )}
                 {measurement && (
-                    <div data-testid="noise-measurement">
+                    <div data-testid="noise-measurement" ref={measurementRef} tabIndex={-1}>
                         <p>
                             <strong>{measurement.status === MeasurementStatus.MEASURED ? 'Measured' : measurement.status === MeasurementStatus.ASSUMED ? 'Assumed' : 'Not measured'}</strong>
                             {measurement.reason ? `: ${measurement.reason}` : ''}
@@ -255,7 +266,7 @@ export const CameraProfilesPanel: React.FC<CameraProfilesPanelProps> = ({ camera
                             Gain {formatNumber(measurement.gainEPerAdu, 3)} e⁻/ADU, read noise {formatNumber(measurement.readNoiseE, 2)} e⁻
                         </p>
                         {measurement.status === MeasurementStatus.MEASURED && !measurement.saved && !isConfirmingSave && (
-                            <button type="button" className="btn quality-button" onClick={() => setIsConfirmingSave(true)}>
+                            <button ref={saveButtonRef} type="button" className="btn quality-button" onClick={() => setIsConfirmingSave(true)}>
                                 Save measurement
                             </button>
                         )}
@@ -265,12 +276,12 @@ export const CameraProfilesPanel: React.FC<CameraProfilesPanelProps> = ({ camera
                                 <button type="button" className="btn btn--primary quality-button" onClick={() => void save()}>
                                     Yes, save
                                 </button>
-                                <button type="button" className="btn quality-button" onClick={() => setIsConfirmingSave(false)}>
+                                <button type="button" className="btn quality-button" onClick={() => { setIsConfirmingSave(false); setFocusAfterConfirm('saveButton'); }}>
                                     Cancel
                                 </button>
                             </div>
                         )}
-                        {saveResult && <p role="status">{saveResult}</p>}
+                        {saveResult && <p>{saveResult}</p>}
                     </div>
                 )}
             </div>

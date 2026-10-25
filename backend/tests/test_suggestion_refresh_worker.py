@@ -116,7 +116,7 @@ def test_a_finished_refresh_announces_the_counts_and_the_checklist() -> None:
     """A change sends `packages:changed` with counts, then `plan:changed`."""
     planning = create_autospec(ObservationPlanning, instance=True)
     planning.refresh_suggestions.return_value = PackageChange(
-        added=["a"], completed=["b"], checklist_item_ids=["c"]
+        added=["a"], completed=["b"], deleted=["d"], checklist_item_ids=["c"]
     )
     planning.get_plan.return_value = SimpleNamespace(id="night-1", revision=4)
     sockets = _Sockets()
@@ -133,10 +133,12 @@ def test_a_finished_refresh_announces_the_counts_and_the_checklist() -> None:
             "kind": "refreshed",
             "added": 1,
             "updated": 0,
-            "deleted": 0,
+            "deleted": 1,
             "completed": 1,
             "reverted": 0,
             "checklistItemsAdded": 1,
+            "deletedPackageIds": ["d"],
+            "completedPackageIds": ["b"],
         },
     )
     assert sockets.events[1] == (

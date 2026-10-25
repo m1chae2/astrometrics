@@ -170,6 +170,7 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # metrics. Neither writes anything.
     "quality:query": ("astrometrics.quality", "query"),
     "quality:metrics": ("astrometrics.quality", "metrics"),
+    "quality:resolve_rows": ("astrometrics.quality", "resolve_rows"),
     # Photometry and spectroscopy analysis
     "analysis:analyze_image": ("analysis_orchestrator", "analyze_image"),
     "analysis:get_results": ("analysis_orchestrator", "get_analysis_results"),
@@ -250,6 +251,7 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "plan:get": ("plan_service", "get_plan"),
     "plan:current_session": ("plan_service", "current_session"),
     "plan:list_packages": ("plan_service", "list_packages"),
+    "plan:package_for_target": ("plan_service", "package_for_target"),
     "plan:create": ("plan_service", "create_plan"),
     "plan:create_package": ("plan_service", "create_package"),
     "plan:edit": ("plan_service", "edit_plan"),

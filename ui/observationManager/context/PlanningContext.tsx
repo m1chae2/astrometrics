@@ -2,7 +2,6 @@
  * @file PlanningContext.tsx
  * @description Provides a global context for managing imaging sequence planning.
  * This allows the imaging plan to be shared across components and persisted during session navigation.
- * REQ: OBM-1: Session Planning
  */
 import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
 
@@ -42,7 +41,6 @@ export const PlanningProvider: React.FC<{ children: ReactNode }> = ({ children }
 
     /**
      * Adds a single item to the imaging plan.
-     * REQ: OBM-2.7: The display SHALL allow adding configured items to a "Plan List" before committing to the queue.
      */
     const addItem = useCallback((type: string, count: number, exposure: number, filter: string, delay: number) => {
         const newItem: PlanItem = {
@@ -58,7 +56,6 @@ export const PlanningProvider: React.FC<{ children: ReactNode }> = ({ children }
 
     /**
      * Adds multiple items to the imaging plan (e.g. from a mosaic).
-     * REQ: OBM-3.5: The display SHALL automatically generate sequence items for each mosaic panel based on current image configuration.
      */
     const addItems = useCallback((items: PlanItem[]) => {
         setPlanItems((prev) => [...prev, ...items]);

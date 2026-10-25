@@ -128,8 +128,8 @@
 /* A small button for in-panel actions (moved from the Observation Manager styles). */
 .btn--tiny {
     padding: 2px 8px;
-    font-size: 10px;
-    border-radius: 2px;
+    font-size: var(--tiny-font-size);
+    border-radius: var(--radius-xs);
     height: 18px;
     line-height: 1;
     width: auto;

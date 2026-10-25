@@ -42,7 +42,7 @@ def library_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def test_the_methods_are_declared_and_served() -> None:
     """Both methods are in the public interface and have a handler."""
-    for method in ("quality:query", "quality:metrics"):
+    for method in ("quality:query", "quality:metrics", "quality:resolve_rows"):
         assert method in RPC_METHODS
         assert method in rpc_registry._handlers
 
@@ -97,4 +97,43 @@ def test_metrics_lists_the_declared_metrics_as_json() -> None:
 
     assert result
     assert {"name", "unit", "checkpoint"} <= set(result[0])
+    json.dumps(result)
+
+
+def test_resolve_rows_passes_the_ids_to_the_library_and_returns_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The route passes the ids to `resolve_rows`; the reply is plain JSON."""
+    from astrometricslib import QualityRowFile, QualityRowResolution
+
+    asked: dict[str, object] = {}
+
+    def fake_resolve_rows(row_ids: list[int]) -> QualityRowResolution:
+        """Record the ids and give a fixed answer.
+
+        Returns
+        -------
+        resolution : `QualityRowResolution`
+            One found row and one missing id.
+        """
+        asked["row_ids"] = row_ids
+        return QualityRowResolution(
+            rows=[
+                QualityRowFile(
+                    row_id=3, level="frame", target_id="M31", subject_id="M31/a.fits", path="/x/a.fits"
+                )
+            ],
+            not_found_row_ids=[9],
+        )
+
+    monkeypatch.setattr(container.astrometrics.quality, "resolve_rows", fake_resolve_rows)
+
+    result = serialize_rpc_result(
+        asyncio.run(rpc_registry.execute("quality:resolve_rows", {"row_ids": [3, 9]}))
+    )
+
+    assert asked == {"row_ids": [3, 9]}
+    assert result["notFoundRowIds"] == [9]
+    assert result["rows"][0]["rowId"] == 3
+    assert result["rows"][0]["path"] == "/x/a.fits"
     json.dumps(result)

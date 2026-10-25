@@ -96,6 +96,7 @@ def test_the_new_methods_and_the_event_are_declared_and_served() -> None:
     for method, handler in (
         ("plan:current_session", "current_session"),
         ("plan:list_packages", "list_packages"),
+        ("plan:package_for_target", "package_for_target"),
         ("plan:create_package", "create_package"),
         ("plan:edit_package", "edit_package"),
     ):
@@ -115,6 +116,18 @@ def test_list_packages_passes_the_filters_through(setup: tuple[Any, _Sockets, Pl
     planning.get_plan.assert_called_once_with(
         kind="packages", status="planned", target="M 81", include_dismissed=False
     )
+    assert sockets.events == []
+
+
+def test_package_for_target_asks_the_library_to_pick_one(setup: tuple[Any, _Sockets, PlanService]) -> None:
+    """The service passes `pick="one"` and the target, and chooses nothing."""
+    planning, sockets, service = setup
+    planning.get_plan.return_value = _package()
+
+    assert service.package_for_target("m_81").id == "pkg-1"
+    planning.get_plan.assert_called_once_with(kind="packages", target="m_81", pick="one")
+    planning.get_plan.return_value = None
+    assert service.package_for_target("M 1") is None
     assert sockets.events == []
 
 

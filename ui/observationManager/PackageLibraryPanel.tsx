@@ -75,6 +75,8 @@ export const PackageLibraryPanel: React.FC<PackageLibraryPanelProps> = ({
     const [selectedTab, setSelectedTab] = useState<TabId>('planned');
     const [isSearchOpen, setIsSearchOpen] = useState(false);
     const listRegionRef = useRef<HTMLDivElement>(null);
+    /** The New package button, so focus can return to it when the search closes. */
+    const newPackageButtonRef = useRef<HTMLButtonElement>(null);
     /** The card that last had focus: its id and its place in its list. Cleared when focus moves on. */
     const focusedCardRef = useRef<{ id: string; index: number } | null>(null);
     const visibleIds = lists[selectedTab].map((candidate) => candidate.id);
@@ -107,9 +109,15 @@ export const PackageLibraryPanel: React.FC<PackageLibraryPanelProps> = ({
 
     /** Starts a package for the picked target and closes the search. */
     const handlePick = (targetId: string) => {
-        setIsSearchOpen(false);
+        closeSearch();
         onNewPackage(targetId);
     };
+
+    /** Closes the search and puts focus back on the New package button. */
+    function closeSearch() {
+        setIsSearchOpen(false);
+        window.setTimeout(() => newPackageButtonRef.current?.focus(), 0);
+    }
 
     return (
         <SectionPanel
@@ -117,7 +125,7 @@ export const PackageLibraryPanel: React.FC<PackageLibraryPanelProps> = ({
             className="package-library"
             headerContent={
                 <span className="package-library__actions">
-                    <button type="button" className="btn btn--tiny btn--primary" onClick={() => setIsSearchOpen(true)}>
+                    <button type="button" ref={newPackageButtonRef} className="btn btn--tiny btn--primary" onClick={() => setIsSearchOpen(true)}>
                         New package
                     </button>
                     <button type="button" className="btn btn--tiny" onClick={onAddTarget} title="Add a new target to the library">
@@ -137,7 +145,7 @@ export const PackageLibraryPanel: React.FC<PackageLibraryPanelProps> = ({
                     </div>
                 )}
                 {undoNotice && (
-                    <div className="package-library__undo" role="status">
+                    <div className="package-library__undo">
                         <span>{undoNotice.text}</span>
                         <button type="button" className="btn btn--tiny" onClick={undoNotice.onUndo}>Undo</button>
                         <button type="button" className="btn btn--tiny" onClick={undoNotice.onClose} aria-label="Close notice">Close</button>
@@ -145,7 +153,7 @@ export const PackageLibraryPanel: React.FC<PackageLibraryPanelProps> = ({
                 )}
                 {refreshStartedText && <div className="package-library__status">{refreshStartedText}</div>}
                 <div className="package-library__status" role="status" aria-live="polite">{refreshNotice}</div>
-                {isSearchOpen && <NewPackageSearch onPick={handlePick} onClose={() => setIsSearchOpen(false)} />}
+                {isSearchOpen && <NewPackageSearch onPick={handlePick} onClose={closeSearch} />}
                 <Tabs
                     tabs={tabs}
                     selectedId={selectedTab}

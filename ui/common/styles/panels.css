@@ -621,5 +621,5 @@
     font-style: italic;
     text-align: center;
     padding: 12px;
-    font-size: 13px;
+    font-size: var(--compact-font-size);
 }

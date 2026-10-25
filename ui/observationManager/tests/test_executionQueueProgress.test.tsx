@@ -10,10 +10,17 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, within, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ExecutionQueue } from '../ExecutionQueue';
+import { beginImagingSession } from '../../common/services/sequencerService';
 import { SequenceObject } from '../hooks/useExecutionQueue';
 import { ObservationSessionWithProgress, RunState } from '../../common/types/backendTypes';
 
 vi.mock('../../common/services/sequencerService', () => ({ beginImagingSession: vi.fn() }));
+
+/** What the mocked policy answers; tests change it. */
+const availability = vi.hoisted(() => ({ canCommand: true, reason: 'Checking whether Ekos is in control…' }));
+vi.mock('../../common/hooks/useCommandAvailability', () => ({
+    useCommandAvailability: () => ({ ...availability, delegations: [], isChecking: false }),
+}));
 
 const queue: SequenceObject[] = [
     { id: 'e1', target_name: 'M 81', items: [{ count: 20, exposure: 60, filter: 'L' }], total_duration: 1200, status: 'pending' },
@@ -146,5 +153,70 @@ describe('ExecutionQueue checklist', () => {
         renderQueue({ tickError: 'Your tick was not saved: conflict' });
         await userEvent.click(screen.getByRole('button', { name: /Checklist/ }));
         expect(screen.getByRole('alert')).toHaveTextContent('Your tick was not saved');
+    });
+});
+
+describe('ExecutionQueue monitor mode and keyboard', () => {
+    it('starts the session when the app may command the equipment', async () => {
+        availability.canCommand = true;
+        vi.mocked(beginImagingSession).mockResolvedValue(undefined as never);
+        renderQueue();
+        await userEvent.click(screen.getByRole('button', { name: 'Start Imaging Session' }));
+        expect(beginImagingSession).toHaveBeenCalled();
+    });
+
+    it('greys Start while Ekos controls the equipment and gives a Why unavailable button', async () => {
+        availability.canCommand = false;
+        availability.reason = 'Equipment commands are off. Ekos controls the equipment.';
+        vi.mocked(beginImagingSession).mockClear();
+        renderQueue();
+        const start = screen.getByRole('button', { name: 'Start Imaging Session' });
+        expect(start).toBeDisabled();
+        expect(start).toHaveAttribute('aria-disabled', 'true');
+        await userEvent.click(start);
+        expect(beginImagingSession).not.toHaveBeenCalled();
+        await userEvent.click(screen.getByRole('button', { name: 'Why unavailable?' }));
+        expect(screen.getByRole('note')).toHaveTextContent('Ekos controls the equipment');
+        availability.canCommand = true;
+    });
+
+    it('shows a refused start as visible alert text', async () => {
+        availability.canCommand = true;
+        vi.mocked(beginImagingSession).mockRejectedValue(new Error('Ekos is busy'));
+        renderQueue();
+        await userEvent.click(screen.getByRole('button', { name: 'Start Imaging Session' }));
+        expect(await screen.findByRole('alert')).toHaveTextContent('Could not start the imaging session: Ekos is busy');
+    });
+
+    it('moves a package later and earlier with buttons', async () => {
+        const props = renderQueue();
+        await userEvent.click(screen.getByRole('button', { name: 'Move M 81 later' }));
+        expect(props.reorderQueue).toHaveBeenLastCalledWith([queue[1], queue[0], queue[2], queue[3]]);
+        expect(screen.queryByRole('button', { name: 'Move M 51 later' })).not.toBeInTheDocument();
+        await userEvent.click(screen.getByRole('button', { name: 'Move M 81 earlier' }));
+        expect(props.reorderQueue).toHaveBeenLastCalledWith(queue);
+    });
+
+    it('opens a card from the keyboard and names the edit and remove buttons', async () => {
+        renderQueue();
+        const toggle = screen.getByRole('button', { name: 'M 81, show details' });
+        toggle.focus();
+        await userEvent.keyboard('{Enter}');
+        expect(screen.getByRole('button', { name: 'M 81, hide details' })).toHaveAttribute('aria-expanded', 'true');
+        expect(screen.getByRole('button', { name: 'Edit M 81' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Remove M 81' })).toBeInTheDocument();
+    });
+
+    it('keeps Tab inside the checklist dialog', async () => {
+        renderQueue();
+        await userEvent.click(screen.getByRole('button', { name: /Checklist/ }));
+        const dialog = screen.getByRole('dialog');
+        const close = within(dialog).getByRole('button', { name: 'Close' });
+        close.focus();
+        await userEvent.tab();
+        expect(dialog.contains(document.activeElement)).toBe(true);
+        await userEvent.tab({ shift: true });
+        await userEvent.tab({ shift: true });
+        expect(dialog.contains(document.activeElement)).toBe(true);
     });
 });

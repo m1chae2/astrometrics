@@ -5,6 +5,8 @@ import { ChecklistDialog } from './ChecklistDialog';
 import { formatAsOfTime } from './packageModel';
 import { ObservationSessionWithProgress } from '../common/types/backendTypes';
 import { SectionPanel } from '../common/components/SectionPanel';
+import { InfoButton } from '../common/components/InfoButton';
+import { useCommandAvailability } from '../common/hooks/useCommandAvailability';
 import { beginImagingSession } from '../common/services/sequencerService';
 import '../common/styles/panels.css';
 import './executionQueue.css';
@@ -32,7 +34,7 @@ interface Props {
 
 /**
  * The Execution Queue strip: the session's packages as cards in a row, with Start Imaging Session.
- * REQ: OBM-4: Execution Queue Management
+ * Start Imaging Session is a device command, so it is greyed while Ekos controls the equipment.
  */
 export const ExecutionQueue: React.FC<Props> = ({
     queue, removeFromQueue, onEdit, reorderQueue, selectedId = null,
@@ -56,6 +58,10 @@ export const ExecutionQueue: React.FC<Props> = ({
     const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
     const [localQueue, setLocalQueue] = useState<SequenceObject[]>(queue);
     const [isStarting, setIsStarting] = useState(false);
+    /** Text of a refused start, shown as an alert until dismissed, or null. */
+    const [startError, setStartError] = useState<string | null>(null);
+    const availability = useCommandAvailability();
+    const canStart = availability.canCommand && !isStarting && queue.length > 0;
 
     // Sync local queue when prop changes from outside (e.g. initial load or other users)
     // but only if we are not currently dragging
@@ -87,7 +93,6 @@ export const ExecutionQueue: React.FC<Props> = ({
         setDraggedIdx(null);
         setDraggedIdx(null);
         // Persist the final order to the server
-        // REQ: OBM-4.2: The display SHALL allow reordering of queued sequences via drag-and-drop.
         reorderQueue(localQueue);
     };
 
@@ -116,13 +121,31 @@ export const ExecutionQueue: React.FC<Props> = ({
         e.preventDefault();
         e.dataTransfer.dropEffect = "move";
     };
+
+    /**
+     * Moves one queued package one place earlier or later and saves the new order.
+     * @param index The package's place in the queue now.
+     * @param step -1 for earlier, 1 for later.
+     */
+    const moveEntry = (index: number, step: -1 | 1) => {
+        const target = index + step;
+        if (target < 0 || target >= localQueue.length) return;
+        const next = [...localQueue];
+        const [moved] = next.splice(index, 1);
+        next.splice(target, 0, moved);
+        setLocalQueue(next);
+        reorderQueue(next);
+    };
+
+    /** Starts the session. Guarded as well as disabled, so a refused policy never sends the command. */
     const handleStartSession = async () => {
-        if (queue.length === 0) return;
+        if (!canStart) return;
         setIsStarting(true);
+        setStartError(null);
         try {
             await beginImagingSession();
         } catch (error) {
-            console.error("Failed to start imaging session:", error);
+            setStartError(`Could not start the imaging session: ${error instanceof Error ? error.message : String(error)}`);
         } finally {
             setIsStarting(false);
         }
@@ -153,16 +176,25 @@ export const ExecutionQueue: React.FC<Props> = ({
                         Checklist ({checklist.length})
                     </button>
                     <button
+                        type="button"
                         className="btn btn--tiny btn--primary"
                         onClick={handleStartSession}
-                        disabled={isStarting || queue.length === 0}
+                        disabled={!canStart}
+                        aria-disabled={!canStart}
+                        title={availability.canCommand ? undefined : availability.reason}
                     >
                         {isStarting ? 'Starting...' : 'Start Imaging Session'}
                     </button>
+                    {!availability.canCommand && <InfoButton label="Why unavailable?" text={availability.reason} />}
                 </span>
             }
         >
-            {/* REQ: OBM-4.1: The display SHALL present a queue of all planned sequences. */}
+            {startError && (
+                <div className="queue-header__error" role="alert">
+                    <span>{startError}</span>
+                    <button type="button" className="btn btn--tiny" onClick={() => setStartError(null)}>Dismiss</button>
+                </div>
+            )}
             <div className="queue-list">
                 {localQueue.length === 0 && (
                     <div className="queue-empty">
@@ -174,12 +206,10 @@ export const ExecutionQueue: React.FC<Props> = ({
                         key={item.id}
                         sequence={item}
                         progress={progressByEntryId.get(item.id) ?? null}
-                        // REQ: OBM-4.3: The display SHALL allow removal of sequences from the queue.
                         onRemove={removeFromQueue}
-                        // REQ: OBM-4.4: The display SHALL allow editing of an existing sequence in the queue.
                         onEdit={() => onEdit(item)}
-                        // REQ: OBM-4.5: The display SHALL indicate the execution status of each sequence (Pending, Running, Completed, Failed).
-                        // REQ: OBM-4.6: The display SHALL visualize the progress of the active sequence.
+                        onMoveEarlier={idx > 0 ? () => moveEntry(idx, -1) : undefined}
+                        onMoveLater={idx < localQueue.length - 1 ? () => moveEntry(idx, 1) : undefined}
                         isSelected={selectedId === item.id}
                         isExpanded={expandedId === item.id}
                         onToggle={() => toggleExpand(item.id)}

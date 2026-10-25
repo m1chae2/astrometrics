@@ -129,6 +129,12 @@
   --plot-zeroline: var(--grey-lightest);
   --plot-accent: var(--accent-blue);
   --plot-selection: var(--accent-red);
+  --plot-reference-line: #aaa;                    /* dashed reference line with no color of its own */
+  /* Framing panels drawn on the Planetarium sky map (read by the canvas code). */
+  --framing-outline: rgba(79, 193, 255, 0.95);
+  --framing-fill: rgba(79, 193, 255, 0.12);
+  --framing-label: rgba(234, 234, 234, 0.95);
+  --framing-label-font: 12px sans-serif;
   /* Interactive Button Colors (Pending vs Active) - Red & Green kept purposeful */
   --btn-blue-pending: #3584e4;
   --btn-blue-active: #244a70;
@@ -160,6 +166,7 @@
   --space-6: 32px;
 
   /* Corner radii. Panels use 8px, cards 6px, buttons/inputs/tables 4px. */
+  --radius-xs: 2px;
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;
@@ -169,6 +176,7 @@
      field labels of the Observation Manager use 12px and 13px (12px is
      --section-label-size above). */
   --small-font-size: 11px;
+  --tiny-font-size: 10px;   /* the smallest buttons */
   --compact-font-size: 13px;
 
   /* Named translucent surfaces (white or black over the panel color). */

@@ -5,7 +5,7 @@
  * the cited quality rows exactly as the library returned them.
  */
 
-import React from 'react';
+import React, { useRef } from 'react';
 import { goBackToPreviousMode } from './citedFramesStore';
 import { useCitedFramesQuery, useCitedFramesRequest } from './useCitedFrames';
 import './citedFrames.css';
@@ -32,6 +32,23 @@ export const CitedFramesPanel: React.FC = () => {
   const { request, clear } = useCitedFramesRequest();
   const rowIds = request?.rowIds ?? [];
   const query = useCitedFramesQuery(rowIds);
+  const sectionRef = useRef<HTMLElement>(null);
+
+  /**
+   * Clears the request. The panel disappears, so focus first moves to the
+   * first control of the Image Viewer outside the panel (its frame area),
+   * so keyboard users do not lose their place.
+   *
+   * @returns Nothing.
+   */
+  const handleClear = () => {
+    const viewer = sectionRef.current?.parentElement;
+    const nextControl = Array.from(
+      viewer?.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])') ?? [],
+    ).find((element) => !sectionRef.current?.contains(element) && !(element as HTMLButtonElement).disabled);
+    nextControl?.focus();
+    clear();
+  };
 
   if (!request) {
     return null;
@@ -42,7 +59,7 @@ export const CitedFramesPanel: React.FC = () => {
   const frameWord = total === 1 ? 'frame' : 'frames';
 
   return (
-    <section className="cited-frames" aria-label="Cited frames">
+    <section className="cited-frames" aria-label="Cited frames" ref={sectionRef}>
       <div className="cited-frames__banner">
         <p className="cited-frames__banner-text" role="status" aria-live="polite">
           Showing {total} {frameWord} cited by {request.statementText}
@@ -53,7 +70,7 @@ export const CitedFramesPanel: React.FC = () => {
               Back to {request.previousMode}
             </button>
           ) : null}
-          <button type="button" className="cited-frames__button" onClick={clear}>
+          <button type="button" className="cited-frames__button" onClick={handleClear}>
             Clear
           </button>
         </div>

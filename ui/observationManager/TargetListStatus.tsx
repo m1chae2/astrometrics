@@ -2,13 +2,13 @@
  * @file TargetListStatus.tsx
  * @description Displays currently visible targets with altitude and azimuth tracking.
  * Integrates with useTargetVisibility hook for real-time backend data.
- * REQ: OBM-1.5: The system SHALL display visibility status for targets.
  */
 import React from 'react';
 import '../common/styles/tables.css';
 import '../common/styles/panels.css';
 import { SectionPanel } from '../common/components/SectionPanel';
 
+import './packageLibrary.css';
 import { useTargetVisibility } from './hooks/useTargetVisibility';
 
 /** Props of the Visible Targets panel. */
@@ -19,13 +19,18 @@ export interface TargetListStatusProps {
 
 /**
  * Component to display a table of visible celestial targets. A row click starts a new package.
- * REQ: OBM-1.5: The system SHALL display visibility status for targets.
  */
 export const TargetListStatus: React.FC<TargetListStatusProps> = ({ onNewPackage }) => {
-    const { visibleTargets, loading } = useTargetVisibility();
+    const { visibleTargets, loading, error, retry } = useTargetVisibility();
     return (
         <SectionPanel title="Visible Targets" className="visible-targets-panel flex-auto">
-            <div className="visible-targets-content">
+            <div className="visible-targets-content" aria-busy={loading && visibleTargets.length === 0}>
+                {error && !loading && (
+                    <div className="package-library__error" role="alert">
+                        <span>Could not load the visible targets.</span>
+                        <button type="button" className="btn btn--tiny" onClick={retry}>Try again</button>
+                    </div>
+                )}
                 <table className="data-table">
                     <thead>
                         <tr>
@@ -61,7 +66,7 @@ export const TargetListStatus: React.FC<TargetListStatusProps> = ({ onNewPackage
                                 <td colSpan={4} className="no-data">Calculating visibility...</td>
                             </tr>
                         )}
-                        {!loading && visibleTargets.length === 0 && (
+                        {!loading && !error && visibleTargets.length === 0 && (
                             <tr>
                                 <td colSpan={4} className="no-data">No targets currently visible</td>
                             </tr>

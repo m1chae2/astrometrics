@@ -3,7 +3,8 @@
  * @description The dialog that lists tonight's session checklist, opened by the "Checklist (N)"
  * button in the Execution Queue header. Each item has a tick box; ticking sends the tick to the
  * library (with the revision the window last read). Ticked items show when they were ticked.
- * Escape and Close shut it; the caller returns focus to the button that opened it.
+ * Escape and Close shut it, Tab stays inside it while it is open, and the caller returns focus to
+ * the button that opened it.
  */
 import React, { useEffect, useRef } from 'react';
 import { ChecklistItem } from '../common/types/backendTypes';
@@ -38,11 +39,32 @@ function itemLabel(item: ChecklistItem): string {
 export const ChecklistDialog: React.FC<ChecklistDialogProps> = ({ items, hasSession, onTick, errorMessage, onClose }) => {
     const dialogRef = useRef<HTMLDivElement>(null);
 
-    // Move focus into the dialog when it opens, and close on Escape.
+    // Move focus into the dialog when it opens, close on Escape, and keep Tab inside the dialog.
     useEffect(() => {
         dialogRef.current?.focus();
         const handleKey = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') onClose();
+            if (event.key === 'Escape') {
+                onClose();
+                return;
+            }
+            if (event.key !== 'Tab' || !dialogRef.current) return;
+            const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
+                'button:not([disabled]), input:not([disabled]), [href], select, textarea, [tabindex]:not([tabindex="-1"])',
+            ));
+            if (focusable.length === 0) {
+                event.preventDefault();
+                return;
+            }
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+            const active = document.activeElement;
+            if (event.shiftKey && (active === first || active === dialogRef.current)) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && active === last) {
+                event.preventDefault();
+                first.focus();
+            }
         };
         window.addEventListener('keydown', handleKey);
         return () => window.removeEventListener('keydown', handleKey);

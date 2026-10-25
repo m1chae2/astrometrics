@@ -2,7 +2,6 @@
  * @file ObservationManager.tsx
  * @description Main container for the Observation Manager display. The Execution Queue spans the top;
  * under it are the package library (left), the package editor (center) and Visible Targets (right).
- * REQ: OBM-1: Session Planning
  */
 import React from 'react';
 import { PackageLibraryPanel } from './PackageLibraryPanel';
@@ -29,9 +28,6 @@ import './observationManagerLayout.css';
 
 /**
  * Main container for the Observation Manager display.
- * REQ: OBM-1: Session Planning
- * REQ: OBM-4: Execution Queue Management
- * REQ: SR-4.3: The system SHALL execute planned imaging sequences via a queue manager.
  */
 export const ObservationManager: React.FC = () => {
     const { queue, addToQueue, removeFromQueue, updateQueueItem, reorderQueue } = useExecutionQueue();

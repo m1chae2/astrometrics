@@ -7,6 +7,7 @@
  * projection. A panel is skipped when any of its corners is out of view.
  */
 
+import { getVar } from '../../common/utils/plotTools';
 import { PlanetariumOverlay, ProjectionContext } from './overlayTypes';
 
 /** One corner of a framing panel on the sky, in degrees. */
@@ -44,10 +45,14 @@ export class FramingOverlay implements PlanetariumOverlay {
     if (!panels || panels.length === 0) return;
 
     context.save();
-    context.strokeStyle = 'rgba(79, 193, 255, 0.95)';
-    context.fillStyle = 'rgba(79, 193, 255, 0.12)';
+    // The colors and the label font are theme tokens (see theme.css); a canvas ignores an empty value.
+    const outlineColor = getVar('--framing-outline', 'currentColor');
+    const fillColor = getVar('--framing-fill', 'transparent');
+    const labelColor = getVar('--framing-label', 'currentColor');
+    context.strokeStyle = outlineColor;
+    context.fillStyle = fillColor;
     context.lineWidth = 2;
-    context.font = '12px sans-serif';
+    context.font = getVar('--framing-label-font', '');
     context.textAlign = 'center';
 
     for (const panel of panels) {
@@ -65,9 +70,9 @@ export class FramingOverlay implements PlanetariumOverlay {
 
       const middleX = points.reduce((sum, point) => sum + point.x, 0) / points.length;
       const middleY = points.reduce((sum, point) => sum + point.y, 0) / points.length;
-      context.fillStyle = 'rgba(234, 234, 234, 0.95)';
+      context.fillStyle = labelColor;
       context.fillText(panel.name, middleX, middleY);
-      context.fillStyle = 'rgba(79, 193, 255, 0.12)';
+      context.fillStyle = fillColor;
     }
     context.restore();
   }

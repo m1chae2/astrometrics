@@ -167,6 +167,7 @@ from astrometricslib.models.quality.quality_summary import (
     ExposureGroupSummary,
     TargetSessionContribution,
 )
+from astrometricslib.models.quality.row_frames import QualityRowFile, QualityRowResolution
 from astrometricslib.models.quality.subset_stacks import (
     HalfDifferenceNoiseResult,
     NightContribution,
@@ -508,6 +509,8 @@ __all__ = [
     "QualityLimit",
     "QualityMeasurement",
     "QualityRecords",
+    "QualityRowFile",
+    "QualityRowResolution",
     "QualitySubject",
     "QuarantinePreview",
     "RawFrameCheckReport",

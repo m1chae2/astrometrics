@@ -34,7 +34,6 @@ export interface TrackingSettingsProps {
  * Displays and allows editing of telescope tracking configurations, including
  * Displays and allows editing of telescope tracking configurations, including
  * alignment parameters and guiding camera settings.
- * REQ: OBS-7.2: The display SHALL allow configuration of guide camera exposure and gain.
  */
 export const TrackingSettings: React.FC<TrackingSettingsProps> = ({
     accuracy = 30,

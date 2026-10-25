@@ -2521,6 +2521,9 @@ export interface MeasurementReference {
  * When the measurement was made. It must carry a time zone.
  * row_id : `int` or `None`
  * The store's row id. Filled only when the measurement is read back.
+ * unit : `str` or `None`
+ * The metric's unit from its declaration. Not stored:
+ * `QualityRecords.query` fills it on a read.
  */
 export interface QualityMeasurement {
   metric: string;
@@ -2540,6 +2543,50 @@ export interface QualityMeasurement {
   jobId?: string | null;
   measuredAt: string;
   rowId?: number | null;
+  unit?: string | null;
+}
+
+/**
+ * The file behind one stored quality row.
+ *
+ * Parameters
+ * ----------
+ * row_id : `int`
+ * The store's row id, as the caller gave it.
+ * level : `str`
+ * ``"frame"``, ``"stack"`` or ``"run"``.
+ * target_id : `str` or `None`
+ * The target the row belongs to.
+ * subject_id : `str`
+ * The row's stable subject id.
+ * path : `str` or `None`
+ * The picture's file path, in the form the app's image reads accept.
+ * `None` when the row has no picture or it could not be found.
+ * reason : `str`
+ * Why `path` is `None`. Empty when a path is given.
+ */
+export interface QualityRowFile {
+  rowId: number;
+  level: string;
+  targetId?: string | null;
+  subjectId: string;
+  path?: string | null;
+  reason?: string;
+}
+
+/**
+ * The answer to "which pictures do these rows describe?".
+ *
+ * Parameters
+ * ----------
+ * rows : `list` [`QualityRowFile`]
+ * One entry for each row id that was found, in the order asked.
+ * not_found_row_ids : `list` [`int`]
+ * The ids that no stored row has, in the order asked.
+ */
+export interface QualityRowResolution {
+  rows?: QualityRowFile[];
+  notFoundRowIds?: number[];
 }
 
 /**
@@ -2981,6 +3028,8 @@ export interface ChecklistItem {
   /** Every time the item was ticked, oldest first. The last one equals `ticked_at`. */
   tickHistory?: string[];
   note?: string;
+  /** The item in plain words, for display. Filled from the rule's plain wording, and from its purpose for an item stored without one. */
+  label?: string;
 }
 
 /**
@@ -3437,6 +3486,8 @@ export interface CalibrationQueryResult {
   flats?: Record<string, any>[] | null;
   groups?: Record<string, any>[] | null;
   lights?: Record<string, any>[] | null;
+  camera_totals?: Record<string, any>[] | null;
+  matched_row_keys?: string[] | null;
 }
 
 /**
@@ -5070,6 +5121,7 @@ export const RPC_METHODS = [
   "processing:measure_night_contributions",
   "quality:query",
   "quality:metrics",
+  "quality:resolve_rows",
   "analysis:analyze_image",
   "analysis:get_results",
   "analysis:cancel",
@@ -5128,6 +5180,7 @@ export const RPC_METHODS = [
   "plan:get",
   "plan:current_session",
   "plan:list_packages",
+  "plan:package_for_target",
   "plan:create",
   "plan:create_package",
   "plan:edit",
@@ -5166,7 +5219,7 @@ export const UI_EVENTS = {
   "quality:measured": "quality:measured",
   /** A write changed the night plan. The payload is {sessionId, revision, changed}, where revision is the plan revision now stored and changed lists the kind of each change. */
   "plan:changed": "plan:changed",
-  /** A write created, edited, reopened, dismissed, brought back, re-framed, deleted or promoted an observation package, or a suggestion refresh ran. The payload is {packageId, targetId, kind, revision}; kind says which, and a promotion has no revision. After a refresh, kind is "refreshed", packageId and targetId are null, and the payload adds the counts added, updated, deleted, completed, reverted and checklistItemsAdded. */
+  /** A write created, edited, reopened, dismissed, brought back, re-framed, deleted or promoted an observation package, or a suggestion refresh ran. The payload is {packageId, targetId, kind, revision}; kind says which, and a promotion has no revision. After a refresh, kind is "refreshed", packageId and targetId are null, and the payload adds the counts added, updated, deleted, completed, reverted and checklistItemsAdded, and the ids deletedPackageIds (suggestions removed) and completedPackageIds. */
   "packages:changed": "packages:changed",
   /** The mount, processing jobs or health status changed. */
   "system_state_update": "system_state_update",

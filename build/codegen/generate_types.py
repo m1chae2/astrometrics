@@ -76,6 +76,7 @@ from astrometricslib.models.quality.quality_summary import (
     StackQualitySummary,
     TargetSessionContribution,
 )
+from astrometricslib.models.quality.row_frames import QualityRowFile, QualityRowResolution
 from astrometricslib.models.quality.spectroscopy_quality import (
     CatalogComparison,
     InputQualityAssessment,
@@ -606,6 +607,8 @@ def render_types() -> str:
         generate_interface(StarResultReference, "StarResultReference"),
         generate_interface(MeasurementReference, "MeasurementReference"),
         generate_interface(QualityMeasurement, "QualityMeasurement"),
+        generate_interface(QualityRowFile, "QualityRowFile"),
+        generate_interface(QualityRowResolution, "QualityRowResolution"),
         generate_interface(MetricSpec, "MetricSpec"),
         generate_interface(MetricSummary, "MetricSummary"),
         generate_interface(SensorNoiseMeasurement, "SensorNoiseMeasurement"),

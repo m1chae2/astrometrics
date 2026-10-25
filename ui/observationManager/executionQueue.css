@@ -76,6 +76,18 @@
     font-weight: bold;
     font-size: 1.1rem;
     color: var(--white);
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    text-align: left;
+}
+
+.card-title:focus-visible,
+.card-edit-btn:focus-visible,
+.card-remove-btn:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 2px;
 }
 
 .card-meta {

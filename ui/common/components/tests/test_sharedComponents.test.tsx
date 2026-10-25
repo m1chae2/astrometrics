@@ -15,6 +15,14 @@ import { ProgressBar } from '../ProgressBar';
 import { FormRow, formRowErrorId } from '../FormRow';
 
 describe('Card', () => {
+    it('puts no heading inside a clickable card, but keeps one in a plain card', () => {
+        const { unmount } = render(<Card title="A" onClick={() => undefined}>a</Card>);
+        expect(screen.queryByRole('heading')).not.toBeInTheDocument();
+        unmount();
+        render(<Card title="B">b</Card>);
+        expect(screen.getByRole('heading', { name: 'B' })).toBeInTheDocument();
+    });
+
     it('marks the selected state', () => {
         render(<Card title="M 81" selected>Body</Card>);
         expect(screen.getByText('Body').closest('.card')).toHaveAttribute('data-selected', 'true');

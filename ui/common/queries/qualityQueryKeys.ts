@@ -46,7 +46,7 @@ export function isAffectedByMeasurement(queryKey: readonly unknown[], payload: Q
 }
 
 /** The start of the tonight ranking's key. It is apart from the quality prefix because a measurement does not refresh it. */
-export const TONIGHT_RANKING_QUERY_KEY_PREFIX = ['qualityTonight'] as const;
+const TONIGHT_RANKING_QUERY_KEY_PREFIX = ['qualityTonight'] as const;
 
 /** The start of every night plan query key. `plan:changed` refreshes them all. */
 export const PLAN_QUERY_KEY_PREFIX = ['plan'] as const;
@@ -125,20 +125,4 @@ export const qualityQueryKeys = {
      * @return The key. It names no target or night, so every measurement refreshes it.
      */
     liveSessionStatus: () => [...QUALITY_QUERY_KEY_PREFIX, 'history-live-status', {}] as const,
-};
-
-/** Builders for the keys of the night plan reads. */
-export const planQueryKeys = {
-    /**
-     * The key of a `plan:get` call that lists every plan.
-     * @return The key, which starts with the plan prefix.
-     */
-    list: () => [...PLAN_QUERY_KEY_PREFIX, 'list'] as const,
-
-    /**
-     * The key of a `plan:get` call for one plan.
-     * @param sessionId The plan's session id.
-     * @return The key, which starts with the plan prefix.
-     */
-    session: (sessionId: string) => [...PLAN_QUERY_KEY_PREFIX, 'session', { session_id: sessionId }] as const,
 };

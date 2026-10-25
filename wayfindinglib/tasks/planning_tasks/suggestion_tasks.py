@@ -358,7 +358,13 @@ def checklist_items_from(statements: Iterable[TargetStatement]) -> list[Checklis
         if key in keys:
             continue
         keys.add(key)
-        items.append(ChecklistItem(rule=statement.rule, capture_setting=statement.capture_setting))
+        items.append(
+            ChecklistItem(
+                rule=statement.rule,
+                capture_setting=statement.capture_setting,
+                label=statement.plain_message or statement.message,
+            )
+        )
     return items
 
 

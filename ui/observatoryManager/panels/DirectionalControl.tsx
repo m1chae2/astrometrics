@@ -16,7 +16,6 @@ export interface DirectionalControlProps {
  *
  * Renders a compass-pad style interface for manual telescope slewing.
  * Supports touch and mouse interactions for continuous movement relative to press duration.
- * REQ: OBS-2: Manual Telescope Movement
  */
 export const DirectionalControl: React.FC<DirectionalControlProps> = ({
     onStop,
@@ -52,7 +51,6 @@ export const DirectionalControl: React.FC<DirectionalControlProps> = ({
                 <button
                     id="btn-move-nw"
                     className="navigator__btn nw"
-                    // REQ: OBS-2.2: The display SHALL provide diagonal slew buttons for combined motion (NW, NE, SW, SE).
                     onMouseDown={() => handleStart('NW')} onMouseUp={() => handleEnd('NW')}
                     onMouseLeave={() => handleEnd('NW')}
                     onTouchStart={(e) => { e.preventDefault(); handleStart('NW'); }}
@@ -66,9 +64,6 @@ export const DirectionalControl: React.FC<DirectionalControlProps> = ({
                 <button
                     id="btn-move-n"
                     className="navigator__btn n"
-                    // REQ: OBS-2.1: The display SHALL provide directional slew buttons for North, South, East, and West commands.
-                    // REQ: OBS-2.3: The display SHALL initiate movement in the selected direction immediately upon button press.
-                    // REQ: OBS-2.4: The display SHALL halt movement immediately upon button release.
                     onMouseDown={() => handleStart('N')} onMouseUp={() => handleEnd('N')}
                     onMouseLeave={() => handleEnd('N')}
                     onTouchStart={(e) => { e.preventDefault(); handleStart('N'); }}
@@ -116,7 +111,6 @@ export const DirectionalControl: React.FC<DirectionalControlProps> = ({
                         setActiveDirection(null);
                         onStop();
                     }}
-                    // REQ: OBS-2.5: The display SHALL provide a "STOP" button to immediately halt all telescope movement.
                     type="button"
                 >
                     STOP
@@ -177,7 +171,6 @@ export const DirectionalControl: React.FC<DirectionalControlProps> = ({
             </div>
 
             <div id="slew-speed-control" className="slew-rate">
-                {/* REQ: OBS-2.6: The display SHALL provide a slew rate selector with at least 4 speed levels. */}
                 <div className="slew-rate__labels">
                     <span id="label-slew-speed">Slew Speed:</span>
                     <span id="label-slew-range">Min &rarr; Max</span>

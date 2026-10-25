@@ -42,9 +42,6 @@ export interface ControlPanelProps {
     guidingGain?: number;
     onGuidingExposureChange?: (value: number) => void;
     onGuidingGainChange?: (value: number) => void;
-    onGuideStart?: () => void;
-    onGuideStop?: () => void;
-    onGuideCapture?: () => void;
 
     // Alignment control
     onStartAlignment?: () => void;
@@ -95,9 +92,6 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
     guidingGain,
     onGuidingExposureChange,
     onGuidingGainChange,
-    onGuideStart,
-    onGuideStop,
-    onGuideCapture,
     onStartAlignment,
     onStopAlignment,
     isAligningActive = false,
@@ -128,9 +122,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                     </CommandGate>
                 </SectionPanel>
 
-                {/* REQ: OBS-4: Tracking & Parking Control */}
                 <SectionPanel title="Tracking Settings" headerContent={<WhyUnavailableButton disabled={commandsDisabled} reason={commandsDisabledReason} />}>
-                    {/* REQ: OBS-4.3: The display SHALL allow enabling and disabling of sidereal tracking. */}
                     <CommandGate
                         disabled={commandsDisabled}
                         reason={commandsDisabledReason}
@@ -165,7 +157,6 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                 />
 
                 {/* Manual Guide */}
-                {/* REQ: OBS-2: Manual Telescope Movement */}
                 <SectionPanel title="Manual Guide" headerContent={<WhyUnavailableButton disabled={commandsDisabled} reason={commandsDisabledReason} />}>
                     <CommandGate disabled={commandsDisabled} reason={commandsDisabledReason}>
                         <DirectionalControl
@@ -179,7 +170,6 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                 </SectionPanel>
 
                 {/* Safety Limits */}
-                {/* REQ: OBS-8: Safety Limits */}
                 <SectionPanel title="Safety Limits" headerContent={<WhyUnavailableButton disabled={commandsDisabled} reason={commandsDisabledReason} />}>
                     <CommandGate
                         disabled={commandsDisabled}
@@ -203,7 +193,6 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             <div className="panel__row flex-fill observatory-guiding-row">
                 {/* Guiding Trends Panel */}
                 <SectionPanel
-                    // REQ: OBS-7: Autoguiding Monitoring & Control
                     title="Guiding Trends"
                     className="panel--guiding-trends"
                     headerContent={
@@ -213,7 +202,6 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                         </span>
                     }
                 >
-                    {/* REQ: OBS-7.3: The display SHALL visualize guiding errors (dRA, dDEC) over time */}
                     <GuidingTrendsPlot history={guidingHistory} />
                 </SectionPanel>
 

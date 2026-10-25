@@ -136,6 +136,7 @@ RPC_METHODS: tuple[str, ...] = (
     # targetId); the router drops names it does not know.
     "quality:query",
     "quality:metrics",
+    "quality:resolve_rows",
     # Photometry and spectroscopy analysis
     "analysis:analyze_image",
     "analysis:get_results",
@@ -206,6 +207,7 @@ RPC_METHODS: tuple[str, ...] = (
     "plan:get",
     "plan:current_session",
     "plan:list_packages",
+    "plan:package_for_target",
     "plan:create",
     "plan:create_package",
     "plan:edit",
@@ -272,7 +274,8 @@ UI_EVENTS: tuple[UiEvent, ...] = (
         "observation package, or a suggestion refresh ran. The payload is {packageId, targetId, kind, "
         "revision}; kind says which, and a promotion has no revision. After a refresh, kind is "
         '"refreshed", packageId and targetId are null, and the payload adds the counts added, updated, '
-        "deleted, completed, reverted and checklistItemsAdded.",
+        "deleted, completed, reverted and checklistItemsAdded, and the ids deletedPackageIds (suggestions "
+        "removed) and completedPackageIds.",
     ),
     UiEvent("system_state_update", "The mount, processing jobs or health status changed."),
     UiEvent("log", "A backend log line, for the app's log panel."),

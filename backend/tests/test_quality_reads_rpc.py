@@ -217,3 +217,22 @@ def test_planning_time_is_broadcast_in_the_handoff_event() -> None:
     assert payload["planning_time"] == "2026-10-24T22:00:00-06:00"
     service.update_state(clear_planning_time=True)
     assert sockets.broadcast_ui_event_sync.call_args.args[1]["planning_time"] is None
+
+
+def test_calibration_query_accepts_the_match_arguments() -> None:
+    """The route target takes the match arguments (autospec checks names)."""
+    from unittest.mock import create_autospec
+
+    from astrometricslib import CalibrationCatalog
+
+    catalog = create_autospec(CalibrationCatalog, instance=True)
+    catalog.query(
+        detail="match",
+        kind="bias",
+        camera_id="ASI533",
+        gain=100,
+        offset=10.0,
+        binning="2",
+        temperature_c=-9.0,
+    )
+    catalog.query.assert_called_once()

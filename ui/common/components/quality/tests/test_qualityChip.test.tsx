@@ -10,12 +10,16 @@ import { render, screen } from '@testing-library/react';
 
 const callBackendMock = vi.fn();
 
+vi.mock('../../../utils/displayCoordinator', () => ({ navigateToElement: vi.fn() }));
+
 vi.mock('../../../services/backendApi', () => ({
     callBackend: (...args: unknown[]) => callBackendMock(...args),
 }));
 
 import { QualityChip } from '../QualityChip';
-import { makeStatement } from './qualityTestData';
+import { calibrationStatement, makeStatement } from './qualityTestData';
+import { navigateToElement } from '../../../utils/displayCoordinator';
+import { QualityPanelState } from '../QualityPanelState';
 
 /**
  * Renders a component inside a fresh query client.
@@ -53,5 +57,27 @@ describe('QualityChip', () => {
         unmount();
         renderWithQuery(<QualityChip targetId={null} objectId={null} />);
         expect(screen.getByText('Choose a target')).toBeTruthy();
+    });
+
+    /** Evidence and calibration actions are wired (user decision D5). */
+    it('offers Evidence and Show in calibration library', async () => {
+        callBackendMock.mockResolvedValue([
+            { ...calibrationStatement, evidence: [{ rowId: 7 }] },
+        ]);
+        renderWithQuery(<QualityChip targetId="M 81" objectId="Vega" />);
+        const evidence = await screen.findByRole('button', { name: 'Evidence' });
+        evidence.click();
+        expect(navigateToElement).toHaveBeenCalledWith(expect.objectContaining({ action: 'showFrames' }));
+        screen.getByRole('button', { name: 'Show in calibration library' }).click();
+        expect(navigateToElement).toHaveBeenCalledWith(expect.objectContaining({ action: 'showCalibrationRow' }));
+    });
+
+    /** The loading state is plain text with aria-busy, not a live region. */
+    it('shows loading as busy text, not a live region', () => {
+        render(<QualityPanelState state="loading" />);
+        const loading = screen.getByText('Loading…');
+        expect(loading).toHaveAttribute('aria-busy', 'true');
+        expect(loading).not.toHaveAttribute('role');
+        expect(loading).not.toHaveAttribute('aria-live');
     });
 });

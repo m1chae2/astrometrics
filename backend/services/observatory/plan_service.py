@@ -102,6 +102,23 @@ class PlanService:
             kind="packages", status=status, target=target, include_dismissed=include_dismissed
         )
 
+    def package_for_target(self, target: str) -> ObservationPackage | None:
+        """Read the one package that stands for a target.
+
+        Parameters
+        ----------
+        target : `str`
+            The target. The library matches it ignoring case, with ``_`` read
+            as a space.
+
+        Returns
+        -------
+        package : `ObservationPackage` or `None`
+            The target's planned package, else its suggested package that is
+            not dismissed, else `None`. The library does the choosing.
+        """
+        return self.wayfinder.planning.get_plan(kind="packages", target=target, pick="one")
+
     def current_session(self) -> Any:
         """Read tonight's session, the one session the app works with.
 

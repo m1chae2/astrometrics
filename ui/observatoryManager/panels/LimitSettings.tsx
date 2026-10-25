@@ -85,6 +85,8 @@ export const LimitSettings: React.FC<LimitSettingsProps> = ({ disabled = false, 
     const telescope = telescopeQuery.data ?? null;
     const [values, setValues] = useState<LimitFormValues | null>(null);
     const [refusal, setRefusal] = useState<string | null>(null);
+    // Stays on screen after a save, because a toast fades and Ekos's copy stays old.
+    const [showEkosCopyNote, setShowEkosCopyNote] = useState(false);
 
     // Reset the form whenever a new read arrives.
     useEffect(() => {
@@ -98,6 +100,7 @@ export const LimitSettings: React.FC<LimitSettingsProps> = ({ disabled = false, 
             callBackend('observatory:set_active_telescope', { telescope_id: (telescope as Telescope).id, limits }),
         onSuccess: () => {
             setRefusal(null);
+            setShowEkosCopyNote(true);
             emitToast(`Safety limits saved. ${EKOS_COPY_WARNING}`, 'success');
             void queryClient.invalidateQueries({ queryKey: ACTIVE_TELESCOPE_QUERY_KEY });
         },
@@ -251,6 +254,7 @@ export const LimitSettings: React.FC<LimitSettingsProps> = ({ disabled = false, 
                     <button type="button" className="btn" onClick={() => setRefusal(null)}>Dismiss</button>
                 </div>
             )}
+            {showEkosCopyNote && <p id="limit-settings-ekos-note" className="limit-settings__hint">{EKOS_COPY_WARNING}</p>}
             <div className="controls__group-row">
                 <button
                     type="button"

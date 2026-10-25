@@ -51,35 +51,19 @@ export function severityWord(severity: Severity | null | undefined): string {
 /**
  * Gives the word for a confidence level.
  * @param confidence The statement's confidence.
- * @param expanded Whether to use the long form for the expanded view.
  * @return "Measured", "Partly measured" or "Tentative".
  */
-export function confidenceWord(confidence: Confidence, expanded = false): string {
+export function confidenceWord(confidence: Confidence): string {
     switch (confidence) {
         case Confidence.MEASURED:
             return 'Measured';
         case Confidence.PARTLY_MEASURED:
             return 'Partly measured';
         case Confidence.DESIGN_ESTIMATE:
-            return expanded ? 'Tentative (design estimate)' : 'Tentative';
+            return 'Tentative';
         default:
             return String(confidence);
     }
-}
-
-/**
- * Formats a length of time for display.
- * @param seconds The time in seconds.
- * @return Text such as "2 h 05 min" or "45 s".
- */
-export function formatSeconds(seconds: number | null | undefined): string {
-    if (seconds === null || seconds === undefined || Number.isNaN(seconds)) return 'not available';
-    const whole = Math.round(seconds);
-    if (whole < 60) return `${whole} s`;
-    const hours = Math.floor(whole / 3600);
-    const minutes = Math.floor((whole % 3600) / 60);
-    if (hours === 0) return `${minutes} min`;
-    return `${hours} h ${String(minutes).padStart(2, '0')} min`;
 }
 
 /**

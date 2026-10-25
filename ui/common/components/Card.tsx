@@ -74,7 +74,9 @@ export const Card: React.FC<CardProps> = ({
         >
             {(title || headerContent) && (
                 <div className="card__header">
-                    <h3 className="card__title">{title}</h3>
+                    {onClick
+                        ? <span className="card__title">{title}</span>
+                        : <h3 className="card__title">{title}</h3>}
                     {headerContent}
                 </div>
             )}

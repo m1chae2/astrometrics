@@ -96,7 +96,7 @@ describe('CameraProfilesPanel', () => {
         const table = screen.getByRole('table', { name: 'Recorded camera noise' });
         expect(table.textContent).toContain('0.783');
         expect(table.textContent).toContain('3.80');
-        expect(table.textContent).toContain('Design estimate');
+        expect(table.textContent).toContain('Tentative');
         expect(table.textContent).toContain('Partly measured');
         expect(screen.queryByTestId('example-data-badge')).toBeNull();
         expect(screen.queryByText('Example data')).toBeNull();
@@ -150,12 +150,16 @@ describe('CameraProfilesPanel', () => {
         expect(callBackendMock).toHaveBeenCalledTimes(1);
         await user.click(screen.getByRole('button', { name: 'Cancel' }));
         expect(callBackendMock).toHaveBeenCalledTimes(1);
+        // Focus returns to the button that opened the confirm step.
+        await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Save measurement' })));
 
         await user.click(screen.getByRole('button', { name: 'Save measurement' }));
         await user.click(screen.getByRole('button', { name: 'Yes, save' }));
         await waitFor(() => expect(callBackendMock).toHaveBeenCalledTimes(2));
         expect(callBackendMock.mock.calls[1][1].save).toBe(true);
-        expect(await screen.findByText('Saved to the calibration library.')).toBeTruthy();
+        const savedText = await screen.findByText('Saved to the calibration library.');
+        expect(savedText.getAttribute('role')).toBeNull();
+        expect(document.activeElement).toBe(screen.getByTestId('noise-measurement'));
     });
 });
 

@@ -105,6 +105,8 @@ describe('Safety Limits panel', () => {
         await waitFor(() => expect(emitToastMock).toHaveBeenCalled());
         expect(String(emitToastMock.mock.calls[0][0])).toContain("Ekos's copy of the session may be out of date");
         expect(emitToastMock.mock.calls[0][1]).toBe('success');
+        // The note also stays in the panel as plain text, because the toast fades.
+        expect((await screen.findByText(/Ekos's copy of the session may be out of date/)).closest('p')).toBeTruthy();
     });
 
     /** A refusal stays as visible text until dismissed. */

@@ -8,10 +8,17 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { PackageEditor, PackageEditorProps } from '../PackageEditor';
+import { captureTestFrame } from '../../common/services/imaging/captureService';
 import { FilterType, FrameType, ObservationPackage } from '../../common/types/backendTypes';
 
 vi.mock('../LastImageViewer', () => ({ LastImageViewer: () => <div>Last Image stub</div> }));
 vi.mock('../../common/services/imaging/captureService', () => ({ captureTestFrame: vi.fn() }));
+
+/** What the mocked policy answers; tests change it. */
+const availability = vi.hoisted(() => ({ canCommand: true, reason: 'Checking whether Ekos is in control…' }));
+vi.mock('../../common/hooks/useCommandAvailability', () => ({
+    useCommandAvailability: () => ({ ...availability, delegations: [], isChecking: false }),
+}));
 
 const samplePackage: ObservationPackage = {
     id: 'p1', name: 'M 81', target_id: 'M 81',
@@ -72,5 +79,28 @@ describe('PackageEditor', () => {
     it('shows a refused save as an alert', () => {
         renderEditor(samplePackage, { errorMessage: 'Could not save the package: revision conflict' });
         expect(screen.getByRole('alert')).toHaveTextContent('revision conflict');
+    });
+
+    it('sends a test image when Ekos is not in control', async () => {
+        availability.canCommand = true;
+        vi.mocked(captureTestFrame).mockResolvedValue('job-1');
+        renderEditor(samplePackage);
+        await userEvent.click(screen.getByRole('button', { name: 'Test Image' }));
+        expect(captureTestFrame).toHaveBeenCalled();
+    });
+
+    it('greys Test Image while Ekos controls the equipment and explains why', async () => {
+        availability.canCommand = false;
+        availability.reason = 'Equipment commands are off. Ekos controls the equipment.';
+        vi.mocked(captureTestFrame).mockClear();
+        renderEditor(samplePackage);
+        const button = screen.getByRole('button', { name: 'Test Image' });
+        expect(button).toBeDisabled();
+        expect(button).toHaveAttribute('aria-disabled', 'true');
+        await userEvent.click(button);
+        expect(captureTestFrame).not.toHaveBeenCalled();
+        await userEvent.click(screen.getByRole('button', { name: 'Why unavailable?' }));
+        expect(screen.getByRole('note')).toHaveTextContent('Ekos controls the equipment');
+        availability.canCommand = true;
     });
 });

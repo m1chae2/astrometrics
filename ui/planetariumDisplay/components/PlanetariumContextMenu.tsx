@@ -13,6 +13,8 @@ import { PlanetariumSource } from '../../common/types/planetariumTypes';
 import { slewTelescope } from '../../common/services/telescope/motionService';
 import { emitToast } from '../../common/utils/emitToast';
 import { navigateToElement } from '../../common/utils/displayCoordinator';
+import { InfoButton } from '../../common/components/InfoButton';
+import { useCommandAvailability } from '../../common/hooks/useCommandAvailability';
 
 /**
  * Props for PlanetariumContextMenu.
@@ -42,6 +44,9 @@ interface Props {
  */
 export const PlanetariumContextMenu: React.FC<Props> = ({ source, x, y, telescopeConnected, onClose }) => {
   const menuRef = useRef<HTMLDivElement>(null);
+  // The app never commands the mount while Ekos is in control (or while that is unknown).
+  const availability = useCommandAvailability();
+  const slewDisabled = !availability.canCommand;
 
   useEffect(() => {
     const handleOutsideClick = (e: MouseEvent | PointerEvent) => {
@@ -101,6 +106,9 @@ export const PlanetariumContextMenu: React.FC<Props> = ({ source, x, y, telescop
    * @returns {Promise<void>}
    */
   const handleSlewToPosition = async () => {
+    if (slewDisabled) {
+      return;
+    }
     // Slew API expects RA in decimal hours (1h = 15°), not decimal degrees
     const raHours = source.ra / 15.0;
     const decDegrees = source.dec;
@@ -146,12 +154,17 @@ export const PlanetariumContextMenu: React.FC<Props> = ({ source, x, y, telescop
       )}
 
       {telescopeConnected && (
-        <button
-          className="planetarium-context-menu__action"
-          onClick={handleSlewToPosition}
-        >
-          Slew Telescope Here
-        </button>
+        <>
+          <button
+            className="planetarium-context-menu__action"
+            onClick={handleSlewToPosition}
+            disabled={slewDisabled}
+            aria-disabled={slewDisabled}
+          >
+            Slew Telescope Here
+          </button>
+          {slewDisabled && <InfoButton label="Why unavailable?" text={availability.reason} />}
+        </>
       )}
     </div>
   );

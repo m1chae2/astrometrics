@@ -14,6 +14,7 @@ import { PlanItem } from './context/PlanningContext';
 import { SectionPanel } from '../common/components/SectionPanel';
 import { ConfirmDialog } from '../common/components/ConfirmDialog';
 import { EmptyState } from '../common/components/EmptyState';
+import { useCommandAvailability } from '../common/hooks/useCommandAvailability';
 import { captureTestFrame } from '../common/services/imaging/captureService';
 import { emitToast } from '../common/utils/emitToast';
 import { DitherConfig, ExposureRequest, FilterType, ObservationPackage } from '../common/types/backendTypes';
@@ -55,6 +56,8 @@ export const PackageEditor: React.FC<PackageEditorProps> = ({
     onAddToSequence, isEditingQueueEntry = false, onCancelEdit, errorMessage = null, onDismissError,
     onDeletePackage, removedNotice = null,
 }) => {
+    /** Test image is a device command: greyed while Ekos controls the equipment. */
+    const availability = useCommandAvailability();
     /** Index of the exposure row being edited in the Image Planner, if any. */
     const [editingIndex, setEditingIndex] = useState<number | null>(null);
 
@@ -102,6 +105,7 @@ export const PackageEditor: React.FC<PackageEditorProps> = ({
 
     /** Captures one test frame with the planner's current settings. */
     const handleTestImage = async (type: string, _count: number, exposure: number, filter: string) => {
+        if (!availability.canCommand) return;
         if (!editedPackage) {
             emitToast('Choose a package before capturing a test frame', 'error');
             return;
@@ -166,6 +170,7 @@ export const PackageEditor: React.FC<PackageEditorProps> = ({
                                 editingItem={editingItem}
                                 onCancel={() => setEditingIndex(null)}
                                 onTestImage={handleTestImage}
+                                testImageUnavailableReason={availability.canCommand ? null : availability.reason}
                                 values={{ type: imgType, count: imgCount, exposure: imgExposure, filter: imgFilter, delay: imgDelay }}
                                 onChange={(values) => {
                                     setImgType(values.type);

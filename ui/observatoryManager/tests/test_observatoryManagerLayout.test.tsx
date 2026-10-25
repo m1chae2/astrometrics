@@ -125,6 +125,7 @@ describe('ObservatoryManager layout', () => {
 
         const slew = screen.getByRole('button', { name: 'Slew to Target' }) as HTMLButtonElement;
         expect(slew.disabled).toBe(true);
+        expect(slew.getAttribute('aria-disabled')).toBe('true');
         expect(within(slew.closest('[data-testid="command-gate"]') as HTMLElement).getByText(/Checking|Equipment commands are off/)).toBeTruthy();
     });
 

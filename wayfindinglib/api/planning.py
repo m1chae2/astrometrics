@@ -160,7 +160,7 @@ PlanListKind = Literal["sessions", "packages", "suggestion_log"]
 
 GET_PLAN_ARGUMENTS = {
     "sessions": ("session_id", "night_id", "include"),
-    "packages": ("status", "target", "include_dismissed"),
+    "packages": ("status", "target", "include_dismissed", "pick"),
     "suggestion_log": ("target",),
 }
 """The arguments each `get_plan` kind uses."""
@@ -2225,11 +2225,13 @@ class ObservationPlanning:
         target: str | Target | None = None,
         include: list[str] | None = None,
         include_dismissed: bool = False,
+        pick: Literal["all", "one"] = "all",
     ) -> (
         ObservationSession
         | list[ObservationSessionSummary]
         | list[ObservationPackage]
         | list[SuggestionLogEntry]
+        | ObservationPackage
         | None
     ):
         """Read recorded sessions, observation packages or the suggestion log.
@@ -2266,6 +2268,13 @@ class ObservationPlanning:
         include_dismissed : `bool`, optional
             ``kind="packages"`` only. Also list suggestions the user
             dismissed. They are left out by default.
+        pick : `str`, optional
+            ``kind="packages"`` only. ``"all"`` (default) lists the packages.
+            ``"one"`` needs `target` and gives that target's package: the
+            newest planned one, else the newest suggested one that is not
+            dismissed, else `None`. Complete packages are never picked. The
+            target is matched like the list does (ignoring case, with ``_``
+            read as a space).
 
         Returns
         -------
@@ -2292,9 +2301,15 @@ class ObservationPlanning:
                 "target": target is not None,
                 "include": include is not None,
                 "include_dismissed": include_dismissed,
+                "pick": pick != "all",
             },
         )
         sections = check_include(include, GET_PLAN_SECTIONS)
+        check_choice("pick", pick, ("all", "one"))
+        if kind == "packages" and pick == "one":
+            if target is None:
+                raise InvalidArgumentError("pick='one' needs a target.")
+            return self._package_for_target(target)
         if kind == "packages":
             return self._list_packages(status, target, include_dismissed)
         if kind == "suggestion_log":
@@ -2307,7 +2322,10 @@ class ObservationPlanning:
         elif night_id is not None:
             session = self._session_for_night(_night_date(night_id))
         if session_id is not None or night_id is not None:
-            if session is None or "progress" not in sections:
+            if session is None:
+                return None
+            session = self._with_checklist_labels(session)
+            if "progress" not in sections:
                 return session
             return self._with_progress(session)
         reader = TargetFrameReader(self._astrometrics) if "progress" in sections else None
@@ -2331,6 +2349,33 @@ class ObservationPlanning:
             )
         summaries.sort(key=lambda summary: summary.night_date, reverse=True)
         return summaries
+
+    def _with_checklist_labels(self, session: ObservationSession) -> ObservationSession:
+        """Give each checklist item a plain label if it has none.
+
+        Parameters
+        ----------
+        session : `ObservationSession`
+            The stored session. It is not changed.
+
+        Returns
+        -------
+        session : `ObservationSession`
+            The session, with an empty item label replaced by the purpose of
+            the item's rule (the rule's one plain sentence), or by the rule
+            name when no rule has that name. The session itself when no item
+            needs a label.
+        """
+        if all(item.label for item in session.checklist):
+            return session
+        from wayfindinglib.analytics.result_quality.all_rules import ALL_RULES
+
+        purposes = {rule.name: rule.purpose for rule in ALL_RULES}
+        labelled = session.model_copy(deep=True)
+        for item in labelled.checklist:
+            if not item.label:
+                item.label = purposes.get(item.rule, item.rule)
+        return labelled
 
     def _with_progress(self, session: ObservationSession) -> ObservationSessionWithProgress:
         """Add the counted progress to a session read.
@@ -2375,6 +2420,26 @@ class ObservationPlanning:
         ]
         entries.sort(key=lambda entry: entry.time, reverse=True)
         return entries
+
+    def _package_for_target(self, target: str | Target) -> ObservationPackage | None:
+        """Pick the one package that stands for a target.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target, matched like `_list_packages` matches it.
+
+        Returns
+        -------
+        package : `ObservationPackage` or `None`
+            The newest planned package, else the newest suggested package
+            that is not dismissed, else `None`.
+        """
+        for status in (PackageStatus.PLANNED, PackageStatus.SUGGESTED):
+            found = self._list_packages(status, target, False)
+            if found:
+                return found[0]
+        return None
 
     def _list_packages(
         self, status: PackageStatus | str | None, target: str | Target | None, include_dismissed: bool = False

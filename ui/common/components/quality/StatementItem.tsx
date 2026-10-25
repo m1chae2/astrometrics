@@ -52,6 +52,7 @@ export const StatementItem: React.FC<StatementItemProps> = ({ statement, itemKey
     const rowIds = evidence.flatMap((reference) =>
         reference.rowId !== null && reference.rowId !== undefined ? [reference.rowId] : [],
     );
+    // The library sometimes leaves plain_message empty, so fall back to the technical message rather than show nothing.
     const text = statement.plainMessage ? statement.plainMessage : statement.message;
     const isCalibration = statement.actionClass === ActionClass.CALIBRATION;
     const showEvidence = Boolean(actions) && rowIds.length > 0;

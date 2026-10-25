@@ -11,7 +11,7 @@
  * target's observation package.
  */
 
-import React, { useEffect, useId, useMemo, useState } from 'react';
+import React, { useEffect, useId, useMemo, useState, useRef } from 'react';
 import type { FramingPanelCorners } from '../layers/FramingOverlay';
 import { useMosaicPreview } from '../hooks/useMosaicPreview';
 import { useTargetPackage } from '../hooks/useTargetPackage';
@@ -47,6 +47,18 @@ function parseNumber(text: string, fallback: number): number {
 export const FramingPanel: React.FC<FramingPanelProps> = ({ targetName, center, onFramingPanelsChange }) => {
   const idPrefix = useId();
   const [isOpen, setIsOpen] = useState(false);
+  // The open and close buttons are different elements; focus follows the swap.
+  const toggleButtonRef = useRef<HTMLButtonElement>(null);
+  const hasToggled = useRef(false);
+  useEffect(() => {
+    if (hasToggled.current) {
+      toggleButtonRef.current?.focus();
+    }
+  }, [isOpen]);
+  const toggleOpen = (nextIsOpen: boolean) => {
+    hasToggled.current = true;
+    setIsOpen(nextIsOpen);
+  };
   const [rows, setRows] = useState(2);
   const [cols, setCols] = useState(2);
   const [overlap, setOverlap] = useState(20);
@@ -97,7 +109,7 @@ export const FramingPanel: React.FC<FramingPanelProps> = ({ targetName, center, 
   if (!isOpen) {
     return (
       <div className="framing-panel framing-panel--closed">
-        <button type="button" className="framing-panel__toggle" onClick={() => setIsOpen(true)}>
+        <button ref={toggleButtonRef} type="button" className="framing-panel__toggle" aria-expanded={false} onClick={() => toggleOpen(true)}>
           Framing
         </button>
       </div>
@@ -112,7 +124,7 @@ export const FramingPanel: React.FC<FramingPanelProps> = ({ targetName, center, 
     >
       <header className="framing-panel__header">
         <h3 className="framing-panel__title">Framing{targetName ? `: ${targetName}` : ''}</h3>
-        <button type="button" className="framing-panel__toggle" onClick={() => setIsOpen(false)}>
+        <button ref={toggleButtonRef} type="button" className="framing-panel__toggle" aria-expanded={true} onClick={() => toggleOpen(false)}>
           Close
         </button>
       </header>

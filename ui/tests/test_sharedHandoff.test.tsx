@@ -16,7 +16,7 @@ import { PlanningTimeProvider, usePlanningTime, toIsoWithLocalOffset } from '../
 import { PlanningTimeIndicator } from '../common/components/PlanningTimeIndicator';
 import { CurrentTargetAnnouncer } from '../common/components/CurrentTargetAnnouncer';
 import { handlePlanChanged } from '../common/utils/planChanged';
-import { planQueryKeys } from '../common/queries/qualityQueryKeys';
+import { PLAN_QUERY_KEY_PREFIX } from '../common/queries/qualityQueryKeys';
 
 type Listener = (action: string, payload: any) => void;
 
@@ -166,7 +166,7 @@ describe('toIsoWithLocalOffset', () => {
 describe('handlePlanChanged', () => {
     it('invalidates plan queries and tells a stale cache from a current one', () => {
         const client = new QueryClient();
-        client.setQueryData(planQueryKeys.session('night-1'), { id: 'night-1', revision: 3 });
+        client.setQueryData([...PLAN_QUERY_KEY_PREFIX, 'session', { session_id: 'night-1' }], { id: 'night-1', revision: 3 });
         client.setQueryData(['other'], 1);
         expect(handlePlanChanged(client, { sessionId: 'night-1', revision: 4 })).toBe(true);
         const states = client.getQueryCache().getAll().map((query) => [query.queryKey[0], query.state.isInvalidated]);

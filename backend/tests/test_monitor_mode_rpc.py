@@ -118,6 +118,8 @@ READ_ONLY_METHODS = frozenset({
     "plan:get",
     "plan:current_session",
     "plan:list_packages",
+    "plan:package_for_target",
+    "quality:resolve_rows",
     "planetarium:get_catalog_sources",
     "planetarium:get_constellation_lines",
     "planetarium:get_deep_catalog_status",

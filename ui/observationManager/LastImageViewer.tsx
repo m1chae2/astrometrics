@@ -1,7 +1,6 @@
 /**
  * @file LastImageViewer.tsx
  * @description Provides a live preview of the last image captured by the camera.
- * REQ: OBM-4: Live Image Feedback
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import { SectionPanel } from '../common/components/SectionPanel';

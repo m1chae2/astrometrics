@@ -196,6 +196,12 @@ class ChecklistItem(BaseModel):
         description="Every time the item was ticked, oldest first. The last one equals `ticked_at`.",
     )
     note: str = Field(default="", alias="note")
+    label: str = Field(
+        default="",
+        alias="label",
+        description="The item in plain words, for display. Filled from the rule's plain wording, and "
+        "from its purpose for an item stored without one.",
+    )
 
 
 class ObservationSession(BaseModel):

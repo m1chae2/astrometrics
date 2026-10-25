@@ -74,6 +74,18 @@ function renderPanel(center: { ra: number; dec: number } | null, onChange = vi.f
 beforeEach(() => callBackendMock.mockReset());
 
 describe('FramingPanel', () => {
+  /** Focus follows the open and close buttons, which are different elements. */
+  it('keeps focus on the toggle button after opening and closing', async () => {
+    setBackend();
+    const user = renderPanel(null);
+    await user.click(screen.getByRole('button', { name: 'Framing' }));
+    const closeButton = screen.getByRole('button', { name: 'Close' });
+    expect(closeButton.getAttribute('aria-expanded')).toBe('true');
+    expect(document.activeElement).toBe(closeButton);
+    await user.click(closeButton);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Framing' }));
+  });
+
   /** No target: asks for one and does not call the preview. */
   it('says "Choose a target" and does not fetch', async () => {
     setBackend();

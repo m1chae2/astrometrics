@@ -263,6 +263,7 @@ export interface ActionRegistry {
     "plan:get": { payload: { session_id?: string }; response: import('../types/backendTypes').ObservationSession | ObservationSessionSummary[] };
     "plan:current_session": { payload: Record<string, never>; response: import('../types/backendTypes').ObservationSessionWithProgress | null };
     "plan:list_packages": { payload: { status?: string; target?: string; include_dismissed?: boolean }; response: import('../types/backendTypes').ObservationPackage[] };
+    "plan:package_for_target": { payload: { target: string }; response: import('../types/backendTypes').ObservationPackage | null };
     "plan:create": { payload: { night_id?: string }; response: import('../types/backendTypes').ObservationSession };
     "plan:create_package": { payload: { target: string; exposure_requests?: Array<Record<string, any>>; plan_items?: Array<Record<string, any>>; dither_config?: Record<string, any>; minimum_altitude_deg?: number; priority?: number; notes?: string }; response: import('../types/backendTypes').ObservationPackage };
     "plan:edit": { payload: { session_id: string; add?: Array<Record<string, any>>; order?: string[]; remove?: string[]; set_exposures?: Record<string, Array<Record<string, any>>>; add_checklist?: Array<Record<string, any>>; framing?: Record<string, any>; expected_revision?: number }; response: import('../types/backendTypes').PlanChange };
@@ -301,6 +302,7 @@ export interface ActionRegistry {
     // Parameter names are snake_case (target_id, not targetId); the router
     // drops names it does not know, so a misspelled filter is ignored.
     "quality:query": { payload: { metric?: string; level?: import('../types/backendTypes').SubjectLevel; target_id?: string; observing_night_id?: string; camera?: string; telescope?: string; since?: string; row_ids?: number[]; latest_only?: boolean; variant?: string; library_only?: boolean }; response: import('../types/backendTypes').QualityMeasurement[] };
+    "quality:resolve_rows": { payload: { row_ids: number[] }; response: import('../types/backendTypes').QualityRowResolution };
     "quality:metrics": { payload: { name?: string; checkpoint?: import('../types/backendTypes').Checkpoint; detail?: 'summary' | 'full' }; response: import('../types/backendTypes').MetricSummary[] | import('../types/backendTypes').MetricSpec[] };
 
     // Analysis
@@ -369,7 +371,7 @@ export interface ActionRegistry {
     "history:target_changes": { payload: { session_id?: string; limit?: number }; response: import('../types/backendTypes').TargetChange[] };
     "history:live_session_status": { payload: { window_minutes?: number; include?: string[]; limit?: number }; response: import('../types/backendTypes').LiveSessionStatus };
     "observatory:safety_status": { payload: Record<string, never>; response: import('../types/backendTypes').SafetyStatus };
-    "calibration:query": { payload: { kind?: 'dark' | 'bias' | 'flat'; detail?: 'counts' | 'target_match' | 'target_frames'; target?: string; camera_id?: string; refresh?: boolean }; response: import('../types/backendTypes').CalibrationQueryResult };
+    "calibration:query": { payload: { kind?: 'dark' | 'bias' | 'flat'; detail?: 'counts' | 'target_match' | 'target_frames' | 'match'; target?: string; camera_id?: string; refresh?: boolean; gain?: string | number; offset?: number; binning?: string | number; temperature_c?: number }; response: import('../types/backendTypes').CalibrationQueryResult };
 
     // Hand-off of the workspace to a paired phone
     "handoff:get_state": { payload: Record<string, never>; response: HandoffState };
@@ -517,6 +519,8 @@ const IDEMPOTENT_READ_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
     'plan:get',
     'plan:current_session',
     'plan:list_packages',
+    'plan:package_for_target',
+    'quality:resolve_rows',
     'advisory:target_report',
     'advisory:tonight',
     'advisory:result',

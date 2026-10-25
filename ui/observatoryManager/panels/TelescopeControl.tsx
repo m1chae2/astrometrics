@@ -23,8 +23,6 @@ export interface TelescopeControlProps {
  *
  * Provides an interface for tracking, parking, and alignment control.
  * Displays buttons with active and pending states based on telescope telemetry.
- * REQ: OBS-4.1: The display SHALL provide controls to Park and Unpark the mount.
- * REQ: OBS-4.2: The display SHALL indicate current park status (Parked/Unparked).
  */
 export const TelescopeControl: React.FC<TelescopeControlProps> = ({
     isTracking,
@@ -113,7 +111,6 @@ export const TelescopeControl: React.FC<TelescopeControlProps> = ({
                 </button>
             </div>
 
-            {/* REQ: OBS-4: Tracking & Parking Control */}
             {/* Park Control Row */}
             <div className="telescope-control__row">
                 <button

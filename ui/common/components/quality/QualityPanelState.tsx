@@ -28,7 +28,7 @@ export const QualityPanelState: React.FC<QualityPanelStateProps> = ({
 }) => {
     if (state === 'loading') {
         return (
-            <div className="quality-state" aria-busy="true" role="status">
+            <div className="quality-state" aria-busy="true">
                 Loading…
             </div>
         );

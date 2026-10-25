@@ -741,10 +741,26 @@ def test_a_calibration_statement_adds_a_checklist_item_merged_by_key(fixture: Fi
     change = fixture.planning.refresh_suggestions(register_job=False)
     stored = fixture.planning.get_plan(session.id)
     assert [item.rule for item in stored.checklist] == ["master_flat_noisy"]
+    assert stored.checklist[0].label == "The master flat is noisy."
     assert change.checklist_item_ids == [stored.checklist[0].item_id]
     again = fixture.planning.refresh_suggestions(register_job=False)
     assert again.checklist_item_ids == []
     assert len(fixture.planning.get_plan(session.id).checklist) == 1
+
+
+def test_an_item_stored_without_a_label_reads_back_with_its_rules_purpose(fixture: Fixture) -> None:
+    """An old item reads back with its rule's purpose, else the rule name."""
+    from wayfindinglib.analytics.result_quality.all_rules import ALL_RULES
+    from wayfindinglib.models.session.observation_session import ChecklistItem
+
+    session = night_session(fixture)
+    fixture.planning.edit_queue(
+        session.id,
+        add_checklist=[ChecklistItem(rule="master_flat_noisy"), ChecklistItem(rule="no_such_rule")],
+    )
+    labels = [item.label for item in fixture.planning.get_plan(session.id).checklist]
+    purpose = next(rule.purpose for rule in ALL_RULES if rule.name == "master_flat_noisy")
+    assert labels == [purpose, "no_such_rule"]
 
 
 def test_a_calibration_statement_without_a_session_leaves_a_note(fixture: Fixture) -> None:
@@ -970,6 +986,37 @@ def test_include_is_refused_where_it_does_not_apply(fixture: Fixture) -> None:
         fixture.planning.get_plan(include=["everything"])
     with pytest.raises(InvalidArgumentError):
         fixture.planning.get_plan(kind="sessions", include_dismissed=True)
+
+
+def test_pick_one_gives_the_planned_package_else_the_suggested_one(fixture: Fixture) -> None:
+    """`pick="one"` prefers planned, skips dismissed, matches names loosely."""
+
+    def pick(name: str) -> ObservationPackage | None:
+        """Pick the one package of a target.
+
+        Returns
+        -------
+        package : `ObservationPackage` or `None`
+            What the library picks.
+        """
+        return fixture.planning.get_plan(kind="packages", target=name, pick="one")
+
+    assert pick("M 81") is None
+    fixture.statements["M 81"] = [more_frames(40)]
+    fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    [suggestion] = suggested(fixture)
+    assert pick("m_81").id == suggestion.id
+    fixture.planning.edit_package(suggestion.id, dismiss=True)
+    assert pick("M 81") is None
+    fixture.planning.edit_package(suggestion.id, undismiss=True)
+    planned = fixture.planning.create_plan("package", target="M 81")
+    assert pick("M 81").id == planned.id
+    with pytest.raises(InvalidArgumentError):
+        fixture.planning.get_plan(kind="packages", pick="one")
+    with pytest.raises(InvalidArgumentError):
+        fixture.planning.get_plan(kind="sessions", pick="one")
+    with pytest.raises(InvalidArgumentError):
+        fixture.planning.get_plan(kind="packages", target="M 81", pick="two")
 
 
 def test_the_suggestion_log_can_be_read_for_one_target(fixture: Fixture) -> None:

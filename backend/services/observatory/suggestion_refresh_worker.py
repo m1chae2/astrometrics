@@ -20,8 +20,9 @@ worker keeps one set of targets that changed and one background thread:
   reaches the caller of `request`, so it cannot break an announcement.
 
 After a run that changed something, the worker sends ``packages:changed`` with
-the counts (kind ``refreshed``). If the run added checklist items, it also
-sends ``plan:changed`` for tonight's session.
+the counts (kind ``refreshed``) and the ids of the removed
+(`deletedPackageIds`) and completed (`completedPackageIds`) packages. If the
+run added checklist items, it also sends ``plan:changed`` for tonight.
 """
 
 import logging
@@ -156,7 +157,15 @@ class SuggestionRefreshWorker:
         if not any(counts.values()):
             return
         self._socket_manager.broadcast_ui_event_sync(
-            "packages:changed", {"packageId": None, "targetId": None, "kind": "refreshed", **counts}
+            "packages:changed",
+            {
+                "packageId": None,
+                "targetId": None,
+                "kind": "refreshed",
+                **counts,
+                "deletedPackageIds": list(change.deleted),
+                "completedPackageIds": list(change.completed),
+            },
         )
         if change.checklist_item_ids:
             session = self._wayfinder.planning.get_plan(night_id=observing_night_id(time.time()))

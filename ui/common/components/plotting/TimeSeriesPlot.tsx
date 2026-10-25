@@ -136,7 +136,7 @@ export const TimeSeriesPlot = React.memo(({
                 x1: 1,
                 y0: line.y,
                 y1: line.y,
-                line: { color: line.color ?? '#aaa', width: 1, dash: 'dash' }
+                line: { color: line.color ?? getVar('--plot-reference-line', 'currentColor'), width: 1, dash: 'dash' }
             }))
         ],
         annotations: [

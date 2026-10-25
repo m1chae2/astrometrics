@@ -49,6 +49,7 @@ from wayfindinglib.models.quality.statements import (
     Severity,
     StatementKind,
 )
+from wayfindinglib.test.plain_wording_support import assert_plain_message_is_sound
 
 SETTING = CaptureSetting(
     camera="ASI533MM Pro",
@@ -569,3 +570,57 @@ def test_seeing_limit_says_nothing_when_it_cannot_be_evaluated() -> None:
     assert (
         rr.seeing_limit_statements(kept, ScienceGoal.PERIOD_DETECTION, lambda _s: physical, _evidence()) == []
     )
+
+
+# -- plain messages ----------------------------------------------------------
+
+
+def test_every_statement_this_module_builds_has_a_sound_plain_message() -> None:
+    """Each builder gives a short, jargon-free plain message."""
+    statements = []
+    statements += rr.frames_lost_statements(
+        [_summary(frames_set_aside=5)], {SETTING: Counter({"clouded": 3})}, {}, Counter({"clouded": 2}), 8
+    )
+    statements += rr.sky_cost_statements([_summary(account=_account(900.0, 600.0))])
+    statements += rr.sky_cost_statements([_summary(account=_account(700.0, None))])
+    cost = rr.find_altitude_cost(_altitude_samples(0.5, 0.8))
+    assert cost is not None
+    statements.append(rr.altitude_cost_statement(cost, SETTING, []))
+    widths = [2.0 + 0.1 * index for index in range(20)]
+    tradeoff = rr.find_sharpness_tradeoff(_frames(20), widths, WeightingMode.EQUAL)
+    assert tradeoff is not None
+    statements.append(rr.sharpness_statement(tradeoff, SETTING, []))
+    for finding in rr.find_calibration_gaps([_group()], [{**DARK_OK, "binning": "2x2"}], [FLAT_OK]):
+        statements.append(rr.calibration_gap_statement(finding))
+    result = TakeMoreResult(
+        frames_needed=20,
+        predicted_noise_ratio=0.71,
+        target_noise_ratio=0.707,
+        added_exposure_seconds=1800.0,
+        new_exposure_seconds=90.0,
+    )
+    overheads = CaptureOverheads(
+        download_seconds=5.0,
+        dither_settle_seconds=20.0,
+        autofocus_seconds=120.0,
+        download_from_records=False,
+        dither_from_records=False,
+        autofocus_from_records=False,
+        gaps_used=0,
+    )
+    more = rr.more_frames_statement(result, SETTING, overheads, [])
+    assert more is not None
+    statements.append(more)
+    signal = StopSignal(stopped=True, predicted_gain_fraction=0.05, reason="Doubling gives 5 percent.")
+    statements.append(rr.stop_statement(signal, SETTING, 7200.0, []))
+    statements += rr.seeing_limit_statements(
+        _width_observations(3.0),
+        ScienceGoal.EXTENDED_OBJECT,
+        lambda _setting: _reference(EfficiencyReferenceKind.PHYSICAL),
+        _evidence(),
+    )
+    statements.append(rr.insufficient("calibration_gap", "Library not read."))
+    assert len(statements) >= 10
+    for statement in statements:
+        assert_plain_message_is_sound(statement)
+    assert "roughly 29%" in next(s for s in statements if s.rule == "more_frames").plain_message

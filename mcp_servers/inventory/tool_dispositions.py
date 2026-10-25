@@ -561,6 +561,7 @@ DECISIONS = {
             "planning_create_plan",
             "planning_edit_queue",
             "planning_edit_package",
+            "planning_refresh_suggestions",
             "planning_tick_checklist_item",
         ),
         ToolDecision("withhold", READ_ONLY_NOTE),

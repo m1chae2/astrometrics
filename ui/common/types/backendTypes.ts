@@ -2778,6 +2778,8 @@ export interface ObservationPackage {
   suggestion?: PackageSuggestion | null;
   /** Where the camera points for this package, with any mosaic panels. */
   framing?: Framing | null;
+  /** When the library last found every light row captured. None: not complete. */
+  completed_at?: string | null;
 }
 
 /**
@@ -2857,6 +2859,16 @@ export interface ExposureRequest {
   offset?: number | null;
   /** The binning factor (1 means no binning). None: not set. */
   binning?: number | null;
+  /** For a row the library suggested: what it came from (rule, target, capture setting). */
+  sourceKey?: string;
+  /** For a row the library suggested: why, in plain words. */
+  reason?: string;
+  /** For a suggested row: a short code for its evidence. A dismissal lasts until it changes. */
+  evidenceFingerprint?: string;
+  /** The row's last update or promotion time. Only frames taken at or after it count toward the row. None: the package's creation time. */
+  countedFrom?: string | null;
+  /** Matching frames already counted when the package was reopened. They do not count again. */
+  baselineCaptured?: number;
 }
 
 /**
@@ -2887,7 +2899,11 @@ export interface SequenceSummary {
  * capture_setting : `CaptureSetting` or `None`
  * The capture setting it is about, when it is about one.
  * message : `str`
- * One plain sentence.
+ * The technical sentence, with the numbers.
+ * plain_message : `str`
+ * The same finding in everyday words, one or two short sentences. Empty
+ * in a statement stored before this field existed; a reader then falls
+ * back to ``message``.
  * reason : `str`
  * Why. For ``insufficient_data``, what is missing and how to get it.
  * proposed_action : `ProposedAction` or `None`
@@ -2918,6 +2934,7 @@ export interface TargetStatement {
   actionClass?: ActionClass | null;
   captureSetting?: CaptureSetting | null;
   message: string;
+  plainMessage?: string;
   reason?: string;
   proposedAction?: ProposedAction | null;
   expectedEffect?: ExpectedEffect | null;
@@ -3181,6 +3198,12 @@ export interface TargetChange {
  * The temperature at that time.
  * flags : `list` [`str`]
  * The session-level problems, one sentence each, most recent first.
+ * plain_flags : `list` [`str`]
+ * The same problems in everyday words, one sentence each. Their order
+ * and count can differ from ``flags``.
+ * plain_verdict : `str`
+ * How the session is going, in one or two everyday sentences built from
+ * ``plain_flags``. It is a rough reading of Ekos' own records.
  */
 export interface LiveSessionStatus {
   analyze_file: string;
@@ -3204,6 +3227,8 @@ export interface LiveSessionStatus {
   last_autofocus_at?: number | null;
   last_autofocus_temperature_c?: number | null;
   flags?: string[];
+  plain_flags?: string[];
+  plain_verdict?: string;
 }
 
 /**
@@ -3359,8 +3384,9 @@ export enum PackageStatus {
 /**
  * Why the library suggested a package, kept with the package.
  *
- * Fields only. A later step fills them in when it makes or updates a
- * suggested package.
+ * The suggestion refresh (`ObservationPlanning.refresh_suggestions`) fills
+ * these fields in. A package the user promoted keeps them, so the refresh
+ * does not suggest it again.
  */
 export interface PackageSuggestion {
   /** "rule": a quality rule asked for more frames. "ranking": tonight's ranking picked it. */
@@ -3375,6 +3401,14 @@ export interface PackageSuggestion {
   confidence?: string;
   /** A short code for the evidence. A dismissal lasts until it changes. */
   evidenceFingerprint?: string;
+  /** For a ranking suggestion: the use it ranks for (imaging, photometry or spectroscopy). */
+  rankingUse?: string;
+  /** For a ranking suggestion: the observing night it is for. It expires after that night. */
+  observingNightId?: string | null;
+  /** The evidence fingerprint when the whole package was dismissed. Empty: not dismissed. */
+  dismissedFingerprint?: string;
+  /** Rows the user dismissed one at a time. */
+  dismissedRows?: DismissedRow[];
   createdAt?: string;
   updatedAt?: string;
 }
@@ -3418,9 +3452,12 @@ export interface SequenceDitherRow {
  * `WARNING` is about data already taken. `RECOMMENDATION` is about the
  * next session. `CONSTRAINT` states a limit of the equipment and gives no
  * advice. `INSUFFICIENT_DATA` says what is missing and how to get it.
+ * `RESULT` states what a star's science result is (for example its
+ * spectral type) with the number behind it, and asks for nothing.
  */
 export enum StatementKind {
   WARNING = "warning",
+  RESULT = "result",
   RECOMMENDATION = "recommendation",
   CONSTRAINT = "constraint",
   INSUFFICIENT_DATA = "insufficient_data"
@@ -4021,6 +4058,9 @@ export interface GuidingWindowSummary {
  * Whether a dither finished shortly before this exposure began.
  * flags : `list` [`str`]
  * One sentence per problem found. Empty for a clean frame.
+ * plain_flags : `list` [`str`]
+ * The same problems in everyday words, one sentence each, in the same
+ * order as ``flags``.
  */
 export interface ExposureSummary {
   frame_name: string;
@@ -4033,6 +4073,7 @@ export interface ExposureSummary {
   guide_rms_rest_arcsec?: number | null;
   follows_dither?: boolean;
   flags?: string[];
+  plain_flags?: string[];
 }
 
 /**
@@ -4238,6 +4279,21 @@ export interface RecoveryAttempt {
   attemptedAt?: string;
   outcome: DeviceSummaryState;
   detail?: string;
+}
+
+/**
+ * A suggested row the user dismissed, kept so the dismissal can be undone.
+ *
+ * The row is taken out of the package's exposure list. The refresh does
+ * not add it again while its fingerprint stays the same.
+ */
+export interface DismissedRow {
+  /** The row's source key. */
+  sourceKey: string;
+  /** The row's evidence fingerprint when dismissed. */
+  fingerprint: string;
+  /** The row as it was when dismissed. */
+  request: ExposureRequest;
 }
 
 /**

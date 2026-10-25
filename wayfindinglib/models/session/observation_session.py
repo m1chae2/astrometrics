@@ -73,6 +73,31 @@ class QueueEntryStatus(StrEnum):
     SKIPPED = "SKIPPED"
 
 
+class RunState(StrEnum):
+    """How far a session or one of its entries has got, from the frames.
+
+    The library works it out from the frames that arrived (see
+    `wayfindinglib.analytics.session_progress`). The value is typed so a
+    screen never has to decide it.
+
+    * `UPCOMING`: the night has not begun, or nothing has been captured yet.
+    * `IMAGING`: a frame arrived a short while ago, so it is imaged now.
+    * `IN_PROGRESS`: tonight, some frames are in, and nothing arrived lately.
+    * `COMPLETE`: every light frame requested has been captured and judged.
+    * `PARTLY_DONE`: the night is over and some, but not all, frames came in.
+    * `NOT_RUN`: the night is over and no frame came in.
+    * `UNKNOWN`: the frames could not be read, so the library cannot say.
+    """
+
+    UPCOMING = "upcoming"
+    IMAGING = "imaging"
+    IN_PROGRESS = "in_progress"
+    COMPLETE = "complete"
+    PARTLY_DONE = "partly_done"
+    NOT_RUN = "not_run"
+    UNKNOWN = "unknown"
+
+
 class StartTimeMode(StrEnum):
     """A package placement request's starting disposition."""
 
@@ -284,3 +309,8 @@ class ObservationSessionSummary(BaseModel):
     status: SessionStatus = Field(alias="status", description="Where the session is in its life.")
     night_date: date = Field(alias="nightDate", description="The local date the observing night began.")
     entry_count: int = Field(alias="entryCount", description="How many entries its queue holds.")
+    run_state: RunState | None = Field(
+        default=None,
+        alias="runState",
+        description='How far the session got. Set only when asked for with include=["progress"].',
+    )

@@ -611,6 +611,13 @@
       "interim_block": "",
       "note": "Built 2026-10-04. The position of a named object, from the library or SIMBAD. Reads only."
     },
+    "planning_refresh_suggestions": {
+      "tool_class": "change-data",
+      "category": "planning-sessions",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "The AI is read-only, so a tool that writes is not offered."
+    },
     "planning_resolve_target_coordinates": {
       "tool_class": "compute",
       "category": "planning-sessions",

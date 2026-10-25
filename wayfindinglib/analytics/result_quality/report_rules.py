@@ -66,6 +66,11 @@ from wayfindinglib.analytics.result_quality.noise_growth import (
     WeightingMode,
     forecast_stack_noise,
 )
+from wayfindinglib.analytics.result_quality.plain_text import (
+    exposure_phrases,
+    format_plain,
+    plain_missing_data,
+)
 from wayfindinglib.analytics.result_quality.rules import rule_by_name
 from wayfindinglib.analytics.result_quality.science_goal import GoalSource, goal_of_setting
 from wayfindinglib.models.quality.capture_summary import CaptureSettingSummary
@@ -178,6 +183,7 @@ def _from_rule(
     reason: str,
     *,
     capture_setting: CaptureSetting | None,
+    plain_message: str,
     evidence: Iterable[MeasurementReference] = (),
     proposed_action: ProposedAction | None = None,
     expected_effect: ExpectedEffect | None = None,
@@ -194,6 +200,8 @@ def _from_rule(
         Why.
     capture_setting : `CaptureSetting` or `None`
         The setting it is about.
+    plain_message : `str`
+        The same finding in everyday words (the rule's plain template, filled).
     evidence : `Iterable` [`MeasurementReference`], optional
         The rows it used. Repeats are dropped.
     proposed_action : `ProposedAction`, optional
@@ -222,6 +230,7 @@ def _from_rule(
         action_class=rule.action_class,
         capture_setting=capture_setting,
         message=message,
+        plain_message=plain_message,
         reason=reason,
         proposed_action=proposed_action,
         expected_effect=expected_effect,
@@ -256,6 +265,7 @@ def insufficient(
         kind=StatementKind.INSUFFICIENT_DATA,
         capture_setting=capture_setting,
         message=f"Cannot check the rule {rule.name.replace('_', ' ')}: data is missing.",
+        plain_message=plain_missing_data(rule.name),
         reason=reason,
         confidence=rule.confidence,
     )
@@ -307,9 +317,12 @@ def frames_lost_statements(
             continue
         reasons = reasons_by_setting.get(summary.capture_setting, Counter())
         reason_text = _reason_text(reasons)
-        message = rule.wording.format(
-            lost_count=summary.frames_set_aside, frame_count=summary.frames_taken, reason_text=reason_text
-        )
+        fields = {
+            "lost_count": summary.frames_set_aside,
+            "frame_count": summary.frames_taken,
+            "reason_text": reason_text,
+        }
+        message = rule.wording.format_map(fields)
         statements.append(
             _from_rule(
                 "frames_lost",
@@ -319,23 +332,28 @@ def frames_lost_statements(
                     f"the {FRAME_LOSS_WARNING_FRACTION * 100:.0f}% that the rule treats as a loss."
                 ),
                 capture_setting=summary.capture_setting,
+                plain_message=format_plain(rule, fields),
                 evidence=evidence_by_setting.get(summary.capture_setting, ()),
             )
         )
     if unassigned_reasons and sum(unassigned_reasons.values()) > 0:
         count = sum(unassigned_reasons.values())
         total = unassigned_frame_count + count
+        unassigned_fields = {
+            "lost_count": count,
+            "frame_count": total,
+            "reason_text": _reason_text(unassigned_reasons),
+        }
         statements.append(
             _from_rule(
                 "frames_lost",
-                rule.wording.format(
-                    lost_count=count, frame_count=total, reason_text=_reason_text(unassigned_reasons)
-                ),
+                rule.wording.format_map(unassigned_fields),
                 (
                     "No stored measurement of these frames names their capture setting, so the loss is "
                     "not in any setting's summary. Measure the target's frames again to place them."
                 ),
                 capture_setting=None,
+                plain_message=format_plain(rule, unassigned_fields),
             )
         )
     return statements
@@ -398,10 +416,11 @@ def sky_cost_statements(summaries: Sequence[CaptureSettingSummary]) -> list[Targ
             continue
         condition = "Moon" if has_split else "Moon, twilight or light pollution"
         advice = "Schedule moonless nights." if has_split else "Schedule darker nights, away from the Moon."
+        fields = {"condition_text": condition, "loss_percent": share * 100.0, "advice_text": advice}
         statements.append(
             _from_rule(
                 "sky_cost",
-                rule.wording.format(condition_text=condition, loss_percent=share * 100.0, advice_text=advice),
+                rule.wording.format_map(fields),
                 (
                     f"The loss account against the {account.reference_name} reference puts "
                     f"{lost_seconds / 60.0:.0f} min of {summary.captured_seconds / 60.0:.0f} min of captured "
@@ -413,6 +432,7 @@ def sky_cost_statements(summaries: Sequence[CaptureSettingSummary]) -> list[Targ
                     )
                 ),
                 capture_setting=summary.capture_setting,
+                plain_message=format_plain(rule, fields),
                 proposed_action=ProposedAction(note=advice),
                 expected_effect=ExpectedEffect(
                     efficiency_change=share, description=f"About {share * 100:.0f}% more usable time."
@@ -535,6 +555,7 @@ def seeing_limit_statements(
                 )
             ),
             capture_setting=setting,
+            plain_message=rule.plain_wording,
             evidence=[star_width_evidence[f] for f, _w in widths if f in star_width_evidence],
         )
         statements.append(statement.model_copy(update={"limits": [limit]}))
@@ -611,13 +632,21 @@ def guiding_limits_statements(
             note="No tested exposure reaches the target share. Check the guiding record first."
         )
         reason_tail = f" No tested exposure reaches {TARGET_SHARP_FRACTION * 100:.0f}%."
+    if supported is not None and supported_fraction is not None:
+        supported_sentence = (
+            f" Try {supported:g} s frames: we expect about {supported_fraction * 100:.0f}% to stay sharp."
+        )
+    else:
+        supported_sentence = " Check the guiding first."
+    fields = {
+        "used_text": f"{result.used_exposure_seconds:g} s",
+        "used_percent": used.sharp_fraction * 100.0,
+        "supported_clause": clause,
+        "supported_sentence": supported_sentence,
+    }
     statement = _from_rule(
         "guiding_limits_exposure",
-        rule.wording.format(
-            used_text=f"{result.used_exposure_seconds:g} s",
-            used_percent=used.sharp_fraction * 100.0,
-            supported_clause=clause,
-        ),
+        rule.wording.format_map(fields),
         (
             f"A window of {result.used_exposure_seconds:g} s is sharp when its guide error on the worse "
             f"axis is at most {result.allowed_guide_rms_arcsec:.2f} arcsec, which widens a "
@@ -626,6 +655,7 @@ def guiding_limits_statements(
             + reason_tail
         ),
         capture_setting=setting,
+        plain_message=format_plain(rule, fields),
         evidence=star_width_evidence,
         proposed_action=action,
     )
@@ -733,13 +763,14 @@ def altitude_cost_statement(
         The recommendation.
     """
     rule = rule_by_name("altitude_cost")
+    fields = {
+        "altitude_degrees": cost.cut_deg,
+        "loss_percent": cost.relative_loss * 100.0,
+        "advice_altitude_degrees": cost.cut_deg,
+    }
     return _from_rule(
         "altitude_cost",
-        rule.wording.format(
-            altitude_degrees=cost.cut_deg,
-            loss_percent=cost.relative_loss * 100.0,
-            advice_altitude_degrees=cost.cut_deg,
-        ),
+        rule.wording.format_map(fields),
         (
             f"{cost.low_frame_count} frames below {cost.cut_deg:.0f} degrees were "
             f"{cost.relative_loss * 100:.0f}% less efficient than {cost.high_frame_count} frames above it. "
@@ -747,6 +778,7 @@ def altitude_cost_statement(
             "of that hour."
         ),
         capture_setting=capture_setting,
+        plain_message=format_plain(rule, fields),
         evidence=evidence,
         proposed_action=ProposedAction(note=f"Image above {cost.cut_deg:.0f} degrees."),
         expected_effect=ExpectedEffect(
@@ -853,18 +885,20 @@ def sharpness_statement(
         The recommendation (a data selection; the user decides).
     """
     rule = rule_by_name("sharpness_tradeoff")
+    fields = {
+        "keep_percent": tradeoff.keep_fraction * 100.0,
+        "sharper_percent": -tradeoff.star_width_change * 100.0,
+        "noisier_percent": tradeoff.noise_change * 100.0,
+    }
     return _from_rule(
         "sharpness_tradeoff",
-        rule.wording.format(
-            keep_percent=tradeoff.keep_fraction * 100.0,
-            sharper_percent=-tradeoff.star_width_change * 100.0,
-            noisier_percent=tradeoff.noise_change * 100.0,
-        ),
+        rule.wording.format_map(fields),
         (
             f"Of {tradeoff.total_count} frames, the {tradeoff.kept_count} sharpest were compared with all. "
             "The noise change is a forecast from the frames' sky and read noise, not a measurement."
         ),
         capture_setting=capture_setting,
+        plain_message=format_plain(rule, fields),
         evidence=evidence,
         proposed_action=ProposedAction(
             note=f"Stack only the sharpest {tradeoff.keep_fraction * 100:.0f}% of the frames."
@@ -1248,9 +1282,10 @@ def calibration_gap_statement(finding: CalibrationFinding) -> TargetStatement:
     rule = rule_by_name("calibration_gap")
     setting = finding.group.capture_setting
     plural = "darks" if finding.frame_type == CALIBRATION_DARK_FRAME_TYPE else "flats"
+    fields = {"frame_type_text": plural, "setting_text": finding.setting_text}
     return _from_rule(
         "calibration_gap",
-        rule.wording.format(frame_type_text=plural, setting_text=finding.setting_text),
+        rule.wording.format_map(fields),
         (
             f"{finding.group.frame_count} light frames need them. {finding.nearest_row_text} "
             f"The match uses the camera, gain, offset, binning and "
@@ -1261,6 +1296,7 @@ def calibration_gap_statement(finding: CalibrationFinding) -> TargetStatement:
             )
         ),
         capture_setting=setting,
+        plain_message=format_plain(rule, fields),
         proposed_action=ProposedAction(
             calibration_frame_type=finding.frame_type, note=f"Take {plural} at {finding.setting_text}."
         ),
@@ -1306,19 +1342,22 @@ def more_frames_statement(
     rule = rule_by_name("more_frames")
     clock = wall_clock_estimate(result.frames_needed, result.new_exposure_seconds, overheads)
     change = (result.predicted_noise_ratio or result.target_noise_ratio) - 1.0
+    fields = {
+        "frame_count": result.frames_needed,
+        "exposure_text": exposure_text(result.new_exposure_seconds),
+        "wall_clock_text": duration_text(clock.total_seconds) + " with downloads",
+        "noise_percent": -change * 100.0,
+        **exposure_phrases(result.new_exposure_seconds),
+    }
     return _from_rule(
         "more_frames",
-        rule.wording.format(
-            frame_count=result.frames_needed,
-            exposure_text=exposure_text(result.new_exposure_seconds),
-            wall_clock_text=duration_text(clock.total_seconds) + " with downloads",
-            noise_percent=-change * 100.0,
-        ),
+        rule.wording.format_map(fields),
         (
             "Doubling the effective time is the step, because it is about the smallest change the eye sees. "
             f"The count follows your own frames' sky and read noise. {result.reason or ''} {exposure_note}"
         ).strip(),
         capture_setting=capture_setting,
+        plain_message=format_plain(rule, fields),
         evidence=evidence,
         proposed_action=ProposedAction(
             exposure_seconds=result.new_exposure_seconds, frame_count=result.frames_needed
@@ -1358,13 +1397,18 @@ def stop_statement(
     """
     rule = rule_by_name("more_frames_will_not_help")
     time_text = duration_text(effective_seconds) if effective_seconds else "the present time"
+    fields = {
+        "effective_time_text": time_text,
+        "advice_text": "Retake flats or dither before adding frames.",
+        "plain_advice_text": (
+            "Retake your flats, or shift the telescope slightly between frames, before adding more."
+        ),
+    }
     return _from_rule(
         "more_frames_will_not_help",
-        rule.wording.format(
-            effective_time_text=time_text,
-            advice_text="Retake flats or dither before adding frames.",
-        ),
+        rule.wording.format_map(fields),
         signal.reason,
         capture_setting=capture_setting,
+        plain_message=format_plain(rule, fields),
         evidence=evidence,
     )

@@ -17,6 +17,7 @@ from wayfindinglib.models.session.ekos_session import (
 )
 from wayfindinglib.models.session.live_session_status import DitherEvent
 from wayfindinglib.session_analysis import live_status
+from wayfindinglib.test.plain_wording_support import banned_terms_in, sentences_of
 
 _START = 1_790_000_000.0
 """An arbitrary start time, in seconds since the epoch."""
@@ -277,3 +278,118 @@ def test_status_reports_pier_side_capture_counts_and_dither_settings() -> None:
     assert (settings.last_amplitude_px, settings.median_amplitude_px) == (3.0, 2.25)
     assert settings.exposures_per_dither == pytest.approx(4.5)
     assert "guide algorithm" in status.unavailable[0].lower()
+
+
+def _frame(
+    index: int, stars: int, target: str = "M 81", filter_name: str = "Luminance", exposure: float = 120.0
+) -> EkosCapture:
+    """Build one finished exposure of a given target, filter and length.
+
+    Returns
+    -------
+    capture : `EkosCapture`
+        The exposure, saved where Ekos saves ``<target>/Light/<filter>/``.
+    """
+    return EkosCapture(
+        completed_at=_START + 130.0 + 120.0 * index,
+        exposure_seconds=exposure,
+        filter_name=filter_name,
+        star_count=stars,
+        file_path=f"/home/stellarmate/Pictures/{target}/Light/{filter_name}/frame_{index:03d}.fits",
+    )
+
+
+def _flagged_for_stars(captures: list[EkosCapture]) -> list[str]:
+    """Name the frames that the live status flags for too few stars.
+
+    Returns
+    -------
+    names : `list` [`str`]
+        File names of flagged frames.
+    """
+    exposures = live_status.summarize_exposures(captures, [], [], [], count=len(captures))
+    return [e.frame_name for e in exposures if any("stars" in flag for flag in e.flags)]
+
+
+def test_a_target_switch_does_not_flag_the_first_frames_of_the_new_target() -> None:
+    """Fewer stars on a new target are not 'trailed or clouded'."""
+    captures = [_frame(i, 240) for i in range(8)] + [_frame(8 + i, 60, target="M 51") for i in range(8)]
+
+    assert _flagged_for_stars(captures) == []
+
+
+def test_a_filter_switch_restarts_the_star_baseline() -> None:
+    """A narrowband filter shows far fewer stars; that is not a fault."""
+    captures = [_frame(i, 240) for i in range(8)] + [_frame(8 + i, 40, filter_name="Ha") for i in range(8)]
+
+    assert _flagged_for_stars(captures) == []
+
+
+def test_an_exposure_change_restarts_the_star_baseline() -> None:
+    """Short frames show fewer stars than long ones."""
+    captures = [_frame(i, 240) for i in range(8)] + [_frame(8 + i, 50, exposure=10.0) for i in range(8)]
+
+    assert _flagged_for_stars(captures) == []
+
+
+def test_a_ruined_frame_is_still_flagged_inside_one_setting() -> None:
+    """The baseline is the same setting's frames, so a real drop is caught."""
+    captures = [_frame(i, 240) for i in range(8)] + [_frame(8, 20)]
+
+    assert _flagged_for_stars(captures) == ["frame_008.fits"]
+
+
+def test_the_baseline_restarts_after_each_change_not_only_the_first() -> None:
+    """Returning to the first setting starts a new baseline there too."""
+    captures = (
+        [_frame(i, 240) for i in range(6)]
+        + [_frame(6 + i, 60, target="M 51") for i in range(6)]
+        + [_frame(12 + i, 240) for i in range(6)]
+        + [_frame(18, 20)]
+    )
+
+    assert _flagged_for_stars(captures) == ["frame_018.fits"]
+
+
+def test_the_baseline_lists_only_the_unbroken_run_of_the_same_setting() -> None:
+    """The star counts compared are those of the run just before the frame."""
+    captures = [_frame(0, 100), _frame(1, 200, target="M 51"), _frame(2, 240), _frame(3, 250), _frame(4, 245)]
+
+    assert live_status.star_count_baseline(captures, 4) == [240, 250]
+    assert live_status.star_count_baseline(captures, 0) == []
+
+
+def test_plain_flags_say_the_same_things_in_everyday_words() -> None:
+    """The plain verdict counts what to check and leads with the first."""
+    status = live_status.summarize_live_session(
+        _context(_captures()),
+        _guide_stats(),
+        [DitherEvent(timestamp=_START + 296.0, amplitude_px=2.5, succeeded=False)],
+        analyze_file="a.analyze",
+        wall_clock_now=_START + 1210.0,
+    )
+
+    assert len(status.plain_flags) >= 4
+    assert status.plain_verdict.startswith(f"{len(status.plain_flags)} things to check. ")
+    assert status.plain_flags[0] in status.plain_verdict
+    for text in [*status.plain_flags, status.plain_verdict]:
+        assert not banned_terms_in(text), text
+        assert len(sentences_of(text)) <= 3
+    ruined = next(e for e in status.exposures if e.frame_name == "frame_005.fits")
+    assert len(ruined.plain_flags) == len(ruined.flags)
+    assert "may be trailed or clouded" in ruined.plain_flags[0]
+
+
+def test_a_clean_session_has_a_calm_plain_verdict() -> None:
+    """Nothing flagged gives a one-sentence all-clear that claims little."""
+    captures = [_capture(130.0 + 120.0 * index, name=f"frame_{index:03d}") for index in range(9)]
+    status = live_status.summarize_live_session(
+        _context(captures),
+        _guide_stats(with_jump=False, with_drift=False),
+        [],
+        analyze_file="a.analyze",
+        wall_clock_now=_START + 1200.0,
+    )
+
+    assert status.plain_flags == []
+    assert status.plain_verdict == "No problems found so far in what Ekos has recorded."

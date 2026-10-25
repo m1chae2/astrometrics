@@ -72,6 +72,33 @@ class ExposureRequest(BaseModel):
         alias="binning",
         description="The binning factor (1 means no binning). None: not set.",
     )
+    source_key: str = Field(
+        default="",
+        alias="sourceKey",
+        description="For a row the library suggested: what it came from (rule, target, capture setting).",
+    )
+    reason: str = Field(
+        default="", alias="reason", description="For a row the library suggested: why, in plain words."
+    )
+    evidence_fingerprint: str = Field(
+        default="",
+        alias="evidenceFingerprint",
+        description="For a suggested row: a short code for its evidence. A dismissal lasts until it changes.",
+    )
+    counted_from: datetime | None = Field(
+        default=None,
+        alias="countedFrom",
+        description=(
+            "The row's last update or promotion time. Only frames taken at or after it count toward the row. "
+            "None: the package's creation time."
+        ),
+    )
+    baseline_captured: int = Field(
+        default=0,
+        ge=0,
+        alias="baselineCaptured",
+        description="Matching frames already counted when the package was reopened. They do not count again.",
+    )
 
     def total_exposure_sec(self) -> float:
         """Total wall-clock time this request occupies, exposures plus pacing.
@@ -96,11 +123,28 @@ class PackageStatus(StrEnum):
     COMPLETE = "COMPLETE"
 
 
+class DismissedRow(BaseModel):
+    """A suggested row the user dismissed, kept so the dismissal can be undone.
+
+    The row is taken out of the package's exposure list. The refresh does
+    not add it again while its fingerprint stays the same.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    source_key: str = Field(alias="sourceKey", description="The row's source key.")
+    fingerprint: str = Field(
+        alias="fingerprint", description="The row's evidence fingerprint when dismissed."
+    )
+    request: ExposureRequest = Field(alias="request", description="The row as it was when dismissed.")
+
+
 class PackageSuggestion(BaseModel):
     """Why the library suggested a package, kept with the package.
 
-    Fields only. A later step fills them in when it makes or updates a
-    suggested package.
+    The suggestion refresh (`ObservationPlanning.refresh_suggestions`) fills
+    these fields in. A package the user promoted keeps them, so the refresh
+    does not suggest it again.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -128,8 +172,37 @@ class PackageSuggestion(BaseModel):
         alias="evidenceFingerprint",
         description="A short code for the evidence. A dismissal lasts until it changes.",
     )
+    ranking_use: str = Field(
+        default="",
+        alias="rankingUse",
+        description="For a ranking suggestion: the use it ranks for (imaging, photometry or spectroscopy).",
+    )
+    observing_night_id: str | None = Field(
+        default=None,
+        alias="observingNightId",
+        description="For a ranking suggestion: the observing night it is for. It expires after that night.",
+    )
+    dismissed_fingerprint: str = Field(
+        default="",
+        alias="dismissedFingerprint",
+        description="The evidence fingerprint when the whole package was dismissed. Empty: not dismissed.",
+    )
+    dismissed_rows: list[DismissedRow] = Field(
+        default_factory=list, alias="dismissedRows", description="Rows the user dismissed one at a time."
+    )
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), alias="createdAt")
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC), alias="updatedAt")
+
+    @property
+    def is_dismissed(self) -> bool:
+        """Whether the whole package is dismissed and its evidence is the same.
+
+        Returns
+        -------
+        dismissed : `bool`
+            `True` when a dismissal is stored and matches the evidence.
+        """
+        return bool(self.dismissed_fingerprint) and self.dismissed_fingerprint == self.evidence_fingerprint
 
 
 class ObservationPackage(BaseModel):
@@ -165,6 +238,32 @@ class ObservationPackage(BaseModel):
     framing: Framing | None = Field(
         default=None, description="Where the camera points for this package, with any mosaic panels."
     )
+    completed_at: datetime | None = Field(
+        default=None, description="When the library last found every light row captured. None: not complete."
+    )
+
+    @property
+    def is_dismissed(self) -> bool:
+        """Whether this is a suggestion the user dismissed.
+
+        A package is dismissed when its whole-package dismissal still
+        matches the evidence, or when every row of a rule suggestion was
+        dismissed one at a time and none is left.
+
+        Returns
+        -------
+        dismissed : `bool`
+            `True` for a dismissed suggestion.
+        """
+        if self.status != PackageStatus.SUGGESTED or self.suggestion is None:
+            return False
+        if self.suggestion.is_dismissed:
+            return True
+        return (
+            self.suggestion.source_kind == "rule"
+            and not self.exposure_requests
+            and bool(self.suggestion.dismissed_rows)
+        )
 
     def total_duration_sec(self) -> float:
         """Sum of every requested exposure's `total_exposure_sec`.

@@ -99,6 +99,7 @@ def _insufficient_data(input_quality: SkyInputQuality) -> TargetStatement:
             "of the sky can be compared."
         ),
         values={"nights": float(input_quality.nights)},
+        plain_values={"minimum": MINIMUM_BASELINE_SESSIONS},
         limits=[
             design_limit(
                 float(MINIMUM_BASELINE_SESSIONS),
@@ -134,6 +135,7 @@ def _poor_region(metric: str, bin_: SkyBinResult, tolerance: float) -> TargetSta
             f"{what} {where} than in the rest of the same nights, over {bin_.nights} nights "
             f"({bin_.samples} measurements). The tolerance is {tolerance:.0%}.{caveat}"
         ),
+        plain_values={"what": what, "where": where},
         values={
             "metric": metric,
             "dimension": bin_.dimension,
@@ -213,6 +215,7 @@ def _coverage_gaps(input_quality: SkyInputQuality) -> TargetStatement | None:
             "Too few nights reached these parts of the sky. Observing there on more nights gives a verdict."
         ),
         values={"parts_not_judged": float(len(input_quality.gaps))},
+        plain_values={"count": len(input_quality.gaps)},
         limits=[_minimum_nights_limit(input_quality)],
         confidence=rule_confidence("sky"),
     )
@@ -256,6 +259,10 @@ def _dimensions_not_compared(
             "could be compared. Image one target early and late, or on both sides of the meridian."
         ),
         values={"dimensions_not_compared": float(len(missing))},
+        plain_message=(
+            f"We could not compare star width along: {names}. Image one target early and late in a night, "
+            "or on both sides of the meridian, to get that comparison."
+        ),
         limits=[_minimum_nights_limit(input_quality)],
         confidence=rule_confidence("sky"),
     )

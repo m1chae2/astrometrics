@@ -96,6 +96,13 @@ fraction of that.
 MINIMUM_FRAMES_FOR_STAR_BASELINE = 5
 """Frames needed before a star-count baseline means anything."""
 
+MAXIMUM_FRAMES_IN_STAR_BASELINE = 20
+"""The most earlier frames the star-count baseline looks back over.
+
+Twenty frames is about 40 minutes of 120 s exposures on the 2026-10-02 session,
+enough to ride out a passing cloud without following a slow change of sky.
+"""
+
 JUMP_FIRST_SAMPLE_FRACTION = 0.5
 """An excursion is a jump if its first sample is already this much of its peak.
 
@@ -309,6 +316,86 @@ def find_guiding_excursions(
     return excursions
 
 
+def _target_name_from_path(file_path: str) -> str:
+    """Read the target's name from where Ekos saved a frame.
+
+    Ekos saves ``<root>/<target>/Light/<filter>/<file>``. The part before the
+    ``Light`` folder is the target. A path with no ``Light`` folder gives an
+    empty name, which then matches only other frames saved the same way.
+
+    Parameters
+    ----------
+    file_path : `str`
+        Where Ekos saved the frame.
+
+    Returns
+    -------
+    target_name : `str`
+        The target's name, or an empty string if the path does not show one.
+    """
+    parts = file_path.replace("\\", "/").split("/")
+    for index, part in enumerate(parts):
+        if part.lower() == "light" and index > 0:
+            return parts[index - 1]
+    return ""
+
+
+def _baseline_key(capture: EkosCapture) -> tuple[str, str, float]:
+    """Name the setting whose frames a capture should be compared with.
+
+    Stars counts depend on the target, the filter and the exposure length, so
+    a frame is compared only with frames that share all three.
+
+    Parameters
+    ----------
+    capture : `EkosCapture`
+        One finished exposure.
+
+    Returns
+    -------
+    key : `tuple` [`str`, `str`, `float`]
+        The target name, the filter name and the exposure in seconds
+        (rounded to a millisecond).
+    """
+    return (
+        _target_name_from_path(capture.file_path),
+        capture.filter_name.strip().lower(),
+        round(capture.exposure_seconds, 3),
+    )
+
+
+def star_count_baseline(captures: Sequence[EkosCapture], index: int) -> list[int]:
+    """List the star counts the frame at `index` is compared with.
+
+    The baseline is the unbroken run of frames just before this one that
+    share its target, filter and exposure. It restarts when any of the three
+    changes, so a switch to another target, filter or exposure never flags
+    the first frames after it as having too few stars. At most
+    `MAXIMUM_FRAMES_IN_STAR_BASELINE` frames are used.
+
+    Parameters
+    ----------
+    captures : `Sequence` [`EkosCapture`]
+        Finished exposures, in time order.
+    index : `int`
+        Position of the frame being judged.
+
+    Returns
+    -------
+    star_counts : `list` [`int`]
+        The star counts of the earlier frames of the run, oldest first.
+    """
+    key = _baseline_key(captures[index])
+    start = index
+    while (
+        start > 0
+        and index - start < MAXIMUM_FRAMES_IN_STAR_BASELINE
+        and _baseline_key(captures[start - 1]) == key
+    ):
+        start -= 1
+    return [capture.star_count for capture in captures[start:index]]
+
+
 def summarize_exposures(
     captures: Sequence[EkosCapture],
     guide_stats: Sequence[EkosGuideStat],
@@ -345,17 +432,26 @@ def summarize_exposures(
         rest = [_total_error(s) for s in inside if s.timestamp >= started_at + EARLY_EXPOSURE_SECONDS]
 
         flags: list[str] = []
-        earlier_star_counts = [c.star_count for c in captures[max(0, index - 20) : index]]
+        plain_flags: list[str] = []
+        earlier_star_counts = star_count_baseline(captures, index)
         if len(earlier_star_counts) >= MINIMUM_FRAMES_FOR_STAR_BASELINE:
             usual = statistics.median(earlier_star_counts)
             if usual > 0 and capture.star_count < LOW_STAR_FRACTION * usual:
                 flags.append(
                     f"Only {capture.star_count} stars against a usual {usual:.0f}: likely trailed or clouded."
                 )
+                plain_flags.append(
+                    f"This frame shows only {capture.star_count} stars against about {usual:.0f} in the "
+                    "frames before it, so it may be trailed or clouded."
+                )
         for excursion in excursions:
             if excursion.ended_at >= started_at and excursion.started_at <= capture.completed_at:
                 peak = excursion.peak_error_arcsec
                 flags.append(f"A guiding excursion (peak {peak:.0f} arcsec) overlapped this exposure.")
+                plain_flags.append(
+                    f"The guiding drifted by up to {peak:.0f} arcsec during this frame, "
+                    "so the stars may be smeared."
+                )
                 break
 
         summaries.append(
@@ -370,6 +466,7 @@ def summarize_exposures(
                 guide_rms_rest_arcsec=_rms(rest),
                 follows_dither=any(0.0 <= started_at - d.timestamp <= DITHER_FOLLOW_SECONDS for d in dithers),
                 flags=flags,
+                plain_flags=plain_flags,
             )
         )
     return summaries
@@ -413,6 +510,30 @@ def summarize_dither_settings(dithers: Sequence[DitherEvent], captures_completed
         median_amplitude_px=statistics.median(amplitudes),
         exposures_per_dither=round(captures_completed / len(dithers), 1),
     )
+
+
+def plain_verdict(plain_flags: Sequence[str]) -> str:
+    """Say in everyday words how the session is going.
+
+    The verdict is built from the plain flags only, so it never claims more
+    than the checks found. It is a rough reading of Ekos' own records.
+
+    Parameters
+    ----------
+    plain_flags : `Sequence` [`str`]
+        The plain-language flags of the session, most important first.
+
+    Returns
+    -------
+    verdict : `str`
+        One sentence when nothing is flagged, otherwise the count of things
+        to check and the first one.
+    """
+    if not plain_flags:
+        return "No problems found so far in what Ekos has recorded."
+    count = len(plain_flags)
+    thing = "thing" if count == 1 else "things"
+    return f"{count} {thing} to check. {plain_flags[0]}"
 
 
 def summarize_live_session(
@@ -463,8 +584,13 @@ def summarize_live_session(
     last_guide_state = context.guide_state_events[-1] if context.guide_state_events else None
 
     flags: list[str] = []
+    plain_flags: list[str] = []
     for excursion in reversed(excursions):
         peak = excursion.peak_error_arcsec
+        plain_flags.append(
+            f"The guiding {'jumped' if excursion.kind == 'jump' else 'drifted'} by up to {peak:.0f} arcsec "
+            f"along the {excursion.axis} axis. Check the mount and the guide star."
+        )
         text = (
             f"Guiding {excursion.kind}: {excursion.axis} error peaked at {peak:.0f} arcsec"
             f" with {excursion.reacquire_count} re-lock(s)."
@@ -479,15 +605,26 @@ def summarize_live_session(
     failed = [d for d in finished_dithers if d.succeeded is False]
     if failed:
         flags.append(f"{len(failed)} of {len(finished_dithers)} dithers failed.")
+        plain_flags.append(
+            f"{len(failed)} of {len(finished_dithers)} small telescope moves between frames failed. "
+            "Check that the guider settles after each move."
+        )
     flagged_frames = [e.frame_name for e in exposures if e.flags]
     if flagged_frames:
         flags.append(f"Frames to check: {', '.join(flagged_frames)}.")
+        plain_flags.append(
+            f"{len(flagged_frames)} recent frames are flagged. Look at them before you keep them."
+        )
     if last_guide_state is not None and last_guide_state.state != "Guiding":
         flags.append(f"The guider is in state {last_guide_state.state!r}, not Guiding.")
+        plain_flags.append(f"The guider is not guiding right now (it is {last_guide_state.state.lower()}).")
     silence = now - as_of
     if silence > STALE_RECORD_SECONDS:
         flags.append(
             f"No new record for {silence / 60:.0f} minutes: Ekos may have stopped, or the file is stale."
+        )
+        plain_flags.append(
+            f"Ekos has written nothing for {silence / 60:.0f} minutes. It may have stopped, so check it."
         )
 
     return LiveSessionStatus(
@@ -511,4 +648,6 @@ def summarize_live_session(
         last_autofocus_at=last_focus.timestamp if last_focus else None,
         last_autofocus_temperature_c=last_focus.temperature_c if last_focus else None,
         flags=flags,
+        plain_flags=plain_flags,
+        plain_verdict=plain_verdict(plain_flags),
     )

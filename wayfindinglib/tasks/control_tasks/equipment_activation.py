@@ -29,13 +29,16 @@ from wayfindinglib.data_access.equipment_catalog_reader import (
     list_cameras,
     list_telescopes,
 )
+from wayfindinglib.data_access.equipment_catalog_writer import build_telescope_limits_update
 from wayfindinglib.models.equipment_and_site.equipment import Camera, EquipmentConfiguration
 
 logger = logging.getLogger(__name__)
 
 
-def set_active_telescope(config: AppConfiguration, telescope_id: str) -> bool:
-    """Record a new active telescope selection.
+def set_active_telescope(
+    config: AppConfiguration, telescope_id: str, limits: dict[str, float | bool] | None = None
+) -> bool:
+    """Record the active telescope, and optionally its safety limits.
 
     Parameters
     ----------
@@ -43,18 +46,38 @@ def set_active_telescope(config: AppConfiguration, telescope_id: str) -> bool:
         The application configuration to update.
     telescope_id : `str`
         Must match the `id` of a `Telescope` returned by `list_telescopes`.
+    limits : `dict`, optional
+        New safety limits for this telescope: any of
+        ``altitude_limits_enabled``, ``min_altitude_deg``,
+        ``max_altitude_deg``, ``hour_angle_limits_enabled``,
+        ``max_hour_angle_hours`` and ``flip_hour_angle_deg``. They are
+        written only to the config section that already holds this
+        telescope's settings, and a section is never created. A
+        per-telescope minimum or maximum altitude overrides the global
+        ``[Observatory.Constraints]`` values. The limits and the active
+        choice are saved together.
 
     Returns
     -------
     activated : `bool`
         `True` if `telescope_id` was recognized and saved, `False`
         otherwise -- the config is left unchanged in that case.
+
+    Notes
+    -----
+    Invalid `limits` (not a limit key, minimum above maximum, a value out
+    of range), or a telescope with no config section to write to, raise
+    `ValueError` and save nothing.
     """
     known_ids = {telescope.id for telescope in list_telescopes(config)}
     if telescope_id not in known_ids:
         logger.warning("set_active_telescope: '%s' is not a known telescope", telescope_id)
         return False
-    config.update_config({TELESCOPE_SECTION: {ACTIVE_TELESCOPE_KEY: telescope_id}})
+    update: dict[str, dict[str, str]] = {}
+    if limits:
+        update = build_telescope_limits_update(config, telescope_id, limits)
+    update.setdefault(TELESCOPE_SECTION, {})[ACTIVE_TELESCOPE_KEY] = telescope_id
+    config.update_config(update)
     logger.info("Active telescope set to '%s'", telescope_id)
     return True
 

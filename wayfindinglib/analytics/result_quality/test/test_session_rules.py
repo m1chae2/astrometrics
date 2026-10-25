@@ -60,9 +60,15 @@ def test_a_statement_takes_its_shape_from_its_row() -> None:
 def test_missing_data_needs_a_reason() -> None:
     """A statement about missing data without a reason is refused."""
     with pytest.raises(ValidationError):
-        session_statement("sky_coverage_gap", message="m", confidence=Confidence.DESIGN_ESTIMATE)
+        session_statement(
+            "sky_coverage_gap", message="m", plain_message="p", confidence=Confidence.DESIGN_ESTIMATE
+        )
     statement = session_statement(
-        "sky_coverage_gap", message="m", reason="Image on more nights.", confidence=Confidence.DESIGN_ESTIMATE
+        "sky_coverage_gap",
+        message="m",
+        plain_message="p",
+        reason="Image on more nights.",
+        confidence=Confidence.DESIGN_ESTIMATE,
     )
     assert statement.action_class is None
 
@@ -70,15 +76,17 @@ def test_missing_data_needs_a_reason() -> None:
 def test_an_unknown_rule_name_is_an_error() -> None:
     """A name that is not in the table is a bug in the caller."""
     with pytest.raises(KeyError):
-        session_statement("not_a_rule", message="m", confidence=Confidence.MEASURED)
+        session_statement("not_a_rule", message="m", plain_message="p", confidence=Confidence.MEASURED)
 
 
 def test_statements_sort_warnings_first() -> None:
     """Warnings come before advice, and advice before information."""
     confidence = Confidence.PARTLY_MEASURED
-    info = session_statement("guiding_insufficient_data", message="i", reason="r", confidence=confidence)
-    advice = session_statement("guiding_above_limit", message="a", confidence=confidence)
-    warning = session_statement("recalibrate_guider", message="w", confidence=confidence)
+    info = session_statement(
+        "guiding_insufficient_data", message="i", plain_message="p", reason="r", confidence=confidence
+    )
+    advice = session_statement("guiding_above_limit", message="a", plain_message="p", confidence=confidence)
+    warning = session_statement("recalibrate_guider", message="w", plain_message="p", confidence=confidence)
     assert sort_by_severity([info, advice, warning]) == [warning, advice, info]
 
 

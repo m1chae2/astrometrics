@@ -17,6 +17,9 @@ Rules and judging:
 - `rules.py` holds `RESULT_QUALITY_RULES`, one row for each warning, recommendation or limit the library can state about a target's data. A row names the metrics it reads (each at one definition version), its action class, its limits, its wording and its register entry. `DEFERRED_RULES` lists the rules not built yet, with the reason.
 - `star_result_rules.py` holds the rows for one star's science result (a spectrum class or a period).
 - `session_rules.py` holds the rows for the per-night guiding, capture and sky analyses.
+- Every row also has a plain wording (`plain_wording`, filled into the statement's `plain_message`) and says what its action becomes in the plan (`produces`: a package row, a checklist item, or nothing). The user interface shows only the plain message.
+- `plain_text.py` holds the helpers that write plain messages: the hedged spectral-type phrase ("an orange K-type star"), the exposure phrases, and the plain note for a rule that could not be checked.
+- `exposure_request.py` turns a "take more frames" statement into the exposure row of an observation package (`exposure_request_from_statement`).
 - `all_rules.py` joins the three tables into `ALL_RULES`. A check that must hold for every rule walks this one list.
 - `judge_results.py` applies the plain rules (one reading against one limit) and returns statements. `needs_attention` counts the warnings that need action, and every view uses it.
 - `report_rules.py` builds the statements that need a join, a fit or a split first: frames lost, sky cost, altitude cost, the sharpness trade-off, calibration gaps and "more frames will not help".
@@ -40,7 +43,7 @@ Inputs and plans:
 - `library_inputs.py` reads what the analyses need from the library in one place, so the report, the ranking and the night review do not each read it their own way.
 - `guiding_join.py` cuts the guide samples to each frame's exposure window.
 - `allowed_capture_values.py` says which gain, offset, binning and filter a night plan may ask for.
-- `reply_budget.py` measures a reply the way the MCP tool registry does, and shortens a statement's evidence when a reply is too long.
+- `reply_budget.py` measures a reply the way the MCP tool registry does, and shortens a statement's evidence when a reply is too long. Its last step empties the plain messages.
 
 ## Quality metrics that each module produces
 

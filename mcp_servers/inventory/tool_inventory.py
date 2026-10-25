@@ -237,6 +237,12 @@ CLASSIFICATION_RULES = (
         "Changes the saved queue or checklist.",
     ),
     _rule(
+        r"^planning_refresh_suggestions$",
+        "change-data",
+        "high",
+        "Writes suggested and finished packages and tonight's checklist.",
+    ),
+    _rule(
         r"^planning_(build_deep_star_catalog|create_mosaic)$",
         "change-data",
         "high",

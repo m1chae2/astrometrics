@@ -11,7 +11,24 @@ import pytest
 
 from wayfindinglib.models.quality.statements import Confidence, Severity
 from wayfindinglib.models.session.session_quality import GuidingInputQuality, GuidingPerformance
-from wayfindinglib.session_analysis.guiding.post_processing.recommend_for_guiding import recommend_for_guiding
+from wayfindinglib.session_analysis.guiding.post_processing.recommend_for_guiding import (
+    recommend_for_guiding as _recommend_for_guiding,
+)
+from wayfindinglib.test.plain_wording_support import assert_plain_message_is_sound
+
+
+def recommend_for_guiding(*arguments: Any, **keywords: Any) -> Any:
+    """Run the guiding rules and check each plain message on the way.
+
+    Returns
+    -------
+    statements : `list` [`TargetStatement`]
+        What `recommend_for_guiding` returned.
+    """
+    statements = _recommend_for_guiding(*arguments, **keywords)
+    for statement in statements:
+        assert_plain_message_is_sound(statement)
+    return statements
 
 
 def _quality(**overrides: Any) -> GuidingInputQuality:

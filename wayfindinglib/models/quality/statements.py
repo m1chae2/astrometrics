@@ -11,9 +11,13 @@ itself (`TargetStatement`).
 Rules the models enforce:
 
 * A warning has a severity. A warning or a recommendation names one action
-  class. A limit of the equipment (``constraint``) and a note that data is
-  missing (``insufficient_data``) name none and propose nothing, because the
-  library never advises buying hardware and never hides missing data.
+  class. A limit of the equipment (``constraint``), a note that data is
+  missing (``insufficient_data``) and a star's result (``result``) name none
+  and propose nothing, because the library never advises buying hardware and
+  never hides missing data.
+* ``message`` is the technical text. ``plain_message`` is the same finding in
+  everyday words, one or two short sentences. The user interface shows only
+  the plain text; scripts and the AI companion read both.
 * A statement cites the exact measurements and limits it used.
 * The confidence of a statement comes from the status label of the
   validation register entry behind its rule (register entry WAY-01).
@@ -50,9 +54,12 @@ class StatementKind(StrEnum):
     `WARNING` is about data already taken. `RECOMMENDATION` is about the
     next session. `CONSTRAINT` states a limit of the equipment and gives no
     advice. `INSUFFICIENT_DATA` says what is missing and how to get it.
+    `RESULT` states what a star's science result is (for example its
+    spectral type) with the number behind it, and asks for nothing.
     """
 
     WARNING = "warning"
+    RESULT = "result"
     RECOMMENDATION = "recommendation"
     CONSTRAINT = "constraint"
     INSUFFICIENT_DATA = "insufficient_data"
@@ -222,7 +229,11 @@ class TargetStatement(BaseModel):
     capture_setting : `CaptureSetting` or `None`
         The capture setting it is about, when it is about one.
     message : `str`
-        One plain sentence.
+        The technical sentence, with the numbers.
+    plain_message : `str`
+        The same finding in everyday words, one or two short sentences. Empty
+        in a statement stored before this field existed; a reader then falls
+        back to ``message``.
     reason : `str`
         Why. For ``insufficient_data``, what is missing and how to get it.
     proposed_action : `ProposedAction` or `None`
@@ -255,6 +266,7 @@ class TargetStatement(BaseModel):
     action_class: ActionClass | None = Field(default=None, alias="actionClass")
     capture_setting: CaptureSetting | None = Field(default=None, alias="captureSetting")
     message: str
+    plain_message: str = Field(default="", alias="plainMessage")
     reason: str = ""
     proposed_action: ProposedAction | None = Field(default=None, alias="proposedAction")
     expected_effect: ExpectedEffect | None = Field(default=None, alias="expectedEffect")

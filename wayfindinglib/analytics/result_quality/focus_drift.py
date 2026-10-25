@@ -58,6 +58,7 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 
 from astrometricslib import CaptureSetting, MeasurementReference
+from wayfindinglib.analytics.result_quality.plain_text import format_plain, plain_missing_data
 from wayfindinglib.analytics.result_quality.rules import rule_by_name
 from wayfindinglib.models.quality.statements import (
     ExpectedEffect,
@@ -554,6 +555,7 @@ def focus_drift_statement(
             kind=StatementKind.INSUFFICIENT_DATA,
             capture_setting=capture_setting,
             message="Cannot find how the focus drifts with temperature.",
+            plain_message=plain_missing_data(rule.name),
             reason=result.reason,
             confidence=rule.confidence,
         )
@@ -565,6 +567,7 @@ def focus_drift_statement(
             message=(
                 "Cannot tell when to refocus: the allowed change in width is smaller than the width error."
             ),
+            plain_message=plain_missing_data(rule.name),
             reason=(
                 f"The allowed increase is {result.allowed_width_increase_px:.2f} px, but one frame's width "
                 f"has an error of {result.width_error_px:.2f} px, so a single width cannot show that the "
@@ -579,18 +582,20 @@ def focus_drift_statement(
         or result.slope_px_per_degc is None
     ):
         raise ValueError("A drift_found result must hold a slope, an interval and a tolerance.")
-    message = rule.wording.format(
-        slope=result.slope_px_per_degc,
-        allowed_percent=result.allowed_width_increase_fraction * 100.0,
-        interval=result.refocus_interval_degc,
-        tolerance=result.interval_tolerance_degc,
-    )
+    fields = {
+        "slope": result.slope_px_per_degc,
+        "allowed_percent": result.allowed_width_increase_fraction * 100.0,
+        "interval": result.refocus_interval_degc,
+        "tolerance": result.interval_tolerance_degc,
+    }
+    message = rule.wording.format_map(fields)
     return TargetStatement(
         rule=rule.name,
         kind=rule.statement_kind,
         action_class=rule.action_class,
         capture_setting=capture_setting,
         message=message,
+        plain_message=format_plain(rule, fields),
         reason=(
             f"{result.reason} The limit is an efficiency of {MINIMUM_SEEING_EFFICIENCY:g} for a faint point "
             "source. The interval is the allowed width increase divided by the measured slope, and its "

@@ -34,6 +34,7 @@ from wayfindinglib.models.equipment_and_site.focus_model import FocusModel
 from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCalibration
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
 from wayfindinglib.models.planning.observation_package import ObservationPackage
+from wayfindinglib.models.planning.suggestion_log import SuggestionLogEntry
 from wayfindinglib.models.policy.commissioning import CommissioningRun
 from wayfindinglib.models.policy.delegation import DelegationPolicy
 from wayfindinglib.models.policy.safety import SafetyRuleSet
@@ -51,6 +52,7 @@ from wayfindinglib.models.session.telemetry import GuidingSpectrumAnalysis
 _DATASET_TYPES: dict[str, tuple[str, type]] = {
     "observation_session": ("wayfinding_observation_sessions", ObservationSession),
     "observation_package": ("observation_packages", ObservationPackage),
+    "package_suggestion_event": ("package_suggestion_events", SuggestionLogEntry),
     "site_profile": ("site_profiles", SiteProfile),
     "enclosure": ("enclosures", Enclosure),
     "guider_calibration": ("guider_calibrations", GuiderCalibration),
@@ -516,24 +518,41 @@ class DiskButler(AbstractButler):
         finally:
             connection.close()
 
-    def delete_package(self, package_id: str) -> bool:
+    def delete_package(
+        self, package_id: str, *, expected_revision: int | None = None, only_status: str | None = None
+    ) -> bool:
         """Remove one observation package from the library.
+
+        With `expected_revision` or `only_status`, the check and the delete
+        are one SQLite statement, so a package that was edited or promoted
+        in the meantime is not removed.
 
         Parameters
         ----------
         package_id : `str`
             The package id.
+        expected_revision : `int`, optional
+            Delete only if the stored revision is this one.
+        only_status : `str`, optional
+            Delete only if the stored status is this one, such as
+            ``"SUGGESTED"``.
 
         Returns
         -------
         deleted : `bool`
-            `True` when a package was removed, `False` when none had that id.
+            `True` when a package was removed, `False` when none had that id
+            (or the revision or status check failed).
         """
         # Reading first makes sure the table exists.
         self._generic.get("observation_package", {"id": package_id})
         connection = connect_db(str(self.library_path / "wayfinding.db"))
         try:
-            cursor = connection.execute("DELETE FROM observation_packages WHERE id = ?", (package_id,))
+            cursor = connection.execute(
+                "DELETE FROM observation_packages WHERE id = ? "
+                "AND (? IS NULL OR COALESCE(json_extract(data_json, '$.revision'), 0) = ?) "
+                "AND (? IS NULL OR json_extract(data_json, '$.status') = ?)",
+                (package_id, expected_revision, expected_revision, only_status, only_status),
+            )
             connection.commit()
             return cursor.rowcount == 1
         finally:

@@ -129,6 +129,9 @@ class ExposureSummary(BaseModel):
         Whether a dither finished shortly before this exposure began.
     flags : `list` [`str`]
         One sentence per problem found. Empty for a clean frame.
+    plain_flags : `list` [`str`]
+        The same problems in everyday words, one sentence each, in the same
+        order as ``flags``.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -143,6 +146,7 @@ class ExposureSummary(BaseModel):
     guide_rms_rest_arcsec: float | None = None
     follows_dither: bool = False
     flags: list[str] = Field(default_factory=list)
+    plain_flags: list[str] = Field(default_factory=list)
 
 
 class DitherSettings(BaseModel):
@@ -217,6 +221,12 @@ class LiveSessionStatus(BaseModel):
         The temperature at that time.
     flags : `list` [`str`]
         The session-level problems, one sentence each, most recent first.
+    plain_flags : `list` [`str`]
+        The same problems in everyday words, one sentence each. Their order
+        and count can differ from ``flags``.
+    plain_verdict : `str`
+        How the session is going, in one or two everyday sentences built from
+        ``plain_flags``. It is a rough reading of Ekos' own records.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -242,3 +252,5 @@ class LiveSessionStatus(BaseModel):
     last_autofocus_at: float | None = None
     last_autofocus_temperature_c: float | None = None
     flags: list[str] = Field(default_factory=list)
+    plain_flags: list[str] = Field(default_factory=list)
+    plain_verdict: str = ""

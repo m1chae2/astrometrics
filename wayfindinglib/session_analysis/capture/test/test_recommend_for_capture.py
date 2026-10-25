@@ -6,6 +6,8 @@ shape judged against earlier nights only, and every recommendation carrying
 its evidence, limit and confidence.
 """
 
+from typing import Any
+
 import pytest
 
 from astrometricslib import LimitTier, MeasurementReference, QualityLimit
@@ -18,7 +20,24 @@ from wayfindinglib.models.session.capture_quality import (
     ExposureClipping,
     StarQuality,
 )
-from wayfindinglib.session_analysis.capture.post_processing.recommend_for_capture import recommend_for_capture
+from wayfindinglib.session_analysis.capture.post_processing.recommend_for_capture import (
+    recommend_for_capture as _recommend_for_capture,
+)
+from wayfindinglib.test.plain_wording_support import assert_plain_message_is_sound
+
+
+def recommend_for_capture(*arguments: Any, **keywords: Any) -> Any:
+    """Run the capture rules and check each plain message on the way.
+
+    Returns
+    -------
+    statements : `list` [`TargetStatement`]
+        What `recommend_for_capture` returned.
+    """
+    statements = _recommend_for_capture(*arguments, **keywords)
+    for statement in statements:
+        assert_plain_message_is_sound(statement)
+    return statements
 
 
 def _input(**overrides: object) -> CaptureInputQuality:

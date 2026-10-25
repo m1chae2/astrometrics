@@ -21,6 +21,7 @@ from wayfindinglib.analytics.result_quality.guiding_exposure import (
 from wayfindinglib.analytics.result_quality.guiding_join import FrameWindow
 from wayfindinglib.analytics.result_quality.report_rules import guiding_limits_statements
 from wayfindinglib.models.quality.statements import ActionClass, StatementKind
+from wayfindinglib.test.plain_wording_support import assert_plain_message_is_sound
 
 SETTING = CaptureSetting(camera="Cam", telescope="Scope", filter_name="L", exposure_seconds=120.0)
 STAR_WIDTH_ARCSEC = 3.0
@@ -135,6 +136,8 @@ def test_the_statement_names_the_exposure_that_stays_sharp() -> None:
     assert statement.action_class == ActionClass.CAPTURE_SETTINGS
     assert statement.message.startswith("At 120 s only ")
     assert "; at 30 s, 80%" in statement.message
+    assert_plain_message_is_sound(statement)
+    assert "Try 30 s frames" in statement.plain_message
     assert statement.proposed_action.exposure_seconds == pytest.approx(30.0)
     assert statement.values["sharp_fraction_at_30s"] == pytest.approx(0.8)
     assert statement.values["allowed_guide_rms_arcsec"] == pytest.approx(0.584, abs=0.001)
@@ -160,6 +163,8 @@ def test_a_noisy_log_proposes_no_exposure_and_says_so() -> None:
     assert statement.proposed_action.exposure_seconds is None
     assert statement.proposed_action.note
     assert "No tested exposure reaches" in statement.reason
+    assert_plain_message_is_sound(statement)
+    assert "Check the guiding first" in statement.plain_message
 
 
 def test_missing_data_makes_an_insufficient_statement() -> None:
@@ -171,3 +176,4 @@ def test_missing_data_makes_an_insufficient_statement() -> None:
 
     assert statement.kind == StatementKind.INSUFFICIENT_DATA
     assert statement.reason == outcome.reason
+    assert_plain_message_is_sound(statement)

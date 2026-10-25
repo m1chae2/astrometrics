@@ -1,6 +1,6 @@
 /**
- * @fileoverview Detailed analytical metrics component in AstronomyManager: a
- * light curve summary, the spectrum's best-matching type, and the Lomb-Scargle
+ * @fileoverview Detailed analytical metrics component in AstronomyManager: the
+ * quality statements about the star's results, a light curve summary, the spectrum's best-matching type, and the Lomb-Scargle
  * periodogram and Box-fitting Least Squares (BLS) transit parameters.
  */
 
@@ -22,6 +22,8 @@ import {
     splitFeaturesForTable,
 } from '../../common/utils/starDisplayFormat';
 import { EmissionLineResult, SpectralFeatureResult } from '../../common/types/spectralFeatureTypes';
+import { useOptionalTargetContext } from '../../common/context/TargetContext';
+import { QualityChip } from '../../common/components/quality/QualityChip';
 
 /**
  * A false-alarm probability above this means a pattern this strong would show up
@@ -102,7 +104,19 @@ export interface StellarAnalysisDetailsProps {
 }
 
 /**
- * Renders a light curve summary, spectrum classification, and periodogram and BLS analysis details.
+ * The quality statements about the star's results, as the first card of the panel.
+ * @param props The target and star ids.
+ * @return The card.
+ */
+const QualitySection: React.FC<{ targetId: string; objectId: string }> = ({ targetId, objectId }) => (
+    <div className="stellar-analysis-details__section">
+        <div className="stellar-analysis-details__section-title">Quality</div>
+        <QualityChip targetId={targetId} objectId={objectId} />
+    </div>
+);
+
+/**
+ * Renders the quality statements, a light curve summary, spectrum classification, and periodogram and BLS analysis details.
  */
 export const StellarAnalysisDetails: React.FC<StellarAnalysisDetailsProps> = ({
     astronomyData,
@@ -110,6 +124,7 @@ export const StellarAnalysisDetails: React.FC<StellarAnalysisDetailsProps> = ({
     isAnalyzing = false,
     analysisError = null,
 }) => {
+    const targetContext = useOptionalTargetContext();
     const photometry = astronomyData?.photometry;
     const periodogram = photometry?.periodogram;
     const transitCandidate = photometry?.transitCandidate;
@@ -143,10 +158,22 @@ export const StellarAnalysisDetails: React.FC<StellarAnalysisDetailsProps> = ({
     const canRunTransitSearch = astronomyData?.canRunTransitSearch === true;
     const canAnalyze = !!onAnalyze && canRunPeriodSearch && !hasSearchResult;
 
+    // The star's own record names the targets it belongs to. Use the target the user
+    // already selected when the star belongs to it; otherwise the first one listed.
+    const targetIds: string[] = Array.isArray(astronomyData?.targetIds) ? astronomyData.targetIds : [];
+    const selectedTargetId = targetContext?.selectedTarget ?? '';
+    const qualityTargetId = targetIds.includes(selectedTargetId) ? selectedTargetId : (targetIds[0] ?? null);
+    const qualityObjectId = astronomyData?.id ? String(astronomyData.id) : null;
+    const qualitySection =
+        qualityTargetId && qualityObjectId ? <QualitySection targetId={qualityTargetId} objectId={qualityObjectId} /> : null;
+
     if (pointCount === 0 && !measuredSpectralType && testedFeatures.length === 0 && emissionLines.length === 0 && !periodogram && !transitCandidate) {
         return (
-            <div className="stellar-analysis-details__empty">
-                <span>This star has no light curve or classified spectrum to analyze.</span>
+            <div className="stellar-analysis-details">
+                {qualitySection}
+                <div className="stellar-analysis-details__empty">
+                    <span>This star has no light curve or classified spectrum to analyze.</span>
+                </div>
             </div>
         );
     }
@@ -173,6 +200,7 @@ export const StellarAnalysisDetails: React.FC<StellarAnalysisDetailsProps> = ({
 
     return (
         <div className="stellar-analysis-details">
+            {qualitySection}
             {pointCount > 0 && (
                 <div className="stellar-analysis-details__section">
                     <div className="stellar-analysis-details__section-title">Light Curve</div>

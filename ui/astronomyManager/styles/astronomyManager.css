@@ -458,8 +458,3 @@
     color: var(--text-primary, #ffffff);
     font-weight: 500;
 }
-
-/* The quality chip sits under the star's details line. */
-.star-summary-card__quality {
-    margin-top: 6px;
-}

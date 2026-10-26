@@ -47,6 +47,8 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "wfwhm_weights",
     "group_frame_weights",
     "fold_exposure_lengths",
+    "aperture_identity_from_number",
+    "aperture_identity_to_number",
     "check_choice",
     "check_include",
     "registered_job",

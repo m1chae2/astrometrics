@@ -194,7 +194,7 @@ MINIMUM_FRAMES_NEW_EXPOSURE_LENGTH = 5
 """A suggestion never asks for fewer frames than this of an exposure length the
 stack does not have yet. The stacker folds a length with fewer frames into the
 nearest group instead of stacking it on its own
-(``exposure_groups.MINIMUM_FRAMES_PER_EXPOSURE_GROUP``, which this repeats
+(the stacking library's minimum frames per exposure group, which this repeats
 because the library does not export it). Register row WAY-D70."""
 
 

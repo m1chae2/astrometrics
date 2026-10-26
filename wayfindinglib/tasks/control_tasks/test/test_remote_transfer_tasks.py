@@ -956,9 +956,17 @@ def test_download_progress_is_reported_to_the_running_job(
     monkeypatch.setattr("astrometricslib.get_current_job", lambda: FakeJob())
     monkeypatch.setattr(remote_operations, "PROGRESS_POLL_SECONDS", 0.05)
     with remote_operations.report_download_progress(str(tmp_path), expected=3):
+        # File times come from a coarse kernel clock that can trail
+        # time.time() by a few milliseconds, so a file written at once could
+        # look older than the start. Real frames arrive much later.
+        time.sleep(0.05)
         (tmp_path / "a.fits").write_bytes(b"x")
         (tmp_path / "b.fits").write_bytes(b"x")
-        time.sleep(0.3)
+        # Wait for the count instead of a fixed time, so a slow machine
+        # still sees both files.
+        deadline = time.time() + 5.0
+        while time.time() < deadline and not (marks and marks[-1][1] == 2):
+            time.sleep(0.05)
     assert marks
     assert marks[-1][1:3] == (2, 3)
     assert marks[-1][3] == "2 of 3 frames transferred"

@@ -1313,6 +1313,7 @@ _STACKING_NOT_HELD: tuple[str, ...] = (
     "stacking.expected_noise_aperture_area_px",
     "stacking.expected_noise_scale_stack_unit_per_adu",
     "stacking.expected_sky_level_stack_unit",
+    "stacking.normalization_scale",
     "stacking.stack_sky_level_stack_unit",
     "stacking.flat_noise_after_smoothing_fraction",
     "stacking.flat_noise_in_aperture_stack_unit",

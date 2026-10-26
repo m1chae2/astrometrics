@@ -1044,3 +1044,150 @@ def test_a_stack_that_may_not_choose_uses_the_library_stacks_set_whatever_its_ow
         "unspecified|exp=120",
         "unspecified|exp=60",
     ]
+
+
+def _scaled_pair(
+    tmp_path: Path, name: str, scale: float, scattered: list[tuple[float, float]]
+) -> tuple[str, str]:
+    """Write a reference frame and a stack with brighter stars.
+
+    Parameters
+    ----------
+    tmp_path : `pathlib.Path`
+        The folder.
+    name : `str`
+        A prefix for the two file names.
+    scale : `float`
+        How many times brighter the stack's stars are than the frame's. The
+        sky and the noise are the same, so only the stars change.
+    scattered : `list` of `tuple`
+        The (column, row) of the stars, the same in both images.
+
+    Returns
+    -------
+    stack_path, frame_path : `tuple` [`str`, `str`]
+        The stack (it has a solution) and its registration reference frame.
+    """
+    header = _sky_header()
+    header["EXPTIME"] = 60.0
+    frame = _write(
+        tmp_path / f"{name}_frame.fits", _sky_image(2.0, seed=11, star_positions=scattered), header
+    )
+    stack = _write(
+        tmp_path / f"{name}_stack.fits",
+        _sky_image(2.0, seed=12, star_positions=scattered, star_amplitude=2000.0 * scale),
+        _sky_header(),
+    )
+    return stack, frame
+
+
+def test_the_stars_flux_ratio_against_the_reference_frame_recovers_a_known_scale(tmp_path: Path) -> None:
+    """Stars 1.4 times as bright in the stack give a ratio of 1.4."""
+    scattered = _scattered_stars(seed=3)
+    stack, frame = _scaled_pair(tmp_path, "a", 1.4, scattered)
+    result = measure_stack_noise(stack, frame, str(tmp_path / APERTURE_FILE_NAME)).result
+    assert result is not None
+    flux_ratio = result.reference_frame_flux_ratio
+    assert flux_ratio is not None and flux_ratio.ratio is not None
+    assert flux_ratio.star_count >= 5
+    assert flux_ratio.uncertainty > 0.0
+    assert flux_ratio.reference_exposure_seconds == pytest.approx(60.0)
+    # The ratio's error is the standard error of the stars' scatter. With noise
+    # of 2 against star fluxes of tens of thousands it is tiny, so allow the
+    # larger of three errors and 0.5%.
+    assert abs(flux_ratio.ratio - 1.4) < max(3.0 * flux_ratio.uncertainty, 0.007)
+
+
+def test_the_flux_ratio_is_a_median_over_stars_and_ignores_one_wrong_star(tmp_path: Path) -> None:
+    """One star far brighter in the stack does not move the median."""
+    scattered = _scattered_stars(seed=3)
+    stack, frame = _scaled_pair(tmp_path, "a", 1.4, scattered)
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    assert measure_stack_noise(stack, frame, apertures).result is not None
+    chosen = load_apertures(apertures)
+    assert chosen is not None
+    wcs = WCS(_sky_header()).celestial
+    column, row = (float(value[0]) for value in wcs.world_to_pixel_values(*chosen.reference_sky[:1].T))
+    brighter = fits.getdata(stack).astype(np.float64)
+    rows, columns = np.mgrid[0:SIZE, 0:SIZE]
+    brighter += 20000.0 * np.exp(-((columns - column) ** 2 + (rows - row) ** 2) / (2 * 2.0**2))
+    second_stack = _write(tmp_path / "second_stack.fits", brighter.astype(np.float32), _sky_header())
+    result = measure_stack_noise(second_stack, frame, apertures).result
+    assert result is not None and result.reference_frame_flux_ratio is not None
+    assert result.reference_frame_flux_ratio.ratio == pytest.approx(1.4, abs=0.02)
+
+
+def test_with_no_named_reference_frame_the_flux_ratio_is_not_measured(tmp_path: Path) -> None:
+    """With no reference frame the ratio is not measured, and says why."""
+    scattered = _scattered_stars(seed=3)
+    stack, _ = _scaled_pair(tmp_path, "a", 1.4, scattered)
+    result = measure_stack_noise(stack, None, str(tmp_path / APERTURE_FILE_NAME)).result
+    assert result is not None
+    flux_ratio = result.reference_frame_flux_ratio
+    assert flux_ratio is not None and flux_ratio.ratio is None
+    assert "no registration reference frame" in flux_ratio.reason
+
+
+def test_a_member_frame_standing_in_for_the_reference_gives_no_flux_ratio(tmp_path: Path) -> None:
+    """A member frame has its own scale, so it is never the reference."""
+    scattered = _scattered_stars(seed=3)
+    stack, frame = _scaled_pair(tmp_path, "a", 1.4, scattered)
+    bare_stack = _write(tmp_path / "bare.fits", fits.getdata(stack), None)
+    result = measure_stack_noise(
+        bare_stack, None, str(tmp_path / APERTURE_FILE_NAME), member_frame_paths=[frame]
+    ).result
+    assert result is not None and result.reference_frame_flux_ratio is not None
+    assert result.reference_frame_flux_ratio.ratio is None
+
+
+def test_too_few_unsaturated_stars_give_no_flux_ratio(tmp_path: Path) -> None:
+    """With fewer than five stars measurable, the ratio is not measured."""
+    scattered = _scattered_stars(seed=3)
+    stack, frame = _scaled_pair(tmp_path, "a", 1.4, scattered)
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    assert measure_stack_noise(stack, frame, apertures).result is not None
+    chosen = load_apertures(apertures)
+    assert chosen is not None
+    wcs = WCS(_sky_header()).celestial
+    columns, rows = wcs.world_to_pixel_values(chosen.reference_sky[:, 0], chosen.reference_sky[:, 1])
+    damaged = fits.getdata(frame).astype(np.float32)
+    ring = int(chosen.reference_ring_inner_px) + 1
+    # An exact zero in the sky ring makes the frame's flux unusable; spoil all
+    # but four of the stars, leaving the stack untouched.
+    for column, row in list(zip(columns, rows, strict=True))[4:]:
+        damaged[round(row) + ring : round(row) + ring + 2, round(column) : round(column) + 2] = 0.0
+    header = _sky_header()
+    header["EXPTIME"] = 60.0
+    damaged_frame = _write(tmp_path / "damaged_frame.fits", damaged, header)
+    second_stack = _write(
+        tmp_path / "second_stack.fits",
+        _sky_image(2.0, seed=13, star_positions=scattered, star_amplitude=2800.0),
+        _sky_header(),
+    )
+    result = measure_stack_noise(second_stack, damaged_frame, apertures).result
+    assert result is not None and result.reference_frame_flux_ratio is not None
+    flux_ratio = result.reference_frame_flux_ratio
+    assert flux_ratio.ratio is None
+    assert "only" in flux_ratio.reason and flux_ratio.star_count < 5
+
+
+def test_a_reference_frame_that_does_not_line_up_gives_no_flux_ratio(tmp_path: Path) -> None:
+    """A frame with the stars elsewhere is refused, not guessed."""
+    scattered = _scattered_stars(seed=3)
+    stack, frame = _scaled_pair(tmp_path, "a", 1.4, scattered)
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    assert measure_stack_noise(stack, frame, apertures).result is not None
+    header = _sky_header()
+    header["EXPTIME"] = 60.0
+    elsewhere = _write(
+        tmp_path / "elsewhere_frame.fits",
+        np.roll(fits.getdata(frame), shift=(40, 40), axis=(0, 1)),
+        header,
+    )
+    second_stack = _write(
+        tmp_path / "second_stack.fits", _sky_image(2.0, seed=13, star_positions=scattered), _sky_header()
+    )
+    result = measure_stack_noise(second_stack, elsewhere, apertures).result
+    assert result is not None and result.reference_frame_flux_ratio is not None
+    assert result.reference_frame_flux_ratio.ratio is None
+    assert "does not line up" in result.reference_frame_flux_ratio.reason

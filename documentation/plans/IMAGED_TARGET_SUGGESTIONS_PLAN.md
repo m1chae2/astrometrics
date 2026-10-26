@@ -26,8 +26,8 @@ are deferred (decisions D2 and the Nikon parts of section 3.3 wait with it). Par
 levels stay: they leave the ZWO unchanged and correct the Nikon's limit.
 
 Later on 2026-10-26: the validation found four gaps that block a forecast check on M 27
-(section 3.6). They are fixed before part 2b and before any rehearsal. D7 and D8 were decided the
-same day; D9 is open. Gaps 3 and 4 and the D7 fallback are built (uncommitted). Gap 3's cause is
+(section 3.6). They are fixed before part 2b and before any rehearsal. D7, D8 and D9 were decided the
+same day. Gaps 3 and 4 and the D7 fallback are built (uncommitted). Gap 3's cause is
 confirmed on M 27's stored registration file: the 120 s frame Siril dropped has an all-zero
 registration line, which looked like a second reference frame. Part 2a's covered area was also never
 passed to the noise step; that is fixed. Next: the gap 1 diagnosis on the copy.
@@ -491,7 +491,7 @@ document, the stacking and wayfinding registers, and the READMEs of the changed 
 | D6 | Which camera this work covers | Both cameras, or the ZWO ASI533MM Pro only | Decided 2026-10-26: ZWO ASI533MM Pro only; Nikon deferred |
 | D7 | Read noise and gain for offset-0 frames (section 3.6.2) | A: library fallback to another offset for unclipped frames; B: a copied config entry; C: offset 10 only from now on | Decided 2026-10-26: A, the library fallback for frames not clipped at zero |
 | D8 | A noise floor in the forecast (section 3.6.1) | Estimate the floor from one stack (measured minus random) and forecast with it; or keep 1/sqrt(N) and wait for two stacks to fit a floor | Decided 2026-10-26: the one-stack floor, built only once the diagnosis (section 3.6.1, step 1) confirms a floor |
-| D9 | Siril's unsaved per-frame normalization scale (impulse test) | Read the scale from Siril's log and include it in the frame coefficient; or define the stored weight without it and record the impulse test as a known 1.0 to 1.75 deviation | Open |
+| D9 | Siril's unsaved per-frame normalization scale (impulse test) | A: ignore and document; B: measure the stack's scale from its reference stars (stack flux over registration reference frame flux) and apply it to the predicted noise and the floor's random part; C: use the half-stack difference as the random part; D: stop Siril from scaling (`-norm=add`) | Decided 2026-10-26: B, with the stored frame weight kept as the star-width share and the per-frame bias (under about 3% on ratios) documented. Built and checked on the copy 2026-10-26: scales 1.193, 1.385 and 1.339 (M 27, M 57, M 81) agree with the half-stack factors 1.14, 1.37 and 1.34 within 0.4σ; corrected floors 2.92e-3, 0.87e-3 and 0.65e-3 |
 
 ## 7. Out of scope
 

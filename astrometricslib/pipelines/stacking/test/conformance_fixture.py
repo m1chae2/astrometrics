@@ -44,6 +44,10 @@ from astrometricslib.pipelines.stacking.post_processing.half_pattern import (
     HalfPatternOutcome,
     HalfPatternResult,
 )
+from astrometricslib.pipelines.stacking.post_processing.normalization_scale import (
+    NormalizationScale,
+    NormalizationScaleOutcome,
+)
 from astrometricslib.pipelines.stacking.post_processing.record_quality import (
     frame_geometry_measurements,
     stacking_measurements,
@@ -115,6 +119,9 @@ def fixture_science() -> StackScience:
         ),
         flat_noise=FlatNoiseOutcome(FlatNoiseContribution(0.004, 0.00003, 0.006)),
         stack_sky_level=0.006,
+        normalization_scale=NormalizationScaleOutcome(
+            NormalizationScale(1.35, 0.01, 9, "Siril's normalization scale, measured on 9 reference stars.")
+        ),
     )
 
 

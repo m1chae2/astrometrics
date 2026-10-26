@@ -196,6 +196,7 @@ STACKING_EXPECTED_EMPTY_APERTURE_NOISE_STACK_UNIT = "stacking.expected_empty_ape
 STACKING_EXPECTED_NOISE_APERTURE_AREA_PX = "stacking.expected_noise_aperture_area_px"
 STACKING_EXPECTED_NOISE_SCALE_STACK_UNIT_PER_ADU = "stacking.expected_noise_scale_stack_unit_per_adu"
 STACKING_EXPECTED_SKY_LEVEL_STACK_UNIT = "stacking.expected_sky_level_stack_unit"
+STACKING_NORMALIZATION_SCALE = "stacking.normalization_scale"
 STACKING_STACK_SKY_LEVEL_STACK_UNIT = "stacking.stack_sky_level_stack_unit"
 STACKING_FLAT_NOISE_AFTER_SMOOTHING_FRACTION = "stacking.flat_noise_after_smoothing_fraction"
 STACKING_FLAT_NOISE_IN_APERTURE_STACK_UNIT = "stacking.flat_noise_in_aperture_stack_unit"
@@ -887,7 +888,10 @@ _NOISE_AND_WEIGHT_METRICS: tuple[MetricSpec, ...] = (
             "report the weights and the scale it fits is not saved: the row is then not measured, "
             "but it still records that the frame is a member. A frame Siril dropped while registering is "
             "not a member and gets no row. When Siril's stack filters dropped frames that cannot be "
-            "told apart, every candidate row is marked assumed."
+            "told apart, every candidate row is marked assumed. The weight is Siril's star-width share "
+            "only: each frame's signal coefficient in the stack also carries Siril's unsaved per-frame "
+            "normalization scale, which biases noise ratios built on these weights by under about 3% "
+            "(design estimate)."
         ),
         sample_definition="Each frame that the run stacked. The run id ties the rows to the stack.",
         band=_BAND,
@@ -1419,8 +1423,13 @@ _EXPECTED_NOISE_MODEL = (
     "that variance by `stacking.expected_noise_aperture_area_px` (about 46 px for the squared "
     "overlaps of the radius 4 px circle plus about 13 px for the variance of the median of the 7 to "
     "12 px sky ring that is subtracted), and the square root is multiplied by "
-    "`stacking.expected_noise_scale_stack_unit_per_adu` to give the stack's units. Left out: Siril's "
-    "normalization of each frame, the debayering of a color stack (interpolated, correlated pixels, "
+    "`stacking.expected_noise_scale_stack_unit_per_adu` to give the stack's units. Siril multiplies each "
+    "frame by a scale it does not save, which multiplies the noise as well; the three noise rows are "
+    "multiplied by the stack's own measured scale (`stacking.normalization_scale`), so the row's "
+    "unscaled value is the row divided by that scale. A stack whose scale was not measured keeps the "
+    "unscaled value, and the row's reason says it is not corrected. Left out: the differences between "
+    "the frames' own scales (under about 3% on a noise ratio, a design estimate), the debayering of a "
+    "color stack (interpolated, correlated pixels, "
     "planes averaged), the noise of the master dark, bias and flat, fixed patterns, the data thrown "
     "away by pixel rejection, and faint stars in the apertures; a measured noise above the expected "
     "one is what these may explain. Registration is not one of the causes: a resampling kernel whose "
@@ -1447,6 +1456,7 @@ _SCIENCE_METRICS: tuple[MetricSpec, ...] = (
         purpose_reason=_EXPECTED_NOISE_PURPOSE_REASON,
         uncertainty_method=_NO_PROPAGATED_UNCERTAINTY,
         register_entry="STK-38",
+        definition_version=2,
     ),
     _context_metric(
         STACKING_EXPECTED_READ_NOISE_STACK_UNIT,
@@ -1460,6 +1470,7 @@ _SCIENCE_METRICS: tuple[MetricSpec, ...] = (
         purpose_reason=_EXPECTED_NOISE_PURPOSE_REASON,
         uncertainty_method=_NO_PROPAGATED_UNCERTAINTY,
         register_entry="STK-38",
+        definition_version=2,
     ),
     _context_metric(
         STACKING_EXPECTED_EMPTY_APERTURE_NOISE_STACK_UNIT,
@@ -1472,6 +1483,7 @@ _SCIENCE_METRICS: tuple[MetricSpec, ...] = (
         purpose_reason=_EXPECTED_NOISE_PURPOSE_REASON,
         uncertainty_method=_NO_PROPAGATED_UNCERTAINTY,
         register_entry="STK-38",
+        definition_version=2,
     ),
     _context_metric(
         STACKING_EXPECTED_NOISE_APERTURE_AREA_PX,
@@ -1519,6 +1531,46 @@ _SCIENCE_METRICS: tuple[MetricSpec, ...] = (
         purpose_reason=(
             "It is the other half of the unit check: the sky the frames predict against the sky the stack "
             "shows."
+        ),
+        register_entry="STK-38",
+    ),
+    _context_metric(
+        STACKING_NORMALIZATION_SCALE,
+        "",
+        "The scale Siril's normalization gave the stack, measured from its stars (1 is no scaling).",
+        (
+            "Siril's `-norm=addscale` multiplies each registered frame by a scale chosen to match the "
+            "frame's pixel spread to the reference frame's, and does not save it. The scale of the "
+            "registration reference frame is 1 by Siril's definition. For each of the target's fixed "
+            "reference stars that is not saturated in the reference frame, the star's flux in the stack "
+            "is divided by its flux in the registration reference frame (the large aperture and sky "
+            "ring of `stacking.noise_reference_flux_stack_unit`, the reference frame's pixel found with "
+            "the trim offset, after a check that the brightest stars of the two images coincide). The "
+            "median of the ratios is divided by the ratio Siril would give with no scaling: 1 / 65535 "
+            "stack unit per ADU for one exposure group, and that times the mean exposure per frame over "
+            "the reference group's exposure for a stack of groups (the combine divides each group by its "
+            "exposure, puts the group on the reference group's brightness with the gain, which is 1 for "
+            "the reference group, and multiplies by the mean exposure). At least 5 stars are needed. "
+            "Clouds or haze in some frames lower the stack's flux against the reference frame and bias "
+            "the value low; a reference frame clearer than the average frame does the same. The stack's "
+            "flux follows the weighted mean of the frames' scales and its noise the weighted root mean "
+            "square; the two differ by about 1% for scales of 1.0 to 1.35 (design estimate). For a stack "
+            "of several groups it is the reference group's scale; the other groups' own scales are "
+            "inside their gains."
+        ),
+        "The fixed reference stars of the target that fall on the stack and are not saturated in the "
+        "registration reference frame. Not measured when the stack has no named reference frame (a "
+        "member frame that stands in for it has a scale of its own).",
+        "pipelines.stacking.post_processing.normalization_scale.measure_normalization_scale",
+        purpose_reason=(
+            "The expected noise parts are multiplied by it, so that the noise the frames predict is on "
+            "the scale of the stack. It is its own row so the unscaled parts stay derivable."
+        ),
+        uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
+        uncertainty_method=(
+            "Statistical, 1 sigma: 1.2533 times 1.4826 times the median absolute deviation of the stars' "
+            "flux ratios, divided by sqrt(k) for k stars (the standard error of a median), divided by the "
+            "expected ratio. The bias from clouds or an unrepresentative reference frame is not in it."
         ),
         register_entry="STK-38",
     ),

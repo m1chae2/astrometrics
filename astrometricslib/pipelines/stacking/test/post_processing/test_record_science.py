@@ -305,8 +305,8 @@ def test_a_group_whose_frames_could_not_be_read_stores_nothing_but_reasons() -> 
 def test_without_science_every_value_is_not_measured() -> None:
     """A caller that gathered nothing still gets a row for each metric."""
     rows = science_measurements(None, CONTEXT, SUBJECT, [_group(), _group()], [SUBJECT, SUBJECT])
-    assert len(rows) == 6 + 3 + 2 * 7
-    assert [row.status for row in rows[:9]] == [MeasurementStatus.NOT_MEASURED] * 9
+    assert len(rows) == 6 + 1 + 3 + 2 * 7
+    assert [row.status for row in rows[:10]] == [MeasurementStatus.NOT_MEASURED] * 10
 
 
 def test_group_values_follow_the_summarys_group_order_and_never_drift() -> None:
@@ -753,4 +753,4 @@ def test_a_non_finite_blur_width_loses_no_row() -> None:
     assert science.flat_noise.result is None
     assert "blur width" in science.flat_noise.reason
     rows = science_measurements(science, CONTEXT, SUBJECT, [_group()], [SUBJECT])
-    assert len(rows) == 6 + 3 + 7
+    assert len(rows) == 6 + 1 + 3 + 7

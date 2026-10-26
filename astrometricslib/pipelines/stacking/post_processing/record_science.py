@@ -67,6 +67,7 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_GROUP_PEAK_FRACTION,
     STACKING_GROUP_RAW_SKY_LEVEL_ADU,
     STACKING_METRICS,
+    STACKING_NORMALIZATION_SCALE,
     STACKING_STACK_SKY_LEVEL_STACK_UNIT,
 )
 from astrometricslib.pipelines.stacking.post_processing.expected_noise import (
@@ -87,6 +88,11 @@ from astrometricslib.pipelines.stacking.post_processing.flat_noise_contribution 
     FlatNoiseOutcome,
     flat_noise_contribution,
 )
+from astrometricslib.pipelines.stacking.post_processing.normalization_scale import (
+    NormalizationScaleOutcome,
+    apply_normalization_scale,
+    measure_normalization_scale,
+)
 from astrometricslib.pipelines.stacking.post_processing.stack_membership import (
     StackMembership,
     normalized_weights,
@@ -103,7 +109,9 @@ __all__ = [
     "flat_noise_measurements",
     "frame_noise_inputs_from_store",
     "group_peak_measurements",
+    "normalization_scale_measurements",
     "resolve_stack_sky_level",
+    "scale_expected_noise",
     "science_measurements",
     "stack_sky_level_measurements",
 ]
@@ -124,6 +132,9 @@ CLIPPED_EXPOSURE_GROUPS_REASON = (
 )
 
 
+_SCALE_NOT_MEASURED = NormalizationScaleOutcome(None, "the caller did not measure the normalization scale")
+
+
 @dataclass(frozen=True)
 class StackScience:
     """What the record step needs for expected noise, flat noise and sky level.
@@ -139,11 +150,15 @@ class StackScience:
         The master flat's contribution, or the reason there is none.
     stack_sky_level : `float` or `None`
         The stack's sky level, in the stack's units.
+    normalization_scale : `NormalizationScaleOutcome`
+        The scale Siril gave the stack, or the reason there is none. The
+        expected noise in `expected_noise` has already been multiplied by it.
     """
 
     expected_noise: ExpectedNoiseOutcome
     flat_noise: FlatNoiseOutcome
     stack_sky_level: float | None
+    normalization_scale: NormalizationScaleOutcome = _SCALE_NOT_MEASURED
 
 
 def resolve_stack_sky_level(noise: StackNoiseOutcome | None, stack_path: str) -> float | None:
@@ -355,6 +370,38 @@ def _expected_noise_from_store(
     return expected_stack_noise(inputs)
 
 
+def exposure_group_facts(group_entries: Sequence[dict[str, Any]]) -> list[ExposureGroupNoiseFacts] | None:
+    """Read the combine's facts about each exposure group.
+
+    Parameters
+    ----------
+    group_entries : `Sequence` of `dict`
+        The stack's ``exposure_group_weights`` entries.
+
+    Returns
+    -------
+    facts : `list` [`ExposureGroupNoiseFacts`] or `None`
+        One entry for each group, or `None` when an entry lacks its weight,
+        exposure, frame count, gain or sky level.
+    """
+    facts = []
+    for entry in group_entries:
+        try:
+            facts.append(
+                ExposureGroupNoiseFacts(
+                    combine_weight=float(entry["weight"]),
+                    exposure_seconds=float(entry["exposure_seconds"]),
+                    frame_count=int(entry["frame_count"]),
+                    gain=float(entry["gain"]),
+                    gain_measured=bool(entry["gain_measured"]),
+                    sky_level_per_second=float(entry["sky_level_per_second"]),
+                )
+            )
+        except KeyError, TypeError, ValueError:
+            return None
+    return facts
+
+
 def _expected_group_noise_from_store(
     membership: StackMembership,
     group_entries: Sequence[dict[str, Any]],
@@ -394,23 +441,11 @@ def _expected_group_noise_from_store(
     )
     if isinstance(inputs, ExpectedNoiseOutcome):
         return inputs
-    facts = []
-    for entry in group_entries:
-        try:
-            facts.append(
-                ExposureGroupNoiseFacts(
-                    combine_weight=float(entry["weight"]),
-                    exposure_seconds=float(entry["exposure_seconds"]),
-                    frame_count=int(entry["frame_count"]),
-                    gain=float(entry["gain"]),
-                    gain_measured=bool(entry["gain_measured"]),
-                    sky_level_per_second=float(entry["sky_level_per_second"]),
-                )
-            )
-        except KeyError, TypeError, ValueError:
-            return ExpectedNoiseOutcome(
-                None, "an exposure group's entry lacks its weight, exposure, gain or sky level"
-            )
+    facts = exposure_group_facts(group_entries)
+    if facts is None:
+        return ExpectedNoiseOutcome(
+            None, "an exposure group's entry lacks its weight, exposure, gain or sky level"
+        )
     group_of_path = {
         str(path): position
         for position, entry in enumerate(group_entries)
@@ -418,6 +453,44 @@ def _expected_group_noise_from_store(
     }
     indices = [group_of_path.get(str(member.frame.path), -1) for member in membership.members]
     return expected_exposure_group_noise(inputs, indices, facts)
+
+
+def scale_expected_noise(
+    expected: ExpectedNoiseOutcome, noise: StackNoiseOutcome | None, diagnostics: dict[str, Any] | None
+) -> tuple[ExpectedNoiseOutcome, NormalizationScaleOutcome]:
+    """Measure the stack's normalization scale and apply it to the noise.
+
+    Parameters
+    ----------
+    expected : `ExpectedNoiseOutcome`
+        The noise the frames predict, before any scale.
+    noise : `StackNoiseOutcome` or `None`
+        The noise step's outcome, which holds the stars' flux ratio against
+        the registration reference frame.
+    diagnostics : `dict` or `None`
+        What the stacking run reported. An ``"exposure_group_weights"`` entry
+        marks a stack combined from several exposure groups.
+
+    Returns
+    -------
+    expected, scale : `tuple`
+        The expected noise multiplied by the scale (or kept, with a note that
+        says it is not corrected), and the scale outcome. A failure while
+        measuring is logged and becomes a reason, never a raised error.
+    """
+    try:
+        group_entries = (diagnostics or {}).get("exposure_group_weights") or []
+        groups = exposure_group_facts(group_entries) if group_entries else []
+        if groups is None:
+            scale = NormalizationScaleOutcome(
+                None, "an exposure group's entry lacks its weight, exposure, gain or sky level"
+            )
+        else:
+            scale = measure_normalization_scale(noise, groups)
+    except Exception as error:  # a by-product: no failure here may fail the stack
+        logger.exception("The normalization scale of a stack could not be measured")
+        scale = NormalizationScaleOutcome(None, f"the normalization scale failed: {type(error).__name__}")
+    return apply_normalization_scale(expected, scale), scale
 
 
 def compute_stack_science(
@@ -467,13 +540,17 @@ def compute_stack_science(
         The three values. Any failure becomes a reason, never a raised error,
         and one failure does not drop the others.
     """
-    expected = compute_expected_noise(
-        membership,
-        membership_reason,
-        target_id,
-        configuration,
-        diagnostics=diagnostics,
-        is_spectral=is_spectral,
+    expected, scale = scale_expected_noise(
+        compute_expected_noise(
+            membership,
+            membership_reason,
+            target_id,
+            configuration,
+            diagnostics=diagnostics,
+            is_spectral=is_spectral,
+        ),
+        noise,
+        diagnostics,
     )
     sky_level = resolve_stack_sky_level(noise, stack_path)
     try:
@@ -481,7 +558,7 @@ def compute_stack_science(
     except Exception as error:  # a by-product again
         logger.exception("The flat noise of the stack %s could not be worked out", stack_path)
         flat = FlatNoiseOutcome(None, f"the flat's noise failed: {type(error).__name__}")
-    return StackScience(expected, flat, sky_level)
+    return StackScience(expected, flat, sky_level, scale)
 
 
 def expected_noise_measurements(
@@ -532,18 +609,69 @@ def expected_noise_measurements(
         result.predicted_sky_level,
     )
     status = MeasurementStatus.ASSUMED if result.assumed_reason else MeasurementStatus.MEASURED
-    reason = result.assumed_reason
+    # An assumed row keeps its reason; a measured row keeps the scale note as
+    # its provenance. Only the three noise rows were multiplied by the scale.
+    scaled_names = names[:3]
     return [
         build_measurement(
             _SPEC_BY_NAME[name],
             value,
             context,
             subject,
-            reason=reason,
+            reason=" ".join(
+                part
+                for part in (result.assumed_reason, result.scale_note if name in scaled_names else "")
+                if part
+            ),
+            provenance=result.scale_note if name in scaled_names else "",
             sample_count=result.frame_count,
             status=status,
         )
         for name, value in zip(names, values, strict=True)
+    ]
+
+
+def normalization_scale_measurements(
+    outcome: NormalizationScaleOutcome, context: PipelineRunContext, subject: QualitySubject
+) -> list[QualityMeasurement]:
+    """Build the stack's normalization scale measurement.
+
+    Parameters
+    ----------
+    outcome : `NormalizationScaleOutcome`
+        The scale or the reason there is none.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    subject : `QualitySubject`
+        The stack (a subset stack too).
+
+    Returns
+    -------
+    measurements : `list` of `QualityMeasurement`
+        One row: the scale with its uncertainty, the number of stars and a
+        note on how it was measured, or not measured with the reason.
+    """
+    result = outcome.result
+    if result is None:
+        return [
+            build_measurement(
+                _SPEC_BY_NAME[STACKING_NORMALIZATION_SCALE],
+                None,
+                context,
+                subject,
+                reason=outcome.reason or "the normalization scale was not measured",
+            )
+        ]
+    return [
+        build_measurement(
+            _SPEC_BY_NAME[STACKING_NORMALIZATION_SCALE],
+            result.value,
+            context,
+            subject,
+            uncertainty=result.uncertainty,
+            sample_count=result.star_count,
+            provenance=result.note,
+        )
     ]
 
 
@@ -853,6 +981,7 @@ def science_measurements(
             None,
         )
     rows = expected_noise_measurements(science.expected_noise, context, stack_subject)
+    rows.extend(normalization_scale_measurements(science.normalization_scale, context, stack_subject))
     rows.extend(flat_noise_measurements(science.flat_noise, science.stack_sky_level, context, stack_subject))
     # `group_subjects` is built from `groups` in the same order (see
     # `record_quality.stacking_measurements`); a strict zip makes any drift

@@ -78,6 +78,13 @@ which is the library stack's. To start over for a target, call
 ``quality_apertures.json`` beside its stacks; the next stack chooses new
 apertures. Noise values measured with different sets are not comparable.
 
+The same reference stars also give the stack's flux against the registration
+reference frame (`ReferenceFrameFluxRatio`). Siril multiplies each frame by a
+scale it does not save, and the reference frame's own scale is 1 by Siril's
+definition, so the ratio of a star's flux in the stack to its flux in that
+frame carries the stack's overall scale. `normalization_scale.py` turns it into
+the scale.
+
 The estimator and the numbers (100 apertures, radius 4 px, 10 reference stars)
 are declared in `pipelines/stacking/metrics.py`.
 
@@ -135,6 +142,7 @@ from astrometricslib.pipelines.stacking.processing.group_alignment import detect
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "ReferenceFrameFluxRatio",
     "StackNoiseOutcome",
     "StackNoiseResult",
     "measure_stack_noise",
@@ -192,6 +200,49 @@ MEMBER_FRAME_ATTEMPTS = 5
 # Given when apertures must be chosen on a group stack but the area every
 # exposure group covers cannot be laid under the trimmed stack.
 UNCOVERED_AREA_MISFIT_REASON = "the area every exposure group covers does not fit under this stack"
+
+
+@dataclass(frozen=True)
+class ReferenceFrameFluxRatio:
+    """Compare the reference stars' flux in the stack and the frame.
+
+    For each usable reference star the flux is taken in the stack and in the
+    registration reference frame, in the same large aperture with the same sky
+    ring. The ratio is in stack units per ADU. It is the product of the unit
+    conversion (1 / 65535 stack unit per ADU), the stack's own scale from
+    Siril's normalization, and, for a stack of exposure groups, the exposure
+    arithmetic of the combine (see `normalization_scale.py`).
+
+    Clouds or haze in some frames lower the stack's flux against a clear
+    reference frame, so the ratio, and the scale made from it, read low. A
+    reference frame that is clearer or cloudier than the average frame moves
+    it the other way.
+
+    Parameters
+    ----------
+    ratio : `float` or `None`
+        The median, over the stars, of the stack's flux over the frame's flux.
+        `None` when it could not be measured.
+    uncertainty : `float`
+        Its 1-sigma uncertainty from the scatter of the stars' ratios (the
+        standard error of a median). 0 when there is no ratio.
+    star_count : `int`
+        How many stars gave a ratio.
+    saturated_count : `int`
+        How many stored reference stars were left out for being saturated in
+        the reference frame.
+    reference_exposure_seconds : `float` or `None`
+        The exposure length of the reference frame, from its header.
+    reason : `str`
+        Why there is no ratio. Empty when there is one.
+    """
+
+    ratio: float | None
+    uncertainty: float = 0.0
+    star_count: int = 0
+    saturated_count: int = 0
+    reference_exposure_seconds: float | None = None
+    reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -255,6 +306,10 @@ class StackNoiseResult:
     aperture_definition_note : `str`
         Which stack defined the set and how deep it was (see
         `ApertureSet.describe_definition`).
+    reference_frame_flux_ratio : `ReferenceFrameFluxRatio` or `None`
+        The reference stars' flux in the stack over their flux in the
+        registration reference frame, or `None` when the measurement was not
+        tried (a difference image).
     """
 
     noise_adu: float
@@ -277,6 +332,7 @@ class StackNoiseResult:
     aperture_set_origin: str = ""
     aperture_identity: str = ""
     aperture_definition_note: str = ""
+    reference_frame_flux_ratio: ReferenceFrameFluxRatio | None = None
 
 
 @dataclass(frozen=True)
@@ -390,6 +446,45 @@ def _saturation_check(
     )
 
 
+def _bright_star_matches(
+    stack_plane: np.ndarray, frame_plane: np.ndarray, crop_offset: tuple[int, int]
+) -> tuple[int, int, int]:
+    """Count bright stack stars that sit where the reference frame has stars.
+
+    Parameters
+    ----------
+    stack_plane : `numpy.ndarray`
+        The stack's image.
+    frame_plane : `numpy.ndarray`
+        The registration reference frame as one 2-D image.
+    crop_offset : `tuple` [`int`, `int`]
+        The (columns, rows) cut from the stack's left and top edges.
+
+    Returns
+    -------
+    matches : `int`
+        How many of the stack's brightest stars have a frame star within
+        `WCS_CHECK_TOLERANCE_PX`.
+    stack_star_count : `int`
+        How many bright stars were found in the stack (at most
+        `WCS_CHECK_STAR_COUNT`).
+    frame_star_count : `int`
+        How many stars were found in the frame. When it is 0, `matches` is 0.
+    """
+    stack_stars = detect_star_centroids(stack_plane, count=WCS_CHECK_STAR_COUNT)
+    # Saturated stars stay in: the stack's brightest stars are bright in
+    # the single frame too, and the frame's own 99.99th percentile would cut
+    # them.
+    frame_stars = detect_star_centroids(frame_plane, count=DETECTED_STAR_COUNT, skip_saturated=False)
+    if len(stack_stars) == 0 or len(frame_stars) == 0:
+        return 0, len(stack_stars), len(frame_stars)
+    # Stack pixel (row, column) is frame pixel (row + rows cut,
+    # column + columns cut).
+    expected = stack_stars + np.array([crop_offset[1], crop_offset[0]], dtype=float)
+    distance = cKDTree(frame_stars).query(expected)[0]
+    return int(np.count_nonzero(distance <= WCS_CHECK_TOLERANCE_PX)), len(stack_stars), len(frame_stars)
+
+
 def _reference_frame_wcs(
     reference_frame_path: str, stack_plane: np.ndarray, crop_offset: tuple[int, int]
 ) -> tuple[WCS | None, str]:
@@ -422,21 +517,12 @@ def _reference_frame_wcs(
     if frame_data is None:
         return None, NO_WCS_REASON
     frame_plane = collapse_to_2d(np.asarray(frame_data, dtype=np.float64))
-    stack_stars = detect_star_centroids(stack_plane, count=WCS_CHECK_STAR_COUNT)
-    # Saturated stars stay in: the stack's brightest stars are bright in
-    # the single frame too, and the frame's own 99.99th percentile would cut
-    # them.
-    frame_stars = detect_star_centroids(frame_plane, count=DETECTED_STAR_COUNT, skip_saturated=False)
-    if len(stack_stars) < WCS_CHECK_MINIMUM_MATCHES or len(frame_stars) == 0:
+    matches, stack_star_count, frame_star_count = _bright_star_matches(stack_plane, frame_plane, crop_offset)
+    if stack_star_count < WCS_CHECK_MINIMUM_MATCHES or frame_star_count == 0:
         return None, "the reference frame's solution could not be checked: too few stars were found"
-    # Stack pixel (row, column) is frame pixel (row + rows cut,
-    # column + columns cut).
-    expected = stack_stars + np.array([crop_offset[1], crop_offset[0]], dtype=float)
-    distance = cKDTree(frame_stars).query(expected)[0]
-    matches = int(np.count_nonzero(distance <= WCS_CHECK_TOLERANCE_PX))
     if matches < WCS_CHECK_MINIMUM_MATCHES:
         return None, (
-            f"the reference frame does not line up with the stack ({matches} of {len(stack_stars)} "
+            f"the reference frame does not line up with the stack ({matches} of {stack_star_count} "
             "bright stars match), so its coordinate solution does not apply to the stack"
         )
     return shifted, ""
@@ -1004,6 +1090,13 @@ def _measure_noise_in_plane(
     if sums.size < MINIMUM_USABLE_APERTURES:
         return StackNoiseOutcome(None, f"only {sums.size} of the stored apertures fall on this stack")
     ratios, saturated_count = _reference_ratios(plane, wcs, aperture_set, saturation)
+    flux_ratio = (
+        None
+        if subtracted_plane is not None
+        else _flux_ratio_to_reference_frame(
+            plane, wcs, aperture_set, saturation, reference_frame_path, crop_offset, reference_header
+        )
+    )
     if ratios.size < MINIMUM_USABLE_REFERENCE_STARS:
         return StackNoiseOutcome(
             None,
@@ -1048,10 +1141,130 @@ def _measure_noise_in_plane(
             aperture_set_origin=aperture_set.created_from,
             aperture_identity=aperture_set.identity,
             aperture_definition_note=aperture_set.describe_definition(),
+            reference_frame_flux_ratio=flux_ratio,
             saturation_source=aperture_set.saturation_source
             if created
             else (saturation.source if saturation is not None else aperture_set.saturation_source),
         )
+    )
+
+
+def _flux_ratio_to_reference_frame(
+    plane: np.ndarray,
+    wcs: WCS,
+    aperture_set: ApertureSet,
+    saturation: SaturationCheck | None,
+    reference_frame_path: str | None,
+    crop_offset: tuple[int, int],
+    reference_header: fits.Header,
+) -> ReferenceFrameFluxRatio:
+    """Compare each reference star's flux in the stack and the reference frame.
+
+    Siril's stack scale is defined against the registration reference frame
+    (its scale is 1), so the ratio of a star's flux in the stack to its flux
+    in that frame, with both in the same aperture and sky ring, carries the
+    stack's overall scale. The stars, the large aperture, the saturation
+    check and the sky positions are those of `_reference_ratios`. The
+    reference frame's pixel for a stack pixel is found with the trim offset,
+    and the claim that the two share a pixel grid is checked with the same
+    bright-star match as `_reference_frame_wcs`.
+
+    Only the registration reference frame is used. A member frame that stands
+    in for it is a registered (resampled) frame with a scale of its own, so no
+    ratio is measured against it.
+
+    Parameters
+    ----------
+    plane : `numpy.ndarray`
+        The stack as a 2-D image.
+    wcs : `astropy.wcs.WCS`
+        The stack's sky solution, already moved onto the stored stars.
+    aperture_set : `ApertureSet`
+        The stored set, with the reference stars and the large aperture.
+    saturation : `SaturationCheck` or `None`
+        Holds the reference frame's pixels and the saturation limit. With
+        `None` there is no readable reference frame.
+    reference_frame_path : `str` or `None`
+        The registration reference frame named by the stack's record. `None`
+        when none is named.
+    crop_offset : `tuple` [`int`, `int`]
+        The (columns, rows) cut from the stack's left and top edges.
+    reference_header : `astropy.io.fits.Header`
+        The reference frame's header, for its exposure length.
+
+    Returns
+    -------
+    ratio : `ReferenceFrameFluxRatio`
+        The median ratio in stack units per ADU with its uncertainty, or the
+        reason there is none (no named reference frame, a frame that does not
+        line up with the stack, or fewer than `MINIMUM_USABLE_REFERENCE_STARS`
+        stars with a positive flux in both).
+    """
+    if not reference_frame_path:
+        return ReferenceFrameFluxRatio(
+            None,
+            reason="no registration reference frame is named, and a member frame is not the "
+            "reference (it has a scale of its own)",
+        )
+    if saturation is None:
+        return ReferenceFrameFluxRatio(None, reason="the registration reference frame could not be read")
+    exposure = _reference_exposure_seconds(reference_header, ())
+    frame_plane = saturation.frame_plane
+    matches, stack_star_count, _ = _bright_star_matches(
+        plane, np.asarray(frame_plane, dtype=np.float64), crop_offset
+    )
+    if matches < WCS_CHECK_MINIMUM_MATCHES:
+        return ReferenceFrameFluxRatio(
+            None,
+            reference_exposure_seconds=exposure,
+            reason=f"the registration reference frame does not line up with the stack ({matches} of "
+            f"{stack_star_count} bright stars match)",
+        )
+    ratios = []
+    saturated_count = 0
+    for (column, row), baseline in zip(
+        _sky_to_pixels(wcs, aperture_set.reference_sky), aperture_set.reference_baseline_flux, strict=True
+    ):
+        if not (math.isfinite(column) and math.isfinite(row)) or not baseline > 0:
+            continue
+        if saturation.is_saturated(float(row), float(column)):
+            saturated_count += 1
+            continue
+        flux_arguments = (
+            aperture_set.reference_radius_px,
+            aperture_set.reference_ring_inner_px,
+            aperture_set.reference_ring_outer_px,
+        )
+        stack_flux = signed_aperture_sum(plane, float(column), float(row), *flux_arguments)
+        # The reference frame's pixel is the stack pixel plus the trimmed edge.
+        frame_flux = signed_aperture_sum(
+            frame_plane, float(column) + crop_offset[0], float(row) + crop_offset[1], *flux_arguments
+        )
+        if stack_flux is not None and frame_flux is not None and stack_flux > 0 and frame_flux > 0:
+            ratios.append(stack_flux / frame_flux)
+    if len(ratios) < MINIMUM_USABLE_REFERENCE_STARS:
+        return ReferenceFrameFluxRatio(
+            None,
+            star_count=len(ratios),
+            saturated_count=saturated_count,
+            reference_exposure_seconds=exposure,
+            reason=f"only {len(ratios)} reference stars have a flux in both the stack and the reference "
+            f"frame ({saturated_count} are saturated in the reference frame)",
+        )
+    values = np.asarray(ratios, dtype=float)
+    median = float(np.median(values))
+    error = (
+        MEDIAN_ERROR_FACTOR
+        * MAD_TO_SIGMA
+        * float(np.median(np.abs(values - median)))
+        / math.sqrt(values.size)
+    )
+    return ReferenceFrameFluxRatio(
+        median,
+        uncertainty=error,
+        star_count=int(values.size),
+        saturated_count=saturated_count,
+        reference_exposure_seconds=exposure,
     )
 
 

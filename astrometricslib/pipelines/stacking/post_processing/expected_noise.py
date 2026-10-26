@@ -57,12 +57,20 @@ that is clipped at zero gets no prediction: the combine drops sky pixels near
 zero there, which these weights do not describe (see
 `expected_exposure_group_noise`).
 
+The numbers this module returns are the frames' own noise, with no Siril
+scaling. Siril multiplies each frame by a scale it does not save, which
+multiplies the noise as well. `normalization_scale.py` measures the stack's
+scale from its stars and multiplies the three noise parts by it. The scale is
+stored in its own row, so the unscaled parts can always be found again.
+
 What the model leaves out, so a measured noise above the expected one is
 expected and has these causes:
 
 - Siril normalizes every frame (it matches each frame's background level and
-  scale to the reference) before it averages, which changes the weights
-  slightly.
+  scale to the reference) before it averages. The scale is corrected for the
+  stack as a whole (see above). What stays is that the frames' scales differ
+  from one another, which changes the weights slightly (under about 3% on a
+  noise ratio, a design estimate).
 - A color stack is debayered: the one-shot color camera's mosaic is filled in
   by interpolation, so neighboring pixels are correlated, and the planes are
   averaged here.
@@ -238,6 +246,10 @@ class ExpectedNoise:
     assumed_reason : `str`
         Why the numbers are assumed, when they are. Empty when all inputs were
         measured.
+    scale_note : `str`
+        Which Siril normalization scale the noise parts were multiplied by, or
+        why they were not corrected (see `normalization_scale.py`). Empty
+        until the scale step has run.
     """
 
     sky_noise: float
@@ -248,6 +260,7 @@ class ExpectedNoise:
     frame_count: int
     predicted_sky_level: float
     assumed_reason: str = ""
+    scale_note: str = ""
 
 
 @dataclass(frozen=True)

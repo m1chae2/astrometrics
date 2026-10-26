@@ -149,7 +149,9 @@ from astrometricslib.pipelines.stacking.post_processing.record_science import (
     compute_expected_noise,
     expected_noise_measurements,
     frame_noise_inputs_from_store,
+    normalization_scale_measurements,
     resolve_stack_sky_level,
+    scale_expected_noise,
     stack_sky_level_measurements,
 )
 from astrometricslib.pipelines.stacking.post_processing.registration_shifts import drift_of_runs
@@ -877,21 +879,21 @@ def _stack_and_measure(
         # The noise the subset's own frames predict, stored beside the noise
         # that was measured, so the two can be read side by side, and the
         # stack's sky level for the unit check.
-        measurements.extend(
-            expected_noise_measurements(
-                compute_expected_noise(
-                    membership,
-                    membership_reason,
-                    target.id,
-                    configuration,
-                    store=None if library is None else library.store,
-                    diagnostics=None if outcome is None else outcome.diagnostics,
-                    is_spectral=bool(outcome is not None and outcome.is_spectral),
-                ),
-                context,
-                subject,
-            )
+        expected, scale = scale_expected_noise(
+            compute_expected_noise(
+                membership,
+                membership_reason,
+                target.id,
+                configuration,
+                store=None if library is None else library.store,
+                diagnostics=None if outcome is None else outcome.diagnostics,
+                is_spectral=bool(outcome is not None and outcome.is_spectral),
+            ),
+            noise,
+            None if outcome is None else outcome.diagnostics,
         )
+        measurements.extend(expected_noise_measurements(expected, context, subject))
+        measurements.extend(normalization_scale_measurements(scale, context, subject))
         if outcome is not None and outcome.stack_path is not None:
             measurements.extend(
                 stack_sky_level_measurements(

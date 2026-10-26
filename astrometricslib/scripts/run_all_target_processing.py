@@ -461,8 +461,8 @@ def camera_refusal_reason(camera_name: str, config: Any) -> str | None:
         )
     if not profile.saturation_threshold_can_be_reached:
         problems.append(
-            f"the saturation level ({profile.saturation_threshold_adu.value:g} ADU) is above the clip "
-            f"ceiling ({profile.clip_ceiling_adu.value:g} ADU)"
+            "the profile's saturation threshold is above the clip ceiling "
+            f"({profile.clip_ceiling_adu.value:g} ADU)"
         )
     return "; ".join(problems) or None
 

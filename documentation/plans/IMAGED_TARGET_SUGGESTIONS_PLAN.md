@@ -38,6 +38,8 @@ Later still on 2026-10-26: the rehearsal on the copy found that one 300 s frame 
 
 Last on 2026-10-26: the restack script measures every frame before it stacks, and a stack that has no plate solution from a frame is plate-solved in memory (section 4.1). Capture settings round the pixel scale (stored settings are merged on first open). The half-difference model uses `k_i` (section 3.7). D11 is built (section 3.9), and the "take N more" wording has a practical limit (section 3.10, decision D12). All of it is uncommitted on `134-group-weights-nikon` after dacb635a, with unit tests and one copy run on M 13 (section 4.5). The full ZWO pass on the copy has not been rerun with these changes.
 
+Then on 2026-10-26: decisions D13 and D14 (sections 3.11 and 4.1). The floor's random part now comes from the half-difference when one exists, and the model test is the fallback with a shared error budget; the loss account follows. The restack runs the half-difference for targets whose measured over predicted noise is 1.1 to 2.0. All of it is uncommitted on `134-group-weights-nikon` after 9ed5af01, with unit tests and one copy run on M 13 (section 4.5).
+
 ## 1. Why suggestions from imaged targets are missing
 
 "Take N more" is a forecast: add these frames and the noise falls this much. The library shows it
@@ -324,7 +326,9 @@ The fix, in order:
    from the measured `s_g` of its groups and the recorded weights, in the same units as the
    measured noise, with no gain or read noise needed. The floor is
    `σ_floor² = σ_measured² − σ_random²`, kept only when it is above zero by 2 standard errors
-   (the aperture error, `1.17 / sqrt(n)`). The forecast becomes
+   (the aperture error, `1.17 / sqrt(n)`). *Revised 2026-10-26 (D13, section 3.11): the error also
+   holds the model's own error, because the prediction is not exact, and a half-difference
+   measurement replaces the prediction when there is one.* The forecast becomes
    `σ_later² = σ_floor² + σ_random,later²`. The suggestion then states the floor, and stops
    offering frames when the floor makes up most of the noise. Decision D8.
    **Result of step 1 (2026-10-26, on the copy, with the gap 3 and 4 fixes and the D7 fallback in
@@ -539,6 +543,19 @@ and is weak; D gives the user a number the report itself does not trust.
 
 All values are design estimates (register WAY-D30).
 
+### 3.11 Decisions D13 and D14: the floor from the half-difference (decided 2026-10-26)
+
+**The finding.** The one-stack floor took the predicted random noise as exact. The model has its own error (the M 57 subsets fell 9% to 31% below the prediction, STK-36), so the floor test was too ready to find a floor, and the loss account's "cause unknown" test already counted that error. The two disagreed. Also, the half-difference of two half stacks measures the random noise directly, so the model is not needed when it exists.
+
+**D13, what is built (uncommitted).**
+
+- **One error budget (the fallback).** `total_variance_ratio_error` is the aperture error and twice the model's relative error times the variance ratio, added in quadrature. `EXPECTED_NOISE_MODEL_RELATIVE_ERROR` is 0.11, half of the 9% to 31% spread (a design estimate, register row WAY-D34). `MODEL_AGREEMENT_SIGMAS` (2) moved to `noise_growth.py`. The one-stack floor's model test and the loss account use them, so they agree. `FLOOR_SIGMAS` now serves only the multi-stack fit.
+- **The floor from a direct measurement.** When a usable half-difference exists (the same aperture set as the stack's noise row, made after it, both noises measured), the floor's random part is the half-difference's full-stack-equivalent noise. It is rebuilt as the difference over `sqrt(N_eff x F)`, or from the model ratio, and compared in normalized noise. The test is F = (measured / random)^2, significant when ln F is above 2 times hypot(e1, e2), with e = 2 x 1.17 / sqrt(n) for each side. Only measurement errors count (no model error). The test is one-sided. Why this holds: with no fixed pattern, the sum and the difference of two independent halves have equal variance and their aperture scatters are independent, so the ratio is an F-test, judged on a log scale. The model test stays the fallback, because its error (from another target) is a stand-in. A half-difference floor wins over a multi-stack fit. Names: `compare_stack_noise_with_half_difference`, `HalfDifferenceTest`, `measure_stack_noise_floor_from_half_difference`, `StackNoiseFloor.basis` and `sigmas`, `HalfDifferenceRecord`, `half_difference_noise_inputs`. The stored rows are `stacking.half_difference_*` (version 1). The statements name the basis ("measured from the odd and even half stacks" or "found from the noise model").
+- **The loss account follows.** `MeasuredNoiseCheck.basis` and `from_half_difference`: with a usable half-difference the measured noise is compared with the measured random part through the same test, and an excess is reported as a pattern fixed on the sky. Without one, the model with the total error. The floor and the loss account read the same record, so they cannot disagree (a unit test over ratios 1 to 8 and 30, 100 and 400 apertures).
+- **Unit-test cases.** M 27 (3.097e-3 against 1.048e-3) keeps its floor on both bases. M 81 (1.126e-3 against 0.921e-3) has none. M 57 (1.057e-3 against 0.596e-3) has a floor on the model basis.
+
+**D14, the restack step.** See section 4.1. The half-difference runs only when measured over predicted noise is between `HALF_DIFFERENCE_LOWER_RATIO` (1.1) and `HALF_DIFFERENCE_UPPER_RATIO` (2.0). Below 1.1 the stack agrees with the model. Above 2.0 the floor is clear either way (M 27 is at 2.95). The limits are design estimates (WAY-D70). The evidence is M 13 (section 4.5, register WAY-76).
+
 ## 4. The forced restack
 
 ### 4.1 How it runs
@@ -552,6 +569,8 @@ one target at a time), `--progress-file`, `--retry-failed`, `--camera`, `--revie
 `--review-only`. **Measure first.** `--stack-only` first measures every imaging frame of the target (`ProcessingPipelines.record_frame_measurements`, no limit), because a stack measures at most `STACKING_STAGE_MEASUREMENT_LIMIT` (40) new frames and its predicted noise needs the sky of every frame. Frames measured before and unchanged are skipped, so a resumed run does not repeat the work. A target that another run is measuring is failed, not stacked.
 
 **Earlier nights.** After the stack, a target whose stack holds two or more observing nights also gets the earlier-nights subset (section 3.9), made with frames chosen in the script. `--no-earlier-nights` turns it off. A failed subset is reported in the run's message and does not fail the target.
+
+**Half-difference (decision D14, section 3.11).** After the stack and the earlier-nights subset, `--stack-only` reads the stack's newest measured and predicted noise rows. When measured over predicted is between `HALF_DIFFERENCE_LOWER_RATIO` (1.1) and `HALF_DIFFERENCE_UPPER_RATIO` (2.0), it calls `ProcessingPipelines.measure_half_difference_noise`. The step prints one line per target (run or skipped, with the ratio). A failure is added to the run's message and does not fail the target. `--no-half-difference` turns it off.
 
 **Plate-solve fallback.** The stack-noise step needs sky coordinates for the stack. When no stack header, registration reference frame or member frame gives a solution, the stack is plate-solved in memory with the astrometry pipeline. The stack header is not written. The solve is also tried when a frame's solution fails the check against the stored reference stars (seen on M 13's earlier-nights subset, whose frames carry a capture-program solution). A failed solve keeps the not-measured result with both reasons, and it can take up to about 10 minutes (a hinted and a blind try of up to 300 s each).
 
@@ -573,7 +592,7 @@ run_all_target_processing.py --force-restack --stack-only --camera zwo \
     --progress-file PROGRESS.jsonl --review-list REVIEW.csv --target "M 27"
 ```
 
-**Review list.** A CSV with the columns `target`, `camera`, `optic_mm`, `status`, `refusal_reason`, `weights_known`, `predicted_noise_present`, `aperture_set_present`, `earlier_nights_present` (yes, no, or n/a for a stack of one night), `frames_moved_count` and `frames_moved`. It covers rows made since the run started. `--review-only` writes it from an existing progress file and processes nothing.
+**Review list.** A CSV with the columns `target`, `camera`, `optic_mm`, `status`, `refusal_reason`, `weights_known`, `predicted_noise_present`, `aperture_set_present`, `earlier_nights_present` (yes, no, or n/a for a stack of one night), `half_difference` (`run`, `skipped (ratio X)`, `failed` or `n/a`), `frames_moved_count` and `frames_moved`. It covers rows made since the run started. `--review-only` writes it from an existing progress file and processes nothing. **Known gap:** a run with `--no-half-difference` shows `failed` for the targets in range, because the column cannot tell a skipped step from a failed one.
 
 ### 4.2 Steps
 
@@ -600,7 +619,7 @@ The restack measures every chosen imaging frame once: about 4,363 frames (3,344 
 4000 pixels, 1,019 ZWO at 3008 by 3008). At about 6 s per 9-megapixel frame with four workers, the
 Nikon frames alone are likely more than 10 hours, and a frame cut short by the 60 s budget
 (`FRAME_MEASUREMENT_TIME_BUDGET_SECONDS`) is measured again on the next run. Plan for two nights,
-using the progress file to resume.
+using the progress file to resume. The half-difference step adds about one library stack's time for each target in range (1.1 to 2.0 times the predicted noise); `--no-half-difference` removes it.
 
 ### 4.4 When "take N more" can appear
 
@@ -620,8 +639,11 @@ Copy at `/home/michael/astrometrics_scratch/134-validation`; code uncommitted on
 
 - **M 27.** 82 imaging frames in three groups (30 s x 26, 60 s x 33, and a 120 s group of 23 frames holding one 300 s frame). After D10: 79 of 79 frame weights, the 300 s frame stacked with raw weight 6.9, and a predicted noise. Before D10 the same restack stored none.
 - **M 42** (one group, 21 x 30 s and one 300 s). Siril did not stack the 300 s frame, so the folded path was not exercised. Weights 21 of 21.
-- **M 13 (two nights; added after the first rehearsal).** Before the plate-solve fallback, M 13 and M 101 restacked with "no WCS for this stack" and stored no noise. After it, M 13's stack solved (18 stars, 0.767 arcsec rms) and so did its earlier-nights subset (23 stars, 0.941 arcsec). Headers wrote M 13's pixel scale as 1.915279 and as 1.9152790075, which split one 30 s setting into 40 and 4 frames; rounding the scale makes them one setting. The earlier-nights subset has 4 frames (effective 2.13): normalized noise 0.778e-3, measured over predicted 0.98, normalization scale 1.234. The library stack has 44 frames (effective 35.9): normalized noise 0.206e-3, measured over predicted 1.40, scale 1.472. The scale difference is not explained. The check came out "as forecast", and the gate opened as exploratory. In-sample, one target, one run. The take-more numbers for M 13 are in section 3.10. A rerun of M 101 after the fix is not recorded.
+- **M 13 (two nights; added after the first rehearsal).** Before the plate-solve fallback, M 13 and M 101 restacked with "no WCS for this stack" and stored no noise. After it, M 13's stack solved (18 stars, 0.767 arcsec rms) and so did its earlier-nights subset (23 stars, 0.941 arcsec). Headers wrote M 13's pixel scale as 1.915279 and as 1.9152790075, which split one 30 s setting into 40 and 4 frames; rounding the scale makes them one setting. The earlier-nights subset has 4 frames (effective 2.13): normalized noise 0.778e-3, measured over predicted 0.98, normalization scale 1.234. The library stack has 44 frames (effective 35.9): normalized noise 0.206e-3, measured over predicted 1.40, scale 1.472. The scale difference is explained by the reference frames (below). The check came out "as forecast", and the gate opened as exploratory. In-sample, one target, one run. The take-more numbers for M 13 are in section 3.10. A rerun of M 101 after the fix is not recorded.
 - **M 81.** Siril did not stack the three folded frames. Weights 42 of 42. The predicted noise is not measured, because four 300 s frames have no stored sky measurement on the copy (not a D10 issue).
+
+- **M 13 half-difference (decisions D13 and D14; copy, one target, in-sample, 2026-10-26; code uncommitted after 9ed5af01; register WAY-76).** Odd half 22 frames and even half 23, both holding the registration reference frame `M_13_Light_Luminance_025.fits` (weight fractions 0.084 and 0.088), 99 apertures. The full-stack-equivalent random noise is 1.4295e-4 normalized, against the model's 1.4298e-4 (0.02% apart). The measured full-stack noise is 2.056e-4. F = 2.07, ln F = 0.73 with an error of 0.33, so about 2.2σ. The floor is about 51% to 52% of the variance (0.000588 stack units). With the model test (11% model error) the same stack shows no floor. The restack rerun ran the half-difference by itself (ratio 1.38). The report now says: 44 more 30 s frames (about 32 min) cut about 13%, at most about 29%, with the floor measured from the odd and even half stacks; the loss account reports the excess as a pattern fixed on the sky.
+- **M 13 normalization scales.** The library stack's scale is 1.472 (reference frame `M_13_Light_Luminance_025`) and the earlier-nights subset's is 1.234 (a first-night reference frame whose stars are about 19% fainter: reference fluxes 2.76 against 2.25, in stack units over scale). The different reference frames explain the difference. The forecast check works in normalized noise, so the scale cancels.
 
 **Left to do.**
 
@@ -660,6 +682,8 @@ document, the stacking and wayfinding registers, and the READMEs of the changed 
 | D11 | Whether a subset pair from frames already taken may open the forecast gate (section 3.9) | A: no change; B: a pair of nights may open it, labeled, with the first real stack as confirmation; C: as B plus a frame-order subset for one-night targets; D: show the subset forecast as information only | Decided 2026-10-26: B. The pair is all nights but the last against the library stack; its count is marked exploratory and ranked below a real check (within a gain tie); the forced restack makes the subset stacks. Built, uncommitted (section 3.9) |
 | D10 | How folded exposure groups are handled (section 3.7) | A: leave frames of a length with fewer than 5 frames out of the stack; B: model a folded group so it gets weights and a predicted noise; C: accept no forecast | Decided 2026-10-26: B. Built, uncommitted. Found on a copy restack of M 27: one 300 s frame folded into its 120 s group left all weights and the predicted noise unmeasured. 12 of 31 ZWO targets have folded groups |
 | D12 | What "take N more" says when the noise floor makes the count very large (section 3.10) | A: keep the count however large; B: give a count only within a practical limit of the stack's exposure time, otherwise what one doubling buys | Decided 2026-10-26: B, with the limit at 4 times the stack's exposure time and a floor of a 5% cut for one doubling. Built, uncommitted |
+| D13 | Where the floor's random part comes from, and the loss account (section 3.11) | A: the prediction taken as exact (before); B: the prediction with the model's own error in the test (the shared budget); C: B as the fallback, and the half-difference measurement when a usable one exists, with the loss account reading the same record | Decided 2026-10-26: C. Built, uncommitted |
+| D14 | When the restack runs the half-difference (section 4.1) | A: never; B: for every target; C: only when measured over predicted noise is between 1.1 and 2.0 | Decided 2026-10-26: C. Built, uncommitted |
 
 ## 7. Out of scope
 

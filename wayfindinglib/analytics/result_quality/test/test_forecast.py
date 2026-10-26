@@ -13,6 +13,7 @@ group-mode pair check, and the noise floor applied to the forecast (with the
 M 27, M 81 and M 57 validation numbers).
 """
 
+import math
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -597,16 +598,18 @@ def test_stop_signal_is_absent_when_the_history_is_too_short() -> None:
 def test_stop_signal_uses_the_one_stack_floor() -> None:
     """A floor found from the newest stack alone can raise the stop.
 
-    Measured 5.0 against expected 4.0 (1000 apertures) is a floor of 3.0 that
-    is 56% of the random variance. Doubling the data then cuts the noise by
-    only 17%, above the 10% limit, so the signal is "not stopped" with the
-    gain stated; a bigger floor stops.
+    Measured 6.0 against expected 4.0 (1000 apertures) is a floor of 20^0.5
+    that is 125% of the random variance. It stays a floor once the expected
+    noise model's own error is counted (5.0 against 4.0 no longer does).
+    Doubling the data then cuts the noise by about 12%, above the 10% limit,
+    so the signal is "not stopped" with the gain stated; a bigger floor
+    stops.
     """
-    middle = fc.target_stop_signal(_noise_runs([5.0], [4.0]))
+    middle = fc.target_stop_signal(_noise_runs([6.0], [4.0]))
     large = fc.target_stop_signal(_noise_runs([12.0], [4.0]))
 
     assert middle.stopped is False
-    assert middle.predicted_gain_fraction == pytest.approx(0.175, abs=0.005)
+    assert middle.predicted_gain_fraction == pytest.approx(0.118, abs=0.005)
     assert large.stopped is True
 
 
@@ -927,6 +930,267 @@ def test_single_stack_floor_needs_the_expected_noise_and_two_apertures() -> None
     assert fc.single_stack_floor(runs[0]) is not None
     assert fc.single_stack_floor(runs[0].model_copy(update={"expected_noise": None})) is None
     assert fc.single_stack_floor(runs[0].model_copy(update={"aperture_count": 1})) is None
+
+
+def _half_difference_rows(
+    stack_run_id: str,
+    day: float,
+    difference_normalized: float,
+    *,
+    apertures: int = 100,
+    aperture_identity: str = APERTURE_SET,
+    variance_factor: float | None = 0.1,
+    effective_count: float = 40.0,
+) -> list[QualityMeasurement]:
+    """Build the rows of the half-difference job on one library stack.
+
+    The defaults are two disjoint halves of 20 equal frames: the difference
+    has the variance factor 20 x (1/20)^2 x 2 = 0.1 and the library stack of
+    40 frames has the effective count 40, so the full-stack equivalent is the
+    difference noise divided by sqrt(40 x 0.1) = 2.
+
+    Parameters
+    ----------
+    stack_run_id : `str`
+        The stack run the job followed (it names the stack's subject).
+    day : `float`
+        Days after the start, for the time (the job runs after the stack).
+    difference_normalized : `float`
+        The difference's normalized noise.
+    apertures : `int`, optional
+        The apertures behind it.
+    aperture_identity : `str`, optional
+        The aperture set it was measured in.
+    variance_factor : `float` or `None`, optional
+        The stored variance factor.
+    effective_count : `float`, optional
+        The library stack's effective frame count (stored with the stack).
+
+    Returns
+    -------
+    rows : `list` [`QualityMeasurement`]
+        The half-difference rows, plus the stack's effective-count row.
+    """
+    stack = f"T/stack_{stack_run_id}"
+    when = START + timedelta(days=day)
+    job = f"half_{stack_run_id}_{day}"
+    return [
+        _row(
+            fc.HALF_DIFFERENCE_NORMALIZED_METRIC,
+            stack,
+            difference_normalized,
+            job,
+            when,
+            version=1,
+            sample_count=apertures,
+        ),
+        _row(
+            fc.HALF_DIFFERENCE_APERTURE_SET_METRIC,
+            stack,
+            aperture_identity_to_number(aperture_identity),
+            job,
+            when,
+            version=1,
+        ),
+        _row(fc.HALF_DIFFERENCE_VARIANCE_FACTOR_METRIC, stack, variance_factor, job, when, version=1),
+        _row(fc.EFFECTIVE_FRAME_COUNT_METRIC, stack, effective_count, stack_run_id, START, version=1),
+    ]
+
+
+def _m13_rows(**half_arguments: float | str | None) -> list[QualityMeasurement]:
+    """Build M 13's one stack with its half-difference rows.
+
+    The full stack's normalized noise is 2.056e-4 over 100 apertures. The
+    difference is 2 x 1.4295e-4, so the full-stack equivalent is 1.4295e-4
+    (validation register entry STK-42). The stored expected noise is the
+    model's 1.4298e-4 (times the 1000 that makes stack units here).
+
+    Returns
+    -------
+    rows : `list` [`QualityMeasurement`]
+        The stack run's rows and the job's.
+    """
+    rows = _run_rows("run1", 0, ["a0"], [1.0], 2.056e-4, expected_noise=0.14298, apertures=100)
+    arguments = {"day": 1, "difference_normalized": 2.859e-4, **half_arguments}
+    return rows + _half_difference_rows("run1", **arguments)
+
+
+def test_m13_half_difference_gives_a_floor_at_2_2_sigma() -> None:
+    """M 13: ln F = 0.73 over an error of 0.33 is a floor, from the halves."""
+    runs = fc.stack_runs_from_measurements(_m13_rows())
+
+    floor = fc.single_stack_floor(runs[0])
+
+    assert floor is not None
+    assert floor.basis == "half_difference"
+    assert floor.floor_detected
+    assert floor.sigmas == pytest.approx(2.2, abs=0.1)
+    assert floor.floor_variance_share == pytest.approx(1.0 - (1.4295 / 2.056) ** 2, abs=1e-3)
+    assert floor.predicted_random_noise == pytest.approx(1.4295e-4 * 1000.0, rel=1e-3)
+    assert "odd and even half stacks" in floor.reason
+
+
+def test_m13_without_a_half_difference_has_no_floor_from_the_model() -> None:
+    """The model test, with its own error, sees no floor on M 13."""
+    runs = fc.stack_runs_from_measurements(_m13_rows()[:-4])
+
+    floor = fc.single_stack_floor(runs[0])
+
+    assert floor is not None
+    assert floor.basis == "model"
+    assert not floor.floor_detected
+    assert "half-difference" not in floor.reason
+
+
+def test_a_half_difference_equal_to_the_measured_noise_gives_no_floor() -> None:
+    """When the random noise is the whole measured noise, there is no floor."""
+    runs = fc.stack_runs_from_measurements(_m13_rows(difference_normalized=2.0 * 2.056e-4))
+
+    floor = fc.single_stack_floor(runs[0])
+
+    assert floor is not None
+    assert floor.basis == "half_difference"
+    assert not floor.floor_detected
+    assert floor.sigmas == pytest.approx(0.0, abs=1e-9)
+
+
+def _loss_account_unknown(record: fc.StackRunRecord) -> tuple[float, str]:
+    """Run the loss account's unknown part on a run's half-difference check.
+
+    Parameters
+    ----------
+    record : `StackRunRecord`
+        The run.
+
+    Returns
+    -------
+    seconds, reason : `tuple` [`float`, `str`]
+        The unexplained seconds of 100 s of effective time, and the reason.
+    """
+    from wayfindinglib.analytics.result_quality.aggregates import MeasuredNoiseCheck, _unknown_part
+
+    inputs = fc.half_difference_noise_inputs(record)
+    assert inputs is not None
+    seconds, reason = _unknown_part(100.0, MeasuredNoiseCheck.from_half_difference(*inputs))
+    assert seconds is not None
+    return seconds, reason
+
+
+def test_m13_loss_account_reports_an_unexplained_part_from_the_halves() -> None:
+    """M 13: the loss account and the floor both see the fixed pattern."""
+    record = fc.stack_runs_from_measurements(_m13_rows())[0]
+
+    seconds, reason = _loss_account_unknown(record)
+    floor = fc.single_stack_floor(record)
+
+    assert floor is not None
+    assert floor.floor_detected
+    assert seconds == pytest.approx(100.0 * (1.0 - (1.4295 / 2.056) ** 2), abs=0.1)
+    assert "odd and even half stacks" in reason
+    assert "fixed on the sky" in reason
+
+
+def test_a_half_difference_equal_to_the_measured_noise_is_within_error_in_the_loss_account() -> None:
+    """With the difference at the measured noise, nothing is unexplained."""
+    record = fc.stack_runs_from_measurements(_m13_rows(difference_normalized=2.0 * 2.056e-4))[0]
+
+    seconds, reason = _loss_account_unknown(record)
+
+    assert seconds == pytest.approx(0.0)
+    assert "within error" in reason
+    assert "odd and even half stacks" in reason
+
+
+def test_without_a_usable_half_difference_the_loss_account_keeps_the_model_basis() -> None:
+    """Without a half-difference the model check is used."""
+    from wayfindinglib.analytics.result_quality.aggregates import MeasuredNoiseCheck, _unknown_part
+
+    record = fc.stack_runs_from_measurements(_m13_rows()[:-4])[0]
+    other = fc.stack_runs_from_measurements(_m13_rows(aperture_identity=OTHER_APERTURE_SET))[0]
+
+    assert fc.half_difference_noise_inputs(record) is None
+    assert fc.half_difference_noise_inputs(other) is None
+    seconds, reason = _unknown_part(100.0, MeasuredNoiseCheck(variance_ratio=1.5, variance_ratio_error=0.1))
+    assert seconds == pytest.approx(0.0)
+    assert "its frames explain" in reason
+    assert "half stacks" not in reason
+
+
+def test_the_floor_and_the_loss_account_agree_on_both_bases_across_ratios() -> None:
+    """A significant floor and an unexplained part go together."""
+    from wayfindinglib.analytics.result_quality import noise_growth as ng
+    from wayfindinglib.analytics.result_quality.aggregates import MeasuredNoiseCheck, _unknown_part
+
+    for ratio in (1.0, 1.1, 1.5, 1.9, 2.0, 2.5, 3.0, 4.0, 8.0):
+        for apertures in (30, 100, 400):
+            measured = math.sqrt(ratio) * 1e-3
+            floor = ng.measure_stack_noise_floor_from_half_difference(measured, apertures, 1e-3, apertures)
+            check = MeasuredNoiseCheck.from_half_difference(measured, apertures, 1e-3, apertures)
+            seconds, _ = _unknown_part(100.0, check)
+            assert floor.floor_detected == (seconds > 0.0), (ratio, apertures)
+            model_floor = ng.measure_stack_noise_floor(measured, 1e-3, apertures)
+            aperture_error = 2.0 * ng.aperture_noise_relative_error(apertures) * ratio
+            model_seconds, _ = _unknown_part(
+                100.0, MeasuredNoiseCheck(variance_ratio=ratio, variance_ratio_error=aperture_error)
+            )
+            assert model_floor.floor_detected == (model_seconds > 0.0), (ratio, apertures)
+
+
+def test_a_half_difference_in_other_apertures_falls_back_to_the_model() -> None:
+    """A half-difference of another aperture set is not used, and says so."""
+    runs = fc.stack_runs_from_measurements(_m13_rows(aperture_identity=OTHER_APERTURE_SET))
+
+    floor = fc.single_stack_floor(runs[0])
+
+    assert floor is not None
+    assert floor.basis == "model"
+    assert "other apertures" in floor.reason
+
+
+def test_an_older_half_difference_falls_back_to_the_model() -> None:
+    """A half-difference made before the stack's noise row is not its own."""
+    rows = _run_rows("run1", 5, ["a0"], [1.0], 2.056e-4, expected_noise=0.14298, apertures=100)
+    rows += _half_difference_rows("run1", 1, 2.859e-4)
+
+    runs = fc.stack_runs_from_measurements(rows)
+
+    assert runs[0].half_difference is None
+    floor = fc.single_stack_floor(runs[0])
+    assert floor is not None
+    assert floor.basis == "model"
+
+
+def test_a_restack_does_not_inherit_the_earlier_stacks_half_difference() -> None:
+    """A half-difference belongs to the run it followed, not a later one."""
+    rows = _m13_rows()
+    rows += _run_rows("run2", 3, ["a0"], [1.0], 2.056e-4, expected_noise=0.14298, apertures=100)
+    runs = fc.stack_runs_from_measurements(rows)
+
+    assert runs[0].half_difference is not None
+    assert runs[1].half_difference is None
+
+
+def test_m27_has_a_floor_from_the_halves_and_from_the_model() -> None:
+    """M 27: 3.097 against a random 1.048 is a floor on either basis."""
+    rows = _run_rows("run1", 0, ["a0"], [1.0], 3.097e-3, expected_noise=1.048, apertures=100)
+    with_halves = rows + _half_difference_rows("run1", 1, 2.0 * 1.048e-3)
+
+    from_halves = fc.single_stack_floor(fc.stack_runs_from_measurements(with_halves)[0])
+    from_model = fc.single_stack_floor(fc.stack_runs_from_measurements(rows)[0])
+
+    assert from_halves is not None and from_model is not None
+    assert from_halves.floor_detected and from_model.floor_detected
+    assert from_halves.basis == "half_difference"
+    assert from_model.basis == "model"
+
+
+def test_the_floor_sentence_names_the_basis() -> None:
+    """The forecast check says which measurement decided the floor."""
+    halves = fc.single_stack_floor(fc.stack_runs_from_measurements(_m13_rows())[0])
+    model = fc.single_stack_floor(fc.stack_runs_from_measurements(_m13_rows()[:-4])[0])
+
+    assert "odd and even half stacks" in fc._floor_sentence(halves)
+    assert "noise model" in fc._floor_sentence(model)
 
 
 def test_the_floor_fit_ignores_runs_from_another_aperture_set() -> None:

@@ -126,11 +126,13 @@ fixed is left in the apertures (faint stars, a calibration residual). Both
 numbers are in the stack's units: the measured noise and the stored
 ``stacking.expected_empty_aperture_noise_stack_unit``, which includes Siril's
 normalization scale (``stacking.normalization_scale``). Then
-``floor^2 = measured^2 - random^2``, kept only when it is above 0 by 2
-standard errors. The error is that of the measured noise (see below, applied
-to the variance); the predicted value has no stored error and is taken as
-exact. Validation (plan section 3.6.1): M 27 60 s has a clear floor, M 81 has
-none at 2 sigma.
+``floor^2 = measured^2 - random^2``, kept only when the variance ratio is
+above 1 by 2 standard errors. The error is the loss account's
+(`total_variance_ratio_error`): the aperture error of the measured noise
+(see below, applied to the variance) and the expected-noise model's own error
+(11 percent, STK-36), added in quadrature, so one error budget serves both.
+Validation (plan section 3.6.1): M 27 60 s has a clear floor, M 81 has none
+at 2 sigma.
 
 The forecast carries the floor as a fraction ``f`` of the random variance of
 today's stack, so the model's rate units need no conversion. Today the
@@ -140,6 +142,22 @@ measured variance is ``V_now (1 + f)``; with more frames it is
 the floor is most of the noise (a share of 0.5 or more makes the 0.707
 target unreachable), `frames_to_cut_noise` gives no N: it says more frames
 will not reach the goal and states the floor.
+
+The floor from a direct measurement
+(`measure_stack_noise_floor_from_half_difference`). When the library stack
+has a half-difference measurement, the floor's random part is that
+measurement, not the model. The odd-minus-even difference of two half stacks
+cancels what is fixed on the sky, so, divided by the factor that turns a
+difference of halves into the full stack's variance, it is the full stack's
+random noise. With no floor the measured full-stack variance and this random
+variance are two independent estimates of the same number. The test is their
+ratio ``F`` on the log scale: ``ln F`` has the standard error
+``sqrt(e1^2 + e2^2)`` with ``e = 2 x 1.17 / sqrt(n)`` for each, and a floor is
+kept when ``ln F`` is above 0 by 2 standard errors (one-sided). The model's
+own error is not in this test, because the model is not in it. The floor is
+``measured^2 - random^2``. The measurement is used only when it is made from
+this library stack (newer than the stack's noise row, in the same aperture
+set); otherwise the floor falls back to the model test above.
 
 Which floor wins (`choose_noise_floor`). A fit over two or more stacks
 (`fit_noise_floor`, below) also finds a floor and does not rely on the
@@ -163,6 +181,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from enum import StrEnum
 
 import numpy as np
@@ -234,6 +253,34 @@ FLOOR_SIGMAS = 2.0
 standard errors. The test is one-sided (a floor cannot be negative), so two
 standard errors is a false alarm of about 2.3 percent, not 5. Design estimate,
 register row WAY-D32."""
+
+MODEL_AGREEMENT_SIGMAS = 2.0
+"""The measured stack noise is said to disagree with the model only when its
+variance ratio exceeds 1 by this many standard errors. The test is one-sided
+(only a noisier stack counts), so two standard errors is a false alarm of
+about 2.3 percent, not 5. Design estimate, register row WAY-D34."""
+
+EXPECTED_NOISE_MODEL_RELATIVE_ERROR = 0.11
+"""The relative error of the expected noise itself, as noise. On M 57 the real
+subsets measured 9 to 31 percent below the prediction (validation register
+entry STK-36); half of that spread, 11 percent, is taken as the model's own
+one-standard-error. Doubled, it is the relative error of the variance. It is
+added in quadrature to the aperture error before "cause unknown" is reported,
+so the model's own error is not counted as an unexplained loss. Design
+estimate from STK-36, register row WAY-D34."""
+
+
+FLOOR_BASIS_HALF_DIFFERENCE = "half_difference"
+FLOOR_BASIS_MODEL = "model"
+FLOOR_BASIS_FIT = "fit"
+"""The three ways a floor's random part is found (`StackNoiseFloor.basis`)."""
+
+FLOOR_BASIS_TEXT = {
+    FLOOR_BASIS_HALF_DIFFERENCE: "measured from the odd and even half stacks",
+    FLOOR_BASIS_MODEL: "found from the noise model",
+    FLOOR_BASIS_FIT: "found from a fit over the earlier stacks",
+}
+"""Words for each basis, used in the statements that name the floor."""
 
 MINIMUM_GAIN_FRACTION = 0.10
 """The stop signal is raised when doubling the data is predicted to cut the
@@ -617,6 +664,9 @@ class TakeMoreResult(BaseModel):
         frames are added.
     floor_variance_share : `float` or `None`
         The share of today's noise variance that is floor, from 0 to 1.
+    floor_basis : `str` or `None`
+        Where the floor's random part came from (`StackNoiseFloor.basis`), when
+        a floor was found.
     floor_limited : `bool`
         True when more frames of this kind will not reach the target because
         of the floor. `frames_needed` is then ``None``.
@@ -661,6 +711,7 @@ class TakeMoreResult(BaseModel):
     reason: str | None = None
     floor_noise: float | None = None
     floor_variance_share: float | None = None
+    floor_basis: str | None = None
     floor_limited: bool = False
     lowest_reachable_ratio: float | None = None
     new_exposure_group: bool = False
@@ -940,7 +991,8 @@ def _take_more_result(
     result : `TakeMoreResult`
         The answer.
     """
-    floor_fields: dict[str, float | None] = {
+    floor_fields: dict[str, float | str | None] = {
+        "floor_basis": floor.basis if floor is not None and floor.floor_detected else None,
         "floor_noise": floor.floor_noise if floor is not None and floor.floor_detected else None,
         "floor_variance_share": (
             floor.floor_variance_share if floor is not None and floor.floor_detected else None
@@ -995,8 +1047,8 @@ def _take_more_result(
                         else f"needs {needed} frames, more than {PRACTICAL_TIME_FACTOR - 1.0:g} times the "
                         "stack's exposure time again"
                     )
-                    + f" because of the noise floor (practical limit {PRACTICAL_TIME_FACTOR:g} times the "
-                    "stack's exposure time, WAY-D30)."
+                    + f" because of the noise floor, {floor.basis_text} (practical limit "
+                    f"{PRACTICAL_TIME_FACTOR:g} times the stack's exposure time, WAY-D30)."
                 ),
                 **floor_fields,
             )
@@ -1008,7 +1060,8 @@ def _take_more_result(
                 floor_limited=True,
                 lowest_reachable_ratio=limit_ratio,
                 reason=(
-                    f"More frames of this kind will not reach the target: the stack has a noise floor of "
+                    f"More frames of this kind will not reach the target: the stack has a noise floor, "
+                    f"{floor.basis_text}, of "
                     f"{floor.floor_noise:.3g} (stack units), {100 * (floor.floor_variance_share or 0.0):.0f} "
                     f"percent of today's noise variance, and {maximum_count} more frames would only reach "
                     f"{limit_ratio:.2f} of today's noise. The floor has to be found and removed first."
@@ -1023,7 +1076,8 @@ def _take_more_result(
     reason = "A design estimate: real subsets of M 57 came out 9 to 31 percent below the prediction (STK-36)."
     if floor_fields["floor_noise"] is not None:
         reason += (
-            f" The stack has a noise floor of {floor_fields['floor_noise']:.3g} (stack units) that more "
+            f" The stack has a noise floor of {floor_fields['floor_noise']:.3g} (stack units), "
+            f"{FLOOR_BASIS_TEXT.get(str(floor_fields['floor_basis']), '')}, that more "
             "frames do not remove; the answer includes it."
         )
     return TakeMoreResult(
@@ -1063,6 +1117,41 @@ def aperture_noise_relative_error(aperture_count: int) -> float:
     if aperture_count < 2:
         raise ValueError("At least 2 apertures are needed to estimate a noise error.")
     return APERTURE_NOISE_ERROR_FACTOR / math.sqrt(aperture_count)
+
+
+def total_variance_ratio_error(
+    variance_ratio: float,
+    aperture_error: float,
+    model_relative_error: float = EXPECTED_NOISE_MODEL_RELATIVE_ERROR,
+) -> float:
+    """Give the error of a measured-over-predicted variance ratio.
+
+    The expected-noise model's own error is included.
+
+    This is the one error budget. The loss account's "cause unknown" test and
+    the one-stack noise floor test both compare ``variance_ratio - 1`` with
+    `MODEL_AGREEMENT_SIGMAS` times this error, so a stack the loss account
+    calls "within error" never has a significant floor, and the other way
+    round.
+
+    Parameters
+    ----------
+    variance_ratio : `float`
+        (measured noise / expected noise) squared.
+    aperture_error : `float`
+        One standard error of the ratio from the apertures alone, for n
+        unpaired apertures ``2 * 1.17 / sqrt(n) * variance_ratio``.
+    model_relative_error : `float`, optional
+        The expected-noise model's own relative error, as noise. Doubled for
+        the variance.
+
+    Returns
+    -------
+    error : `float`
+        The aperture error and ``2 * model_relative_error * variance_ratio``
+        added in quadrature.
+    """
+    return math.hypot(aperture_error, 2.0 * model_relative_error * variance_ratio)
 
 
 class NoiseStep(BaseModel):
@@ -1406,6 +1495,14 @@ class StackNoiseFloor(BaseModel):
     normalized_units : `bool`
         True when `floor_noise` is a fraction of the reference stars' flux
         (a fit result with no single stack to convert it).
+    basis : `str`
+        What the floor's random part came from: ``"half_difference"`` (the
+        direct measurement from the odd and even half stacks, errors of
+        measurements only), ``"model"`` (the noise model's prediction, its own
+        error included) or ``"fit"`` (`fit_noise_floor`).
+    sigmas : `float` or `None`
+        How many standard errors the test found: ``ln F`` over its error for
+        ``half_difference``, ``(ratio - 1)`` over its error for ``model``.
     reason : `str`
         One or two sentences saying what was found and why.
     """
@@ -1423,7 +1520,20 @@ class StackNoiseFloor(BaseModel):
     floor_to_random_variance_ratio: float | None = None
     floor_variance_share: float | None = None
     normalized_units: bool = False
+    basis: str = FLOOR_BASIS_MODEL
+    sigmas: float | None = None
     reason: str
+
+    @property
+    def basis_text(self) -> str:
+        """Say in a few words where the floor's random part came from.
+
+        Returns
+        -------
+        text : `str`
+            A phrase that completes "The floor is ...".
+        """
+        return FLOOR_BASIS_TEXT.get(self.basis, FLOOR_BASIS_TEXT[FLOOR_BASIS_MODEL])
 
 
 def measure_stack_noise_floor(
@@ -1431,14 +1541,16 @@ def measure_stack_noise_floor(
 ) -> StackNoiseFloor:
     """Find a stack's noise floor from its measured and predicted noise.
 
-    ``floor^2 = measured^2 - random^2``. It is kept only when it is above 0 by
-    `FLOOR_SIGMAS` standard errors. The measured noise has the relative error
-    ``1.17 / sqrt(n)`` (`aperture_noise_relative_error`), so its variance has
-    twice that, and the error of the difference is
-    ``2 * relative_error * measured^2``. The predicted random noise comes from
-    the frames' own sky and read noise and the stored weights; no error is
-    stored for it, so it is taken as exact. That is the one assumption of this
-    test, and it makes the test slightly too ready to find a floor.
+    ``floor^2 = measured^2 - random^2``. It is kept only when the variance
+    ratio ``measured^2 / random^2`` is above 1 by `MODEL_AGREEMENT_SIGMAS`
+    standard errors, where the error is `total_variance_ratio_error`: the
+    aperture error (the measured noise has the relative error
+    ``1.17 / sqrt(n)``, `aperture_noise_relative_error`, so its variance has
+    twice that) and the expected-noise model's own error (validation register
+    entry STK-36), added in quadrature. This is the same test the loss
+    account uses before it reports "cause unknown", so a stack that account
+    calls "within error" has no floor here. The floor value itself is
+    unchanged by the test.
 
     Parameters
     ----------
@@ -1455,6 +1567,7 @@ def measure_stack_noise_floor(
     -------
     floor : `StackNoiseFloor`
         The floor, or a result with ``floor_detected`` false and the reason.
+        ``floor_variance_error`` is the total error in variance units.
 
     Raises
     ------
@@ -1467,20 +1580,25 @@ def measure_stack_noise_floor(
     measured_variance = measured_noise**2
     random_variance = predicted_random_noise**2
     difference = measured_variance - random_variance
-    error = 2.0 * relative_error * measured_variance
+    variance_ratio = measured_variance / random_variance
+    ratio_error = total_variance_ratio_error(variance_ratio, 2.0 * relative_error * variance_ratio)
+    error = ratio_error * random_variance
     common = {
         "source": "single_stack",
         "measured_noise": measured_noise,
         "predicted_random_noise": predicted_random_noise,
         "apertures": apertures,
         "floor_variance_error": error,
+        "basis": FLOOR_BASIS_MODEL,
+        "sigmas": (variance_ratio - 1.0) / ratio_error,
     }
-    if difference <= FLOOR_SIGMAS * error:
+    if variance_ratio - 1.0 <= MODEL_AGREEMENT_SIGMAS * ratio_error:
         return StackNoiseFloor(
             **common,
             reason=(
                 "No floor: the measured noise does not exceed the predicted random noise by "
-                f"{FLOOR_SIGMAS:g} standard errors ({difference / error:.1f} found)."
+                f"{MODEL_AGREEMENT_SIGMAS:g} standard errors, counting the prediction's own error "
+                f"({difference / error:.1f} found)."
             ),
         )
     return StackNoiseFloor(
@@ -1492,8 +1610,182 @@ def measure_stack_noise_floor(
         floor_variance_share=difference / measured_variance,
         reason=(
             f"A floor of {math.sqrt(difference):.3g} (stack units) was found, {difference / error:.1f} "
-            f"standard errors above 0 and {100 * difference / measured_variance:.0f} percent of the "
-            "measured noise variance."
+            f"standard errors above 0 (counting the prediction's own error) and "
+            f"{100 * difference / measured_variance:.0f} percent of the measured noise variance."
+        ),
+    )
+
+
+@dataclass(frozen=True)
+class HalfDifferenceTest:
+    """The result of comparing a stack's noise with its half-difference noise.
+
+    Parameters
+    ----------
+    variance_ratio : `float`
+        ``F = measured^2 / random^2``.
+    log_ratio : `float`
+        ``ln F``.
+    log_error : `float`
+        The standard error of ``ln F``, ``sqrt(e1^2 + e2^2)``.
+    measured_variance_error, random_variance_error : `float`
+        The relative error of each variance, ``2 x 1.17 / sqrt(n)``.
+    sigmas : `float`
+        ``ln F`` over its error.
+    significant : `bool`
+        ``True`` when ``ln F`` exceeds `MODEL_AGREEMENT_SIGMAS` times its
+        error (one-sided).
+    """
+
+    variance_ratio: float
+    log_ratio: float
+    log_error: float
+    measured_variance_error: float
+    random_variance_error: float
+    sigmas: float
+    significant: bool
+
+
+def compare_stack_noise_with_half_difference(
+    measured_noise: float,
+    measured_apertures: int,
+    random_noise: float,
+    random_apertures: int,
+) -> HalfDifferenceTest:
+    """Compare a stack's noise with the random noise its halves measured.
+
+    This is the one test behind both the noise floor and the loss account's
+    "cause unknown" part when a half-difference exists, so the two cannot
+    disagree. With no fixed pattern, the full stack and the full-stack
+    equivalent of the difference have the same variance, and the
+    aperture-to-aperture scatters of the two are independent estimates of
+    it. Each variance has the relative error ``2 x 1.17 / sqrt(n)``
+    (`aperture_noise_relative_error` doubled), so ``ln F`` has the standard
+    error ``sqrt(e1^2 + e2^2)``. Only measurement errors count: the noise
+    model plays no part.
+
+    Parameters
+    ----------
+    measured_noise : `float`
+        The full stack's measured empty-aperture noise.
+    measured_apertures : `int`
+        The apertures behind it (at least 2).
+    random_noise : `float`
+        The full-stack equivalent of the difference noise, in the same unit
+        as ``measured_noise``.
+    random_apertures : `int`
+        The apertures behind the difference noise (at least 2).
+
+    Returns
+    -------
+    result : `HalfDifferenceTest`
+        The ratio, its errors and whether it is significant.
+
+    Raises
+    ------
+    ValueError
+        If a noise is not positive or an aperture count is below 2.
+    """
+    if measured_noise <= 0.0 or random_noise <= 0.0:
+        raise ValueError("Both noise values must be positive.")
+    measured_error = 2.0 * aperture_noise_relative_error(measured_apertures)
+    random_error = 2.0 * aperture_noise_relative_error(random_apertures)
+    log_error = math.hypot(measured_error, random_error)
+    variance_ratio = (measured_noise / random_noise) ** 2
+    log_ratio = math.log(variance_ratio)
+    return HalfDifferenceTest(
+        variance_ratio=variance_ratio,
+        log_ratio=log_ratio,
+        log_error=log_error,
+        measured_variance_error=measured_error,
+        random_variance_error=random_error,
+        sigmas=log_ratio / log_error,
+        significant=log_ratio > MODEL_AGREEMENT_SIGMAS * log_error,
+    )
+
+
+def measure_stack_noise_floor_from_half_difference(
+    measured_noise: float,
+    measured_apertures: int,
+    random_noise: float,
+    random_apertures: int,
+) -> StackNoiseFloor:
+    """Find a stack's noise floor from a direct random-noise measurement.
+
+    The random noise comes from the odd-minus-even difference of two half
+    stacks, which cancels everything fixed on the sky (the library stack's
+    own full-stack equivalent of it, see `StackRunRecord.half_difference`).
+    With no floor, the full stack (odd plus even) and the difference have
+    the same variance, and the aperture-to-aperture scatters of the two are
+    independent estimates of it. The test is the ratio of the two variances,
+    ``F = measured^2 / random^2``, on the log scale. Each variance has the
+    relative error ``2 x 1.17 / sqrt(n)`` (`aperture_noise_relative_error`
+    doubled), so ``ln F`` has the standard error ``sqrt(e1^2 + e2^2)``. A
+    floor is kept when ``ln F`` exceeds `MODEL_AGREEMENT_SIGMAS` times that
+    error (one-sided). Only measurement errors count: the noise model plays
+    no part, so its own error is not added, unlike in
+    `measure_stack_noise_floor`.
+    The floor's value is ``measured^2 - random^2``.
+
+    Parameters
+    ----------
+    measured_noise : `float`
+        The full stack's measured empty-aperture noise.
+    measured_apertures : `int`
+        The apertures behind ``measured_noise`` (at least 2).
+    random_noise : `float`
+        The full-stack equivalent of the half-difference noise, in the same
+        unit as ``measured_noise``.
+    random_apertures : `int`
+        The apertures behind the difference noise (at least 2).
+
+    Returns
+    -------
+    floor : `StackNoiseFloor`
+        The floor, or a result with ``floor_detected`` false and the reason.
+        ``basis`` is ``"half_difference"``; ``floor_variance_error`` is the
+        error of ``measured^2 - random^2`` in variance units, ``sigmas`` is
+        ``ln F`` over its error.
+    """
+    test = compare_stack_noise_with_half_difference(
+        measured_noise, measured_apertures, random_noise, random_apertures
+    )
+    measured_variance = measured_noise**2
+    random_variance = random_noise**2
+    measured_error = test.measured_variance_error
+    random_error = test.random_variance_error
+    sigmas = test.sigmas
+    difference = measured_variance - random_variance
+    error = math.hypot(measured_variance * measured_error, random_variance * random_error)
+    common = {
+        "source": "single_stack",
+        "measured_noise": measured_noise,
+        "predicted_random_noise": random_noise,
+        "apertures": measured_apertures,
+        "floor_variance_error": error,
+        "basis": FLOOR_BASIS_HALF_DIFFERENCE,
+        "sigmas": sigmas,
+    }
+    if not test.significant:
+        return StackNoiseFloor(
+            **common,
+            reason=(
+                "No floor: the full stack's noise does not exceed the random noise measured from the odd "
+                f"and even half stacks by {MODEL_AGREEMENT_SIGMAS:g} standard errors ({sigmas:.1f} found)."
+            ),
+        )
+    return StackNoiseFloor(
+        **common,
+        floor_variance=difference,
+        floor_detected=True,
+        floor_noise=math.sqrt(difference),
+        floor_to_random_variance_ratio=difference / random_variance,
+        floor_variance_share=difference / measured_variance,
+        reason=(
+            f"A floor of {math.sqrt(difference):.3g} (stack units) was found, measured from the odd and "
+            f"even half stacks: the full stack's variance is {measured_variance / random_variance:.2f} "
+            f"times the random variance, {sigmas:.1f} standard errors above 1 on the log scale, and "
+            f"the floor is {100 * difference / measured_variance:.0f} percent of the measured noise variance."
         ),
     )
 
@@ -1511,6 +1803,10 @@ def choose_noise_floor(
     two or more stacks and fits the model's scale as well, so it does not
     depend on the prediction being right in scale. The rule:
 
+    0. A floor measured from the odd and even half stacks
+       (`measure_stack_noise_floor_from_half_difference`) is used as it is.
+       It measures the random noise directly, so neither the noise model nor
+       a fit is consulted.
     1. A fit with at least one degree of freedom (the stacks' scatter checks
        the line) that finds a floor wins. Its floor enters the forecast as a
        fraction ``b / (alpha * expected_variance)`` of today's stack.
@@ -1536,6 +1832,10 @@ def choose_noise_floor(
     floor : `StackNoiseFloor` or `None`
         The chosen floor, or ``None`` when there is no estimate at all.
     """
+    if single_stack is not None and single_stack.basis == FLOOR_BASIS_HALF_DIFFERENCE:
+        # The direct measurement of the random noise decides (user decision
+        # 2026-10-26); a fit that disagrees is not allowed to override it.
+        return single_stack
     fit_floor = None
     fit_note = ""
     if fit is not None and fit.floor_variance is not None and fit.alpha is not None:
@@ -1559,6 +1859,7 @@ def choose_noise_floor(
                 floor_to_random_variance_ratio=ratio,
                 floor_variance_share=share,
                 normalized_units=not stack_units,
+                basis=FLOOR_BASIS_FIT,
                 reason=f"The fit over {fit.steps_used} stacks found a floor. {fit.reason}",
             )
             if fit.degrees_of_freedom >= 1 or single_stack is None:

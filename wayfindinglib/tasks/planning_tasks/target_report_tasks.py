@@ -78,6 +78,7 @@ from wayfindinglib.analytics.result_quality.forecast import (
     StackRunRecord,
     camera_gain_for_setting,
     forecast_gate_state,
+    half_difference_noise_inputs,
     library_runs,
     noise_floor_for_runs,
     stack_frames_from_observations,
@@ -393,8 +394,14 @@ def _measured_noise_checks(
     rows: Sequence[QualityMeasurement],
     stack_settings: Mapping[str, int],
     settings: Mapping[int, CaptureSetting],
+    runs: Sequence[StackRunRecord] = (),
 ) -> dict[CaptureSetting, MeasuredNoiseCheck]:
-    """Compare each stack's measured noise with the noise its frames predict.
+    """Compare each stack's measured noise with the noise it should have.
+
+    A stack with a usable half-difference is compared with the random noise
+    measured from its odd and even half stacks, read from its newest library
+    run (`half_difference_noise_inputs`, the record the noise floor reads).
+    Any other stack is compared with the noise its frames predict.
 
     Parameters
     ----------
@@ -404,16 +411,27 @@ def _measured_noise_checks(
         The setting id of each stack.
     settings : `Mapping` [`int`, `CaptureSetting`]
         The target's settings.
+    runs : `Sequence` [`StackRunRecord`], optional
+        The target's library stack runs, with half-differences attached.
 
     Returns
     -------
     checks : `dict` [`CaptureSetting`, `MeasuredNoiseCheck`]
-        For each setting with a stack, the variance ratio and its error. The
-        error is ``2 * 1.17 / sqrt(n)`` times the ratio for n apertures
-        (unpaired). A stack missing either noise value is left out.
+        For each setting with a stack, the variance ratio and its error. On
+        the model basis the error is ``2 * 1.17 / sqrt(n)`` times the ratio
+        for n apertures (unpaired). A stack missing the noise values its
+        basis needs is left out.
     """
+    newest_run_by_stack: dict[str, StackRunRecord] = {}
+    for run in sorted(runs, key=lambda item: (item.measured_at, item.run_id)):
+        newest_run_by_stack[run.stack_subject_id] = run
     checks: dict[CaptureSetting, MeasuredNoiseCheck] = {}
     for stack_id, setting_id in stack_settings.items():
+        newest_run = newest_run_by_stack.get(stack_id)
+        inputs = half_difference_noise_inputs(newest_run) if newest_run is not None else None
+        if inputs is not None:
+            checks[settings[setting_id]] = MeasuredNoiseCheck.from_half_difference(*inputs)
+            continue
         stack_rows = [row for row in rows if row.subject.subject_id == stack_id]
         measured = _newest(stack_rows, NOISE_METRIC)
         expected = _newest(stack_rows, EXPECTED_NOISE_METRIC)
@@ -1926,7 +1944,7 @@ def build_target_dataset_report(
     # Summaries, one group of settings for each science goal.
     moonless = context.moonless_sky_rates(observations)
     weight_seconds = _weight_effective_seconds(rows, stack_setting_by_subject, target_rows.settings)
-    checks = _measured_noise_checks(rows, stack_setting_by_subject, target_rows.settings)
+    checks = _measured_noise_checks(rows, stack_setting_by_subject, target_rows.settings, runs)
     summaries = []
     for group_goal, group in group_by_goal(
         observations, lambda observation: observation.capture_setting, goal_for_setting

@@ -492,6 +492,39 @@ def test_m81_has_no_floor_at_two_sigma() -> None:
     assert "No floor" in floor.reason
 
 
+# M 13 on a copy: measured 0.835e-3 against 0.598e-3 predicted. The test uses
+# 100 apertures (the 11.7 percent error); the stored count was not read.
+def test_m13_has_no_floor_once_the_models_own_error_is_counted() -> None:
+    """The loss account and the floor give the same answer on M 13.
+
+    The variance ratio is 1.95. With the aperture error alone the floor would
+    be 2.4 standard errors up; with the model error added it is within 2.
+    """
+    from wayfindinglib.analytics.result_quality.aggregates import MeasuredNoiseCheck, _unknown_part
+
+    floor = ng.measure_stack_noise_floor(0.835e-3, 0.598e-3, APERTURES_FOR_11_7_PERCENT)
+    assert not floor.floor_detected
+    ratio = (0.835e-3 / 0.598e-3) ** 2
+    aperture_error = 2.0 * ng.aperture_noise_relative_error(APERTURES_FOR_11_7_PERCENT) * ratio
+    assert ratio - 1.0 > ng.FLOOR_SIGMAS * aperture_error
+    check = MeasuredNoiseCheck(variance_ratio=ratio, variance_ratio_error=aperture_error)
+    unknown_seconds, _ = _unknown_part(100.0, check)
+    assert unknown_seconds == pytest.approx(0.0)
+
+
+def test_the_floor_and_the_loss_account_agree_across_ratios() -> None:
+    """A significant floor and a "cause unknown" part go together."""
+    from wayfindinglib.analytics.result_quality.aggregates import MeasuredNoiseCheck, _unknown_part
+
+    for ratio in (1.1, 1.5, 1.9, 2.0, 2.5, 3.0, 4.0, 8.0):
+        floor = ng.measure_stack_noise_floor(math.sqrt(ratio) * 1e-3, 1e-3, APERTURES_FOR_11_7_PERCENT)
+        aperture_error = 2.0 * ng.aperture_noise_relative_error(APERTURES_FOR_11_7_PERCENT) * ratio
+        unknown_seconds, _ = _unknown_part(
+            100.0, MeasuredNoiseCheck(variance_ratio=ratio, variance_ratio_error=aperture_error)
+        )
+        assert floor.floor_detected == (unknown_seconds != pytest.approx(0.0)), ratio
+
+
 def test_m57_floor_is_found() -> None:
     """M 57: 1.057e-3 against 0.596e-3 is a floor, more than 2 sigma up."""
     floor = ng.measure_stack_noise_floor(1.057e-3, 0.596e-3, APERTURES_FOR_11_7_PERCENT)
@@ -959,3 +992,52 @@ def test_a_tiny_doubling_gain_is_not_worthwhile() -> None:
     assert result.doubling_noise_cut is not None
     assert result.doubling_noise_cut < ng.MINIMUM_DOUBLING_GAIN_FRACTION
     assert not result.doubling_worthwhile
+
+
+# ---------------------------------------------------------------------------
+# The floor measured from the odd and even half stacks
+# ---------------------------------------------------------------------------
+
+
+def test_the_half_difference_floor_on_m13_numbers() -> None:
+    """M 13: 2.056e-4 against a measured random 1.4295e-4 is 2.2 sigma."""
+    floor = ng.measure_stack_noise_floor_from_half_difference(2.056e-4, 100, 1.4295e-4, 100)
+
+    assert floor.basis == "half_difference"
+    assert floor.floor_detected
+    assert floor.sigmas == pytest.approx(2.2, abs=0.1)
+    assert floor.floor_variance == pytest.approx(2.056e-4**2 - 1.4295e-4**2)
+    assert floor.floor_variance_share == pytest.approx(1.0 - (1.4295 / 2.056) ** 2)
+
+
+def test_the_half_difference_floor_is_one_sided_and_uses_measurement_errors_only() -> None:
+    """A lower noise is no floor, and the model has a stricter test."""
+    below = ng.measure_stack_noise_floor_from_half_difference(1.0, 100, 1.2, 100)
+    assert not below.floor_detected
+    assert below.sigmas is not None and below.sigmas < 0.0
+    # The same M 13 ratio has no floor against the model, with its own error.
+    model = ng.measure_stack_noise_floor(2.056e-4, 1.4298e-4, 100)
+    assert not model.floor_detected
+    assert model.basis == "model"
+    with pytest.raises(ValueError):
+        ng.measure_stack_noise_floor_from_half_difference(0.0, 100, 1.0, 100)
+
+
+def test_the_statements_name_the_basis_of_the_floor() -> None:
+    """M 27's floor limits take-more; the reason says how it was found."""
+    from wayfindinglib.analytics.result_quality.report_rules import floor_limited_statement
+
+    frames = [_frame(i, exposure=60.0, sky=1.0, read=0.0, width=3.0) for i in range(20)]
+    halves = ng.measure_stack_noise_floor_from_half_difference(3.097e-3, 100, 1.048e-3, 100)
+    model = ng.measure_stack_noise_floor(3.097e-3, 1.048e-3, APERTURES_FOR_11_7_PERCENT)
+
+    from_halves = ng.frames_to_cut_noise(frames, frames, WeightingMode.WFWHM, floor=halves)
+    from_model = ng.frames_to_cut_noise(frames, frames, WeightingMode.WFWHM, floor=model)
+
+    assert halves.floor_detected and model.floor_detected
+    assert from_halves.floor_limited and from_model.floor_limited
+    assert from_halves.floor_basis == "half_difference"
+    assert "measured from the odd and even half stacks" in str(from_halves.reason)
+    assert "found from the noise model" in str(from_model.reason)
+    statement = floor_limited_statement(from_halves, None, [])
+    assert "measured from the odd and even half stacks" in statement.message

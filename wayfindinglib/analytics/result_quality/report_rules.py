@@ -60,6 +60,7 @@ from wayfindinglib.analytics.result_quality.guiding_exposure import (
     GuidingExposureOutcome,
 )
 from wayfindinglib.analytics.result_quality.noise_growth import (
+    FLOOR_BASIS_TEXT,
     PRACTICAL_TIME_FACTOR,
     StackFrame,
     StackGroup,
@@ -1395,6 +1396,24 @@ PLAIN_FLOOR_CALIBRATION_TEXT = "and the calibration recommendations in this repo
 """What replaces `PLAIN_FLOOR_NOT_REMOVED_TEXT` when advice exists."""
 
 
+def _floor_basis_sentence(result: TakeMoreResult) -> str:
+    """Say which measurement decided the floor.
+
+    Parameters
+    ----------
+    result : `TakeMoreResult`
+        An answer that may carry a floor.
+
+    Returns
+    -------
+    text : `str`
+        For example "The floor was measured from the odd and even half
+        stacks.", or an empty string when the answer names no basis.
+    """
+    text = FLOOR_BASIS_TEXT.get(result.floor_basis or "")
+    return f"The floor was {text}." if text else ""
+
+
 def _floor_share_sentence(result: TakeMoreResult) -> str:
     """Say how much frames can give at most, and why.
 
@@ -1415,8 +1434,8 @@ def _floor_share_sentence(result: TakeMoreResult) -> str:
     floor_text = f" of {result.floor_noise:.3g} (stack units)" if result.floor_noise is not None else ""
     return (
         f"More frames give less each time: at most about {most_cut:.0f}% in all, because a noise "
-        f"floor{floor_text} makes up about {share:.0f}% of the noise."
-    )
+        f"floor{floor_text} makes up about {share:.0f}% of the noise. {_floor_basis_sentence(result)}"
+    ).strip()
 
 
 def _diminishing_returns_statement(
@@ -1622,10 +1641,12 @@ def floor_limited_statement(
         share = 100.0 * (result.floor_variance_share or 0.0)
         best_cut = 100.0 * (1.0 - (result.lowest_reachable_ratio or 1.0))
         floor_text = f"{result.floor_noise:.3g} in stack units, " if result.floor_noise is not None else ""
+        basis_sentence = _floor_basis_sentence(result)
+        basis_sentence = f"{basis_sentence} " if basis_sentence else ""
         message = (
             f"More frames will not help much: a noise floor ({floor_text}{share:.0f}% of the noise) does "
             f"not shrink with more frames, so even very many more would cut the noise by only "
-            f"{best_cut:.0f}%. {FLOOR_CAUSE_TEXT} {FLOOR_NOT_REMOVED_TEXT}"
+            f"{best_cut:.0f}%. {basis_sentence}{FLOOR_CAUSE_TEXT} {FLOOR_NOT_REMOVED_TEXT}"
         )
         plain = (
             f"More frames probably will not help: about {share:.0f}% of the noise does not shrink with "

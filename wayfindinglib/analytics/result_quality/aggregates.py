@@ -34,6 +34,14 @@ from wayfindinglib.analytics.result_quality.efficiency import (
     assess_efficiency,
     split_kept_frame_deficit,
 )
+from wayfindinglib.analytics.result_quality.noise_growth import (
+    EXPECTED_NOISE_MODEL_RELATIVE_ERROR,
+    FLOOR_BASIS_HALF_DIFFERENCE,
+    FLOOR_BASIS_MODEL,
+    MODEL_AGREEMENT_SIGMAS,
+    compare_stack_noise_with_half_difference,
+    total_variance_ratio_error,
+)
 from wayfindinglib.models.quality.capture_summary import CaptureSettingSummary
 from wayfindinglib.models.quality.efficiency import (
     EfficiencyReference,
@@ -48,24 +56,14 @@ ReferenceProvider = Callable[[CaptureSetting], EfficiencyReference | None]
 """A function that gives the reference for a capture setting, or ``None`` when
 there is none."""
 
-MODEL_AGREEMENT_SIGMAS = 2.0
-"""The measured stack noise is said to disagree with the model only when its
-variance ratio exceeds 1 by this many standard errors. The test is one-sided
-(only a noisier stack counts), so two standard errors is a false alarm of
-about 2.3 percent, not 5. Design estimate, register row WAY-D34."""
-
-EXPECTED_NOISE_MODEL_RELATIVE_ERROR = 0.11
-"""The relative error of the expected noise itself, as noise. On M 57 the real
-subsets measured 9 to 31 percent below the prediction (validation register
-entry STK-36); half of that spread, 11 percent, is taken as the model's own
-one-standard-error. Doubled, it is the relative error of the variance. It is
-added in quadrature to the aperture error before "cause unknown" is reported,
-so the model's own error is not counted as an unexplained loss. Design
-estimate from STK-36, register row WAY-D34."""
-
 
 class MeasuredNoiseCheck(BaseModel):
-    """A stack's measured noise against the noise expected for its frames.
+    """A stack's measured noise against the noise it should have.
+
+    With a usable half-difference, the stack is compared with the random
+    noise measured from its odd and even half stacks (`basis` is
+    ``half_difference``, built by `from_half_difference`). Otherwise it is
+    compared with the noise its frames are expected to have, below.
 
     This is the independent measure of efficiency (decision S15): the
     expected noise comes from the frames' sky and read noise
@@ -84,6 +82,13 @@ class MeasuredNoiseCheck(BaseModel):
     expected_noise_relative_error : `float`
         The expected-noise model's own relative error, as noise. It is added
         in quadrature (doubled for the variance) to `variance_ratio_error`.
+        Not used on the half-difference basis, where no model is compared.
+    basis : `str`
+        What the stack was compared with: ``model`` (the expected noise) or
+        ``half_difference`` (the random noise measured from the half stacks).
+    log_ratio_error : `float` or `None`
+        The standard error of ``ln(variance_ratio)`` on the half-difference
+        basis; ``None`` on the model basis.
     """
 
     model_config = _MODEL_CONFIG
@@ -91,6 +96,65 @@ class MeasuredNoiseCheck(BaseModel):
     variance_ratio: float = Field(gt=0.0)
     variance_ratio_error: float = Field(ge=0.0)
     expected_noise_relative_error: float = Field(default=EXPECTED_NOISE_MODEL_RELATIVE_ERROR, ge=0.0)
+    basis: str = FLOOR_BASIS_MODEL
+    log_ratio_error: float | None = None
+
+    @classmethod
+    def from_half_difference(
+        cls,
+        measured_noise: float,
+        measured_apertures: int,
+        random_noise: float,
+        random_apertures: int,
+    ) -> MeasuredNoiseCheck:
+        """Compare a stack with the random noise its half stacks measured.
+
+        Uses the same test as the noise floor
+        (`noise_growth.compare_stack_noise_with_half_difference`), so the two
+        agree.
+
+        Parameters
+        ----------
+        measured_noise : `float`
+            The full stack's measured noise.
+        measured_apertures : `int`
+            The apertures behind it.
+        random_noise : `float`
+            The full-stack equivalent of the half-difference noise, in the
+            same unit.
+        random_apertures : `int`
+            The apertures behind the difference noise.
+
+        Returns
+        -------
+        check : `MeasuredNoiseCheck`
+            The check, on the ``half_difference`` basis.
+        """
+        test = compare_stack_noise_with_half_difference(
+            measured_noise, measured_apertures, random_noise, random_apertures
+        )
+        return cls(
+            variance_ratio=test.variance_ratio,
+            variance_ratio_error=test.variance_ratio * test.log_error,
+            basis=FLOOR_BASIS_HALF_DIFFERENCE,
+            log_ratio_error=test.log_error,
+        )
+
+    @property
+    def is_significant(self) -> bool:
+        """Say whether the stack is noisier than its comparison, beyond error.
+
+        Returns
+        -------
+        significant : `bool`
+            On the half-difference basis, ``ln F`` above
+            `MODEL_AGREEMENT_SIGMAS` times its error. On the model basis,
+            ``F - 1`` above that many times the total error (the model's own
+            error included).
+        """
+        if self.basis == FLOOR_BASIS_HALF_DIFFERENCE and self.log_ratio_error is not None:
+            return math.log(self.variance_ratio) > MODEL_AGREEMENT_SIGMAS * self.log_ratio_error
+        return self.variance_ratio - 1.0 > MODEL_AGREEMENT_SIGMAS * self.total_variance_ratio_error
 
     @property
     def total_variance_ratio_error(self) -> float:
@@ -100,10 +164,13 @@ class MeasuredNoiseCheck(BaseModel):
         -------
         error : `float`
             The aperture error and ``2 * expected_noise_relative_error *
-            variance_ratio`` added in quadrature.
+            variance_ratio`` added in quadrature
+            (`noise_growth.total_variance_ratio_error`, the same error the
+            noise floor test uses).
         """
-        model_part = 2.0 * self.expected_noise_relative_error * self.variance_ratio
-        return math.hypot(self.variance_ratio_error, model_part)
+        return total_variance_ratio_error(
+            self.variance_ratio, self.variance_ratio_error, self.expected_noise_relative_error
+        )
 
 
 class SetAsideInput(BaseModel):
@@ -224,11 +291,23 @@ def _unknown_part(effective_by_factors: float, check: MeasuredNoiseCheck | None)
     """
     if check is None:
         return None, "Not measured: no stack noise was measured against the noise its frames explain."
-    excess = check.variance_ratio - 1.0
-    if excess <= MODEL_AGREEMENT_SIGMAS * check.total_variance_ratio_error:
+    half = check.basis == FLOOR_BASIS_HALF_DIFFERENCE
+    if not check.is_significant:
+        if half:
+            return 0.0, (
+                "The stack's measured noise agrees with the random noise measured from the odd and even "
+                "half stacks, within error."
+            )
         return 0.0, "The stack's measured noise agrees with the noise its frames explain, within error."
+    unexplained = effective_by_factors * (1.0 - 1.0 / check.variance_ratio)
+    if half:
+        return unexplained, (
+            "The stack is noisier than the random noise measured from the odd and even half stacks. The "
+            "excess is a pattern fixed on the sky (the half-difference cancels it), not random noise the "
+            "frames fail to explain; no listed cause accounts for it."
+        )
     return (
-        effective_by_factors * (1.0 - 1.0 / check.variance_ratio),
+        unexplained,
         "The stack is noisier than its frames' sky and read noise explain; no listed cause accounts for it.",
     )
 

@@ -4,15 +4,15 @@
 
 ## Abstract
 
-This paper maps the design in `Wayfinding_Library_Architecture.md` to the Python source in `wayfindinglib/`. It names the layers of the package and the rule that keeps them apart, the model classes that hold each record, and the modules that carry out planning, execution and control. It lists the settings the code uses, with their values. It also names the tests and import contracts that check the structure, and it states which parts of the design have code behind them and which do not yet. Evidence for the settings is in the validation register, and each setting here carries its register identifier.
+This paper maps the design in `Wayfinding_Library_Architecture.md` to the Python source in `wayfindinglib/`. It names the layers, the model classes and the modules for planning, execution and control. It lists the settings with values and register identifiers; evidence is in the validation register. It names the structural tests and says which parts of the design have no code yet.
 
-Terms are defined in the [glossary](./../Glossary.md). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](./../Glossary.md) and at first use.
 
 ## 1. Scope
 
-This paper is an index from the theory to the code. Theory stays in [Wayfinding_Library_Architecture.md](./Wayfinding_Library_Architecture.md). Module paths are relative to `wayfindinglib/` unless a path starts with another folder.
+This paper indexes the code; theory stays in [Wayfinding_Library_Architecture.md](./Wayfinding_Library_Architecture.md). Module paths are relative to `wayfindinglib/` unless a path starts with another folder.
 
-The one supported entry point is the package root, which loads its names on first use so that importing the library loads no hardware code. It offers `Wayfinder` with three sub-APIs, `control`, `planning` and `execution`, their models, `group_alignment_attempts` and the error class.
+The one supported entry point is the package root, which loads its names on first use, so importing it loads no hardware code. It offers `Wayfinder` with three sub-APIs, `control`, `planning` and `execution`, their models, `group_alignment_attempts` and the error class.
 
 <!-- impl: wayfindinglib.Wayfinder -->
 <!-- impl: wayfindinglib.api.control.control.ObservatoryControl -->
@@ -395,7 +395,7 @@ All in `tasks/control_tasks/` unless noted.
 
 The theory is in [Wayfinding quality judgment](Wayfinding_Quality_Judgment.md) (Architecture Section 6.11 gives its scope). Planning and Control share the vocabulary in `models/quality/`. The judging code is in `analytics/result_quality/` (Foundation, so both can call it) and is described in its README. The entry points are `get_advisory` (kinds `quality`, `tonight`, `result`, `calibration`) and `control.history.query` (kinds `night_quality`, `nights`, `target_changes`). A rule's confidence is the status label of its register entry (partly measured; see [WAY-01](validation/wayfinding.md#way-01)).
 
-**Table 12.** Where each part of the judgment lives. Paths are relative to `wayfindinglib/`. Register entries hold the evidence, and WAY-D rows hold the settings of Table 13.
+**Table 12.** Where each part of the judgment lives. Paths are relative to `wayfindinglib/`. Register entries hold the evidence; WAY-D rows hold Table 13's settings.
 
 | Part | Code | Register |
 | --- | --- | --- |
@@ -405,8 +405,8 @@ The theory is in [Wayfinding quality judgment](Wayfinding_Quality_Judgment.md) (
 | Envelope limits the rules read | `envelope_assembly.assemble_performance_envelope`, `performance_envelope.py` (Section 6.8) | [WAY-40](validation/wayfinding.md#way-40), [WAY-41](validation/wayfinding.md#way-41), [WAY-42](validation/wayfinding.md#way-42), [WAY-43](validation/wayfinding.md#way-43), [WAY-44](validation/wayfinding.md#way-44); WAY-D40, WAY-D41, WAY-D42, WAY-D43, WAY-D44 |
 | Efficiency, goal, references | `physical_reference`, `baseline_reference`, `noise_regime`, `assess_efficiency` (`efficiency.py`); `science_goal_for_setting` (`science_goal.py`); `observing_values.py` | [WAY-20](validation/wayfinding.md#way-20); WAY-D01, WAY-D20, WAY-D21, WAY-D22, WAY-D23, WAY-D24, WAY-D25, WAY-D26, WAY-D27, WAY-D28, WAY-D74 |
 | Loss account and night review | `loss_account`, `capture_setting_summaries`, `night_summary`, `target_summary` (`aggregates.py`); `set_aside_reasons` (`library_inputs.py`, reads `Astrometrics.quality.set_aside_frames`); `build_night_quality` (`night_quality_task.py`) | [WAY-74](validation/wayfinding.md#way-74); WAY-D75, WAY-D76 |
-| Noise growth and the stop signal | `forecast_stack_noise`, `frames_to_cut_noise`, `fit_noise_floor`, `stop_signal`, group mode (`forecast_group_noise`, `plan_group_stack`), folded frames (`StackGroup.frame_noise_factors`, `group_frame_rate_variances`), floor (`measure_stack_noise_floor`, `choose_noise_floor`), practical limit (`TakeMoreResult.practical_limit_applied`, `doubling_frames`, `doubling_noise_cut`, `most_reachable_cut`, `doubling_worthwhile`) (`noise_growth.py`) | [WAY-21](validation/wayfinding.md#way-21); WAY-D30, WAY-D31, WAY-D32, WAY-D34 |
-| Forecast check | `forecast_check`, `stack_groups_of_run`, `attach_calibration_identities`, `subset_pairs`, `library_runs`, `forecast_gate_state`, `_subset_new_frame_reason` (`forecast.py`); `StackRunRecord.is_earlier_nights_subset`; `ForecastBasis`, `ForecastGate` (`target_report.py`); confound rules in `_confound_reason`, which compare group lengths (`RunGroups.group_lengths`) | [WAY-70](validation/wayfinding.md#way-70); WAY-D70 |
+| Noise growth and the stop signal | `forecast_stack_noise`, `frames_to_cut_noise`, `fit_noise_floor`, `stop_signal`, group mode (`forecast_group_noise`, `plan_group_stack`), folded frames (`StackGroup.frame_noise_factors`, `group_frame_rate_variances`), floor (`measure_stack_noise_floor`, `choose_noise_floor`; from the half-difference: `measure_stack_noise_floor_from_half_difference`, `compare_stack_noise_with_half_difference`, `HalfDifferenceTest`, `total_variance_ratio_error`; `StackNoiseFloor.basis`, `sigmas`), practical limit (`TakeMoreResult.practical_limit_applied`, `doubling_frames`, `doubling_noise_cut`, `most_reachable_cut`, `doubling_worthwhile`) (`noise_growth.py`) | [WAY-21](validation/wayfinding.md#way-21), [WAY-76](validation/wayfinding.md#way-76); WAY-D30, WAY-D31, WAY-D32, WAY-D34 |
+| Forecast check | `forecast_check`, `stack_groups_of_run`, `attach_calibration_identities`, `subset_pairs`, `library_runs`, `forecast_gate_state`, `_subset_new_frame_reason`, `HalfDifferenceRecord`, `half_difference_noise_inputs`, `_half_difference_problem` (`forecast.py`; rows `stacking.half_difference_*`, version 1); `MeasuredNoiseCheck.basis`, `from_half_difference` (`aggregates.py`); `StackRunRecord.is_earlier_nights_subset`; `ForecastBasis`, `ForecastGate` (`target_report.py`); confound rules in `_confound_reason`, which compare group lengths (`RunGroups.group_lengths`) | [WAY-70](validation/wayfinding.md#way-70); WAY-D70 |
 | Target dataset report | `build_target_dataset_report` (`target_report_tasks.py`), `target_report_inputs.py`, `report_rules.py`, `starting_point.py`; `TargetDatasetReport` (`models/planning/target_report.py`) | [WAY-60](validation/wayfinding.md#way-60); WAY-D60, WAY-D61, WAY-D62, WAY-D63, WAY-D64, WAY-D65, WAY-D66, WAY-D67, WAY-D68, WAY-D69 |
 | One star's result | `judge_star_result` (`result_judgment_tasks.py`), `star_result_rules.py` | [WAY-73](validation/wayfinding.md#way-73); WAY-D73 |
 | Sky model, overheads, tonight's ranking | `fit_sky_model` (`sky_model.py`), `estimate_capture_overheads` (`capture_overheads.py`), `rank_tonight`, `score_candidate`, `forecast_gate_of_target` (`tonight_ranking_tasks.py`, `target_report_inputs.py`) | [WAY-71](validation/wayfinding.md#way-71), [WAY-72](validation/wayfinding.md#way-72); WAY-D29, WAY-D33, WAY-D71, WAY-D72 |
@@ -449,7 +449,7 @@ The theory is in [Wayfinding quality judgment](Wayfinding_Quality_Judgment.md) (
 
 Without `SiteProfile.typical_seeing_fwhm_arcsec`, the physical reference uses the diffraction limit alone (design estimate; WAY-D01). `DiskButler.put_session_from_execution` <!-- impl: wayfindinglib.drivers.butler.DiskButler.put_session_from_execution --> is the one write Execution uses. It merges the fields Planning owns inside one transaction, so a plan edit survives a checkpoint. A plan edit that changes nothing stores nothing, keeps the revision and sends no `plan:changed` event. The `sequencer:add`, `remove`, `reorder` and `modify` methods edit the queue through the plan service and send the same event.
 
-**Table 13.** Main settings of the quality judgment. Each row's register identifier gives its status and a way to measure it.
+**Table 13.** Main settings of the quality judgment. Each register identifier gives status and a way to measure.
 
 | Setting | Value | Where | Register |
 | --- | --- | --- | --- |
@@ -458,7 +458,9 @@ Without `SiteProfile.typical_seeing_fwhm_arcsec`, the physical reference uses th
 | Noise regimes | sky variance 9 × read-noise variance; source variance 1 × sky | `SKY_LIMITED_VARIANCE_RATIO`, `SOURCE_LIMITED_VARIANCE_RATIO` | WAY-D24 |
 | Sky model | 5 nights, 20 frames; Moon term from 2 moonlit nights | `MINIMUM_NIGHTS_FOR_SKY_MODEL`, `MINIMUM_FRAMES_FOR_SKY_MODEL`, `MINIMUM_MOON_NIGHTS` | WAY-D29 |
 | "Take N more" | noise to 0.707 of today's; new exposure length at least 5 frames; a count only within 4 times the stack's exposure time; one doubling worth at least a 5% cut | `TARGET_NOISE_RATIO`, `MINIMUM_FRAMES_NEW_EXPOSURE_LENGTH`, `PRACTICAL_TIME_FACTOR`, `MINIMUM_DOUBLING_GAIN_FRACTION` | WAY-D30 |
-| Floor and stop signal | 2 standard errors, one-sided; stop under a 10% cut from doubling | `FLOOR_SIGMAS`, `MINIMUM_GAIN_FRACTION` | WAY-D32 |
+| Floor and stop signal | 2 standard errors, one-sided (fit only); stop under a 10% cut from doubling | `FLOOR_SIGMAS`, `MINIMUM_GAIN_FRACTION` | WAY-D32 |
+| Model or half-difference agreement (one-stack floor, loss account) | 2 standard errors, one-sided; model error 11% as noise | `MODEL_AGREEMENT_SIGMAS`, `EXPECTED_NOISE_MODEL_RELATIVE_ERROR` | WAY-D34 |
+| Restack runs the half-difference when measured over predicted noise is | 1.1 to 2.0 | `HALF_DIFFERENCE_LOWER_RATIO`, `HALF_DIFFERENCE_UPPER_RATIO` (`run_all_target_processing.py`, `--no-half-difference`) | WAY-D70 |
 | Capture overheads | download 5 s, dither settle 20 s, autofocus 120 s | `DEFAULT_DOWNLOAD_SECONDS`, `DEFAULT_DITHER_SETTLE_SECONDS`, `DEFAULT_AUTOFOCUS_SECONDS` | WAY-D33 |
 | Forecast agreement; dark master compared unless the camera name has zwo or asi | 2 standard errors | `AGREEMENT_TOLERANCES`, `COOLED_CAMERA_NAME_MARKERS` | WAY-D70 |
 | Exploratory count in the ranking: gains tied to | 2 decimals (whole percent) | `GAIN_TIE_DIGITS` | WAY-D70 |

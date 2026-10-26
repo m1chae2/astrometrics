@@ -17,8 +17,10 @@ from astrometricslib import EARLIER_NIGHTS_VARIANT
 from astrometricslib.foundation.config import _TomlSectionedConfig
 from astrometricslib.foundation.observatory_setups import ObservatorySetups, OpticConfig, SetupConfig
 from astrometricslib.pipelines.stacking.metrics import (
+    STACKING_EMPTY_APERTURE_NOISE_STACK_UNIT,
     STACKING_EXPECTED_EMPTY_APERTURE_NOISE_STACK_UNIT,
     STACKING_FRAME_WEIGHT,
+    STACKING_HALF_DIFFERENCE_NOISE_STACK_UNIT,
 )
 
 _EXAMPLE_CONFIG_PATH = Path(__file__).resolve().parents[2] / "astrometrics.config.example.toml"
@@ -144,7 +146,10 @@ class FakeAstrometrics:
         self.measuring_elsewhere: set[str] = set()
         self.earlier_nights_calls: list[dict[str, Any]] = []
         self.earlier_nights_failures: set[str] = set()
+        self.half_difference_calls: list[str] = []
+        self.half_difference_failures: set[str] = set()
         self.processing = SimpleNamespace(
+            measure_half_difference_noise=self.measure_half_difference_noise,
             process_target=self.process_target,
             stack=self.stack,
             stack_subset=self.stack_subset,
@@ -205,6 +210,24 @@ class FakeAstrometrics:
         self.earlier_nights_calls.append({"target": target.id, "frames": frames, **keywords})
         if target.id in self.earlier_nights_failures:
             raise RuntimeError(f"the earlier nights of {target.id} broke")
+        return SimpleNamespace()
+
+    def measure_half_difference_noise(self, target: Any, **keywords: Any) -> SimpleNamespace:
+        """Record one half-difference request, or fail it on request.
+
+        Returns
+        -------
+        result : `types.SimpleNamespace`
+            An empty result.
+
+        Raises
+        ------
+        RuntimeError
+            If the target is in `half_difference_failures`.
+        """
+        self.half_difference_calls.append(target.id)
+        if target.id in self.half_difference_failures:
+            raise RuntimeError(f"the half-difference of {target.id} broke")
         return SimpleNamespace()
 
     def query_quality(
@@ -845,5 +868,154 @@ def test_the_review_list_marks_a_one_night_or_refused_target_not_applicable(
     assert {name: row["earlier_nights_present"] for name, row in rows.items()} == {
         "AsiOnly": "n/a",
         "Both": "n/a",
+        "NikonOnly": "n/a",
+    }
+
+
+# -- The half-difference step (decision of 2026-10-26) ------------------------
+
+
+def noise_rows(target: str, ratio: float | None) -> dict[str, list[SimpleNamespace]]:
+    """Build the measured and predicted noise rows of a library stack.
+
+    Parameters
+    ----------
+    target : `str`
+        The target.
+    ratio : `float` or `None`
+        Measured over predicted noise; `None` leaves the measured row out.
+
+    Returns
+    -------
+    rows : `dict` [`str`, `list`]
+        Fake quality rows, keyed as `query_quality` reads them.
+    """
+    rows = {f"{target}|{STACKING_EXPECTED_EMPTY_APERTURE_NOISE_STACK_UNIT}": rows_for(1.0e-3)}
+    if ratio is not None:
+        rows[f"{target}|{STACKING_EMPTY_APERTURE_NOISE_STACK_UNIT}"] = rows_for(ratio * 1.0e-3)
+    return rows
+
+
+@pytest.mark.parametrize("ratio", [1.1, 1.4, 2.0])
+def test_the_half_difference_runs_for_a_ratio_inside_the_range(
+    script: Any, fake: FakeAstrometrics, tmp_path: Path, ratio: float
+) -> None:
+    """Check a ratio in range (ends included) starts the measurement."""
+    fake.quality_rows = noise_rows("Both", ratio)
+
+    records = run_stack_only(script, tmp_path)
+
+    assert fake.half_difference_calls == ["Both"]
+    assert [record["status"] for record in records] == ["success", "success"]
+
+
+@pytest.mark.parametrize("ratio", [1.05, 2.95, None])
+def test_the_half_difference_is_skipped_outside_the_range_or_without_a_row(
+    script: Any, fake: FakeAstrometrics, tmp_path: Path, ratio: float | None
+) -> None:
+    """Check a low, a high or a missing ratio makes no measurement."""
+    fake.quality_rows = noise_rows("Both", ratio)
+
+    run_stack_only(script, tmp_path)
+
+    assert fake.half_difference_calls == []
+
+
+def test_the_half_difference_line_says_run_or_skipped_with_the_ratio(
+    script: Any, fake: FakeAstrometrics, tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """Check each target prints one line with its ratio."""
+    fake.quality_rows = {**noise_rows("Both", 1.4), **noise_rows("AsiOnly", 2.95)}
+
+    run_stack_only(script, tmp_path)
+
+    output = capsys.readouterr().out
+    assert "[Both] half-difference run (ratio 1.40)" in output
+    assert "[AsiOnly] half-difference skipped (ratio 2.95)" in output
+
+
+def test_a_failed_half_difference_is_noted_and_the_run_goes_on(
+    script: Any, fake: FakeAstrometrics, tmp_path: Path
+) -> None:
+    """Check the failure is in the error text, the status stays success."""
+    fake.quality_rows = {**noise_rows("Both", 1.4), **noise_rows("AsiOnly", 1.4)}
+    fake.half_difference_failures = {"Both"}
+
+    records = run_stack_only(script, tmp_path)
+
+    assert [record["status"] for record in records] == ["success", "success"]
+    assert "the half-difference measurement failed" in records[0]["error"]
+    assert "the half-difference of Both broke" in records[0]["error"]
+    assert fake.half_difference_calls == ["Both", "AsiOnly"]
+
+
+def test_no_half_difference_skips_the_measurement(
+    script: Any, fake: FakeAstrometrics, tmp_path: Path
+) -> None:
+    """Check --no-half-difference leaves the measurement out."""
+    fake.quality_rows = noise_rows("Both", 1.4)
+
+    records = run_stack_only(script, tmp_path, "--no-half-difference")
+
+    assert fake.half_difference_calls == []
+    assert records[0]["error"] == ""
+
+
+def test_a_stack_that_failed_makes_no_half_difference(
+    script: Any, fake: FakeAstrometrics, tmp_path: Path
+) -> None:
+    """Check a failed stack never reaches the measurement."""
+    fake.quality_rows = noise_rows("Both", 1.4)
+    fake.stack_failures = {"Both"}
+
+    run_stack_only(script, tmp_path)
+
+    assert fake.half_difference_calls == []
+
+
+def test_the_review_list_says_what_happened_to_the_half_difference(
+    script: Any, fake: FakeAstrometrics, tmp_path: Path
+) -> None:
+    """Check the column is run, skipped (ratio X), failed or n/a."""
+    import csv
+
+    fake.quality_rows = {
+        **noise_rows("Both", 1.4),
+        f"Both|{STACKING_HALF_DIFFERENCE_NOISE_STACK_UNIT}": rows_for(1.0e-3),
+        **noise_rows("AsiOnly", 2.95),
+    }
+    review_path = tmp_path / "review.csv"
+
+    run_stack_only(script, tmp_path, "--review-list", str(review_path))
+
+    with open(review_path, newline="") as handle:
+        rows = {row["target"]: row for row in csv.DictReader(handle)}
+    assert rows["Both"]["half_difference"] == "run"
+    assert rows["AsiOnly"]["half_difference"] == "skipped (ratio 2.95)"
+
+
+def test_the_review_list_marks_a_failed_unmeasured_or_refused_half_difference(
+    script: Any, fake: FakeAstrometrics, tmp_path: Path
+) -> None:
+    """Check failed (not-measured row, or in range with no row) and n/a."""
+    import csv
+
+    fake.quality_rows = {
+        **noise_rows("Both", 1.4),
+        f"Both|{STACKING_HALF_DIFFERENCE_NOISE_STACK_UNIT}": rows_for(None, status="not_measured"),
+        **noise_rows("AsiOnly", 1.4),
+    }
+    review_path = tmp_path / "review.csv"
+
+    script.run_full_processing([
+        "--skip-reindex", "--stack-only", "--progress-file", str(tmp_path / "progress.jsonl"),
+        "--review-list", str(review_path),
+    ])  # fmt: skip
+
+    with open(review_path, newline="") as handle:
+        rows = {row["target"]: row for row in csv.DictReader(handle)}
+    assert {name: row["half_difference"] for name, row in rows.items()} == {
+        "AsiOnly": "failed",
+        "Both": "failed",
         "NikonOnly": "n/a",
     }

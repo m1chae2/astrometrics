@@ -118,6 +118,7 @@ from astrometricslib import (
 )
 from wayfindinglib.analytics.result_quality.efficiency import FrameObservation
 from wayfindinglib.analytics.result_quality.noise_growth import (
+    FLOOR_BASIS_HALF_DIFFERENCE,
     MINIMUM_GAIN_FRACTION,
     NoiseForecast,
     NoiseStep,
@@ -136,6 +137,7 @@ from wayfindinglib.analytics.result_quality.noise_growth import (
     group_frame_rate_variances,
     identify_weighting_mode,
     measure_stack_noise_floor,
+    measure_stack_noise_floor_from_half_difference,
     new_frames_like,
     noise_ratio_after_adding,
     noise_ratio_with_floor,
@@ -173,6 +175,11 @@ EXPECTED_NOISE_METRIC = "stacking.expected_empty_aperture_noise_stack_unit"
 FRAME_WEIGHT_METRIC = "stacking.frame_weight"
 REFERENCE_FLUX_METRIC = "stacking.noise_reference_flux_stack_unit"
 APERTURE_SET_METRIC = "stacking.aperture_set_number"
+EFFECTIVE_FRAME_COUNT_METRIC = "stacking.effective_frame_count"
+HALF_DIFFERENCE_NORMALIZED_METRIC = "stacking.half_difference_noise_normalized"
+HALF_DIFFERENCE_APERTURE_SET_METRIC = "stacking.half_difference_aperture_set_number"
+HALF_DIFFERENCE_VARIANCE_FACTOR_METRIC = "stacking.half_difference_variance_factor"
+HALF_DIFFERENCE_MODEL_RATIO_METRIC = "stacking.half_difference_model_variance_ratio"
 GROUP_EXPOSURE_METRIC = "stacking.group_exposure_s"
 GROUP_FRAMES_STACKED_METRIC = "stacking.group_frames_stacked_count"
 GROUP_GAIN_METRIC = "stacking.group_gain_applied"
@@ -195,6 +202,11 @@ PINNED_STACK_METRICS = {
     FRAME_WEIGHT_METRIC: 1,
     REFERENCE_FLUX_METRIC: 3,
     APERTURE_SET_METRIC: 1,
+    EFFECTIVE_FRAME_COUNT_METRIC: 1,
+    HALF_DIFFERENCE_NORMALIZED_METRIC: 1,
+    HALF_DIFFERENCE_APERTURE_SET_METRIC: 1,
+    HALF_DIFFERENCE_VARIANCE_FACTOR_METRIC: 1,
+    HALF_DIFFERENCE_MODEL_RATIO_METRIC: 1,
     GROUP_EXPOSURE_METRIC: 1,
     GROUP_FRAMES_STACKED_METRIC: 1,
     GROUP_GAIN_METRIC: 1,
@@ -335,6 +347,95 @@ def calibration_summary_from_record(record: Any) -> CalibrationSummary:
     )
 
 
+HALF_DIFFERENCE_METRICS = frozenset({
+    HALF_DIFFERENCE_NORMALIZED_METRIC,
+    HALF_DIFFERENCE_APERTURE_SET_METRIC,
+    HALF_DIFFERENCE_VARIANCE_FACTOR_METRIC,
+    HALF_DIFFERENCE_MODEL_RATIO_METRIC,
+})
+"""The half-difference rows read. They sit on the library stack's subject but
+belong to a later run (the half-difference job runs after the stack), so they
+are read apart from the noise rows and joined to the run they follow."""
+
+
+class HalfDifferenceRecord(BaseModel):
+    """The half-difference measurement of one library stack.
+
+    The job takes the odd-minus-even difference of two half stacks, which
+    cancels everything fixed on the sky, so its noise is the random noise
+    alone (see `noise_growth.measure_stack_noise_floor_from_half_difference`).
+
+    Parameters
+    ----------
+    run_id : `str`
+        The run of the half-difference job.
+    measured_at : `datetime`
+        When its newest row was stored.
+    normalized_noise : `float` or `None`
+        The difference's noise as a fraction of the reference stars' flux (no
+        unit), measured in the apertures of `aperture_identity`.
+    apertures : `int` or `None`
+        The empty apertures behind `normalized_noise`.
+    aperture_identity : `str` or `None`
+        The identity of the aperture set it was measured in.
+    variance_factor : `float` or `None`
+        The difference's variance in units of one frame's variance
+        (``F = sum((a - b)^2)`` over the frames of both halves).
+    model_variance_ratio : `float` or `None`
+        The difference's variance in units of the library stack's, with each
+        frame's modeled noise. Used only when `variance_factor` is missing.
+    problems : `dict` [`str`, `str`]
+        Why a part is missing, by part name.
+    """
+
+    model_config = _MODEL_CONFIG
+
+    run_id: str
+    measured_at: datetime
+    normalized_noise: float | None = None
+    apertures: int | None = None
+    aperture_identity: str | None = None
+    variance_factor: float | None = None
+    model_variance_ratio: float | None = None
+    problems: dict[str, str] = Field(default_factory=dict)
+
+    def full_stack_equivalent(self, library_effective_count: float | None) -> float | None:
+        """Give the full stack's normalized random noise.
+
+        Built as the job builds it. With equal frame noise, a stack with
+        weight shares ``s`` has the variance ``sigma^2 x sum(s^2)``, which is
+        ``sigma^2 / N_eff`` for the library stack, and the difference has
+        ``sigma^2 x F``. So the library stack's random noise is the
+        difference noise divided by ``sqrt(N_eff x F)``. When the effective
+        frame count or ``F`` is missing, the difference noise divided by the
+        square root of the stored model variance ratio is used instead.
+
+        Parameters
+        ----------
+        library_effective_count : `float` or `None`
+            The library stack's effective frame count
+            (``stacking.effective_frame_count``).
+
+        Returns
+        -------
+        noise : `float` or `None`
+            The normalized random noise of the full stack, or ``None`` when
+            the difference noise or both divisors are missing.
+        """
+        if self.normalized_noise is None or self.normalized_noise <= 0.0:
+            return None
+        if (
+            library_effective_count is not None
+            and library_effective_count > 0.0
+            and self.variance_factor is not None
+            and self.variance_factor > 0.0
+        ):
+            return self.normalized_noise / math.sqrt(library_effective_count * self.variance_factor)
+        if self.model_variance_ratio is not None and self.model_variance_ratio > 0.0:
+            return self.normalized_noise / math.sqrt(self.model_variance_ratio)
+        return None
+
+
 class StackRunRecord(BaseModel):
     """What one library stack run stored that the forecast check needs.
 
@@ -379,11 +480,19 @@ class StackRunRecord(BaseModel):
         existed) or was not measured.
     noise_definition_version : `int` or `None`
         The definition version of the stack's noise row.
+    noise_measured_at : `datetime` or `None`
+        When the stack's noise row was stored. A half-difference measurement
+        is used only when it is newer.
     groups : `list` [`RecordedGroup`]
         The exposure groups the run recorded. Empty for a run that stored
         none (a stack made before part 2a) and for a run that made several
         stacks, because no stored row says which group belongs to which
         stack (see ``problems["groups"]``).
+    effective_frame_count : `float` or `None`
+        The stack's effective frame count (``stacking.effective_frame_count``).
+    half_difference : `HalfDifferenceRecord` or `None`
+        The newest half-difference measurement made after this run's noise
+        row and before the next run of the same stack, or ``None``.
     calibration : `CalibrationSummary` or `None`
         The calibration the run used. ``None`` until
         `attach_calibration_identities` adds it; a run with no record counts
@@ -416,6 +525,9 @@ class StackRunRecord(BaseModel):
     aperture_identity: str | None = None
     noise_definition_version: int | None = None
     groups: list[RecordedGroup] = Field(default_factory=list)
+    effective_frame_count: float | None = None
+    half_difference: HalfDifferenceRecord | None = None
+    noise_measured_at: datetime | None = None
     calibration: CalibrationSummary | None = None
     is_earlier_nights_subset: bool = False
     problems: dict[str, str] = Field(default_factory=dict)
@@ -564,10 +676,17 @@ def stack_runs_from_measurements(
     stack_rows: dict[tuple[str, str, bool], list[QualityMeasurement]] = defaultdict(list)
     weight_rows: dict[str, list[QualityMeasurement]] = defaultdict(list)
     group_rows: dict[str, dict[str, list[QualityMeasurement]]] = defaultdict(lambda: defaultdict(list))
+    half_rows: dict[tuple[str, str], list[QualityMeasurement]] = defaultdict(list)
     for row in measurements:
         if row.metric not in PINNED_STACK_METRICS:
             continue
         variant = row.subject.variant
+        if row.metric in HALF_DIFFERENCE_METRICS:
+            # The job's rows follow the stack's own run, so they must not make
+            # a run of their own. The earlier-nights subset has none.
+            if row.subject.level == SubjectLevel.STACK and variant is None:
+                half_rows[row.run_id, row.subject.subject_id].append(row)
+            continue
         is_subset = include_earlier_nights and variant == EARLIER_NIGHTS_VARIANT
         if row.subject.level == SubjectLevel.STACK and (variant is None or is_subset):
             if row.metric in GROUP_METRICS:
@@ -667,6 +786,9 @@ def stack_runs_from_measurements(
                     recorded_groups.append(group)
         noise_version_rows = grouped.get((stack_id, NOISE_METRIC), [])
         newest_time = max(row.measured_at for row in rows)
+        effective_count, _count_reason = _usable_value(
+            grouped.get((stack_id, EFFECTIVE_FRAME_COUNT_METRIC), []), EFFECTIVE_FRAME_COUNT_METRIC
+        )
         records.append(
             StackRunRecord(
                 run_id=run_id,
@@ -687,11 +809,108 @@ def stack_runs_from_measurements(
                     noise_version_rows[0].definition_version if noise_version_rows else None
                 ),
                 groups=recorded_groups,
+                effective_frame_count=effective_count,
+                noise_measured_at=max((row.measured_at for row in noise_rows), default=None),
                 is_earlier_nights_subset=is_subset,
                 problems=problems,
             )
         )
-    return sorted(records, key=lambda record: (record.measured_at, record.run_id))
+    ordered = sorted(records, key=lambda record: (record.measured_at, record.run_id))
+    return _attach_half_differences(ordered, half_rows)
+
+
+def _half_difference_record(run_id: str, rows: Sequence[QualityMeasurement]) -> HalfDifferenceRecord:
+    """Build one half-difference record from the rows of one job run.
+
+    Parameters
+    ----------
+    run_id : `str`
+        The job's run.
+    rows : `Sequence` [`QualityMeasurement`]
+        The run's half-difference rows on one library stack.
+
+    Returns
+    -------
+    record : `HalfDifferenceRecord`
+        The usable values; a missing one is named in ``problems``.
+    """
+    grouped = _newest_by_subject(rows)
+    problems: dict[str, str] = {}
+    values: dict[str, float | None] = {}
+    for metric in HALF_DIFFERENCE_METRICS:
+        found = [pair for key, pair in grouped.items() if key[1] == metric]
+        value, reason = _usable_value(found[0], metric) if found else (None, f"{metric} has no row.")
+        values[metric] = value
+        if value is None:
+            problems[metric] = reason or f"{metric} was not measured."
+    normalized_rows = next(
+        (pair for key, pair in grouped.items() if key[1] == HALF_DIFFERENCE_NORMALIZED_METRIC), []
+    )
+    apertures = next((row.sample_count for row in normalized_rows if row.sample_count), None)
+    identity = None
+    identity_value = values[HALF_DIFFERENCE_APERTURE_SET_METRIC]
+    if identity_value is not None:
+        try:
+            identity = aperture_identity_from_number(identity_value)
+        except ValueError:
+            problems[HALF_DIFFERENCE_APERTURE_SET_METRIC] = (
+                f"The stored aperture-set number {identity_value!r} is invalid."
+            )
+    return HalfDifferenceRecord(
+        run_id=run_id,
+        measured_at=max(row.measured_at for row in rows),
+        normalized_noise=values[HALF_DIFFERENCE_NORMALIZED_METRIC],
+        apertures=apertures,
+        aperture_identity=identity,
+        variance_factor=values[HALF_DIFFERENCE_VARIANCE_FACTOR_METRIC],
+        model_variance_ratio=values[HALF_DIFFERENCE_MODEL_RATIO_METRIC],
+        problems=problems,
+    )
+
+
+def _attach_half_differences(
+    records: list[StackRunRecord], half_rows: Mapping[tuple[str, str], Sequence[QualityMeasurement]]
+) -> list[StackRunRecord]:
+    """Give each library run the half-difference measurement that follows it.
+
+    The job measures the halves of a stack after the stack's noise row is
+    stored, so a measurement belongs to the newest run of its stack whose
+    noise row is not newer than the measurement. A measurement older than
+    every noise row of its stack belongs to none.
+
+    Parameters
+    ----------
+    records : `list` [`StackRunRecord`]
+        The runs, oldest first.
+    half_rows : `Mapping`
+        The half-difference rows by ``(job run id, stack subject id)``.
+
+    Returns
+    -------
+    records : `list` [`StackRunRecord`]
+        The same runs, each with ``half_difference`` set where one belongs.
+    """
+    attached: dict[int, HalfDifferenceRecord] = {}
+    for (run_id, stack_id), rows in half_rows.items():
+        candidate = _half_difference_record(run_id, rows)
+        owners = [
+            index
+            for index, record in enumerate(records)
+            if not record.is_earlier_nights_subset
+            and record.stack_subject_id == stack_id
+            and record.noise_measured_at is not None
+            and _as_utc(record.noise_measured_at) <= _as_utc(candidate.measured_at)
+        ]
+        if not owners:
+            continue
+        owner = max(owners, key=lambda index: (_as_utc(records[index].noise_measured_at), index))
+        current = attached.get(owner)
+        if current is None or _as_utc(candidate.measured_at) > _as_utc(current.measured_at):
+            attached[owner] = candidate
+    return [
+        record.model_copy(update={"half_difference": attached[index]}) if index in attached else record
+        for index, record in enumerate(records)
+    ]
 
 
 def attach_calibration_identities(
@@ -1060,13 +1279,124 @@ def stack_groups_of_run(
     )
 
 
-def single_stack_floor(record: StackRunRecord) -> StackNoiseFloor | None:
-    """Find a run's noise floor from its own measured and expected noise.
+def _half_difference_problem(record: StackRunRecord) -> str | None:
+    """Say why a run's half-difference measurement cannot decide its floor.
 
-    Both noises are in the stack's units. The expected noise is version 2 of
+    The measurement must be of this stack (the join in
+    `stack_runs_from_measurements` makes it newer than the stack's noise row),
+    in the same aperture set as the stack's noise row, and both noises must be
+    measured.
+
+    Parameters
+    ----------
+    record : `StackRunRecord`
+        The run.
+
+    Returns
+    -------
+    problem : `str` or `None`
+        The reason it cannot be used, or ``None`` when it can.
+    """
+    half = record.half_difference
+    if half is None:
+        return "no half-difference measurement was stored for this stack"
+    if record.noise_measured_at is None or _as_utc(half.measured_at) < _as_utc(record.noise_measured_at):
+        return "the half-difference measurement is older than the stack's noise measurement"
+    if (
+        record.noise is None
+        or record.noise <= 0.0
+        or record.reference_flux is None
+        or record.aperture_count is None
+        or record.aperture_count < 2
+    ):
+        return "the stack's own noise was not measured"
+    if half.normalized_noise is None or half.apertures is None or half.apertures < 2:
+        return "the half-difference noise was not measured"
+    if record.aperture_identity is None or half.aperture_identity != record.aperture_identity:
+        return "the half-difference was measured in other apertures than the stack"
+    if half.full_stack_equivalent(record.effective_frame_count) is None:
+        return "the half-difference has no variance factor or model ratio to scale it to the full stack"
+    return None
+
+
+def half_difference_noise_inputs(record: StackRunRecord) -> tuple[float, int, float, int] | None:
+    """Give the four numbers that compare a stack with its half-difference.
+
+    This is the one place that decides whether the half-difference is usable
+    (`_half_difference_problem`) and builds the full-stack equivalent of its
+    noise (`HalfDifferenceRecord.full_stack_equivalent`). The noise floor and
+    the loss account both read it, so they use the same record of the same
+    stack.
+
+    Parameters
+    ----------
+    record : `StackRunRecord`
+        The run.
+
+    Returns
+    -------
+    inputs : `tuple` [`float`, `int`, `float`, `int`] or `None`
+        The stack's measured noise, its apertures, the random noise of the
+        full stack (all in stack units) and the difference's apertures, or
+        ``None`` when the half-difference cannot be used.
+    """
+    half = record.half_difference
+    if half is None or _half_difference_problem(record) is not None:
+        return None
+    equivalent = half.full_stack_equivalent(record.effective_frame_count)
+    if (
+        equivalent is None
+        or record.noise is None
+        or record.reference_flux is None
+        or record.aperture_count is None
+        or half.apertures is None
+    ):
+        return None
+    return record.noise, record.aperture_count, equivalent * record.reference_flux, half.apertures
+
+
+def single_stack_floor(record: StackRunRecord) -> StackNoiseFloor | None:
+    """Find a run's noise floor from its own measured noise.
+
+    When the run has a usable half-difference measurement
+    (`_half_difference_problem` says none is missing), the random part is that
+    direct measurement, scaled to the full stack
+    (`HalfDifferenceRecord.full_stack_equivalent`), and the test counts
+    measurement errors only (`measure_stack_noise_floor_from_half_difference`).
+    The two noises are compared as normalized noises, so the stack's
+    brightness scale cancels, and are put back in the stack's units with the
+    stack's reference flux. Otherwise the floor falls back to the noise model:
+    the expected noise is version 2 of
     ``stacking.expected_empty_aperture_noise_stack_unit``, which includes
-    Siril's normalization scale (plan decision D9), so it is the random part
-    of the measured noise.
+    Siril's normalization scale (plan decision D9), and the test counts the
+    model's own error too (`measure_stack_noise_floor`).
+
+    Parameters
+    ----------
+    record : `StackRunRecord`
+        The run.
+
+    Returns
+    -------
+    floor : `StackNoiseFloor` or `None`
+        The floor result (found or not), or ``None`` when neither basis can
+        be used.
+    """
+    problem = _half_difference_problem(record)
+    half = record.half_difference
+    inputs = half_difference_noise_inputs(record)
+    if inputs is not None:
+        return measure_stack_noise_floor_from_half_difference(*inputs)
+    model_floor = _model_single_stack_floor(record)
+    if model_floor is not None and half is not None and problem is not None:
+        return model_floor.model_copy(
+            update={"reason": f"{model_floor.reason} The half-difference was not used: {problem}."}
+        )
+    return model_floor
+
+
+def _model_single_stack_floor(record: StackRunRecord) -> StackNoiseFloor | None:
+    """Find a run's noise floor against the noise model's prediction.
 
     Parameters
     ----------
@@ -1621,11 +1951,16 @@ def _floor_sentence(floor: StackNoiseFloor | None) -> str:
     if floor is None:
         return "No noise floor could be measured for the earlier stack."
     if not floor.floor_detected:
-        return "The earlier stack showed no noise floor."
+        tested = (
+            "tested against the random noise measured from the odd and even half stacks"
+            if floor.basis == FLOOR_BASIS_HALF_DIFFERENCE
+            else "tested against the noise model"
+        )
+        return f"The earlier stack showed no noise floor ({tested})."
     share = 100 * (floor.floor_variance_share or 0.0)
     return (
         f"The forecast already includes a noise floor that makes up {share:.0f}% of the earlier "
-        "stack's noise variance."
+        f"stack's noise variance ({floor.basis_text})."
     )
 
 
@@ -2199,6 +2534,7 @@ __all__ = [
     "camera_gain_for_setting",
     "forecast_check",
     "forecast_gate_state",
+    "half_difference_noise_inputs",
     "library_runs",
     "noise_floor_for_runs",
     "noise_steps_from_runs",

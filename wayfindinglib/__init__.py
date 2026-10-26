@@ -65,10 +65,13 @@ if TYPE_CHECKING:
         ExposureRequest,
         FrameType,
         ObservationPackage,
+        PackageStatus,
+        PackageSuggestion,
     )
     from wayfindinglib.models.planning.sequence_plan import SequenceItem, SequencePlan
     from wayfindinglib.models.planning.sequence_summary import SequenceSummary
     from wayfindinglib.models.planning.sky_source import SkySource
+    from wayfindinglib.models.planning.suggestion_log import PackageChange, SuggestionLogEntry
     from wayfindinglib.models.planning.target_report import TargetDatasetReport
     from wayfindinglib.models.planning.tonight_ranking import TonightRanking
     from wayfindinglib.models.planning.visibility import (
@@ -94,7 +97,13 @@ if TYPE_CHECKING:
         PlanChangeItem,
         PlanRevisionConflictError,
         QueueRequest,
+        RunState,
         StartTimeMode,
+    )
+    from wayfindinglib.models.session.session_progress import (
+        EntryProgress,
+        ObservationSessionWithProgress,
+        SessionProgress,
     )
     from wayfindinglib.models.session.telemetry import (
         AlignmentAttempt,
@@ -153,12 +162,20 @@ _LAZY_EXPORTS = {
     "SequenceItem": "wayfindinglib.models.planning.sequence_plan",
     "SequencePlan": "wayfindinglib.models.planning.sequence_plan",
     "ObservationPackage": "wayfindinglib.models.planning.observation_package",
+    "PackageStatus": "wayfindinglib.models.planning.observation_package",
+    "PackageSuggestion": "wayfindinglib.models.planning.observation_package",
+    "PackageChange": "wayfindinglib.models.planning.suggestion_log",
+    "SuggestionLogEntry": "wayfindinglib.models.planning.suggestion_log",
     "ExposureRequest": "wayfindinglib.models.planning.observation_package",
     "DitherConfig": "wayfindinglib.models.planning.observation_package",
     "FrameType": "wayfindinglib.models.planning.observation_package",
     "ObservationSession": "wayfindinglib.models.session.observation_session",
     "ObservationSessionSummary": "wayfindinglib.models.session.observation_session",
     "QueueRequest": "wayfindinglib.models.session.observation_session",
+    "RunState": "wayfindinglib.models.session.observation_session",
+    "SessionProgress": "wayfindinglib.models.session.session_progress",
+    "EntryProgress": "wayfindinglib.models.session.session_progress",
+    "ObservationSessionWithProgress": "wayfindinglib.models.session.session_progress",
     "StartTimeMode": "wayfindinglib.models.session.observation_session",
     "ChecklistItem": "wayfindinglib.models.session.observation_session",
     "Framing": "wayfindinglib.models.session.observation_session",

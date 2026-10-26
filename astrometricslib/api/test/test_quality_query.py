@@ -213,3 +213,65 @@ def test_the_root_object_holds_the_quality_child() -> None:
     assert isinstance(astrometrics.quality, QualityRecords)
     assert astrometrics.quality._targets is astrometrics.targets
     assert not hasattr(astrometrics.processing, "diagnostics")
+
+
+def test_query_fills_each_row_with_its_metric_unit(quality: QualityRecords, tmp_path: Path) -> None:
+    """A row read back carries the unit of its metric."""
+    QualityStore(quality_database_path(quality._config)).write_measurements([_measurement("run", BASE_TIME)])
+
+    [row] = quality.query()
+
+    assert row.unit == "arcsec"
+
+
+def test_resolve_rows_gives_frame_and_stack_paths_and_reasons(tmp_path: Path) -> None:
+    """Each found row gets a path or a reason; missing ids are listed apart."""
+    frames_folder = tmp_path / "lights" / "M31" / "scope" / "cam"
+    frames_folder.mkdir(parents=True)
+    present = frames_folder / "a.fits"
+    present.write_text("x")
+    stack_folder = tmp_path / "lights" / "M31"
+    (stack_folder / "M31_stack.fits").write_text("x")
+    target = SimpleNamespace(
+        id="M31",
+        frames=[
+            SimpleNamespace(path=str(present)),
+            SimpleNamespace(path=str(frames_folder / "gone.fits")),
+        ],
+    )
+    configuration = SimpleNamespace(get_library_path=lambda: tmp_path, get_stacks_path=lambda: tmp_path)
+    records = QualityRecords(configuration, None, targets=SimpleNamespace(get=lambda target_id: target))
+    subjects = {
+        "frame": QualitySubject(level=SubjectLevel.FRAME, subject_id="M31/scope/cam/a.fits", target_id="M31"),
+        "gone": QualitySubject(
+            level=SubjectLevel.FRAME, subject_id="M31/scope/cam/gone.fits", target_id="M31"
+        ),
+        "unlisted": QualitySubject(
+            level=SubjectLevel.FRAME, subject_id="M31/scope/cam/z.fits", target_id="M31"
+        ),
+        "stack": QualitySubject(level=SubjectLevel.STACK, subject_id="M31/M31_stack.fits", target_id="M31"),
+        "run": QualitySubject(level=SubjectLevel.RUN, subject_id="run-1", target_id="M31"),
+    }
+    store = QualityStore(quality_database_path(configuration))
+    store.write_measurements([
+        _measurement(f"run-{name}", BASE_TIME, subject=subject) for name, subject in subjects.items()
+    ])
+    ids = {row.subject.subject_id: row.row_id for row in records.query(latest_only=False)}
+
+    result = records.resolve_rows([
+        ids["run-1"],
+        9999,
+        ids["M31/scope/cam/a.fits"],
+        ids["M31/scope/cam/gone.fits"],
+        ids["M31/scope/cam/z.fits"],
+        ids["M31/M31_stack.fits"],
+    ])
+
+    assert result.not_found_row_ids == [9999]
+    by_subject = {row.subject_id: row for row in result.rows}
+    assert by_subject["M31/scope/cam/a.fits"].path == str(present)
+    assert by_subject["M31/M31_stack.fits"].path == str(stack_folder / "M31_stack.fits")
+    assert "no longer on disk" in by_subject["M31/scope/cam/gone.fits"].reason
+    assert "not in the target's frame list" in by_subject["M31/scope/cam/z.fits"].reason
+    assert by_subject["run-1"].path is None
+    assert next(row.row_id for row in result.rows) == ids["run-1"]

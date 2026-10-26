@@ -23,6 +23,7 @@ interface Props {
  *
  * A reusable wrapper around Plotly for rendering 2D scatter plots (XY data).
  * Supports optional "bullseye" background circles for target visualization.
+ * The plot fills its container and redraws when the container changes size.
  */
 export const ScatterPlot: React.FC<Props> = ({
     data,
@@ -66,14 +67,17 @@ export const ScatterPlot: React.FC<Props> = ({
                     gridcolor: '#444',
                     zerolinecolor: '#888',
                     title: { text: xLabel, font: { size: 9 } },
-                    fixedrange: true
+                    fixedrange: true,
+                    // Keep the given range and shrink the plot area instead, so the axes stay square.
+                    constrain: 'domain'
                 },
                 yaxis: {
                     gridcolor: '#444',
                     zerolinecolor: '#888',
                     title: { text: yLabel, font: { size: 9 } },
                     scaleanchor: 'x',
-                    fixedrange: true
+                    fixedrange: true,
+                    constrain: 'domain'
                 },
             };
 
@@ -97,6 +101,21 @@ export const ScatterPlot: React.FC<Props> = ({
             render();
         }
     }, [data, xRange, yRange, showCircles, xLabel, yLabel]);
+
+    // Redraw to the container's size whenever it changes, including when a hidden tab
+    // holding the plot is first shown (Plotly falls back to 450px when drawn hidden).
+    useEffect(() => {
+        const element = plotRef.current;
+        if (!element || typeof ResizeObserver === 'undefined') return;
+        const observer = new ResizeObserver(() => {
+            const P = plotlyRef.current;
+            if (P && element.clientWidth > 0 && element.clientHeight > 0) {
+                P.Plots?.resize(element);
+            }
+        });
+        observer.observe(element);
+        return () => observer.disconnect();
+    }, []);
 
     return <div className="scatter-plot-container" ref={plotRef} />;
 };

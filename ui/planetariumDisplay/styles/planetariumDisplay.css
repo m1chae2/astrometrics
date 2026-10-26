@@ -1,4 +1,5 @@
 /* Astrometrics Planetarium Display Styling - Theme Variable Injection */
+@import "./planetariumFraming.css";
 
 .planetarium-display {
   height: 100%;
@@ -759,93 +760,6 @@
   outline: none;
 }
 
-/* Equipment Configuration Panel */
-.equipment-config-panel {
-  position: absolute;
-  bottom: 12px;
-  left: 12px;
-  z-index: 100;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-}
-
-.equipment-config-panel__toggle {
-  background: rgba(var(--grey-darkest-rgb, 24, 24, 24), 0.85);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 6px;
-  color: var(--text-primary, #eaeaea);
-  font-size: 12px;
-  font-family: var(--font-family-base);
-  padding: 4px 10px;
-  cursor: pointer;
-  transition: background 0.12s ease;
-}
-
-.equipment-config-panel__toggle:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.equipment-config-panel__body {
-  width: 240px;
-  background: rgba(10, 14, 22, 0.95);
-  backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.equipment-config-panel__row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-}
-
-.equipment-config-panel__label {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-  color: var(--text-dim, #aaa);
-  flex-shrink: 0;
-}
-
-.equipment-config-panel__value {
-  font-size: 12px;
-  color: var(--text-light, #eee);
-  text-align: right;
-}
-
-.equipment-config-panel__value--mono {
-  font-family: var(--font-family-mono), monospace;
-  color: var(--status-cyan, #4fc1ff);
-}
-
-.equipment-config-panel__select {
-  background: var(--grey-dark, #222);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: var(--text-primary, #eaeaea);
-  font-size: 12px;
-  font-family: var(--font-family-base);
-  padding: 3px 6px;
-  border-radius: 4px;
-  outline: none;
-  cursor: pointer;
-  max-width: 150px;
-}
-
-.equipment-config-panel__divider {
-  height: 1px;
-  background: rgba(255, 255, 255, 0.06);
-  margin: 2px 0;
-}
-
 /* Date and Time simulation modal */
 .planetarium-datetime-modal {
   position: absolute;
@@ -1032,4 +946,29 @@
 
 .planetarium-datetime-modal__reset-btn:hover {
   background: rgba(255, 255, 255, 0.12);
+}
+
+.planetarium-info-card__add-package-btn {
+  margin-top: var(--space-3);
+  padding: var(--space-1) var(--space-3);
+  background: var(--grey-dark);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.planetarium-info-card__add-package-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.planetarium-info-card__add-package-btn:focus-visible {
+  outline: 2px solid var(--primary-blue);
+  outline-offset: 2px;
+}
+
+.planetarium-info-card__refusal {
+  margin-top: var(--space-2);
+  color: var(--status-red);
 }

@@ -167,8 +167,8 @@ class TelescopeService:
             from astrometricslib import parse_coordinate_string
 
             nearest = self._target_service.astrometrics.targets.query(
-                ra=parse_coordinate_string(ra_str, is_ra=True),
-                dec=parse_coordinate_string(dec_str, is_ra=False),
+                ra_deg=parse_coordinate_string(ra_str, is_ra=True),
+                dec_deg=parse_coordinate_string(dec_str, is_ra=False),
                 radius_deg=1.0,  # 1 degree tolerance for sensor FOV match
                 include_empty=True,
                 sort="separation",
@@ -177,7 +177,7 @@ class TelescopeService:
         except (AstrometricsError, sqlite3.Error) as exc:
             logger.debug("Target inference failed: %s", exc)
             return None
-        rows = nearest.get("targets") or []
+        rows = nearest.targets or []
         return (rows[0].get("common_name") or rows[0]["id"]) if rows else None
 
     def connect(self) -> bool:

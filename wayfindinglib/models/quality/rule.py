@@ -13,7 +13,7 @@ about missing data names none, because the library never advises hardware
 and never hides missing data.
 """
 
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -65,6 +65,19 @@ class QualityRule(BaseModel):
     wording : `str`
         A template for the message, with the numbers filled in when a
         statement is built.
+    plain_wording : `str`
+        A template for the plain message, in everyday words: one or two short
+        sentences that say what the finding means for the observer and what
+        to do. It uses the same fields as ``wording`` (and may use more, which
+        the code that builds the statement passes). It avoids statistics
+        terms, uses forecast words (``"we expect"``, ``"roughly"``) when the
+        rule is a design estimate, and says when a value comes from a model.
+    produces : `str`
+        What the rule's proposed action becomes in the observer's plan:
+        ``"package_row"`` (an exposure row of a suggested observation
+        package), ``"checklist_item"`` (an item of the assigned session's
+        checklist, such as taking flats or darks), or ``"none"`` (a setting
+        change or a note, which only the statement shows).
     purpose : `str`
         Why the rule exists, in one plain sentence.
     computed_by : `str` or `None`
@@ -84,6 +97,8 @@ class QualityRule(BaseModel):
     register_entry: str = Field(min_length=1, alias="registerEntry")
     confidence: Confidence
     wording: str
+    plain_wording: str = Field(default="", alias="plainWording")
+    produces: Literal["package_row", "checklist_item", "none"] = "none"
     purpose: str
     computed_by: str | None = Field(default=None, alias="computedBy")
 

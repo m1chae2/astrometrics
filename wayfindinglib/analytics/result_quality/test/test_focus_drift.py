@@ -23,6 +23,7 @@ from wayfindinglib.analytics.result_quality.focus_drift import (
     focus_drift_statement,
 )
 from wayfindinglib.models.quality.statements import ActionClass, StatementKind
+from wayfindinglib.test.plain_wording_support import assert_plain_message_is_sound
 
 _START = datetime(2026, 9, 25, 21, 0, tzinfo=UTC)
 
@@ -140,6 +141,7 @@ def test_no_autofocus_times_is_insufficient_data() -> None:
     assert "autofocus" in result.reason
     statement = focus_drift_statement(result)
     assert statement.kind == StatementKind.INSUFFICIENT_DATA
+    assert_plain_message_is_sound(statement)
 
 
 def test_too_few_frames_is_insufficient_data() -> None:
@@ -168,6 +170,8 @@ def test_statement_is_a_session_procedure_recommendation_with_evidence() -> None
     assert statement.proposed_action.refocus_every_degc == pytest.approx(result.refocus_interval_degc)
     assert len(statement.evidence) == 120
     assert "give or take" in statement.message
+    assert_plain_message_is_sound(statement)
+    assert "we expect to refocus roughly every" in statement.plain_message
 
 
 def test_interval_below_the_width_error_is_insufficient_data() -> None:
@@ -178,6 +182,7 @@ def test_interval_below_the_width_error_is_insufficient_data() -> None:
     statement = focus_drift_statement(result)
     assert statement.kind == StatementKind.INSUFFICIENT_DATA
     assert "error" in statement.reason
+    assert_plain_message_is_sound(statement)
 
 
 def test_bootstrap_draws_whole_segments_when_there_are_several() -> None:

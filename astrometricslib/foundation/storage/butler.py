@@ -365,6 +365,123 @@ class Butler(AbstractButler):
         finally:
             conn.close()
 
+    def select_where(
+        self,
+        dataset_type: str,
+        columns: list[str],
+        where_sql: str = "",
+        parameters: list[Any] | None = None,
+        order_by_sql: str = "",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Read one ordered page of rows that satisfy a SQL condition.
+
+        The database filters, orders and cuts the page, so only the rows
+        of the page are read into Python. The condition and the order are
+        SQL text written by library code (never by an end user); every
+        value that comes from a caller goes in ``parameters``.
+
+        Parameters
+        ----------
+        dataset_type : `str`
+            Registered dataset type to query.
+        columns : `list` [`str`]
+            Columns to select. Each must be ``"id"``, ``"data_json"`` or a
+            key in the dataset's `DatasetSpec.extra_column_types`.
+        where_sql : `str`, optional
+            Condition for the ``WHERE`` clause, with ``?`` for each value.
+            Every row matches when empty.
+        parameters : `list`, optional
+            The values for the ``?`` marks in ``where_sql``, in order.
+        order_by_sql : `str`, optional
+            Text for the ``ORDER BY`` clause. No defined order when empty.
+        limit : `int`, optional
+            Most rows to return. Every matching row when `None`.
+        offset : `int`, optional
+            Rows to skip before the page starts.
+
+        Returns
+        -------
+        rows : `list` [`dict`]
+            One dict per row, keyed by column name.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If `columns` is empty or names an unknown column.
+        """
+        spec = self._spec(dataset_type)
+        allowed_columns = {"id", "data_json", *spec.extra_column_types.keys()}
+        if not columns:
+            raise InvalidArgumentError("select_where requires at least one column")
+        unknown = [column for column in columns if column not in allowed_columns]
+        if unknown:
+            raise InvalidArgumentError(
+                f"select_where: unknown column(s) {unknown} for dataset type {dataset_type!r}; "
+                f"expected one of {sorted(allowed_columns)}"
+            )
+        db_path = self._db_path()
+        if not os.path.exists(db_path):
+            return []
+        query = f"SELECT {', '.join(columns)} FROM {spec.table_name}"
+        values = list(parameters or [])
+        if where_sql:
+            query += f" WHERE {where_sql}"
+        if order_by_sql:
+            query += f" ORDER BY {order_by_sql}"
+        if limit is not None or offset:
+            # SQLite needs a LIMIT before an OFFSET; -1 means no limit.
+            query += " LIMIT ? OFFSET ?"
+            values.extend([-1 if limit is None else int(limit), int(offset)])
+        conn = connect_db(db_path)
+        try:
+            cursor = conn.cursor()
+            self._ensure_table(cursor, spec)
+            cursor.execute(query, values)
+            return [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def count_where(
+        self,
+        dataset_type: str,
+        where_sql: str = "",
+        parameters: list[Any] | None = None,
+    ) -> int:
+        """Count the rows that satisfy a SQL condition, inside the database.
+
+        Parameters
+        ----------
+        dataset_type : `str`
+            Registered dataset type to query.
+        where_sql : `str`, optional
+            Condition for the ``WHERE`` clause, with ``?`` for each value.
+            Every row is counted when empty.
+        parameters : `list`, optional
+            The values for the ``?`` marks in ``where_sql``, in order.
+
+        Returns
+        -------
+        count : `int`
+            How many rows match.
+        """
+        spec = self._spec(dataset_type)
+        db_path = self._db_path()
+        if not os.path.exists(db_path):
+            return 0
+        query = f"SELECT COUNT(*) FROM {spec.table_name}"
+        if where_sql:
+            query += f" WHERE {where_sql}"
+        conn = connect_db(db_path)
+        try:
+            cursor = conn.cursor()
+            self._ensure_table(cursor, spec)
+            cursor.execute(query, list(parameters or []))
+            return int(cursor.fetchone()[0])
+        finally:
+            conn.close()
+
     def count_grouped(
         self,
         dataset_type: str,

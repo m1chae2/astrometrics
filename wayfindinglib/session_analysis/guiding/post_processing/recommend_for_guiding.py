@@ -93,6 +93,7 @@ def _insufficient_data(input_quality: GuidingInputQuality) -> TargetStatement:
             "enabled, then sync the logs."
         ),
         values={"samples": float(input_quality.samples_analyzed)},
+        plain_values={"minimum": MINIMUM_SAMPLES_PER_SESSION},
         limits=[
             design_limit(
                 float(MINIMUM_SAMPLES_PER_SESSION),
@@ -290,6 +291,7 @@ def _guiding_against_limit(
         "guiding_above_limit",
         message=f"Guiding error was {error:.2f} arcsec per axis, {verdict}",
         values={"rms_per_axis_arcsec": error, "expected_star_widening_fraction": widening},
+        plain_values={"error": error, "limit": limit},
         limits=_limits(envelope, input_quality, "guiding_rms_limit"),
         confidence=_confidence(input_quality, signal_problem),
     )
@@ -347,6 +349,7 @@ def _exposure_length_limited(
             "wobble_fraction": longest.wobble_fraction,
             "windows": float(longest.windows),
         },
+        plain_values={"clean_percent": longest.clean_fraction * 100.0},
         limits=[
             design_limit(
                 RELIABLE_CLEAN_FRACTION,

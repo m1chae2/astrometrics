@@ -219,6 +219,10 @@ export const useTargetListLogic = (
         targets,
         stars,
         isLoading: targetListQuery.isLoading,
+        /** True when the target list could not be loaded. */
+        isError: targetListQuery.isError,
+        /** Loads the target list again. */
+        refetchTargets: () => { void targetListQuery.refetch(); },
         filterPanel,
         filterText,
         setFilterText,

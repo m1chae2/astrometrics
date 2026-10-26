@@ -13,16 +13,16 @@ export interface TelescopeControlProps {
     onStartAlignment?: () => void;
     onStopAlignment?: () => void;
     isAligningActive?: boolean;
+
+    /** True when the app may not command the mount. Every button is then disabled. */
+    disabled?: boolean;
 }
 
 /**
  * TelescopeControl Component
  *
  * Provides an interface for tracking, parking, and alignment control.
- * Provides an interface for tracking, parking, and alignment control.
  * Displays buttons with active and pending states based on telescope telemetry.
- * REQ: OBS-4.1: The display SHALL provide controls to Park and Unpark the mount.
- * REQ: OBS-4.2: The display SHALL indicate current park status (Parked/Unparked).
  */
 export const TelescopeControl: React.FC<TelescopeControlProps> = ({
     isTracking,
@@ -33,6 +33,7 @@ export const TelescopeControl: React.FC<TelescopeControlProps> = ({
     onStartAlignment,
     onStopAlignment,
     isAligningActive = false,
+    disabled = false,
 }) => {
     // Local state to track which action is pending
     const [pendingAction, setPendingAction] = React.useState<string | null>(null);
@@ -48,6 +49,7 @@ export const TelescopeControl: React.FC<TelescopeControlProps> = ({
     }, [isTracking, isParked, isAligningActive, pendingAction]);
 
     const handleAction = (action: string, callback: () => void) => {
+        if (disabled) return;
         setPendingAction(action);
         callback();
     };
@@ -67,7 +69,8 @@ export const TelescopeControl: React.FC<TelescopeControlProps> = ({
                     onClick={() => handleAction('align_start', () => {
                         onStartAlignment?.();
                     })}
-                    disabled={isAligningActive}
+                    disabled={disabled || isAligningActive}
+                    aria-disabled={disabled || isAligningActive}
                     type="button"
                 >
                     Start Alignment
@@ -76,7 +79,8 @@ export const TelescopeControl: React.FC<TelescopeControlProps> = ({
                     id="btn-stop-alignment"
                     className={getBtnClass(!isAligningActive, 'align_stop', 'danger')}
                     onClick={() => handleAction('align_stop', () => onStopAlignment?.())}
-                    disabled={!isAligningActive}
+                    disabled={disabled || !isAligningActive}
+                    aria-disabled={disabled || !isAligningActive}
                     type="button"
                 >
                     Stop Alignment
@@ -87,6 +91,8 @@ export const TelescopeControl: React.FC<TelescopeControlProps> = ({
             <div className="telescope-control__row">
                 <button
                     id="btn-tracking-on"
+                    disabled={disabled}
+                    aria-disabled={disabled}
                     className={getBtnClass(isTracking, 'tracking_on', 'success')}
                     onClick={() => handleAction('tracking_on', () => onSetTracking(true))}
                     type="button"
@@ -95,6 +101,8 @@ export const TelescopeControl: React.FC<TelescopeControlProps> = ({
                 </button>
                 <button
                     id="btn-tracking-off"
+                    disabled={disabled}
+                    aria-disabled={disabled}
                     className={getBtnClass(!isTracking, 'tracking_off', 'success')}
                     onClick={() => handleAction('tracking_off', () => onSetTracking(false))}
                     type="button"
@@ -103,11 +111,12 @@ export const TelescopeControl: React.FC<TelescopeControlProps> = ({
                 </button>
             </div>
 
-            {/* REQ: OBS-4: Tracking & Parking Control */}
             {/* Park Control Row */}
             <div className="telescope-control__row">
                 <button
                     id="btn-telescope-park"
+                    disabled={disabled}
+                    aria-disabled={disabled}
                     className={getBtnClass(isParked, 'park', 'success')}
                     onClick={() => handleAction('park', onPark)}
                     type="button"
@@ -117,6 +126,8 @@ export const TelescopeControl: React.FC<TelescopeControlProps> = ({
                 </button>
                 <button
                     id="btn-telescope-unpark"
+                    disabled={disabled}
+                    aria-disabled={disabled}
                     className={getBtnClass(!isParked, 'unpark', 'success')}
                     onClick={() => handleAction('unpark', onUnpark)}
                     type="button"

@@ -32,6 +32,7 @@ from wayfindinglib.models.quality.statements import (
     StatementKind,
     TargetStatement,
 )
+from wayfindinglib.test.plain_wording_support import assert_plain_message_is_sound
 
 _NOW = datetime(2026, 10, 20, 22, 0, tzinfo=UTC)
 _SETTING = CaptureSetting(
@@ -93,9 +94,12 @@ def _judge(rows: list[QualityMeasurement], **keywords: Any) -> list[TargetStatem
     Returns
     -------
     statements : `list` [`TargetStatement`]
-        The statements.
+        The statements. Each one's plain message is checked on the way.
     """
-    return judge_results(rows, capture_settings={1: _SETTING}, **keywords)
+    statements = judge_results(rows, capture_settings={1: _SETTING}, **keywords)
+    for statement in statements:
+        assert_plain_message_is_sound(statement)
+    return statements
 
 
 def _of_rule(statements: list[TargetStatement], name: str) -> list[TargetStatement]:

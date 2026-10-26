@@ -11,6 +11,7 @@ spectroscopy limits must equal the pipeline's.
 from astrometricslib import PhotometryResult, SpectroscopyResult
 from wayfindinglib.analytics.result_quality import star_result_rules as sr
 from wayfindinglib.models.quality.statements import ActionClass, StatementKind
+from wayfindinglib.test.plain_wording_support import assert_plain_message_is_sound
 
 STAR = "star-1"
 
@@ -94,13 +95,15 @@ def _rules(statements: list) -> list[str]:
 
 
 def test_a_good_unambiguous_match_gives_the_number_behind_it() -> None:
-    """A passing match is a recommendation with its RMS, not a bare yes."""
+    """A passing match is a result statement with its RMS, not a bare yes."""
     statements = sr.judge_star_record(STAR, _spectrum(), None)
 
     assert _rules(statements) == [sr.SPECTRUM_USE_RESULT, sr.SPECTRAL_REACHABILITY]
     use = statements[0]
-    assert use.kind == StatementKind.RECOMMENDATION
+    assert use.kind == StatementKind.RESULT
+    assert use.action_class is None
     assert "0.05" in use.message and "G2V" in use.message
+    assert "yellow G-type star" in use.plain_message and "0.05" in use.plain_message
     assert use.evidence[0].star_result is not None
     assert use.evidence[0].star_result.run_id == "job-9"
     assert use.evidence[0].star_result.star_id == STAR
@@ -213,3 +216,47 @@ def test_every_rule_row_is_consistent_with_its_register_entry() -> None:
         assert rule.register_entry
         if rule.register_entry.startswith("WAY-D"):
             assert rule.confidence.value == "design_estimate"
+
+
+def test_every_star_statement_has_a_sound_plain_message() -> None:
+    """Each star statement has short, jargon-free plain text."""
+    statements = []
+    statements += sr.judge_star_record(STAR, _spectrum(), None)
+    statements += sr.judge_star_record(STAR, _spectrum(rms=0.4, second=0.5, next_class=0.6), None)
+    statements += sr.judge_star_record(STAR, _spectrum(rms=0.05, second=0.06, next_class=0.07), None)
+    statements += sr.judge_star_record(STAR, _spectrum(rms=None), None)
+    statements += sr.judge_star_record(STAR, None, _search())
+    statements += sr.judge_star_record(STAR, None, _search(cycles_observed=1.2, unconfirmed=True))
+    statements += sr.judge_star_record(STAR, None, _search(verdict="not_detected"))
+    statements += sr.judge_star_record(STAR, None, _search(verdict="insufficient_data"))
+    statements += sr.judge_star_record(STAR, None, None)
+    assert {statement.rule for statement in statements} >= {
+        sr.SPECTRAL_TYPE_POOR_MATCH,
+        sr.SPECTRUM_USE_RESULT,
+        sr.PERIOD_USE_RESULT,
+        sr.PERIOD_FEW_CYCLES,
+        sr.PERIOD_UNCONFIRMED,
+        sr.PERIOD_NOT_DETECTED,
+        sr.PERIOD_NOT_TESTABLE,
+        sr.NO_STAR_RESULT,
+        sr.SPECTRAL_TYPE_NOT_FOUND,
+        sr.SPECTRAL_REACHABILITY,
+    }
+    for statement in statements:
+        assert_plain_message_is_sound(statement)
+
+
+def test_a_spectral_type_is_named_as_a_hedged_color_and_class() -> None:
+    """A poor match says the star only looks like a type, in words."""
+    statements = sr.judge_star_record(STAR, _spectrum(rms=0.4, second=0.5, next_class=0.6), None)
+    warning = next(s for s in statements if s.rule == sr.SPECTRAL_TYPE_POOR_MATCH)
+    assert "looks like a yellow G-type star" in warning.plain_message
+    assert "Do not claim that type" in warning.plain_message
+
+
+def test_period_results_use_the_result_kind() -> None:
+    """A passing period search is a result with no action."""
+    statements = sr.judge_star_record(STAR, None, _search())
+    use = next(s for s in statements if s.rule == sr.PERIOD_USE_RESULT)
+    assert use.kind == StatementKind.RESULT
+    assert use.action_class is None and use.proposed_action is None

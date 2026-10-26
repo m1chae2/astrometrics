@@ -11,8 +11,10 @@ moment.
 `record_frame_pointing_errors` runs after `control.remote.sync_frames`
 brings new frames into the library. It records one alignment attempt per
 new frame that has both positions, so
-`control.history.query(kind="alignment")` shows them. Only new frames
-are read, so a frame is never recorded twice.
+`control.history.query(kind="alignment")` shows them. Each attempt names
+its frame (``source_frame``, the file name), so a frame that comes into
+the library again, for example after a re-download, or that has been
+solved again, updates its one record instead of adding another.
 """
 
 from __future__ import annotations
@@ -108,8 +110,9 @@ def pointing_error_from_header(header: Any, file_path: str) -> dict[str, Any] | 
         the commanded to the solved position as ``delta_ra_arcsec`` and
         ``delta_dec_arcsec`` (a distance on the sky, wrapped at 0h/24h),
         ``pointing_error_arcsec``, the solved ``ra`` and ``dec`` in
-        degrees, ``target_name`` and ``timestamp``. `None` when the header
-        lacks either position.
+        degrees, ``target_name``, ``timestamp`` and ``source_frame`` (the
+        frame's file name, which stays the same when the frame is moved
+        within the library). `None` when the header lacks either position.
     """
     solved_ra = header.get("CRVAL1")
     solved_dec = header.get("CRVAL2")
@@ -131,6 +134,7 @@ def pointing_error_from_header(header: Any, file_path: str) -> dict[str, Any] | 
         "dec": round(solved_dec, 5),
         "target_name": header.get("OBJECT"),
         "timestamp": _observation_time(header, file_path),
+        "source_frame": os.path.basename(file_path),
     }
 
 

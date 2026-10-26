@@ -15,9 +15,6 @@ import { IndiPropertyData } from '../common/types/indiTypes';
  * Manages the INDI device selection and property inspection interface.
  * Manages the INDI device selection and property inspection interface.
  * Consists of a device list and a dynamic property inspector.
- * REQ: OBS-9: INDI Device Inspection
- * REQ: OBS-9.1: The display SHALL allow viewing of all connected INDI devices.
- * REQ: OBS-9.2: The display SHALL allow viewing and editing of raw INDI properties.
  */
 export const IndiStatusPanel: React.FC = () => {
     const [devices, setDevices] = useState<string[]>([]);
@@ -69,7 +66,6 @@ export const IndiStatusPanel: React.FC = () => {
     return (
         <div className="panel-group indi-management-wrapper">
             {/* Device Selection Panel */}
-            {/* REQ: OBS-9.1: The display SHALL list all connected INDI devices. */}
             <SectionPanel title="Devices" className="flex-auto">
                 <IndiDevicePanel
                     devices={devices}
@@ -80,7 +76,6 @@ export const IndiStatusPanel: React.FC = () => {
             </SectionPanel>
 
             {/* Property Inspector Panel */}
-            {/* REQ: OBS-9.2: The display SHALL allow viewing and editing of raw INDI properties. */}
             <SectionPanel title="Device Properties" className="flex-fill">
                 {selectedDevice ? (
                     <IndiPropertyInspector

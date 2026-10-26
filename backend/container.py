@@ -63,6 +63,7 @@ class Container:
         self.alignment_service = None
         self.mosaic_service = None
         self.plan_service = None
+        self.advisory_service = None
         self.analysis_orchestrator = None
         self.job_repository = None
         self.job_service = None
@@ -234,13 +235,21 @@ class Container:
             astrometrics=self.astrometrics,
         )
 
+        from backend.services.observatory.suggestion_refresh_worker import SuggestionRefreshWorker
         from backend.services.processing.quality_measurement_service import QualityMeasurementService
 
+        self.suggestion_refresh_worker = SuggestionRefreshWorker(
+            wayfinder=self.wayfinder, socket_manager=self.socket_manager
+        )
         self.quality_measurement_service = QualityMeasurementService(
-            astrometrics=self.astrometrics, socket_manager=self.socket_manager
+            astrometrics=self.astrometrics,
+            socket_manager=self.socket_manager,
+            suggestion_trigger=self.suggestion_refresh_worker.request,
         )
         self.sync_service = SyncService(
-            observatory_api=self.wayfinder.control, measurement_announcer=self.quality_measurement_service
+            observatory_api=self.wayfinder.control,
+            measurement_announcer=self.quality_measurement_service,
+            suggestion_trigger=self.suggestion_refresh_worker.request,
         )
 
         from backend.services.observatory.imaging_service import ImagingService
@@ -265,7 +274,15 @@ class Container:
 
         from backend.services.observatory.plan_service import PlanService
 
-        self.plan_service = PlanService(wayfinder=self.wayfinder, socket_manager=self.socket_manager)
+        self.plan_service = PlanService(
+            wayfinder=self.wayfinder,
+            socket_manager=self.socket_manager,
+            refresh_worker=self.suggestion_refresh_worker,
+        )
+
+        from backend.services.observatory.advisory_service import AdvisoryService
+
+        self.advisory_service = AdvisoryService(wayfinder=self.wayfinder)
         self.target_imaging_executor = TargetImagingExecutor(
             wayfinder=self.wayfinder, plan_service=self.plan_service
         )

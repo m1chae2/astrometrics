@@ -13,6 +13,8 @@ import { useRemoteStatusContext } from '../common/context/RemoteStatusContext';
 import { useTargetImage } from './hooks/useTargetImage';
 import { GenericDisplayLayout } from '../common/components/GenericDisplayLayout';
 import { useReportModeReady } from '../common/utils/appBootReadiness';
+import { CitedFramesPanel } from './citedFrames/CitedFramesPanel';
+import { useOpenedFrame } from './citedFrames/useOpenedFrame';
 import './imageViewerDisplay.css';
 
 /**
@@ -67,6 +69,8 @@ export const ImageViewerDisplay: React.FC = () => {
     handleImageLoaded
   );
   useReportModeReady('Image Viewer', !loading);
+  // A frame opened from the Evidence list is shown in place of the target's image.
+  const { openedFrame, openFrame, closeFrame } = useOpenedFrame();
 
   const handleDeleteTarget = () => {
     // REQ: TGT-1.4: The display SHALL allow deletion of existing targets from the catalog.
@@ -80,9 +84,10 @@ export const ImageViewerDisplay: React.FC = () => {
 
   /** Handles immediate target selection from the list. */
   const handleTargetSelect = useCallback((id: string) => {
+    closeFrame();
     setSelectedTarget(id);
     setPendingTarget(id);
-  }, [setSelectedTarget, setPendingTarget]);
+  }, [setSelectedTarget, setPendingTarget, closeFrame]);
 
   const leftPanel = (
     <RadioListManager
@@ -108,10 +113,10 @@ export const ImageViewerDisplay: React.FC = () => {
   const centerPanel = (
     // REQ: TGT-2.1: The display SHALL present the most recently captured image for the selected target.
     <TargetViewerManager
-      imageUrl={imageUrl}
-      imageBlob={imageBlob}
-      loading={loading}
-      error={error}
+      imageUrl={openedFrame ? openedFrame.imageUrl : imageUrl}
+      imageBlob={openedFrame ? openedFrame.imageBlob : imageBlob}
+      loading={openedFrame ? openedFrame.loading : loading}
+      error={openedFrame ? openedFrame.error : error}
       selectedTarget={selectedTarget}
     />
   );
@@ -132,6 +137,7 @@ export const ImageViewerDisplay: React.FC = () => {
 
   return (
     <>
+      <CitedFramesPanel onOpenFrame={openFrame} onClosed={closeFrame} />
       <GenericDisplayLayout
         className="target-display-container"
         leftPanel={leftPanel}

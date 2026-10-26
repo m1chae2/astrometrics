@@ -61,6 +61,36 @@ class EquipmentService:
         """
         return self._observatory.equipment.set_active_camera(camera_name)
 
+    def get_active_telescope(self) -> Any:
+        """Read the active telescope with its safety limits.
+
+        Returns
+        -------
+        telescope : `Telescope` or `None`
+            The active telescope (its altitude and hour angle limits and
+            flip threshold are fields of it), or `None` when none is set up.
+        """
+        return self._observatory.equipment.status(include=["telescope"]).telescope
+
+    def set_active_telescope(self, telescope_id: str, limits: dict[str, float | bool] | None = None) -> bool:
+        """Choose the active telescope, and optionally save its safety limits.
+
+        Parameters
+        ----------
+        telescope_id : `str`
+            The telescope's id in the configuration.
+        limits : `dict`, optional
+            New safety limits, such as ``min_altitude_deg`` or
+            ``max_hour_angle_hours``. The library checks them and writes them
+            only to the telescope's existing config section.
+
+        Returns
+        -------
+        saved : `bool`
+            Whether the choice was saved.
+        """
+        return self._observatory.equipment.set_active_telescope(telescope_id, limits=limits)
+
     def enter_monitoring_mode(self, evidence_note: str = "") -> dict[str, dict[str, str]]:
         """Hand every capability back to the outside software, to watch only.
 

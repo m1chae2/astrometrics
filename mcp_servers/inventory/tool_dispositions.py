@@ -392,6 +392,12 @@ DECISIONS = {
         "no table.",
         tool_class="observe",
     ),
+    "quality_resolve_rows": ToolDecision(
+        "keep",
+        "Built 2026-10-25. Turns stored quality row ids into the frame or stack file each row is about, with "
+        "a plain reason when a picture cannot be found, and lists the ids no row has. Reads only.",
+        tool_class="observe",
+    ),
     "quality_set_aside_frames": ToolDecision(
         "keep",
         "Built 2026-10-24. Lists the frames lying in a target's _excluded folders with the kind and "
@@ -560,6 +566,8 @@ DECISIONS = {
             "planning_create_mosaic",
             "planning_create_plan",
             "planning_edit_queue",
+            "planning_edit_package",
+            "planning_refresh_suggestions",
             "planning_tick_checklist_item",
         ),
         ToolDecision("withhold", READ_ONLY_NOTE),

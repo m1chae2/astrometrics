@@ -10,6 +10,7 @@
 
 import React from 'react';
 import { Popover } from '../../common/components/Popover';
+import { PlanningTimeIndicator } from '../../common/components/PlanningTimeIndicator';
 
 /**
  * Props for PlanetariumToolbar.
@@ -238,6 +239,7 @@ export const PlanetariumToolbar: React.FC<Props> = ({
 
       {/* Group 4: Time & Readouts */}
       <div className="planetarium-toolbar__group">
+        <PlanningTimeIndicator />
         <button
           type="button"
           className="planetarium-toolbar__button"

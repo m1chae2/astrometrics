@@ -22,7 +22,7 @@ from astrometricslib import ErrorInfo, FilterType
 from astrometricslib.foundation.jobs.models import ProcessingJob, ProcessStatus
 from astrometricslib.models.applied_camera_profile import AppliedCameraProfile
 from astrometricslib.models.calibration_inventory import CalibrationEntry, CalibrationStats
-from astrometricslib.models.catalog_queries import OverlayStar, TargetStarCount
+from astrometricslib.models.catalog_queries import CalibrationQueryResult, OverlayStar, TargetStarCount
 from astrometricslib.models.measured_line_spread import MeasuredLineSpread
 from astrometricslib.models.moving_object import (
     AsteroidDetectionCandidate,
@@ -76,6 +76,7 @@ from astrometricslib.models.quality.quality_summary import (
     StackQualitySummary,
     TargetSessionContribution,
 )
+from astrometricslib.models.quality.row_frames import QualityRowFile, QualityRowResolution
 from astrometricslib.models.quality.spectroscopy_quality import (
     CatalogComparison,
     InputQualityAssessment,
@@ -136,15 +137,20 @@ from backend.services.infrastructure.system_status_service import (
     TelescopePulse,
 )
 from wayfindinglib.drivers.indi_interface import TelescopeStatus
+from wayfindinglib.models.control_status import SafetyStatus
+from wayfindinglib.models.equipment_and_site.camera_noise import CameraNoiseSetting
+from wayfindinglib.models.equipment_and_site.equipment import Telescope
 from wayfindinglib.models.equipment_and_site.performance_envelope import (
     PerformanceEnvelope,
     TrackingRiskMap,
 )
+from wayfindinglib.models.planning.framing import SkyCorner
 from wayfindinglib.models.planning.mosaic import MosaicPanel
-from wayfindinglib.models.planning.observation_package import ExposureRequest
+from wayfindinglib.models.planning.observation_package import ExposureRequest, ObservationPackage
 from wayfindinglib.models.planning.sequence_plan import SequenceItem, SequencePlan
 from wayfindinglib.models.planning.sequence_summary import SequenceSummary
 from wayfindinglib.models.planning.sky_source import SkySource
+from wayfindinglib.models.planning.suggestion_log import PackageChange, SuggestionLogEntry
 from wayfindinglib.models.planning.target_report import TargetDatasetReport
 from wayfindinglib.models.planning.tonight_ranking import TonightRanking
 from wayfindinglib.models.planning.visibility import (
@@ -157,6 +163,8 @@ from wayfindinglib.models.planning.visibility import (
     VisibilitySpan,
 )
 from wayfindinglib.models.quality.statements import NeedsAttention, TargetStatement
+from wayfindinglib.models.session.live_session_status import LiveSessionStatus
+from wayfindinglib.models.session.night_list import NightListEntry, TargetChange
 from wayfindinglib.models.session.night_quality import NightQuality
 from wayfindinglib.models.session.observation_session import (
     ChecklistItem,
@@ -166,6 +174,7 @@ from wayfindinglib.models.session.observation_session import (
     PlanChangeItem,
     WeatherSample,
 )
+from wayfindinglib.models.session.session_progress import ObservationSessionWithProgress
 from wayfindinglib.models.session.telemetry import (
     AlignmentAttempt,
     AlignmentSessionSummary,
@@ -545,6 +554,7 @@ def render_types() -> str:
         generate_interface(SequencePlan, "SequencePlan"),
         generate_interface(CalibrationEntry, "CalibrationEntry"),
         generate_interface(CalibrationStats, "CalibrationStats"),
+        generate_interface(SkyCorner, "SkyCorner"),
         generate_interface(MosaicPanel, "MosaicPanel"),
         generate_interface(TimeSpan, "TimeSpan"),
         generate_interface(MeridianStatus, "MeridianStatus"),
@@ -597,18 +607,27 @@ def render_types() -> str:
         generate_interface(StarResultReference, "StarResultReference"),
         generate_interface(MeasurementReference, "MeasurementReference"),
         generate_interface(QualityMeasurement, "QualityMeasurement"),
+        generate_interface(QualityRowFile, "QualityRowFile"),
+        generate_interface(QualityRowResolution, "QualityRowResolution"),
         generate_interface(MetricSpec, "MetricSpec"),
         generate_interface(MetricSummary, "MetricSummary"),
         generate_interface(SensorNoiseMeasurement, "SensorNoiseMeasurement"),
     ]
 
     # The night plan, its change record, the sequence summary and the target
-    # dataset report, with every model and enum they hold (#95).
+    # dataset report, with every model and enum they hold (#95), and the
+    # replies of the nights, live-status, safety-status and calibration-query
+    # reads (#96).
     written = {block.split("export ", 1)[1].split(" ", 2)[1].split("{")[0] for block in interfaces}
     interfaces.extend(
         generate_closure(
             [
                 ObservationSession,
+                ObservationSessionWithProgress,
+                ObservationPackage,
+                PackageChange,
+                SuggestionLogEntry,
+                Telescope,
                 PlanChange,
                 PlanChangeItem,
                 ChecklistItem,
@@ -620,6 +639,12 @@ def render_types() -> str:
                 TargetDatasetReport,
                 TonightRanking,
                 NightQuality,
+                NightListEntry,
+                TargetChange,
+                LiveSessionStatus,
+                SafetyStatus,
+                CameraNoiseSetting,
+                CalibrationQueryResult,
             ],
             written,
         )

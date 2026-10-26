@@ -1,0 +1,197 @@
+/*
+ * Styles of the progress part of the Execution Queue cards, the strip header and the checklist
+ * dialog. Only tokens from ui/common/styles/theme.css are used for colors, font sizes, spacing
+ * and radii.
+ */
+.card-progress {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-3) var(--space-2);
+}
+
+.card-progress__note {
+    color: var(--text-dim);
+    font-size: var(--small-font-size);
+}
+
+.imaging-card[aria-current='step'] {
+    border-color: var(--accent-blue);
+    border-left-width: var(--space-1);
+}
+
+.queue-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.queue-header__status {
+    color: var(--text-dim);
+    font-size: var(--small-font-size);
+}
+
+.queue-header__error {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    color: var(--danger-red);
+    font-size: var(--small-font-size);
+}
+
+.checklist-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--surface-overlay);
+}
+
+.checklist-dialog {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    min-width: 320px;
+    max-width: 480px;
+    max-height: 70vh;
+    padding: var(--space-4);
+    overflow-y: auto;
+    background-color: var(--grey-darkest);
+    border: 1px solid var(--grey-light);
+    border-radius: var(--radius-lg);
+    color: var(--text-primary);
+}
+
+.checklist-dialog__title {
+    margin: 0;
+    font-size: var(--compact-font-size);
+}
+
+.checklist-dialog__list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.checklist-dialog__item {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
+    font-size: var(--compact-font-size);
+}
+
+.checklist-dialog__ticked-at {
+    color: var(--text-dim);
+    font-size: var(--small-font-size);
+}
+
+.checklist-dialog__error {
+    color: var(--danger-red);
+    font-size: var(--compact-font-size);
+}
+
+.checklist-dialog__actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.checklist-dialog__item input:focus-visible,
+.checklist-dialog:focus-visible {
+    outline: var(--focus-outline);
+}
+
+/* Queue strip cards: wide enough that the target, time and four buttons share one line. The strip
+   scrolls sideways only when there are more cards than fit; it never scrolls vertically. These rules
+   load last and win over older card rules. */
+.execution-queue-strip .queue-list > .imaging-card {
+    flex: 0 0 300px;
+    width: 300px;
+    box-sizing: border-box;
+    max-height: none;
+    overflow: hidden;
+}
+
+.execution-queue-strip .imaging-card .card-header {
+    flex-wrap: nowrap;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-2);
+}
+
+.execution-queue-strip .imaging-card .card-title {
+    /* The name takes the free room and shortens with an ellipsis only for a very long name. */
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--compact-font-size);
+}
+
+.execution-queue-strip .imaging-card .card-meta {
+    flex: 0 0 auto;
+    gap: var(--space-1);
+    white-space: nowrap;
+}
+
+.execution-queue-strip .imaging-card .card-duration {
+    white-space: nowrap;
+    font-size: var(--small-font-size);
+}
+
+.execution-queue-strip .imaging-card .card-progress {
+    flex-shrink: 0;
+    padding: var(--space-1) var(--space-2) var(--space-2);
+}
+
+/* One line under the card title: the status chip at its own width, then the progress bar and its
+   frame count side by side. A note, when there is one, wraps onto its own line. */
+.execution-queue-strip .imaging-card .card-progress {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1) var(--space-2);
+}
+
+.execution-queue-strip .imaging-card .card-progress .status-chip {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+.execution-queue-strip .imaging-card .card-progress .progress-bar {
+    flex: 1 1 0;
+    min-width: 0;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.execution-queue-strip .imaging-card .card-progress .progress-bar__track {
+    flex: 1 1 0;
+    min-width: 0;
+}
+
+.execution-queue-strip .imaging-card .card-progress .progress-bar__text {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+.execution-queue-strip .imaging-card .card-progress__note {
+    flex: 1 0 100%;
+}
+
+/* Smaller card buttons, so the title line is no taller than the text. */
+.execution-queue-strip .imaging-card .card-edit-btn,
+.execution-queue-strip .imaging-card .card-remove-btn {
+    width: 22px;
+    height: 22px;
+    min-width: 22px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}

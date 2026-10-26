@@ -1,22 +1,11 @@
 import { useState } from 'react';
 import { parkTelescope, unparkTelescope, slewTelescope, abortTelescopeMotion, setTelescopeTracking, moveTelescope, setTelescopeSlewRate } from '../../common/services/telescope/motionService';
-import { moveFocuser, setFilterWheelPosition } from '../../common/services/telescope/deviceService';
 import { startGuiding, stopGuiding, captureGuideFrame } from '../../common/services/telescope/guidingService';
 import { startAlignment, stopAlignment } from '../../common/services/alignmentApi';
 import { createTarget } from '../../common/services/targetService';
 import { emitToast } from '../../common/utils/emitToast';
 
 export const useObservatoryControl = (forceReload: () => void) => {
-    // State for LimitSettings
-    const [limitsConfig, setLimitsConfig] = useState({
-        altitudeEnabled: false,
-        minimumAltitude: 0,
-        maximumAltitude: 90,
-        hourAngleEnabled: false,
-        maximumHourAngle: 2,
-        flipHourAngle: 1,
-    });
-
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
 
     // State for Guiding
@@ -59,14 +48,6 @@ export const useObservatoryControl = (forceReload: () => void) => {
         await setTelescopeSlewRate(rate);
     };
 
-    const handleMoveFocuser = async (steps: number) => {
-        await moveFocuser(steps);
-    };
-
-    const handleSelectFilter = async (filter: string) => {
-        await setFilterWheelPosition(filter);
-    };
-
     const handleSetTracking = async (enabled: boolean) => {
         emitToast(`${enabled ? 'Enabling' : 'Disabling'} Tracking`, 'info');
         await setTelescopeTracking(enabled);
@@ -80,25 +61,6 @@ export const useObservatoryControl = (forceReload: () => void) => {
     const handleUnpark = async () => {
         emitToast('Unparking Telescope', 'info');
         await unparkTelescope();
-    };
-
-    const handleApplyLimits = (
-        enabled: boolean,
-        minimumAltitude: number,
-        maximumAltitude: number,
-        hourAngleEnabled: boolean,
-        maximumHourAngle: number,
-        flipHourAngle: number
-    ) => {
-        setLimitsConfig({
-            altitudeEnabled: enabled,
-            minimumAltitude,
-            maximumAltitude,
-            hourAngleEnabled,
-            maximumHourAngle,
-            flipHourAngle,
-        });
-        emitToast(`Limits updated: Alt ${enabled ? 'ON' : 'OFF'} (${minimumAltitude}°-${maximumAltitude}°), HA ${hourAngleEnabled ? 'ON' : 'OFF'} (max ${maximumHourAngle}h), Flip HA: ${flipHourAngle}°`, 'success');
     };
 
     const handleAddTarget = () => {
@@ -140,7 +102,6 @@ export const useObservatoryControl = (forceReload: () => void) => {
     };
 
     return {
-        limitsConfig,
         isAddModalOpen,
         setIsAddModalOpen,
         guidingExposure,
@@ -154,12 +115,9 @@ export const useObservatoryControl = (forceReload: () => void) => {
             onStartMove: handleStartMove,
             onStopMove: handleStopMove,
             onSetSlewRate: handleSetSlewRate,
-            onMoveFocuser: handleMoveFocuser,
-            onSelectFilter: handleSelectFilter,
             onSetTracking: handleSetTracking,
             onPark: handlePark,
             onUnpark: handleUnpark,
-            onApplyLimits: handleApplyLimits,
             onAddTarget: handleAddTarget,
             onGuideStart: handleGuideStart,
             onGuideStop: handleGuideStop,

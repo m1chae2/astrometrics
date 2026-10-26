@@ -131,22 +131,39 @@ class EquipmentControl(ControlChild):
 
         return hardware_operations.disconnect(self._context)
 
-    def set_active_telescope(self, telescope_id: str) -> bool:
-        """Choose the active telescope and save the choice.
+    def set_active_telescope(self, telescope_id: str, limits: dict[str, float | bool] | None = None) -> bool:
+        """Choose the active telescope, and optionally save its safety limits.
+
+        The current limits are read back with `status` (the ``telescope``
+        section).
 
         Parameters
         ----------
         telescope_id : `str`
             The telescope's id in the configuration.
+        limits : `dict`, optional
+            New safety limits: any of ``altitude_limits_enabled``,
+            ``min_altitude_deg``, ``max_altitude_deg``,
+            ``hour_angle_limits_enabled``, ``max_hour_angle_hours`` and
+            ``flip_hour_angle_deg``. They are checked, then written only
+            to the config section that already holds this telescope's
+            settings (a section is never created). A per-telescope
+            minimum or maximum altitude overrides the global
+            ``[Observatory.Constraints]`` section.
 
         Returns
         -------
         success : `bool`
             Whether the choice was saved.
+
+        Notes
+        -----
+        Invalid `limits`, or a telescope with no config section to write
+        to, raise `ValueError` and save nothing.
         """
         from wayfindinglib.tasks.control_tasks.equipment_activation import set_active_telescope
 
-        return set_active_telescope(self._context.config, telescope_id)
+        return set_active_telescope(self._context.config, telescope_id, limits)
 
     def set_active_camera(self, camera_id: str) -> bool:
         """Choose the active main camera and save the choice.

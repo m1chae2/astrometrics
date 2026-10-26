@@ -15,5 +15,5 @@ Terms are defined in the [glossary](../Glossary.md). This document also defines 
 3. **Re-run the procedure.** Run the entry's **Procedure** on your data, as described in [Validate a result on your data](validate_on_your_data.md). If you cannot, mark the old result as made with an earlier version.
 4. **Update the entry.** Change **Settings it supports**, **Status**, **Our result** and **Verdict**. Record the code version, sample size, uncertainty and data split. A re-run adds a row to the **Runs** table.
 5. **Update the documents that cite the value.** Search for the constant's name. Update the implementation paper's table and any README that states the value. The architecture paper states no tuned values, so it does not change.
-6. **Regenerate the guides.** Run `.venv/bin/python build/documentation/generate_pipeline_review_docs.py` and, if gates changed, `.venv/bin/python build/documentation/audit_pipelines.py`.
+6. **Regenerate the guides.** Run `.venv/bin/python build/documentation/generate_pipeline_review_docs.py`.
 7. **Run the checks.** The command is in [Contributing](https://github.com/m1chae2/astrometrics/blob/main/CONTRIBUTING.md#documentation).

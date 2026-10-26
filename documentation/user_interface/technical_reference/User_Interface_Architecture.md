@@ -1,6 +1,6 @@
 # Desktop app architecture
 
-*Version 2.0 · 2026-10-15 · Status: current*
+*Version 2.1 · 2026-10-25 · Status: current*
 
 This page explains how the Astrometrics desktop app is built. It is for developers who want to change the app and for readers who want to know how its parts fit together. To use the app, read [Getting started](../../Getting_Started.md) and the [user manual](../user_guides/User_Manual.md).
 
@@ -88,13 +88,13 @@ Each view lives in its own folder.
 
 Other folders hold the title bar (`ui/titleBar/`), the status header with the settings panel (`ui/statusHeader/`) and the tray popover (`ui/trayPopover/`). The list of views and the setting that turns each on or off live in `ui/common/constants/displayFlags.ts`.
 
-`ui/common/` holds everything shared: components, hooks, services, queries, contexts and types. Its files must not import from any other top-level `ui/` folder. ESLint enforces this, so a shared file never depends on one view.
+`ui/common/` holds everything shared: components, hooks, services, queries, contexts and types. The shared components in `ui/common/components/` are described in [its README](https://github.com/m1chae2/astrometrics/blob/main/ui/common/components/README.md). Its files must not import from any other top-level `ui/` folder. ESLint enforces this, so a shared file never depends on one view.
 
 ## Talking to the backend
 
 The user interface and the shell reach the backend only through its public interface. `backend/public_interface.py` is the one list of it. It has two parts.
 
-**RPC methods.** `RPC_METHODS` lists every method that the `/api/rpc` route answers. RPC stands for remote procedure call: the app sends a small JSON message that names a method and its inputs, and gets the result back. Method names have the form `group:action`, such as `target:list` or `telescope:park`. The groups cover system and settings, the Python terminal and docs, guiding, the telescope, the observatory, ingestion, processing, analysis, targets, stars, the planetarium, imaging, images, calibration, mosaics, sessions and the sequencer.
+**RPC methods.** `RPC_METHODS` lists every method that the `/api/rpc` route answers. RPC stands for remote procedure call: the app sends a small JSON message that names a method and its inputs, and gets the result back. Method names have the form `group:action`, such as `target:list` or `telescope:park`. The groups cover system and settings, the Python terminal and docs, guiding, the telescope, the observatory, ingestion, processing, analysis, targets, stars, the planetarium, imaging, images, calibration, mosaics, planning (`plan:` and `advisory:`), sessions and the sequencer.
 
 **Routes.** `ROUTES` lists the few HTTP and WebSocket routes that RPC cannot carry.
 
@@ -133,9 +133,57 @@ The generated file `ui/common/types/backendTypes.ts` lists the same method names
 
 ### Live updates
 
-`socketClient` keeps the `/ws/events` connection open. The backend sends messages of type `UI_EVENT`, each with an action name and a payload. The telescope is polled every two seconds, and the backend sends the whole system state as a `system_state_update` action. Other actions tell the app to switch views (`navigate`), share the selected target between devices (`handoff`), show a log line (`log`), reload the page (`refresh`), or refresh star data (`catalog:changed`). When a frame measurement job stores new quality numbers, the backend sends `quality:measured` with `{targetId, framesMeasured, rowsWritten, observingNightIds}`, and the app marks the stored quality queries for that target or those nights as stale so open screens read them again (`ui/common/queries/qualityQueryKeys.ts`). `backend/public_interface.py` declares every event in `UI_EVENTS` with a one-line meaning, and `build/codegen/generate-types.sh` copies the list into `ui/common/types/backendTypes.ts`. A test fails if the backend sends an event that is not declared.
+`socketClient` keeps the `/ws/events` connection open. The backend sends messages of type `UI_EVENT`, each with an action name and a payload. The telescope is polled every two seconds, and the backend sends the whole system state as a `system_state_update` action. Other actions tell the app to switch views (`navigate`), share the selected target between devices (`handoff`), show a log line (`log`), reload the page (`refresh`), or refresh star data (`catalog:changed`). When a session changes, the backend sends `plan:changed`. When an observation package changes, or a suggestion refresh runs, it sends `packages:changed` with the package id, the target id and a kind (after a refresh, the kind is `refreshed` and the payload holds the counts). When a frame measurement job stores new quality numbers, the backend sends `quality:measured` with `{targetId, framesMeasured, rowsWritten, observingNightIds}`, and the app marks the stored quality queries for that target or those nights as stale so open screens read them again (`ui/common/queries/qualityQueryKeys.ts`). `backend/public_interface.py` declares every event in `UI_EVENTS` with a one-line meaning, and `build/codegen/generate-types.sh` copies the list into `ui/common/types/backendTypes.ts`. A test fails if the backend sends an event that is not declared.
 
 Both WebSockets need a session token. The shell makes a random token, passes it to the backend it starts, and hands it to windows over the `backend` bridge. If the shell did not start the backend, the app asks `/api/session-token` instead.
+
+## Planning displays
+
+The Observation Manager, the Observatory Manager, the Planetarium and the Astronomy Manager's star Quality card each show what the planning library returns. They do no ranking, grouping, classification, text writing, unit conversion or joining. Each panel names its source: an RPC method, an event or a library call. If a panel needs a new number, the library gains the call. The panel does not compute it.
+
+### Observation Manager
+
+The Observation Manager (`ui/observationManager/`) keeps a library of observation packages and shows one night's session. The page never scrolls. Panels scroll inside themselves. The display holds one selection: a package from the library or a card from the Execution Queue, never both.
+
+| Panel | Folder file | Data source |
+| --- | --- | --- |
+| Execution Queue | `ExecutionQueue.tsx`, `ImagingCard.tsx`, `ChecklistDialog.tsx` | `plan:current_session` (the session with the frames captured for each entry, the entry imaging now and its run state), `plan:tick_checklist_item`, and the `sequencer:` methods for the queue itself |
+| Observation Packages library | `PackageLibraryPanel.tsx`, `NewPackageSearch.tsx` | `plan:list_packages` (one call for each status: Suggested, Planned, Complete), `plan:create_package`, `plan:edit_package` (Dismiss, Undo, Reopen, Delete and every exposure or dither change), `plan:refresh_suggestions` |
+| Package editor | `PackageEditor.tsx`, `ImagePlanner.tsx`, `ImageList.tsx`, `DitherSettings.tsx` | The open package. The draft saves through `plan:edit_package` |
+| Visible Targets | `TargetListStatus.tsx` | The targets above the horizon. A click calls the same open-or-create path as New package |
+| Last Image | `LastImageViewer.tsx` | The newest captured frame |
+
+Four rules keep the display simple.
+
+- **The library owns the package states.** A package is Suggested, Planned or Complete. The library creates and deletes suggestions, marks a package Complete when enough judged frames arrive, and moves it back to Planned if frames are set aside. The display only sends the user's requests: Dismiss, Undo, Reopen, Delete and edits. Every edit names the revision the window last read, and the library refuses an edit made from an old revision. The display shows the refusal as text and does not retry.
+- **One session for each night.** `plan:current_session` returns tonight's session, or nothing before the first package is added. Adding a package to the session makes it Planned.
+- **Events refresh the display.** `ui/App.tsx` listens for `plan:changed` and `packages:changed` and marks the session and package queries stale. A refresh result also goes into a small cache entry that the library panel shows as a status line. The session read also repeats once a minute, because frames arrive with no event.
+- **No technical text.** A statement shows its plain message only. Confidence uses the register's words: Measured, Partly measured and Tentative.
+
+Sessions are set up by hand here and in Ekos for now. The sequencer (`sequencer:` methods and `backend/services/observatory/target_imaging_executor.py`) stays, because the app is meant to run sessions without Ekos later. Target-level quality is for the library and the AI companion. No display shows it.
+
+The mode names Observation Planner and Observation Execution still map to the Observation Manager (`ui/common/utils/normalizeAppMode.ts`), so links from older settings and agents still open a display.
+
+### Observatory Manager
+
+The Observatory Manager (`ui/observatoryManager/`) holds the equipment setup. Ekos captures for now, so the app never commands a device while Ekos controls it. The rule is in `wayfindinglib`, which refuses every command to a capability that it delegated to Ekos. The display adds two things:
+
+- `useCommandAvailability.ts` (in `ui/common/hooks/`, shared by every display that sends a command) reads the delegation state (`observatory:safety_status`). Until the library says the app may command a capability, the answer is no. The Observation Manager (Start Imaging Session, Test Image) and the Planetarium (Slew Telescope Here) turn off their command controls with the same answer.
+- `CommandGate.tsx` turns off the controls that send commands, shows the reason on hover, and adds a Why unavailable? info button (`WhyUnavailableButton`) to the panel title for keyboard and touch users.
+
+Safety Limits (`panels/LimitSettings.tsx`) reads the active telescope (`observatory:get_active_telescope`) and saves through `observatory:set_active_telescope` with a `limits` value. The library checks the limits and refuses to create a configuration section. Camera Profiles (`equipment/CameraProfilesPanel.tsx`) shows the camera noise that the library returns with each profile, and the Measure noise button calls `calibration:measure_sensor_noise`. The Calibration Library (`calibration/CalibrationLibraryPanel.tsx`) reads `calibration:query`.
+
+### Planetarium actions
+
+The Planetarium adds two actions that work on the chosen target's package (`planetariumDisplay/hooks/useTargetPackage.ts`): Add to observation package, and Send framing to package from the Framing panel (`components/FramingPanel.tsx`). Both call `plan:list_packages` first. A planned package wins, then a suggested one, and only then does `plan:create_package` make one. The framing numbers come from `mosaic:preview`. The library also supplies the panel corners and the words that say what the rotation means.
+
+### Shared current target and planning time
+
+Each window is a separate React tree. A shared current target and a shared planning time reach them through the backend's handoff state. `HandoffContext.tsx` reads it at start (`handoff:get_state`), follows the `handoff` event, and sends changes with `handoff:update_state`. `TargetContext` and `PlanningTimeContext` build on it. The Planetarium uses the planning time. Electron can open any display in a second window, placed on another monitor, and the target follows across windows.
+
+### Star Quality card
+
+The Stellar Analysis panel in the Astronomy Manager starts with a Quality card (`ui/common/components/quality/QualityChip.tsx`). It asks `advisory:result` for the statements about one star's result and draws them in the order returned. A statement has a kind word (Result, Warning, Recommendation, Limit or Not enough data), a confidence chip and the plain message. A statement with cited frames has an Evidence button, which opens the cited frames list in the Image Viewer. A row with a picture file has Open image, which draws the frame with `images:convert_fits`; a row without one shows the library's reason (`quality:resolve_rows`). A calibration statement has Show in calibration library. Both come from `useStatementActions`.
 
 ## State
 

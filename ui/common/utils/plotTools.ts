@@ -54,6 +54,8 @@ export type PlotlyStatic = {
   addTraces(node: HTMLElement, trace: PlotlyTrace | PlotlyTrace[]): Promise<unknown>;
   deleteTraces(node: HTMLElement, inds: number | number[]): Promise<unknown>;
   purge(node: HTMLElement): void;
+  /** Plotly's helpers; `resize` redraws a plot to its container's current size. */
+  Plots?: { resize(node: HTMLElement): unknown };
 };
 
 export type PlotNodeLike = {

@@ -1,0 +1,143 @@
+/*
+ * Styles of the package library panel and its target search. Only tokens from
+ * ui/common/styles/theme.css are used for colors, font sizes and radii.
+ */
+.package-library__actions {
+    display: flex;
+    gap: var(--space-1);
+}
+
+.package-library__body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    min-height: 0;
+}
+
+.package-library__list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    padding-top: var(--space-2);
+}
+
+.package-library__error {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    color: var(--danger-red);
+    font-size: var(--compact-font-size);
+}
+
+.package-row .card__header {
+    padding: var(--space-1) var(--space-2);
+    border-bottom: none;
+}
+
+.package-row .card__title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.package-search {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-2);
+    background-color: var(--surface-inset);
+    border: 1px solid var(--grey-light);
+    border-radius: var(--radius-md);
+}
+
+.package-search__bar {
+    display: flex;
+    gap: var(--space-1);
+}
+
+.package-search__results {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 160px;
+    overflow-y: auto;
+}
+
+.package-search__result {
+    width: 100%;
+    text-align: left;
+    padding: var(--space-1) var(--space-2);
+    background: none;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-size: var(--compact-font-size);
+    cursor: pointer;
+}
+
+.package-search__result:hover {
+    background-color: var(--surface-hover);
+}
+
+.package-search__result:focus-visible {
+    outline: var(--focus-outline);
+}
+
+.package-library__actions {
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+}
+
+/* The panel title stays on one line beside its two header buttons. */
+.package-library > .panel__header > span:first-child,
+.package-library__actions .btn {
+    white-space: nowrap;
+}
+
+.package-library__actions .btn {
+    padding-left: var(--space-1);
+    padding-right: var(--space-1);
+}
+
+/* Refresh suggestions sits at the top of the Suggested tab, above the cards it refreshes. */
+.package-library__tab-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: var(--space-2);
+}
+
+.package-library__status {
+    color: var(--text-dim);
+    font-size: var(--small-font-size);
+}
+
+.package-library__status:empty {
+    display: none;
+}
+
+.package-library__undo {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-2);
+    background-color: var(--surface-inset-strong);
+    border-radius: var(--radius-sm);
+    font-size: var(--compact-font-size);
+}
+
+.package-library__undo > span {
+    flex: 1;
+}
+
+.package-row-wrap {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+}
+
+.package-row-wrap > .package-row {
+    flex: 1;
+    min-width: 0;
+}

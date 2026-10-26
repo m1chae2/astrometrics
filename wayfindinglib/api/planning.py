@@ -4,7 +4,9 @@ Description: `Wayfinder.planning` is an `ObservationPlanning`. It answers
 where objects are in the sky (`get_visibility`), advises on targets and
 calibration frames (`get_advisory`), lays out mosaics
 (`calculate_panels`, `create_mosaic`), writes plans (`create_plan`,
-`edit_queue`, `tick_checklist_item`) and reads them back (`get_plan`). It
+`edit_queue`, `edit_package`, `tick_checklist_item`) and reads them back
+(`get_plan`). `refresh_suggestions` keeps the library's suggested
+observation packages up to date and marks finished packages complete. It
 also browses the library and online catalogs around a point in the sky and
 reports on the downloaded deep-star catalog.
 
@@ -18,6 +20,7 @@ Each method checks its arguments and hands the work to a function under
 directly.
 """
 
+import logging
 import threading
 import uuid
 from collections.abc import Sequence
@@ -30,6 +33,7 @@ from pydantic import ValidationError
 from astrometricslib import (
     AppConfiguration,
     Astrometrics,
+    AstrometricsError,
     FilterType,
     InvalidArgumentError,
     NotFoundError,
@@ -43,21 +47,34 @@ from astrometricslib import (
     reject_unused_arguments,
     resolve_target,
 )
-from wayfindinglib.drivers.butler import DiskButler
+from wayfindinglib.analytics.frame_counting import (
+    EquipmentNames,
+    TargetFrameReader,
+    count_request_frames,
+    missing_requests,
+)
+from wayfindinglib.drivers.butler import DiskButler, pick_session_for_night
 from wayfindinglib.models.equipment_and_site.calibration import CalibrationAdvisory
 from wayfindinglib.models.equipment_and_site.equipment import EquipmentConfiguration, Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
 from wayfindinglib.models.planning.deep_catalog import DeepCatalogEstimate, DeepCatalogStatus
 from wayfindinglib.models.planning.mosaic import MosaicPanel, MosaicPlan
 from wayfindinglib.models.planning.observation_package import (
+    DismissedRow,
     DitherConfig,
     ExposureRequest,
     FrameType,
     ObservationPackage,
+    PackageStatus,
 )
 from wayfindinglib.models.planning.planning_config import PlanningConfig
 from wayfindinglib.models.planning.sequence_plan import SequencePlan
 from wayfindinglib.models.planning.sky_source import SkySource
+from wayfindinglib.models.planning.suggestion_log import (
+    PackageChange,
+    SuggestionEvent,
+    SuggestionLogEntry,
+)
 from wayfindinglib.models.planning.target_report import TargetDatasetReport
 from wayfindinglib.models.planning.tonight_ranking import TonightRanking
 from wayfindinglib.models.planning.visibility import HorizonZone, VisibilityReport
@@ -75,6 +92,7 @@ from wayfindinglib.models.session.observation_session import (
     QueueRequest,
     SessionStatus,
 )
+from wayfindinglib.models.session.session_progress import ObservationSessionWithProgress
 
 # Declares this module's own public surface. Without it, sphinx-automodapi
 # documents every imported name too, which is what produced the
@@ -83,6 +101,8 @@ __all__ = [
     "ObservationPlanning",
 ]
 
+
+logger = logging.getLogger(__name__)
 
 MAXIMUM_SOURCES = 300
 """Most stars one `ObservationPlanning.find_sources` answer lists."""
@@ -135,8 +155,48 @@ PLAN_REQUIRED_ARGUMENTS = {
 }
 """The arguments each plan kind cannot do without."""
 
+PlanListKind = Literal["sessions", "packages", "suggestion_log"]
+"""What `ObservationPlanning.get_plan` lists."""
+
+GET_PLAN_ARGUMENTS = {
+    "sessions": ("session_id", "night_id", "include"),
+    "packages": ("status", "target", "include_dismissed", "pick"),
+    "suggestion_log": ("target",),
+}
+"""The arguments each `get_plan` kind uses."""
+
+GET_PLAN_SECTIONS = ("progress",)
+"""Optional sections `ObservationPlanning.get_plan` can add to a session."""
+
 DEEP_CATALOG_SECTIONS = ("estimate",)
 """Optional sections `ObservationPlanning.deep_catalog_status` can add."""
+
+
+def _utc_now() -> datetime:
+    """Give the current time. Tests replace this to control the clock.
+
+    Returns
+    -------
+    now : `datetime`
+        The current time, with a UTC offset.
+    """
+    return datetime.now(UTC)
+
+
+def _fold_target_id(name: str) -> str:
+    """Fold a target id so spelling differences do not matter.
+
+    Parameters
+    ----------
+    name : `str`
+        The target id.
+
+    Returns
+    -------
+    folded : `str`
+        The id with underscores as spaces, in lower case.
+    """
+    return name.replace("_", " ").strip().casefold()
 
 
 def _night_date(night_id: str) -> date:
@@ -380,6 +440,68 @@ class ObservationPlanning:
                 "An observing session needs a telescope and a camera, and none is active."
             )
         return site_profile, telescope, camera_id
+
+    def _equipment_names(self, session: ObservationSession) -> EquipmentNames:
+        """Give the names a session's camera and telescope go by in frames.
+
+        A frame record holds the camera and telescope by name, a session by
+        id. Both the id and the configured name are accepted. An id with no
+        configured equipment is matched by its id alone.
+
+        Parameters
+        ----------
+        session : `ObservationSession`
+            The session.
+
+        Returns
+        -------
+        names : `EquipmentNames`
+            The names to match frames against.
+        """
+        from wayfindinglib.data_access.equipment_catalog_reader import list_cameras, list_telescopes
+
+        camera_names = [session.camera_id]
+        telescope_names = [session.telescope_id]
+        try:
+            camera_names.extend(
+                camera.name for camera in list_cameras(self._config) if camera.id == session.camera_id
+            )
+            telescope_names.extend(
+                telescope.name
+                for telescope in list_telescopes(self._config)
+                if telescope.id == session.telescope_id
+            )
+        except AstrometricsError, OSError, KeyError, ValueError:
+            pass
+        return EquipmentNames.from_names(camera_names, telescope_names)
+
+    def _log_suggestion_event(
+        self, event: SuggestionEvent, package: ObservationPackage, cause: str = "", source_key: str = ""
+    ) -> None:
+        """Write one line of the suggestion log for a user or promotion action.
+
+        Parameters
+        ----------
+        event : `SuggestionEvent`
+            What happened.
+        package : `ObservationPackage`
+            The package it happened to.
+        cause : `str`, optional
+            Why.
+        source_key : `str`, optional
+            The row, when the event is about one row.
+        """
+        suggestion = package.suggestion
+        entry = SuggestionLogEntry(
+            time=_utc_now(),
+            event=event,
+            package_id=package.id,
+            target_id=package.target_id,
+            rule_name="" if suggestion is None else suggestion.rule_name,
+            source_key=source_key or ("" if suggestion is None else suggestion.source_key),
+            cause=cause,
+        )
+        self._butler.put(entry, "package_suggestion_event", {"id": entry.id})
 
     # -- Sky browsing (name lookup and catalogs) ----------------------------
 
@@ -1116,6 +1238,11 @@ class ObservationPlanning:
         InvalidArgumentError
             If `kind` is unknown, an argument the kind does not use is
             given, or a required argument is missing.
+        NotFoundError
+            If a package's target is neither in the library nor known to
+            the catalog. A catalog name that is not in the library yet is
+            added to the library, with its position, before the package
+            is recorded.
         """
         check_choice("kind", kind, tuple(PLAN_ARGUMENTS))
         arguments = {
@@ -1149,16 +1276,38 @@ class ObservationPlanning:
         if kind == "package":
             from wayfindinglib.tasks.planning_tasks.planning_operations import exposure_requests_from_items
 
-            if (exposure_requests is None) == (plan_items is None):
-                raise InvalidArgumentError(
-                    "kind='package' needs exactly one of exposure_requests and plan_items."
-                )
-            resolved = self._target(target)
+            if exposure_requests is not None and plan_items is not None:
+                raise InvalidArgumentError("kind='package' takes exposure_requests or plan_items, not both.")
+            try:
+                resolved = self._target(target)
+            except NotFoundError:
+                # Not in the library: make it from the catalog, with its
+                # position. `create` raises NotFoundError when the catalog
+                # does not know the name.
+                try:
+                    resolved = self._astrometrics.targets.create(target, from_catalog=True)
+                except NotFoundError as error:
+                    raise NotFoundError(
+                        f"No target '{target}' in the library or the catalog: {error}"
+                    ) from error
+            if plan_items is not None:
+                requests_for_package = exposure_requests_from_items(plan_items)
+            else:
+                # No exposures is allowed: "New package" and the
+                # Planetarium's "Add" start empty.
+                requests_for_package = list(exposure_requests or [])
+            # Frames count toward a row only from its last update, so a new
+            # row starts counting now.
+            moment = _utc_now()
+            requests_for_package = [
+                row if row.counted_from is not None else row.model_copy(update={"counted_from": moment})
+                for row in requests_for_package
+            ]
             package = ObservationPackage(
                 id=str(uuid.uuid4()),
                 name=resolved.id,
                 target_id=resolved.id,
-                exposure_requests=exposure_requests or exposure_requests_from_items(plan_items),
+                exposure_requests=requests_for_package,
                 dither_config=dither_config,
                 minimum_altitude_deg=minimum_altitude_deg,
                 priority=priority or 0,
@@ -1168,21 +1317,103 @@ class ObservationPlanning:
             self._butler.put(package, "observation_package", {"id": package.id})
             return package
         if kind == "empty_session":
+            night = _night_date(night_id)
+            existing = self._session_for_night(night)
+            if existing is not None:
+                return existing
             site_profile, telescope, camera_id = self._session_equipment(site_profile, telescope, camera_id)
             session = ObservationSession(
                 id=str(uuid.uuid4()),
-                night_date=_night_date(night_id),
+                night_date=night,
                 status=SessionStatus.PLANNED,
                 site_profile_id=site_profile.id,
                 telescope_id=telescope.id,
                 camera_id=camera_id,
             )
-        else:
-            session = self._schedule_session(
-                requests, site_profile, telescope, camera_id, _night_date(night_id)
+            # Check and insert in one transaction: a second caller gets
+            # this session back.
+            return self._butler.insert_session_for_night(session)
+        night = _night_date(night_id)
+        placed = self._schedule_session(requests, site_profile, telescope, camera_id, night)
+        existing = self._session_for_night(night)
+        if existing is None:
+            existing = self._butler.insert_session_for_night(placed)
+            if existing is placed:
+                return placed
+        return self._replace_placement(existing, placed)
+
+    def _session_for_night(self, night: date) -> ObservationSession | None:
+        """Find the one session that stands for a night.
+
+        Parameters
+        ----------
+        night : `datetime.date`
+            The local date the night begins.
+
+        Returns
+        -------
+        session : `ObservationSession` or `None`
+            The session with the most queue entries, then the newest; `None`
+            when the night has none.
+        """
+        return pick_session_for_night([
+            session for session in self._butler.get_all("observation_session") if session.night_date == night
+        ])
+
+    def _replace_placement(
+        self, existing: ObservationSession, placed: ObservationSession
+    ) -> ObservationSession:
+        """Put a new automatic placement into a night's existing session.
+
+        The session keeps its id, checklist, framing and history. Its queue,
+        the reasons packages were left out, and its site, telescope and
+        camera come from `placed`.
+
+        Parameters
+        ----------
+        existing : `ObservationSession`
+            The night's recorded session.
+        placed : `ObservationSession`
+            The new placement, not stored.
+
+        Returns
+        -------
+        session : `ObservationSession`
+            The updated, stored session.
+
+        Raises
+        ------
+        ConflictError
+            If an entry of the existing queue has started, so re-placing
+            would lose its record.
+        PlanRevisionConflictError
+            If the session changed while this was running.
+        """
+        from astrometricslib import ConflictError
+
+        started = [entry.id for entry in existing.queue if entry.status != QueueEntryStatus.PENDING]
+        if started:
+            raise ConflictError(
+                "This night's session has entries that already started, so it cannot be placed again.",
+                details={"started": started},
             )
-        self._butler.put(session, "observation_session", {"session_id": session.id})
-        return session
+        loaded_revision = existing.revision
+        existing.queue = placed.queue
+        existing.unplaced_package_diagnostics = placed.unplaced_package_diagnostics
+        existing.site_profile_id = placed.site_profile_id
+        existing.telescope_id = placed.telescope_id
+        existing.camera_id = placed.camera_id
+        existing.revision = loaded_revision + 1
+        if not self._butler.put_session_if_revision(existing, loaded_revision):
+            stored = self._butler.get("observation_session", {"session_id": existing.id})
+            raise PlanRevisionConflictError(
+                "The plan changed while it was being placed. Read it again and redo the edit.",
+                details={
+                    "current_revision": stored.revision if stored is not None else None,
+                    "expected_revision": loaded_revision,
+                },
+            )
+        return existing
 
     def _schedule_session(
         self,
@@ -1361,6 +1592,7 @@ class ObservationPlanning:
         changes: list[PlanChangeItem] = []
         allowed = None
         notes: list[str] = []
+        promoted_package_ids: list[str] = []
 
         def checked_requests(requests: list[ExposureRequest]) -> list[ExposureRequest]:
             """Merge duplicates and check the camera allows each request.
@@ -1413,13 +1645,11 @@ class ObservationPlanning:
                     "Each entry to add needs a package_id.", details={"error": str(error)}
                 ) from error
             package = self._package(request.package_id)
-            requests = checked_requests(
-                list(
-                    package.exposure_requests
-                    if request.exposure_requests is None
-                    else request.exposure_requests
-                )
-            )
+            if request.exposure_requests is None:
+                base_requests = self._requests_still_missing(package, session)
+            else:
+                base_requests = list(request.exposure_requests)
+            requests = checked_requests(base_requests)
             entry = QueuedObservationPackage(
                 id=str(uuid.uuid4()),
                 observation_package_id=package.id,
@@ -1435,6 +1665,9 @@ class ObservationPlanning:
             )
             session.queue.append(entry)
             changes.append(PlanChangeItem(kind="queue_added", detail=package.id, entry_id=entry.id))
+            if package.status == PackageStatus.SUGGESTED and package.id not in promoted_package_ids:
+                promoted_package_ids.append(package.id)
+                changes.append(PlanChangeItem(kind="package_promoted", detail=package.id))
         for entry_id, raw_requests in (set_exposures or {}).items():
             entry = next((candidate for candidate in session.queue if candidate.id == entry_id), None)
             if entry is None:
@@ -1476,7 +1709,450 @@ class ObservationPlanning:
         )
         if isinstance(result, PlanRevisionConflictError):
             raise PlanRevisionConflictError(str(result), details=result.details) from result
+        for package_id in promoted_package_ids:
+            self._promote_suggested_package(package_id)
         return result
+
+    def _requests_still_missing(
+        self, package: ObservationPackage, session: ObservationSession
+    ) -> list[ExposureRequest]:
+        """List the rows a package still has to ask for in a session.
+
+        A planned package that was partly captured in an earlier session asks
+        a later one only for the missing frames. A light row that is met is
+        dropped; a partly met row keeps the missing count. The counting is
+        the one that decides completeness, with the session's camera and
+        telescope. The package itself is not changed.
+
+        When nothing was captured, when every row is already met (the package
+        is about to turn complete, and the user is adding it on purpose), when
+        the package is not planned, or when the frames cannot be read, the
+        package's own rows are used.
+
+        Parameters
+        ----------
+        package : `ObservationPackage`
+            The package being added.
+        session : `ObservationSession`
+            The session it is added to. Its camera and telescope decide
+            which frames count.
+
+        Returns
+        -------
+        requests : `list` [`ExposureRequest`]
+            The rows for the new queue entry.
+        """
+        full = list(package.exposure_requests)
+        if package.status != PackageStatus.PLANNED or not any(
+            row.frame_type == FrameType.LIGHT for row in full
+        ):
+            return full
+        target_frames = TargetFrameReader(self._astrometrics).read(package.target_id)
+        if target_frames.note and not target_frames.frames:
+            return full
+        remaining = missing_requests(full, target_frames, self._equipment_names(session), package.created_at)
+        if not any(row.frame_type == FrameType.LIGHT for row in remaining):
+            return full
+        return remaining
+
+    def _promote_suggested_package(self, package_id: str) -> None:
+        """Make a suggested package planned, with a revision-checked write.
+
+        A package that is no longer suggested (someone else already changed
+        it) is left as it is. A write that loses a race is retried against
+        the newly read package.
+
+        Parameters
+        ----------
+        package_id : `str`
+            The package that was added to a queue.
+        """
+        for _attempt in range(3):
+            package = self._butler.get("observation_package", {"id": package_id})
+            if package is None or package.status != PackageStatus.SUGGESTED:
+                return
+            loaded_revision = package.revision
+            package.status = PackageStatus.PLANNED
+            # Frames count toward the rows only from now on.
+            moment = _utc_now()
+            package.exposure_requests = [
+                row.model_copy(update={"counted_from": moment}) for row in package.exposure_requests
+            ]
+            package.revision = loaded_revision + 1
+            if self._butler.put_package_if_revision(package, loaded_revision):
+                self._log_suggestion_event(SuggestionEvent.PROMOTED, package, "added to a session")
+                return
+
+    def edit_package(
+        self,
+        package_id: str,
+        *,
+        exposure_requests: list[ExposureRequest | dict[str, Any]] | None = None,
+        dither_config: DitherConfig | dict[str, Any] | None = None,
+        minimum_altitude_deg: float | None = None,
+        priority: int | None = None,
+        notes: str | None = None,
+        name: str | None = None,
+        framing: Framing | dict[str, Any] | None = None,
+        reopen: bool = False,
+        delete: bool = False,
+        dismiss: bool = False,
+        undismiss: bool = False,
+        source_key: str | None = None,
+        expected_revision: int | None = None,
+    ) -> ObservationPackage:
+        """Change, reopen, dismiss or delete one observation package.
+
+        Values are checked the same way `create_plan` with ``kind="package"``
+        checks them. A change counts as one write and adds one to the
+        package's revision. A value left out (`None`) is not changed, so
+        this call cannot clear the dither or the altitude limit.
+
+        A new or changed exposure row starts counting frames from now. A row
+        whose frame type, filter, length, gain, offset and binning are the
+        same as a row already in the package keeps its counting time (a
+        change of its count alone does not restart the count).
+
+        Reopening a complete package stores, for each light row, how many
+        matching frames are already captured, so those frames do not complete
+        the package again. When the frames cannot be counted (the package is
+        in no session, or the library cannot be read), each row starts
+        counting from now instead.
+
+        Dismissing a library suggestion hides it until its evidence changes
+        (the refresh then shows it again). With `source_key` only that row
+        is dismissed and taken out of the package. Undismissing reverses it.
+
+        Parameters
+        ----------
+        package_id : `str`
+            The package to change.
+        exposure_requests : `list` [`ExposureRequest`], optional
+            The new full list of exposures, replacing the old list. An empty
+            list clears them.
+        dither_config : `DitherConfig`, optional
+            The new dithering.
+        minimum_altitude_deg : `float`, optional
+            The new lowest altitude the package may be imaged at.
+        priority : `int`, optional
+            The new priority.
+        notes : `str`, optional
+            The new free text.
+        name : `str`, optional
+            The new package name.
+        framing : `Framing`, optional
+            Where the camera points: the field center, the camera rotation
+            and any mosaic panels. The Planetarium's "Send framing to
+            package" sets it.
+        reopen : `bool`, optional
+            Set a complete package back to planned.
+        delete : `bool`, optional
+            Remove the package. Cannot be combined with any change.
+        dismiss : `bool`, optional
+            Dismiss a suggested package, or one row of it with `source_key`.
+            Cannot be combined with any other change.
+        undismiss : `bool`, optional
+            Take a dismissal back. Cannot be combined with any other change.
+        source_key : `str`, optional
+            With `dismiss` or `undismiss`: the row to act on instead of the
+            whole package.
+        expected_revision : `int`, optional
+            The package revision the caller last read. Leave out to write
+            over whatever is stored.
+
+        Returns
+        -------
+        package : `ObservationPackage`
+            The stored package. For ``delete=True``, the package as it was
+            when removed.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If nothing to change is given, `delete`, `dismiss` or `undismiss`
+            is mixed with a change, `source_key` is given without `dismiss`
+            or `undismiss`, or a value is malformed.
+        NotFoundError
+            If no package has that id, or `source_key` names no row.
+        ConflictError
+            If `reopen` is asked for a package that is not complete, or a
+            dismissal is asked for a package that is not a library
+            suggestion.
+        PlanRevisionConflictError
+            If the stored revision is not `expected_revision`. Its details
+            hold the current revision.
+        """
+        from astrometricslib import ConflictError
+
+        changes = {
+            "exposure_requests": exposure_requests,
+            "dither_config": dither_config,
+            "minimum_altitude_deg": minimum_altitude_deg,
+            "priority": priority,
+            "notes": notes,
+            "name": name,
+            "framing": framing,
+        }
+        has_change = any(value is not None for value in changes.values()) or reopen
+        for flag, label in ((delete, "delete"), (dismiss, "dismiss"), (undismiss, "undismiss")):
+            if flag and (has_change or sum([delete, dismiss, undismiss]) > 1):
+                raise InvalidArgumentError(
+                    f"{label} cannot be combined with a change or with delete, dismiss or undismiss."
+                )
+        if source_key is not None and not (dismiss or undismiss):
+            raise InvalidArgumentError("source_key is used only with dismiss or undismiss.")
+        if not (delete or dismiss or undismiss or has_change):
+            raise InvalidArgumentError(
+                "Give exposure_requests, dither_config, minimum_altitude_deg, priority, notes, name, "
+                "framing, reopen, delete, dismiss or undismiss."
+            )
+        package = self._package(package_id)
+        loaded_revision = package.revision
+        wanted = loaded_revision if expected_revision is None else expected_revision
+        if wanted != loaded_revision:
+            raise PlanRevisionConflictError(
+                f"The package is at revision {loaded_revision}, not {wanted}. "
+                "Read it again and redo the edit.",
+                details={"current_revision": loaded_revision, "expected_revision": wanted},
+            )
+        if delete:
+            if not self._butler.delete_package(package_id):
+                raise NotFoundError(
+                    f"No observation package {package_id!r}.", details={"package_id": package_id}
+                )
+            return package
+        if reopen and package.status != PackageStatus.COMPLETE:
+            raise ConflictError(
+                "Only a complete package can be reopened.",
+                details={"package_id": package_id, "status": package.status.value},
+            )
+        if (dismiss or undismiss) and (
+            package.status != PackageStatus.SUGGESTED or package.suggestion is None
+        ):
+            raise ConflictError(
+                "Only a suggested package can be dismissed.",
+                details={"package_id": package_id, "status": package.status.value},
+            )
+        if dismiss or undismiss:
+            edited = self._dismissed(package, dismiss, source_key)
+        else:
+            edited = self._changed_package(package, changes, reopen)
+        edited.revision = loaded_revision + 1
+        if not self._butler.put_package_if_revision(edited, loaded_revision):
+            stored = self._butler.get("observation_package", {"id": package_id})
+            raise PlanRevisionConflictError(
+                "The package changed while this edit was being made. Read it again and redo the edit.",
+                details={
+                    "current_revision": stored.revision if stored is not None else None,
+                    "expected_revision": wanted,
+                },
+            )
+        if dismiss or undismiss:
+            self._log_suggestion_event(
+                SuggestionEvent.DISMISSED if dismiss else SuggestionEvent.UNDISMISSED,
+                edited,
+                "the user asked",
+                source_key or "",
+            )
+        elif reopen:
+            self._log_suggestion_event(SuggestionEvent.REOPENED, edited, "the user reopened it")
+        return edited
+
+    def _changed_package(
+        self, package: ObservationPackage, changes: dict[str, Any], reopen: bool
+    ) -> ObservationPackage:
+        """Apply the plain changes of `edit_package` to a copy of a package.
+
+        Parameters
+        ----------
+        package : `ObservationPackage`
+            The package as stored. It is not changed.
+        changes : `dict`
+            The values to set, `None` for one to leave alone.
+        reopen : `bool`
+            Whether to set a complete package back to planned.
+
+        Returns
+        -------
+        edited : `ObservationPackage`
+            The validated copy with the changes. Its revision is not yet
+            bumped.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If a value is not valid.
+        """
+        updates = {name_: value for name_, value in changes.items() if value is not None}
+        if reopen:
+            updates["status"] = PackageStatus.PLANNED
+            updates["completed_at"] = None
+        try:
+            edited = ObservationPackage.model_validate({**package.model_dump(), **updates})
+        except ValidationError as error:
+            raise InvalidArgumentError(
+                "A package value is not valid.", details={"error": str(error)}
+            ) from error
+        if changes.get("exposure_requests") is not None:
+            edited.exposure_requests = self._stamped_rows(package.exposure_requests, edited.exposure_requests)
+        if reopen:
+            edited.exposure_requests = self._rows_with_baseline(edited)
+        return edited
+
+    @staticmethod
+    def _stamped_rows(
+        old_rows: list[ExposureRequest], new_rows: list[ExposureRequest]
+    ) -> list[ExposureRequest]:
+        """Give each edited row its counting time and baseline.
+
+        A row that matches an old row in frame type, filter, length, gain,
+        offset and binning keeps the old row's counting time and baseline. A
+        new or changed row starts counting now. The source key, reason and
+        fingerprint of a row the library suggested are kept.
+
+        Parameters
+        ----------
+        old_rows : `list` [`ExposureRequest`]
+            The package's rows before the edit.
+        new_rows : `list` [`ExposureRequest`]
+            The rows after the edit.
+
+        Returns
+        -------
+        rows : `list` [`ExposureRequest`]
+            The new rows with their counting fields set.
+        """
+
+        def match_key(row: ExposureRequest) -> tuple:
+            """Name the fields that decide which frames a row counts.
+
+            Parameters
+            ----------
+            row : `ExposureRequest`
+                The row.
+
+            Returns
+            -------
+            key : `tuple`
+                Frame type, filter, length, gain, offset and binning.
+            """
+            return (row.frame_type, row.filter, row.exposure_sec, row.gain_setting, row.offset, row.binning)
+
+        old_by_key = {match_key(row): row for row in old_rows}
+        moment = _utc_now()
+        stamped = []
+        for row in new_rows:
+            old = old_by_key.get(match_key(row))
+            if old is None:
+                stamped.append(row.model_copy(update={"counted_from": moment, "baseline_captured": 0}))
+                continue
+            stamped.append(
+                row.model_copy(
+                    update={
+                        "counted_from": old.counted_from,
+                        "baseline_captured": old.baseline_captured,
+                        "source_key": row.source_key or old.source_key,
+                        "reason": row.reason or old.reason,
+                        "evidence_fingerprint": row.evidence_fingerprint or old.evidence_fingerprint,
+                    }
+                )
+            )
+        return stamped
+
+    def _rows_with_baseline(self, package: ObservationPackage) -> list[ExposureRequest]:
+        """Store how many frames are already captured for each light row.
+
+        Used when a complete package is reopened. The matching frames
+        already in the library become the row's baseline, so they do not
+        complete it again. When the frames cannot be counted, the row
+        counts from now instead.
+
+        Parameters
+        ----------
+        package : `ObservationPackage`
+            The package being reopened.
+
+        Returns
+        -------
+        rows : `list` [`ExposureRequest`]
+            The rows with their baselines (or new counting times) set.
+        """
+        from wayfindinglib.tasks.planning_tasks.suggestion_tasks import newest_session_with
+
+        moment = _utc_now()
+        session = newest_session_with(package.id, self._butler.get_all("observation_session"))
+        target_frames = TargetFrameReader(self._astrometrics).read(package.target_id) if session else None
+        rows = []
+        for row in package.exposure_requests:
+            if row.frame_type != FrameType.LIGHT:
+                rows.append(row)
+            elif (
+                session is None or target_frames is None or (target_frames.note and not target_frames.frames)
+            ):
+                rows.append(row.model_copy(update={"counted_from": moment, "baseline_captured": 0}))
+            else:
+                count = count_request_frames(
+                    row.model_copy(update={"baseline_captured": 0}),
+                    target_frames,
+                    self._equipment_names(session),
+                    package.created_at,
+                )
+                rows.append(row.model_copy(update={"baseline_captured": count.captured}))
+        return rows
+
+    @staticmethod
+    def _dismissed(package: ObservationPackage, dismiss: bool, source_key: str | None) -> ObservationPackage:
+        """Dismiss or undismiss a suggested package, or one of its rows.
+
+        Parameters
+        ----------
+        package : `ObservationPackage`
+            The package as stored. It is not changed.
+        dismiss : `bool`
+            `True` to dismiss, `False` to take a dismissal back.
+        source_key : `str` or `None`
+            The row to act on, or `None` for the whole package.
+
+        Returns
+        -------
+        edited : `ObservationPackage`
+            A copy with the dismissal changed. Its revision is not yet bumped.
+
+        Raises
+        ------
+        NotFoundError
+            If `source_key` names no row (or no dismissed row).
+        """
+        edited = package.model_copy(deep=True)
+        suggestion = edited.suggestion
+        if suggestion is None:
+            return edited
+        if source_key is None:
+            if dismiss and not suggestion.evidence_fingerprint:
+                suggestion.evidence_fingerprint = package.id[:16]
+            suggestion.dismissed_fingerprint = suggestion.evidence_fingerprint if dismiss else ""
+            return edited
+        if dismiss:
+            row = next((row for row in edited.exposure_requests if row.source_key == source_key), None)
+            if row is None:
+                raise NotFoundError(
+                    f"No row {source_key!r} in the package.",
+                    details={"package_id": package.id, "source_key": source_key},
+                )
+            edited.exposure_requests = [item for item in edited.exposure_requests if item is not row]
+            suggestion.dismissed_rows.append(
+                DismissedRow(source_key=source_key, fingerprint=row.evidence_fingerprint, request=row)
+            )
+            return edited
+        held = next((item for item in suggestion.dismissed_rows if item.source_key == source_key), None)
+        if held is None:
+            raise NotFoundError(
+                f"No dismissed row {source_key!r} in the package.",
+                details={"package_id": package.id, "source_key": source_key},
+            )
+        suggestion.dismissed_rows = [item for item in suggestion.dismissed_rows if item is not held]
+        edited.exposure_requests.append(held.request)
+        return edited
 
     def tick_checklist_item(
         self,
@@ -1539,33 +2215,533 @@ class ObservationPlanning:
             raise PlanRevisionConflictError(str(result), details=result.details) from result
         return result
 
-    def get_plan(self, session_id: str | None = None) -> ObservationSession | list[ObservationSessionSummary]:
-        """Read one recorded observing session, or list them all.
+    def get_plan(
+        self,
+        session_id: str | None = None,
+        *,
+        kind: PlanListKind = "sessions",
+        night_id: str | None = None,
+        status: PackageStatus | str | None = None,
+        target: str | Target | None = None,
+        include: list[str] | None = None,
+        include_dismissed: bool = False,
+        pick: Literal["all", "one"] = "all",
+    ) -> (
+        ObservationSession
+        | list[ObservationSessionSummary]
+        | list[ObservationPackage]
+        | list[SuggestionLogEntry]
+        | ObservationPackage
+        | None
+    ):
+        """Read recorded sessions, observation packages or the suggestion log.
 
         Parameters
         ----------
         session_id : `str`, optional
-            The session to read. When omitted, every session is listed.
+            ``kind="sessions"`` only. The session to read.
+        kind : `str`, optional
+            ``"sessions"`` (default): one session when `session_id` or
+            `night_id` is given, otherwise one line per session.
+            ``"packages"``: the package library, newest first, narrowed by
+            `status` and `target`. ``"suggestion_log"``: the suggestion
+            lifecycle log (created, updated, deleted with the cause,
+            dismissed, completed), newest first, narrowed by `target`.
+        night_id : `str`, optional
+            ``kind="sessions"`` only. The observing night, such as
+            ``"2026-09-24"``. Gives that night's session, or `None` when the
+            night has none. A night with several old sessions gives the one
+            with the most queue entries, then the newest.
+        status : `PackageStatus` or `str`, optional
+            ``kind="packages"`` only. Keep packages with this status.
+        target : `str` or `Target`, optional
+            ``kind="packages"`` or ``"suggestion_log"``. Keep only this
+            target.
+        include : `list` [`str`], optional
+            ``kind="sessions"`` only. ``"progress"`` counts the frames that
+            arrived. One session then comes back as an
+            `ObservationSessionWithProgress` (its `progress` holds, for each
+            entry, the frames requested and captured, flagged and not
+            judged, the entry being imaged now and a typed run state,
+            including "not run" for a night that passed with nothing
+            captured). A list of sessions then has each line's `run_state`.
+        include_dismissed : `bool`, optional
+            ``kind="packages"`` only. Also list suggestions the user
+            dismissed. They are left out by default.
+        pick : `str`, optional
+            ``kind="packages"`` only. ``"all"`` (default) lists the packages.
+            ``"one"`` needs `target` and gives that target's package: the
+            newest planned one, else the newest suggested one that is not
+            dismissed, else `None`. Complete packages are never picked. The
+            target is matched like the list does (ignoring case, with ``_``
+            read as a space).
 
         Returns
         -------
-        plan : `ObservationSession` or `list` [`ObservationSessionSummary`]
-            The whole session, or one line per session, newest night
-            first.
+        plan : `ObservationSession`, `list` or `None`
+            A whole session (or `None` for a night with none), one line per
+            session newest night first, the packages newest first, or the
+            log lines newest first.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If `kind`, `status` or `include` is unknown, an argument the kind
+            does not use is given, or both `session_id` and `night_id` are
+            given.
         """
+        check_choice("kind", kind, tuple(GET_PLAN_ARGUMENTS))
+        reject_unused_arguments(
+            kind,
+            GET_PLAN_ARGUMENTS,
+            {
+                "session_id": session_id is not None,
+                "night_id": night_id is not None,
+                "status": status is not None,
+                "target": target is not None,
+                "include": include is not None,
+                "include_dismissed": include_dismissed,
+                "pick": pick != "all",
+            },
+        )
+        sections = check_include(include, GET_PLAN_SECTIONS)
+        check_choice("pick", pick, ("all", "one"))
+        if kind == "packages" and pick == "one":
+            if target is None:
+                raise InvalidArgumentError("pick='one' needs a target.")
+            return self._package_for_target(target)
+        if kind == "packages":
+            return self._list_packages(status, target, include_dismissed)
+        if kind == "suggestion_log":
+            return self._suggestion_log(target)
+        if session_id is not None and night_id is not None:
+            raise InvalidArgumentError("Give session_id or night_id, not both.")
+        session = None
         if session_id is not None:
-            return self._session(session_id)
-        summaries = [
-            ObservationSessionSummary(
-                id=session.id,
-                status=session.status,
-                night_date=session.night_date,
-                entry_count=len(session.queue),
+            session = self._session(session_id)
+        elif night_id is not None:
+            session = self._session_for_night(_night_date(night_id))
+        if session_id is not None or night_id is not None:
+            if session is None:
+                return None
+            session = self._with_checklist_labels(session)
+            if "progress" not in sections:
+                return session
+            return self._with_progress(session)
+        reader = TargetFrameReader(self._astrometrics) if "progress" in sections else None
+        summaries = []
+        for recorded in self._butler.get_all("observation_session"):
+            run_state = None
+            if reader is not None:
+                from wayfindinglib.analytics.session_progress import run_state_of_session
+
+                run_state = run_state_of_session(
+                    recorded, reader, self._equipment_names(recorded), _utc_now()
+                )
+            summaries.append(
+                ObservationSessionSummary(
+                    id=recorded.id,
+                    status=recorded.status,
+                    night_date=recorded.night_date,
+                    entry_count=len(recorded.queue),
+                    run_state=run_state,
+                )
             )
-            for session in self._butler.get_all("observation_session")
-        ]
         summaries.sort(key=lambda summary: summary.night_date, reverse=True)
         return summaries
+
+    def _with_checklist_labels(self, session: ObservationSession) -> ObservationSession:
+        """Give each checklist item a plain label if it has none.
+
+        Parameters
+        ----------
+        session : `ObservationSession`
+            The stored session. It is not changed.
+
+        Returns
+        -------
+        session : `ObservationSession`
+            The session, with an empty item label replaced by the purpose of
+            the item's rule (the rule's one plain sentence), or by the rule
+            name when no rule has that name. The session itself when no item
+            needs a label.
+        """
+        if all(item.label for item in session.checklist):
+            return session
+        from wayfindinglib.analytics.result_quality.all_rules import ALL_RULES
+
+        purposes = {rule.name: rule.purpose for rule in ALL_RULES}
+        labelled = session.model_copy(deep=True)
+        for item in labelled.checklist:
+            if not item.label:
+                item.label = purposes.get(item.rule, item.rule)
+        return labelled
+
+    def _with_progress(self, session: ObservationSession) -> ObservationSessionWithProgress:
+        """Add the counted progress to a session read.
+
+        Parameters
+        ----------
+        session : `ObservationSession`
+            The stored session.
+
+        Returns
+        -------
+        session : `ObservationSessionWithProgress`
+            The session with its `progress` set.
+        """
+        from wayfindinglib.analytics.session_progress import build_session_progress
+
+        progress = build_session_progress(
+            session, TargetFrameReader(self._astrometrics), self._equipment_names(session), _utc_now()
+        )
+        return ObservationSessionWithProgress.model_validate({**session.model_dump(), "progress": progress})
+
+    def _suggestion_log(self, target: str | Target | None) -> list[SuggestionLogEntry]:
+        """List the suggestion lifecycle log, newest first.
+
+        Parameters
+        ----------
+        target : `str` or `Target` or `None`
+            Keep only this target's lines, or every line when `None`.
+
+        Returns
+        -------
+        entries : `list` [`SuggestionLogEntry`]
+            The log lines, newest first.
+        """
+        wanted = (
+            None if target is None else _fold_target_id(target.id if isinstance(target, Target) else target)
+        )
+        entries = [
+            entry
+            for entry in self._butler.get_all("package_suggestion_event")
+            if wanted is None or _fold_target_id(entry.target_id) == wanted
+        ]
+        entries.sort(key=lambda entry: entry.time, reverse=True)
+        return entries
+
+    def _package_for_target(self, target: str | Target) -> ObservationPackage | None:
+        """Pick the one package that stands for a target.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target, matched like `_list_packages` matches it.
+
+        Returns
+        -------
+        package : `ObservationPackage` or `None`
+            The newest planned package, else the newest suggested package
+            that is not dismissed, else `None`.
+        """
+        for status in (PackageStatus.PLANNED, PackageStatus.SUGGESTED):
+            found = self._list_packages(status, target, False)
+            if found:
+                return found[0]
+        return None
+
+    def _list_packages(
+        self, status: PackageStatus | str | None, target: str | Target | None, include_dismissed: bool = False
+    ) -> list[ObservationPackage]:
+        """List the recorded packages, newest first.
+
+        Parameters
+        ----------
+        status : `PackageStatus` or `str` or `None`
+            Keep only this status, or every status when `None`.
+        target : `str` or `Target` or `None`
+            Keep only this target's packages, or every target when `None`.
+        include_dismissed : `bool`, optional
+            Also keep suggestions the user dismissed.
+
+        Returns
+        -------
+        packages : `list` [`ObservationPackage`]
+            The matching packages, newest first.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If `status` is not a package status.
+        """
+        wanted_status = None
+        if status is not None:
+            try:
+                wanted_status = PackageStatus(status)
+            except ValueError as error:
+                raise InvalidArgumentError(
+                    f"status must be one of: {', '.join(item.value for item in PackageStatus)}.",
+                    details={"status": str(status)},
+                ) from error
+
+        wanted_target = None
+        if target is not None:
+            wanted_target = _fold_target_id(target.id if isinstance(target, Target) else target)
+        packages = [
+            package
+            for package in self._butler.get_all("observation_package")
+            if (wanted_status is None or package.status == wanted_status)
+            and (wanted_target is None or _fold_target_id(package.target_id) == wanted_target)
+            and (include_dismissed or not package.is_dismissed)
+        ]
+        packages.sort(key=lambda package: package.created_at, reverse=True)
+        return packages
+
+    # -- Suggestions -------------------------------------------------------
+
+    @background_job("planning", grace_period_seconds=20.0)
+    def refresh_suggestions(
+        self, target_ids: list[str] | None = None, register_job: bool = True
+    ) -> PackageChange:
+        """Update suggested packages, the checklist and finished packages.
+
+        One run does four things:
+
+        * **Rule suggestions.** A target's quality report may ask for more
+          frames. While the target's noise is above the library's one
+          default noise goal, that becomes one suggested package of
+          exposure rows for the target. Each row keeps its own reason and
+          source key (rule, target, capture setting). The package is
+          deleted only when the rules say frames are no longer needed (the
+          noise is at or below the goal, or a stop rule spoke). A target
+          whose noise or report is missing is left as it is: missing data
+          never deletes a suggestion.
+        * **Calibration suggestions.** A rule whose action is a checklist
+          item (such as taking flats) adds it to tonight's session
+          checklist, merged with the items already there. Nothing is added
+          when tonight has no session.
+        * **Ranking suggestions.** The top 3 targets of each use in
+          tonight's ranking become suggested packages with no rows, tied to
+          tonight, labeled a design estimate. They are deleted when the
+          night ends or the target falls out of the top. The ranking is read
+          only when `target_ids` is `None`.
+        * **Completion.** A planned package whose light rows are all
+          captured and judged becomes complete. A complete package that is
+          no longer met (frames were set aside) becomes planned again.
+
+        A source key held by a planned or complete package, or by a queue
+        entry of tonight or later, is not suggested again. A dismissed
+        suggestion stays hidden until its evidence changes. Every write
+        checks the revision it read, so an edit made at the same time is
+        never overwritten (a lost race is read again, up to three times).
+        Every change is written to the suggestion log (see `get_plan` with
+        ``kind="suggestion_log"``).
+
+        Parameters
+        ----------
+        target_ids : `list` [`str`], optional
+            Refresh only these targets (after new frames were measured).
+            `None` refreshes every library target and the ranking.
+        register_job : `bool`, optional
+            Record the run as a job in the job history, with its log.
+            Defaults to `True`.
+
+        Returns
+        -------
+        change : `PackageChange`
+            The ids of the packages added, updated, deleted, completed and
+            reverted, the checklist items added, and notes on anything
+            skipped.
+        """
+        with registered_job(
+            enabled=register_job and get_current_job() is None,
+            job_type="planning",
+            target_id="package_suggestions",
+        ):
+            return self._refresh_suggestions(target_ids)
+
+    def _refresh_suggestions(self, target_ids: list[str] | None) -> PackageChange:
+        """Run the suggestion refresh. See `refresh_suggestions`.
+
+        Parameters
+        ----------
+        target_ids : `list` [`str`] or `None`
+            The targets to refresh, or `None` for all.
+
+        Returns
+        -------
+        change : `PackageChange`
+            What changed.
+        """
+        import sqlite3
+
+        from astrometricslib import observing_night_id
+        from wayfindinglib.analytics.package_suggestions import (
+            DEFAULT_NOISE_GOAL,
+            RANKING_SUGGESTIONS_PER_USE,
+            read_target_noise,
+        )
+        from wayfindinglib.analytics.result_quality.all_rules import ALL_RULES
+        from wayfindinglib.tasks.planning_tasks import suggestion_tasks as tasks
+
+        now = _utc_now()
+        change = PackageChange(as_of=now)
+        night_id = observing_night_id(now.timestamp())
+        tonight_session = self._session_for_night(date.fromisoformat(night_id))
+        rules = {rule.name: rule for rule in ALL_RULES}
+        try:
+            from wayfindinglib.analytics.result_quality.exposure_request import (
+                exposure_request_from_statement,
+            )
+        except ImportError:
+            exposure_request_from_statement = None
+            change.notes.append(
+                "Rule suggestions are not available: no function turns a statement into a row."
+            )
+        targets = (
+            list(dict.fromkeys(target_ids))
+            if target_ids is not None
+            else [target.id for target in self._astrometrics.targets.list()]
+        )
+        reader = TargetFrameReader(self._astrometrics)
+        noise_by_target: dict[str, Any] = {}
+
+        def noise_for(target_id: str) -> Any:
+            """Read a target's noise once per refresh.
+
+            Parameters
+            ----------
+            target_id : `str`
+                The target.
+
+            Returns
+            -------
+            noise : `TargetNoise` or `None`
+                The target's noise, or `None` when unknown.
+            """
+            if target_id not in noise_by_target:
+                noise_by_target[target_id] = read_target_noise(self._astrometrics, target_id)
+            return noise_by_target[target_id]
+
+        def held_keys() -> set[str]:
+            """Collect the source keys no suggestion may take now.
+
+            Returns
+            -------
+            keys : `set` [`str`]
+                The held keys, read fresh.
+            """
+            return tasks.held_source_keys(
+                self._butler.get_all("observation_package"),
+                self._butler.get_all("observation_session"),
+                night_id,
+                lambda target_id: getattr(noise_for(target_id), "measured_at", None),
+            )
+
+        def retrying(work: Any, label: str) -> None:
+            """Run one write step, reading again when it loses a race.
+
+            Parameters
+            ----------
+            work : `Callable`
+                Takes a `PackageWriter` and the freshly read packages.
+            label : `str`
+                What the step is, for the note when it gives up.
+            """
+            for _attempt in range(3):
+                writer = tasks.PackageWriter(self._butler, now, change)
+                try:
+                    work(writer, self._butler.get_all("observation_package"))
+                    return
+                except PlanRevisionConflictError:
+                    continue
+            change.notes.append(f"{label}: a package kept changing, so it was left for the next refresh.")
+
+        checklist_statements: list[TargetStatement] = []
+        for target_id in targets:
+            if exposure_request_from_statement is None:
+                break
+            try:
+                report = self.get_advisory(kind="quality", target=target_id)
+            except (AstrometricsError, OSError, sqlite3.Error, ValueError) as error:
+                logger.warning("Suggestions: no report for %s: %s", target_id, error)
+                change.notes.append(
+                    f"{target_id}: no report ({error}). Its suggestions were left as they are."
+                )
+                continue
+            reading = tasks.read_rule_statements(
+                target_id, report.statements, rules, exposure_request_from_statement
+            )
+            checklist_statements.extend(reading.checklist)
+            noise = noise_for(target_id)
+            retrying(
+                lambda writer, packages, target_id=target_id, reading=reading, noise=noise: (
+                    tasks.refresh_rule_package(
+                        writer, packages, target_id, reading, noise, DEFAULT_NOISE_GOAL, held_keys()
+                    )
+                ),
+                target_id,
+            )
+        self._add_calibration_items(tonight_session, checklist_statements, change)
+        ranking = None
+        if target_ids is None:
+            try:
+                ranking = self.get_advisory(kind="tonight", at=now)
+            except (AstrometricsError, OSError, sqlite3.Error, ValueError) as error:
+                logger.warning("Suggestions: no ranking: %s", error)
+                change.notes.append(
+                    f"No ranking for tonight ({error}). Ranking suggestions were left as they are."
+                )
+        queued_targets = {entry.target_id for entry in tonight_session.queue} if tonight_session else set()
+        retrying(
+            lambda writer, packages: tasks.refresh_ranking_packages(
+                writer, packages, ranking, night_id, RANKING_SUGGESTIONS_PER_USE, held_keys(), queued_targets
+            ),
+            "ranking",
+        )
+        retrying(
+            lambda writer, packages: tasks.refresh_completion(
+                writer,
+                packages,
+                self._butler.get_all("observation_session"),
+                reader,
+                self._equipment_names,
+                None if target_ids is None else set(targets),
+            ),
+            "completion",
+        )
+        for name in ("added", "updated", "deleted", "completed", "reverted"):
+            setattr(change, name, list(dict.fromkeys(getattr(change, name))))
+        return change
+
+    def _add_calibration_items(
+        self,
+        session: ObservationSession | None,
+        statements: list[TargetStatement],
+        change: PackageChange,
+    ) -> None:
+        """Add the checklist items that calibration statements ask for.
+
+        Parameters
+        ----------
+        session : `ObservationSession` or `None`
+            Tonight's session. With `None`, nothing is added (a note says so).
+        statements : `list` [`TargetStatement`]
+            Statements whose rule makes a checklist item.
+        change : `PackageChange`
+            The refresh result. The new item ids and any note are added.
+        """
+        from wayfindinglib.tasks.planning_tasks.suggestion_tasks import checklist_items_from
+
+        items = checklist_items_from(statements)
+        if not items:
+            return
+        if session is None:
+            change.notes.append("Tonight has no session, so calibration items were not added to a checklist.")
+            return
+        for _attempt in range(3):
+            try:
+                result = self.edit_queue(session.id, add_checklist=items)
+            except PlanRevisionConflictError:
+                continue
+            change.checklist_item_ids.extend(
+                item.entry_id for item in result.changes if item.kind == "checklist_added" and item.entry_id
+            )
+            return
+        change.notes.append(
+            "The checklist kept changing, so calibration items were left for the next refresh."
+        )
 
     # -- Deep-star catalog -------------------------------------------------
 

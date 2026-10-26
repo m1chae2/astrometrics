@@ -14,6 +14,9 @@ import { useObservatoryControl } from './hooks/useObservatoryControl';
 import { useRemoteStatusContext } from '../common/context/RemoteStatusContext';
 import { useAstrometrics } from '../common/context/AstrometricsContext';
 import { useReportModeReady } from '../common/utils/appBootReadiness';
+import { useCommandAvailability } from '../common/hooks/useCommandAvailability';
+import { useEquipmentConfiguration } from '../common/hooks/useEquipmentConfiguration';
+import { CommandGate, WhyUnavailableButton } from './CommandGate';
 
 import './observatoryManager.css';
 
@@ -21,9 +24,7 @@ import './observatoryManager.css';
  * ObservatoryManager component.
  *
  * The main container for the Observatory/Telescope management interface.
- * The main container for the Observatory/Telescope management interface.
  * Orchestrates target selection, telescope control, and status monitoring.
- * REQ: SR-1.1: The system SHALL provide control of telescope pointing and tracking.
  */
 export const ObservatoryManager: React.FC = () => {
     const {
@@ -45,8 +46,10 @@ export const ObservatoryManager: React.FC = () => {
         isLoading,
     } = useTargetListLogic(reloadKey, pendingTarget, selectedTarget, setPendingTarget, undefined, remoteTargets);
 
-    // REQ: OBS-1.5: The display SHALL update position values at a minimum rate of 1Hz.
     const { trackingStatus, telemetry } = useTelescopeStatus();
+    // Equipment commands stay off until the library says this app may send them.
+    const availability = useCommandAvailability();
+    const equipment = useEquipmentConfiguration();
     // No fetch-once "loading" concept here (this view is live telemetry, not a
     // one-shot data load, and AstrometricsContext seeds `telescope` with a
     // placeholder object rather than null/undefined, so there's no clean
@@ -59,7 +62,6 @@ export const ObservatoryManager: React.FC = () => {
 
     // Custom hook for control logic
     const {
-        limitsConfig,
         isAddModalOpen,
         setIsAddModalOpen,
         guidingExposure,
@@ -73,12 +75,10 @@ export const ObservatoryManager: React.FC = () => {
     const targetListPanel = (
         <RadioListManager
             title="Target List"
-            // REQ: OBS-3.1: The display SHALL present a selectable list of detailed targets.
             items={items}
             selectedId={selectedTarget}
             pendingId={pendingTarget}
             onSelect={setPendingTarget}
-            // REQ: OBS-3.2: The display SHALL allow filtering of the target list by name or type.
             topPanel={<TargetListFilterPanel {...filterPanel} />}
             topPanelTitle="Filter Targets"
             filterText={filterText}
@@ -88,10 +88,21 @@ export const ObservatoryManager: React.FC = () => {
             emptyMessage="No targets in the catalog."
             actions={
                 <ListActions>
-                    {/* REQ: OBS-3.3: The display SHALL provide an "Add Target" function */}
                     <button className="btn" onClick={handlers.onAddTarget}>Add Target</button>
-                    {/* REQ: OBS-3.4: The display SHALL provide a "Slew to Target" command button */}
-                    <button className="btn btn--primary" onClick={() => handlers.onSlewToTarget(raShared, decShared)}>Slew to Target</button>
+                    <CommandGate disabled={!availability.canCommand} reason={availability.reason}>
+                        <button
+                            className="btn btn--primary"
+                            disabled={!availability.canCommand}
+                            aria-disabled={!availability.canCommand}
+                            onClick={() => {
+                                if (!availability.canCommand) return;
+                                void handlers.onSlewToTarget(raShared, decShared);
+                            }}
+                        >
+                            Slew to Target
+                        </button>
+                    </CommandGate>
+                    <WhyUnavailableButton disabled={!availability.canCommand} reason={availability.reason} />
                 </ListActions>
             }
         />
@@ -101,10 +112,6 @@ export const ObservatoryManager: React.FC = () => {
         <ControlPanel
             isTracking={trackingStatus === 'Tracking'}
             isParked={trackingStatus === 'Parked'}
-            minimumAltitudeLimit={limitsConfig.minimumAltitude}
-            maximumAltitudeLimit={limitsConfig.maximumAltitude}
-            maxHourAngle={limitsConfig.maximumHourAngle}
-            meridianFlipHourAngle={limitsConfig.flipHourAngle}
             onStartMove={handlers.onStartMove}
             onStopMove={handlers.onStopMove}
             onSetSlewRate={handlers.onSetSlewRate}
@@ -112,15 +119,7 @@ export const ObservatoryManager: React.FC = () => {
             onSetTracking={handlers.onSetTracking}
             onPark={handlers.onPark}
             onUnpark={handlers.onUnpark}
-            onApplyLimits={handlers.onApplyLimits}
-            onMoveFocuser={handlers.onMoveFocuser}
-            focuserPosition={telemetry.focuserPosition || 0}
-            activeFilter={telemetry.filter}
-            onSelectFilter={handlers.onSelectFilter}
             guidingHistory={telemetry.guidingHistory || []}
-            onGuideStart={handlers.onGuideStart}
-            onGuideStop={handlers.onGuideStop}
-            onGuideCapture={handlers.onGuideCapture}
             guidingExposure={guidingExposure}
             guidingGain={guidingGain}
             onGuidingExposureChange={setGuidingExposure}
@@ -129,6 +128,12 @@ export const ObservatoryManager: React.FC = () => {
             onStartAlignment={() => handlers.onStartAlignment(raShared, decShared)}
             onStopAlignment={handlers.onStopAlignment}
             isAligningActive={telemetry.alignmentActive}
+            commandsDisabled={!availability.canCommand}
+            commandsDisabledReason={availability.reason}
+            cameras={equipment.availableCameras}
+            camerasLoading={equipment.loading}
+            camerasError={equipment.error}
+            onRetryCameras={equipment.reload}
         />
     );
 

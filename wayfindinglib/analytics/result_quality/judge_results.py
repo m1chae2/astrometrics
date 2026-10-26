@@ -37,6 +37,11 @@ from astrometricslib import (
     SubjectLevel,
 )
 from wayfindinglib.analytics.result_quality.evidence_order import order_evidence_most_extreme_first
+from wayfindinglib.analytics.result_quality.plain_text import (
+    exposure_phrases,
+    format_plain,
+    plain_missing_data,
+)
 from wayfindinglib.analytics.result_quality.rules import (
     ELONGATION_METRIC,
     EMPTY_APERTURE_NOISE_METRIC,
@@ -65,12 +70,14 @@ from wayfindinglib.models.quality.statements import (
 _FAILED_CHECK_OUTCOME = "failed"
 
 # The order statements are shown in: warnings first (they are about data
-# already taken), then recommendations, constraints and missing data.
+# already taken), then a star's results, recommendations, constraints and
+# missing data.
 _KIND_ORDER = {
     StatementKind.WARNING: 0,
-    StatementKind.RECOMMENDATION: 1,
-    StatementKind.CONSTRAINT: 2,
-    StatementKind.INSUFFICIENT_DATA: 3,
+    StatementKind.RESULT: 1,
+    StatementKind.RECOMMENDATION: 2,
+    StatementKind.CONSTRAINT: 3,
+    StatementKind.INSUFFICIENT_DATA: 4,
 }
 
 # Within warnings, the most severe comes first.
@@ -343,6 +350,7 @@ def _statement(
     message: str,
     reason: str,
     *,
+    plain_message: str = "",
     proposed_action: ProposedAction | None = None,
     expected_effect: ExpectedEffect | None = None,
     extra_limits: Sequence[QualityLimit] = (),
@@ -357,6 +365,8 @@ def _statement(
         One plain sentence.
     reason : `str`
         Why.
+    plain_message : `str`, optional
+        The same finding in everyday words (the rule's plain template, filled).
     proposed_action : `ProposedAction`, optional
         The values proposed, for a recommendation.
     expected_effect : `ExpectedEffect`, optional
@@ -389,6 +399,7 @@ def _statement(
         action_class=rule.action_class,
         capture_setting=case.capture_setting,
         message=message,
+        plain_message=plain_message,
         reason=f"{reason} {assumed}".strip(),
         proposed_action=proposed_action,
         expected_effect=expected_effect,
@@ -432,6 +443,7 @@ def _insufficient_statement(
         kind=StatementKind.INSUFFICIENT_DATA,
         capture_setting=capture_setting,
         message=f"Cannot check the rule {rule.name.replace('_', ' ')}: data is missing.",
+        plain_message=plain_missing_data(rule.name),
         reason=" ".join(problem.text for problem in problems),
         evidence=cited,
         confidence=rule.confidence,
@@ -458,6 +470,7 @@ def _insufficient_from_values(case: _Case, reason: str) -> TargetStatement:
         kind=StatementKind.INSUFFICIENT_DATA,
         capture_setting=case.capture_setting,
         message=f"Cannot check the rule {case.rule.name.replace('_', ' ')}: the values cannot be used.",
+        plain_message=plain_missing_data(case.rule.name),
         reason=reason,
         evidence=_evidence(case.readings.values()),
         confidence=case.rule.confidence,
@@ -502,14 +515,27 @@ def _judge_overexposed_setting(case: _Case) -> list[TargetStatement]:
             )
         )
         effect = None
-    message = case.rule.wording.format(
-        exposure_text=_exposure_text(case.capture_setting), peak_fraction=reading.value, advice_text=advice
-    )
+    fields = {
+        "exposure_text": _exposure_text(case.capture_setting),
+        "peak_fraction": reading.value,
+        "advice_text": advice,
+        **exposure_phrases(exposure),
+    }
+    message = case.rule.wording.format_map(fields)
     reason = (
         f"The peak is {reading.value:.2f} of the room between the sky and the ceiling; "
         f"a star clips at {clip_fraction:g}."
     )
-    return [_statement(case, message, reason, proposed_action=action, expected_effect=effect)]
+    return [
+        _statement(
+            case,
+            message,
+            reason,
+            plain_message=format_plain(case.rule, fields),
+            proposed_action=action,
+            expected_effect=effect,
+        )
+    ]
 
 
 def _judge_underexposed_setting(case: _Case) -> list[TargetStatement]:
@@ -554,14 +580,27 @@ def _judge_underexposed_setting(case: _Case) -> list[TargetStatement]:
     effect = ExpectedEffect(
         description=f"The sky noise would be {least_ratio:g} times the read noise, so the camera adds little."
     )
-    message = case.rule.wording.format(
-        exposure_text=_exposure_text(case.capture_setting), ratio=ratio, advice_text=advice
-    )
+    fields = {
+        "exposure_text": _exposure_text(case.capture_setting),
+        "ratio": ratio,
+        "advice_text": advice,
+        **exposure_phrases(exposure),
+    }
+    message = case.rule.wording.format_map(fields)
     reason = (
         f"Sky noise {sky_noise:.2f} e- against read noise {read_noise:.2f} e- in one pixel; "
         f"the least ratio is {least_ratio:g}."
     )
-    return [_statement(case, message, reason, proposed_action=action, expected_effect=effect)]
+    return [
+        _statement(
+            case,
+            message,
+            reason,
+            plain_message=format_plain(case.rule, fields),
+            proposed_action=action,
+            expected_effect=effect,
+        )
+    ]
 
 
 def _judge_offset_too_low(case: _Case) -> list[TargetStatement]:
@@ -584,14 +623,24 @@ def _judge_offset_too_low(case: _Case) -> list[TargetStatement]:
     row = reading.rows[0]
     if str(row.check_outcome) != _FAILED_CHECK_OUTCOME:
         return []
-    message = case.rule.wording.format(zero_percent=reading.value * 100.0)
+    fields = {"zero_percent": reading.value * 100.0}
+    message = case.rule.wording.format_map(fields)
     reason = (
         f"The stacker's own check found up to {reading.value:.0%} of raw pixels at zero. "
         "Allowed offsets come from the camera profile's measured settings."
     )
     action = ProposedAction(note="Raise the camera offset until the dark pixels no longer read zero.")
     extra = [row.check_limit] if row.check_limit is not None else []
-    return [_statement(case, message, reason, proposed_action=action, extra_limits=extra)]
+    return [
+        _statement(
+            case,
+            message,
+            reason,
+            plain_message=format_plain(case.rule, fields),
+            proposed_action=action,
+            extra_limits=extra,
+        )
+    ]
 
 
 def _judge_trailed_stars(case: _Case) -> list[TargetStatement]:
@@ -611,11 +660,15 @@ def _judge_trailed_stars(case: _Case) -> list[TargetStatement]:
     limit = _limit_value(case.limits, 0, case.rule.name)
     if reading.value <= limit:
         return []
-    message = case.rule.wording.format(
-        elongation=reading.value, exposure_text=_exposure_text(case.capture_setting)
-    )
+    exposure = case.capture_setting.exposure_seconds if case.capture_setting else None
+    fields = {
+        "elongation": reading.value,
+        "exposure_text": _exposure_text(case.capture_setting),
+        **exposure_phrases(exposure),
+    }
+    message = case.rule.wording.format_map(fields)
     reason = f"The median axis ratio is {reading.value:.2f}; the limit is {limit:g}."
-    return [_statement(case, message, reason)]
+    return [_statement(case, message, reason, plain_message=format_plain(case.rule, fields))]
 
 
 def _flat_count(case: _Case) -> int:
@@ -673,9 +726,12 @@ def _judge_flat_noise_limits_stack(case: _Case) -> list[TargetStatement]:
     new_flat_share = variance_share * present_count / (present_count + extra_flats)
     new_noise_ratio = math.sqrt(max(0.0, 1.0 - variance_share + new_flat_share))
     advice = f"Take {extra_flats} more flats."
-    message = case.rule.wording.format(
-        noise_percent=ratio * 100.0, variance_percent=variance_share * 100.0, advice_text=advice
-    )
+    fields = {
+        "noise_percent": ratio * 100.0,
+        "variance_percent": variance_share * 100.0,
+        "advice_text": advice,
+    }
+    message = case.rule.wording.format_map(fields)
     reason = (
         f"The flat's noise is {ratio:.0%} of the stack's noise in the same empty apertures, from "
         f"{present_count} flats. Flat noise falls as one over the square root of the number of flats."
@@ -685,7 +741,16 @@ def _judge_flat_noise_limits_stack(case: _Case) -> list[TargetStatement]:
         noise_change_fraction=new_noise_ratio - 1.0,
         description=f"The stack's noise would fall by about {1.0 - new_noise_ratio:.0%}.",
     )
-    return [_statement(case, message, reason, proposed_action=action, expected_effect=effect)]
+    return [
+        _statement(
+            case,
+            message,
+            reason,
+            plain_message=format_plain(case.rule, fields),
+            proposed_action=action,
+            expected_effect=effect,
+        )
+    ]
 
 
 def _judge_master_flat_noisy(case: _Case) -> list[TargetStatement]:
@@ -709,16 +774,24 @@ def _judge_master_flat_noisy(case: _Case) -> list[TargetStatement]:
     new_count = math.ceil(present_count * (fraction / limit) ** 2)
     extra_flats = max(1, new_count - present_count)
     advice = f"Take {extra_flats} more flats."
-    message = case.rule.wording.format(
-        noise_percent=fraction * 100.0, limit_percent=limit * 100.0, advice_text=advice
-    )
+    fields = {"noise_percent": fraction * 100.0, "limit_percent": limit * 100.0, "advice_text": advice}
+    message = case.rule.wording.format_map(fields)
     reason = (
         f"The master flat's relative noise is {fraction:.2%} from {present_count} flats, "
         f"above the {limit:.1%} limit. Flat noise falls as one over the square root of the number of flats."
     )
     action = ProposedAction(calibration_frame_type="flat", frame_count=extra_flats)
     effect = ExpectedEffect(description=f"The master flat's noise would reach the {limit:.1%} limit.")
-    return [_statement(case, message, reason, proposed_action=action, expected_effect=effect)]
+    return [
+        _statement(
+            case,
+            message,
+            reason,
+            plain_message=format_plain(case.rule, fields),
+            proposed_action=action,
+            expected_effect=effect,
+        )
+    ]
 
 
 _PLAIN_RULE_JUDGES: dict[str, Callable[[_Case], list[TargetStatement]]] = {

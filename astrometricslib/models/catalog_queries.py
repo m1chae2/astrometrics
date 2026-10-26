@@ -142,6 +142,12 @@ class CalibrationQueryResult(BaseModel):
     # detail="target_frames": the target's light frames counted by
     # telescope, camera, gain, exposure and filter.
     lights: list[dict[str, Any]] | None = None
+    # detail="counts" and "match": the totals of each camera, so a reader
+    # does not add up rows.
+    camera_totals: list[dict[str, Any]] | None = None
+    # detail="match": the `row_key` of every counts row that has the asked
+    # settings.
+    matched_row_keys: list[str] | None = None
 
 
 class TargetReindexChange(BaseModel):

@@ -1,24 +1,26 @@
 import { useQuery } from '@tanstack/react-query';
+import { useIsDisplayActive } from '../context/DisplayActiveContext';
+import { catalogQueryPolicy } from './catalogQueryPolicy';
 import { fetchStarsBySpectralClass } from '../services/astronomyService';
 
 /**
  * Query for the stars in one catalog spectral class, best self-determined
  * match first.
  *
- * `fetchStarsBySpectralClass` swallows a failed request into an empty
- * list rather than throwing, so React Query would otherwise treat a
- * transient backend hiccup as a permanently cached "no stars" result;
- * refetch-on-focus (matching `useAstronomyListQuery`) gives it a chance
- * to recover instead of sticking with an empty list forever. No polling
- * interval, since this list is only shown while its class is selected.
+ * A failed request throws, so it is retried and never cached as an empty
+ * result. App.tsx invalidates this key on `catalog:changed`. There is no
+ * timer and no refetch on window focus.
  *
  * @param spectralClass The spectral class letter, or undefined when no class is selected.
  * @returns {import('@tanstack/react-query').UseQueryResult} The class's star list query result.
  */
-export const useStarsBySpectralClassQuery = (spectralClass: string | undefined) =>
-    useQuery({
+export const useStarsBySpectralClassQuery = (spectralClass: string | undefined) => {
+    const isDisplayActive = useIsDisplayActive();
+    const policy = catalogQueryPolicy(isDisplayActive);
+    return useQuery({
         queryKey: ['starsBySpectralClass', spectralClass],
         queryFn: () => fetchStarsBySpectralClass(spectralClass as string),
-        enabled: !!spectralClass,
-        refetchOnWindowFocus: true,
+        ...policy,
+        enabled: !!spectralClass && policy.enabled,
     });
+};

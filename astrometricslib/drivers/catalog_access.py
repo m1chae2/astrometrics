@@ -265,6 +265,27 @@ def _split_target_ids(joined_target_ids: Any) -> list[str]:
     return [piece.strip() for piece in str(joined_target_ids).split(",") if piece.strip()]
 
 
+def _summary_from_row(row: dict[str, Any]) -> StarSummary:
+    """Build a star summary from one row of the summary columns.
+
+    Returns
+    -------
+    summary : `StarSummary`
+        The star's short form.
+    """
+    return StarSummary(
+        id=row["id"],
+        name=row["name"] or "",
+        right_ascension=row["ra"],
+        declination=row["dec"],
+        target_ids=_split_target_ids(row["target_id"]),
+        has_spectra=bool(row["has_spectra"]),
+        has_photometry=bool(row["has_photometry"]),
+        magnitude=_coerce_float(row["magnitude"]),
+        spectral_type=row["spectral_type"] or "",
+    )
+
+
 class AbstractCatalogAccess(ABC):
     """The blueprint for how data is loaded and saved."""
 
@@ -374,6 +395,58 @@ class AbstractCatalogAccess(ABC):
             )
             for (target_ids, spectral_type, has_spectra, has_photometry), count in grouped.items()
         ]
+
+    def query_star_summary_page(
+        self,
+        *,
+        target_id: str | None = None,
+        magnitude_range: tuple[float, float] | None = None,
+        has_spectra: bool | None = None,
+        has_photometry: bool | None = None,
+        has_catalog_magnitude: bool | None = None,
+        search: str | None = None,
+        include_unresolved: bool = False,
+        order: str = "id",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> tuple[int, list[StarSummary]] | None:
+        """Filter, order and page the star listing inside the storage.
+
+        A storage that can do this without loading every star returns the
+        number of stars that match and one page of them. The default cannot,
+        and returns `None` so the caller filters the whole listing itself.
+
+        Parameters
+        ----------
+        target_id : `str`, optional
+            Only stars belonging to this target.
+        magnitude_range : `tuple` [`float`, `float`], optional
+            Lowest and highest magnitude to keep. A star with no magnitude
+            is dropped when a range is given.
+        has_spectra, has_photometry : `bool`, optional
+            Keep only stars with (or without) that data.
+        has_catalog_magnitude : `bool`, optional
+            Keep only stars whose magnitude is (or is not) a real catalog
+            magnitude.
+        search : `str`, optional
+            Keep only stars whose id or name contains this text, ignoring
+            case.
+        include_unresolved : `bool`, optional
+            Keep the single-frame photometry detections. Hidden by default.
+        order : `str`, optional
+            ``"id"`` or ``"useful"``.
+        limit : `int`, optional
+            Most stars in the page. Every match when `None`.
+        offset : `int`, optional
+            Stars to skip before the page.
+
+        Returns
+        -------
+        answer : `tuple` [`int`, `list` [`StarSummary`]] or `None`
+            The number of matching stars and the page, or `None` when this
+            storage cannot answer in place.
+        """
+        return None
 
     @abstractmethod
     def list_star_summaries(
@@ -996,20 +1069,141 @@ class CatalogAccess(AbstractCatalogAccess):
             target_ids = _split_target_ids(row["target_id"])
             if target_id and target_id not in target_ids:
                 continue
-            summaries.append(
-                StarSummary(
-                    id=row["id"],
-                    name=row["name"] or "",
-                    right_ascension=row["ra"],
-                    declination=row["dec"],
-                    target_ids=target_ids,
-                    has_spectra=bool(row["has_spectra"]),
-                    has_photometry=bool(row["has_photometry"]),
-                    magnitude=_coerce_float(row["magnitude"]),
-                    spectral_type=row["spectral_type"] or "",
-                )
-            )
+            summaries.append(_summary_from_row(row))
         return summaries
+
+    def query_star_summary_page(
+        self,
+        *,
+        target_id: str | None = None,
+        magnitude_range: tuple[float, float] | None = None,
+        has_spectra: bool | None = None,
+        has_photometry: bool | None = None,
+        has_catalog_magnitude: bool | None = None,
+        search: str | None = None,
+        include_unresolved: bool = False,
+        order: str = "id",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> tuple[int, list[StarSummary]] | None:
+        """Filter, order and page the star listing inside the database.
+
+        The database applies every filter, counts the matches with
+        ``COUNT(*)`` and returns only the requested page, so a page or a
+        count never loads the whole catalog. The answer is the same as
+        filtering and sorting the full `list_star_summaries` result in
+        Python, except for text that is not plain ASCII: SQLite changes the
+        case of ASCII letters only, so a search with other characters
+        returns `None` and the caller filters in Python.
+
+        Parameters
+        ----------
+        target_id : `str`, optional
+            Only stars belonging to this target. The stored ids are joined
+            by commas; the condition matches one whole id between commas.
+        magnitude_range : `tuple` [`float`, `float`], optional
+            Lowest and highest magnitude to keep.
+        has_spectra, has_photometry : `bool`, optional
+            Keep only stars with (or without) that data.
+        has_catalog_magnitude : `bool`, optional
+            Keep only stars whose magnitude is (or is not) a real catalog
+            magnitude (finite, at least -2, not zero).
+        search : `str`, optional
+            Keep only stars whose id or name contains this text, ignoring
+            case.
+        include_unresolved : `bool`, optional
+            Keep the single-frame photometry detections. Hidden by default.
+        order : `str`, optional
+            ``"id"`` for id order, or ``"useful"`` for stars with a
+            spectrum first, then real catalog names, then photometry, then
+            the brightest catalog magnitude, then id.
+        limit : `int`, optional
+            Most stars in the page. Every match when `None`.
+        offset : `int`, optional
+            Stars to skip before the page.
+
+        Returns
+        -------
+        answer : `tuple` [`int`, `list` [`StarSummary`]] or `None`
+            The number of matching stars and the page, or `None` when the
+            search text needs Python's case rules.
+        """
+        from astrometricslib.models.stellar_source import BRIGHTEST_CATALOG_MAGNITUDE
+
+        conditions: list[str] = []
+        values: list[Any] = []
+        known_magnitude = (
+            "(typeof(magnitude) IN ('real', 'integer') AND magnitude >= ? "
+            "AND magnitude != 0 AND magnitude < 1e308)"
+        )
+        if target_id:
+            # Whole-id match between commas. Spaces around a comma are
+            # removed first, as `_split_target_ids` trims each piece.
+            conditions.append(
+                "instr(',' || replace(replace(replace(replace(COALESCE(target_id, ''), "
+                "', ', ','), ' ,', ','), ', ', ','), ' ,', ',') || ',', ',' || ? || ',') > 0"
+            )
+            values.append(target_id)
+        if not include_unresolved:
+            conditions.append(
+                "NOT (length(rtrim(id, '0123456789')) < length(id) "
+                "AND substr(rtrim(id, '0123456789'), -6) = ':Star_')"
+            )
+        if magnitude_range is not None:
+            conditions.append("(typeof(magnitude) IN ('real', 'integer') AND magnitude BETWEEN ? AND ?)")
+            values.extend([magnitude_range[0], magnitude_range[1]])
+        for column, wanted in (("has_spectra", has_spectra), ("has_photometry", has_photometry)):
+            if wanted is not None:
+                conditions.append(f"(COALESCE({column}, 0) != 0) = ?")
+                values.append(int(wanted))
+        if has_catalog_magnitude is not None:
+            conditions.append(f"{known_magnitude} = ?")
+            values.extend([BRIGHTEST_CATALOG_MAGNITUDE, int(has_catalog_magnitude)])
+        needle = (search or "").strip().lower()
+        if needle:
+            if not needle.isascii():
+                return None
+            escaped = needle.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            conditions.append("(id LIKE ? ESCAPE '\\' OR COALESCE(name, '') LIKE ? ESCAPE '\\')")
+            values.extend([f"%{escaped}%", f"%{escaped}%"])
+        where_sql = " AND ".join(conditions)
+
+        if order == "useful":
+            # The prefix and the magnitude limit are fixed constants of this
+            # library, so they are written into the text.
+            known_in_order = known_magnitude.replace("?", repr(float(BRIGHTEST_CATALOG_MAGNITUDE)))
+            order_by_sql = (
+                "(COALESCE(has_spectra, 0) = 0), "
+                f"(substr(id, 1, {len(POSITION_ONLY_STAR_ID_PREFIX)}) = '{POSITION_ONLY_STAR_ID_PREFIX}'), "
+                "(COALESCE(has_photometry, 0) = 0), "
+                f"(NOT {known_in_order}), "
+                f"CASE WHEN {known_in_order} THEN magnitude ELSE 0.0 END, id"
+            )
+        else:
+            order_by_sql = "id"
+
+        total = self._generic.count_where("stellar_catalog", where_sql, values)
+        rows = self._generic.select_where(
+            "stellar_catalog",
+            [
+                "id",
+                "name",
+                "ra",
+                "dec",
+                "target_id",
+                "has_spectra",
+                "has_photometry",
+                "magnitude",
+                "spectral_type",
+            ],
+            where_sql,
+            # The order's placeholders come after the WHERE ones in the text.
+            values,
+            order_by_sql,
+            limit,
+            offset,
+        )
+        return total, [_summary_from_row(row) for row in rows]
 
     def list_stars_in_region(
         self,

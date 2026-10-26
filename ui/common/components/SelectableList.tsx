@@ -31,6 +31,12 @@ export interface SelectableListProps {
     loadingMessage?: React.ReactNode;
     /** Shown in place of the list once loading has finished and `items` is empty. */
     emptyMessage?: React.ReactNode;
+    /** Whether the last fetch failed. Shown only while `items` is empty, so earlier data stays visible. */
+    isError?: boolean;
+    /** Shown in place of the list when `isError` is true and `items` is empty. */
+    errorMessage?: React.ReactNode;
+    /** Called by the "Try again" button shown with the error message. */
+    onRetry?: () => void;
 }
 
 // Match .selectable-list__item's CSS min-height (and its --two-line
@@ -71,7 +77,10 @@ export const SelectableList: React.FC<SelectableListProps> = ({
     highlightedIds,
     isLoading = false,
     loadingMessage = 'Loading…',
-    emptyMessage = 'No items to display.'
+    emptyMessage = 'No items to display.',
+    isError = false,
+    errorMessage = 'Could not load the list.',
+    onRetry,
 }) => {
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const [scrollTop, setScrollTop] = useState(0);
@@ -119,7 +128,23 @@ export const SelectableList: React.FC<SelectableListProps> = ({
                 // leave `viewportHeight` stuck at its initial 0 forever, which
                 // caps rendering at OVERSCAN_ROWS items no matter how tall the
                 // container actually is.
-                <EmptyState variant={isLoading ? 'loading' : 'empty'} message={isLoading ? loadingMessage : emptyMessage} />
+                isError && !isLoading ? (
+                    <EmptyState
+                        variant="error"
+                        message={
+                            <>
+                                {errorMessage}
+                                {onRetry && (
+                                    <button type="button" className="manager__retry-btn" onClick={onRetry}>
+                                        Try again
+                                    </button>
+                                )}
+                            </>
+                        }
+                    />
+                ) : (
+                    <EmptyState variant={isLoading ? 'loading' : 'empty'} message={isLoading ? loadingMessage : emptyMessage} />
+                )
             ) : (
             <div className="selectable-list" style={{ position: 'relative', height: totalHeight, display: 'block' }}>
                 {visibleItems.map((item, relativeIndex) => {

@@ -230,6 +230,10 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
             "{exposure_text} frames clip the brightest star: its peak is {peak_fraction:.1f} times the "
             "room below the ceiling. {advice_text}"
         ),
+        plain_wording=(
+            "In {exposure_phrase}, the brightest star is roughly {peak_fraction:.1f} times brighter "
+            "than the camera can record, so it is likely washed out. {advice_text}"
+        ),
         purpose="Clipped stars lose their brightness, so photometry and star colors from them are wrong.",
     ),
     QualityRule(
@@ -257,6 +261,11 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
             "{exposure_text} frames are limited by read noise: the sky noise is {ratio:.1f} times the "
             "read noise. {advice_text}"
         ),
+        plain_wording=(
+            "In {exposure_phrase}, the sky glow is only {ratio:.1f} times stronger than the camera's "
+            "own noise, "
+            "so we expect longer frames to help. {advice_text}"
+        ),
         purpose=(
             "Short frames spend part of their noise on the camera instead of the sky, so more of "
             "them are needed."
@@ -273,6 +282,12 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         confidence=Confidence.PARTLY_MEASURED,
         wording=(
             "Raise the offset: {zero_percent:.0f}% of the pixels read exactly zero in the worst frame group."
+        ),
+        plain_wording=(
+            "About {zero_percent:.0f}% of the pixels in the darkest frames read exactly zero, which "
+            "hides faint "
+            "detail. "
+            "Raise the camera's offset setting."
         ),
         purpose="Pixels clipped at zero read the faint sky too high and make the measured noise too low.",
     ),
@@ -295,6 +310,10 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         wording=(
             "Stars are {elongation:.2f} times longer than they are wide ({exposure_text} frames). "
             "Check the guiding."
+        ),
+        plain_wording=(
+            "Stars look stretched, roughly {elongation:.2f} times longer than wide in {exposure_phrase}. "
+            "Check the guiding and tracking."
         ),
         purpose="Stretched stars lose sharpness and depth, and the cause is usually guiding or tracking.",
     ),
@@ -328,6 +347,13 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
             "The master flat adds {noise_percent:.0f}% to the stack's noise ({variance_percent:.1f}% of its "
             "variance). {advice_text}"
         ),
+        plain_wording=(
+            "Your flat calibration frame adds roughly {noise_percent:.0f}% as much noise as the "
+            "combined picture "
+            "already has. "
+            "{advice_text}"
+        ),
+        produces="checklist_item",
         purpose=(
             "A noisy master flat puts its noise into every frame as a fixed pattern that stacking "
             "cannot average out."
@@ -359,6 +385,12 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
             "The master flat's noise is {noise_percent:.2f}%, above the {limit_percent:.1f}% limit. "
             "{advice_text}"
         ),
+        plain_wording=(
+            "Your combined flat frame is noisier than we like: {noise_percent:.2f}% against a limit of "
+            "{limit_percent:.1f}%. "
+            "{advice_text}"
+        ),
+        produces="checklist_item",
         purpose=(
             "The stacker blurs a flat that is noisier than the limit, which loses dust and vignetting detail."
         ),
@@ -381,6 +413,10 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         register_entry="WAY-D60",
         confidence=Confidence.DESIGN_ESTIMATE,
         wording="{lost_count} of {frame_count} frames were set aside ({reason_text}).",
+        plain_wording=(
+            "{lost_count} of your {frame_count} frames were left out of the final picture ({reason_text}). "
+            "We expect clearer skies or better guiding to save more of them."
+        ),
         purpose="Frames set aside for cloud or trailing are time that did not reach the stack.",
         computed_by="report_rules",
     ),
@@ -401,6 +437,12 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
             "Take {frame_count} more at {exposure_text} (about {wall_clock_text}) to cut the noise "
             "by about {noise_percent:.0f}%."
         ),
+        plain_wording=(
+            "Take {frame_count} more {exposure_clause}frames: we expect roughly {noise_percent:.0f}% "
+            "less noise, "
+            "in about {wall_clock_text}."
+        ),
+        produces="package_row",
         purpose=(
             "Noise falls as the square root of the effective time, so the next step shows how much "
             "more data is worth."
@@ -420,6 +462,11 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         register_entry="WAY-D62",
         confidence=Confidence.DESIGN_ESTIMATE,
         wording="Noise stopped falling after about {effective_time_text}. {advice_text}",
+        plain_wording=(
+            "More frames probably will not help: the noise stopped falling after about "
+            "{effective_time_text}. "
+            "{plain_advice_text}"
+        ),
         purpose=(
             "A noise floor means more frames do not help until the cause (flats, dither, a fixed "
             "pattern) is fixed."
@@ -435,6 +482,11 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         register_entry="WAY-D63",
         confidence=Confidence.DESIGN_ESTIMATE,
         wording="Take {frame_type_text} at {setting_text}: none in the library matches.",
+        plain_wording=(
+            "No {frame_type_text} in your library match these frames, so the calibration may be off. "
+            "Take new ones at {setting_text}."
+        ),
+        produces="checklist_item",
         purpose=(
             "A calibration frame taken at other settings does not remove the fixed pattern of the "
             "light frames."
@@ -456,6 +508,12 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
             "Stars widen by {slope:.2f} px per degree C. To keep the width within {allowed_percent:.0f}% of "
             "best focus, refocus every {interval:.1f} degrees C (give or take {tolerance:.1f})."
         ),
+        plain_wording=(
+            "Stars get wider as the temperature changes, so we expect to refocus roughly every "
+            "{interval:.1f} "
+            "degrees C "
+            "(give or take {tolerance:.1f})."
+        ),
         purpose=(
             "Focus moves with temperature, so a refocus interval keeps the stars sharp through the night."
         ),
@@ -472,6 +530,12 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         wording=(
             "Frames with a bright sky ({condition_text}) lost about {loss_percent:.0f}% "
             "(model-derived). {advice_text}"
+        ),
+        plain_wording=(
+            "Frames taken under a bright sky ({condition_text}) lost roughly {loss_percent:.0f}% of "
+            "their value, "
+            "estimated from a model. "
+            "{advice_text}"
         ),
         purpose=(
             "A bright sky (Moon, twilight, light pollution) raises the noise, so the sky's cost "
@@ -494,6 +558,12 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
             "Frames below {altitude_degrees:.0f} degrees lost {loss_percent:.0f}%. Image above "
             "{advice_altitude_degrees:.0f} degrees."
         ),
+        plain_wording=(
+            "Frames taken below {altitude_degrees:.0f} degrees above the horizon lost roughly "
+            "{loss_percent:.0f}%"
+            " of their value. "
+            "Image above {advice_altitude_degrees:.0f} degrees when you can."
+        ),
         purpose="Low targets are seen through more air, which widens stars and brightens the sky.",
         computed_by="report_rules",
     ),
@@ -509,6 +579,12 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
             "Keeping the sharpest {keep_percent:.0f}% of frames sharpens stars by {sharper_percent:.0f}% "
             "and raises the noise by {noisier_percent:.0f}%."
         ),
+        plain_wording=(
+            "Using only your sharpest {keep_percent:.0f}% of frames makes stars about {sharper_percent:.0f}% "
+            "sharper "
+            "but the picture roughly {noisier_percent:.0f}% noisier (a forecast). You choose which "
+            "matters more."
+        ),
         purpose=(
             "Stacking only the sharpest frames trades noise for sharper stars, so the user can choose "
             "which matters more for the target."
@@ -523,6 +599,10 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         register_entry="WAY-D68",
         confidence=Confidence.DESIGN_ESTIMATE,
         wording="Seeing limits the detail on this target; more time adds depth, not detail.",
+        plain_wording=(
+            "The air limits how much detail you can get on this target. "
+            "We expect more time to add depth, not sharper detail."
+        ),
         purpose=(
             "When the star width is already at the seeing limit, only better nights (not more "
             "frames) add detail. No advice follows."
@@ -538,6 +618,10 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         register_entry="WAY-D79",
         confidence=Confidence.DESIGN_ESTIMATE,
         wording=("At {used_text} only {used_percent:.0f}% of frames stay sharp{supported_clause}."),
+        plain_wording=(
+            "With {used_text} frames, only about {used_percent:.0f}% stay sharp, so the guiding is likely "
+            "drifting.{supported_sentence}"
+        ),
         purpose=(
             "A longer exposure gives the guiding more time to wander. The share of frames whose guide "
             "error keeps the stars within the width budget falls with the exposure; the rule names the "
@@ -554,6 +638,12 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         register_entry="WAY-D81",
         confidence=Confidence.DESIGN_ESTIMATE,
         wording="The efficiency of this capture setting cannot be judged: no reference exists for it.",
+        plain_wording=(
+            "We cannot yet say how well this setting performed, because there is nothing fair to "
+            "compare it with."
+            " "
+            "The reason says what is missing."
+        ),
         purpose=(
             "The efficiency rules (sky cost, frames lost in time, the loss account) compare a setting with "
             "a reference. When no reference can be made for a setting, this rule says so and gives the "

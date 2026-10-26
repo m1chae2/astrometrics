@@ -10,9 +10,11 @@ Symbols and their units are listed in the [notation appendix](#appendix-a-notati
 
 ## 1. Introduction
 
+**In plain words.** This paper explains how the software evaluates last night's data to figure out why frames were lost (poor focus, bad guiding, passing clouds) and recommends what capture settings to change for tomorrow.
+
 **Statement of need.** A pass or fail mark on a night hides the reason. An observer who is told "the data was poor" cannot tell whether the focus drifted, the guiding failed, the sky was bright, or the target was simply faint. An observer who is told "take more frames" cannot tell whether more frames will help. A program that plans the next night needs the same facts in a form it can read. Both need statements that name their evidence, say what kind of action they suggest, and say how much to trust them.
 
-**Approach.** The science library (`Astrometrics_Quality_Measurements.md`) measures. It states a number, its uncertainty, or the reason it could not measure. It gives no advice. This library judges. Judging needs the equipment, the site and the goal of the observation, and these belong to the observatory. Both observation planning and observatory control give judgments, so they share one vocabulary and one set of rules, held in the foundation of the library (Section 3 of `Wayfinding_Library_Architecture.md`).
+**Approach.** The science library (`Astrometrics_Library_Architecture.md`) measures. It states a number, its uncertainty, or the reason it could not measure. It gives no advice. This library judges. Judging needs the equipment, the site and the goal of the observation, and these belong to the observatory. Both observation planning and observatory control give judgments, so they share one vocabulary and one set of rules, held in the foundation of the library (Section 3 of `Wayfinding_Library_Architecture.md`).
 
 **Scope.** This paper explains the theory: what each judgment compares, why it is built as it is, and where it fails. It names no code and states no tuned value. The code and the settings are in the implementation paper. The evidence for each judgment is in the validation register ([validation/index.md](validation/index.md)), and Section 15 lists the entries.
 
@@ -141,7 +143,7 @@ Register entry: [WAY-74](validation/wayfinding.md#way-74).
 
 Random noise falls as the square root of the effective time, so each extra hour helps less than the one before. For imaging, the library does not ask the observer for a goal. It gives the next step instead: what doubling the effective time would do, and how many frames that takes.
 
-The forecast uses the noise model of a stack, which is the one the science library measures against (`Astrometrics_Quality_Measurements.md`, Section 4.1). The variance of a stack in rate units is
+The forecast uses the noise model of a stack, which is the one the science library measures against (`Astrometrics_Library_Architecture.md`, Section 3.2). The variance of a stack in rate units is
 
 $$
 V = \frac{\sum_i q_i^{2}\, v_i}{\left(\sum_i q_i\right)^{2}},
@@ -221,7 +223,7 @@ $$
 
 where $\theta_0$ is the rotation offset, and $a$ and $b$ are the two parts of the polar error, along the two axes. The rate is largest near the pole, because of the division by $\cos\delta$. Near the pole, however, the small-angle model and the plate-solved rotation both fail, so the analysis uses only fields away from it. A run must cover a wide enough span of hour angle for the two parts to separate. A short run gives a lower bound on the error and not an estimate, and the statement says which one it is.
 
-This estimate is *exploratory*. It answers the question "is the mount well aligned?" and it has not been compared with a drift-alignment measurement of the same night. It drives no rule, and it is never shown as advice. It is shown in the night review with its label, and it has a review date, after which it is promoted or removed (design-estimate row WAY-D28; the field rotation itself is measured in `Astrometrics_Quality_Measurements.md`, Section 5.3).
+This estimate is *exploratory*. It answers the question "is the mount well aligned?" and it has not been compared with a drift-alignment measurement of the same night. It drives no rule, and it is never shown as advice. It is shown in the night review with its label, and it has a review date, after which it is promoted or removed (design-estimate row WAY-D28; the field rotation itself is measured during stacking quality processing).
 
 ## 11. Tonight's ranking
 

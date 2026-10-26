@@ -1,6 +1,6 @@
 # Observatory control guide
 
-*Version 2.0 · 2026-10-15 · Status: current*
+*Version 2.1 · 2026-10-25 · Status: current*
 
 This guide has short recipes for running your telescope from the Astrometrics desktop app. Each recipe has one goal, the things you need first, and numbered steps. Pick the recipe you need. You do not have to read them in order.
 
@@ -52,13 +52,13 @@ The app handles basic telescope control and simple capture queues. Full automate
 
 **Steps.**
 
-1. Open the Observatory Manager or the Observation Manager.
-2. Under the Target List, click Add Target.
+1. Open the Observatory Manager, or the Observation Manager.
+2. In the Observatory Manager, click Add Target under the Target List. In the Observation Manager, click Add Target in the Observation Packages panel.
 3. Type the Target Name. For example, M42.
 4. Fill in RA and DEC, for example 05h 35m 17s and -05d 23m 28s. Both are optional in the dialog. A slew needs coordinates.
 5. Click the add button in the dialog.
 
-**Result.** The target appears in the Target List. Use the search box to find it.
+**Result.** The target appears in the target list. Use the search box to find it. In the Observation Manager, click New package to start a package for it.
 
 ## Slew to a target and track it
 
@@ -135,44 +135,9 @@ You can also slew from the Planetarium. Right-click an object on the sky map and
 
 **Result.** The mount stops or parks. If the tray Park fails, an error message tells you to park the mount by hand. Do that at once.
 
-## Change the filter
+## Change the filter or the focus
 
-**Goal.** Move the filter wheel to a different filter.
-
-**Before you start.**
-
-- The filter wheel is connected and Safe Mode is off.
-- Settings > Observatory > Available Filters lists the filters that the wheel holds.
-
-**Steps.**
-
-1. Open the Observatory Manager and find the Filter Wheel panel.
-2. Click the button for the filter you want: L, R, G, B, Ha, OIII, SII or Spect.
-3. Wait while the button shows that the change is in progress.
-
-**Result.** The button for the active filter is highlighted.
-
-## Focus by hand
-
-**Goal.** Move the focuser until stars look as small and sharp as possible. The app has no autofocus. You focus by taking test frames and moving the focuser between them.
-
-**Before you start.**
-
-- The focuser and camera are connected and Safe Mode is off.
-- The mount points at a star field and is tracking.
-- Tip: open the Observation Manager in a second window. In the mode menu, click the pop-out button next to Observation Manager. Then you can see the focuser and the test frame at the same time.
-
-**Steps.**
-
-1. In the Observation Manager, take a [test frame](#take-a-test-frame).
-2. Look at the Last Image panel. Judge how big the stars are.
-3. In the Observatory Manager, find the Focuser panel. Note the Position.
-4. Under Steps, choose a step size. Use 500 for a big move and 10 for a fine move.
-5. Click Focus IN (-) or Focus OUT (+).
-6. Take another test frame and compare the stars.
-7. Repeat steps 4 to 6. If the stars get bigger, go the other way. Stop when the stars are smallest.
-
-**Result.** Stars are small and round in the test frame.
+The Observatory Manager has no Filter Wheel or Focuser panel. Ekos moves both. Change the filter and run the focus routine in KStars/Ekos. The filter you choose for each row of an observation package must match a filter that the wheel holds (Settings > Observatory > Available Filters).
 
 ## Check guiding
 
@@ -200,7 +165,7 @@ You can also slew from the Planetarium. Right-click an object on the sky map and
 
 **Steps.**
 
-1. Open the Observation Manager and select your target in the Target List.
+1. Open the Observation Manager. Choose New package, search for your target and pick it. The package opens in the editor.
 2. In the Image Planner, set Type to Light.
 3. Set Filter and Exposure. Exposure is in seconds.
 4. Click Test Image.
@@ -209,28 +174,37 @@ You can also slew from the Planetarium. Right-click an object on the sky map and
 
 **Result.** The Last Image panel shows the new frame when the exposure ends.
 
-## Plan and run a capture sequence
+## Plan a capture sequence
 
-**Goal.** Queue the exposures for a target and let the app take them.
+**Goal.** Write the exposures for a target as an observation package, and place the package in tonight's session.
 
-**Before you start.**
-
-- The mount and camera are connected, and Safe Mode is off.
-- The mount is unparked. The queue checks safety, slews to the target and takes the frames.
-- You know what you need: the frame type, filter, exposure time and number of frames.
+**Before you start.** You know what you need: the frame type, filter, exposure time and number of frames. Ekos runs the night for now, so set the same session up in Ekos.
 
 **Steps.**
 
-1. Open the Observation Manager and select your target in the Target List.
-2. In the Image Planner, set Type, Count, Filter, Exposure and Delay. Delay is the pause between frames, in seconds.
-3. Click Add to List. The row appears in the Image List.
-4. Repeat steps 2 and 3 for each filter or exposure length you need.
-5. Optional: to shift the pointing between frames, use Dither Settings. The settings apply to mosaic panels. To plan a grid of panels, set Grid Size and Overlap in the Mosaic Planner and click Create Mosaic. Each panel adds a row to the Image List.
-6. Check the Image List. Use the pencil on a row to edit it, or × to remove it.
-7. Click Add to Sequence. A card for the target appears in the Execution Queue.
-8. To change the order of cards, drag a card. To change a plan, click the pencil on its card, edit the rows, and click Modify.
-9. Click Start Imaging Session.
-10. Watch the Last Image panel. It updates after each frame.
+1. Open the Observation Manager. In the Observation Packages panel, click New package, search for your target and pick it. You can also click the target's row in Visible Targets, or choose Add to observation package on the target's card in the Planetarium. A target that already has a planned or suggested package opens that package.
+2. To start from a suggestion, open the Suggested tab and click its card.
+3. In the Image Planner, set Type, Count, Filter, Exposure and Delay. Delay is the pause between frames, in seconds.
+4. Click Add to List. The row appears in the Image List.
+5. Repeat steps 3 and 4 for each filter or exposure length you need.
+6. Optional: to shift the pointing between frames, use Dither Settings.
+7. Check the Image List. Use the pencil on a row to edit it, or × to remove it.
+8. Click Add to Sequence. A card for the package appears in the Execution Queue and the package moves to the Planned tab.
+9. To change the order of cards, drag a card. To change a package, click the pencil on its card, edit the rows, and click Modify.
+
+**Result.** The Execution Queue lists tonight's packages in order. During the night, each card shows how many frames have arrived, for example 12 of 20 frames. The package moves to the Complete tab when enough good frames have arrived.
+
+## Run the queue with the app
+
+**Goal.** Let the app's own sequencer take the queued frames.
+
+**Before you start.** The mount and camera are connected, Safe Mode is off, and the mount is unparked. Ekos is the normal way to run a night. Use this recipe only when Ekos is not capturing. While Ekos controls the equipment, Start Imaging Session and Test Image are greyed out. Click the Why unavailable? button beside them to read the reason.
+
+**Steps.**
+
+1. Add the packages to the session as in [Plan a capture sequence](#plan-a-capture-sequence).
+2. Click Start Imaging Session.
+3. Watch the Last Image panel. It updates after each frame.
 
 **Result.** The queue runs card by card. The Observation Manager has no pause or stop button. For a night that needs one, use KStars/Ekos.
 

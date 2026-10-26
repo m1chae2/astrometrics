@@ -33,6 +33,7 @@ The rules never read an exploratory metric, and the layering matches the rest
 of the quality code: this module imports the science library from its root.
 """
 
+from collections.abc import Mapping
 from typing import Any
 
 from astrometricslib import (
@@ -42,6 +43,7 @@ from astrometricslib import (
     MeasurementReference,
     StarResultReference,
 )
+from wayfindinglib.analytics.result_quality.plain_text import format_plain, spectral_type_phrase
 from wayfindinglib.analytics.result_quality.rules import build_limit
 from wayfindinglib.models.quality.rule import QualityRule
 from wayfindinglib.models.quality.statements import (
@@ -123,6 +125,11 @@ STAR_RESULT_RULES: tuple[QualityRule, ...] = (
         wording=(
             "The best reference differs from this spectrum by {rms:.2f} (relative RMS), above {limit:.2f}."
         ),
+        plain_wording=(
+            "The best match looks like {type_phrase}, but it fits poorly ({rms:.2f}; a good match is under "
+            "{limit:.2f}). "
+            "Do not claim that type."
+        ),
         purpose="A poor match means the named spectral type should not be claimed.",
     ),
     QualityRule(
@@ -134,6 +141,12 @@ STAR_RESULT_RULES: tuple[QualityRule, ...] = (
         register_entry="SPE-18",
         confidence=Confidence.MEASURED,
         wording="Another class fits within {gap:.3f} (relative RMS) of the best one.",
+        plain_wording=(
+            "The spectrum looks like {type_phrase}, but a neighboring class fits almost as well (the "
+            "gap is only "
+            "{gap:.3f}). "
+            "Report the class as uncertain."
+        ),
         purpose="When the next class fits almost as well, the class letter itself is uncertain.",
     ),
     QualityRule(
@@ -142,16 +155,19 @@ STAR_RESULT_RULES: tuple[QualityRule, ...] = (
         register_entry=STAR_RESULT_ROW,
         confidence=Confidence.DESIGN_ESTIMATE,
         wording="No spectral type was found for this spectrum.",
+        plain_wording=("No spectral type could be found for this spectrum. The reason says what to try."),
         purpose="Says that the classifier named no type, and why.",
     ),
     QualityRule(
         name=SPECTRUM_USE_RESULT,
-        statement_kind=StatementKind.RECOMMENDATION,
-        action_class=ActionClass.DATA_SELECTION,
+        statement_kind=StatementKind.RESULT,
         limits=[_POOR_MATCH_LIMIT, _AMBIGUOUS_GAP_LIMIT],
         register_entry=STAR_RESULT_ROW,
         confidence=Confidence.DESIGN_ESTIMATE,
         wording="The best match is {spectral_type}, with a relative RMS of {rms:.2f}.",
+        plain_wording=(
+            "The spectrum looks like {type_phrase}; its fit score is {rms:.2f}, which is a good match."
+        ),
         purpose="Gives the number behind a spectral type that passed both checks.",
     ),
     QualityRule(
@@ -160,6 +176,7 @@ STAR_RESULT_RULES: tuple[QualityRule, ...] = (
         register_entry=STAR_RESULT_ROW,
         confidence=Confidence.DESIGN_ESTIMATE,
         wording="Whether more exposure would separate the best classes is not known.",
+        plain_wording=("We do not yet know whether a longer exposure would tell the closest classes apart."),
         purpose=(
             "Says that 'not reachable at this resolution' cannot be judged until the class gap is "
             "calibrated against the signal-to-noise ratio."
@@ -173,6 +190,10 @@ STAR_RESULT_RULES: tuple[QualityRule, ...] = (
         register_entry=STAR_RESULT_ROW,
         confidence=Confidence.DESIGN_ESTIMATE,
         wording="The {label} failed a check made on data it was not found from: {checks}.",
+        plain_wording=(
+            "The {label} failed a test on data it was not found from, so it may be a false alarm. "
+            "Do not rely on it yet."
+        ),
         purpose="A result that fails a held-out check is lowered a level, and the user should see which.",
     ),
     QualityRule(
@@ -183,6 +204,10 @@ STAR_RESULT_RULES: tuple[QualityRule, ...] = (
         register_entry=STAR_RESULT_ROW,
         confidence=Confidence.DESIGN_ESTIMATE,
         wording="The {label} has not been confirmed on data it was not found from.",
+        plain_wording=(
+            "The {label} has not been checked on separate data, so it may not be real. "
+            "Observe on another night to check it."
+        ),
         purpose="Too few nights to leave one out: the result stands, but it is unchecked.",
     ),
     QualityRule(
@@ -194,17 +219,24 @@ STAR_RESULT_RULES: tuple[QualityRule, ...] = (
         register_entry=STAR_RESULT_ROW,
         confidence=Confidence.DESIGN_ESTIMATE,
         wording="The data cover {cycles:.1f} cycles of the {label}; two are needed to show it repeats.",
+        plain_wording=(
+            "Your data cover only {cycles:.1f} cycles of the {label}, so it may just be a trend. "
+            "Two cycles show it repeats, so observe longer or on more nights."
+        ),
         purpose="A period seen for less than two cycles may be a trend.",
     ),
     QualityRule(
         name=PERIOD_USE_RESULT,
-        statement_kind=StatementKind.RECOMMENDATION,
-        action_class=ActionClass.DATA_SELECTION,
+        statement_kind=StatementKind.RESULT,
         register_entry=STAR_RESULT_ROW,
         confidence=Confidence.DESIGN_ESTIMATE,
         wording=(
             "The search found a {label} of {period:.4g} days; the chance that noise alone looks this "
             "strong is {probability:.2g}."
+        ),
+        plain_wording=(
+            "The search found a {label} of {period:.4g} days, with a false-alarm chance of about "
+            "{probability:.2g}."
         ),
         purpose="Gives the number behind a detected or possible period that passed every check.",
     ),
@@ -215,6 +247,10 @@ STAR_RESULT_RULES: tuple[QualityRule, ...] = (
         register_entry=STAR_RESULT_ROW,
         confidence=Confidence.DESIGN_ESTIMATE,
         wording="The search found no {label} stronger than noise would give.",
+        plain_wording=(
+            "The search found no clear {label}, so this star probably has none that these data can show. "
+            "Do not claim one."
+        ),
         purpose="A search with enough data that found nothing is a result: do not claim a period.",
     ),
     QualityRule(
@@ -223,6 +259,10 @@ STAR_RESULT_RULES: tuple[QualityRule, ...] = (
         register_entry=STAR_RESULT_ROW,
         confidence=Confidence.DESIGN_ESTIMATE,
         wording="The data cannot test for a {label}.",
+        plain_wording=(
+            "Your data may be too few or too short to test for a {label}. "
+            "Collect more measurements over a longer time."
+        ),
         purpose="Says that the measurements are too few or too short, and what the search reported.",
     ),
     QualityRule(
@@ -231,6 +271,7 @@ STAR_RESULT_RULES: tuple[QualityRule, ...] = (
         register_entry=STAR_RESULT_ROW,
         confidence=Confidence.DESIGN_ESTIMATE,
         wording="This star has no result to judge.",
+        plain_wording=("This star has no spectrum or period search yet. Run one to get a result."),
         purpose="Names the results that are missing, so the user knows what to run.",
     ),
 )
@@ -283,6 +324,7 @@ def _statement(
     reason: str,
     evidence: list[MeasurementReference],
     *,
+    plain_values: Mapping[str, Any] | None = None,
     proposed_note: str | None = None,
 ) -> TargetStatement:
     """Build a statement from a rule row.
@@ -297,6 +339,9 @@ def _statement(
         Why, or for missing data, what is missing.
     evidence : `list` [`MeasurementReference`]
         The statistics used.
+    plain_values : `Mapping` [`str`, `Any`], optional
+        The fields of the rule's plain template. The plain message is the
+        template filled with them.
     proposed_note : `str`, optional
         A short plain action for a warning or recommendation. It becomes the
         note of the proposed action.
@@ -314,8 +359,9 @@ def _statement(
         severity=rule.severity,
         action_class=rule.action_class,
         message=message,
+        plain_message=format_plain(rule, plain_values or {}),
         reason=reason,
-        proposed_action=ProposedAction(note=proposed_note) if proposed_note else None,
+        proposed_action=ProposedAction(note=proposed_note) if proposed_note and rule.action_class else None,
         evidence=evidence,
         limits=list(rule.limits),
         confidence=rule.confidence,
@@ -364,6 +410,11 @@ def judge_spectrum(star_id: str, spectroscopy: Any) -> list[TargetStatement]:
                 ),
                 "Do not claim the type: even the closest reference fits badly.",
                 [rms_reference],
+                plain_values={
+                    "type_phrase": spectral_type_phrase(spectral_type),
+                    "rms": rms,
+                    "limit": NO_GOOD_MATCH_RMS,
+                },
                 proposed_note=f"Do not report {spectral_type} as the star's type.",
             )
         )
@@ -378,6 +429,7 @@ def judge_spectrum(star_id: str, spectroscopy: Any) -> list[TargetStatement]:
                 ),
                 "The class letter is uncertain, not only the subtype.",
                 [rms_reference, _reference(star_id, run, "spectroscopy.rms_gap_to_next_class")],
+                plain_values={"type_phrase": spectral_type_phrase(spectral_type), "gap": gap},
                 proposed_note="Report the class as uncertain, with the neighbouring class.",
             )
         )
@@ -390,6 +442,7 @@ def judge_spectrum(star_id: str, spectroscopy: Any) -> list[TargetStatement]:
                 "The match is within the limit and the class is not ambiguous.",
                 [rms_reference]
                 + ([_reference(star_id, run, "spectroscopy.rms_gap_to_next_class")] if gap else []),
+                plain_values={"type_phrase": spectral_type_phrase(spectral_type), "rms": rms},
                 proposed_note=f"The type {spectral_type} may be used.",
             )
         )
@@ -440,6 +493,7 @@ def judge_period_search(
                 f"The data cannot test for a {search_label}.",
                 search.note or "The search reported too few or too short measurements.",
                 [verdict_reference],
+                plain_values={"label": search_label},
             )
         ]
     if verdict == "not_detected":
@@ -449,6 +503,7 @@ def judge_period_search(
                 f"The search found no {search_label} stronger than noise would give.",
                 search.note or "More nights, or longer exposures, may reveal a weaker signal.",
                 [verdict_reference],
+                plain_values={"label": search_label},
                 proposed_note=f"Do not report a {search_label} for this star.",
             )
         ]
@@ -474,6 +529,7 @@ def judge_period_search(
                 f"The {search_label} failed a check made on data it was not found from: {names}.",
                 "The pipeline lowered the verdict one level for each failed check.",
                 [*evidence, _reference(star_id, run_id, f"{metric_prefix}.verdict_checks")],
+                plain_values={"label": search_label},
                 proposed_note=f"Do not rely on this {search_label} until it passes the check.",
             )
         )
@@ -484,6 +540,7 @@ def judge_period_search(
                 f"The {search_label} has not been confirmed on data it was not found from.",
                 "Too few nights to leave one out, so the check could not be made.",
                 [*evidence, _reference(star_id, run_id, f"{metric_prefix}.unconfirmed")],
+                plain_values={"label": search_label},
                 proposed_note="Observe on another night so the result can be checked on held-out data.",
             )
         )
@@ -498,6 +555,7 @@ def judge_period_search(
                 ),
                 "A pattern seen for less than two cycles may be a trend.",
                 [*evidence, _reference(star_id, run_id, f"{metric_prefix}.cycles_observed")],
+                plain_values={"label": search_label, "cycles": cycles},
                 proposed_note="Observe over more cycles, on more nights.",
             )
         )
@@ -511,6 +569,7 @@ def judge_period_search(
                 ),
                 "The result passed every check that could be made.",
                 evidence,
+                plain_values={"label": search_label, "period": period, "probability": probability},
                 proposed_note=f"The {search_label} may be used, with its probability.",
             )
         )

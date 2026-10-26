@@ -40,6 +40,12 @@ repos:
         entry: ./build/hooks/check_commit_message.sh
         language: system
         stages: [commit-msg]
+      - id: stylelint
+        name: Stylelint (no raw colors, font sizes or radii outside theme.css)
+        entry: npx --no-install stylelint
+        language: system
+        files: ^ui/.*\.css$
+        types: [css]
       - id: documentation-rules
         name: Documentation Rules
         # The fast documentation tests: where content lives, the validation

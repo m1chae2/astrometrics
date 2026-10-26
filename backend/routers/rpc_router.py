@@ -128,6 +128,8 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "observatory:list_cameras": ("equipment_service", "list_camera_profiles"),
     "observatory:get_equipment_configuration": ("equipment_service", "get_equipment_configuration"),
     "observatory:set_active_camera": ("equipment_service", "set_active_camera"),
+    "observatory:get_active_telescope": ("equipment_service", "get_active_telescope"),
+    "observatory:set_active_telescope": ("equipment_service", "set_active_telescope"),
     "observatory:enter_monitoring_mode": ("equipment_service", "enter_monitoring_mode"),
     "observatory:enter_controller_mode": ("equipment_service", "enter_controller_mode"),
     # Ingestion of new frames
@@ -168,6 +170,7 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # metrics. Neither writes anything.
     "quality:query": ("astrometrics.quality", "query"),
     "quality:metrics": ("astrometrics.quality", "metrics"),
+    "quality:resolve_rows": ("astrometrics.quality", "resolve_rows"),
     # Photometry and spectroscopy analysis
     "analysis:analyze_image": ("analysis_orchestrator", "analyze_image"),
     "analysis:get_results": ("analysis_orchestrator", "get_analysis_results"),
@@ -237,14 +240,35 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "execution:abort_session": ("execution_service", "abort_session"),
     "execution:reconcile_session": ("execution_service", "reconcile_session"),
     "execution:record_divergence": ("execution_service", "record_divergence"),
-    # Night plan. `plan:get` reads (no `session_id` lists all). `plan:edit`
-    # and `plan:tick_checklist_item` write and send the `plan:changed` event;
+    # Night plan and observation packages. `plan:get` reads (no `session_id`
+    # lists all), `plan:list_packages` lists the package library and
+    # `plan:current_session` reads tonight's session. `plan:edit` and
+    # `plan:tick_checklist_item` write and send the `plan:changed` event;
+    # `plan:edit_package` and `plan:create_package` send `packages:changed`;
     # a stale `expected_revision` answers with the `conflict` error and the
     # current revision in its details. Writes, so the AI's read-only profile
     # withholds them.
     "plan:get": ("plan_service", "get_plan"),
+    "plan:current_session": ("plan_service", "current_session"),
+    "plan:list_packages": ("plan_service", "list_packages"),
+    "plan:package_for_target": ("plan_service", "package_for_target"),
+    "plan:create": ("plan_service", "create_plan"),
+    "plan:create_package": ("plan_service", "create_package"),
     "plan:edit": ("plan_service", "edit_plan"),
+    "plan:edit_package": ("plan_service", "edit_package"),
+    "plan:refresh_suggestions": ("plan_service", "refresh_suggestions"),
     "plan:tick_checklist_item": ("plan_service", "tick_checklist_item"),
+    # Quality advice and night history. Reads only; each kind has its own
+    # method so each reply has one type. The history reads register no job.
+    "advisory:target_report": ("advisory_service", "get_target_report"),
+    "advisory:tonight": ("advisory_service", "get_tonight_ranking"),
+    "advisory:result": ("advisory_service", "get_result_statements"),
+    "history:nights": ("advisory_service", "list_nights"),
+    "history:night_quality": ("advisory_service", "get_night_quality"),
+    "history:target_changes": ("advisory_service", "list_target_changes"),
+    "history:live_session_status": ("advisory_service", "get_live_session_status"),
+    "observatory:safety_status": ("advisory_service", "get_safety_status"),
+    "calibration:query": ("astrometrics.processing.calibration", "query"),
     # Sequencer queue
     "sequencer:get_queue": ("target_imaging_executor", "get_queue"),
     "sequencer:create_plan": ("target_imaging_executor", "create_plan"),

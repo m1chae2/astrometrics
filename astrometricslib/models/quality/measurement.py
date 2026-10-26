@@ -122,6 +122,9 @@ class QualityMeasurement(BaseModel):
         When the measurement was made. It must carry a time zone.
     row_id : `int` or `None`
         The store's row id. Filled only when the measurement is read back.
+    unit : `str` or `None`
+        The metric's unit from its declaration. Not stored:
+        `QualityRecords.query` fills it on a read.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -143,6 +146,7 @@ class QualityMeasurement(BaseModel):
     job_id: str | None = Field(default=None, alias="jobId")
     measured_at: datetime = Field(alias="measuredAt")
     row_id: int | None = Field(default=None, alias="rowId")
+    unit: str | None = None
 
     @field_validator("value", "uncertainty")
     @classmethod

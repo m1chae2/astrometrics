@@ -38,7 +38,7 @@ the changes and where each one landed. After the review, the new science metrics
 own plan, `QUALITY_SCIENCE_PLAN.md`.
 
 A second board (the same three roles plus a user-experience reviewer) reviewed this plan,
-`QUALITY_USE_CASES.md`, `QUALITY_SCIENCE_PLAN.md` and `UI_DISPLAY_PLAN.md` together later on
+`QUALITY_USE_CASES.md` and `QUALITY_SCIENCE_PLAN.md` together later on
 2026-10-17. All four approved with changes. Decisions 16 to 21 and Appendix B record the outcome.
 
 Phase 4 (issue #95, `wayfindinglib` judges quality and recommends) is built on branch
@@ -1271,9 +1271,9 @@ Readers of today's verdicts outside `astrometricslib`:
   the MCP tool names through `mcp_servers/astrometrics_core/definition.py`, the tool manifest and
   `mcp_servers/inventory/`. Phase 0 keeps this path; phase 1 changes it (decision 9).
 
-Cross-plan order: the Observation Execution phase of `UI_DISPLAY_PLAN.md` needs phases 2 and 4
-of this plan (frame measurements, then the night reads and the stored night plan). Its
-Observation Planner phase needs phase 4 (the report, the tonight ranking and the night plan).
+Cross-plan order: the night-session screens need phases 2 and 4 of this plan (frame measurements,
+then the night reads and the stored night plan), and the planning screens need phase 4 (the report,
+the tonight ranking and the night plan).
 
 Safeguards:
 
@@ -1298,7 +1298,7 @@ Safeguards:
    #94, `astrometricslib` measures everything the use cases need (phases 0 to 3 and the
    `QUALITY_SCIENCE_PLAN.md` metrics that back a use case); #95, `wayfindinglib` judgments,
    efficiency and recommendations (phase 4 and the result-quality rules); #96, the UI tier
-   (`UI_DISPLAY_PLAN.md`, the backend and the MCP servers); #97, cleanup across the layers (phases
+   (the displays in the user manual, the backend and the MCP servers); #97, cleanup across the layers (phases
    6 and 7). Each sub-issue takes several pull requests marked "Part of", and its last pull request
    closes it. Each has its own Analysis and Plan.
 7. **Data safety.** The new tables only add; existing table schemas do not change before phase 7.
@@ -1393,7 +1393,7 @@ the affected READMEs updated. Each phase is one pull request.
    - the typed night review and live status reads, the night list, the `row_ids` filter of
      `quality.query`, and their backend RPC methods;
    - regenerated UI types, and a data-quality panel on the target view in the desktop app
-     (`UI_DISPLAY_PLAN.md`, phase 0).
+     (phase 0 of the UI work).
 
    Phase 4 is large, so it may land as two pull requests: first efficiency, the rules and the
    target report; then the night reads, the stored night plan and the tonight ranking. Done when
@@ -1424,8 +1424,8 @@ the affected READMEs updated. Each phase is one pull request.
    field.
 
 Phases 2 and 3 can run at the same time once phase 1 is done. Phase 5 can start any time after
-phase 1. The Observation Execution phase of `UI_DISPLAY_PLAN.md` waits for phases 2 and 4, and its
-Observation Planner phase waits for phase 4 (section 8).
+phase 1. The night-session screens wait for phases 2 and 4, and the planning screens wait for phase 4
+(section 8).
 
 ### 9.1 How issues #95 to #97 are run (lessons of #94, 2026-10-24)
 
@@ -1526,7 +1526,7 @@ date changes at local noon, so a one-hour shift stays in daylight (section 11).
 ## Appendix B. Review board changes (second review)
 
 The second board met on 2026-10-17 and reviewed this plan with `QUALITY_USE_CASES.md`,
-`QUALITY_SCIENCE_PLAN.md` and `UI_DISPLAY_PLAN.md`. The rows below are the findings that touched
+`QUALITY_SCIENCE_PLAN.md` and the UI display plan. The rows below are the findings that touched
 this plan. The user's decisions from the review are decisions 16 and 17; the settled architecture
 points are decisions 18 to 21.
 

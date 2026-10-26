@@ -34,6 +34,7 @@ from wayfindinglib.models.equipment_and_site.focus_model import FocusModel
 from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCalibration
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
 from wayfindinglib.models.planning.observation_package import ObservationPackage
+from wayfindinglib.models.planning.suggestion_log import SuggestionLogEntry
 from wayfindinglib.models.policy.commissioning import CommissioningRun
 from wayfindinglib.models.policy.delegation import DelegationPolicy
 from wayfindinglib.models.policy.safety import SafetyRuleSet
@@ -51,6 +52,7 @@ from wayfindinglib.models.session.telemetry import GuidingSpectrumAnalysis
 _DATASET_TYPES: dict[str, tuple[str, type]] = {
     "observation_session": ("wayfinding_observation_sessions", ObservationSession),
     "observation_package": ("observation_packages", ObservationPackage),
+    "package_suggestion_event": ("package_suggestion_events", SuggestionLogEntry),
     "site_profile": ("site_profiles", SiteProfile),
     "enclosure": ("enclosures", Enclosure),
     "guider_calibration": ("guider_calibrations", GuiderCalibration),
@@ -146,6 +148,28 @@ def _merge_planning_fields(session: ObservationSession, stored: ObservationSessi
     # Entries Planning removed: keep only those Execution has started.
     merged.extend(entry for entry in local_by_id.values() if entry.status != QueueEntryStatus.PENDING)
     session.queue[:] = merged
+
+
+def pick_session_for_night(sessions: list[ObservationSession]) -> ObservationSession | None:
+    """Choose the one session that stands for a night.
+
+    A night should have one session. Older data can hold several. The one
+    with the most queue entries wins. When entries tie, the newest session
+    (by its creation time) wins.
+
+    Parameters
+    ----------
+    sessions : `list` [`ObservationSession`]
+        The sessions recorded for one night.
+
+    Returns
+    -------
+    session : `ObservationSession` or `None`
+        The winner, or `None` when the list is empty.
+    """
+    if not sessions:
+        return None
+    return max(sessions, key=lambda session: (len(session.queue), session.created_at))
 
 
 def _wayfinding_library_path(app_config: Any) -> Path:
@@ -393,6 +417,144 @@ class DiskButler(AbstractButler):
                 return False
             # A locked or broken database is a real failure; do not hide it.
             raise
+        finally:
+            connection.close()
+
+    def insert_session_for_night(self, session: ObservationSession) -> ObservationSession:
+        """Store a new session unless its night already has one.
+
+        The check and the insert are one database transaction, so two
+        callers cannot both add a session for the same night. When the night
+        already has sessions, nothing is written and the winner
+        (`pick_session_for_night`) is returned.
+
+        Parameters
+        ----------
+        session : `ObservationSession`
+            The session to store when its night has none.
+
+        Returns
+        -------
+        stored : `ObservationSession`
+            The session now standing for that night: `session` itself when it
+            was stored, otherwise the one already there.
+        """
+        connection = connect_db(str(self.library_path / "wayfinding.db"))
+        try:
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS wayfinding_observation_sessions "
+                "(id TEXT PRIMARY KEY, data_json TEXT)"
+            )
+            connection.commit()
+            connection.execute("BEGIN IMMEDIATE")
+            rows = connection.execute("SELECT data_json FROM wayfinding_observation_sessions").fetchall()
+            same_night = [
+                stored
+                for stored in (
+                    ObservationSession.model_validate(json.loads(row["data_json"])) for row in rows
+                )
+                if stored.night_date == session.night_date
+            ]
+            existing = pick_session_for_night(same_night)
+            if existing is not None:
+                connection.rollback()
+                return existing
+            payload = safe_json_dumps(session.model_dump(mode="json", by_alias=True))
+            connection.execute(
+                "INSERT INTO wayfinding_observation_sessions (id, data_json) VALUES (?, ?)",
+                (session.id, payload),
+            )
+            connection.commit()
+        except BaseException:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+        return session
+
+    def put_package_if_revision(self, package: ObservationPackage, expected_revision: int) -> bool:
+        """Write a package only if it has not changed since it was read.
+
+        Works like `put_session_if_revision`: the check and the write are one
+        SQLite ``UPDATE``. A package stored before packages had a revision
+        counts as revision 0.
+
+        Parameters
+        ----------
+        package : `ObservationPackage`
+            The package to store, already carrying its new revision.
+        expected_revision : `int`
+            The revision the caller read.
+
+        Returns
+        -------
+        written : `bool`
+            `True` when the package was stored. `False` when the stored
+            revision was no longer `expected_revision`, or no such package is
+            stored.
+
+        Raises
+        ------
+        sqlite3.OperationalError
+            For a database error other than a missing table, such as a locked
+            file.
+        """
+        # Reading first makes sure the table exists.
+        self._generic.get("observation_package", {"id": package.id})
+        payload = safe_json_dumps(package.model_dump(mode="json", by_alias=True))
+        connection = connect_db(str(self.library_path / "wayfinding.db"))
+        try:
+            cursor = connection.execute(
+                "UPDATE observation_packages SET data_json = ? WHERE id = ? "
+                "AND COALESCE(json_extract(data_json, '$.revision'), 0) = ?",
+                (payload, package.id, expected_revision),
+            )
+            connection.commit()
+            return cursor.rowcount == 1
+        except sqlite3.OperationalError as error:
+            if "no such table" in str(error):
+                return False
+            raise
+        finally:
+            connection.close()
+
+    def delete_package(
+        self, package_id: str, *, expected_revision: int | None = None, only_status: str | None = None
+    ) -> bool:
+        """Remove one observation package from the library.
+
+        With `expected_revision` or `only_status`, the check and the delete
+        are one SQLite statement, so a package that was edited or promoted
+        in the meantime is not removed.
+
+        Parameters
+        ----------
+        package_id : `str`
+            The package id.
+        expected_revision : `int`, optional
+            Delete only if the stored revision is this one.
+        only_status : `str`, optional
+            Delete only if the stored status is this one, such as
+            ``"SUGGESTED"``.
+
+        Returns
+        -------
+        deleted : `bool`
+            `True` when a package was removed, `False` when none had that id
+            (or the revision or status check failed).
+        """
+        # Reading first makes sure the table exists.
+        self._generic.get("observation_package", {"id": package_id})
+        connection = connect_db(str(self.library_path / "wayfinding.db"))
+        try:
+            cursor = connection.execute(
+                "DELETE FROM observation_packages WHERE id = ? "
+                "AND (? IS NULL OR COALESCE(json_extract(data_json, '$.revision'), 0) = ?) "
+                "AND (? IS NULL OR json_extract(data_json, '$.status') = ?)",
+                (package_id, expected_revision, expected_revision, only_status, only_status),
+            )
+            connection.commit()
+            return cursor.rowcount == 1
         finally:
             connection.close()
 

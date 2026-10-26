@@ -21,9 +21,11 @@ things are the same in all three, so they live here:
   shape and names its register row.
 """
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
+from typing import Any
 
 from astrometricslib import LimitTier, MeasurementReference, QualityLimit
+from wayfindinglib.analytics.result_quality.plain_text import format_plain
 from wayfindinglib.analytics.result_quality.session_rules import SESSION_RULES_BY_NAME
 from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
 from wayfindinglib.models.quality.statements import (
@@ -169,6 +171,8 @@ def session_statement(
     limits: Iterable[QualityLimit] = (),
     values: dict[str, float | str | None] | None = None,
     proposed_action: ProposedAction | None = None,
+    plain_values: Mapping[str, Any] | None = None,
+    plain_message: str | None = None,
 ) -> TargetStatement:
     """Build a statement from its row of the session rule table.
 
@@ -195,6 +199,12 @@ def session_statement(
         such as guide-log values and counts.
     proposed_action : `ProposedAction` or `None`, optional
         The values proposed, when the statement proposes some.
+    plain_values : `Mapping` [`str`, `Any`], optional
+        Fields for the row's plain template beyond ``values``.
+    plain_message : `str` or `None`, optional
+        The plain message, when the caller writes it itself (the row's
+        template does not fit this use of the row). Otherwise the row's
+        plain template is filled from ``values`` and ``plain_values``.
 
     Returns
     -------
@@ -203,12 +213,15 @@ def session_statement(
 
     """
     rule = SESSION_RULES_BY_NAME[rule_name]
+    if plain_message is None:
+        plain_message = format_plain(rule, {**(values or {}), **(plain_values or {})})
     return TargetStatement(
         rule=rule.name,
         kind=rule.statement_kind,
         severity=rule.severity,
         action_class=rule.action_class,
         message=message,
+        plain_message=plain_message,
         reason=reason,
         proposed_action=proposed_action,
         evidence=list(evidence),

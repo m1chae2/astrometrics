@@ -136,6 +136,24 @@ describe('chart settings are all known to Plotly', () => {
     expect(plot.config.displayModeBar).toBe(false);
   });
 
+  /** The night altitude chart: shaded bands with labels, a limit line and local time. */
+  it('TimeSeriesPlot with bands and a reference line', async () => {
+    render(
+      <TimeSeriesPlot
+        data={[{ name: 'Altitude', color: '#00ffff', values: [30, 60], timestamps: [1700000000, 1700003600] }]}
+        yLabel="deg"
+        yRange={[-30, 90]}
+        bands={[{ start: 1700000000, end: 1700001800, label: 'Usable', color: '#34c759' }]}
+        referenceLines={[{ y: 30, label: 'Altitude limit 30 deg', color: '#ffb300' }]}
+        localTime
+      />
+    );
+    const plot = await lastPlot();
+    expect(problemsWith(plot)).toEqual([]);
+    expect(plot.layout.shapes).toHaveLength(2);
+    expect(plot.layout.annotations).toHaveLength(2);
+  });
+
   /** The guiding bullseye chart with its three target circles. */
   it('ScatterPlot with bullseye circles', async () => {
     render(<ScatterPlot data={[{ x: [0.5], y: [-0.5], name: 'Guide Error', color: '#ffffff' }]} xRange={[5, -5]} yRange={[-5, 5]} showCircles />);

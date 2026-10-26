@@ -34,7 +34,7 @@ Every file starts with a description block, and every class, function, method an
 The rules for writing and placing documentation are in [Documentation conventions](documentation/Documentation_Conventions.md), and [About these docs](documentation/About_These_Docs.md) maps every document.
 
 - **Where content lives.** Theory goes in the architecture paper, code names and tuned values in the implementation paper, and evidence in the validation register under `documentation/library_design/validation/`.
-- **Generated files.** The pipeline review guides and `Pipeline_Audit_Report.md` are generated. Edit the generators in `build/documentation/` and run them again. Never edit the output by hand.
+- **Generated files.** The pipeline review guides are generated. Edit the generators in `build/documentation/` and run them again. Never edit the output by hand.
 - **Register workflow.** Changing a tuned value or its method means updating its register entry. See the [how-to guides](documentation/how_to/change_a_tuned_value.md).
 - **Checks.** Run the documentation tests:
 

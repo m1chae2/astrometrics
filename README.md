@@ -35,7 +35,7 @@ The desktop application provides 6 primary display workspaces:
 - **Astronomy Manager**: Measure star brightness over time (photometry), search for exoplanet transits, and extract and calibrate 1D star spectra.
 - **Planetarium**: Explore an interactive 3D sky map, view camera field-of-view outlines, and command telescope slews to target objects.
 - **Observatory Manager**: Monitor and control telescope mounts, focusers, filter wheels, autoguiders, and weather safety sensors.
-- **Observation Manager**: Plan exposure sequences, check target visibility across the night, author mosaic grids, and run automated imaging queues.
+- **Observation Planner**: Plan the night: see the quality of a target's data, the altitude chart and tonight's candidates, and keep the stored night plan with its checklist and Ekos summary.
 
 ---
 
@@ -78,7 +78,7 @@ The full documentation is published at **[astrometrics.readthedocs.io](https://a
 * **How-to guides.** Task recipes in [`documentation/how_to/`](documentation/how_to/tune_for_your_setup.md), such as tuning the tool for your setup.
 * **Explanation.** The [Astrometrics library architecture](documentation/library_design/Astrometrics_Library_Architecture.md) and [Wayfinding library architecture](documentation/library_design/Wayfinding_Library_Architecture.md) papers, and the [pipeline review guides](documentation/library_design/pipelines/index.md).
 * **Reference.** The Python API reference and the [Astrometrics](documentation/library_design/Astrometrics_Library_Implementation.md) and [Wayfinding](documentation/library_design/Wayfinding_Library_Implementation.md) implementation papers.
-* **Evidence.** The [validation register](documentation/library_design/validation/index.md) and the [pipeline audit report](documentation/library_design/Pipeline_Audit_Report.md).
+* **Evidence.** The [validation register](documentation/library_design/validation/index.md).
 
 To contribute, read [CONTRIBUTING.md](CONTRIBUTING.md).
 

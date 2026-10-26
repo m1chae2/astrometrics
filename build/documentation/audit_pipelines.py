@@ -540,18 +540,29 @@ def generate_markdown_report(
     output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     """Run the pipeline audit and print summary to stdout.
+
+    Parameters
+    ----------
+    argv : `list` [`str`] or `None`
+        Command line arguments. Supports ``--write-report`` and ``--output``.
 
     Returns
     -------
     exit_code : `int`
         0 if successful, 1 if broken links or conformance failures occur.
     """
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Audit pipeline implementation references.")
+    parser.add_argument("--write-report", action="store_true", help="Write Markdown report to documentation.")
+    parser.add_argument("--output", type=Path, default=None, help="Custom output path for the report.")
+    args = parser.parse_args(argv)
+
     repo_root = Path(__file__).resolve().parents[2]
     arch_doc = repo_root / "documentation" / "library_design" / "Astrometrics_Library_Architecture.md"
     impl_doc = repo_root / "documentation" / "library_design" / "Astrometrics_Library_Implementation.md"
-    report_output = repo_root / "documentation" / "library_design" / "Pipeline_Audit_Report.md"
 
     for doc in (arch_doc, impl_doc):
         if not doc.exists():
@@ -572,35 +583,34 @@ def main() -> int:
     parameter_rows = extract_parameter_table_rows(impl_doc)
     print(f"  Extracted {len(parameter_rows)} parameter definitions.")
 
-    print(f"Writing audit report to {report_output}...")
-    generate_markdown_report(refs, pipeline_structs, parameter_rows, report_output)
-    print("Audit report generated successfully.")
+    output_path = args.output or (
+        repo_root / "documentation" / "library_design" / "Pipeline_Audit_Report.md"
+        if args.write_report
+        else None
+    )
+    if output_path:
+        print(f"Writing audit report to {output_path}...")
+        generate_markdown_report(refs, pipeline_structs, parameter_rows, output_path)
+        print("Audit report generated successfully.")
 
     broken = [r for r in refs if not r.resolved]
     if broken:
         print("\nBroken references detected:")
         for b in broken:
             print(f"  - {b.dotted_path}: {b.error_message}")
+        return 1
     return 0
 
 
 def generate_audit_report_sphinx(app: Any) -> None:
-    """Generate pipeline audit report during Sphinx build.
+    """Validate pipeline implementation references during Sphinx build.
 
     Parameters
     ----------
     app : `Any`
         The Sphinx application instance.
     """
-    doc_dir = Path(app.srcdir)
-    arch_doc = doc_dir / "library_design" / "Astrometrics_Library_Architecture.md"
-    impl_doc = doc_dir / "library_design" / "Astrometrics_Library_Implementation.md"
-    report_output = doc_dir / "library_design" / "Pipeline_Audit_Report.md"
-    if arch_doc.exists() and impl_doc.exists():
-        refs = extract_implementation_references(arch_doc, impl_doc)
-        pipeline_structs = audit_pipeline_structures()
-        parameter_rows = extract_parameter_table_rows(impl_doc)
-        generate_markdown_report(refs, pipeline_structs, parameter_rows, report_output)
+    pass
 
 
 def setup(app: Any) -> dict[str, Any]:

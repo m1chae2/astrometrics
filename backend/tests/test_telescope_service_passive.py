@@ -7,13 +7,17 @@ import pytest
 
 def test_infer_target_at_coordinates() -> None:
     """Match the mount position to the nearest target within 1 degree."""
+    from astrometricslib import TargetQueryResult
     from backend.services.observatory.telescope_service import TelescopeService
 
     target_service_mock = MagicMock()
     targets = target_service_mock.astrometrics.targets
+    # The library replies with a TargetQueryResult model, not a dict.
     targets.query.side_effect = [
-        {"targets": [{"id": "M 27", "common_name": None, "separation_deg": 0.3}]},
-        {"targets": []},
+        TargetQueryResult(
+            detail="summary", targets=[{"id": "M 27", "common_name": None, "separation_deg": 0.3}]
+        ),
+        TargetQueryResult(detail="summary", targets=[]),
     ]
 
     service = TelescopeService(target_service=target_service_mock)
@@ -23,8 +27,10 @@ def test_infer_target_at_coordinates() -> None:
     asked = targets.query.call_args_list[0].kwargs
     assert asked["radius_deg"] == pytest.approx(1.0)
     assert asked["sort"] == "separation"
-    assert asked["ra"] == pytest.approx(300.25)
-    assert asked["dec"] == pytest.approx(22.7667, abs=1e-3)
+    # The region search takes ra_deg / dec_deg (TargetCatalog.query).
+    assert set(asked) == {"ra_deg", "dec_deg", "radius_deg", "include_empty", "sort", "limit"}
+    assert asked["ra_deg"] == pytest.approx(300.25)
+    assert asked["dec_deg"] == pytest.approx(22.7667, abs=1e-3)
 
     # Coordinates far from every target (e.g. Vega)
     assert service._infer_target_at_coordinates("18h 36m 56s", "+38° 47′ 01″") is None

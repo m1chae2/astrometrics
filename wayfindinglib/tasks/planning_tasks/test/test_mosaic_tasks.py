@@ -191,3 +191,53 @@ def test_a_non_finite_rotation_is_refused() -> None:
         calculate_panels(
             object(), "10:00:00", "+30:00:00", 1, 1, 0.0, _equipment(), rotation_deg=float("nan")
         )
+
+
+def test_corners_at_zero_rotation_form_the_field_of_view_around_the_center() -> None:
+    """With no rotation at declination 0, corners sit half a field away."""
+    equipment = _equipment()
+    (panel,) = calculate_panels(None, "180", "0", 1, 1, 0.0, equipment)
+    half_width = equipment.fov_width_deg / 2.0
+    half_height = equipment.fov_height_deg / 2.0
+    expected = [
+        (180.0 - half_width, -half_height),
+        (180.0 + half_width, -half_height),
+        (180.0 + half_width, half_height),
+        (180.0 - half_width, half_height),
+    ]
+    assert len(panel.corners) == 4
+    for corner, (expected_ra, expected_dec) in zip(panel.corners, expected, strict=True):
+        assert corner.ra_deg == pytest.approx(expected_ra, abs=1e-3)
+        assert corner.dec_deg == pytest.approx(expected_dec, abs=1e-9)
+
+
+def test_corners_at_ninety_degrees_swap_the_field_axes() -> None:
+    """At 90 degrees the field height runs along right ascension."""
+    equipment = _equipment()
+    (panel,) = calculate_panels(None, "180", "0", 1, 1, 0.0, equipment, rotation_deg=90.0)
+    half_width = equipment.fov_width_deg / 2.0
+    half_height = equipment.fov_height_deg / 2.0
+    lower_left = panel.corners[0]
+    assert lower_left.ra_deg == pytest.approx(180.0 - half_height, abs=1e-3)
+    assert lower_left.dec_deg == pytest.approx(half_width, abs=1e-9)
+    assert panel.rotation_convention.startswith("Degrees east of north")
+
+
+def test_corners_of_a_rotated_panel_stay_a_rectangle_around_the_panel_center() -> None:
+    """Corners average to the center; opposite ones span the diagonal."""
+    import math
+
+    equipment = _equipment()
+    panels = calculate_panels(None, "100", "10", 2, 2, 10.0, equipment, rotation_deg=37.0)
+    diagonal = math.hypot(equipment.fov_width_deg, equipment.fov_height_deg)
+    for panel in panels:
+        mean_ra = sum(corner.ra_deg for corner in panel.corners) / 4.0
+        mean_dec = sum(corner.dec_deg for corner in panel.corners) / 4.0
+        assert mean_ra == pytest.approx(panel.ra_deg, abs=1e-2)
+        assert mean_dec == pytest.approx(panel.dec_deg, abs=1e-2)
+        first, third = panel.corners[0], panel.corners[2]
+        separation = math.hypot(
+            (third.ra_deg - first.ra_deg) * math.cos(math.radians(panel.dec_deg)),
+            third.dec_deg - first.dec_deg,
+        )
+        assert separation == pytest.approx(diagonal, rel=1e-2)

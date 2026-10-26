@@ -16,3 +16,14 @@
 .empty-state__text {
   line-height: 1.4;
 }
+
+.manager__retry-btn {
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: var(--section-label-size);
+  color: inherit;
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}

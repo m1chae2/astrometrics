@@ -15,6 +15,7 @@ cannot be met, and return a typed result otherwise.
 """
 
 import logging
+import math
 import os
 from collections.abc import Callable
 from contextlib import AbstractContextManager
@@ -73,12 +74,100 @@ __all__ = ["CalibrationCatalog", "ProcessingPipelines"]
 _CalibrationKind = Literal["dark", "bias", "flat"]
 _CALIBRATION_KINDS: tuple[str, ...] = ("dark", "bias", "flat")
 
-CALIBRATION_DETAILS = ("counts", "target_match", "target_frames")
+CALIBRATION_DETAILS = ("counts", "target_match", "target_frames", "match")
 _CALIBRATION_ARGUMENTS = {
     "counts": ("kind",),
     "target_match": ("target", "camera_id"),
     "target_frames": ("target",),
+    "match": ("kind", "camera_id", "gain", "offset", "binning", "temperature_c"),
 }
+
+
+def _calibration_row_key(kind: str, row: dict[str, Any]) -> str:
+    """Make the stable key of one calibration counts row.
+
+    Parameters
+    ----------
+    kind : `str`
+        ``"dark"``, ``"bias"`` or ``"flat"``.
+    row : `dict` [`str`, `Any`]
+        The counts row from `CalibrationLibrary.get_stats`.
+
+    Returns
+    -------
+    key : `str`
+        The kind, camera, filter, gain, offset, binning, temperature and
+        exposure joined with ``|``. Two rows never share a key.
+    """
+    parts = [
+        kind,
+        row.get("camera"),
+        row.get("filter"),
+        row.get("iso"),
+        row.get("offset"),
+        row.get("binning"),
+        row.get("temperature_c"),
+        row.get("exposure"),
+    ]
+    return "|".join("" if part is None else str(part) for part in parts)
+
+
+def _calibration_row_matches(
+    kind: str,
+    row: dict[str, Any],
+    camera_id: str,
+    gain: Any,
+    offset: float | None,
+    binning: Any,
+    temperature_c: float | None,
+) -> bool:
+    """Tell whether a counts row has the asked settings.
+
+    Parameters
+    ----------
+    kind : `str`
+        The row's kind.
+    row : `dict` [`str`, `Any`]
+        The counts row.
+    camera_id : `str`
+        The camera, matched ignoring case.
+    gain, offset, binning, temperature_c : optional
+        The settings to match. A setting left as `None` is not compared.
+        Gains match as numbers when both are numbers. Binning is written in
+        the library's standard form first, so ``"2"`` equals ``"2x2"``. The
+        temperature is turned into the library's temperature slot, and only
+        darks are compared on it, since only darks are filed by temperature.
+
+    Returns
+    -------
+    matches : `bool`
+        `True` when every given setting matches.
+    """
+    from astrometricslib.drivers.calibration_library import (
+        DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+        normalize_binning,
+        temperature_slot_c,
+    )
+
+    if str(row.get("camera", "")).strip().casefold() != camera_id.strip().casefold():
+        return False
+    if gain is not None:
+        try:
+            gain_matches = math.isclose(float(row.get("iso")), float(gain))
+        except TypeError, ValueError:
+            gain_matches = str(row.get("iso")).strip() == str(gain).strip()
+        if not gain_matches:
+            return False
+    if offset is not None and not math.isclose(float(row.get("offset") or 0.0), float(offset)):
+        return False
+    if binning is not None and normalize_binning(row.get("binning")) != normalize_binning(binning):
+        return False
+    return not (
+        kind == "dark"
+        and temperature_c is not None
+        and row.get("temperature_c")
+        != temperature_slot_c(temperature_c, DEFAULT_DARK_TEMPERATURE_TOLERANCE_C)
+    )
 
 
 class CalibrationCatalog:
@@ -130,12 +219,18 @@ class CalibrationCatalog:
         target: str | Target | None = None,
         camera_id: str | None = None,
         refresh: bool = False,
+        gain: str | int | float | None = None,
+        offset: float | None = None,
+        binning: str | int | None = None,
+        temperature_c: float | None = None,
     ) -> CalibrationQueryResult:
         """Report on the calibration library. Nothing is written.
 
         Arguments used by each detail (any other argument is refused):
 
         - ``"counts"``: ``kind``.
+        - ``"match"``: ``camera_id`` (needed), ``kind``, ``gain``, ``offset``,
+          ``binning`` and ``temperature_c``.
         - ``"target_match"``: ``target`` (needed) and ``camera_id``.
         - ``"target_frames"``: ``target`` (needed).
 
@@ -152,10 +247,18 @@ class CalibrationCatalog:
             gain and exposure, each with how many darks match it.
             ``"target_frames"``: a target's light frames counted by
             telescope, camera, gain, exposure and filter.
+            ``"match"``: the ``counts`` rows that have the asked camera,
+            kind and settings, as `matched_row_keys`.
         target : `str` or `Target`, optional
             The target, for the target details.
         camera_id : `str`, optional
-            For ``"target_match"``, only frames from this camera.
+            For ``"target_match"``, only frames from this camera. For
+            ``"match"``, the camera to match (ignoring case).
+        gain, offset, binning, temperature_c : optional
+            For ``"match"``, the settings a row must have. Left out, a
+            setting is not compared. Binning ``"2"`` and ``"2x2"`` are the
+            same. The temperature is compared by the library's temperature
+            slot, and only for darks.
         refresh : `bool`, optional
             Read the calibration index from disk again first, so files
             another program added are counted. This replaces the copy in
@@ -180,17 +283,51 @@ class CalibrationCatalog:
         reject_unused_arguments(
             detail,
             _CALIBRATION_ARGUMENTS,
-            {"kind": kind is not None, "target": target is not None, "camera_id": camera_id is not None},
+            {
+                "kind": kind is not None,
+                "target": target is not None,
+                "camera_id": camera_id is not None,
+                "gain": gain is not None,
+                "offset": offset is not None,
+                "binning": binning is not None,
+                "temperature_c": temperature_c is not None,
+            },
         )
         if refresh:
             self.library.load_library()
-        if detail == "counts":
+        if detail in ("counts", "match"):
             stats = self.library.get_stats()
             wanted = {"dark": "darks", "bias": "biases", "flat": "flats"}
-            rows = {key: stats.get(key, []) for key in wanted.values()}
+            keyed = {
+                key: [{**row, "row_key": _calibration_row_key(label, row)} for row in stats.get(key, [])]
+                for label, key in wanted.items()
+            }
+            totals: dict[str, dict[str, Any]] = {}
+            for label, key in wanted.items():
+                for row in keyed[key]:
+                    entry = totals.setdefault(
+                        row["camera"],
+                        {"camera": row["camera"], "dark_count": 0, "bias_count": 0, "flat_count": 0},
+                    )
+                    entry[f"{label}_count"] += int(row.get("count") or 0)
+            camera_totals = sorted(totals.values(), key=lambda entry: str(entry["camera"]).casefold())
+            if detail == "match":
+                if camera_id is None:
+                    raise InvalidArgumentError("detail='match' needs a camera_id.")
+                matched = [
+                    row["row_key"]
+                    for label, key in wanted.items()
+                    if kind in (None, label)
+                    for row in keyed[key]
+                    if _calibration_row_matches(label, row, camera_id, gain, offset, binning, temperature_c)
+                ]
+                return CalibrationQueryResult(
+                    detail=detail, kind=kind, camera_totals=camera_totals, matched_row_keys=matched
+                )
+            rows = keyed
             if kind is not None:
                 rows = {wanted[kind]: rows[wanted[kind]]}
-            return CalibrationQueryResult(detail=detail, kind=kind, **rows)
+            return CalibrationQueryResult(detail=detail, kind=kind, camera_totals=camera_totals, **rows)
         if target is None:
             raise InvalidArgumentError(f"detail={detail!r} needs a target.")
         resolved = resolve_target(self._targets, target)

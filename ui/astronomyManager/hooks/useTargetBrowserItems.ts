@@ -58,5 +58,8 @@ export const useTargetBrowserItems = () => {
         });
     }, [targets, targetDataAvailability, isAvailabilityLoading, filterText]);
 
-    return { items, filterText, setFilterText, isLoading: targetListQuery.isLoading };
+    return { items, filterText, setFilterText, isLoading: targetListQuery.isLoading,
+        isError: targetListQuery.isError,
+        retry: () => { void targetListQuery.refetch(); },
+    };
 };

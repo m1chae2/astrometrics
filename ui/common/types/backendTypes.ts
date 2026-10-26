@@ -1510,6 +1510,16 @@ export interface CalibrationStats {
 }
 
 /**
+ * One corner of a panel, as a point on the sky.
+ */
+export interface SkyCorner {
+  /** Right ascension, in degrees. */
+  ra_deg: number;
+  /** Declination, in degrees. */
+  dec_deg: number;
+}
+
+/**
  * One panel of a mosaic grid and where its center is.
  */
 export interface MosaicPanel {
@@ -1529,6 +1539,10 @@ export interface MosaicPanel {
   panel_id: string;
   /** How far the camera is turned, in degrees east of north (the way Ekos and KStars give it). 0 puts the grid rows along declination and the columns along right ascension. */
   rotation_deg?: number;
+  /** What `rotation_deg` means, in words, for display. */
+  rotation_convention?: string;
+  /** The four corners of the panel's field of view, in drawing order: lower left, lower right, upper right, upper left of the camera image. Empty when the field of view is not known. */
+  corners?: SkyCorner[];
 }
 
 /**
@@ -2507,6 +2521,9 @@ export interface MeasurementReference {
  * When the measurement was made. It must carry a time zone.
  * row_id : `int` or `None`
  * The store's row id. Filled only when the measurement is read back.
+ * unit : `str` or `None`
+ * The metric's unit from its declaration. Not stored:
+ * `QualityRecords.query` fills it on a read.
  */
 export interface QualityMeasurement {
   metric: string;
@@ -2526,6 +2543,50 @@ export interface QualityMeasurement {
   jobId?: string | null;
   measuredAt: string;
   rowId?: number | null;
+  unit?: string | null;
+}
+
+/**
+ * The file behind one stored quality row.
+ *
+ * Parameters
+ * ----------
+ * row_id : `int`
+ * The store's row id, as the caller gave it.
+ * level : `str`
+ * ``"frame"``, ``"stack"`` or ``"run"``.
+ * target_id : `str` or `None`
+ * The target the row belongs to.
+ * subject_id : `str`
+ * The row's stable subject id.
+ * path : `str` or `None`
+ * The picture's file path, in the form the app's image reads accept.
+ * `None` when the row has no picture or it could not be found.
+ * reason : `str`
+ * Why `path` is `None`. Empty when a path is given.
+ */
+export interface QualityRowFile {
+  rowId: number;
+  level: string;
+  targetId?: string | null;
+  subjectId: string;
+  path?: string | null;
+  reason?: string;
+}
+
+/**
+ * The answer to "which pictures do these rows describe?".
+ *
+ * Parameters
+ * ----------
+ * rows : `list` [`QualityRowFile`]
+ * One entry for each row id that was found, in the order asked.
+ * not_found_row_ids : `list` [`int`]
+ * The ids that no stored row has, in the order asked.
+ */
+export interface QualityRowResolution {
+  rows?: QualityRowFile[];
+  notFoundRowIds?: number[];
 }
 
 /**
@@ -2752,6 +2813,175 @@ export interface ObservationSession {
 }
 
 /**
+ * A stored session plus its progress, as `get_plan` returns it.
+ *
+ * The progress is worked out on each read and is not part of the stored
+ * session. Do not write this object back.
+ */
+export interface ObservationSessionWithProgress {
+  id: string;
+  nightDate: string;
+  status?: SessionStatus;
+  statusDetail?: string;
+  siteProfileId: string;
+  telescopeId: string;
+  cameraId: string;
+  queue?: QueuedObservationPackage[];
+  unplacedPackageDiagnostics?: InfeasibilityReason[];
+  divergenceRecords?: DivergenceRecord[];
+  faultRecords?: FaultRecord[];
+  meridianFlips?: MeridianFlipOutcome[];
+  targetSessionIds?: string[];
+  guidingSamples?: GuidingSample[];
+  weatherSamples?: WeatherSample[];
+  createdAt?: string;
+  closedAt?: string | null;
+  checklist?: ChecklistItem[];
+  framing?: Framing | null;
+  /** Counts the plan writes. Starts at 0. */
+  revision?: number;
+  progress?: SessionProgress | null;
+}
+
+/**
+ * A reusable imaging request for one target.
+ *
+ * `target_id` references an existing `astrometricslib.models.target.Target`
+ * by identifier only, never embedded -- resolved live at placement
+ * time, never cached (`Wayfinding_Library_Architecture.md` Section 3.3,
+ * "Live target resolution").
+ */
+export interface ObservationPackage {
+  id: string;
+  name: string;
+  target_id: string;
+  exposure_requests?: ExposureRequest[];
+  dither_config?: DitherConfig | null;
+  minimum_altitude_deg?: number | null;
+  priority?: number;
+  quality_weighting_enabled?: boolean;
+  notes?: string;
+  created_at?: string;
+  /** Planned, suggested by the library, or complete. */
+  status?: PackageStatus;
+  /** Counts the package writes. Starts at 0. A stale edit is refused. */
+  revision?: number;
+  /** Why the library suggested this package. None for one made by hand. */
+  suggestion?: PackageSuggestion | null;
+  /** Where the camera points for this package, with any mosaic panels. */
+  framing?: Framing | null;
+  /** When the library last found every light row captured. None: not complete. */
+  completed_at?: string | null;
+}
+
+/**
+ * What one suggestion refresh changed, as lists of package ids.
+ *
+ * Parameters
+ * ----------
+ * added : `list` [`str`]
+ * Suggested packages created.
+ * updated : `list` [`str`]
+ * Suggested packages whose rows or reason changed.
+ * deleted : `list` [`str`]
+ * Suggested packages removed (goal met, the rule stopped asking, or
+ * the night ended).
+ * completed : `list` [`str`]
+ * Planned packages found complete.
+ * reverted : `list` [`str`]
+ * Complete packages set back to planned because frames were set aside.
+ * checklist_item_ids : `list` [`str`]
+ * Checklist items added to tonight's session.
+ * notes : `list` [`str`]
+ * Plain sentences about anything skipped, such as a target whose report
+ * could not be built. Missing data never deletes a suggestion.
+ * as_of : `datetime`
+ * When the refresh ran (UTC).
+ */
+export interface PackageChange {
+  added?: string[];
+  updated?: string[];
+  deleted?: string[];
+  completed?: string[];
+  reverted?: string[];
+  checklistItemIds?: string[];
+  notes?: string[];
+  asOf?: string;
+}
+
+/**
+ * One line of the suggestion lifecycle log.
+ *
+ * Parameters
+ * ----------
+ * id : `str`
+ * A unique id for the line.
+ * time : `datetime`
+ * When it happened (UTC).
+ * event : `SuggestionEvent`
+ * What happened.
+ * package_id : `str`
+ * The package it happened to.
+ * target_id : `str`
+ * The package's target.
+ * rule_name : `str`
+ * The rule behind the suggestion, or ``"ranking"``.
+ * source_key : `str`
+ * What the suggestion came from. Empty for the whole package.
+ * cause : `str`
+ * Why it happened, such as ``"goal met"`` or ``"night ended"``.
+ * evidence_row_ids : `list` [`int`]
+ * The stored measurement rows behind the suggestion.
+ * values : `dict` [`str`, `float` or `str` or `None`]
+ * The numbers that mattered, such as the noise, the goal and the
+ * proposed frame count.
+ */
+export interface SuggestionLogEntry {
+  id?: string;
+  time?: string;
+  event: SuggestionEvent;
+  package_id: string;
+  target_id?: string;
+  rule_name?: string;
+  source_key?: string;
+  cause?: string;
+  evidence_row_ids?: number[];
+  values?: Record<string, number | string | null>;
+}
+
+/**
+ * A physical imaging rig's optics and safe pointing envelope.
+ *
+ * More than one may be configured in an `EquipmentCatalog`; exactly
+ * one is active. `flip_hour_angle_deg` is the single stored
+ * meridian-flip threshold; `meridian_flip_delay_min` is derived from
+ * it (`Wayfinding_Library_Architecture.md` Section 5.5, Equation (3)).
+ */
+export interface Telescope {
+  id: string;
+  name: string;
+  /** Effective focal length in millimetres. */
+  focal_length_mm: number;
+  /** Focal ratio (f/number). */
+  focal_ratio?: number;
+  altitude_limits_enabled?: boolean;
+  min_altitude_deg?: number;
+  max_altitude_deg?: number;
+  hour_angle_limits_enabled?: boolean;
+  max_hour_angle_hours?: number;
+  /** Hour angle past transit at which a meridian flip is triggered, in degrees. */
+  flip_hour_angle_deg?: number;
+  /** Hardware-control protocol driving this telescope's mount. */
+  mount_protocol?: string;
+  /** Hardware-control protocol driving this telescope's focuser. Lives here rather than on a standalone catalog entry because the focuser has no `EquipmentCatalog` entry of its own -- it is discovered heuristically off the same connection as the mount. */
+  focuser_protocol?: string;
+  /** Hardware-control protocol driving this telescope's filter wheel. Lives here rather than on a standalone catalog entry for the same reason as `focuser_protocol`. */
+  filter_wheel_protocol?: string;
+  /** Which guider guides this telescope: 'phd2' (PHD2), 'internal' (KStars/Ekos sends the mount its own guide pulses) or 'simulator' (a stand-in guide loop). */
+  guiding_protocol?: string;
+}
+
+/**
  * What a plan write returns: the new revision and what changed.
  *
  * The backend sends the plan-changed event from this record.
@@ -2798,6 +3028,8 @@ export interface ChecklistItem {
   /** Every time the item was ticked, oldest first. The last one equals `ticked_at`. */
   tickHistory?: string[];
   note?: string;
+  /** The item in plain words, for display. Filled from the rule's plain wording, and from its purpose for an item stored without one. */
+  label?: string;
 }
 
 /**
@@ -2828,6 +3060,16 @@ export interface ExposureRequest {
   offset?: number | null;
   /** The binning factor (1 means no binning). None: not set. */
   binning?: number | null;
+  /** For a row the library suggested: what it came from (rule, target, capture setting). */
+  sourceKey?: string;
+  /** For a row the library suggested: why, in plain words. */
+  reason?: string;
+  /** For a suggested row: a short code for its evidence. A dismissal lasts until it changes. */
+  evidenceFingerprint?: string;
+  /** The row's last update or promotion time. Only frames taken at or after it count toward the row. None: the package's creation time. */
+  countedFrom?: string | null;
+  /** Matching frames already counted when the package was reopened. They do not count again. */
+  baselineCaptured?: number;
 }
 
 /**
@@ -2858,7 +3100,11 @@ export interface SequenceSummary {
  * capture_setting : `CaptureSetting` or `None`
  * The capture setting it is about, when it is about one.
  * message : `str`
- * One plain sentence.
+ * The technical sentence, with the numbers.
+ * plain_message : `str`
+ * The same finding in everyday words, one or two short sentences. Empty
+ * in a statement stored before this field existed; a reader then falls
+ * back to ``message``.
  * reason : `str`
  * Why. For ``insufficient_data``, what is missing and how to get it.
  * proposed_action : `ProposedAction` or `None`
@@ -2889,6 +3135,7 @@ export interface TargetStatement {
   actionClass?: ActionClass | null;
   captureSetting?: CaptureSetting | null;
   message: string;
+  plainMessage?: string;
   reason?: string;
   proposedAction?: ProposedAction | null;
   expectedEffect?: ExpectedEffect | null;
@@ -3031,6 +3278,219 @@ export interface NightQuality {
 }
 
 /**
+ * One recorded observing night and what data it has.
+ *
+ * Attributes
+ * ----------
+ * night_id : `str`
+ * The night, named for the local date on which it began, such as
+ * ``"2026-09-24"``. Pass it as ``session_id`` to the other history
+ * questions.
+ * night_date : `datetime.date`
+ * The same date as a date.
+ * targets_imaged : `list` [`str`]
+ * Ids of the library targets with light frames from the active
+ * equipment on this night, sorted. Empty when there are no frames.
+ * frame_count : `int`
+ * Light frames from the active equipment on this night.
+ * has_frame_data : `bool`
+ * Whether the night has light frames from the active equipment.
+ * has_guiding_data : `bool`
+ * Whether at least one guiding run is recorded for the night.
+ * has_sky_data : `bool`
+ * Whether at least one of the night's frames has a stored sky
+ * background measurement. Sky brightness and transparency checks
+ * need it.
+ * has_ekos_record : `bool`
+ * Whether an Ekos session record is stored for the night.
+ */
+export interface NightListEntry {
+  nightId: string;
+  nightDate: string;
+  targetsImaged?: string[];
+  frameCount?: number;
+  hasFrameData?: boolean;
+  hasGuidingData?: boolean;
+  hasSkyData?: boolean;
+  hasEkosRecord?: boolean;
+}
+
+/**
+ * A slew that ended in tracking at a new place in the sky.
+ *
+ * Attributes
+ * ----------
+ * time : `float`
+ * When the mount began tracking after the slew.
+ * night_id : `str`
+ * The observing night of the Ekos session it came from.
+ * ra_deg, dec_deg : `float` or `None`
+ * Where the mount pointed, in degrees. `None` when the position could
+ * not be worked out; `note` says why.
+ * target_id : `str` or `None`
+ * The nearest library target inside the match radius. `None` when no
+ * library target is that close.
+ * separation_deg : `float` or `None`
+ * How far the pointing is from `target_id`'s position, in degrees.
+ * `None` when there is no matched target.
+ * source : `str`
+ * The id of the Ekos session record the change was read from.
+ * note : `str` or `None`
+ * Why a field is missing, in plain words. `None` when nothing is
+ * missing.
+ */
+export interface TargetChange {
+  time: number;
+  nightId: string;
+  raDeg?: number | null;
+  decDeg?: number | null;
+  targetId?: string | null;
+  separationDeg?: number | null;
+  source: string;
+  note?: string | null;
+}
+
+/**
+ * The state of the current observing session.
+ *
+ * Attributes
+ * ----------
+ * analyze_file, kstars_log_file : `str` or `None`
+ * The files the status was read from.
+ * as_of : `float`
+ * Time of the latest record in the analyze file.
+ * seconds_since_last_record : `float` or `None`
+ * How long ago that was by the wall clock. A large value means Ekos
+ * has stopped writing (or the file was not refreshed).
+ * guider_state : `str` or `None`
+ * The guider's latest state, such as ``"Guiding"``.
+ * guider_state_since : `float` or `None`
+ * When it entered that state.
+ * declination_degrees : `float` or `None`
+ * The mount's latest declination.
+ * temperature_c : `float` or `None`
+ * The latest camera sensor temperature Ekos logged, in degrees C.
+ * pier_side : `str` or `None`
+ * The side of the pier the mount was on at the latest position
+ * record: ``"East"`` or ``"West"``.
+ * captures_completed, captures_aborted : `int`
+ * Exposures that finished and exposures that were cancelled, in the
+ * session this analyze file records.
+ * dither_settings : `DitherSettings`
+ * How the session has been dithering, worked out from the dithers
+ * in the KStars log. These are observed values, not the Ekos setting.
+ * unavailable : `list` [`str`]
+ * Things the app cannot report from these logs, so a client does not
+ * have to guess.
+ * details : `dict` [`str`, `Any`]
+ * The Ekos record sections the caller asked for (autofocus runs,
+ * aborted captures, state events and so on), empty if none were.
+ * recent_guiding : `GuidingWindowSummary`
+ * Guiding accuracy over the requested window.
+ * exposures : `list` [`ExposureSummary`]
+ * The most recent finished exposures, oldest first.
+ * excursions : `list` [`GuidingExcursion`]
+ * Every excursion in the file.
+ * dithers : `list` [`DitherEvent`]
+ * Every dither in the KStars log.
+ * last_autofocus_at : `float` or `None`
+ * When the latest successful autofocus ended.
+ * last_autofocus_temperature_c : `float` or `None`
+ * The temperature at that time.
+ * flags : `list` [`str`]
+ * The session-level problems, one sentence each, most recent first.
+ * plain_flags : `list` [`str`]
+ * The same problems in everyday words, one sentence each. Their order
+ * and count can differ from ``flags``.
+ * plain_verdict : `str`
+ * How the session is going, in one or two everyday sentences built from
+ * ``plain_flags``. It is a rough reading of Ekos' own records.
+ */
+export interface LiveSessionStatus {
+  analyze_file: string;
+  kstars_log_file?: string | null;
+  as_of: number;
+  seconds_since_last_record?: number | null;
+  guider_state?: string | null;
+  guider_state_since?: number | null;
+  declination_degrees?: number | null;
+  temperature_c?: number | null;
+  pier_side?: string | null;
+  captures_completed?: number;
+  captures_aborted?: number;
+  dither_settings?: DitherSettings;
+  unavailable?: string[];
+  details?: Record<string, any>;
+  recent_guiding: GuidingWindowSummary;
+  exposures?: ExposureSummary[];
+  excursions?: GuidingExcursion[];
+  dithers?: DitherEvent[];
+  last_autofocus_at?: number | null;
+  last_autofocus_temperature_c?: number | null;
+  flags?: string[];
+  plain_flags?: string[];
+  plain_verdict?: string;
+}
+
+/**
+ * The weather verdict, the enclosure and who may command the hardware.
+ */
+export interface SafetyStatus {
+  /** The sections that were read. */
+  sections?: string[];
+  /** Saved safety rules. */
+  rule_set?: SafetyRuleSet | null;
+  /** Verdict from a fresh weather reading. */
+  assessment?: SafetyAssessment | null;
+  /** The configured enclosure. */
+  enclosure?: Enclosure | null;
+  /** The enclosure's live motion state. */
+  enclosure_state?: EnclosureState | null;
+  /** Which capabilities this app may command. */
+  delegation_policy?: DelegationPolicy | null;
+  /** Agreement between this app's advice and what the incumbent did. */
+  divergence?: Record<string, any> | null;
+}
+
+/**
+ * The gain and read noise of a camera at one setting.
+ */
+export interface CameraNoiseSetting {
+  /** The camera's name in the configuration. */
+  cameraName: string;
+  /** The camera's gain setting (an index, not electrons per ADU) or a DSLR's ISO. */
+  gainSetting: string;
+  /** The camera offset. */
+  offset: string;
+  /** The binning, such as "1x1". */
+  binning: string;
+  /** Sensor temperature of the measurement, in degrees C. */
+  temperatureC?: number | null;
+  /** The conversion gain in electrons per ADU, or None when only read noise is recorded. */
+  gain?: CameraNoiseValue | null;
+  /** The read noise in electrons (RMS), or None when only the gain is recorded. */
+  readNoise?: CameraNoiseValue | null;
+  /** Measured when every number recorded here is measured. Partly measured when some are. Design estimate when none is. */
+  status: NoiseEvidenceStatus;
+}
+
+/**
+ * The answer of `CalibrationCatalog.query`.
+ */
+export interface CalibrationQueryResult {
+  detail: string;
+  kind?: string | null;
+  target_id?: string | null;
+  darks?: Record<string, any>[] | null;
+  biases?: Record<string, any>[] | null;
+  flats?: Record<string, any>[] | null;
+  groups?: Record<string, any>[] | null;
+  lights?: Record<string, any>[] | null;
+  camera_totals?: Record<string, any>[] | null;
+  matched_row_keys?: string[] | null;
+}
+
+/**
  * One observation session's overall lifecycle state.
  *
  * `SUSPENDED` means an unsafe verdict halted advancement without ending
@@ -3129,6 +3589,94 @@ export interface MeridianFlipOutcome {
 }
 
 /**
+ * The progress of a whole session.
+ *
+ * Parameters
+ * ----------
+ * session_id : `str`
+ * The session.
+ * entries : `list` [`EntryProgress`]
+ * One per queue entry, in queue order.
+ * imaging_now_entry_id : `str` or `None`
+ * The entry being imaged now, or `None`.
+ * run_state : `RunState`
+ * Where the session stands.
+ * as_of : `datetime`
+ * When the counts were made (UTC).
+ */
+export interface SessionProgress {
+  sessionId: string;
+  entries?: EntryProgress[];
+  imagingNowEntryId?: string | null;
+  runState: RunState;
+  asOf?: string;
+}
+
+/**
+ * A package-level dithering cadence, applied across a package's run.
+ */
+export interface DitherConfig {
+  enabled?: boolean;
+  everyNFrames?: number;
+  pixels?: number;
+}
+
+/**
+ * Where an observation package stands in the package library.
+ */
+export enum PackageStatus {
+  PLANNED = "PLANNED",
+  SUGGESTED = "SUGGESTED",
+  COMPLETE = "COMPLETE"
+}
+
+/**
+ * Why the library suggested a package, kept with the package.
+ *
+ * The suggestion refresh (`ObservationPlanning.refresh_suggestions`) fills
+ * these fields in. A package the user promoted keeps them, so the refresh
+ * does not suggest it again.
+ */
+export interface PackageSuggestion {
+  /** "rule": a quality rule asked for more frames. "ranking": tonight's ranking picked it. */
+  sourceKind: any;
+  /** The rule that made the suggestion, if any. */
+  ruleName?: string;
+  /** Names what the suggestion came from, so a repeat is not added twice. */
+  sourceKey?: string;
+  /** The reason, in plain words. */
+  reason?: string;
+  /** How sure the library is, for example measured or design_estimate. */
+  confidence?: string;
+  /** A short code for the evidence. A dismissal lasts until it changes. */
+  evidenceFingerprint?: string;
+  /** For a ranking suggestion: the use it ranks for (imaging, photometry or spectroscopy). */
+  rankingUse?: string;
+  /** For a ranking suggestion: the observing night it is for. It expires after that night. */
+  observingNightId?: string | null;
+  /** The evidence fingerprint when the whole package was dismissed. Empty: not dismissed. */
+  dismissedFingerprint?: string;
+  /** Rows the user dismissed one at a time. */
+  dismissedRows?: DismissedRow[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/**
+ * What happened to a suggestion or to a package the refresh looked at.
+ */
+export enum SuggestionEvent {
+  CREATED = "created",
+  UPDATED = "updated",
+  DELETED = "deleted",
+  DISMISSED = "dismissed",
+  UNDISMISSED = "undismissed",
+  COMPLETED = "completed",
+  REOPENED = "reopened",
+  PROMOTED = "promoted"
+}
+
+/**
  * The role of a requested exposure within an observation package.
  */
 export enum FrameType {
@@ -3167,9 +3715,12 @@ export interface SequenceDitherRow {
  * `WARNING` is about data already taken. `RECOMMENDATION` is about the
  * next session. `CONSTRAINT` states a limit of the equipment and gives no
  * advice. `INSUFFICIENT_DATA` says what is missing and how to get it.
+ * `RESULT` states what a star's science result is (for example its
+ * spectral type) with the number behind it, and asks for nothing.
  */
 export enum StatementKind {
   WARNING = "warning",
+  RESULT = "result",
   RECOMMENDATION = "recommendation",
   CONSTRAINT = "constraint",
   INSUFFICIENT_DATA = "insufficient_data"
@@ -3703,12 +4254,241 @@ export interface NightPolarAlignment {
 }
 
 /**
- * A package-level dithering cadence, applied across a package's run.
+ * How a session has been dithering, as seen in the KStars log.
+ *
+ * Attributes
+ * ----------
+ * dither_count, failed_count : `int`
+ * Dithers started, and how many gave up.
+ * last_amplitude_px, median_amplitude_px : `float` or `None`
+ * The latest and the typical requested move, in guide-camera pixels.
+ * exposures_per_dither : `float` or `None`
+ * Finished exposures divided by dithers: roughly how many frames
+ * between dithers. `None` with no dithers.
  */
-export interface DitherConfig {
-  enabled?: boolean;
-  everyNFrames?: number;
-  pixels?: number;
+export interface DitherSettings {
+  dither_count?: number;
+  failed_count?: number;
+  last_amplitude_px?: number | null;
+  median_amplitude_px?: number | null;
+  exposures_per_dither?: number | null;
+}
+
+/**
+ * Guiding accuracy over a recent stretch of time.
+ *
+ * Attributes
+ * ----------
+ * window_seconds : `float`
+ * The length of the stretch, ending at the latest record.
+ * sample_count : `int`
+ * Guiding measurements inside it.
+ * ra_rms_arcsec, dec_rms_arcsec, total_rms_arcsec : `float` or `None`
+ * Root-mean-square guide error along RA, along Dec, and combined.
+ * `None` when there are no samples.
+ */
+export interface GuidingWindowSummary {
+  window_seconds: number;
+  sample_count: number;
+  ra_rms_arcsec?: number | null;
+  dec_rms_arcsec?: number | null;
+  total_rms_arcsec?: number | null;
+}
+
+/**
+ * One finished exposure and how guiding behaved during it.
+ *
+ * Attributes
+ * ----------
+ * frame_name : `str`
+ * The saved file's name.
+ * completed_at : `float`
+ * When the exposure finished.
+ * exposure_seconds : `float`
+ * Its length.
+ * star_count : `int`
+ * Stars Ekos found in the frame.
+ * half_flux_radius_px : `float` or `None`
+ * Median star half-flux radius, in pixels.
+ * eccentricity : `float` or `None`
+ * Median star eccentricity (0 is round).
+ * guide_rms_first_seconds_arcsec : `float` or `None`
+ * Guide error (total, root-mean-square) in the first stretch of the
+ * exposure, where a dither's after-effects show.
+ * guide_rms_rest_arcsec : `float` or `None`
+ * Guide error over the rest of the exposure.
+ * follows_dither : `bool`
+ * Whether a dither finished shortly before this exposure began.
+ * flags : `list` [`str`]
+ * One sentence per problem found. Empty for a clean frame.
+ * plain_flags : `list` [`str`]
+ * The same problems in everyday words, one sentence each, in the same
+ * order as ``flags``.
+ */
+export interface ExposureSummary {
+  frame_name: string;
+  completed_at: number;
+  exposure_seconds: number;
+  star_count: number;
+  half_flux_radius_px?: number | null;
+  eccentricity?: number | null;
+  guide_rms_first_seconds_arcsec?: number | null;
+  guide_rms_rest_arcsec?: number | null;
+  follows_dither?: boolean;
+  flags?: string[];
+  plain_flags?: string[];
+}
+
+/**
+ * A stretch where the guide error ran far above its normal level.
+ *
+ * Attributes
+ * ----------
+ * started_at, ended_at : `float`
+ * First and last measurement of the excursion.
+ * peak_error_arcsec : `float`
+ * The largest total guide error inside it.
+ * axis : `str`
+ * ``"RA"`` or ``"Dec"``, whichever carried the larger error.
+ * kind : `str`
+ * ``"jump"`` if the error arrived at full size in one step (the
+ * field moved suddenly), ``"drift"`` if it built up over time.
+ * drift_rate_arcsec_per_second : `float` or `None`
+ * How fast the error grew along that axis, from a straight-line fit.
+ * `None` with fewer than three measurements.
+ * matches_stopped_ra_axis : `bool` or `None`
+ * For an RA excursion: whether the drift rate is within 25% of the
+ * rate a motionless mount drifts at the current declination
+ * (15.04 arcsec per second times the cosine of the declination).
+ * `None` for Dec excursions or when the declination is unknown.
+ * reacquire_count : `int`
+ * How many times the guider re-locked during the excursion.
+ */
+export interface GuidingExcursion {
+  started_at: number;
+  ended_at: number;
+  peak_error_arcsec: number;
+  axis: string;
+  kind?: string;
+  drift_rate_arcsec_per_second?: number | null;
+  matches_stopped_ra_axis?: boolean | null;
+  reacquire_count?: number;
+}
+
+/**
+ * One dither, read from the KStars log.
+ *
+ * Attributes
+ * ----------
+ * timestamp : `float`
+ * When the dither began.
+ * amplitude_px : `float`
+ * The requested move, in guide-camera pixels.
+ * succeeded : `bool` or `None`
+ * `True` if the guide star reached its new position, `False` if the
+ * guider gave up after its allowed tries, `None` if the log ends
+ * before the dither does.
+ * settle_seconds : `float` or `None`
+ * The wait the guider applied after the move, before the next
+ * exposure could start.
+ * duration_seconds : `float` or `None`
+ * Time from the start of the dither to its completion message.
+ */
+export interface DitherEvent {
+  timestamp: number;
+  amplitude_px: number;
+  succeeded?: boolean | null;
+  settle_seconds?: number | null;
+  duration_seconds?: number | null;
+}
+
+/**
+ * The full configured set of environmental safety rules.
+ */
+export interface SafetyRuleSet {
+  id: string;
+  rules?: SafetyRule[];
+  /** Duration conditions must remain continuously safe before the enclosure may reopen. */
+  settling_period_sec?: number;
+}
+
+/**
+ * The current verdict, which rule produced it, and its freshness.
+ */
+export interface SafetyAssessment {
+  verdict: SafetyVerdict;
+  triggering_rule_id?: string | null;
+  assessed_at?: string;
+  oldest_reading_at?: string | null;
+}
+
+/**
+ * The observatory's roof or dome and its mechanical interlock envelope.
+ *
+ * `present=False` distinguishes an observatory with no enclosure from
+ * one whose enclosure is offline -- a distinction that matters because
+ * the first permits unattended operation under the remaining safety
+ * actions while the second is a fault.
+ */
+export interface Enclosure {
+  id: string;
+  enclosure_type: EnclosureType;
+  present?: boolean;
+  park_azimuth_deg: number;
+  park_altitude_deg: number;
+  clearance_tolerance_deg?: number;
+  motion_timeout_sec?: number;
+  /** Hardware-control protocol driving this enclosure. */
+  protocol?: string;
+}
+
+/**
+ * A device's motion state, published uniformly for the interlock.
+ *
+ * `UNKNOWN` is treated as unsafe for both mount motion and enclosure
+ * motion, per `Wayfinding_Library_Architecture.md` Section 6.6 (an
+ * unknown enclosure state blocks mount motion; see also Section 6.5,
+ * "Absence of information is not safety").
+ */
+export enum EnclosureState {
+  OPEN = "open",
+  OPENING = "opening",
+  CLOSED = "closed",
+  CLOSING = "closing",
+  UNKNOWN = "unknown",
+  FAULT = "fault"
+}
+
+/**
+ * The delegation state of every capability -- the observatory phase.
+ */
+export interface DelegationPolicy {
+  id: string;
+  capability_delegations?: CapabilityDelegation[];
+  updated_at?: string;
+}
+
+/**
+ * One gain or read noise number with where it came from.
+ */
+export interface CameraNoiseValue {
+  /** The number: electrons per ADU for a gain, electrons for a read noise. */
+  value: number;
+  /** Measured when someone measured it on frames. Design estimate when it comes from a datasheet or an assumption. A single number is never Partly measured. */
+  status: NoiseEvidenceStatus;
+  /** How the profile records its origin: "measured", "datasheet" or "assumed". */
+  kind: string;
+  /** Enough detail to find the origin again: a file, a paper or the frames. */
+  source: string;
+}
+
+/**
+ * How well a gain or read noise is backed, in the register's words.
+ */
+export enum NoiseEvidenceStatus {
+  MEASURED = "measured",
+  PARTLY_MEASURED = "partly_measured",
+  DESIGN_ESTIMATE = "design_estimate"
 }
 
 /**
@@ -3785,6 +4565,88 @@ export interface RecoveryAttempt {
   attemptedAt?: string;
   outcome: DeviceSummaryState;
   detail?: string;
+}
+
+/**
+ * The progress of one queue entry.
+ *
+ * Parameters
+ * ----------
+ * entry_id : `str`
+ * The queue entry id.
+ * target_id : `str`
+ * The entry's target.
+ * requested : `int`
+ * Light frames asked for, over all light rows.
+ * captured : `int`
+ * Light frames captured, each row capped at its request.
+ * flagged : `int`
+ * Flagged frames among them.
+ * not_judged : `int`
+ * Frames not judged yet.
+ * rows : `list` [`RowProgress`]
+ * The light rows, in order.
+ * newest_frame_time : `datetime` or `None`
+ * When the newest counted frame was taken. `None` when none was.
+ * state : `RunState`
+ * Where the entry stands.
+ * imaging_now : `bool`
+ * `True` when this is the entry being imaged now.
+ * note : `str`
+ * A plain sentence when the frames could not be read, else empty.
+ */
+export interface EntryProgress {
+  entryId: string;
+  targetId: string;
+  requested: number;
+  captured: number;
+  flagged: number;
+  notJudged: number;
+  rows?: RowProgress[];
+  newestFrameTime?: string | null;
+  state: RunState;
+  imagingNow?: boolean;
+  note?: string;
+}
+
+/**
+ * How far a session or one of its entries has got, from the frames.
+ *
+ * The library works it out from the frames that arrived (see
+ * `wayfindinglib.analytics.session_progress`). The value is typed so a
+ * screen never has to decide it.
+ *
+ * * `UPCOMING`: the night has not begun, or nothing has been captured yet.
+ * * `IMAGING`: a frame arrived a short while ago, so it is imaged now.
+ * * `IN_PROGRESS`: tonight, some frames are in, and nothing arrived lately.
+ * * `COMPLETE`: every light frame requested has been captured and judged.
+ * * `PARTLY_DONE`: the night is over and some, but not all, frames came in.
+ * * `NOT_RUN`: the night is over and no frame came in.
+ * * `UNKNOWN`: the frames could not be read, so the library cannot say.
+ */
+export enum RunState {
+  UPCOMING = "upcoming",
+  IMAGING = "imaging",
+  IN_PROGRESS = "in_progress",
+  COMPLETE = "complete",
+  PARTLY_DONE = "partly_done",
+  NOT_RUN = "not_run",
+  UNKNOWN = "unknown"
+}
+
+/**
+ * A suggested row the user dismissed, kept so the dismissal can be undone.
+ *
+ * The row is taken out of the package's exposure list. The refresh does
+ * not add it again while its fingerprint stays the same.
+ */
+export interface DismissedRow {
+  /** The row's source key. */
+  sourceKey: string;
+  /** The row's evidence fingerprint when dismissed. */
+  fingerprint: string;
+  /** The row as it was when dismissed. */
+  request: ExposureRequest;
 }
 
 /**
@@ -4026,6 +4888,92 @@ export interface GuidingRunPerformance {
 }
 
 /**
+ * One environmental threshold the safety monitor evaluates.
+ *
+ * `comparison` names how `unsafe_threshold` is applied to the named
+ * measurement -- e.g. ``"greater_than"``, ``"less_than"`` -- rather
+ * than being hardcoded per measurement, so a new sensor is
+ * configuration, not a new evaluation path
+ * (`Wayfinding_Library_Architecture.md` Section 6.5).
+ */
+export interface SafetyRule {
+  id: string;
+  measurement: string;
+  comparison: string;
+  unsafe_threshold: number;
+  marginal_threshold?: number | null;
+  staleness_bound_sec?: number;
+}
+
+/**
+ * The current environmental judgment.
+ *
+ * `UNKNOWN` is not a lesser-severity middle ground between `SAFE` and
+ * `UNSAFE` -- it is treated identically to `UNSAFE` by
+ * `permits_observing()`.
+ */
+export enum SafetyVerdict {
+  SAFE = "SAFE",
+  MARGINAL = "MARGINAL",
+  UNSAFE = "UNSAFE",
+  UNKNOWN = "UNKNOWN"
+}
+
+/**
+ * The physical form of the observatory's protective structure.
+ */
+export enum EnclosureType {
+  ROLL_OFF_ROOF = "roll_off_roof",
+  DOME = "dome"
+}
+
+/**
+ * The delegation state of one capability, and since when.
+ */
+export interface CapabilityDelegation {
+  capability: ObservatoryCapability;
+  state: DelegationState;
+  effective_since?: string;
+  promotion_evidence_note?: string;
+}
+
+/**
+ * The frames captured for one light row of an entry.
+ *
+ * Parameters
+ * ----------
+ * source_key : `str`
+ * The row's source key, when the library suggested it.
+ * filter_name : `str`
+ * The row's filter.
+ * exposure_sec : `float`
+ * The row's frame length in seconds.
+ * requested : `int`
+ * How many frames the row asks for.
+ * captured : `int`
+ * Matching frames that arrived, judged or not, and not set aside.
+ * judged : `int`
+ * How many of them have a stored quality judgment.
+ * flagged : `int`
+ * How many of the judged frames carry a quality flag. They still count.
+ * not_judged : `int`
+ * How many have no judgment yet. They do not complete the row.
+ * met : `bool`
+ * `True` when the judged frames reach the requested count.
+ */
+export interface RowProgress {
+  sourceKey?: string;
+  filterName?: string;
+  exposureSec: number;
+  requested: number;
+  captured: number;
+  judged: number;
+  flagged: number;
+  notJudged: number;
+  met: boolean;
+}
+
+/**
  * The time lost to one cause.
  *
  * Parameters
@@ -4059,6 +5007,20 @@ export enum CandidateStatus {
   STOPPED = "stopped",
   NEW = "new",
   NO_FORECAST = "no_forecast"
+}
+
+/**
+ * Which system currently performs a capability.
+ *
+ * `SHADOWED` is not a valid state for `OBSERVATORY_SAFETY`
+ * (`Wayfinding_Library_Architecture.md` Section 2.3, "Safety is never
+ * shadowed") -- enforced by the delegation policy reader, not by this
+ * enum, since the restriction is per-capability rather than global.
+ */
+export enum DelegationState {
+  DELEGATED = "DELEGATED",
+  SHADOWED = "SHADOWED",
+  AUTHORITATIVE = "AUTHORITATIVE"
 }
 
 /**
@@ -4133,6 +5095,8 @@ export const RPC_METHODS = [
   "observatory:list_cameras",
   "observatory:get_equipment_configuration",
   "observatory:set_active_camera",
+  "observatory:get_active_telescope",
+  "observatory:set_active_telescope",
   "observatory:enter_monitoring_mode",
   "observatory:enter_controller_mode",
   "ingestion:start",
@@ -4157,6 +5121,7 @@ export const RPC_METHODS = [
   "processing:measure_night_contributions",
   "quality:query",
   "quality:metrics",
+  "quality:resolve_rows",
   "analysis:analyze_image",
   "analysis:get_results",
   "analysis:cancel",
@@ -4213,8 +5178,24 @@ export const RPC_METHODS = [
   "execution:reconcile_session",
   "execution:record_divergence",
   "plan:get",
+  "plan:current_session",
+  "plan:list_packages",
+  "plan:package_for_target",
+  "plan:create",
+  "plan:create_package",
   "plan:edit",
+  "plan:edit_package",
+  "plan:refresh_suggestions",
   "plan:tick_checklist_item",
+  "advisory:target_report",
+  "advisory:tonight",
+  "advisory:result",
+  "history:nights",
+  "history:night_quality",
+  "history:target_changes",
+  "history:live_session_status",
+  "observatory:safety_status",
+  "calibration:query",
   "sequencer:get_queue",
   "sequencer:create_plan",
   "sequencer:add",
@@ -4238,6 +5219,8 @@ export const UI_EVENTS = {
   "quality:measured": "quality:measured",
   /** A write changed the night plan. The payload is {sessionId, revision, changed}, where revision is the plan revision now stored and changed lists the kind of each change. */
   "plan:changed": "plan:changed",
+  /** A write created, edited, reopened, dismissed, brought back, re-framed, deleted or promoted an observation package, or a suggestion refresh ran. The payload is {packageId, targetId, kind, revision}; kind says which, and a promotion has no revision. After a refresh, kind is "refreshed", packageId and targetId are null, and the payload adds the counts added, updated, deleted, completed, reverted and checklistItemsAdded, and the ids deletedPackageIds (suggestions removed) and completedPackageIds. */
+  "packages:changed": "packages:changed",
   /** The mount, processing jobs or health status changed. */
   "system_state_update": "system_state_update",
   /** A backend log line, for the app's log panel. */

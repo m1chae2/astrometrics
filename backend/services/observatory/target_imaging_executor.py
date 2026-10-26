@@ -8,7 +8,10 @@ starting the sequencer runs `ObservationExecution.advance_session` on a
 background thread until the queue is done. Each cycle checks safety,
 slews to the entry's target and captures its exposures.
 
-This service keeps only the session's id, the thread, and the change of
+The session is the current one: tonight's. The service never keeps a
+session id between calls, so a backend that runs past midnight, or restarts,
+uses the night's one session and never makes a second. It keeps only the
+thread, the stop signal, the id of the session being run, and the change of
 shape between the session's entries and the sequences the app shows.
 Every queue edit goes through the plan service, so each one sends the
 ``plan:changed`` event and other open windows read the plan again.
@@ -48,25 +51,33 @@ class TargetImagingExecutor:
         """
         self._wayfinder = wayfinder
         self._plan_service = plan_service or PlanService(wayfinder=wayfinder)
-        self._session_id: str | None = None
+        self._running_session_id: str | None = None
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
     def _session(self) -> ObservationSession:
-        """Return the sequencer's session, starting one for tonight if needed.
+        """Return tonight's session, creating it if needed.
+
+        The library returns the existing session for a night, so this
+        never makes a second one. The night is named by the library each
+        time, so the answer follows the night.
 
         Returns
         -------
         session : `ObservationSession`
             The session whose queue the sequencer shows.
         """
-        if self._session_id is not None:
-            return self._wayfinder.planning.get_plan(self._session_id)
-        session = self._wayfinder.planning.create_plan(
-            "empty_session", night_id=observing_night_id(time.time())
-        )
-        self._session_id = session.id
-        return session
+        return self._wayfinder.planning.create_plan("empty_session", night_id=observing_night_id(time.time()))
+
+    def _existing_session(self) -> ObservationSession | None:
+        """Return tonight's session if it exists, without creating one.
+
+        Returns
+        -------
+        session : `ObservationSession` or `None`
+            Tonight's session, or `None` when none was made yet.
+        """
+        return self._wayfinder.planning.get_plan(night_id=observing_night_id(time.time()))
 
     @staticmethod
     def _request(package_id: str, timing: dict[str, Any] | None) -> QueueRequest:
@@ -115,10 +126,7 @@ class TargetImagingExecutor:
         entry_id : `str`
             The new queue entry's id.
         """
-        planning = self._wayfinder.planning
-        package = planning.create_plan(
-            "package", target=sequence["target_name"], plan_items=sequence["items"]
-        )
+        package = self._plan_service.create_package(sequence["target_name"], plan_items=sequence["items"])
         change = self._plan_service.edit_plan(
             self._session().id, add=[self._request(package.id, timing).model_dump(mode="json")]
         )
@@ -151,9 +159,10 @@ class TargetImagingExecutor:
         removed : `bool`
             `True` if the entry was in the queue and was removed.
         """
-        if sequence_id not in {entry.id for entry in self._session().queue}:
+        session = self._existing_session()
+        if session is None or sequence_id not in {entry.id for entry in session.queue}:
             return False
-        self._plan_service.edit_plan(self._session_id, remove=[sequence_id])
+        self._plan_service.edit_plan(session.id, remove=[sequence_id])
         return True
 
     def modify_queue_item(self, sequence_id: str, sequence: dict[str, Any]) -> bool:
@@ -165,7 +174,10 @@ class TargetImagingExecutor:
             `True` if the entry was found and replaced. The new entry has
             a new id.
         """
-        queue = self._session().queue
+        session = self._existing_session()
+        if session is None:
+            return False
+        queue = session.queue
         ids = [entry.id for entry in queue]
         if sequence_id not in ids:
             return False
@@ -177,7 +189,7 @@ class TargetImagingExecutor:
         )
         new_id = self._queue_sequence(sequence, timing)
         order = [new_id if entry_id == sequence_id else entry_id for entry_id in ids]
-        self._plan_service.edit_plan(self._session_id, remove=[sequence_id], order=order)
+        self._plan_service.edit_plan(session.id, remove=[sequence_id], order=order)
         return True
 
     def reorder(self, sequence_ids: list[str]) -> bool:
@@ -190,10 +202,13 @@ class TargetImagingExecutor:
         """
         if not sequence_ids:
             return False
-        current = [entry.id for entry in self._session().queue]
+        session = self._existing_session()
+        if session is None:
+            return False
+        current = [entry.id for entry in session.queue]
         named = [entry_id for entry_id in sequence_ids if entry_id in current]
         order = named + [entry_id for entry_id in current if entry_id not in named]
-        self._plan_service.edit_plan(self._session_id, order=order)
+        self._plan_service.edit_plan(session.id, order=order)
         return True
 
     def create_plan(self, target_name: str, items: list[dict[str, Any]]) -> Any:
@@ -223,10 +238,11 @@ class TargetImagingExecutor:
             ``target_name``, ``items``, ``total_duration``, ``timing`` and
             ``status``.
         """
-        if self._session_id is None:
+        session = self._existing_session()
+        if session is None:
             return []
         sequences = []
-        for entry in self._session().queue:
+        for entry in session.queue:
             if entry.status.value not in SHOWN_STATUSES:
                 continue
             items = [
@@ -263,7 +279,8 @@ class TargetImagingExecutor:
             logger.warning("Imaging already in progress.")
             return
         self._stop.clear()
-        session_id = self._session_id
+        session_id = self._existing_session().id
+        self._running_session_id = session_id
 
         def run() -> None:
             """Run the queue; the top of a background thread."""
@@ -286,7 +303,8 @@ class TargetImagingExecutor:
     def abort_imaging(self) -> None:
         """Stop running the queue and skip every waiting entry."""
         self._stop.set()
-        if self._session_id is not None:
-            self._wayfinder.execution.abort_session(self._session_id, "Aborted from the sequencer.")
-            self._session_id = None
+        session_id = self._running_session_id
+        if session_id is not None:
+            self._wayfinder.execution.abort_session(session_id, "Aborted from the sequencer.")
+            self._running_session_id = None
         logger.info("Imaging aborted.")

@@ -17,6 +17,14 @@ Key behavior
   returned by the backend. The parsing block normalizes those shapes into two
   `number[]` arrays (wavelength and flux).
 
+Quality chip
+
+- `StarSummaryCard` shows a `QualityChip` (from `ui/common/components/quality/`) under the
+  star's details. It asks the library (`advisory:result`) for the statements about this star's
+  result. The star's id is the object id. The target is the selected target when the star belongs
+  to it, otherwise the first target in the star's record. With no target, no chip shows.
+- The card only draws what the library returns, in the order returned.
+
 Caching and cancellation
 
 - This module uses a local cache and an `AbortController` signal to cancel

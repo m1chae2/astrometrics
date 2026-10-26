@@ -212,6 +212,13 @@
       "interim_block": "",
       "note": "Built 2026-10-21. Reads the quality measurements that earlier runs stored (the latest for each subject and metric, or every row). Writes nothing and creates no table."
     },
+    "quality_resolve_rows": {
+      "tool_class": "observe",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-10-25. Turns stored quality row ids into the frame or stack file each row is about, with a plain reason when a picture cannot be found, and lists the ids no row has. Reads only."
+    },
     "quality_set_aside_frames": {
       "tool_class": "observe",
       "category": "image-processing",

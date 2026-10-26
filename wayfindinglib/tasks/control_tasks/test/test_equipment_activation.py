@@ -8,16 +8,21 @@ pattern.
 """
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
-from astrometricslib import AppConfiguration
+from astrometricslib import AppConfiguration, resolve_camera_profile
+from wayfindinglib.data_access import equipment_catalog_writer
 from wayfindinglib.data_access.equipment_catalog_reader import (
     get_active_camera_id,
     get_active_telescope_id,
+    list_telescopes,
 )
+from wayfindinglib.data_access.equipment_catalog_writer import build_telescope_limits_update
 from wayfindinglib.tasks.control_tasks.equipment_activation import (
     get_equipment_configuration,
+    list_camera_noise,
     list_camera_profiles,
     set_active_camera,
     set_active_telescope,
@@ -128,3 +133,242 @@ def test_get_equipment_configuration_reports_fov_geometry_for_active_rig(
     assert configuration["telescope"] == {"name": "Apertura 75Q", "focalLengthMm": 450.0, "focalRatio": 6.0}
     assert configuration["plateScaleArcsecPerPx"] == pytest.approx(206.265 * 3.76 / 450.0, abs=1e-4)
     assert configuration["fovWidthDeg"] == pytest.approx(206.265 * 3.76 / 450.0 * 6248 / 3600.0, abs=1e-5)
+
+
+@pytest.fixture
+def limits_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AppConfiguration:
+    """Build a fresh `AppConfiguration` saved to a per-test temp file.
+
+    The path is set through ``ASTROMETRICS_CONFIG_PATH`` and the file lookup,
+    so saving really writes the temp file and can never reach the user's
+    config. The configuration starts without any telescope section.
+
+    Returns
+    -------
+    config : `AppConfiguration`
+        A fresh configuration saved to the temp file.
+    """
+    config_path = tmp_path / "astrometrics.config.toml"
+    monkeypatch.setenv("ASTROMETRICS_CONFIG_PATH", str(config_path))
+    # The test session patches the file lookup; patch it for this test too.
+    monkeypatch.setattr(AppConfiguration, "_find_config_file", lambda self: config_path)
+    config = AppConfiguration()
+    assert Path(config.config_file_path or config._find_config_file()) == config_path
+    return config
+
+
+def _seed_rig(config: AppConfiguration, own_section: bool = True) -> None:
+    """Add telescope "Rig A", with or without its own section.
+
+    The change is saved to the temp config file.
+    """
+    base = {"models": "Rig A", "focal_length_mm": "300.0"}
+    sections: dict[str, dict[str, str]] = {"Observatory.Telescope": base}
+    if own_section:
+        sections["Observatory.Telescope.Rig A"] = {
+            "focal_length_mm": "450.0",
+            "focal_ratio": "6.0",
+            "min_altitude_deg": "20.0",
+        }
+    config.update_config(sections)
+
+
+def _config_path(config: AppConfiguration) -> Path:
+    """Return the file a configuration saves to.
+
+    Returns
+    -------
+    path : `Path`
+        The config file path.
+    """
+    return Path(config.config_file_path or config._find_config_file())
+
+
+def _reloaded() -> AppConfiguration:
+    """Read the config file from disk into a new `AppConfiguration`.
+
+    Returns
+    -------
+    config : `AppConfiguration`
+        A new configuration loaded from the file.
+    """
+    return AppConfiguration()
+
+
+def test_limits_written_only_to_the_resolved_section(limits_config: AppConfiguration) -> None:
+    """Limits land in the named section, and the file on disk changes."""
+    _seed_rig(limits_config)
+    path = _config_path(limits_config)
+    before = path.read_text()
+    assert set_active_telescope(limits_config, "Rig A", {"min_altitude_deg": 30.0, "max_altitude_deg": 80.0})
+    assert path.read_text() != before
+    saved = _reloaded().app_config
+    assert saved["Observatory.Telescope.Rig A"]["min_altitude_deg"] == "30.0"
+    assert saved["Observatory.Telescope.Rig A"]["max_altitude_deg"] == "80.0"
+    assert "min_altitude_deg" not in saved["Observatory.Telescope"]
+    assert saved["Observatory.Telescope"]["active_telescope"] == "Rig A"
+
+
+def test_limits_never_create_a_section(limits_config: AppConfiguration) -> None:
+    """No new section appears when limits are saved."""
+    _seed_rig(limits_config)
+    sections_before = set(_reloaded().app_config.sections())
+    set_active_telescope(limits_config, "Rig A", {"hour_angle_limits_enabled": True})
+    assert set(_reloaded().app_config.sections()) == sections_before
+
+
+def test_limits_fall_back_to_base_section_when_named_one_is_absent(limits_config: AppConfiguration) -> None:
+    """With no per-name section, the base section receives the limits."""
+    _seed_rig(limits_config, own_section=False)
+    sections_before = set(limits_config.app_config.sections())
+    assert set_active_telescope(limits_config, "Rig A", {"min_altitude_deg": 25.0})
+    assert _reloaded().app_config["Observatory.Telescope"]["min_altitude_deg"] == "25.0"
+    assert set(_reloaded().app_config.sections()) == sections_before
+
+
+def test_limits_refused_when_no_section_resolves(
+    limits_config: AppConfiguration, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When no section resolves, the writer refuses and saves nothing."""
+    _seed_rig(limits_config)
+    monkeypatch.setattr(equipment_catalog_writer, "telescope_section_name_for", lambda config, name: None)
+    path = _config_path(limits_config)
+    before = path.read_text()
+    sections_before = set(limits_config.app_config.sections())
+    with pytest.raises(ValueError, match="never created"):
+        set_active_telescope(limits_config, "Rig A", {"min_altitude_deg": 25.0})
+    assert path.read_text() == before
+    assert set(limits_config.app_config.sections()) == sections_before
+
+
+def test_limits_for_an_unknown_telescope_are_refused(limits_config: AppConfiguration) -> None:
+    """An unknown telescope id is refused, and the choice returns `False`."""
+    with pytest.raises(ValueError, match="not a known telescope"):
+        build_telescope_limits_update(limits_config, "Rig A", {"min_altitude_deg": 25.0})
+    assert set_active_telescope(limits_config, "Rig A", {"min_altitude_deg": 25.0}) is False
+
+
+def test_list_telescopes_still_returns_the_telescope_with_new_limits(limits_config: AppConfiguration) -> None:
+    """After saving, the catalog still lists the rig with the new limits."""
+    _seed_rig(limits_config)
+    set_active_telescope(
+        limits_config,
+        "Rig A",
+        {"altitude_limits_enabled": False, "min_altitude_deg": 35.0, "max_hour_angle_hours": 3.5},
+    )
+    telescopes = list_telescopes(_reloaded())
+    assert [telescope.id for telescope in telescopes] == ["Rig A"]
+    assert telescopes[0].min_altitude_deg == pytest.approx(35.0)
+    assert telescopes[0].altitude_limits_enabled is False
+    assert telescopes[0].max_hour_angle_hours == pytest.approx(3.5)
+    assert telescopes[0].focal_length_mm == pytest.approx(450.0)
+
+
+@pytest.mark.parametrize(
+    "limits",
+    [
+        {"min_altitude_deg": 70.0, "max_altitude_deg": 60.0},
+        {"max_hour_angle_hours": 0.0},
+        {"min_altitude_deg": 120.0},
+        {"focal_length_mm": 10.0},
+    ],
+)
+def test_invalid_limits_are_refused_and_nothing_is_saved(
+    limits_config: AppConfiguration, limits: dict[str, float]
+) -> None:
+    """Bad limits raise `ValueError` and leave the file untouched."""
+    _seed_rig(limits_config)
+    path = _config_path(limits_config)
+    before = path.read_text()
+    with pytest.raises(ValueError):
+        set_active_telescope(limits_config, "Rig A", limits)
+    assert path.read_text() == before
+
+
+def test_limits_use_the_temp_config_path_only(limits_config: AppConfiguration, tmp_path: Path) -> None:
+    """The configuration points at the per-test file, not the user's."""
+    path = _config_path(limits_config)
+    assert path.parent == tmp_path
+    assert ".config/astrometrics" not in str(path)
+
+
+SHIPPED_CONFIG_PATH = (
+    Path(__file__).resolve().parents[4] / "astrometricslib" / "astrometrics.config.example.toml"
+)
+
+
+@pytest.fixture
+def shipped_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AppConfiguration:
+    """Build a configuration from a temporary copy of the shipped example file.
+
+    Returns
+    -------
+    config : `AppConfiguration`
+        A configuration holding the shipped camera profiles, with the file
+        in a temporary folder so the real configuration is never touched.
+    """
+    config_path = tmp_path / "astrometrics.config.toml"
+    config_path.write_text(SHIPPED_CONFIG_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+    monkeypatch.setattr(AppConfiguration, "_find_config_file", lambda self: config_path)
+    return AppConfiguration()
+
+
+def test_camera_noise_reports_the_measured_setting_with_its_status_word(
+    shipped_config: AppConfiguration,
+) -> None:
+    """The shipped ASI533 entry is measured, with its numbers and source."""
+    (setting,) = list_camera_noise(shipped_config, "ZWO ASI533MM Pro")
+    assert (setting.gain_setting, setting.offset, setting.binning) == ("0", "10", "1x1")
+    assert setting.status == "measured"
+    assert setting.temperature_c == pytest.approx(-10.0)
+    assert setting.gain.value == pytest.approx(0.783)
+    assert setting.gain.status == "measured"
+    assert setting.read_noise.value == pytest.approx(3.8)
+    assert "bias-frame pairs" in setting.read_noise.source
+
+
+def test_camera_noise_status_is_partly_measured_when_only_one_number_is(
+    shipped_config: AppConfiguration,
+) -> None:
+    """A measured gain with a datasheet read noise is partly measured."""
+    from astrometricslib.models.camera_profile import (
+        CameraProfile,
+        ProvenancedValue,
+        SensorSettingNoise,
+        ValueProvenance,
+    )
+
+    entry = SensorSettingNoise(
+        gain_setting="100",
+        gain_e_per_adu=ProvenancedValue(
+            value=0.9, provenance=ValueProvenance(kind="measured", source="flats")
+        ),
+        read_noise_e=ProvenancedValue(
+            value=1.6, provenance=ValueProvenance(kind="datasheet", source="sheet")
+        ),
+    )
+    base = resolve_camera_profile("ZWO ASI533MM Pro", shipped_config)
+    profile = CameraProfile(**{**dict(base), "sensor_noise": (entry,)})
+    with patch(
+        "wayfindinglib.tasks.control_tasks.equipment_activation.resolve_camera_profile", return_value=profile
+    ):
+        (setting,) = list_camera_noise(shipped_config, "ZWO ASI533MM Pro")
+    assert setting.status == "partly_measured"
+    assert setting.gain.status == "measured"
+    assert setting.read_noise.status == "design_estimate"
+
+
+def test_camera_without_a_profile_or_entries_reports_none(shipped_config: AppConfiguration) -> None:
+    """An unknown camera, or one with no entries, gives an empty list."""
+    assert list_camera_noise(shipped_config, "No Such Camera") == []
+    assert list_camera_noise(shipped_config, "Nikon D5300") == []
+
+
+def test_camera_profiles_carry_the_noise_in_camel_case(shipped_config: AppConfiguration) -> None:
+    """The profile list gives each camera its `sensorNoise` entries."""
+    profiles = {profile["name"]: profile for profile in list_camera_profiles(shipped_config)}
+    first = profiles["ZWO ASI533MM Pro"]["sensorNoise"][0]
+    assert first["gainSetting"] == "0"
+    assert first["readNoise"]["status"] == "measured"
+    assert first["gain"]["kind"] == "measured"
+    assert first["cameraName"] == "ZWO ASI533MM Pro"

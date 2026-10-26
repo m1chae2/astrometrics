@@ -520,6 +520,13 @@
       "interim_block": "",
       "note": "Built 2026-10-06. Reads the catalog file; the optional estimate queries the Gaia archive and saves nothing."
     },
+    "planning_edit_package": {
+      "tool_class": "change-data",
+      "category": "planning-sessions",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "The AI is read-only, so a tool that writes is not offered."
+    },
     "planning_edit_queue": {
       "tool_class": "change-data",
       "category": "planning-sessions",
@@ -603,6 +610,13 @@
       "disposition": "keep",
       "interim_block": "",
       "note": "Built 2026-10-04. The position of a named object, from the library or SIMBAD. Reads only."
+    },
+    "planning_refresh_suggestions": {
+      "tool_class": "change-data",
+      "category": "planning-sessions",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "The AI is read-only, so a tool that writes is not offered."
     },
     "planning_resolve_target_coordinates": {
       "tool_class": "compute",

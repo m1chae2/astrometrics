@@ -66,6 +66,11 @@ def _insufficient_frames(input_quality: CaptureInputQuality) -> TargetStatement:
             "or image longer, then run the analysis again."
         ),
         values={"light_frames": float(input_quality.light_frames)},
+        plain_message=(
+            f"Only {input_quality.light_frames} light frames from this equipment exist for this night, "
+            f"and we need at least {MINIMUM_FRAMES_PER_NIGHT} to judge it. "
+            "Image longer or sync the frames, then check again."
+        ),
         limits=[
             design_limit(
                 float(MINIMUM_FRAMES_PER_NIGHT),
@@ -258,6 +263,7 @@ def _spectral_star_clipped(performance: CapturePerformance) -> list[TargetStatem
         frames_clipped = sum(group.frames for group in clipped)
         if unclipped:
             longest_clear = max(group.exposure_seconds for group in unclipped)
+            plain_message = None
             message = (
                 f"{target_id}: a star clipped at {len(clipped)} of {len(groups)} exposure lengths, "
                 f"{frames_clipped} of {frames_total} frames. The longest length that stayed below the "
@@ -269,10 +275,15 @@ def _spectral_star_clipped(performance: CapturePerformance) -> list[TargetStatem
                 f"{target_id}: a star clipped at every exposure length tried, the shortest being "
                 f"{_format_exposure(shortest)}. If that star is the target, try a shorter exposure."
             )
+            plain_message = (
+                f"{target_id}: the star was too bright at every exposure length tried, even the shortest "
+                f"({_format_exposure(shortest)}). If that star is the target, try a shorter exposure."
+            )
         recommendations.append(
             session_statement(
                 "spectral_star_clipped",
                 message=message,
+                plain_message=plain_message,
                 evidence=[reference for group in clipped for reference in group.evidence],
                 values={
                     "target": target_id,
@@ -330,6 +341,11 @@ def _star_shape(
                 ),
                 evidence=quality.width_evidence,
                 values={"median_star_width_arcsec": quality.median_star_width_arcsec},
+                plain_message=(
+                    f"Stars were about {quality.median_star_width_arcsec:.1f} arcsec wide, but we have "
+                    "too few earlier nights to say whether that is usual. "
+                    "Image on more nights with this equipment."
+                ),
                 confidence=rule_confidence("capture"),
             )
         )

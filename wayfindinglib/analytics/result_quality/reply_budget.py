@@ -17,6 +17,12 @@ module holds what that needs, in one place:
 * ``fit_reply_to_budget``, the one public entry point, which picks the
   shrinking steps for each kind of reply.
 
+When cutting evidence is not enough, the last step of a target report or a
+night review empties the plain message of every statement. The technical
+message says the same thing, and a reader that finds an empty plain message
+uses it. The desktop app never meets this step, because only the MCP layer
+calls ``fit_reply_to_budget``.
+
 Each statement lists its evidence with the most extreme reference first (the
 reference furthest beyond the statement's limit; see
 ``evidence_order.py``), so cutting a list from the end keeps the references
@@ -152,6 +158,26 @@ def limit_statement_evidence(statements: Sequence[TargetStatement], keep: int) -
     ]
 
 
+def drop_plain_messages(statements: Sequence[TargetStatement]) -> list[TargetStatement]:
+    """Empty each statement's plain message, the last way to shorten a reply.
+
+    Parameters
+    ----------
+    statements : `Sequence` [`TargetStatement`]
+        The statements, in order.
+
+    Returns
+    -------
+    statements : `list` [`TargetStatement`]
+        Copies in the same order whose ``plain_message`` is empty. A reader
+        then falls back to the technical ``message``.
+    """
+    return [
+        statement.model_copy(update={"plain_message": ""}) if statement.plain_message else statement
+        for statement in statements
+    ]
+
+
 def _fit_target_report(report: TargetDatasetReport, limit: int) -> TargetDatasetReport:
     """Shrink a target report until its JSON fits the budget.
 
@@ -159,7 +185,8 @@ def _fit_target_report(report: TargetDatasetReport, limit: int) -> TargetDataset
     a convenience: the statements cite the rows they used, so the report
     says why the section is empty. Then the long evidence lists, cut to
     ``EVIDENCE_STEPS`` references per statement in turn, each statement
-    counting what it lost. The statements, their order and the counts of the
+    counting what it lost. Last, the plain messages are emptied (see
+    `drop_plain_messages`). The statements, their order and the counts of the
     warnings never change.
 
     Parameters
@@ -184,7 +211,8 @@ def _fit_target_report(report: TargetDatasetReport, limit: int) -> TargetDataset
         current : `TargetDatasetReport`
             The report so far.
         round_number : `int`
-            0 drops the context; later rounds cut the evidence lists.
+            0 drops the context; later rounds cut the evidence lists, and the
+            round after them empties the plain messages.
 
         Returns
         -------
@@ -202,7 +230,9 @@ def _fit_target_report(report: TargetDatasetReport, limit: int) -> TargetDataset
                     ),
                 }
             )
-        if round_number > len(EVIDENCE_STEPS):
+        if round_number == len(EVIDENCE_STEPS) + 1:
+            return current.model_copy(update={"statements": drop_plain_messages(current.statements)})
+        if round_number > len(EVIDENCE_STEPS) + 1:
             return None
         keep = EVIDENCE_STEPS[round_number - 1]
         return current.model_copy(update={"statements": limit_statement_evidence(current.statements, keep)})
@@ -283,7 +313,8 @@ def _fit_night_quality(quality: NightQuality, limit: int) -> NightQuality:
     quality : `NightQuality`
         The same review when it fits. Otherwise a copy whose statements keep
         fewer references each (``EVIDENCE_STEPS``, in turn) and count what
-        they lost; a note says it was done. No statement is removed.
+        they lost; a note says it was done. Last, the plain messages are
+        emptied. No statement is removed.
     """
     note = (
         f"The evidence lists of the statements were cut to fit the reply budget of {limit:,} characters. "
@@ -305,7 +336,17 @@ def _fit_night_quality(quality: NightQuality, limit: int) -> NightQuality:
         smaller : `NightQuality` or `None`
             The shorter review, or ``None`` when no step is left.
         """
-        if round_number >= len(EVIDENCE_STEPS):
+        if round_number == len(EVIDENCE_STEPS):
+            return current.model_copy(
+                update={
+                    "targets": [
+                        entry.model_copy(update={"statements": drop_plain_messages(entry.statements)})
+                        for entry in current.targets
+                    ],
+                    "night_statements": drop_plain_messages(current.night_statements),
+                }
+            )
+        if round_number > len(EVIDENCE_STEPS):
             return None
         keep = EVIDENCE_STEPS[round_number]
         return current.model_copy(

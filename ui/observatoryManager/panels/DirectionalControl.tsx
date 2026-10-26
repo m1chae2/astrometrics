@@ -7,25 +7,28 @@ export interface DirectionalControlProps {
     onStartMove: (direction: string) => void;
     onStopMove: (direction: string) => void;
     onSetSlewRate: (rate: number) => void;
+    /** True when the app may not command the mount. Every control is then disabled. */
+    disabled?: boolean;
 }
 
 /**
  * DirectionalControl Component
  *
  * Renders a compass-pad style interface for manual telescope slewing.
- * Renders a compass-pad style interface for manual telescope slewing.
  * Supports touch and mouse interactions for continuous movement relative to press duration.
- * REQ: OBS-2: Manual Telescope Movement
+ * The 3x3 pad is compact and the slew-speed slider sits beside it.
  */
 export const DirectionalControl: React.FC<DirectionalControlProps> = ({
     onStop,
     onStartMove,
     onStopMove,
-    onSetSlewRate
+    onSetSlewRate,
+    disabled = false
 }) => {
     const [activeDirection, setActiveDirection] = React.useState<string | null>(null);
 
     const handleStart = (direction: string) => {
+        if (disabled) return;
         setActiveDirection(direction);
         onStartMove(direction);
     };
@@ -38,36 +41,37 @@ export const DirectionalControl: React.FC<DirectionalControlProps> = ({
     };
 
     const handleRateChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        if (disabled) return;
         const value = parseInt(event.target.value, 10);
         onSetSlewRate(value);
     };
 
     return (
-        <div id="manual-guide-controls" className="navigator">
+        <div id="manual-guide-controls" className="navigator navigator--side">
             <div id="directional-button-grid" className="navigator__grid">
                 <button
                     id="btn-move-nw"
                     className="navigator__btn nw"
-                    // REQ: OBS-2.2: The display SHALL provide diagonal slew buttons for combined motion (NW, NE, SW, SE).
                     onMouseDown={() => handleStart('NW')} onMouseUp={() => handleEnd('NW')}
                     onMouseLeave={() => handleEnd('NW')}
                     onTouchStart={(e) => { e.preventDefault(); handleStart('NW'); }}
                     onTouchEnd={(e) => { e.preventDefault(); handleEnd('NW'); }}
                     type="button"
+                    disabled={disabled}
+                    aria-disabled={disabled}
                 >
                     ↖
                 </button>
                 <button
                     id="btn-move-n"
                     className="navigator__btn n"
-                    // REQ: OBS-2.1: The display SHALL provide directional slew buttons for North, South, East, and West commands.
-                    // REQ: OBS-2.3: The display SHALL initiate movement in the selected direction immediately upon button press.
-                    // REQ: OBS-2.4: The display SHALL halt movement immediately upon button release.
                     onMouseDown={() => handleStart('N')} onMouseUp={() => handleEnd('N')}
                     onMouseLeave={() => handleEnd('N')}
                     onTouchStart={(e) => { e.preventDefault(); handleStart('N'); }}
                     onTouchEnd={(e) => { e.preventDefault(); handleEnd('N'); }}
                     type="button"
+                    disabled={disabled}
+                    aria-disabled={disabled}
                 >
                     ↑
                 </button>
@@ -79,6 +83,8 @@ export const DirectionalControl: React.FC<DirectionalControlProps> = ({
                     onTouchStart={(e) => { e.preventDefault(); handleStart('NE'); }}
                     onTouchEnd={(e) => { e.preventDefault(); handleEnd('NE'); }}
                     type="button"
+                    disabled={disabled}
+                    aria-disabled={disabled}
                 >
                     ↗
                 </button>
@@ -91,17 +97,21 @@ export const DirectionalControl: React.FC<DirectionalControlProps> = ({
                     onTouchStart={(e) => { e.preventDefault(); handleStart('W'); }}
                     onTouchEnd={(e) => { e.preventDefault(); handleEnd('W'); }}
                     type="button"
+                    disabled={disabled}
+                    aria-disabled={disabled}
                 >
                     ←
                 </button>
                 <button
                     id="btn-manual-stop"
                     className="navigator__stop"
+                    disabled={disabled}
+                    aria-disabled={disabled}
                     onClick={() => {
+                        if (disabled) return;
                         setActiveDirection(null);
                         onStop();
                     }}
-                    // REQ: OBS-2.5: The display SHALL provide a "STOP" button to immediately halt all telescope movement.
                     type="button"
                 >
                     STOP
@@ -114,6 +124,8 @@ export const DirectionalControl: React.FC<DirectionalControlProps> = ({
                     onTouchStart={(e) => { e.preventDefault(); handleStart('E'); }}
                     onTouchEnd={(e) => { e.preventDefault(); handleEnd('E'); }}
                     type="button"
+                    disabled={disabled}
+                    aria-disabled={disabled}
                 >
                     →
                 </button>
@@ -126,6 +138,8 @@ export const DirectionalControl: React.FC<DirectionalControlProps> = ({
                     onTouchStart={(e) => { e.preventDefault(); handleStart('SW'); }}
                     onTouchEnd={(e) => { e.preventDefault(); handleEnd('SW'); }}
                     type="button"
+                    disabled={disabled}
+                    aria-disabled={disabled}
                 >
                     ↙
                 </button>
@@ -137,6 +151,8 @@ export const DirectionalControl: React.FC<DirectionalControlProps> = ({
                     onTouchStart={(e) => { e.preventDefault(); handleStart('S'); }}
                     onTouchEnd={(e) => { e.preventDefault(); handleEnd('S'); }}
                     type="button"
+                    disabled={disabled}
+                    aria-disabled={disabled}
                 >
                     ↓
                 </button>
@@ -148,13 +164,14 @@ export const DirectionalControl: React.FC<DirectionalControlProps> = ({
                     onTouchStart={(e) => { e.preventDefault(); handleStart('SE'); }}
                     onTouchEnd={(e) => { e.preventDefault(); handleEnd('SE'); }}
                     type="button"
+                    disabled={disabled}
+                    aria-disabled={disabled}
                 >
                     ↘
                 </button>
             </div>
 
             <div id="slew-speed-control" className="slew-rate">
-                {/* REQ: OBS-2.6: The display SHALL provide a slew rate selector with at least 4 speed levels. */}
                 <div className="slew-rate__labels">
                     <span id="label-slew-speed">Slew Speed:</span>
                     <span id="label-slew-range">Min &rarr; Max</span>
@@ -167,6 +184,8 @@ export const DirectionalControl: React.FC<DirectionalControlProps> = ({
                     step="1"
                     defaultValue="2"
                     onChange={handleRateChange}
+                    disabled={disabled}
+                    aria-disabled={disabled}
                     className="slew-rate__slider"
                 />
             </div>

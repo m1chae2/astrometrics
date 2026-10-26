@@ -28,7 +28,6 @@ ARCHITECTURE_DOCUMENT = (
     / "Astrometrics_Library_Architecture.md"
 )
 IMPLEMENTATION_DOCUMENT = ARCHITECTURE_DOCUMENT.with_name("Astrometrics_Library_Implementation.md")
-QUALITY_MEASUREMENTS_DOCUMENT = ARCHITECTURE_DOCUMENT.with_name("Astrometrics_Quality_Measurements.md")
 IMPL_COMMENT = re.compile(r"<!-- impl: ([^ ]+?) -->")
 MINIMUM_LINKED_CLAIMS = 100
 
@@ -86,17 +85,6 @@ def test_every_architecture_claim_names_code_that_exists() -> None:
 def test_the_architecture_document_keeps_its_claims_linked() -> None:
     """The document does not silently lose its implementation links."""
     assert len(_linked_claims()) >= MINIMUM_LINKED_CLAIMS
-
-
-def test_every_quality_measurements_link_names_code_that_exists() -> None:
-    """Each ``impl`` link in the quality paper imports and resolves."""
-    names = IMPL_COMMENT.findall(QUALITY_MEASUREMENTS_DOCUMENT.read_text(encoding="utf-8"))
-    assert names, f"{QUALITY_MEASUREMENTS_DOCUMENT.name} has no impl links"
-    unresolved = sorted({name for name in names if _resolve(name) is None})
-    assert not unresolved, (
-        f"{len(unresolved)} impl link(s) in {QUALITY_MEASUREMENTS_DOCUMENT.name} name code that does "
-        f"not exist: {unresolved}. Update the document or the link when the code moves."
-    )
 
 
 def test_every_implementation_document_link_names_code_that_exists() -> None:

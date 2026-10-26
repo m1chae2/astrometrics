@@ -10,9 +10,10 @@ It also lets an agent move the desktop app to another screen
 import logging
 import threading
 import time
+from datetime import datetime
 from typing import Any
 
-from astrometricslib import ConfigurationError, ExternalServiceError, NotFoundError
+from astrometricslib import ConfigurationError, ExternalServiceError, InvalidArgumentError, NotFoundError
 from backend.services.infrastructure.socket_manager import SocketManager
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,34 @@ logger = logging.getLogger(__name__)
 _NO_PHONE_LINK_MESSAGE = (
     "Neither gsconnect-cli nor kdeconnect-cli is installed, so the phone cannot be reached."
 )
+
+
+def _check_planning_time(planning_time: str) -> None:
+    """Refuse planning-time text that is not ISO 8601 with a UTC offset.
+
+    Parameters
+    ----------
+    planning_time : `str`
+        The text to check.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If the text is not a time, or has no UTC offset.
+    """
+    try:
+        moment = datetime.fromisoformat(planning_time)
+    except (TypeError, ValueError) as error:
+        raise InvalidArgumentError(
+            f"planning_time must be an ISO 8601 time with a UTC offset, such as "
+            f"2026-10-24T22:00:00-06:00; got {planning_time!r}.",
+            details={"planning_time": planning_time},
+        ) from error
+    if moment.tzinfo is None or moment.utcoffset() is None:
+        raise InvalidArgumentError(
+            f"planning_time needs a UTC offset, such as 2026-10-24T22:00:00-06:00; got {planning_time!r}.",
+            details={"planning_time": planning_time},
+        )
 
 
 class HandoffService:
@@ -43,6 +72,7 @@ class HandoffService:
         self._state: dict[str, Any] = {
             "active_mode": "Image Viewer",
             "selected_target": None,
+            "planning_time": None,
             "coordinates": {
                 "ra_hours": None,
                 "dec_degrees": None,
@@ -75,6 +105,8 @@ class HandoffService:
         coordinates: dict[str, Any] | None = None,
         telemetry: dict[str, Any] | None = None,
         origin_device: str = "desktop",
+        planning_time: str | None = None,
+        clear_planning_time: bool = False,
     ) -> dict[str, Any]:
         """Update active state fields and broadcast changes to all devices.
 
@@ -90,17 +122,31 @@ class HandoffService:
             Live mount and sequence execution telemetry facts.
         origin_device : `str`
             Device identifier updating the state ('desktop' or 'mobile').
+        planning_time : `str`, optional
+            The moment the planning screens work at, as ISO 8601 text with a
+            UTC offset, such as ``2026-10-24T22:00:00-06:00``. Text without
+            an offset is refused with `InvalidArgumentError` and nothing
+            changes.
+        clear_planning_time : `bool`, optional
+            Go back to working at the present moment. Wins over
+            `planning_time` when both are given.
 
         Returns
         -------
         state : `dict`
             Updated workspace continuity state dictionary.
         """
+        if planning_time is not None and not clear_planning_time:
+            _check_planning_time(planning_time)
         with self._lock:
             if active_mode is not None:
                 self._state["active_mode"] = active_mode
             if selected_target is not None:
                 self._state["selected_target"] = selected_target
+            if clear_planning_time:
+                self._state["planning_time"] = None
+            elif planning_time is not None:
+                self._state["planning_time"] = planning_time
             if coordinates is not None:
                 self._state["coordinates"].update(coordinates)
             if telemetry is not None:

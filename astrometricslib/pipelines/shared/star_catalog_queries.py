@@ -621,6 +621,53 @@ def _filtered_rows(storage: Any, query: StarQuery, selector: str | None) -> list
     return rows
 
 
+def _page_in_storage(
+    storage: Any,
+    query: StarQuery,
+    selector: str | None,
+    order: str | None,
+    page_size: int | None,
+    offset: int,
+) -> tuple[int, list[dict[str, Any]]] | None:
+    """Let the storage filter, order, count and page the listing.
+
+    Only the plain listing qualifies: no selector or a target, id or
+    useful order, and no spectral class. The database then counts the
+    matches and reads one page, instead of this module loading every
+    star and filtering it in Python.
+
+    Returns
+    -------
+    answer : `tuple` [`int`, `list` [`dict`]] or `None`
+        The total number of matches and the page as summary rows, or
+        `None` when the query needs the full listing (another selector, a
+        spectral class, the match order, or a storage that cannot page).
+    """
+    if selector not in (None, "target_id") or query.spectral_class is not None:
+        return None
+    if order not in (None, "id", "useful"):
+        return None
+    method = getattr(storage, "query_star_summary_page", None)
+    if method is None:
+        return None
+    answer = method(
+        target_id=query.target_id,
+        magnitude_range=query.magnitude_range,
+        has_spectra=query.has_spectra,
+        has_photometry=query.has_photometry,
+        has_catalog_magnitude=query.has_catalog_magnitude,
+        search=query.search,
+        include_unresolved=query.include_unresolved,
+        order="useful" if order == "useful" else "id",
+        limit=page_size,
+        offset=offset,
+    )
+    if answer is None:
+        return None
+    total, summaries = answer
+    return total, [summary_row(star) for star in summaries]
+
+
 def run_star_query(
     storage: Any,
     query: StarQuery,
@@ -710,25 +757,28 @@ def run_star_query(
     ):
         raise InvalidArgumentError(f"radius_deg must be above 0 and at most {QUERY_MAXIMUM_RADIUS_DEGREES}.")
 
-    rows = _filtered_rows(storage, query, selector)
     if order is None:
         order = "match" if detail == "analysis" and query.spectral_class is not None else None
-    match_rms: dict[str, float] | None = None
-    if order == "useful":
-        rows.sort(key=_useful_order_key)
-    elif order is not None or selector != "name":
-        # A name search keeps the exact id match first; every other list is
-        # in id order, so offset paging is stable.
-        rows.sort(key=lambda row: row["id"])
-    if order == "match":
-        rows, match_rms = _best_matched_first(storage, rows, None if limit is None else MAXIMUM_MATCH_RANKING)
-    total = len(rows)
     offset = max(0, int(offset))
-    page = (
-        rows[offset:]
-        if limit is None
-        else rows[offset : offset + max(1, min(int(limit), QUERY_LIMITS[detail]))]
-    )
+    page_size = None if limit is None else max(1, min(int(limit), QUERY_LIMITS[detail]))
+    match_rms: dict[str, float] | None = None
+    paged = _page_in_storage(storage, query, selector, order, page_size, offset)
+    if paged is not None:
+        total, page = paged
+    else:
+        rows = _filtered_rows(storage, query, selector)
+        if order == "useful":
+            rows.sort(key=_useful_order_key)
+        elif order is not None or selector != "name":
+            # A name search keeps the exact id match first; every other list is
+            # in id order, so offset paging is stable.
+            rows.sort(key=lambda row: row["id"])
+        if order == "match":
+            rows, match_rms = _best_matched_first(
+                storage, rows, None if limit is None else MAXIMUM_MATCH_RANKING
+            )
+        total = len(rows)
+        page = rows[offset:] if page_size is None else rows[offset : offset + page_size]
     answer = StarQueryResult(
         detail=detail, total_matching=total, offset=offset, truncated=offset + len(page) < total
     )

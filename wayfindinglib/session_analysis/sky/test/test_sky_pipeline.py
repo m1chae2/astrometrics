@@ -11,11 +11,27 @@ from typing import Any
 import pytest
 
 from wayfindinglib.models.quality.statements import Confidence, Severity
-from wayfindinglib.session_analysis.sky.pipeline import SkyAnalysisRequest, analyze_sky_request
+from wayfindinglib.session_analysis.sky.pipeline import SkyAnalysisRequest
+from wayfindinglib.session_analysis.sky.pipeline import analyze_sky_request as _analyze_sky_request
 from wayfindinglib.session_analysis.sky.pre_processing.assess_sky_input_quality import (
     MINIMUM_NIGHTS_PER_BIN,
     assess_sky_input_quality,
 )
+from wayfindinglib.test.plain_wording_support import assert_plain_message_is_sound
+
+
+def analyze_sky_request(request: SkyAnalysisRequest) -> Any:
+    """Run the sky analysis and check each plain message on the way.
+
+    Returns
+    -------
+    analysis : `SkyAnalysis`
+        What the pipeline returned.
+    """
+    analysis = _analyze_sky_request(request)
+    for statement in analysis.recommendations:
+        assert_plain_message_is_sound(statement)
+    return analysis
 
 
 def _request(samples: list, **overrides: Any) -> SkyAnalysisRequest:

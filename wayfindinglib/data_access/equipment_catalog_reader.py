@@ -98,13 +98,32 @@ def _telescope_section_for_name(config: AppConfiguration, telescope_name: str) -
     section : `dict` [`str`, `str`]
         The resolved config section, or an empty dict if none matched.
     """
+    section_name = telescope_section_name_for(config, telescope_name)
+    if section_name is None:
+        return {}
+    return dict(config.app_config[section_name])
+
+
+def telescope_section_name_for(config: AppConfiguration, telescope_name: str) -> str | None:
+    """Return the name of the config section a named telescope reads from.
+
+    Checked in order of ``Observatory.Telescope.<name>``, then
+    ``Observatory.Telescope``. The same rule `_telescope_section_for_name`
+    uses to read, so a writer that targets this name changes exactly what
+    the reader sees.
+
+    Returns
+    -------
+    section_name : `str` or `None`
+        The first section that exists, or `None` if neither does.
+    """
     for section in [
         f"{TELESCOPE_SECTION}.{telescope_name}",
         TELESCOPE_SECTION,
     ]:
         if section in config.app_config:
-            return dict(config.app_config[section])
-    return {}
+            return section
+    return None
 
 
 def _build_telescope(

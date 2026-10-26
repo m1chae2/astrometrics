@@ -50,6 +50,12 @@ export interface RadioListManagerProps {
     loadingMessage?: React.ReactNode;
     /** Shown in place of the list once loading has finished and `items` is empty. */
     emptyMessage?: React.ReactNode;
+    /** Whether the last fetch failed; the error shows only while `items` is empty. */
+    isError?: boolean;
+    /** Shown with a "Try again" button when `isError` is true and `items` is empty. */
+    errorMessage?: React.ReactNode;
+    /** Called by the "Try again" button. */
+    onRetry?: () => void;
 }
 
 const noopOptionChange = (): void => {};
@@ -85,6 +91,9 @@ export const RadioListManager: React.FC<RadioListManagerProps> = ({
     isLoading,
     loadingMessage,
     emptyMessage,
+    isError,
+    errorMessage,
+    onRetry,
 }) => {
     // REQ: GEN-1.1 - Consistent container structure
 
@@ -115,6 +124,9 @@ export const RadioListManager: React.FC<RadioListManagerProps> = ({
                 isLoading={isLoading}
                 loadingMessage={loadingMessage}
                 emptyMessage={emptyMessage}
+                isError={isError}
+                errorMessage={errorMessage}
+                onRetry={onRetry}
             />
 
             {/* Pagination Controls */}

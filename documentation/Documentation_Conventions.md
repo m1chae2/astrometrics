@@ -13,7 +13,6 @@ Each kind of content has one home, so a fact is written once.
 | Content | Home | Reader |
 | --- | --- | --- |
 | Theory: what each step does and why, and its equations | `library_design/<Library>_Library_Architecture.md` (Astrometrics and Wayfinding) | Anyone learning the methods |
-| Theory of the quality measurements, the numbers the Astrometrics library derives from data | `library_design/Astrometrics_Quality_Measurements.md` | Anyone learning how the numbers are measured |
 | Theory of how the Wayfinding library judges quality and recommends the next observation | `library_design/Wayfinding_Quality_Judgment.md` | Anyone learning how quality is judged |
 | Definitions of terms, for the whole site | `Glossary.md` | Everyone |
 | Code names, tuned values and their status | `library_design/<Library>_Library_Implementation.md` | Developers and reviewers |
@@ -27,9 +26,9 @@ Each kind of content has one home, so a fact is written once.
 
 Rules:
 
-- An architecture paper names no code and states no tuned values. It explains the idea behind each setting. The quality measurements paper follows the same rule.
+- An architecture paper names no code and states no tuned values. It explains the idea behind each setting.
 - A README or review guide gives a tuned value with its status label and a link to its register entry. It does not repeat the evidence.
-- Generated files are never edited by hand. The review guides come from `build/documentation/generate_pipeline_review_docs.py` and `library_design/Pipeline_Audit_Report.md` from `build/documentation/audit_pipelines.py`. Edit the generator and run it again.
+- Generated files are never edited by hand. The review guides come from `build/documentation/generate_pipeline_review_docs.py`. Edit the generator and run it again.
 
 ### 1.1 The site's sections
 

@@ -47,3 +47,13 @@ Common extension points
   `imageUrl` and can support overlays, zoom, and annotation layers.
 - To add backend actions, add a helper in `src/services/backendApi.ts` and call
   it from the appropriate manager component.
+
+Cited frames (Evidence)
+
+`citedFrames/` holds the Evidence list that opens when a quality statement cites
+frames. `useCitedFrames.ts` reads the rows with `quality:query` (each row carries its
+unit) and their picture files with `quality:resolve_rows`, which also names the row
+ids the library no longer has. A row with a file has an Open image button. The button
+draws the frame with `images:convert_fits` (`useOpenedFrame.ts`) and the center viewer
+shows it until the user picks a target or clears the list. A row without a file shows
+the reason the library gives, as text.

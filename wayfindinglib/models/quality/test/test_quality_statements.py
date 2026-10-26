@@ -177,3 +177,31 @@ def test_rule_validators_match_the_statement_validators() -> None:
     with pytest.raises(ValidationError):
         MetricRequirement(name="x", definition_version=0)
     assert _rule(statement_kind=StatementKind.INSUFFICIENT_DATA, action_class=None).action_class is None
+
+
+def test_a_stored_statement_without_plain_text_still_loads() -> None:
+    """The plain message defaults to empty so older stored statements load."""
+    stored = {"rule": "r", "kind": "constraint", "message": "m", "confidence": "measured"}
+    statement = TargetStatement.model_validate(stored)
+    assert statement.plain_message == ""
+    assert TargetStatement.model_validate({**stored, "plainMessage": "p"}).plain_message == "p"
+
+
+def test_a_result_statement_names_no_action() -> None:
+    """A result states a finding: no action class and no proposed action."""
+    result = TargetStatement(
+        rule="r",
+        kind=StatementKind.RESULT,
+        message="m",
+        plain_message="p",
+        confidence=Confidence.DESIGN_ESTIMATE,
+    )
+    assert result.action_class is None
+    with pytest.raises(ValidationError):
+        TargetStatement(
+            rule="r",
+            kind=StatementKind.RESULT,
+            action_class=ActionClass.DATA_SELECTION,
+            message="m",
+            confidence=Confidence.DESIGN_ESTIMATE,
+        )

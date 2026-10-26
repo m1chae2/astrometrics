@@ -38,7 +38,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field
 
 from astrometricslib import CaptureSetting, ConflictError
-from wayfindinglib.models.planning.mosaic import MosaicPanel
+from wayfindinglib.models.planning.framing import Framing
 from wayfindinglib.models.planning.observation_package import DitherConfig, ExposureRequest
 from wayfindinglib.models.policy.recovery import FaultRecord
 from wayfindinglib.models.session.divergence import DivergenceRecord
@@ -71,6 +71,31 @@ class QueueEntryStatus(StrEnum):
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
     SKIPPED = "SKIPPED"
+
+
+class RunState(StrEnum):
+    """How far a session or one of its entries has got, from the frames.
+
+    The library works it out from the frames that arrived (see
+    `wayfindinglib.analytics.session_progress`). The value is typed so a
+    screen never has to decide it.
+
+    * `UPCOMING`: the night has not begun, or nothing has been captured yet.
+    * `IMAGING`: a frame arrived a short while ago, so it is imaged now.
+    * `IN_PROGRESS`: tonight, some frames are in, and nothing arrived lately.
+    * `COMPLETE`: every light frame requested has been captured and judged.
+    * `PARTLY_DONE`: the night is over and some, but not all, frames came in.
+    * `NOT_RUN`: the night is over and no frame came in.
+    * `UNKNOWN`: the frames could not be read, so the library cannot say.
+    """
+
+    UPCOMING = "upcoming"
+    IMAGING = "imaging"
+    IN_PROGRESS = "in_progress"
+    COMPLETE = "complete"
+    PARTLY_DONE = "partly_done"
+    NOT_RUN = "not_run"
+    UNKNOWN = "unknown"
 
 
 class StartTimeMode(StrEnum):
@@ -171,21 +196,12 @@ class ChecklistItem(BaseModel):
         description="Every time the item was ticked, oldest first. The last one equals `ticked_at`.",
     )
     note: str = Field(default="", alias="note")
-
-
-class Framing(BaseModel):
-    """Where the camera points and how it is turned, with any mosaic panels.
-
-    The rotation is in degrees east of north, the way Ekos and KStars give
-    it. The first version shows the numbers only.
-    """
-
-    model_config = ConfigDict(populate_by_name=True)
-
-    center_ra_deg: float = Field(ge=0.0, lt=360.0, alias="centerRaDeg")
-    center_dec_deg: float = Field(ge=-90.0, le=90.0, alias="centerDecDeg")
-    rotation_deg: float = Field(default=0.0, alias="rotationDeg")
-    panels: list[MosaicPanel] = Field(default_factory=list, alias="panels")
+    label: str = Field(
+        default="",
+        alias="label",
+        description="The item in plain words, for display. Filled from the rule's plain wording, and "
+        "from its purpose for an item stored without one.",
+    )
 
 
 class ObservationSession(BaseModel):
@@ -299,3 +315,8 @@ class ObservationSessionSummary(BaseModel):
     status: SessionStatus = Field(alias="status", description="Where the session is in its life.")
     night_date: date = Field(alias="nightDate", description="The local date the observing night began.")
     entry_count: int = Field(alias="entryCount", description="How many entries its queue holds.")
+    run_state: RunState | None = Field(
+        default=None,
+        alias="runState",
+        description='How far the session got. Set only when asked for with include=["progress"].',
+    )

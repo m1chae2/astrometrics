@@ -7,6 +7,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef, ReactNode } from 'react';
 import { on as onEvent } from '../utils/eventBus';
 import { DisplayActiveContext } from './DisplayActiveContext';
+import { useOptionalHandoff } from './HandoffContext';
 
 export type InvalidationScope = 'targets' | 'frames' | 'all';
 
@@ -60,7 +61,15 @@ export const TargetProvider: React.FC<TargetProviderProps> = ({ children }) => {
     const [reloadKey, setReloadKey] = useState<number>(0);
     const [framesReloadKey, setFramesReloadKey] = useState<number>(0);
 
-    const setSelectedTarget = useCallback((id: string) => {
+    const handoff = useOptionalHandoff();
+    const publishHandoff = handoff?.publish;
+    // The target this window holds now. Read inside callbacks so a target
+    // received from another window is never published back (no echo).
+    const selectedTargetRef = useRef<string>(selectedTarget);
+
+    /** Holds a target in state and local storage without telling the backend. */
+    const holdTarget = useCallback((id: string) => {
+        selectedTargetRef.current = id;
         setSelectedTargetState(id);
         try {
             if (id) {
@@ -70,6 +79,24 @@ export const TargetProvider: React.FC<TargetProviderProps> = ({ children }) => {
             // Ignore
         }
     }, []);
+
+    /** The user chooses a target: hold it and publish it when it is a change. */
+    const setSelectedTarget = useCallback(
+        (id: string) => {
+            const changed = id !== selectedTargetRef.current;
+            holdTarget(id);
+            if (changed && id && publishHandoff) void publishHandoff({ selected_target: id });
+        },
+        [holdTarget, publishHandoff],
+    );
+
+    // Adopt the backend's target at start and whenever another window changes it.
+    const sharedTarget = handoff?.state?.selected_target ?? null;
+    useEffect(() => {
+        if (!sharedTarget || sharedTarget === selectedTargetRef.current) return;
+        holdTarget(sharedTarget);
+        setPendingTargetState(sharedTarget);
+    }, [sharedTarget, holdTarget]);
 
     const setPendingTarget = useCallback((id: string) => {
         setPendingTargetState(id);

@@ -2,11 +2,11 @@
  * @file useTargetVisibility.ts
  * @description Hook to fetch and poll for currently visible targets from the backend.
  * Provides real-time tracking of altitude, azimuth, and set times for the library.
- * REQ: OBM-1.5: The system SHALL display visibility status for targets.
  */
+import { useCallback, useState } from 'react';
 import { useBackendFetch } from '../../common/hooks/useBackendFetch';
 import { usePollTick } from '../../common/hooks/usePollTick';
-import { fetchVisibleTargets } from '../../common/services/targetService';
+import { callBackend } from '../../common/services/backendApi';
 import { ObjectVisibility } from '../../common/types/backendTypes';
 
 /** How often to re-poll visible targets, in milliseconds. */
@@ -14,16 +14,18 @@ const VISIBILITY_POLL_INTERVAL_MS = 30000;
 
 /**
  * Hook to fetch and poll for currently visible targets.
- * REQ: OBM-1.5: The system SHALL display visibility status for targets.
+ * @return The targets, whether a fetch is running, the error text of the last fetch (or null) and `retry`.
  */
 export const useTargetVisibility = () => {
     const pollTick = usePollTick(VISIBILITY_POLL_INTERVAL_MS);
+    const [retryCount, setRetryCount] = useState(0);
+    const retry = useCallback(() => setRetryCount((count) => count + 1), []);
 
-    const { data, loading } = useBackendFetch<ObjectVisibility[]>(
-        () => fetchVisibleTargets(),
-        [pollTick],
+    const { data, loading, error } = useBackendFetch<ObjectVisibility[]>(
+        async (signal) => (await callBackend('astronomy:visible', {}, { timeoutMs: 30000, signal })) ?? [],
+        [pollTick, retryCount],
         { errorMessage: 'Failed to load visible targets' }
     );
 
-    return { visibleTargets: data ?? [], loading };
+    return { visibleTargets: data ?? [], loading, error, retry };
 };

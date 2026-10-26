@@ -4,6 +4,7 @@
  * overlays active running telescope telemetry onto the WebSocket feed,
  * suppresses transient notification toasts, scrolls/pitches the Planetarium sky view upward
  * with Cataloged unchecked and a star selected (opening PlanetariumInfoCard),
+ * also captures the Observation Manager, Observatory Manager and Astronomy Manager at 1024x700 and 1870x1040,
  * ensures Alcor is selected in Astronomy Manager, and persists publication-quality
  * screenshots into the asset directory.
  */
@@ -278,4 +279,40 @@ test.describe('Documentation Screenshots Generator (Live Backend)', () => {
     await page.screenshot({ path: outputPath, fullPage: true });
     console.log(`Saved screenshot: ${outputPath}`);
   });
+
+});
+
+/**
+ * Display sizes for the quality-display screenshots: the smallest window the
+ * app supports and a large desktop window.
+ */
+const QUALITY_DISPLAY_SIZES = [
+  { width: 1024, height: 700 },
+  { width: 1870, height: 1040 },
+];
+
+/**
+ * Displays captured at every size in QUALITY_DISPLAY_SIZES, so the changed
+ * displays can be compared beside the Astronomy Manager.
+ */
+const QUALITY_DISPLAYS = [
+  { mode: 'Observation Manager', fileStem: 'observation_manager' },
+  { mode: 'Observatory Manager', fileStem: 'observatory_manager' },
+  { mode: 'Astronomy Manager', fileStem: 'astronomy_manager', extraQuery: 'star=Alcor' },
+];
+
+test.describe('Quality display screenshots at two window sizes (Live Backend)', () => {
+  for (const size of QUALITY_DISPLAY_SIZES) {
+    for (const display of QUALITY_DISPLAYS) {
+      test(`Capture ${display.mode} at ${size.width}x${size.height}`, async ({ page }) => {
+        await page.setViewportSize(size);
+        await setupLiveBackend(page);
+        await preparePage(page, display.mode, display.extraQuery ?? '');
+        await page.waitForTimeout(2500);
+        const outputPath = path.join(OUTPUT_DIR, `${display.fileStem}_${size.width}x${size.height}.png`);
+        await page.screenshot({ path: outputPath, fullPage: false });
+        console.log(`Saved screenshot: ${outputPath}`);
+      });
+    }
+  }
 });

@@ -1,0 +1,66 @@
+/* Cited-frames banner and list in the Image Viewer. */
+.cited-frames {
+    border: 1px solid var(--grey-light);
+    border-radius: var(--radius-lg);
+    padding: 8px 12px;
+    margin-bottom: 8px;
+    max-height: 40%;
+    overflow: auto;
+    user-select: text;
+}
+
+.cited-frames__banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.cited-frames__banner-text {
+    margin: 0;
+    font-weight: 600;
+}
+
+.cited-frames__banner-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.cited-frames__button {
+    cursor: pointer;
+}
+
+.cited-frames__button:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.cited-frames__button:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
+}
+
+.cited-frames__message,
+.cited-frames__missing {
+    margin: 8px 0 0;
+}
+
+.cited-frames__list {
+    list-style: none;
+    margin: 8px 0 0;
+    padding: 0;
+}
+
+.cited-frames__row {
+    display: grid;
+    grid-template-columns: 2fr 2fr 1.5fr auto;
+    gap: 8px;
+    align-items: center;
+    padding: 4px 0;
+    border-top: 1px solid var(--grey-light);
+}
+
+.cited-frames__reason {
+    max-width: 24ch;
+}

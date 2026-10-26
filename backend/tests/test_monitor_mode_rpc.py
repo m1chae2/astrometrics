@@ -72,6 +72,9 @@ BACKGROUND_COMMANDS_STARTED_BY_QUEUE = frozenset({"sequencer:begin"})
 own test below, because the queue needs a stored session first."""
 
 READ_ONLY_METHODS = frozenset({
+    "advisory:result",
+    "advisory:target_report",
+    "advisory:tonight",
     "analysis:get_results",
     "astronomy:analyze_periodicity",
     "astronomy:count",
@@ -85,7 +88,7 @@ READ_ONLY_METHODS = frozenset({
     "astronomy:target_data_availability",
     "astronomy:visible",
     "calibration:get_stats",
-    "calibration:measure_sensor_noise",
+    "calibration:query",
     "docs:get_topic",
     "docs:list_topics",
     "docs:search_topics",
@@ -94,6 +97,10 @@ READ_ONLY_METHODS = frozenset({
     "guiding:status",
     "handoff:get_state",
     "handoff:list_devices",
+    "history:live_session_status",
+    "history:night_quality",
+    "history:nights",
+    "history:target_changes",
     "images:get_fits_header",
     "images:get_light_frame_data",
     "images:get_target_frame",
@@ -105,8 +112,14 @@ READ_ONLY_METHODS = frozenset({
     "ingestion:status",
     "mosaic:preview",
     "observatory:get_equipment_configuration",
+    "observatory:get_active_telescope",
     "observatory:list_cameras",
+    "observatory:safety_status",
     "plan:get",
+    "plan:current_session",
+    "plan:list_packages",
+    "plan:package_for_target",
+    "quality:resolve_rows",
     "planetarium:get_catalog_sources",
     "planetarium:get_constellation_lines",
     "planetarium:get_deep_catalog_status",
@@ -168,6 +181,7 @@ LOCAL_WRITE_METHODS = frozenset({
     "analysis:cancel",
     "astronomy:delete",
     "astronomy:save",
+    "calibration:measure_sensor_noise",
     "execution:abort_session",
     "execution:reconcile_session",
     "execution:record_divergence",
@@ -183,7 +197,15 @@ LOCAL_WRITE_METHODS = frozenset({
     "observatory:enter_controller_mode",
     "observatory:enter_monitoring_mode",
     "observatory:set_active_camera",
+    # Saves the telescope's safety limits to the config file; no device
+    # command. The screen greys Apply while Ekos controls, but that is a
+    # screen rule (user decision), not a backend one.
+    "observatory:set_active_telescope",
+    "plan:create",
     "plan:edit",
+    "plan:edit_package",
+    "plan:refresh_suggestions",
+    "plan:create_package",
     "telescope:apply_promotion_decision",
     "plan:tick_checklist_item",
     "processing:cancel",
@@ -423,7 +445,9 @@ async def test_sequencer_begin_sends_no_command_in_monitor_mode(
     executor = container.target_imaging_executor
     session = support.make_night_session(container.wayfinder)
     support.force_safe_assessment(container.wayfinder, monkeypatch)
-    monkeypatch.setattr(executor, "_session_id", session.id)
+    # The sequencer uses tonight's session; point it at the prepared one.
+    monkeypatch.setattr(executor, "_existing_session", lambda: session)
+    monkeypatch.setattr(executor, "_session", lambda: session)
     await _enter_monitor_mode()
 
     reply = await _call("sequencer:begin", {})

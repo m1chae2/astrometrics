@@ -73,6 +73,8 @@ export interface EquipmentCameraProfile {
     pixelSizeUm: number;
     sensorWidthPx: number;
     sensorHeightPx: number;
+    /** The gain and read noise recorded for each camera setting. Empty when none is recorded. */
+    sensorNoise?: import('../types/backendTypes').CameraNoiseSetting[];
 }
 
 /** Active equipment configuration with computed imaging geometry, from observatory:get_equipment_configuration. */
@@ -119,6 +121,8 @@ export interface TargetCameraIndex {
 export interface HandoffState {
     active_mode: string;
     selected_target: string | null;
+    /** The moment the planning screens work at (ISO 8601 with a UTC offset), or null for Now. */
+    planning_time: string | null;
     coordinates: Record<string, any>;
     telemetry: Record<string, any>;
     origin_device: string;
@@ -165,7 +169,7 @@ export interface ActionRegistry {
     "astronomy:stars_by_spectral_class": { payload: { spectral_class: string }; response: { id: string; name: string; ra: number | null; dec: number | null; magnitude: number | null; spectralType: string; hasSpectra: boolean; hasPhotometry: boolean; selfDeterminedSpectralTypeRms: number | null }[] };
     "planetarium:get_sources": { payload: { ra: number; dec: number; radius: number; limiting_magnitude?: number; include_stars_without_catalog_magnitude?: boolean }; response: PlanetariumSource[] };
     "planetarium:get_targets": { payload: Record<string, never>; response: PlanetariumTarget[] };
-    "planetarium:get_visibility": { payload: { objects: Array<{ id: string; type?: string }>; time?: string }; response: ObjectVisibility[] };
+    "planetarium:get_visibility": { payload: { objects: Array<{ id: string; type?: string }>; time?: string; end?: string; include?: string[] }; response: ObjectVisibility[] };
     "planetarium:get_observer_location": { payload: Record<string, never>; response: ObserverLocation };
     "planetarium:get_catalog_sources": { payload: { ra: number; dec: number; radius: number; enabled_drivers: string[]; limiting_magnitude?: number }; response: PlanetariumSource[] };
     "planetarium:get_deep_catalog_status": { payload: Record<string, never>; response: DeepCatalogStatus };
@@ -177,6 +181,8 @@ export interface ActionRegistry {
     "observatory:get_equipment_configuration": { payload: Record<string, never>; response: EquipmentConfigurationResult | null };
     "telescope:slew_target": { payload: { target_name: string }; response: boolean };
     "observatory:set_active_camera": { payload: { camera_name: string }; response: boolean };
+    "observatory:get_active_telescope": { payload: Record<string, never>; response: import('../types/backendTypes').Telescope | null };
+    "observatory:set_active_telescope": { payload: { telescope_id: string; limits?: Record<string, number | boolean> }; response: boolean };
     "telescope:apply_promotion_decision": {
         payload: { capability: string; new_state: string; evidence_note?: string };
         response: Record<string, any>;
@@ -248,11 +254,21 @@ export interface ActionRegistry {
     "execution:record_divergence": { payload: { record_id: string; observation_session_id: string; capability: string; comparison_input_id: string; intended_value: number; observed_value: number; tolerance: number; divergence_unit: string; queued_observation_package_id?: string | null; converged?: boolean | null; detail?: string }; response: Record<string, any> };
 
     // Night plan (#95). `plan:get` without a session id lists every session.
-    // The two writes send the `plan:changed` event and answer with the
-    // `conflict` error (current revision in its details) when
+    // `plan:list_packages` lists the package library;
+    // `plan:current_session` is tonight's session or null (never created by a
+    // read). Session writes send the `plan:changed` event; package writes
+    // (`plan:edit_package`, `plan:create_package`) send `packages:changed`.
+    // A write answers with the `conflict` error (current revision in its details) when
     // `expected_revision` is out of date.
     "plan:get": { payload: { session_id?: string }; response: import('../types/backendTypes').ObservationSession | ObservationSessionSummary[] };
+    "plan:current_session": { payload: Record<string, never>; response: import('../types/backendTypes').ObservationSessionWithProgress | null };
+    "plan:list_packages": { payload: { status?: string; target?: string; include_dismissed?: boolean }; response: import('../types/backendTypes').ObservationPackage[] };
+    "plan:package_for_target": { payload: { target: string }; response: import('../types/backendTypes').ObservationPackage | null };
+    "plan:create": { payload: { night_id?: string }; response: import('../types/backendTypes').ObservationSession };
+    "plan:create_package": { payload: { target: string; exposure_requests?: Array<Record<string, any>>; plan_items?: Array<Record<string, any>>; dither_config?: Record<string, any>; minimum_altitude_deg?: number; priority?: number; notes?: string }; response: import('../types/backendTypes').ObservationPackage };
     "plan:edit": { payload: { session_id: string; add?: Array<Record<string, any>>; order?: string[]; remove?: string[]; set_exposures?: Record<string, Array<Record<string, any>>>; add_checklist?: Array<Record<string, any>>; framing?: Record<string, any>; expected_revision?: number }; response: import('../types/backendTypes').PlanChange };
+    "plan:edit_package": { payload: { package_id: string; exposure_requests?: Array<Record<string, any>>; dither_config?: Record<string, any>; minimum_altitude_deg?: number; priority?: number; notes?: string; name?: string; framing?: Record<string, any>; reopen?: boolean; delete?: boolean; dismiss?: boolean; undismiss?: boolean; source_key?: string; expected_revision?: number }; response: import('../types/backendTypes').ObservationPackage };
+    "plan:refresh_suggestions": { payload: { target_ids?: string[] }; response: { started: boolean } };
     "plan:tick_checklist_item": { payload: { session_id: string; item_id: string; expected_revision?: number; note?: string; ticked_at?: string }; response: import('../types/backendTypes').PlanChange };
 
     // Ingestion
@@ -286,6 +302,7 @@ export interface ActionRegistry {
     // Parameter names are snake_case (target_id, not targetId); the router
     // drops names it does not know, so a misspelled filter is ignored.
     "quality:query": { payload: { metric?: string; level?: import('../types/backendTypes').SubjectLevel; target_id?: string; observing_night_id?: string; camera?: string; telescope?: string; since?: string; row_ids?: number[]; latest_only?: boolean; variant?: string; library_only?: boolean }; response: import('../types/backendTypes').QualityMeasurement[] };
+    "quality:resolve_rows": { payload: { row_ids: number[] }; response: import('../types/backendTypes').QualityRowResolution };
     "quality:metrics": { payload: { name?: string; checkpoint?: import('../types/backendTypes').Checkpoint; detail?: 'summary' | 'full' }; response: import('../types/backendTypes').MetricSummary[] | import('../types/backendTypes').MetricSpec[] };
 
     // Analysis
@@ -315,7 +332,7 @@ export interface ActionRegistry {
 
 
     // Mosaic
-    "mosaic:preview": { payload: { center_ra: number; center_dec: number; grid: any }; response: MosaicPanel[] };
+    "mosaic:preview": { payload: { center_ra: number; center_dec: number; grid: any; rotation_deg?: number }; response: MosaicPanel[] };
     "mosaic:create": { payload: { parent_target_id: string; grid: any; panels: any[]; image_config: any; dither_config: any }; response: string[] };
 
     // Sequencer
@@ -345,9 +362,20 @@ export interface ActionRegistry {
     "ui:navigate": { payload: { mode: string; target?: string | null }; response: void };
     "ui:inspect_variable": { payload: { variable_name: string }; response: void };
 
+    // Quality advice and night history (reads)
+    "advisory:target_report": { payload: { target: string }; response: import('../types/backendTypes').TargetDatasetReport };
+    "advisory:tonight": { payload: { at?: string }; response: import('../types/backendTypes').TonightRanking };
+    "advisory:result": { payload: { target: string; object_id: string }; response: import('../types/backendTypes').TargetStatement[] };
+    "history:nights": { payload: { limit?: number }; response: import('../types/backendTypes').NightListEntry[] };
+    "history:night_quality": { payload: { session_id: string }; response: import('../types/backendTypes').NightQuality };
+    "history:target_changes": { payload: { session_id?: string; limit?: number }; response: import('../types/backendTypes').TargetChange[] };
+    "history:live_session_status": { payload: { window_minutes?: number; include?: string[]; limit?: number }; response: import('../types/backendTypes').LiveSessionStatus };
+    "observatory:safety_status": { payload: Record<string, never>; response: import('../types/backendTypes').SafetyStatus };
+    "calibration:query": { payload: { kind?: 'dark' | 'bias' | 'flat'; detail?: 'counts' | 'target_match' | 'target_frames' | 'match'; target?: string; camera_id?: string; refresh?: boolean; gain?: string | number; offset?: number; binning?: string | number; temperature_c?: number }; response: import('../types/backendTypes').CalibrationQueryResult };
+
     // Hand-off of the workspace to a paired phone
     "handoff:get_state": { payload: Record<string, never>; response: HandoffState };
-    "handoff:update_state": { payload: { active_mode?: string; selected_target?: string; coordinates?: Record<string, any>; telemetry?: Record<string, any>; origin_device?: string }; response: HandoffState };
+    "handoff:update_state": { payload: { active_mode?: string; selected_target?: string; coordinates?: Record<string, any>; telemetry?: Record<string, any>; origin_device?: string; planning_time?: string; clear_planning_time?: boolean }; response: HandoffState };
     "handoff:beam": { payload: { target?: string; mode?: string }; response: Record<string, any> };
     "handoff:list_devices": { payload: Record<string, never>; response: Array<Record<string, any>> };
     "handoff:send_alert": { payload: { title: string; message: string; priority?: string; ring_device?: boolean; device_id?: string }; response: Record<string, any> };
@@ -489,6 +517,19 @@ const IDEMPOTENT_READ_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
     'telescope:list_alignment_sessions',
     'execution:list_sessions',
     'plan:get',
+    'plan:current_session',
+    'plan:list_packages',
+    'plan:package_for_target',
+    'quality:resolve_rows',
+    'advisory:target_report',
+    'advisory:tonight',
+    'advisory:result',
+    'history:nights',
+    'history:night_quality',
+    'history:target_changes',
+    'history:live_session_status',
+    'observatory:safety_status',
+    'calibration:query',
     'telescope:get_session_alignment',
     'telescope:get_cumulative_tracking_data',
     'telescope:get_performance_envelope',
@@ -511,6 +552,7 @@ const IDEMPOTENT_READ_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
     'astronomy:spectral_class_summary',
     'astronomy:stars_by_spectral_class',
     'observatory:get_equipment_configuration',
+    'observatory:get_active_telescope',
     'observatory:list_cameras',
 ]);
 
@@ -717,7 +759,12 @@ export async function callBackend<A extends keyof ActionRegistry>(
         let existingPromise = inFlightRequests.get(cacheKey);
 
         if (!existingPromise) {
-            existingPromise = callBackendInternal(action, params, options)
+            // The shared fetch must not carry one caller's abort signal: if the
+            // first caller cancels (for example a React effect that re-runs),
+            // every caller joined to it would be cancelled too and get no data.
+            // Each caller's own signal is honoured below, for that caller only.
+            const sharedOptions = options ? { ...options, signal: undefined } : options;
+            existingPromise = callBackendInternal(action, params, sharedOptions)
                 .finally(() => {
                     inFlightRequests.delete(cacheKey);
                 });

@@ -1,0 +1,258 @@
+/*
+ * Styles of the shared building blocks: Card, Tabs, InfoButton, StatusChip,
+ * ProgressBar and FormRow. Only tokens from theme.css are used, so the blocks
+ * look like the Observation Manager panels they were taken from.
+ */
+
+/* Card ------------------------------------------------------------------ */
+.card {
+    background-color: var(--background-secondary);
+    border: 1px solid var(--grey-light);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card);
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.card--interactive {
+    cursor: pointer;
+}
+
+.card--selected,
+.card[aria-current='true'] {
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 0 1px var(--accent-blue);
+}
+
+.card--current {
+    border-left-width: var(--space-1);
+}
+
+.card:focus-visible {
+    outline: var(--focus-outline);
+    outline-offset: 2px;
+}
+
+.card__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    background-color: var(--surface-subtle);
+    border-bottom: 1px solid var(--grey-light);
+}
+
+.card--interactive:hover > .card__header {
+    background-color: var(--surface-hover);
+}
+
+.card__title {
+    margin: 0;
+    font-size: var(--control-font-size);
+    font-weight: bold;
+    color: var(--white);
+}
+
+.card__body {
+    padding: var(--space-2) var(--space-3);
+    background-color: var(--surface-inset);
+}
+
+/* Tabs ------------------------------------------------------------------ */
+.tabs {
+    display: flex;
+    gap: var(--space-1);
+    border-bottom: 1px solid var(--grey-light);
+}
+
+.tabs__tab {
+    background: none;
+    border: 1px solid transparent;
+    border-bottom: none;
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    padding: var(--space-1) var(--space-3);
+    color: var(--text-muted);
+    font-size: var(--compact-font-size);
+    cursor: pointer;
+}
+
+.tabs__tab:hover {
+    background-color: var(--surface-hover);
+    color: var(--white);
+}
+
+.tabs__tab[aria-selected='true'] {
+    background-color: var(--grey-medium);
+    border-color: var(--grey-light);
+    color: var(--white);
+    font-weight: 600;
+}
+
+.tabs__tab:focus-visible {
+    outline: var(--focus-outline);
+    outline-offset: -2px;
+}
+
+.tabs__count {
+    margin-left: var(--space-1);
+    color: var(--text-dim);
+}
+
+/* InfoButton ------------------------------------------------------------ */
+.info-button {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+}
+
+.info-button__trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--space-4);
+    height: var(--space-4);
+    padding: 0;
+    border: 1px solid var(--text-dim);
+    border-radius: var(--radius-pill);
+    background: none;
+    color: var(--text-dim);
+    font-size: var(--small-font-size);
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.info-button__trigger:hover,
+.info-button__trigger[aria-expanded='true'] {
+    border-color: var(--white);
+    color: var(--white);
+}
+
+.info-button__trigger:focus-visible {
+    outline: var(--focus-outline);
+    outline-offset: 2px;
+}
+
+.info-button__text {
+    /* Drawn on the page body and placed by InfoButton, so no panel clips it. */
+    position: fixed;
+    z-index: 1000;
+    width: max-content;
+    max-width: 260px;
+    padding: var(--space-2) var(--space-3);
+    background-color: var(--grey-medium);
+    border: 1px solid var(--grey-light);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-card);
+    color: var(--text-primary);
+    font-size: var(--section-label-size);
+    font-weight: normal;
+    text-align: left;
+    user-select: text;
+}
+
+/* StatusChip ------------------------------------------------------------ */
+.status-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: 0 var(--space-2);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-pill);
+    font-size: var(--section-label-size);
+    color: var(--text-primary);
+}
+
+.status-chip__icon {
+    flex-shrink: 0;
+}
+
+.status-chip--ok {
+    border-color: var(--success-green);
+}
+
+.status-chip--ok .status-chip__icon {
+    color: var(--success-green);
+}
+
+.status-chip--warning {
+    border-color: var(--warning-amber);
+}
+
+.status-chip--warning .status-chip__icon {
+    color: var(--warning-amber);
+}
+
+.status-chip--error {
+    border-color: var(--danger-red);
+}
+
+.status-chip--error .status-chip__icon {
+    color: var(--danger-red);
+}
+
+.status-chip--info {
+    border-color: var(--accent-blue);
+}
+
+.status-chip--info .status-chip__icon {
+    color: var(--accent-blue);
+}
+
+/* ProgressBar ----------------------------------------------------------- */
+.progress-bar {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+}
+
+.progress-bar__track {
+    height: var(--space-2);
+    background-color: var(--surface-inset-strong);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+.progress-bar__fill {
+    height: 100%;
+    background-color: var(--accent-blue);
+}
+
+.progress-bar__text {
+    font-size: var(--section-label-size);
+    color: var(--text-dim);
+}
+
+/* FormRow --------------------------------------------------------------- */
+.form-row {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+}
+
+.form-row__line {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-height: 28px;
+}
+
+.form-row__label {
+    flex-shrink: 0;
+    width: var(--parameter-label-width, 100px);
+    color: var(--text-muted);
+    font-size: var(--compact-font-size);
+    text-align: right;
+}
+
+.form-row__unit {
+    color: var(--text-muted);
+    font-size: var(--compact-font-size);
+}
+
+.form-row__error {
+    margin: 0;
+    color: var(--danger-red);
+    font-size: var(--section-label-size);
+}

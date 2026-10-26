@@ -102,6 +102,8 @@ RPC_METHODS: tuple[str, ...] = (
     "observatory:list_cameras",
     "observatory:get_equipment_configuration",
     "observatory:set_active_camera",
+    "observatory:get_active_telescope",
+    "observatory:set_active_telescope",
     "observatory:enter_monitoring_mode",
     "observatory:enter_controller_mode",
     # Ingestion of new frames
@@ -134,6 +136,7 @@ RPC_METHODS: tuple[str, ...] = (
     # targetId); the router drops names it does not know.
     "quality:query",
     "quality:metrics",
+    "quality:resolve_rows",
     # Photometry and spectroscopy analysis
     "analysis:analyze_image",
     "analysis:get_results",
@@ -198,11 +201,29 @@ RPC_METHODS: tuple[str, ...] = (
     "execution:abort_session",
     "execution:reconcile_session",
     "execution:record_divergence",
-    # Night plan: read it, edit it, tick a checklist item. Each write sends
-    # the `plan:changed` event.
+    # Night plan and observation packages: read them, edit them, tick a
+    # checklist item. A session write sends the `plan:changed` event; a package
+    # write sends the `packages:changed` event.
     "plan:get",
+    "plan:current_session",
+    "plan:list_packages",
+    "plan:package_for_target",
+    "plan:create",
+    "plan:create_package",
     "plan:edit",
+    "plan:edit_package",
+    "plan:refresh_suggestions",
     "plan:tick_checklist_item",
+    # Quality advice and night history (all reads)
+    "advisory:target_report",
+    "advisory:tonight",
+    "advisory:result",
+    "history:nights",
+    "history:night_quality",
+    "history:target_changes",
+    "history:live_session_status",
+    "observatory:safety_status",
+    "calibration:query",
     # Sequencer queue
     "sequencer:get_queue",
     "sequencer:create_plan",
@@ -246,6 +267,15 @@ UI_EVENTS: tuple[UiEvent, ...] = (
         "plan:changed",
         "A write changed the night plan. The payload is {sessionId, revision, changed}, where "
         "revision is the plan revision now stored and changed lists the kind of each change.",
+    ),
+    UiEvent(
+        "packages:changed",
+        "A write created, edited, reopened, dismissed, brought back, re-framed, deleted or promoted an "
+        "observation package, or a suggestion refresh ran. The payload is {packageId, targetId, kind, "
+        "revision}; kind says which, and a promotion has no revision. After a refresh, kind is "
+        '"refreshed", packageId and targetId are null, and the payload adds the counts added, updated, '
+        "deleted, completed, reverted and checklistItemsAdded, and the ids deletedPackageIds (suggestions "
+        "removed) and completedPackageIds.",
     ),
     UiEvent("system_state_update", "The mount, processing jobs or health status changed."),
     UiEvent("log", "A backend log line, for the app's log panel."),

@@ -28,6 +28,7 @@ import { HudOverlay } from '../layers/HudOverlay';
 import { ConstellationOverlay } from '../layers/ConstellationOverlay';
 import { AlignmentOverlay } from '../layers/AlignmentOverlay';
 import { TrackingRiskOverlay } from '../layers/TrackingRiskOverlay';
+import { FramingOverlay, FramingPanelCorners } from '../layers/FramingOverlay';
 import { StarFieldRenderer } from '../webgl/StarFieldRenderer';
 import { useTimeController } from '../hooks/useTimeController';
 import { useSkyMapInput } from '../hooks/useSkyMapInput';
@@ -103,6 +104,8 @@ interface Props {
   sensorFovWidthDeg?: number;
   /** Sensor FOV height in degrees from the active equipment configuration. */
   sensorFovHeightDeg?: number;
+  /** Framing panels to outline, as corners in RA and Dec degrees. */
+  framingPanels?: FramingPanelCorners[];
 }
 
 // How much Local Sidereal Time must drift since the last drawn frame before
@@ -169,6 +172,7 @@ export const CelestialSkyMap: React.FC<Props> = ({
   onCenterChange,
   sensorFovWidthDeg,
   sensorFovHeightDeg,
+  framingPanels,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const starCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -229,6 +233,7 @@ export const CelestialSkyMap: React.FC<Props> = ({
     new AlignmentOverlay(),
     starRenderMode === 'webgl' ? new StarSelectionOverlay() : new StarOverlay(),
     new FovOverlay(),
+    new FramingOverlay(),
     new TelescopeOverlay(),
     new EnvironmentOverlay(),
     new HudOverlay()
@@ -586,6 +591,7 @@ export const CelestialSkyMap: React.FC<Props> = ({
         trackingRisk,
         polarAlignment,
         selectedSessionId,
+        framingPanels,
         sensorFovWidthDeg: sensorFovWidthDegRef.current,
         sensorFovHeightDeg: sensorFovHeightDegRef.current,
         projectCoords: (ra: number, dec: number) => {
@@ -635,6 +641,7 @@ export const CelestialSkyMap: React.FC<Props> = ({
     showEnvironment, showGrid, showCatalog, showTelescope, selectedTargetId,
     showConstellations, constellationLines,
     showAlignment, showTrackingRisk, alignmentTargets, trackingRisk, polarAlignment, selectedSessionId,
+    framingPanels,
     simulationDate,
     trackingMode, observerLat, observerLon, overlays
   ]);

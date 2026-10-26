@@ -50,6 +50,8 @@ class _FakeTargetCatalog:
             The library's targets.
         """
         self._targets = {target.id: target for target in targets}
+        self.catalog_names = {"NGC 7331"}
+        self.created: list[str] = []
 
     def get(self, target_id: str, refresh: bool = False) -> Target | None:
         """Find one target by id.
@@ -87,6 +89,35 @@ class _FakeTargetCatalog:
             The target.
         """
         self._targets[target.id] = target
+
+    def create(self, target_id: str, from_catalog: bool = False) -> Target:
+        """Stand in for catalog-based creation.
+
+        Parameters
+        ----------
+        target_id : `str`
+            The catalog name.
+        from_catalog : `bool`, optional
+            Must be `True`.
+
+        Returns
+        -------
+        target : `Target`
+            The new target, with a position, when `catalog_names` lists
+            the name.
+
+        Raises
+        ------
+        NotFoundError
+            If the name is not in `catalog_names`.
+        """
+        assert from_catalog
+        self.created.append(target_id)
+        if target_id not in self.catalog_names:
+            raise NotFoundError(f"The catalog does not know {target_id!r}.")
+        target = Target(id=target_id, ra="01h 02m 03s", dec="+10° 20′ 30″")
+        self._targets[target.id] = target
+        return target
 
     def save(self) -> None:
         """Do nothing; the stand-in keeps everything in memory."""
@@ -547,8 +578,15 @@ def test_a_package_can_be_built_from_sequence_items(isolated_butler: DiskButler)
         (2, 30.0, "Ha"),
     ]
     assert package.exposure_requests[0].frame_type == FrameType.LIGHT
-    with pytest.raises(InvalidArgumentError, match="exactly one"):
-        planning.create_plan("package", target="M 81")
+    with pytest.raises(InvalidArgumentError, match="not both"):
+        planning.create_plan(
+            "package",
+            target="M 81",
+            exposure_requests=[],
+            plan_items=[{"count": 1, "exposure": 1, "filter": "L"}],
+        )
+    # With neither source, the package has no exposures yet.
+    assert planning.create_plan("package", target="M 81").exposure_requests == []
     with pytest.raises(InvalidArgumentError, match="Unknown filter"):
         planning.create_plan(
             "package", target="M 81", plan_items=[{"count": 1, "exposure": 1, "filter": "Z"}]
@@ -574,7 +612,8 @@ def test_an_empty_session_defaults_to_the_site_and_active_equipment(
     empty = SimpleNamespace(active_telescope=lambda: None, active_camera=lambda: None)
     monkeypatch.setattr(equipment_catalog_reader, "get_equipment_catalog", lambda config: empty)
     with pytest.raises(ConfigurationError):
-        planning.create_plan("empty_session", night_id="2026-08-10")
+        # A night with no session needs equipment; 08-10 has one.
+        planning.create_plan("empty_session", night_id="2026-08-11")
 
 
 def test_edit_queue_removes_entries_and_refuses_unknown_ones(isolated_butler: DiskButler) -> None:

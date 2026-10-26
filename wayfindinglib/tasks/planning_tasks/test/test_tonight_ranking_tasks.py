@@ -37,6 +37,11 @@ from wayfindinglib.analytics.result_quality.efficiency import (
     baseline_key,
     frame_observations_from_measurements,
 )
+from wayfindinglib.analytics.result_quality.noise_growth import (
+    StackFrame,
+    StackGroup,
+    group_coefficients,
+)
 from wayfindinglib.analytics.result_quality.sky_model import SkyModel
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
 from wayfindinglib.models.planning.tonight_ranking import CandidateStatus, RankedUse
@@ -54,6 +59,8 @@ SETTING = CaptureSetting(
 )
 SPECTRAL_SETTING = SETTING.model_copy(update={"filter_name": "Star Analyzer 200"})
 """The same camera behind the grating: a spectroscopy setting (id 2)."""
+SHORT_SETTING = SETTING.model_copy(update={"exposure_seconds": 30.0})
+"""The same camera with 30 s frames: the short exposure group (id 3)."""
 TONIGHT = datetime(2026, 10, 10, 6, 0, tzinfo=UTC)
 FIRST_NIGHT = datetime(2026, 9, 28, 6, 0, tzinfo=UTC)
 M81 = ("M 81", "09h 55m 33s", "+69° 03′ 55″")
@@ -213,7 +220,8 @@ class FakeLibrary:
         self.rows = rows
         self.targets = SimpleNamespace(list=lambda: targets)
         self.quality = SimpleNamespace(
-            query=self._query, capture_settings=lambda ids=None: {1: SETTING, 2: SPECTRAL_SETTING}
+            query=self._query,
+            capture_settings=lambda ids=None: {1: SETTING, 2: SPECTRAL_SETTING, 3: SHORT_SETTING},
         )
 
     def _query(
@@ -553,3 +561,155 @@ def test_the_hour_uses_the_cadence_of_the_capture_overheads_module() -> None:
 
     assert tr.DITHER_EVERY_FRAMES == capture_overheads.DITHER_EVERY_FRAMES
     assert tr.AUTOFOCUS_RUNS_PER_HOUR == capture_overheads.AUTOFOCUS_RUNS_PER_HOUR
+
+
+def _group_stack_library(measured: float, expected: float) -> FakeLibrary:
+    """Build a target whose stack was combined from a 30 s and a 60 s group.
+
+    Parameters
+    ----------
+    measured, expected : `float`
+        The stack's measured and expected noise, in stack units.
+
+    Returns
+    -------
+    library : `FakeLibrary`
+        One target with 12 frames of 30 s and 20 of 60 s, their frame
+        measurements, and one stack run with the part 2a rows: the frame
+        weights from the library's group rule, and the exposure, frame count
+        and gain of each group.
+    """
+    frames = []
+    for index in range(32):
+        short = index < 12
+        moment = FIRST_NIGHT + timedelta(minutes=2 * index)
+        frames.append(
+            FrameRecord(
+                path=f"/lib/lights/M 81/Scope/CamA/g_{index:03d}.fits",
+                timestamp=moment.timestamp(),
+                exposure="30" if short else "60",
+            )
+        )
+    target = Target(id="M 81", ra=M81[1], dec=M81[2], frames=frames)
+    rows: list[QualityMeasurement] = []
+    model_groups = []
+    members_by_group: list[list[str]] = [[], []]
+    for index, frame in enumerate(frames):
+        short = index < 12
+        subject_id = frame_subject_id(frame.path, "M 81")
+        width = 2.5 + 0.05 * (index % 7)
+        sky = 0.5
+        exposure = 30.0 if short else 60.0
+        members_by_group[0 if short else 1].append(subject_id)
+        subject = QualitySubject(
+            level=SubjectLevel.FRAME,
+            subject_id=subject_id,
+            target_id="M 81",
+            capture_setting_id=3 if short else 1,
+        )
+        for metric, version, value in (
+            (STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC, 1, width),
+            (SKY_RATE_METRIC, 2, sky),
+            (SKY_NOISE_METRIC, 2, (sky * exposure) ** 0.5),
+            (READ_NOISE_METRIC, 1, 3.0),
+        ):
+            rows.append(
+                QualityMeasurement(
+                    metric=metric,
+                    definition_version=version,
+                    subject=subject,
+                    status=MeasurementStatus.MEASURED,
+                    value=value,
+                    origin=MeasurementOrigin.MEASURED,
+                    run_id="frames",
+                    measured_at=FIRST_NIGHT,
+                )
+            )
+        model_groups.append(
+            StackFrame(
+                frame_id=subject_id,
+                exposure_seconds=exposure,
+                sky_rate_e_per_s_per_px=sky,
+                read_noise_e=3.0,
+                star_width=width,
+            )
+        )
+    groups = [
+        StackGroup(frames=tuple(model_groups[:12]), frame_noise_adu=30.0),
+        StackGroup(frames=tuple(model_groups[12:]), frame_noise_adu=40.0),
+    ]
+    raw = group_coefficients(groups).raw_weights
+    assert raw is not None
+    stack = QualitySubject(level=SubjectLevel.STACK, subject_id="M 81/stack", target_id="M 81")
+
+    def stored(metric: str, version: int, subject: QualitySubject, value: float, **extra: Any) -> None:
+        """Add one stored row of the stack's run.
+
+        Parameters
+        ----------
+        metric : `str`
+            The metric.
+        version : `int`
+            Its definition version.
+        subject : `QualitySubject`
+            What the row is about.
+        value : `float`
+            The value.
+        **extra
+            Other fields of the row.
+        """
+        rows.append(
+            QualityMeasurement(
+                metric=metric,
+                definition_version=version,
+                subject=subject,
+                status=MeasurementStatus.MEASURED,
+                value=value,
+                origin=MeasurementOrigin.MEASURED,
+                run_id="run0",
+                measured_at=FIRST_NIGHT + timedelta(days=1),
+                **extra,
+            )
+        )
+
+    stored(fc.NORMALIZED_NOISE_METRIC, 3, stack, measured / 1000.0, sample_count=1000, row_id=1)
+    stored(fc.NOISE_METRIC, 3, stack, measured, sample_count=1000, row_id=2)
+    stored(fc.EXPECTED_NOISE_METRIC, 2, stack, expected)
+    for frame_model, weight in zip(model_groups, raw, strict=True):
+        stored(
+            fc.FRAME_WEIGHT_METRIC,
+            1,
+            QualitySubject(level=SubjectLevel.FRAME, subject_id=frame_model.frame_id, target_id="M 81"),
+            weight,
+        )
+    for length, count in ((30.0, 12), (60.0, 20)):
+        group_stack = QualitySubject(
+            level=SubjectLevel.STACK, subject_id=f"M 81/groups/g{length:g}.fits", target_id="M 81"
+        )
+        stored(fc.GROUP_EXPOSURE_METRIC, 1, group_stack, length)
+        stored(fc.GROUP_FRAMES_STACKED_METRIC, 1, group_stack, float(count))
+        stored(fc.GROUP_GAIN_METRIC, 1, group_stack, 1.0)
+    return FakeLibrary([target], rows)
+
+
+def test_a_group_stack_is_ranked_with_the_group_model() -> None:
+    """A target whose stack came from exposure groups gets a gain.
+
+    The 60 s setting has 20 frames; the hour's new frames join the 60 s group.
+    The stack is rebuilt from its stored group rows (no weight-mode remark).
+    """
+    ranking = _rank(_group_stack_library(measured=4.0, expected=4.0))
+
+    (candidate,) = ranking.lists[0].candidates
+
+    assert candidate.status == CandidateStatus.RANKED
+    assert (candidate.gain_per_hour_fraction or 0.0) > 0.0
+    assert "weights were not recorded" not in candidate.reason
+
+
+def test_a_noise_floor_lowers_the_gain_of_a_group_stack() -> None:
+    """A floor (measured above expected) lowers the gain per hour."""
+    without = _rank(_group_stack_library(measured=4.0, expected=4.0)).lists[0].candidates[0]
+    with_floor = _rank(_group_stack_library(measured=5.5, expected=4.0)).lists[0].candidates[0]
+
+    assert (with_floor.gain_per_hour_fraction or 0.0) < (without.gain_per_hour_fraction or 0.0)

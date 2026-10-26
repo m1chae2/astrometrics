@@ -32,6 +32,8 @@ confirmed on M 27's stored registration file: the 120 s frame Siril dropped has 
 registration line, which looked like a second reference frame. Part 2a's covered area was also never
 passed to the noise step; that is fixed. Next: the gap 1 diagnosis on the copy.
 
+Still on 2026-10-26: part 2b is built (uncommitted, unit tests only; sections 3.3 and 3.6). The ZWO rehearsal and the restack are next.
+
 ## 1. Why suggestions from imaged targets are missing
 
 "Take N more" is a forecast: add these frames and the noise falls this much. The library shows it
@@ -174,6 +176,18 @@ So frame `i` of group `g` enters the stack, in rate units, with the coefficient
   cores patched from other groups.
 
 ### 3.3 Part 2b: the forecast (wayfindinglib)
+
+**Status 2026-10-26: built, uncommitted on `134-group-weights-nikon` after 9613ffc1. Unit tests only; no real-data run yet.** What differs from the text below, and what is left:
+
+- The aperture-set identity is stored as a number (`stacking.aperture_set_number`, and `stacking.half_difference_aperture_set_number`), so older stacks have none and a pair with one is not checkable.
+- A pair whose earlier stack is a single group and whose later stack has several is not checkable. This is stricter than this plan.
+- The stop signal can come from one stack's floor.
+- The camera profile has no cooled flag, so a changed dark master confounds a pair unless the camera name contains `zwo` or `asi`.
+- The Nikon sensor-temperature band is not stored and is not checked.
+- Nikon forecasts are not yet labeled exploratory.
+- No row links a frame to its group or a group to its stack. The forecast places each frame by its exposure length with the stacker's fold rule.
+- `CalibrationIdentities` is not exported at the `astrometricslib` top level.
+- A planned new exposure length needs at least 5 frames. A smaller set is folded into a neighbor group, which the stacker records no weights for, so that plan is forecast but flagged.
 
 - **A group weighting mode** for both the earlier run and the planned one: `wfwhm` inside each
   group and `W_g = N_g t_g^2 / s_g^2` per group, through the public group rule. `identify_weighting_mode`
@@ -410,6 +424,8 @@ quantized synthetic data (about half a day). It changes the weights, so it lands
 restack.
 
 #### 3.6.5 Order
+
+Part 2b with the floor term is built (2026-10-26, uncommitted, unit tests only; see section 3.3). The floor rule is the one-stack rule above, kept as a fraction of today's random variance, and the aperture-set identity is now a stored number. The ZWO rehearsal and the restack are not done.
 
 Fix gaps 3 and 4 and option D7 first (library, part 2a follow-up), then run the gap 1 diagnosis on
 the copy, then build part 2b with the floor term, then the ZWO rehearsal, then the restack. The

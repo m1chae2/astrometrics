@@ -60,6 +60,76 @@ from astrometricslib.pipelines.stacking.processing.group_alignment import detect
 
 logger = logging.getLogger(__name__)
 
+
+# The hash in an identity has 12 hex digits, which is 48 bits. A stored row
+# keeps the identity as one number, the file version times 2**48 plus the
+# hash. A 64-bit float holds every integer below 2**53 exactly, so the file
+# version can be at most 31 (2**53 / 2**48 is 32).
+_IDENTITY_HASH_BITS = 48
+_IDENTITY_HASH_DIGITS = 12
+_MAXIMUM_IDENTITY_FILE_VERSION = 31
+
+
+def aperture_identity_to_number(identity: str) -> float:
+    """Turn an aperture-set identity into one exact number for a stored row.
+
+    The quality store keeps numbers, not text, as a row's value. The number
+    is the file version times 2**48 plus the hash read as a hexadecimal
+    number. It is below 2**53, so a 64-bit float holds it exactly.
+
+    Parameters
+    ----------
+    identity : `str`
+        An identity such as ``"v3-1a2b3c4d5e6f"`` (see `ApertureSet.identity`).
+
+    Returns
+    -------
+    number : `float`
+        A whole number stored in a float.
+
+    Raises
+    ------
+    ValueError
+        If the text is not a version, a dash and 12 hexadecimal digits, or
+        if the version is above 31.
+    """
+    prefix, dash, digest = identity.partition("-")
+    if not (dash and prefix[:1] == "v" and prefix[1:].isdigit() and len(digest) == _IDENTITY_HASH_DIGITS):
+        raise ValueError(f"not an aperture-set identity: {identity!r}")
+    version = int(prefix[1:])
+    if version > _MAXIMUM_IDENTITY_FILE_VERSION:
+        raise ValueError(f"aperture file version {version} does not fit an exact stored number")
+    return float((version << _IDENTITY_HASH_BITS) + int(digest, 16))
+
+
+def aperture_identity_from_number(number: float) -> str:
+    """Turn a stored aperture-set number back into the identity text.
+
+    This undoes `aperture_identity_to_number`. Two stored rows were measured
+    in the same apertures exactly when this gives the same text for both.
+
+    Parameters
+    ----------
+    number : `float`
+        The value of a ``stacking.aperture_set_number`` row.
+
+    Returns
+    -------
+    identity : `str`
+        For example ``"v3-1a2b3c4d5e6f"``.
+
+    Raises
+    ------
+    ValueError
+        If the number is not a whole number from 0 up to 2**53.
+    """
+    if not math.isfinite(number) or number != int(number) or not 0 <= number < 2**53:
+        raise ValueError(f"not a stored aperture-set number: {number!r}")
+    whole = int(number)
+    version, digest = whole >> _IDENTITY_HASH_BITS, whole & ((1 << _IDENTITY_HASH_BITS) - 1)
+    return f"v{version}-{digest:0{_IDENTITY_HASH_DIGITS}x}"
+
+
 __all__ = [
     "APERTURE_FILE_NAME",
     "ApertureSet",
@@ -67,6 +137,8 @@ __all__ = [
     "FaintSourceAnalysis",
     "StackDepth",
     "analyze_faint_sources",
+    "aperture_identity_from_number",
+    "aperture_identity_to_number",
     "choose_apertures",
     "choose_apertures_with_reason",
     "faint_source_distance",

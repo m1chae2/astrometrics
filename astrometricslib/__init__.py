@@ -234,6 +234,10 @@ if TYPE_CHECKING:
         select_library_frames,
     )
     from astrometricslib.pipelines.shared.stack_preview_path import preview_path_for
+    from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
+        aperture_identity_from_number,
+        aperture_identity_to_number,
+    )
     from astrometricslib.pipelines.stacking.post_processing.stack_membership import (
         group_frame_weights,
         wfwhm_weights,
@@ -275,6 +279,8 @@ _DEFERRED_EXPORTS = {
     "equal_weight_noise_penalty": "astrometricslib.pipelines.stacking.pre_processing.exposure_weighting",
     "wfwhm_weights": "astrometricslib.pipelines.stacking.post_processing.stack_membership",
     "group_frame_weights": "astrometricslib.pipelines.stacking.post_processing.stack_membership",
+    "aperture_identity_from_number": "astrometricslib.pipelines.stacking.post_processing.empty_apertures",
+    "aperture_identity_to_number": "astrometricslib.pipelines.stacking.post_processing.empty_apertures",
     "fold_exposure_lengths": "astrometricslib.pipelines.stacking.processing.exposure_groups",
     "check_choice": "astrometricslib.pipelines.shared.api_arguments",
     "check_include": "astrometricslib.pipelines.shared.api_arguments",
@@ -564,6 +570,8 @@ __all__ = [
     "WasConfiguredBy",
     "WasGeneratedBy",
     "acquire_resource_slot",
+    "aperture_identity_from_number",
+    "aperture_identity_to_number",
     "background_job",
     "capture_job_logs",
     "check_choice",

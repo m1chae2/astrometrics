@@ -22,7 +22,7 @@ Rules and judging:
 - `exposure_request.py` turns a "take more frames" statement into the exposure row of an observation package (`exposure_request_from_statement`).
 - `all_rules.py` joins the three tables into `ALL_RULES`. A check that must hold for every rule walks this one list.
 - `judge_results.py` applies the plain rules (one reading against one limit) and returns statements. `needs_attention` counts the warnings that need action, and every view uses it.
-- `report_rules.py` builds the statements that need a join, a fit or a split first: frames lost, sky cost, altitude cost, the sharpness trade-off, calibration gaps and "more frames will not help".
+- `report_rules.py` builds the statements that need a join, a fit or a split first: frames lost, sky cost, altitude cost, the sharpness trade-off (for a stack of exposure groups, worked out on the whole stack), calibration gaps and "more frames will not help" (from the stop signal, or when a noise floor makes up too much of the noise for a count).
 - `focus_drift.py` fits how star width grows with focuser temperature.
 - `guiding_exposure.py` finds how long an exposure the guiding lets stay sharp.
 
@@ -31,8 +31,8 @@ Efficiency and noise:
 - `efficiency.py` finds the efficiency of each frame against two references, the physical one and the equipment's own baseline, and splits the loss among causes.
 - `science_goal.py` chooses the science goal for each capture setting.
 - `aggregates.py` builds the loss account and the summaries of a capture setting, a night and a target.
-- `noise_growth.py` forecasts how a stack's noise falls as frames are added, works out "take N more" and fits the noise floor that gives the stop signal.
-- `forecast.py` checks an earlier forecast against the stack that followed it.
+- `noise_growth.py` forecasts how a stack's noise falls as frames are added, works out "take N more" and finds the noise floor that gives the stop signal. It follows the stacker's exposure groups: it keeps each group's measured frame noise, predicts a new group's, folds short sets of new frames where the stacker would, and says when new frames would change the heaviest group. It never asks for fewer than 5 frames of a new exposure length. The floor comes from one stack's measured noise against the noise its frames predict, or from a fit over several stacks; when the floor is most of the noise, the answer says more frames will not help and states the floor. A forecast ratio is given as a fraction of the stars' flux, like the stack's normalized noise, so the combine's mean-exposure scale is left out.
+- `forecast.py` reads a target's stack runs from the stored rows and checks an earlier forecast against the stack that followed it. For a stack of exposure groups it rebuilds each group's frame noise from the stored frame weights, frame count and exposure (the stored rows give no direct link from a frame to its group, so a frame goes to the group of its own exposure length). It applies the earlier stack's noise floor. It keeps a confounded pair out of the check, with a short reason: no aperture-set identity or a different one, a different noise definition, no calibration record or a changed camera, optic, flat, bias, Siril or stacking-algorithm version (a changed dark master counts only for an uncooled camera), a changed heaviest exposure group, a switch between one group and several, or added frames that were taken before the earlier stack. The sensor-temperature band the plan names for the uncooled Nikon is not stored, so it is not checked.
 - `sky_model.py` fits the sky background to the user's own frames against Moon geometry and airmass.
 - `capture_overheads.py` finds the time lost to downloads, dither settling and autofocus, and turns a frame count into clock time.
 - `starting_point.py` gives a first exposure for a target with no frames.

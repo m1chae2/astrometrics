@@ -166,6 +166,7 @@ STACKING_GROUP_GAIN_APPLIED = "stacking.group_gain_applied"
 STACKING_EMPTY_APERTURE_NOISE_STACK_UNIT = "stacking.empty_aperture_noise_stack_unit"
 STACKING_NOISE_REFERENCE_FLUX_STACK_UNIT = "stacking.noise_reference_flux_stack_unit"
 STACKING_EMPTY_APERTURE_NOISE_NORMALIZED = "stacking.empty_aperture_noise_normalized"
+STACKING_APERTURE_SET_NUMBER = "stacking.aperture_set_number"
 STACKING_EFFECTIVE_FRAME_COUNT = "stacking.effective_frame_count"
 STACKING_EFFECTIVE_TIME_S = "stacking.effective_time_s"
 STACKING_EFFECTIVE_TIME_READ_NOISE_S = "stacking.effective_time_read_noise_s"
@@ -174,6 +175,7 @@ STACKING_NIGHT_WEIGHT_SHARE = "stacking.night_weight_fraction"
 STACKING_NOISE_WITHOUT_NIGHT = "stacking.noise_without_night"
 STACKING_NOISE_DIFFERENCE_WITHOUT_NIGHT = "stacking.noise_difference_without_night"
 STACKING_SUBSET_EXPECTED_NOISE_RATIO = "stacking.subset_expected_noise_ratio"
+STACKING_HALF_DIFFERENCE_APERTURE_SET_NUMBER = "stacking.half_difference_aperture_set_number"
 STACKING_HALF_DIFFERENCE_NOISE_STACK_UNIT = "stacking.half_difference_noise_stack_unit"
 STACKING_HALF_DIFFERENCE_NOISE_NORMALIZED = "stacking.half_difference_noise_normalized"
 STACKING_HALF_DIFFERENCE_REFERENCE_FLUX_STACK_UNIT = "stacking.half_difference_reference_flux_stack_unit"
@@ -738,6 +740,21 @@ _WEIGHT_PURPOSE_REASON = (
     "forecast check needs them to predict the stack's noise from the frames' own noise."
 )
 
+_APERTURE_SET_NUMBER_REASON = (
+    "The normalized noise is divided by the flux of the set's reference stars, so two stacks' noise "
+    "values compare only when the same set measured both. This number says which set it was, so a "
+    "reader never has to parse the reason text."
+)
+_APERTURE_SET_NUMBER_ESTIMATOR = (
+    "The identity of the set (`ApertureSet.identity`, such as v3-156104df543d) as one whole number: "
+    "the aperture file version times 2^48 plus the 12 hexadecimal digits of the hash, read as a "
+    "number. It is below 2^53, so the stored float is exact. The hash covers the aperture "
+    "positions, the reference stars, the camera, optic and reference exposure, and the depth of the "
+    "stack that chose the set. The number is a label: it has no size, no unit and no better "
+    "direction, and it is only ever compared for equality. `aperture_identity_from_number` turns it "
+    "back into the text. Not measured, with the reason, when the stack's noise was not measured."
+)
+
 _NOISE_AND_WEIGHT_METRICS: tuple[MetricSpec, ...] = (
     _context_metric(
         STACKING_EMPTY_APERTURE_NOISE_STACK_UNIT,
@@ -811,6 +828,16 @@ _NOISE_AND_WEIGHT_METRICS: tuple[MetricSpec, ...] = (
         ),
         register_entry="STK-36",
         definition_version=3,
+    ),
+    _context_metric(
+        STACKING_APERTURE_SET_NUMBER,
+        "",
+        "Which set of empty apertures and reference stars the stack's noise rows were measured in.",
+        _APERTURE_SET_NUMBER_ESTIMATOR,
+        _NOISE_SAMPLE,
+        "pipelines.stacking.post_processing.record_quality.noise_measurements",
+        purpose_reason=_APERTURE_SET_NUMBER_REASON,
+        register_entry="STK-36",
     ),
     _context_metric(
         STACKING_EFFECTIVE_FRAME_COUNT,
@@ -1065,6 +1092,18 @@ _HALF_DIFFERENCE_CANCELS = (
 )
 
 _HALF_DIFFERENCE_METRICS: tuple[MetricSpec, ...] = (
+    _context_metric(
+        STACKING_HALF_DIFFERENCE_APERTURE_SET_NUMBER,
+        "",
+        "Which set of empty apertures and reference stars the half-difference rows were measured in.",
+        _APERTURE_SET_NUMBER_ESTIMATOR.replace(
+            "when the stack's noise was not measured", "when the difference was not measured"
+        ),
+        _HALF_DIFFERENCE_SAMPLE,
+        "pipelines.stacking.subset_noise_run.half_difference_measurements",
+        purpose_reason=_APERTURE_SET_NUMBER_REASON,
+        register_entry="STK-42",
+    ),
     _context_metric(
         STACKING_HALF_DIFFERENCE_NOISE_STACK_UNIT,
         "stack_unit",

@@ -154,9 +154,19 @@ $$
 
 where $q_i$ is the weight the stacker gave frame $i$, $B_i$ its sky rate, $T_i$ its exposure length and $N_r$ the read noise. The forecast uses the weights that the stacker really applied, which depend on its weighting mode, and not an assumed equal weighting. New frames are assumed to look like the target's past frames. The forecast counts frames by effective time, because a frame that is limited by read noise is worth less than one that is limited by the sky.
 
+A stack may combine several exposure groups, each a set of frames of one exposure length. The stacker weights the groups against each other and then the frames within each group. The forecast follows the same two steps. It rebuilds each group's frame noise from the weights the stacker recorded, and it predicts the weight that a new group would get. A new exposure length needs enough frames to form a group of its own. A smaller set is folded into a neighboring group, as the stacker does, and the forecast says so. The forecast refuses a plan that would regroup frames already stacked.
+
+The forecast states every noise change as a fraction of the stars' flux. The stacker scales its output by the mean exposure of the combined frames, and that scale cancels in the ratio of two stacks. The ratio needs only the change in mean exposure, and no absolute scale.
+<!-- impl: wayfindinglib.analytics.result_quality.noise_growth.forecast_group_noise -->
+<!-- impl: wayfindinglib.analytics.result_quality.noise_growth.plan_group_stack -->
+
 ### 6.2 The stop signal
 
-More frames stop helping when a floor, such as a fixed pattern or the noise of a master flat, dominates the noise. The library infers a floor only from a fit of stack noise against effective time across two or more steps, never from one shortfall. A single stack that came out noisier than the model has too many possible causes: worse frames, a wrong weight, a flat that changed. When the fit puts the floor above zero by a set number of standard errors, the library says that more frames will not help and names the floor as the limit. With only two steps, the fit has no spare data to test itself, and the statement says so.
+More frames stop helping when a floor, such as a fixed pattern or the noise of a master flat, dominates the noise. The library has two ways to find a floor, and both must put it above zero by a set number of standard errors. The first uses one stack. The floor is the measured noise variance minus the random variance that the frames alone predict. The second is a fit of stack noise against effective time across two or more stacks. A fit that has spare data to test itself and finds a floor wins. Otherwise the one-stack result is used. A two-stack fit never overrides it, because with two points it has nothing to test itself against, and the statement says so.
+
+The floor is kept as a fraction of today's random variance. It is treated as a fixed pattern from faint stars and sky, so it grows and shrinks with the stars' flux, as the random noise does in these units. When more frames would not reach the goal, the library says that more frames will not help and gives the floor's share of the noise.
+<!-- impl: wayfindinglib.analytics.result_quality.noise_growth.choose_noise_floor -->
+<!-- impl: wayfindinglib.analytics.result_quality.noise_growth.measure_stack_noise_floor -->
 
 ### 6.3 The forecast check
 
@@ -165,7 +175,10 @@ A forecast earns trust by agreeing with what happens. For each pair of neighbori
 - the gain came as forecast;
 - it fell short for a known reason, such as worse new frames;
 - it fell short for no known reason;
-- the check could not be made, with the reason (for instance, a weighting mode that the stacker did not report).
+- the check could not be made, with the reason (for instance, a weighting mode that the stacker did not report, or a pair of stacks that differ in more than the added frames).
+
+Two stacks are compared only when the added frames are the one difference. The check refuses a pair that differ in the apertures that measured the noise, the noise definition, the calibration (camera, optic, flat and bias masters, and the dark master of a camera that is not cooled), the versions of the stacking software, or the heaviest exposure group. It also refuses a pair of which one stack is a single group and the other has several, and a pair whose added frames are older than the earlier stack's measurement. Each refusal names its cause. A stack that stored none of this information counts as different.
+<!-- impl: wayfindinglib.analytics.result_quality.forecast.forecast_check -->
 
 The "take N more" count appears for a target only after one of the target's own forecast checks agreed. The forward model is a design estimate, and a count that has never been tested on the target is not shown. Until then, the report says what is missing (register entries [WAY-21](validation/wayfinding.md#way-21) and [WAY-70](validation/wayfinding.md#way-70)).
 
@@ -231,7 +244,7 @@ Which target should the observer image tonight? Targets are ranked by the cut in
 
 A clock hour holds fewer frames than its seconds suggest. Each frame costs a download, a dither costs a settling time, and the hour costs one autofocus run. The overheads come from the operator's own session records, with defaults when the records are too few. The new frames are assumed to look like the target's past frames, under tonight's modeled sky.
 
-A target whose fitted floor says that more data would not help is ranked at zero, with the reason. A target with no measured frames is marked *new* and is not ranked, because there is nothing to forecast from. Targets that move on the sky or are not stacked, such as comets and calibration folders, are not ranked.
+A target whose fitted floor says that more data would not help is ranked at zero, with the reason. A smaller floor lowers the gain of the hour in proportion, because the floor does not shrink with the new frames. A target with no measured frames is marked *new* and is not ranked, because there is nothing to forecast from. Targets that move on the sky or are not stacked, such as comets and calibration folders, are not ranked.
 
 A gain in noise has different meanings for different uses. A cut in stack noise is a gain in depth for imaging, but it is not a gain in precision for photometry, nor in signal-to-noise ratio for spectroscopy. Numbers with different meanings must not share a list. Each use (imaging, spectroscopy, photometry) has its own list, and a target appears in every list that its capture settings belong to. The gain is the fall in the noise of the whole stack. It does not include sharpness. A target that leads a list on a thin dataset is called out, since its forecast rests on few frames (register entries [WAY-71](validation/wayfinding.md#way-71) and [WAY-72](validation/wayfinding.md#way-72), design-estimate rows WAY-D30 and WAY-D33).
 

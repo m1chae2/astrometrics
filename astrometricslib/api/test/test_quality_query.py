@@ -291,3 +291,24 @@ def test_resolve_rows_gives_frame_and_stack_paths_and_reasons(tmp_path: Path) ->
     assert "not in the target's frame list" in by_subject["M31/scope/cam/z.fits"].reason
     assert by_subject["run-1"].path is None
     assert next(row.row_id for row in result.rows) == ids["run-1"]
+
+
+def test_the_aperture_set_identity_row_is_read_back_through_the_public_query(
+    quality: QualityRecords, tmp_path: Path
+) -> None:
+    """A stored identity row is read back and turned into its text."""
+    from astrometricslib import aperture_identity_from_number, aperture_identity_to_number
+
+    store = QualityStore(str(tmp_path / "astrometrics.db"))
+    subject = QualitySubject(level=SubjectLevel.STACK, subject_id="M13/M13_Stacked.fits", target_id="M13")
+    store.write_measurements([
+        _measurement(
+            "run-1",
+            BASE_TIME,
+            metric="stacking.aperture_set_number",
+            subject=subject,
+            value=aperture_identity_to_number("v3-156104df543d"),
+        )
+    ])
+    rows = quality.query(metric="stacking.aperture_set_number", target_id="M13", library_only=True)
+    assert [aperture_identity_from_number(row.value) for row in rows] == ["v3-156104df543d"]

@@ -90,6 +90,7 @@ def fixture_noise_outcome() -> StackNoiseOutcome:
             normalized_uncertainty=0.0004,
             wcs_source="stack header",
             apertures_created=False,
+            aperture_identity="v3-156104df543d",
         )
     )
 

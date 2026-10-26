@@ -61,10 +61,13 @@ from wayfindinglib.analytics.result_quality.guiding_exposure import (
 )
 from wayfindinglib.analytics.result_quality.noise_growth import (
     StackFrame,
+    StackGroup,
     StopSignal,
     TakeMoreResult,
     WeightingMode,
+    forecast_group_noise,
     forecast_stack_noise,
+    noise_ratio_with_floor,
 )
 from wayfindinglib.analytics.result_quality.plain_text import (
     exposure_phrases,
@@ -837,8 +840,12 @@ def find_sharpness_tradeoff(
     tradeoff : `SharpnessTradeoff` or `None`
         The trade-off, when there are `SHARPNESS_MINIMUM_FRAMES` frames, the
         noise can be forecast and the stars narrow by at least
-        `SHARPNESS_MINIMUM_GAIN`; else ``None``.
+        `SHARPNESS_MINIMUM_GAIN`; else ``None``. Always ``None`` for the
+        ``group`` mode: the noise of a stack of exposure groups depends on the
+        other groups, so `find_sharpness_tradeoff_in_groups` is used instead.
     """
+    if mode == WeightingMode.GROUP:
+        return None
     if len(frames) != len(widths_arcsec) or len(frames) < SHARPNESS_MINIMUM_FRAMES:
         return None
     order = sorted(range(len(frames)), key=lambda index: widths_arcsec[index])
@@ -860,6 +867,66 @@ def find_sharpness_tradeoff(
         total_count=len(frames),
         star_width_change=width_change,
         noise_change=kept_noise / all_noise - 1.0,
+    )
+
+
+def find_sharpness_tradeoff_in_groups(
+    groups: Sequence[StackGroup], group_position: int, widths_arcsec: Sequence[float]
+) -> SharpnessTradeoff | None:
+    """Work out the sharpness trade-off for one group of a group stack.
+
+    Keeping only the sharpest frames of one exposure group changes that
+    group's weight (``N t^2 / s^2``, with fewer frames) and so its share of
+    the combined stack. The other groups dilute the change, so the noise
+    change is found on the whole stack (`forecast_group_noise`), not on the
+    group alone. The two stacks are compared as a fraction of the stars'
+    flux (`noise_ratio_with_floor`), which leaves the combine's scale out.
+
+    Parameters
+    ----------
+    groups : `Sequence` [`StackGroup`]
+        The groups of the stack, with their frame noise and gain.
+    group_position : `int`
+        The group whose sharpest frames are kept.
+    widths_arcsec : `Sequence` [`float`]
+        Each of that group's frames' star width, in arcseconds, in the order
+        of its frames.
+
+    Returns
+    -------
+    tradeoff : `SharpnessTradeoff` or `None`
+        The trade-off, under the same limits as `find_sharpness_tradeoff`;
+        ``None`` when the stack cannot be forecast.
+    """
+    group = groups[group_position]
+    if len(group.frames) != len(widths_arcsec) or len(group.frames) < SHARPNESS_MINIMUM_FRAMES:
+        return None
+    order = sorted(range(len(group.frames)), key=lambda index: widths_arcsec[index])
+    kept_count = math.ceil(SHARPNESS_KEEP_FRACTION * len(group.frames))
+    kept_indices = sorted(order[:kept_count])
+    kept_group = group.model_copy(
+        update={"frames": tuple(group.frames[index] for index in kept_indices), "in_group_weights": None}
+    )
+    kept_groups = [
+        kept_group if position == group_position else other for position, other in enumerate(groups)
+    ]
+    all_forecast = forecast_group_noise(groups)
+    kept_forecast = forecast_group_noise(kept_groups)
+    ratio = noise_ratio_with_floor(all_forecast, kept_forecast, None)
+    if ratio is None:
+        return None
+    width_change = (
+        statistics.median(widths_arcsec[index] for index in kept_indices) / statistics.median(widths_arcsec)
+        - 1.0
+    )
+    if -width_change < SHARPNESS_MINIMUM_GAIN:
+        return None
+    return SharpnessTradeoff(
+        keep_fraction=SHARPNESS_KEEP_FRACTION,
+        kept_count=kept_count,
+        total_count=len(group.frames),
+        star_width_change=width_change,
+        noise_change=ratio - 1.0,
     )
 
 
@@ -1368,6 +1435,52 @@ def more_frames_statement(
             wall_clock_seconds=clock.total_seconds,
             description=f"Noise down about {-change * 100:.0f}%.",
         ),
+    )
+
+
+def floor_limited_statement(
+    result: TakeMoreResult,
+    capture_setting: CaptureSetting | None,
+    evidence: Iterable[MeasurementReference],
+) -> TargetStatement:
+    """Build the warning that a noise floor makes more frames pointless.
+
+    Used when "take N more" has no count because a floor makes up so much of
+    the stack's noise that the target cannot be reached
+    (`TakeMoreResult.floor_limited`). It says so in place of a count.
+
+    Parameters
+    ----------
+    result : `TakeMoreResult`
+        The answer, with ``floor_limited`` true.
+    capture_setting : `CaptureSetting` or `None`
+        The setting.
+    evidence : `Iterable` [`MeasurementReference`]
+        The rows the floor came from.
+
+    Returns
+    -------
+    statement : `TargetStatement`
+        The ``more_frames_will_not_help`` warning, worded for a floor.
+    """
+    share = 100.0 * (result.floor_variance_share or 0.0)
+    best_cut = 100.0 * (1.0 - (result.lowest_reachable_ratio or 1.0))
+    floor_text = f"{result.floor_noise:.3g} in stack units, " if result.floor_noise is not None else ""
+    message = (
+        f"More frames will not help much: a noise floor ({floor_text}{share:.0f}% of the noise) does not "
+        f"shrink with more frames, so even very many more would cut the noise by only {best_cut:.0f}%."
+    )
+    plain = (
+        f"More frames probably will not help: about {share:.0f}% of the noise does not shrink with more "
+        "frames. Find the cause (flats, dither, faint stars in the field) before adding more."
+    )
+    return _from_rule(
+        "more_frames_will_not_help",
+        message,
+        result.reason or message,
+        capture_setting=capture_setting,
+        plain_message=plain,
+        evidence=evidence,
     )
 
 

@@ -49,6 +49,7 @@ from astrometricslib import (
     MeasurementReference,
     QualityMeasurement,
     Target,
+    fold_exposure_lengths,
     frame_is_spectral,
     observing_night_id,
     resolve_camera_profile,
@@ -73,6 +74,13 @@ from wayfindinglib.analytics.result_quality.efficiency import (
     baseline_key,
 )
 from wayfindinglib.analytics.result_quality.evidence_order import order_statements_evidence
+from wayfindinglib.analytics.result_quality.forecast import (
+    StackRunRecord,
+    camera_gain_for_setting,
+    noise_floor_for_runs,
+    stack_frames_from_observations,
+    stack_groups_of_run,
+)
 from wayfindinglib.analytics.result_quality.guiding_exposure import (
     GuidingExposureOutcome,
     assess_guiding_exposure,
@@ -92,9 +100,13 @@ from wayfindinglib.analytics.result_quality.library_inputs import (
 )
 from wayfindinglib.analytics.result_quality.noise_growth import (
     APERTURE_NOISE_ERROR_FACTOR,
+    MINIMUM_FRAMES_NEW_EXPOSURE_LENGTH,
     StackFrame,
+    StackGroup,
     WeightingMode,
     frames_to_cut_noise,
+    frames_to_cut_noise_in_groups,
+    predict_group_frame_noise_adu,
     predict_weighting_mode,
 )
 from wayfindinglib.analytics.result_quality.report_rules import (
@@ -106,6 +118,8 @@ from wayfindinglib.analytics.result_quality.report_rules import (
     find_altitude_cost,
     find_calibration_gaps,
     find_sharpness_tradeoff,
+    find_sharpness_tradeoff_in_groups,
+    floor_limited_statement,
     frames_lost_statements,
     guiding_limits_statements,
     insufficient,
@@ -589,6 +603,9 @@ def _more_frames_gate_statement(
     if forecast_checks:
         tried = ", ".join(sorted({check.outcome.value for check in forecast_checks}))
         history = f" {len(forecast_checks)} check(s) so far came out as: {tried}."
+        not_checkable = [check for check in forecast_checks if check.outcome == ForecastOutcome.NOT_CHECKABLE]
+        if not_checkable and not _forecast_gate_open(forecast_checks):
+            history += f" The latest one that could not be made: {not_checkable[-1].reason}"
     else:
         history = " No stack has followed a forecast yet, so there is no check."
     if not has_frame_weights:
@@ -600,18 +617,130 @@ def _more_frames_gate_statement(
     return insufficient("more_frames", MORE_FRAMES_GATE_REASON + history, setting)
 
 
+def _single_group_of(frames: Sequence[StackFrame], electrons_per_adu: float) -> StackGroup:
+    """Make the one exposure group of a stack that has only one.
+
+    A stack of one exposure length stores no ``s_g`` (the frame noise the
+    combine measures), so it is predicted from the frames' sky and read noise.
+    It is used only to plan a stack that a new exposure length would turn into
+    a group stack.
+
+    Parameters
+    ----------
+    frames : `Sequence` [`StackFrame`]
+        The stack's frames.
+    electrons_per_adu : `float`
+        The camera gain.
+
+    Returns
+    -------
+    group : `StackGroup`
+        The group, with a predicted frame noise.
+    """
+    return StackGroup(
+        frames=tuple(frames),
+        frame_noise_adu=predict_group_frame_noise_adu(frames, electrons_per_adu),
+        electrons_per_adu=electrons_per_adu,
+        noise_predicted=True,
+    )
+
+
+def _camera_gain(config: Any, setting: CaptureSetting) -> float | None:
+    """Look up a setting's camera gain, or give ``None`` when unknown.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The configuration that holds the camera profiles.
+    setting : `CaptureSetting`
+        The setting.
+
+    Returns
+    -------
+    gain : `float` or `None`
+        Electrons per ADU.
+    """
+    try:
+        return camera_gain_for_setting(config, setting)
+    except AstrometricsError:
+        logger.warning("The camera profile of '%s' could not be read.", setting.camera, exc_info=True)
+        return None
+
+
+def _stack_of_setting(
+    observations: Sequence[FrameObservation],
+    fallback_frames: Sequence[StackFrame],
+    runs: Sequence[StackRunRecord],
+    observations_by_id: Mapping[str, FrameObservation],
+    electrons_per_adu: float | None,
+) -> tuple[list[StackRunRecord], StackRunRecord | None, Any, list[StackFrame]]:
+    """Find the newest stack of a setting's frames and rebuild its groups.
+
+    Parameters
+    ----------
+    observations : `Sequence` [`FrameObservation`]
+        The setting's frames.
+    fallback_frames : `Sequence` [`StackFrame`]
+        The setting's usable frames, used as the stack's frames when no stack
+        holds any of them.
+    runs : `Sequence` [`StackRunRecord`]
+        The target's library stack runs.
+    observations_by_id : `Mapping` [`str`, `FrameObservation`]
+        Every frame of the target by id.
+    electrons_per_adu : `float` or `None`
+        The camera gain, kept on the rebuilt groups.
+
+    Returns
+    -------
+    setting_runs, newest_run, run_groups, stack_frames : `tuple`
+        The runs that hold any of the setting's frames (oldest first), the
+        newest of them (or ``None``), its `RunGroups` (or ``None`` when a
+        member frame has no usable measurements) and the newest stack's
+        frames (the fallback frames when there is none).
+    """
+    frame_ids = {observation.frame_id for observation in observations}
+    setting_runs = [run for run in runs if frame_ids & set(run.member_frame_ids)]
+    newest_run = setting_runs[-1] if setting_runs else None
+    if newest_run is None:
+        return setting_runs, None, None, list(fallback_frames)
+    run_frames, run_problems = stack_frames_from_observations(newest_run.member_frame_ids, observations_by_id)
+    if run_problems:
+        return setting_runs, newest_run, None, list(fallback_frames)
+    return (
+        setting_runs,
+        newest_run,
+        stack_groups_of_run(newest_run, run_frames, electrons_per_adu=electrons_per_adu),
+        run_frames,
+    )
+
+
 def _more_frames_for_setting(
     setting: CaptureSetting,
     observations: Sequence[FrameObservation],
     rows: Sequence[QualityMeasurement],
     configured_weight: str | None,
     overheads: Any,
+    *,
+    runs: Sequence[StackRunRecord] = (),
+    observations_by_id: Mapping[str, FrameObservation] | None = None,
+    electrons_per_adu: float | None = None,
 ) -> list[TargetStatement]:
     """Make the "take N more" statement of one capture setting.
 
     The new frames copy the setting's past frames. When the past frames were
     limited by read noise, the new frames use the exposure at which the sky
     dominates instead (plan section 6.4), and the reason says so.
+
+    The number comes from the model the forecast check used. When the newest
+    stack that holds the setting's frames was combined from exposure groups,
+    the groups are rebuilt from its stored rows and the take-more search
+    places the new frames the way the stacker would
+    (`frames_to_cut_noise_in_groups`: at least 5 frames of a new exposure
+    length, a say when the heaviest group would change). When the new frames
+    would turn a single-group stack into a group stack, the same search is
+    used with the earlier group's frame noise predicted. The stack's noise
+    floor is applied. When the floor makes up so much of the noise that more
+    frames cannot reach the target, the statement says so in place of a count.
 
     Parameters
     ----------
@@ -625,12 +754,19 @@ def _more_frames_for_setting(
         The stacker's configured weight mode.
     overheads : `CaptureOverheads`
         Download and settle times.
+    runs : `Sequence` [`StackRunRecord`], optional
+        The target's library stack runs, for the stack's groups and floor.
+    observations_by_id : `Mapping` [`str`, `FrameObservation`], optional
+        Every frame of the target by id (the stack may hold frames of other
+        settings).
+    electrons_per_adu : `float`, optional
+        The camera gain at the setting, for the frame noise of a new group.
 
     Returns
     -------
     statements : `list` [`TargetStatement`]
         One recommendation, or one ``insufficient_data`` statement saying
-        what is missing.
+        what is missing, or the floor warning.
     """
     frames, used, problems = _stack_frames(observations)
     if len(frames) < MINIMUM_FRAMES_FOR_FORECAST:
@@ -646,7 +782,20 @@ def _more_frames_for_setting(
         [frame.exposure_seconds for frame in frames],
         is_spectral=frame_is_spectral({"filter": setting.filter_name}),
     )
-    if mode == WeightingMode.WFWHM and any(frame.star_width is None for frame in frames):
+    setting_runs, newest_run, run_groups, stack_frames = _stack_of_setting(
+        observations,
+        frames,
+        runs,
+        observations_by_id or {observation.frame_id: observation for observation in observations},
+        electrons_per_adu,
+    )
+    floor = noise_floor_for_runs(setting_runs) if setting_runs else None
+    stack_is_groups = run_groups is not None and run_groups.is_group_stack
+    if (
+        mode == WeightingMode.WFWHM
+        and any(frame.star_width is None for frame in frames)
+        and not stack_is_groups
+    ):
         return [
             insufficient(
                 "more_frames",
@@ -674,13 +823,62 @@ def _more_frames_for_setting(
                     "Check that the brightest star will not clip."
                 )
                 new_exposure = rounded
-    result = frames_to_cut_noise(frames, frames, mode, new_exposure_seconds=new_exposure)
+    # A single-group stack becomes a group stack when the new frames have an
+    # exposure length that is not the stack's: the stacker then makes a new
+    # group of them, and the flat model no longer describes the stack.
+    stack_lengths = [frame.exposure_seconds for frame in stack_frames]
+    becomes_group_stack = not stack_is_groups and (
+        len(
+            set(
+                fold_exposure_lengths([
+                    *stack_lengths,
+                    *([new_exposure] * MINIMUM_FRAMES_NEW_EXPOSURE_LENGTH),
+                ])
+            )
+        )
+        > 1
+    )
+    if stack_is_groups:
+        if run_groups is not None and run_groups.reason is not None:
+            return [insufficient("more_frames", run_groups.reason, setting)]
+        existing_groups = list(run_groups.groups) if run_groups is not None else []
+    elif becomes_group_stack:
+        if electrons_per_adu is None:
+            return [
+                insufficient(
+                    "more_frames",
+                    f"The new {new_exposure:g} s frames would make a new exposure group, and the "
+                    "camera's gain (electrons per ADU) is needed to predict its weight. The camera "
+                    "profile has no gain for this setting.",
+                    setting,
+                )
+            ]
+        existing_groups = [_single_group_of(stack_frames, electrons_per_adu)]
+    else:
+        existing_groups = []
+    if existing_groups:
+        result = frames_to_cut_noise_in_groups(
+            existing_groups,
+            frames,
+            new_exposure_seconds=new_exposure,
+            electrons_per_adu=electrons_per_adu,
+            floor=floor,
+        )
+    else:
+        result = frames_to_cut_noise(frames, frames, mode, new_exposure_seconds=new_exposure, floor=floor)
     used_ids = {frame.frame_id for frame in frames}
     evidence = _references([
         row
         for row in rows
         if row.subject.subject_id in used_ids and row.metric in (SKY_RATE_METRIC, READ_NOISE_METRIC)
     ])
+    if result.floor_limited:
+        floor_evidence = (
+            [MeasurementReference(row_id=newest_run.noise_row_id)]
+            if newest_run is not None and newest_run.noise_row_id is not None
+            else []
+        )
+        return [floor_limited_statement(result, setting, floor_evidence)]
     statement = more_frames_statement(result, setting, overheads, evidence, exposure_note=note)
     if statement is None or result.frames_needed is None or result.new_exposure_seconds is None:
         return [
@@ -825,6 +1023,7 @@ def _quality_statements_of_settings(
     by_setting: dict[CaptureSetting, list[FrameObservation]] = defaultdict(list)
     for observation in observations:
         by_setting[observation.capture_setting].append(observation)
+    observations_by_id = {observation.frame_id: observation for observation in observations}
     for summary in summaries:
         setting = summary.capture_setting
         setting_observations = by_setting.get(setting, [])
@@ -835,7 +1034,14 @@ def _quality_statements_of_settings(
             if _forecast_gate_open(forecast_checks):
                 statements.extend(
                     _more_frames_for_setting(
-                        setting, setting_observations, target_rows.rows, configured_weight, overheads
+                        setting,
+                        setting_observations,
+                        target_rows.rows,
+                        configured_weight,
+                        overheads,
+                        runs=runs,
+                        observations_by_id=observations_by_id,
+                        electrons_per_adu=_camera_gain(config, setting),
                     )
                 )
             else:
@@ -848,7 +1054,33 @@ def _quality_statements_of_settings(
                 [frame.exposure_seconds for frame in frames],
                 is_spectral=frame_is_spectral({"filter": setting.filter_name}),
             )
-            tradeoff = find_sharpness_tradeoff(frames, [float(w) for w in widths if w is not None], mode)
+            width_values = [float(w) for w in widths if w is not None]
+            tradeoff = find_sharpness_tradeoff(frames, width_values, mode)
+            _, _, run_groups, _ = _stack_of_setting(
+                setting_observations, frames, runs, observations_by_id, None
+            )
+            if run_groups is not None and run_groups.is_group_stack and run_groups.reason is None:
+                # The stack was combined from exposure groups: the other
+                # groups dilute the change, so it is worked out on the stack.
+                setting_ids = {frame.frame_id for frame in frames}
+                position = next(
+                    (
+                        index
+                        for index, group in enumerate(run_groups.groups)
+                        if setting_ids & {frame.frame_id for frame in group.frames}
+                    ),
+                    None,
+                )
+                tradeoff = None
+                if position is not None:
+                    group_widths = [
+                        _width_row_value(target_rows.rows, frame.frame_id)
+                        for frame in run_groups.groups[position].frames
+                    ]
+                    if all(width is not None for width in group_widths):
+                        tradeoff = find_sharpness_tradeoff_in_groups(
+                            run_groups.groups, position, [float(w) for w in group_widths if w is not None]
+                        )
             if tradeoff is not None:
                 statements.append(
                     sharpness_statement(
@@ -1497,6 +1729,7 @@ def build_target_dataset_report(
     """
     from wayfindinglib.analytics.result_quality.forecast import (
         PINNED_STACK_METRICS,
+        attach_calibration_identities,
         forecast_check,
         stack_runs_from_measurements,
     )
@@ -1537,7 +1770,12 @@ def build_target_dataset_report(
                 metric=metric, target_id=target.id, library_only=True, latest_only=False
             )
         )
-    runs = stack_runs_from_measurements(stack_rows)
+    # The calibration of each run is not a measurement row; it is a record of
+    # master file identities. A run with none counts as confounded.
+    runs = attach_calibration_identities(
+        stack_runs_from_measurements(stack_rows),
+        astrometrics.quality.calibration_identities(target_id=target.id),
+    )
     newest_members: dict[str, list[str]] = {}
     for run in runs:
         newest_members[run.stack_subject_id] = run.member_frame_ids
@@ -1634,7 +1872,16 @@ def build_target_dataset_report(
     contexts = butler.get_all("ekos_session_context")
     # The checks come first: "take N more" waits for one that agreed (U1).
     forecast_checks: list[ForecastCheck] = (
-        forecast_check(runs, observations, configured_stack_weight=configured_weight)
+        forecast_check(
+            runs,
+            observations,
+            configured_stack_weight=configured_weight,
+            electrons_per_adu=(
+                _camera_gain(config, dominant_setting(observations))
+                if dominant_setting(observations)
+                else None
+            ),
+        )
         if len(runs) >= 2
         else []
     )

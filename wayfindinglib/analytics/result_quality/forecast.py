@@ -39,10 +39,33 @@ for no known reason. Or the check could not be made, and the reason says why
 (weights that were not recorded, a frame with no sky rate, a stack
 with no normalized noise). Nothing is guessed in that last case.
 
+A stack of several exposure groups is checked with the group model
+(`noise_growth.forecast_group_noise`, `plan_group_stack`). Each group's frame
+noise ``s_g`` is not stored; it is rebuilt from the group's summed
+``stacking.frame_weight`` rows, ``stacking.group_frames_stacked_count`` and
+``stacking.group_exposure_s``, and its gain is ``stacking.group_gain_applied``
+(`stack_groups_of_run`). The earlier stack's noise floor is part of every
+forecast: the measured empty-aperture noise against the
+expected noise (version 2, which includes Siril's normalization scale), or a
+fit over the history, reconciled by `noise_growth.choose_noise_floor`.
+
+A pair is not checkable, and says why, when the two stacks differ in more than
+the added frames (`_confound_reason`): the aperture set
+(``stacking.aperture_set_number``), the noise definition, the calibration
+(read from the calibration record, `attach_calibration_identities`: camera,
+optic, flat and bias masters, the dark master of an uncooled camera, the Siril
+and stacking-algorithm versions), the heaviest exposure group, or a switch
+between one group and several. A run with no aperture identity or no
+calibration record counts as confounded. Frames added to the later stack that
+were taken before the earlier stack was made are not new (`_new_frame_reason`).
+The sensor-temperature band that the plan names for the uncooled Nikon is not
+stored, so it is not checked.
+
 The module also turns the run history into the steps of the noise-floor fit
 (`noise_steps_from_runs`) and reads the stop signal from it
 (`target_stop_signal`), so the target report and tonight's ranking use the same
-history. A floor is reported only from two or more steps (`noise_growth`).
+history. The stop signal uses the floor `noise_floor_for_runs` chooses, which
+can come from the newest stack alone.
 
 The planned forecast is made before the frames exist, so it must assume a
 weighting mode. When that mode weights by star width, the check uses the
@@ -58,26 +81,47 @@ passes (`forecast_check`).
 import math
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 from itertools import pairwise
+from typing import Any, cast
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
-from astrometricslib import MeasurementReference, MeasurementStatus, QualityMeasurement, SubjectLevel
+from astrometricslib import (
+    CaptureSetting,
+    MeasurementReference,
+    MeasurementStatus,
+    QualityMeasurement,
+    SubjectLevel,
+    aperture_identity_from_number,
+    fold_exposure_lengths,
+    resolve_camera_profile,
+)
 from wayfindinglib.analytics.result_quality.efficiency import FrameObservation
 from wayfindinglib.analytics.result_quality.noise_growth import (
+    MINIMUM_GAIN_FRACTION,
+    NoiseForecast,
     NoiseStep,
     StackFrame,
+    StackGroup,
+    StackNoiseFloor,
     StopSignal,
     WeightingMode,
     aperture_noise_relative_error,
+    choose_noise_floor,
     fit_noise_floor,
+    forecast_group_noise,
     forecast_noise_with_weights,
     forecast_stack_noise,
+    frame_noise_from_group_weight,
     identify_weighting_mode,
+    measure_stack_noise_floor,
+    new_frames_like,
     noise_ratio_after_adding,
+    noise_ratio_with_floor,
+    plan_group_stack,
     predict_weighting_mode,
     stop_signal,
 )
@@ -104,6 +148,15 @@ NORMALIZED_NOISE_METRIC = "stacking.empty_aperture_noise_normalized"
 EXPECTED_NOISE_METRIC = "stacking.expected_empty_aperture_noise_stack_unit"
 FRAME_WEIGHT_METRIC = "stacking.frame_weight"
 REFERENCE_FLUX_METRIC = "stacking.noise_reference_flux_stack_unit"
+APERTURE_SET_METRIC = "stacking.aperture_set_number"
+GROUP_EXPOSURE_METRIC = "stacking.group_exposure_s"
+GROUP_FRAMES_STACKED_METRIC = "stacking.group_frames_stacked_count"
+GROUP_GAIN_METRIC = "stacking.group_gain_applied"
+
+GROUP_METRICS = (GROUP_EXPOSURE_METRIC, GROUP_FRAMES_STACKED_METRIC, GROUP_GAIN_METRIC)
+"""The exposure-group rows. They sit on the group's own stack subject (the
+file in the ``groups`` folder), not on the combined stack, so they are read
+apart from the noise rows."""
 
 PINNED_STACK_METRICS = {
     NOISE_METRIC: 3,
@@ -111,10 +164,138 @@ PINNED_STACK_METRICS = {
     EXPECTED_NOISE_METRIC: 2,
     FRAME_WEIGHT_METRIC: 1,
     REFERENCE_FLUX_METRIC: 3,
+    APERTURE_SET_METRIC: 1,
+    GROUP_EXPOSURE_METRIC: 1,
+    GROUP_FRAMES_STACKED_METRIC: 1,
+    GROUP_GAIN_METRIC: 1,
 }
 """The metrics read, and the definition version each is pinned to (decision
 S13). A row of another version is not used. A test fails when the registry
 moves past one of these versions."""
+
+COOLED_CAMERA_NAME_MARKERS = ("zwo", "asi")
+"""Words that mark a cooled astronomy camera in its name. A new dark master
+does not confound two stacks from such a camera, because its dark current is
+held at a set temperature and is small. For any other camera (the uncooled
+Nikon) the dark master is part of the calibration. The camera profile does not
+say whether the camera is cooled, so the name decides. Scope: the ZWO ASI533MM
+Pro. Register row WAY-D70."""
+
+
+class RecordedGroup(BaseModel):
+    """What a stack run stored about one exposure group.
+
+    The rows sit on the group's own stack subject (the file in the
+    ``groups`` folder), so the combined stack's record has to collect them.
+
+    Parameters
+    ----------
+    subject_id : `str`
+        The group stack's id in the measurement store.
+    exposure_seconds : `float`
+        The group's exposure length (``stacking.group_exposure_s``).
+    frames_stacked : `int`
+        Frames stacked in the group (``stacking.group_frames_stacked_count``).
+    gain_applied : `float` or `None`
+        The brightness gain the combine applied
+        (``stacking.group_gain_applied``). ``None`` when no row has a value:
+        the combine applied none, so the forecast uses 1.
+    """
+
+    model_config = _MODEL_CONFIG
+
+    subject_id: str
+    exposure_seconds: float
+    frames_stacked: int
+    gain_applied: float | None = None
+
+
+FileIdentity = tuple[str, int | None, int | None]
+"""A calibration master as the store names it: path, size in bytes and
+modification time in nanoseconds. Two equal identities are the same file."""
+
+
+class CalibrationSummary(BaseModel):
+    """The calibration a stack run used, kept for the confound rules.
+
+    Built from a stored calibration record
+    (`QualityRecords.calibration_identities`) by
+    `calibration_summary_from_record`. The record is read with duck typing
+    because the record's class is not in the science library's public root.
+
+    Parameters
+    ----------
+    camera, optic : `str` or `None`
+        The camera and the telescope or lens.
+    focal_length_mm : `float` or `None`
+        The focal length.
+    flat_masters, bias_masters, dark_masters : `tuple` [`FileIdentity`, ...]
+        The master files, sorted.
+    siril_version : `str` or `None`
+        The Siril version that combined the frames.
+    stacking_algorithm_version : `int` or `None`
+        The stacking algorithm version.
+    """
+
+    model_config = _MODEL_CONFIG
+
+    camera: str | None = None
+    optic: str | None = None
+    focal_length_mm: float | None = None
+    flat_masters: tuple[FileIdentity, ...] = ()
+    bias_masters: tuple[FileIdentity, ...] = ()
+    dark_masters: tuple[FileIdentity, ...] = ()
+    siril_version: str | None = None
+    stacking_algorithm_version: int | None = None
+
+
+def _file_identities(files: Iterable[Any]) -> tuple[FileIdentity, ...]:
+    """Turn stored master-file identities into sorted tuples.
+
+    Parameters
+    ----------
+    files : `Iterable` [`Any`]
+        Objects with ``path``, ``size_bytes`` and ``modified_ns``.
+
+    Returns
+    -------
+    identities : `tuple` [`FileIdentity`, ...]
+        One tuple per file, sorted so two lists compare equal when they hold
+        the same files.
+    """
+    return tuple(
+        sorted(
+            ((str(item.path), item.size_bytes, item.modified_ns) for item in files),
+            key=lambda identity: (identity[0], identity[1] or 0, identity[2] or 0),
+        )
+    )
+
+
+def calibration_summary_from_record(record: Any) -> CalibrationSummary:
+    """Keep what the confound rules need from a stored calibration record.
+
+    Parameters
+    ----------
+    record : `Any`
+        A calibration record (`CalibrationIdentities`): ``camera``,
+        ``optic``, ``focal_length_mm``, ``flat_masters``, ``bias_masters``,
+        ``dark_masters``, ``siril_version`` and ``stacking_algorithm_version``.
+
+    Returns
+    -------
+    summary : `CalibrationSummary`
+        The summary.
+    """
+    return CalibrationSummary(
+        camera=record.camera,
+        optic=record.optic,
+        focal_length_mm=record.focal_length_mm,
+        flat_masters=_file_identities(record.flat_masters),
+        bias_masters=_file_identities(record.bias_masters),
+        dark_masters=_file_identities(record.dark_masters),
+        siril_version=record.siril_version,
+        stacking_algorithm_version=record.stacking_algorithm_version,
+    )
 
 
 class StackRunRecord(BaseModel):
@@ -153,9 +334,26 @@ class StackRunRecord(BaseModel):
         The weight recorded for each member, in the same order. ``None`` for a
         weight that was not measured (Siril does not report it in its noise
         mode).
+    aperture_identity : `str` or `None`
+        The identity of the aperture set the noise was measured in, such as
+        ``"v3-156104df543d"`` (`aperture_identity_from_number` of the
+        ``stacking.aperture_set_number`` row). Equal text means the same set.
+        ``None`` when the row is missing (a stack made before the row
+        existed) or was not measured.
+    noise_definition_version : `int` or `None`
+        The definition version of the stack's noise row.
+    groups : `list` [`RecordedGroup`]
+        The exposure groups the run recorded. Empty for a run that stored
+        none (a stack made before part 2a) and for a run that made several
+        stacks, because no stored row says which group belongs to which
+        stack (see ``problems["groups"]``).
+    calibration : `CalibrationSummary` or `None`
+        The calibration the run used. ``None`` until
+        `attach_calibration_identities` adds it; a run with no record counts
+        as confounded.
     problems : `dict` [`str`, `str`]
         Why a part is missing, by part name (``normalized_noise``,
-        ``expected_noise``, ``members``).
+        ``expected_noise``, ``members``, ``aperture_identity``, ``groups``).
     """
 
     model_config = _MODEL_CONFIG
@@ -173,6 +371,10 @@ class StackRunRecord(BaseModel):
     normalized_row_id: int | None = None
     member_frame_ids: list[str] = Field(default_factory=list)
     recorded_weights: list[float | None] = Field(default_factory=list)
+    aperture_identity: str | None = None
+    noise_definition_version: int | None = None
+    groups: list[RecordedGroup] = Field(default_factory=list)
+    calibration: CalibrationSummary | None = None
     problems: dict[str, str] = Field(default_factory=dict)
 
     @property
@@ -252,6 +454,37 @@ def _usable_value(rows: Sequence[QualityMeasurement], metric: str) -> tuple[floa
     return None, reason or f"{metric} has no row."
 
 
+def _recorded_group(subject_id: str, rows: Sequence[QualityMeasurement]) -> RecordedGroup | None:
+    """Build one exposure group's record from its rows.
+
+    Parameters
+    ----------
+    subject_id : `str`
+        The group stack's subject id.
+    rows : `Sequence` [`QualityMeasurement`]
+        The group subject's rows of the exposure-group metrics.
+
+    Returns
+    -------
+    group : `RecordedGroup` or `None`
+        ``None`` when the exposure or the frame count is missing.
+    """
+    grouped = _newest_by_subject(rows)
+    exposure, _ = _usable_value(grouped.get((subject_id, GROUP_EXPOSURE_METRIC), []), GROUP_EXPOSURE_METRIC)
+    stacked, _ = _usable_value(
+        grouped.get((subject_id, GROUP_FRAMES_STACKED_METRIC), []), GROUP_FRAMES_STACKED_METRIC
+    )
+    gain, _ = _usable_value(grouped.get((subject_id, GROUP_GAIN_METRIC), []), GROUP_GAIN_METRIC)
+    if exposure is None or exposure <= 0.0 or stacked is None or stacked < 1:
+        return None
+    return RecordedGroup(
+        subject_id=subject_id,
+        exposure_seconds=float(exposure),
+        frames_stacked=round(stacked),
+        gain_applied=float(gain) if gain is not None and gain > 0.0 else None,
+    )
+
+
 def stack_runs_from_measurements(measurements: Iterable[QualityMeasurement]) -> list[StackRunRecord]:
     """Group a target's stored rows into its library stack runs.
 
@@ -273,11 +506,17 @@ def stack_runs_from_measurements(measurements: Iterable[QualityMeasurement]) -> 
     """
     stack_rows: dict[tuple[str, str], list[QualityMeasurement]] = defaultdict(list)
     weight_rows: dict[str, list[QualityMeasurement]] = defaultdict(list)
+    group_rows: dict[str, dict[str, list[QualityMeasurement]]] = defaultdict(lambda: defaultdict(list))
     for row in measurements:
         if row.metric not in PINNED_STACK_METRICS:
             continue
         if row.subject.level == SubjectLevel.STACK and row.subject.variant is None:
-            stack_rows[row.run_id, row.subject.subject_id].append(row)
+            if row.metric in GROUP_METRICS:
+                # A group's rows are kept apart: a group subject has no noise
+                # rows, so it must not become a run of its own.
+                group_rows[row.run_id][row.subject.subject_id].append(row)
+            else:
+                stack_rows[row.run_id, row.subject.subject_id].append(row)
         elif row.subject.level == SubjectLevel.FRAME and row.metric == FRAME_WEIGHT_METRIC:
             weight_rows[row.run_id].append(row)
     members_by_run: dict[str, tuple[list[str], list[float | None]]] = {}
@@ -289,6 +528,9 @@ def stack_runs_from_measurements(measurements: Iterable[QualityMeasurement]) -> 
             value, _reason = _usable_value(grouped[frame_id, FRAME_WEIGHT_METRIC], FRAME_WEIGHT_METRIC)
             weights.append(value)
         members_by_run[run_id] = (frame_ids, weights)
+    stacks_in_run: dict[str, int] = defaultdict(int)
+    for run_id, _stack_id in stack_rows:
+        stacks_in_run[run_id] += 1
     records = []
     for (run_id, stack_id), rows in stack_rows.items():
         grouped = _newest_by_subject(rows)
@@ -329,6 +571,31 @@ def stack_runs_from_measurements(measurements: Iterable[QualityMeasurement]) -> 
         member_ids, recorded = members_by_run.get(run_id, ([], []))
         if not member_ids:
             problems["members"] = "The run stored no frame weights, so its member frames are not known."
+        identity_value, identity_reason = _usable_value(
+            grouped.get((stack_id, APERTURE_SET_METRIC), []), APERTURE_SET_METRIC
+        )
+        identity = None
+        if identity_value is None:
+            problems["aperture_identity"] = identity_reason or "The stack has no aperture-set row."
+        else:
+            try:
+                identity = aperture_identity_from_number(identity_value)
+            except ValueError:
+                problems["aperture_identity"] = (
+                    f"The stored aperture-set number {identity_value!r} is invalid."
+                )
+        recorded_groups: list[RecordedGroup] = []
+        if stacks_in_run[run_id] > 1:
+            problems["groups"] = (
+                "The run made more than one stack, and no stored row says which exposure group "
+                "belongs to which stack."
+            )
+        else:
+            for group_subject, group_subject_rows in sorted(group_rows.get(run_id, {}).items()):
+                group = _recorded_group(group_subject, group_subject_rows)
+                if group is not None:
+                    recorded_groups.append(group)
+        noise_version_rows = grouped.get((stack_id, NOISE_METRIC), [])
         newest_time = max(row.measured_at for row in rows)
         records.append(
             StackRunRecord(
@@ -345,10 +612,50 @@ def stack_runs_from_measurements(measurements: Iterable[QualityMeasurement]) -> 
                 normalized_row_id=first_normalized.row_id if first_normalized is not None else None,
                 member_frame_ids=member_ids,
                 recorded_weights=recorded,
+                aperture_identity=identity,
+                noise_definition_version=(
+                    noise_version_rows[0].definition_version if noise_version_rows else None
+                ),
+                groups=recorded_groups,
                 problems=problems,
             )
         )
     return sorted(records, key=lambda record: (record.measured_at, record.run_id))
+
+
+def attach_calibration_identities(
+    runs: Iterable[StackRunRecord], identities: Iterable[Any]
+) -> list[StackRunRecord]:
+    """Put each run's stored calibration record on the run.
+
+    The calibration is not a measurement row: it is a record of master file
+    identities, read with `QualityRecords.calibration_identities`. A run is
+    matched on its run id and its stack's subject id. A run with no record
+    keeps ``calibration`` as ``None``, and the confound rules then count it as
+    confounded.
+
+    Parameters
+    ----------
+    runs : `Iterable` [`StackRunRecord`]
+        The runs from `stack_runs_from_measurements`.
+    identities : `Iterable` [`Any`]
+        The stored calibration records (`CalibrationIdentities`).
+
+    Returns
+    -------
+    runs : `list` [`StackRunRecord`]
+        Copies of the runs, with the calibration added where a record exists.
+    """
+    by_key = {(record.run_id, record.subject_id): record for record in identities}
+    attached = []
+    for run in runs:
+        record = by_key.get((run.run_id, run.stack_subject_id))
+        attached.append(
+            run
+            if record is None
+            else run.model_copy(update={"calibration": calibration_summary_from_record(record)})
+        )
+    return attached
 
 
 def stack_frames_from_observations(
@@ -517,14 +824,647 @@ def _frame_difference_text(old: Sequence[StackFrame], new: Sequence[StackFrame])
     return " ".join(parts)
 
 
+class RunGroups(BaseModel):
+    """The exposure groups of one stack run, rebuilt from its stored rows.
+
+    Parameters
+    ----------
+    is_group_stack : `bool`
+        True when the stacker split the run's frames into more than one
+        exposure group (`fold_exposure_lengths`). The group fields are filled
+        only then.
+    groups : `list` [`StackGroup`]
+        One group for each exposure length, in length order. Each holds its
+        frames, its frame noise ``s_g`` (in ADU), its gain ``G_g``, and the
+        recorded in-group weights.
+    group_weights : `list` [`float`]
+        ``W_g`` of each group: the sum of its frames' recorded weights.
+    reason : `str` or `None`
+        Why the groups could not be rebuilt (a missing row or weight).
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    is_group_stack: bool
+    groups: list[StackGroup] = Field(default_factory=list)
+    group_weights: list[float] = Field(default_factory=list)
+    reason: str | None = None
+
+    @property
+    def heaviest_exposure_seconds(self) -> float | None:
+        """Give the exposure length of the group with the largest weight.
+
+        Returns
+        -------
+        length : `float` or `None`
+            The heaviest group's mean exposure, in seconds; ``None`` with no
+            groups. The heaviest group is the combine's reference: it sets the
+            brightness scale the other groups are matched to.
+        """
+        if not self.groups:
+            return None
+        return self.groups[
+            max(range(len(self.groups)), key=lambda index: self.group_weights[index])
+        ].mean_exposure_seconds
+
+
+def stack_groups_of_run(
+    run: StackRunRecord, frames: Sequence[StackFrame], *, electrons_per_adu: float | None = None
+) -> RunGroups:
+    """Rebuild the exposure groups of a stack run from its stored rows.
+
+    The part 2a rows hold, for each group, the frames stacked and the
+    exposure (the group's own stack subject) and the gain applied, and, for
+    each frame, its raw combine weight ``W_g w_i``. The frame noise ``s_g`` is
+    not stored. It comes back from the group's weight: the weights of a
+    group's frames add up to ``W_g = N_g t_g^2 / s_g^2``, so
+    ``s_g = t_g sqrt(N_g / W_g)`` (`frame_noise_from_group_weight`).
+
+    One link is missing from the stored rows: no row says which frames belong
+    to which group. Each frame is placed by its own exposure length with the
+    stacker's own rule (`fold_exposure_lengths`), which is how the stacker
+    placed it.
+
+    Parameters
+    ----------
+    run : `StackRunRecord`
+        The run, with its groups and recorded weights.
+    frames : `Sequence` [`StackFrame`]
+        The run's member frames, in the order of `run.member_frame_ids`.
+    electrons_per_adu : `float`, optional
+        The camera's gain, kept on each group so a new group can be planned.
+
+    Returns
+    -------
+    groups : `RunGroups`
+        ``is_group_stack`` false for a run of one exposure group (or of mixed
+        lengths in one group); else the groups, or the reason there are none.
+    """
+    lengths = fold_exposure_lengths([frame.exposure_seconds for frame in frames])
+    unique = sorted({length for length in lengths if length is not None})
+    if len(unique) < 2:
+        return RunGroups(is_group_stack=False)
+    if len(run.recorded_weights) != len(frames) or any(weight is None for weight in run.recorded_weights):
+        return RunGroups(
+            is_group_stack=True,
+            reason=(
+                "The stacker's weights were not recorded for every frame, so the groups' weights are unknown."
+            ),
+        )
+    weights = [float(weight or 0.0) for weight in run.recorded_weights]
+    groups: list[StackGroup] = []
+    group_weights: list[float] = []
+    for length in unique:
+        indices = [index for index, group_length in enumerate(lengths) if group_length == length]
+        recorded = next(
+            (group for group in run.groups if abs(group.exposure_seconds - length) <= 0.005 * length), None
+        )
+        if recorded is None:
+            return RunGroups(
+                is_group_stack=True,
+                reason=f"Run {run.run_id} stored no row for its {length:g} s exposure group.",
+            )
+        if recorded.frames_stacked != len(indices):
+            return RunGroups(
+                is_group_stack=True,
+                reason=(
+                    f"Run {run.run_id} says its {length:g} s group stacked {recorded.frames_stacked} frames, "
+                    f"but {len(indices)} are listed as members."
+                ),
+            )
+        total = math.fsum(weights[index] for index in indices)
+        if total <= 0.0:
+            return RunGroups(
+                is_group_stack=True, reason=f"The {length:g} s group's recorded weights add up to 0."
+            )
+        groups.append(
+            StackGroup(
+                frames=tuple(frames[index] for index in indices),
+                frame_noise_adu=frame_noise_from_group_weight(
+                    total, recorded.frames_stacked, recorded.exposure_seconds
+                ),
+                gain=recorded.gain_applied or 1.0,
+                electrons_per_adu=electrons_per_adu,
+                in_group_weights=tuple(weights[index] for index in indices),
+            )
+        )
+        group_weights.append(total)
+    return RunGroups(is_group_stack=True, groups=groups, group_weights=group_weights)
+
+
+def single_stack_floor(record: StackRunRecord) -> StackNoiseFloor | None:
+    """Find a run's noise floor from its own measured and expected noise.
+
+    Both noises are in the stack's units. The expected noise is version 2 of
+    ``stacking.expected_empty_aperture_noise_stack_unit``, which includes
+    Siril's normalization scale (plan decision D9), so it is the random part
+    of the measured noise.
+
+    Parameters
+    ----------
+    record : `StackRunRecord`
+        The run.
+
+    Returns
+    -------
+    floor : `StackNoiseFloor` or `None`
+        The floor result (found or not), or ``None`` when the run lacks a
+        measured noise, an expected noise or 2 apertures.
+    """
+    if (
+        record.noise is None
+        or record.noise <= 0.0
+        or record.expected_noise is None
+        or record.expected_noise <= 0.0
+        or record.aperture_count is None
+        or record.aperture_count < 2
+    ):
+        return None
+    return measure_stack_noise_floor(record.noise, record.expected_noise, record.aperture_count)
+
+
+def noise_floor_for_runs(runs: Sequence[StackRunRecord]) -> StackNoiseFloor | None:
+    """Choose the noise floor of a target's newest stack.
+
+    The one-stack floor of the newest run (`single_stack_floor`) and the fit
+    over the runs that share its aperture set (`fit_noise_floor`) are
+    reconciled by `choose_noise_floor`. A fit never mixes aperture sets: the
+    normalized noise of two sets is not on one scale.
+
+    Parameters
+    ----------
+    runs : `Sequence` [`StackRunRecord`]
+        The target's library stack runs, up to and including the stack being
+        extended.
+
+    Returns
+    -------
+    floor : `StackNoiseFloor` or `None`
+        The chosen floor, or ``None`` when neither estimate can be made.
+    """
+    ordered = sorted(runs, key=lambda item: (item.measured_at, item.run_id))
+    if not ordered:
+        return None
+    newest = ordered[-1]
+    same_set = [record for record in ordered if record.aperture_identity == newest.aperture_identity]
+    steps = noise_steps_from_runs(same_set)
+    fit = fit_noise_floor(steps) if steps else None
+    expected_variance = steps[-1].expected_variance if steps and steps[-1].label == newest.run_id else None
+    return choose_noise_floor(single_stack_floor(newest), fit, expected_variance)
+
+
+def camera_gain_for_setting(config: Any, setting: CaptureSetting) -> float | None:
+    """Look up a camera's gain, in electrons per ADU, at a capture setting.
+
+    The camera profile holds it for each gain setting, offset and binning. The
+    offset does not change the gain unless the frame is cut off at zero, which
+    a sky-dominated planned frame is not, so the profile's offset fallback is
+    allowed.
+
+    Parameters
+    ----------
+    config : `Any`
+        The application configuration (the camera profiles live in it).
+    setting : `CaptureSetting`
+        The capture setting of the planned frames.
+
+    Returns
+    -------
+    gain : `float` or `None`
+        Electrons per ADU, or ``None`` when the camera has no profile or no
+        entry for the setting.
+    """
+    profile = resolve_camera_profile(setting.camera, config)
+    if profile.is_generic_fallback:
+        return None
+    entry = profile.sensor_noise_for(
+        setting.gain_setting, setting.offset or 0, setting.binning or 1, clipped_at_zero=False
+    )
+    if entry is None or entry.gain_e_per_adu is None:
+        return None
+    value = float(entry.gain_e_per_adu.value)
+    return value if value > 0.0 else None
+
+
+def _camera_is_cooled(camera: str | None) -> bool:
+    """Say whether a camera name marks a cooled astronomy camera.
+
+    Parameters
+    ----------
+    camera : `str` or `None`
+        The camera name.
+
+    Returns
+    -------
+    cooled : `bool`
+        True when the name holds one of `COOLED_CAMERA_NAME_MARKERS`.
+    """
+    name = (camera or "").casefold()
+    return any(marker in name for marker in COOLED_CAMERA_NAME_MARKERS)
+
+
+def _confound_reason(previous: StackRunRecord, current: StackRunRecord) -> str | None:
+    """Say whether two stacks cannot be compared, from the runs' records.
+
+    These are the rules that need only the stored rows of the two runs. The
+    rules that need the frames are `_new_frame_reason` and the heaviest-group
+    rule in `_group_forecast`.
+
+    Parameters
+    ----------
+    previous, current : `StackRunRecord`
+        The earlier and the later run.
+
+    Returns
+    -------
+    reason : `str` or `None`
+        A short plain sentence naming the first rule that holds, or ``None``
+        when none does.
+    """
+    for record in (previous, current):
+        if record.aperture_identity is None:
+            return (
+                f"Run {record.run_id} has no aperture-set identity, so its noise cannot be tied to the same "
+                "apertures as the other run's."
+            )
+    if previous.aperture_identity != current.aperture_identity:
+        return (
+            f"The two stacks' noise was measured in different aperture sets ({previous.aperture_identity} "
+            f"and {current.aperture_identity}), so the values cannot be compared."
+        )
+    if previous.noise_definition_version != current.noise_definition_version:
+        return (
+            f"The noise was measured with definition version {previous.noise_definition_version} for run "
+            f"{previous.run_id} and {current.noise_definition_version} for run {current.run_id}."
+        )
+    for record in (previous, current):
+        if record.calibration is None:
+            return (
+                f"Run {record.run_id} has no calibration record, so a change of flats, biases or software "
+                "cannot be ruled out."
+            )
+    before = cast("CalibrationSummary", previous.calibration)
+    after = cast("CalibrationSummary", current.calibration)
+    if before.camera != after.camera:
+        return f"The camera changed from {before.camera} to {after.camera}."
+    if before.optic != after.optic or before.focal_length_mm != after.focal_length_mm:
+        return "The telescope or lens changed between the two stacks."
+    if before.flat_masters != after.flat_masters:
+        return "The flat master changed between the two stacks."
+    if before.bias_masters != after.bias_masters:
+        return "The bias master changed between the two stacks."
+    if before.dark_masters != after.dark_masters and not _camera_is_cooled(after.camera):
+        return "The dark master changed between the two stacks."
+    for name, first, second in (
+        ("Siril version", before.siril_version, after.siril_version),
+        ("stacking algorithm version", before.stacking_algorithm_version, after.stacking_algorithm_version),
+    ):
+        if first is None or second is None:
+            return f"The {name} was not recorded for both stacks."
+        if first != second:
+            return f"The {name} changed from {first} to {second}."
+    return None
+
+
+def _new_frame_reason(
+    previous: StackRunRecord, new_frames: Sequence[StackFrame], observations: Mapping[str, FrameObservation]
+) -> str | None:
+    """Say whether the frames added to the later stack are really new.
+
+    A frame the earlier stack left out although it was already taken (set
+    aside and restored, or not yet synced) is not new data of the kind the
+    forecast assumes. The earlier stack's made time is the time its noise was
+    measured, which is a little after the stack was made; a frame taken in
+    between is counted as old, which errs on the side of not checking.
+
+    Parameters
+    ----------
+    previous : `StackRunRecord`
+        The earlier run.
+    new_frames : `Sequence` [`StackFrame`]
+        The frames in the later stack and not in the earlier one.
+    observations : `Mapping` [`str`, `FrameObservation`]
+        The frames' measurements, for their start times.
+
+    Returns
+    -------
+    reason : `str` or `None`
+        A sentence when a frame has no start time or was taken before the
+        earlier stack was made; ``None`` otherwise.
+    """
+    made_at = (
+        previous.measured_at if previous.measured_at.tzinfo else previous.measured_at.replace(tzinfo=UTC)
+    )
+    made_epoch = made_at.timestamp()
+    unknown = 0
+    old = 0
+    for frame in new_frames:
+        observation = observations.get(frame.frame_id)
+        start = None if observation is None else observation.start_epoch_seconds
+        if start is None:
+            unknown += 1
+        elif start < made_epoch:
+            old += 1
+    if old:
+        return (
+            f"{old} of the {len(new_frames)} added frames were taken before the earlier stack was made, so "
+            "they are not new frames."
+        )
+    if unknown:
+        return (
+            f"{unknown} of the {len(new_frames)} added frames have no start time, so it cannot be shown that "
+            "they are new."
+        )
+    return None
+
+
+class _PairForecast(BaseModel):
+    """The two forecast numbers of a pair, or why they cannot be made.
+
+    Parameters
+    ----------
+    planned, given : `float` or `None`
+        The forecast changes in noise (-0.29 is a fall of 29%).
+    mode_name : `str`
+        The weighting mode named for the reader.
+    equal_weights : `bool`
+        Whether the later stack's weights were equal.
+    reason : `str` or `None`
+        Why the pair cannot be checked.
+    """
+
+    planned: float | None = None
+    given: float | None = None
+    mode_name: str = "unknown"
+    equal_weights: bool = False
+    reason: str | None = None
+
+
+def _is_group_stack(frames: Sequence[StackFrame]) -> bool:
+    """Say whether the stacker would split these frames into exposure groups.
+
+    Parameters
+    ----------
+    frames : `Sequence` [`StackFrame`]
+        The stack's frames.
+
+    Returns
+    -------
+    is_group : `bool`
+        True when the frames fall into more than one group length.
+    """
+    lengths = fold_exposure_lengths([frame.exposure_seconds for frame in frames])
+    return None not in lengths and len(set(lengths)) > 1
+
+
+def _given_group_forecast(
+    run: StackRunRecord, frames: Sequence[StackFrame], run_groups: RunGroups
+) -> NoiseForecast:
+    """Predict a group stack's noise from the weights the run recorded.
+
+    The coefficient of frame ``i`` in group ``g`` is ``W_g w_i / (sum(W) G_g)``
+    (the recorded weight over the gain, over the sum of the recorded weights),
+    and the combine scales the result by the mean exposure ``t_bar``.
+
+    Parameters
+    ----------
+    run : `StackRunRecord`
+        The run, with its recorded weights.
+    frames : `Sequence` [`StackFrame`]
+        The run's member frames, in the order of the recorded weights.
+    run_groups : `RunGroups`
+        The run's groups (`stack_groups_of_run`).
+
+    Returns
+    -------
+    forecast : `NoiseForecast`
+        Mode ``group``, in the stack's scale, with ``mean_exposure_seconds``
+        set.
+    """
+    weight_of = {
+        frame.frame_id: float(weight or 0.0)
+        for frame, weight in zip(frames, run.recorded_weights, strict=True)
+    }
+    ordered = [frame for group in run_groups.groups for frame in group.frames]
+    adjusted = [
+        weight_of[frame.frame_id] / group.gain for group in run_groups.groups for frame in group.frames
+    ]
+    base = forecast_noise_with_weights(
+        ordered, adjusted, WeightingMode.GROUP, weight_normalization=math.fsum(weight_of.values())
+    )
+    if base.variance is None:
+        return base
+    mean_exposure = math.fsum(frame.exposure_seconds for frame in ordered) / len(ordered)
+    variance = base.variance * mean_exposure**2
+    return NoiseForecast(
+        variance=variance,
+        noise=math.sqrt(variance),
+        frame_count=len(ordered),
+        mode=WeightingMode.GROUP,
+        mean_exposure_seconds=mean_exposure,
+    )
+
+
+def _group_forecast(
+    previous: StackRunRecord,
+    current: StackRunRecord,
+    previous_frames: Sequence[StackFrame],
+    current_frames: Sequence[StackFrame],
+    new_frames: Sequence[StackFrame],
+    floor: StackNoiseFloor | None,
+    electrons_per_adu: float | None,
+) -> _PairForecast:
+    """Forecast a pair of stacks that were both combined from exposure groups.
+
+    The planned forecast places the new frames with the stacker's own rule
+    (`plan_group_stack`); the forecast given the frames taken uses the
+    recorded weights. Both carry the earlier stack's floor.
+
+    Parameters
+    ----------
+    previous, current : `StackRunRecord`
+        The earlier and the later run.
+    previous_frames, current_frames : `Sequence` [`StackFrame`]
+        Their member frames.
+    new_frames : `Sequence` [`StackFrame`]
+        The frames only the later stack holds.
+    floor : `StackNoiseFloor` or `None`
+        The earlier stack's noise floor.
+    electrons_per_adu : `float` or `None`
+        The camera gain, needed to predict the frame noise of a group the new
+        frames start.
+
+    Returns
+    -------
+    forecast : `_PairForecast`
+        The numbers, or the reason (a missing row, or the heaviest group
+        changing).
+    """
+    previous_groups = stack_groups_of_run(previous, previous_frames, electrons_per_adu=electrons_per_adu)
+    current_groups = stack_groups_of_run(current, current_frames, electrons_per_adu=electrons_per_adu)
+    for groups in (previous_groups, current_groups):
+        if groups.reason is not None:
+            return _PairForecast(reason=groups.reason)
+    heaviest_before = previous_groups.heaviest_exposure_seconds
+    heaviest_after = current_groups.heaviest_exposure_seconds
+    if heaviest_before != heaviest_after:
+        return _PairForecast(
+            reason=(
+                f"The heaviest exposure group changed from {heaviest_before:g} s to {heaviest_after:g} s, "
+                "which rescales the stack, so the two noise values are not like for like."
+            )
+        )
+    noises = {
+        group.mean_exposure_seconds: group.frame_noise_adu
+        for group in current_groups.groups
+        if group.frame_noise_adu is not None
+    }
+    evidence = identify_weighting_mode(
+        current_frames, current.recorded_weights, group_frame_noises_adu=noises
+    )
+    mode_name = evidence.mode.value if evidence.mode != WeightingMode.UNKNOWN else "recorded_weights"
+    planned_exposure = float(np.median([frame.exposure_seconds for frame in new_frames]))
+    plan = plan_group_stack(
+        previous_groups.groups,
+        new_frames_like(previous_frames, len(new_frames), planned_exposure),
+        electrons_per_adu=electrons_per_adu,
+    )
+    before = forecast_group_noise(previous_groups.groups)
+    given_before = _given_group_forecast(previous, previous_frames, previous_groups)
+    given_after = _given_group_forecast(current, current_frames, current_groups)
+    if (
+        before.noise is None
+        or plan.forecast.noise is None
+        or given_before.noise is None
+        or given_after.noise is None
+    ):
+        return _PairForecast(
+            mode_name=mode_name,
+            reason=plan.reason
+            or before.reason
+            or given_after.reason
+            or "The group model could not be evaluated.",
+        )
+    planned_ratio = noise_ratio_with_floor(before, plan.forecast, floor)
+    given_ratio = noise_ratio_with_floor(given_before, given_after, floor)
+    if planned_ratio is None or given_ratio is None:
+        return _PairForecast(mode_name=mode_name, reason="The group model could not be evaluated.")
+    return _PairForecast(planned=planned_ratio - 1.0, given=given_ratio - 1.0, mode_name=mode_name)
+
+
+def _flat_forecast(
+    previous: StackRunRecord,
+    current: StackRunRecord,
+    previous_frames: Sequence[StackFrame],
+    current_frames: Sequence[StackFrame],
+    new_frames: Sequence[StackFrame],
+    floor: StackNoiseFloor | None,
+    configured_stack_weight: str | None,
+) -> _PairForecast:
+    """Forecast a pair of stacks that are each one exposure group.
+
+    Parameters
+    ----------
+    previous, current : `StackRunRecord`
+        The earlier and the later run.
+    previous_frames, current_frames : `Sequence` [`StackFrame`]
+        Their member frames.
+    new_frames : `Sequence` [`StackFrame`]
+        The frames only the later stack holds.
+    floor : `StackNoiseFloor` or `None`
+        The earlier stack's noise floor.
+    configured_stack_weight : `str` or `None`
+        The configured stack weight, used for the planned forecast when the
+        earlier run's mode is not known.
+
+    Returns
+    -------
+    forecast : `_PairForecast`
+        The numbers, or the reason they cannot be made.
+    """
+    current_weights = [float(weight or 0.0) for weight in current.recorded_weights]
+    previous_weights = [float(weight or 0.0) for weight in previous.recorded_weights]
+    current_mode = identify_weighting_mode(current_frames, current.recorded_weights)
+    mode_name = current_mode.mode.value if current_mode.mode != WeightingMode.UNKNOWN else "recorded_weights"
+    previous_mode = identify_weighting_mode(previous_frames, previous.recorded_weights)
+    planned_mode = (
+        previous_mode.mode
+        if previous_mode.mode != WeightingMode.UNKNOWN
+        else predict_weighting_mode(
+            configured_stack_weight, [frame.exposure_seconds for frame in [*previous_frames, *new_frames]]
+        )
+    )
+    before = forecast_stack_noise(previous_frames, planned_mode)
+    planned_exposure = float(np.median([frame.exposure_seconds for frame in new_frames]))
+    planned_after = noise_ratio_after_adding(
+        previous_frames, previous_frames, len(new_frames), planned_mode, planned_exposure
+    )
+    given_after = forecast_noise_with_weights(current_frames, current_weights)
+    given_before = forecast_noise_with_weights(previous_frames, previous_weights)
+    if (
+        before.noise is None
+        or planned_after is None
+        or planned_after.noise is None
+        or given_after.noise is None
+        or given_before.noise is None
+    ):
+        return _PairForecast(
+            mode_name=mode_name,
+            reason=given_after.reason or before.reason or "The forward model could not be evaluated.",
+        )
+    planned_ratio = noise_ratio_with_floor(before, planned_after, floor)
+    given_ratio = noise_ratio_with_floor(given_before, given_after, floor)
+    if planned_ratio is None or given_ratio is None:
+        return _PairForecast(mode_name=mode_name, reason="The forward model could not be evaluated.")
+    return _PairForecast(
+        planned=planned_ratio - 1.0,
+        given=given_ratio - 1.0,
+        mode_name=mode_name,
+        equal_weights=current_mode.mode == WeightingMode.EQUAL,
+    )
+
+
+def _floor_sentence(floor: StackNoiseFloor | None) -> str:
+    """Say in a sentence what the forecast assumed about a noise floor.
+
+    Parameters
+    ----------
+    floor : `StackNoiseFloor` or `None`
+        The earlier stack's floor.
+
+    Returns
+    -------
+    text : `str`
+        A sentence naming the floor, or saying none was found or measured.
+    """
+    if floor is None:
+        return "No noise floor could be measured for the earlier stack."
+    if not floor.floor_detected:
+        return "The earlier stack showed no noise floor."
+    share = 100 * (floor.floor_variance_share or 0.0)
+    return (
+        f"The forecast already includes a noise floor that makes up {share:.0f}% of the earlier "
+        "stack's noise variance."
+    )
+
+
 def _check_pair(
     previous: StackRunRecord,
     current: StackRunRecord,
     observations: Mapping[str, FrameObservation],
     paired_relative_error: float | None,
     configured_stack_weight: str | None,
+    *,
+    history: Sequence[StackRunRecord] = (),
+    electrons_per_adu: float | None = None,
 ) -> ForecastCheck:
     """Check the forecast for one pair of neighbouring stack runs.
+
+    The pair is not checkable when the two stacks differ in more than the
+    added frames: the aperture set, the noise definition, the calibration,
+    the Siril or stacking-algorithm version, the heaviest exposure group, or
+    when an added frame is older than the earlier stack. See
+    `_confound_reason`, `_new_frame_reason` and `_group_forecast`.
 
     Parameters
     ----------
@@ -538,6 +1478,11 @@ def _check_pair(
     configured_stack_weight : `str` or `None`
         The ``Processing.Siril.stack_weight`` setting, used only for the
         planned forecast when the earlier run's mode is not known.
+    history : `Sequence` [`StackRunRecord`], optional
+        The runs up to and including the earlier run, for the floor fit. The
+        earlier run alone is used when this is left out.
+    electrons_per_adu : `float`, optional
+        The camera gain, for the frame noise of a group the new frames start.
 
     Returns
     -------
@@ -554,6 +1499,9 @@ def _check_pair(
             return _not_checkable(
                 current, f"Run {record.run_id}: {record.problems['members']}", mode_name, evidence
             )
+    confounded = _confound_reason(previous, current)
+    if confounded is not None:
+        return _not_checkable(current, confounded, mode_name, evidence)
     previous_relative = previous.normalized_relative_error
     current_relative = current.normalized_relative_error
     if paired_relative_error is None and (previous_relative is None or current_relative is None):
@@ -592,16 +1540,18 @@ def _check_pair(
         )
     previous_ids = set(previous.member_frame_ids)
     new_frames = [frame for frame in current_frames if frame.frame_id not in previous_ids]
+    numbers = {"measured": measured, "tolerance": tolerance, "paired": paired}
     if not new_frames:
         return _not_checkable(
             current,
             "The later stack holds no frame that the earlier one did not, so no gain was forecast.",
             mode_name,
             evidence,
-            measured=measured,
-            tolerance=tolerance,
-            paired=paired,
+            **numbers,
         )
+    not_new = _new_frame_reason(previous, new_frames, observations)
+    if not_new is not None:
+        return _not_checkable(current, not_new, mode_name, evidence, **numbers)
 
     # The frames' real weights are the recorded ones. The mode is named for the
     # reader when the weights match one, but nothing depends on it.
@@ -612,49 +1562,39 @@ def _check_pair(
             "noise mode), so the forecast given the frames taken cannot be made. Nothing is guessed.",
             mode_name,
             evidence,
-            measured=measured,
-            tolerance=tolerance,
-            paired=paired,
+            **numbers,
         )
-    current_weights = [float(weight or 0.0) for weight in current.recorded_weights]
-    previous_weights = [float(weight or 0.0) for weight in previous.recorded_weights]
-    current_mode = identify_weighting_mode(current_frames, current.recorded_weights)
-    mode_name = current_mode.mode.value if current_mode.mode != WeightingMode.UNKNOWN else "recorded_weights"
-    previous_mode = identify_weighting_mode(previous_frames, previous.recorded_weights)
-    planned_mode = (
-        previous_mode.mode
-        if previous_mode.mode != WeightingMode.UNKNOWN
-        else predict_weighting_mode(
-            configured_stack_weight, [frame.exposure_seconds for frame in [*previous_frames, *new_frames]]
-        )
-    )
-
-    before = forecast_stack_noise(previous_frames, planned_mode)
-    planned_exposure = float(np.median([frame.exposure_seconds for frame in new_frames]))
-    planned_after = noise_ratio_after_adding(
-        previous_frames, previous_frames, len(new_frames), planned_mode, planned_exposure
-    )
-    given_after = forecast_noise_with_weights(current_frames, current_weights)
-    given_before = forecast_noise_with_weights(previous_frames, previous_weights)
-    if (
-        before.noise is None
-        or planned_after is None
-        or planned_after.noise is None
-        or given_after.noise is None
-        or given_before.noise is None
-    ):
-        reason = given_after.reason or before.reason or "The forward model could not be evaluated."
+    floor = noise_floor_for_runs(list(history) if history else [previous])
+    previous_is_group = _is_group_stack(previous_frames)
+    current_is_group = _is_group_stack(current_frames)
+    if previous_is_group != current_is_group:
         return _not_checkable(
             current,
-            reason,
+            "One stack was combined from exposure groups and the other was a single group. The combine "
+            "rescales the brightness, so the two noise values are not like for like.",
             mode_name,
             evidence,
-            measured=measured,
-            tolerance=tolerance,
-            paired=paired,
+            **numbers,
         )
-    planned = planned_after.noise / before.noise - 1.0
-    given = given_after.noise / given_before.noise - 1.0
+    forecast = (
+        _group_forecast(
+            previous, current, previous_frames, current_frames, new_frames, floor, electrons_per_adu
+        )
+        if current_is_group
+        else _flat_forecast(
+            previous, current, previous_frames, current_frames, new_frames, floor, configured_stack_weight
+        )
+    )
+    mode_name = forecast.mode_name
+    if forecast.planned is None or forecast.given is None:
+        return _not_checkable(
+            current,
+            forecast.reason or "The forward model could not be evaluated.",
+            mode_name,
+            evidence,
+            **numbers,
+        )
+    planned, given = forecast.planned, forecast.given
     width = AGREEMENT_TOLERANCES * tolerance
 
     if measured - planned <= width:
@@ -677,18 +1617,14 @@ def _check_pair(
             f"The forecast given the frames taken was {100 * given:.0f}% against "
             f"{100 * planned:.0f}% planned, and the measured "
             f"{100 * measured:.0f}% agrees with it. {difference}"
-            + (
-                " The stacker gave the frames equal weight."
-                if current_mode.mode == WeightingMode.EQUAL
-                else ""
-            )
+            + (" The stacker gave the frames equal weight." if forecast.equal_weights else "")
         ).strip()
     else:
         outcome = ForecastOutcome.SHORT_UNKNOWN_REASON
         reason = (
             f"The noise changed by {100 * measured:.0f}% against {100 * planned:.0f}% planned, and the "
             f"frames taken explain a change of only {100 * given:.0f}%. The cause is not known. "
-            "A noise floor is named only from two or more steps of data."
+            f"{_floor_sentence(floor)}"
         )
     return ForecastCheck(
         stack_run_id=current.run_id,
@@ -709,14 +1645,15 @@ def forecast_check(
     *,
     configured_stack_weight: str | None = None,
     paired_relative_error_by_run: Mapping[str, float] | None = None,
+    electrons_per_adu: float | None = None,
 ) -> list[ForecastCheck]:
     """Check each stack run's gain against the forecast from the run before.
 
     Parameters
     ----------
     runs : `Sequence` [`StackRunRecord`]
-        The target's library stack runs (`stack_runs_from_measurements`). They
-        are put in time order here.
+        The target's library stack runs (`stack_runs_from_measurements`, with
+        `attach_calibration_identities`). They are put in time order here.
     observations : `Iterable` [`FrameObservation`]
         The measurements of the frames in the runs
         (`frame_observations_from_measurements`).
@@ -729,6 +1666,9 @@ def forecast_check(
         For a run whose noise was compared with the run before in the same
         apertures, the relative error of the ratio. The check then uses it and
         says it is paired.
+    electrons_per_adu : `float`, optional
+        The camera gain at the target's setting (`camera_gain_for_setting`),
+        for the frame noise of an exposure group the new frames start.
 
     Returns
     -------
@@ -739,9 +1679,19 @@ def forecast_check(
     by_id = {observation.frame_id: observation for observation in observations}
     ordered = sorted(runs, key=lambda record: (record.measured_at, record.run_id))
     checks = []
-    for previous, current in pairwise(ordered):
+    for position, (previous, current) in enumerate(pairwise(ordered)):
         paired = (paired_relative_error_by_run or {}).get(current.run_id)
-        checks.append(_check_pair(previous, current, by_id, paired, configured_stack_weight))
+        checks.append(
+            _check_pair(
+                previous,
+                current,
+                by_id,
+                paired,
+                configured_stack_weight,
+                history=ordered[: position + 1],
+                electrons_per_adu=electrons_per_adu,
+            )
+        )
     return checks
 
 
@@ -798,6 +1748,12 @@ def noise_steps_from_runs(runs: Sequence[StackRunRecord]) -> list[NoiseStep]:
 def target_stop_signal(runs: Sequence[StackRunRecord]) -> StopSignal:
     """Say whether more frames of a target are still worth taking.
 
+    The floor is the one `noise_floor_for_runs` chooses: the fit over two or
+    more stacks, or the one-stack floor of the newest run. Doubling the data
+    then halves the random variance and leaves the floor, so the noise falls
+    from ``sqrt(1 + f)`` to ``sqrt(0.5 + f)`` (in units of today's random
+    noise), with ``f`` the floor's share of the random variance.
+
     Parameters
     ----------
     runs : `Sequence` [`StackRunRecord`]
@@ -806,26 +1762,62 @@ def target_stop_signal(runs: Sequence[StackRunRecord]) -> StopSignal:
     Returns
     -------
     signal : `StopSignal`
-        ``stopped`` is true only when a floor was fitted from two or more
-        steps and doubling the data would cut the noise by under 10%. It is
-        ``None`` (no signal) when the history is too short.
+        ``stopped`` is true only when a floor was found and doubling the data
+        would cut the noise by under 10%. It is ``False`` when a fit over two
+        or more stacks found no floor, and ``None`` (no signal) when the
+        history is too short: a single stack with no floor is not enough to
+        say.
     """
-    steps = noise_steps_from_runs(runs)
-    fit = fit_noise_floor(steps)
+    ordered = sorted(runs, key=lambda item: (item.measured_at, item.run_id))
+    newest_identity = ordered[-1].aperture_identity if ordered else None
+    steps = noise_steps_from_runs([
+        record for record in ordered if record.aperture_identity == newest_identity
+    ])
     if not steps:
         return StopSignal(reason="No stack run has both a measured and an expected noise.")
+    floor = noise_floor_for_runs(ordered)
+    if floor is not None and floor.floor_detected and floor.floor_to_random_variance_ratio is not None:
+        ratio = floor.floor_to_random_variance_ratio
+        gain = 1.0 - math.sqrt((0.5 + ratio) / (1.0 + ratio))
+        stopped = gain < MINIMUM_GAIN_FRACTION
+        return StopSignal(
+            stopped=stopped,
+            predicted_gain_fraction=gain,
+            reason=(
+                f"Doubling the data would cut the noise by {100 * gain:.0f} percent"
+                + (
+                    ", below the limit; more frames will not help until the floor is fixed."
+                    if stopped
+                    else "."
+                )
+            ),
+        )
+    fit = fit_noise_floor(steps)
+    if floor is not None and fit.steps_used >= 2 and fit.alpha is not None:
+        return StopSignal(stopped=False, reason="No floor was found, so more frames are expected to help.")
     return stop_signal(fit, steps[-1].expected_variance)
 
 
 __all__ = [
     "AGREEMENT_TOLERANCES",
+    "COOLED_CAMERA_NAME_MARKERS",
     "FORECAST_CHECK_ENTRY",
     "FORECAST_CHECK_ROW",
+    "GROUP_METRICS",
     "PINNED_STACK_METRICS",
+    "CalibrationSummary",
+    "RecordedGroup",
+    "RunGroups",
     "StackRunRecord",
+    "attach_calibration_identities",
+    "calibration_summary_from_record",
+    "camera_gain_for_setting",
     "forecast_check",
+    "noise_floor_for_runs",
     "noise_steps_from_runs",
+    "single_stack_floor",
     "stack_frames_from_observations",
+    "stack_groups_of_run",
     "stack_runs_from_measurements",
     "target_stop_signal",
 ]

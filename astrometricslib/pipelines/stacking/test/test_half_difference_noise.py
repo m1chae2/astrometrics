@@ -28,6 +28,7 @@ import pytest
 from astropy.io import fits
 from scipy.ndimage import gaussian_filter
 
+from astrometricslib import aperture_identity_from_number
 from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.drivers.interfaces.stacking_driver import StackingDriver, StackRunResult, StackSettings
 from astrometricslib.drivers.quality_store import QualityStore
@@ -587,11 +588,11 @@ def test_the_difference_recovers_the_injected_noise_where_the_plain_noise_does_n
 
 
 def test_the_rows_sit_on_the_library_stack_beside_its_own_noise(tmp_path: Path) -> None:
-    """Seventeen stack-level rows are stored on the library stack's subject."""
+    """Eighteen stack-level rows are stored on the library stack's subject."""
     library = _Library(tmp_path)
     library.record_library_count(float(FRAME_COUNT))
     result = library.run()
-    assert result.rows_written == 17
+    assert result.rows_written == 18
     subject_id = f"M 99/{STACK_NAME}"
     for metric in NINE_METRICS:
         rows = library.rows(metric)
@@ -623,6 +624,10 @@ def test_the_rows_sit_on_the_library_stack_beside_its_own_noise(tmp_path: Path) 
     assert normalized.sample_count == result.aperture_count
     assert "f005.fits" in (normalized.reason or "")
     assert library.rows(STACKING_EMPTY_APERTURE_NOISE_NORMALIZED) == []
+    # A row of its own names the apertures the halves were measured in.
+    identity_rows = library.rows("stacking.half_difference_aperture_set_number")
+    assert len(identity_rows) == 1 and identity_rows[0].status == MeasurementStatus.MEASURED
+    assert aperture_identity_from_number(identity_rows[0].value).startswith("v3-")
     odd_count = library.rows(STACKING_HALF_DIFFERENCE_ODD_EFFECTIVE_FRAME_COUNT)[0].value
     assert odd_count == result.odd_half_effective_frame_count == len(library.stacker.calls[0])
     # The pattern the halves share is stored on the same subject: a value, or

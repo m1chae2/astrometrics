@@ -1286,6 +1286,8 @@ _STACKING_GATES: tuple[GateMapping, ...] = gate_mappings_from_sources(STACKING_G
 # run stores them.
 # The pattern the two half stacks share comes from the half stacks themselves.
 _STACKING_NOT_HELD: tuple[str, ...] = (
+    "stacking.aperture_set_number",
+    "stacking.half_difference_aperture_set_number",
     "stacking.empty_aperture_noise_stack_unit",
     "stacking.noise_reference_flux_stack_unit",
     "stacking.empty_aperture_noise_normalized",

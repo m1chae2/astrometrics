@@ -109,6 +109,7 @@ from astrometricslib.pipelines.shared.registration_record import build_registrat
 from astrometricslib.pipelines.stacking.metrics import (
     STACKING_EFFECTIVE_FRAME_COUNT,
     STACKING_FRAME_WEIGHT,
+    STACKING_HALF_DIFFERENCE_APERTURE_SET_NUMBER,
     STACKING_HALF_DIFFERENCE_EVEN_EFFECTIVE_FRAME_COUNT,
     STACKING_HALF_DIFFERENCE_MODEL_VARIANCE_RATIO,
     STACKING_HALF_DIFFERENCE_NOISE_NORMALIZED,
@@ -141,6 +142,7 @@ from astrometricslib.pipelines.stacking.post_processing.half_pattern import (
     measure_half_pattern,
 )
 from astrometricslib.pipelines.stacking.post_processing.record_quality import (
+    aperture_set_measurement,
     measure_noise_safely,
     membership_count_measurements,
     noise_measurements,
@@ -1750,6 +1752,11 @@ def half_difference_measurements(
                 STACKING_HALF_DIFFERENCE_REFERENCE_FLUX_STACK_UNIT,
             )
         ]
+        noise_rows.append(
+            aperture_set_measurement(
+                STACKING_HALF_DIFFERENCE_APERTURE_SET_NUMBER, None, context, subject, missing
+            )
+        )
     else:
         noise_rows = [
             build_measurement(
@@ -1782,6 +1789,11 @@ def half_difference_measurements(
         )
         if kept_note:
             noise_rows = [row.model_copy(update={"reason": kept_note}) for row in noise_rows]
+        noise_rows.append(
+            aperture_set_measurement(
+                STACKING_HALF_DIFFERENCE_APERTURE_SET_NUMBER, result.aperture_identity, context, subject
+            )
+        )
     count_rows = [
         build_measurement(
             _SPEC_BY_NAME[name],

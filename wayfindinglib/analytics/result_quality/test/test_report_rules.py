@@ -25,6 +25,7 @@ from wayfindinglib.analytics.result_quality.efficiency import (
 )
 from wayfindinglib.analytics.result_quality.noise_growth import (
     StackFrame,
+    StackGroup,
     StopSignal,
     TakeMoreResult,
     WeightingMode,
@@ -238,6 +239,77 @@ def test_sharpness_tradeoff_is_quiet_when_the_frames_are_alike_or_few() -> None:
         rr.find_sharpness_tradeoff(_frames(19), [2.0 + 0.1 * i for i in range(19)], WeightingMode.EQUAL)
         is None
     )
+
+
+def test_sharpness_tradeoff_is_not_made_for_a_group_stack_on_one_setting() -> None:
+    """The ``group`` mode is refused: use the group form instead."""
+    widths = [2.0 + 0.1 * index for index in range(20)]
+
+    assert rr.find_sharpness_tradeoff(_frames(20), widths, WeightingMode.GROUP) is None
+
+
+def _stack_group(count: int, exposure: float, frame_noise: float) -> StackGroup:
+    """Make one exposure group of frames with a spread of star widths.
+
+    Returns
+    -------
+    group : `StackGroup`
+        The group.
+    """
+    frames = tuple(
+        StackFrame(
+            frame_id=f"g{exposure:g}_{index}",
+            exposure_seconds=exposure,
+            sky_rate_e_per_s_per_px=1.0,
+            read_noise_e=3.0,
+            star_width=2.0 + 0.1 * index,
+        )
+        for index in range(count)
+    )
+    return StackGroup(frames=frames, frame_noise_adu=frame_noise)
+
+
+def test_the_group_sharpness_tradeoff_is_diluted_by_the_other_groups() -> None:
+    """Dropping frames of one group changes the stack less than the group."""
+    groups = [_stack_group(10, 30.0, 20.0), _stack_group(20, 60.0, 30.0)]
+    widths = [frame.star_width or 0.0 for frame in groups[1].frames]
+
+    in_stack = rr.find_sharpness_tradeoff_in_groups(groups, 1, widths)
+    alone = rr.find_sharpness_tradeoff(list(groups[1].frames), widths, WeightingMode.WFWHM)
+
+    assert in_stack is not None and alone is not None
+    assert in_stack.kept_count == 14
+    assert in_stack.star_width_change == pytest.approx(alone.star_width_change)
+    assert 0.0 < in_stack.noise_change < alone.noise_change
+
+
+def test_the_group_sharpness_tradeoff_needs_enough_frames() -> None:
+    """A group of 19 frames is below the minimum, as for one setting."""
+    groups = [_stack_group(19, 60.0, 30.0), _stack_group(10, 30.0, 20.0)]
+
+    assert rr.find_sharpness_tradeoff_in_groups(groups, 0, [2.0 + 0.1 * i for i in range(19)]) is None
+
+
+def test_floor_limited_statement_says_the_floor_in_place_of_a_count() -> None:
+    """The warning names the floor share of the noise and the best cut."""
+    result = TakeMoreResult(
+        target_noise_ratio=0.707,
+        floor_limited=True,
+        floor_noise=2.9e-3,
+        floor_variance_share=0.88,
+        lowest_reachable_ratio=0.95,
+        reason="More frames of this kind will not reach the target.",
+    )
+
+    statement = rr.floor_limited_statement(result, SETTING, [MeasurementReference(row_id=5)])
+
+    assert statement.rule == "more_frames_will_not_help"
+    assert statement.kind == StatementKind.WARNING
+    assert "noise floor (0.0029 in stack units, 88% of the noise)" in statement.message
+    assert "only 5%" in statement.message
+    assert statement.proposed_action is None
+    assert [reference.row_id for reference in statement.evidence] == [5]
+    assert_plain_message_is_sound(statement)
 
 
 # -- calibration gap ---------------------------------------------------------

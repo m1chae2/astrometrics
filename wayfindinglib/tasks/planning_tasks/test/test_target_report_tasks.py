@@ -44,6 +44,7 @@ from wayfindinglib.models.session.observation_session import (
     QueuedObservationPackage,
     StartTimeMode,
 )
+from wayfindinglib.tasks.planning_tasks import target_report_tasks
 from wayfindinglib.tasks.planning_tasks.target_report_inputs import assign_stacks_to_settings
 from wayfindinglib.tasks.planning_tasks.target_report_tasks import build_target_dataset_report
 
@@ -123,6 +124,25 @@ class _FakeQuality:
                 == filters["camera"]
             ]
         return list(rows)
+
+    def calibration_identities(
+        self, run_ids: list[str] | None = None, target_id: str | None = None
+    ) -> list[Any]:
+        """Give the stored calibration records (none in this fake).
+
+        Parameters
+        ----------
+        run_ids : `list` [`str`], optional
+            Only these runs.
+        target_id : `str`, optional
+            Only this target's stacks.
+
+        Returns
+        -------
+        records : `list`
+            Always empty, so every run counts as confounded.
+        """
+        return []
 
     def metrics(self, **_arguments: Any) -> list[Any]:
         """Give the registered metrics, from the real registry.
@@ -447,8 +467,33 @@ def _report_with_forecast_outcome(
     return _report(library, butler)
 
 
-TWO_RUNS = [("r1", NOW - timedelta(days=1), 0.0361, 0.030), ("r2", NOW, 0.0283, 0.020)]
-"""Two stack runs, so the report attempts a forecast check."""
+TWO_RUNS = [("r1", NOW - timedelta(days=1), 0.0361, 0.0361), ("r2", NOW, 0.0283, 0.0283)]
+"""Two stack runs, so the report attempts a forecast check. Each stack's
+expected noise equals its measured noise: no noise floor, so "take N more"
+gives a count."""
+
+CAMERA_GAIN = 0.783
+"""Electrons per ADU of the ZWO ASI533MM Pro at gain 0 (the camera profile's
+measured value). The made-up configuration holds no camera profile, so tests
+that need a gain patch it in."""
+
+
+@pytest.fixture
+def camera_gain(monkeypatch: pytest.MonkeyPatch) -> float:
+    """Give the report a camera gain, as the real camera profile does.
+
+    Parameters
+    ----------
+    monkeypatch : `pytest.MonkeyPatch`
+        Replaces the profile lookup.
+
+    Returns
+    -------
+    gain : `float`
+        The gain, in electrons per ADU.
+    """
+    monkeypatch.setattr(target_report_tasks, "camera_gain_for_setting", lambda _config, _setting: CAMERA_GAIN)
+    return CAMERA_GAIN
 
 
 def _of_rule(report: Any, rule: str) -> list[Any]:
@@ -549,7 +594,7 @@ def test_a_matching_calibration_library_gives_no_gap(isolated_butler: DiskButler
 
 
 def test_more_frames_proposes_a_count_and_says_it_is_tentative(
-    isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch
+    isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch, camera_gain: float
 ) -> None:
     """With 30 frames and an agreeing forecast check, a count is proposed."""
     report = _report_with_forecast_outcome(
@@ -560,11 +605,14 @@ def test_more_frames_proposes_a_count_and_says_it_is_tentative(
     assert more[0].kind == StatementKind.RECOMMENDATION
     assert more[0].confidence == Confidence.DESIGN_ESTIMATE
     assert more[0].proposed_action.frame_count > 0
-    assert "to cut the noise by about 30%" in more[0].message
+    assert "to cut the noise by about 31%" in more[0].message
     assert more[0].expected_effect.noise_change_fraction == pytest.approx(-0.29, abs=0.02)
     assert more[0].proposed_action.exposure_seconds > 60.0
     assert "limited by read noise" in more[0].reason
     assert more[0].expected_effect.wall_clock_seconds > 0.0
+    # A new exposure length makes a new group: at least 5 frames are asked for.
+    assert more[0].proposed_action.frame_count >= 5
+    assert "new exposure group" in more[0].reason
 
 
 @pytest.mark.parametrize(
@@ -583,6 +631,64 @@ def test_take_more_is_hidden_until_a_forecast_check_agreed(
     assert more.proposed_action is None
     assert "one check agrees" in more.reason
     assert "Take more frames and stack them" in more.reason
+
+
+def test_a_floor_that_most_of_the_noise_is_made_of_replaces_the_count(
+    isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch, camera_gain: float
+) -> None:
+    """A floor above the random noise means more frames cannot reach the goal.
+
+    Measured 0.01483 against expected 0.0100 is a floor that is 55% of the
+    noise variance. Doubling the data still cuts the noise by 13%, above the
+    stop limit, so the stop warning is not raised; the report says so in place
+    of a count and names the floor.
+    """
+    runs = [("r1", NOW - timedelta(days=1), 0.01483, 0.0100), ("r2", NOW, 0.01483, 0.0100)]
+    report = _report_with_forecast_outcome(
+        _Library(runs=runs), isolated_butler, monkeypatch, ForecastOutcome.AS_FORECAST
+    )
+
+    assert _of_rule(report, "more_frames") == []
+    (floor,) = _of_rule(report, "more_frames_will_not_help")
+
+    assert floor.kind == StatementKind.WARNING
+    assert "noise floor" in floor.message
+    assert "55% of the noise" in floor.message
+    assert floor.proposed_action is None
+    assert floor.evidence
+
+
+def test_a_pair_with_no_aperture_identity_keeps_take_more_hidden(isolated_butler: DiskButler) -> None:
+    """Runs stored before the identity row give no checkable pair.
+
+    The report's own check runs on the two made-up stacks. They have no
+    aperture identity and no calibration record, so the check says it could
+    not be made, the gate stays shut, and the hidden statement says why.
+    """
+    library = _Library(runs=TWO_RUNS)
+    for run_id, at, noise, _expected in TWO_RUNS:
+        library.rows.append(
+            library._row(
+                "stacking.empty_aperture_noise_normalized",
+                noise / 1000.0,
+                STACK_ID,
+                level=SubjectLevel.STACK,
+                version=3,
+                setting_id=None,
+                run_id=run_id,
+                sample_count=2000,
+                at=at,
+            )
+        )
+    report = _report(library, isolated_butler)
+
+    (check,) = report.forecast_checks
+    (more,) = _of_rule(report, "more_frames")
+
+    assert check.outcome == ForecastOutcome.NOT_CHECKABLE
+    assert "aperture-set identity" in check.reason
+    assert more.kind == StatementKind.INSUFFICIENT_DATA
+    assert "aperture-set identity" in more.reason
 
 
 def test_take_more_is_hidden_for_a_target_with_one_stack(isolated_butler: DiskButler) -> None:
@@ -1012,7 +1118,7 @@ def test_the_context_section_goes_first_and_then_the_long_evidence_lists(
 
 
 def test_take_more_prices_dithers_and_refocusing_like_the_ranking(
-    isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch
+    isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch, camera_gain: float
 ) -> None:
     """The time of "take N more" counts dithers and autofocus runs."""
     from wayfindinglib.analytics.result_quality.capture_overheads import (

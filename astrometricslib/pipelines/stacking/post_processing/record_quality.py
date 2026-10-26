@@ -53,6 +53,7 @@ from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
 from astrometricslib.pipelines.shared.registration_record import build_registration_record
 from astrometricslib.pipelines.stacking.metrics import (
     GATE_METRIC_BY_NAME,
+    STACKING_APERTURE_SET_NUMBER,
     STACKING_DURATION_S,
     STACKING_EFFECTIVE_FRAME_COUNT,
     STACKING_EFFECTIVE_TIME_READ_NOISE_S,
@@ -98,6 +99,7 @@ from astrometricslib.pipelines.stacking.post_processing.difference_noise import 
 from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
     APERTURE_FILE_NAME,
     StackDepth,
+    aperture_identity_to_number,
 )
 from astrometricslib.pipelines.stacking.post_processing.field_rotation import (
     MULTI_GROUP_REASON,
@@ -132,6 +134,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "GATE_LIMIT_SOURCES",
     "FrameGeometryRows",
+    "aperture_set_measurement",
     "exposure_group_subject",
     "frame_geometry_measurements",
     "gate_for_measurement",
@@ -372,10 +375,62 @@ def gate_for_measurement(gate: GateResult) -> GateResult:
     )
 
 
+def aperture_set_measurement(
+    metric_name: str,
+    identity: str | None,
+    context: PipelineRunContext,
+    subject: QualitySubject,
+    reason: str = "",
+) -> QualityMeasurement:
+    """Build the row that names the aperture set of a noise measurement.
+
+    Why a row of its own: a row's value is a number, and the set's identity
+    (for example ``"v3-156104df543d"``) is text. The identity is stored as one
+    exact whole number (see `aperture_identity_to_number`), in a separate row
+    per noise family, beside the noise rows. No existing text field fits: the
+    reason is free text that readers must not parse, and the subject's variant
+    names a subset, not a set of apertures. A new column would need a store
+    migration. A reader takes the newest row of this metric for a subject, as
+    for any other metric, and turns the value back into text with
+    `aperture_identity_from_number`.
+
+    Parameters
+    ----------
+    metric_name : `str`
+        ``stacking.aperture_set_number`` or
+        ``stacking.half_difference_aperture_set_number``.
+    identity : `str` or `None`
+        The set's identity (`ApertureSet.identity`), or `None` when nothing
+        was measured.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    subject : `QualitySubject`
+        The stack the noise rows are about.
+    reason : `str`, optional
+        Why there is no identity, when `identity` is `None`.
+
+    Returns
+    -------
+    measurement : `QualityMeasurement`
+        A measured row, or a not-measured one with the reason.
+    """
+    if not identity:
+        return build_measurement(
+            _SPEC_BY_NAME[metric_name],
+            None,
+            context,
+            subject,
+            reason=reason or "the noise was not measured, so no aperture set was used",
+        )
+    return build_measurement(
+        _SPEC_BY_NAME[metric_name], aperture_identity_to_number(identity), context, subject
+    )
+
+
 def noise_measurements(
     outcome: StackNoiseOutcome, context: PipelineRunContext, subject: QualitySubject
 ) -> list[QualityMeasurement]:
-    """Build the three noise measurements of a stack.
+    """Build the noise measurements of a stack and the aperture set they used.
 
     Parameters
     ----------
@@ -389,8 +444,9 @@ def noise_measurements(
     Returns
     -------
     measurements : `list` of `QualityMeasurement`
-        The noise, the reference flux and their ratio; all not measured, with
-        the reason, when there is no result.
+        The noise, the reference flux, their ratio and the number that names
+        the aperture set; all not measured, with the reason, when there is no
+        result.
     """
     result = outcome.result
     reason = outcome.reason or "the noise was not measured"
@@ -402,7 +458,7 @@ def noise_measurements(
                 STACKING_NOISE_REFERENCE_FLUX_STACK_UNIT,
                 STACKING_EMPTY_APERTURE_NOISE_NORMALIZED,
             )
-        ]
+        ] + [aperture_set_measurement(STACKING_APERTURE_SET_NUMBER, None, context, subject, reason)]
     rows = [
         build_measurement(
             _SPEC_BY_NAME[STACKING_EMPTY_APERTURE_NOISE_STACK_UNIT],
@@ -445,9 +501,14 @@ def noise_measurements(
     if result.wcs_source:
         notes.append(f"Sky coordinates from the {result.wcs_source}.")
     note = " ".join(part for part in notes if part)
-    if not note:
-        return rows
-    return [row.model_copy(update={"reason": note}) for row in rows]
+    if note:
+        rows = [row.model_copy(update={"reason": note}) for row in rows]
+    # The identity goes in its own row (no reason text), so a reader can tell
+    # whether two stacks' noise came from the same apertures.
+    return [
+        *rows,
+        aperture_set_measurement(STACKING_APERTURE_SET_NUMBER, result.aperture_identity, context, subject),
+    ]
 
 
 def membership_count_measurements(

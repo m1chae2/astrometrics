@@ -19,9 +19,10 @@ those patches (it does not measure any noise):
   `REPLACEMENT_DEPTH_FACTOR` times the effective frame count.
 * `load_apertures`, `load_apertures_with_reason` and `reset_apertures` read
   and forget the small file beside the target's stacks
-  (``quality_apertures.json``) that keeps one set for each camera and optic
-  (see `ApertureSet.setup_key`). A stack made with other equipment starts a
-  new set. Noise values measured with different sets are not comparable.
+  (``quality_apertures.json``) that keeps one set for each camera, optic and
+  reference exposure length (see `ApertureSet.setup_key`). A stack made with
+  other equipment, or lined up on a frame of another exposure length, starts
+  a new set. Noise values measured with different sets are not comparable.
 
 It imports `stack_image` only; `stack_noise.py` and `difference_noise.py`
 import it. The estimator and the numbers are declared in
@@ -69,6 +70,8 @@ __all__ = [
     "choose_apertures",
     "choose_apertures_with_reason",
     "faint_source_distance",
+    "find_library_set_key",
+    "is_legacy_setup_key",
     "load_apertures",
     "load_apertures_with_reason",
     "place_empty_apertures",
@@ -79,7 +82,8 @@ __all__ = [
 APERTURE_FILE_NAME = "quality_apertures.json"
 
 # The version of the file's layout. Version 3 holds one set of apertures for
-# each camera and optic, placed away from faint sources as well as bright
+# each camera, optic and reference exposure, placed away from faint sources
+# as well as bright
 # stars (see `FAINT_SOURCE_THRESHOLD_SIGMAS`), with the depth of the stack that
 # defined it. Version 2 apertures were placed away from the 400 brightest stars
 # only; faint stars sat in them. Version 1 held one set, with no per-star
@@ -106,6 +110,11 @@ REPLACEMENT_DEPTH_FACTOR = 2.0
 # The setup key of a stack whose header names neither camera, telescope nor
 # focal length.
 UNSPECIFIED_SETUP = "unspecified"
+
+# The text before the reference exposure length at the end of a setup key.
+# Keys written before the exposure was added end without it, and are never
+# matched (see `is_legacy_setup_key`).
+EXPOSURE_KEY_MARKER = "|exp="
 
 # The number of empty apertures. The spread of n samples has a relative error
 # of about 1.17 / sqrt(n) (see `MAD_SIGMA_ERROR_FACTOR`): about 12% for 100.
@@ -285,7 +294,8 @@ class ApertureSet:
     saturation_source : `str`
         How saturated stars were kept out when the set was chosen.
     setup_key : `str`
-        The camera, telescope and focal length the set belongs to.
+        The camera, telescope, focal length and reference exposure length the
+        set belongs to (see `_setup_key`).
     defining_frame_count : `int` or `None`
         The number of frames in the stack that chose the set; `None` when the
         caller did not know it.
@@ -327,9 +337,12 @@ class ApertureSet:
         Two noise measurements may be compared only when they were made in
         apertures with the same identity. The hash covers the aperture
         positions rounded to 1e-6 degrees (0.004 arcsec), so it is the same
-        after the positions go through the JSON file and back, and the defining
-        stack's frame counts, so a set chosen again on a deeper stack has a new
-        identity even if the same positions were drawn.
+        after the positions go through the JSON file and back, the reference
+        stars' positions rounded the same way, the setup key (camera, optic
+        and reference exposure) and the defining stack's frame counts. So a
+        set chosen again on a deeper stack, or on a reference frame of
+        another exposure length, has a new identity even if the same
+        positions were drawn.
 
         Returns
         -------
@@ -337,10 +350,12 @@ class ApertureSet:
             For example ``"v3-1a2b3c4d5e6f"``.
         """
         rounded = np.round(np.asarray(self.aperture_sky, dtype="<f8"), 6)
+        reference_rounded = np.round(np.asarray(self.reference_sky, dtype="<f8"), 6)
         depth = f"{self.defining_frame_count}|{_rounded_or_none(self.defining_effective_frame_count)}"
-        digest = hashlib.sha1(rounded.tobytes() + depth.encode("utf-8"), usedforsecurity=False).hexdigest()[
-            :12
-        ]
+        digest = hashlib.sha1(
+            rounded.tobytes() + reference_rounded.tobytes() + f"{self.setup_key}|{depth}".encode(),
+            usedforsecurity=False,
+        ).hexdigest()[:12]
         return f"v{APERTURE_FILE_VERSION}-{digest}"
 
     def describe_definition(self) -> str:
@@ -459,7 +474,7 @@ class ApertureSet:
         )
 
 
-def _setup_key(*headers: fits.Header) -> str:
+def _equipment_key(*headers: fits.Header) -> str:
     """Name the camera and optic a stack was made with.
 
     Parameters
@@ -485,6 +500,76 @@ def _setup_key(*headers: fits.Header) -> str:
     return UNSPECIFIED_SETUP
 
 
+def _setup_key(*headers: fits.Header, reference_exposure_seconds: float | None = None) -> str:
+    """Name the camera, optic and reference exposure of a stack.
+
+    The exposure length is the one of the frame the stack was lined up on
+    (for a stack of exposure groups, the heaviest group's). It is part of the
+    key, and a set is not shared between exposure lengths, for two reasons.
+    The set's reference stars are chosen so that none is saturated in the
+    reference frame; a longer exposure saturates stars a shorter one does not,
+    and then no reference star can be used (the noise is not measured). And a
+    star's brightness in the set is its brightness on the stack that chose it,
+    which depends on how the stack was weighted. One set per exposure length
+    is kept, not one that is overwritten, so a later stack with the same
+    exposure length is still compared in the same patches of sky as before.
+
+    Parameters
+    ----------
+    *headers : `astropy.io.fits.Header`
+        The stack's header, then the registration reference frame's, if any.
+        See `_equipment_key`.
+    reference_exposure_seconds : `float`, optional
+        The exposure length of the reference frame, in seconds. Left out when
+        it is not known; the key then ends in ``?``.
+
+    Returns
+    -------
+    key : `str`
+        ``camera|telescope|focal length|exp=<seconds>`` in lower case, for
+        example ``zwo asi533mm pro|?|400|exp=120``.
+    """
+    if reference_exposure_seconds is None or not math.isfinite(reference_exposure_seconds):
+        exposure_text = "?"
+    else:
+        exposure_text = f"{reference_exposure_seconds:g}"
+    return f"{_equipment_key(*headers)}{EXPOSURE_KEY_MARKER}{exposure_text}"
+
+
+def is_legacy_setup_key(setup_key: str) -> bool:
+    """Say whether a stored key was written before the exposure was part of it.
+
+    Parameters
+    ----------
+    setup_key : `str`
+        A key from the aperture file.
+
+    Returns
+    -------
+    legacy : `bool`
+        `True` when the key has no reference exposure part. Such a set was
+        chosen on a frame of an unknown exposure length, so no stack is
+        measured in it; the next library stack chooses a new set, once.
+    """
+    return EXPOSURE_KEY_MARKER not in setup_key
+
+
+def _equipment_of_key(setup_key: str) -> str:
+    """Give the camera and optic part of a setup key.
+
+    Parameters
+    ----------
+    setup_key : `str`
+        A key from the aperture file.
+
+    Returns
+    -------
+    equipment : `str`
+        The key without its exposure part.
+    """
+    return setup_key.split(EXPOSURE_KEY_MARKER, 1)[0]
+
+
 def choose_apertures(
     plane: np.ndarray,
     wcs: WCS,
@@ -508,7 +593,7 @@ def choose_apertures(
     created_from : `str`
         The stack's file name, kept with the set.
     setup_key : `str`, optional
-        The camera and optic the set belongs to.
+        The camera, optic and reference exposure the set belongs to.
     saturation : `SaturationCheck`, optional
         Keeps stars that are saturated in the registration reference frame
         out of the reference stars. Left out, the stack's own 99.99th
@@ -553,7 +638,7 @@ def choose_apertures_with_reason(
     created_from : `str`
         The stack's file name, kept with the set.
     setup_key : `str`, optional
-        The camera and optic the set belongs to.
+        The camera, optic and reference exposure the set belongs to.
     saturation : `SaturationCheck`, optional
         Keeps stars that are saturated in the registration reference frame
         out of the reference stars. Left out, the stack's own 99.99th
@@ -887,7 +972,10 @@ def load_apertures(path: str, setup_key: str | None = None) -> ApertureSet | Non
     path : `str`
         The ``quality_apertures.json`` file.
     setup_key : `str`, optional
-        The camera and optic wanted. Left out, the first stored set.
+        The camera, optic and reference exposure wanted. Left out, the
+        deepest stored set (see `_deepest_key`), which is the one the
+        target's library stack was measured in. A set stored under a key
+        with no exposure (`is_legacy_setup_key`) is never returned.
 
     Returns
     -------
@@ -897,7 +985,9 @@ def load_apertures(path: str, setup_key: str | None = None) -> ApertureSet | Non
     """
     sets = _read_aperture_file(path)
     if setup_key is None:
-        data = next(iter(sets.values()), None)
+        data = sets.get(_deepest_key(sets) or "")
+    elif is_legacy_setup_key(setup_key):
+        data = None
     else:
         data = sets.get(setup_key)
     if data is None:
@@ -907,6 +997,62 @@ def load_apertures(path: str, setup_key: str | None = None) -> ApertureSet | Non
     except (ValueError, KeyError, TypeError) as error:
         logger.warning("The stored noise apertures at %s could not be read: %s", path, error)
         return None
+
+
+def _deepest_key(sets: dict[str, dict], equipment: str | None = None) -> str | None:
+    """Pick the stored set that the target's library stack was measured in.
+
+    A subset stack or a half-difference job has to use the library stack's
+    set, whatever exposure length its own reference frame has. When one
+    target holds several sets (one per reference exposure length), the
+    library stack's is the one chosen on the deepest stack, because a set is
+    stored by a library stack and a shallower one is not stored over it.
+
+    Parameters
+    ----------
+    sets : `dict` [`str`, `dict`]
+        The JSON data of each set, by setup key.
+    equipment : `str`, optional
+        Only keys of this camera and optic are considered. Left out, all.
+
+    Returns
+    -------
+    setup_key : `str` or `None`
+        The key of the set with the largest effective frame count (an unknown
+        count counts as 0; the first stored wins a tie), or `None` when there
+        is no usable key. Keys without an exposure are skipped.
+    """
+    best_key = None
+    best_depth = -1.0
+    for key, data in sets.items():
+        if is_legacy_setup_key(key) or (equipment is not None and _equipment_of_key(key) != equipment):
+            continue
+        try:
+            depth = float(data.get("defining_effective_frame_count") or 0.0)
+        except AttributeError, TypeError, ValueError:
+            depth = 0.0
+        if depth > best_depth:
+            best_key, best_depth = key, depth
+    return best_key
+
+
+def find_library_set_key(path: str, setup_key: str) -> str | None:
+    """Find the key of the library stack's set for a stack that may not choose.
+
+    Parameters
+    ----------
+    path : `str`
+        The ``quality_apertures.json`` file.
+    setup_key : `str`
+        The key the stack itself would have (see `_setup_key`).
+
+    Returns
+    -------
+    library_key : `str` or `None`
+        The deepest stored set of the same camera and optic, whatever its
+        exposure length, or `None` when there is none.
+    """
+    return _deepest_key(_read_aperture_file(path), _equipment_of_key(setup_key))
 
 
 def load_apertures_with_reason(path: str, setup_key: str | None = None) -> tuple[ApertureSet | None, str]:
@@ -920,7 +1066,8 @@ def load_apertures_with_reason(path: str, setup_key: str | None = None) -> tuple
     path : `str`
         The ``quality_apertures.json`` file.
     setup_key : `str`, optional
-        The camera and optic wanted. Left out, the first stored set.
+        The camera, optic and reference exposure wanted. Left out, the
+        deepest stored set (see `load_apertures`).
 
     Returns
     -------
@@ -942,8 +1089,8 @@ def load_apertures_with_reason(path: str, setup_key: str | None = None) -> tuple
     aperture_set = load_apertures(path, setup_key)
     if aperture_set is None:
         return None, (
-            "the target's stored noise apertures hold no usable set for this camera and optic "
-            f"({setup_key}); stack the target once so its library stack chooses one"
+            "the target's stored noise apertures hold no usable set for this camera, optic and "
+            f"reference exposure ({setup_key}); stack the target once so its library stack chooses one"
         )
     return aperture_set, ""
 
@@ -1044,6 +1191,11 @@ def _store_apertures_once(
                     return stored
             except ValueError, KeyError, TypeError:
                 logger.warning("A stored set of noise apertures at %s was unreadable and is replaced.", path)
+        # A set stored under a key with no exposure (an older file) is never
+        # used again, so the new set for the same equipment takes its place.
+        equipment = _equipment_of_key(aperture_set.setup_key)
+        for key in [key for key in sets if is_legacy_setup_key(key) and _equipment_of_key(key) == equipment]:
+            del sets[key]
         sets[aperture_set.setup_key] = aperture_set.to_json()
         _write_aperture_file(path, sets)
     return aperture_set
@@ -1061,7 +1213,8 @@ def reset_apertures(path: str, setup_key: str | None = None) -> bool:
     path : `str`
         The ``quality_apertures.json`` file.
     setup_key : `str`, optional
-        The one camera and optic to forget. Left out, every set is forgotten
+        The one camera, optic and reference exposure to forget. Left out,
+        every set is forgotten
         and the file is deleted.
 
     Returns

@@ -44,6 +44,15 @@ shifted by the same offset. The claim is checked, not assumed: the brightest
 stars of the stack must sit where the reference frame shows stars. If they do
 not, no noise is measured.
 
+A stack combined from exposure groups may have no named reference frame (its
+registration lines can leave the reference unclear). The caller can then give
+member frames of the group the stack was lined up with. Such a frame is not the
+reference, so it sits a few to a few hundred pixels off the stack. Its solution
+is moved onto the stack by the shift most of the stack's brightest stars agree
+on, and then checked the same way as the reference frame's. The source is
+recorded as `MEMBER_FRAME_WCS_SOURCE`, with the shift, so a stored result
+always says which route gave its coordinates.
+
 Even a stack's own header is checked. A frame's own "solution" is often only a
 first guess: the camera software (Ekos) writes the position the mount was told
 to point at, not a plate solution, and Siril copies it into the stack. The sky
@@ -58,9 +67,14 @@ more than three times its own error. The leftover position error (how well the
 stars agree after the shift) is reported in the `position_note`. If fewer than
 a few stars agree, no noise is measured.
 
-A target keeps one set of apertures for each camera and optic (see
-`ApertureSet.setup_key`). A stack made with other equipment starts a new set.
-To start over for a target, call `reset_apertures` or delete
+A target keeps one set of apertures for each camera, optic and reference
+exposure length (see `ApertureSet.setup_key`). A stack made with other
+equipment, or lined up on a frame of another exposure length (for a stack of
+exposure groups, the heaviest group's), starts a new set. A stack that may not
+choose apertures (a subset stack or a half-difference job) ignores its own
+exposure length and uses the target's deepest set of the same camera and optic,
+which is the library stack's. To start over for a target, call
+`reset_apertures` or delete
 ``quality_apertures.json`` beside its stacks; the next stack chooses new
 apertures. Noise values measured with different sets are not comparable.
 
@@ -77,6 +91,7 @@ difference of two stacks and compares two stacks' noise aperture by aperture.
 import logging
 import math
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 
 import numpy as np
@@ -99,6 +114,7 @@ from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
     _setup_key,
     _store_apertures_once,
     choose_apertures_with_reason,
+    find_library_set_key,
     load_apertures,
     load_apertures_with_reason,
 )
@@ -162,6 +178,16 @@ MAXIMUM_ROTATION_DEG = 0.1
 ROTATION_SIGNIFICANCE = 3.0
 
 NO_WCS_REASON = "no WCS for this stack"
+
+# The ``wcs_source`` of a stack whose solution was taken from a member frame
+# of the group it was lined up with, because no reference frame was named.
+MEMBER_FRAME_WCS_SOURCE = "member frame of the reference exposure group"
+
+# How many member frames are tried, in the order given, before giving up. Each
+# try reads one frame and runs the star check, so a few are enough: a frame
+# that fails the check is a poor frame (clouds, trails), and the next is
+# unlikely to be as bad. A design estimate.
+MEMBER_FRAME_ATTEMPTS = 5
 
 # Given when apertures must be chosen on a group stack but the area every
 # exposure group covers cannot be laid under the trimmed stack.
@@ -416,6 +442,139 @@ def _reference_frame_wcs(
     return shifted, ""
 
 
+def _member_frame_wcs(
+    member_frame_paths: Sequence[str], stack_plane: np.ndarray, crop_offset: tuple[int, int]
+) -> tuple[WCS | None, str, str, str | None, tuple[int, int]]:
+    """Take the plate solution of a member frame, moved onto the stack.
+
+    A member frame of the group the stack was lined up with is not the
+    reference frame, so its stars sit at their own place, off the stack's by
+    the frame's shift. For each frame in turn (up to `MEMBER_FRAME_ATTEMPTS`),
+    every pair of a bright stack star and a detected frame star suggests a
+    shift. The shift most stars agree on is taken, and the frame is accepted
+    only when at least `WCS_CHECK_MINIMUM_MATCHES` different stack stars agree
+    within `WCS_CHECK_TOLERANCE_PX`. When two shifts tie, the smaller one wins.
+    The frame's solution is then moved by that shift, onto the stack's pixel
+    grid.
+
+    Parameters
+    ----------
+    member_frame_paths : `Sequence` of `str`
+        Frames of the group the stack was lined up with, best first.
+    stack_plane : `numpy.ndarray`
+        The stack's image.
+    crop_offset : `tuple` [`int`, `int`]
+        The (columns, rows) cut from the stack's left and top edges.
+
+    Returns
+    -------
+    wcs : `astropy.wcs.WCS` or `None`
+        The solution on the stack's pixel grid, or `None`.
+    reason : `str`
+        Why there is none. Empty when there is one.
+    wcs_source : `str`
+        `MEMBER_FRAME_WCS_SOURCE` with the frame's name and the shift applied.
+        Empty when there is no solution.
+    frame_path : `str` or `None`
+        The frame whose solution was taken, or `None`.
+    frame_crop_offset : `tuple` [`int`, `int`]
+        The (columns, rows) to add to a stack pixel to reach the same sky
+        place in that frame (rounded to whole pixels). Equal to ``crop_offset``
+        when there is no solution.
+    """
+    stack_stars = detect_star_centroids(stack_plane, count=WCS_CHECK_STAR_COUNT)
+    if len(stack_stars) < WCS_CHECK_MINIMUM_MATCHES:
+        return (
+            None,
+            "the member frames' solutions could not be checked: too few stars were found",
+            "",
+            None,
+            crop_offset,
+        )
+    expected = stack_stars + np.array([crop_offset[1], crop_offset[0]], dtype=float)
+    reasons = []
+    for frame_path in list(member_frame_paths)[:MEMBER_FRAME_ATTEMPTS]:
+        try:
+            frame_wcs = _celestial_wcs(read_header(frame_path))
+            frame_data = read_data(frame_path)
+        except OSError, ValueError:
+            continue
+        if frame_wcs is None or frame_data is None:
+            continue
+        frame_stars = detect_star_centroids(
+            collapse_to_2d(np.asarray(frame_data, dtype=np.float64)),
+            count=DETECTED_STAR_COUNT,
+            skip_saturated=False,
+        )
+        if len(frame_stars) == 0:
+            continue
+        shift = _agreed_shift(expected, frame_stars)
+        if shift is None:
+            reasons.append(os.path.basename(frame_path))
+            continue
+        # A stack pixel (row, column) is frame pixel + cut - shift.
+        moved = frame_wcs.deepcopy()
+        moved.wcs.crpix = [
+            frame_wcs.wcs.crpix[0] - crop_offset[0] + shift[1],
+            frame_wcs.wcs.crpix[1] - crop_offset[1] + shift[0],
+        ]
+        source = (
+            f"{MEMBER_FRAME_WCS_SOURCE} ({os.path.basename(frame_path)}, "
+            f"moved by {shift[0]:+.1f} rows and {shift[1]:+.1f} columns onto the stack's stars)"
+        )
+        frame_offset = (crop_offset[0] - round(shift[1]), crop_offset[1] - round(shift[0]))
+        return moved, "", source, frame_path, frame_offset
+    tried = f" (tried {', '.join(reasons)})" if reasons else ""
+    return (
+        None,
+        f"no member frame of the reference exposure group lines up with the stack{tried}, "
+        "so no coordinate solution applies to the stack",
+        "",
+        None,
+        crop_offset,
+    )
+
+
+def _agreed_shift(expected: np.ndarray, frame_stars: np.ndarray) -> tuple[float, float] | None:
+    """Find the shift that puts the most stack stars onto frame stars.
+
+    Parameters
+    ----------
+    expected : `numpy.ndarray`
+        Shape ``(n, 2)``: the (row, column) of the stack's bright stars on the
+        frame's pixel grid (the trim offset already added).
+    frame_stars : `numpy.ndarray`
+        Shape ``(m, 2)``: the (row, column) of the frame's stars.
+
+    Returns
+    -------
+    shift : `tuple` [`float`, `float`] or `None`
+        The (rows, columns) by which the frame's stars lie off the expected
+        places (``expected - frame``), averaged over the stars that agree, or
+        `None` when fewer than `WCS_CHECK_MINIMUM_MATCHES` stars agree.
+    """
+    star_index, frame_index = np.meshgrid(
+        np.arange(len(expected)), np.arange(len(frame_stars)), indexing="ij"
+    )
+    shifts = expected[star_index.ravel()] - frame_stars[frame_index.ravel()]
+    owner = star_index.ravel()
+    near = np.hypot(shifts[:, 0], shifts[:, 1]) <= SEED_SEARCH_RADIUS_PX
+    shifts, owner = shifts[near], owner[near]
+    if len(shifts) == 0:
+        return None
+    neighbors = cKDTree(shifts).query_ball_point(shifts, r=WCS_CHECK_TOLERANCE_PX)
+    best = None
+    for index, members in enumerate(neighbors):
+        agreeing_stars = len(set(owner[members].tolist()))
+        size = float(np.hypot(*shifts[index]))
+        if best is None or (agreeing_stars, -size) > (best[0], -best[1]):
+            best = (agreeing_stars, size, members)
+    if best is None or best[0] < WCS_CHECK_MINIMUM_MATCHES:
+        return None
+    mean_shift = shifts[best[2]].mean(axis=0)
+    return float(mean_shift[0]), float(mean_shift[1])
+
+
 def _move_guess_onto_reference_stars(
     plane: np.ndarray, wcs: WCS, reference_sky: np.ndarray
 ) -> tuple[WCS | None, str, _Alignment | None]:
@@ -564,6 +723,7 @@ def measure_stack_noise(
     may_choose_apertures: bool = True,
     depth: StackDepth | None = None,
     covered_mask: np.ndarray | None = None,
+    member_frame_paths: Sequence[str] = (),
 ) -> StackNoiseOutcome:
     """Measure a stack's noise in the target's fixed empty apertures.
 
@@ -597,6 +757,11 @@ def measure_stack_noise(
         Apertures this stack chooses keep out of the pixels it marks `False`
         (see `empty_apertures.UNCOVERED_CLEARANCE_PX`). Left out for a stack
         of one group.
+    member_frame_paths : `Sequence` of `str`, optional
+        Frames of the group the stack was lined up with, best first. Used only
+        when the stack has no solution and no reference frame is named: the
+        first one that lines up with the stack gives the solution (see
+        `_member_frame_wcs`), and the result's ``wcs_source`` says so.
 
     Returns
     -------
@@ -620,6 +785,7 @@ def measure_stack_noise(
         may_choose_apertures,
         depth,
         covered_mask=covered_mask,
+        member_frame_paths=member_frame_paths,
     )
     return replace(outcome, stack_sky_level=sky_level_of_plane(plane))
 
@@ -651,6 +817,41 @@ def _covered_window(
     return covered_mask[row_offset : row_offset + rows, column_offset : column_offset + columns]
 
 
+def _reference_exposure_seconds(
+    reference_header: fits.Header, member_frame_paths: Sequence[str]
+) -> float | None:
+    """Find the exposure length of the frame the stack was lined up on.
+
+    Parameters
+    ----------
+    reference_header : `astropy.io.fits.Header`
+        The registration reference frame's header, empty when there is none.
+    member_frame_paths : `Sequence` of `str`
+        Frames of the group the stack was lined up with, best first. For a
+        stack of exposure groups that is the heaviest group, so its frames
+        have the reference exposure length. Used only when the reference
+        header gives no exposure length.
+
+    Returns
+    -------
+    exposure_seconds : `float` or `None`
+        The ``EXPTIME`` (or ``EXPOSURE``) of the reference frame, or of the
+        first readable member frame, or `None` when none is known.
+    """
+    headers = [reference_header]
+    for frame_path in list(member_frame_paths)[:MEMBER_FRAME_ATTEMPTS]:
+        try:
+            headers.append(read_header(frame_path))
+        except OSError, ValueError:
+            continue
+    for header in headers:
+        for keyword in ("EXPTIME", "EXPOSURE"):
+            value = header.get(keyword)
+            if isinstance(value, int | float) and math.isfinite(value) and value > 0:
+                return float(value)
+    return None
+
+
 def _measure_noise_in_plane(
     plane: np.ndarray,
     stack_path: str,
@@ -661,6 +862,7 @@ def _measure_noise_in_plane(
     depth: StackDepth | None,
     subtracted_plane: np.ndarray | None = None,
     covered_mask: np.ndarray | None = None,
+    member_frame_paths: Sequence[str] = (),
 ) -> StackNoiseOutcome:
     """Measure a stack's noise in the target's fixed apertures on its plane.
 
@@ -688,6 +890,8 @@ def _measure_noise_in_plane(
         empty edge). See `measure_difference_noise`.
     covered_mask : `numpy.ndarray`, optional
         See `measure_stack_noise`. Used only when apertures are chosen.
+    member_frame_paths : `Sequence` of `str`, optional
+        See `measure_stack_noise`.
 
     Returns
     -------
@@ -700,18 +904,38 @@ def _measure_noise_in_plane(
     stack_header = read_header(stack_path)
     wcs = _celestial_wcs(stack_header)
     wcs_source = "stack header"
+    # The frame that stands in for the reference frame in the header and
+    # saturation checks, and where it sits relative to the stack.
+    check_frame_path = reference_frame_path
+    check_offset = crop_offset
     if wcs is None:
-        if not reference_frame_path:
+        if reference_frame_path:
+            wcs, reason = _reference_frame_wcs(reference_frame_path, plane, crop_offset)
+            wcs_source = "registration reference frame"
+        elif member_frame_paths:
+            wcs, reason, wcs_source, check_frame_path, check_offset = _member_frame_wcs(
+                member_frame_paths, plane, crop_offset
+            )
+        else:
             return StackNoiseOutcome(None, NO_WCS_REASON)
-        wcs, reason = _reference_frame_wcs(reference_frame_path, plane, crop_offset)
-        wcs_source = "registration reference frame"
         if wcs is None:
             return StackNoiseOutcome(None, reason)
-    reference_header = read_header(reference_frame_path) if reference_frame_path else fits.Header()
-    setup_key = _setup_key(stack_header, reference_header)
-    saturation = _saturation_check(reference_frame_path, crop_offset)
+    reference_header = read_header(check_frame_path) if check_frame_path else fits.Header()
+    setup_key = _setup_key(
+        stack_header,
+        reference_header,
+        reference_exposure_seconds=_reference_exposure_seconds(reference_header, member_frame_paths),
+    )
+    saturation = _saturation_check(check_frame_path, check_offset)
 
-    aperture_set = load_apertures(apertures_path, setup_key)
+    if may_choose_apertures:
+        aperture_set = load_apertures(apertures_path, setup_key)
+    else:
+        # A stack that may not choose is read in the library stack's set,
+        # whatever the exposure length of its own reference frame.
+        library_key = find_library_set_key(apertures_path, setup_key)
+        setup_key = library_key or setup_key
+        aperture_set = load_apertures(apertures_path, setup_key)
     created = False
     keep_note = ""
     mask_does_not_fit = covered_mask is not None and window is None

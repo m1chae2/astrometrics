@@ -186,6 +186,15 @@ GAIN_MINIMUM_PIXELS = 200
 # above it. The value is a design choice checked on those two fields.
 GAIN_SOURCE_SIGMAS = 10.0
 
+# How far from the median a neighbour difference may be, in units of the
+# rough (median absolute deviation) scale, and still count as noise in
+# `estimate_background_noise`. 4 cuts only 0.006% of a bell curve, and the
+# rough scale is coarse by up to ~20% for a stepped sensor, so the real cut
+# is 3.2 to 5 sigma: still leaves the bias under 0.5% while star pixels
+# fall outside. Checked on synthetic stepped data by
+# test_the_noise_estimate_is_fine_grained_on_stepped_data.
+NOISE_CLIP_SIGMAS = 4.0
+
 # The sky level of a group is the median of its trusted pixels after
 # repeatedly dropping pixels more than SKY_CLIP_SIGMAS spreads from it (stars
 # and the target), as in a sigma-clipped median. Five passes settle it on the
@@ -755,9 +764,20 @@ def estimate_background_noise(image: np.ndarray) -> float:
     The noise is estimated from the difference between neighbouring pixels.
     A smooth background and the few pixels that hold stars barely change
     that difference, while noise does, so the answer is not thrown off by
-    the stars in the frame. The "median absolute deviation" (the middle of
-    the sorted sizes of the differences) makes it robust to the star pixels
-    that do get in.
+    the stars in the frame.
+
+    The estimate takes two passes. The first pass uses the "median absolute
+    deviation" (the middle of the sorted sizes of the differences) as a
+    rough scale. It ignores stars but is coarse: a camera that stores its
+    values in steps (the ZWO ASI533MM keeps 14-bit values in steps of 4)
+    makes every difference a multiple of the step, so the median can only
+    land on a multiple of that step. The second pass keeps the differences
+    within `NOISE_CLIP_SIGMAS` of the median, using that rough scale as the
+    limit, and takes their ordinary standard deviation. A standard deviation
+    uses every kept value, so it is fine-grained even when the data are
+    stepped. The limit is wide enough that the rough scale's error (up to
+    about 20% at one step per sigma) hardly moves it, and tight enough that
+    star pixels, whose differences are many sigma, fall outside it.
 
     Parameters
     ----------
@@ -767,17 +787,29 @@ def estimate_background_noise(image: np.ndarray) -> float:
     Returns
     -------
     noise : `float`
-        The typical noise of one pixel, in the image's own units.
+        The typical noise of one pixel, in the image's own units. It is 0
+        when more than half of the differences are identical (for example
+        an image that is mostly clipped to zero).
     """
     differences = np.asarray(image[:, 1:], dtype=np.float64) - np.asarray(image[:, :-1], dtype=np.float64)
     differences = differences[np.isfinite(differences)]
     if differences.size == 0:
         return float("nan")
-    deviation = np.median(np.abs(differences - np.median(differences)))
+    center = np.median(differences)
     # 1.4826 turns a median absolute deviation into a standard deviation for
-    # bell-curve noise. Dividing by the square root of 2 undoes the extra
-    # noise from taking a difference of two pixels.
-    return float(1.4826 * deviation / math.sqrt(2.0))
+    # bell-curve noise.
+    rough_scale = 1.4826 * np.median(np.abs(differences - center))
+    if rough_scale <= 0:
+        return 0.0
+    kept = differences[np.abs(differences - center) <= NOISE_CLIP_SIGMAS * rough_scale]
+    # Cutting a bell curve at 4 sigma removes 0.05% of its spread (the
+    # standard deviation of a normal curve cut at +-4 sigma is 0.99947 of the
+    # full one), so no correction is applied. If the rough scale is 20% off,
+    # the cut sits at 3.2 to 5 sigma and the bias stays under 0.5% (checked
+    # on synthetic data in test_exposure_groups.py).
+    # Dividing by the square root of 2 undoes the extra noise from taking a
+    # difference of two pixels.
+    return float(np.std(kept) / math.sqrt(2.0))
 
 
 def estimate_saturation_mask_level(

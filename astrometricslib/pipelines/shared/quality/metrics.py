@@ -607,7 +607,9 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         decisions=("exposure length", "noise regime"),
         estimator=(
             "Read from the camera profile entry that matches the frame's gain setting, offset and "
-            "binning exactly; not computed from the frame's pixels. Stored as assumed unless the "
+            "binning; not computed from the frame's pixels. When no entry has the frame's offset and "
+            "the frame is not clipped at zero, the entry of the same gain and binning at the nearest "
+            "other offset is used and the source says 'offset fallback'. Stored as assumed unless the "
             "profile's value was measured."
         ),
         sample_definition="One profile value per frame.",

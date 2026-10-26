@@ -7,7 +7,9 @@ knows:
 
 - Members. The frames of the exposure groups that were combined, without the
   frames whose files could not be read and without the frames Siril dropped
-  while registering (its sequence file marks them). A frame Siril's own stack
+  while registering (its sequence file marks them; a group stack reads the
+  marks from each group's own entry). The stack's frame count comes from this
+  same list (see `count_frames_stacked`). A frame Siril's own stack
   filters (star width or roundness) left out afterwards is not marked anywhere.
   When fewer images were stacked than there are candidates, the member list is
   marked uncertain instead of guessed.
@@ -26,8 +28,8 @@ knows:
   weights are unknown. Unknown is reported as unknown. It is never replaced by
   equal weights.
 - Reference frame. A group stack is lined up with its heaviest group, so the
-  reference frame is the identity line of that group (see
-  `registration_reference_from_diagnostics`).
+  reference frame is the identity line of that group, leaving out the lines of
+  frames Siril dropped (see `registration_reference_from_diagnostics`).
 
 The effective frame count and effective time say how much a weighted stack is
 worth in equal frames and equal seconds.
@@ -45,13 +47,16 @@ __all__ = [
     "GroupFrameWeights",
     "StackMember",
     "StackMembership",
+    "count_frames_stacked",
     "determine_stack_members",
     "effective_exposure_seconds",
     "effective_frame_count",
     "effective_read_noise_time_seconds",
     "group_frame_weights",
     "normalized_weights",
+    "reference_group_frame_paths",
     "registration_reference_from_diagnostics",
+    "stack_candidate_frames",
     "wfwhm_weights",
 ]
 
@@ -92,38 +97,194 @@ class StackMembership:
     membership_reason: str = ""
 
 
-def _dropped_at_registration(diagnostics: dict[str, Any]) -> set[str]:
-    """Find the frames Siril marked as not included in its sequence file.
+def _paths_marked_not_included(paths: Sequence[Any], included: Sequence[Any]) -> set[str]:
+    """Pick the paths whose Siril inclusion flag is `False`.
 
     Parameters
     ----------
-    diagnostics : `dict`
-        What the stacking run reported. ``symlinked_light_paths`` and
-        ``registration_included`` are read.
+    paths : `Sequence`
+        The frame paths, in the order they were given to Siril.
+    included : `Sequence`
+        Siril's inclusion flag for each frame (``I n 0`` is `False`).
 
     Returns
     -------
     dropped : `set` of `str`
-        The paths of the dropped frames. Empty when the two lists are missing
-        or do not line up, because then no frame can be named safely.
+        The paths of the dropped frames. Empty when either list is missing or
+        the two do not line up, because then no frame can be named safely.
     """
-    paths = diagnostics.get("symlinked_light_paths") or []
-    included = diagnostics.get("registration_included") or []
     if not paths or len(paths) != len(included):
         return set()
-    return {path for path, flag in zip(paths, included, strict=True) if flag is False}
+    return {str(path) for path, flag in zip(paths, included, strict=True) if flag is False}
+
+
+def _dropped_at_registration(diagnostics: dict[str, Any]) -> set[str]:
+    """Find the frames Siril marked as not included in its sequence file.
+
+    A stack of exposure groups keeps each group's own path and flag lists in
+    its ``exposure_group_weights`` entries, because the joined top-level lists
+    do not line up (the flags are those of the first group only). Those entries
+    are used when they exist.
+
+    Parameters
+    ----------
+    diagnostics : `dict`
+        What the stacking run reported. ``exposure_group_weights`` is read
+        when present; otherwise ``symlinked_light_paths`` and
+        ``registration_included``.
+
+    Returns
+    -------
+    dropped : `set` of `str`
+        The paths of the dropped frames. Empty when the lists are missing
+        or do not line up, because then no frame can be named safely.
+    """
+    groups = diagnostics.get("exposure_group_weights") or []
+    if groups:
+        dropped: set[str] = set()
+        for group in groups:
+            dropped |= _paths_marked_not_included(
+                group.get("frame_paths") or [], group.get("registration_included") or []
+            )
+        return dropped
+    return _paths_marked_not_included(
+        diagnostics.get("symlinked_light_paths") or [], diagnostics.get("registration_included") or []
+    )
+
+
+def stack_candidate_frames(target_frames: Sequence[Any], diagnostics: dict[str, Any]) -> list[Any]:
+    """List the frames that went into a stack.
+
+    These are the frames of the exposure groups that were combined, without the
+    frames whose files could not be read and without the frames Siril dropped
+    while registering. This is the one list behind both the stack's frame count
+    and its member rows, so the two cannot disagree.
+
+    Parameters
+    ----------
+    target_frames : `Sequence`
+        The frames given to the stacking program (they have ``path``).
+    diagnostics : `dict`
+        What the stacking run reported (``combined_frame_paths``,
+        ``corrupt_frames_skipped`` and the registration flags; see
+        `_dropped_at_registration`).
+
+    Returns
+    -------
+    frames : `list`
+        The frames, in the order they were given.
+    """
+    combined = diagnostics.get("combined_frame_paths")
+    corrupt = set(diagnostics.get("corrupt_frames_skipped", []))
+    dropped = _dropped_at_registration(diagnostics)
+    return [
+        frame
+        for frame in target_frames
+        if (combined is None or frame.path in combined)
+        and frame.path not in corrupt
+        and frame.path not in dropped
+    ]
+
+
+def count_frames_stacked(target_frames: Sequence[Any], diagnostics: dict[str, Any]) -> int:
+    """Count the frames that went into a stack.
+
+    The count is the number of frames in `stack_candidate_frames`: submitted,
+    less the frames of groups that were not combined, the unreadable files and
+    the frames Siril left out while registering. When Siril also reports that
+    it stacked fewer images than that (its own star-width or roundness filters
+    left some out without naming them), Siril's number is used, because it is
+    the count of what the program actually combined.
+
+    Parameters
+    ----------
+    target_frames : `Sequence`
+        The frames given to the stacking program.
+    diagnostics : `dict`
+        What the stacking run reported.
+
+    Returns
+    -------
+    count : `int`
+        The number of frames in the stack. When the registration flags are
+        missing or do not line up with the frame paths, the frames Siril left
+        out cannot be named and are not subtracted.
+    """
+    count = len(stack_candidate_frames(target_frames, diagnostics))
+    images_stacked = diagnostics.get("images_stacked")
+    if images_stacked is not None and int(images_stacked) < count:
+        return int(images_stacked)
+    return count
+
+
+def _is_unregistered_line(facts: dict[str, Any]) -> bool:
+    """Tell whether a registration line is Siril's empty entry for a frame.
+
+    Siril keeps a line for a frame it could not register, with every number of
+    the transform at zero. Read as a shift, that line looks like "no shift",
+    the same as the reference frame's identity transform. The identity has 1 on
+    the diagonal; the empty entry does not.
+
+    Parameters
+    ----------
+    facts : `dict`
+        One registration line (``homography`` is read when present).
+
+    Returns
+    -------
+    empty : `bool`
+        `True` when the line has a transform made only of zeros.
+    """
+    homography = facts.get("homography")
+    return bool(homography) and all(not value for value in homography)
+
+
+def _registration_line_owners(
+    paths: Sequence[str], line_count: int, included: Sequence[bool]
+) -> list[str | None] | None:
+    """Pair each registration line with the frame it describes.
+
+    Siril's sequence file names no frames, so the pairing is by position. The
+    pairing is made only when it is safe: either every frame has a line, or
+    the lines are exactly as many as the frames Siril kept (then a dropped
+    frame has no line and the kept frames take the lines in order).
+
+    Parameters
+    ----------
+    paths : `Sequence` of `str`
+        The frame paths, in the order they were given to Siril.
+    line_count : `int`
+        The number of registration lines.
+    included : `Sequence` of `bool`
+        Siril's inclusion flag for each frame, or an empty sequence.
+
+    Returns
+    -------
+    owners : `list` of (`str` or `None`) or `None`
+        The path that owns each line, or `None` for the whole answer when no
+        safe pairing exists. A line of a dropped frame is paired with `None`,
+        so that it can never be taken as the reference.
+    """
+    if line_count == len(paths):
+        flags = list(included) if len(included) == len(paths) else [True] * len(paths)
+        return [path if flag else None for path, flag in zip(paths, flags, strict=True)]
+    if len(included) == len(paths) and line_count == sum(1 for flag in included if flag):
+        return [path for path, flag in zip(paths, included, strict=True) if flag]
+    return None
 
 
 def registration_reference_from_diagnostics(diagnostics: dict[str, Any]) -> tuple[str, int | None] | None:
     """Find the frame Siril lined every other frame up with.
 
     The reference frame is the one whose transform is the identity (it has no
-    shift of its own). The answer is given only when it is certain: the frame
-    paths and the registration facts must have the same length, so a position
-    in one names the same frame in the other, and exactly one frame must have
-    no shift. A sequence of frames that were already aligned has a zero shift
-    for every frame, so no single frame can be named as "the" reference, and
-    naming the first would be made up.
+    shift of its own). The answer is given only when it is certain. The
+    registration lines must be paired with frame paths safely (see
+    `_registration_line_owners`). Lines of frames Siril dropped do not count:
+    Siril keeps an all-zero line for such a frame, which looks like a zero
+    shift. Exactly one remaining frame must have no shift. A sequence of frames
+    that were already aligned has a zero shift for every frame, so no single
+    frame can be named as "the" reference, and naming the first would be made
+    up.
 
     A stack combined from exposure groups has one identity line per group. It
     is lined up with its heaviest group (the one with the largest combine
@@ -134,10 +295,11 @@ def registration_reference_from_diagnostics(diagnostics: dict[str, Any]) -> tupl
     ----------
     diagnostics : `dict`
         What the stacking run reported. ``registration_frames`` (one dict per
-        frame with ``dx``, ``dy`` and ``star_count``) and
-        ``symlinked_light_paths`` are read; for a group stack, the same lists
-        inside the heaviest entry of ``exposure_group_weights``
-        (``registration_frames`` and ``frame_paths``).
+        frame with ``dx``, ``dy`` and ``star_count``),
+        ``symlinked_light_paths`` and ``registration_included`` are read; for
+        a group stack, the same lists inside the heaviest entry of
+        ``exposure_group_weights`` (``registration_frames``, ``frame_paths``
+        and ``registration_included``).
 
     Returns
     -------
@@ -147,19 +309,57 @@ def registration_reference_from_diagnostics(diagnostics: dict[str, Any]) -> tupl
     """
     groups = diagnostics.get("exposure_group_weights") or []
     if groups:
-        heaviest = max(groups, key=lambda group: float(group.get("weight") or 0.0))
-        registration_frames = heaviest.get("registration_frames") or []
-        registration_frame_paths = heaviest.get("frame_paths") or []
+        source = max(groups, key=lambda group: float(group.get("weight") or 0.0))
+        registration_frames = source.get("registration_frames") or []
+        registration_frame_paths = source.get("frame_paths") or []
     else:
+        source = diagnostics
         registration_frames = diagnostics.get("registration_frames", [])
         registration_frame_paths = diagnostics.get("symlinked_light_paths", [])
-    zero_shift_indices = [
-        index for index, facts in enumerate(registration_frames) if not facts["dx"] and not facts["dy"]
-    ]
-    if len(zero_shift_indices) != 1 or len(registration_frame_paths) != len(registration_frames):
+    owners = _registration_line_owners(
+        registration_frame_paths, len(registration_frames), source.get("registration_included") or []
+    )
+    if owners is None:
         return None
-    reference_index = zero_shift_indices[0]
-    return registration_frame_paths[reference_index], registration_frames[reference_index]["star_count"]
+    candidates = [
+        (owner, facts)
+        for owner, facts in zip(owners, registration_frames, strict=True)
+        if owner is not None and not _is_unregistered_line(facts) and not facts["dx"] and not facts["dy"]
+    ]
+    if len(candidates) != 1:
+        return None
+    owner, facts = candidates[0]
+    return owner, facts["star_count"]
+
+
+def reference_group_frame_paths(diagnostics: dict[str, Any]) -> list[str]:
+    """List the frames of the group a combined stack was lined up with.
+
+    Used when no single reference frame can be named: any registered frame of
+    the heaviest group has a plate solution close to the stack's geometry.
+    Frames Siril dropped are left out when its flags can be paired with the
+    frames (see `_registration_line_owners`).
+
+    Parameters
+    ----------
+    diagnostics : `dict`
+        What the stacking run reported (``exposure_group_weights``).
+
+    Returns
+    -------
+    paths : `list` of `str`
+        The heaviest group's frame paths, in the order they were given to
+        Siril. Empty for a stack of one group or when the entries are missing.
+    """
+    groups = diagnostics.get("exposure_group_weights") or []
+    if not groups:
+        return []
+    heaviest = max(groups, key=lambda group: float(group.get("weight") or 0.0))
+    paths = [str(path) for path in heaviest.get("frame_paths") or heaviest.get("paths") or []]
+    included = heaviest.get("registration_included") or []
+    if len(included) == len(paths):
+        return [path for path, flag in zip(paths, included, strict=True) if flag]
+    return paths
 
 
 def wfwhm_weights(weighted_fwhm_px: Sequence[float]) -> list[float]:
@@ -471,16 +671,7 @@ def determine_stack_members(
     membership : `StackMembership`
         The members with raw weights (see the module description).
     """
-    combined = diagnostics.get("combined_frame_paths")
-    corrupt = set(diagnostics.get("corrupt_frames_skipped", []))
-    dropped = _dropped_at_registration(diagnostics)
-    candidates = [
-        frame
-        for frame in target_frames
-        if (combined is None or frame.path in combined)
-        and frame.path not in corrupt
-        and frame.path not in dropped
-    ]
+    candidates = stack_candidate_frames(target_frames, diagnostics)
 
     membership_reason = ""
     images_stacked = diagnostics.get("images_stacked")

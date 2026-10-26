@@ -7,7 +7,7 @@ done in order:
 2. **Part 2, exposure-group weights.** 2a: a stacking run records frame weights, gains and the
    predicted noise for stacks combined from several exposure lengths. 2b: the forecast and the
    "take N more" suggestion use them.
-3. **One forced restack of every imaging target**, after parts 1 and 2 land.
+3. **One forced restack of every ZWO ASI533MM imaging target**, after parts 1 and 2 land (decision D6).
 
 The code is the source of truth. Line numbers drift, so this plan names files and functions.
 
@@ -18,6 +18,19 @@ Versions 1 to 3 tried to measure or rebuild the record of the existing stacks wi
 again; the board reviewed each the same day (appendices A to C). The user chose one forced restack
 after parts 1 and 2 instead, and dropped the rebuild. Decisions D4 and D5 were made on 2026-10-25;
 D1 to D3 wait. Ready to build once the user approves.
+
+Status on 2026-10-26: part 1 and the Image Planner filters are built (f542a026, 5df591d0), and part
+2a is built (73faef14). The validation on a copy is under way. Decision D6 (2026-10-26): the work
+now covers the ZWO ASI533MM Pro only. The Nikon D5300's read noise, its forecasts and its restack
+are deferred (decisions D2 and the Nikon parts of section 3.3 wait with it). Part 1's saturation
+levels stay: they leave the ZWO unchanged and correct the Nikon's limit.
+
+Later on 2026-10-26: the validation found four gaps that block a forecast check on M 27
+(section 3.6). They are fixed before part 2b and before any rehearsal. D7 and D8 were decided the
+same day; D9 is open. Gaps 3 and 4 and the D7 fallback are built (uncommitted). Gap 3's cause is
+confirmed on M 27's stored registration file: the 120 s frame Siril dropped has an all-zero
+registration line, which looked like a second reference frame. Part 2a's covered area was also never
+passed to the noise step; that is fixed. Next: the gap 1 diagnosis on the copy.
 
 ## 1. Why suggestions from imaged targets are missing
 
@@ -233,6 +246,175 @@ All on a copy of the library (`build/agent_tools/realrun.sh`) or with synthetic 
 - CI uses synthetic `.seq` and manifest fixtures and the existing synthetic group harness
   (`test_exposure_group_linearity.py`); the real-data runs are register evidence.
 
+### 3.6 Validation findings and the forecast gaps (2026-10-26)
+
+The validation of part 2a on a copy (section 3.4) passed the Siril weight test and failed the
+impulse test (the cause is Siril's unsaved normalization scale, decision D9). On M 27 the forecast
+could not be checked, for the three reasons below. The numbers are from the copy's stored rows
+(`/home/michael/astrometrics_scratch/134-validation/snapshots/`), run on commit 73faef14.
+
+#### 3.6.1 Gap 1: the stack is about 3.5 times noisier than predicted, and flat noise is not why
+
+The 60 s group of M 27 (33 frames, effective count 22.0, sky 933 ADU) measured an empty-aperture
+noise of 3.10e-3 ± 0.36e-3 stack units. The prediction was 8.78e-4: sky 8.70e-4, read 1.22e-4.
+The flat's own contribution is already stored (`stacking.flat_noise_in_aperture_stack_unit`):
+1.17e-4. Added in quadrature it raises the prediction by 1%. The flat's pixel noise is not the gap.
+
+One raw 60 s frame matches the model. Its measured noise, `s_g` in the group manifest, is
+37.7 ADU, and the model gives 35.1 ADU (933 ADU of sky at 0.783 e-/ADU and 3.8 e- of read noise).
+The 30 s and 120 s groups come out 0.81 and 0.92 of the model, within the coarse steps of `s_g`
+(gap 4). So the model holds for a single frame, and the stack misses it.
+
+In pixel units the stack's noise is 26.3 ADU. The frames' random noise averaged over 22 effective
+frames is 37.7 / sqrt(22) = 8.0 ADU. What is left, sqrt(26.3² − 8.0²) = 25 ADU, is about 2.7% of
+the sky. It does not average down with more frames: a floor. Siril's normalization scale (D9)
+would raise the random part by at most 1.4 times and leave the floor about the same.
+
+Possible sources, none confirmed yet:
+
+- **Faint stars.** M 27 lies 3.5° from the galactic plane. The aperture search flagged 9% of the
+  image and excluded 82%, which says the field is crowded. Stars too faint to detect still fill
+  the apertures, and they are the same in every frame.
+- **The calibration.** An analysis of the ZWO previews on 2026-10-02 found a 4% to 8% large-scale pattern from the old
+  single flat. M 27's lights at offset 0 are calibrated with offset-10 flats, and biases at
+  offset 0 are mostly exact zeros.
+- **Fixed sensor patterns** (dark residuals). These are partly averaged, because the frames drift
+  84 px across the session.
+
+Why it matters: the forecast check compares the change in noise, not the absolute noise. With a
+floor this large, adding frames lowers M 27's noise far less than the 1/sqrt(N) forecast, so
+every check falls short "for no known reason" and the gate never opens. The honest suggestion for
+such a target is "more frames will not help much; the floor is X". `noise_growth.fit_noise_floor`
+already models a floor, but only from two or more stacks.
+
+The fix, in order:
+
+1. **Diagnose (on the copy, about half a day).** Prove the floor and find its kind, using tools
+   that exist:
+   - Noise against frame count inside the 60 s group: substacks of 8, 16 and 33 frames
+     (`subset_stack.py`). A fit of `σ² = a / N_eff + b` gives the floor `b`. Pass: `b` above zero
+     by 2 standard errors. If `b` is zero, the excess falls with N and the model misses a random
+     term instead.
+   - The same random-against-measured split on a high-latitude target (M 101 or M 81) and on M 57.
+     A floor on M 27 only points at faint stars. A floor on every target points at the
+     calibration.
+   - An odd-minus-even difference of two half-stacks. It cancels anything fixed on the sky and
+     keeps the random noise, which tests the random part directly. This reopens "half-stack
+     noise", which section 7 left out of scope; it is used here as a check only.
+2. **Model the floor in the forecast (part 2b, about 1 day).** The random part of a stack comes
+   from the measured `s_g` of its groups and the recorded weights, in the same units as the
+   measured noise, with no gain or read noise needed. The floor is
+   `σ_floor² = σ_measured² − σ_random²`, kept only when it is above zero by 2 standard errors
+   (the aperture error, `1.17 / sqrt(n)`). The forecast becomes
+   `σ_later² = σ_floor² + σ_random,later²`. The suggestion then states the floor, and stops
+   offering frames when the floor makes up most of the noise. Decision D8.
+   **Result of step 1 (2026-10-26, on the copy, with the gap 3 and 4 fixes and the D7 fallback in
+   place).** The full record is `work/FLOOR_REPORT.md` in the copy folder. The floor is
+   `sqrt(measured² − random²)`, with the random part taken from the measured `s_g` and the stored
+   weights:
+
+   | Stack | N_eff | Measured | Random from `s_g` | Floor | Floor / sky | Fit `b` |
+   | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+   | M 27, 60 s (galactic latitude about −4°) | 22.0 | 3.10e-3 ± 0.36e-3 | 0.93e-3 | 2.95e-3 ± 0.38e-3 (25 ADU) | 2.6% | 3.4σ above 0 |
+   | M 57, 60 s (+13°, offset 10, matched flats) | 40.8 | 1.25e-3 ± 0.15e-3 | 0.46e-3 | 1.17e-3 ± 0.16e-3 (9.9 ADU) | 2.4% | 3.3σ |
+   | M 81, 60 s (+41°) | 22.1 | 1.13e-3 ± 0.13e-3 | 0.70e-3 | 0.89e-3 ± 0.17e-3 (7.5 ADU) | 1.3% | 1.5σ |
+   | M 27, three groups | 29.9 | 2.25e-3 ± 0.26e-3 | 0.51e-3 | 2.19e-3 ± 0.27e-3 (19 ADU) | 3.9% | not run |
+
+   On M 27, going from 5 to 22 effective frames lowers the noise by 22%; the model says 54%. The
+   half-stack difference (`measure_half_difference_noise`) gives a random part of 1.1 to 1.4 times the
+   `s_g` value, so it confirms the floors on M 27 and M 57 and leaves M 81's at about 2σ. A single
+   frame still matches the model. The floor follows galactic latitude, and M 57 has one even with
+   matched flats. This favors faint stars and crowding over the offset-0 calibration, with at most a
+   common residual of about 1% of the sky. Three targets cannot separate a field cause from a
+   multiplicative one by sky level. The floor is confirmed, so D8's one-stack floor goes ahead in
+   part 2b.
+
+   Found on the way:
+   - The noise row did not name its sky-coordinate source. Fixed in `record_quality.py`.
+   - **Apertures from a different stack can block the noise.** The first three-group restack of
+     M 27 kept the apertures chosen on the 60 s stack. Their 10 reference stars saturate in the
+     120 s reference frame, so no noise was stored ("only 0 of the reference stars can be used").
+     With a new aperture set the stack measured, but its noise is then not comparable with the
+     60 s stack's. Part 2b must treat a pair with different aperture sets as not checkable, and
+     the restack should choose apertures again where the reference group changed. Fixed: a set is
+     now kept per camera, optic and reference exposure, and its identity covers the reference stars.
+     Part 2b still needs the identity as a structured value on the noise rows (today it is only in
+     the reason text), an `aperture_identity` on `StackRunRecord`, and `_check_pair` treating a
+     pair with different or missing identities as not checkable.
+   - `stacking.frames_stacked_count` says 77 for the three-group stack, while its members and N_eff
+     use 76 (the 120 s group stacked 17 of 18). The count (`stage.py`) subtracts only corrupt
+     frames. Fixed: the count and the member rows now use one list (definition version 2).
+3. **If step 1 points at the calibration,** the cure is the user's: new offset-matched flats,
+   biases and darks (the offset test of 2026-10-02 is still open). The forecast's floor term
+   reports the problem until then.
+
+#### 3.6.2 Gap 2: frames at offset 0 have no noise entry
+
+The ZWO profile has one `sensor_noise` entry: gain 0, offset 10, binning 1x1. Most ZWO lights are
+at offset 0 (all 26 + 33 + 4 of M 27's 30 s, 60 s and 120 s frames at offset 0, and M 57's 30 s
+frames). `CameraProfile.sensor_noise_for` matches exactly, with no fallback, so these frames get
+no read noise or gain. Predicted noise is then missing, and a forecast check is not possible,
+because every member frame needs a stored read noise.
+
+The offset is a constant added to every pixel before digitizing. It changes neither the gain
+(electrons per ADU) nor the read noise, as long as the noise is not cut off at zero. The offset-0
+values cannot be measured on this camera anyway: offset-0 biases are 96% exact zeros, so the read
+noise of a bias pair is cut off. A light frame with a sky well above zero is not cut off (M 27's
+frames have no zeros, `frame_zero_fraction` = 0).
+
+Options (decision D7, decided 2026-10-26: option A):
+
+- **A. An offset fallback in the library** (recommended, about half a day). `sensor_noise_for`
+  uses the entry of the same gain and binning at another offset when the frame is not clipped at
+  zero (`CLIPPED_FRAME_ZERO_FRACTION`). The value keeps its kind (measured). Its source says
+  "measured at offset 10, used at offset 0: the offset does not change gain or read noise". A
+  clipped frame gets nothing, as today. Tests cover the fallback, the clipped refusal and the
+  exact match winning.
+- **B. A second config entry** for offset 0, entered by the user and copied from offset 10. It is
+  simple, but the entry claims a measurement that was not made at that setting.
+- **C. Offset 10 from now on.** Old offset-0 frames never take part in a forecast. M 27, M 57 and
+  most ZWO targets would wait for new frames.
+
+#### 3.6.3 Gap 3: the group stack has no plate solution, and plate solving is not the fix
+
+Neither M 27 stack on the copy has a WCS in its header. The noise step then borrows the solution
+of the registration reference frame (`stack_noise._reference_frame_wcs`), and every M 27 frame
+has one. The 60 s stack worked that way. The three-group stack did not, because no reference
+frame was named: its rows say "no single registration reference frame could be identified"
+(`stack_membership.registration_reference_from_diagnostics`). That rule needs exactly one
+zero-shift frame in the heaviest group (120 s), with the frame list and the registration lines
+of the same length. That group stacked 17 of its 18 submitted frames, so the two lists likely
+differ in length. That is not confirmed.
+
+This is a part 2a bug, not a restack problem: a normal group stack hits it too, because the
+quality rows are written before astrometry runs. So `--stack-only` keeps skipping astrometry.
+
+The fix (about half a day):
+
+1. Reproduce it with a unit test: a heaviest group whose frame list holds one more frame than its
+   registration lines. Fix the lookup so it pairs frames by name, not by position.
+2. A fallback for when no single frame can be named: take the solution of any member of the
+   reference group. `_reference_frame_wcs` already checks a solution against the stack's stars,
+   and `_move_guess_onto_reference_stars` corrects a shift of a few pixels.
+3. Rerun the M 27 three-group stack on the copy. Pass: a measured noise is stored.
+
+#### 3.6.4 Gap 4, found on the way: `s_g` moves in steps of about 4 ADU
+
+`exposure_groups.estimate_background_noise` takes the median absolute deviation of neighboring
+pixel differences. The ZWO stores its 14-bit values in steps of 4, so the median is a multiple
+of 4 and `s_g` can only be 1.048 times a multiple of 4 ADU (M 27: 25.16 = 1.048 × 24, and 37.74 =
+1.048 × 36 for both the 60 s and the 120 s group). At these levels one step is about 11% in `s_g`
+and 22% in a group's weight `W_g`. The fix is an estimator with finer resolution, for example
+interpolating the median inside its step, or a clipped standard deviation. It goes with a test on
+quantized synthetic data (about half a day). It changes the weights, so it lands before the
+restack.
+
+#### 3.6.5 Order
+
+Fix gaps 3 and 4 and option D7 first (library, part 2a follow-up), then run the gap 1 diagnosis on
+the copy, then build part 2b with the floor term, then the ZWO rehearsal, then the restack. The
+rehearsal needs all four.
+
 ## 4. The forced restack
 
 ### 4.1 How it runs
@@ -306,6 +488,10 @@ document, the stacking and wayfinding registers, and the READMEs of the changed 
 | D3 | Which issue holds this work | One issue under epic #93 with the pull requests and the restack, or separate issues | Open: one issue recommended |
 | D4 | Where the calibration identities live | A side table with a schema migration, or a hash stored as a measurement | Decided 2026-10-25: side table |
 | D5 | The older previous stacks the restack deletes | Back up the stacks folder first, or accept the loss | Decided 2026-10-25: accept the loss; only the databases are backed up |
+| D6 | Which camera this work covers | Both cameras, or the ZWO ASI533MM Pro only | Decided 2026-10-26: ZWO ASI533MM Pro only; Nikon deferred |
+| D7 | Read noise and gain for offset-0 frames (section 3.6.2) | A: library fallback to another offset for unclipped frames; B: a copied config entry; C: offset 10 only from now on | Decided 2026-10-26: A, the library fallback for frames not clipped at zero |
+| D8 | A noise floor in the forecast (section 3.6.1) | Estimate the floor from one stack (measured minus random) and forecast with it; or keep 1/sqrt(N) and wait for two stacks to fit a floor | Decided 2026-10-26: the one-stack floor, built only once the diagnosis (section 3.6.1, step 1) confirms a floor |
+| D9 | Siril's unsaved per-frame normalization scale (impulse test) | Read the scale from Siril's log and include it in the frame coefficient; or define the stored weight without it and record the impulse test as a known 1.0 to 1.75 deviation | Open |
 
 ## 7. Out of scope
 

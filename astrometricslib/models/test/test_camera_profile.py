@@ -285,3 +285,89 @@ def test_the_old_schema_version_is_refused() -> None:
     """Schema 1 held single values; this model only accepts schema 2."""
     with pytest.raises(ValidationError):
         CameraProfile.model_validate(make_profile_data(schema_version=1))
+
+
+def make_offset_profile(*offsets: str, gain_setting: str = "0", binning: str = "1x1") -> CameraProfile:
+    """Build a profile with one measured gain and read noise entry per offset.
+
+    Parameters
+    ----------
+    *offsets : `str`
+        The offsets that get an entry.
+    gain_setting : `str`, optional
+        The gain setting of every entry.
+    binning : `str`, optional
+        The binning of every entry.
+
+    Returns
+    -------
+    profile : `CameraProfile`
+        The profile. The read noise of an entry is 3.8 plus its offset over 100
+        e-, so a test can tell which entry was used.
+    """
+    entries = [
+        make_noise_entry(
+            gain_setting=gain_setting,
+            offset=offset,
+            binning=binning,
+            read_noise_e={
+                "value": 3.8 + float(offset) / 100.0,
+                "provenance": {"kind": "measured", "source": f"bias pairs at offset {offset}"},
+            },
+        )
+        for offset in offsets
+    ]
+    return CameraProfile.model_validate(make_profile_data(sensor_noise=entries))
+
+
+def test_an_exact_entry_wins_over_the_offset_fallback() -> None:
+    """With an entry at the frame's own offset, the fallback is never used."""
+    profile = make_offset_profile("0", "10")
+    entry = profile.sensor_noise_for(0, 0, "1x1", clipped_at_zero=False)
+    assert entry is not None
+    assert entry.offset == "0"
+    assert entry.read_noise_e.value == pytest.approx(3.8)
+    assert "offset fallback" not in entry.read_noise_e.provenance.source
+
+
+def test_an_unclipped_frame_uses_another_offset_and_the_source_says_so() -> None:
+    """The value and its kind are kept; the source names both offsets."""
+    profile = make_offset_profile("10")
+    entry = profile.sensor_noise_for(0, None, "1x1", clipped_at_zero=False)
+    assert entry is not None
+    assert entry.read_noise_e.value == pytest.approx(3.9)
+    assert entry.read_noise_e.provenance.kind == ProvenanceKind.MEASURED
+    for value in (entry.read_noise_e, entry.gain_e_per_adu):
+        assert "offset fallback" in value.provenance.source
+        assert "measured at offset 10 and used at offset 0" in value.provenance.source
+    assert "bias pairs at offset 10" in entry.read_noise_e.provenance.source
+    assert profile.sensor_noise_gap_reason(0, 0, "1x1", clipped_at_zero=False) is None
+
+
+def test_a_clipped_or_unknown_frame_gets_only_an_exact_match() -> None:
+    """A clipped frame, or one not known to be unclipped, gets no fallback."""
+    profile = make_offset_profile("10")
+    assert profile.sensor_noise_for(0, 0, "1x1") is None
+    assert profile.sensor_noise_for(0, 0, "1x1", clipped_at_zero=None) is None
+    assert profile.sensor_noise_for(0, 0, "1x1", clipped_at_zero=True) is None
+    reason = profile.sensor_noise_gap_reason(0, 0, "1x1", clipped_at_zero=True)
+    assert "entry at offset 10 cannot stand in" in reason
+    assert "clipped at zero" in reason
+    assert "not known" in profile.sensor_noise_gap_reason(0, 0, "1x1")
+
+
+def test_the_fallback_needs_the_same_gain_and_binning() -> None:
+    """An entry at another gain or binning is never borrowed."""
+    profile = make_offset_profile("10")
+    assert profile.sensor_noise_for(1, 0, "1x1", clipped_at_zero=False) is None
+    assert profile.sensor_noise_for(0, 0, "2x2", clipped_at_zero=False) is None
+    assert "offset 0" in profile.sensor_noise_gap_reason(1, 0, "1x1", clipped_at_zero=False)
+
+
+def test_the_fallback_picks_the_nearest_offset_and_the_higher_on_a_tie() -> None:
+    """Nearest wins; two equally near offsets resolve to the higher one."""
+    profile = make_offset_profile("5", "30", "1")
+    assert profile.sensor_noise_for(0, 2, "1x1", clipped_at_zero=False).offset == "1"
+    tied = make_offset_profile("10", "20", "5")
+    assert tied.sensor_noise_for(0, 15, "1x1", clipped_at_zero=False).offset == "20"
+    assert tied.sensor_noise_for(0, 12, "1x1", clipped_at_zero=False).offset == "10"

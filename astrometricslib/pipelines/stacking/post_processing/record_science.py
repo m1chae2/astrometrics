@@ -302,7 +302,14 @@ def frame_noise_inputs_from_store(
         gain, read_noise, reason : `tuple`
             See `look_up_frame_sensor_noise`.
         """
-        return look_up_frame_sensor_noise(resolve_camera_profile(frame.camera, configuration), frame)
+        # `gather_frame_noise_inputs` calls this only for a frame whose stored
+        # sky rate has a value. The frame measurement gives a sky rate only
+        # when it found a gain, and it uses another offset's gain only for a
+        # frame it found unclipped at zero. So a stored value means the offset
+        # fallback is allowed here, and the same entry is found again.
+        return look_up_frame_sensor_noise(
+            resolve_camera_profile(frame.camera, configuration), frame, clipped_at_zero=False
+        )
 
     return gather_frame_noise_inputs(
         members,

@@ -9,7 +9,10 @@ that the stage stores nothing when the caller gave no time.
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
+import numpy as np
 import pytest
 
 from astrometricslib.drivers.quality_store import QualityStore
@@ -34,6 +37,7 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_NEGATIVE_PIXEL_MAX_FRACTION,
     STACKING_NOISE_REFERENCE_FLUX_STACK_UNIT,
 )
+from astrometricslib.pipelines.stacking.post_processing import record_quality
 from astrometricslib.pipelines.stacking.post_processing.record_quality import (
     measure_noise_safely,
     stack_depth_of,
@@ -216,6 +220,15 @@ def test_measured_noise_rows_name_the_apertures_and_the_depth_that_defined_them(
         assert note in _by_metric(measurements, metric)[0].reason
 
 
+def test_measured_noise_rows_name_the_source_of_the_sky_coordinates() -> None:
+    """A noise row says where the stack's sky coordinates came from."""
+    base = fixture_noise_outcome().result
+    source = "member frame of the reference exposure group (frame_007.fits)"
+    outcome = StackNoiseOutcome(StackNoiseResult(**{**base.__dict__, "wcs_source": source}))
+    row = _by_metric(_measurements(noise=outcome), STACKING_EMPTY_APERTURE_NOISE_STACK_UNIT)[0]
+    assert f"Sky coordinates from the {source}." in row.reason
+
+
 def test_the_depth_of_a_stack_comes_from_its_members_weights() -> None:
     """Frame count and effective count come from the members."""
     depth = stack_depth_of(fixture_membership())
@@ -242,6 +255,34 @@ def test_a_failure_while_measuring_noise_is_recorded_as_a_reason(
         outcome = measure_noise_safely(str(tmp_path / "missing.fits"), None, False)
     assert outcome.result is None
     assert "failed" in outcome.reason
+
+
+def test_the_covered_area_reaches_the_noise_measurement(tmp_path: Path) -> None:
+    """The area every exposure group covers reaches the noise step."""
+    covered = np.ones((4, 4), dtype=bool)
+    seen: dict[str, object] = {}
+
+    def fake_measure(*_arguments: object, **keywords: object) -> SimpleNamespace:
+        """Keep the keywords the noise step was called with.
+
+        Parameters
+        ----------
+        *_arguments : `object`
+            The positional arguments, ignored.
+        **keywords : `object`
+            The keyword arguments, kept in ``seen``.
+
+        Returns
+        -------
+        outcome : `types.SimpleNamespace`
+            An outcome with no result.
+        """
+        seen.update(keywords)
+        return SimpleNamespace(result=None, reason="")
+
+    with patch.object(record_quality, "measure_stack_noise", fake_measure):
+        measure_noise_safely(str(tmp_path / "stack.fits"), None, False, covered_mask=covered)
+    assert seen["covered_mask"] is covered
 
 
 def test_one_weight_row_per_member_frame_and_the_weights_have_mean_one() -> None:

@@ -9,6 +9,7 @@ into an image that is closer to the truth than an equal-weight average,
 leaves out saturated pixels, and rejects nonsense input.
 """
 
+import math
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -173,6 +174,57 @@ def test_the_noise_estimate_ignores_a_smooth_gradient() -> None:
     image = gradient + np.random.default_rng(3).normal(0.0, 0.01, (300, 300))
 
     assert estimate_background_noise(image) == pytest.approx(0.01, rel=0.05)
+
+
+def _stepped_noise_image(
+    sigma: float,
+    step: int,
+    seed: int,
+    shape: tuple[int, int] = (600, 600),
+) -> np.ndarray:
+    """Make a sky of Gaussian noise stored in whole steps of `step` counts.
+
+    Returns
+    -------
+    image : `numpy.ndarray`
+        The noisy image, every value a multiple of `step`.
+    """
+    values = np.random.default_rng(seed).normal(1000.0, sigma, shape)
+    return np.round(values / step) * step
+
+
+@pytest.mark.parametrize("step", [1, 4])
+@pytest.mark.parametrize("sigma", [8.0, 16.0, 40.0])
+def test_the_noise_estimate_is_fine_grained_on_stepped_data(sigma: float, step: int) -> None:
+    """Noise stored in steps of 1 or 4 counts is recovered within 3%.
+
+    The rounding to steps adds its own noise of step/sqrt(12), which a real
+    sensor also has, so the expected value includes it.
+    """
+    expected = math.sqrt(sigma**2 + step**2 / 12.0)
+    estimates = [estimate_background_noise(_stepped_noise_image(sigma, step, seed)) for seed in range(5)]
+
+    assert np.mean(estimates) == pytest.approx(expected, rel=0.03)
+    assert np.std(estimates) / expected < 0.01
+
+
+def test_two_noise_levels_five_percent_apart_are_told_apart_at_step_four() -> None:
+    """The old estimate was stuck on multiples of 4; the new one is not."""
+    quiet = estimate_background_noise(_stepped_noise_image(30.0, 4, 11))
+    louder = estimate_background_noise(_stepped_noise_image(31.5, 4, 12))
+
+    assert louder / quiet == pytest.approx(1.05, abs=0.02)
+    assert louder > quiet * 1.02
+
+
+def test_the_noise_estimate_survives_stars_and_a_gradient_on_stepped_data() -> None:
+    """Stars and a gradient move the stepped-data estimate by under 4%."""
+    image = _stepped_noise_image(20.0, 4, 13, (500, 500)) + np.linspace(0, 400, 500)[None, :]
+    for row, column in ((60, 70), (200, 300), (400, 120), (320, 440)):
+        image[row - 4 : row + 5, column - 4 : column + 5] += 8000.0
+    image = np.round(image / 4) * 4
+
+    assert estimate_background_noise(image) == pytest.approx(math.sqrt(20.0**2 + 16 / 12), rel=0.04)
 
 
 def _bracketed_images(read_noise: float) -> tuple[np.ndarray, list[np.ndarray], list[float]]:

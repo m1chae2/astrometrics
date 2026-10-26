@@ -7,11 +7,15 @@ from types import SimpleNamespace
 import pytest
 
 from astrometricslib.drivers.siril_output_parsing import parse_seq_inclusion
+from astrometricslib.pipelines.stacking import stage
 from astrometricslib.pipelines.stacking.post_processing.stack_membership import (
+    count_frames_stacked,
     determine_stack_members,
     effective_exposure_seconds,
     effective_frame_count,
     normalized_weights,
+    reference_group_frame_paths,
+    registration_reference_from_diagnostics,
     wfwhm_weights,
 )
 from astrometricslib.pipelines.stacking.processing.exposure_groups import merge_registration_sequences
@@ -33,7 +37,14 @@ def _frames(count: int, exposure: str = "60") -> list[SimpleNamespace]:
         Frames with a path, exposure and timestamp.
     """
     return [
-        SimpleNamespace(path=f"/frames/{index}.fits", exposure=exposure, timestamp=1.0e9 + index)
+        SimpleNamespace(
+            path=f"/frames/{index}.fits",
+            exposure=exposure,
+            timestamp=1.0e9 + index,
+            camera="cam",
+            iso="800",
+            offset="0",
+        )
         for index in range(count)
     ]
 
@@ -278,3 +289,192 @@ def test_noise_weights_say_what_is_missing() -> None:
     """The reason for -weight=noise names the scale Siril does not save."""
     membership = determine_stack_members(_frames(2), {}, "noise")
     assert "pscale" in membership.weights_reason
+
+
+def _group_entry_with_a_dropped_frame() -> dict:
+    """Build a group entry like the heavy M 27 group: 5 frames, one dropped.
+
+    Siril keeps a line for the dropped frame, with a transform of all zeros,
+    which reads as no shift just as the reference frame's identity does.
+
+    Returns
+    -------
+    entry : `dict`
+        An ``exposure_group_weights`` entry with the dropped frame second.
+    """
+    identity = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+    moved = [1.0, 0.0, 4.5, 0.0, 1.0, -2.0, 0.0, 0.0, 1.0]
+    lines = [
+        {"dx": 4.5, "dy": -2.0, "star_count": 90, "homography": moved},
+        {"dx": 0.0, "dy": 0.0, "star_count": 0, "homography": [0.0] * 9},
+        {"dx": 0.0, "dy": 0.0, "star_count": 120, "homography": identity},
+        {"dx": 4.5, "dy": -2.0, "star_count": 95, "homography": moved},
+        {"dx": 4.5, "dy": -2.0, "star_count": 99, "homography": moved},
+    ]
+    return {
+        "weight": 9.0,
+        "paths": [f"/raw/{index}.fits" for index in range(5)],
+        "frame_paths": [f"/raw/{index}.fits" for index in range(5)],
+        "registration_frames": lines,
+        "registration_included": [True, False, True, True, True],
+    }
+
+
+def test_a_dropped_frames_empty_line_is_not_taken_for_a_second_reference() -> None:
+    """A dropped frame must not hide the heavy group's identity frame."""
+    light = {
+        "weight": 1.0,
+        "paths": ["/raw/x.fits"],
+        "frame_paths": ["/raw/x.fits"],
+        "registration_frames": [{"dx": 0.0, "dy": 0.0, "star_count": 5}],
+        "registration_included": [True],
+    }
+    diagnostics = {"exposure_group_weights": [light, _group_entry_with_a_dropped_frame()]}
+
+    assert registration_reference_from_diagnostics(diagnostics) == ("/raw/2.fits", 120)
+
+
+def test_a_dropped_frame_with_a_plain_zero_shift_line_is_skipped_by_its_flag() -> None:
+    """Even a dropped frame's line that looks like an identity is ignored."""
+    entry = _group_entry_with_a_dropped_frame()
+    entry["registration_frames"][1].pop("homography")
+    diagnostics = {"exposure_group_weights": [entry]}
+
+    assert registration_reference_from_diagnostics(diagnostics) == ("/raw/2.fits", 120)
+
+
+def test_lines_only_for_the_kept_frames_are_paired_with_the_kept_paths() -> None:
+    """A dropped frame with no line: kept frames take the lines in order."""
+    entry = _group_entry_with_a_dropped_frame()
+    del entry["registration_frames"][1]
+    diagnostics = {"exposure_group_weights": [entry]}
+
+    assert registration_reference_from_diagnostics(diagnostics) == ("/raw/2.fits", 120)
+
+
+def test_lines_that_cannot_be_paired_with_the_paths_name_no_reference() -> None:
+    """A line count that fits neither the frames nor the kept ones: refused."""
+    entry = _group_entry_with_a_dropped_frame()
+    del entry["registration_frames"][0:2]
+    diagnostics = {"exposure_group_weights": [entry]}
+
+    assert registration_reference_from_diagnostics(diagnostics) is None
+
+
+def test_two_real_identity_lines_still_name_no_reference() -> None:
+    """Two kept frames with no shift cannot name one reference."""
+    entry = _group_entry_with_a_dropped_frame()
+    entry["registration_frames"][0].update(dx=0.0, dy=0.0, homography=[1.0, 0, 0, 0, 1.0, 0, 0, 0, 1.0])
+    diagnostics = {"exposure_group_weights": [entry]}
+
+    assert registration_reference_from_diagnostics(diagnostics) is None
+
+
+def test_the_reference_group_frames_leave_out_the_dropped_frame() -> None:
+    """The fallback frames are the heaviest group's kept frames."""
+    light = {"weight": 1.0, "paths": ["/raw/x.fits"], "frame_paths": ["/raw/x.fits"]}
+    diagnostics = {"exposure_group_weights": [light, _group_entry_with_a_dropped_frame()]}
+
+    assert reference_group_frame_paths(diagnostics) == [f"/raw/{index}.fits" for index in (0, 2, 3, 4)]
+    assert reference_group_frame_paths({}) == []
+
+
+def _three_group_diagnostics(frames: list[SimpleNamespace], sizes: list[int], left_out: set[int]) -> dict:
+    """Build the diagnostics of an exposure-group stack.
+
+    Parameters
+    ----------
+    frames : `list` of `SimpleNamespace`
+        All the frames, in group order.
+    sizes : `list` of `int`
+        The number of frames in each group.
+    left_out : `set` of `int`
+        Positions in `frames` that Siril marked ``I n 0`` while registering.
+
+    Returns
+    -------
+    diagnostics : `dict`
+        The joined top-level lists (the inclusion flags are the first group's
+        only, as in the real merge) and one ``exposure_group_weights`` entry
+        per group.
+    """
+    entries = []
+    start = 0
+    for size in sizes:
+        group_paths = [frame.path for frame in frames[start : start + size]]
+        flags = [position not in left_out for position in range(start, start + size)]
+        entries.append({
+            "weight": 1.0,
+            "paths": group_paths,
+            "frame_paths": group_paths,
+            "registration_included": flags,
+            "frame_count": sum(flags),
+            "exposure_seconds": 30.0,
+            "frame_noise_counts": 1.0,
+            "stack_weight": None,
+        })
+        start += size
+    return {
+        "combined_frame_paths": [frame.path for frame in frames],
+        "symlinked_light_paths": [frame.path for frame in frames],
+        "registration_included": entries[0]["registration_included"],
+        "images_stacked": len(frames) - len(left_out),
+        "exposure_group_weights": entries,
+    }
+
+
+def test_group_stack_count_equals_member_count_when_siril_left_a_frame_out() -> None:
+    """M 27: groups of 26, 33 and 18, one left out, counts 76 of 77."""
+    frames = _frames(77)
+    diagnostics = _three_group_diagnostics(frames, [26, 33, 18], left_out={70})
+    summary = stage._base_stack_quality_summary(
+        SimpleNamespace(id="M 27"), False, 77, frames, [], diagnostics
+    )
+    membership = determine_stack_members(frames, diagnostics, None)
+    assert summary.stacking_metrics.frames_stacked == 76
+    assert len(membership.members) == 76
+    assert count_frames_stacked(frames, diagnostics) == len(membership.members)
+    assert "/frames/70.fits" not in [member.frame.path for member in membership.members]
+    assert membership.membership_reason == ""
+
+
+def test_group_stack_count_leaves_out_a_group_that_was_not_combined() -> None:
+    """A group missing from the combine contributes 0 frames."""
+    frames = _frames(77)
+    diagnostics = _three_group_diagnostics(frames, [26, 33, 18], left_out={30})
+    diagnostics["combined_frame_paths"] = [frame.path for frame in frames[:59]]
+    diagnostics["exposure_group_weights"] = diagnostics["exposure_group_weights"][:2]
+    diagnostics["images_stacked"] = 58
+    assert count_frames_stacked(frames, diagnostics) == 58
+    assert len(determine_stack_members(frames, diagnostics, None).members) == 58
+
+
+def test_single_group_count_leaves_out_the_frame_siril_marked_not_included() -> None:
+    """A single-group stack with one ``I n 0`` frame counts one fewer."""
+    frames = _frames(12)
+    diagnostics = {
+        "symlinked_light_paths": [frame.path for frame in frames],
+        "registration_included": [position != 5 for position in range(12)],
+        "images_stacked": 11,
+    }
+    summary = stage._base_stack_quality_summary(
+        SimpleNamespace(id="M 27"), False, 12, frames, [], diagnostics
+    )
+    assert summary.stacking_metrics.frames_stacked == 11
+    assert len(determine_stack_members(frames, diagnostics, None).members) == 11
+
+
+def test_count_does_not_guess_when_the_inclusion_flags_do_not_line_up() -> None:
+    """Flags that do not match the paths name no frame, so none is dropped."""
+    frames = _frames(6)
+    diagnostics = {
+        "symlinked_light_paths": [frame.path for frame in frames],
+        "registration_included": [True, False],
+    }
+    assert count_frames_stacked(frames, diagnostics) == 6
+
+
+def test_count_uses_siril_number_when_its_own_filters_left_more_out() -> None:
+    """Siril's stacked count wins when it is below the named candidates."""
+    frames = _frames(6)
+    assert count_frames_stacked(frames, {"images_stacked": 4}) == 4

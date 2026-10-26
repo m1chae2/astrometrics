@@ -456,12 +456,16 @@ _VALUE_METRICS: tuple[MetricSpec, ...] = (
         "How many frames the stage counts as stacked.",
         (
             "The frames of the exposure groups that were combined, minus the frames whose files "
-            "could not be read. It is the stage's count, not the number Siril printed, and it does "
-            "not subtract the frames Siril dropped while registering."
+            "could not be read and minus the frames Siril dropped while registering (its sequence "
+            "file marks them). When Siril reports that it stacked fewer images than that, its number "
+            "is used. When the sequence file's marks cannot be matched to the frames, the dropped "
+            "frames cannot be named and are not subtracted. It equals the number of "
+            "`stacking.frame_weight` rows."
         ),
-        "The frames left after the stage's own checks.",
+        "The frames that went into the stack.",
         f"{_STAGE}._base_stack_quality_summary",
         better=Direction.HIGHER,
+        definition_version=2,
     ),
     _context_metric(
         STACKING_FRAMES_ACCEPTED,

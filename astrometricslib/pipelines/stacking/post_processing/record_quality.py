@@ -118,6 +118,7 @@ from astrometricslib.pipelines.stacking.post_processing.stack_membership import 
     effective_frame_count,
     effective_read_noise_time_seconds,
     normalized_weights,
+    reference_group_frame_paths,
     registration_reference_from_diagnostics,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
@@ -439,6 +440,10 @@ def noise_measurements(
     # Every row says which apertures it was measured in and how deep the stack
     # that chose them was, so rows of different sets are never compared.
     notes.append(result.aperture_definition_note)
+    # Where the sky coordinates came from: the stack header, the registration
+    # reference frame, or a member frame of the reference exposure group.
+    if result.wcs_source:
+        notes.append(f"Sky coordinates from the {result.wcs_source}.")
     note = " ".join(part for part in notes if part)
     if not note:
         return rows
@@ -756,6 +761,7 @@ def measure_noise_safely(
     may_choose_apertures: bool = True,
     depth: StackDepth | None = None,
     covered_mask: np.ndarray | None = None,
+    member_frame_paths: Sequence[str] = (),
 ) -> StackNoiseOutcome:
     """Measure the stack's empty-aperture noise, never raising.
 
@@ -784,6 +790,10 @@ def measure_noise_safely(
     covered_mask : `numpy.ndarray`, optional
         For a group stack, `True` where every exposure group has data (see
         `stack_noise.measure_stack_noise`).
+    member_frame_paths : `Sequence` of `str`, optional
+        For a group stack with no named reference frame, frames of the group it
+        was lined up with, which give the coordinate solution instead (see
+        `stack_noise.measure_stack_noise`).
 
     Returns
     -------
@@ -804,6 +814,8 @@ def measure_noise_safely(
             crop_offset,
             may_choose_apertures=may_choose_apertures,
             depth=depth,
+            covered_mask=covered_mask,
+            member_frame_paths=member_frame_paths,
         )
     except Exception as error:  # the noise is a by-product: no failure here may fail the stack
         logger.exception("The noise of the stack %s could not be measured", stack_path)
@@ -901,6 +913,7 @@ def record_stacking_quality(
             crop_offset,
             depth=stack_depth_of(membership),
             covered_mask=diagnostics.get("covered_in_every_group"),
+            member_frame_paths=reference_group_frame_paths(diagnostics),
         )
         if noise.result is not None:
             # The library stack's sums, kept for the leave-one-night-out

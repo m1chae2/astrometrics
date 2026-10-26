@@ -132,6 +132,7 @@ def resolve_detector_noise(
     gain_setting: Any = None,
     offset: Any = None,
     binning: Any = None,
+    clipped_at_zero: bool | None = None,
 ) -> DetectorNoise:
     """Pick the gain and read noise for a camera and frame.
 
@@ -149,6 +150,11 @@ def resolve_detector_noise(
         The frame's setting, when it is known from somewhere other than a
         header (for example a frame record's ``iso``, ``offset`` and
         ``binning``). Each one given replaces what the header says.
+    clipped_at_zero : `bool` or `None`, optional
+        Whether the frame is cut off at zero. `False` lets the profile's
+        entry from another offset stand in when none has the frame's offset
+        (see `CameraProfile.sensor_noise_for`). `None` (not known, the
+        default) and `True` allow only an exact match.
 
     Returns
     -------
@@ -168,9 +174,15 @@ def resolve_detector_noise(
     if profile is None:
         profile_gap_reason = "no camera profile"
     else:
-        entry = profile.sensor_noise_for(gain_setting, offset, binning) if gain_setting is not None else None
+        entry = (
+            profile.sensor_noise_for(gain_setting, offset, binning, clipped_at_zero=clipped_at_zero)
+            if gain_setting is not None
+            else None
+        )
         if entry is None:
-            profile_gap_reason = profile.sensor_noise_gap_reason(gain_setting, offset, binning)
+            profile_gap_reason = profile.sensor_noise_gap_reason(
+                gain_setting, offset, binning, clipped_at_zero=clipped_at_zero
+            )
         elif entry.gain_e_per_adu is None:
             profile_gap_reason = "the profile entry for this setting has no gain"
         elif entry.read_noise_e is None:

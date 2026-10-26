@@ -66,6 +66,7 @@ from astrometricslib.pipelines.shared.quality.metrics import (
 from astrometricslib.pipelines.shared.quality.record_measurements import (
     check_measurement_against_registry,
 )
+from astrometricslib.pipelines.stacking.processing.exposure_groups import CLIPPED_FRAME_ZERO_FRACTION
 from astrometricslib.test.golden import measurements as golden_measurements
 
 # The camera setting of the synthetic frames, and the numbers the profile holds
@@ -1112,3 +1113,63 @@ def test_the_samples_hold_the_stars_behind_the_median() -> None:
     result = measure_star_profiles(_make_frame_pixels(), SATURATION_ADU)
     assert len(result.samples) == result.star_count
     assert float(np.median([sample.width_px for sample in result.samples])) == pytest.approx(result.width_px)
+
+
+def _profile_at_offset_ten() -> CameraProfile:
+    """Build a profile whose only entry is at offset 10, measured.
+
+    Returns
+    -------
+    profile : `CameraProfile`
+        The profile; the test frames are at offset 0.
+    """
+    profile = _profile()
+    entry = profile.sensor_noise[0].model_copy(update={"offset": "10"})
+    return profile.model_copy(update={"sensor_noise": (entry,)})
+
+
+def test_lookup_uses_another_offset_only_for_a_frame_known_to_be_unclipped() -> None:
+    """The offset fallback needs clipped_at_zero=False; its source says so."""
+    profile = _profile_at_offset_ten()
+    record = _frame_record("x.fits")
+    assert look_up_frame_sensor_noise(profile, record)[1] is None
+    assert look_up_frame_sensor_noise(profile, record, clipped_at_zero=True)[1] is None
+    gain, read_noise, reason = look_up_frame_sensor_noise(profile, record, clipped_at_zero=False)
+    assert reason == ""
+    assert gain.value == GAIN_E_PER_ADU
+    assert read_noise.provenance.kind == ProvenanceKind.MEASURED
+    assert "offset fallback" in read_noise.provenance.source
+
+
+def test_measure_frame_uses_the_offset_fallback_for_an_unclipped_frame(round_frame_path: str) -> None:
+    """A frame with no zero pixels borrows offset 10 gain and read noise."""
+    rows = _by_metric(
+        _run(
+            round_frame_path,
+            camera_profile=_profile_at_offset_ten(),
+            clipped_zero_fraction_limit=CLIPPED_FRAME_ZERO_FRACTION,
+        )
+    )
+    assert rows[FRAME_READ_NOISE_E][0].status == MeasurementStatus.MEASURED
+    assert "offset fallback" in rows[FRAME_READ_NOISE_E][0].reason
+    assert rows[FRAME_SKY_RATE_E_PER_S_PER_PX][0].status == MeasurementStatus.MEASURED
+
+
+def test_measure_frame_refuses_the_offset_fallback_without_a_limit_or_for_a_clipped_frame(
+    round_frame_path: str, tmp_path: Path
+) -> None:
+    """With no limit, or 30% zero pixels, there is no gain or read noise."""
+    rows = _by_metric(_run(round_frame_path, camera_profile=_profile_at_offset_ten()))
+    assert rows[FRAME_READ_NOISE_E][0].status == MeasurementStatus.NOT_MEASURED
+    pixels = _make_frame_pixels()
+    pixels[:, : int(0.3 * pixels.shape[1])] = 0.0
+    clipped_path = _write_frame(tmp_path, pixels)
+    rows = _by_metric(
+        _run(
+            clipped_path,
+            camera_profile=_profile_at_offset_ten(),
+            clipped_zero_fraction_limit=CLIPPED_FRAME_ZERO_FRACTION,
+        )
+    )
+    assert rows[FRAME_READ_NOISE_E][0].status == MeasurementStatus.NOT_MEASURED
+    assert "clipped at zero" in rows[FRAME_READ_NOISE_E][0].reason

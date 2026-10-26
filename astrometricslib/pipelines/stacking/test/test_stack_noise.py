@@ -54,6 +54,7 @@ from astrometricslib.pipelines.stacking.post_processing.stack_image import (
     signed_aperture_sum,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
+    MEMBER_FRAME_WCS_SOURCE,
     NO_WCS_REASON,
     measure_stack_noise,
 )
@@ -533,12 +534,12 @@ def test_each_camera_and_optic_keeps_its_own_apertures_and_they_can_be_reset(tmp
     assert first is not None and other is not None
     assert first.apertures_created and other.apertures_created
     sets = json.loads(Path(apertures).read_text())["sets"]
-    assert sorted(sets) == ["camera a|?|400", "camera b|?|400"]
-    assert load_apertures(apertures, "camera a|?|400").created_from == "a.fits"
+    assert sorted(sets) == ["camera a|?|400|exp=?", "camera b|?|400|exp=?"]
+    assert load_apertures(apertures, "camera a|?|400|exp=?").created_from == "a.fits"
     # Forgetting one camera leaves the other; forgetting all deletes the file.
-    assert reset_apertures(apertures, "camera a|?|400") is True
-    assert sorted(json.loads(Path(apertures).read_text())["sets"]) == ["camera b|?|400"]
-    assert reset_apertures(apertures, "camera a|?|400") is False
+    assert reset_apertures(apertures, "camera a|?|400|exp=?") is True
+    assert sorted(json.loads(Path(apertures).read_text())["sets"]) == ["camera b|?|400|exp=?"]
+    assert reset_apertures(apertures, "camera a|?|400|exp=?") is False
     assert reset_apertures(apertures) is True
     assert not Path(apertures).exists()
     assert measure_stack_noise(stack_a, None, apertures).result.apertures_created is True
@@ -854,3 +855,192 @@ def test_the_paired_ratio_of_a_stack_with_itself_is_one_with_no_error(tmp_path: 
     noisy = sums + 0.5 * generator.normal(size=100)
     _, error, _ = paired_noise_ratio(sums, 1.0, "v3-x", noisy, 1.0, "v3-x")
     assert 0.0 < error < 0.2
+
+
+def test_a_member_frames_solution_is_moved_onto_a_stack_with_no_reference_frame(tmp_path: Path) -> None:
+    """A member frame 12 rows and -9 columns off the stack gives a solution.
+
+    The stack's stars sit where the member frame's stars sit after the shift,
+    so the solution is accepted, moved, and recorded with its source.
+    """
+    scattered = _scattered_stars(seed=11)
+    stack_image = _sky_image(2.0, seed=21, star_positions=scattered)
+    member_image = np.roll(_sky_image(2.0, seed=22, star_positions=scattered), shift=(-12, 9), axis=(0, 1))
+    member = _write(tmp_path / "member.fits", member_image, _sky_header())
+    stack = _write(tmp_path / "stack.fits", stack_image, None)
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    outcome = measure_stack_noise(stack, None, apertures, member_frame_paths=[member])
+    assert outcome.result is not None, outcome.reason
+    assert outcome.result.wcs_source.startswith(MEMBER_FRAME_WCS_SOURCE)
+    assert "member.fits" in outcome.result.wcs_source
+    assert "+12.0 rows" in outcome.result.wcs_source
+    stored = load_apertures(apertures)
+    assert stored is not None
+    assert stored.wcs_source.startswith(MEMBER_FRAME_WCS_SOURCE)
+    # The stack is the unrolled image: its true solution is the header's.
+    truth = _write(tmp_path / "truth.fits", stack_image, _sky_header())
+    truth_outcome = measure_stack_noise(truth, None, str(tmp_path / "truth_apertures.json"))
+    assert truth_outcome.result is not None
+    assert outcome.result.noise_adu == pytest.approx(truth_outcome.result.noise_adu, rel=0.2)
+
+
+def test_a_member_frame_that_does_not_fit_is_skipped_and_a_later_one_used(tmp_path: Path) -> None:
+    """A frame of another field is skipped; the next that lines up is used."""
+    scattered = _scattered_stars(seed=11)
+    wrong = _write(
+        tmp_path / "wrong.fits",
+        _sky_image(2.0, seed=23, star_positions=_scattered_stars(seed=12)),
+        _sky_header(),
+    )
+    right = _write(
+        tmp_path / "right.fits",
+        np.roll(_sky_image(2.0, seed=24, star_positions=scattered), shift=(5, 5), axis=(0, 1)),
+        _sky_header(),
+    )
+    stack = _write(tmp_path / "stack.fits", _sky_image(2.0, seed=25, star_positions=scattered), None)
+    outcome = measure_stack_noise(
+        stack, None, str(tmp_path / APERTURE_FILE_NAME), member_frame_paths=[wrong, right]
+    )
+    assert outcome.result is not None, outcome.reason
+    assert "right.fits" in outcome.result.wcs_source
+
+
+def test_member_frames_that_do_not_fit_the_stack_are_refused(tmp_path: Path) -> None:
+    """No member frame lines up: no measurement, a reason, and no apertures."""
+    wrong = _write(
+        tmp_path / "wrong.fits",
+        _sky_image(2.0, seed=23, star_positions=_scattered_stars(seed=12)),
+        _sky_header(),
+    )
+    stack = _write(
+        tmp_path / "stack.fits", _sky_image(2.0, seed=25, star_positions=_scattered_stars(seed=11)), None
+    )
+    outcome = measure_stack_noise(stack, None, str(tmp_path / APERTURE_FILE_NAME), member_frame_paths=[wrong])
+    assert outcome.result is None
+    assert "no member frame" in outcome.reason
+    assert not (tmp_path / APERTURE_FILE_NAME).exists()
+
+
+def test_member_frames_without_a_solution_leave_the_stack_unmeasured(tmp_path: Path) -> None:
+    """A member frame with no plate solution gives no coordinates."""
+    scattered = _scattered_stars(seed=11)
+    bare = _write(tmp_path / "bare.fits", _sky_image(2.0, seed=24, star_positions=scattered), None)
+    stack = _write(tmp_path / "stack.fits", _sky_image(2.0, seed=25, star_positions=scattered), None)
+    outcome = measure_stack_noise(stack, None, str(tmp_path / APERTURE_FILE_NAME), member_frame_paths=[bare])
+    assert outcome.result is None
+    assert "no member frame" in outcome.reason
+
+
+def _reference_pair(tmp_path: Path, name: str, exposure_seconds: float, seed: int = 1) -> tuple[str, str]:
+    """Write a stack with no solution and a reference frame.
+
+    Parameters
+    ----------
+    tmp_path : `pathlib.Path`
+        The folder.
+    name : `str`
+        A prefix for the two file names.
+    exposure_seconds : `float`
+        The ``EXPTIME`` of the reference frame.
+    seed : `int`, optional
+        Seed of the noise.
+
+    Returns
+    -------
+    stack_path, frame_path : `tuple` [`str`, `str`]
+        The stack and its registration reference frame.
+    """
+    image = _sky_image(2.0, seed=seed)
+    header = _sky_header()
+    header["EXPTIME"] = exposure_seconds
+    frame = _write(tmp_path / f"{name}_frame.fits", image, header)
+    stack = _write(tmp_path / f"{name}_stack.fits", image, None)
+    return stack, frame
+
+
+def test_a_set_chosen_on_a_60_second_reference_is_not_reused_for_a_120_second_reference(
+    tmp_path: Path,
+) -> None:
+    """Each reference exposure gets its own set; the same one reuses it."""
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    stack_60, frame_60 = _reference_pair(tmp_path, "a60", 60.0)
+    stack_120, frame_120 = _reference_pair(tmp_path, "b120", 120.0, seed=2)
+    stack_60_again, frame_60_again = _reference_pair(tmp_path, "c60", 60.0, seed=3)
+    first = measure_stack_noise(stack_60, frame_60, apertures).result
+    second = measure_stack_noise(stack_120, frame_120, apertures).result
+    third = measure_stack_noise(stack_60_again, frame_60_again, apertures).result
+    assert first is not None and second is not None and third is not None
+    assert first.apertures_created and second.apertures_created and not third.apertures_created
+    assert second.aperture_identity != first.aperture_identity
+    assert third.aperture_identity == first.aperture_identity
+    # The set's identity is in the note of every stored row, so rows of the
+    # two sets can be told apart.
+    assert first.aperture_identity in first.aperture_definition_note
+    assert second.aperture_identity in second.aperture_definition_note
+    assert sorted(json.loads(Path(apertures).read_text())["sets"]) == [
+        "unspecified|exp=120",
+        "unspecified|exp=60",
+    ]
+    assert load_apertures(apertures, "unspecified|exp=120").created_from == "b120_stack.fits"
+
+
+def test_a_group_stack_takes_its_reference_exposure_from_a_member_of_the_reference_group(
+    tmp_path: Path,
+) -> None:
+    """With no reference frame, a member frame's exposure is the key."""
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    image = _sky_image(2.0, seed=1)
+    member_header = _sky_header()
+    member_header["EXPTIME"] = 120.0
+    member = _write(tmp_path / "member.fits", image, member_header)
+    stack = _write(tmp_path / "stack.fits", image, _sky_header())
+    result = measure_stack_noise(stack, None, apertures, member_frame_paths=[member]).result
+    assert result is not None and result.apertures_created
+    assert list(json.loads(Path(apertures).read_text())["sets"]) == ["unspecified|exp=120"]
+
+
+def test_an_aperture_file_keyed_without_an_exposure_is_never_used_and_is_replaced_once(
+    tmp_path: Path,
+) -> None:
+    """A key with no exposure matches nothing; one new set replaces it."""
+    apertures = Path(tmp_path / APERTURE_FILE_NAME)
+    stack_a, frame_a = _reference_pair(tmp_path, "a", 60.0)
+    assert measure_stack_noise(stack_a, frame_a, str(apertures)).result is not None
+    data = json.loads(apertures.read_text())
+    data["sets"] = {"unspecified": data["sets"]["unspecified|exp=60"]}
+    apertures.write_text(json.dumps(data))
+    assert load_apertures(str(apertures), "unspecified") is None
+    assert load_apertures(str(apertures)) is None
+    stack_b, frame_b = _reference_pair(tmp_path, "b", 60.0, seed=2)
+    refused = measure_stack_noise(stack_b, frame_b, str(apertures), may_choose_apertures=False)
+    assert refused.result is None and "no usable set" in refused.reason
+    chosen = measure_stack_noise(stack_b, frame_b, str(apertures)).result
+    assert chosen is not None and chosen.apertures_created
+    assert list(json.loads(apertures.read_text())["sets"]) == ["unspecified|exp=60"]
+    reused = measure_stack_noise(stack_b, frame_b, str(apertures)).result
+    assert reused is not None and not reused.apertures_created
+
+
+def test_a_stack_that_may_not_choose_uses_the_library_stacks_set_whatever_its_own_reference(
+    tmp_path: Path,
+) -> None:
+    """A stack that may not choose finds the deepest set of its equipment."""
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    stack_60, frame_60 = _reference_pair(tmp_path, "a60", 60.0)
+    stack_120, frame_120 = _reference_pair(tmp_path, "b120", 120.0, seed=2)
+    shallow = measure_stack_noise(stack_60, frame_60, apertures, depth=StackDepth(10, 10.0)).result
+    library = measure_stack_noise(stack_120, frame_120, apertures, depth=StackDepth(40, 30.0)).result
+    assert shallow is not None and library is not None
+    assert library.aperture_identity != shallow.aperture_identity
+    stack_30, frame_30 = _reference_pair(tmp_path, "c30", 30.0, seed=3)
+    subset = measure_stack_noise(stack_30, frame_30, apertures, may_choose_apertures=False).result
+    bare = measure_stack_noise(stack_30, None, apertures, may_choose_apertures=False)
+    assert subset is not None and subset.aperture_identity == library.aperture_identity
+    assert not subset.apertures_created
+    assert bare.result is None  # no solution at all, so no set is looked for
+    assert load_apertures(apertures).identity == library.aperture_identity
+    assert load_apertures_with_reason(apertures)[0].identity == library.aperture_identity
+    assert sorted(json.loads(Path(apertures).read_text())["sets"]) == [
+        "unspecified|exp=120",
+        "unspecified|exp=60",
+    ]

@@ -1152,6 +1152,11 @@ def _base_stack_quality_summary(
 ) -> StackQualitySummary:
     """Build the `StackQualitySummary` shell before any measured metrics.
 
+    The summary's ``frames_stacked`` is the number of frames that went into
+    the stack: the frames of the combined exposure groups, less the unreadable
+    files and the frames Siril left out while registering (see
+    `stack_membership.count_frames_stacked`).
+
     Returns
     -------
     summary : `StackQualitySummary`
@@ -1167,10 +1172,13 @@ def _base_stack_quality_summary(
         build_target_session_breakdown,
         derive_target_sessions,
     )
+    from astrometricslib.pipelines.stacking.post_processing.stack_membership import count_frames_stacked
 
-    # Only the frames of the groups that were combined count as stacked.
+    # Only the frames of the groups that were combined count as stacked, less
+    # the unreadable files and the frames Siril left out while registering.
+    # The member rows use the same list (see `stack_membership`).
     combined_frames = _frames_in_combined_groups(target_frames, diagnostics)
-    frames_stacked = len(combined_frames) - len(diagnostics.get("corrupt_frames_skipped", []))
+    frames_stacked = count_frames_stacked(target_frames, diagnostics)
 
     target_sessions = derive_target_sessions(target.id, combined_frames)
     excluded_paths = {excluded_frame.path for excluded_frame in excluded_frames}

@@ -484,7 +484,7 @@ def fake_profiles(monkeypatch: pytest.MonkeyPatch) -> list[object]:
     )
     monkeypatch.setattr(
         "astrometricslib.pipelines.stacking.post_processing.record_science.look_up_frame_sensor_noise",
-        lambda _profile, _frame: (_measured(0.8), _measured(3.8), ""),
+        lambda _profile, _frame, **_keywords: (_measured(0.8), _measured(3.8), ""),
     )
     return seen
 

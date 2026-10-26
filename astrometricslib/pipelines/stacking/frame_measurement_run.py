@@ -109,6 +109,7 @@ from astrometricslib.pipelines.shared.quality.metrics import FRAME_BACKGROUND_LE
 from astrometricslib.pipelines.shared.quality.record_measurements import record_measurements
 from astrometricslib.pipelines.stacking.exact_bias_frames import exact_setting_bias_frames
 from astrometricslib.pipelines.stacking.metrics import FRAME_QUARANTINE_ROUNDNESS, FRAME_QUARANTINE_SKY_MEDIAN
+from astrometricslib.pipelines.stacking.processing.exposure_groups import CLIPPED_FRAME_ZERO_FRACTION
 from astrometricslib.utilities.camera_setting_text import (
     canonical_binning_setting,
     canonical_gain_setting,
@@ -544,6 +545,7 @@ def run_measurement_task(task: FrameMeasurementTask) -> list[QualityMeasurement]
         bias_level_adu=task.bias_level_adu,
         bias_level_reason=task.bias_level_reason,
         measure_gaussian_width=measure_fwhm_from_data,
+        clipped_zero_fraction_limit=CLIPPED_FRAME_ZERO_FRACTION,
     )
 
 

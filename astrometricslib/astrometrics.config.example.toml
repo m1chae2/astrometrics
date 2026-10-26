@@ -195,7 +195,10 @@ photometric_linearity_limit_adu = { value = 60000.0, kind = "measured", source =
 # Each entry is one inline table:
 #   gain_setting   the camera's gain setting (or the ISO of a DSLR), as the
 #                  header's GAIN card writes it; 0.0 and 0 are the same
-#   offset         the camera's offset
+#   offset         the camera's offset. A frame at another offset uses the
+#                  entry of the same gain and binning at the nearest offset
+#                  when it is not clipped at zero (the offset does not change
+#                  gain or read noise); a clipped frame needs an exact entry
 #   binning        for example "1x1"
 #   temperature_c  optional; the sensor temperature of the measurement
 #   gain_e_per_adu, read_noise_e   optional inline tables of the form

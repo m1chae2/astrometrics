@@ -65,6 +65,21 @@ cancels. The two half stacks are deleted after the measurement. It costs two
 stacks of half the frames each. The growth job (`run_noise_growth`) can run
 it too, in the same lock; no job starts by itself after a stack.
 
+A subset for the forecast check (`stack_chosen_subset` with
+``record_forecast_rows=True``). The caller picks the frames; the restack script
+picks all nights of a library stack but the last and labels the subset
+`EARLIER_NIGHTS_VARIANT`. Such a subset is the earlier member of the forecast
+check's pair, and the library stack is the later one, so it stores what the
+check reads from a library stack: the
+empty-aperture noise (in the library stack's apertures) and the aperture set,
+the effective counts, one weight for each frame, the exposure-group rows, the
+predicted noise with each frame's scale and the stack's normalization scale,
+and the calibration record. Its frame weights sit on frame subjects of their
+own (`subset_frame_subject_id`), because the "newest row" view of the quality
+store ranks rows by subject, and a weight on the library stack's frame subject
+would hide the library stack's weight of the same frame. The other subset jobs
+store none of these rows.
+
 A storage failure is logged and never fails a subset. Nothing here reads the
 clock: the caller supplies the measurement time.
 """
@@ -91,6 +106,7 @@ from astrometricslib.models.quality.measurement import (
     QualitySubject,
     SubjectLevel,
 )
+from astrometricslib.models.quality.quality_summary import ExposureGroupSummary
 from astrometricslib.models.quality.subset_stacks import (
     HalfDifferenceNoiseResult,
     NightContribution,
@@ -100,6 +116,7 @@ from astrometricslib.models.quality.subset_stacks import (
 )
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
+from astrometricslib.pipelines.shared.quality.frame_measurement import frame_subject
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
     PipelineRunContext,
     build_measurement,
@@ -125,6 +142,9 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_NOISE_WITHOUT_NIGHT,
     STACKING_SUBSET_EXPECTED_NOISE_RATIO,
 )
+from astrometricslib.pipelines.stacking.post_processing.calibration_record import (
+    record_calibration_identities,
+)
 from astrometricslib.pipelines.stacking.post_processing.difference_noise import (
     load_noise_sums,
     measure_difference_noise,
@@ -143,6 +163,8 @@ from astrometricslib.pipelines.stacking.post_processing.half_pattern import (
 )
 from astrometricslib.pipelines.stacking.post_processing.record_quality import (
     aperture_set_measurement,
+    frame_weight_measurements,
+    group_summary_measurements,
     measure_noise_safely,
     membership_count_measurements,
     noise_measurements,
@@ -151,6 +173,7 @@ from astrometricslib.pipelines.stacking.post_processing.record_science import (
     compute_expected_noise,
     expected_noise_measurements,
     frame_noise_inputs_from_store,
+    group_reference_exposure_measurements,
     normalization_scale_measurements,
     resolve_stack_sky_level,
     scale_expected_noise,
@@ -203,6 +226,7 @@ __all__ = [
     "run_noise_growth",
     "split_into_halves",
     "stack_chosen_subset",
+    "subset_frame_subject_id",
 ]
 
 _SPEC_BY_NAME = {spec.name: spec for spec in STACKING_METRICS}
@@ -681,6 +705,141 @@ def _subset_subject(context: PipelineRunContext, label: str, night_id: str | Non
     return subject.model_copy(update=update)
 
 
+def subset_frame_subject_id(frame_subject_id: str, label: str) -> str:
+    """Name a frame as the subject of a subset stack's own weight row.
+
+    Parameters
+    ----------
+    frame_subject_id : `str`
+        The frame's subject id (`frame_subject_id` of the pipelines' shared
+        frame measurement).
+    label : `str`
+        The subset's label.
+
+    Returns
+    -------
+    subject_id : `str`
+        The frame's id, ``#`` and the label. A reader strips everything from
+        the last ``#`` to get the frame's own id back.
+    """
+    return f"{frame_subject_id}#{label}"
+
+
+def _subset_frame_subject(context: PipelineRunContext, label: str, frame: FrameRecord) -> QualitySubject:
+    """Name a member frame as the subject of the subset's weight row.
+
+    Parameters
+    ----------
+    context : `PipelineRunContext`
+        The run's shared facts.
+    label : `str`
+        The subset's label.
+    frame : `FrameRecord`
+        The member frame.
+
+    Returns
+    -------
+    subject : `QualitySubject`
+        Level ``frame``, in the frame's observing night, with the id from
+        `subset_frame_subject_id` and the subset's label as its variant.
+    """
+    subject = frame_subject(frame.path, context.target_id, frame.timestamp)
+    return subject.model_copy(
+        update={"subject_id": subset_frame_subject_id(subject.subject_id, label), "variant": label}
+    )
+
+
+def _subset_group_subject(
+    context: PipelineRunContext, label: str, library_folder: str, group: ExposureGroupSummary, index: int
+) -> QualitySubject:
+    """Name one exposure group of a subset stack as the subject of its rows.
+
+    A library stack names a group by the file of its group stack. The subset
+    does the same, but under its own ``_subsets/<label>`` folder, so a group of
+    the subset never takes the id of a group of the library stack.
+
+    Parameters
+    ----------
+    context : `PipelineRunContext`
+        The run's shared facts.
+    label : `str`
+        The subset's label.
+    library_folder : `str`
+        The folder of the library stack (the folder ``_subsets`` is in).
+    group : `ExposureGroupSummary`
+        The group.
+    index : `int`
+        The group's place in the summary's list.
+
+    Returns
+    -------
+    subject : `QualitySubject`
+        Level ``stack``, with the subset's label as its variant. A group with
+        its own file is named by the file's place below the library folder
+        (the subset stack itself for a stack of one exposure length, a file in
+        its ``groups`` folder otherwise); a group with no file by the subset
+        stack, its place in the list and its exposure.
+    """
+    stack_name = f"{SUBSET_FOLDER_NAME}/{label}/{label}.fits"
+    if group.stack_path:
+        relative = os.path.relpath(group.stack_path, library_folder).replace(os.sep, "/")
+        if relative.startswith(".."):
+            relative = f"{SUBSET_FOLDER_NAME}/{label}/groups/{os.path.basename(group.stack_path)}"
+        name = relative
+    else:
+        name = f"{stack_name}#group-{index}-{group.exposure_seconds:g}s"
+    return context.stack_subject(name).model_copy(update={"variant": label})
+
+
+def _forecast_record_measurements(
+    context: PipelineRunContext,
+    label: str,
+    library_folder: str,
+    membership: StackMembership | None,
+    outcome: Any,
+) -> list[QualityMeasurement]:
+    """Build the rows of a library stack that the forecast check also reads.
+
+    These are the same rows, built by the same functions as for a library
+    stack (`record_quality.frame_weight_measurements`,
+    `record_quality.group_summary_measurements` and
+    `record_science.group_reference_exposure_measurements`), put on the
+    subset's own subjects.
+
+    Parameters
+    ----------
+    context : `PipelineRunContext`
+        The run's shared facts.
+    label : `str`
+        The subset's label.
+    library_folder : `str`
+        The folder of the library stack.
+    membership : `StackMembership` or `None`
+        The subset's members and weights, or `None` when they are unknown.
+    outcome : `SubsetStackOutcome` or `None`
+        What stacking the subset produced, or `None` when the stacker failed.
+
+    Returns
+    -------
+    measurements : `list` of `QualityMeasurement`
+        One weight for each member frame; then, for each exposure group of the
+        subset, its summary rows and the exposure of its registration
+        reference frame.
+    """
+    rows = frame_weight_measurements(
+        membership, "", context, lambda frame: _subset_frame_subject(context, label, frame)
+    )
+    if outcome is None:
+        return rows
+    references = membership.group_references if membership is not None else ()
+    for index, entry in enumerate(outcome.diagnostics.get("exposure_group_summaries") or []):
+        group = ExposureGroupSummary(**entry)
+        group_subject = _subset_group_subject(context, label, library_folder, group, index)
+        rows.extend(group_summary_measurements(group, context, group_subject))
+        rows.extend(group_reference_exposure_measurements(references, index, context, group_subject))
+    return rows
+
+
 def expected_ratio_measurement(
     context: PipelineRunContext,
     subject: QualitySubject,
@@ -749,6 +908,7 @@ def _stack_and_measure(
     keep_going: bool = False,
     extra_measurements: Callable[[SubsetStackResult, StackNoiseOutcome | None], list[QualityMeasurement]]
     | None = None,
+    record_forecast_rows: bool = False,
 ) -> SubsetStackResult:
     """Stack one subset, measure its noise and members, and store the rows.
 
@@ -785,6 +945,11 @@ def _stack_and_measure(
     extra_measurements : `Callable`, optional
         Builds more rows from the finished subset result and its noise outcome
         (the night metrics). They are stored with the others.
+    record_forecast_rows : `bool`, optional
+        When `True`, also store what the forecast check reads from a library
+        stack: one weight for each member frame, the exposure-group rows and
+        the calibration record (see `_forecast_record_measurements`). Only
+        `stack_chosen_subset` can ask for it.
 
     Returns
     -------
@@ -909,7 +1074,24 @@ def _stack_and_measure(
         )
         if extra_measurements is not None:
             measurements.extend(extra_measurements(result, noise))
+        if record_forecast_rows:
+            measurements.extend(
+                _forecast_record_measurements(context, label, library_folder, membership, outcome)
+            )
         result.rows_written = record_run_measurements(measurements, config=configuration)
+        if record_forecast_rows and outcome is not None and outcome.stack_path is not None:
+            # The calibration files the subset applied, filed under the
+            # subset's own subject so the check can tell whether the two
+            # stacks of a pair were calibrated alike. Its own call, so a
+            # failure keeps the rows above.
+            record_calibration_identities(
+                context,
+                outcome.stack_path,
+                frames,
+                outcome.diagnostics,
+                config=configuration,
+                subject_file_name=f"{SUBSET_FOLDER_NAME}/{label}/{label}.fits",
+            )
     return result
 
 
@@ -1315,6 +1497,7 @@ def stack_chosen_subset(
     drivers: Drivers | None,
     stacking_slot: Callable[[], AbstractContextManager],
     output_folder: str | None = None,
+    record_forecast_rows: bool = False,
 ) -> SubsetStackResult:
     """Stack exactly the frames given and measure the result.
 
@@ -1344,6 +1527,11 @@ def stack_chosen_subset(
     output_folder : `str`, optional
         A folder to write the stack to instead of ``_subsets/<label>``. It
         must lie inside the ``_subsets`` folder beside the library stack.
+    record_forecast_rows : `bool`, optional
+        Also store what the forecast check reads from a library stack (see
+        `_forecast_record_measurements`): one weight for each member frame, the
+        exposure-group rows and the calibration record. Defaults to `False`,
+        which stores only the rows every subset stores.
 
     Returns
     -------
@@ -1361,6 +1549,7 @@ def stack_chosen_subset(
             drivers=drivers,
             stacking_slot=stacking_slot,
             output_folder=output_folder,
+            record_forecast_rows=record_forecast_rows,
         )
 
 
@@ -1617,8 +1806,15 @@ def _model_ratio_for_library(
     configuration: Any,
     odd_shares: dict[str, float] | None,
     even_shares: dict[str, float] | None,
+    exposure_scales: dict[str, float] | None = None,
 ) -> tuple[float | None, str]:
     """Work out `model_variance_ratio` from stored sky rates and profiles.
+
+    A frame folded into an exposure group of another length is multiplied by
+    ``k_i`` (about the group's reference exposure over the frame's exposure)
+    before it is averaged, so its variance in the stack's units is ``k_i``
+    squared times its own (see `FrameNoiseInput.exposure_scale`). Without the
+    scales every frame would be treated as unfolded.
 
     Parameters
     ----------
@@ -1630,6 +1826,12 @@ def _model_ratio_for_library(
         Where the camera profiles live.
     odd_shares, even_shares : `dict` [`str`, `float`] or `None`
         The halves' weight shares by frame path.
+    exposure_scales : `dict` [`str`, `float`], optional
+        The ``k_i`` of each frame by path, read from the half stack that
+        holds the frame (a half works out its own exposure groups, and the
+        library stack's own scales are not stored for each frame). A frame
+        with no entry gets 1. For a frame of an unfolded group the half's
+        scale and the library stack's are both exactly 1.
 
     Returns
     -------
@@ -1641,13 +1843,21 @@ def _model_ratio_for_library(
         return None, library.weights_reason or "the library stack's frame weights are unknown"
     if odd_shares is None or even_shares is None:
         return None, "a half's weights are unknown"
+    scales = exposure_scales or {}
     inputs = frame_noise_inputs_from_store(
-        library.members, [1.0] * len(library.members), target_id, configuration, library.store
+        library.members,
+        [1.0] * len(library.members),
+        target_id,
+        configuration,
+        library.store,
+        exposure_scales=[scales.get(frame.path, 1.0) for frame in library.members],
     )
     if isinstance(inputs, ExpectedNoiseOutcome):
         return None, inputs.reason
     variances = {
-        frame.path: (item.sky_electrons + item.read_noise_electrons**2) / item.gain_electrons_per_adu**2
+        frame.path: item.exposure_scale**2
+        * (item.sky_electrons + item.read_noise_electrons**2)
+        / item.gain_electrons_per_adu**2
         for frame, item in zip(library.members, inputs, strict=True)
     }
     ratio = model_variance_ratio(odd_shares, even_shares, library_shares, variances)
@@ -2285,8 +2495,14 @@ def _run_half_difference_noise(
         )
         result.shared_frame_odd_weight_fraction, result.shared_frame_even_weight_fraction = shared_fractions
         try:
+            half_scales = {
+                member.frame.path: member.exposure_scale
+                for membership in memberships.values()
+                if membership is not None
+                for member in membership.members
+            }
             model_ratio, model_ratio_reason = _model_ratio_for_library(
-                library, target.id, configuration, shares["odd"], shares["even"]
+                library, target.id, configuration, shares["odd"], shares["even"], half_scales
             )
         except Exception as error:  # a by-product: its failure must not lose the noise
             logger.exception("The modeled variance ratio of %s could not be worked out", target.id)

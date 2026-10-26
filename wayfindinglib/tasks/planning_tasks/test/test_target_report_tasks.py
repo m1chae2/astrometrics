@@ -35,7 +35,12 @@ from astrometricslib.models.catalog_queries import CalibrationQueryResult
 from astrometricslib.models.target import FrameRecord
 from wayfindinglib.analytics.result_quality.reply_budget import MAXIMUM_REPLY_CHARACTERS, fit_reply_to_budget
 from wayfindinglib.drivers.butler import DiskButler
-from wayfindinglib.models.planning.target_report import ForecastCheck, ForecastedChange, ForecastOutcome
+from wayfindinglib.models.planning.target_report import (
+    ForecastBasis,
+    ForecastCheck,
+    ForecastedChange,
+    ForecastOutcome,
+)
 from wayfindinglib.models.quality.efficiency import ScienceGoal
 from wayfindinglib.models.quality.statements import ActionClass, Confidence, Severity, StatementKind
 from wayfindinglib.models.session.observation_session import (
@@ -463,6 +468,51 @@ def _report_with_forecast_outcome(
             )
         ]
     )
+    monkeypatch.setattr(forecast, "forecast_check", lambda *args, **keywords: checks)
+    return _report(library, butler)
+
+
+def _report_with_checks(
+    library: _Library,
+    butler: DiskButler,
+    monkeypatch: pytest.MonkeyPatch,
+    sequence: list[tuple[ForecastOutcome, ForecastBasis]],
+) -> Any:
+    """Build the report with made-up forecast checks, oldest first.
+
+    Parameters
+    ----------
+    library : `_Library`
+        The library (two stack runs, so a check is attempted).
+    butler : `DiskButler`
+        The storage.
+    monkeypatch : `pytest.MonkeyPatch`
+        Replaces the check function.
+    sequence : `list` [`tuple`]
+        The outcome and basis of each check.
+
+    Returns
+    -------
+    report : `TargetDatasetReport`
+        The report.
+    """
+    from wayfindinglib.analytics.result_quality import forecast
+
+    change = ForecastedChange(noiseChangeFraction=-0.2, tolerance=0.05)
+    checks = [
+        ForecastCheck(
+            stackRunId="r2",
+            forecastWhenPlanned=change,
+            forecastGivenFramesTaken=change,
+            measured=change,
+            weightingMode="equal",
+            paired=True,
+            outcome=outcome,
+            reason="" if outcome == ForecastOutcome.AS_FORECAST else "made up for the test",
+            basis=basis,
+        )
+        for outcome, basis in sequence
+    ]
     monkeypatch.setattr(forecast, "forecast_check", lambda *args, **keywords: checks)
     return _report(library, butler)
 
@@ -1233,3 +1283,166 @@ def test_the_clipping_note_names_the_linearity_limit_when_there_is_one(
     assert "at or above 65000 ADU (assumed: default)" in note
     assert "the ceiling is used instead" not in note
     assert "above 60000 ADU (measured: Antonov 2026)" in note
+
+
+def test_an_agreeing_earlier_nights_check_shows_an_exploratory_count(
+    isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch, camera_gain: float
+) -> None:
+    """Decision D11: a subset check opens the gate as exploratory."""
+    report = _report_with_checks(
+        _Library(runs=TWO_RUNS),
+        isolated_butler,
+        monkeypatch,
+        [(ForecastOutcome.AS_FORECAST, ForecastBasis.EARLIER_NIGHTS_SUBSET)],
+    )
+
+    (more,) = _of_rule(report, "more_frames")
+
+    assert more.kind == StatementKind.RECOMMENDATION
+    assert more.proposed_action.frame_count > 0
+    assert more.confidence == Confidence.DESIGN_ESTIMATE
+    assert more.values["count_basis"] == "exploratory"
+    for text in (more.message, more.reason):
+        assert "exploratory" in text
+        assert (
+            "frames already taken (the stack of all nights but the last against the stack of all nights)"
+            in text
+        )
+        assert "next real stack will confirm it or close it again" in text
+    assert report.forecast_checks[0].basis == ForecastBasis.EARLIER_NIGHTS_SUBSET
+
+
+def test_a_later_real_check_that_agrees_removes_the_exploratory_mark(
+    isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch, camera_gain: float
+) -> None:
+    """A real later stack that agrees confirms the count: no mark."""
+    report = _report_with_checks(
+        _Library(runs=TWO_RUNS),
+        isolated_butler,
+        monkeypatch,
+        [
+            (ForecastOutcome.AS_FORECAST, ForecastBasis.EARLIER_NIGHTS_SUBSET),
+            (ForecastOutcome.AS_FORECAST, ForecastBasis.LATER_STACK),
+        ],
+    )
+
+    (more,) = _of_rule(report, "more_frames")
+
+    assert more.kind == StatementKind.RECOMMENDATION
+    assert "exploratory" not in more.message
+    assert "count_basis" not in more.values
+
+
+def test_a_later_real_check_that_disagrees_closes_an_exploratory_count(
+    isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A real check that falls short hides the count again."""
+    report = _report_with_checks(
+        _Library(runs=TWO_RUNS),
+        isolated_butler,
+        monkeypatch,
+        [
+            (ForecastOutcome.AS_FORECAST, ForecastBasis.EARLIER_NIGHTS_SUBSET),
+            (ForecastOutcome.SHORT_UNKNOWN_REASON, ForecastBasis.LATER_STACK),
+        ],
+    )
+
+    (more,) = _of_rule(report, "more_frames")
+
+    assert more.kind == StatementKind.INSUFFICIENT_DATA
+    assert more.proposed_action is None
+    assert "1 of them were made from frames already taken" in more.reason
+
+
+def test_a_disagreeing_earlier_nights_check_keeps_the_count_hidden(
+    isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A subset check that falls short opens nothing and is named."""
+    report = _report_with_checks(
+        _Library(runs=TWO_RUNS),
+        isolated_butler,
+        monkeypatch,
+        [(ForecastOutcome.SHORT_UNKNOWN_REASON, ForecastBasis.EARLIER_NIGHTS_SUBSET)],
+    )
+
+    (more,) = _of_rule(report, "more_frames")
+
+    assert more.kind == StatementKind.INSUFFICIENT_DATA
+    assert "made from frames already taken" in more.reason
+
+
+def _floor_statement(setting: CaptureSetting = SETTING) -> Any:
+    """Make the M 13 diminishing-returns "take N more" statement.
+
+    Parameters
+    ----------
+    setting : `CaptureSetting`, optional
+        The setting it is about.
+
+    Returns
+    -------
+    statement : `TargetStatement`
+        The recommendation for 44 more frames, with the floor sentences.
+    """
+    from wayfindinglib.analytics.result_quality.capture_overheads import CaptureOverheads
+    from wayfindinglib.analytics.result_quality.noise_growth import TakeMoreResult
+    from wayfindinglib.analytics.result_quality.report_rules import more_frames_statement
+
+    result = TakeMoreResult(
+        target_noise_ratio=0.707,
+        added_exposure_seconds=44 * 30.0,
+        new_exposure_seconds=30.0,
+        floor_noise=0.583e-3,
+        floor_variance_share=0.49,
+        practical_limit_applied=True,
+        doubling_frames=44,
+        doubling_noise_cut=0.137,
+        most_reachable_cut=0.296,
+    )
+    overheads = CaptureOverheads(
+        download_seconds=5.0,
+        dither_settle_seconds=20.0,
+        autofocus_seconds=120.0,
+        download_from_records=False,
+        dither_from_records=False,
+        autofocus_from_records=False,
+        gaps_used=0,
+    )
+    return more_frames_statement(result, setting, overheads, [])
+
+
+def test_the_floor_sentence_points_at_calibration_advice_in_the_same_report() -> None:
+    """A calibration_gap statement for the setting swaps the last sentence."""
+    from wayfindinglib.analytics.result_quality.report_rules import (
+        FLOOR_CALIBRATION_TEXT,
+        FLOOR_NOT_REMOVED_TEXT,
+    )
+    from wayfindinglib.models.quality.statements import TargetStatement
+
+    floor = _floor_statement()
+    gap = TargetStatement(
+        rule="calibration_gap",
+        kind=StatementKind.RECOMMENDATION,
+        severity=None,
+        action_class=ActionClass.CALIBRATION,
+        capture_setting=SETTING,
+        message="Take flats.",
+        confidence=Confidence.DESIGN_ESTIMATE,
+    )
+
+    [with_gap, _] = target_report_tasks._point_floor_at_calibration([floor, gap])
+    [without_gap] = target_report_tasks._point_floor_at_calibration([floor])
+
+    assert with_gap.message.endswith(FLOOR_CALIBRATION_TEXT)
+    assert FLOOR_NOT_REMOVED_TEXT not in with_gap.message
+    assert "calibration recommendations" in with_gap.plain_message
+    assert without_gap.message.endswith(FLOOR_NOT_REMOVED_TEXT)
+
+
+def test_an_exploratory_gate_keeps_its_sentence_on_the_doubling_statement() -> None:
+    """The D11 sentence and count basis go on the doubling statement too."""
+    [marked] = target_report_tasks._mark_exploratory([_floor_statement()])
+
+    assert target_report_tasks.EXPLORATORY_COUNT_SENTENCE in marked.message
+    assert marked.values["count_basis"] == "exploratory"
+    assert marked.proposed_action.frame_count == 44

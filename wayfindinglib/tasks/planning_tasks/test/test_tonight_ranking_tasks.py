@@ -44,7 +44,8 @@ from wayfindinglib.analytics.result_quality.noise_growth import (
 )
 from wayfindinglib.analytics.result_quality.sky_model import SkyModel
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
-from wayfindinglib.models.planning.tonight_ranking import CandidateStatus, RankedUse
+from wayfindinglib.models.planning.target_report import ForecastGate
+from wayfindinglib.models.planning.tonight_ranking import CandidateStatus, RankedCandidate, RankedUse
 from wayfindinglib.tasks.planning_tasks import tonight_ranking_tasks as tr
 
 SITE = SiteProfile(id="site", name="Home", latitude_deg=45.76, longitude_deg=-110.74, elevation_m=1400.0)
@@ -713,3 +714,93 @@ def test_a_noise_floor_lowers_the_gain_of_a_group_stack() -> None:
     with_floor = _rank(_group_stack_library(measured=5.5, expected=4.0)).lists[0].candidates[0]
 
     assert (with_floor.gain_per_hour_fraction or 0.0) < (without.gain_per_hour_fraction or 0.0)
+
+
+def _candidate(target_id: str, gain: float, gate: ForecastGate) -> RankedCandidate:
+    """Build a ranked candidate with a given gain and count basis.
+
+    Parameters
+    ----------
+    target_id : `str`
+        The target.
+    gain : `float`
+        The gain per hour, as a fraction.
+    gate : `ForecastGate`
+        Whether the target's count is confirmed, exploratory or closed.
+
+    Returns
+    -------
+    candidate : `RankedCandidate`
+        The candidate.
+    """
+    return RankedCandidate(
+        target_id=target_id,
+        use=RankedUse.IMAGING,
+        status=CandidateStatus.RANKED,
+        gain_per_hour_fraction=gain,
+        forecast_gate=gate,
+    )
+
+
+def test_an_exploratory_count_ranks_below_a_confirmed_one_of_the_same_gain() -> None:
+    """Gains equal to the whole percent tie; the exploratory one goes last."""
+    candidates = [
+        _candidate("A", 0.2040, ForecastGate.EXPLORATORY),
+        _candidate("B", 0.2010, ForecastGate.CONFIRMED),
+        _candidate("C", 0.2000, ForecastGate.CLOSED),
+    ]
+
+    lists, _notes = tr.build_lists(candidates)
+
+    order = [(c.target_id, c.rank) for c in lists[0].candidates]
+    assert order == [("B", 1), ("C", 2), ("A", 3)]
+
+
+def test_a_clearly_larger_gain_still_ranks_first_even_when_exploratory() -> None:
+    """The exploratory rule is a tie-break: a larger gain still wins."""
+    candidates = [
+        _candidate("A", 0.30, ForecastGate.EXPLORATORY),
+        _candidate("B", 0.10, ForecastGate.CONFIRMED),
+    ]
+
+    lists, _notes = tr.build_lists(candidates)
+
+    assert [c.target_id for c in lists[0].candidates] == ["A", "B"]
+
+
+def test_without_exploratory_counts_the_order_is_by_gain_as_before() -> None:
+    """Targets with no exploratory count keep the order of their gains."""
+    candidates = [
+        _candidate("B", 0.2000, ForecastGate.CLOSED),
+        _candidate("A", 0.2040, ForecastGate.CONFIRMED),
+    ]
+
+    lists, _notes = tr.build_lists(candidates)
+
+    assert [c.target_id for c in lists[0].candidates] == ["A", "B"]
+
+
+def test_the_ranking_marks_a_target_whose_count_is_exploratory(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each target's gate is kept on its candidate and said in its reason."""
+    gates = {"M 81": ForecastGate.EXPLORATORY, "NGC 7331": ForecastGate.CONFIRMED}
+    monkeypatch.setattr(
+        tr,
+        "forecast_gate_of_target",
+        lambda _library, target_id, *_args, **_keywords: gates.get(target_id, ForecastGate.CLOSED),
+    )
+
+    ranking = _rank(_library())
+
+    by_id = {c.target_id: c for c in ranking.lists[0].candidates}
+    assert by_id["M 81"].forecast_gate == ForecastGate.EXPLORATORY
+    assert tr.EXPLORATORY_RANKING_REMARK in by_id["M 81"].reason
+    assert by_id["NGC 7331"].forecast_gate == ForecastGate.CONFIRMED
+    assert tr.EXPLORATORY_RANKING_REMARK not in by_id["NGC 7331"].reason
+    assert by_id["NGC 6946"].forecast_gate == ForecastGate.CLOSED
+
+
+def test_the_real_gate_of_a_target_with_one_stack_is_closed() -> None:
+    """A target with one stack and no subset has no check: closed."""
+    ranking = _rank(_library())
+
+    assert {c.forecast_gate for c in ranking.lists[0].candidates} == {ForecastGate.CLOSED}

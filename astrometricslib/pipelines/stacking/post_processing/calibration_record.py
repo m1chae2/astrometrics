@@ -148,8 +148,9 @@ def record_calibration_identities(
     diagnostics: dict[str, Any],
     *,
     config: Any = None,
+    subject_file_name: str | None = None,
 ) -> bool:
-    """Store one library stack's calibration record, never failing the stack.
+    """Store one stack's calibration record, never failing the stack.
 
     Parameters
     ----------
@@ -164,6 +165,12 @@ def record_calibration_identities(
     config : `AppConfiguration`, optional
         Where the quality store lives, and the Siril command. The
         process-wide configuration when omitted.
+    subject_file_name : `str`, optional
+        The name that makes the record's subject id, when it is not the stack
+        file's own name. A subset stack passes
+        ``"_subsets/<label>/<label>.fits"`` (what
+        `PipelineRunContext.stack_subject` takes), so its record is filed
+        under its own subject and never replaces the library stack's.
 
     Returns
     -------
@@ -176,7 +183,7 @@ def record_calibration_identities(
         siril_executable = configuration.get_siril_executable()
         identities = build_calibration_identities(
             context,
-            os.path.basename(stack_path),
+            subject_file_name or os.path.basename(stack_path),
             target_frames,
             diagnostics,
             cached_siril_version(siril_executable) if siril_executable else None,

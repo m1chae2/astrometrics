@@ -4,7 +4,10 @@ Four jobs stack some of a target's frames, apart from the library stack, and
 measure the noise of each result:
 
 - `ProcessingPipelines.stack_subset` stacks exactly the frames it is given and
-  returns a `SubsetStackResult`.
+  returns a `SubsetStackResult`. With ``record_forecast_rows=True`` it also
+  stores a library stack's forecast rows (frame weights, group rows and a
+  calibration record), so the subset can be the earlier member of a forecast
+  check's pair.
 - `ProcessingPipelines.measure_noise_growth` stacks the first nights (or the
   first part of one night) and returns a `NoiseGrowthResult`.
 - `ProcessingPipelines.measure_night_contributions` stacks the library stack's
@@ -19,6 +22,15 @@ failed.
 """
 
 from pydantic import BaseModel, ConfigDict, Field
+
+EARLIER_NIGHTS_VARIANT = "earlier-nights"
+"""The label, and so the ``variant``, of the stack of all nights but the last.
+
+The restack script stacks all nights of a library stack but the last with this
+label (``stack_subset(..., label=EARLIER_NIGHTS_VARIANT,
+record_forecast_rows=True)``), so the subset's rows carry it as their
+``variant``, and the forecast check finds the earlier member of its pair by the
+field, without parsing a subject id."""
 
 
 class SubsetStackResult(BaseModel):

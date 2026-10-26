@@ -1,6 +1,6 @@
 # Wayfinding library implementation
 
-*Version 2.2 · 2026-10-24 · Status: current*
+*Version 2.3 · 2026-10-26 · Status: current*
 
 ## Abstract
 
@@ -405,11 +405,11 @@ The theory is in [Wayfinding quality judgment](Wayfinding_Quality_Judgment.md) (
 | Envelope limits the rules read | `envelope_assembly.assemble_performance_envelope`, `performance_envelope.py` (Section 6.8) | [WAY-40](validation/wayfinding.md#way-40), [WAY-41](validation/wayfinding.md#way-41), [WAY-42](validation/wayfinding.md#way-42), [WAY-43](validation/wayfinding.md#way-43), [WAY-44](validation/wayfinding.md#way-44); WAY-D40, WAY-D41, WAY-D42, WAY-D43, WAY-D44 |
 | Efficiency, goal, references | `physical_reference`, `baseline_reference`, `noise_regime`, `assess_efficiency` (`efficiency.py`); `science_goal_for_setting` (`science_goal.py`); `observing_values.py` | [WAY-20](validation/wayfinding.md#way-20); WAY-D01, WAY-D20, WAY-D21, WAY-D22, WAY-D23, WAY-D24, WAY-D25, WAY-D26, WAY-D27, WAY-D28, WAY-D74 |
 | Loss account and night review | `loss_account`, `capture_setting_summaries`, `night_summary`, `target_summary` (`aggregates.py`); `set_aside_reasons` (`library_inputs.py`, reads `Astrometrics.quality.set_aside_frames`); `build_night_quality` (`night_quality_task.py`) | [WAY-74](validation/wayfinding.md#way-74); WAY-D75, WAY-D76 |
-| Noise growth and the stop signal | `forecast_stack_noise`, `frames_to_cut_noise`, `fit_noise_floor`, `stop_signal`, group mode (`forecast_group_noise`, `plan_group_stack`), folded frames (`StackGroup.frame_noise_factors`, `group_frame_rate_variances`), floor (`measure_stack_noise_floor`, `choose_noise_floor`) (`noise_growth.py`) | [WAY-21](validation/wayfinding.md#way-21); WAY-D30, WAY-D31, WAY-D32, WAY-D34 |
-| Forecast check | `forecast_check`, `stack_groups_of_run`, `attach_calibration_identities` (`forecast.py`); confound rules in `_confound_reason`, which compare group lengths (`RunGroups.group_lengths`) | [WAY-70](validation/wayfinding.md#way-70); WAY-D70 |
+| Noise growth and the stop signal | `forecast_stack_noise`, `frames_to_cut_noise`, `fit_noise_floor`, `stop_signal`, group mode (`forecast_group_noise`, `plan_group_stack`), folded frames (`StackGroup.frame_noise_factors`, `group_frame_rate_variances`), floor (`measure_stack_noise_floor`, `choose_noise_floor`), practical limit (`TakeMoreResult.practical_limit_applied`, `doubling_frames`, `doubling_noise_cut`, `most_reachable_cut`, `doubling_worthwhile`) (`noise_growth.py`) | [WAY-21](validation/wayfinding.md#way-21); WAY-D30, WAY-D31, WAY-D32, WAY-D34 |
+| Forecast check | `forecast_check`, `stack_groups_of_run`, `attach_calibration_identities`, `subset_pairs`, `library_runs`, `forecast_gate_state`, `_subset_new_frame_reason` (`forecast.py`); `StackRunRecord.is_earlier_nights_subset`; `ForecastBasis`, `ForecastGate` (`target_report.py`); confound rules in `_confound_reason`, which compare group lengths (`RunGroups.group_lengths`) | [WAY-70](validation/wayfinding.md#way-70); WAY-D70 |
 | Target dataset report | `build_target_dataset_report` (`target_report_tasks.py`), `target_report_inputs.py`, `report_rules.py`, `starting_point.py`; `TargetDatasetReport` (`models/planning/target_report.py`) | [WAY-60](validation/wayfinding.md#way-60); WAY-D60, WAY-D61, WAY-D62, WAY-D63, WAY-D64, WAY-D65, WAY-D66, WAY-D67, WAY-D68, WAY-D69 |
 | One star's result | `judge_star_result` (`result_judgment_tasks.py`), `star_result_rules.py` | [WAY-73](validation/wayfinding.md#way-73); WAY-D73 |
-| Sky model, overheads, tonight's ranking | `fit_sky_model` (`sky_model.py`), `estimate_capture_overheads` (`capture_overheads.py`), `rank_tonight`, `score_candidate` (`tonight_ranking_tasks.py`) | [WAY-71](validation/wayfinding.md#way-71), [WAY-72](validation/wayfinding.md#way-72); WAY-D29, WAY-D33, WAY-D71, WAY-D72 |
+| Sky model, overheads, tonight's ranking | `fit_sky_model` (`sky_model.py`), `estimate_capture_overheads` (`capture_overheads.py`), `rank_tonight`, `score_candidate`, `forecast_gate_of_target` (`tonight_ranking_tasks.py`, `target_report_inputs.py`) | [WAY-71](validation/wayfinding.md#way-71), [WAY-72](validation/wayfinding.md#way-72); WAY-D29, WAY-D33, WAY-D71, WAY-D72 |
 | Night plan | `ObservationSession` fields `checklist`, `framing`, `revision`; `PlanChange`, `PlanRevisionConflictError`; `night_plan_tasks.py`; `AllowedCaptureValues`; `SequenceSummary` | [WAY-50](validation/wayfinding.md#way-50), [WAY-51](validation/wayfinding.md#way-51), [WAY-52](validation/wayfinding.md#way-52), [WAY-53](validation/wayfinding.md#way-53), [WAY-54](validation/wayfinding.md#way-54); WAY-D50, WAY-D51, WAY-D52, WAY-D53, WAY-D54 |
 | Night list and target changes | `build_night_list`, `build_night_history` (`night_history.py`); `find_target_changes` (`target_changes.py`) | [WAY-55](validation/wayfinding.md#way-55), [WAY-57](validation/wayfinding.md#way-57); WAY-D55, WAY-D56, WAY-D57 |
 | Monitor mode | `ALLOWED_IN_MONITOR_MODE` and the three `test_monitor_mode_*` tests; guards in `hardware_operations.py` | [WAY-56](validation/wayfinding.md#way-56) |
@@ -457,10 +457,11 @@ Without `SiteProfile.typical_seeing_fwhm_arcsec`, the physical reference uses th
 | Equipment baseline | 10th percentile of nightly medians; 3 nights | `BASELINE_PERCENTILE`, `MINIMUM_NIGHTS_FOR_BASELINE` | WAY-D22 |
 | Noise regimes | sky variance 9 × read-noise variance; source variance 1 × sky | `SKY_LIMITED_VARIANCE_RATIO`, `SOURCE_LIMITED_VARIANCE_RATIO` | WAY-D24 |
 | Sky model | 5 nights, 20 frames; Moon term from 2 moonlit nights | `MINIMUM_NIGHTS_FOR_SKY_MODEL`, `MINIMUM_FRAMES_FOR_SKY_MODEL`, `MINIMUM_MOON_NIGHTS` | WAY-D29 |
-| "Take N more" | noise to 0.707 of today's; new exposure length at least 5 frames | `TARGET_NOISE_RATIO`, `MINIMUM_FRAMES_NEW_EXPOSURE_LENGTH` | WAY-D30 |
+| "Take N more" | noise to 0.707 of today's; new exposure length at least 5 frames; a count only within 4 times the stack's exposure time; one doubling worth at least a 5% cut | `TARGET_NOISE_RATIO`, `MINIMUM_FRAMES_NEW_EXPOSURE_LENGTH`, `PRACTICAL_TIME_FACTOR`, `MINIMUM_DOUBLING_GAIN_FRACTION` | WAY-D30 |
 | Floor and stop signal | 2 standard errors, one-sided; stop under a 10% cut from doubling | `FLOOR_SIGMAS`, `MINIMUM_GAIN_FRACTION` | WAY-D32 |
 | Capture overheads | download 5 s, dither settle 20 s, autofocus 120 s | `DEFAULT_DOWNLOAD_SECONDS`, `DEFAULT_DITHER_SETTLE_SECONDS`, `DEFAULT_AUTOFOCUS_SECONDS` | WAY-D33 |
 | Forecast agreement; dark master compared unless the camera name has zwo or asi | 2 standard errors | `AGREEMENT_TOLERANCES`, `COOLED_CAMERA_NAME_MARKERS` | WAY-D70 |
+| Exploratory count in the ranking: gains tied to | 2 decimals (whole percent) | `GAIN_TIE_DIGITS` | WAY-D70 |
 | Clock hour of the ranking | dither every 3 frames; 1 autofocus run; thin under 2 h | `DITHER_EVERY_FRAMES`, `AUTOFOCUS_RUNS_PER_HOUR`, `THIN_DATASET_SECONDS` | WAY-D71 |
 | Frames lost warning | 5% of a setting's frames | `FRAME_LOSS_WARNING_FRACTION` | WAY-D60 |
 | Report "take N more" | 10 frames at least; exposure rounded up to 10 s | `MINIMUM_FRAMES_FOR_FORECAST`, `EXPOSURE_ROUNDING_SECONDS` | WAY-D61 |

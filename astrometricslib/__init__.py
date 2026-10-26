@@ -169,6 +169,7 @@ from astrometricslib.models.quality.quality_summary import (
 )
 from astrometricslib.models.quality.row_frames import QualityRowFile, QualityRowResolution
 from astrometricslib.models.quality.subset_stacks import (
+    EARLIER_NIGHTS_VARIANT,
     HalfDifferenceNoiseResult,
     NightContribution,
     NightContributionResult,
@@ -427,6 +428,7 @@ __all__ = [
     "AMBIGUOUS_RMS_GAP",
     "DATA_ERRORS",
     "DEFAULT_DARK_TEMPERATURE_TOLERANCE_C",
+    "EARLIER_NIGHTS_VARIANT",
     "FITS_READ_ERRORS",
     "MINIMUM_PENALTY_TO_WEIGHT",
     "NOISE_WEIGHT_MODE",

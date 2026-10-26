@@ -806,6 +806,7 @@ class ProcessingPipelines:
         *,
         label: str,
         output_folder: str | None = None,
+        record_forecast_rows: bool = False,
         register_job: bool = True,
     ) -> SubsetStackResult:
         """Stack exactly the given frames into a scratch folder.
@@ -838,6 +839,25 @@ class ProcessingPipelines:
         output_folder : `str`, optional
             Write the stack here instead of the default subset folder. It
             must be inside the target's ``_subsets`` folder.
+        record_forecast_rows : `bool`, optional
+            Also store what the forecast check reads from a library stack, so
+            the subset can be the earlier member of a check's pair (the
+            library stack being the later one). The subset's rows carry the
+            label as their ``variant`` and a run id of their own, and the
+            noise is measured in the library stack's apertures as always.
+            Added: one ``stacking.frame_weight`` for each frame (on the
+            frame's subject id plus ``#`` and the label, so it never hides the
+            library stack's newest row of that frame); the exposure-group rows
+            (``stacking.group_exposure_s``, ``group_frames_stacked_count``,
+            ``group_gain_applied``, ``group_reference_exposure_s`` and the
+            others a library stack stores except the star-peak rows) on the
+            subset's own group subjects; and a calibration record under the
+            subset's subject. The predicted noise (with each frame's folding
+            scale), the normalization scale and the aperture-set row are
+            stored for every subset. Defaults to `False`, which stores only
+            the rows every subset stores. The restack script uses
+            ``label=EARLIER_NIGHTS_VARIANT`` with the frames of all nights
+            but the last.
         register_job : `bool`, optional
             Record the run in the job list. Defaults to `True`.
 
@@ -867,6 +887,7 @@ class ProcessingPipelines:
                 drivers=self._drivers,
                 stacking_slot=self.acquire_stacking_slot,
                 output_folder=output_folder,
+                record_forecast_rows=record_forecast_rows,
             )
 
     @background_job("stacking", grace_period_seconds=8.0)

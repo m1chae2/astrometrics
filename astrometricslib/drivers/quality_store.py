@@ -27,7 +27,11 @@ subset rows that already exist, and rebuilds the "latest" view. Version 3 adds
 the side table ``quality_calibration_identity`` (the calibration, optic,
 camera and software each library stack used; see
 `QualityStore.write_calibration_identities`). The move from version 2 only
-creates that table, so it is additive and safe to repeat. Take a backup first
+creates that table, so it is additive and safe to repeat. Version 4 rounds the
+pixel scale in ``quality_capture_setting`` (as `CaptureSetting` now does),
+merges the rows that become equal into the one with the smallest id, points
+their measurements at it and deletes the others; see
+`QualityStore._migrate_from_version_3`. Take a backup first
 with ``scripts/backup_library_databases.py``. A migration only touches the
 quality tables, view and version table and never any other table.
 
@@ -59,7 +63,7 @@ from astrometricslib.models.quality.calibration_identities import (
     CalibrationFileIdentity,
     CalibrationIdentities,
 )
-from astrometricslib.models.quality.capture_setting import CaptureSetting
+from astrometricslib.models.quality.capture_setting import CaptureSetting, round_pixel_scale
 from astrometricslib.models.quality.gate_result import GateStatus
 from astrometricslib.models.quality.limit import LimitTier, QualityLimit
 from astrometricslib.models.quality.measurement import (
@@ -73,7 +77,7 @@ from astrometricslib.models.quality.measurement import (
 logger = logging.getLogger(__name__)
 
 #: The schema version this code writes and expects.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _MEASUREMENT_COLUMNS = (
     "metric",
@@ -661,6 +665,9 @@ class QualityStore:
             # statements above did not include it, so it is created here too.
             for statement in _CREATE_CALIBRATION_IDENTITY_STATEMENTS:
                 connection.execute(statement)
+        if 1 <= version < 4:
+            # A new file (version 0) has no rows to merge.
+            QualityStore._migrate_from_version_3(connection)
         has_version_table = connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'quality_schema_version'"
         ).fetchone()
@@ -702,6 +709,62 @@ class QualityStore:
                 )
         connection.execute("DROP VIEW IF EXISTS quality_measurements_latest")
         connection.execute(_CREATE_LATEST_VIEW_STATEMENT)
+
+    @staticmethod
+    def _migrate_from_version_3(connection: sqlite3.Connection) -> None:
+        """Merge capture settings that differ only by pixel-scale precision.
+
+        Frame headers write one pixel scale with different precision, and
+        each distinct value used to be its own setting row. This rounds every
+        stored scale with `round_pixel_scale` (the rounding `CaptureSetting`
+        uses) and merges the rows that then match on every field (NULL
+        matches NULL). The row with the smallest id is kept.
+
+        The steps run in this order, so the unique index
+        ``quality_capture_setting_unique`` is never broken:
+
+        1. Group the rows by their fields with the scale rounded.
+        2. In each group, point the measurements of the other rows at the
+           kept row, then delete the other rows.
+        3. Write the rounded scale into the kept row. Every row that could
+           have matched it is gone by now.
+
+        A second run finds nothing to change. Settings that differ in any
+        other field are left alone. Only ``quality_measurements`` refers to a
+        setting id; ``quality_calibration_identity`` stores camera and optic
+        as text.
+
+        Parameters
+        ----------
+        connection : `sqlite3.Connection`
+            A connection with a write transaction begun.
+        """
+        rows = connection.execute(
+            f"SELECT capture_setting_id, {', '.join(_CAPTURE_SETTING_FIELDS)} "  # ruff: ignore[hardcoded-sql-expression]
+            "FROM quality_capture_setting ORDER BY capture_setting_id"
+        ).fetchall()
+        scale_position = 1 + _CAPTURE_SETTING_FIELDS.index("pixel_scale_arcsec")
+        groups: dict[tuple, list[tuple[int, float | None]]] = {}
+        for row in rows:
+            rounded_scale = round_pixel_scale(row[scale_position])
+            key = (*row[1:scale_position], rounded_scale, *row[scale_position + 1 :])
+            groups.setdefault(key, []).append((row[0], row[scale_position]))
+        for members in groups.values():
+            kept_id, kept_scale = members[0]
+            for duplicate_id, _ in members[1:]:
+                connection.execute(
+                    "UPDATE quality_measurements SET capture_setting_id = ? WHERE capture_setting_id = ?",
+                    (kept_id, duplicate_id),
+                )
+                connection.execute(
+                    "DELETE FROM quality_capture_setting WHERE capture_setting_id = ?", (duplicate_id,)
+                )
+            rounded_scale = round_pixel_scale(kept_scale)
+            if rounded_scale != kept_scale:
+                connection.execute(
+                    "UPDATE quality_capture_setting SET pixel_scale_arcsec = ? WHERE capture_setting_id = ?",
+                    (rounded_scale, kept_id),
+                )
 
     def get_or_create_capture_setting(self, setting: CaptureSetting) -> int:
         """Return the id of a capture setting, adding it if it is new.

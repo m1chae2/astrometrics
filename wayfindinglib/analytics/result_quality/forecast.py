@@ -66,6 +66,16 @@ were taken before the earlier stack was made are not new (`_new_frame_reason`).
 The sensor-temperature band that the plan names for the uncooled Nikon is not
 stored, so it is not checked.
 
+A target with two or more observing nights also has an earlier-nights subset
+stack (all nights but the last). `stack_runs_from_measurements` can read it as
+a run marked ``is_earlier_nights_subset``, and `subset_pairs` pairs it with
+the library run it was cut from. The pair is checked with the same rules,
+except that every frame the library stack added must start on a later observing
+night than the subset's newest frame (`_subset_new_frame_reason`). The check
+carries ``basis="earlier_nights_subset"``. `forecast_gate_state` reads the
+checks in order and says whether "take N more" is closed, exploratory (only a
+subset check agreed) or confirmed (two library stacks agreed).
+
 The module also turns the run history into the steps of the noise-floor fit
 (`noise_steps_from_runs`) and reads the stop signal from it
 (`target_stop_signal`), so the target report and tonight's ranking use the same
@@ -95,6 +105,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from astrometricslib import (
+    EARLIER_NIGHTS_VARIANT,
     CaptureSetting,
     MeasurementReference,
     MeasurementStatus,
@@ -102,6 +113,7 @@ from astrometricslib import (
     SubjectLevel,
     aperture_identity_from_number,
     fold_exposure_lengths,
+    observing_night_id,
     resolve_camera_profile,
 )
 from wayfindinglib.analytics.result_quality.efficiency import FrameObservation
@@ -131,7 +143,13 @@ from wayfindinglib.analytics.result_quality.noise_growth import (
     predict_weighting_mode,
     stop_signal,
 )
-from wayfindinglib.models.planning.target_report import ForecastCheck, ForecastedChange, ForecastOutcome
+from wayfindinglib.models.planning.target_report import (
+    ForecastBasis,
+    ForecastCheck,
+    ForecastedChange,
+    ForecastGate,
+    ForecastOutcome,
+)
 
 _MODEL_CONFIG = ConfigDict(populate_by_name=True, alias_generator=to_camel)
 
@@ -370,6 +388,11 @@ class StackRunRecord(BaseModel):
         The calibration the run used. ``None`` until
         `attach_calibration_identities` adds it; a run with no record counts
         as confounded.
+    is_earlier_nights_subset : `bool`
+        ``True`` for the run of the earlier-nights subset stack (all observing
+        nights but the last, cut from the library stack), whose rows sit on
+        a subject with the variant `EARLIER_NIGHTS_VARIANT`. ``False`` for a
+        library stack run.
     problems : `dict` [`str`, `str`]
         Why a part is missing, by part name (``normalized_noise``,
         ``expected_noise``, ``members``, ``aperture_identity``, ``groups``).
@@ -394,6 +417,7 @@ class StackRunRecord(BaseModel):
     noise_definition_version: int | None = None
     groups: list[RecordedGroup] = Field(default_factory=list)
     calibration: CalibrationSummary | None = None
+    is_earlier_nights_subset: bool = False
     problems: dict[str, str] = Field(default_factory=dict)
 
     @property
@@ -508,18 +532,28 @@ def _recorded_group(subject_id: str, rows: Sequence[QualityMeasurement]) -> Reco
     )
 
 
-def stack_runs_from_measurements(measurements: Iterable[QualityMeasurement]) -> list[StackRunRecord]:
+def stack_runs_from_measurements(
+    measurements: Iterable[QualityMeasurement], *, include_earlier_nights: bool = False
+) -> list[StackRunRecord]:
     """Group a target's stored rows into its library stack runs.
 
-    Only rows of the library stack are used (a row of a subset stack has a
-    ``variant``). The noise rows are read at the stack level and the weight
-    rows at the frame level; both carry the run id, which joins them. A run
-    that made more than one stack shares its member list between them.
+    Only rows of the library stack are used, unless `include_earlier_nights`
+    is set. A row of any other subset stack has a ``variant`` and is always
+    left out. The noise rows are read at the stack level and the weight rows
+    at the frame level; both carry the run id, which joins them. A run that
+    made more than one stack shares its member list between them.
 
     Parameters
     ----------
     measurements : `Iterable` [`QualityMeasurement`]
         All rows of the target, with every run kept (``latest_only=False``).
+    include_earlier_nights : `bool`, optional
+        Also build the runs of the earlier-nights subset stack (all nights
+        but the last), whose stack rows have the variant
+        `EARLIER_NIGHTS_VARIANT`. Each is marked
+        ``is_earlier_nights_subset``. Callers that fit a noise floor or read
+        a stop signal must leave this off, because a subset is not part of
+        the library's history. Defaults to `False`.
 
     Returns
     -------
@@ -527,20 +561,33 @@ def stack_runs_from_measurements(measurements: Iterable[QualityMeasurement]) -> 
         One record per stack in each run, oldest first. A run that stored no
         noise row at all is left out.
     """
-    stack_rows: dict[tuple[str, str], list[QualityMeasurement]] = defaultdict(list)
+    stack_rows: dict[tuple[str, str, bool], list[QualityMeasurement]] = defaultdict(list)
     weight_rows: dict[str, list[QualityMeasurement]] = defaultdict(list)
     group_rows: dict[str, dict[str, list[QualityMeasurement]]] = defaultdict(lambda: defaultdict(list))
     for row in measurements:
         if row.metric not in PINNED_STACK_METRICS:
             continue
-        if row.subject.level == SubjectLevel.STACK and row.subject.variant is None:
+        variant = row.subject.variant
+        is_subset = include_earlier_nights and variant == EARLIER_NIGHTS_VARIANT
+        if row.subject.level == SubjectLevel.STACK and (variant is None or is_subset):
             if row.metric in GROUP_METRICS:
                 # A group's rows are kept apart: a group subject has no noise
                 # rows, so it must not become a run of its own.
                 group_rows[row.run_id][row.subject.subject_id].append(row)
             else:
-                stack_rows[row.run_id, row.subject.subject_id].append(row)
-        elif row.subject.level == SubjectLevel.FRAME and row.metric == FRAME_WEIGHT_METRIC:
+                stack_rows[row.run_id, row.subject.subject_id, is_subset].append(row)
+        elif (
+            row.subject.level == SubjectLevel.FRAME
+            and row.metric == FRAME_WEIGHT_METRIC
+            and (variant is None or is_subset)
+        ):
+            if is_subset:
+                # A subset's weight row sits on "<frame id>#<label>" so that it
+                # does not shadow the library's row. The frame's own id is the
+                # text before the last "#".
+                frame_id = row.subject.subject_id.rsplit("#", 1)[0]
+                subject = row.subject.model_copy(update={"subject_id": frame_id})
+                row = row.model_copy(update={"subject": subject})
             weight_rows[row.run_id].append(row)
     members_by_run: dict[str, tuple[list[str], list[float | None]]] = {}
     for run_id, rows in weight_rows.items():
@@ -552,10 +599,10 @@ def stack_runs_from_measurements(measurements: Iterable[QualityMeasurement]) -> 
             weights.append(value)
         members_by_run[run_id] = (frame_ids, weights)
     stacks_in_run: dict[str, int] = defaultdict(int)
-    for run_id, _stack_id in stack_rows:
+    for run_id, _stack_id, _is_subset in stack_rows:
         stacks_in_run[run_id] += 1
     records = []
-    for (run_id, stack_id), rows in stack_rows.items():
+    for (run_id, stack_id, is_subset), rows in stack_rows.items():
         grouped = _newest_by_subject(rows)
 
         problems: dict[str, str] = {}
@@ -640,6 +687,7 @@ def stack_runs_from_measurements(measurements: Iterable[QualityMeasurement]) -> 
                     noise_version_rows[0].definition_version if noise_version_rows else None
                 ),
                 groups=recorded_groups,
+                is_earlier_nights_subset=is_subset,
                 problems=problems,
             )
         )
@@ -1238,6 +1286,75 @@ def _new_frame_reason(
     return None
 
 
+def _subset_new_frame_reason(
+    subset: StackRunRecord,
+    library: StackRunRecord,
+    new_frames: Sequence[StackFrame],
+    observations: Mapping[str, FrameObservation],
+) -> str | None:
+    """Say whether the frames the library stack added are from a later night.
+
+    The pair of an earlier-nights subset and its library stack differs by the
+    last observing night. Every frame is older than both stacks, so the rule
+    of `_new_frame_reason` cannot apply. Here the subset must hold only
+    frames of earlier nights: each added frame must start on a later
+    observing night (`observing_night_id`) than the subset's newest frame.
+
+    Parameters
+    ----------
+    subset, library : `StackRunRecord`
+        The earlier-nights subset run and the library run it pairs with.
+    new_frames : `Sequence` [`StackFrame`]
+        The frames in the library stack and not in the subset.
+    observations : `Mapping` [`str`, `FrameObservation`]
+        The frames' measurements, for their start times.
+
+    Returns
+    -------
+    reason : `str` or `None`
+        A sentence when the subset holds a frame with no frame record or start
+        time, when an added frame has no start time, or when an added frame
+        is not from a later observing night; ``None`` otherwise.
+    """
+    subset_ids = set(subset.member_frame_ids)
+    library_ids = set(library.member_frame_ids)
+    if not subset_ids <= library_ids:
+        return (
+            f"The subset holds {len(subset_ids - library_ids)} frame(s) that the library stack does "
+            "not, so it was not cut from that stack."
+        )
+    subset_starts = []
+    for frame_id in subset.member_frame_ids:
+        observation = observations.get(frame_id)
+        start = None if observation is None else observation.start_epoch_seconds
+        if start is None:
+            return (
+                "A frame of the earlier-nights stack has no start time, so its newest night cannot be found."
+            )
+        subset_starts.append(start)
+    newest_night = observing_night_id(max(subset_starts))
+    unknown = 0
+    not_later = 0
+    for frame in new_frames:
+        observation = observations.get(frame.frame_id)
+        start = None if observation is None else observation.start_epoch_seconds
+        if start is None:
+            unknown += 1
+        elif observing_night_id(start) <= newest_night:
+            not_later += 1
+    if not_later:
+        return (
+            f"{not_later} of the {len(new_frames)} frames added by the library stack are not from a later "
+            f"observing night than the earlier-nights stack's newest night ({newest_night})."
+        )
+    if unknown:
+        return (
+            f"{unknown} of the {len(new_frames)} added frames have no start time, so it cannot be shown that "
+            "they are from a later night."
+        )
+    return None
+
+
 class _PairForecast(BaseModel):
     """The two forecast numbers of a pair, or why they cannot be made.
 
@@ -1512,7 +1629,7 @@ def _floor_sentence(floor: StackNoiseFloor | None) -> str:
     )
 
 
-def _check_pair(
+def _check_pair_unlabeled(
     previous: StackRunRecord,
     current: StackRunRecord,
     observations: Mapping[str, FrameObservation],
@@ -1613,7 +1730,11 @@ def _check_pair(
             evidence,
             **numbers,
         )
-    not_new = _new_frame_reason(previous, new_frames, observations)
+    not_new = (
+        _subset_new_frame_reason(previous, current, new_frames, observations)
+        if previous.is_earlier_nights_subset
+        else _new_frame_reason(previous, new_frames, observations)
+    )
     if not_new is not None:
         return _not_checkable(current, not_new, mode_name, evidence, **numbers)
 
@@ -1703,6 +1824,62 @@ def _check_pair(
     )
 
 
+def _check_pair(
+    previous: StackRunRecord,
+    current: StackRunRecord,
+    observations: Mapping[str, FrameObservation],
+    paired_relative_error: float | None,
+    configured_stack_weight: str | None,
+    *,
+    history: Sequence[StackRunRecord] = (),
+    electrons_per_adu: float | None = None,
+) -> ForecastCheck:
+    """Check one pair of runs and label the check with what it compared.
+
+    A pair whose earlier run is an earlier-nights subset is checked with the
+    same rules as two library stacks, except that the frames the library stack
+    added must be from a later observing night (`_subset_new_frame_reason`).
+    The check is labeled ``earlier_nights_subset``; any other is labeled
+    ``later_stack``. See `_check_pair_unlabeled` for the rules and the
+    parameters.
+
+    Parameters
+    ----------
+    previous, current : `StackRunRecord`
+        The earlier and the later run.
+    observations : `Mapping` [`str`, `FrameObservation`]
+        The measurements of every frame, by frame id.
+    paired_relative_error : `float` or `None`
+        The relative error of the noise ratio when paired.
+    configured_stack_weight : `str` or `None`
+        The configured stack weight setting.
+    history : `Sequence` [`StackRunRecord`], optional
+        The runs up to and including the earlier run, for the floor fit.
+    electrons_per_adu : `float`, optional
+        The camera gain.
+
+    Returns
+    -------
+    check : `ForecastCheck`
+        The check, with its `basis` set.
+    """
+    check = _check_pair_unlabeled(
+        previous,
+        current,
+        observations,
+        paired_relative_error,
+        configured_stack_weight,
+        history=history,
+        electrons_per_adu=electrons_per_adu,
+    )
+    basis = (
+        ForecastBasis.EARLIER_NIGHTS_SUBSET
+        if previous.is_earlier_nights_subset
+        else ForecastBasis.LATER_STACK
+    )
+    return check.model_copy(update={"basis": basis})
+
+
 def forecast_check(
     runs: Sequence[StackRunRecord],
     observations: Iterable[FrameObservation],
@@ -1741,22 +1918,166 @@ def forecast_check(
         are fewer than two runs, because there is no forecast to check.
     """
     by_id = {observation.frame_id: observation for observation in observations}
-    ordered = sorted(runs, key=lambda record: (record.measured_at, record.run_id))
-    checks = []
+    ordered = library_runs(runs)
+    # Each entry is (when the later run was made, 0 for a subset check and 1
+    # for a real one, run id, check). At a tie the real check sorts after the
+    # subset check, so a real disagreement closes the gate that a subset check
+    # opened at the same stack.
+    made: list[tuple[datetime, int, str, ForecastCheck]] = []
     for position, (previous, current) in enumerate(pairwise(ordered)):
         paired = (paired_relative_error_by_run or {}).get(current.run_id)
-        checks.append(
-            _check_pair(
-                previous,
-                current,
-                by_id,
-                paired,
-                configured_stack_weight,
-                history=ordered[: position + 1],
-                electrons_per_adu=electrons_per_adu,
-            )
+        check = _check_pair(
+            previous,
+            current,
+            by_id,
+            paired,
+            configured_stack_weight,
+            history=ordered[: position + 1],
+            electrons_per_adu=electrons_per_adu,
         )
-    return checks
+        made.append((current.measured_at, 1, current.run_id, check))
+    for subset, library in subset_pairs(runs):
+        paired = (paired_relative_error_by_run or {}).get(library.run_id)
+        check = _check_pair(
+            subset,
+            library,
+            by_id,
+            paired,
+            configured_stack_weight,
+            electrons_per_adu=electrons_per_adu,
+        )
+        made.append((library.measured_at, 0, library.run_id, check))
+    made.sort(key=lambda item: (_as_utc(item[0]), item[1], item[2]))
+    return [item[3] for item in made]
+
+
+def _as_utc(moment: datetime) -> datetime:
+    """Give a time with a zone, counting a time with none as UTC.
+
+    Parameters
+    ----------
+    moment : `datetime`
+        The time.
+
+    Returns
+    -------
+    moment : `datetime`
+        The same time, zone aware.
+    """
+    return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
+
+
+def library_runs(runs: Iterable[StackRunRecord]) -> list[StackRunRecord]:
+    """Keep the library stack runs, in time order.
+
+    Parameters
+    ----------
+    runs : `Iterable` [`StackRunRecord`]
+        Runs from `stack_runs_from_measurements`, with or without
+        earlier-nights subset runs.
+
+    Returns
+    -------
+    runs : `list` [`StackRunRecord`]
+        The runs that are not earlier-nights subsets, oldest first.
+    """
+    return sorted(
+        (run for run in runs if not run.is_earlier_nights_subset),
+        key=lambda record: (_as_utc(record.measured_at), record.run_id),
+    )
+
+
+def subset_pairs(runs: Iterable[StackRunRecord]) -> list[tuple[StackRunRecord, StackRunRecord]]:
+    """Pair each earlier-nights subset run with its library run.
+
+    The library run is the one the subset was cut from. It is the one whose
+    members include every member of the subset and that was made closest in
+    time to the subset (the older one at a tie).
+    A subset made before and a subset made after its library stack both pair
+    correctly, and a later library stack that also holds the subset's frames is
+    passed over. When no library run holds the subset's members (or the
+    members are not known), the closest library run in time is used, and the
+    check then says why it cannot be made. When there are several subset runs
+    for one library run (a stack made again), only the newest is kept.
+
+    Parameters
+    ----------
+    runs : `Iterable` [`StackRunRecord`]
+        Library and subset runs together.
+
+    Returns
+    -------
+    pairs : `list` [`tuple`]
+        ``(subset, library)`` for each subset that has a library run, oldest
+        subset first.
+    """
+    everything = list(runs)
+    libraries = library_runs(everything)
+    if not libraries:
+        return []
+    newest_by_library: dict[str, tuple[StackRunRecord, StackRunRecord]] = {}
+    subsets = sorted(
+        (run for run in everything if run.is_earlier_nights_subset),
+        key=lambda record: (_as_utc(record.measured_at), record.run_id),
+    )
+    for subset in subsets:
+        members = set(subset.member_frame_ids)
+        candidates = [
+            run for run in libraries if members and members < set(run.member_frame_ids)
+        ] or libraries
+        library = min(
+            candidates,
+            key=lambda run: (
+                abs((_as_utc(run.measured_at) - _as_utc(subset.measured_at)).total_seconds()),
+                run.run_id,
+            ),
+        )
+        newest_by_library[library.run_id] = (subset, library)
+    return sorted(newest_by_library.values(), key=lambda pair: (_as_utc(pair[0].measured_at), pair[0].run_id))
+
+
+def forecast_gate_state(checks: Iterable[ForecastCheck]) -> ForecastGate:
+    """Say whether "take N more" may be shown, and on what footing.
+
+    The checks are read in the order `forecast_check` returns them (oldest
+    first; at one stack a subset check comes before a real one).
+
+    * A check of two library stacks that agreed (``as_forecast``) makes the
+      gate ``confirmed``, and it stays so. This is the rule before the
+      earlier-nights check existed, and it is the only way to open the gate
+      for a target with one observing night.
+    * A check of two library stacks that did not agree closes the gate, unless
+      it is already confirmed.
+    * A check from an earlier-nights subset that agreed opens a closed gate as
+      ``exploratory``. One that did not agree closes an exploratory gate.
+    * A check that could not be made changes nothing.
+
+    Parameters
+    ----------
+    checks : `Iterable` [`ForecastCheck`]
+        The target's forecast checks.
+
+    Returns
+    -------
+    gate : `ForecastGate`
+        ``closed``, ``exploratory`` or ``confirmed``.
+    """
+    gate = ForecastGate.CLOSED
+    for check in checks:
+        if check.outcome == ForecastOutcome.NOT_CHECKABLE:
+            continue
+        agreed = check.outcome == ForecastOutcome.AS_FORECAST
+        if check.basis == ForecastBasis.LATER_STACK:
+            if agreed:
+                gate = ForecastGate.CONFIRMED
+            elif gate != ForecastGate.CONFIRMED:
+                gate = ForecastGate.CLOSED
+        elif agreed:
+            if gate == ForecastGate.CLOSED:
+                gate = ForecastGate.EXPLORATORY
+        elif gate == ForecastGate.EXPLORATORY:
+            gate = ForecastGate.CLOSED
+    return gate
 
 
 def noise_steps_from_runs(runs: Sequence[StackRunRecord]) -> list[NoiseStep]:
@@ -1877,11 +2198,14 @@ __all__ = [
     "calibration_summary_from_record",
     "camera_gain_for_setting",
     "forecast_check",
+    "forecast_gate_state",
+    "library_runs",
     "noise_floor_for_runs",
     "noise_steps_from_runs",
     "single_stack_floor",
     "stack_frames_from_observations",
     "stack_groups_of_run",
     "stack_runs_from_measurements",
+    "subset_pairs",
     "target_stop_signal",
 ]

@@ -56,6 +56,7 @@ from astrometricslib.pipelines.stacking.post_processing.stack_image import (
 from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
     MEMBER_FRAME_WCS_SOURCE,
     NO_WCS_REASON,
+    PLATE_SOLVE_WCS_SOURCE,
     measure_stack_noise,
 )
 
@@ -214,7 +215,9 @@ def test_a_stack_with_no_solution_and_no_reference_frame_is_not_measured(tmp_pat
     stack = _write(tmp_path / "stack.fits", _sky_image(2.0, seed=1), None)
     outcome = measure_stack_noise(stack, None, str(tmp_path / APERTURE_FILE_NAME))
     assert outcome.result is None
-    assert outcome.reason == NO_WCS_REASON
+    # The solve of the stack itself was tried last (the stand-in fails it).
+    assert outcome.reason.startswith(NO_WCS_REASON)
+    assert "plate-solving the stack itself" in outcome.reason
     assert not (tmp_path / APERTURE_FILE_NAME).exists()
 
 
@@ -1191,3 +1194,189 @@ def test_a_reference_frame_that_does_not_line_up_gives_no_flux_ratio(tmp_path: P
     assert result is not None and result.reference_frame_flux_ratio is not None
     assert result.reference_frame_flux_ratio.ratio is None
     assert "does not line up" in result.reference_frame_flux_ratio.reason
+
+
+def _fake_stack_solver(monkeypatch: pytest.MonkeyPatch, solution: WCS | None, reason: str = "") -> list[str]:
+    """Replace the stack plate solve with a fake and record what it was asked.
+
+    Parameters
+    ----------
+    monkeypatch : `pytest.MonkeyPatch`
+        The fixture that undoes the change.
+    solution : `astropy.wcs.WCS` or `None`
+        What the fake solve returns.
+    reason : `str`, optional
+        The reason it returns with no solution.
+
+    Returns
+    -------
+    calls : `list` [`str`]
+        Filled with the stack path of each solve.
+    """
+    calls: list[str] = []
+
+    def fake(stack_path: str) -> tuple[WCS | None, str]:
+        """Record the call and give the prepared answer.
+
+        Parameters
+        ----------
+        stack_path : `str`
+            The stack to solve.
+
+        Returns
+        -------
+        solution : `tuple` [`astropy.wcs.WCS` or `None`, `str`]
+            The prepared solution and reason.
+        """
+        calls.append(stack_path)
+        return solution, reason
+
+    monkeypatch.setattr(
+        "astrometricslib.pipelines.stacking.post_processing.stack_noise._plate_solve_stack_wcs", fake
+    )
+    return calls
+
+
+def test_a_stack_nobody_solved_is_plate_solved_as_the_last_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no solution anywhere, the stack's own solve gives positions."""
+    calls = _fake_stack_solver(monkeypatch, WCS(_sky_header()).celestial)
+    stack = _write(tmp_path / "stack.fits", _sky_image(2.0, seed=1), None)
+    before = fits.getheader(stack)
+    outcome = measure_stack_noise(stack, None, str(tmp_path / APERTURE_FILE_NAME))
+    assert outcome.result is not None
+    assert outcome.result.wcs_source == PLATE_SOLVE_WCS_SOURCE
+    assert outcome.result.aperture_identity
+    assert calls == [stack]
+    # The stack's header is read only, never written.
+    assert fits.getheader(stack) == before
+
+
+def test_the_solve_of_the_stack_gives_the_reference_frame_flux_ratio(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A frame with no solution still gives the flux ratio."""
+    scattered = _scattered_stars(seed=3)
+    stack, frame = _scaled_pair(tmp_path, "a", 1.4, scattered)
+    bare_frame = _write(tmp_path / "bare_frame.fits", fits.getdata(frame), None)
+    bare_stack = _write(tmp_path / "bare_stack.fits", fits.getdata(stack), None)
+    _fake_stack_solver(monkeypatch, WCS(_sky_header()).celestial)
+    result = measure_stack_noise(bare_stack, bare_frame, str(tmp_path / APERTURE_FILE_NAME)).result
+    assert result is not None
+    assert result.wcs_source == PLATE_SOLVE_WCS_SOURCE
+    assert result.reference_frame_flux_ratio is not None
+    assert result.reference_frame_flux_ratio.ratio == pytest.approx(1.4, abs=0.02)
+
+
+def test_the_solve_is_tried_after_the_member_frames_fail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Member frames with no solution leave the stack's own solve."""
+    scattered = _scattered_stars(seed=11)
+    bare = _write(tmp_path / "bare.fits", _sky_image(2.0, seed=24, star_positions=scattered), None)
+    stack = _write(tmp_path / "stack.fits", _sky_image(2.0, seed=25, star_positions=scattered), None)
+    calls = _fake_stack_solver(monkeypatch, WCS(_sky_header()).celestial)
+    outcome = measure_stack_noise(stack, None, str(tmp_path / APERTURE_FILE_NAME), member_frame_paths=[bare])
+    assert calls == [stack]
+    assert outcome.result is not None
+    assert outcome.result.wcs_source == PLATE_SOLVE_WCS_SOURCE
+
+
+def test_a_failed_solve_of_the_stack_gives_a_reason_and_no_apertures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A solve with no answer leaves the stack unmeasured, with a reason."""
+    _fake_stack_solver(monkeypatch, None, "plate-solving the stack itself was tried and found no solution")
+    stack = _write(tmp_path / "stack.fits", _sky_image(2.0, seed=1), None)
+    outcome = measure_stack_noise(stack, None, str(tmp_path / APERTURE_FILE_NAME))
+    assert outcome.result is None
+    assert NO_WCS_REASON in outcome.reason
+    assert "was tried and found no solution" in outcome.reason
+    assert not (tmp_path / APERTURE_FILE_NAME).exists()
+
+
+def test_the_real_stack_solve_turns_an_exception_into_a_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A solver that raises gives a reason and never fails the stack."""
+    from astrometricslib.pipelines.stacking.post_processing import stack_noise
+    from astrometricslib.utilities.exceptions import PlateSolveFailedError
+
+    class RaisingPipeline:
+        """A stand-in astrometry pipeline whose solve fails."""
+
+        def process(self, image: str, attempt_plate_solving: bool = True) -> None:
+            """Fail as the star identifier does for an unsolvable field.
+
+            Raises
+            ------
+            PlateSolveFailedError
+                Always.
+            """
+            raise PlateSolveFailedError("Plate solving failed: could not solve field.")
+
+    monkeypatch.setattr("astrometricslib.pipelines.astrometry.pipeline.AstrometryPipeline", RaisingPipeline)
+    # The conftest stand-in keeps the real function for this test.
+    real = stack_noise._plate_solve_stack_wcs.real_function  # type: ignore[attr-defined]
+    wcs, reason = real(str(tmp_path / "stack.fits"))
+    assert wcs is None
+    assert "tried and failed" in reason
+    assert "PlateSolveFailedError" in reason
+
+
+def test_a_stack_with_a_header_solution_is_never_solved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Stacks that already work keep their source, with no solve."""
+    calls = _fake_stack_solver(monkeypatch, WCS(_sky_header()).celestial)
+    stack = _write(tmp_path / "stack.fits", _sky_image(2.0, seed=1), _sky_header())
+    outcome = measure_stack_noise(stack, None, str(tmp_path / APERTURE_FILE_NAME))
+    assert outcome.result is not None
+    assert outcome.result.wcs_source == "stack header"
+    reference = _write(tmp_path / "reference.fits", _sky_image(2.0, seed=5), _sky_header())
+    trimmed = _write(tmp_path / "trimmed.fits", _sky_image(2.0, seed=6)[20:, 10:], None)
+    reference_outcome = measure_stack_noise(
+        trimmed, reference, str(tmp_path / "other_apertures.json"), crop_offset=(10, 20)
+    )
+    assert reference_outcome.result is not None
+    assert reference_outcome.result.wcs_source == "registration reference frame"
+    assert calls == []
+
+
+def test_a_header_solution_that_misses_the_stored_stars_falls_back_to_the_stack_solve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A solution 800 px off is replaced by the stack's own solve."""
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    scattered = _scattered_stars(seed=3)
+    first = _write(tmp_path / "first.fits", _sky_image(2.0, seed=1, star_positions=scattered), _sky_header())
+    assert measure_stack_noise(first, None, apertures).result is not None
+    # The stars are where the first stack had them, but the header says they
+    # are 800 px away: farther than the shift search reaches.
+    wrong_header = _sky_header()
+    wrong_header["CRPIX1"] = SIZE / 2 + 800
+    stack = _write(tmp_path / "stack.fits", _sky_image(2.0, seed=7, star_positions=scattered), wrong_header)
+    calls = _fake_stack_solver(monkeypatch, WCS(_sky_header()).celestial)
+    result = measure_stack_noise(stack, None, apertures).result
+    assert calls == [stack]
+    assert result is not None
+    assert result.wcs_source == PLATE_SOLVE_WCS_SOURCE
+
+
+def test_a_missed_header_solution_with_a_failed_stack_solve_gives_both_reasons(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the retry solve finds nothing too, the reason names both."""
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    scattered = _scattered_stars(seed=3)
+    first = _write(tmp_path / "first.fits", _sky_image(2.0, seed=1, star_positions=scattered), _sky_header())
+    assert measure_stack_noise(first, None, apertures).result is not None
+    wrong_header = _sky_header()
+    wrong_header["CRPIX1"] = SIZE / 2 + 800
+    stack = _write(tmp_path / "stack.fits", _sky_image(2.0, seed=7, star_positions=scattered), wrong_header)
+    _fake_stack_solver(monkeypatch, None, "plate-solving the stack itself was tried and found no solution")
+    outcome = measure_stack_noise(stack, None, apertures)
+    assert outcome.result is None
+    assert "stored reference stars" in outcome.reason
+    assert "was tried and found no solution" in outcome.reason

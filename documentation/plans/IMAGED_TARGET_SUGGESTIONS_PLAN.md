@@ -36,6 +36,8 @@ Still on 2026-10-26: part 2b is built (uncommitted, unit tests only; sections 3.
 
 Later still on 2026-10-26: the rehearsal on the copy found that one 300 s frame folded into M 27's 120 s group left every frame weight and the predicted noise unmeasured. The user decided D10 (option B): a folded group is modeled, so it gets weights and a predicted noise. D10 and the restack tooling (section 4) are built, uncommitted on `134-group-weights-nikon` after 30f53f77. The rehearsal ran on M 27, M 42 and M 81 (section 4.5). The rest of the ZWO targets on the copy come next. The real library is restacked only on the user's go-ahead.
 
+Last on 2026-10-26: the restack script measures every frame before it stacks, and a stack that has no plate solution from a frame is plate-solved in memory (section 4.1). Capture settings round the pixel scale (stored settings are merged on first open). The half-difference model uses `k_i` (section 3.7). D11 is built (section 3.9), and the "take N more" wording has a practical limit (section 3.10, decision D12). All of it is uncommitted on `134-group-weights-nikon` after dacb635a, with unit tests and one copy run on M 13 (section 4.5). The full ZWO pass on the copy has not been rerun with these changes.
+
 ## 1. Why suggestions from imaged targets are missing
 
 "Take N more" is a forecast: add these frames and the noise falls this much. The library shows it
@@ -446,11 +448,96 @@ rehearsal needs all four.
 - **New row.** `stacking.group_reference_exposure_s` (version 1, unit s, STK-38) on the group's own subject; for a single-group stack, on the stack file. `stacking.frame_weight` (STK-07) no longer refuses folded groups.
 - **Normalization scale (D9).** Reference-group membership is decided by the reference frame's path. The expected ratio divides by the group's exposure `t_g`, which the combine divides by, not by the reference frame's exposure. The single-group path needs no change.
 - **Forecast.** Each frame has a noise factor `k_i sqrt((B t_i + RN^2) / (B t_len + RN^2))` relative to a frame of the group's main length `t_len`, because the stored `s_g` is the median of sampled raw frames and stands for a main-length frame (exact only when no sampled frame was folded). Folded new frames are forecast normally. A new length still needs at least 5 frames. The heaviest-group confound and the weight lookup compare group lengths, not mean exposures, because the mean moves when frames fold in. A single group of mixed lengths needs no per-frame factor: the stack is `t_ref` times the rate stack, and the forecast compares noise relative to the stars' flux, which scales the same way. The model agrees with the library's predicted noise to 1e-9 for folded groups (unit test).
-- **Known limit.** The subset job (half-stack and leave-one-night-out) refuses a folded subset whose reference cannot be named. It passes no `k_i` when it predicts (`k = 1`), so its predictions for mixed-length subsets are slightly off. Left to do.
+- **Known limit (closed).** The subset job refuses a folded subset whose reference cannot be named. The half-difference model ratio took no `k_i`, so it treated a folded frame as unfolded. It now multiplies each frame's variance by `k_i` squared, read from the half stack that holds the frame. The subset stacks already used `k_i` through their membership, so the limit was only partly true. Unit tests only; no real folded target has been measured with it.
 
 ### 3.8 Evidence for D10
 
 See section 4.5 for the numbers. The register entries are STK-07, STK-38, WAY-D30 and WAY-D70.
+
+### 3.9 Decision D11: checking the forecast with frames already taken (decided 2026-10-26)
+
+**Decision.** The user chose B on 2026-10-26, with these choices:
+
+- The pair is the stack of all nights but the last, against the library stack (one subset stack per
+  target with two or more nights).
+- A count opened by such a pair is marked exploratory and ranked below counts confirmed by a real
+  later stack. The first real stack confirms it or closes the gate again.
+- The forced restack makes the subset stack for each target with two or more nights, so D11 is built
+  before the real restack.
+
+The rest of this section is the analysis the decision was made from.
+
+**The question.** "Take N more" stays hidden until a forecast check agrees (section 4.4). Today a
+check needs two library stacks of the same setting, the later one holding newer frames. After the
+forced restack no target has such a pair, so the count appears only after a new night is imaged and
+stacked. Raised by the user on 2026-10-26 after the M 13 copy restack.
+
+**What already exists.** The library can stack a subset of a target's frames without touching the
+library stack (`ProcessingPipelines.stack_subset`). `measure_noise_growth` stacks the first night,
+the first two nights and so on (a one-night stack uses the first quarter, half and three quarters of
+its frames). `measure_night_contributions` stacks the frames without each night in turn. Each
+subset's noise is measured in the library stack's own apertures and stored at the stack level with
+the subset's label as the variant. A subset stack stores no frame weights, no predicted noise and no
+calibration record. The forecast check reads library stacks only. (Before the work below, the half-difference
+prediction also ignored `k_i`; section 3.7.)
+
+**What a subset pair would test, and what it would not.** A pair of "earlier nights" and "all nights"
+asks the same question as a real later stack: given the frames added, did the noise fall as
+forecast? It differs from a real later stack in three ways:
+
+- The two stacks share frames, the calibration masters and the apertures. Errors common to both, a
+  flat-field pattern above all, cancel more than they would against new data. The check is easier to
+  pass than a real one.
+- It is in-sample: the same frames were used to judge the model (the floor of D8 came from such
+  subsets).
+- It does not test what a new night brings: other sky, focus, temperature or calibration.
+
+**Options.**
+
+- A: no change. The count waits for a new night and a normal stack.
+- B: a subset pair of nights may open the gate. For a target with two or more nights in the restacked
+  stack, the check compares the stack of all nights but the last with the library stack. A
+  one-night target still waits for a new night. The suggestion says it rests on a check made from
+  frames already taken, and the first real new stack is checked as before, as a held-out
+  confirmation.
+- C: as B, and a one-night target may also use a frame-order subset (the first half against all).
+  This is the weakest form: the same night, the same conditions, shared frames.
+- D: show the forecast from the subset pair as information only, labeled not checked, and keep the
+  count hidden until a real check agrees.
+
+**Work for B as planned (design estimate, about one to two days).** The subset stack records what the check
+needs: frame weights, predicted noise with `k_i`, the aperture-set row and the calibration record. The
+forecast check reads a subset stack as the earlier member of a pair and applies the same confound
+rules (its frames are by construction older than the library stack's newest night). The register
+gains an entry for the subset check, labeled in-sample. A real check that later disagrees closes the
+gate again, as today.
+
+**Recommendation.** B, with the label. It turns on the count right after the restack for the targets
+imaged on two or more nights, and keeps the stronger real check as the confirmation. C adds little
+and is weak; D gives the user a number the report itself does not trust.
+
+**As built (uncommitted).**
+
+- **API shape.** The user chose an option on the existing call, not a new one: `ProcessingPipelines.stack_subset(..., record_forecast_rows=True)`. There is no dedicated "earlier nights" call. The caller picks the frames and the label; the restack script picks all nights but the last and uses the label `EARLIER_NIGHTS_VARIANT` (`"earlier-nights"`).
+- **Rows a subset records.** One frame weight per frame, on the subject `<frame id>#<label>` so it never hides the library stack's newest weight of that frame. The exposure-group rows, under `_subsets/<label>/groups/`. The predicted noise (with `k_i` and the normalization scale), the aperture-set row (in the library stack's apertures) and a calibration record under the subset's own subject. Without the option a subset stores what it stored before.
+- **Pairing rule.** The forecast check pairs the subset with the library run that holds all of its frames and was made closest in time (the older run at a tie). A later library stack that also holds the frames is passed over. If no library run holds them, the closest in time is used and the check says why it cannot be made. With several subset runs for one library run, the newest is kept.
+- **Later-night rule.** The rule "added frames newer than the earlier stack's noise measurement" cannot hold for a subset, because all frames are older than both stacks. The rule for a pair with a subset is: every frame the library stack added is from a later observing night than the subset's newest frame. A frame with no start time makes the pair not checkable.
+- **Gate.** A check records its basis (`ForecastBasis`: later stack or earlier-nights subset). `ForecastGate` has three states: closed, exploratory and confirmed (section 4.4). The take-more statement carries a sentence saying the count is exploratory.
+- **Ranking.** Tonight's ranking puts an exploratory target after the others only when the gains tie to the whole percent (`GAIN_TIE_DIGITS = 2`). This is a deliberately soft reading, because the ranking orders by gain and not by frame count. The ranked reason says the count is exploratory.
+- **Evidence.** Section 4.5 (M 13, in-sample, one target, one run). Register: STK-38 for the rows, WAY-D70 for the pair and the gate.
+
+### 3.10 Decision D12: take-more wording with a floor (user-approved 2026-10-26)
+
+**The finding.** With a noise floor, the count that reaches the target can be very large for a small last gain. On the M 13 copy the floor is 0.49 of the noise variance. The old report asked for 1,748 frames (about 20.9 h) to cut the noise by 29%. Doubling the stack's time cuts about 14%.
+
+**What is built (uncommitted).**
+
+- A count is given only when the target needs at most `PRACTICAL_TIME_FACTOR` (4.0) times the stack's present exposure time. The time is the sum of the exposure of every frame, not the weighted time.
+- Past that limit, or when the target cannot be reached, the statement gives what one doubling buys (frames, time and noise cut), the most any number of frames can give, and a pointer to the report's calibration recommendations when there are any. The package rows ask for the doubling frames.
+- When doubling cuts less than `MINIMUM_DOUBLING_GAIN_FRACTION` (0.05), the floor warning is given and no frames are suggested.
+- M 13, 44 frames of 30 s: doubling cuts about 14%, 4 times about 21%, 10 times about 26%, 40 times about 29%, and at most about 30%. Now the report asks for 44 frames (about 32 min) for about 14%.
+
+All values are design estimates (register WAY-D30).
 
 ## 4. The forced restack
 
@@ -462,7 +549,13 @@ has `--dry-run`, `--target`, `--targets-from` and `--skip-target(s-from)`. It ga
 these options (one tool with parameters), all built (uncommitted): `--stack-only` (the public
 `processing.stack` for each target, no astrometry, photometry, spectroscopy or spectral stacks; run
 one target at a time), `--progress-file`, `--retry-failed`, `--camera`, `--review-list` and
-`--review-only`. No new script and no backend call with `force`. A plain loop of `processing.stack(target, force=True)` would fail on the 13
+`--review-only`. **Measure first.** `--stack-only` first measures every imaging frame of the target (`ProcessingPipelines.record_frame_measurements`, no limit), because a stack measures at most `STACKING_STAGE_MEASUREMENT_LIMIT` (40) new frames and its predicted noise needs the sky of every frame. Frames measured before and unchanged are skipped, so a resumed run does not repeat the work. A target that another run is measuring is failed, not stacked.
+
+**Earlier nights.** After the stack, a target whose stack holds two or more observing nights also gets the earlier-nights subset (section 3.9), made with frames chosen in the script. `--no-earlier-nights` turns it off. A failed subset is reported in the run's message and does not fail the target.
+
+**Plate-solve fallback.** The stack-noise step needs sky coordinates for the stack. When no stack header, registration reference frame or member frame gives a solution, the stack is plate-solved in memory with the astrometry pipeline. The stack header is not written. The solve is also tried when a frame's solution fails the check against the stored reference stars (seen on M 13's earlier-nights subset, whose frames carry a capture-program solution). A failed solve keeps the not-measured result with both reasons, and it can take up to about 10 minutes (a hinted and a blind try of up to 300 s each).
+
+No new script and no backend call with `force`. A plain loop of `processing.stack(target, force=True)` would fail on the 13
 targets with frames from both cameras and would mix optics on the 12 shot at both 300 and 405 mm.
 
 Second-camera stacks of a target are not rebuilt; the plan accepts that.
@@ -480,7 +573,7 @@ run_all_target_processing.py --force-restack --stack-only --camera zwo \
     --progress-file PROGRESS.jsonl --review-list REVIEW.csv --target "M 27"
 ```
 
-**Review list.** A CSV with the columns `target`, `camera`, `optic_mm`, `status`, `refusal_reason`, `weights_known`, `predicted_noise_present`, `aperture_set_present`, `frames_moved_count` and `frames_moved`. It covers rows made since the run started. `--review-only` writes it from an existing progress file and processes nothing.
+**Review list.** A CSV with the columns `target`, `camera`, `optic_mm`, `status`, `refusal_reason`, `weights_known`, `predicted_noise_present`, `aperture_set_present`, `earlier_nights_present` (yes, no, or n/a for a stack of one night), `frames_moved_count` and `frames_moved`. It covers rows made since the run started. `--review-only` writes it from an existing progress file and processes nothing.
 
 ### 4.2 Steps
 
@@ -488,7 +581,7 @@ run_all_target_processing.py --force-restack --stack-only --camera zwo \
    (`QualityDiagnostics.frame_quality`), since the restack may move frames library-wide.
 2. Back up the databases with `scripts/backup_library_databases.py`. The restack deletes each
    target's older previous stack (`previous_stack.commit_archive`); the user accepted that loss
-   (decision D5).
+   (decision D5). The quality store's schema version 4 changes stored data on its first open: it rounds the stored pixel scales and merges capture settings that become equal, so the backup comes first.
 3. Stop the backend (`build/linux/run_backend.sh stop`). The stack guard does not stop two library
    stacks of the same target, and a running sync can take the frame-measurement turn so frames go
    unmeasured.
@@ -519,19 +612,22 @@ After the restack, a target's next normal stack with new frames opens the gate o
 - no group is clipped or stacked with `-weight=noise`;
 - for Nikon targets, the read noise was measured first.
 
+A target imaged on two or more nights can open the gate earlier, as exploratory (decision D11, section 3.9). Its earlier-nights subset is paired with the library stack. The check needs the same confound rules, and every frame the library stack added must be from a later observing night than the subset's newest frame. If the check agrees, the count is shown with a sentence saying it is exploratory. The first real later stack then confirms it or closes the gate. A target imaged on one night still waits for a new night.
+
 ### 4.5 Rehearsal on the copy (2026-10-26)
 
 Copy at `/home/michael/astrometrics_scratch/134-validation`; code uncommitted on `134-group-weights-nikon` after 30f53f77; one run each, in-sample. Details are in register entries STK-38 and WAY-D70.
 
 - **M 27.** 82 imaging frames in three groups (30 s x 26, 60 s x 33, and a 120 s group of 23 frames holding one 300 s frame). After D10: 79 of 79 frame weights, the 300 s frame stacked with raw weight 6.9, and a predicted noise. Before D10 the same restack stored none.
 - **M 42** (one group, 21 x 30 s and one 300 s). Siril did not stack the 300 s frame, so the folded path was not exercised. Weights 21 of 21.
+- **M 13 (two nights; added after the first rehearsal).** Before the plate-solve fallback, M 13 and M 101 restacked with "no WCS for this stack" and stored no noise. After it, M 13's stack solved (18 stars, 0.767 arcsec rms) and so did its earlier-nights subset (23 stars, 0.941 arcsec). Headers wrote M 13's pixel scale as 1.915279 and as 1.9152790075, which split one 30 s setting into 40 and 4 frames; rounding the scale makes them one setting. The earlier-nights subset has 4 frames (effective 2.13): normalized noise 0.778e-3, measured over predicted 0.98, normalization scale 1.234. The library stack has 44 frames (effective 35.9): normalized noise 0.206e-3, measured over predicted 1.40, scale 1.472. The scale difference is not explained. The check came out "as forecast", and the gate opened as exploratory. In-sample, one target, one run. The take-more numbers for M 13 are in section 3.10. A rerun of M 101 after the fix is not recorded.
 - **M 81.** Siril did not stack the three folded frames. Weights 42 of 42. The predicted noise is not measured, because four 300 s frames have no stored sky measurement on the copy (not a D10 issue).
 
 **Left to do.**
 
 1. Restack the rest of the ZWO targets on the copy, one target at a time, and read the review list.
 2. Compare the M 27 floor across stacks in normalized noise (noise over the stars' flux) before trusting the floor from the three-group stack. Stack-unit numbers of different stacks are not comparable.
-3. Give the subset job the `k_i` (known limit, section 3.7).
+3. Rerun the full ZWO pass on the copy with the changes of 2026-10-26 (measure first, the plate-solve fallback, pixel-scale merging, the earlier-nights subsets). It has not been rerun. (The subset job's `k_i` is done, section 3.7.)
 4. Find why four M 81 300 s frames have no sky measurement.
 5. Restack the real library, with the databases backed up and the backend stopped, only on the user's go-ahead.
 
@@ -561,7 +657,9 @@ document, the stacking and wayfinding registers, and the READMEs of the changed 
 | D7 | Read noise and gain for offset-0 frames (section 3.6.2) | A: library fallback to another offset for unclipped frames; B: a copied config entry; C: offset 10 only from now on | Decided 2026-10-26: A, the library fallback for frames not clipped at zero |
 | D8 | A noise floor in the forecast (section 3.6.1) | Estimate the floor from one stack (measured minus random) and forecast with it; or keep 1/sqrt(N) and wait for two stacks to fit a floor | Decided 2026-10-26: the one-stack floor, built only once the diagnosis (section 3.6.1, step 1) confirms a floor |
 | D9 | Siril's unsaved per-frame normalization scale (impulse test) | A: ignore and document; B: measure the stack's scale from its reference stars (stack flux over registration reference frame flux) and apply it to the predicted noise and the floor's random part; C: use the half-stack difference as the random part; D: stop Siril from scaling (`-norm=add`) | Decided 2026-10-26: B, with the stored frame weight kept as the star-width share and the per-frame bias (under about 3% on ratios) documented. Built and checked on the copy 2026-10-26: scales 1.193, 1.385 and 1.339 (M 27, M 57, M 81) agree with the half-stack factors 1.14, 1.37 and 1.34 within 0.4σ; corrected floors 2.92e-3, 0.87e-3 and 0.65e-3 |
+| D11 | Whether a subset pair from frames already taken may open the forecast gate (section 3.9) | A: no change; B: a pair of nights may open it, labeled, with the first real stack as confirmation; C: as B plus a frame-order subset for one-night targets; D: show the subset forecast as information only | Decided 2026-10-26: B. The pair is all nights but the last against the library stack; its count is marked exploratory and ranked below a real check (within a gain tie); the forced restack makes the subset stacks. Built, uncommitted (section 3.9) |
 | D10 | How folded exposure groups are handled (section 3.7) | A: leave frames of a length with fewer than 5 frames out of the stack; B: model a folded group so it gets weights and a predicted noise; C: accept no forecast | Decided 2026-10-26: B. Built, uncommitted. Found on a copy restack of M 27: one 300 s frame folded into its 120 s group left all weights and the predicted noise unmeasured. 12 of 31 ZWO targets have folded groups |
+| D12 | What "take N more" says when the noise floor makes the count very large (section 3.10) | A: keep the count however large; B: give a count only within a practical limit of the stack's exposure time, otherwise what one doubling buys | Decided 2026-10-26: B, with the limit at 4 times the stack's exposure time and a floor of a 5% cut for one doubling. Built, uncommitted |
 
 ## 7. Out of scope
 

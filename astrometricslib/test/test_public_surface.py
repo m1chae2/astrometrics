@@ -36,6 +36,7 @@ import astrometricslib
 # not a side effect of moving code around internally.
 EXPECTED_PUBLIC_NAMES = frozenset({
     "AMBIGUOUS_RMS_GAP",
+    "EARLIER_NIGHTS_VARIANT",
     "MINIMUM_PENALTY_TO_WEIGHT",
     "NOISE_WEIGHT_MODE",
     "NO_GOOD_MATCH_RMS",

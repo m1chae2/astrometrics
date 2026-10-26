@@ -21,6 +21,7 @@ from enum import StrEnum
 from pydantic import BaseModel, ConfigDict, Field
 
 from astrometricslib import CaptureSetting, MeasurementReference
+from wayfindinglib.models.planning.target_report import ForecastGate
 from wayfindinglib.models.quality.statements import Confidence
 
 
@@ -165,6 +166,11 @@ class RankedCandidate(BaseModel):
         ranked one. Empty when there is nothing to add.
     confidence : `Confidence`
         Always ``design_estimate`` today.
+    forecast_gate : `ForecastGate`
+        Whether the target's "take N more" count is confirmed by a check of two
+        library stacks, exploratory (only a check made from frames already
+        taken agreed), or closed (no check agreed). An exploratory target
+        ranks below a confirmed or closed one of about the same gain.
     register_entry : `str`
         The validation register entry behind the ranking.
     evidence : `list` [`MeasurementReference`]
@@ -189,6 +195,7 @@ class RankedCandidate(BaseModel):
     thin_dataset: bool = Field(default=False, alias="thinDataset")
     reason: str = ""
     confidence: Confidence = Confidence.DESIGN_ESTIMATE
+    forecast_gate: ForecastGate = Field(default=ForecastGate.CLOSED, alias="forecastGate")
     register_entry: str = Field(default="WAY-72", alias="registerEntry")
     evidence: list[MeasurementReference] = Field(default_factory=list)
 

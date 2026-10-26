@@ -884,3 +884,78 @@ def test_a_single_group_of_mixed_lengths_needs_no_per_frame_factor() -> None:
         # it to get back to rate units.
         scaled = counts_variance / reference**2
         assert scaled == pytest.approx(plain.variance, rel=1e-12)
+
+
+def _m13_floor() -> ng.StackNoiseFloor:
+    """Make the floor of the M 13 case: 49 percent of the measured variance.
+
+    Returns
+    -------
+    floor : `StackNoiseFloor`
+        A detected floor of 0.583e-3 with a share of 0.49.
+    """
+    return ng.StackNoiseFloor(
+        source="single_stack",
+        floor_detected=True,
+        floor_noise=0.583e-3,
+        floor_to_random_variance_ratio=0.49 / 0.51,
+        floor_variance_share=0.49,
+        reason="made up like M 13",
+    )
+
+
+def test_a_count_beyond_the_practical_limit_gives_one_doubling_instead() -> None:
+    """M 13: 44 frames of 30 s with a floor of 49 percent of the variance.
+
+    The target needs more than 4 times the time, so the result gives the 44
+    frames that double the time (about 14 percent) and the most any frames
+    give (about 30 percent).
+    """
+    frames = [_frame(i, exposure=30.0, sky=1.0, read=0.0) for i in range(44)]
+    result = ng.frames_to_cut_noise(frames, frames, WeightingMode.EQUAL, floor=_m13_floor())
+    assert result.practical_limit_applied
+    assert result.frames_needed is None
+    assert not result.floor_limited
+    assert result.doubling_frames == 44
+    assert result.doubling_noise_cut == pytest.approx(0.14, abs=0.01)
+    assert result.most_reachable_cut == pytest.approx(0.30, abs=0.01)
+    assert result.doubling_worthwhile
+    assert result.added_exposure_seconds == pytest.approx(44 * 30.0)
+
+
+def test_a_floor_limited_target_also_gives_the_doubling() -> None:
+    """A floor of 60 percent cannot reach 0.707 but doubling still helps."""
+    frames = [_frame(i, exposure=30.0, sky=1.0, read=0.0) for i in range(44)]
+    floor = _m13_floor().model_copy(
+        update={"floor_variance_share": 0.6, "floor_to_random_variance_ratio": 0.6 / 0.4}
+    )
+    result = ng.frames_to_cut_noise(frames, frames, WeightingMode.EQUAL, floor=floor)
+    assert result.practical_limit_applied
+    assert result.floor_limited
+    assert result.doubling_frames == 44
+    assert result.doubling_noise_cut == pytest.approx(1 - math.sqrt(0.6 + 0.4 / 2), abs=0.005)
+    assert result.doubling_worthwhile
+
+
+def test_a_count_within_the_practical_limit_is_kept() -> None:
+    """A floor of 30 percent needs 1.4 times the frames: the count stays."""
+    frames = [_frame(i, exposure=60.0, sky=1.0, read=0.0) for i in range(20)]
+    floor = _m13_floor().model_copy(
+        update={"floor_variance_share": 0.3, "floor_to_random_variance_ratio": 0.3 / 0.7}
+    )
+    result = ng.frames_to_cut_noise(frames, frames, WeightingMode.EQUAL, floor=floor)
+    assert not result.practical_limit_applied
+    assert result.frames_needed is not None
+    assert result.frames_needed > 20
+    assert result.doubling_frames is None
+
+
+def test_a_tiny_doubling_gain_is_not_worthwhile() -> None:
+    """With a floor of 88 percent, doubling cuts under 5 percent."""
+    frames = [_frame(i, exposure=60.0, sky=1.0, read=0.0) for i in range(20)]
+    floor = ng.measure_stack_noise_floor(3.097e-3, 1.048e-3, APERTURES_FOR_11_7_PERCENT)
+    result = ng.frames_to_cut_noise(frames, frames, WeightingMode.EQUAL, floor=floor)
+    assert result.practical_limit_applied
+    assert result.doubling_noise_cut is not None
+    assert result.doubling_noise_cut < ng.MINIMUM_DOUBLING_GAIN_FRACTION
+    assert not result.doubling_worthwhile

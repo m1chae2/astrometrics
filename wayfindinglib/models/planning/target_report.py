@@ -31,6 +31,32 @@ class ForecastOutcome(StrEnum):
     NOT_CHECKABLE = "not_checkable"
 
 
+class ForecastBasis(StrEnum):
+    """What the later stack of a forecast check is compared with.
+
+    ``later_stack`` is a check of two library stacks, the later one holding
+    new frames. ``earlier_nights_subset`` is a check made from frames already
+    taken: the stack of all observing nights but the last against the library
+    stack of all nights.
+    """
+
+    LATER_STACK = "later_stack"
+    EARLIER_NIGHTS_SUBSET = "earlier_nights_subset"
+
+
+class ForecastGate(StrEnum):
+    """Whether "take N more" may be shown for a target, and on what footing.
+
+    ``closed`` hides the count. ``exploratory`` shows it after a check made
+    from frames already taken agreed; the next real stack confirms or closes
+    it. ``confirmed`` shows it after a check of two library stacks agreed.
+    """
+
+    CLOSED = "closed"
+    EXPLORATORY = "exploratory"
+    CONFIRMED = "confirmed"
+
+
 class ForecastedChange(BaseModel):
     """One predicted or measured change in stack noise, with its tolerance.
 
@@ -75,6 +101,10 @@ class ForecastCheck(BaseModel):
         arrived as forecast.
     evidence : `list` [`MeasurementReference`]
         The measurements the check used.
+    basis : `ForecastBasis`
+        Whether the check compared two library stacks (``later_stack``) or an
+        earlier-nights subset with the library stack
+        (``earlier_nights_subset``).
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -88,6 +118,7 @@ class ForecastCheck(BaseModel):
     outcome: ForecastOutcome
     reason: str = ""
     evidence: list[MeasurementReference] = Field(default_factory=list)
+    basis: ForecastBasis = ForecastBasis.LATER_STACK
 
     @model_validator(mode="after")
     def _require_reason_unless_as_forecast(self) -> Self:

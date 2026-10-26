@@ -27,7 +27,7 @@ import logging
 import math
 import os
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any, NamedTuple
 
 import numpy as np
@@ -137,7 +137,9 @@ __all__ = [
     "aperture_set_measurement",
     "exposure_group_subject",
     "frame_geometry_measurements",
+    "frame_weight_measurements",
     "gate_for_measurement",
+    "group_summary_measurements",
     "measure_noise_safely",
     "membership_count_measurements",
     "noise_measurements",
@@ -576,6 +578,71 @@ def membership_count_measurements(
     ]
 
 
+def frame_weight_measurements(
+    membership: StackMembership | None,
+    unavailable_reason: str,
+    context: PipelineRunContext,
+    subject_for_frame: Callable[[Any], QualitySubject] | None = None,
+) -> list[QualityMeasurement]:
+    """Build one weight row for each member frame of a stack.
+
+    Parameters
+    ----------
+    membership : `StackMembership` or `None`
+        The stack's members, or `None` when they could not be worked out.
+    unavailable_reason : `str`
+        Why there is no membership (not used when there are members; the
+        count rows say it when there are none).
+    context : `PipelineRunContext`
+        The run's shared facts.
+    subject_for_frame : `Callable`, optional
+        Names the subject of a member's weight row from the member's frame
+        record. Left out, it is the frame's own subject (`frame_subject`),
+        which a library stack uses so that its weights join the frame's other
+        rows. A subset stack passes its own naming, so that its weights never
+        replace the library stack's as the newest row of the same frame.
+
+    Returns
+    -------
+    measurements : `list` of `QualityMeasurement`
+        A weight for each member frame, in member order; empty when there are
+        no members. A weight that is unknown is a not-measured record that
+        still records the membership; a member list that may include frames
+        Siril's filters dropped makes every row ``assumed``.
+    """
+    if membership is None or not membership.members:
+        return []
+    weights = normalized_weights(membership)
+    unknown_reason = membership.weights_reason or "the frames' weights are unknown"
+    uncertain = bool(membership.membership_reason)
+    status = MeasurementStatus.ASSUMED if uncertain else MeasurementStatus.MEASURED
+    rows = []
+    weight_spec = _SPEC_BY_NAME[STACKING_FRAME_WEIGHT]
+    for member, weight in zip(membership.members, weights, strict=True):
+        frame = member.frame
+        if subject_for_frame is None:
+            subject = frame_subject(frame.path, context.target_id, frame.timestamp)
+        else:
+            subject = subject_for_frame(frame)
+        if weight is None:
+            reason = unknown_reason
+            if uncertain:
+                reason += "; " + membership.membership_reason
+            rows.append(build_measurement(weight_spec, None, context, subject, reason=reason))
+        else:
+            rows.append(
+                build_measurement(
+                    weight_spec,
+                    weight,
+                    context,
+                    subject,
+                    reason=membership.membership_reason,
+                    status=status,
+                )
+            )
+    return rows
+
+
 def _membership_measurements(
     membership: StackMembership | None,
     unavailable_reason: str,
@@ -599,38 +666,47 @@ def _membership_measurements(
     -------
     measurements : `list` of `QualityMeasurement`
         The effective frame count and time on the stack, and a weight for each
-        member frame. A weight that is unknown is a not-measured record that
-        still records the membership; a member list that may include frames
-        Siril's filters dropped makes every row ``assumed``.
+        member frame (see `frame_weight_measurements`).
     """
     count_rows = membership_count_measurements(membership, unavailable_reason, context, stack_subject)
-    if membership is None or not membership.members:
-        return count_rows
-    weights = normalized_weights(membership)
-    unknown_reason = membership.weights_reason or "the frames' weights are unknown"
-    uncertain = bool(membership.membership_reason)
-    status = MeasurementStatus.ASSUMED if uncertain else MeasurementStatus.MEASURED
-    rows = count_rows
-    weight_spec = _SPEC_BY_NAME[STACKING_FRAME_WEIGHT]
-    for member, weight in zip(membership.members, weights, strict=True):
-        frame = member.frame
-        subject = frame_subject(frame.path, context.target_id, frame.timestamp)
-        if weight is None:
-            reason = unknown_reason
-            if uncertain:
-                reason += "; " + membership.membership_reason
-            rows.append(build_measurement(weight_spec, None, context, subject, reason=reason))
-        else:
-            rows.append(
-                build_measurement(
-                    weight_spec,
-                    weight,
-                    context,
-                    subject,
-                    reason=membership.membership_reason,
-                    status=status,
-                )
-            )
+    return [*count_rows, *frame_weight_measurements(membership, unavailable_reason, context)]
+
+
+def group_summary_measurements(
+    group: ExposureGroupSummary, context: PipelineRunContext, group_subject: QualitySubject
+) -> list[QualityMeasurement]:
+    """Build the summary rows of one exposure group.
+
+    Parameters
+    ----------
+    group : `ExposureGroupSummary`
+        The group, from the stack's summary.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    group_subject : `QualitySubject`
+        The group's stack (see `exposure_group_subject`).
+
+    Returns
+    -------
+    measurements : `list` of `QualityMeasurement`
+        The group's exposure and frame counts, its brightness gain and the
+        gain applied, and how far it was moved to line up. A number the
+        group does not have is not measured, with a reason.
+    """
+    rows = [
+        _value_measurement(metric_name, getattr(group, field_name), reason, context, group_subject)
+        for field_name, (metric_name, reason) in _GROUP_FIELDS.items()
+    ]
+    shift = group.alignment_shift_pixels
+    rows.append(
+        _value_measurement(
+            STACKING_GROUP_ALIGNMENT_SHIFT_PX,
+            None if not shift else math.hypot(*shift),
+            "this is the reference group, or the group could not be lined up",
+            context,
+            group_subject,
+        )
+    )
     return rows
 
 
@@ -687,20 +763,7 @@ def stacking_measurements(
 
     for index, group in enumerate(metrics.exposure_groups):
         group_subject = exposure_group_subject(context, stack_file_name, group, index)
-        for field_name, (metric_name, reason) in _GROUP_FIELDS.items():
-            measurements.append(
-                _value_measurement(metric_name, getattr(group, field_name), reason, context, group_subject)
-            )
-        shift = group.alignment_shift_pixels
-        measurements.append(
-            _value_measurement(
-                STACKING_GROUP_ALIGNMENT_SHIFT_PX,
-                None if not shift else math.hypot(*shift),
-                "this is the reference group, or the group could not be lined up",
-                context,
-                group_subject,
-            )
-        )
+        measurements.extend(group_summary_measurements(group, context, group_subject))
 
     for gate in summary.gates:
         metric_name = GATE_METRIC_BY_NAME.get(gate.name)

@@ -2423,7 +2423,8 @@ export interface QualityLimit {
  * focal_length_mm : `float` or `None`
  * The focal length in millimeters.
  * pixel_scale_arcsec : `float` or `None`
- * The size of one pixel on the sky, in arcseconds per pixel.
+ * The size of one pixel on the sky, in arcseconds per pixel, rounded to
+ * `PIXEL_SCALE_SIGNIFICANT_FIGURES` significant figures.
  * filter_name : `str` or `None`
  * The filter in the light path, such as ``"L"`` or ``"Ha"``.
  * exposure_seconds : `float` or `None`
@@ -3955,6 +3956,10 @@ export interface StartingPoint {
  * arrived as forecast.
  * evidence : `list` [`MeasurementReference`]
  * The measurements the check used.
+ * basis : `ForecastBasis`
+ * Whether the check compared two library stacks (``later_stack``) or an
+ * earlier-nights subset with the library stack
+ * (``earlier_nights_subset``).
  */
 export interface ForecastCheck {
   stackRunId?: string | null;
@@ -3966,6 +3971,7 @@ export interface ForecastCheck {
   outcome: ForecastOutcome;
   reason?: string;
   evidence?: MeasurementReference[];
+  basis?: ForecastBasis;
 }
 
 /**
@@ -4744,6 +4750,19 @@ export enum ForecastOutcome {
 }
 
 /**
+ * What the later stack of a forecast check is compared with.
+ *
+ * ``later_stack`` is a check of two library stacks, the later one holding
+ * new frames. ``earlier_nights_subset`` is a check made from frames already
+ * taken: the stack of all observing nights but the last against the library
+ * stack of all nights.
+ */
+export enum ForecastBasis {
+  LATER_STACK = "later_stack",
+  EARLIER_NIGHTS_SUBSET = "earlier_nights_subset"
+}
+
+/**
  * What a target is observed for. Each use has its own ranked list.
  */
 export enum RankedUse {
@@ -4796,6 +4815,11 @@ export enum RankedUse {
  * ranked one. Empty when there is nothing to add.
  * confidence : `Confidence`
  * Always ``design_estimate`` today.
+ * forecast_gate : `ForecastGate`
+ * Whether the target's "take N more" count is confirmed by a check of two
+ * library stacks, exploratory (only a check made from frames already
+ * taken agreed), or closed (no check agreed). An exploratory target
+ * ranks below a confirmed or closed one of about the same gain.
  * register_entry : `str`
  * The validation register entry behind the ranking.
  * evidence : `list` [`MeasurementReference`]
@@ -4818,6 +4842,7 @@ export interface RankedCandidate {
   thinDataset?: boolean;
   reason?: string;
   confidence?: Confidence;
+  forecastGate?: ForecastGate;
   registerEntry?: string;
   evidence?: MeasurementReference[];
 }
@@ -5009,6 +5034,19 @@ export enum CandidateStatus {
   STOPPED = "stopped",
   NEW = "new",
   NO_FORECAST = "no_forecast"
+}
+
+/**
+ * Whether "take N more" may be shown for a target, and on what footing.
+ *
+ * ``closed`` hides the count. ``exploratory`` shows it after a check made
+ * from frames already taken agreed; the next real stack confirms or closes
+ * it. ``confirmed`` shows it after a check of two library stacks agreed.
+ */
+export enum ForecastGate {
+  CLOSED = "closed",
+  EXPLORATORY = "exploratory",
+  CONFIRMED = "confirmed"
 }
 
 /**

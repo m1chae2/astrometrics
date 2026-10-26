@@ -43,6 +43,7 @@ from typing import Any
 import numpy as np
 
 from astrometricslib import (
+    EARLIER_NIGHTS_VARIANT,
     AstrometricsError,
     CaptureSetting,
     QualityMeasurement,
@@ -51,6 +52,7 @@ from astrometricslib import (
     frame_subject_id,
 )
 from wayfindinglib.analytics.result_quality.capture_overheads import EXPOSURE_MATCH_SECONDS
+from wayfindinglib.models.planning.target_report import ForecastGate
 from wayfindinglib.models.session.observation_session import ObservationSession
 
 logger = logging.getLogger(__name__)
@@ -114,6 +116,125 @@ def read_target_rows(astrometrics: Any, target_id: str) -> TargetRows:
     })
     settings = dict(astrometrics.quality.capture_settings(ids=ids)) if ids else {}
     return TargetRows(rows=rows, settings=settings)
+
+
+def read_earlier_nights_rows(astrometrics: Any, target_id: str) -> list[QualityMeasurement]:
+    """Read the stored rows of a target's earlier-nights subset stacks.
+
+    The subset stack (all observing nights but the last) keeps its rows apart
+    from the library stack's: they carry the variant `EARLIER_NIGHTS_VARIANT`,
+    which a read of the library's own rows leaves out. Every run is kept.
+    Only the stack-level rows and the per-frame weights are read, which is
+    what the forecast check needs.
+
+    Parameters
+    ----------
+    astrometrics : `Astrometrics`
+        The science library handle.
+    target_id : `str`
+        The target.
+
+    Returns
+    -------
+    rows : `list` [`QualityMeasurement`]
+        The rows; empty when the target has no subset stack.
+    """
+    return [
+        *astrometrics.quality.query(
+            target_id=target_id, level="stack", variant=EARLIER_NIGHTS_VARIANT, latest_only=False
+        ),
+        *astrometrics.quality.query(
+            target_id=target_id,
+            level="frame",
+            metric=FRAME_WEIGHT_METRIC,
+            variant=EARLIER_NIGHTS_VARIANT,
+            latest_only=False,
+        ),
+    ]
+
+
+def read_forecast_runs(
+    astrometrics: Any, target_id: str, library_rows: Iterable[QualityMeasurement]
+) -> list[Any]:
+    """Build a target's stack runs, with the subset runs and calibration.
+
+    Parameters
+    ----------
+    astrometrics : `Astrometrics`
+        The science library handle.
+    target_id : `str`
+        The target.
+    library_rows : `Iterable` [`QualityMeasurement`]
+        The target's library stack rows and frame weights with every run kept
+        (``latest_only=False``, ``library_only=True``).
+
+    Returns
+    -------
+    runs : `list` [`StackRunRecord`]
+        The library runs and the earlier-nights subset runs, oldest first,
+        each with its calibration record where one is stored. A library
+        without ``calibration_identities`` (an old one) gives runs with none,
+        and the forecast check then counts them as confounded.
+    """
+    from wayfindinglib.analytics.result_quality.forecast import (
+        attach_calibration_identities,
+        stack_runs_from_measurements,
+    )
+
+    reader = getattr(astrometrics.quality, "calibration_identities", None)
+    identities = list(reader(target_id=target_id)) if callable(reader) else []
+    runs = stack_runs_from_measurements(
+        [*library_rows, *read_earlier_nights_rows(astrometrics, target_id)], include_earlier_nights=True
+    )
+    return attach_calibration_identities(runs, identities)
+
+
+def forecast_gate_of_target(
+    astrometrics: Any,
+    target_id: str,
+    library_rows: Iterable[QualityMeasurement],
+    observations: Sequence[Any],
+    *,
+    configured_stack_weight: str | None = None,
+    electrons_per_adu: float | None = None,
+) -> ForecastGate:
+    """Work out whether "take N more" is open for a target.
+
+    The target report and tonight's ranking both use this, so they agree.
+
+    Parameters
+    ----------
+    astrometrics : `Astrometrics`
+        The science library handle.
+    target_id : `str`
+        The target.
+    library_rows : `Iterable` [`QualityMeasurement`]
+        The target's library stack rows and frame weights, every run kept.
+    observations : `Sequence` [`FrameObservation`]
+        The target's frames.
+    configured_stack_weight : `str` or `None`, optional
+        The configured stacker weight mode.
+    electrons_per_adu : `float`, optional
+        The camera gain, for the frame noise of a group the new frames start.
+
+    Returns
+    -------
+    gate : `ForecastGate`
+        ``closed``, ``exploratory`` or ``confirmed`` (`forecast_gate_state`).
+    """
+    from wayfindinglib.analytics.result_quality.forecast import forecast_check, forecast_gate_state
+
+    runs = read_forecast_runs(astrometrics, target_id, library_rows)
+    if not runs:
+        return ForecastGate.CLOSED
+    return forecast_gate_state(
+        forecast_check(
+            runs,
+            observations,
+            configured_stack_weight=configured_stack_weight,
+            electrons_per_adu=electrons_per_adu,
+        )
+    )
 
 
 def frame_altitudes(target: Target) -> dict[str, float]:

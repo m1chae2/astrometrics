@@ -18,6 +18,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from astrometricslib import (
+    EARLIER_NIGHTS_VARIANT,
     Astrometrics,
     CaptureSetting,
     MeasurementOrigin,
@@ -46,7 +47,13 @@ from wayfindinglib.analytics.result_quality.noise_growth import (
     measure_stack_noise_floor,
     noise_ratio_with_floor,
 )
-from wayfindinglib.models.planning.target_report import ForecastOutcome
+from wayfindinglib.models.planning.target_report import (
+    ForecastBasis,
+    ForecastCheck,
+    ForecastedChange,
+    ForecastGate,
+    ForecastOutcome,
+)
 
 SETTING = CaptureSetting(camera="CamA", telescope="Scope", filter_name="L", exposure_seconds=60.0)
 START = datetime(2026, 10, 1, 4, 0, tzinfo=UTC)
@@ -1356,3 +1363,488 @@ def test_a_folded_group_whose_reference_exposure_row_was_not_measured_is_not_che
 
     assert check.outcome == ForecastOutcome.NOT_CHECKABLE
     assert "reference-frame exposure" in check.reason
+
+
+# ---------------------------------------------------------------------------
+# Decision D11: the earlier-nights subset as the earlier member of a pair
+# ---------------------------------------------------------------------------
+
+
+def _as_subset_rows(rows: list[QualityMeasurement]) -> list[QualityMeasurement]:
+    """Put the stack-level rows of a run on the earlier-nights subject.
+
+    Parameters
+    ----------
+    rows : `list` [`QualityMeasurement`]
+        The rows `_run_rows` or `_group_run_rows` made.
+
+    Returns
+    -------
+    rows : `list` [`QualityMeasurement`]
+        Copies whose stack-level subjects carry the earlier-nights variant.
+        Frame rows are left as they are.
+    """
+    subset = []
+    for row in rows:
+        if row.subject.level == SubjectLevel.STACK:
+            subject = row.subject.model_copy(update={"variant": EARLIER_NIGHTS_VARIANT})
+            row = row.model_copy(update={"subject": subject})
+        subset.append(row)
+    return subset
+
+
+def _subset_pair(runs: list[fc.StackRunRecord]) -> list[fc.StackRunRecord]:
+    """Mark the first of two runs as the earlier-nights subset.
+
+    Parameters
+    ----------
+    runs : `list` [`StackRunRecord`]
+        Two runs, the earlier holding the frames of the earlier nights.
+
+    Returns
+    -------
+    runs : `list` [`StackRunRecord`]
+        The same runs with the first marked as a subset.
+    """
+    return [runs[0].model_copy(update={"is_earlier_nights_subset": True}), runs[1]]
+
+
+def _check_of(outcome: ForecastOutcome, basis: ForecastBasis) -> ForecastCheck:
+    """Build a made-up forecast check.
+
+    Parameters
+    ----------
+    outcome : `ForecastOutcome`
+        The outcome.
+    basis : `ForecastBasis`
+        What the check compared.
+
+    Returns
+    -------
+    check : `ForecastCheck`
+        The check.
+    """
+    change = ForecastedChange(noiseChangeFraction=-0.2, tolerance=0.05)
+    return ForecastCheck(
+        stackRunId="r",
+        forecastWhenPlanned=change,
+        forecastGivenFramesTaken=change,
+        measured=change,
+        weightingMode="equal",
+        paired=False,
+        outcome=outcome,
+        reason="" if outcome == ForecastOutcome.AS_FORECAST else "made up",
+        basis=basis,
+    )
+
+
+def test_the_earlier_nights_run_is_read_and_marked() -> None:
+    """The subset run is built and marked on request, else left out."""
+    library = _run_rows("lib", 5, ["a0", "a1", "b0", "b1"], [1.0] * 4, 0.007, row_id=2)
+    subset = _as_subset_rows(_run_rows("sub", 5, ["a0", "a1"], [1.0, 1.0], 0.010, row_id=3))
+    other = _row(fc.NORMALIZED_NOISE_METRIC, "T/other", 0.02, "other", START, variant="without_night_1")
+
+    default_runs = fc.stack_runs_from_measurements([*library, *subset, other])
+    with_subset = fc.stack_runs_from_measurements([*library, *subset, other], include_earlier_nights=True)
+
+    assert [run.run_id for run in default_runs] == ["lib"]
+    assert {run.run_id: run.is_earlier_nights_subset for run in with_subset} == {"lib": False, "sub": True}
+    subset_run = next(run for run in with_subset if run.is_earlier_nights_subset)
+    assert subset_run.member_frame_ids == ["a0", "a1"]
+    assert subset_run.normalized_noise == pytest.approx(0.010)
+    assert subset_run.aperture_identity == APERTURE_SET
+    assert fc.library_runs(with_subset)[0].run_id == "lib"
+
+
+def test_a_subset_pair_is_checked_and_labeled() -> None:
+    """A subset and its library stack make a labeled check."""
+    runs, observations = _plain_pair()
+
+    (check,) = fc.forecast_check(_subset_pair(runs), observations)
+
+    assert check.outcome == ForecastOutcome.AS_FORECAST
+    assert check.basis == ForecastBasis.EARLIER_NIGHTS_SUBSET
+    assert check.stack_run_id == "run2"
+
+
+def test_two_library_stacks_keep_the_later_stack_label() -> None:
+    """A pair of library stacks is labeled as before."""
+    runs, observations = _plain_pair()
+
+    (check,) = fc.forecast_check(runs, observations)
+
+    assert check.basis == ForecastBasis.LATER_STACK
+
+
+def test_added_frames_older_than_the_subset_run_are_fine_for_a_subset() -> None:
+    """Only the night order matters, not the stacks' made times."""
+    runs, observations = _plain_pair()
+    assert (
+        max(o.start_epoch_seconds or 0.0 for o in observations) < runs[0].measured_at.timestamp() + 10 * 86400
+    )
+
+    (check,) = fc.forecast_check(_subset_pair(runs), observations)
+
+    assert check.outcome == ForecastOutcome.AS_FORECAST
+
+
+def test_a_frame_from_the_same_night_as_the_subset_is_not_checkable() -> None:
+    """An added frame must be from a later observing night."""
+    runs, observations = _plain_pair(new_frame_epoch=OLD_FRAME_EPOCH + 3600.0)
+
+    (check,) = fc.forecast_check(_subset_pair(runs), observations)
+
+    assert check.outcome == ForecastOutcome.NOT_CHECKABLE
+    assert "not from a later observing night" in check.reason
+    assert check.basis == ForecastBasis.EARLIER_NIGHTS_SUBSET
+
+
+def test_a_subset_pair_needs_start_times_for_added_and_subset_frames() -> None:
+    """Without a start time the night order cannot be shown."""
+    runs, observations = _plain_pair()
+    no_new_time = [
+        o.model_copy(update={"start_epoch_seconds": None}) if o.frame_id.startswith("b") else o
+        for o in observations
+    ]
+    no_old_time = [
+        o.model_copy(update={"start_epoch_seconds": None}) if o.frame_id == "a0" else o for o in observations
+    ]
+
+    (new_check,) = fc.forecast_check(_subset_pair(runs), no_new_time)
+    (old_check,) = fc.forecast_check(_subset_pair(runs), no_old_time)
+
+    assert new_check.outcome == ForecastOutcome.NOT_CHECKABLE
+    assert "have no start time" in new_check.reason
+    assert old_check.outcome == ForecastOutcome.NOT_CHECKABLE
+    assert "has no start time" in old_check.reason
+
+
+def test_a_subset_with_a_frame_the_library_stack_lacks_is_not_checkable() -> None:
+    """A subset not cut from the library stack is not compared."""
+    runs, observations = _plain_pair()
+    subset, library = _subset_pair(runs)
+    changed = subset.model_copy(update={"member_frame_ids": ["z0", *subset.member_frame_ids[1:]]})
+    observations = [*observations, _observation("z0")]
+
+    (check,) = fc.forecast_check([changed, library], observations)
+
+    assert check.outcome == ForecastOutcome.NOT_CHECKABLE
+    assert "was not cut from that stack" in check.reason
+
+
+@pytest.mark.parametrize(
+    ("first_identity", "second_identity", "changes", "expected_text"),
+    [
+        (OTHER_APERTURE_SET, APERTURE_SET, {}, "different aperture sets"),
+        (None, APERTURE_SET, {}, "has no aperture-set identity"),
+        (APERTURE_SET, APERTURE_SET, {"run1": {"flat": "flat_2.fits"}}, "The flat master changed"),
+        (APERTURE_SET, APERTURE_SET, {"run2": {"bias": "bias_2.fits"}}, "The bias master changed"),
+        (APERTURE_SET, APERTURE_SET, {"run2": {"siril": "1.5.0"}}, "The Siril version changed"),
+        (APERTURE_SET, APERTURE_SET, {"run2": {"algorithm": 8}}, "The stacking algorithm version changed"),
+    ],
+)
+def test_each_confound_still_applies_to_a_subset_pair(
+    first_identity: str | None,
+    second_identity: str,
+    changes: dict[str, dict[str, object]],
+    expected_text: str,
+) -> None:
+    """The aperture, calibration and software rules hold for a subset."""
+    runs, observations = _plain_pair(
+        run1_identity=first_identity, run2_identity=second_identity, calibration_changes=changes
+    )
+
+    (check,) = fc.forecast_check(_subset_pair(runs), observations)
+
+    assert check.outcome == ForecastOutcome.NOT_CHECKABLE
+    assert expected_text in check.reason
+    assert check.basis == ForecastBasis.EARLIER_NIGHTS_SUBSET
+
+
+def test_a_subset_pair_with_no_calibration_record_or_another_noise_definition_is_confounded() -> None:
+    """A missing calibration record or a new noise definition confounds."""
+    runs, observations = _plain_pair(attach=False)
+    (no_record,) = fc.forecast_check(_subset_pair(runs), observations)
+    runs, observations = _plain_pair()
+    subset, library = _subset_pair(runs)
+    changed = subset.model_copy(update={"noise_definition_version": 4})
+
+    (other_definition,) = fc.forecast_check([changed, library], observations)
+
+    assert "has no calibration record" in no_record.reason
+    assert "definition version 4 for run run1 and 3 for run run2" in other_definition.reason
+
+
+def test_a_subset_pair_of_groups_follows_the_group_model_and_its_heaviest_group_rule() -> None:
+    """A group subset uses the group model and the heaviest group rule."""
+    runs, observations = _group_pair(_group_frames("b60_", 10, 60.0))
+    (agreeing,) = fc.forecast_check(_subset_pair(runs), observations)
+    runs, observations = _group_pair(_group_frames("b30_", 60, 30.0))
+
+    (heavier,) = fc.forecast_check(_subset_pair(runs), observations)
+
+    assert agreeing.outcome == ForecastOutcome.AS_FORECAST
+    assert agreeing.weighting_mode == "group"
+    assert agreeing.basis == ForecastBasis.EARLIER_NIGHTS_SUBSET
+    assert heavier.outcome == ForecastOutcome.NOT_CHECKABLE
+    assert "heaviest exposure group changed from 60 s to 30 s" in heavier.reason
+
+
+def _three_stacks(later_ratio: float) -> tuple[list[fc.StackRunRecord], list[FrameObservation]]:
+    """Build a subset, its library stack and a later library stack.
+
+    The subset (run ``sub``) and the library stack (run ``lib1``) were made on
+    day 5; ``lib2`` was made on day 10 with 10 new frames.
+
+    Parameters
+    ----------
+    later_ratio : `float`
+        The measured noise of ``lib2`` over ``lib1``'s.
+
+    Returns
+    -------
+    runs, observations : `tuple`
+        The runs, with calibration records, and the frames.
+    """
+    night_one = _dark(20, "a")
+    night_two = [_observation(f"b{i}") for i in range(20)]
+    night_three = [
+        _observation(f"c{i}", start_epoch_seconds=(START + timedelta(days=7)).timestamp()) for i in range(10)
+    ]
+    ids_one = [o.frame_id for o in night_one]
+    ids_two = ids_one + [o.frame_id for o in night_two]
+    ids_three = ids_two + [o.frame_id for o in night_three]
+    lib1_noise = 0.010 * 0.5**0.5
+    rows = _as_subset_rows(_run_rows("sub", 5, ids_one, [1.0] * 20, 0.010, row_id=1))
+    rows += _run_rows("lib1", 5, ids_two, [1.0] * 40, lib1_noise, row_id=2)
+    rows += _run_rows(
+        "lib2", 10, ids_three, [1.0] * 50, lib1_noise * later_ratio * (40 / 50) ** 0.5, row_id=3
+    )
+    runs = fc.stack_runs_from_measurements(rows, include_earlier_nights=True)
+    records = [_calibration(run.run_id) for run in runs]
+    return fc.attach_calibration_identities(runs, records), night_one + night_two + night_three
+
+
+def test_the_subset_pairs_with_the_library_run_it_was_cut_from() -> None:
+    """The subset pairs with ``lib1``, not with the later ``lib2``."""
+    runs, _observations = _three_stacks(1.0)
+
+    ((subset, library),) = fc.subset_pairs(runs)
+
+    assert (subset.run_id, library.run_id) == ("sub", "lib1")
+
+
+def test_checks_come_in_time_order_with_the_subset_check_first_at_one_stack() -> None:
+    """The subset check of ``lib1`` comes before the check ``lib2`` makes."""
+    runs, observations = _three_stacks(1.0)
+
+    checks = fc.forecast_check(runs, observations)
+
+    assert [(c.stack_run_id, c.basis) for c in checks] == [
+        ("lib1", ForecastBasis.EARLIER_NIGHTS_SUBSET),
+        ("lib2", ForecastBasis.LATER_STACK),
+    ]
+    assert all(c.outcome == ForecastOutcome.AS_FORECAST for c in checks)
+    assert fc.forecast_gate_state(checks) == ForecastGate.CONFIRMED
+
+
+def test_a_later_real_check_that_agrees_confirms_the_gate() -> None:
+    """A subset check opens the gate as exploratory; a real one confirms."""
+    runs, observations = _three_stacks(1.0)
+    only_subset = fc.forecast_check(runs[:2], observations)
+
+    assert fc.forecast_gate_state(only_subset) == ForecastGate.EXPLORATORY
+    assert fc.forecast_gate_state(fc.forecast_check(runs, observations)) == ForecastGate.CONFIRMED
+
+
+def test_a_later_real_check_that_disagrees_closes_the_gate() -> None:
+    """A real check that falls short closes the gate again."""
+    runs, observations = _three_stacks(1.3)
+
+    checks = fc.forecast_check(runs, observations)
+
+    assert checks[0].outcome == ForecastOutcome.AS_FORECAST
+    assert checks[1].outcome in (ForecastOutcome.SHORT_UNKNOWN_REASON, ForecastOutcome.SHORT_KNOWN_REASON)
+    assert fc.forecast_gate_state(checks) == ForecastGate.CLOSED
+
+
+def test_a_subset_with_no_library_run_makes_no_pair() -> None:
+    """A subset alone has nothing to be compared with."""
+    runs, observations = _three_stacks(1.0)
+
+    assert fc.subset_pairs(runs[:1]) == []
+    assert fc.forecast_check(runs[:1], observations) == []
+
+
+@pytest.mark.parametrize(
+    ("sequence", "expected"),
+    [
+        ([], ForecastGate.CLOSED),
+        ([(ForecastOutcome.AS_FORECAST, ForecastBasis.LATER_STACK)], ForecastGate.CONFIRMED),
+        ([(ForecastOutcome.SHORT_UNKNOWN_REASON, ForecastBasis.LATER_STACK)], ForecastGate.CLOSED),
+        ([(ForecastOutcome.AS_FORECAST, ForecastBasis.EARLIER_NIGHTS_SUBSET)], ForecastGate.EXPLORATORY),
+        ([(ForecastOutcome.SHORT_KNOWN_REASON, ForecastBasis.EARLIER_NIGHTS_SUBSET)], ForecastGate.CLOSED),
+        ([(ForecastOutcome.NOT_CHECKABLE, ForecastBasis.EARLIER_NIGHTS_SUBSET)], ForecastGate.CLOSED),
+        (
+            [
+                (ForecastOutcome.AS_FORECAST, ForecastBasis.EARLIER_NIGHTS_SUBSET),
+                (ForecastOutcome.AS_FORECAST, ForecastBasis.LATER_STACK),
+            ],
+            ForecastGate.CONFIRMED,
+        ),
+        (
+            [
+                (ForecastOutcome.AS_FORECAST, ForecastBasis.EARLIER_NIGHTS_SUBSET),
+                (ForecastOutcome.SHORT_UNKNOWN_REASON, ForecastBasis.LATER_STACK),
+            ],
+            ForecastGate.CLOSED,
+        ),
+        (
+            [
+                (ForecastOutcome.AS_FORECAST, ForecastBasis.EARLIER_NIGHTS_SUBSET),
+                (ForecastOutcome.NOT_CHECKABLE, ForecastBasis.LATER_STACK),
+            ],
+            ForecastGate.EXPLORATORY,
+        ),
+        (
+            [
+                (ForecastOutcome.SHORT_UNKNOWN_REASON, ForecastBasis.LATER_STACK),
+                (ForecastOutcome.AS_FORECAST, ForecastBasis.EARLIER_NIGHTS_SUBSET),
+            ],
+            ForecastGate.EXPLORATORY,
+        ),
+        (
+            [
+                (ForecastOutcome.AS_FORECAST, ForecastBasis.LATER_STACK),
+                (ForecastOutcome.SHORT_UNKNOWN_REASON, ForecastBasis.EARLIER_NIGHTS_SUBSET),
+            ],
+            ForecastGate.CONFIRMED,
+        ),
+        (
+            [
+                (ForecastOutcome.AS_FORECAST, ForecastBasis.EARLIER_NIGHTS_SUBSET),
+                (ForecastOutcome.SHORT_UNKNOWN_REASON, ForecastBasis.EARLIER_NIGHTS_SUBSET),
+            ],
+            ForecastGate.CLOSED,
+        ),
+    ],
+)
+def test_the_gate_state_follows_the_checks_in_order(
+    sequence: list[tuple[ForecastOutcome, ForecastBasis]], expected: ForecastGate
+) -> None:
+    """The gate state follows the order of agreeing and failing checks."""
+    checks = [_check_of(outcome, basis) for outcome, basis in sequence]
+
+    assert fc.forecast_gate_state(checks) == expected
+
+
+def _rows_as_the_library_writes_a_subset(rows: list[QualityMeasurement]) -> list[QualityMeasurement]:
+    """Put a run's rows on the subjects the science library gives a subset.
+
+    The formats are the library's: the subset stack's own subject
+    ``T/_subsets/earlier-nights/earlier-nights.fits`` and a frame weight on
+    ``<frame id>#earlier-nights``, all with the variant. The library does not
+    export the frame-id helper at its top level, so the format is copied.
+
+    Parameters
+    ----------
+    rows : `list` [`QualityMeasurement`]
+        The rows `_run_rows` made for the subset's run.
+
+    Returns
+    -------
+    rows : `list` [`QualityMeasurement`]
+        Copies on the subset's subjects.
+    """
+    moved = []
+    for row in rows:
+        if row.subject.level == SubjectLevel.STACK:
+            subject_id = f"T/_subsets/{EARLIER_NIGHTS_VARIANT}/{EARLIER_NIGHTS_VARIANT}.fits"
+        else:
+            subject_id = f"{row.subject.subject_id}#{EARLIER_NIGHTS_VARIANT}"
+        subject = row.subject.model_copy(update={"subject_id": subject_id, "variant": EARLIER_NIGHTS_VARIANT})
+        moved.append(row.model_copy(update={"subject": subject}))
+    return moved
+
+
+class _StoreStandIn:
+    """The ``quality`` part of the science library, over made-up rows."""
+
+    def __init__(self, rows: list[QualityMeasurement], identities: list[CalibrationIdentities]) -> None:
+        """Keep the rows and the calibration records.
+
+        Parameters
+        ----------
+        rows : `list` [`QualityMeasurement`]
+            Every stored row.
+        identities : `list` [`CalibrationIdentities`]
+            The stored calibration records.
+        """
+        self._rows = rows
+        self._identities = identities
+
+    def query(
+        self,
+        metric: str | None = None,
+        level: str | None = None,
+        variant: str | None = None,
+        library_only: bool = False,
+        **_: object,
+    ) -> list[QualityMeasurement]:
+        """Answer ``quality.query`` the way the library does for these filters.
+
+        Returns
+        -------
+        rows : `list` [`QualityMeasurement`]
+            The rows that match.
+        """
+        return [
+            row
+            for row in self._rows
+            if (metric is None or row.metric == metric)
+            and (level is None or row.subject.level.value == level)
+            and (variant is None or row.subject.variant == variant)
+            and not (library_only and row.subject.variant is not None)
+        ]
+
+    def calibration_identities(self, **_: object) -> list[CalibrationIdentities]:
+        """Give the stored calibration records.
+
+        Returns
+        -------
+        records : `list` [`CalibrationIdentities`]
+            The records.
+        """
+        return self._identities
+
+
+def test_rows_as_the_library_writes_a_subset_give_an_exploratory_gate() -> None:
+    """Subset rows as the library writes them give an exploratory gate."""
+    from types import SimpleNamespace
+
+    from wayfindinglib.tasks.planning_tasks.target_report_inputs import forecast_gate_of_target
+
+    old = _dark(20, "a")
+    new = [_observation(f"b{i}") for i in range(20)]
+    everyone = old + new
+    library_rows = _run_rows(
+        "run2", 5, [o.frame_id for o in everyone], [1.0] * 40, 0.010 * 0.5**0.5, row_id=2
+    )
+    subset_rows = _rows_as_the_library_writes_a_subset(
+        _run_rows("sub", 5, [o.frame_id for o in old], [1.0] * 20, 0.010, row_id=1)
+    )
+    subset_subject = f"T/_subsets/{EARLIER_NIGHTS_VARIANT}/{EARLIER_NIGHTS_VARIANT}.fits"
+    identities = [
+        _calibration("run2"),
+        _calibration("sub").model_copy(update={"subject_id": subset_subject}),
+    ]
+    store = _StoreStandIn([*library_rows, *subset_rows], identities)
+    astrometrics = SimpleNamespace(quality=store)
+
+    runs = fc.stack_runs_from_measurements([*library_rows, *subset_rows], include_earlier_nights=True)
+    subset = next(run for run in runs if run.is_earlier_nights_subset)
+    gate = forecast_gate_of_target(astrometrics, "T", store.query(library_only=True), everyone)
+
+    assert subset.stack_subject_id == subset_subject
+    assert subset.member_frame_ids == sorted(o.frame_id for o in old)
+    assert gate == ForecastGate.EXPLORATORY

@@ -77,6 +77,8 @@ from wayfindinglib.analytics.result_quality.evidence_order import order_statemen
 from wayfindinglib.analytics.result_quality.forecast import (
     StackRunRecord,
     camera_gain_for_setting,
+    forecast_gate_state,
+    library_runs,
     noise_floor_for_runs,
     stack_frames_from_observations,
     stack_groups_of_run,
@@ -110,6 +112,10 @@ from wayfindinglib.analytics.result_quality.noise_growth import (
     predict_weighting_mode,
 )
 from wayfindinglib.analytics.result_quality.report_rules import (
+    FLOOR_CALIBRATION_TEXT,
+    FLOOR_NOT_REMOVED_TEXT,
+    PLAIN_FLOOR_CALIBRATION_TEXT,
+    PLAIN_FLOOR_NOT_REMOVED_TEXT,
     AltitudeSample,
     LightFrameGroup,
     altitude_cost_statement,
@@ -146,7 +152,9 @@ from wayfindinglib.analytics.result_quality.starting_point import (
 )
 from wayfindinglib.models.planning.target_report import (
     ContextReading,
+    ForecastBasis,
     ForecastCheck,
+    ForecastGate,
     ForecastOutcome,
     ScienceOutcomeSummary,
     StartingPoint,
@@ -168,6 +176,7 @@ from wayfindinglib.tasks.planning_tasks.target_report_inputs import (
     frame_sensor_temperatures,
     median_or_none,
     read_calibration_rows,
+    read_forecast_runs,
     read_target_rows,
     sessions_of_target,
 )
@@ -563,6 +572,37 @@ decision U1) that the number of frames is shown for a target only after one of
 THAT target's forecast checks came out as forecast."""
 
 
+EXPLORATORY_COUNT_SENTENCE = (
+    "This count is exploratory. It rests on a check made from frames already taken (the stack of all "
+    "nights but the last against the stack of all nights), not on a new stack. The next real stack will "
+    "confirm it or close it again."
+)
+"""What a "take N more" statement says when only an earlier-nights check
+agreed. The user decided on 2026-10-26 (issue #134, decision D11) that such a
+count is shown, marked exploratory, and ranked below a count that a real later
+stack confirmed."""
+
+
+def _forecast_gate_state(forecast_checks: Sequence[ForecastCheck]) -> ForecastGate:
+    """Say whether "take N more" may be shown, and on what footing.
+
+    Parameters
+    ----------
+    forecast_checks : `Sequence` [`ForecastCheck`]
+        The target's own forecast checks, oldest first
+        (`forecast.forecast_check`).
+
+    Returns
+    -------
+    gate : `ForecastGate`
+        ``confirmed`` once a check of two library stacks agreed;
+        ``exploratory`` when only a check made from frames already taken
+        agreed (and no real check has disagreed since); else ``closed``. See
+        `forecast.forecast_gate_state`.
+    """
+    return forecast_gate_state(forecast_checks)
+
+
 def _forecast_gate_open(forecast_checks: Sequence[ForecastCheck]) -> bool:
     """Say whether "take N more" may be shown for the target.
 
@@ -574,9 +614,47 @@ def _forecast_gate_open(forecast_checks: Sequence[ForecastCheck]) -> bool:
     Returns
     -------
     open : `bool`
-        `True` once at least one check has the outcome ``as_forecast``.
+        `True` when the gate is confirmed or exploratory.
     """
-    return any(check.outcome == ForecastOutcome.AS_FORECAST for check in forecast_checks)
+    return _forecast_gate_state(forecast_checks) != ForecastGate.CLOSED
+
+
+def _mark_exploratory(statements: Sequence[TargetStatement]) -> list[TargetStatement]:
+    """Say on each "take N more" count that it is exploratory.
+
+    The confidence stays ``design_estimate``, which is what the rule already
+    carries, and no new confidence label exists. The sentence goes on the
+    message, the plain message and the reason, and the statement's values name
+    the basis (``count_basis`` is ``"exploratory"``).
+
+    Parameters
+    ----------
+    statements : `Sequence` [`TargetStatement`]
+        The statements made for one setting.
+
+    Returns
+    -------
+    statements : `list` [`TargetStatement`]
+        The same statements; each ``more_frames`` recommendation carries the
+        sentence.
+    """
+    marked = []
+    for statement in statements:
+        if statement.rule == "more_frames" and statement.kind == StatementKind.RECOMMENDATION:
+            statement = statement.model_copy(
+                update={
+                    "message": f"{statement.message} {EXPLORATORY_COUNT_SENTENCE}",
+                    "plain_message": (
+                        f"{statement.plain_message} {EXPLORATORY_COUNT_SENTENCE}".strip()
+                        if statement.plain_message
+                        else ""
+                    ),
+                    "reason": f"{statement.reason} {EXPLORATORY_COUNT_SENTENCE}".strip(),
+                    "values": {**statement.values, "count_basis": ForecastGate.EXPLORATORY.value},
+                }
+            )
+        marked.append(statement)
+    return marked
 
 
 def _more_frames_gate_statement(
@@ -603,6 +681,11 @@ def _more_frames_gate_statement(
     if forecast_checks:
         tried = ", ".join(sorted({check.outcome.value for check in forecast_checks}))
         history = f" {len(forecast_checks)} check(s) so far came out as: {tried}."
+        from_frames_taken = sum(
+            1 for check in forecast_checks if check.basis == ForecastBasis.EARLIER_NIGHTS_SUBSET
+        )
+        if from_frames_taken:
+            history += f" {from_frames_taken} of them were made from frames already taken (earlier nights)."
         not_checkable = [check for check in forecast_checks if check.outcome == ForecastOutcome.NOT_CHECKABLE]
         if not_checkable and not _forecast_gate_open(forecast_checks):
             history += f" The latest one that could not be made: {not_checkable[-1].reason}"
@@ -872,7 +955,9 @@ def _more_frames_for_setting(
         for row in rows
         if row.subject.subject_id in used_ids and row.metric in (SKY_RATE_METRIC, READ_NOISE_METRIC)
     ])
-    if result.floor_limited:
+    if (result.practical_limit_applied and not result.doubling_worthwhile) or (
+        result.floor_limited and not result.practical_limit_applied
+    ):
         floor_evidence = (
             [MeasurementReference(row_id=newest_run.noise_row_id)]
             if newest_run is not None and newest_run.noise_row_id is not None
@@ -880,11 +965,49 @@ def _more_frames_for_setting(
         )
         return [floor_limited_statement(result, setting, floor_evidence)]
     statement = more_frames_statement(result, setting, overheads, evidence, exposure_note=note)
-    if statement is None or result.frames_needed is None or result.new_exposure_seconds is None:
+    frame_count = result.doubling_frames if result.practical_limit_applied else result.frames_needed
+    if statement is None or frame_count is None or result.new_exposure_seconds is None:
         return [
             insufficient("more_frames", result.reason or "The number of frames could not be found.", setting)
         ]
-    return [_with_full_wall_clock(statement, result.frames_needed, result.new_exposure_seconds, overheads)]
+    return [_with_full_wall_clock(statement, frame_count, result.new_exposure_seconds, overheads)]
+
+
+def _point_floor_at_calibration(statements: Sequence[TargetStatement]) -> list[TargetStatement]:
+    """Tell a noise floor's statement that the report has calibration advice.
+
+    The floor statements end with "More frames will not remove it." When the
+    same report carries a ``calibration_gap`` statement for the same capture
+    setting, that sentence is replaced by a pointer to it, because a missing
+    flat or dark is a likely cause of a floor.
+
+    Parameters
+    ----------
+    statements : `Sequence` [`TargetStatement`]
+        All the report's statements.
+
+    Returns
+    -------
+    statements : `list` [`TargetStatement`]
+        The same statements; those that carry the floor sentence and have
+        calibration advice for their setting say so.
+    """
+    calibration_settings = {
+        statement.capture_setting for statement in statements if statement.rule == CALIBRATION_RULE_NAME
+    }
+    pointed = []
+    for statement in statements:
+        if statement.capture_setting in calibration_settings and FLOOR_NOT_REMOVED_TEXT in statement.message:
+            statement = statement.model_copy(
+                update={
+                    "message": statement.message.replace(FLOOR_NOT_REMOVED_TEXT, FLOOR_CALIBRATION_TEXT),
+                    "plain_message": statement.plain_message.replace(
+                        PLAIN_FLOOR_NOT_REMOVED_TEXT, PLAIN_FLOOR_CALIBRATION_TEXT
+                    ),
+                }
+            )
+        pointed.append(statement)
+    return pointed
 
 
 def _with_full_wall_clock(
@@ -981,7 +1104,9 @@ def _quality_statements_of_settings(
         The stored Ekos session records, for the download times.
     forecast_checks : `Sequence` [`ForecastCheck`], optional
         The target's own forecast checks. "Take N more" is shown only when one
-        came out as forecast (user decision U1, 2026-10-24).
+        came out as forecast (user decision U1, 2026-10-24). When only a check
+        made from frames already taken agreed, the count is marked exploratory
+        (decision D11, 2026-10-26).
     has_frame_weights : `bool`, optional
         Whether the target has any ``stacking.frame_weight`` rows; when it
         has none, the "take N more" reason says to restack.
@@ -997,6 +1122,7 @@ def _quality_statements_of_settings(
     altitudes = frame_altitudes(target)
     configured_weight = config.get_stack_weight() if hasattr(config, "get_stack_weight") else None
     stopped = False
+    gate = _forecast_gate_state(forecast_checks)
     signal = target_stop_signal(runs) if runs else None
     dominant = dominant_setting(observations)
     if signal is not None and signal.stopped:
@@ -1031,18 +1157,19 @@ def _quality_statements_of_settings(
             overheads = estimate_capture_overheads(
                 contexts_for_overheads, setting.exposure_seconds, setting.filter_name
             )
-            if _forecast_gate_open(forecast_checks):
+            if gate != ForecastGate.CLOSED:
+                more_frames = _more_frames_for_setting(
+                    setting,
+                    setting_observations,
+                    target_rows.rows,
+                    configured_weight,
+                    overheads,
+                    runs=runs,
+                    observations_by_id=observations_by_id,
+                    electrons_per_adu=_camera_gain(config, setting),
+                )
                 statements.extend(
-                    _more_frames_for_setting(
-                        setting,
-                        setting_observations,
-                        target_rows.rows,
-                        configured_weight,
-                        overheads,
-                        runs=runs,
-                        observations_by_id=observations_by_id,
-                        electrons_per_adu=_camera_gain(config, setting),
-                    )
+                    _mark_exploratory(more_frames) if gate == ForecastGate.EXPLORATORY else more_frames
                 )
             else:
                 statements.append(_more_frames_gate_statement(setting, forecast_checks, has_frame_weights))
@@ -1727,12 +1854,7 @@ def build_target_dataset_report(
         need attention, the starting point when there are no frames, the
         forecast checks and the science outcomes. Nothing is stored.
     """
-    from wayfindinglib.analytics.result_quality.forecast import (
-        PINNED_STACK_METRICS,
-        attach_calibration_identities,
-        forecast_check,
-        stack_runs_from_measurements,
-    )
+    from wayfindinglib.analytics.result_quality.forecast import PINNED_STACK_METRICS, forecast_check
 
     now = at or datetime.now(UTC)
     target_rows = read_target_rows(astrometrics, target.id)
@@ -1772,10 +1894,10 @@ def build_target_dataset_report(
         )
     # The calibration of each run is not a measurement row; it is a record of
     # master file identities. A run with none counts as confounded.
-    runs = attach_calibration_identities(
-        stack_runs_from_measurements(stack_rows),
-        astrometrics.quality.calibration_identities(target_id=target.id),
-    )
+    all_runs = read_forecast_runs(astrometrics, target.id, stack_rows)
+    # The earlier-nights subset runs serve only the forecast check. The stop
+    # signal, the floor and the stack map read the library runs alone.
+    runs = library_runs(all_runs)
     newest_members: dict[str, list[str]] = {}
     for run in runs:
         newest_members[run.stack_subject_id] = run.member_frame_ids
@@ -1873,7 +1995,7 @@ def build_target_dataset_report(
     # The checks come first: "take N more" waits for one that agreed (U1).
     forecast_checks: list[ForecastCheck] = (
         forecast_check(
-            runs,
+            all_runs,
             observations,
             configured_stack_weight=configured_weight,
             electrons_per_adu=(
@@ -1882,7 +2004,7 @@ def build_target_dataset_report(
                 else None
             ),
         )
-        if len(runs) >= 2
+        if len(runs) >= 2 or len(all_runs) > len(runs)
         else []
     )
     statements.extend(
@@ -1902,6 +2024,7 @@ def build_target_dataset_report(
         )
     )
     statements.extend(_calibration_statements(target, summaries, observations, astrometrics, rows))
+    statements = _point_floor_at_calibration(statements)
     has_photometry = any(row.metric.startswith("photometry.") for row in rows)
     goals_in_use = {summary.science_goal for summary in summaries} or {target_goal}
     statements.extend(_natural_goal_statements(goals_in_use, rows, has_photometry))

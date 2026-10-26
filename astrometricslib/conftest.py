@@ -156,6 +156,39 @@ def synthetic_test_library(test_directories: SimpleNamespace, isolate_config_sin
 
 
 @pytest.fixture(autouse=True)
+def no_stack_plate_solve(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stop tests from plate-solving a stack that has no coordinate solution.
+
+    The noise step solves the stack itself as its last source of a solution
+    (`stack_noise._plate_solve_stack_wcs`), which would start the real solver.
+    Tests that stack or measure a stack without a solution get a failed solve
+    instead. Tests of the fallback replace this stand-in with their own.
+    """
+    from astrometricslib.pipelines.stacking.post_processing import stack_noise
+
+    def failed_solve(stack_path: str) -> tuple[None, str]:
+        """Give the answer of a solve that was not run.
+
+        Parameters
+        ----------
+        stack_path : `str`
+            The stack that would have been solved (unused).
+
+        Returns
+        -------
+        wcs : `None`
+            Never a solution.
+        reason : `str`
+            Says the solve was not run.
+        """
+        return None, "plate-solving the stack itself was not run in this test"
+
+    # The real function stays reachable for the test of its own error handling.
+    failed_solve.real_function = stack_noise._plate_solve_stack_wcs  # type: ignore[attr-defined]
+    monkeypatch.setattr(stack_noise, "_plate_solve_stack_wcs", failed_solve)
+
+
+@pytest.fixture(autouse=True)
 def no_siril_stack_preview(monkeypatch: pytest.MonkeyPatch) -> None:
     """Stop tests from starting Siril or GraXpert to draw a preview picture.
 

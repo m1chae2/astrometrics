@@ -107,6 +107,17 @@ prediction (validation register entry STK-36), so the answer is labeled
 tentative. A new exposure length is never suggested with fewer than 5
 frames, because the stacker would fold a smaller set into another group.
 
+The practical limit. With a floor, the count that reaches the target can be
+very large for a small last gain (M 13: a floor of 49 percent of the noise
+variance asks for 1748 frames to cut the noise by 29 percent, and doubling
+alone cuts it by 14 percent). A count is given only when it needs at most
+`PRACTICAL_TIME_FACTOR` times the stack's exposure time. Beyond that, or when
+the target cannot be reached, the result gives the diminishing-returns answer
+instead: the frames that double the stack's time
+(`TakeMoreResult.doubling_frames`), the noise cut that doubling gives, and
+the most cut any number of frames gives. When doubling would cut the noise
+by less than `MINIMUM_DOUBLING_GAIN_FRACTION`, no frames are suggested.
+
 The floor
 ---------
 One stack's floor (`measure_stack_noise_floor`). A stack's measured
@@ -187,6 +198,25 @@ TARGET_NOISE_RATIO = 1.0 / math.sqrt(2.0)
 is
 the effect of doubling the effective time (noise falls as the square root of
 time) and is the smallest change the eye sees. From the plan, section 6.4."""
+
+PRACTICAL_TIME_FACTOR = 4.0
+"""A "take N more" count is given only when reaching the target needs at most
+this many times the stack's present exposure time (so at most 3 times as much
+again). The time is the sum of the exposure of every frame in the stack, not
+the weighted (effective) time, and the new frames are priced at their own
+exposure. Design estimate, register row WAY-D30: with a noise floor of about
+half the noise variance, doubling the time cuts the noise by 14 percent, 4
+times by 21 percent, 10 times by 26 percent and 40 times by 29 percent (the
+most any number of frames gives is 30 percent), so the gain flattens past
+about 4 times (M 13, 44 frames of 30 s, a copy of the library)."""
+
+MINIMUM_DOUBLING_GAIN_FRACTION = 0.05
+"""Below this cut in the noise, doubling the stack's time is not worth asking
+for, and no frames are suggested. It is half of `MINIMUM_GAIN_FRACTION` (the
+cut below which a target counts as stopped, 10 percent): a doubling between
+the two is still offered, with the diminishing-returns wording, and one below
+5 percent (a floor of about 80 percent of the noise variance or more) is
+not. Design estimate, register row WAY-D30."""
 
 MAXIMUM_NEW_FRAMES = 5000
 """The search for N stops here. 5000 frames of 30 s is 42 hours, far more than
@@ -598,6 +628,25 @@ class TakeMoreResult(BaseModel):
     heaviest_group_changed : `bool`
         True when the new frames would change which group is heaviest, so the
         pair of stacks is confounded (``group`` mode only).
+    practical_limit_applied : `bool`
+        True when a floor is present and the target needs more than
+        `PRACTICAL_TIME_FACTOR` times the stack's exposure time (or cannot be
+        reached). `frames_needed` is then ``None`` and the answer is the
+        diminishing-returns one: `doubling_frames`, `doubling_noise_cut` and
+        `most_reachable_cut`.
+    doubling_frames : `int` or `None`
+        The frames that double the stack's exposure time at the new frames'
+        exposure (as many frames again as the stack holds, when the exposure
+        is unchanged). Set with `practical_limit_applied`.
+    doubling_noise_cut : `float` or `None`
+        The fraction by which the noise falls after `doubling_frames`, from
+        the same forecast as the count (0.14 is 14 percent).
+    most_reachable_cut : `float` or `None`
+        The fraction by which the noise falls after the most frames the search
+        tries (`MAXIMUM_NEW_FRAMES`): the most the floor lets frames give.
+    doubling_worthwhile : `bool`
+        False when `doubling_noise_cut` is below
+        `MINIMUM_DOUBLING_GAIN_FRACTION`: no frames are then suggested.
     """
 
     model_config = _MODEL_CONFIG
@@ -616,6 +665,11 @@ class TakeMoreResult(BaseModel):
     lowest_reachable_ratio: float | None = None
     new_exposure_group: bool = False
     heaviest_group_changed: bool = False
+    practical_limit_applied: bool = False
+    doubling_frames: int | None = None
+    doubling_noise_cut: float | None = None
+    most_reachable_cut: float | None = None
+    doubling_worthwhile: bool = True
 
 
 def _new_frames(
@@ -843,6 +897,7 @@ def frames_to_cut_noise(
         target_noise_ratio=target_noise_ratio,
         exposure_seconds=exposure,
         floor=floor,
+        held_exposure_seconds=sum(frame.exposure_seconds for frame in existing),
     )
 
 
@@ -854,8 +909,15 @@ def _take_more_result(
     target_noise_ratio: float,
     exposure_seconds: float,
     floor: StackNoiseFloor | None,
+    held_exposure_seconds: float | None = None,
 ) -> TakeMoreResult:
     """Search for N and write the answer, naming the floor when it limits.
+
+    With a floor, the count is given only when it is within the practical
+    limit (`PRACTICAL_TIME_FACTOR` times the stack's exposure time). Beyond
+    it, or when the target cannot be reached, the answer is the
+    diminishing-returns one: the frames that double the stack's time, what
+    that cuts, and the most any frames cut.
 
     Parameters
     ----------
@@ -869,6 +931,9 @@ def _take_more_result(
         The exposure of one new frame.
     floor : `StackNoiseFloor` or `None`
         The stack's noise floor, when one was found.
+    held_exposure_seconds : `float`, optional
+        The sum of the exposure of every frame the stack holds today. Without
+        it the practical limit is not applied.
 
     Returns
     -------
@@ -899,6 +964,42 @@ def _take_more_result(
         return ratio is not None and ratio <= target_noise_ratio
 
     needed = _smallest_count_reaching(reached, minimum_count, maximum_count)
+    floor_present = floor is not None and floor.floor_detected
+    beyond_practical_limit = needed is None or (
+        held_exposure_seconds is not None
+        and needed * exposure_seconds > (PRACTICAL_TIME_FACTOR - 1.0) * held_exposure_seconds
+    )
+    if floor_present and beyond_practical_limit and held_exposure_seconds:
+        doubling_frames = max(minimum_count, round(held_exposure_seconds / exposure_seconds))
+        doubling_ratio = ratio_for(doubling_frames)
+        most_ratio = ratio_for(maximum_count)
+        if doubling_ratio is not None and most_ratio is not None:
+            doubling_cut = 1.0 - doubling_ratio
+            return TakeMoreResult(
+                target_noise_ratio=target_noise_ratio,
+                added_exposure_seconds=doubling_frames * exposure_seconds,
+                new_exposure_seconds=exposure_seconds,
+                floor_limited=needed is None,
+                lowest_reachable_ratio=most_ratio,
+                practical_limit_applied=True,
+                doubling_frames=doubling_frames,
+                doubling_noise_cut=doubling_cut,
+                most_reachable_cut=1.0 - most_ratio,
+                doubling_worthwhile=doubling_cut >= MINIMUM_DOUBLING_GAIN_FRACTION,
+                reason=(
+                    "A design estimate: real subsets of M 57 came out 9 to 31 percent below the prediction "
+                    f"(STK-36). Reaching the target of {target_noise_ratio:.2f} of today's noise "
+                    + (
+                        "is out of reach"
+                        if needed is None
+                        else f"needs {needed} frames, more than {PRACTICAL_TIME_FACTOR - 1.0:g} times the "
+                        "stack's exposure time again"
+                    )
+                    + f" because of the noise floor (practical limit {PRACTICAL_TIME_FACTOR:g} times the "
+                    "stack's exposure time, WAY-D30)."
+                ),
+                **floor_fields,
+            )
     if needed is None:
         limit_ratio = ratio_for(maximum_count)
         if floor is not None and floor.floor_detected and limit_ratio is not None:
@@ -2400,8 +2501,11 @@ def frames_to_cut_noise_in_groups(
         target_noise_ratio=target_noise_ratio,
         exposure_seconds=exposure,
         floor=floor,
+        held_exposure_seconds=sum(
+            frame.exposure_seconds for group in existing_groups for frame in group.frames
+        ),
     )
-    answer_plan = plan_for(result.frames_needed or minimum_count)
+    answer_plan = plan_for(result.frames_needed or result.doubling_frames or minimum_count)
     notes = []
     if starts_new_group:
         notes.append(

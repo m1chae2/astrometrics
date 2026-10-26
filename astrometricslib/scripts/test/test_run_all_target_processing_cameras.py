@@ -13,8 +13,13 @@ from typing import Any
 
 import pytest
 
+from astrometricslib import EARLIER_NIGHTS_VARIANT
 from astrometricslib.foundation.config import _TomlSectionedConfig
 from astrometricslib.foundation.observatory_setups import ObservatorySetups, OpticConfig, SetupConfig
+from astrometricslib.pipelines.stacking.metrics import (
+    STACKING_EXPECTED_EMPTY_APERTURE_NOISE_STACK_UNIT,
+    STACKING_FRAME_WEIGHT,
+)
 
 _EXAMPLE_CONFIG_PATH = Path(__file__).resolve().parents[2] / "astrometrics.config.example.toml"
 
@@ -135,8 +140,36 @@ class FakeAstrometrics:
         self.stack_failures: set[str] = set()
         self.process_failures: set[str] = set()
         self.quality_rows: dict[str, list[SimpleNamespace]] = {}
-        self.processing = SimpleNamespace(process_target=self.process_target, stack=self.stack)
+        self.measure_calls: list[dict[str, Any]] = []
+        self.measuring_elsewhere: set[str] = set()
+        self.earlier_nights_calls: list[dict[str, Any]] = []
+        self.earlier_nights_failures: set[str] = set()
+        self.processing = SimpleNamespace(
+            process_target=self.process_target,
+            stack=self.stack,
+            stack_subset=self.stack_subset,
+            record_frame_measurements=self.record_frame_measurements,
+        )
         self.quality = SimpleNamespace(query=self.query_quality)
+
+    def record_frame_measurements(self, target: Any, **keywords: Any) -> SimpleNamespace:
+        """Record one frame-measurement request.
+
+        Returns
+        -------
+        summary : `types.SimpleNamespace`
+            A summary that measured every frame it was given, or one that says
+            another run has the turn when the test says so.
+        """
+        self.measure_calls.append({"target": target.id, **keywords})
+        frame_count = len(keywords.get("frames") or [])
+        return SimpleNamespace(
+            already_running=target.id in self.measuring_elsewhere,
+            frames_measured=frame_count,
+            frames_skipped_unchanged=0,
+            frames_cut_short=0,
+            frames_failed=0,
+        )
 
     def stack(self, target: Any, **keywords: Any) -> SimpleNamespace:
         """Record one stack request, or fail it when the test says so.
@@ -156,15 +189,39 @@ class FakeAstrometrics:
             raise RuntimeError(f"stacking {target.id} broke")
         return SimpleNamespace()
 
-    def query_quality(self, metric: str, target_id: str, **keywords: Any) -> list[SimpleNamespace]:
+    def stack_subset(self, target: Any, frames: list[Any], **keywords: Any) -> SimpleNamespace:
+        """Record one subset request, or fail it when the test says so.
+
+        Returns
+        -------
+        result : `types.SimpleNamespace`
+            An empty subset result.
+
+        Raises
+        ------
+        RuntimeError
+            If the target is in `earlier_nights_failures`.
+        """
+        self.earlier_nights_calls.append({"target": target.id, "frames": frames, **keywords})
+        if target.id in self.earlier_nights_failures:
+            raise RuntimeError(f"the earlier nights of {target.id} broke")
+        return SimpleNamespace()
+
+    def query_quality(
+        self, metric: str, target_id: str, variant: str | None = None, **keywords: Any
+    ) -> list[SimpleNamespace]:
         """Return the fake quality rows of one metric for one target.
+
+        Rows asked for by a subset variant are kept under the key with the
+        variant added.
 
         Returns
         -------
         rows : `list`
             The rows the test set up, or none.
         """
-        return self.quality_rows.get(f"{target_id}|{metric}", [])
+        key = f"{target_id}|{metric}" + (f"|{variant}" if variant else "")
+        return self.quality_rows.get(key, [])
 
     def process_target(self, target: list[str] | None, **keywords: Any) -> SimpleNamespace:
         """Record one pass and pretend it succeeded.
@@ -304,6 +361,42 @@ def test_stack_only_stacks_forced_and_runs_no_other_step(
     ]
 
 
+def test_stack_only_measures_every_imaging_frame_before_it_stacks(
+    script: Any, fake: FakeAstrometrics, tmp_path: Path
+) -> None:
+    """Check --stack-only measures all imaging frames before stacking."""
+    script.run_full_processing([
+        "--skip-reindex", "--stack-only", "--force-restack", "--camera", ASI,
+        "--progress-file", str(tmp_path / "progress.jsonl"),
+    ])  # fmt: skip
+
+    assert [(call["target"], len(call["frames"]), call.get("limit")) for call in fake.measure_calls] == [
+        ("Both", 1, None),
+        ("AsiOnly", 1, None),
+    ]
+    assert [call["frames"] for call in fake.measure_calls] == [call["frames"] for call in fake.stack_calls]
+
+
+def test_stack_only_does_not_stack_while_another_run_measures_the_frames(
+    script: Any, fake: FakeAstrometrics, tmp_path: Path
+) -> None:
+    """Check a target being measured elsewhere fails and is not stacked."""
+    fake.measuring_elsewhere = {"Both"}
+    progress_path = tmp_path / "progress.jsonl"
+
+    script.run_full_processing([
+        "--skip-reindex", "--stack-only", "--camera", ASI, "--progress-file", str(progress_path),
+    ])  # fmt: skip
+
+    records = read_lines(progress_path)
+    assert [(record["target"], record["status"]) for record in records] == [
+        ("Both", "failed"),
+        ("AsiOnly", "success"),
+    ]
+    assert "another run is measuring" in records[0]["error"]
+    assert [call["target"] for call in fake.stack_calls] == ["AsiOnly"]
+
+
 def test_stack_only_records_a_failure_and_goes_on(
     script: Any, fake: FakeAstrometrics, tmp_path: Path
 ) -> None:
@@ -433,15 +526,43 @@ def test_the_shipped_profiles_give_the_expected_guard_answers(script: Any) -> No
     assert script.camera_refusal_reason(ASI, config) is None
 
 
-def rows_for(*values: Any, status: str = "measured") -> list[SimpleNamespace]:
+def rows_for(
+    *values: Any,
+    status: str = "measured",
+    nights: tuple[str | None, ...] = (),
+    subject_ids: tuple[str, ...] = (),
+) -> list[SimpleNamespace]:
     """Build fake quality rows holding the given values.
+
+    Parameters
+    ----------
+    *values : `Any`
+        One value for each row.
+    status : `str`, optional
+        The rows' status.
+    nights : `tuple` [`str` or `None`, ...], optional
+        The observing night of each row's subject, in the order of the values;
+        a row past the end of the list has none.
+    subject_ids : `tuple` [`str`, ...], optional
+        The subject id of each row, in the order of the values.
 
     Returns
     -------
     rows : `list` [`types.SimpleNamespace`]
         One row per value.
     """
-    return [SimpleNamespace(value=value, status=status, action_taken=None) for value in values]
+    return [
+        SimpleNamespace(
+            value=value,
+            status=status,
+            action_taken=None,
+            subject=SimpleNamespace(
+                observing_night_id=nights[index] if index < len(nights) else None,
+                subject_id=subject_ids[index] if index < len(subject_ids) else f"row-{index}",
+            ),
+        )
+        for index, value in enumerate(values)
+    ]
 
 
 def test_the_review_list_has_one_row_per_target_with_what_was_recorded(
@@ -543,3 +664,186 @@ def test_a_dry_run_with_the_new_options_writes_nothing(
     assert "REFUSED: " in output
     assert fake.stack_calls == [] and fake.calls == []
     assert list(tmp_path.iterdir()) == []
+
+
+# -- The earlier-nights stack (decision D11) ----------------------------------
+
+TWO_NIGHTS = ("2026-10-01", "2026-10-02")
+BOTH_FRAMES = ("Both/light_0.fit", "Both/light_1.fit")
+
+
+def two_night_rows(target: str = "Both") -> list[SimpleNamespace]:
+    """Build library weight rows for two frames on two nights.
+
+    Parameters
+    ----------
+    target : `str`, optional
+        The target whose frames the rows name.
+
+    Returns
+    -------
+    rows : `list` [`types.SimpleNamespace`]
+        A weight row for ``light_0`` (first night) and ``light_1`` (second).
+    """
+    return rows_for(
+        1.0, 1.0, nights=TWO_NIGHTS, subject_ids=(f"{target}/light_0.fit", f"{target}/light_1.fit")
+    )
+
+
+def run_stack_only(script: Any, tmp_path: Path, *extra: str) -> list[dict]:
+    """Run a stack-only pass over the ASI camera and read its progress file.
+
+    Parameters
+    ----------
+    script : `module`
+        The imported script module.
+    tmp_path : `pathlib.Path`
+        Holds the progress file.
+    *extra : `str`
+        More command-line options.
+
+    Returns
+    -------
+    records : `list` [`dict`]
+        The progress records, one per target.
+    """
+    progress_path = tmp_path / "progress.jsonl"
+    script.run_full_processing([
+        "--skip-reindex", "--stack-only", "--force-restack", "--camera", ASI,
+        "--progress-file", str(progress_path), *extra,
+    ])  # fmt: skip
+    return read_lines(progress_path)
+
+
+def test_a_stack_of_two_nights_also_gets_its_earlier_nights_stacked(
+    script: Any, fake: FakeAstrometrics, tmp_path: Path
+) -> None:
+    """Check only the target with a two-night stack makes the subset."""
+    fake.quality_rows = {
+        f"Both|{STACKING_FRAME_WEIGHT}": two_night_rows(),
+        f"AsiOnly|{STACKING_FRAME_WEIGHT}": rows_for(
+            1.0, 1.0, nights=("2026-10-01", "2026-10-01"), subject_ids=("AsiOnly/light_0.fit", "x")
+        ),
+    }
+
+    records = run_stack_only(script, tmp_path)
+
+    (call,) = fake.earlier_nights_calls
+    assert call["target"] == "Both"
+    # Only the first night's frame is picked; the last night's is left out.
+    assert [frame.path for frame in call["frames"]] == ["Both/light_0.fit"]
+    assert call["label"] == EARLIER_NIGHTS_VARIANT
+    assert call["record_forecast_rows"] is True
+    assert [(record["target"], record["status"], record["error"]) for record in records] == [
+        ("Both", "success", ""),
+        ("AsiOnly", "success", ""),
+    ]
+
+
+def test_a_one_night_stack_makes_no_earlier_nights_stack(
+    script: Any, fake: FakeAstrometrics, tmp_path: Path
+) -> None:
+    """Check one night, or no stored weights, is not given a subset."""
+    fake.quality_rows = {
+        f"Both|{STACKING_FRAME_WEIGHT}": rows_for(
+            1.0, 1.0, nights=("2026-10-01", "2026-10-01"), subject_ids=BOTH_FRAMES
+        )
+    }
+    run_stack_only(script, tmp_path)
+
+    assert fake.earlier_nights_calls == []
+
+
+def test_a_failed_earlier_nights_stack_is_noted_and_the_library_stack_still_counts(
+    script: Any, fake: FakeAstrometrics, tmp_path: Path
+) -> None:
+    """Check a failure is noted, the status stays success, the run goes on."""
+    fake.quality_rows = {
+        f"Both|{STACKING_FRAME_WEIGHT}": two_night_rows("Both"),
+        f"AsiOnly|{STACKING_FRAME_WEIGHT}": two_night_rows("AsiOnly"),
+    }
+    fake.earlier_nights_failures = {"Both"}
+
+    records = run_stack_only(script, tmp_path)
+
+    assert [(record["target"], record["status"]) for record in records] == [
+        ("Both", "success"),
+        ("AsiOnly", "success"),
+    ]
+    assert "the earlier-nights stack failed" in records[0]["error"]
+    assert "the earlier nights of Both broke" in records[0]["error"]
+    assert records[1]["error"] == ""
+    assert [call["target"] for call in fake.earlier_nights_calls] == ["Both", "AsiOnly"]
+
+
+def test_no_earlier_nights_skips_the_subset_stack(
+    script: Any, fake: FakeAstrometrics, tmp_path: Path
+) -> None:
+    """Check --no-earlier-nights leaves the subset out."""
+    fake.quality_rows = {f"Both|{STACKING_FRAME_WEIGHT}": two_night_rows()}
+
+    records = run_stack_only(script, tmp_path, "--no-earlier-nights")
+
+    assert fake.earlier_nights_calls == []
+    assert [record["status"] for record in records] == ["success", "success"]
+
+
+def test_a_stack_that_failed_makes_no_earlier_nights_stack(
+    script: Any, fake: FakeAstrometrics, tmp_path: Path
+) -> None:
+    """Check a failed library stack never reaches the subset step."""
+    fake.stack_failures = {"Both"}
+    fake.quality_rows = {f"Both|{STACKING_FRAME_WEIGHT}": two_night_rows()}
+
+    run_stack_only(script, tmp_path)
+
+    assert fake.earlier_nights_calls == []
+
+
+def test_the_review_list_says_whether_the_earlier_nights_rows_are_there(
+    script: Any, fake: FakeAstrometrics, tmp_path: Path
+) -> None:
+    """Check the column is yes, no or n/a by the library stack's nights."""
+    import csv
+
+    fake.quality_rows = {
+        f"Both|{STACKING_FRAME_WEIGHT}": two_night_rows("Both"),
+        f"Both|{STACKING_FRAME_WEIGHT}|{EARLIER_NIGHTS_VARIANT}": rows_for(1.0),
+        f"Both|{STACKING_EXPECTED_EMPTY_APERTURE_NOISE_STACK_UNIT}|{EARLIER_NIGHTS_VARIANT}": rows_for(
+            2.0e-3
+        ),
+        f"AsiOnly|{STACKING_FRAME_WEIGHT}": two_night_rows("AsiOnly"),
+        f"AsiOnly|{STACKING_FRAME_WEIGHT}|{EARLIER_NIGHTS_VARIANT}": rows_for(1.0),
+    }
+    review_path = tmp_path / "review.csv"
+
+    run_stack_only(script, tmp_path, "--review-list", str(review_path))
+
+    with open(review_path, newline="") as handle:
+        rows = {row["target"]: row for row in csv.DictReader(handle)}
+    # Both has the subset's weights and noise; AsiOnly lacks the noise.
+    assert rows["Both"]["earlier_nights_present"] == "yes"
+    assert rows["AsiOnly"]["earlier_nights_present"] == "no"
+
+
+def test_the_review_list_marks_a_one_night_or_refused_target_not_applicable(
+    script: Any, fake: FakeAstrometrics, tmp_path: Path
+) -> None:
+    """Check one night, no weights and a refusal all give n/a."""
+    import csv
+
+    fake.quality_rows = {f"Both|{STACKING_FRAME_WEIGHT}": rows_for(1.0, 1.0, nights=("2026-10-01",) * 2)}
+    review_path = tmp_path / "review.csv"
+
+    script.run_full_processing([
+        "--skip-reindex", "--stack-only", "--progress-file", str(tmp_path / "progress.jsonl"),
+        "--review-list", str(review_path),
+    ])  # fmt: skip
+
+    with open(review_path, newline="") as handle:
+        rows = {row["target"]: row for row in csv.DictReader(handle)}
+    assert {name: row["earlier_nights_present"] for name, row in rows.items()} == {
+        "AsiOnly": "n/a",
+        "Both": "n/a",
+        "NikonOnly": "n/a",
+    }

@@ -696,3 +696,82 @@ def test_every_statement_this_module_builds_has_a_sound_plain_message() -> None:
     for statement in statements:
         assert_plain_message_is_sound(statement)
     assert "roughly 29%" in next(s for s in statements if s.rule == "more_frames").plain_message
+
+
+def _m13_result(*, doubling_cut: float = 0.137, worthwhile: bool = True) -> TakeMoreResult:
+    """Make the answer for the M 13 case (a floor of 49 percent of the noise).
+
+    Parameters
+    ----------
+    doubling_cut : `float`, optional
+        The noise cut by doubling.
+    worthwhile : `bool`, optional
+        Whether doubling is worth asking for.
+
+    Returns
+    -------
+    result : `TakeMoreResult`
+        The diminishing-returns answer for 44 frames of 30 s.
+    """
+    return TakeMoreResult(
+        target_noise_ratio=0.707,
+        added_exposure_seconds=44 * 30.0,
+        new_exposure_seconds=30.0,
+        floor_noise=0.583e-3,
+        floor_variance_share=0.49,
+        lowest_reachable_ratio=0.704,
+        practical_limit_applied=True,
+        doubling_frames=44,
+        doubling_noise_cut=doubling_cut,
+        most_reachable_cut=0.296,
+        doubling_worthwhile=worthwhile,
+        reason="A design estimate.",
+    )
+
+
+_NO_EXTRA_OVERHEADS = CaptureOverheads(
+    download_seconds=5.0,
+    dither_settle_seconds=20.0,
+    autofocus_seconds=120.0,
+    download_from_records=False,
+    dither_from_records=False,
+    autofocus_from_records=False,
+    gaps_used=0,
+)
+
+
+def test_beyond_the_practical_limit_the_statement_gives_one_doubling() -> None:
+    """The M 13 numbers give the diminishing-returns shape, not a count."""
+    statement = rr.more_frames_statement(
+        _m13_result(), SETTING, _NO_EXTRA_OVERHEADS, [MeasurementReference(row_id=3)]
+    )
+
+    assert statement is not None
+    assert statement.rule == "more_frames"
+    assert statement.kind == StatementKind.RECOMMENDATION
+    assert "as many frames again as the stack holds (44 more at 30 s" in statement.message
+    assert "cuts the noise by about 14%" in statement.message
+    assert "at most about 30% in all" in statement.message
+    assert "noise floor of 0.000583 (stack units) makes up about 49% of the noise" in statement.message
+    assert rr.FLOOR_CAUSE_TEXT in statement.message
+    assert statement.message.endswith(rr.FLOOR_NOT_REMOVED_TEXT)
+    assert statement.proposed_action.frame_count == 44
+    assert statement.expected_effect.noise_change_fraction == pytest.approx(-0.137)
+    assert statement.values["practical_limit_applied"] == pytest.approx(1.0)
+    assert statement.values["doubling_frames"] == pytest.approx(44.0)
+    assert_plain_message_is_sound(statement)
+
+
+def test_a_worthless_doubling_gives_the_stop_warning_in_the_new_shape() -> None:
+    """Under 5 percent: a warning, no proposed frames, same floor sentences."""
+    result = _m13_result(doubling_cut=0.03, worthwhile=False)
+    result = result.model_copy(update={"floor_variance_share": 0.88, "most_reachable_cut": 0.06})
+
+    statement = rr.floor_limited_statement(result, SETTING, [MeasurementReference(row_id=5)])
+
+    assert statement.rule == "more_frames_will_not_help"
+    assert statement.proposed_action is None
+    assert "only about 3%" in statement.message
+    assert "at most about 6% in all" in statement.message
+    assert rr.FLOOR_CAUSE_TEXT in statement.message
+    assert_plain_message_is_sound(statement)

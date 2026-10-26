@@ -53,6 +53,18 @@ on, and then checked the same way as the reference frame's. The source is
 recorded as `MEMBER_FRAME_WCS_SOURCE`, with the shift, so a stored result
 always says which route gave its coordinates.
 
+When none of those gives a solution (the raw frames carry none, which is the
+case for a target imaged without a plate-solving mount or camera program), the
+last source is the stack itself. The stack is plate-solved in memory by the
+same code the astrometry step uses (`_plate_solve_stack_wcs`). The stack's
+header is not changed: the astrometry step writes its own solution later, and
+a header changed here could make the stack look new to the checks that compare
+a stack against its earlier record. The solved grid is the stack's own, so no
+trim offset or shift applies and no frame has to line up with it. A solve that
+fails (no match, no index files, a time limit) gives the usual "no result",
+with a reason that says the solve was tried. The source is recorded as
+`PLATE_SOLVE_WCS_SOURCE`.
+
 Even a stack's own header is checked. A frame's own "solution" is often only a
 first guess: the camera software (Ekos) writes the position the mount was told
 to point at, not a plate solution, and Siril copies it into the stack. The sky
@@ -100,6 +112,7 @@ import math
 import os
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
+from subprocess import SubprocessError  # ruff: ignore[suspicious-subprocess-import] -- only to name the solver's time-limit error
 
 import numpy as np
 from astropy.io import fits
@@ -138,6 +151,7 @@ from astrometricslib.pipelines.stacking.post_processing.stack_image import (
     sky_level_of_plane,
 )
 from astrometricslib.pipelines.stacking.processing.group_alignment import detect_star_centroids
+from astrometricslib.utilities.exceptions import DATA_ERRORS, ONLINE_QUERY_ERRORS, PlateSolveFailedError
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +204,10 @@ NO_WCS_REASON = "no WCS for this stack"
 # The ``wcs_source`` of a stack whose solution was taken from a member frame
 # of the group it was lined up with, because no reference frame was named.
 MEMBER_FRAME_WCS_SOURCE = "member frame of the reference exposure group"
+
+# The ``wcs_source`` of a stack whose solution came from plate-solving the
+# stack itself, the last source tried.
+PLATE_SOLVE_WCS_SOURCE = "plate solve of the stack"
 
 # How many member frames are tried, in the order given, before giving up. Each
 # try reads one frame and runs the star check, so a few are enough: a frame
@@ -488,6 +506,88 @@ def _bright_star_matches(
     expected = stack_stars + np.array([crop_offset[1], crop_offset[0]], dtype=float)
     distance = cKDTree(frame_stars).query(expected)[0]
     return int(np.count_nonzero(distance <= WCS_CHECK_TOLERANCE_PX)), len(stack_stars), len(frame_stars)
+
+
+def _frame_lines_up(frame_path: str, stack_plane: np.ndarray, crop_offset: tuple[int, int]) -> bool:
+    """Say whether a frame shares the stack's pixel grid, by its bright stars.
+
+    Parameters
+    ----------
+    frame_path : `str`
+        The frame, normally the registration reference frame.
+    stack_plane : `numpy.ndarray`
+        The stack's image.
+    crop_offset : `tuple` [`int`, `int`]
+        The (columns, rows) cut from the stack's left and top edges.
+
+    Returns
+    -------
+    lines_up : `bool`
+        True when at least `WCS_CHECK_MINIMUM_MATCHES` of the stack's
+        brightest stars have a star in the frame (the check
+        `_reference_frame_wcs` makes). False when the frame cannot be read.
+    """
+    try:
+        frame_data = read_data(frame_path)
+    except OSError, ValueError:
+        return False
+    if frame_data is None:
+        return False
+    frame_plane = collapse_to_2d(np.asarray(frame_data, dtype=np.float64))
+    matches, stack_star_count, frame_star_count = _bright_star_matches(stack_plane, frame_plane, crop_offset)
+    enough_stars = stack_star_count >= WCS_CHECK_MINIMUM_MATCHES and frame_star_count > 0
+    return enough_stars and matches >= WCS_CHECK_MINIMUM_MATCHES
+
+
+def _plate_solve_stack_wcs(stack_path: str) -> tuple[WCS | None, str]:
+    """Plate-solve the stack itself, in memory, as the last source.
+
+    This runs the astrometry step's own solver path (`AstrometryPipeline`): the
+    same configuration, the same index lookup, the same scale and position
+    hints taken from the stack's header, the same Gaia refit and the same
+    time limit (`solve_timeout` of 300 s for each of the hinted and the blind
+    try, set in `StarIdentifier.process_image`). A solve with a good star
+    list normally takes a few seconds to a minute; a failed one can use the
+    whole limit. The stack file is only read: the solution is not written to
+    its header (see the module description).
+
+    Parameters
+    ----------
+    stack_path : `str`
+        The finished stack.
+
+    Returns
+    -------
+    wcs : `astropy.wcs.WCS` or `None`
+        The solution on the stack's own pixel grid, or `None`.
+    reason : `str`
+        Why there is none, saying the solve was tried. Empty when there is one.
+    """
+    # Imported here: the astrometry package is large, and a stack that has a
+    # solution never needs it.
+    from astrometricslib.pipelines.astrometry.pipeline import AstrometryPipeline
+
+    try:
+        context = AstrometryPipeline().process(stack_path, attempt_plate_solving=True)
+    except (
+        PlateSolveFailedError,
+        RuntimeError,
+        SubprocessError,
+        *DATA_ERRORS,
+        *ONLINE_QUERY_ERRORS,
+    ) as error:
+        # A solve is a by-product here: the errors a solve can raise (no match,
+        # a missing index or program, a time limit, an online query) must not
+        # fail the stack. Anything else is a bug and is caught, with the stack
+        # still recorded, by `record_quality`.
+        logger.warning("Plate-solving the stack %s failed: %s", stack_path, error)
+        return None, f"plate-solving the stack itself was tried and failed ({type(error).__name__}: {error})"
+    if context.wcs is None or context.wcs_is_header_fallback:
+        return None, "plate-solving the stack itself was tried and found no solution"
+    celestial = context.wcs.celestial if context.wcs.has_celestial else None
+    if celestial is None:
+        return None, "plate-solving the stack itself was tried and gave no sky solution"
+    return celestial, ""
 
 
 def _reference_frame_wcs(
@@ -1008,9 +1108,22 @@ def _measure_noise_in_plane(
                 member_frame_paths, plane, crop_offset
             )
         else:
-            return StackNoiseOutcome(None, NO_WCS_REASON)
+            reason = NO_WCS_REASON
         if wcs is None:
-            return StackNoiseOutcome(None, reason)
+            # Last source: solve the stack itself. Its solution is on the
+            # stack's own grid, so the trim offset is not applied to it.
+            wcs, solve_reason = _plate_solve_stack_wcs(stack_path)
+            if wcs is None:
+                return StackNoiseOutcome(None, f"{reason}; {solve_reason}")
+            wcs_source = PLATE_SOLVE_WCS_SOURCE
+            check_offset = crop_offset
+            # The reference frame still gives the saturation limit, but only
+            # when it shares the stack's pixel grid. Its solution was not
+            # used, so nothing has checked that yet.
+            if not reference_frame_path or not _frame_lines_up(reference_frame_path, plane, crop_offset):
+                check_frame_path = None
+            else:
+                check_frame_path = reference_frame_path
     reference_header = read_header(check_frame_path) if check_frame_path else fits.Header()
     setup_key = _setup_key(
         stack_header,
@@ -1082,6 +1195,21 @@ def _measure_noise_in_plane(
         # these apertures were chosen on another stack's solution. Put them
         # on this stack's stars, whatever the header says.
         wcs, reason, alignment = _move_guess_onto_reference_stars(plane, wcs, aperture_set.reference_sky)
+        if wcs is None and wcs_source != PLATE_SOLVE_WCS_SOURCE:
+            # A frame's own solution can be off (a pointing solve written by
+            # the capture program, or a frame that does not share the stack's
+            # grid). Before giving up, solve the stack itself and try again.
+            solved_wcs, solve_reason = _plate_solve_stack_wcs(stack_path)
+            if solved_wcs is None:
+                return StackNoiseOutcome(None, f"{reason}; {solve_reason}")
+            wcs, retry_reason, alignment = _move_guess_onto_reference_stars(
+                plane, solved_wcs, aperture_set.reference_sky
+            )
+            if wcs is None:
+                return StackNoiseOutcome(
+                    None, f"{reason}; with the plate solve of the stack itself: {retry_reason}"
+                )
+            wcs_source = PLATE_SOLVE_WCS_SOURCE
         if wcs is None:
             return StackNoiseOutcome(None, reason)
         position_note = alignment.describe() if alignment is not None else ""

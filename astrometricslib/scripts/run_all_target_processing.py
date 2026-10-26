@@ -4,7 +4,10 @@ Runs stacking, astrometry, photometry, and spectroscopy (where
 applicable) in one pass per camera. For a forced restack, ``--stack-only``
 runs the stacking step alone, ``--progress-file`` lets an interrupted run
 resume, ``--camera`` limits the run to one camera, and ``--review-list``
-writes a table (CSV) of what each target's run recorded.
+writes a table (CSV) of what each target's run recorded. A stack-only run also
+stacks the earlier nights of every target whose stack holds two or more
+nights (the earlier member of the forecast check's pair);
+``--no-earlier-nights`` turns that off.
 
 The cameras, and their order, come from
 the setups listed in the config file: the primary camera first, then the
@@ -37,7 +40,7 @@ from astrometricslib import FITS_READ_ERRORS, AstrometricsError
 # target should never pop open a GUI window mid-run.
 os.environ["HEADLESS"] = "1"
 
-from astrometricslib import Astrometrics, configure_logging
+from astrometricslib import EARLIER_NIGHTS_VARIANT, Astrometrics, configure_logging, frame_subject_id
 from astrometricslib.drivers.camera_profile_store import camera_identity, resolve_camera_profile
 from astrometricslib.foundation.paths import siril_work_directory as siril_work_directory_path
 from astrometricslib.models.quality.measurement import MeasurementStatus
@@ -79,6 +82,7 @@ REVIEW_COLUMNS = (
     "weights_known",
     "predicted_noise_present",
     "aperture_set_present",
+    "earlier_nights_present",
     "frames_moved_count",
     "frames_moved",
 )
@@ -498,13 +502,103 @@ def select_camera_names(camera_names: list[str], requested: str | None, config: 
     ]
 
 
+def _earlier_nights_frames(astrometrics: Astrometrics, target: Any, since: datetime) -> list:
+    """Pick the frames of all observing nights of a new stack but the last.
+
+    The stack's members and their nights are the frames of the
+    ``stacking.frame_weight`` rows the stack just stored (each row names its
+    frame by subject id and carries the frame's observing night). That is the
+    set of frames Siril really stacked, so a frame the quarantine set aside is
+    not counted. Each subject id is matched to the target's frame with
+    `frame_subject_id`.
+
+    Parameters
+    ----------
+    astrometrics : `Astrometrics`
+        The library interface.
+    target : `Target`
+        The target that was just stacked.
+    since : `datetime`
+        When the stack began; only rows made at or after it count.
+
+    Returns
+    -------
+    frames : `list` [`FrameRecord`]
+        The frames of every night but the latest, in the target's order. Empty
+        when the stack holds fewer than two nights (including a stack that
+        stored no weights).
+    """
+    weight_rows = astrometrics.quality.query(
+        metric=STACKING_FRAME_WEIGHT, target_id=target.id, since=since, library_only=True
+    )
+    night_of_subject = {
+        row.subject.subject_id: row.subject.observing_night_id
+        for row in weight_rows
+        if row.subject.observing_night_id
+    }
+    if len(set(night_of_subject.values())) < 2:
+        return []
+    # A night's name is its start date, so the largest name is the last night.
+    last_night = max(night_of_subject.values())
+    return [
+        frame
+        for frame in target.frames
+        if night_of_subject.get(frame_subject_id(frame.path, target.id), last_night) != last_night
+    ]
+
+
+def _stack_earlier_nights_note(astrometrics: Astrometrics, target: Any, since: datetime) -> str:
+    """Stack the earlier nights of a target whose new stack has several nights.
+
+    The subset is stacked with `ProcessingPipelines.stack_subset`, labeled
+    `EARLIER_NIGHTS_VARIANT`, with the forecast rows recorded. A failure is a
+    by-product: it is reported in the returned text and never raised, so the
+    library stack still counts as done.
+
+    Parameters
+    ----------
+    astrometrics : `Astrometrics`
+        The library interface.
+    target : `Target`
+        The target that was just stacked.
+    since : `datetime`
+        When the stack began; only rows made at or after it count.
+
+    Returns
+    -------
+    note : `str`
+        Empty when the earlier-nights stack was made or was not needed;
+        otherwise one sentence saying why it failed.
+    """
+    try:
+        frames = _earlier_nights_frames(astrometrics, target, since)
+        if not frames:
+            return ""
+        astrometrics.processing.stack_subset(
+            target, frames, label=EARLIER_NIGHTS_VARIANT, record_forecast_rows=True
+        )
+    except Exception as earlier_nights_error:
+        # The library stack is already made and recorded; the subset is an
+        # extra. Whatever its cause, its failure is noted and the run goes on.
+        logging.getLogger(__name__).exception("The earlier-nights stack of '%s' failed", target.id)
+        return f"the earlier-nights stack failed: {earlier_nights_error!r}"
+    return ""
+
+
 def _stack_one_target(
-    astrometrics: Astrometrics, target: Any, camera_name: str, focal_length_mm: float | None, force: bool
+    astrometrics: Astrometrics,
+    target: Any,
+    camera_name: str,
+    focal_length_mm: float | None,
+    force: bool,
+    earlier_nights: bool = True,
 ) -> tuple[str, str]:
-    """Stack one target's imaging frames and do nothing else.
+    """Measure and stack one target's imaging frames and do nothing else.
 
     The frames are chosen as the full pipeline chooses them: one camera, one
-    optic, imaging (not spectral) frames. They go to the public
+    optic, imaging (not spectral) frames. Every one of them is measured first
+    (`ProcessingPipelines.record_frame_measurements`), so the stack's
+    predicted noise has the sky of each frame. They then go to the public
     `ProcessingPipelines.stack`, which sets aside bad frames, stacks, and
     records the stack's quality rows. No astrometry, photometry or
     spectroscopy runs, and no spectral stack is made.
@@ -521,11 +615,21 @@ def _stack_one_target(
         The optic whose frames to stack, or `None` for every optic.
     force : `bool`
         Rebuild even if nothing changed since the stack on disk.
+    earlier_nights : `bool`, optional
+        After the stack, also stack the target's earlier nights when the
+        stack holds two or more nights (see `_stack_earlier_nights_note`).
+        Defaults to `True`.
 
     Returns
     -------
     status, message : `tuple` [`str`, `str`]
-        ``"success"`` or ``"skipped"``, and the reason when skipped.
+        ``"success"`` or ``"skipped"``, and the reason when skipped. A
+        ``"success"`` carries a message when the earlier-nights stack failed.
+
+    Raises
+    ------
+    RuntimeError
+        If another run is measuring the target's frames.
     """
     camera_frames = select_frames_for_processing(target, camera_name, focal_length_mm)
     if camera_frames is None:
@@ -533,8 +637,24 @@ def _stack_one_target(
     standard_frames, _spectral_frames = split_standard_and_spectral_frames(target, camera_frames)
     if not standard_frames:
         return "skipped", "No imaging frames to stack"
+    # The stack measures at most `STACKING_STAGE_MEASUREMENT_LIMIT` frames
+    # that were never measured, and its predicted noise needs the sky of every
+    # frame. So every imaging frame is measured first, with no limit. Frames
+    # measured before and unchanged since are skipped, so a resumed run does
+    # not repeat the work.
+    measurement = astrometrics.processing.record_frame_measurements(target, frames=standard_frames)
+    if measurement.already_running:
+        raise RuntimeError(f"another run is measuring the frames of '{target.id}'; try again later")
+    print(
+        f"  [{target.id}] frames measured: {measurement.frames_measured}, unchanged: "
+        f"{measurement.frames_skipped_unchanged}, cut short: {measurement.frames_cut_short}, "
+        f"failed: {measurement.frames_failed}"
+    )
+    stack_started_at = datetime.now(UTC)
     astrometrics.processing.stack(target, frames=standard_frames, force=force)
-    return "success", ""
+    if not earlier_nights:
+        return "success", ""
+    return "success", _stack_earlier_nights_note(astrometrics, target, stack_started_at)
 
 
 def _presence_label(rows: list[Any]) -> str:
@@ -585,6 +705,7 @@ def build_review_row(astrometrics: Any, record: dict) -> dict[str, Any]:
         "weights_known": "n/a",
         "predicted_noise_present": "n/a",
         "aperture_set_present": "n/a",
+        "earlier_nights_present": "n/a",
         "frames_moved_count": "n/a",
         "frames_moved": "",
     }
@@ -608,9 +729,27 @@ def build_review_row(astrometrics: Any, record: dict) -> dict[str, Any]:
             metric=metric, target_id=row["target"], since=record.get("run_started_at"), library_only=True
         )
 
-    row["weights_known"] = _presence_label(query(STACKING_FRAME_WEIGHT))
+    weight_rows = query(STACKING_FRAME_WEIGHT)
+    row["weights_known"] = _presence_label(weight_rows)
     row["predicted_noise_present"] = _presence_label(query(STACKING_EXPECTED_EMPTY_APERTURE_NOISE_STACK_UNIT))
     row["aperture_set_present"] = _presence_label(query(STACKING_APERTURE_SET_NUMBER))
+    # The earlier-nights stack is made only for a stack of two or more nights.
+    nights = {
+        weight.subject.observing_night_id for weight in weight_rows if weight.subject.observing_night_id
+    }
+    if len(nights) >= 2:
+        earlier_rows = [
+            astrometrics.quality.query(
+                metric=metric,
+                target_id=row["target"],
+                since=record.get("run_started_at"),
+                variant=EARLIER_NIGHTS_VARIANT,
+            )
+            for metric in (STACKING_FRAME_WEIGHT, STACKING_EXPECTED_EMPTY_APERTURE_NOISE_STACK_UNIT)
+        ]
+        row["earlier_nights_present"] = (
+            "yes" if all(_presence_label(rows) != "no" for rows in earlier_rows) else "no"
+        )
     moved_frames = sorted({
         os.path.basename(quarantine_row.subject.subject_id)
         for metric in (FRAME_QUARANTINE_ROUNDNESS, FRAME_QUARANTINE_SKY_MEDIAN)
@@ -659,6 +798,7 @@ def _run_stack_only_pass(
     focal_length_mm: float | None,
     force: bool,
     progress: ProgressLog,
+    earlier_nights: bool = True,
 ) -> None:
     """Stack each target of one camera pass, one after the other.
 
@@ -681,6 +821,9 @@ def _run_stack_only_pass(
         Rebuild even if nothing changed since the stack on disk.
     progress : `ProgressLog`
         Where each finished target is recorded.
+    earlier_nights : `bool`, optional
+        Also stack the earlier nights of each target that holds two or more
+        (see `_stack_one_target`). Defaults to `True`.
     """
     target_by_id = {target.id: target for target in targets}
     failed_ids: list[str] = []
@@ -688,7 +831,7 @@ def _run_stack_only_pass(
         print(f"[{position}/{len(target_ids)}] Stacking {target_id}...")
         try:
             status, message = _stack_one_target(
-                astrometrics, target_by_id[target_id], camera_name, focal_length_mm, force
+                astrometrics, target_by_id[target_id], camera_name, focal_length_mm, force, earlier_nights
             )
         except Exception as stacking_error:
             # One target's failure, whatever its cause, must not stop the
@@ -798,6 +941,15 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--no-earlier-nights",
+        action="store_true",
+        help=(
+            "With --stack-only, do not stack the earlier nights of a target whose stack holds two or "
+            "more nights. By default each such target also gets the stack of all nights but the "
+            "last (stored as the 'earlier-nights' subset), the earlier member of the forecast check."
+        ),
+    )
+    parser.add_argument(
         "--progress-file",
         metavar="PATH",
         help=(
@@ -824,7 +976,8 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help=(
             "At the end, write a CSV with one row per target in --progress-file: whether frame weights, "
-            "predicted noise and the aperture-set row were recorded, any refusal and its reason, and "
+            "predicted noise and the aperture-set row were recorded, whether the earlier-nights stack's "
+            "rows are there (yes, no, or n/a for a stack of one night), any refusal and its reason, and "
             "the frames the quarantine moved."
         ),
     )
@@ -1127,6 +1280,7 @@ def run_full_processing(argv: list[str] | None = None) -> None:
                     focal_length_mm,
                     arguments.force_restack,
                     progress,
+                    not arguments.no_earlier_nights,
                 )
                 continue
 

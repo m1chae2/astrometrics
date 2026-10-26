@@ -60,6 +60,7 @@ from wayfindinglib.analytics.result_quality.guiding_exposure import (
     GuidingExposureOutcome,
 )
 from wayfindinglib.analytics.result_quality.noise_growth import (
+    PRACTICAL_TIME_FACTOR,
     StackFrame,
     StackGroup,
     StopSignal,
@@ -1375,6 +1376,143 @@ def calibration_gap_statement(finding: CalibrationFinding) -> TargetStatement:
 # -----------------------------------------------------------------------------
 
 
+FLOOR_CAUSE_TEXT = "The floor is a pattern fixed on the sky (faint stars, the flat field, calibration)."
+"""The sentence that says what a noise floor probably is."""
+
+FLOOR_NOT_REMOVED_TEXT = "More frames will not remove it."
+"""Ends the floor's cause sentences when the report has no calibration advice
+for the setting. The report builder swaps it for `FLOOR_CALIBRATION_TEXT` when
+the same report carries a ``calibration_gap`` statement for the setting."""
+
+FLOOR_CALIBRATION_TEXT = "The calibration recommendations in this report may lower it."
+"""What replaces `FLOOR_NOT_REMOVED_TEXT` when calibration advice exists."""
+
+PLAIN_FLOOR_NOT_REMOVED_TEXT = "and more frames will not remove it."
+"""The plain-message ending that says the floor stays. The report builder swaps
+it for `PLAIN_FLOOR_CALIBRATION_TEXT` when calibration advice exists."""
+
+PLAIN_FLOOR_CALIBRATION_TEXT = "and the calibration recommendations in this report may lower it."
+"""What replaces `PLAIN_FLOOR_NOT_REMOVED_TEXT` when advice exists."""
+
+
+def _floor_share_sentence(result: TakeMoreResult) -> str:
+    """Say how much frames can give at most, and why.
+
+    Parameters
+    ----------
+    result : `TakeMoreResult`
+        An answer with ``practical_limit_applied`` true.
+
+    Returns
+    -------
+    text : `str`
+        For example "More frames give less each time: at most about 30% in
+        all, because a noise floor of 0.000583 (stack units) makes up about
+        49% of the noise."
+    """
+    most_cut = 100.0 * (result.most_reachable_cut or 0.0)
+    share = 100.0 * (result.floor_variance_share or 0.0)
+    floor_text = f" of {result.floor_noise:.3g} (stack units)" if result.floor_noise is not None else ""
+    return (
+        f"More frames give less each time: at most about {most_cut:.0f}% in all, because a noise "
+        f"floor{floor_text} makes up about {share:.0f}% of the noise."
+    )
+
+
+def _diminishing_returns_statement(
+    result: TakeMoreResult,
+    capture_setting: CaptureSetting | None,
+    overheads: CaptureOverheads,
+    evidence: Iterable[MeasurementReference],
+    exposure_note: str,
+) -> TargetStatement | None:
+    """Build the recommendation that gives one doubling in place of a count.
+
+    Used when a noise floor puts the target beyond the practical limit
+    (`TakeMoreResult.practical_limit_applied`). It asks for the frames that
+    double the stack's exposure time, says what that buys, what the most
+    frames could give, and where the floor probably comes from.
+
+    Parameters
+    ----------
+    result : `TakeMoreResult`
+        The answer, with ``doubling_frames`` and ``doubling_noise_cut``.
+    capture_setting : `CaptureSetting` or `None`
+        The setting the new frames use.
+    overheads : `CaptureOverheads`
+        Download and settle times, for the wall-clock time.
+    evidence : `Iterable` [`MeasurementReference`]
+        The rows the forecast used.
+    exposure_note : `str`
+        Why the exposure differs from the setting's, when it does.
+
+    Returns
+    -------
+    statement : `TargetStatement` or `None`
+        The ``more_frames`` recommendation, or ``None`` when the result lacks
+        the doubling numbers.
+    """
+    if (
+        result.doubling_frames is None
+        or result.doubling_noise_cut is None
+        or result.new_exposure_seconds is None
+    ):
+        return None
+    rule = rule_by_name("more_frames")
+    clock = wall_clock_estimate(result.doubling_frames, result.new_exposure_seconds, overheads)
+    cut = 100.0 * result.doubling_noise_cut
+    exposure = exposure_text(result.new_exposure_seconds)
+    message = (
+        f"Taking as many frames again as the stack holds ({result.doubling_frames} more at {exposure}, "
+        f"about {duration_text(clock.total_seconds)} with downloads) cuts the noise by about {cut:.0f}%. "
+        f"{_floor_share_sentence(result)} {FLOOR_CAUSE_TEXT} {FLOOR_NOT_REMOVED_TEXT}"
+    )
+    fields = {
+        "frame_count": result.doubling_frames,
+        "wall_clock_text": duration_text(clock.total_seconds) + " with downloads",
+        "noise_percent": cut,
+        **exposure_phrases(result.new_exposure_seconds),
+    }
+    plain = (
+        f"{format_plain(rule, fields)} Frames after that help less, at most about "
+        f"{100.0 * (result.most_reachable_cut or 0.0):.0f}% in all, because part of the noise is a "
+        f"pattern fixed on the sky, {PLAIN_FLOOR_NOT_REMOVED_TEXT}"
+    )
+    statement = _from_rule(
+        "more_frames",
+        message,
+        (
+            "Doubling the effective time is the step, because it is about the smallest change the eye "
+            "sees. The count asked for is the practical one: the target's own count is beyond "
+            f"{PRACTICAL_TIME_FACTOR:g} times the stack's time, so one doubling is given instead. "
+            f"{result.reason or ''} {exposure_note}"
+        ).strip(),
+        capture_setting=capture_setting,
+        plain_message=plain,
+        evidence=evidence,
+        proposed_action=ProposedAction(
+            exposure_seconds=result.new_exposure_seconds, frame_count=result.doubling_frames
+        ),
+        expected_effect=ExpectedEffect(
+            noise_change_fraction=-result.doubling_noise_cut,
+            effective_time_added_seconds=result.added_exposure_seconds,
+            wall_clock_seconds=clock.total_seconds,
+            description=f"Noise down about {cut:.0f}%.",
+        ),
+    )
+    return statement.model_copy(
+        update={
+            "values": {
+                **statement.values,
+                "practical_limit_applied": 1.0,
+                "doubling_frames": float(result.doubling_frames),
+                "doubling_noise_cut": result.doubling_noise_cut,
+                "most_reachable_cut": result.most_reachable_cut,
+            }
+        }
+    )
+
+
 def more_frames_statement(
     result: TakeMoreResult,
     capture_setting: CaptureSetting | None,
@@ -1404,6 +1542,8 @@ def more_frames_statement(
         The recommendation, or ``None`` when the result has no frame count
         (the caller then reports the reason as missing data).
     """
+    if result.practical_limit_applied:
+        return _diminishing_returns_statement(result, capture_setting, overheads, evidence, exposure_note)
     if result.frames_needed is None or result.new_exposure_seconds is None:
         return None
     rule = rule_by_name("more_frames")
@@ -1447,7 +1587,10 @@ def floor_limited_statement(
 
     Used when "take N more" has no count because a floor makes up so much of
     the stack's noise that the target cannot be reached
-    (`TakeMoreResult.floor_limited`). It says so in place of a count.
+    (`TakeMoreResult.floor_limited`) and one doubling of the stack's time is
+    not worth asking for (`TakeMoreResult.doubling_worthwhile` false). It says
+    so in place of a count, with the same floor sentences as the
+    diminishing-returns recommendation.
 
     Parameters
     ----------
@@ -1463,17 +1606,31 @@ def floor_limited_statement(
     statement : `TargetStatement`
         The ``more_frames_will_not_help`` warning, worded for a floor.
     """
-    share = 100.0 * (result.floor_variance_share or 0.0)
-    best_cut = 100.0 * (1.0 - (result.lowest_reachable_ratio or 1.0))
-    floor_text = f"{result.floor_noise:.3g} in stack units, " if result.floor_noise is not None else ""
-    message = (
-        f"More frames will not help much: a noise floor ({floor_text}{share:.0f}% of the noise) does not "
-        f"shrink with more frames, so even very many more would cut the noise by only {best_cut:.0f}%."
-    )
-    plain = (
-        f"More frames probably will not help: about {share:.0f}% of the noise does not shrink with more "
-        "frames. Find the cause (flats, dither, faint stars in the field) before adding more."
-    )
+    if result.practical_limit_applied:
+        doubling_cut = 100.0 * (result.doubling_noise_cut or 0.0)
+        message = (
+            f"More frames will not help: as many frames again as the stack holds would cut the noise by "
+            f"only about {doubling_cut:.0f}%. {_floor_share_sentence(result)} {FLOOR_CAUSE_TEXT} "
+            f"{FLOOR_NOT_REMOVED_TEXT}"
+        )
+        plain = (
+            f"More frames probably will not help: doubling the frames would cut the noise by only about "
+            f"{doubling_cut:.0f}%, because part of the noise is a pattern fixed on the sky, "
+            f"{PLAIN_FLOOR_NOT_REMOVED_TEXT}"
+        )
+    else:
+        share = 100.0 * (result.floor_variance_share or 0.0)
+        best_cut = 100.0 * (1.0 - (result.lowest_reachable_ratio or 1.0))
+        floor_text = f"{result.floor_noise:.3g} in stack units, " if result.floor_noise is not None else ""
+        message = (
+            f"More frames will not help much: a noise floor ({floor_text}{share:.0f}% of the noise) does "
+            f"not shrink with more frames, so even very many more would cut the noise by only "
+            f"{best_cut:.0f}%. {FLOOR_CAUSE_TEXT} {FLOOR_NOT_REMOVED_TEXT}"
+        )
+        plain = (
+            f"More frames probably will not help: about {share:.0f}% of the noise does not shrink with "
+            f"more frames. Find the cause (flats, dither, faint stars in the field) before adding more."
+        )
     return _from_rule(
         "more_frames_will_not_help",
         message,

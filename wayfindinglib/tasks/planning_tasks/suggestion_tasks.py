@@ -60,6 +60,7 @@ from wayfindinglib.models.planning.observation_package import (
     PackageSuggestion,
 )
 from wayfindinglib.models.planning.suggestion_log import PackageChange, SuggestionEvent, SuggestionLogEntry
+from wayfindinglib.models.planning.target_report import ForecastGate
 from wayfindinglib.models.planning.tonight_ranking import CandidateStatus, TonightRanking
 from wayfindinglib.models.quality.rule import QualityRule
 from wayfindinglib.models.quality.statements import Confidence, StatementKind, TargetStatement
@@ -684,7 +685,9 @@ def refresh_ranking_packages(
     """Make tonight's ranking into suggested packages and remove stale ones.
 
     The top `per_use` ranked targets of each use get a suggested package with
-    no rows, labeled as a design estimate, tied to tonight. A ranking package
+    no rows, labeled as a design estimate, tied to tonight. The order is the
+    ranking's: a target whose count is only exploratory (decision D11) sits
+    below one of about the same gain, and its reason says so. A ranking package
     whose night has ended is deleted. When the ranking is known and a package
     of tonight fell out of the top, it is deleted. When the ranking could not
     be made (`ranking` is `None`), nothing but the expiry changes.
@@ -737,6 +740,8 @@ def refresh_ranking_packages(
                 if gain is not None
                 else ""
             )
+            if candidate.forecast_gate == ForecastGate.EXPLORATORY:
+                reason += " Its count of frames to take is exploratory, so it ranks below a confirmed one."
             wanted[key] = (candidate.target_id, ranked_list.use.value, reason)
             _store_ranking_package(
                 writer, existing.get(key), key, candidate, ranked_list.use.value, night_id, reason

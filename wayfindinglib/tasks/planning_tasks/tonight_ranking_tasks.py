@@ -103,6 +103,7 @@ from wayfindinglib.analytics.result_quality.sky_model import SkyModel, predict_s
 from wayfindinglib.astronomy.coordinate_transforms import compute_altaz, earth_location
 from wayfindinglib.models.equipment_and_site.equipment import Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
+from wayfindinglib.models.planning.target_report import ForecastGate
 from wayfindinglib.models.planning.tonight_ranking import (
     CandidateStatus,
     RankedCandidate,
@@ -113,6 +114,7 @@ from wayfindinglib.models.planning.tonight_ranking import (
     TonightSkyModel,
 )
 from wayfindinglib.models.quality.efficiency import ScienceGoal
+from wayfindinglib.tasks.planning_tasks.target_report_inputs import forecast_gate_of_target
 from wayfindinglib.tasks.planning_tasks.visibility_tasks import effective_altitude_floor, visibility_state_at
 
 TONIGHT_SKY_ENTRY = "WAY-71"
@@ -120,6 +122,18 @@ TONIGHT_SKY_ENTRY = "WAY-71"
 
 TONIGHT_RANKING_ENTRY = "WAY-72"
 """Register entry behind the ranking and its design-estimate row."""
+
+GAIN_TIE_DIGITS = 2
+"""Two gains that agree to this many decimals (the whole percent the reason
+text shows) count as tied for the exploratory rule. Among targets tied this
+way, one whose "take N more" count is only exploratory (decision D11,
+2026-10-26) ranks after the others; otherwise the larger gain ranks first."""
+
+EXPLORATORY_RANKING_REMARK = (
+    "Its count of frames to take is exploratory: it rests on a check made from frames already taken, "
+    "and the next real stack will confirm it or close it."
+)
+"""The remark added to a ranked target whose count is exploratory."""
 
 CLOCK_HOUR_SECONDS = 3600.0
 """The span the gain is worked out for: one hour of real clock time."""
@@ -562,7 +576,12 @@ def build_lists(candidates: Iterable[RankedCandidate]) -> tuple[list[RankedList]
             continue
         ranked = sorted(
             (c for c in group if c.status == CandidateStatus.RANKED),
-            key=lambda c: (-(c.gain_per_hour_fraction or 0.0), c.target_id),
+            key=lambda c: (
+                -round(c.gain_per_hour_fraction or 0.0, GAIN_TIE_DIGITS),
+                c.forecast_gate == ForecastGate.EXPLORATORY,
+                -(c.gain_per_hour_fraction or 0.0),
+                c.target_id,
+            ),
         )
         stopped = sorted((c for c in group if c.status == CandidateStatus.STOPPED), key=lambda c: c.target_id)
         unranked = sorted(
@@ -819,6 +838,18 @@ def rank_tonight(
             ),
         ]
         all_runs = stack_runs_from_measurements(history)
+        # Whether the target's "take N more" count is confirmed, exploratory
+        # or closed. Only an exploratory one changes the order
+        # (`build_lists`).
+        dominant = dominant_setting(all_observations)
+        gate = forecast_gate_of_target(
+            astrometrics,
+            target.id,
+            history,
+            all_observations,
+            configured_stack_weight=configured_weight,
+            electrons_per_adu=electrons_per_adu_for(dominant) if dominant is not None else None,
+        )
         # A target in several lists is scored once for each, on the frames of
         # that use's settings (user decision U2, 2026-10-24).
         for use in classify_uses(target, {o.capture_setting for o in all_observations}) or []:
@@ -831,22 +862,26 @@ def rank_tonight(
             runs = [
                 run for run in all_runs if not run.member_frame_ids or set(run.member_frame_ids) <= frame_ids
             ]
-            candidates.append(
-                score_candidate(
-                    target.id,
-                    use,
-                    observations,
-                    runs,
-                    epoch_seconds=epoch_seconds,
-                    direction=direction,
-                    altitude_deg=float(altitude_deg),
-                    site=site_profile,
-                    sky_models=models,
-                    overheads_for=overheads_for,
-                    configured_weight=configured_weight,
-                    electrons_per_adu_for=electrons_per_adu_for,
-                )
+            scored = score_candidate(
+                target.id,
+                use,
+                observations,
+                runs,
+                epoch_seconds=epoch_seconds,
+                direction=direction,
+                altitude_deg=float(altitude_deg),
+                site=site_profile,
+                sky_models=models,
+                overheads_for=overheads_for,
+                configured_weight=configured_weight,
+                electrons_per_adu_for=electrons_per_adu_for,
             )
+            if gate != ForecastGate.CLOSED and scored.status == CandidateStatus.RANKED:
+                remark = EXPLORATORY_RANKING_REMARK if gate == ForecastGate.EXPLORATORY else ""
+                scored = scored.model_copy(
+                    update={"forecast_gate": gate, "reason": f"{scored.reason} {remark}".strip()}
+                )
+            candidates.append(scored)
     lists, notes = build_lists(candidates)
     for kind, count in sorted(skipped.items()):
         notes.append(f"{count} {kind} not ranked.")

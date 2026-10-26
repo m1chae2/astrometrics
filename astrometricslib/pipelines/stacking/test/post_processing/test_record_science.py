@@ -34,14 +34,17 @@ from astrometricslib.pipelines.stacking.post_processing.flat_noise_contribution 
 from astrometricslib.pipelines.stacking.post_processing.record_science import (
     CLIPPED_EXPOSURE_GROUPS_REASON,
     SPECTRAL_STACK_REASON,
+    StackScience,
     compute_expected_noise,
     compute_stack_science,
     expected_noise_measurements,
     flat_noise_measurements,
     group_peak_measurements,
+    group_reference_exposure_measurements,
     science_measurements,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_membership import (
+    GroupReference,
     StackMember,
     StackMembership,
 )
@@ -305,7 +308,7 @@ def test_a_group_whose_frames_could_not_be_read_stores_nothing_but_reasons() -> 
 def test_without_science_every_value_is_not_measured() -> None:
     """A caller that gathered nothing still gets a row for each metric."""
     rows = science_measurements(None, CONTEXT, SUBJECT, [_group(), _group()], [SUBJECT, SUBJECT])
-    assert len(rows) == 6 + 1 + 3 + 2 * 7
+    assert len(rows) == 6 + 1 + 3 + 2 * 8
     assert [row.status for row in rows[:10]] == [MeasurementStatus.NOT_MEASURED] * 10
 
 
@@ -753,4 +756,54 @@ def test_a_non_finite_blur_width_loses_no_row() -> None:
     assert science.flat_noise.result is None
     assert "blur width" in science.flat_noise.reason
     rows = science_measurements(science, CONTEXT, SUBJECT, [_group()], [SUBJECT])
-    assert len(rows) == 6 + 1 + 3 + 7
+    assert len(rows) == 6 + 1 + 3 + 8
+
+
+def test_the_group_reference_exposure_is_stored_on_the_groups_own_subject() -> None:
+    """The row has the reference frame's exposure, found by summary index."""
+    references = (GroupReference(0, None, 60.0), GroupReference(1, "/frames/long.fits", 300.0))
+    science = StackScience(
+        ExpectedNoiseOutcome(None, "x"),
+        FlatNoiseOutcome(None, "x"),
+        None,
+        group_references=references,
+    )
+    other = QualitySubject(level=SubjectLevel.STACK, subjectId="M 99/groups/b.fits", targetId="M 99")
+    rows = science_measurements(science, CONTEXT, SUBJECT, [_group(), _group()], [SUBJECT, other])
+    reference_rows = [row for row in rows if row.metric == "stacking.group_reference_exposure_s"]
+    assert [row.value for row in reference_rows] == [60.0, 300.0]
+    assert [row.subject.subject_id for row in reference_rows] == [SUBJECT.subject_id, other.subject_id]
+    assert all(row.status == MeasurementStatus.MEASURED for row in reference_rows)
+
+
+def test_an_unknown_group_reference_is_not_measured_with_its_reason() -> None:
+    """An unknown exposure and a group with no entry both say why."""
+    unknown = GroupReference(0, None, None, "no single registration reference frame can be identified")
+    (row,) = group_reference_exposure_measurements((unknown,), 0, CONTEXT, SUBJECT)
+    assert row.status == MeasurementStatus.NOT_MEASURED
+    assert row.value is None
+    assert row.reason == "no single registration reference frame can be identified"
+    (missing,) = group_reference_exposure_measurements((unknown,), 1, CONTEXT, SUBJECT)
+    assert missing.status == MeasurementStatus.NOT_MEASURED
+    assert "left out" in missing.reason
+
+
+def test_a_folded_member_scale_raises_the_group_noise(fake_profiles: list[object]) -> None:
+    """A member's exposure scale reaches the group prediction."""
+    store = _FakeStore(_sky_rows(["/frames/a.fits", "/frames/b.fits"]))
+    diagnostics = {"exposure_group_weights": [_group_entry(["/frames/a.fits", "/frames/b.fits"], weight=8.0)]}
+    frames = _membership().members
+    unscaled = StackMembership(tuple(StackMember(member.frame, 4.0) for member in frames))
+    scaled = StackMembership(
+        tuple(
+            StackMember(member.frame, 4.0, exposure_scale=scale)
+            for member, scale in zip(frames, (1.0, 2.0), strict=True)
+        )
+    )
+    plain = compute_expected_noise(unscaled, "", "M 99", store=store, diagnostics=diagnostics)
+    folded = compute_expected_noise(scaled, "", "M 99", store=store, diagnostics=diagnostics)
+    assert plain.result is not None and folded.result is not None
+    assert folded.result.read_noise > plain.result.read_noise
+    # Two frames with weight 1/2 each: the variance share is (1 + 4) / 4
+    # with k = 1 and 2, against (1 + 1) / 4 with k = 1 and 1.
+    assert folded.result.read_noise / plain.result.read_noise == pytest.approx((5.0 / 2.0) ** 0.5)

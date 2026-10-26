@@ -22,9 +22,14 @@ Nothing here reads the clock, and a failure never fails the stack.
 
 The expected noise is stored only where the frames' weights and sky describe
 the stack. A stack combined from several exposure lengths divides each group
-by its exposure and rescales it, which the frame weights leave out, so it gets
-no expected noise. A stack whose member list is uncertain gets an assumed one.
-A spectral stack gets none, because its measured noise is not stored either.
+by its exposure and rescales it, and the group formula in `expected_noise.py`
+describes that. A group that holds folded frames of another length is
+described too, with each frame's scale to the group's registration reference
+frame; the exposure of that reference frame is stored for each group
+(`group_reference_exposure_measurements`). A stack that is clipped at zero, or
+a group whose reference frame cannot be identified, gets no expected noise.
+A stack whose member list is uncertain gets an assumed one. A spectral stack
+gets none, because its measured noise is not stored either.
 """
 
 import logging
@@ -66,6 +71,7 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_GROUP_PEAK_ESTIMATED_FRAME_COUNT,
     STACKING_GROUP_PEAK_FRACTION,
     STACKING_GROUP_RAW_SKY_LEVEL_ADU,
+    STACKING_GROUP_REFERENCE_EXPOSURE_S,
     STACKING_METRICS,
     STACKING_NORMALIZATION_SCALE,
     STACKING_STACK_SKY_LEVEL_STACK_UNIT,
@@ -94,6 +100,7 @@ from astrometricslib.pipelines.stacking.post_processing.normalization_scale impo
     measure_normalization_scale,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_membership import (
+    GroupReference,
     StackMembership,
     normalized_weights,
 )
@@ -109,6 +116,7 @@ __all__ = [
     "flat_noise_measurements",
     "frame_noise_inputs_from_store",
     "group_peak_measurements",
+    "group_reference_exposure_measurements",
     "normalization_scale_measurements",
     "resolve_stack_sky_level",
     "scale_expected_noise",
@@ -153,12 +161,17 @@ class StackScience:
     normalization_scale : `NormalizationScaleOutcome`
         The scale Siril gave the stack, or the reason there is none. The
         expected noise in `expected_noise` has already been multiplied by it.
+    group_references : `tuple` of `GroupReference`
+        For a stack of exposure groups, the exposure of each combined group's
+        registration reference frame (see `stack_membership.group_references`).
+        Empty for a stack that is not made of groups.
     """
 
     expected_noise: ExpectedNoiseOutcome
     flat_noise: FlatNoiseOutcome
     stack_sky_level: float | None
     normalization_scale: NormalizationScaleOutcome = _SCALE_NOT_MEASURED
+    group_references: tuple[GroupReference, ...] = ()
 
 
 def resolve_stack_sky_level(noise: StackNoiseOutcome | None, stack_path: str) -> float | None:
@@ -267,6 +280,7 @@ def frame_noise_inputs_from_store(
     configuration: object,
     store: QualityStore | None,
     weights_reason: str = "",
+    exposure_scales: Sequence[float] | None = None,
 ) -> ExpectedNoiseOutcome | list[FrameNoiseInput]:
     """Join frames' stored sky measurements with their camera profiles.
 
@@ -284,11 +298,15 @@ def frame_noise_inputs_from_store(
         The store to read, or `None` to open the configured one.
     weights_reason : `str`, optional
         Why the weights are unknown.
+    exposure_scales : `Sequence` [`float`], optional
+        Each frame's ``k_i`` (see `FrameNoiseInput.exposure_scale`). Left out,
+        every frame gets 1.
 
     Returns
     -------
     inputs : `list` [`FrameNoiseInput`] or `ExpectedNoiseOutcome`
-        One entry for each frame (its sky, read noise, gain and weight), or
+        One entry for each frame (its sky, read noise, gain, weight and
+        scale), or
         the reason there is none (see `gather_frame_noise_inputs`).
     """
     try:
@@ -333,6 +351,7 @@ def frame_noise_inputs_from_store(
         lambda frame: frame_subject_id(frame.path, target_id),
         noise_setting,
         weights_reason,
+        exposure_scales,
     )
 
 
@@ -364,6 +383,7 @@ def _expected_noise_from_store(
         configuration,
         store,
         membership.weights_reason,
+        [member.exposure_scale for member in membership.members],
     )
     if isinstance(inputs, ExpectedNoiseOutcome):
         return inputs
@@ -395,6 +415,7 @@ def exposure_group_facts(group_entries: Sequence[dict[str, Any]]) -> list[Exposu
                     gain=float(entry["gain"]),
                     gain_measured=bool(entry["gain_measured"]),
                     sky_level_per_second=float(entry["sky_level_per_second"]),
+                    member_paths=tuple(str(path) for path in entry.get("paths") or []),
                 )
             )
         except KeyError, TypeError, ValueError:
@@ -438,6 +459,7 @@ def _expected_group_noise_from_store(
         configuration,
         store,
         membership.weights_reason,
+        [member.exposure_scale for member in membership.members],
     )
     if isinstance(inputs, ExpectedNoiseOutcome):
         return inputs
@@ -558,7 +580,9 @@ def compute_stack_science(
     except Exception as error:  # a by-product again
         logger.exception("The flat noise of the stack %s could not be worked out", stack_path)
         flat = FlatNoiseOutcome(None, f"the flat's noise failed: {type(error).__name__}")
-    return StackScience(expected, flat, sky_level, scale)
+    return StackScience(
+        expected, flat, sky_level, scale, membership.group_references if membership is not None else ()
+    )
 
 
 def expected_noise_measurements(
@@ -945,6 +969,53 @@ def group_peak_measurements(
     return rows
 
 
+def group_reference_exposure_measurements(
+    references: Sequence[GroupReference],
+    summary_index: int,
+    context: PipelineRunContext,
+    subject: QualitySubject,
+) -> list[QualityMeasurement]:
+    """Build the registration reference frame's exposure row of one group.
+
+    Parameters
+    ----------
+    references : `Sequence` [`GroupReference`]
+        The stack's combined groups' references (see
+        `stack_membership.group_references`).
+    summary_index : `int`
+        The group's place in the summary's list of exposure groups.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    subject : `QualitySubject`
+        The group's stack.
+
+    Returns
+    -------
+    measurements : `list` of `QualityMeasurement`
+        One row: the exposure of the group's registration reference frame, or
+        not measured with the reason (the reference frame cannot be identified,
+        or the group was not combined, or the stack is of one group).
+    """
+    spec = _SPEC_BY_NAME[STACKING_GROUP_REFERENCE_EXPOSURE_S]
+    reference = next((item for item in references if item.summary_index == summary_index), None)
+    if reference is None:
+        reason = (
+            "the group was left out of the combination, or the stack's member frames could not be worked out"
+        )
+        return [build_measurement(spec, None, context, subject, reason=reason)]
+    if reference.exposure_seconds is None:
+        return [
+            build_measurement(
+                spec,
+                None,
+                context,
+                subject,
+                reason=reference.reason or "the registration reference frame's exposure is not known",
+            )
+        ]
+    return [build_measurement(spec, reference.exposure_seconds, context, subject)]
+
+
 def science_measurements(
     science: StackScience | None,
     context: PipelineRunContext,
@@ -986,6 +1057,7 @@ def science_measurements(
     # `group_subjects` is built from `groups` in the same order (see
     # `record_quality.stacking_measurements`); a strict zip makes any drift
     # fail loudly.
-    for group, subject in zip(groups, group_subjects, strict=True):
+    for index, (group, subject) in enumerate(zip(groups, group_subjects, strict=True)):
         rows.extend(group_peak_measurements(group, context, subject))
+        rows.extend(group_reference_exposure_measurements(science.group_references, index, context, subject))
     return rows

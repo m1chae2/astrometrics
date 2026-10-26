@@ -60,16 +60,38 @@ library, which works in stack units; a test compares the two.
   frames are in electrons, so the camera gain converts them), and it keeps
   the gain of the nearest existing group;
 * a length with fewer than 5 frames is folded into the nearest group by the
-  library's own rule (`fold_exposure_lengths`);
+  library's own rule (`fold_exposure_lengths`). The folded frame is forecast
+  as a member of that group, scaled to the group's reference frame (below);
 * when no length would have 5 frames the stacker would make one group of
   mixed lengths, and the plan is refused;
 * if the new frames make another group the heaviest, the later stack has a
   different brightness scale and the pair is confounded (flagged).
 
+Folded groups. Siril normalizes each frame of a group to the group's
+registration reference frame, so frame ``i`` of length ``t_i`` enters the
+group stack multiplied by ``k_i = t_ref / t_i`` (1 for a group of one length),
+and its noise in the group's units is ``k_i`` times its own. The variance term
+of the frame is ``(a_i k_i / t_g)^2 v_i``, with ``t_g`` the group's mean
+exposure that the combine used. `StackGroup.frame_noise_factors` carries the
+noise of each frame relative to a frame of the group's own length, which is the
+frame the stored ``s_g`` stands for (`frame_noise_from_group_weight`): the
+stacker measures ``s_g`` as the median noise of a few raw frames sampled across
+the group, and the folded frames are fewer than 5 in a larger group, so the
+median is that of a frame of the group's own length. The stored rows do not say
+which frames were sampled, so this is an approximation; it is exact when no
+sampled frame was folded. The electron form of the factor,
+``k_i sqrt((B_i t_i + RN^2) / (B_i t_len + RN^2))``, is used because the read
+noise does not scale with the exposure and the folded frames are short; where
+the sky rate and read noise are both unknown it falls back to the sky-limited
+form ``k_i sqrt(t_i / t_len)``. The group's reference exposure is
+``stacking.group_reference_exposure_s``; with no row for it the group cannot
+be forecast.
+
 What part 2a stores, and what this needs. The group's ``W_g`` is the sum of
 its ``stacking.frame_weight`` rows, ``N_g`` is
 ``stacking.group_frames_stacked_count``, ``t_g`` is
-``stacking.group_exposure_s`` and ``G_g`` is ``stacking.group_gain_applied``;
+``stacking.group_exposure_s`` (the mean exposure of a folded group) and
+``G_g`` is ``stacking.group_gain_applied``;
 ``s_g`` is not a row of its own, but `frame_noise_from_group_weight` gets it
 back from those. The camera gain (electrons per ADU) comes from the camera
 profile.
@@ -394,6 +416,7 @@ def forecast_noise_with_weights(
     weights: Sequence[float],
     mode: WeightingMode = WeightingMode.UNKNOWN,
     weight_normalization: float | None = None,
+    rate_variances: Sequence[float] | None = None,
 ) -> NoiseForecast:
     """Predict the noise of a stack from the weights the stacker really used.
 
@@ -414,6 +437,11 @@ def forecast_noise_with_weights(
         exposure-group combine needs it: its frame coefficient is
         ``W_g w_i / (sum(W) G_g)``, which divides by the sum of the group
         weights and not by the sum of the coefficients when a gain is not 1.
+    rate_variances : `Sequence` [`float`], optional
+        One variance per frame, in rate units, in place of each frame's own
+        `StackFrame.rate_variance`. The group combine needs it for a folded
+        group, where Siril rescales a frame to the group's reference frame
+        (`group_frame_rate_variances`).
 
     Returns
     -------
@@ -422,16 +450,15 @@ def forecast_noise_with_weights(
         normalization (the sum of the weights by default), or ``None`` with a
         reason when the lists differ in length or all weights are 0.
     """
-    if len(weights) != len(frames):
+    if len(weights) != len(frames) or (rate_variances is not None and len(rate_variances) != len(frames)):
         return NoiseForecast(
             mode=mode, frame_count=len(frames), reason="The weights and the frames do not match up."
         )
+    variances = [frame.rate_variance for frame in frames] if rate_variances is None else list(rate_variances)
     total_weight = sum(weights) if weight_normalization is None else weight_normalization
     if total_weight <= 0.0:
         return NoiseForecast(mode=mode, frame_count=len(frames), reason="All frames have weight 0.")
-    variance = (
-        sum(w**2 * frame.rate_variance for w, frame in zip(weights, frames, strict=True)) / total_weight**2
-    )
+    variance = sum(w**2 * v for w, v in zip(weights, variances, strict=True)) / total_weight**2
     return NoiseForecast(variance=variance, noise=math.sqrt(variance), frame_count=len(frames), mode=mode)
 
 
@@ -1537,6 +1564,20 @@ class StackGroup(BaseModel):
     in_group_weights : `tuple` [`float`, ...] or `None`
         Siril's recorded weights inside the group, one per frame. Used only
         when the frames have no star widths to rebuild ``wfwhm`` from.
+    reference_exposure_seconds : `float` or `None`
+        ``t_ref``: the exposure of the group's registration reference frame
+        (``stacking.group_reference_exposure_s``). Siril scales every frame
+        of a group to that frame, so a frame of length ``t_i`` enters the
+        group stack multiplied by ``k_i = t_ref / t_i``. ``None`` means the
+        frames are not rescaled (every ``k_i`` is 1), which is right for a
+        group of one length and is today's model.
+    noise_length_seconds : `float` or `None`
+        The exposure length that `frame_noise_adu` stands for. The stacker
+        measures ``s_g`` as the median noise of a few raw frames sampled from
+        the group, so for a folded group (a few frames of another length in a
+        group of one main length) it is the noise of a frame of the group's
+        own length, not of the reference frame and not of the folded frames.
+        ``None`` means the most common exposure among the frames.
     """
 
     model_config = ConfigDict(populate_by_name=True, alias_generator=to_camel, frozen=True)
@@ -1547,6 +1588,67 @@ class StackGroup(BaseModel):
     electrons_per_adu: float | None = Field(default=None, gt=0.0)
     noise_predicted: bool = False
     in_group_weights: tuple[float, ...] | None = None
+    reference_exposure_seconds: float | None = Field(default=None, gt=0.0)
+    noise_length_seconds: float | None = Field(default=None, gt=0.0)
+
+    @property
+    def noise_length(self) -> float:
+        """Give the exposure length that the group's frame noise stands for.
+
+        Returns
+        -------
+        length : `float`
+            `noise_length_seconds`, or the most common exposure of the frames
+            (the shortest one when two are equally common); 0 for a group
+            with no frames.
+        """
+        if self.noise_length_seconds is not None:
+            return self.noise_length_seconds
+        if not self.frames:
+            return 0.0
+        counts: dict[float, int] = {}
+        for frame in self.frames:
+            counts[frame.exposure_seconds] = counts.get(frame.exposure_seconds, 0) + 1
+        return min(counts, key=lambda exposure: (-counts[exposure], exposure))
+
+    @property
+    def frame_noise_factors(self) -> tuple[float, ...]:
+        """Give each frame's noise relative to the `frame_noise_adu` frame.
+
+        Frame ``i`` enters the group stack scaled by ``k_i = t_ref / t_i``,
+        so its noise in the group's units is ``k_i`` times its own raw noise.
+        Its own raw noise, in electrons, is ``sqrt(B_i t_i + RN^2)`` (``B_i``
+        the frame's sky rate, ``RN`` its read noise). The factor compares
+        that with a frame of the group's noise length ``t_len`` (what
+        `frame_noise_adu` measures) under the same sky and read noise::
+
+            factor_i = k_i sqrt((B_i t_i + RN^2) / (B_i t_len + RN^2))
+
+        When a frame has no sky rate and no read noise (both 0, which is how
+        "not known" reaches this model) the electron form has nothing to
+        divide, and the factor is the sky-limited form
+        ``k_i sqrt(t_i / t_len)``, where the sky photons alone set the noise.
+        A group with no reference exposure is not rescaled: every factor is
+        1, and an unfolded group (one length) gives 1 either way.
+
+        Returns
+        -------
+        factors : `tuple` [`float`, ...]
+            One factor per frame, in frame order.
+        """
+        if self.reference_exposure_seconds is None:
+            return (1.0,) * len(self.frames)
+        length = self.noise_length
+        factors = []
+        for frame in self.frames:
+            scale = self.reference_exposure_seconds / frame.exposure_seconds
+            own = frame.sky_rate_e_per_s_per_px * frame.exposure_seconds + frame.read_noise_e**2
+            at_length = frame.sky_rate_e_per_s_per_px * length + frame.read_noise_e**2
+            if own > 0.0 and at_length > 0.0:
+                factors.append(scale * math.sqrt(own / at_length))
+            else:
+                factors.append(scale * math.sqrt(frame.exposure_seconds / length))
+        return tuple(factors)
 
     @property
     def mean_exposure_seconds(self) -> float:
@@ -1569,6 +1671,14 @@ def frame_noise_from_group_weight(group_weight: float, frame_count: int, exposur
     ``stacking.frame_weight`` rows of a group add up to ``W_g``, so
     ``s_g = t_g sqrt(N_g / W_g)``. The part 2a rows do not store ``s_g`` on its
     own; this is how a forecast gets it from rows.
+
+    The stacker measures ``s_g`` as the median noise of a few raw frames
+    sampled from the group, and takes ``t_g`` as the group's mean exposure. For
+    a folded group the rows therefore give the noise of a typical frame of the
+    group's main length, not of the reference frame or of a folded frame; the
+    rows cannot say which frames were sampled.
+    `StackGroup.noise_length_seconds`
+    records the length the result stands for.
 
     Parameters
     ----------
@@ -1650,6 +1760,41 @@ def _in_group_weights(group: StackGroup) -> list[float] | None:
     if group.in_group_weights is not None and len(group.in_group_weights) == len(group.frames):
         return list(group.in_group_weights)
     return None
+
+
+def group_frame_rate_variances(groups: Sequence[StackGroup]) -> list[float]:
+    """Give each frame's variance in rate units, as the group combine sees it.
+
+    A group with no reference exposure is not rescaled, so its frames keep
+    their own `StackFrame.rate_variance` (the model before folded groups).
+    For a group with one, frame ``i`` is multiplied by ``k_i`` inside Siril,
+    so its noise is ``factor_i`` times that of a frame of the group's noise
+    length (`StackGroup.frame_noise_factors`). The combine then divides the
+    group stack by the group's exposure ``t_g``, so the variance in rate units
+    is ``factor_i^2 (B_i t_len + RN^2) / t_g^2``. For a group of one length
+    this is the frame's own rate variance.
+
+    Parameters
+    ----------
+    groups : `Sequence` [`StackGroup`]
+        The groups, in the order of the frames.
+
+    Returns
+    -------
+    variances : `list` [`float`]
+        One variance per frame, groups in order.
+    """
+    variances: list[float] = []
+    for group in groups:
+        if group.reference_exposure_seconds is None:
+            variances.extend(frame.rate_variance for frame in group.frames)
+            continue
+        length = group.noise_length
+        group_exposure = group.mean_exposure_seconds
+        for frame, factor in zip(group.frames, group.frame_noise_factors, strict=True):
+            at_length = frame.sky_rate_e_per_s_per_px * length + frame.read_noise_e**2
+            variances.append(factor**2 * at_length / group_exposure**2)
+    return variances
 
 
 class GroupCoefficients(BaseModel):
@@ -1735,7 +1880,10 @@ def forecast_group_noise(groups: Sequence[StackGroup]) -> NoiseForecast:
     the coefficient ``a_i = W_g w_i / (sum(W) G_g)``; ``w_i`` is its ``wfwhm``
     share inside the group. The variance in rate units is ``sum(a_i^2 v_i)``
     (`forecast_noise_with_weights` with the gain divided out of each weight
-    and ``sum(W)`` as the normalization). The combine then scales the result
+    and ``sum(W)`` as the normalization). For a folded group ``v_i`` includes
+    the frame's scaling to the group's reference frame
+    (`group_frame_rate_variances`); an unfolded group is unchanged. The
+    combine then scales the result
     by the mean exposure per frame ``t_bar``, so the returned variance and
     noise are the rate-unit values times ``t_bar^2`` and ``t_bar``: they are in
     the stack's scale, and the ratio of two of them is the ratio of the
@@ -1761,7 +1909,11 @@ def forecast_group_noise(groups: Sequence[StackGroup]) -> NoiseForecast:
     frames = [frame for group in groups for frame in group.frames]
     weights = [raw / gain for raw, gain in zip(coefficients.raw_weights, coefficients.gains, strict=True)]
     base = forecast_noise_with_weights(
-        frames, weights, WeightingMode.GROUP, weight_normalization=coefficients.total_group_weight
+        frames,
+        weights,
+        WeightingMode.GROUP,
+        weight_normalization=coefficients.total_group_weight,
+        rate_variances=group_frame_rate_variances(groups),
     )
     if base.variance is None:
         return base
@@ -1889,9 +2041,10 @@ class GroupPlan(BaseModel):
         scale then differs from today's, so the two are confounded: the noise
         ratio is not a like-for-like comparison.
     folded_group_lengths : `list` [`float`]
-        Groups that hold folded frames of another length. The stacker records
-        no weights for such a group, so a stack check cannot confirm the
-        forecast.
+        Groups that hold folded frames of another length. This is information
+        only: such a group is forecast like any other, with the folded frames
+        scaled to the group's reference frame
+        (`StackGroup.frame_noise_factors`).
     reason : `str` or `None`
         Why the later stack cannot be forecast.
     """
@@ -1906,6 +2059,23 @@ class GroupPlan(BaseModel):
     heaviest_group_changed: bool = False
     folded_group_lengths: list[float] = Field(default_factory=list)
     reason: str | None = None
+
+
+def _length_key(exposure_seconds: float) -> float | None:
+    """Give the exposure length a frame is grouped under.
+
+    Parameters
+    ----------
+    exposure_seconds : `float`
+        A frame's exposure.
+
+    Returns
+    -------
+    length : `float` or `None`
+        The exposure rounded the way `fold_exposure_lengths` rounds it (lengths
+        that match to three significant figures are one length).
+    """
+    return fold_exposure_lengths([exposure_seconds])[0]
 
 
 def _refused_plan(reason: str, placements: list[FramePlacement] | None = None) -> GroupPlan:
@@ -1974,10 +2144,12 @@ def plan_group_stack(
       existing group (nearest in the ratio of exposures, the fold rule's
       measure);
     * new frames of a length with fewer than 5 frames are folded into the
-      nearest large group. That group then holds frames of another length, so
-      the stacker records no weights for it (listed in
-      `GroupPlan.folded_group_lengths`); the forecast is still made, with the
-      folded frames weighted as members of the group;
+      nearest large group (listed in `GroupPlan.folded_group_lengths`). The
+      group's registration reference frame keeps the exposure it had, and
+      each folded frame enters the group stack scaled to it, so its noise is
+      scaled by ``k = t_ref / t`` (`StackGroup.frame_noise_factors`). A group
+      whose reference exposure is not known cannot take folded frames, and
+      the plan is refused with that reason;
     * when no length has 5 frames, or the existing groups would be regrouped,
       the stacker would not make the groups the forecast assumes, and the
       plan is refused with a reason.
@@ -2027,8 +2199,10 @@ def plan_group_stack(
     frames_by_length: dict[float, list[StackFrame]] = {}
     for frame, destination in zip(new, new_destinations, strict=True):
         own_length = fold_exposure_lengths([frame.exposure_seconds])[0]
-        if destination in existing_lengths:
-            outcome = "joins_existing_group" if own_length == destination else "folded_into_group"
+        if own_length != destination:
+            outcome = "folded_into_group"
+        elif destination in existing_lengths:
+            outcome = "joins_existing_group"
         else:
             outcome = "starts_new_group"
         placements.append(
@@ -2045,6 +2219,23 @@ def plan_group_stack(
     planned_lengths: list[float] = []
     for group, length in zip(existing, existing_lengths, strict=True):
         added = frames_by_length.pop(float(length), [])
+        lengths_held = {_length_key(frame.exposure_seconds) for frame in (*group.frames, *added)}
+        if group.reference_exposure_seconds is None and len(lengths_held) > 1:
+            if len({_length_key(frame.exposure_seconds) for frame in group.frames}) == 1:
+                # The old frames share one length, so the reference frame was
+                # one of them; the new frames of another length scale to it.
+                group = group.model_copy(
+                    update={
+                        "reference_exposure_seconds": group.frames[0].exposure_seconds,
+                        "noise_length_seconds": group.frames[0].exposure_seconds,
+                    }
+                )
+            else:
+                return _refused_plan(
+                    f"The {float(length):g} s group holds frames of more than one length and its "
+                    "reference frame's exposure is not known.",
+                    placements,
+                )
         planned.append(group.model_copy(update={"frames": (*group.frames, *added)}) if added else group)
         planned_lengths.append(float(length))
     for length in sorted(frames_by_length):
@@ -2062,13 +2253,17 @@ def plan_group_stack(
                 f"{length:g} s group.",
                 placements,
             )
+        own_length_frames = [frame for frame in added if _length_key(frame.exposure_seconds) == length]
         planned.append(
             StackGroup(
                 frames=tuple(added),
-                frame_noise_adu=predict_group_frame_noise_adu(added, camera_gain),
+                # The noise stands for a frame of the group's own length.
+                frame_noise_adu=predict_group_frame_noise_adu(own_length_frames or added, camera_gain),
                 gain=existing[nearest].gain,
                 electrons_per_adu=camera_gain,
                 noise_predicted=True,
+                reference_exposure_seconds=length,
+                noise_length_seconds=length,
             )
         )
         planned_lengths.append(length)
@@ -2218,8 +2413,6 @@ def frames_to_cut_noise_in_groups(
             "The new frames would make a different group the heaviest, which rescales the stack: "
             "the earlier and later stacks cannot be compared like for like."
         )
-    if answer_plan.folded_group_lengths:
-        notes.append("Some frames would be folded into another group, which records no weights.")
     return result.model_copy(
         update={
             "new_exposure_group": starts_new_group,

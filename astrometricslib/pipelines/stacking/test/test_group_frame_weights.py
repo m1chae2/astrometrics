@@ -28,6 +28,7 @@ from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
 from astrometricslib.pipelines.stacking.post_processing.stack_membership import (
     determine_stack_members,
     group_frame_weights,
+    group_references,
     normalized_weights,
     registration_reference_from_diagnostics,
     wfwhm_weights,
@@ -168,7 +169,6 @@ def _single_group(frames: list[SimpleNamespace], entry: dict) -> dict:
 @pytest.mark.parametrize(
     ("overrides", "expected_text"),
     [
-        ({"holds_folded_frames": True}, "folded frames of another exposure length"),
         ({"stack_weight": "noise"}, "-weight=noise"),
         ({"stack_weight": "nbstars"}, "-weight=nbstars"),
         ({"gain_measured": False}, "could not measure the brightness gain"),
@@ -192,6 +192,215 @@ def test_a_group_with_an_unknown_weight_gives_unknown_weights_and_a_reason(
     assert normalized_weights(membership) == [None] * 5
     assert expected_text in membership.weights_reason
     assert "5 s exposure group" in membership.weights_reason
+
+
+def _folded_group(
+    long_frame_position: int = 4, reference_position: int = 0, long_exposure: str = "300"
+) -> tuple[list[SimpleNamespace], dict]:
+    """Build a 120 s group that holds one folded frame of another length.
+
+    Parameters
+    ----------
+    long_frame_position : `int`, optional
+        Where the folded frame sits in the group.
+    reference_position : `int`, optional
+        Which frame has the identity transform (the registration reference).
+    long_exposure : `str`, optional
+        The folded frame's exposure; ``"0"`` makes a frame with no exposure.
+
+    Returns
+    -------
+    frames, entry : `tuple`
+        Five frames and the group's entry, with the mean exposure as the
+        group's exposure the way the stacker reports it.
+    """
+    frames = _frames("f", 5, "120")
+    frames[long_frame_position].exposure = long_exposure
+    mean_exposure = (4 * 120.0 + float(long_exposure)) / 5
+    entry = _entry(frames, mean_exposure, holds_folded_frames=True)
+    for index, facts in enumerate(entry["registration_frames"]):
+        facts["dx"] = 0.0 if index == reference_position else 1.5
+        facts["dy"] = 0.0 if index == reference_position else -0.5
+    return frames, entry
+
+
+def test_a_folded_group_gets_weights_and_scales_to_its_reference_frame() -> None:
+    """A 300 s frame in a 120 s group with a 120 s reference has k = 0.4."""
+    frames, entry = _folded_group()
+
+    membership = determine_stack_members(frames, _single_group(frames, entry), None)
+
+    assert membership.weights_reason == ""
+    assert all(member.raw_weight is not None for member in membership.members)
+    assert [member.exposure_scale for member in membership.members] == pytest.approx([
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        120.0 / 300.0,
+    ])
+    # The weights are still the group weight shared equally.
+    group_weight = 5 * entry["exposure_seconds"] ** 2 / 10.0**2
+    assert [member.raw_weight for member in membership.members] == pytest.approx([group_weight / 5] * 5)
+    (reference,) = membership.group_references
+    assert reference.exposure_seconds == pytest.approx(120.0)
+    assert reference.reference_path == frames[0].path
+    assert reference.reason == ""
+
+
+def test_a_folded_group_whose_reference_is_the_long_frame_scales_the_others_up() -> None:
+    """Siril may pick the 300 s frame: the 120 s frames then have k = 2.5."""
+    frames, entry = _folded_group(reference_position=4)
+
+    membership = determine_stack_members(frames, _single_group(frames, entry), None)
+
+    assert membership.weights_reason == ""
+    assert [member.exposure_scale for member in membership.members] == pytest.approx([2.5] * 4 + [1.0])
+    (reference,) = membership.group_references
+    assert reference.exposure_seconds == pytest.approx(300.0)
+    assert reference.reference_path == frames[4].path
+
+
+def test_an_unfolded_group_has_scale_one_for_every_frame_even_with_slightly_different_lengths() -> None:
+    """Frames that share a rounded length are not scaled."""
+    frames = _frames("u", 4, "120")
+    frames[2].exposure = "120.4"
+    entry = _entry(frames, 120.1)
+
+    membership = determine_stack_members(frames, _single_group(frames, entry), None)
+
+    assert [member.exposure_scale for member in membership.members] == pytest.approx([1.0] * 4, abs=0.0)
+    (reference,) = membership.group_references
+    assert reference.exposure_seconds == pytest.approx(120.1)
+    assert reference.reference_path is None
+
+
+def test_a_folded_group_with_a_frame_of_no_exposure_is_refused_with_a_reason() -> None:
+    """A 0 s frame has no ratio, so the group's weights are unknown."""
+    frames, entry = _folded_group(long_exposure="0")
+
+    membership = determine_stack_members(frames, _single_group(frames, entry), None)
+
+    assert all(member.raw_weight is None for member in membership.members)
+    assert "no usable exposure length" in membership.weights_reason
+    assert "96 s exposure group" in membership.weights_reason
+
+
+def test_a_folded_group_without_one_identity_frame_is_refused_with_a_reason() -> None:
+    """Two frames with no shift: no single reference frame can be named."""
+    frames, entry = _folded_group()
+    entry["registration_frames"][1].update(dx=0.0, dy=0.0)
+
+    membership = determine_stack_members(frames, _single_group(frames, entry), None)
+
+    assert all(member.raw_weight is None for member in membership.members)
+    assert "no single registration reference frame" in membership.weights_reason
+    (reference,) = membership.group_references
+    assert reference.exposure_seconds is None
+    assert reference.reason == membership.weights_reason
+
+
+def test_the_group_reference_row_names_the_group_by_its_place_in_the_summaries() -> None:
+    """The entry's ``summary_index`` is carried to the reference."""
+    frames, entry = _folded_group()
+    entry["summary_index"] = 3
+
+    (reference,) = group_references(frames, [entry])
+
+    assert reference.summary_index == 3
+
+
+def test_the_rule_with_folded_frames_needs_the_lengths_and_the_reference() -> None:
+    """The pure rule refuses a folded group that lacks either."""
+    folded = {"holds_folded_frames": [True]}
+    weights = [[1.0, 1.0]]
+    known = group_frame_weights(
+        weights, [10.0], [2], [10.0], **folded, frame_exposures=[[5.0, 20.0]], reference_exposures=[5.0]
+    )
+    assert known.weights[0] is not None
+    assert known.exposure_scales == ((1.0, 0.25),)
+    no_lengths = group_frame_weights(weights, [10.0], [2], [10.0], **folded, reference_exposures=[5.0])
+    assert no_lengths.weights == (None,)
+    assert "no usable exposure length" in no_lengths.reasons[0]
+    no_reference = group_frame_weights(
+        weights, [10.0], [2], [10.0], **folded, frame_exposures=[[5.0, 20.0]], reference_exposures=[None]
+    )
+    assert no_reference.weights == (None,)
+    assert "could not be identified" in no_reference.reasons[0]
+
+
+def _plain_folded_stack(
+    reference_position: int = 0, long_exposure: str = "300"
+) -> tuple[list[SimpleNamespace], dict]:
+    """Build the diagnostics of a one-group stack with a folded frame.
+
+    Parameters
+    ----------
+    reference_position : `int`, optional
+        Which frame has the identity transform.
+    long_exposure : `str`, optional
+        The exposure of the last frame (``"0"`` for a frame with none).
+
+    Returns
+    -------
+    frames, diagnostics : `tuple`
+        Five frames and the plain (no ``exposure_group_weights``) diagnostics.
+    """
+    frames, entry = _folded_group(reference_position=reference_position, long_exposure=long_exposure)
+    diagnostics = {
+        "combined_frame_paths": [frame.path for frame in frames],
+        "symlinked_light_paths": entry["frame_paths"],
+        "registration_frames": entry["registration_frames"],
+        "registration_included": entry["registration_included"],
+    }
+    return frames, diagnostics
+
+
+def test_a_one_group_stack_with_a_folded_frame_gets_scales_and_a_reference_exposure() -> None:
+    """The plain path scales a 300 s frame in a 120 s stack by 0.4."""
+    frames, diagnostics = _plain_folded_stack()
+    membership = determine_stack_members(frames, diagnostics, None)
+    assert membership.weights_reason == ""
+    assert [member.exposure_scale for member in membership.members] == pytest.approx([
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        0.4,
+    ])
+    (reference,) = membership.group_references
+    assert reference.summary_index == 0
+    assert reference.exposure_seconds == pytest.approx(120.0)
+    reversed_frames, reversed_diagnostics = _plain_folded_stack(reference_position=4)
+    other = determine_stack_members(reversed_frames, reversed_diagnostics, None)
+    assert [member.exposure_scale for member in other.members] == pytest.approx([2.5] * 4 + [1.0])
+
+
+def test_a_one_group_stack_with_one_length_is_unchanged() -> None:
+    """Scales are exactly 1, and the reference exposure is the mean length."""
+    frames = _frames("p", 4, "60")
+    diagnostics = {
+        "combined_frame_paths": [frame.path for frame in frames],
+        "symlinked_light_paths": [frame.path for frame in frames],
+    }
+    membership = determine_stack_members(frames, diagnostics, None)
+    assert [member.exposure_scale for member in membership.members] == pytest.approx([1.0] * 4, abs=0.0)
+    assert [member.raw_weight for member in membership.members] == pytest.approx([1.0] * 4, abs=0.0)
+    assert membership.group_references[0].exposure_seconds == pytest.approx(60.0)
+
+
+def test_a_one_group_stack_with_a_zero_second_frame_or_no_reference_is_refused() -> None:
+    """The reasons are stored, and no weight is made up."""
+    frames, diagnostics = _plain_folded_stack(long_exposure="0")
+    zero = determine_stack_members(frames, diagnostics, None)
+    assert all(member.raw_weight is None for member in zero.members)
+    assert "no usable exposure length" in zero.weights_reason
+    frames, diagnostics = _plain_folded_stack()
+    diagnostics["registration_frames"][1].update(dx=0.0, dy=0.0)
+    ambiguous = determine_stack_members(frames, diagnostics, None)
+    assert all(member.raw_weight is None for member in ambiguous.members)
+    assert "no single registration reference frame" in ambiguous.weights_reason
+    assert ambiguous.group_references[0].exposure_seconds is None
 
 
 def test_a_group_whose_star_widths_siril_did_not_report_is_unknown() -> None:
@@ -559,6 +768,7 @@ def test_the_runner_keeps_each_groups_own_siril_data_and_the_applied_gain(tmp_pa
     assert light["gain"] == pytest.approx(TRUE_GAIN, rel=0.02) and light["gain_measured"] is True
     assert heavy["stack_weight"] == "wfwhm"
     assert heavy["holds_folded_frames"] is False
+    assert heavy["summary_index"] == 0
     assert len(heavy["registration_frames"]) == 20 and len(light["registration_frames"]) == 10
     assert heavy["frame_paths"] == [f"/raw/a{index}.fits" for index in range(20)]
     assert light["registration_included"] == [True] * 10

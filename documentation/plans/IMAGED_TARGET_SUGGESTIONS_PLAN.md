@@ -34,6 +34,8 @@ passed to the noise step; that is fixed. Next: the gap 1 diagnosis on the copy.
 
 Still on 2026-10-26: part 2b is built (uncommitted, unit tests only; sections 3.3 and 3.6). The ZWO rehearsal and the restack are next.
 
+Later still on 2026-10-26: the rehearsal on the copy found that one 300 s frame folded into M 27's 120 s group left every frame weight and the predicted noise unmeasured. The user decided D10 (option B): a folded group is modeled, so it gets weights and a predicted noise. D10 and the restack tooling (section 4) are built, uncommitted on `134-group-weights-nikon` after 30f53f77. The rehearsal ran on M 27, M 42 and M 81 (section 4.5). The rest of the ZWO targets on the copy come next. The real library is restacked only on the user's go-ahead.
+
 ## 1. Why suggestions from imaged targets are missing
 
 "Take N more" is a forecast: add these frames and the noise falls this much. The library shows it
@@ -123,7 +125,8 @@ the groups:
 - where a group is saturated or empty the combine weights pixel by pixel, clipped groups drop sky
   pixels below a noise floor (`CLIPPING_FLOOR_SIGMAS`), and shifted borders are dropped;
 - `split_frames_by_exposure` folds a group of fewer than 5 frames into the nearest exposure, and
-  Siril normalizes the mixed frames with a scale it does not save.
+  Siril normalizes the mixed frames with a scale it does not save. Decision D10 models that scale
+  (section 3.7).
 
 So frame `i` of group `g` enters the stack, in rate units, with the coefficient
 `W_g ŵ_i / (ΣW · G_g)`, where `ŵ_i = w_i / Σw_g` is its Siril weight inside the group.
@@ -147,7 +150,7 @@ So frame `i` of group `g` enters the stack, in rate units, with the coefficient
   `σ = t̄ · STACK_UNITS_PER_ADU · sqrt(area · var_rate)`. The predicted sky is the reference group's
   sky per second times `t̄`. A group whose gain was not measured uses the combine's `G = 1`.
 - **Unknown stays unknown**, with a reason:
-  - a group that holds folded frames of another exposure;
+  - a group that holds folded frames of another exposure (until D10, section 3.7);
   - a group stacked with `-weight=noise`;
   - a group whose gain the combine could not measure;
   - a group whose frame noise could not be read (today `frame_noises = [1.0] * n`, an invented
@@ -187,7 +190,7 @@ So frame `i` of group `g` enters the stack, in rate units, with the coefficient
 - Nikon forecasts are not yet labeled exploratory.
 - No row links a frame to its group or a group to its stack. The forecast places each frame by its exposure length with the stacker's fold rule.
 - `CalibrationIdentities` is not exported at the `astrometricslib` top level.
-- A planned new exposure length needs at least 5 frames. A smaller set is folded into a neighbor group, which the stacker records no weights for, so that plan is forecast but flagged.
+- A planned new exposure length needs at least 5 frames. A smaller set is folded into a neighbor group. Since D10 (section 3.7) the stacker records weights for that group and the forecast scales each folded frame, so the plan is forecast normally.
 
 - **A group weighting mode** for both the earlier run and the planned one: `wfwhm` inside each
   group and `W_g = N_g t_g^2 / s_g^2` per group, through the public group rule. `identify_weighting_mode`
@@ -431,19 +434,53 @@ Fix gaps 3 and 4 and option D7 first (library, part 2a follow-up), then run the 
 the copy, then build part 2b with the floor term, then the ZWO rehearsal, then the restack. The
 rehearsal needs all four.
 
+### 3.7 Decision D10: folded exposure groups (2026-10-26)
+
+**The finding.** On a copy restack of M 27, one 300 s frame was folded into the 120 s group. Part 2a left all frame weights and the predicted noise unmeasured for such a group. A count on the copy found folded groups in 12 of the 31 ZWO targets: M 27, M 81, M 45, M 42, NGC 1893, NGC 2403, M 101, NGC 4438, M 13, Albireo, the Moon and Alnath.
+
+**The options.** A: leave the frames of a length with fewer than 5 frames out of the stack. B: model a folded group so it gets weights and a predicted noise. C: accept no forecast. The user chose B.
+
+**What is built (uncommitted).**
+
+- **Library.** Siril normalizes each frame of a group to the group's registration reference frame. Frame `i` enters with the scale `k_i = t_ref / t_i`, and its noise grows by `k_i`. The `k_i` come from exposure ratios (design estimate: Siril fits the scale from stars, which also absorbs transparency). An unfolded group keeps `k_i = 1` exactly, so older results do not change. The reference is the group's one zero-shift kept frame, read from Siril's registration, not assumed to have the main length. A frame with no usable exposure (0 s; M 13 and Polaris) or a reference that cannot be named is still refused.
+- **New row.** `stacking.group_reference_exposure_s` (version 1, unit s, STK-38) on the group's own subject; for a single-group stack, on the stack file. `stacking.frame_weight` (STK-07) no longer refuses folded groups.
+- **Normalization scale (D9).** Reference-group membership is decided by the reference frame's path. The expected ratio divides by the group's exposure `t_g`, which the combine divides by, not by the reference frame's exposure. The single-group path needs no change.
+- **Forecast.** Each frame has a noise factor `k_i sqrt((B t_i + RN^2) / (B t_len + RN^2))` relative to a frame of the group's main length `t_len`, because the stored `s_g` is the median of sampled raw frames and stands for a main-length frame (exact only when no sampled frame was folded). Folded new frames are forecast normally. A new length still needs at least 5 frames. The heaviest-group confound and the weight lookup compare group lengths, not mean exposures, because the mean moves when frames fold in. A single group of mixed lengths needs no per-frame factor: the stack is `t_ref` times the rate stack, and the forecast compares noise relative to the stars' flux, which scales the same way. The model agrees with the library's predicted noise to 1e-9 for folded groups (unit test).
+- **Known limit.** The subset job (half-stack and leave-one-night-out) refuses a folded subset whose reference cannot be named. It passes no `k_i` when it predicts (`k = 1`), so its predictions for mixed-length subsets are slightly off. Left to do.
+
+### 3.8 Evidence for D10
+
+See section 4.5 for the numbers. The register entries are STK-07, STK-38, WAY-D30 and WAY-D70.
+
 ## 4. The forced restack
 
 ### 4.1 How it runs
 
 `astrometricslib/scripts/run_all_target_processing.py --force-restack` already gives each target to
 one camera (`assign_targets_to_cameras`), uses the primary optic, isolates failures per target, and
-has `--dry-run`, `--target`, `--targets-from` and `--skip-target(s-from)`. It gains two options
-(one tool with parameters): `--stack-only` (no astrometry, photometry or spectroscopy, and no
-spectral stacks) and a progress file so an interrupted run resumes. No new script and no backend
-call with `force`. A plain loop of `processing.stack(target, force=True)` would fail on the 13
+has `--dry-run`, `--target`, `--targets-from` and `--skip-target(s-from)`. It gains
+these options (one tool with parameters), all built (uncommitted): `--stack-only` (the public
+`processing.stack` for each target, no astrometry, photometry, spectroscopy or spectral stacks; run
+one target at a time), `--progress-file`, `--retry-failed`, `--camera`, `--review-list` and
+`--review-only`. No new script and no backend call with `force`. A plain loop of `processing.stack(target, force=True)` would fail on the 13
 targets with frames from both cameras and would mix optics on the 12 shot at both 300 and 405 mm.
 
 Second-camera stacks of a target are not rebuilt; the plan accepts that.
+
+**Progress file.** One JSON line per finished target (`target`, `camera`, `optic_mm`, `status`, `error`, `time`, `run_started_at`). Status `success` and `skipped` count as done and are not run again. A `failed` target is retried only with `--retry-failed`. A `refused` target is checked again on every run. An unreadable line is skipped with a warning.
+
+**Dry run.** `--dry-run` writes nothing (no progress line, no review list, no scratch cleanup). In stack-only mode it counts imaging frames. Over the ZWO targets it counted 31 targets and 1,019 imaging frames, which matches the estimate in section 4.3; six targets have spectral frames only.
+
+**Nikon guard.** `camera_refusal_reason` refuses a D5300 target unless the profile has a noise entry for ISO 800, offset 0 and binning 1, and a saturation level at or below the clip ceiling. Today it refuses: there is no such entry, and saturation 65000 is above the 16383 clip ceiling. A Nikon restack stays refused until the profile is fixed.
+
+**ZWO command shape** (through `build/agent_tools/realrun.sh`, which runs only scripts inside the scratch folder; a wrapper there runs the repository script):
+
+```text
+run_all_target_processing.py --force-restack --stack-only --camera zwo \
+    --progress-file PROGRESS.jsonl --review-list REVIEW.csv --target "M 27"
+```
+
+**Review list.** A CSV with the columns `target`, `camera`, `optic_mm`, `status`, `refusal_reason`, `weights_known`, `predicted_noise_present`, `aperture_set_present`, `frames_moved_count` and `frames_moved`. It covers rows made since the run started. `--review-only` writes it from an existing progress file and processes nothing.
 
 ### 4.2 Steps
 
@@ -482,6 +519,22 @@ After the restack, a target's next normal stack with new frames opens the gate o
 - no group is clipped or stacked with `-weight=noise`;
 - for Nikon targets, the read noise was measured first.
 
+### 4.5 Rehearsal on the copy (2026-10-26)
+
+Copy at `/home/michael/astrometrics_scratch/134-validation`; code uncommitted on `134-group-weights-nikon` after 30f53f77; one run each, in-sample. Details are in register entries STK-38 and WAY-D70.
+
+- **M 27.** 82 imaging frames in three groups (30 s x 26, 60 s x 33, and a 120 s group of 23 frames holding one 300 s frame). After D10: 79 of 79 frame weights, the 300 s frame stacked with raw weight 6.9, and a predicted noise. Before D10 the same restack stored none.
+- **M 42** (one group, 21 x 30 s and one 300 s). Siril did not stack the 300 s frame, so the folded path was not exercised. Weights 21 of 21.
+- **M 81.** Siril did not stack the three folded frames. Weights 42 of 42. The predicted noise is not measured, because four 300 s frames have no stored sky measurement on the copy (not a D10 issue).
+
+**Left to do.**
+
+1. Restack the rest of the ZWO targets on the copy, one target at a time, and read the review list.
+2. Compare the M 27 floor across stacks in normalized noise (noise over the stars' flux) before trusting the floor from the three-group stack. Stack-unit numbers of different stacks are not comparable.
+3. Give the subset job the `k_i` (known limit, section 3.7).
+4. Find why four M 81 300 s frames have no sky measurement.
+5. Restack the real library, with the databases backed up and the backend stopped, only on the user's go-ahead.
+
 ## 5. Order of work and effort
 
 | Step | Work | Effort |
@@ -508,6 +561,7 @@ document, the stacking and wayfinding registers, and the READMEs of the changed 
 | D7 | Read noise and gain for offset-0 frames (section 3.6.2) | A: library fallback to another offset for unclipped frames; B: a copied config entry; C: offset 10 only from now on | Decided 2026-10-26: A, the library fallback for frames not clipped at zero |
 | D8 | A noise floor in the forecast (section 3.6.1) | Estimate the floor from one stack (measured minus random) and forecast with it; or keep 1/sqrt(N) and wait for two stacks to fit a floor | Decided 2026-10-26: the one-stack floor, built only once the diagnosis (section 3.6.1, step 1) confirms a floor |
 | D9 | Siril's unsaved per-frame normalization scale (impulse test) | A: ignore and document; B: measure the stack's scale from its reference stars (stack flux over registration reference frame flux) and apply it to the predicted noise and the floor's random part; C: use the half-stack difference as the random part; D: stop Siril from scaling (`-norm=add`) | Decided 2026-10-26: B, with the stored frame weight kept as the star-width share and the per-frame bias (under about 3% on ratios) documented. Built and checked on the copy 2026-10-26: scales 1.193, 1.385 and 1.339 (M 27, M 57, M 81) agree with the half-stack factors 1.14, 1.37 and 1.34 within 0.4σ; corrected floors 2.92e-3, 0.87e-3 and 0.65e-3 |
+| D10 | How folded exposure groups are handled (section 3.7) | A: leave frames of a length with fewer than 5 frames out of the stack; B: model a folded group so it gets weights and a predicted noise; C: accept no forecast | Decided 2026-10-26: B. Built, uncommitted. Found on a copy restack of M 27: one 300 s frame folded into its 120 s group left all weights and the predicted noise unmeasured. 12 of 31 ZWO targets have folded groups |
 
 ## 7. Out of scope
 

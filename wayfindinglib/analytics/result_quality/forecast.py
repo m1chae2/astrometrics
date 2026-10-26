@@ -44,7 +44,12 @@ A stack of several exposure groups is checked with the group model
 noise ``s_g`` is not stored; it is rebuilt from the group's summed
 ``stacking.frame_weight`` rows, ``stacking.group_frames_stacked_count`` and
 ``stacking.group_exposure_s``, and its gain is ``stacking.group_gain_applied``
-(`stack_groups_of_run`). The earlier stack's noise floor is part of every
+(`stack_groups_of_run`). A group that holds folded frames (a length with
+fewer than 5 frames, put into the nearest group) also needs
+``stacking.group_reference_exposure_s``: Siril scales each of its frames to
+the reference frame, which changes the frame's noise
+(`noise_growth.StackGroup.frame_noise_factors`). Without that row the pair is
+not checked. The earlier stack's noise floor is part of every
 forecast: the measured empty-aperture noise against the
 expected noise (version 2, which includes Siril's normalization scale), or a
 fit over the history, reconciled by `noise_growth.choose_noise_floor`.
@@ -116,6 +121,7 @@ from wayfindinglib.analytics.result_quality.noise_growth import (
     forecast_noise_with_weights,
     forecast_stack_noise,
     frame_noise_from_group_weight,
+    group_frame_rate_variances,
     identify_weighting_mode,
     measure_stack_noise_floor,
     new_frames_like,
@@ -152,8 +158,14 @@ APERTURE_SET_METRIC = "stacking.aperture_set_number"
 GROUP_EXPOSURE_METRIC = "stacking.group_exposure_s"
 GROUP_FRAMES_STACKED_METRIC = "stacking.group_frames_stacked_count"
 GROUP_GAIN_METRIC = "stacking.group_gain_applied"
+GROUP_REFERENCE_EXPOSURE_METRIC = "stacking.group_reference_exposure_s"
 
-GROUP_METRICS = (GROUP_EXPOSURE_METRIC, GROUP_FRAMES_STACKED_METRIC, GROUP_GAIN_METRIC)
+GROUP_METRICS = (
+    GROUP_EXPOSURE_METRIC,
+    GROUP_FRAMES_STACKED_METRIC,
+    GROUP_GAIN_METRIC,
+    GROUP_REFERENCE_EXPOSURE_METRIC,
+)
 """The exposure-group rows. They sit on the group's own stack subject (the
 file in the ``groups`` folder), not on the combined stack, so they are read
 apart from the noise rows."""
@@ -168,6 +180,7 @@ PINNED_STACK_METRICS = {
     GROUP_EXPOSURE_METRIC: 1,
     GROUP_FRAMES_STACKED_METRIC: 1,
     GROUP_GAIN_METRIC: 1,
+    GROUP_REFERENCE_EXPOSURE_METRIC: 1,
 }
 """The metrics read, and the definition version each is pinned to (decision
 S13). A row of another version is not used. A test fails when the registry
@@ -200,6 +213,11 @@ class RecordedGroup(BaseModel):
         The brightness gain the combine applied
         (``stacking.group_gain_applied``). ``None`` when no row has a value:
         the combine applied none, so the forecast uses 1.
+    reference_exposure_seconds : `float` or `None`
+        The exposure of the group's registration reference frame
+        (``stacking.group_reference_exposure_s``). ``None`` when the row is
+        missing or not measured. A group that holds frames of more than one
+        length cannot be forecast without it.
     """
 
     model_config = _MODEL_CONFIG
@@ -208,6 +226,7 @@ class RecordedGroup(BaseModel):
     exposure_seconds: float
     frames_stacked: int
     gain_applied: float | None = None
+    reference_exposure_seconds: float | None = None
 
 
 FileIdentity = tuple[str, int | None, int | None]
@@ -475,6 +494,9 @@ def _recorded_group(subject_id: str, rows: Sequence[QualityMeasurement]) -> Reco
         grouped.get((subject_id, GROUP_FRAMES_STACKED_METRIC), []), GROUP_FRAMES_STACKED_METRIC
     )
     gain, _ = _usable_value(grouped.get((subject_id, GROUP_GAIN_METRIC), []), GROUP_GAIN_METRIC)
+    reference, _ = _usable_value(
+        grouped.get((subject_id, GROUP_REFERENCE_EXPOSURE_METRIC), []), GROUP_REFERENCE_EXPOSURE_METRIC
+    )
     if exposure is None or exposure <= 0.0 or stacked is None or stacked < 1:
         return None
     return RecordedGroup(
@@ -482,6 +504,7 @@ def _recorded_group(subject_id: str, rows: Sequence[QualityMeasurement]) -> Reco
         exposure_seconds=float(exposure),
         frames_stacked=round(stacked),
         gain_applied=float(gain) if gain is not None and gain > 0.0 else None,
+        reference_exposure_seconds=float(reference) if reference is not None and reference > 0.0 else None,
     )
 
 
@@ -839,6 +862,10 @@ class RunGroups(BaseModel):
         recorded in-group weights.
     group_weights : `list` [`float`]
         ``W_g`` of each group: the sum of its frames' recorded weights.
+    group_lengths : `list` [`float`]
+        The exposure length each group was filed under
+        (`fold_exposure_lengths`). A folded group's mean exposure differs
+        from it.
     reason : `str` or `None`
         Why the groups could not be rebuilt (a missing row or weight).
     """
@@ -848,6 +875,7 @@ class RunGroups(BaseModel):
     is_group_stack: bool
     groups: list[StackGroup] = Field(default_factory=list)
     group_weights: list[float] = Field(default_factory=list)
+    group_lengths: list[float] = Field(default_factory=list)
     reason: str | None = None
 
     @property
@@ -857,15 +885,18 @@ class RunGroups(BaseModel):
         Returns
         -------
         length : `float` or `None`
-            The heaviest group's mean exposure, in seconds; ``None`` with no
+            The length the heaviest group was filed under, in seconds (a
+            folded group's mean exposure moves when frames are folded in, so
+            the length is the stable name of the group); ``None`` with no
             groups. The heaviest group is the combine's reference: it sets the
             brightness scale the other groups are matched to.
         """
         if not self.groups:
             return None
-        return self.groups[
-            max(range(len(self.groups)), key=lambda index: self.group_weights[index])
-        ].mean_exposure_seconds
+        index = max(range(len(self.groups)), key=lambda position: self.group_weights[position])
+        if len(self.group_lengths) == len(self.groups):
+            return self.group_lengths[index]
+        return self.groups[index].mean_exposure_seconds
 
 
 def stack_groups_of_run(
@@ -879,6 +910,11 @@ def stack_groups_of_run(
     not stored. It comes back from the group's weight: the weights of a
     group's frames add up to ``W_g = N_g t_g^2 / s_g^2``, so
     ``s_g = t_g sqrt(N_g / W_g)`` (`frame_noise_from_group_weight`).
+
+    A group that holds folded frames takes its reference frame's exposure from
+    ``stacking.group_reference_exposure_s``; with no such row it is refused,
+    because the folded frames' scaling cannot be known. A group of one length
+    needs no reference row (a group with a stored reference keeps it).
 
     One link is missing from the stored rows: no row says which frames belong
     to which group. Each frame is placed by its own exposure length with the
@@ -914,10 +950,20 @@ def stack_groups_of_run(
     weights = [float(weight or 0.0) for weight in run.recorded_weights]
     groups: list[StackGroup] = []
     group_weights: list[float] = []
+    group_lengths: list[float] = []
     for length in unique:
         indices = [index for index, group_length in enumerate(lengths) if group_length == length]
+        # A folded group's stored exposure is the mean of its frames, which
+        # can differ from its length, so the mean is tried first.
+        mean_exposure = math.fsum(frames[index].exposure_seconds for index in indices) / len(indices)
         recorded = next(
-            (group for group in run.groups if abs(group.exposure_seconds - length) <= 0.005 * length), None
+            (
+                group
+                for target in (mean_exposure, length)
+                for group in run.groups
+                if abs(group.exposure_seconds - target) <= 0.005 * target
+            ),
+            None,
         )
         if recorded is None:
             return RunGroups(
@@ -930,6 +976,15 @@ def stack_groups_of_run(
                 reason=(
                     f"Run {run.run_id} says its {length:g} s group stacked {recorded.frames_stacked} frames, "
                     f"but {len(indices)} are listed as members."
+                ),
+            )
+        own_lengths = {fold_exposure_lengths([frames[index].exposure_seconds])[0] for index in indices}
+        if len(own_lengths) > 1 and recorded.reference_exposure_seconds is None:
+            return RunGroups(
+                is_group_stack=True,
+                reason=(
+                    f"Run {run.run_id} folded frames of another length into its {length:g} s group and "
+                    "stored no reference-frame exposure for it, so the folded frames' scaling is unknown."
                 ),
             )
         total = math.fsum(weights[index] for index in indices)
@@ -946,10 +1001,15 @@ def stack_groups_of_run(
                 gain=recorded.gain_applied or 1.0,
                 electrons_per_adu=electrons_per_adu,
                 in_group_weights=tuple(weights[index] for index in indices),
+                reference_exposure_seconds=recorded.reference_exposure_seconds,
+                noise_length_seconds=length,
             )
         )
         group_weights.append(total)
-    return RunGroups(is_group_stack=True, groups=groups, group_weights=group_weights)
+        group_lengths.append(float(length))
+    return RunGroups(
+        is_group_stack=True, groups=groups, group_weights=group_weights, group_lengths=group_lengths
+    )
 
 
 def single_stack_floor(record: StackRunRecord) -> StackNoiseFloor | None:
@@ -1250,7 +1310,11 @@ def _given_group_forecast(
         weight_of[frame.frame_id] / group.gain for group in run_groups.groups for frame in group.frames
     ]
     base = forecast_noise_with_weights(
-        ordered, adjusted, WeightingMode.GROUP, weight_normalization=math.fsum(weight_of.values())
+        ordered,
+        adjusted,
+        WeightingMode.GROUP,
+        weight_normalization=math.fsum(weight_of.values()),
+        rate_variances=group_frame_rate_variances(run_groups.groups),
     )
     if base.variance is None:
         return base
@@ -1315,8 +1379,8 @@ def _group_forecast(
             )
         )
     noises = {
-        group.mean_exposure_seconds: group.frame_noise_adu
-        for group in current_groups.groups
+        length: group.frame_noise_adu
+        for length, group in zip(current_groups.group_lengths, current_groups.groups, strict=True)
         if group.frame_noise_adu is not None
     }
     evidence = identify_weighting_mode(

@@ -11,6 +11,13 @@ A script here may import astrometricslib's internal modules. It never imports an
 ## Batch processing
 
 - `run_all_target_processing.py` — runs the full pipeline (stacking, astrometry, photometry, spectroscopy, asteroid detection) on every target in the catalog. A stack whose frames, calibration frames and settings are unchanged since it was made is skipped; `--force-restack` rebuilds every stack.
+  - For a forced restack of one camera's targets, it takes these options (all optional):
+    - `--stack-only` stacks each target's imaging frames and records the stack's quality rows. It runs no astrometry, photometry or spectroscopy and makes no spectral stack. Targets run one at a time through `ProcessingPipelines.stack`, with the same camera and optic choice as a full run.
+    - `--camera NAME` limits the run to one camera's pass (any spelling of the name, or part of it). A target imaged by two cameras still goes to the earlier camera of the config's setups, as in a full run.
+    - `--progress-file PATH` appends one JSON line per finished target: `target`, `camera`, `optic_mm`, `status` (`success`, `skipped`, `failed` or `refused`), `error`, `time` and `run_started_at`. Each line is flushed and synced to disk. On the next start, targets marked `success` or `skipped` are not run again. A `failed` target is run again only with `--retry-failed`. A `refused` target is checked again every run. An unreadable line, such as one cut short by a kill, is skipped with a warning.
+    - `--review-list PATH` writes a CSV at the end of the run, one row per target in the progress file: whether frame weights, the predicted noise and the aperture-set row (`stacking.aperture_set_number`) were recorded since the run began (`yes`, `assumed` or `no`), any refusal and its reason, and the frames the quarantine moved. `--review-only` writes the same list from an existing progress file and processes nothing. The list reads the quality table through `Astrometrics.quality.query`.
+    - A Nikon D5300 target is refused (and recorded as `refused` with the reason) unless the camera profile has a sensor-noise entry for ISO 800, offset 0 and binning 1, and a saturation level at or below the clip ceiling. A ZWO target runs regardless.
+    - `--dry-run` lists the targets, the frame count of each, the refusals and what resume would skip. It writes nothing: no progress file line, no review list and no scratch-folder cleanup.
 - `reindex_all_targets.py` — cycles through every target and re-scans its frames from disk.
 - `rebuild_stacks.py` — finds stacks that should be rebuilt (for example, after a calibration change) and rebuilds them only when asked.
 

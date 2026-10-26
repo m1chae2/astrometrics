@@ -26,6 +26,7 @@ from astrometricslib import (
     QualitySubject,
     SubjectLevel,
     aperture_identity_to_number,
+    fold_exposure_lengths,
 )
 from astrometricslib.models.quality.calibration_identities import (
     CalibrationFileIdentity,
@@ -972,11 +973,15 @@ def _group_run_rows(
     gains: dict[float, float] | None = None,
     row_id: int = 1,
     expected_noise: float | None = None,
+    reference_exposures: dict[float, float] | None = None,
 ) -> list[QualityMeasurement]:
     """Build the rows of a group stack as part 2a stores them.
 
     The frame weights are the library's own group rule (``W_g w_i`` from the
-    star widths), and each group has its three rows on its own subject.
+    star widths), and each group has its three rows on its own subject. Frames
+    are placed with the stacker's fold rule, so a length with fewer than 5
+    frames lands in the nearest group, whose exposure row is then the mean of
+    its frames.
 
     Parameters
     ----------
@@ -996,6 +1001,9 @@ def _group_run_rows(
         The row id of the normalized noise.
     expected_noise : `float`, optional
         The expected noise; the measured noise when omitted.
+    reference_exposures : `dict` [`float`, `float`], optional
+        The exposure of each group's reference frame, keyed by group length.
+        No reference row is written for a group that is not in it.
 
     Returns
     -------
@@ -1003,10 +1011,11 @@ def _group_run_rows(
         The stack, group and frame rows.
     """
     when = START + timedelta(days=day)
-    lengths = sorted({o.exposure_seconds for o in observations if o.exposure_seconds})
+    placed = fold_exposure_lengths([o.exposure_seconds for o in observations])
+    lengths = sorted({float(length) for length in placed if length is not None})
     groups = []
     for length in lengths:
-        members = [o for o in observations if o.exposure_seconds == length]
+        members = [o for o, group_length in zip(observations, placed, strict=True) if group_length == length]
         groups.append(
             StackGroup(
                 frames=tuple(_frames(members)),
@@ -1029,10 +1038,21 @@ def _group_run_rows(
     for group, length in zip(groups, lengths, strict=True):
         subject = f"T/groups/g{length:g}_{run_id}.fits"
         rows += [
-            _row(fc.GROUP_EXPOSURE_METRIC, subject, length, run_id, when, version=1),
+            _row(fc.GROUP_EXPOSURE_METRIC, subject, group.mean_exposure_seconds, run_id, when, version=1),
             _row(fc.GROUP_FRAMES_STACKED_METRIC, subject, float(len(group.frames)), run_id, when, version=1),
             _row(fc.GROUP_GAIN_METRIC, subject, group.gain, run_id, when, version=1),
         ]
+        if reference_exposures is not None and length in reference_exposures:
+            rows.append(
+                _row(
+                    fc.GROUP_REFERENCE_EXPOSURE_METRIC,
+                    subject,
+                    reference_exposures[length],
+                    run_id,
+                    when,
+                    version=1,
+                )
+            )
     return rows
 
 
@@ -1218,3 +1238,121 @@ def test_a_run_that_made_several_stacks_has_no_group_link() -> None:
 
     assert all(run.groups == [] for run in runs)
     assert all("groups" in run.problems for run in runs)
+
+
+# ---------------------------------------------------------------------------
+# Folded groups (decision D10, option B)
+# ---------------------------------------------------------------------------
+
+
+def _folded_pair(
+    reference_exposures: dict[float, float] | None,
+    later_reference_exposures: dict[float, float] | str | None = "same",
+    measured_ratio: float | None = None,
+) -> tuple[list[fc.StackRunRecord], list[FrameObservation]]:
+    """Build two group stacks; the later one folds 100 s frames into 60 s.
+
+    Parameters
+    ----------
+    reference_exposures : `dict` [`float`, `float`] or `None`
+        The reference-frame exposure rows of the earlier run (none when
+        ``None``).
+    later_reference_exposures : `dict` [`float`, `float`] or `None` or `str`
+        The same for the later run; ``"same"`` copies the earlier run's.
+    measured_ratio : `float`, optional
+        The later stack's measured noise over the first's; the model's own
+        ratio (a perfect forecast) when omitted.
+
+    Returns
+    -------
+    runs, observations : `tuple`
+        The runs (with calibration records) and the frames.
+    """
+    later = reference_exposures if later_reference_exposures == "same" else later_reference_exposures
+    old = _group_frames("a30_", 12, 30.0) + _group_frames("a60_", 20, 60.0)
+    new = _group_frames("b100_", 3, 100.0)
+    noises = {30.0: 30.0, 60.0: 40.0}
+    if measured_ratio is None:
+
+        def model(frames: list[FrameObservation], references: dict[float, float] | None) -> object:
+            """Forecast the group stack of some frames with the model.
+
+            Returns
+            -------
+            forecast : `NoiseForecast`
+                The group forecast.
+            """
+            placed = fold_exposure_lengths([o.exposure_seconds for o in frames])
+            groups = []
+            for length in sorted({float(value) for value in placed if value is not None}):
+                members = _frames([o for o, key in zip(frames, placed, strict=True) if key == length])
+                groups.append(
+                    StackGroup(
+                        frames=tuple(members),
+                        frame_noise_adu=noises[length],
+                        reference_exposure_seconds=None if references is None else references[length],
+                        noise_length_seconds=length,
+                    )
+                )
+            return forecast_group_noise(groups)
+
+        measured_ratio = noise_ratio_with_floor(
+            model(old, reference_exposures),
+            model(old + new, later),
+            None,  # type: ignore[arg-type]
+        )
+        assert measured_ratio is not None
+    rows = _group_run_rows("run1", 0, old, noises, 0.010, reference_exposures=reference_exposures)
+    rows += _group_run_rows(
+        "run2", 5, old + new, noises, 0.010 * measured_ratio, row_id=2, reference_exposures=later
+    )
+    return _runs_from(rows), old + new
+
+
+def test_the_reference_exposure_row_is_read_into_the_group() -> None:
+    """The new group row is read at version 1 into the recorded group."""
+    runs, _ = _folded_pair({30.0: 30.0, 60.0: 100.0})
+
+    assert [g.reference_exposure_seconds for g in runs[1].groups] == [30.0, 100.0]
+    assert runs[1].groups[1].exposure_seconds == pytest.approx((20 * 60.0 + 3 * 100.0) / 23)
+
+
+def test_a_folded_group_is_forecast_and_checked_with_its_reference_exposure() -> None:
+    """A later stack that folds frames into a group follows the model."""
+    runs, observations = _folded_pair({30.0: 30.0, 60.0: 100.0})
+
+    (check,) = fc.forecast_check(runs, observations)
+
+    assert check.outcome == ForecastOutcome.AS_FORECAST
+    assert check.weighting_mode == "group"
+    assert check.forecast_given_frames_taken.noise_change_fraction == pytest.approx(
+        check.measured.noise_change_fraction, abs=1e-6
+    )
+
+
+def test_a_folded_group_with_no_reference_exposure_row_is_not_checkable() -> None:
+    """The folded frames' scaling is unknown, so there is no check."""
+    runs, observations = _folded_pair(
+        {30.0: 30.0, 60.0: 60.0}, later_reference_exposures=None, measured_ratio=0.9
+    )
+
+    (check,) = fc.forecast_check(runs, observations)
+
+    assert check.outcome == ForecastOutcome.NOT_CHECKABLE
+    assert "stored no reference-frame exposure" in check.reason
+    assert "60 s group" in check.reason
+
+
+def test_a_folded_group_whose_reference_exposure_row_was_not_measured_is_not_checkable() -> None:
+    """A reference exposure row with no value is the same as no row."""
+    runs, observations = _folded_pair({30.0: 30.0, 60.0: 60.0}, measured_ratio=0.9)
+    groups = [
+        group.model_copy(update={"reference_exposure_seconds": None}) if group.frames_stacked == 23 else group
+        for group in runs[1].groups
+    ]
+    runs[1] = runs[1].model_copy(update={"groups": groups})
+
+    (check,) = fc.forecast_check(runs, observations)
+
+    assert check.outcome == ForecastOutcome.NOT_CHECKABLE
+    assert "reference-frame exposure" in check.reason

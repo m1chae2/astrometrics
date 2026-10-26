@@ -27,13 +27,21 @@ combine divides each group by its exposure ``t_g``, applies a gain ``G_g`` to
 put it on the reference group's brightness and multiplies the average by the
 mean exposure per frame ``t_bar`` (see `expected_noise.py`). The reference
 group (the one with the most weight, which holds the registration reference
-frame, with exposure ``t_ref``) has ``G = 1``. A star then has
-``t_bar * F / (t_ref * 65535)`` stack units. In short::
+frame) has ``G = 1``. A star then has ``t_bar * F / (t_g * 65535)`` stack
+units, with ``t_g`` the reference group's exposure, the number the combine
+divided by. In short::
 
-    expected ratio (no Siril scale) = STACK_UNITS_PER_ADU * t_bar / t_ref
+    expected ratio (no Siril scale) = STACK_UNITS_PER_ADU * t_bar / t_g
     scale = measured ratio / expected ratio
 
-and ``t_bar = t_ref`` for one group. The measured gains of the other groups
+and ``t_bar = t_g`` for one group. The reference frame must be one of the
+reference group's frames, which is decided by membership. Its own exposure
+need not equal ``t_g``: a group that holds folded frames has a mean exposure
+``t_g`` (127.8 s for 22 frames of 120 s and one of 300 s), and Siril may pick
+a frame of the folded length as the reference. Siril matches every frame of
+the group to the reference frame's brightness, so a star has ``F`` ADU in the
+group stack whatever the reference frame's exposure, and the combine still
+divides by ``t_g``. The measured gains of the other groups
 carry each of those groups' own Siril scales. Those do not enter here: the
 gain divides them out of the stars, so the stack's stars show the reference
 group's scale only.
@@ -80,12 +88,16 @@ __all__ = [
     "measure_normalization_scale",
 ]
 
-# The registration reference frame's exposure must match the reference group's
-# exposure within this fraction before the group arithmetic above is used. Two
-# exposure groups differ by far more than this (the Vega groups were 0.5, 1,
-# 2, 3 and 5 s; the M 27 groups 30, 60 and 120 s), and the header's exposure is
-# the same number the group was made from, so it is an equality check, not a
-# tolerance on a measurement. A design choice; not tuned.
+# Used only when the reference group's frame paths or the reference frame's
+# path are not known (a caller that gives no paths): the registration reference
+# frame's exposure must then match the reference group's exposure within this
+# fraction before the group arithmetic above is used. Two exposure groups
+# differ by far more than this (the Vega groups were 0.5, 1, 2, 3 and 5 s; the
+# M 27 groups 30, 60 and 120 s), and the header's exposure is the same number
+# the group was made from, so it is an equality check, not a tolerance on a
+# measurement. A group that holds folded frames has a mean exposure that this
+# check refuses, which is why the stack's own records give paths and the
+# membership check below is used instead. A design choice; not tuned.
 EXPOSURE_MATCH_FRACTION = 0.01
 
 
@@ -129,7 +141,7 @@ class NormalizationScaleOutcome:
 
 
 def _expected_ratio_without_scaling(
-    groups: Sequence[ExposureGroupNoiseFacts], reference_exposure_seconds: float | None
+    groups: Sequence[ExposureGroupNoiseFacts], flux_ratio: ReferenceFrameFluxRatio
 ) -> tuple[float | None, str]:
     """Work out the stack-to-frame flux ratio if Siril applied no scale.
 
@@ -138,15 +150,16 @@ def _expected_ratio_without_scaling(
     groups : `Sequence` [`ExposureGroupNoiseFacts`]
         The exposure groups of a combined stack. Empty for a stack of one
         group.
-    reference_exposure_seconds : `float` or `None`
-        The exposure length of the registration reference frame.
+    flux_ratio : `ReferenceFrameFluxRatio`
+        The stars' flux ratio, which names the registration reference frame
+        (``reference_frame_path``) and gives its exposure.
 
     Returns
     -------
     ratio : `float` or `None`
-        ``STACK_UNITS_PER_ADU * t_bar / t_ref`` in stack units per ADU
-        (``t_bar = t_ref`` for one group), or `None` when the arithmetic does
-        not apply.
+        ``STACK_UNITS_PER_ADU * t_bar / t_g`` in stack units per ADU, with
+        ``t_g`` the reference group's exposure (``t_bar = t_g`` for one
+        group), or `None` when the arithmetic does not apply.
     reason : `str`
         Why it does not apply. Empty when there is a ratio.
     """
@@ -157,15 +170,26 @@ def _expected_ratio_without_scaling(
     ):
         return None, "an exposure group has a weight, exposure or frame count that is not usable"
     reference = max(groups, key=lambda group: group.combine_weight)
-    if reference_exposure_seconds is None:
-        return None, "the registration reference frame has no exposure length in its header"
-    if abs(reference_exposure_seconds - reference.exposure_seconds) > EXPOSURE_MATCH_FRACTION * (
-        reference.exposure_seconds
-    ):
-        return None, (
-            f"the registration reference frame ({reference_exposure_seconds:g} s) is not in the reference "
-            f"exposure group ({reference.exposure_seconds:g} s)"
-        )
+    reference_path = flux_ratio.reference_frame_path
+    if reference.member_paths and reference_path:
+        # Membership decides. A frame of the reference group may have another
+        # exposure than the group's mean, when the group holds folded frames.
+        if str(reference_path) not in reference.member_paths:
+            return None, (
+                f"the registration reference frame ({reference_path}) is not one of the frames of the "
+                f"reference exposure group ({reference.exposure_seconds:g} s)"
+            )
+    else:
+        reference_exposure_seconds = flux_ratio.reference_exposure_seconds
+        if reference_exposure_seconds is None:
+            return None, "the registration reference frame has no exposure length in its header"
+        if abs(reference_exposure_seconds - reference.exposure_seconds) > EXPOSURE_MATCH_FRACTION * (
+            reference.exposure_seconds
+        ):
+            return None, (
+                f"the registration reference frame ({reference_exposure_seconds:g} s) is not in the "
+                f"reference exposure group ({reference.exposure_seconds:g} s)"
+            )
     mean_exposure = math.fsum(group.frame_count * group.exposure_seconds for group in groups) / math.fsum(
         group.frame_count for group in groups
     )
@@ -208,7 +232,7 @@ def measure_normalization_scale(
         )
     if flux_ratio.ratio is None:
         return NormalizationScaleOutcome(None, flux_ratio.reason or "the stars' flux ratio was not measured")
-    expected, reason = _expected_ratio_without_scaling(groups, flux_ratio.reference_exposure_seconds)
+    expected, reason = _expected_ratio_without_scaling(groups, flux_ratio)
     if expected is None or not expected > 0:
         return NormalizationScaleOutcome(None, reason)
     value = flux_ratio.ratio / expected

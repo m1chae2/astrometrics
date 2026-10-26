@@ -235,6 +235,10 @@ class ReferenceFrameFluxRatio:
         The exposure length of the reference frame, from its header.
     reason : `str`
         Why there is no ratio. Empty when there is one.
+    reference_frame_path : `str` or `None`
+        The registration reference frame the ratio was taken against. It is
+        used to tell whether that frame is one of the reference group's
+        frames (see `normalization_scale.py`).
     """
 
     ratio: float | None
@@ -243,6 +247,7 @@ class ReferenceFrameFluxRatio:
     saturated_count: int = 0
     reference_exposure_seconds: float | None = None
     reason: str = ""
+    reference_frame_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1217,6 +1222,7 @@ def _flux_ratio_to_reference_frame(
         return ReferenceFrameFluxRatio(
             None,
             reference_exposure_seconds=exposure,
+            reference_frame_path=reference_frame_path,
             reason=f"the registration reference frame does not line up with the stack ({matches} of "
             f"{stack_star_count} bright stars match)",
         )
@@ -1248,6 +1254,7 @@ def _flux_ratio_to_reference_frame(
             star_count=len(ratios),
             saturated_count=saturated_count,
             reference_exposure_seconds=exposure,
+            reference_frame_path=reference_frame_path,
             reason=f"only {len(ratios)} reference stars have a flux in both the stack and the reference "
             f"frame ({saturated_count} are saturated in the reference frame)",
         )
@@ -1265,6 +1272,7 @@ def _flux_ratio_to_reference_frame(
         star_count=int(values.size),
         saturated_count=saturated_count,
         reference_exposure_seconds=exposure,
+        reference_frame_path=reference_frame_path,
     )
 
 

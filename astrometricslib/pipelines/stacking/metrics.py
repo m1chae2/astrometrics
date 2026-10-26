@@ -163,6 +163,7 @@ STACKING_GROUP_GAIN_MID_RANGE = "stacking.group_gain_mid_range"
 STACKING_GROUP_GAIN_BRIGHT_END_RATIO = "stacking.group_gain_bright_end_ratio"
 STACKING_GROUP_GAIN_DISAGREEMENT = "stacking.group_gain_disagreement_fraction"
 STACKING_GROUP_GAIN_APPLIED = "stacking.group_gain_applied"
+STACKING_GROUP_REFERENCE_EXPOSURE_S = "stacking.group_reference_exposure_s"
 STACKING_EMPTY_APERTURE_NOISE_STACK_UNIT = "stacking.empty_aperture_noise_stack_unit"
 STACKING_NOISE_REFERENCE_FLUX_STACK_UNIT = "stacking.noise_reference_flux_stack_unit"
 STACKING_EMPTY_APERTURE_NOISE_NORMALIZED = "stacking.empty_aperture_noise_normalized"
@@ -703,6 +704,28 @@ _VALUE_METRICS: tuple[MetricSpec, ...] = (
         f"One exposure group that was combined. {_GROUP_NOTE}",
         "pipelines.stacking.processing.exposure_groups.combine_exposure_group_images",
         register_entry="STK-19",
+    ),
+    _context_metric(
+        STACKING_GROUP_REFERENCE_EXPOSURE_S,
+        "s",
+        "The exposure length of the frame Siril lined one exposure group's frames up with.",
+        (
+            "The exposure time of the group's registration reference frame (the one frame whose transform "
+            "in Siril's sequence file is the identity, among the frames Siril kept). Siril matches every "
+            "frame of the group to that frame's brightness, so a frame of t seconds in a group whose "
+            "reference frame has t_ref seconds is multiplied by about k = t_ref / t, and its noise grows "
+            "by the same factor (a design estimate: Siril fits the scale from the frame's stars, which "
+            "also absorbs the frame's transparency). The predicted noise (`stacking.expected_*`) uses "
+            "k; the forecast reads this row to do the same. For a group whose frames share one exposure "
+            "length it is that length. It is not assumed to be the group's main length: Siril picks the "
+            "best frame, and a long frame that holds more stars can win. Not stored when no single "
+            "reference frame can be identified in a group that holds frames of another length. A stack "
+            "of one exposure group stores it too, on that group's subject (the stack itself): the "
+            "mean exposure when the frames share one length, else the reference frame's."
+        ),
+        f"One exposure group that was combined, or the one group of a single-group stack. {_GROUP_NOTE}",
+        "pipelines.stacking.post_processing.stack_membership.group_references",
+        register_entry="STK-38",
     ),
 )
 

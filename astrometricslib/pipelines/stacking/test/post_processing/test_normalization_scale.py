@@ -9,6 +9,7 @@ did), that too few stars give "not measured", and that the expected noise rows
 are multiplied by the scale and say so.
 """
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -283,6 +284,66 @@ def test_a_reference_frame_outside_the_reference_group_gives_no_scale(tmp_path: 
     scale = measure_normalization_scale(outcome, facts)
     assert scale.result is None
     assert "not in the reference exposure group" in scale.reason
+
+
+def _facts_with_paths(
+    facts: list[ExposureGroupNoiseFacts], paths: list[list[str]]
+) -> list[ExposureGroupNoiseFacts]:
+    """Give each group's facts the paths of its frames.
+
+    Parameters
+    ----------
+    facts : `list` [`ExposureGroupNoiseFacts`]
+        The groups' facts.
+    paths : `list` [`list` [`str`]]
+        The frame paths of each group.
+
+    Returns
+    -------
+    facts : `list` [`ExposureGroupNoiseFacts`]
+        The same facts with ``member_paths`` set.
+    """
+    return [replace(item, member_paths=tuple(group)) for item, group in zip(facts, paths, strict=True)]
+
+
+def test_a_reference_frame_of_the_reference_group_counts_whatever_its_own_exposure(tmp_path: Path) -> None:
+    """A reference frame of another length than the group's mean still works.
+
+    A folded group's exposure is a mean (127.8 s for 22 frames of 120 s and one
+    of 300 s), and Siril may pick a frame of another length as the reference.
+    Membership by path decides, and the expected ratio uses the group's
+    exposure, the number the combine divided by. So a reference frame whose
+    header says 30 s gives the same scale as one whose header says 60 s, the
+    length the old equality rule accepted.
+    """
+    image, facts = _combined_group_stack((1.0, 1.0))
+    (tmp_path / "equal").mkdir()
+    (tmp_path / "other").mkdir()
+    accepted = measure_normalization_scale(
+        _noise_outcome(tmp_path / "equal", image, _image_adu(60.0, 1.0, seed=1), 60.0), facts
+    )
+    outcome = _noise_outcome(tmp_path / "other", image, _image_adu(60.0, 1.0, seed=1), 30.0)
+    assert outcome.result is not None and outcome.result.reference_frame_flux_ratio is not None
+    flux_ratio = replace(outcome.result.reference_frame_flux_ratio, reference_frame_path="/frames/ref.fits")
+    outcome = replace(outcome, result=replace(outcome.result, reference_frame_flux_ratio=flux_ratio))
+    by_path = _facts_with_paths(facts, [["/frames/ref.fits", "/frames/a.fits"], ["/frames/b.fits"]])
+    scale = measure_normalization_scale(outcome, by_path)
+    assert accepted.result is not None, accepted.reason
+    assert scale.result is not None, scale.reason
+    assert scale.result.value == pytest.approx(accepted.result.value, rel=1e-9)
+
+
+def test_a_reference_frame_outside_the_reference_groups_paths_gives_no_scale(tmp_path: Path) -> None:
+    """A reference frame that is not one of the group's frames is refused."""
+    image, facts = _combined_group_stack((1.0, 1.0))
+    outcome = _noise_outcome(tmp_path, image, _image_adu(60.0, 1.0, seed=1), 60.0)
+    assert outcome.result is not None and outcome.result.reference_frame_flux_ratio is not None
+    flux_ratio = replace(outcome.result.reference_frame_flux_ratio, reference_frame_path="/frames/other.fits")
+    outcome = replace(outcome, result=replace(outcome.result, reference_frame_flux_ratio=flux_ratio))
+    with_paths = _facts_with_paths(facts, [["/frames/ref.fits"], ["/frames/b.fits"]])
+    scale = measure_normalization_scale(outcome, with_paths)
+    assert scale.result is None
+    assert "not one of the frames of the reference exposure group" in scale.reason
 
 
 def _outcome_with_ratio(ratio: ReferenceFrameFluxRatio | None) -> StackNoiseOutcome:

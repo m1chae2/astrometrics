@@ -621,3 +621,266 @@ def test_the_group_ratio_leaves_the_mean_exposure_scale_out() -> None:
     tau = later.mean_exposure_seconds / current.mean_exposure_seconds
     assert tau > 1.05
     assert ratio == pytest.approx(later.noise / current.noise / tau)
+
+
+# ---------------------------------------------------------------------------
+# Folded groups (decision D10, option B)
+# ---------------------------------------------------------------------------
+
+
+def _folded_group(reference: float | None, sky: float = 2.0, read: float = 3.5) -> ng.StackGroup:
+    """Build a 120 s group that holds one folded 300 s frame.
+
+    Parameters
+    ----------
+    reference : `float` or `None`
+        The exposure of the group's reference frame.
+    sky, read : `float`
+        Sky rate and read noise of every frame.
+
+    Returns
+    -------
+    group : `StackGroup`
+        Eight 120 s frames and one 300 s frame with equal in-group weights.
+    """
+    frames = (
+        *(_frame(index, exposure=120.0, sky=sky, read=read) for index in range(8)),
+        _frame(8, exposure=300.0, sky=sky, read=read),
+    )
+    return ng.StackGroup(
+        frames=frames,
+        frame_noise_adu=30.0,
+        in_group_weights=(1.0 / 9.0,) * 9,
+        reference_exposure_seconds=reference,
+        noise_length_seconds=120.0,
+    )
+
+
+def test_a_folded_group_forecast_matches_the_hand_computation() -> None:
+    """One group of 8 x 120 s and 1 x 300 s, the reference a 120 s frame.
+
+    The coefficient of each frame is 1/9. The 300 s frame is multiplied by
+    k = 120/300 = 0.4, so its variance (600 + 12.25 electrons squared) counts
+    0.16 times. The combine divides by t_g = 140 s and multiplies by
+    t_bar = 140 s, so for one group the two cancel.
+    """
+    forecast = ng.forecast_group_noise([_folded_group(120.0)])
+    expected = ((8 * 252.25) + 0.16 * 612.25) / 81.0
+    assert forecast.variance == pytest.approx(expected, rel=1e-12)
+    assert forecast.mean_exposure_seconds == pytest.approx(140.0)
+
+
+def test_a_folded_group_with_the_long_frame_as_reference_scales_the_short_frames_up() -> None:
+    """With a 300 s reference each 120 s frame is multiplied by 2.5."""
+    forecast = ng.forecast_group_noise([_folded_group(300.0)])
+    expected = ((8 * 2.5**2 * 252.25) + 612.25) / 81.0
+    assert forecast.variance == pytest.approx(expected, rel=1e-12)
+
+
+def test_the_noise_factors_use_the_electron_form_and_fall_back_to_the_sky_limited_form() -> None:
+    """The factor uses electrons, or the sky-limited form with none known."""
+    factors = _folded_group(120.0).frame_noise_factors
+    assert factors[:8] == pytest.approx((1.0,) * 8)
+    assert factors[8] == pytest.approx(0.4 * math.sqrt(612.25 / 252.25))
+    sky_limited = _folded_group(120.0, sky=0.0, read=0.0).frame_noise_factors
+    assert sky_limited[8] == pytest.approx(0.4 * math.sqrt(300.0 / 120.0))
+    assert _folded_group(None).frame_noise_factors == (1.0,) * 9
+
+
+def test_an_unfolded_group_gives_the_same_numbers_with_or_without_a_reference() -> None:
+    """A group of one length ignores a reference exposure (to 1e-12)."""
+    plain = [_group(30.0, 8, 20.0, gain=0.9), _group(60.0, 10, 30.0, gain=1.1)]
+    referenced = [
+        group.model_copy(update={"reference_exposure_seconds": group.frames[0].exposure_seconds})
+        for group in plain
+    ]
+    assert ng.forecast_group_noise(referenced).variance == pytest.approx(
+        ng.forecast_group_noise(plain).variance, rel=1e-12
+    )
+    assert all(factor == pytest.approx(1.0) for group in referenced for factor in group.frame_noise_factors)
+
+
+def test_the_folded_group_enters_the_model_agreement_with_the_library_formula() -> None:
+    """The model equals the library's ``(a_i k_i / t_g)^2 v_i`` sum.
+
+    This is the hand computation of the library's group noise with the
+    per-frame scale. Point it at ``expected_exposure_group_noise`` once the
+    library's version with the per-frame scale has landed.
+    """
+    groups = [
+        _group(30.0, 8, 20.0, gain=0.9),
+        _folded_group(300.0).model_copy(update={"frame_noise_adu": 40.0}),
+    ]
+    coefficients = ng.group_coefficients(groups)
+    assert coefficients.raw_weights is not None and coefficients.total_group_weight is not None
+    frames = [frame for group in groups for frame in group.frames]
+    scales = [
+        (group.reference_exposure_seconds or frame.exposure_seconds) / frame.exposure_seconds
+        for group in groups
+        for frame in group.frames
+    ]
+    exposures = [group.mean_exposure_seconds for group in groups for _ in group.frames]
+    variance = 0.0
+    for raw, gain, frame, scale, group_exposure in zip(
+        coefficients.raw_weights, coefficients.gains, frames, scales, exposures, strict=True
+    ):
+        coefficient = raw / (coefficients.total_group_weight * gain)
+        variance += (coefficient * scale / group_exposure) ** 2 * (
+            frame.sky_rate_e_per_s_per_px * frame.exposure_seconds + frame.read_noise_e**2
+        )
+    t_bar = sum(frame.exposure_seconds for frame in frames) / len(frames)
+    assert ng.forecast_group_noise(groups).variance == pytest.approx(variance * t_bar**2, rel=1e-12)
+
+
+def test_new_frames_folded_into_a_group_are_forecast_with_their_scaling() -> None:
+    """Three 200 s frames folded into the 120 s group are scaled to it."""
+    existing = [_group(60.0, 10, 30.0), _group(120.0, 10, 45.0)]
+    new = [_frame(100 + i, exposure=200.0, sky=2.0, read=3.5, width=3.0) for i in range(3)]
+    plan = ng.plan_group_stack(existing, new)
+    assert plan.folded_group_lengths == [120.0]
+    assert plan.forecast.noise is not None
+    group = plan.groups[1]
+    assert group.reference_exposure_seconds == pytest.approx(120.0)
+    assert group.frame_noise_factors[-1] == pytest.approx(0.6 * math.sqrt((400 + 12.25) / (240 + 12.25)))
+    assert group.frame_noise_factors[0] == pytest.approx(1.0)
+    # Frames of the group's own length give a different forecast, so the
+    # folded frames' scaling matters.
+    same_length = ng.plan_group_stack(
+        existing, [_frame(100 + i, exposure=120.0, sky=2.0, read=3.5, width=3.0) for i in range(3)]
+    )
+    assert same_length.forecast.noise != pytest.approx(plan.forecast.noise)
+
+
+def test_a_folded_existing_group_with_no_reference_refuses_new_frames_for_it() -> None:
+    """A mixed-length group with no known reference takes no new frames."""
+    existing = [_group(60.0, 10, 30.0), _folded_group(None)]
+    new = [_frame(100 + i, exposure=120.0, sky=2.0, read=3.5, width=3.0) for i in range(2)]
+    plan = ng.plan_group_stack(existing, new)
+    assert plan.forecast.noise is None
+    assert "reference frame's exposure is not known" in str(plan.reason)
+
+
+def test_take_more_does_not_say_a_folded_group_records_no_weights() -> None:
+    """The old flag text is gone; the answer is still given."""
+    existing = [_group(60.0, 10, 30.0), _group(120.0, 10, 45.0)]
+    template = [_frame(i, exposure=200.0, sky=2.0, read=3.5, width=3.0) for i in range(4)]
+    result = ng.frames_to_cut_noise_in_groups(existing, template, new_exposure_seconds=200.0)
+    assert "records no weights" not in (result.reason or "")
+    assert result.frames_needed is not None
+
+
+def test_a_folded_group_agrees_with_the_library_noise_model() -> None:
+    """The rate-unit model matches the library's stack-unit model, folded case.
+
+    One stack holds a 60 s group and a 120 s group that has one folded 300 s
+    frame. The library takes the frame's scale ``k = t_ref / t`` in
+    ``FrameNoiseInput.exposure_scale``. Both models must give the same noise
+    ratio between two stacks and differ by one constant in absolute value.
+    """
+    from astrometricslib.pipelines.stacking.post_processing.expected_noise import (
+        ExposureGroupNoiseFacts,
+        FrameNoiseInput,
+        effective_aperture_area_px,
+        expected_exposure_group_noise,
+    )
+
+    def both(extra_sixty: int, reference: float) -> tuple[float, float]:
+        """Give the rate-unit and stack-unit noise of one stack.
+
+        Parameters
+        ----------
+        extra_sixty : `int`
+            Frames in the 60 s group.
+        reference : `float`
+            The exposure of the folded group's reference frame.
+
+        Returns
+        -------
+        noises : `tuple` [`float`, `float`]
+            The model's noise times ``t_bar``, and the library's noise.
+        """
+        folded = _folded_group(reference).model_copy(update={"in_group_weights": None})
+        folded = folded.model_copy(
+            update={
+                "frames": tuple(
+                    frame.model_copy(update={"star_width": 3.0 + 0.1 * (index % 4)})
+                    for index, frame in enumerate(folded.frames)
+                )
+            }
+        )
+        groups = [_group(60.0, extra_sixty, 30.0, gain=0.9), folded]
+        coefficients = ng.group_coefficients(groups)
+        assert coefficients.raw_weights is not None
+        frames = [frame for group in groups for frame in group.frames]
+        model = ng.forecast_group_noise(groups)
+        scales = [
+            (group.reference_exposure_seconds or frame.exposure_seconds) / frame.exposure_seconds
+            for group in groups
+            for frame in group.frames
+        ]
+        inputs = [
+            FrameNoiseInput(
+                weight=raw,
+                sky_electrons=frame.sky_rate_e_per_s_per_px * frame.exposure_seconds,
+                read_noise_electrons=frame.read_noise_e,
+                gain_electrons_per_adu=CAMERA_GAIN,
+                exposure_scale=scale,
+            )
+            for raw, frame, scale in zip(coefficients.raw_weights, frames, scales, strict=True)
+        ]
+        indices = [position for position, group in enumerate(groups) for _ in group.frames]
+        facts = [
+            ExposureGroupNoiseFacts(
+                combine_weight=len(group.frames) * group.mean_exposure_seconds**2 / group.frame_noise_adu**2,
+                exposure_seconds=group.mean_exposure_seconds,
+                frame_count=len(group.frames),
+                gain=group.gain,
+                gain_measured=True,
+                sky_level_per_second=1.0,
+            )
+            for group in groups
+        ]
+        outcome = expected_exposure_group_noise(inputs, indices, facts)
+        assert outcome.result is not None
+        assert model.noise is not None
+        return model.noise, outcome.result.total_noise
+
+    for reference in (120.0, 300.0):
+        model_a, library_a = both(10, reference)
+        model_b, library_b = both(20, reference)
+        assert model_b / model_a == pytest.approx(library_b / library_a, rel=1e-9)
+        assert model_b / model_a != pytest.approx(1.0, abs=0.01)
+    constant = math.sqrt(effective_aperture_area_px()) / 65535.0 / CAMERA_GAIN
+    assert library_a / model_a == pytest.approx(constant, rel=1e-9)
+
+
+def test_a_single_group_of_mixed_lengths_needs_no_per_frame_factor() -> None:
+    """Scaling each frame by ``k = t_ref / t`` only rescales the whole stack.
+
+    In a stack that is one group, Siril multiplies frame ``i`` by ``k_i``, so
+    its counts become ``t_ref`` times its rate. The stack is then ``t_ref``
+    times
+    the rate stack, for the same weights. The noise ratio between two stacks,
+    and the normalized noise (taken over the stars' flux, which scales alike),
+    do not change. Checked with explicit factors for 21 x 30 s and one 300 s
+    frame, for several reference exposures.
+    """
+    frames = [_frame(i, exposure=30.0, sky=1.5, read=3.0, width=3.0 + 0.05 * (i % 5)) for i in range(21)]
+    frames.append(_frame(21, exposure=300.0, sky=1.5, read=3.0, width=3.1))
+    weights = ng.frame_weights(frames, WeightingMode.WFWHM)
+    assert weights is not None
+    plain = ng.forecast_stack_noise(frames, WeightingMode.WFWHM)
+    assert plain.variance is not None
+    for reference in (30.0, 300.0):
+        scales = [reference / frame.exposure_seconds for frame in frames]
+        counts_variance = (
+            sum(
+                (w * k) ** 2 * frame.rate_variance * frame.exposure_seconds**2
+                for w, k, frame in zip(weights, scales, frames, strict=True)
+            )
+            / sum(weights) ** 2
+        )
+        # The scaled stack is in counts of the reference exposure; divide by
+        # it to get back to rate units.
+        scaled = counts_variance / reference**2
+        assert scaled == pytest.approx(plain.variance, rel=1e-12)

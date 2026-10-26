@@ -904,6 +904,7 @@ def _stack_exposure_groups(
         [frame_noises[index] if frame_noises_read else None for index in used],
         combination,
         stack_options.get("stack_weight"),
+        list(used),
     )
     # Where every combined group has data. Empty-sky apertures keep out of the
     # rest (see `empty_apertures.UNCOVERED_CLEARANCE_PX`).
@@ -957,6 +958,7 @@ def _exposure_group_weight_entries(
     frame_noises: list[float | None],
     combination: Any,
     stack_weight: str | None,
+    summary_indices: list[int] | None = None,
 ) -> list[dict[str, Any]]:
     """Describe what each combined group counted for in the stack.
 
@@ -987,11 +989,16 @@ def _exposure_group_weight_entries(
         was measured, and its sky level.
     stack_weight : `str` or `None`
         The Siril ``-weight`` mode the groups were stacked with.
+    summary_indices : `list` [`int`], optional
+        The place of each group in the ``"exposure_group_summaries"`` list,
+        where the group's own quality rows are filed. Left out, the groups are
+        taken to be its first entries in order.
 
     Returns
     -------
     entries : `list` [`dict`]
-        One entry per group with ``paths`` (every frame of the group),
+        One entry per group with ``summary_index`` (the group's place in the
+        summaries), ``paths`` (every frame of the group),
         ``frame_paths``, ``registration_frames`` and ``registration_included``
         (Siril's lists for the group, in the engine's order), ``weight``
         (``W_g``), ``frame_count`` (``N_g``), ``exposure_seconds`` (``t_g``),
@@ -1006,6 +1013,7 @@ def _exposure_group_weight_entries(
     entries = []
     for position, group in enumerate(groups):
         entries.append({
+            "summary_index": position if summary_indices is None else int(summary_indices[position]),
             "paths": [
                 str(path)
                 for frame in group.frames

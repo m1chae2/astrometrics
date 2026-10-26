@@ -8,6 +8,7 @@ tools:
   - mcp__astrometricslib-core__processing_remake_preview
   - mcp__astrometricslib-core__processing_stack
   - mcp__astrometricslib-core__processing_stack_summary
+  - mcp__astrometricslib-core__quality_calibration_identities
   - mcp__astrometricslib-core__quality_capture_settings
   - mcp__astrometricslib-core__quality_check_spectral_frames
   - mcp__astrometricslib-core__quality_measure_frames

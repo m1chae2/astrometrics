@@ -165,7 +165,7 @@ def _stack_rows(target: Target, measured: list[float], expected: list[float]) ->
         for metric, version, value in (
             (fc.NORMALIZED_NOISE_METRIC, 3, noise / 1000.0),
             (fc.NOISE_METRIC, 3, noise),
-            (fc.EXPECTED_NOISE_METRIC, 1, expect),
+            (fc.EXPECTED_NOISE_METRIC, 2, expect),
         ):
             rows.append(
                 QualityMeasurement(

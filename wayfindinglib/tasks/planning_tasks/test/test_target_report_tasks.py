@@ -339,7 +339,7 @@ class _Library:
             for metric, value, version in (
                 ("stacking.group_brightest_star_peak_fraction", 2.0, 1),
                 ("stacking.empty_aperture_noise_stack_unit", noise, 3),
-                ("stacking.expected_empty_aperture_noise_stack_unit", expected, 1),
+                ("stacking.expected_empty_aperture_noise_stack_unit", expected, 2),
                 ("stacking.effective_time_s", 1800.0, 1),
             ):
                 rows.append(

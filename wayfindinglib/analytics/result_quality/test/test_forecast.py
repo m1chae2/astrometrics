@@ -184,7 +184,14 @@ def _run_rows(
             sample_count=APERTURES,
             row_id=row_id + 1000,
         ),
-        _row(fc.EXPECTED_NOISE_METRIC, stack, expected_noise, run_id, when, version=1),
+        _row(
+            fc.EXPECTED_NOISE_METRIC,
+            stack,
+            expected_noise,
+            run_id,
+            when,
+            version=fc.PINNED_STACK_METRICS[fc.EXPECTED_NOISE_METRIC],
+        ),
     ]
     rows += [
         _row(fc.FRAME_WEIGHT_METRIC, member, weight, run_id, when, level=SubjectLevel.FRAME, version=1)

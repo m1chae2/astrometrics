@@ -312,8 +312,6 @@ document, the stacking and wayfinding registers, and the READMEs of the changed 
 - Rebuilding the record of existing stacks without stacking (versions 2 and 3, dropped).
 - Second-camera stacks of a target.
 - Night weights, subset stacks and half-stack noise.
-- Filling the Image Planner's filter list from the configuration (`system:filters` reads a key the
-  configuration does not have).
 - Any change to the forecast gate's rule.
 
 ## Appendix A. Review board changes, version 1 (2026-10-25)

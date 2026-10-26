@@ -1208,12 +1208,32 @@ class AppConfiguration:
         -------
         filters : `list` [`FilterType`]
             Configured filters, in the order listed under
-            ``[Observatory.Filters] available``.
+            ``[Observatory.Filters] available``. Each name may be a
+            `FilterType` member name (``L``, ``Ha``, ``SPEC``) or value
+            (``Luminance``), in any case. A name that matches no filter is
+            left out and logged.
         """
         filters_str = self.app_config.get("Observatory.Filters", "available", fallback="")
-        if not filters_str:
-            return []
-        return [FilterType[name.strip().upper()] for name in filters_str.split(",") if name.strip()]
+        filters: list[FilterType] = []
+        for raw_name in filters_str.split(","):
+            wanted = raw_name.strip().lower()
+            if not wanted:
+                continue
+            match = next(
+                (
+                    member
+                    for member_name, member in FilterType.__members__.items()
+                    if wanted in (member_name.lower(), member.value.lower())
+                ),
+                None,
+            )
+            if match is None:
+                logging.getLogger(__name__).warning(
+                    "Ignoring unknown filter %r in [Observatory.Filters] available.", raw_name.strip()
+                )
+            elif match not in filters:
+                filters.append(match)
+        return filters
 
     def get_all_config(self) -> dict[str, Any]:
         """Return the entire configuration as a dictionary of sections.

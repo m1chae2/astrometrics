@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from astrometricslib.foundation.config import AppConfiguration
+from astrometricslib.foundation.enums import FilterType
 
 
 def test_a_fresh_config_defaults_the_identified_star_ceiling_to_500(
@@ -61,6 +62,28 @@ def test_a_camera_section_is_found_whatever_the_spacing_case_or_punctuation() ->
     config.app_config = parser
     for spelling in ("ZWO ASI 533MM Pro", "ZWO ASI533MM Pro", "zwo-asi533mm-pro"):
         assert config.get_camera_config(spelling) == {"grating_lines_per_mm": "200"}
+
+
+def test_available_filters_accept_member_names_and_values_in_any_case() -> None:
+    """Check that ``Ha``, ``SPEC`` and ``Luminance`` read and unknowns skip."""
+    import configparser
+
+    parser = configparser.ConfigParser()
+    parser.read_string(
+        '[Observatory.Filters]\navailable = "L, SPEC, Ha, luminance, Purple"\n'.replace('"', "")
+    )
+    config = AppConfiguration()
+    config.app_config = parser
+    assert config.get_available_filters() == [FilterType.L, FilterType.SPEC, FilterType.Ha]
+
+
+def test_no_available_filters_gives_an_empty_list() -> None:
+    """Check that a configuration without the filter list gives no filters."""
+    import configparser
+
+    config = AppConfiguration()
+    config.app_config = configparser.ConfigParser()
+    assert config.get_available_filters() == []
 
 
 def test_update_config_leaves_untouched_camera_calibration_fields_alone(

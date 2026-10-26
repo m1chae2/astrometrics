@@ -393,7 +393,7 @@ Adding a package to the session makes it Planned. Suggestions update and delete 
 | Control | What it does |
 | --- | --- |
 | Image Planner: Type | Light, Dark, Flat or Bias |
-| Image Planner: Exposures tab | Count, Filter, Exposure and Delay: the number of frames, the filter (L, R, G, B, Ha, OIII or SII), the exposure time in seconds and the pause between frames in seconds |
+| Image Planner: Exposures tab | Count, Filter, Exposure and Delay: the number of frames, the filter, the exposure time in seconds and the pause between frames in seconds. The Filter list holds the filters set in Settings, Observatory, Filters, by their short names (for example L and SPEC). With none set, it offers None and says where to set them |
 | Add to List | Adds the row to the package. While you edit a row, the button pair reads Update and Cancel |
 | Test Image | Takes one frame now with the current Type, Exposure and Filter. The Last Image panel then shows it. It is a device command, so it is greyed while Ekos controls the equipment, with a Why unavailable? button beside it |
 | Image Planner: Dither tab | Dither shifts the pointing slightly between frames. Tick Dither between frames to turn it on. Every sets how many frames pass between shifts, and Scale sets the size of the shift in pixels; both are greyed while dither is off |

@@ -86,6 +86,7 @@ from scipy.spatial import cKDTree
 
 from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.drivers.fits_access import collapse_to_2d, read_data, read_header
+from astrometricslib.models.camera_profile import ProvenanceKind
 from astrometricslib.pipelines.shared.applied_camera_profile import camera_name_from_header
 from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
     DETECTED_STAR_COUNT,
@@ -341,17 +342,21 @@ def _saturation_check(
     if data is None:
         return None
     profile = resolve_camera_profile(camera_name_from_header(header))
-    limit = float(profile.saturation_threshold_adu.value)
-    linearity = profile.photometric_linearity_limit_adu
-    if linearity is not None:
-        limit = min(limit, float(linearity.value))
+    usable_peak = profile.usable_peak_level_adu
+    limit = float(usable_peak.value)
     stand_in = " (generic stand-in: the camera has no profile)" if profile.is_generic_fallback else ""
+    notes = []
+    if usable_peak.provenance.kind == ProvenanceKind.ASSUMED:
+        notes.append("the limit is assumed, not measured")
+    if limit >= float(profile.clip_ceiling_adu.value):
+        notes.append("the check fires only at the sensor's clip level itself, on the reference frame only")
+    assumed = f" ({'; '.join(notes)})" if notes else ""
     return SaturationCheck(
         frame_plane=collapse_to_2d(np.asarray(data, dtype=np.float32)),
         crop_offset=crop_offset,
         limit_adu=limit,
         source=f"peak in the registration reference frame at or above {limit:g} ADU of the "
-        f"{profile.camera_name} camera profile{stand_in}",
+        f"{profile.camera_name} camera profile{stand_in}{assumed}",
     )
 
 

@@ -65,6 +65,14 @@ class FrameMeasurements(BaseModel):
     # hasn't been aligned or stacked yet.
     background_level: float | None = Field(default=None, alias="backgroundLevel")
     saturated_pixel_fraction: float | None = Field(default=None, alias="saturatedPixelFraction")
+    # The level, in ADU, at or above which a pixel was counted as saturated
+    # when `saturated_pixel_fraction` was measured. Records written before
+    # this field existed leave it empty, so the stacking stage measures the
+    # fraction again when this is missing or no longer matches the camera
+    # profile's pixel-saturation level.
+    saturated_pixel_fraction_limit_adu: float | None = Field(
+        default=None, alias="saturatedPixelFractionLimitAdu"
+    )
     # Star sharpness measured directly by the code, rather than by Siril.
     # This number cannot be directly compared to `registration_fwhm_x_px`.
     measured_fwhm_px: float | None = Field(default=None, alias="measuredFwhmPx")

@@ -1285,7 +1285,7 @@ def _clipping_note(camera_name: str, config: Any, goal: ScienceGoal) -> str:
         profile = resolve_camera_profile(camera_name, config)
     except AstrometricsError:
         return note + " The camera's saturation limits are not known."
-    clip, saturation = profile.clip_ceiling_adu, profile.saturation_threshold_adu
+    clip, saturation = profile.clip_ceiling_adu, profile.pixel_saturation_level_adu
     note += (
         f" The camera's pixels top out at {clip.value:.0f} ADU ({_provenance_text(clip)}); a raw frame "
         f"counts a pixel as saturated at or above {saturation.value:.0f} ADU "
@@ -1293,7 +1293,8 @@ def _clipping_note(camera_name: str, config: Any, goal: ScienceGoal) -> str:
     )
     if not profile.saturation_threshold_can_be_reached:
         note += (
-            " The threshold is above the ceiling, so no pixel can reach it and saturation would go unseen."
+            " The profile's own saturation threshold is above the ceiling, so no pixel could reach it; "
+            "the ceiling is used instead."
         )
     linearity = profile.photometric_linearity_limit_adu
     if linearity is not None:

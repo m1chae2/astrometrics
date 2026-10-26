@@ -18,6 +18,7 @@ import pytest
 from astropy.io import fits
 from astropy.wcs import WCS
 
+from astrometricslib.models.camera_profile import ProvenanceKind
 from astrometricslib.pipelines.stacking.post_processing import empty_apertures
 from astrometricslib.pipelines.stacking.post_processing.difference_noise import (
     discard_noise_sums,
@@ -347,8 +348,10 @@ def _fake_camera_profile(saturation_adu: float) -> object:
         An object with the fields the saturation check reads.
     """
     return SimpleNamespace(
-        saturation_threshold_adu=SimpleNamespace(value=saturation_adu),
-        photometric_linearity_limit_adu=None,
+        usable_peak_level_adu=SimpleNamespace(
+            value=saturation_adu, provenance=SimpleNamespace(kind=ProvenanceKind.MEASURED)
+        ),
+        clip_ceiling_adu=SimpleNamespace(value=65532.0),
         camera_name="Test camera",
         is_generic_fallback=False,
     )

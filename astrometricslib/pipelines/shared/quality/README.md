@@ -7,7 +7,7 @@ Terms are defined in the [glossary](../../../../documentation/Glossary.md). This
 ## What each file is for
 
 - `quality_metrics.py` — functions that measure how good an image is, such as star width (FWHM, full width at half maximum) and the count of saturated pixels (pixels at the sensor's maximum value).
-- `saturation.py` — counts saturated pixels and finds the level at which a raw frame's pixels count as saturated, from the camera profile (`resolve_saturation_threshold`). The raw frame check and the spectral frame check share it, so they agree on the level.
+- `saturation.py` — counts saturated pixels and finds the level at which a raw frame's pixels count as saturated, from the camera profile's `pixel_saturation_level_adu` (`resolve_saturation_threshold`): its saturation threshold capped at its clip ceiling. The raw frame check and the spectral frame check share it, so they agree on the level.
 - `background_measurement.py` — reads image data and measures how bright the sky background is. The decision about whether the background changed too much during a stacking session lives in `stacking/pre_processing/background_homogeneity.py`.
 - `frame_statistics.py` — counts the frames of a target that share the same camera settings, and measures basic per-frame statistics.
 - `frame_selection.py` — chooses which frames a quality check measures, by filter, file-name range and time, for frames in the library and for frames in a plain folder. It only reads.

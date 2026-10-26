@@ -424,3 +424,59 @@ class CameraProfile(BaseModel):
             `True` when the threshold is at or below the clip ceiling.
         """
         return self.saturation_threshold_adu.value <= self.clip_ceiling_adu.value
+
+    @property
+    def pixel_saturation_level_adu(self) -> ProvenancedValue:
+        """Give the level at which a pixel counts as saturated.
+
+        This is the saturation threshold, brought down to the clip ceiling
+        when the threshold lies above it. A clipped pixel can never read
+        more than the ceiling, so a higher threshold would hide real
+        saturation. The ceiling caps the threshold even when the ceiling
+        is only assumed. Use this level to count saturated pixels. The
+        photometric linearity limit does not enter here: it decides
+        whether a star is usable, not whether a pixel is clipped (see
+        `usable_peak_level_adu`).
+
+        Returns
+        -------
+        level : `ProvenancedValue`
+            The level in ADU, with the kind and source of the number that
+            set it. A pixel at or above the level is saturated.
+        """
+        threshold = self.saturation_threshold_adu
+        ceiling = self.clip_ceiling_adu
+        if threshold.value <= ceiling.value:
+            return threshold
+        return ProvenancedValue(
+            value=ceiling.value,
+            provenance=ValueProvenance(
+                kind=ceiling.provenance.kind,
+                source=(
+                    f"clip ceiling ({ceiling.provenance.source}); the saturation threshold of "
+                    f"{threshold.value:g} ADU is above it, so no pixel could reach it"
+                ),
+            ),
+        )
+
+    @property
+    def usable_peak_level_adu(self) -> ProvenancedValue:
+        """Give the star peak level above which a star is not photometric.
+
+        This is `pixel_saturation_level_adu`, brought further down to the
+        photometric linearity limit when the profile has one. Above that
+        limit the pixel value stops following the light, so a star whose
+        peak reaches it cannot be measured reliably. Use this level to
+        decide whether a star is photometric.
+
+        Returns
+        -------
+        level : `ProvenancedValue`
+            The level in ADU, with the kind and source of the number that
+            set it. A star peak at or above the level is not usable.
+        """
+        saturation_level = self.pixel_saturation_level_adu
+        linearity = self.photometric_linearity_limit_adu
+        if linearity is None or linearity.value >= saturation_level.value:
+            return saturation_level
+        return linearity

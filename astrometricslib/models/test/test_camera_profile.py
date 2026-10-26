@@ -146,6 +146,95 @@ def test_the_threshold_can_be_reached_only_when_it_is_not_above_the_ceiling(
     assert profile.saturation_threshold_can_be_reached is expected
 
 
+def _profile_with_limits(
+    threshold: float,
+    ceiling: float,
+    linearity: float | None = None,
+    ceiling_kind: str = "measured",
+    threshold_kind: str = "assumed",
+) -> CameraProfile:
+    """Build a profile with the three saturation numbers set.
+
+    Parameters
+    ----------
+    threshold : `float`
+        The saturation threshold, in ADU.
+    ceiling : `float`
+        The clip ceiling, in ADU.
+    linearity : `float` or `None`
+        The photometric linearity limit, in ADU, or `None` for none.
+    ceiling_kind : `str`
+        The provenance kind of the clip ceiling.
+    threshold_kind : `str`
+        The provenance kind of the saturation threshold.
+
+    Returns
+    -------
+    profile : `CameraProfile`
+        The profile.
+    """
+    overrides: dict[str, object] = {
+        "clip_ceiling_adu": {"value": ceiling, "provenance": {"kind": ceiling_kind, "source": "a test"}},
+        "saturation_threshold_adu": {
+            "value": threshold,
+            "provenance": {"kind": threshold_kind, "source": "a test"},
+        },
+    }
+    if linearity is not None:
+        overrides["photometric_linearity_limit_adu"] = {
+            "value": linearity,
+            "provenance": {"kind": "measured", "source": "a test"},
+        }
+    return CameraProfile.model_validate(make_profile_data(**overrides))
+
+
+def test_pixel_saturation_level_is_the_threshold_when_it_is_reachable() -> None:
+    """Check a ZWO-like profile keeps its threshold level."""
+    profile = _profile_with_limits(65000.0, 65532.0, linearity=60000.0)
+    level = profile.pixel_saturation_level_adu
+    assert level.value == pytest.approx(65000.0)
+    assert level.provenance.kind == ProvenanceKind.ASSUMED
+
+
+def test_pixel_saturation_level_is_capped_at_the_clip_ceiling() -> None:
+    """Check a Nikon-like profile is capped at its measured clip level."""
+    profile = _profile_with_limits(65000.0, 16383.0)
+    level = profile.pixel_saturation_level_adu
+    assert level.value == pytest.approx(16383.0)
+    assert level.provenance.kind == ProvenanceKind.MEASURED
+    assert "clip ceiling" in level.provenance.source
+
+
+def test_an_assumed_clip_ceiling_still_caps_and_stays_assumed() -> None:
+    """Check an assumed ceiling still caps and the level reads assumed."""
+    profile = _profile_with_limits(65000.0, 16383.0, ceiling_kind="assumed")
+    level = profile.pixel_saturation_level_adu
+    assert level.value == pytest.approx(16383.0)
+    assert level.provenance.kind == ProvenanceKind.ASSUMED
+
+
+def test_usable_peak_level_equals_the_pixel_level_without_a_linearity_limit() -> None:
+    """Check the usable peak equals the pixel level with no linearity limit."""
+    nikon = _profile_with_limits(65000.0, 16383.0)
+    assert nikon.usable_peak_level_adu.value == pytest.approx(16383.0)
+    zwo = _profile_with_limits(65000.0, 65532.0)
+    assert zwo.usable_peak_level_adu.value == pytest.approx(65000.0)
+
+
+def test_usable_peak_level_is_capped_at_the_linearity_limit() -> None:
+    """Check a ZWO-like usable peak is 60,000 ADU, its pixel level 65,000."""
+    profile = _profile_with_limits(65000.0, 65532.0, linearity=60000.0)
+    assert profile.usable_peak_level_adu.value == pytest.approx(60000.0)
+    assert profile.usable_peak_level_adu.provenance.kind == ProvenanceKind.MEASURED
+    assert profile.pixel_saturation_level_adu.value == pytest.approx(65000.0)
+
+
+def test_a_linearity_limit_above_the_pixel_level_does_not_raise_it() -> None:
+    """Check the usable peak never exceeds the pixel level."""
+    profile = _profile_with_limits(65000.0, 16383.0, linearity=60000.0)
+    assert profile.usable_peak_level_adu.value == pytest.approx(16383.0)
+
+
 NOISE_VALUE = {"value": 0.78, "provenance": PROVENANCE}
 
 

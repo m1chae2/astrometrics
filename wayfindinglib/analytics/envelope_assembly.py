@@ -100,8 +100,8 @@ def sensor_limits_for_camera(camera_name: str, config: Any = None) -> SensorLimi
         camera_name=profile.camera_name,
         clip_ceiling_adu=profile.clip_ceiling_adu.value,
         clip_ceiling_source=_describe_provenance(profile.clip_ceiling_adu),
-        saturation_threshold_adu=profile.saturation_threshold_adu.value,
-        saturation_threshold_source=_describe_provenance(profile.saturation_threshold_adu),
+        saturation_threshold_adu=profile.pixel_saturation_level_adu.value,
+        saturation_threshold_source=_describe_provenance(profile.pixel_saturation_level_adu),
         is_generic_fallback=profile.is_generic_fallback,
     )
 

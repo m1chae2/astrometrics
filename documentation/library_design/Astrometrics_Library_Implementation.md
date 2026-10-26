@@ -50,7 +50,7 @@ Pydantic classes in `models/` hold fields and validation only. Table 2 maps Arch
 | Camera profile (§2.3) | `CameraProfile` (schema 2), `SensorSettingNoise`, `ProvenancedValue`, `AppliedCameraProfile` | `models/camera_profile.py`, `models/applied_camera_profile.py` |
 | Provenance (§2.3) | IVOA Provenance Data Model [7] classes such as `Agent` and `Entity` | `models/provenance.py` |
 
-Camera profiles: `drivers/camera_profile_store.py`, `camera_profile_migration.py`, `pipelines/shared/applied_camera_profile.py`. Provenance: `pipelines/shared/provenance_recording.py`, `drivers/provenance_store.py`.
+Camera profiles: `drivers/camera_profile_store.py`, `camera_profile_migration.py`, `pipelines/shared/applied_camera_profile.py`. Provenance: `pipelines/shared/provenance_recording.py`, `drivers/provenance_store.py`. Two `CameraProfile` properties give the saturation levels: `pixel_saturation_level_adu` (the threshold capped at the clip ceiling) counts saturated pixels, and `usable_peak_level_adu` (also capped at the linearity limit) decides whether a star is photometric ([STK-36](validation/stacking.md#stk-36)).
 
 ## 4. Pipelines
 

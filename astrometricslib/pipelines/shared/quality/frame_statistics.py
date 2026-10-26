@@ -155,7 +155,7 @@ def measure_frame_input_quality(
             counts["skipped"] += 1
             continue
 
-        saturation_threshold_adu = resolve_camera_profile(frame.camera).saturation_threshold_adu.value
+        saturation_threshold_adu = resolve_camera_profile(frame.camera).pixel_saturation_level_adu.value
         metrics = measure_one_frame(
             frame.path, measure_fwhm=measure_fwhm, saturation_threshold_adu=saturation_threshold_adu
         )

@@ -2102,7 +2102,7 @@ class SpectroscopyPipeline:
             # Siril stacks run 0 to 1, below any ADU level.
             return compute_stack_saturated_pixel_fraction(data, zero_order_cutout)
         return compute_saturated_pixel_fraction(
-            zero_order_cutout, self.camera_profile.saturation_threshold_adu.value
+            zero_order_cutout, self.camera_profile.pixel_saturation_level_adu.value
         )
 
     def _dispersion_overlay_geometry(

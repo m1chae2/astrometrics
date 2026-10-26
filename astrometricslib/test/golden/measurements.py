@@ -245,7 +245,7 @@ def _saturation_threshold_adu(header: fits.Header) -> float:
     threshold : `float`
         Pixels at or above this many ADU count as saturated.
     """
-    return float(resolve_camera_profile(header.get("INSTRUME")).saturation_threshold_adu.value)
+    return float(resolve_camera_profile(header.get("INSTRUME")).pixel_saturation_level_adu.value)
 
 
 def measure_raw_frame_quality() -> dict[str, dict[str, float]]:

@@ -746,12 +746,7 @@ def _usable_top_level_adu(camera_profile: CameraProfile | None) -> float | None:
     """
     if camera_profile is None:
         return None
-    ceiling = float(camera_profile.clip_ceiling_adu.value)
-    threshold = float(camera_profile.saturation_threshold_adu.value)
-    level = threshold if camera_profile.saturation_threshold_can_be_reached else ceiling
-    if camera_profile.photometric_linearity_limit_adu is not None:
-        level = min(level, float(camera_profile.photometric_linearity_limit_adu.value))
-    return level
+    return float(camera_profile.usable_peak_level_adu.value)
 
 
 def _plateau_saturation_level_adu(plane: np.ndarray) -> float | None:
@@ -2236,11 +2231,7 @@ def _emit_background_and_saturation(
             reason="no camera profile was given, so the saturation level is unknown",
         )
     else:
-        threshold = (
-            float(camera_profile.saturation_threshold_adu.value)
-            if camera_profile.saturation_threshold_can_be_reached
-            else float(camera_profile.clip_ceiling_adu.value)
-        )
+        threshold = float(camera_profile.pixel_saturation_level_adu.value)
         context.add(
             FRAME_SATURATED_PIXEL_FRACTION,
             value=compute_saturated_pixel_fraction(collapsed, threshold),

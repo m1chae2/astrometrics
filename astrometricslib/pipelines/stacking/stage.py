@@ -9,7 +9,7 @@ import os
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib.drivers.camera_profile_store import camera_identity
+from astrometricslib.drivers.camera_profile_store import camera_identity, resolve_camera_profile
 from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.foundation.enums import FilterType
@@ -395,10 +395,8 @@ def _stack_frames_guarded(
     background_check_enabled = get_configuration().get_background_homogeneity_check_enabled()
     frames_before_background_check = target_frames
     if background_check_enabled:
-        from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
         from astrometricslib.pipelines.shared.quality.background_measurement import (
             measure_frame_background_level,
-            measure_frame_saturated_pixel_fraction,
         )
         from astrometricslib.pipelines.stacking.pre_processing.background_homogeneity import (
             find_dominant_background_subset_by_exposure,
@@ -411,11 +409,7 @@ def _stack_frames_guarded(
                 # pipelines/runs read these instead of recomputing them.
                 if frame.measurements.background_level is None:
                     frame.measurements.background_level = measure_frame_background_level(frame.path)
-                if frame.measurements.saturated_pixel_fraction is None:
-                    camera_profile = resolve_camera_profile(frame.camera)
-                    frame.measurements.saturated_pixel_fraction = measure_frame_saturated_pixel_fraction(
-                        frame.path, camera_profile.saturation_threshold_adu.value
-                    )
+                refresh_saturated_pixel_fraction(frame)
             except (AstrometricsError, *FITS_READ_ERRORS, *DATA_ERRORS) as exc:
                 logger.debug("Skipping background/saturation measurement for '%s': %s", frame.path, exc)
                 continue
@@ -665,6 +659,45 @@ def _stack_frames_guarded(
         )
 
     return stacked_path
+
+
+def refresh_saturated_pixel_fraction(frame: Any) -> bool:
+    """Measure a frame's saturated pixel fraction when the stored one is stale.
+
+    The fraction is stored with the level it was counted at
+    (`saturated_pixel_fraction_limit_adu`). It is measured again when it is
+    missing, when no level was stored (a record from before the level was
+    kept), or when the level differs from the camera profile's current
+    `pixel_saturation_level_adu`. That way a fix to a profile, such as a
+    clip ceiling that lowers the level, reaches frames measured earlier.
+
+    Parameters
+    ----------
+    frame : `FrameRecord`
+        The frame. Its measurements are updated in place.
+
+    Returns
+    -------
+    measured : `bool`
+        `True` when the fraction was measured again, `False` when the stored
+        one was kept.
+    """
+    from astrometricslib.pipelines.shared.quality.background_measurement import (
+        measure_frame_saturated_pixel_fraction,
+    )
+
+    saturation_level_adu = float(resolve_camera_profile(frame.camera).pixel_saturation_level_adu.value)
+    measurements = frame.measurements
+    if (
+        measurements.saturated_pixel_fraction is not None
+        and measurements.saturated_pixel_fraction_limit_adu == saturation_level_adu
+    ):
+        return False
+    measurements.saturated_pixel_fraction = measure_frame_saturated_pixel_fraction(
+        frame.path, saturation_level_adu
+    )
+    measurements.saturated_pixel_fraction_limit_adu = saturation_level_adu
+    return True
 
 
 def _record_frame_quality(

@@ -94,7 +94,7 @@ describe('ObservationManager display', () => {
         answerBackend();
         renderDisplay();
         await userEvent.click(await screen.findByRole('button', { name: 'M 81, planned package' }));
-        await userEvent.click(screen.getByTitle('Remove Item'));
+        await userEvent.click(screen.getByTitle('Remove row'));
         await waitFor(() => expect(callBackendMock).toHaveBeenCalledWith(
             'plan:edit_package',
             { package_id: 'p1', exposure_requests: [], expected_revision: 4 },
@@ -106,7 +106,7 @@ describe('ObservationManager display', () => {
         answerBackend({ 'plan:edit_package': () => { throw new Error('revision conflict'); } });
         renderDisplay();
         await userEvent.click(await screen.findByRole('button', { name: 'M 81, planned package' }));
-        await userEvent.click(screen.getByTitle('Remove Item'));
+        await userEvent.click(screen.getByTitle('Remove row'));
         expect(await screen.findByRole('alert')).toHaveTextContent('revision conflict');
     });
 
@@ -138,7 +138,7 @@ describe('ObservationManager display', () => {
         await waitFor(() => expect(screen.queryByText('Choose a package or New package')).not.toBeInTheDocument());
         expect(callBackendMock).toHaveBeenCalledWith('plan:package_for_target', { target: 'M 31' }, expect.anything());
         expect(callBackendMock.mock.calls.some(([action]) => action === 'plan:create_package')).toBe(false);
-        await userEvent.click(screen.getByRole('button', { name: 'Delete' }));
+        await userEvent.click(screen.getByRole('button', { name: 'Delete package' }));
         await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
         await waitFor(() => expect(callBackendMock).toHaveBeenCalledWith(
             'plan:edit_package', expect.objectContaining({ package_id: 'pp' }), expect.anything()
@@ -228,19 +228,19 @@ describe('ObservationManager display', () => {
     });
 
     describe('Delete', () => {
-        /** Opens the library package and clicks Delete in the editor. */
+        /** Opens the library package and clicks Delete package in the Image List header. */
         async function openAndClickDelete() {
             await userEvent.click(await screen.findByRole('button', { name: 'M 81, planned package' }));
-            await userEvent.click(screen.getByRole('button', { name: 'Delete' }));
+            await userEvent.click(screen.getByRole('button', { name: 'Delete package' }));
         }
 
-        it('does nothing when the confirmation is cancelled and returns focus to Delete', async () => {
+        it('does nothing when the confirmation is cancelled and returns focus to Delete package', async () => {
             answerBackend();
             renderDisplay();
             await openAndClickDelete();
             await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
             expect(callBackendMock.mock.calls.some(([, params]) => params?.delete)).toBe(false);
-            await waitFor(() => expect(screen.getByRole('button', { name: 'Delete' })).toHaveFocus());
+            await waitFor(() => expect(screen.getByRole('button', { name: 'Delete package' })).toHaveFocus());
             expect(screen.queryByText('Choose a package or New package')).not.toBeInTheDocument();
         });
 

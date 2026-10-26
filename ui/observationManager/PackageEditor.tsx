@@ -1,9 +1,11 @@
 /**
  * @file PackageEditor.tsx
- * @description The package editor: Image Planner, Dither Settings and Image List work on the one
- * package picked in the package library. The Image List shows the package's exposure rows, the
- * Image Planner adds rows, Dither Settings edits its dither and "Add to Sequence" adds the package
- * to the session. With no package picked, each panel says "Choose a package or New package".
+ * @description The package editor: the Image Planner and the Image List work on the one package
+ * picked in the package library. The Image Planner has two tabs: Exposures adds rows and Dither
+ * edits the package's dither. The Image List below it shows the package's exposure rows, with
+ * "Add to Sequence" (which adds the package to the session) and "Delete package" in its header.
+ * Last Image takes the column on the right. With no package picked, each panel says "Choose a
+ * package or New package".
  */
 import React, { useRef, useState } from 'react';
 import { ImagePlanner } from './ImagePlanner';
@@ -13,14 +15,24 @@ import { LastImageViewer } from './LastImageViewer';
 import { PlanItem } from './context/PlanningContext';
 import { SectionPanel } from '../common/components/SectionPanel';
 import { ConfirmDialog } from '../common/components/ConfirmDialog';
+import { TabPanel, Tabs, type TabDefinition } from '../common/components/Tabs';
 import { EmptyState } from '../common/components/EmptyState';
 import { useCommandAvailability } from '../common/hooks/useCommandAvailability';
 import { captureTestFrame } from '../common/services/imaging/captureService';
 import { emitToast } from '../common/utils/emitToast';
 import { DitherConfig, ExposureRequest, FilterType, ObservationPackage } from '../common/types/backendTypes';
-import { ditherValuesOf, frameTypeFromLabel, labelFromFrameType } from './packageModel';
+import { ditherValuesOf, filterLabel, frameTypeFromLabel, labelFromFrameType } from './packageModel';
 import '../common/styles/panels.css';
 import './packageLibrary.css';
+
+/** The two views of the Image Planner panel. */
+const PLANNER_TABS: TabDefinition[] = [
+    { id: 'exposures', label: 'Exposures' },
+    { id: 'dither', label: 'Dither' },
+];
+
+/** Prefix of the Image Planner tab and panel element ids. */
+const PLANNER_TABS_ID_PREFIX = 'image-planner';
 
 /** The words shown by each editor panel while no package is picked. */
 export const NO_PACKAGE_MESSAGE = 'Choose a package or New package';
@@ -40,7 +52,7 @@ export interface PackageEditorProps {
     /** Text of a refused save (for example a revision conflict), or null. Stays until dismissed. */
     errorMessage?: string | null;
     onDismissError?: () => void;
-    /** Called after the user confirms Delete for the shown library package. Omit to hide Delete. */
+    /** Called after the user confirms Delete package for the shown library package. Omit to hide it. */
     onDeletePackage?: (editedPackage: ObservationPackage) => void;
     /** Set when the open suggestion was removed by a refresh: the notice text and the save action. */
     removedNotice?: { text: string; onSave: () => void } | null;
@@ -58,6 +70,8 @@ export const PackageEditor: React.FC<PackageEditorProps> = ({
 }) => {
     /** Test image is a device command: greyed while Ekos controls the equipment. */
     const availability = useCommandAvailability();
+    /** The Image Planner tab shown: Exposures or Dither. */
+    const [plannerTab, setPlannerTab] = useState('exposures');
     /** Index of the exposure row being edited in the Image Planner, if any. */
     const [editingIndex, setEditingIndex] = useState<number | null>(null);
 
@@ -70,7 +84,7 @@ export const PackageEditor: React.FC<PackageEditorProps> = ({
 
     /** True while the Delete confirmation is open. */
     const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
-    /** The Delete button, so focus can return to it when the dialog is cancelled. */
+    /** The Delete package button, so focus can return to it when the dialog is cancelled. */
     const deleteButtonRef = useRef<HTMLButtonElement>(null);
 
     const requests = editedPackage?.exposure_requests ?? [];
@@ -79,7 +93,7 @@ export const PackageEditor: React.FC<PackageEditorProps> = ({
         type: labelFromFrameType(request.frameType),
         count: request.count,
         exposure: request.exposureSec,
-        filter: request.filter ?? FilterType.NONE,
+        filter: filterLabel(request.filter ?? FilterType.NONE),
         delay: request.delaySec ?? 0,
         name: undefined,
     }));
@@ -163,91 +177,103 @@ export const PackageEditor: React.FC<PackageEditorProps> = ({
             )}
             <div className="target-planner__top-row">
                 <div className="target-planner__left-column">
-                    <SectionPanel title="Image Planner">
+                    <SectionPanel title="Image Planner" className="target-planner__planner">
                         {editedPackage ? (
-                            <ImagePlanner
-                                onAdd={handleAddRow}
-                                editingItem={editingItem}
-                                onCancel={() => setEditingIndex(null)}
-                                onTestImage={handleTestImage}
-                                testImageUnavailableReason={availability.canCommand ? null : availability.reason}
-                                values={{ type: imgType, count: imgCount, exposure: imgExposure, filter: imgFilter, delay: imgDelay }}
-                                onChange={(values) => {
-                                    setImgType(values.type);
-                                    setImgCount(values.count);
-                                    setImgExposure(values.exposure);
-                                    setImgFilter(values.filter);
-                                    setImgDelay(values.delay);
-                                }}
-                            />
+                            <>
+                                <Tabs
+                                    tabs={PLANNER_TABS}
+                                    selectedId={plannerTab}
+                                    onChange={setPlannerTab}
+                                    ariaLabel="Image Planner views"
+                                    idPrefix={PLANNER_TABS_ID_PREFIX}
+                                />
+                                <TabPanel idPrefix={PLANNER_TABS_ID_PREFIX} tabId="exposures" selected={plannerTab === 'exposures'}>
+                                    <ImagePlanner
+                                        onAdd={handleAddRow}
+                                        editingItem={editingItem}
+                                        onCancel={() => setEditingIndex(null)}
+                                        onTestImage={handleTestImage}
+                                        testImageUnavailableReason={availability.canCommand ? null : availability.reason}
+                                        values={{ type: imgType, count: imgCount, exposure: imgExposure, filter: imgFilter, delay: imgDelay }}
+                                        onChange={(values) => {
+                                            setImgType(values.type);
+                                            setImgCount(values.count);
+                                            setImgExposure(values.exposure);
+                                            setImgFilter(values.filter);
+                                            setImgDelay(values.delay);
+                                        }}
+                                    />
+                                </TabPanel>
+                                <TabPanel idPrefix={PLANNER_TABS_ID_PREFIX} tabId="dither" selected={plannerTab === 'dither'}>
+                                    <DitherSettings
+                                        enabled={dither.enabled}
+                                        everyN={dither.everyN}
+                                        scale={dither.pixels}
+                                        onChange={(enabled, everyNFrames, pixels) =>
+                                            onChangeDither({ enabled, everyNFrames, pixels })}
+                                    />
+                                </TabPanel>
+                            </>
                         ) : (
                             <EmptyState message={NO_PACKAGE_MESSAGE} />
                         )}
                     </SectionPanel>
-                    <SectionPanel title="Dither Settings">
+                    <SectionPanel
+                        title="Image List"
+                        className="target-planner__image-list"
+                        headerContent={editedPackage ? (
+                            <span className="target-planner__header-actions">
+                                {isEditingQueueEntry ? (
+                                    <>
+                                        <button type="button" className="btn btn--tiny" onClick={onCancelEdit}>
+                                            Cancel
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="btn btn--tiny btn--primary"
+                                            disabled={!canAdd}
+                                            onClick={() => editedPackage && onAddToSequence(editedPackage)}
+                                        >
+                                            Modify
+                                        </button>
+                                    </>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        className="btn btn--tiny btn--primary"
+                                        disabled={!canAdd}
+                                        onClick={() => editedPackage && onAddToSequence(editedPackage)}
+                                    >
+                                        Add to Sequence
+                                    </button>
+                                )}
+                                {onDeletePackage && !isEditingQueueEntry && (
+                                    <button
+                                        type="button"
+                                        ref={deleteButtonRef}
+                                        className="btn btn--tiny btn--danger"
+                                        onClick={() => setIsConfirmingDelete(true)}
+                                    >
+                                        Delete package
+                                    </button>
+                                )}
+                            </span>
+                        ) : undefined}
+                    >
                         {editedPackage ? (
-                            <DitherSettings
-                                enabled={dither.enabled}
-                                everyN={dither.everyN}
-                                scale={dither.pixels}
-                                onChange={(enabled, everyNFrames, pixels) =>
-                                    onChangeDither({ enabled, everyNFrames, pixels })}
-                            />
+                            <div className="image-list-scroll-container">
+                                <ImageList
+                                    items={listItems}
+                                    onRemove={(_, itemId) => onRemoveExposure(Number(itemId))}
+                                    onEdit={(item) => setEditingIndex(Number(item.id))}
+                                />
+                            </div>
                         ) : (
                             <EmptyState message={NO_PACKAGE_MESSAGE} />
                         )}
                     </SectionPanel>
                 </div>
                 <div className="target-planner__right-column">
-                    <SectionPanel title="Image List">
-                        {editedPackage ? (
-                            <div className="target-planner__image-list-container">
-                                <div className="image-list-scroll-container">
-                                    <ImageList
-                                        items={listItems}
-                                        onRemove={(_, itemId) => onRemoveExposure(Number(itemId))}
-                                        onEdit={(item) => setEditingIndex(Number(item.id))}
-                                    />
-                                </div>
-                                <div className="target-planner__actions">
-                                    {isEditingQueueEntry ? (
-                                        <>
-                                            <button className="btn btn--danger btn--flex-1" onClick={onCancelEdit}>
-                                                Cancel
-                                            </button>
-                                            <button
-                                                className="btn btn--primary btn--flex-1"
-                                                disabled={!canAdd}
-                                                onClick={() => editedPackage && onAddToSequence(editedPackage)}
-                                            >
-                                                Modify
-                                            </button>
-                                        </>
-                                    ) : (
-                                        <button
-                                            className="btn btn--full-width"
-                                            disabled={!canAdd}
-                                            onClick={() => editedPackage && onAddToSequence(editedPackage)}
-                                        >
-                                            Add to Sequence
-                                        </button>
-                                    )}
-                                    {onDeletePackage && !isEditingQueueEntry && (
-                                        <button
-                                            type="button"
-                                            ref={deleteButtonRef}
-                                            className="btn btn--danger"
-                                            onClick={() => setIsConfirmingDelete(true)}
-                                        >
-                                            Delete
-                                        </button>
-                                    )}
-                                </div>
-                            </div>
-                        ) : (
-                            <EmptyState message={NO_PACKAGE_MESSAGE} />
-                        )}
-                    </SectionPanel>
                     <LastImageViewer />
                 </div>
             </div>

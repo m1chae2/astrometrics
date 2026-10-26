@@ -1,7 +1,7 @@
 /**
  * @file test_packageSuggestions.test.tsx
  * @description Tests of the Observation Manager's suggestion handling with the backend mocked:
- * Dismiss with Undo, Reopen, the Refresh suggestions button, the "Suggestions updated" line after a
+ * Dismiss with Undo, Reopen, the Refresh suggestions button on the Suggested tab, the "Suggestions updated" line after a
  * refresh event, and the notice (with "Save as planned package") when the suggestion open in the
  * editor is removed by a refresh.
  */
@@ -99,9 +99,10 @@ describe('Observation Manager suggestions', () => {
         ));
     });
 
-    it('starts a refresh from the header button and says it started', async () => {
+    it('starts a refresh from the Suggested tab and says it started', async () => {
         answerBackend();
         renderDisplay();
+        await userEvent.click(await screen.findByRole('tab', { name: /Suggested/ }));
         await userEvent.click(await screen.findByRole('button', { name: 'Refresh suggestions' }));
         await waitFor(() => expect(callBackendMock).toHaveBeenCalledWith('plan:refresh_suggestions', {}, expect.anything()));
         expect(await screen.findByText(/Refresh started/)).toBeInTheDocument();
@@ -110,6 +111,7 @@ describe('Observation Manager suggestions', () => {
     it('shows a refused refresh as an alert', async () => {
         answerBackend({ 'plan:refresh_suggestions': () => ({ started: false }) });
         renderDisplay();
+        await userEvent.click(await screen.findByRole('tab', { name: /Suggested/ }));
         await userEvent.click(await screen.findByRole('button', { name: 'Refresh suggestions' }));
         expect(await screen.findByRole('alert')).toHaveTextContent('Could not start a refresh');
     });
@@ -117,7 +119,7 @@ describe('Observation Manager suggestions', () => {
     it('shows "Suggestions updated" after a refresh event', async () => {
         answerBackend();
         const client = renderDisplay();
-        await screen.findByRole('button', { name: 'Refresh suggestions' });
+        await screen.findByRole('tab', { name: /Suggested/ });
         act(() => {
             client.setQueryData(PACKAGE_REFRESH_NOTICE_QUERY_KEY, { added: 1, deleted: 2, receivedAt: 1 });
         });

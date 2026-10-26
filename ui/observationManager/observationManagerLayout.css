@@ -30,8 +30,8 @@
     height: auto;
 }
 
-/* The package library needs room for its three tabs and header buttons; Visible Targets gives
-   width back. */
+/* The package library needs room for its three tabs and, on one line, its title and two header
+   buttons; Visible Targets gives width back. */
 .observation-manager__body > .layout {
     --layout-left-col-width: 285px;
     --layout-right-col-width: 290px;
@@ -39,7 +39,7 @@
 
 @media (min-width: 1280px) {
     .observation-manager__body > .layout {
-        --layout-left-col-width: 330px;
+        --layout-left-col-width: 360px;
         --layout-right-col-width: 380px;
     }
 }
@@ -72,7 +72,7 @@
 }
 
 .execution-queue-strip .panel__content {
-    padding: var(--space-2);
+    padding: var(--space-1) var(--space-2);
     overflow: hidden;
 }
 
@@ -94,6 +94,32 @@
     margin: auto;
     color: var(--text-dim);
     font-size: var(--compact-font-size);
+}
+
+/* Visible Targets: one line per target. A long name is cut short (the full name is its tooltip). */
+.visible-targets__table {
+    table-layout: fixed;
+}
+
+.visible-targets__table td,
+.visible-targets__table th {
+    white-space: nowrap;
+    padding-left: var(--space-1);
+    padding-right: var(--space-1);
+}
+
+.visible-targets__table th:nth-child(2),
+.visible-targets__table th:nth-child(3) {
+    width: 46px;
+}
+
+.visible-targets__until {
+    width: 78px;
+}
+
+.visible-targets__name {
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* Visible Targets: a row click starts a new package. */

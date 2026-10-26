@@ -39,16 +39,16 @@ function renderEditor(editedPackage: ObservationPackage | null, overrides: Parti
 }
 
 describe('PackageEditor', () => {
-    it('shows the empty state in all three panels when no package is chosen', () => {
+    it('shows the empty state in both editor panels when no package is chosen', () => {
         renderEditor(null);
-        expect(screen.getAllByText('Choose a package or New package')).toHaveLength(3);
+        expect(screen.getAllByText('Choose a package or New package')).toHaveLength(2);
         expect(screen.queryByRole('button', { name: 'Add to Sequence' })).not.toBeInTheDocument();
     });
 
     it('shows the exposure rows of the passed package', () => {
         renderEditor(samplePackage);
         const table = screen.getByRole('table');
-        expect(within(table).getByText('300s')).toBeInTheDocument();
+        expect(within(table).getByText('300 s')).toBeInTheDocument();
         expect(within(table).getByText('Ha')).toBeInTheDocument();
     });
 
@@ -60,13 +60,14 @@ describe('PackageEditor', () => {
 
     it('removes a row', async () => {
         const props = renderEditor(samplePackage);
-        await userEvent.click(screen.getByTitle('Remove Item'));
+        await userEvent.click(screen.getByTitle('Remove row'));
         expect(props.onRemoveExposure).toHaveBeenCalledWith(0);
     });
 
-    it('edits the dither of the package', async () => {
+    it('edits the dither of the package on the Dither tab', async () => {
         const props = renderEditor(samplePackage);
-        await userEvent.click(screen.getByRole('checkbox'));
+        await userEvent.click(screen.getByRole('tab', { name: 'Dither' }));
+        await userEvent.click(screen.getByRole('checkbox', { name: 'Dither between frames' }));
         expect(props.onChangeDither).toHaveBeenCalledWith({ enabled: false, everyNFrames: 3, pixels: 4 });
     });
 
@@ -74,6 +75,22 @@ describe('PackageEditor', () => {
         const props = renderEditor(samplePackage);
         await userEvent.click(screen.getByRole('button', { name: 'Add to Sequence' }));
         expect(props.onAddToSequence).toHaveBeenCalledWith(samplePackage);
+    });
+
+    it('shows Luminance as L and puts Delete package in the Image List header', () => {
+        renderEditor(
+            { ...samplePackage, exposure_requests: [{ frameType: FrameType.LIGHT, filter: 'Luminance' as FilterType, exposureSec: 60, count: 2 }] },
+            { onDeletePackage: vi.fn() },
+        );
+        expect(within(screen.getByRole('table')).getByText('L')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Delete package' })).toBeInTheDocument();
+        expect(screen.queryByText('No exposure rows yet. Add one with the Image Planner above.')).not.toBeInTheDocument();
+    });
+
+    it('says how to add a row when the package has none', () => {
+        renderEditor({ ...samplePackage, exposure_requests: [] });
+        expect(screen.getByText('No exposure rows yet. Add one with the Image Planner above.')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Add to Sequence' })).toBeDisabled();
     });
 
     it('shows a refused save as an alert', () => {

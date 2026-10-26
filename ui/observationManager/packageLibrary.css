@@ -86,8 +86,26 @@
 }
 
 .package-library__actions {
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     justify-content: flex-end;
+}
+
+/* The panel title stays on one line beside its two header buttons. */
+.package-library > .panel__header > span:first-child,
+.package-library__actions .btn {
+    white-space: nowrap;
+}
+
+.package-library__actions .btn {
+    padding-left: var(--space-1);
+    padding-right: var(--space-1);
+}
+
+/* Refresh suggestions sits at the top of the Suggested tab, above the cards it refreshes. */
+.package-library__tab-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: var(--space-2);
 }
 
 .package-library__status {

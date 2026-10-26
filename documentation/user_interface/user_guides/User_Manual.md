@@ -357,7 +357,7 @@ An observation package is the plan for one target: a list of exposure rows (type
 
 - Across the whole top: the Execution Queue.
 - Left column: the Observation Packages library.
-- Center: the package editor, made of Image Planner, Dither Settings, Image List and Last Image.
+- Center: the package editor. On the left, the Image Planner (Exposures and Dither tabs) with the Image List under it; on the right, Last Image.
 - Right column: Visible Targets.
 
 You work on one thing at a time. Picking a package in the library, or a card in the Execution Queue, clears the other pick.
@@ -366,7 +366,7 @@ You work on one thing at a time. Picking a package in the library, or a card in 
 
 | Control | What it does |
 | --- | --- |
-| Queue cards | One card for each package in tonight's session, in order. A card shows the target name, the total run time (such as 3 min), the run state and the frame progress. It does not repeat the exposure rows. Click a card, or its pencil, to load the package into the editor, where the Image List shows the rows. Drag cards to reorder them. The × removes a card after you confirm. The row of cards scrolls sideways only when there are more cards than fit the window. Move earlier and Move later buttons on each card change its place from the keyboard |
+| Queue cards | One card for each package in tonight's session, in order. A card shows the target name and total run time (such as 3 min) on one line, and the run state and frame progress on the next. It does not repeat the exposure rows. Click a card, or its pencil, to load the package into the editor, where the Image List shows the rows. Drag cards to reorder them. The × removes a card after you confirm. The row of cards scrolls sideways only when there are more cards than fit the window. Move earlier and Move later buttons on each card change its place from the keyboard |
 | Run state | A chip on each card: Imaging now, Not imaging, Done, Partly done, Not run or Progress unknown. The card of the package being imaged is marked as the current step. A progress bar reads, for example, 12 of 20 frames. A short note can follow. The library counts the frames. The view only shows the counts |
 | as of | The time of the last progress read. The view reads again each minute, because frames arrive without any message |
 | Imaging now | A package counts as imaging now when a frame for it arrived in the last few minutes. This is read from the frames, because Ekos runs the queue (see the [validation register](../../library_design/validation/wayfinding.md), WAY-D84, Design estimate) |
@@ -379,12 +379,12 @@ You work on one thing at a time. Picking a package in the library, or a card in 
 | --- | --- |
 | Suggested, Planned and Complete tabs | The three lists, each with a count. Suggested packages come from the library. Planned packages are the ones you made or kept. A package is Complete when enough good frames have arrived for all its rows. If frames are later set aside and the rows are no longer met, it moves back to Planned |
 | New package | Opens a search box over the targets in the library. Pick a target to open its package. A target with a planned package opens that one. Else a suggested one opens. Only a target with neither gets a new, empty package. The library creates a target from a catalog name if it is not yet in the library, and refuses a name it cannot find |
-| Add Target | Opens the [Add New Target dialog](#add-new-target-dialog) |
-| Refresh suggestions | Asks the library to look again at which targets need more frames. A line under the buttons says that the refresh started, then reports what changed, for example Suggestions updated: 1 added. The app also refreshes after frames are measured and after a sync |
+| Add Target | Opens the [Add New Target dialog](#add-new-target-dialog), for a target that is not in the library yet. New package picks from the targets already there |
+| Refresh suggestions | At the top of the Suggested tab. Asks the library to look again at which targets need more frames. A line above the tabs says that the refresh started, then reports what changed, for example Suggestions updated: 1 added. The app also refreshes after frames are measured and after a sync |
 | Package card | Shows the target name. A suggested card also shows a confidence chip: Measured, Partly measured or Tentative. Click a card to load it into the editor |
 | Dismiss and Undo | On a suggested card. Dismiss hides the suggestion until the evidence behind it changes. A notice follows with Undo and Close |
 | Reopen | On a complete card. Moves the package back to Planned, and it counts new frames only |
-| Delete | In the editor, for a library package. Asks you to confirm, and cannot be undone |
+| Delete package | In the Image List title bar, for a library package. Asks you to confirm, and cannot be undone |
 
 Adding a package to the session makes it Planned. Suggestions update and delete themselves when the frames are no longer needed. If you have a suggestion open and a refresh removes it, your form stays open with a notice and a Save as planned package button.
 
@@ -393,17 +393,17 @@ Adding a package to the session makes it Planned. Suggestions update and delete 
 | Control | What it does |
 | --- | --- |
 | Image Planner: Type | Light, Dark, Flat or Bias |
-| Image Planner: Count, Filter, Exposure and Delay | The number of frames, the filter (L, R, G, B, Ha, OIII or SII), the exposure time in seconds and the pause between frames in seconds |
+| Image Planner: Exposures tab | Count, Filter, Exposure and Delay: the number of frames, the filter (L, R, G, B, Ha, OIII or SII), the exposure time in seconds and the pause between frames in seconds |
 | Add to List | Adds the row to the package. While you edit a row, the button pair reads Update and Cancel |
 | Test Image | Takes one frame now with the current Type, Exposure and Filter. The Last Image panel then shows it. It is a device command, so it is greyed while Ekos controls the equipment, with a Why unavailable? button beside it |
-| Dither Settings | Dither shifts the pointing slightly between frames. The check box reads Enabled or Disabled. Every sets how many frames pass between shifts. Scale sets the size of the shift |
-| Image List | Lists the package's rows with Type / Info, Count, Exposure, Delay, Filter and Actions. The Actions edit and remove a row |
-| Add to Sequence | Adds the package, as edited, to tonight's session at the end of the Execution Queue. While you edit a queued card, Cancel and Modify replace this button |
+| Image Planner: Dither tab | Dither shifts the pointing slightly between frames. Tick Dither between frames to turn it on. Every sets how many frames pass between shifts, and Scale sets the size of the shift in pixels; both are greyed while dither is off |
+| Image List | Lists the package's rows with #, Type, Count, Exposure, Delay and Filter, and a pencil and an × that edit and remove a row. Times read as 60 s, and the luminance filter reads L. With no rows it says to add one with the Image Planner |
+| Add to Sequence | In the Image List title bar. Adds the package, as edited, to tonight's session at the end of the Execution Queue. While you edit a queued card, Cancel and Modify replace this button |
 | Last Image | Shows the newest captured frame. A button switches between the linear and the stretched view. The frame updates when a capture ends |
 
 Each editor panel reads Choose a package or New package until you pick one. The editor has no framing controls. Framing comes from the Planetarium (see [Planetarium](#planetarium)).
 
-**Visible Targets.** A table with Target, Alt, Az and Visible Until for the targets now above the horizon. Click a row, or press Enter on it, to open that target's package. It works like New package: it opens the existing planned or suggested package, and makes an empty one only if the target has neither.
+**Visible Targets.** A table with Target, Alt, Az and Until (UTC) for the targets now above the horizon. Until (UTC) is the time of day, in UTC, when the target sets, or Circumpolar. A long name is cut short; hover over it to read it all. Click a row, or press Enter on it, to open that target's package. It works like New package: it opens the existing planned or suggested package, and makes an empty one only if the target has neither.
 
 **Not in this view.** Target quality statements are not shown here. They are for the library and the AI companion. The view also has no target status table, mosaic planner or calibration library. The calibration library is in the Observatory Manager.
 

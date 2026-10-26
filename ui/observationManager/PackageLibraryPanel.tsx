@@ -3,7 +3,8 @@
  * @description The observation package library, in the left column of the Observation Manager.
  * Tabs Suggested, Planned and Complete (with counts); each card shows only the target name on one
  * line and, for a suggestion, a small confidence chip. Picking a card loads the editor. "New package" opens a
- * target search; "Add Target" adds a target to the library; "Refresh suggestions" asks the library to
+ * target search; "Add Target" adds a target that is not in the library yet; "Refresh suggestions", at the
+ * top of the Suggested tab, asks the library to
  * refresh the suggestions. A suggestion card has Dismiss (with an Undo notice); a complete card has
  * Reopen. A polite status line reports "Suggestions updated: ..." after a refresh. When the focused
  * card goes away, focus moves to the card that takes its place. A presentational component: the lists,
@@ -128,11 +129,13 @@ export const PackageLibraryPanel: React.FC<PackageLibraryPanelProps> = ({
                     <button type="button" ref={newPackageButtonRef} className="btn btn--tiny btn--primary" onClick={() => setIsSearchOpen(true)}>
                         New package
                     </button>
-                    <button type="button" className="btn btn--tiny" onClick={onAddTarget} title="Add a new target to the library">
+                    <button
+                        type="button"
+                        className="btn btn--tiny"
+                        onClick={onAddTarget}
+                        title="Add a target that is not in the library yet, by name and coordinates. New package picks from targets already there."
+                    >
                         Add Target
-                    </button>
-                    <button type="button" className="btn btn--tiny" onClick={onRefreshSuggestions}>
-                        Refresh suggestions
                     </button>
                 </span>
             }
@@ -163,6 +166,13 @@ export const PackageLibraryPanel: React.FC<PackageLibraryPanelProps> = ({
                 />
                 {TAB_DEFINITIONS.map((definition) => (
                     <TabPanel key={definition.id} idPrefix={ID_PREFIX} tabId={definition.id} selected={selectedTab === definition.id}>
+                        {definition.id === 'suggested' && (
+                            <div className="package-library__tab-actions">
+                                <button type="button" className="btn btn--tiny" onClick={onRefreshSuggestions}>
+                                    Refresh suggestions
+                                </button>
+                            </div>
+                        )}
                         <div className="package-library__list" ref={selectedTab === definition.id ? listRegionRef : undefined}>
                             {isLoading && <EmptyState variant="loading" message="Loading…" />}
                             {!isLoading && error && (

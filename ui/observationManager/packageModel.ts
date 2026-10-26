@@ -55,6 +55,24 @@ export function labelFromFrameType(frameType: FrameType): string {
     return FRAME_TYPE_LABELS[frameType] ?? 'Light';
 }
 
+/** The library's long filter names and the short names the Image Planner offers. */
+const SHORT_FILTER_NAMES: Record<string, string> = {
+    Luminance: 'L',
+    Red: 'R',
+    Green: 'G',
+    Blue: 'B',
+};
+
+/**
+ * Gives the short name of a filter, the one the Image Planner offers: the library stores the
+ * luminance filter as "Luminance", and the planner and lists show it as "L".
+ * @param filter The filter as the library stores it.
+ * @return The short name, or the filter unchanged when it has no long form.
+ */
+export function filterLabel(filter: string): string {
+    return SHORT_FILTER_NAMES[filter] ?? filter;
+}
+
 /**
  * Writes one exposure request in short form: "L 20 x 60 s". A calibration frame starts with its
  * type instead of a filter ("Dark 20 x 60 s").
@@ -63,7 +81,7 @@ export function labelFromFrameType(frameType: FrameType): string {
  */
 export function formatExposureRequest(request: ExposureRequest): string {
     const lead = request.frameType === FrameType.LIGHT
-        ? (request.filter ?? FilterType.NONE)
+        ? filterLabel(request.filter ?? FilterType.NONE)
         : labelFromFrameType(request.frameType);
     return `${lead} ${request.count} x ${request.exposureSec} s`;
 }

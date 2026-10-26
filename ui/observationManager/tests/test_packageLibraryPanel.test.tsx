@@ -153,9 +153,12 @@ describe('PackageLibraryPanel suggestions and refresh', () => {
         expect(line).toHaveAttribute('aria-live', 'polite');
     });
 
-    it('calls onRefreshSuggestions from the Refresh suggestions button', async () => {
+    it('calls onRefreshSuggestions from the Refresh suggestions button on the Suggested tab', async () => {
         const onRefreshSuggestions = vi.fn();
         renderPanel({ onRefreshSuggestions, refreshStartedText: 'Refresh started. Changes will appear here.' });
+        // The button sits at the top of the Suggested tab, not in the panel header.
+        expect(screen.queryByRole('button', { name: 'Refresh suggestions' })).not.toBeInTheDocument();
+        await userEvent.click(screen.getByRole('tab', { name: /Suggested/ }));
         await userEvent.click(screen.getByRole('button', { name: 'Refresh suggestions' }));
         expect(onRefreshSuggestions).toHaveBeenCalled();
         expect(screen.getByText('Refresh started. Changes will appear here.')).toBeInTheDocument();

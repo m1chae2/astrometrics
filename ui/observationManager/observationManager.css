@@ -49,22 +49,33 @@
     min-height: 0;
 }
 
-.target-planner__image-list-container {
-    display: flex;
-    flex-direction: column;
-    max-height: 220px;
-    min-height: 0;
-    flex-shrink: 1;
+/* Left column of the editor: the Image Planner (Exposures and Dither tabs) is as tall as its
+   content, and the Image List under it takes the rest and scrolls inside itself. Last Image fills
+   the right column. */
+.target-planner__left-column > .target-planner__planner {
+    flex: 0 0 auto;
 }
 
-/* .target-planner__image-list-content {
-} */
-
-.target-planner__actions {
+.target-planner__planner .panel__content {
     display: flex;
-    gap: 8px;
-    margin-top: 8px;
-    flex-shrink: 0;
+    flex-direction: column;
+    gap: var(--space-2);
+    overflow: visible;
+}
+
+.target-planner__left-column > .target-planner__image-list {
+    flex: 1 1 0;
+    min-height: 120px;
+}
+
+.target-planner__header-actions {
+    display: inline-flex;
+    gap: var(--space-1);
+    align-items: center;
+}
+
+.target-planner__header-actions .btn {
+    white-space: nowrap;
 }
 
 .btn--full-width {
@@ -246,9 +257,42 @@
     height: 100%;
 }
 
-/* Image List */
+/* Image List: headers in sentence case as on the Observatory Manager, numbers on the right with
+   equal-width digits, and the edit and remove buttons at the end of each row. */
 .image-list-wrapper {
     padding: 0;
+}
+
+.observation-manager .data-table th {
+    text-transform: none;
+    letter-spacing: normal;
+    font-size: var(--section-label-size);
+}
+
+.image-list__table td,
+.image-list__table th {
+    white-space: nowrap;
+}
+
+.image-list__number {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.image-list__table th.image-list__number {
+    text-align: right;
+}
+
+.image-list__actions {
+    width: 1%;
+    text-align: right;
+}
+
+.image-list__empty {
+    color: var(--text-muted);
+    text-align: center;
+    padding: var(--space-3);
+    cursor: default;
 }
 
 .image-list-info {

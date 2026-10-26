@@ -7,7 +7,7 @@ import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { TargetListStatus } from '../TargetListStatus';
+import { TargetListStatus, formatSetTime } from '../TargetListStatus';
 
 /** What the mocked visibility hook answers; tests change it. */
 const visibility = vi.hoisted(() => ({
@@ -17,6 +17,15 @@ const visibility = vi.hoisted(() => ({
     retry: vi.fn(),
 }));
 vi.mock('../hooks/useTargetVisibility', () => ({ useTargetVisibility: () => visibility }));
+
+describe('formatSetTime', () => {
+    /** A UTC setting time drops its seconds; words and missing times stay readable. */
+    it('shows hours and minutes, or the word', () => {
+        expect(formatSetTime('09:35:47')).toBe('09:35');
+        expect(formatSetTime('Circumpolar')).toBe('Circumpolar');
+        expect(formatSetTime('')).toBe('--');
+    });
+});
 
 describe('TargetListStatus', () => {
     it('is busy while it calculates', () => {

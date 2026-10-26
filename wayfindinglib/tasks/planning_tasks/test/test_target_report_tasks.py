@@ -1068,3 +1068,62 @@ def test_set_aside_frames_come_from_stored_rows_not_the_frames_folder(isolated_b
     report = _report(library, isolated_butler)
     assert report.capture_settings[0].frames_set_aside == 2
     assert any("not why" in note for note in report.notes)
+
+
+def _provenanced(value: float, kind: str, source: str) -> SimpleNamespace:
+    """Build a stand-in profile value with its provenance.
+
+    Parameters
+    ----------
+    value : `float`
+        The value in ADU.
+    kind : `str`
+        Where it came from, such as ``"measured"``.
+    source : `str`
+        The source text.
+
+    Returns
+    -------
+    provenanced : `SimpleNamespace`
+        An object shaped like a `ProvenancedValue`.
+    """
+    return SimpleNamespace(value=value, provenance=SimpleNamespace(kind=kind, source=source))
+
+
+def test_the_clipping_note_uses_the_ceiling_when_the_threshold_cannot_be_reached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A threshold above the clip ceiling reports the ceiling instead."""
+    from wayfindinglib.tasks.planning_tasks import target_report_tasks
+
+    ceiling = _provenanced(16383, "measured", "raw maximum")
+    profile = SimpleNamespace(
+        clip_ceiling_adu=ceiling,
+        pixel_saturation_level_adu=ceiling,
+        saturation_threshold_can_be_reached=False,
+        photometric_linearity_limit_adu=None,
+    )
+    monkeypatch.setattr(target_report_tasks, "resolve_camera_profile", lambda name, config: profile)
+    note = target_report_tasks._clipping_note("Nikon D5300", None, ScienceGoal.FAINT_POINT_SOURCE)
+    assert "at or above 16383 ADU (measured: raw maximum)" in note
+    assert "the ceiling is used instead" in note
+    assert "proportional" not in note
+
+
+def test_the_clipping_note_names_the_linearity_limit_when_there_is_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A ZWO-like profile keeps its threshold and adds the linearity limit."""
+    from wayfindinglib.tasks.planning_tasks import target_report_tasks
+
+    profile = SimpleNamespace(
+        clip_ceiling_adu=_provenanced(65532, "measured", "raw maximum"),
+        pixel_saturation_level_adu=_provenanced(65000, "assumed", "default"),
+        saturation_threshold_can_be_reached=True,
+        photometric_linearity_limit_adu=_provenanced(60000, "measured", "Antonov 2026"),
+    )
+    monkeypatch.setattr(target_report_tasks, "resolve_camera_profile", lambda name, config: profile)
+    note = target_report_tasks._clipping_note("ZWO ASI 533MM Pro", None, ScienceGoal.FAINT_POINT_SOURCE)
+    assert "at or above 65000 ADU (assumed: default)" in note
+    assert "the ceiling is used instead" not in note
+    assert "above 60000 ADU (measured: Antonov 2026)" in note

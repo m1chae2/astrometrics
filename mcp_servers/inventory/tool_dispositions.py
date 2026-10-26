@@ -392,6 +392,13 @@ DECISIONS = {
         "no table.",
         tool_class="observe",
     ),
+    "quality_calibration_identities": ToolDecision(
+        "keep",
+        "Built 2026-10-25. Reads which flat, bias and dark masters, optic, camera, Siril version and "
+        "stacking algorithm version each library stacking run used, by run id or target, so two runs "
+        "confounded by a calibration change can be told apart. Writes nothing and creates no table.",
+        tool_class="observe",
+    ),
     "quality_resolve_rows": ToolDecision(
         "keep",
         "Built 2026-10-25. Turns stored quality row ids into the frame or stack file each row is about, with "

@@ -24,6 +24,11 @@ import os
 import shutil
 from typing import Any
 
+from astrometricslib.drivers.calibration_library import (
+    BIAS_FRAME_PATHS_KEY,
+    DARK_FRAME_PATHS_KEY,
+    FLAT_FRAME_PATHS_KEY,
+)
 from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.drivers.interfaces.stacking_driver import PipelineSteps, StackingDriver, StackSettings
 from astrometricslib.pipelines.stacking.pre_processing.flat_calibration import assess_flats
@@ -528,9 +533,11 @@ def _stack_exposure_groups(
         ``"recommended_exposure_seconds"``, and a ``"clipped_exposure_groups"``
         list of the groups whose raw frames are clipped at zero, and an
         ``"exposure_group_frame_zero_fractions"`` list with every group's
-        measured zero fraction (empty when the frames could not be read), and
-        an ``"exposure_group_weights"`` list with the weight, frame count and
-        frame paths of each group that was combined.
+        measured zero fraction (empty when the frames could not be read), an
+        ``"exposure_group_weights"`` list with one entry for each group that
+        was combined (see `_exposure_group_weight_entries`), and a
+        ``"covered_in_every_group"`` mask of the pixels every combined group
+        has data at.
     """
     import numpy as np
 
@@ -599,6 +606,12 @@ def _stack_exposure_groups(
     if not results:
         return None, {}
 
+    # Each group's own registration facts, read while its sequence file is
+    # still next to its stack: the frame weights and the reference frame of
+    # the combined stack are worked out per group (see
+    # `stack_membership.group_frame_weights`).
+    group_artifacts = [_read_group_artifacts(engine, path, diagnostics) for _, path, diagnostics in results]
+
     images, exposures, counts = [], [], []
     for group, path, diagnostics in results:
         images.append(np.asarray(read_data(path), dtype=np.float32))
@@ -638,6 +651,7 @@ def _stack_exposure_groups(
     clip_ceiling_adu = resolve_camera_profile(camera_name).clip_ceiling_adu.value if camera_name else None
 
     zero_fractions_measured = True
+    frame_noises_read = True
     try:
         frame_noises, frame_zero_fractions = measure_group_frames(kept_groups)
     except OSError as read_error:
@@ -650,6 +664,10 @@ def _stack_exposure_groups(
         frame_noises = [1.0] * len(kept_groups)
         frame_zero_fractions = [0.0] * len(kept_groups)
         zero_fractions_measured = False
+        # The 1.0 above only keeps the combine going. It is not a noise, so
+        # the frame weights of the stack are unknown (see
+        # `_exposure_group_weight_entries`), never built from it.
+        frame_noises_read = False
     measured_zero_fractions, clipped_groups = describe_group_clipping(exposures, frame_zero_fractions)
     if not zero_fractions_measured:
         # The zeros above are stand-ins, not measurements: the raw-clipping
@@ -751,7 +769,7 @@ def _stack_exposure_groups(
             left_out_reasons[position] = reason
             logger.warning("The %g s exposure group of '%s' %s.", exposures[position], target_id, reason)
         used = [index for index in used if index not in left_out_reasons]
-    combined = combine_exposure_group_images(
+    combination = combine_exposure_group_images(
         [aligned_images[index] for index in used],
         [exposures[index] for index in used],
         [counts[index] for index in used],
@@ -761,6 +779,7 @@ def _stack_exposure_groups(
         clip_ceiling_adu=clip_ceiling_adu,
         use_star_fluxes=not is_spectral,
     )
+    combined = combination.image
 
     stacked_fwhm = None
     if not is_spectral:
@@ -770,8 +789,10 @@ def _stack_exposure_groups(
 
     directory = os.path.dirname(results[0][1])
     final_path = os.path.join(directory, output_file)
-    largest = max((results[index] for index in used), key=lambda result: len(result[0].frames))
-    header = read_header(largest[1])
+    # The header comes from the heaviest group, the one every other group was
+    # lined up with and whose frame is the registration reference.
+    heaviest = results[used[combination.reference_index]]
+    header = read_header(heaviest[1])
     header["EXPTIME"] = float(sum(counts[index] * exposures[index] for index in used))
     header["STACKCNT"] = int(sum(counts[index] for index in used))
     header["HISTORY"] = "Combined from exposure groups: " + ", ".join(
@@ -808,6 +829,14 @@ def _stack_exposure_groups(
             if os.path.exists(leftover) and leftover != final_path:
                 os.remove(leftover)
 
+    # The gain the combination applied to each group it measured one for, by
+    # the group's place in `results`.
+    applied_gains = {
+        used[position]: combination.gains[position]
+        for position in range(len(used))
+        if combination.gains_measured[position]
+    }
+
     # Describe every group, including any not stacked or not lined up.
     summaries, details, saturation_by_group, saturation_exposures = [], [], [], []
     for index, (group, _, diagnostics) in enumerate(results):
@@ -833,6 +862,7 @@ def _stack_exposure_groups(
                 else [round(alignment.shift_rows_pixels, 3), round(alignment.shift_columns_pixels, 3)],
                 left_out_reason=left_out_reasons.get(index),
                 gain_measurement=gain_measurements.get(index),
+                gain_applied=applied_gains.get(index),
             )
         )
         details.append({
@@ -862,27 +892,139 @@ def _stack_exposure_groups(
     merged_diagnostics["clipped_exposure_groups"] = clipped_groups
     merged_diagnostics["exposure_group_frame_zero_fractions"] = measured_zero_fractions
     merged_diagnostics["exposure_group_summaries"] = summaries
-    # What each combined group counted for: the group weight and the frames it
-    # holds, so the quality record can give every frame its share (the weight
-    # is per pixel in the combine only where a group is saturated or empty).
-    merged_diagnostics["exposure_group_weights"] = [
-        {
-            "paths": [
-                str(path)
-                for frame in results[index][0].frames
-                if (path := frame.get("path") if isinstance(frame, dict) else getattr(frame, "path", None))
-            ],
-            "weight": float(weights[index]),
-            "frame_count": int(counts[index]),
-        }
-        for index in used
-    ]
+    # What each combined group counted for, so the quality record can give
+    # every frame its share (the weight is per pixel in the combine only where
+    # a group is saturated or empty).
+    merged_diagnostics["exposure_group_weights"] = _exposure_group_weight_entries(
+        [results[index][0] for index in used],
+        [group_artifacts[index] for index in used],
+        [weights[index] for index in used],
+        [counts[index] for index in used],
+        [exposures[index] for index in used],
+        [frame_noises[index] if frame_noises_read else None for index in used],
+        combination,
+        stack_options.get("stack_weight"),
+    )
+    # Where every combined group has data. Empty-sky apertures keep out of the
+    # rest (see `empty_apertures.UNCOVERED_CLEARANCE_PX`).
+    merged_diagnostics["covered_in_every_group"] = np.logical_and.reduce(combination.covered_masks)
     if stacked_fwhm is not None:
         merged_diagnostics["stacked_fwhm_px"] = stacked_fwhm
     merged_diagnostics["recommended_exposure_seconds"] = recommended_exposure_for_groups(
         saturation_exposures, saturation_by_group
     )
     return final_path, merged_diagnostics
+
+
+def _read_group_artifacts(
+    engine: StackingDriver, group_stack_path: str, group_diagnostics: dict[str, Any]
+) -> dict[str, Any]:
+    """Read the registration facts the engine saved next to one group's stack.
+
+    Parameters
+    ----------
+    engine : `StackingDriver`
+        The stacking engine.
+    group_stack_path : `str`
+        One group's stack, whose registration sequence is beside it.
+    group_diagnostics : `dict`
+        What the engine reported for the group's run. ``symlinked_light_paths``
+        names the frames in the order of the registration facts.
+
+    Returns
+    -------
+    artifacts : `dict`
+        What `StackingDriver.read_stack_artifacts` gave, with the group's
+        ``symlinked_light_paths``. The registration lists are missing when the
+        files cannot be read. A missing reading never costs the stack; the
+        group's frame weights are then unknown.
+    """
+    artifacts: dict[str, Any] = {}
+    try:
+        artifacts = dict(engine.read_stack_artifacts(group_stack_path))
+    except (OSError, *DATA_ERRORS) as read_error:
+        logger.warning("Could not read the registration facts of '%s': %s", group_stack_path, read_error)
+    artifacts["symlinked_light_paths"] = list(group_diagnostics.get("symlinked_light_paths") or [])
+    return artifacts
+
+
+def _exposure_group_weight_entries(
+    groups: list[Any],
+    artifacts: list[dict[str, Any]],
+    weights: list[float],
+    counts: list[int],
+    exposures: list[float],
+    frame_noises: list[float | None],
+    combination: Any,
+    stack_weight: str | None,
+) -> list[dict[str, Any]]:
+    """Describe what each combined group counted for in the stack.
+
+    Every list has one item per combined group, in the order the groups were
+    combined. The entries keep the group's own frame lists, registration facts
+    and inclusion flags, so the frame weights can be worked out per group (see
+    `stack_membership.group_frame_weights`). The merged diagnostics keep their
+    joined lists as well; these entries do not replace them.
+
+    Parameters
+    ----------
+    groups : `list`
+        The combined `ExposureGroup` objects.
+    artifacts : `list` [`dict`]
+        What the engine read next to each group's stack
+        (``"registration_frames"`` and ``"registration_included"``).
+    weights : `list` [`float`]
+        The combine weight of each group, ``N t^2 / s^2``.
+    counts : `list` [`int`]
+        The number of frames stacked in each group (``N``).
+    exposures : `list` [`float`]
+        The exposure length of each group in seconds (``t``).
+    frame_noises : `list` [`float` or `None`]
+        The noise of one raw frame of each group in counts (``s``), or `None`
+        when it could not be read.
+    combination : `ExposureGroupCombination`
+        The result of the combine, for each group's applied gain, whether it
+        was measured, and its sky level.
+    stack_weight : `str` or `None`
+        The Siril ``-weight`` mode the groups were stacked with.
+
+    Returns
+    -------
+    entries : `list` [`dict`]
+        One entry per group with ``paths`` (every frame of the group),
+        ``frame_paths``, ``registration_frames`` and ``registration_included``
+        (Siril's lists for the group, in the engine's order), ``weight``
+        (``W_g``), ``frame_count`` (``N_g``), ``exposure_seconds`` (``t_g``),
+        ``frame_noise_counts`` (``s_g`` or `None`), ``gain`` (the applied
+        ``G_g``), ``gain_measured``, ``sky_level_per_second``,
+        ``stack_weight`` and ``holds_folded_frames``.
+    """
+    from astrometricslib.pipelines.stacking.processing.exposure_groups import (
+        exposure_group_holds_folded_frames,
+    )
+
+    entries = []
+    for position, group in enumerate(groups):
+        entries.append({
+            "paths": [
+                str(path)
+                for frame in group.frames
+                if (path := frame.get("path") if isinstance(frame, dict) else getattr(frame, "path", None))
+            ],
+            "frame_paths": list(artifacts[position].get("symlinked_light_paths") or []),
+            "registration_frames": list(artifacts[position].get("registration_frames") or []),
+            "registration_included": list(artifacts[position].get("registration_included") or []),
+            "weight": float(weights[position]),
+            "frame_count": int(counts[position]),
+            "exposure_seconds": float(exposures[position]),
+            "frame_noise_counts": None if frame_noises[position] is None else float(frame_noises[position]),
+            "gain": float(combination.gains[position]),
+            "gain_measured": bool(combination.gains_measured[position]),
+            "sky_level_per_second": float(combination.sky_levels[position]),
+            "stack_weight": stack_weight,
+            "holds_folded_frames": exposure_group_holds_folded_frames(group.frames),
+        })
+    return entries
 
 
 def _measure_combined_fwhm(
@@ -952,6 +1094,12 @@ def _merge_diagnostics(results: list[tuple[Any, str, dict[str, Any]]]) -> dict[s
         "zero_order_stars",
     ):
         merged[key] = [item for _, _, diagnostics in results for item in diagnostics.get(key, [])]
+    # The calibration files every group applied, each once: groups of other
+    # exposure lengths use other darks, and the quality step must see them all.
+    for key in (FLAT_FRAME_PATHS_KEY, BIAS_FRAME_PATHS_KEY, DARK_FRAME_PATHS_KEY):
+        joined = [item for _, _, diagnostics in results for item in diagnostics.get(key, [])]
+        if joined:
+            merged[key] = list(dict.fromkeys(joined))
     durations = [diagnostics.get("stacking_duration_seconds") for _, _, diagnostics in results]
     if any(duration is not None for duration in durations):
         merged["stacking_duration_seconds"] = float(sum(duration or 0.0 for duration in durations))

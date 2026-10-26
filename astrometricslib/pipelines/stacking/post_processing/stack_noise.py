@@ -163,6 +163,10 @@ ROTATION_SIGNIFICANCE = 3.0
 
 NO_WCS_REASON = "no WCS for this stack"
 
+# Given when apertures must be chosen on a group stack but the area every
+# exposure group covers cannot be laid under the trimmed stack.
+UNCOVERED_AREA_MISFIT_REASON = "the area every exposure group covers does not fit under this stack"
+
 
 @dataclass(frozen=True)
 class StackNoiseResult:
@@ -559,6 +563,7 @@ def measure_stack_noise(
     *,
     may_choose_apertures: bool = True,
     depth: StackDepth | None = None,
+    covered_mask: np.ndarray | None = None,
 ) -> StackNoiseOutcome:
     """Measure a stack's noise in the target's fixed empty apertures.
 
@@ -586,6 +591,12 @@ def measure_stack_noise(
         This stack's frame counts. They are kept with a set this stack
         chooses, and decide whether a stored set is replaced. Without them a
         stored set is never replaced.
+    covered_mask : `numpy.ndarray`, optional
+        For a stack combined from exposure groups, `True` where every group
+        has data, on the grid the stack had before its edges were trimmed.
+        Apertures this stack chooses keep out of the pixels it marks `False`
+        (see `empty_apertures.UNCOVERED_CLEARANCE_PX`). Left out for a stack
+        of one group.
 
     Returns
     -------
@@ -601,9 +612,43 @@ def measure_stack_noise(
     # The plane is read once; the sky level is taken from it here so no later
     # step has to read the stack again.
     outcome = _measure_noise_in_plane(
-        plane, stack_path, reference_frame_path, apertures_path, crop_offset, may_choose_apertures, depth
+        plane,
+        stack_path,
+        reference_frame_path,
+        apertures_path,
+        crop_offset,
+        may_choose_apertures,
+        depth,
+        covered_mask=covered_mask,
     )
     return replace(outcome, stack_sky_level=sky_level_of_plane(plane))
+
+
+def _covered_window(
+    covered_mask: np.ndarray, plane_shape: tuple[int, int], crop_offset: tuple[int, int]
+) -> np.ndarray | None:
+    """Cut the part of a covered mask that lies under a trimmed stack.
+
+    Parameters
+    ----------
+    covered_mask : `numpy.ndarray`
+        `True` where every exposure group has data, on the untrimmed grid.
+    plane_shape : `tuple` [`int`, `int`]
+        The (rows, columns) of the trimmed stack.
+    crop_offset : `tuple` [`int`, `int`]
+        The (columns, rows) trimmed from the stack's left and top edges.
+
+    Returns
+    -------
+    window : `numpy.ndarray` or `None`
+        The mask over the stack's own pixels, or `None` when the mask is too
+        small to lie under the stack.
+    """
+    column_offset, row_offset = crop_offset
+    rows, columns = plane_shape
+    if row_offset + rows > covered_mask.shape[0] or column_offset + columns > covered_mask.shape[1]:
+        return None
+    return covered_mask[row_offset : row_offset + rows, column_offset : column_offset + columns]
 
 
 def _measure_noise_in_plane(
@@ -615,6 +660,7 @@ def _measure_noise_in_plane(
     may_choose_apertures: bool,
     depth: StackDepth | None,
     subtracted_plane: np.ndarray | None = None,
+    covered_mask: np.ndarray | None = None,
 ) -> StackNoiseOutcome:
     """Measure a stack's noise in the target's fixed apertures on its plane.
 
@@ -640,12 +686,17 @@ def _measure_noise_in_plane(
         against) and the sums are taken on ``plane`` minus this image, with
         every pixel that is exactly zero in either image left at zero (the
         empty edge). See `measure_difference_noise`.
+    covered_mask : `numpy.ndarray`, optional
+        See `measure_stack_noise`. Used only when apertures are chosen.
 
     Returns
     -------
     outcome : `StackNoiseOutcome`
         The measurement, or the reason there is none.
     """
+    window = None
+    if covered_mask is not None:
+        window = _covered_window(covered_mask, plane.shape, crop_offset)
     stack_header = read_header(stack_path)
     wcs = _celestial_wcs(stack_header)
     wcs_source = "stack header"
@@ -663,20 +714,26 @@ def _measure_noise_in_plane(
     aperture_set = load_apertures(apertures_path, setup_key)
     created = False
     keep_note = ""
+    mask_does_not_fit = covered_mask is not None and window is None
     if aperture_set is None:
         if not may_choose_apertures:
             return StackNoiseOutcome(None, load_apertures_with_reason(apertures_path, setup_key)[1])
+        if mask_does_not_fit:
+            return StackNoiseOutcome(None, UNCOVERED_AREA_MISFIT_REASON)
         chosen, choice_reason = choose_apertures_with_reason(
-            plane, wcs, wcs_source, os.path.basename(stack_path), setup_key, saturation, depth
+            plane, wcs, wcs_source, os.path.basename(stack_path), setup_key, saturation, depth, window
         )
         if chosen is None:
             return StackNoiseOutcome(None, choice_reason)
         aperture_set = _store_apertures_once(apertures_path, chosen)
         created = aperture_set is chosen
     elif may_choose_apertures and _is_much_deeper(depth, aperture_set):
-        chosen, choice_reason = choose_apertures_with_reason(
-            plane, wcs, wcs_source, os.path.basename(stack_path), setup_key, saturation, depth
-        )
+        if mask_does_not_fit:
+            chosen, choice_reason = None, UNCOVERED_AREA_MISFIT_REASON
+        else:
+            chosen, choice_reason = choose_apertures_with_reason(
+                plane, wcs, wcs_source, os.path.basename(stack_path), setup_key, saturation, depth, window
+            )
         if chosen is None:
             keep_note = (
                 f"A set from this deeper stack could not be chosen ({choice_reason}); the older set was kept."

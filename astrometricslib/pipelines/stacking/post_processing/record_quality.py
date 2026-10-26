@@ -30,6 +30,8 @@ import time
 from collections.abc import Sequence
 from typing import Any, NamedTuple
 
+import numpy as np
+
 from astrometricslib.drivers.calibration_library import BIAS_FRAME_PATHS_KEY, FLAT_FRAME_PATHS_KEY
 from astrometricslib.models.quality.gate_result import GateResult
 from astrometricslib.models.quality.limit import LimitTier
@@ -72,6 +74,7 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_GROUP_EXPOSURE_S,
     STACKING_GROUP_FRAMES_STACKED,
     STACKING_GROUP_FRAMES_SUBMITTED,
+    STACKING_GROUP_GAIN_APPLIED,
     STACKING_GROUP_GAIN_BRIGHT_END_RATIO,
     STACKING_GROUP_GAIN_DISAGREEMENT,
     STACKING_GROUP_GAIN_MID_RANGE,
@@ -84,6 +87,9 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_SATURATED_PIXEL_FRACTION,
     STACKING_STACKED_FWHM_PX,
     STACKING_ZERO_PIXEL_FRACTION,
+)
+from astrometricslib.pipelines.stacking.post_processing.calibration_record import (
+    record_calibration_identities,
 )
 from astrometricslib.pipelines.stacking.post_processing.difference_noise import (
     discard_noise_sums,
@@ -259,6 +265,11 @@ _GROUP_FIELDS: dict[str, tuple[str, str]] = {
     "gain_disagreement": (
         STACKING_GROUP_GAIN_DISAGREEMENT,
         "this is the reference group, or its brightness ratios could not be compared",
+    ),
+    "gain_applied": (
+        STACKING_GROUP_GAIN_APPLIED,
+        "the stack is of one exposure group, or the group was left out of the combination, or the "
+        "combination could not measure its gain and applied none",
     ),
 }
 
@@ -744,6 +755,7 @@ def measure_noise_safely(
     *,
     may_choose_apertures: bool = True,
     depth: StackDepth | None = None,
+    covered_mask: np.ndarray | None = None,
 ) -> StackNoiseOutcome:
     """Measure the stack's empty-aperture noise, never raising.
 
@@ -769,6 +781,9 @@ def measure_noise_safely(
     depth : `StackDepth`, optional
         The stack's frame counts, for the rule that keeps the apertures
         matched to the stack's depth.
+    covered_mask : `numpy.ndarray`, optional
+        For a group stack, `True` where every exposure group has data (see
+        `stack_noise.measure_stack_noise`).
 
     Returns
     -------
@@ -885,6 +900,7 @@ def record_stacking_quality(
             summary.stacking_metrics.is_spectral,
             crop_offset,
             depth=stack_depth_of(membership),
+            covered_mask=diagnostics.get("covered_in_every_group"),
         )
         if noise.result is not None:
             # The library stack's sums, kept for the leave-one-night-out
@@ -927,6 +943,9 @@ def record_stacking_quality(
                 new_count += record_run_measurements(rows, config=config)
             except Exception:  # a by-product of the stack: no failure here may fail it
                 logger.exception("The frame %s rows of the stack %s were not stored", name, stack_path)
+    # The calibration files the run applied, for the forecast's check that two
+    # stacks were calibrated alike. Its own call, so a failure keeps the rows.
+    record_calibration_identities(context, stack_path, target_frames, diagnostics, config=config)
     # The flat-to-light match reads raw frames, so it too goes in its own call.
     # It samples only the frames that went into the stack.
     try:

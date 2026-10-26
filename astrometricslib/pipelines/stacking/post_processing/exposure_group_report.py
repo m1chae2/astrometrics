@@ -303,6 +303,7 @@ def build_group_summary(
     alignment_shift_pixels: list[float] | None = None,
     left_out_reason: str | None = None,
     gain_measurement: GroupGainMeasurement | None = None,
+    gain_applied: float | None = None,
 ) -> dict[str, Any]:
     """Build the entry describing one exposure group.
 
@@ -330,6 +331,10 @@ def build_group_summary(
         ratio (brightest quarter of the stars, or brightest pixels on the pixel
         fallback) and their disagreement. Leave it out for a group that was
         never compared with the reference.
+    gain_applied : `float`, optional
+        The gain the final combination applied to the group, when it measured
+        one (see `ExposureGroupCombination`). Leave it out for a group that was
+        left out, or whose gain the combination could not measure.
 
     Returns
     -------
@@ -366,6 +371,7 @@ def build_group_summary(
         "stack_path": stack_path,
         "alignment_shift_pixels": alignment_shift_pixels,
         **gain_fields,
+        "gain_applied": None if gain_applied is None else float(gain_applied),
         "left_out_reason": left_out_reason,
         **group_peak_fields(frames, saturation),
     }

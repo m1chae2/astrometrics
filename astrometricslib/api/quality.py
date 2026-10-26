@@ -19,6 +19,7 @@ from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.jobs.runner import background_job, registered_job
+from astrometricslib.models.quality.calibration_identities import CalibrationIdentities
 from astrometricslib.models.quality.capture_setting import CaptureSetting
 from astrometricslib.models.quality.excluded_frames import QuarantinePreview, SetAsideFrameRecord
 from astrometricslib.models.quality.measurement import QualityMeasurement, SubjectLevel
@@ -332,6 +333,38 @@ class QualityRecords:
         from astrometricslib.drivers.quality_store import QualityStore, quality_database_path
 
         return QualityStore(quality_database_path(self._config)).get_capture_settings(ids)
+
+    def calibration_identities(
+        self, run_ids: list[str] | None = None, target_id: str | None = None
+    ) -> list[CalibrationIdentities]:
+        """Read which calibration each library stacking run used.
+
+        Two stacks of a target are confounded when their calibration
+        differs: another flat or bias master (and, for the uncooled Nikon,
+        dark master), another optic or camera, or another Siril or stacking
+        algorithm version. Each record names the master files by path, size
+        and modification time. Nothing is measured or written, and a library
+        with no quality database (or one not yet migrated) gives an empty
+        list without creating anything.
+
+        Parameters
+        ----------
+        run_ids : `list` [`str`], optional
+            Only these stacking runs (the run id a stack's measurements carry).
+        target_id : `str`, optional
+            Only the stacks of this target. Leave both out to read every
+            stored record.
+
+        Returns
+        -------
+        records : `list` [`CalibrationIdentities`]
+            The records, oldest first.
+        """
+        from astrometricslib.drivers.quality_store import QualityStore, quality_database_path
+
+        return QualityStore(quality_database_path(self._config)).get_calibration_identities(
+            run_ids, target_id
+        )
 
     def metrics(
         self,

@@ -162,6 +162,7 @@ STACKING_GROUP_ALIGNMENT_SHIFT_PX = "stacking.group_alignment_shift_px"
 STACKING_GROUP_GAIN_MID_RANGE = "stacking.group_gain_mid_range"
 STACKING_GROUP_GAIN_BRIGHT_END_RATIO = "stacking.group_gain_bright_end_ratio"
 STACKING_GROUP_GAIN_DISAGREEMENT = "stacking.group_gain_disagreement_fraction"
+STACKING_GROUP_GAIN_APPLIED = "stacking.group_gain_applied"
 STACKING_EMPTY_APERTURE_NOISE_STACK_UNIT = "stacking.empty_aperture_noise_stack_unit"
 STACKING_NOISE_REFERENCE_FLUX_STACK_UNIT = "stacking.noise_reference_flux_stack_unit"
 STACKING_EMPTY_APERTURE_NOISE_NORMALIZED = "stacking.empty_aperture_noise_normalized"
@@ -680,6 +681,21 @@ _VALUE_METRICS: tuple[MetricSpec, ...] = (
         "pipelines.stacking.processing.exposure_groups.measure_exposure_group_gains",
         better=Direction.LOWER,
         register_entry="STK-20",
+    ),
+    _context_metric(
+        STACKING_GROUP_GAIN_APPLIED,
+        "",
+        "The brightness gain the final combination applied to one exposure group.",
+        (
+            "The gain the combination itself measured for the group (the median flux ratio of isolated "
+            "stars, or of mid-range pixels), over the groups that were combined. It is 1 for the "
+            "reference group. Not stored for a group that was left out, or whose gain the combination "
+            "could not measure and so did not apply. It can differ from the earlier "
+            "`stacking.group_gain_mid_range` measurement, which was made before any group was left out."
+        ),
+        f"One exposure group that was combined. {_GROUP_NOTE}",
+        "pipelines.stacking.processing.exposure_groups.combine_exposure_group_images",
+        register_entry="STK-19",
     ),
 )
 

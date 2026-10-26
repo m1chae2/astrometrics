@@ -163,6 +163,13 @@
       "interim_block": "",
       "note": "The AI is read-only, so a tool that writes is not offered."
     },
+    "quality_calibration_identities": {
+      "tool_class": "observe",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-10-25. Reads which flat, bias and dark masters, optic, camera, Siril version and stacking algorithm version each library stacking run used, by run id or target, so two runs confounded by a calibration change can be told apart. Writes nothing and creates no table."
+    },
     "quality_capture_settings": {
       "tool_class": "observe",
       "category": "image-processing",

@@ -1774,6 +1774,7 @@ export interface ExposureGroupSummary {
   gainMidRange?: number | null;
   gainBrightEndRatio?: number | null;
   gainDisagreement?: number | null;
+  gainApplied?: number | null;
   gainNonlinear?: boolean;
   leftOutReason?: string | null;
   brightestStarPeakFraction?: number | null;

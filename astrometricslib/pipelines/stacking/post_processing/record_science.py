@@ -71,7 +71,9 @@ from astrometricslib.pipelines.stacking.metrics import (
 )
 from astrometricslib.pipelines.stacking.post_processing.expected_noise import (
     ExpectedNoiseOutcome,
+    ExposureGroupNoiseFacts,
     FrameNoiseInput,
+    expected_exposure_group_noise,
     expected_stack_noise,
     gather_frame_noise_inputs,
     measure_stack_sky_level,
@@ -115,9 +117,10 @@ _NO_SKY_LEVEL_REASON = (
 SPECTRAL_STACK_REASON = (
     "a spectral stack's measured empty-aperture noise is not stored, so no expected noise is stored beside it"
 )
-MULTIPLE_EXPOSURE_GROUPS_REASON = (
-    "the stack combines several exposure groups, each divided by its exposure and rescaled, which the "
-    "frame weights and the sky model do not describe"
+CLIPPED_EXPOSURE_GROUPS_REASON = (
+    "a group of the stack is clipped at zero in its raw frames, and the combine drops its sky pixels near "
+    "zero, which the frame weights and the sky model do not describe (a clipped single-group stack is "
+    "refused too, on purpose)"
 )
 
 
@@ -199,7 +202,10 @@ def compute_expected_noise(
     diagnostics : `dict`, optional
         What the stacking run reported. A stack with an
         ``"exposure_group_weights"`` entry was combined from several exposure
-        groups and gets no expected noise.
+        groups and gets the group formula (`expected_exposure_group_noise`).
+        A stack with a non-empty ``"clipped_exposure_groups"`` gets no
+        expected noise. This includes a clipped single-group stack, on
+        purpose.
     is_spectral : `bool`, optional
         Whether the stack is spectral. Its measured noise is not stored, so no
         expected noise is stored beside it.
@@ -208,7 +214,7 @@ def compute_expected_noise(
     -------
     outcome : `ExpectedNoiseOutcome`
         The expected noise, or the reason there is none (a spectral stack,
-        several exposure groups, no members, unknown weights, a frame with no
+        a clipped group, no members, unknown weights, a frame with no
         stored sky measurement, or a setting with no gain and read noise in
         the camera profile). When the member list is uncertain (Siril stacked
         fewer frames than there were candidates) the result is marked assumed,
@@ -218,10 +224,16 @@ def compute_expected_noise(
         return ExpectedNoiseOutcome(None, SPECTRAL_STACK_REASON)
     if membership is None or not membership.members:
         return ExpectedNoiseOutcome(None, unavailable_reason or "the stack has no member frames")
-    if diagnostics and diagnostics.get("exposure_group_weights"):
-        return ExpectedNoiseOutcome(None, MULTIPLE_EXPOSURE_GROUPS_REASON)
+    if diagnostics and diagnostics.get("clipped_exposure_groups"):
+        return ExpectedNoiseOutcome(None, CLIPPED_EXPOSURE_GROUPS_REASON)
+    group_entries = (diagnostics or {}).get("exposure_group_weights") or []
     try:
-        outcome = _expected_noise_from_store(membership, target_id, configuration, store)
+        if group_entries:
+            outcome = _expected_group_noise_from_store(
+                membership, group_entries, target_id, configuration, store
+            )
+        else:
+            outcome = _expected_noise_from_store(membership, target_id, configuration, store)
     except Exception as error:  # a by-product: no failure here may fail the stack
         logger.exception("The expected noise of '%s' could not be worked out", target_id)
         return ExpectedNoiseOutcome(None, f"the expected noise failed: {type(error).__name__}")
@@ -336,6 +348,71 @@ def _expected_noise_from_store(
     return expected_stack_noise(inputs)
 
 
+def _expected_group_noise_from_store(
+    membership: StackMembership,
+    group_entries: Sequence[dict[str, Any]],
+    target_id: str,
+    configuration: object,
+    store: QualityStore | None,
+) -> ExpectedNoiseOutcome:
+    """Work out the expected noise of a stack combined from exposure groups.
+
+    Parameters
+    ----------
+    membership : `StackMembership`
+        The stack's members and their raw weights ``W_g w_i`` (it has members).
+    group_entries : `Sequence` of `dict`
+        The stack's ``exposure_group_weights`` entries.
+    target_id : `str`
+        The target.
+    configuration : `AppConfiguration` or `None`
+        Where the store and the camera profiles live.
+    store : `QualityStore` or `None`
+        The store to read, or `None` to open the configured one.
+
+    Returns
+    -------
+    outcome : `ExpectedNoiseOutcome`
+        The expected noise, or the reason there is none (unknown weights with
+        the membership's reason, an entry that lacks a fact, a member in no
+        group, or a missing sky measurement).
+    """
+    inputs = frame_noise_inputs_from_store(
+        [member.frame for member in membership.members],
+        [member.raw_weight for member in membership.members],
+        target_id,
+        configuration,
+        store,
+        membership.weights_reason,
+    )
+    if isinstance(inputs, ExpectedNoiseOutcome):
+        return inputs
+    facts = []
+    for entry in group_entries:
+        try:
+            facts.append(
+                ExposureGroupNoiseFacts(
+                    combine_weight=float(entry["weight"]),
+                    exposure_seconds=float(entry["exposure_seconds"]),
+                    frame_count=int(entry["frame_count"]),
+                    gain=float(entry["gain"]),
+                    gain_measured=bool(entry["gain_measured"]),
+                    sky_level_per_second=float(entry["sky_level_per_second"]),
+                )
+            )
+        except KeyError, TypeError, ValueError:
+            return ExpectedNoiseOutcome(
+                None, "an exposure group's entry lacks its weight, exposure, gain or sky level"
+            )
+    group_of_path = {
+        str(path): position
+        for position, entry in enumerate(group_entries)
+        for path in entry.get("paths") or []
+    }
+    indices = [group_of_path.get(str(member.frame.path), -1) for member in membership.members]
+    return expected_exposure_group_noise(inputs, indices, facts)
+
+
 def compute_stack_science(
     stack_path: str,
     summary_flat_noise_fraction: float | None,
@@ -367,7 +444,8 @@ def compute_stack_science(
         The target.
     diagnostics : `dict`
         What the stacking run reported; ``"exposure_group_weights"`` marks a
-        stack combined from several exposure groups.
+        stack combined from several exposure groups and
+        ``"clipped_exposure_groups"`` one the expected noise is refused for.
     configuration : `AppConfiguration`, optional
         Where the quality store and the camera profiles live.
     noise : `StackNoiseOutcome`, optional

@@ -27,6 +27,7 @@ from typing import Any
 from astrometricslib.drivers.calibration_library import (
     BIAS_FRAME_PATHS_KEY,
     CALIBRATION_MATCH_BLOCKING_FLAGS_KEY,
+    DARK_FRAME_PATHS_KEY,
     FLAT_FRAME_PATHS_KEY,
     CalibrationSelection,
     format_binning,
@@ -1512,6 +1513,8 @@ class ImageProcessing:
                     try:
                         os.symlink(item, os.path.join(target_folder, "darks", f"dark_{dark_idx:05d}.fits"))
                         dark_idx += 1
+                        # Kept for the calibration record: the darks applied.
+                        self.last_run_diagnostics.setdefault(DARK_FRAME_PATHS_KEY, []).append(item)
                     except OSError as e:
                         log(f"Error symlinking dark {item}: {e}")
 

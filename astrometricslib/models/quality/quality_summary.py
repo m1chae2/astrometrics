@@ -76,6 +76,12 @@ class ExposureGroupSummary(BaseModel):
     # abs(bright end ratio - mid-range gain). Divided by the gain, as a
     # fraction (0.05 is 5%). `None` when either ratio could not be measured.
     gain_disagreement: float | None = Field(default=None, alias="gainDisagreement")
+    # The gain the final combination applied to this group (see
+    # `combine_exposure_group_images`): 1 for the reference group, `None` for a
+    # group left out of the combination and for a group whose gain the
+    # combination could not measure. It is measured again inside the combine,
+    # over the groups kept, so it can differ from `gain_mid_range`. No unit.
+    gain_applied: float | None = Field(default=None, alias="gainApplied")
     # True when `gain_disagreement` is above the configured tolerance
     # (`exposure_group_gain_tolerance`). The group is then left out of the
     # combined image and `left_out_reason` names both ratios.

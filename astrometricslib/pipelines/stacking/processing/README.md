@@ -104,7 +104,7 @@ A group with too few shared pixels, or a scale factor outside 0.25 to 4, keeps a
 
 ## Files
 
-- `exposure_groups.py`: splits frames by exposure length, measures the group scale factor and combines the group stacks.
+- `exposure_groups.py`: splits frames by exposure length, measures the group scale factor and combines the group stacks. `fold_exposure_lengths` is the one rule that says which group each exposure length lands in (a length with fewer than `MINIMUM_FRAMES_PER_EXPOSURE_GROUP` frames joins the nearest length), and `split_frames_by_exposure` calls it. `combine_exposure_group_images` returns an `ExposureGroupCombination`: the image, the gain applied to each group and whether it was measured, the sky levels, the group weights, the reference group, and the trusted and covered masks.
 - `group_alignment.py`: lines up the group stacks and finds the zero-order target.
 - `star_pattern_candidates.py`: the star-pattern search that `group_alignment.py` falls back to.
 - `spectral_frame_alignment.py`: aligns spectral frames by phase correlation.

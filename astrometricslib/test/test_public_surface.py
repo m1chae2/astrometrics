@@ -45,6 +45,8 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "choose_stack_weight",
     "equal_weight_noise_penalty",
     "wfwhm_weights",
+    "group_frame_weights",
+    "fold_exposure_lengths",
     "check_choice",
     "check_include",
     "registered_job",
@@ -362,6 +364,7 @@ SUB_API_MEMBERS = {
         "save",
     },
     "quality": {
+        "calibration_identities",
         "capture_settings",
         "check_spectral_frames",
         "flag_value_outliers",

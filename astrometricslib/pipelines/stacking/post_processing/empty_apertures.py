@@ -182,6 +182,15 @@ APERTURE_SEPARATION_PX = 2.0 * RING_OUTER_PX
 # Apertures stay this far from the edge so the whole ring is on the image.
 EDGE_MARGIN_PX = math.ceil(RING_OUTER_PX) + 1
 
+# How far an empty aperture stays from a pixel that one of the exposure groups
+# of a group stack does not cover (its shifted border; see
+# `ExposureGroupCombination.covered_masks`). The combine leaves a group out
+# where its mask is empty, so the weights, and the noise, change across that
+# border; the aperture's sky ring must not reach it. The outer ring radius
+# plus one pixel is the same reach `signed_aperture_sum` keeps from the image
+# edge. Design choice, not tuned.
+UNCOVERED_CLEARANCE_PX = RING_OUTER_PX + 1.0
+
 
 # How many stars to detect when choosing apertures and the reference stars.
 DETECTED_STAR_COUNT = 400
@@ -484,6 +493,7 @@ def choose_apertures(
     setup_key: str = UNSPECIFIED_SETUP,
     saturation: SaturationCheck | None = None,
     depth: StackDepth | None = None,
+    covered_mask: np.ndarray | None = None,
 ) -> ApertureSet | None:
     """Choose empty-sky apertures and reference stars on one stack.
 
@@ -506,13 +516,18 @@ def choose_apertures(
     depth : `StackDepth`, optional
         The stack's frame counts, kept with the set. A set without them is
         never replaced for depth.
+    covered_mask : `numpy.ndarray`, optional
+        `True` where every exposure group of a group stack has data (see
+        `place_empty_apertures`).
 
     Returns
     -------
     aperture_set : `ApertureSet` or `None`
         See `choose_apertures_with_reason`.
     """
-    return choose_apertures_with_reason(plane, wcs, wcs_source, created_from, setup_key, saturation, depth)[0]
+    return choose_apertures_with_reason(
+        plane, wcs, wcs_source, created_from, setup_key, saturation, depth, covered_mask
+    )[0]
 
 
 def choose_apertures_with_reason(
@@ -523,6 +538,7 @@ def choose_apertures_with_reason(
     setup_key: str = UNSPECIFIED_SETUP,
     saturation: SaturationCheck | None = None,
     depth: StackDepth | None = None,
+    covered_mask: np.ndarray | None = None,
 ) -> tuple[ApertureSet | None, str]:
     """Choose empty-sky apertures and reference stars, and say why not if none.
 
@@ -544,6 +560,12 @@ def choose_apertures_with_reason(
         percentile screens the brightest stars instead.
     depth : `StackDepth`, optional
         The stack's frame counts, kept with the set.
+    covered_mask : `numpy.ndarray`, optional
+        `True` where every exposure group of a group stack has data, on the
+        same pixel grid as `plane`. An aperture is kept at least
+        `UNCOVERED_CLEARANCE_PX` from any pixel where it is `False`, because
+        a group that does not reach a pixel changes how the others are
+        weighted there.
 
     Returns
     -------
@@ -569,7 +591,7 @@ def choose_apertures_with_reason(
     # or not: a saturated star has the widest wings.
     stars = detect_star_centroids(plane, count=DETECTED_STAR_COUNT, skip_saturated=False)
     analysis = analyze_faint_sources(plane)
-    positions = place_empty_apertures(plane, stars, analysis.distance)
+    positions = place_empty_apertures(plane, stars, analysis.distance, covered_mask)
     if len(positions) < MINIMUM_USABLE_APERTURES:
         return None, (
             f"only {len(positions)} empty apertures could be placed on this stack, away from bright stars "
@@ -632,7 +654,10 @@ def choose_apertures_with_reason(
 
 
 def place_empty_apertures(
-    plane: np.ndarray, stars: np.ndarray, source_distance: np.ndarray | None = None
+    plane: np.ndarray,
+    stars: np.ndarray,
+    source_distance: np.ndarray | None = None,
+    covered_mask: np.ndarray | None = None,
 ) -> list[tuple[float, float]]:
     """Draw empty-sky aperture positions, away from stars and faint sources.
 
@@ -641,8 +666,10 @@ def place_empty_apertures(
     `STAR_CLEARANCE_PX` from every given star, at least
     `FAINT_SOURCE_CLEARANCE_PX` from every faint source (see
     `faint_source_distance`), at least `APERTURE_SEPARATION_PX` from every
-    kept position, and where `signed_aperture_sum` works. No test looks at an
-    aperture's sum, so the choice cannot favor quiet apertures.
+    kept position, and where `signed_aperture_sum` works. When a covered mask
+    is given, a draw is also kept at least `UNCOVERED_CLEARANCE_PX` from every
+    pixel the mask marks as not covered. No test looks at an aperture's sum,
+    so the choice cannot favor quiet apertures.
 
     Parameters
     ----------
@@ -653,6 +680,9 @@ def place_empty_apertures(
     source_distance : `numpy.ndarray`, optional
         The stack's `faint_source_distance`, when the caller already has it.
         Found here when left out.
+    covered_mask : `numpy.ndarray`, optional
+        `True` where every exposure group of a group stack has data, on the
+        same pixel grid as `plane`. Left out for a stack of one group.
 
     Returns
     -------
@@ -662,6 +692,9 @@ def place_empty_apertures(
     star_tree = cKDTree(stars) if len(stars) else None
     if source_distance is None:
         source_distance = faint_source_distance(plane)
+    # The distance of every pixel to the nearest pixel a group does not cover
+    # (zero on the uncovered pixels themselves).
+    uncovered_distance = None if covered_mask is None else distance_transform_edt(covered_mask)
     height, width = plane.shape
     generator = np.random.default_rng(APERTURE_SEED)
     positions: list[tuple[float, float]] = []
@@ -671,6 +704,11 @@ def place_empty_apertures(
         if star_tree is not None and star_tree.query([row, column])[0] <= STAR_CLEARANCE_PX:
             continue
         if source_distance[round(row), round(column)] <= FAINT_SOURCE_CLEARANCE_PX:
+            continue
+        if (
+            uncovered_distance is not None
+            and uncovered_distance[round(row), round(column)] <= UNCOVERED_CLEARANCE_PX
+        ):
             continue
         if positions and np.min(np.hypot(*(np.array(positions) - (row, column)).T)) < APERTURE_SEPARATION_PX:
             continue

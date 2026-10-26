@@ -197,7 +197,7 @@ def test_combined_image_is_closer_to_the_truth_than_an_equal_weight_average() ->
     signal, images, exposures = _bracketed_images(read_noise=0.01)
     mean_exposure = float(np.mean(exposures))
 
-    combined = combine_exposure_group_images(images, exposures) / mean_exposure
+    combined = combine_exposure_group_images(images, exposures).image / mean_exposure
     equal_weight = np.mean(
         [image / exposure for image, exposure in zip(images, exposures, strict=True)], axis=0
     )
@@ -212,7 +212,7 @@ def test_output_is_scaled_to_the_mean_exposure_per_frame() -> None:
     """The result is comparable in brightness with a normal stack."""
     signal, images, exposures = _bracketed_images(read_noise=0.001)
 
-    combined = combine_exposure_group_images(images, exposures, frame_counts=[60, 20])
+    combined = combine_exposure_group_images(images, exposures, frame_counts=[60, 20]).image
 
     expected_mean_exposure = (60 * 0.5 + 20 * 5.0) / 80
     assert float(np.mean(combined)) == pytest.approx(
@@ -229,7 +229,7 @@ def test_a_saturated_group_is_left_out_where_it_is_saturated() -> None:
     long[30, 30] = 1.0  # clipped at the top of the range
     short[30, 30] = 0.04  # the short frame measured it properly
 
-    combined = combine_exposure_group_images([short, long], [0.5, 5.0])
+    combined = combine_exposure_group_images([short, long], [0.5, 5.0]).image
 
     mean_exposure = 2.75
     # The brightness scale of the groups is measured from the noisy mid-range
@@ -246,7 +246,7 @@ def test_a_pixel_saturated_in_every_group_uses_the_shortest_exposure() -> None:
     short[5, 5] = 0.99
     long[5, 5] = 1.0
 
-    combined = combine_exposure_group_images([short, long], [0.5, 5.0])
+    combined = combine_exposure_group_images([short, long], [0.5, 5.0]).image
 
     assert combined[5, 5] == pytest.approx(0.99 / 0.5 * 2.75, rel=1e-4)
 
@@ -392,7 +392,9 @@ def test_frame_noise_weights_are_frames_times_exposure_squared() -> None:
     short = 0.05 * 0.5 + generator.normal(0.0, 0.001, (80, 80))
     long = 0.05 * 5.0 + generator.normal(0.0, 0.001, (80, 80))
 
-    combined = combine_exposure_group_images([short, long], [0.5, 5.0], [60, 20], frame_noises=[1.0, 1.0])
+    combined = combine_exposure_group_images(
+        [short, long], [0.5, 5.0], [60, 20], frame_noises=[1.0, 1.0]
+    ).image
 
     long_weight, short_weight = 20 * 5.0**2, 60 * 0.5**2
     expected_per_second = (short_weight * 0.05 + long_weight * 0.05) / (short_weight + long_weight)
@@ -525,7 +527,7 @@ def test_combining_groups_of_different_sky_keeps_star_fluxes_and_one_sky() -> No
     other = 0.10 + 1.4 * stars
     combined = combine_exposure_group_images(
         [reference * 10.0, other * 10.0], [10.0, 10.0], frame_counts=[1, 1], frame_noises=[1.0, 1.0]
-    )
+    ).image
 
     sky = float(np.median(combined))
     assert sky == pytest.approx(10.0 * float(np.median(reference)), rel=0.01)
@@ -573,7 +575,7 @@ def test_the_combined_image_stays_finite_when_a_short_group_is_nearly_empty() ->
         [30, 40],
         frame_noises=[16.0, 16.0],
         frame_zero_fractions=[0.9, 0.0],
-    )
+    ).image
 
     assert np.isfinite(combined).all()
     assert combined.max() < 10.0
@@ -594,7 +596,7 @@ def test_groups_with_different_scales_and_saturation_combine_to_one_spectrum() -
     long_unscaled = truth * exposures[1] + generator.normal(0.0, 0.002, truth.shape)
     long = np.minimum(0.7 * long_unscaled, 0.8)  # own scale, clipped core
 
-    combined = combine_exposure_group_images([short, long], exposures)
+    combined = combine_exposure_group_images([short, long], exposures).image
 
     mean_exposure = float(np.mean(exposures))
     relative_error = combined / mean_exposure / truth
@@ -650,14 +652,16 @@ def test_a_clipped_group_no_longer_biases_faint_pixels_upward() -> None:
     frame_counts = [100, 2]
     expected = rate / FULL_SCALE_COUNTS * float(np.average(exposures, weights=frame_counts))
 
-    unaware = combine_exposure_group_images(images, exposures, frame_counts, frame_noises=[noise_counts] * 2)
+    unaware = combine_exposure_group_images(
+        images, exposures, frame_counts, frame_noises=[noise_counts] * 2
+    ).image
     aware = combine_exposure_group_images(
         images,
         exposures,
         frame_counts,
         frame_noises=[noise_counts] * 2,
         frame_zero_fractions=[0.36, 0.0],
-    )
+    ).image
 
     # The clipped group's own stack reads high. The combination without the
     # floor is not compared: on this featureless patch the mid-range gain
@@ -680,7 +684,7 @@ def test_a_clipped_group_still_supplies_pixels_nothing_else_can() -> None:
         [10, 10],
         frame_noises=[8.4, 8.4],
         frame_zero_fractions=[0.7, 0.0],
-    )
+    ).image
 
     assert np.all(np.isfinite(combined))
     assert float(np.mean(combined)) == pytest.approx(5e-5 / 0.5 * 2.75, rel=1e-3)

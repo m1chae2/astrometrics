@@ -24,8 +24,10 @@ from astrometricslib.models.quality.measurement import (
 from astrometricslib.pipelines.stacking.post_processing.expected_noise import (
     NO_FRAME_ROWS_REASON,
     STACK_UNITS_PER_ADU,
+    ExposureGroupNoiseFacts,
     FrameNoiseInput,
     effective_aperture_area_px,
+    expected_exposure_group_noise,
     expected_stack_noise,
     gather_frame_noise_inputs,
     measure_stack_sky_level,
@@ -327,3 +329,111 @@ def test_the_sky_level_of_a_plane_matches_the_file_reader_on_a_smooth_sky(tmp_pa
     assert measure_stack_sky_level(str(path)) == pytest.approx(0.006, rel=2e-3)
     assert sky_level_of_plane(np.zeros((5, 5))) is None
     assert sky_level_of_plane(np.full((5, 5), np.nan)) is None
+
+
+def _group_facts(
+    weight: float, exposure: float, count: int, gain: float, sky_per_second: float, measured: bool = True
+) -> ExposureGroupNoiseFacts:
+    """Build the facts of one exposure group.
+
+    Parameters
+    ----------
+    weight, exposure, count, gain, sky_per_second : `float`
+        The group's combine weight, exposure, frame count, applied gain and
+        sky per second.
+    measured : `bool`, optional
+        Whether the gain was measured.
+
+    Returns
+    -------
+    facts : `ExposureGroupNoiseFacts`
+        The group's facts.
+    """
+    return ExposureGroupNoiseFacts(weight, exposure, count, gain, measured, sky_per_second)
+
+
+def _frame(raw_weight: float, sky: float, read: float, gain: float) -> FrameNoiseInput:
+    """Build a frame input with a raw group weight.
+
+    Parameters
+    ----------
+    raw_weight, sky, read, gain : `float`
+        The weight, sky electrons, read noise and gain of the frame.
+
+    Returns
+    -------
+    frame : `FrameNoiseInput`
+        The frame.
+    """
+    return FrameNoiseInput(raw_weight, sky, read, gain)
+
+
+def test_one_group_with_gain_one_reduces_to_the_single_group_noise() -> None:
+    """With G = 1 and t_bar = t, the group formula is the plain one."""
+    frames = [_frame(1.0, 120.0, 3.8, 0.8), _frame(2.5, 100.0, 3.8, 0.8), _frame(0.5, 140.0, 3.8, 0.8)]
+    plain = expected_stack_noise(frames)
+    group = expected_exposure_group_noise(frames, [0, 0, 0], [_group_facts(9.0, 60.0, 3, 1.0, 1e-4)])
+    assert plain.result is not None and group.result is not None
+    assert group.result.sky_noise == pytest.approx(plain.result.sky_noise, rel=1e-12)
+    assert group.result.read_noise == pytest.approx(plain.result.read_noise, rel=1e-12)
+    assert group.result.total_noise == pytest.approx(plain.result.total_noise, rel=1e-12)
+
+
+def test_two_groups_with_gains_match_the_formula_worked_out_apart() -> None:
+    """Gains other than 1 and two exposures: compare with a direct sum."""
+    groups = [_group_facts(3.0, 30.0, 4, 1.0, 1e-4), _group_facts(5.0, 120.0, 2, 1.25, 2e-4)]
+    frames = [
+        _frame(1.0, 60.0, 3.0, 0.9),
+        _frame(3.0, 70.0, 3.0, 0.9),
+        _frame(2.0, 240.0, 3.0, 0.9),
+        _frame(2.0, 250.0, 3.0, 0.9),
+    ]
+    indices = [0, 0, 1, 1]
+    outcome = expected_exposure_group_noise(frames, indices, groups)
+    assert outcome.result is not None
+    total_weight = 8.0
+    mean_exposure = (4 * 30.0 + 2 * 120.0) / 6
+    shares = [1 / 4, 3 / 4, 1 / 2, 1 / 2]
+    group_weights = [3.0, 3.0, 5.0, 5.0]
+    gains = [1.0, 1.0, 1.25, 1.25]
+    exposures = [30.0, 30.0, 120.0, 120.0]
+    variance = 0.0
+    for frame, share, group_weight, gain, exposure in zip(
+        frames, shares, group_weights, gains, exposures, strict=True
+    ):
+        coefficient = group_weight * share / (total_weight * gain)
+        frame_variance = (
+            frame.sky_electrons + frame.read_noise_electrons**2
+        ) / frame.gain_electrons_per_adu**2
+        variance += coefficient**2 * frame_variance / exposure**2
+    expected = mean_exposure / 65535.0 * math.sqrt(effective_aperture_area_px() * variance)
+    assert outcome.result.total_noise == pytest.approx(expected, rel=1e-12)
+    assert outcome.result.assumed_reason == ""
+
+
+def test_the_predicted_sky_is_the_heaviest_groups_sky_times_the_mean_exposure() -> None:
+    """The reference group is the one with the largest combine weight."""
+    groups = [_group_facts(3.0, 30.0, 4, 1.0, 1e-4), _group_facts(5.0, 120.0, 2, 1.0, 2e-4)]
+    frames = [_frame(3.0, 60.0, 3.0, 0.9), _frame(5.0, 240.0, 3.0, 0.9)]
+    outcome = expected_exposure_group_noise(frames, [0, 1], groups)
+    assert outcome.result is not None
+    assert outcome.result.predicted_sky_level == pytest.approx(2e-4 * (4 * 30.0 + 2 * 120.0) / 6)
+
+
+def test_an_unmeasured_group_gain_uses_the_applied_gain_and_is_marked_assumed() -> None:
+    """The combine's gain of 1 is used, and the result says so."""
+    groups = [_group_facts(3.0, 30.0, 4, 1.0, 1e-4, measured=False)]
+    outcome = expected_exposure_group_noise([_frame(3.0, 60.0, 3.0, 0.9)], [0], groups)
+    assert outcome.result is not None
+    assert "could not measure the gain" in outcome.result.assumed_reason
+
+
+def test_group_noise_gives_a_reason_for_unusable_inputs() -> None:
+    """Empty groups, unplaced frames and bad numbers each say why."""
+    groups = [_group_facts(3.0, 30.0, 4, 1.0, 1e-4), _group_facts(5.0, 120.0, 2, 1.0, 2e-4)]
+    frame = _frame(1.0, 60.0, 3.0, 0.9)
+    assert expected_exposure_group_noise([], [], groups).result is None
+    assert "no member frame" in expected_exposure_group_noise([frame], [0], groups).reason
+    assert "no combined" in expected_exposure_group_noise([frame], [5], groups).reason
+    assert expected_exposure_group_noise([_frame(1.0, 60.0, 3.0, 0.0)], [0], groups[:1]).result is None
+    assert expected_exposure_group_noise([frame], [0], [_group_facts(3.0, 30.0, 4, 0.0, 1e-4)]).result is None

@@ -23,9 +23,13 @@ database written by the first version of this code has the quality tables
 but no version table; it is recognized as version 1 and gets the table.
 Version 2 adds the column ``variant`` (the label of a subset stack, empty for
 a library stack); the move from version 1 adds the column, fills it for the
-subset rows that already exist, and rebuilds the "latest" view. A migration
-only touches the quality tables, view and version table and never any other
-table.
+subset rows that already exist, and rebuilds the "latest" view. Version 3 adds
+the side table ``quality_calibration_identity`` (the calibration, optic,
+camera and software each library stack used; see
+`QualityStore.write_calibration_identities`). The move from version 2 only
+creates that table, so it is additive and safe to repeat. Take a backup first
+with ``scripts/backup_library_databases.py``. A migration only touches the
+quality tables, view and version table and never any other table.
 
 Reading and writing are separate paths. A read opens the file read-only
 (``mode=ro``), takes no write lock, never changes the journal mode and never
@@ -51,6 +55,10 @@ from urllib.parse import quote
 from astrometricslib.foundation.config import AppConfiguration, get_configuration
 from astrometricslib.foundation.errors import InvalidArgumentError, StorageError
 from astrometricslib.foundation.storage.local_database import connect_db
+from astrometricslib.models.quality.calibration_identities import (
+    CalibrationFileIdentity,
+    CalibrationIdentities,
+)
 from astrometricslib.models.quality.capture_setting import CaptureSetting
 from astrometricslib.models.quality.gate_result import GateStatus
 from astrometricslib.models.quality.limit import LimitTier, QualityLimit
@@ -65,7 +73,7 @@ from astrometricslib.models.quality.measurement import (
 logger = logging.getLogger(__name__)
 
 #: The schema version this code writes and expects.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _MEASUREMENT_COLUMNS = (
     "metric",
@@ -194,6 +202,41 @@ _CREATE_SCHEMA_STATEMENTS = (
     _CREATE_LATEST_VIEW_STATEMENT,
 )
 
+# Version 3 adds this table. One row per (run, stack subject). Each master
+# column holds a JSON list of ``[path, size_bytes, modified_ns]`` file
+# identities, because a stack can use several masters and the list is only
+# ever compared as a whole, never filtered on.
+_CREATE_CALIBRATION_IDENTITY_STATEMENTS = (
+    """
+    CREATE TABLE IF NOT EXISTS quality_calibration_identity (
+        run_id TEXT NOT NULL,
+        subject_id TEXT NOT NULL,
+        target_id TEXT,
+        camera TEXT,
+        optic TEXT,
+        focal_length_mm REAL,
+        flat_masters TEXT NOT NULL DEFAULT '[]',
+        bias_masters TEXT NOT NULL DEFAULT '[]',
+        dark_masters TEXT NOT NULL DEFAULT '[]',
+        siril_version TEXT,
+        stacking_algorithm_version INTEGER,
+        recorded_at TEXT NOT NULL,
+        PRIMARY KEY (run_id, subject_id)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS quality_calibration_identity_target
+    ON quality_calibration_identity (target_id)
+    """,
+)
+
+_INSERT_CALIBRATION_IDENTITY_SQL = (
+    "INSERT INTO quality_calibration_identity (run_id, subject_id, target_id, camera, optic, "
+    "focal_length_mm, flat_masters, bias_masters, dark_masters, siril_version, "
+    "stacking_algorithm_version, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+    "ON CONFLICT (run_id, subject_id) DO NOTHING"
+)
+
 _CAPTURE_SETTING_FIELDS = (
     "camera",
     "telescope",
@@ -249,6 +292,25 @@ def _format_time(moment: datetime) -> str:
     if moment.tzinfo is None or moment.utcoffset() is None:
         raise InvalidArgumentError("A time given to the quality store must carry a time zone.")
     return moment.astimezone(UTC).isoformat(timespec="microseconds")
+
+
+def _decode_masters(text: str) -> list[CalibrationFileIdentity]:
+    """Decode the JSON text of a list of file identities.
+
+    Parameters
+    ----------
+    text : `str`
+        ``[[path, size_bytes, modified_ns], ...]`` as stored.
+
+    Returns
+    -------
+    masters : `list` [`CalibrationFileIdentity`]
+        The identities, in stored order.
+    """
+    return [
+        CalibrationFileIdentity(path=path, size_bytes=size_bytes, modified_ns=modified_ns)
+        for path, size_bytes, modified_ns in json.loads(text)
+    ]
 
 
 def _measurement_to_values(measurement: QualityMeasurement) -> tuple[Any, ...]:
@@ -594,6 +656,11 @@ class QualityStore:
                 connection.execute(statement)
         elif version < 2:
             QualityStore._migrate_from_version_1(connection)
+        if version < 3:
+            # Version 3 only adds a table. For a new file (version 0) the
+            # statements above did not include it, so it is created here too.
+            for statement in _CREATE_CALIBRATION_IDENTITY_STATEMENTS:
+                connection.execute(statement)
         has_version_table = connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'quality_schema_version'"
         ).fetchone()
@@ -717,6 +784,122 @@ class QualityStore:
             })
             for row in rows
         }
+
+    def write_calibration_identities(self, identities: CalibrationIdentities) -> bool:
+        """Store the calibration one library stack used.
+
+        The stacking stage calls this once per library stack, with the run id
+        and stack subject id the stack's measurements carry. A second call
+        for the same run id and subject id is ignored, so a repeated run adds
+        nothing and never replaces a stored record.
+
+        Parameters
+        ----------
+        identities : `CalibrationIdentities`
+            The record to store. Its ``recorded_at`` is ignored; the store
+            stamps the time itself.
+
+        Returns
+        -------
+        is_new : `bool`
+            `True` if a row was added, `False` if the run and subject were
+            already stored.
+
+        Notes
+        -----
+        This creates the file and tables if they are missing, and migrates an
+        older file (run ``scripts/backup_library_databases.py`` first when the
+        file is a real library).
+        """
+
+        def encode(masters: Sequence[CalibrationFileIdentity]) -> str:
+            """Encode a list of file identities as compact JSON text.
+
+            Returns
+            -------
+            text : `str`
+                ``[[path, size_bytes, modified_ns], ...]``.
+            """
+            return json.dumps(
+                [[master.path, master.size_bytes, master.modified_ns] for master in masters],
+                separators=(",", ":"),
+            )
+
+        values = (
+            identities.run_id,
+            identities.subject_id,
+            identities.target_id,
+            identities.camera,
+            identities.optic,
+            identities.focal_length_mm,
+            encode(identities.flat_masters),
+            encode(identities.bias_masters),
+            encode(identities.dark_masters),
+            identities.siril_version,
+            identities.stacking_algorithm_version,
+            _format_time(datetime.now(UTC)),
+        )
+        with self._write_transaction() as connection:
+            cursor = connection.execute(_INSERT_CALIBRATION_IDENTITY_SQL, values)
+            return cursor.rowcount > 0
+
+    def get_calibration_identities(
+        self, run_ids: Sequence[str] | None = None, target_id: str | None = None
+    ) -> list[CalibrationIdentities]:
+        """Read the stored calibration records.
+
+        Parameters
+        ----------
+        run_ids : `Sequence` of `str`, optional
+            Only these runs. An empty sequence gives an empty list.
+        target_id : `str`, optional
+            Only the stacks of this target.
+
+        Returns
+        -------
+        records : `list` [`CalibrationIdentities`]
+            The records, oldest first. A library with no quality database, or
+            one older than schema version 3, gives an empty list and nothing
+            is created or migrated.
+        """
+        if run_ids is not None and not run_ids:
+            return []
+        with self._read_connection() as connection:
+            if connection is None or self._read_schema_version(connection) < 3:
+                return []
+            clauses = []
+            parameters: list[Any] = []
+            if run_ids is not None:
+                clauses.append("run_id IN (SELECT value FROM json_each(?))")
+                parameters.append(json.dumps([str(run_id) for run_id in run_ids]))
+            if target_id is not None:
+                clauses.append("target_id = ?")
+                parameters.append(target_id)
+            where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+            # The WHERE text is built only from the fixed clauses above.
+            rows = connection.execute(
+                "SELECT * FROM quality_calibration_identity"  # ruff: ignore[hardcoded-sql-expression]
+                + where
+                + " ORDER BY recorded_at, run_id, subject_id",
+                parameters,
+            ).fetchall()
+        return [
+            CalibrationIdentities(
+                run_id=row["run_id"],
+                subject_id=row["subject_id"],
+                target_id=row["target_id"],
+                camera=row["camera"],
+                optic=row["optic"],
+                focal_length_mm=row["focal_length_mm"],
+                flat_masters=_decode_masters(row["flat_masters"]),
+                bias_masters=_decode_masters(row["bias_masters"]),
+                dark_masters=_decode_masters(row["dark_masters"]),
+                siril_version=row["siril_version"],
+                stacking_algorithm_version=row["stacking_algorithm_version"],
+                recorded_at=row["recorded_at"],
+            )
+            for row in rows
+        ]
 
     def write_measurements(self, measurements: Sequence[QualityMeasurement]) -> int:
         """Append the measurements of one run in a single transaction.

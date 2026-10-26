@@ -79,13 +79,16 @@ DEFAULT_DARK_TEMPERATURE_TOLERANCE_C = 3.0
 CALIBRATION_MATCH_BLOCKING_FLAGS_KEY = "calibration_match_blocking_flags"
 
 # The keys in `ImageProcessing.last_run_diagnostics` that hold the library
-# files of the flat and bias frames a run staged (the ones that were readable
-# and linked into the work folder), as a list of path strings. They are
-# recorded where the library's selection is made, so the quality step does not
-# have to guess them from the staging folder. The flat-to-light match reads
-# both (see `pipelines/stacking/post_processing/flat_match.py`).
+# files of the flat, bias and dark frames a run staged (the ones that were
+# readable and linked into the work folder), as a list of path strings. They
+# are recorded where the library's selection is made, so the quality step does
+# not have to guess them from the staging folder. The flat-to-light match reads
+# the flat and bias lists (see `pipelines/stacking/post_processing/
+# flat_match.py`); the calibration record reads all three (see
+# `pipelines/stacking/post_processing/calibration_record.py`).
 FLAT_FRAME_PATHS_KEY = "flat_frame_paths"
 BIAS_FRAME_PATHS_KEY = "bias_frame_paths"
+DARK_FRAME_PATHS_KEY = "dark_frame_paths"
 
 # The binning of a frame whose header names none: no binning at all.
 UNBINNED = UNBINNED_TEXT

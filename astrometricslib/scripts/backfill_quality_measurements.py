@@ -1292,6 +1292,7 @@ _STACKING_NOT_HELD: tuple[str, ...] = (
     "stacking.effective_frame_count",
     "stacking.effective_time_s",
     "stacking.frame_weight",
+    "stacking.group_gain_applied",
     "stacking.night_weight_fraction",
     "stacking.noise_without_night",
     "stacking.noise_difference_without_night",

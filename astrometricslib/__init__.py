@@ -234,13 +234,17 @@ if TYPE_CHECKING:
         select_library_frames,
     )
     from astrometricslib.pipelines.shared.stack_preview_path import preview_path_for
-    from astrometricslib.pipelines.stacking.post_processing.stack_membership import wfwhm_weights
+    from astrometricslib.pipelines.stacking.post_processing.stack_membership import (
+        group_frame_weights,
+        wfwhm_weights,
+    )
     from astrometricslib.pipelines.stacking.pre_processing.exposure_weighting import (
         MINIMUM_PENALTY_TO_WEIGHT,
         NOISE_WEIGHT_MODE,
         choose_stack_weight,
         equal_weight_noise_penalty,
     )
+    from astrometricslib.pipelines.stacking.processing.exposure_groups import fold_exposure_lengths
 
 # A library only writes log messages. A program decides where they go, by
 # calling `configure_logging`. The null handler stops Python from printing a
@@ -270,6 +274,8 @@ _DEFERRED_EXPORTS = {
     "choose_stack_weight": "astrometricslib.pipelines.stacking.pre_processing.exposure_weighting",
     "equal_weight_noise_penalty": "astrometricslib.pipelines.stacking.pre_processing.exposure_weighting",
     "wfwhm_weights": "astrometricslib.pipelines.stacking.post_processing.stack_membership",
+    "group_frame_weights": "astrometricslib.pipelines.stacking.post_processing.stack_membership",
+    "fold_exposure_lengths": "astrometricslib.pipelines.stacking.processing.exposure_groups",
     "check_choice": "astrometricslib.pipelines.shared.api_arguments",
     "check_include": "astrometricslib.pipelines.shared.api_arguments",
     "reject_unused_arguments": "astrometricslib.pipelines.shared.api_arguments",
@@ -573,11 +579,13 @@ __all__ = [
     "error_from_info",
     "export_target_lineage_as_prov_xml",
     "file_lock",
+    "fold_exposure_lengths",
     "frame_is_spectral",
     "frame_subject_id",
     "get_configuration",
     "get_current_job",
     "get_log_context",
+    "group_frame_weights",
     "has_catalog_magnitude",
     "is_path_inside",
     "locks_directory",

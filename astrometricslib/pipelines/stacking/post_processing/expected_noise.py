@@ -41,6 +41,22 @@ sky, in the same units, must be close to the median of the stack. Both
 numbers are stored (`ExpectedNoise.predicted_sky_level` and the stack's sky
 level), so a reader can repeat the check on every stack.
 
+A stack of several exposure groups. The combine divides each group's stack by
+its exposure (counts per second), puts it on the reference group's brightness
+scale with a gain ``G_g``, averages the groups with the weights ``W_g`` and
+multiplies the result by ``t_bar``, the mean exposure per frame. Frame ``i`` of
+group ``g`` therefore enters with the coefficient ``a_i = W_g w_i / (W G_g)``
+in counts per second, where ``w_i`` is its weight inside the group (the
+weights of a group add to 1) and ``W`` is the sum of the group weights. The
+variance of the combined image, in counts per second squared, is
+``sum(a_i^2 v_i) / t_g^2`` over all frames, and the noise in stack units is
+``t_bar * scale * sqrt(area * variance)``. With one group, ``G = 1`` and
+``t_bar = t``, this is the single-group formula above. The predicted sky is
+the reference group's sky per second times ``t_bar``. A stack with a group
+that is clipped at zero gets no prediction: the combine drops sky pixels near
+zero there, which these weights do not describe (see
+`expected_exposure_group_noise`).
+
 What the model leaves out, so a measured noise above the expected one is
 expected and has these causes:
 
@@ -98,8 +114,10 @@ __all__ = [
     "STACK_UNITS_PER_ADU",
     "ExpectedNoise",
     "ExpectedNoiseOutcome",
+    "ExposureGroupNoiseFacts",
     "FrameNoiseInput",
     "effective_aperture_area_px",
+    "expected_exposure_group_noise",
     "expected_stack_noise",
     "gather_frame_noise_inputs",
     "measure_stack_sky_level",
@@ -162,6 +180,35 @@ class FrameNoiseInput:
     read_noise_electrons: float
     gain_electrons_per_adu: float
     assumed_reason: str = ""
+
+
+@dataclass(frozen=True)
+class ExposureGroupNoiseFacts:
+    """What the noise model needs to know about one exposure group.
+
+    Parameters
+    ----------
+    combine_weight : `float`
+        The group's weight in the combine, ``W_g = N_g t_g^2 / s_g^2``.
+    exposure_seconds : `float`
+        The group's exposure length, ``t_g``, in seconds.
+    frame_count : `int`
+        The number of frames stacked in the group, ``N_g``.
+    gain : `float`
+        The brightness gain the combine applied to the group, ``G_g`` (1 when
+        the combine could not measure one).
+    gain_measured : `bool`
+        Whether the combine measured the gain.
+    sky_level_per_second : `float`
+        The group stack's sky level in counts per second, in stack units.
+    """
+
+    combine_weight: float
+    exposure_seconds: float
+    frame_count: int
+    gain: float
+    gain_measured: bool
+    sky_level_per_second: float
 
 
 @dataclass(frozen=True)
@@ -326,6 +373,123 @@ def expected_stack_noise(
             frame_count=len(frames),
             predicted_sky_level=predicted_sky_level,
             assumed_reason="; ".join(reasons),
+        )
+    )
+
+
+def expected_exposure_group_noise(
+    frames: Sequence[FrameNoiseInput],
+    frame_group_indices: Sequence[int],
+    groups: Sequence[ExposureGroupNoiseFacts],
+    stack_units_per_adu: float = STACK_UNITS_PER_ADU,
+) -> ExpectedNoiseOutcome:
+    """Work out the expected noise of a stack combined from exposure groups.
+
+    Frame ``i`` of group ``g`` enters the combined image, in counts per
+    second, with the coefficient ``a_i = W_g w_i / (W G_g)``. Here ``w_i`` is
+    the frame's share inside its group (its weight over the sum of the weights
+    of the group's members, so a group's shares add to 1) and ``W`` is the sum
+    of all the groups' combine weights. The variance in counts per second
+    squared is ``sum(a_i^2 v_i) / t_g^2``, with ``v_i`` the frame's variance in
+    ADU squared (sky electrons plus read noise squared, over the gain
+    squared). The noise in stack units is
+    ``t_bar * scale * sqrt(area * variance)``, with ``t_bar`` the mean exposure
+    per frame, weighted by frame count, that the combine scales back by. The
+    sky part and the read part are summed apart.
+
+    The predicted sky is the reference group's sky per second times ``t_bar``.
+    The reference group is the one with the largest combine weight, which the
+    combine aligns every group to.
+
+    The frames' weights are the stored raw weights ``W_g w_i`` (see
+    `stack_membership.group_frame_weights`); only their ratios inside a group
+    are used here, and `groups` supplies ``W_g``.
+
+    A stack with a group clipped at zero is not handled here. The caller
+    refuses it, because the combine drops that group's sky pixels near zero
+    and these weights do not describe that. That includes a clipped stack of
+    one group, on purpose.
+
+    Parameters
+    ----------
+    frames : `Sequence` [`FrameNoiseInput`]
+        One entry for each member frame; ``weight`` is the raw weight.
+    frame_group_indices : `Sequence` [`int`]
+        For each frame, the position of its group in `groups`.
+    groups : `Sequence` [`ExposureGroupNoiseFacts`]
+        One entry for each combined group.
+    stack_units_per_adu : `float`, optional
+        The stack's units for one camera ADU.
+
+    Returns
+    -------
+    outcome : `ExpectedNoiseOutcome`
+        The noise, or the reason there is none (no frames, a group without
+        member frames, or values that are not usable). A group whose gain was
+        not measured is computed with the combine's gain of 1 and marked
+        assumed.
+    """
+    if not frames or not groups or len(frames) != len(frame_group_indices):
+        return ExpectedNoiseOutcome(None, "the stack has no member frames")
+    if any(
+        group.combine_weight <= 0
+        or group.exposure_seconds <= 0
+        or group.frame_count <= 0
+        or group.gain <= 0
+        or not math.isfinite(group.sky_level_per_second)
+        for group in groups
+    ):
+        return ExpectedNoiseOutcome(
+            None, "an exposure group has a weight, exposure, gain or sky that is not usable"
+        )
+    if any(not 0 <= index < len(groups) for index in frame_group_indices):
+        return ExpectedNoiseOutcome(None, "a member frame belongs to no combined exposure group")
+    if any(
+        frame.weight < 0
+        or frame.gain_electrons_per_adu <= 0
+        or frame.sky_electrons < 0
+        or frame.read_noise_electrons < 0
+        for frame in frames
+    ):
+        return ExpectedNoiseOutcome(None, "a frame has a weight, gain, sky or read noise that is not usable")
+    raw_totals = [0.0] * len(groups)
+    for frame, index in zip(frames, frame_group_indices, strict=True):
+        raw_totals[index] += frame.weight
+    if any(total <= 0 for total in raw_totals):
+        return ExpectedNoiseOutcome(None, "a combined exposure group has no member frame with a weight")
+    weight_total = math.fsum(group.combine_weight for group in groups)
+    mean_exposure = math.fsum(group.frame_count * group.exposure_seconds for group in groups) / math.fsum(
+        group.frame_count for group in groups
+    )
+    sky_variance = 0.0
+    read_variance = 0.0
+    for frame, index in zip(frames, frame_group_indices, strict=True):
+        group = groups[index]
+        coefficient = group.combine_weight * frame.weight / raw_totals[index] / (weight_total * group.gain)
+        scale_to_rate = coefficient / (frame.gain_electrons_per_adu * group.exposure_seconds)
+        sky_variance += scale_to_rate**2 * frame.sky_electrons
+        read_variance += scale_to_rate**2 * frame.read_noise_electrons**2
+    area = effective_aperture_area_px()
+    scale = stack_units_per_adu
+    sky_noise = mean_exposure * scale * math.sqrt(area * sky_variance)
+    read_noise = mean_exposure * scale * math.sqrt(area * read_variance)
+    reference = max(groups, key=lambda group: group.combine_weight)
+    reasons = {frame.assumed_reason for frame in frames if frame.assumed_reason}
+    for group in groups:
+        if not group.gain_measured:
+            reasons.add(
+                f"the combine could not measure the gain of the {group.exposure_seconds:g} s group and used 1"
+            )
+    return ExpectedNoiseOutcome(
+        ExpectedNoise(
+            sky_noise=sky_noise,
+            read_noise=read_noise,
+            total_noise=math.hypot(sky_noise, read_noise),
+            aperture_area_px=area,
+            stack_units_per_adu=scale,
+            frame_count=len(frames),
+            predicted_sky_level=reference.sky_level_per_second * mean_exposure,
+            assumed_reason="; ".join(sorted(reasons)),
         )
     )
 

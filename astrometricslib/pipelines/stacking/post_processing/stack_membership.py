@@ -14,14 +14,20 @@ knows:
 - Weights. With equal weights every frame counts 1. With several exposure
   groups, the combine weights each group by frames x exposure^2 / frame noise^2
   (see `stack_runner._stack_exposure_groups`); a frame's share of that is the
-  group weight divided by the group's frame count. When Siril weights the
-  frames itself it computes the weights inside and does not print them.
+  group weight times the frame's share of its group, which is Siril's weight
+  inside the group over the group's total (see `group_frame_weights`). The
+  brightness gain of a group is not part of the weight; it is stored on its
+  own. When Siril weights the frames itself it computes the weights inside and
+  does not print them.
   ``-weight=wfwhm`` is rebuilt exactly, because it needs only each frame's
   weighted star width, which Siril does save in its sequence file (see
   `wfwhm_weights`). ``-weight=noise`` needs a scale Siril fits during
   normalization and does not save, and ``nbstars`` is not rebuilt, so their
   weights are unknown. Unknown is reported as unknown. It is never replaced by
   equal weights.
+- Reference frame. A group stack is lined up with its heaviest group, so the
+  reference frame is the identity line of that group (see
+  `registration_reference_from_diagnostics`).
 
 The effective frame count and effective time say how much a weighted stack is
 worth in equal frames and equal seconds.
@@ -36,12 +42,14 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "GroupFrameWeights",
     "StackMember",
     "StackMembership",
     "determine_stack_members",
     "effective_exposure_seconds",
     "effective_frame_count",
     "effective_read_noise_time_seconds",
+    "group_frame_weights",
     "normalized_weights",
     "registration_reference_from_diagnostics",
     "wfwhm_weights",
@@ -117,12 +125,19 @@ def registration_reference_from_diagnostics(diagnostics: dict[str, Any]) -> tupl
     for every frame, so no single frame can be named as "the" reference, and
     naming the first would be made up.
 
+    A stack combined from exposure groups has one identity line per group. It
+    is lined up with its heaviest group (the one with the largest combine
+    weight, see `stack_runner._stack_exposure_groups`), so the reference is
+    the identity line inside that group's own lines.
+
     Parameters
     ----------
     diagnostics : `dict`
         What the stacking run reported. ``registration_frames`` (one dict per
         frame with ``dx``, ``dy`` and ``star_count``) and
-        ``symlinked_light_paths`` are read.
+        ``symlinked_light_paths`` are read; for a group stack, the same lists
+        inside the heaviest entry of ``exposure_group_weights``
+        (``registration_frames`` and ``frame_paths``).
 
     Returns
     -------
@@ -130,8 +145,14 @@ def registration_reference_from_diagnostics(diagnostics: dict[str, Any]) -> tupl
         The reference frame's path and the number of stars Siril found in it,
         or `None` when no single frame can be named.
     """
-    registration_frames = diagnostics.get("registration_frames", [])
-    registration_frame_paths = diagnostics.get("symlinked_light_paths", [])
+    groups = diagnostics.get("exposure_group_weights") or []
+    if groups:
+        heaviest = max(groups, key=lambda group: float(group.get("weight") or 0.0))
+        registration_frames = heaviest.get("registration_frames") or []
+        registration_frame_paths = heaviest.get("frame_paths") or []
+    else:
+        registration_frames = diagnostics.get("registration_frames", [])
+        registration_frame_paths = diagnostics.get("symlinked_light_paths", [])
     zero_shift_indices = [
         index for index, facts in enumerate(registration_frames) if not facts["dx"] and not facts["dy"]
     ]
@@ -180,6 +201,213 @@ def wfwhm_weights(weighted_fwhm_px: Sequence[float]) -> list[float]:
         ]
     mean = math.fsum(raw) / len(raw)
     return [weight / mean for weight in raw] if mean > 0 else [0.0] * len(raw)
+
+
+@dataclass(frozen=True)
+class GroupFrameWeights:
+    """The frame weights of a stack combined from exposure groups.
+
+    Parameters
+    ----------
+    weights : `tuple` of (`tuple` of `float`) or `None`
+        One entry per group. Each is the raw weight of the group's frames, in
+        the order of the group's in-group weights, or `None` when the group's
+        weights are unknown.
+    reasons : `tuple` of `str`
+        One entry per group: why its weights are unknown, or an empty string
+        when they are known.
+    """
+
+    weights: tuple[tuple[float, ...] | None, ...]
+    reasons: tuple[str, ...]
+
+
+def group_frame_weights(
+    in_group_weights: Sequence[Sequence[float] | None],
+    exposures_seconds: Sequence[float],
+    frame_counts: Sequence[int],
+    frame_noises: Sequence[float | None],
+    holds_folded_frames: Sequence[bool] | None = None,
+    gains_measured: Sequence[bool] | None = None,
+    weight_modes: Sequence[str | None] | None = None,
+) -> GroupFrameWeights:
+    """Give each frame of an exposure-group stack its raw weight.
+
+    The combine averages the groups with the weight ``W = N t^2 / s^2`` (``N``
+    frames stacked, exposure ``t`` seconds, frame noise ``s`` counts). Inside
+    a group, Siril weighted the frames by ``w``. Frame ``i`` of group ``g``
+    therefore counts ``W_g * w_i / sum(w)`` where the sum runs over the
+    group's frames, and these raw weights add up to the sum of the group
+    weights. The brightness gain of a group is not a factor here. It is kept
+    as its own value, and the noise models divide it in later.
+
+    The weights of a group are unknown, with a reason, when they cannot be
+    stated honestly. They are never replaced by equal weights:
+
+    - the group holds frames of another exposure length (folded in because
+      that length had too few frames), so one exposure does not describe it;
+    - Siril weighted the group by noise (``-weight=noise``) or another mode
+      it does not report;
+    - the combine could not measure the group's gain;
+    - the group's frame noise could not be read;
+    - Siril did not report the group's in-group weights.
+
+    Parameters
+    ----------
+    in_group_weights : `Sequence` of (`Sequence` of `float` or `None`)
+        For each group, the weight Siril gave each frame inside the group (all
+        equal for equal weighting), over the frames that were stacked. `None`
+        when they are not known.
+    exposures_seconds : `Sequence` of `float`
+        The exposure length of each group, in seconds.
+    frame_counts : `Sequence` of `int`
+        The number of frames stacked in each group.
+    frame_noises : `Sequence` of `float` or `None`
+        The noise of one raw frame of each group, in counts, or `None` when it
+        could not be read.
+    holds_folded_frames : `Sequence` of `bool`, optional
+        For each group, whether it holds frames of another exposure length.
+        Defaults to no group.
+    gains_measured : `Sequence` of `bool`, optional
+        For each group, whether the combine measured its gain. Defaults to
+        every group.
+    weight_modes : `Sequence` of (`str` or `None`), optional
+        The Siril ``-weight`` mode each group was stacked with. `None` is
+        equal weights. Defaults to equal weights for every group.
+
+    Returns
+    -------
+    result : `GroupFrameWeights`
+        The raw weights of each group's frames, or `None` and a reason for a
+        group whose weights are unknown.
+    """
+    group_count = len(in_group_weights)
+    folded = list(holds_folded_frames) if holds_folded_frames is not None else [False] * group_count
+    measured = list(gains_measured) if gains_measured is not None else [True] * group_count
+    modes = list(weight_modes) if weight_modes is not None else [None] * group_count
+    weights: list[tuple[float, ...] | None] = []
+    reasons: list[str] = []
+    for index in range(group_count):
+        label = f"the {exposures_seconds[index]:g} s exposure group"
+        reason = ""
+        if folded[index]:
+            reason = f"{label} holds folded frames of another exposure length"
+        elif modes[index] == "noise":
+            reason = (
+                f"Siril weighted the frames of {label} by noise (-weight=noise), 1 / (pscale^2 x bgnoise^2). "
+                "The sequence file does not hold the scale Siril fits (pscale) while normalizing, "
+                "so the weights cannot be rebuilt"
+            )
+        elif modes[index] not in (None, "wfwhm"):
+            reason = (
+                f"Siril weighted the frames of {label} itself (-weight={modes[index]}) "
+                "and does not report the weights"
+            )
+        elif not measured[index]:
+            reason = f"the combine could not measure the brightness gain of {label}"
+        elif (
+            frame_noises[index] is None or not math.isfinite(frame_noises[index]) or frame_noises[index] <= 0
+        ):
+            reason = f"the frame noise of {label} could not be read"
+        else:
+            group_weights = in_group_weights[index]
+            total = math.fsum(group_weights) if group_weights else 0.0
+            if not group_weights or total <= 0 or any(weight < 0 for weight in group_weights):
+                reason = f"Siril did not report the frame weights of {label} and they cannot be rebuilt"
+        if reason:
+            weights.append(None)
+            reasons.append(reason)
+            continue
+        combine_weight = frame_counts[index] * exposures_seconds[index] ** 2 / frame_noises[index] ** 2
+        weights.append(tuple(combine_weight * weight / total for weight in group_weights))
+        reasons.append("")
+    return GroupFrameWeights(tuple(weights), tuple(reasons))
+
+
+def _group_in_group_weights(
+    group_frames: Sequence[Any], entry: dict[str, Any], mode: str | None
+) -> list[float] | None:
+    """Work out Siril's weights inside one exposure group.
+
+    Parameters
+    ----------
+    group_frames : `Sequence`
+        The group's member frames (they have ``path``).
+    entry : `dict`
+        The group's ``exposure_group_weights`` entry; ``frame_paths`` and
+        ``registration_frames`` are read for star-width weights.
+    mode : `str` or `None`
+        The Siril ``-weight`` mode of the group.
+
+    Returns
+    -------
+    weights : `list` of `float` or `None`
+        One weight per member in order (all 1 for equal weighting), or `None`
+        when the star-width weights cannot be rebuilt.
+    """
+    if mode != "wfwhm":
+        return [1.0] * len(group_frames)
+    weight_by_path, _ = _star_width_weights(
+        group_frames,
+        {
+            "symlinked_light_paths": entry.get("frame_paths"),
+            "registration_frames": entry.get("registration_frames"),
+        },
+    )
+    if not weight_by_path:
+        return None
+    return [weight_by_path[frame.path] for frame in group_frames]
+
+
+def _exposure_group_raw_weights(
+    candidates: Sequence[Any], group_entries: Sequence[dict[str, Any]], stack_weight: str | None
+) -> tuple[dict[str, float], str]:
+    """Give every member of an exposure-group stack its raw weight.
+
+    Parameters
+    ----------
+    candidates : `Sequence`
+        The frames the stack is thought to hold.
+    group_entries : `Sequence` of `dict`
+        The stack's ``exposure_group_weights`` entries.
+    stack_weight : `str` or `None`
+        The Siril ``-weight`` mode, used for an entry that names none.
+
+    Returns
+    -------
+    weight_by_path : `dict` of `str` to `float`
+        The raw weight of each member whose group's weights are known.
+    reason : `str`
+        Why some weights are unknown, or an empty string.
+    """
+    members_per_group = []
+    in_group_weights = []
+    modes = []
+    for entry in group_entries:
+        group_paths = set(entry.get("paths") or [])
+        group_frames = [frame for frame in candidates if frame.path in group_paths]
+        mode = entry["stack_weight"] if "stack_weight" in entry else stack_weight
+        members_per_group.append(group_frames)
+        modes.append(mode)
+        in_group_weights.append(_group_in_group_weights(group_frames, entry, mode))
+    # A group whose entry lacks the exposure, noise or gain facts is a group
+    # the stacker did not describe: its weights are unknown, not guessed.
+    result = group_frame_weights(
+        in_group_weights,
+        [float(entry.get("exposure_seconds") or 1.0) for entry in group_entries],
+        [int(entry["frame_count"]) for entry in group_entries],
+        [entry.get("frame_noise_counts") for entry in group_entries],
+        holds_folded_frames=[bool(entry.get("holds_folded_frames")) for entry in group_entries],
+        gains_measured=[bool(entry.get("gain_measured")) for entry in group_entries],
+        weight_modes=modes,
+    )
+    weight_by_path: dict[str, float] = {}
+    for group_frames, group_weights in zip(members_per_group, result.weights, strict=True):
+        if group_weights is None:
+            continue
+        for frame, weight in zip(group_frames, group_weights, strict=True):
+            weight_by_path[frame.path] = weight
+    return weight_by_path, "; ".join(reason for reason in result.reasons if reason)
 
 
 def _star_width_weights(
@@ -233,8 +461,8 @@ def determine_stack_members(
         What the stacking run reported. Read: ``combined_frame_paths``,
         ``corrupt_frames_skipped``, ``symlinked_light_paths``,
         ``registration_included``, ``images_stacked`` and
-        ``exposure_group_weights`` (a list of ``{"paths", "weight",
-        "frame_count"}`` for each group that was combined).
+        ``exposure_group_weights`` (one entry for each group that was
+        combined; see `stack_runner._stack_exposure_groups` for its keys).
     stack_weight : `str` or `None`
         The Siril ``-weight`` mode the stack used, `None` for equal weights.
 
@@ -266,16 +494,7 @@ def determine_stack_members(
     weights_reason = ""
     weight_by_path: dict[str, float] = {}
     if group_weights:
-        if stack_weight:
-            weights_reason = (
-                f"Siril also weights the frames inside each exposure group (-weight={stack_weight}) "
-                "and does not report those weights"
-            )
-        else:
-            for group in group_weights:
-                count = max(int(group["frame_count"]), 1)
-                for path in group["paths"]:
-                    weight_by_path[path] = float(group["weight"]) / count
+        weight_by_path, weights_reason = _exposure_group_raw_weights(candidates, group_weights, stack_weight)
     elif stack_weight == "wfwhm":
         weight_by_path, weights_reason = _star_width_weights(candidates, diagnostics)
     elif stack_weight == "noise":
@@ -291,10 +510,10 @@ def determine_stack_members(
 
     members = []
     for frame in candidates:
-        if (group_weights or stack_weight == "wfwhm") and not weights_reason:
-            raw_weight = weight_by_path.get(frame.path)
-        elif weights_reason:
+        if weights_reason:
             raw_weight = None
+        elif group_weights or stack_weight == "wfwhm":
+            raw_weight = weight_by_path.get(frame.path)
         else:
             raw_weight = 1.0
         members.append(StackMember(frame=frame, raw_weight=raw_weight))

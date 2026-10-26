@@ -119,21 +119,41 @@ def test_siril_weighting_makes_the_weights_unknown_but_keeps_the_members() -> No
     assert "-weight=noise" in membership.weights_reason
 
 
+def _group_entry(frames: list[SimpleNamespace], exposure: float = 60.0) -> dict:
+    """Make an ``exposure_group_weights`` entry with equal in-group weights.
+
+    Returns
+    -------
+    entry : `dict`
+        An entry whose gain was measured and whose frame noise was read.
+    """
+    return {
+        "paths": [frame.path for frame in frames],
+        "weight": len(frames) * exposure**2 / 25.0,
+        "frame_count": len(frames),
+        "exposure_seconds": exposure,
+        "frame_noise_counts": 5.0,
+        "gain": 1.0,
+        "gain_measured": True,
+        "stack_weight": None,
+        "holds_folded_frames": False,
+    }
+
+
 def test_exposure_group_weights_become_per_frame_shares_with_mean_one() -> None:
     """A group's weight is shared by its frames; the mean is 1."""
     frames = _frames(5)
     diagnostics = {
         "combined_frame_paths": [frame.path for frame in frames],
-        "exposure_group_weights": [
-            {"paths": [frame.path for frame in frames[:2]], "weight": 2.0, "frame_count": 2},
-            {"paths": [frame.path for frame in frames[2:]], "weight": 12.0, "frame_count": 3},
-        ],
+        "exposure_group_weights": [_group_entry(frames[:2], 60.0), _group_entry(frames[2:], 120.0)],
     }
     membership = determine_stack_members(frames, diagnostics, None)
     weights = normalized_weights(membership)
-    # Raw shares are 2 / 2 = 1 and 12 / 3 = 4; their mean is 2.8.
-    assert weights[0] == weights[1] == pytest.approx(1.0 / 2.8)
-    assert weights[2] == weights[3] == weights[4] == pytest.approx(4.0 / 2.8)
+    # Group weights N t^2 / s^2 are 2 * 3600 / 25 = 288 and
+    # 3 * 14400 / 25 = 1728, shared per frame as 144 and 576.
+    # The mean is (2 * 144 + 3 * 576) / 5 = 403.2.
+    assert weights[0] == weights[1] == pytest.approx(144.0 / 403.2)
+    assert weights[2] == weights[3] == weights[4] == pytest.approx(576.0 / 403.2)
     assert math.fsum(weights) == pytest.approx(5.0)
 
 
@@ -142,9 +162,7 @@ def test_frames_of_a_group_left_out_of_the_combine_are_not_members() -> None:
     frames = _frames(4)
     diagnostics = {
         "combined_frame_paths": [frame.path for frame in frames[:3]],
-        "exposure_group_weights": [
-            {"paths": [frame.path for frame in frames[:3]], "weight": 3.0, "frame_count": 3}
-        ],
+        "exposure_group_weights": [_group_entry(frames[:3])],
     }
     assert len(determine_stack_members(frames, diagnostics, None).members) == 3
 

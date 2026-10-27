@@ -555,6 +555,13 @@
       "interim_block": "",
       "note": "Draws the Planetarium. Returns an empty list because of a wrong file path, and is 89 KB when fixed."
     },
+    "planning_get_depth_goal": {
+      "tool_class": "observe",
+      "category": "planning-sessions",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-10-27 (#134). Reads a target's depth goal: the chosen level, the depth reached and the time to reach the level. Saves nothing."
+    },
     "planning_get_imaged_field_centers": {
       "tool_class": "observe",
       "category": "planning-sessions",
@@ -624,6 +631,13 @@
       "disposition": "keep",
       "interim_block": "Returns the whole target record, frames and all, which overflows the reply. Use planning_lookup_coordinates, which returns the position.",
       "note": "Looks up an object's position by name. Unknown names go to SIMBAD over the network."
+    },
+    "planning_set_depth_goal": {
+      "tool_class": "change-data",
+      "category": "planning-sessions",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "Writes the user's chosen depth level for a target to the database. Not a hardware command, but the user decided an AI may not change configuration."
     },
     "planning_tick_checklist_item": {
       "tool_class": "change-data",

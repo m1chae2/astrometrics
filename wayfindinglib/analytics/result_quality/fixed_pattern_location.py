@@ -169,6 +169,21 @@ SHAPE_MEANING = {
 """What each shape means, as a phrase for the loss account."""
 
 
+class FixedPatternCause(StrEnum):
+    """The one most likely cause of a stack's fixed-pattern noise.
+
+    The members are listed in the order `fixed_pattern_cause` tries them.
+    """
+
+    FLATS = "flats"
+    NEAR_TARGET = "near_target"
+    BANDING = "banding"
+    GRADIENT = "gradient"
+    CALIBRATION_MASTERS = "calibration_masters"
+    SKY_STRUCTURE = "sky_structure"
+    UNPLACED = "unplaced"
+
+
 class FixedPatternAperture(BaseModel):
     """One empty aperture's place and its two values.
 
@@ -873,6 +888,45 @@ def locate_fixed_pattern(
     )
 
 
+def fixed_pattern_cause(account: FixedPatternAccount | None) -> FixedPatternCause:
+    """Pick the one most likely cause of a stack's fixed-pattern noise.
+
+    The rule is fixed, so the same account always gives the same cause. The
+    first test that holds wins: a trend from the center (flats), a rise near
+    the target, banding, a gradient, the calibration masters explaining all
+    of the excess, a sky-structure note on any shape test, and last "not
+    placed". A trend that cannot be told from a rise near the target is not
+    significant, so the rise near the target is the one found.
+
+    Parameters
+    ----------
+    account : `FixedPatternAccount` or `None`
+        The stack's shape tests and calibration breakdown, if it has them.
+
+    Returns
+    -------
+    cause : `FixedPatternCause`
+        The cause; ``UNPLACED`` when there is no account or no test holds.
+    """
+    if account is None:
+        return FixedPatternCause.UNPLACED
+    if account.location is not None:
+        for shape, cause in (
+            (FixedPatternShape.RADIAL_TREND, FixedPatternCause.FLATS),
+            (FixedPatternShape.NEAR_TARGET, FixedPatternCause.NEAR_TARGET),
+            (FixedPatternShape.BANDING, FixedPatternCause.BANDING),
+            (FixedPatternShape.GRADIENT, FixedPatternCause.GRADIENT),
+        ):
+            test = account.location.test_for(shape)
+            if test is not None and test.significant:
+                return cause
+    if account.calibration is not None and account.calibration.consistent_with_zero:
+        return FixedPatternCause.CALIBRATION_MASTERS
+    if account.location is not None and any(test.explanation for test in account.location.tests):
+        return FixedPatternCause.SKY_STRUCTURE
+    return FixedPatternCause.UNPLACED
+
+
 def explain_with_calibration_masters(
     fixed_pattern_variance: float,
     fixed_pattern_variance_error: float,
@@ -932,11 +986,13 @@ __all__ = [
     "CalibrationNoiseBreakdown",
     "FixedPatternAccount",
     "FixedPatternAperture",
+    "FixedPatternCause",
     "FixedPatternLocation",
     "FixedPatternShape",
     "LinePatternScatters",
     "ShapeTest",
     "apertures_from_record",
     "explain_with_calibration_masters",
+    "fixed_pattern_cause",
     "locate_fixed_pattern",
 ]

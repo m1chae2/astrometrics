@@ -23,6 +23,7 @@ from astrometricslib import (
     QualitySubject,
     SubjectLevel,
 )
+from wayfindinglib.analytics.result_quality.fixed_pattern_location import FixedPatternCause
 from wayfindinglib.analytics.test.frame_counting_helpers import FakeLibrary
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.planning.depth_goal import DepthGoalState, DepthLevel
@@ -134,6 +135,7 @@ def statement(
             action_class=ActionClass.CAPTURE_SETTINGS,
             message="A warning.",
             confidence=Confidence.DESIGN_ESTIMATE,
+            values=values or {},
         )
     return TargetStatement(
         rule=rule,
@@ -312,8 +314,67 @@ def test_more_frames_will_not_help_names_what_to_fix(butler: DiskButler, forecas
     ])
     result = status_of(butler, [row(SURFACE_METRIC, 24.2)], recorder)
     assert result.state == DepthGoalState.WILL_NOT_HELP
-    assert result.message == "Your image: Quick look. More frames won't help much here. Retake flats first."
+    assert result.message == (
+        "Your image: Quick look. More frames won't help much here. "
+        "The noise has a fixed part we can't place yet. Retake flats first."
+    )
     assert result.seconds_to_goal is None
+
+
+@pytest.mark.parametrize(
+    ("cause", "sentence"),
+    [
+        (FixedPatternCause.FLATS, "The flats no longer match the optics; new flats should help."),
+        (
+            FixedPatternCause.NEAR_TARGET,
+            "Faint light from the object itself fills the sky around it, "
+            "so the noise there won't average away.",
+        ),
+        (FixedPatternCause.BANDING, "The frames carry a fixed stripe pattern."),
+        (
+            FixedPatternCause.GRADIENT,
+            "The sky brightness has a slope across the frame that stays in every frame.",
+        ),
+        (
+            FixedPatternCause.CALIBRATION_MASTERS,
+            "Noise in the calibration frames is the same in every frame.",
+        ),
+        (
+            FixedPatternCause.SKY_STRUCTURE,
+            "The sky has fixed structure, likely faint light or a slope in the background.",
+        ),
+        (FixedPatternCause.UNPLACED, "The noise has a fixed part we can't place yet."),
+    ],
+)
+def test_each_cause_gives_its_one_sentence(
+    butler: DiskButler, forecast_status: dict, cause: FixedPatternCause, sentence: str
+) -> None:
+    """The cause code picks the sentence, the same every time."""
+    statements = [
+        statement(
+            "more_frames_will_not_help", StatementKind.WARNING, values={"fixed_pattern_cause": cause.value}
+        )
+    ]
+    first = status_of(butler, [row(SURFACE_METRIC, 24.2)], Recorder(statements))
+    second = status_of(butler, [row(SURFACE_METRIC, 24.2)], Recorder(statements))
+    assert first.message == f"Your image: Quick look. More frames won't help much here. {sentence}"
+    assert first.message == second.message
+
+
+def test_the_practical_limit_statement_also_carries_the_cause(
+    butler: DiskButler, forecast_status: dict
+) -> None:
+    """With no stop statement, the "take more" statement gives the cause."""
+    recorder = Recorder([
+        statement(
+            "more_frames",
+            StatementKind.RECOMMENDATION,
+            seconds=900.0,
+            values={"practical_limit_applied": 1.0, "fixed_pattern_cause": "banding"},
+        )
+    ])
+    result = status_of(butler, [row(SURFACE_METRIC, 24.2)], recorder)
+    assert result.message.endswith("The frames carry a fixed stripe pattern.")
 
 
 def test_the_practical_limit_also_means_frames_will_not_help(

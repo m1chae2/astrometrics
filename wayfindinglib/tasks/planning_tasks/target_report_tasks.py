@@ -75,7 +75,10 @@ from wayfindinglib.analytics.result_quality.efficiency import (
     baseline_key,
 )
 from wayfindinglib.analytics.result_quality.evidence_order import order_statements_evidence
-from wayfindinglib.analytics.result_quality.fixed_pattern_location import FixedPatternAccount
+from wayfindinglib.analytics.result_quality.fixed_pattern_location import (
+    FixedPatternAccount,
+    fixed_pattern_cause,
+)
 from wayfindinglib.analytics.result_quality.forecast import (
     StackRunRecord,
     camera_gain_for_setting,
@@ -1425,6 +1428,10 @@ def _quality_statements_of_settings(
     return _add_fixed_pattern_accounts(statements, accounts)
 
 
+FIXED_PATTERN_CAUSE_RULES = frozenset({"more_frames", "more_frames_will_not_help"})
+"""The statements that carry the fixed-pattern cause code in their values."""
+
+
 def _add_fixed_pattern_accounts(
     statements: Sequence[TargetStatement], accounts: Mapping[CaptureSetting, FixedPatternAccount]
 ) -> list[TargetStatement]:
@@ -1436,7 +1443,9 @@ def _add_fixed_pattern_accounts(
     that text in the message and are added to the reason, so the statement
     names the shape that was found and what the master flat and dark explain,
     in place of only saying the cause is probably the flats or calibration
-    (decisions D21 and D22).
+    (decisions D21 and D22). The "take N more" and "will not help"
+    statements of a setting with an account also carry the cause code
+    (`fixed_pattern_cause`) in ``values["fixed_pattern_cause"]``.
 
     Parameters
     ----------
@@ -1454,6 +1463,13 @@ def _add_fixed_pattern_accounts(
     updated = []
     for statement in statements:
         account = accounts.get(statement.capture_setting) if statement.capture_setting is not None else None
+        if account is not None and statement.rule in FIXED_PATTERN_CAUSE_RULES:
+            # The depth goal reads this code to say why frames will not help.
+            statement = statement.model_copy(
+                update={
+                    "values": {**statement.values, "fixed_pattern_cause": fixed_pattern_cause(account).value}
+                }
+            )
         if account is not None and account.text and FIXED_PATTERN_CAUSE_TEXT in statement.message:
             statement = statement.model_copy(
                 update={

@@ -29,6 +29,7 @@ from wayfindinglib.analytics.depth_goal import (
     noise_ratio_for_depth_gain,
     time_text,
 )
+from wayfindinglib.analytics.result_quality.fixed_pattern_location import FixedPatternCause
 from wayfindinglib.analytics.result_quality.forecast import (
     NORMALIZED_NOISE_METRIC,
     PINNED_STACK_METRICS,
@@ -52,6 +53,27 @@ FIX_FIRST_ADVICE = {
     "retake_flats": "Retake flats first.",
 }
 """The advice a quality statement adds to "more frames will not help"."""
+
+FIXED_PATTERN_CAUSE_SENTENCES = {
+    FixedPatternCause.FLATS: "The flats no longer match the optics; new flats should help.",
+    FixedPatternCause.NEAR_TARGET: (
+        "Faint light from the object itself fills the sky around it, so the noise there won't average away."
+    ),
+    FixedPatternCause.BANDING: "The frames carry a fixed stripe pattern.",
+    FixedPatternCause.GRADIENT: "The sky brightness has a slope across the frame that stays in every frame.",
+    FixedPatternCause.CALIBRATION_MASTERS: "Noise in the calibration frames is the same in every frame.",
+    FixedPatternCause.SKY_STRUCTURE: (
+        "The sky has fixed structure, likely faint light or a slope in the background."
+    ),
+    FixedPatternCause.UNPLACED: "The noise has a fixed part we can't place yet.",
+}
+"""One plain sentence for each cause of fixed-pattern noise (row WAY-D94).
+
+The words are for a novice, so they use no statistics terms. The cause itself
+is picked by `fixed_pattern_cause`, in a fixed order."""
+
+CAUSE_STATEMENT_RULES = ("more_frames_will_not_help", "more_frames")
+"""The statements that carry the cause code, most direct first."""
 
 
 @dataclass(frozen=True)
@@ -278,6 +300,35 @@ def _options(kind: DepthKind | None) -> list[DepthLevelOption]:
     ]
 
 
+def reason_frames_will_not_help(statements: list[Any]) -> str:
+    """Pick the one plain sentence that says why more frames will not help.
+
+    The same statements always give the same sentence. The cause code comes
+    from the "will not help" statement first, then from the "take N more"
+    statement. A report with no code gives the "can't place yet" sentence.
+
+    Parameters
+    ----------
+    statements : `list` [`TargetStatement`]
+        The statements of a report.
+
+    Returns
+    -------
+    sentence : `str`
+        The sentence for the cause.
+    """
+    for rule in CAUSE_STATEMENT_RULES:
+        for statement in statements:
+            code = statement.values.get("fixed_pattern_cause") if statement.rule == rule else None
+            if code is not None:
+                try:
+                    return FIXED_PATTERN_CAUSE_SENTENCES[FixedPatternCause(code)]
+                except ValueError:
+                    # An unknown code is treated as no code.
+                    continue
+    return FIXED_PATTERN_CAUSE_SENTENCES[FixedPatternCause.UNPLACED]
+
+
 def _time_to_goal(
     report: Any,
 ) -> tuple[
@@ -300,13 +351,15 @@ def _time_to_goal(
         ``below_goal`` with the time and frames when there is a forecast,
         ``will_not_help`` with advice when frames will not reach the goal,
         and ``below_goal`` with no time and a reason otherwise. The advice is
-        a sentence naming what to fix first, or empty.
+        the plain reason (`reason_frames_will_not_help`), then the
+        advice naming what to fix first, if any.
     """
     forecast_status = recommended_additional_frames_status_from_checks(report.forecast_checks)
     names = {
         statement.rule for statement in report.statements if statement.kind != StatementKind.INSUFFICIENT_DATA
     }
     advice = next((text for rule, text in FIX_FIRST_ADVICE.items() if rule in names), "")
+    advice = f"{reason_frames_will_not_help(report.statements)} {advice}".strip()
     if "more_frames_will_not_help" in names:
         return DepthGoalState.WILL_NOT_HELP, None, None, None, advice, forecast_status, ""
     for statement in report.statements:

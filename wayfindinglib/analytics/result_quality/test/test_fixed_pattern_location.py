@@ -16,12 +16,17 @@ import pytest
 from wayfindinglib.analytics.result_quality.fixed_pattern_location import (
     MINIMUM_SHAPE_APERTURES,
     SHAPE_SIGMAS,
+    CalibrationNoiseBreakdown,
+    FixedPatternAccount,
     FixedPatternAperture,
+    FixedPatternCause,
     FixedPatternLocation,
     FixedPatternShape,
     LinePatternScatters,
+    ShapeTest,
     apertures_from_record,
     explain_with_calibration_masters,
+    fixed_pattern_cause,
     locate_fixed_pattern,
 )
 
@@ -365,3 +370,110 @@ def test_the_dark_alone_or_nothing_is_handled() -> None:
     assert only_dark.flat_variance is None
     assert explain_with_calibration_masters(2.0, 0.3, None, None) is None
     assert explain_with_calibration_masters(0.0, 0.3, 1.0, 1.0) is None
+
+
+def _account(
+    significant: tuple[FixedPatternShape, ...] = (),
+    *,
+    explanation: bool = False,
+    masters_explain_all: bool = False,
+) -> FixedPatternAccount:
+    """Build a made-up account with chosen shape results.
+
+    Parameters
+    ----------
+    significant : `tuple` [`FixedPatternShape`], optional
+        The shapes whose test is significant.
+    explanation : `bool`, optional
+        Whether the banding test carries a sky-structure explanation.
+    masters_explain_all : `bool`, optional
+        Whether the calibration masters explain all of the excess.
+
+    Returns
+    -------
+    account : `FixedPatternAccount`
+        The account.
+    """
+    tests = [
+        ShapeTest(
+            shape=shape,
+            sigmas=5.0 if shape in significant else 0.5,
+            significant=shape in significant,
+            reason="made up",
+            explanation="Sky structure." if explanation and shape == FixedPatternShape.BANDING else "",
+        )
+        for shape in FixedPatternShape
+    ]
+    breakdown = CalibrationNoiseBreakdown(
+        fixed_pattern_variance=1.0,
+        fixed_pattern_variance_error=0.1,
+        flat_variance=0.5,
+        explained_variance=1.0 if masters_explain_all else 0.2,
+        remaining_variance=0.0 if masters_explain_all else 0.8,
+        remaining_sigmas=0.0 if masters_explain_all else 8.0,
+        consistent_with_zero=masters_explain_all,
+    )
+    return FixedPatternAccount(
+        location=FixedPatternLocation(aperture_count=100, tests=tests), calibration=breakdown
+    )
+
+
+def test_cause_is_flats_for_a_radial_trend() -> None:
+    """A trend from the center is the flats, even with other shapes."""
+    account = _account((FixedPatternShape.RADIAL_TREND, FixedPatternShape.GRADIENT), masters_explain_all=True)
+    assert fixed_pattern_cause(account) == FixedPatternCause.FLATS
+
+
+def test_cause_is_the_near_target_rise() -> None:
+    """A rise near the target comes before banding and a gradient."""
+    account = _account((FixedPatternShape.NEAR_TARGET, FixedPatternShape.BANDING, FixedPatternShape.GRADIENT))
+    assert fixed_pattern_cause(account) == FixedPatternCause.NEAR_TARGET
+
+
+def test_cause_is_banding_before_a_gradient() -> None:
+    """Banding comes before a gradient."""
+    account = _account((FixedPatternShape.BANDING, FixedPatternShape.GRADIENT))
+    assert fixed_pattern_cause(account) == FixedPatternCause.BANDING
+
+
+def test_cause_is_a_gradient() -> None:
+    """A gradient comes before the masters."""
+    account = _account((FixedPatternShape.GRADIENT,), masters_explain_all=True)
+    assert fixed_pattern_cause(account) == FixedPatternCause.GRADIENT
+
+
+def test_cause_is_the_calibration_masters_when_no_shape_is_found() -> None:
+    """Masters that explain all of it count when no shape holds."""
+    account = _account(explanation=True, masters_explain_all=True)
+    assert fixed_pattern_cause(account) == FixedPatternCause.CALIBRATION_MASTERS
+
+
+def test_cause_is_sky_structure_when_a_test_explains_it() -> None:
+    """A sky-structure note counts when nothing else does."""
+    assert fixed_pattern_cause(_account(explanation=True)) == FixedPatternCause.SKY_STRUCTURE
+
+
+def test_cause_is_unplaced_otherwise() -> None:
+    """With nothing found, or no account, the cause is not placed."""
+    assert fixed_pattern_cause(_account()) == FixedPatternCause.UNPLACED
+    assert fixed_pattern_cause(None) == FixedPatternCause.UNPLACED
+    assert fixed_pattern_cause(FixedPatternAccount()) == FixedPatternCause.UNPLACED
+
+
+def test_an_ambiguous_trend_gives_the_near_target_cause() -> None:
+    """A trend that is really a near-target rise gives that cause."""
+    account = _account((FixedPatternShape.NEAR_TARGET,))
+    ambiguous = [
+        test.model_copy(update={"ambiguous": True}) if test.shape == FixedPatternShape.RADIAL_TREND else test
+        for test in account.location.tests
+    ]
+    account = account.model_copy(
+        update={"location": account.location.model_copy(update={"tests": ambiguous})}
+    )
+    assert fixed_pattern_cause(account) == FixedPatternCause.NEAR_TARGET
+
+
+def test_the_cause_is_the_same_every_time() -> None:
+    """The same account gives the same cause twice."""
+    account = _account((FixedPatternShape.BANDING,))
+    assert fixed_pattern_cause(account) == fixed_pattern_cause(account)

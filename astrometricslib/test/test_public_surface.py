@@ -228,6 +228,7 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "safe_json_dumps",
     "scratch_directory",
     "select_library_frames",
+    "target_object_category",
     "to_error_info",
     "warm_earth_orientation_data",
 })

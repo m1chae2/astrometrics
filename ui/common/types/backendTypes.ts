@@ -232,6 +232,7 @@ export interface TargetObject {
   ra?: string;
   dec?: string;
   positionUnverified?: boolean;
+  simbadObjectType?: string | null;
   fieldOfView?: string;
   mainCamera?: string;
   mainScope?: string;
@@ -3238,6 +3239,91 @@ export interface TonightRanking {
 }
 
 /**
+ * A target's chosen depth level and how close its image is.
+ *
+ * Parameters
+ * ----------
+ * target_id : `str`
+ * The target.
+ * level : `DepthLevel`
+ * The chosen level (Good when none was chosen).
+ * level_label : `str`
+ * The chosen level in words.
+ * options : `list` [`DepthLevelOption`]
+ * Every level, for a dropdown.
+ * state : `DepthGoalState`
+ * Where the image stands.
+ * depth_kind : `DepthKind` or `None`
+ * The depth the target is judged by, or ``None`` with no depth goal.
+ * depth_unit : `str` or `None`
+ * ``"mag"`` (point source) or ``"mag/arcsec2"`` (surface brightness).
+ * current_depth : `float` or `None`
+ * The newest library stack's depth.
+ * goal_depth : `float` or `None`
+ * The depth the chosen level needs.
+ * reached_level : `DepthLevel` or `None`
+ * The deepest level the current depth meets, or ``None`` when it meets
+ * none.
+ * reached_level_label : `str` or `None`
+ * That level in words.
+ * seconds_to_goal : `float` or `None`
+ * Clock time to reach the chosen level, with downloads, when below it
+ * and a forecast could be made.
+ * frames_to_goal : `int` or `None`
+ * The frames behind that time.
+ * exposure_seconds : `float` or `None`
+ * The exposure of each of those frames.
+ * forecast_status : `RecommendedAdditionalFramesStatus`
+ * Whether the forecast behind the time was checked. ``not_checked``
+ * hides the time.
+ * provisional : `bool`
+ * True when the time rests on a provisional forecast.
+ * message : `str`
+ * The sentence for a novice.
+ * reason : `str`
+ * Why there is no depth goal, no depth or no time (empty otherwise).
+ */
+export interface DepthGoalStatus {
+  targetId: string;
+  level: DepthLevel;
+  levelLabel: string;
+  options?: DepthLevelOption[];
+  state: DepthGoalState;
+  depthKind?: DepthKind | null;
+  depthUnit?: string | null;
+  currentDepth?: number | null;
+  goalDepth?: number | null;
+  reachedLevel?: DepthLevel | null;
+  reachedLevelLabel?: string | null;
+  secondsToGoal?: number | null;
+  framesToGoal?: number | null;
+  exposureSeconds?: number | null;
+  forecastStatus?: RecommendedAdditionalFramesStatus;
+  provisional?: boolean;
+  message: string;
+  reason?: string;
+}
+
+/**
+ * One level a person can choose, with its depth for this target.
+ *
+ * Parameters
+ * ----------
+ * level : `DepthLevel`
+ * The level.
+ * label : `str`
+ * The words to show ("Quick look", "Good" or "Deep").
+ * goal_depth : `float` or `None`
+ * The depth that reaches the level, in the status' unit. ``None`` when
+ * the target has no depth goal.
+ */
+export interface DepthLevelOption {
+  level: DepthLevel;
+  label: string;
+  goalDepth?: number | null;
+}
+
+/**
  * The quality of one observing night.
  *
  * Parameters
@@ -4091,6 +4177,57 @@ export interface TonightSkyModel {
   extinctionNote?: string;
   confidence?: Confidence;
   registerEntry?: string;
+}
+
+/**
+ * The plain depth levels a person can choose.
+ */
+export enum DepthLevel {
+  QUICK_LOOK = "quick_look",
+  GOOD = "good",
+  DEEP = "deep"
+}
+
+/**
+ * Where an image stands against its chosen level.
+ *
+ * ``no_depth_goal`` means the kind of object has no depth goal.
+ * ``not_stacked`` means the target has no library stack.
+ * ``depth_not_measured`` means the stack has no usable depth. ``reached``
+ * means the depth meets the chosen
+ * level. ``below_goal`` means it does not, and ``seconds_to_goal`` may say
+ * how long it would take. ``will_not_help`` means more frames will not
+ * reach the level.
+ */
+export enum DepthGoalState {
+  NO_DEPTH_GOAL = "no_depth_goal",
+  NOT_STACKED = "not_stacked",
+  DEPTH_NOT_MEASURED = "depth_not_measured",
+  REACHED = "reached",
+  BELOW_GOAL = "below_goal",
+  WILL_NOT_HELP = "will_not_help"
+}
+
+/**
+ * Which measured depth a kind of object is judged by.
+ */
+export enum DepthKind {
+  POINT_SOURCE = "point_source",
+  SURFACE_BRIGHTNESS = "surface_brightness"
+}
+
+/**
+ * Whether "take N more" may be shown for a target, and on what footing.
+ *
+ * ``not_checked`` hides the count. ``provisional`` shows it after a check
+ * made from frames already taken agreed; the next real stack confirms or
+ * withdraws it. ``confirmed`` shows it after a check of two library stacks
+ * agreed.
+ */
+export enum RecommendedAdditionalFramesStatus {
+  NOT_CHECKED = "not_checked",
+  PROVISIONAL = "provisional",
+  CONFIRMED = "confirmed"
 }
 
 /**
@@ -5037,20 +5174,6 @@ export enum CandidateStatus {
 }
 
 /**
- * Whether "take N more" may be shown for a target, and on what footing.
- *
- * ``not_checked`` hides the count. ``provisional`` shows it after a check
- * made from frames already taken agreed; the next real stack confirms or
- * withdraws it. ``confirmed`` shows it after a check of two library stacks
- * agreed.
- */
-export enum RecommendedAdditionalFramesStatus {
-  NOT_CHECKED = "not_checked",
-  PROVISIONAL = "provisional",
-  CONFIRMED = "confirmed"
-}
-
-/**
  * Which system currently performs a capability.
  *
  * `SHADOWED` is not a valid state for `OBSERVATORY_SAFETY`
@@ -5231,6 +5354,8 @@ export const RPC_METHODS = [
   "advisory:target_report",
   "advisory:tonight",
   "advisory:result",
+  "advisory:depth_goal",
+  "advisory:set_depth_goal",
   "history:nights",
   "history:night_quality",
   "history:target_changes",

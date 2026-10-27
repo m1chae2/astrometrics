@@ -5,6 +5,7 @@
  */
 import React, { useEffect, useState } from 'react';
 import { fetchTargetFrameHeader } from '../../common/services/targetService';
+import { DepthGoalRow } from './DepthGoalRow';
 
 interface StackedImagePanelProps {
     path: string;
@@ -14,6 +15,8 @@ interface StackedImagePanelProps {
     selectedFile?: string | null;
     onView: (path: string | null) => void;
     onShowHeader?: (path: string) => void;
+    /** Changes when a stack finishes, so the depth goal row reads again. */
+    depthGoalRefreshKey?: string | number;
 }
 
 /**
@@ -27,7 +30,8 @@ export const StackedImagePanel: React.FC<StackedImagePanelProps> = ({
     targetId,
     selectedFile,
     onView,
-    onShowHeader
+    onShowHeader,
+    depthGoalRefreshKey
 }) => {
     const [headerExptime, setHeaderExptime] = useState<number | null>(null);
 
@@ -57,7 +61,13 @@ export const StackedImagePanel: React.FC<StackedImagePanelProps> = ({
         }
     }, [path, spectralPath, targetId]);
 
-    if (!path && !spectralPath) return null;
+    if (!path && !spectralPath) {
+        return (
+            <div className="stacked-image-panel-container">
+                <DepthGoalRow targetId={targetId} refreshKey={depthGoalRefreshKey} />
+            </div>
+        );
+    }
 
     const formatExposure = (seconds: number) => {
         if (seconds >= 3600) {
@@ -124,6 +134,7 @@ export const StackedImagePanel: React.FC<StackedImagePanelProps> = ({
                     <span className="stacked-image-panel__exposure-value">{formatExposure(effectiveExposure)}</span>
                 </div>
             )}
+            <DepthGoalRow targetId={targetId} refreshKey={depthGoalRefreshKey} />
         </div>
     );
 };

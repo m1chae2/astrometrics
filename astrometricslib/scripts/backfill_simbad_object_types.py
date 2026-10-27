@@ -46,9 +46,6 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from astropy import units as u
-from astropy.coordinates import SkyCoord
-
 from astrometricslib import Astrometrics, configure_logging
 from astrometricslib.drivers.local_database import backup_catalog_database
 from astrometricslib.foundation.errors import ExternalServiceError
@@ -58,7 +55,11 @@ from astrometricslib.models.known_variability import (
     variable_object_types_in,
 )
 from astrometricslib.models.stellar_source import StellarObject
-from astrometricslib.pipelines.shared.simbad_object_types import read_simbad_object_types
+from astrometricslib.pipelines.shared.simbad_object_types import (
+    quote_adql,
+    read_simbad_object_types,
+    separation_arcsec,
+)
 from astrometricslib.pipelines.shared.star_kinds import StarKind, kind_of_star_id, stored_position_degrees
 
 logger = logging.getLogger(__name__)
@@ -125,22 +126,6 @@ class BackfillReport:
     saved: int = 0
 
 
-def quote_adql(text: str) -> str:
-    """Write text as an ADQL string literal.
-
-    Parameters
-    ----------
-    text : `str`
-        The text; a single quote inside it is doubled.
-
-    Returns
-    -------
-    literal : `str`
-        The text in single quotes.
-    """
-    return "'" + text.replace("'", "''") + "'"
-
-
 def build_query(kind: StarKind, identifiers: Sequence[str]) -> str:
     """Build the ADQL query that fetches the object types of some stars.
 
@@ -182,26 +167,6 @@ def build_query(kind: StarKind, identifiers: Sequence[str]) -> str:
             f"WHERE ident.id IN ({id_list})"
         )
     raise ValueError(f"Cannot build a query for a {kind.value} star.")
-
-
-def separation_arcsec(first: tuple[float, float], second: tuple[float, float]) -> float:
-    """Measure the distance between two positions.
-
-    Parameters
-    ----------
-    first, second : `tuple` [`float`, `float`]
-        Right ascension and declination in degrees.
-
-    Returns
-    -------
-    separation : `float`
-        The angle between them, in arcseconds.
-    """
-    return float(
-        SkyCoord(first[0] * u.deg, first[1] * u.deg)
-        .separation(SkyCoord(second[0] * u.deg, second[1] * u.deg))
-        .arcsec
-    )
 
 
 def decide_outcome(star: StellarObject, row: Any | None) -> tuple[Outcome, str]:

@@ -342,6 +342,12 @@ class Target(BaseModel):
     # outside the image, or its id and common name disagreed). That point is
     # where the camera looked, not necessarily where the object is.
     position_unverified: bool = Field(default=False, alias="positionUnverified")
+    # SIMBAD's main object type code for the object ("G" galaxy, "GlC"
+    # globular cluster, "PN" planetary nebula, "*" star, ...), or None when it
+    # is not known. It is filled in when the position is looked up in SIMBAD,
+    # and by `astrometricslib.scripts.backfill_target_object_types` for targets
+    # saved before it was recorded. `target_object_category` groups the codes.
+    simbad_object_type: str | None = Field(default=None, alias="simbadObjectType")
     field_of_view: str = Field(default="0′", alias="fieldOfView")
     main_camera: str = Field(default="", alias="mainCamera")
     main_scope: str = Field(default="", alias="mainScope")

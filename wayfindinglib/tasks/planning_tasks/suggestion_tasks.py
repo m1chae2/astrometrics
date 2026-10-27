@@ -7,8 +7,9 @@ here. They do five jobs:
 * Read the statements of a target's quality report (`read_rule_statements`)
   and turn the ones whose rule makes a package row into suggested rows.
 * Create, update or delete the one suggested package of a target
-  (`refresh_rule_package`), only while the target's noise is above the
-  default goal, and never because data is missing.
+  (`refresh_rule_package`), only while the target has not reached its goal
+  (its chosen depth level, or the default noise goal when it has no depth
+  goal), and never because data is missing.
 * Turn tonight's ranking into suggested packages with no rows, and remove
   the ones that fell out of the top few or whose night ended
   (`refresh_ranking_packages`).
@@ -479,12 +480,17 @@ def refresh_rule_package(
     noise: TargetNoise | None,
     noise_goal: float,
     held_keys: Collection[str],
+    *,
+    depth_goal_met: bool | None = None,
 ) -> None:
     """Create, update or delete a target's suggested package of rule rows.
 
-    A suggestion for more frames stands only while the target's noise is
-    above `noise_goal`. It is deleted only when the rules say frames are no
-    longer needed (the noise is at or below the goal, or a stop rule spoke).
+    A suggestion for more frames stands only while the target's goal is not
+    met. When the target has a depth goal (`depth_goal_met` is not ``None``),
+    its chosen depth level is the goal (register row WAY-D94; it replaces
+    the noise goal of WAY-D83 for that target). Otherwise the goal is the
+    noise at or below `noise_goal`. It is deleted only when the rules say
+    frames are no longer needed (the goal is met, or a stop rule spoke).
     A target with no noise reading, or whose rules lacked data, changes
     nothing: missing data never deletes a suggestion.
 
@@ -505,6 +511,10 @@ def refresh_rule_package(
     held_keys : `Collection` [`str`]
         Source keys held by a planned package, a complete one or a queue
         entry. They are not suggested.
+    depth_goal_met : `bool` or `None`, optional
+        Whether the target's image has reached its chosen depth level. ``None``
+        when the target has no depth kind or no measured depth; the noise goal
+        then decides.
     """
     keeper, extras = _rule_package_of(packages, target_id)
     values: dict[str, float | str | None] = {
@@ -514,10 +524,15 @@ def refresh_rule_package(
     noise_rows = [] if noise is None or noise.row_id is None else [noise.row_id]
     for extra in extras:
         writer.delete(extra, "a target has one suggested package", values=values)
-    goal_met = noise is not None and noise.value <= noise_goal
+    if depth_goal_met is not None:
+        goal_met = depth_goal_met
+        goal_cause = "the depth goal is met"
+    else:
+        goal_met = noise is not None and noise.value <= noise_goal
+        goal_cause = "the noise goal is met"
     if reading.stopped or goal_met:
         if keeper is not None:
-            cause = "a rule says more frames will not help" if reading.stopped else "the noise goal is met"
+            cause = "a rule says more frames will not help" if reading.stopped else goal_cause
             writer.delete(keeper, cause, evidence_row_ids=noise_rows, values=values)
         return
     if noise is None or not reading.rows:

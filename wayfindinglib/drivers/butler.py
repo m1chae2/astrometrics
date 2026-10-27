@@ -33,6 +33,7 @@ from wayfindinglib.models.equipment_and_site.enclosure import Enclosure
 from wayfindinglib.models.equipment_and_site.focus_model import FocusModel
 from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCalibration
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
+from wayfindinglib.models.planning.depth_goal import TargetDepthGoal
 from wayfindinglib.models.planning.observation_package import ObservationPackage
 from wayfindinglib.models.planning.suggestion_log import SuggestionLogEntry
 from wayfindinglib.models.policy.commissioning import CommissioningRun
@@ -53,6 +54,7 @@ _DATASET_TYPES: dict[str, tuple[str, type]] = {
     "observation_session": ("wayfinding_observation_sessions", ObservationSession),
     "observation_package": ("observation_packages", ObservationPackage),
     "package_suggestion_event": ("package_suggestion_events", SuggestionLogEntry),
+    "target_depth_goal": ("target_depth_goals", TargetDepthGoal),
     "site_profile": ("site_profiles", SiteProfile),
     "enclosure": ("enclosures", Enclosure),
     "guider_calibration": ("guider_calibrations", GuiderCalibration),

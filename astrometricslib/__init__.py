@@ -209,6 +209,7 @@ from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
 from astrometricslib.utilities.exceptions import DATA_ERRORS, ONLINE_QUERY_ERRORS, PlateSolveFailedError
 from astrometricslib.utilities.observing_night import observing_night_id
 from astrometricslib.utilities.parallel_batch import BatchRunSummary
+from astrometricslib.utilities.target_object_category import target_object_category
 
 if TYPE_CHECKING:
     from astrometricslib.api.jobs import Jobs
@@ -620,6 +621,7 @@ __all__ = [
     "safe_json_dumps",
     "scratch_directory",
     "select_library_frames",
+    "target_object_category",
     "to_epoch_seconds",
     "to_error_info",
     "warm_earth_orientation_data",

@@ -8,6 +8,9 @@ RPC reply has one fixed type.
   dataset report, the ranking of targets for tonight, and the statements
   about one star's result. The library has one advice call with a ``kind``;
   the RPC route cannot fix an argument, so each kind has a method here.
+* The depth goal of a target, from `Wayfinder.planning.get_depth_goal` and
+  `set_depth_goal`: the plain level a person chose (Quick look, Good or
+  Deep), how deep the image is, and the time to reach the level.
 * Night history, from `Wayfinder.control.history`: the list of nights, one
   night's quality review, and the slews that changed target. These reads
   never register a background job.
@@ -15,8 +18,9 @@ RPC reply has one fixed type.
   already on disk, without copying new ones) and the safety status limited
   to the delegation policy, which says who is in control of the equipment.
 
-This service only reads. It does no ranking, grouping or sorting; the
-library's reply is passed up as it is.
+This service reads, except for `set_depth_goal`, which keeps a level a
+person chose. It does no ranking, grouping or sorting; the library's reply
+is passed up as it is.
 """
 
 from datetime import datetime
@@ -82,6 +86,39 @@ class AdvisoryService:
             The statements, in the order the library gives them.
         """
         return self.wayfinder.planning.get_advisory(kind="result", target=target, object_id=object_id)
+
+    def get_depth_goal(self, target: str) -> Any:
+        """Read the depth goal status of one target.
+
+        Parameters
+        ----------
+        target : `str`
+            The target's id or name.
+
+        Returns
+        -------
+        status : `DepthGoalStatus`
+            The chosen level, the image's depth and level, the time to the
+            chosen level, and a sentence for the user.
+        """
+        return self.wayfinder.planning.get_depth_goal(target)
+
+    def set_depth_goal(self, target: str, level: str) -> Any:
+        """Choose the depth level of one target.
+
+        Parameters
+        ----------
+        target : `str`
+            The target's id or name.
+        level : `str`
+            ``"quick_look"``, ``"good"`` or ``"deep"``.
+
+        Returns
+        -------
+        status : `DepthGoalStatus`
+            The status for the new level.
+        """
+        return self.wayfinder.planning.set_depth_goal(target, level)
 
     def list_nights(self, limit: int = 10) -> Any:
         """List the recorded observing nights.

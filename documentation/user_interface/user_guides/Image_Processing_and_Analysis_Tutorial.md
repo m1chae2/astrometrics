@@ -52,6 +52,8 @@ Now look at the result.
 
 **What you should see.** The Final Stack row names the stack file, and its button now reads Viewing. A Total Exposure line shows the exposure time of the stack. The FITS Viewer shows the stack. It has less noise than a single frame, and faint stars stand out. Scroll to zoom in and drag to move around.
 
+Below Total Exposure is a Depth goal row. Pick how deep you want the image: Quick look, Good or Deep. The line under it says which level your stack has reached and about how much more imaging time the next level needs. Hover over the small info mark to see the goal and your current depth in magnitudes. Some objects, such as planets, have no depth goal, and the row says so.
+
 ## Step 4: Plate solve and measure the stars
 
 The next job plate solves your frames and then measures the brightness of every star in each frame.

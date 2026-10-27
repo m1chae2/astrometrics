@@ -23,8 +23,9 @@ directly.
 import logging
 import threading
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, date, datetime
+from functools import partial
 from typing import Any, Literal
 
 from astropy.time import Time
@@ -58,6 +59,7 @@ from wayfindinglib.models.equipment_and_site.calibration import CalibrationAdvis
 from wayfindinglib.models.equipment_and_site.equipment import EquipmentConfiguration, Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
 from wayfindinglib.models.planning.deep_catalog import DeepCatalogEstimate, DeepCatalogStatus
+from wayfindinglib.models.planning.depth_goal import DepthGoalStatus, DepthLevel
 from wayfindinglib.models.planning.mosaic import MosaicPanel, MosaicPlan
 from wayfindinglib.models.planning.observation_package import (
     DismissedRow,
@@ -2488,6 +2490,71 @@ class ObservationPlanning:
         packages.sort(key=lambda package: package.created_at, reverse=True)
         return packages
 
+    # -- Depth goal --------------------------------------------------------
+
+    def get_depth_goal(self, target: str | Target) -> DepthGoalStatus:
+        """Say how close a target's image is to its chosen depth level.
+
+        The depth levels are Quick look, Good (the default) and Deep. Each is a
+        depth in magnitudes that depends on the kind of object (register row
+        WAY-D94). The status gives the chosen level, the newest library
+        stack's depth, the level that depth reaches, and the time to reach the
+        chosen level, forecast with the "take N more" machinery.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target, by id or as a `Target`.
+
+        Returns
+        -------
+        status : `DepthGoalStatus`
+            The status, with a sentence for a novice in ``message``.
+        """
+        from wayfindinglib.tasks.planning_tasks.depth_goal_tasks import build_depth_goal_status
+        from wayfindinglib.tasks.planning_tasks.target_report_tasks import build_target_dataset_report
+
+        resolved = self._target(target)
+        return build_depth_goal_status(
+            resolved.id,
+            astrometrics=self._astrometrics,
+            butler=self._butler,
+            report_for_noise_ratio=lambda ratio: build_target_dataset_report(
+                resolved,
+                astrometrics=self._astrometrics,
+                butler=self._butler,
+                config=self._config,
+                target_noise_ratio=ratio,
+            ),
+        )
+
+    def set_depth_goal(self, target: str | Target, level: DepthLevel | str) -> DepthGoalStatus:
+        """Choose the depth level of a target.
+
+        The level is kept in wayfindinglib's own database, not in the
+        configuration file. A level that is not one of the three raises
+        `InvalidArgumentError`.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target, by id or as a `Target`.
+        level : `DepthLevel` or `str`
+            ``"quick_look"``, ``"good"`` or ``"deep"``.
+
+        Returns
+        -------
+        status : `DepthGoalStatus`
+            The status for the new level.
+
+        """
+        from wayfindinglib.tasks.planning_tasks.depth_goal_tasks import coerce_level, store_chosen_level
+
+        chosen = coerce_level(level)
+        resolved = self._target(target)
+        store_chosen_level(self._butler, resolved.id, chosen)
+        return self.get_depth_goal(resolved)
+
     # -- Suggestions -------------------------------------------------------
 
     @background_job("planning", grace_period_seconds=20.0)
@@ -2551,6 +2618,52 @@ class ObservationPlanning:
         ):
             return self._refresh_suggestions(target_ids)
 
+    @staticmethod
+    def _refresh_rule_package_of(
+        tasks: Any,
+        target_id: str,
+        reading: Any,
+        noise: Any,
+        depth_met: bool | None,
+        held_keys: Callable[[], set[str]],
+        writer: Any,
+        packages: list[ObservationPackage],
+    ) -> None:
+        """Refresh one target's suggested package of rule rows.
+
+        Parameters
+        ----------
+        tasks : `module`
+            The suggestion tasks module.
+        target_id : `str`
+            The target.
+        reading : `RuleReading`
+            What the target's statements ask for.
+        noise : `TargetNoise` or `None`
+            The target's noise.
+        depth_met : `bool` or `None`
+            Whether the target reached its chosen depth level, or `None`
+            when it has no depth goal.
+        held_keys : `Callable`
+            Gives the source keys no suggestion may take now.
+        writer : `PackageWriter`
+            Writes with revision checks and logs.
+        packages : `list` [`ObservationPackage`]
+            Every package, freshly read.
+        """
+        from wayfindinglib.analytics.package_suggestions import DEFAULT_NOISE_GOAL
+
+        tasks.refresh_rule_package(
+            writer,
+            packages,
+            target_id,
+            reading,
+            noise,
+            DEFAULT_NOISE_GOAL,
+            held_keys(),
+            depth_goal_met=depth_met,
+        )
+
     def _refresh_suggestions(self, target_ids: list[str] | None) -> PackageChange:
         """Run the suggestion refresh. See `refresh_suggestions`.
 
@@ -2568,12 +2681,12 @@ class ObservationPlanning:
 
         from astrometricslib import observing_night_id
         from wayfindinglib.analytics.package_suggestions import (
-            DEFAULT_NOISE_GOAL,
             RANKING_SUGGESTIONS_PER_USE,
             read_target_noise,
         )
         from wayfindinglib.analytics.result_quality.all_rules import ALL_RULES
         from wayfindinglib.tasks.planning_tasks import suggestion_tasks as tasks
+        from wayfindinglib.tasks.planning_tasks.depth_goal_tasks import depth_goal_met
 
         now = _utc_now()
         change = PackageChange(as_of=now)
@@ -2665,11 +2778,16 @@ class ObservationPlanning:
             )
             checklist_statements.extend(reading.checklist)
             noise = noise_for(target_id)
+            depth_met = depth_goal_met(self._astrometrics, self._butler, target_id)
             retrying(
-                lambda writer, packages, target_id=target_id, reading=reading, noise=noise: (
-                    tasks.refresh_rule_package(
-                        writer, packages, target_id, reading, noise, DEFAULT_NOISE_GOAL, held_keys()
-                    )
+                partial(
+                    self._refresh_rule_package_of,
+                    tasks,
+                    target_id,
+                    reading,
+                    noise,
+                    depth_met,
+                    held_keys,
                 ),
                 target_id,
             )

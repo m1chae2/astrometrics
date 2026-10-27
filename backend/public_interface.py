@@ -218,6 +218,8 @@ RPC_METHODS: tuple[str, ...] = (
     "advisory:target_report",
     "advisory:tonight",
     "advisory:result",
+    "advisory:depth_goal",
+    "advisory:set_depth_goal",
     "history:nights",
     "history:night_quality",
     "history:target_changes",

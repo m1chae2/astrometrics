@@ -217,6 +217,8 @@ GROUP_EXPOSURE_METRIC = "stacking.group_exposure_s"
 GROUP_FRAMES_STACKED_METRIC = "stacking.group_frames_stacked_count"
 GROUP_GAIN_METRIC = "stacking.group_gain_applied"
 GROUP_REFERENCE_EXPOSURE_METRIC = "stacking.group_reference_exposure_s"
+POINT_SOURCE_DEPTH_METRIC = "stacking.point_source_depth_5sigma_mag"
+SURFACE_BRIGHTNESS_LIMIT_METRIC = "stacking.surface_brightness_limit_3sigma_10arcsec_mag_per_arcsec2"
 
 GROUP_METRICS = (
     GROUP_EXPOSURE_METRIC,
@@ -252,6 +254,8 @@ PINNED_STACK_METRICS = {
     GROUP_FRAMES_STACKED_METRIC: 1,
     GROUP_GAIN_METRIC: 1,
     GROUP_REFERENCE_EXPOSURE_METRIC: 1,
+    POINT_SOURCE_DEPTH_METRIC: 1,
+    SURFACE_BRIGHTNESS_LIMIT_METRIC: 1,
 }
 """The metrics read, and the definition version each is pinned to (decision
 S13). A row of another version is not used. A test fails when the registry

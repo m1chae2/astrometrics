@@ -263,6 +263,8 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "advisory:target_report": ("advisory_service", "get_target_report"),
     "advisory:tonight": ("advisory_service", "get_tonight_ranking"),
     "advisory:result": ("advisory_service", "get_result_statements"),
+    "advisory:depth_goal": ("advisory_service", "get_depth_goal"),
+    "advisory:set_depth_goal": ("advisory_service", "set_depth_goal"),
     "history:nights": ("advisory_service", "list_nights"),
     "history:night_quality": ("advisory_service", "get_night_quality"),
     "history:target_changes": ("advisory_service", "list_target_changes"),

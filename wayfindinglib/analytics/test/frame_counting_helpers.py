@@ -155,13 +155,20 @@ class FakeLibrary:
         The frames of each target.
     rows : `list` [`QualityMeasurement`], optional
         Every stored row. `quality.query` filters them.
+    object_types : `dict` [`str`, `str`], optional
+        The stored SIMBAD object type of each target. A target left out has
+        none.
     """
 
     def __init__(
-        self, frames_by_target: dict[str, list[FrameRecord]], rows: list[QualityMeasurement] | None = None
+        self,
+        frames_by_target: dict[str, list[FrameRecord]],
+        rows: list[QualityMeasurement] | None = None,
+        object_types: dict[str, str] | None = None,
     ) -> None:
         self.frames_by_target = frames_by_target
         self.rows = rows or []
+        self.object_types = object_types or {}
         self.read_failures: set[str] = set()
         self.targets = SimpleNamespace(get=self._get_target, list=self._list_targets)
         self.quality = SimpleNamespace(
@@ -194,7 +201,11 @@ class FakeLibrary:
             raise OSError("disk unreadable")
         if target_id not in self.frames_by_target:
             return None
-        return Target(id=target_id, frames=list(self.frames_by_target[target_id]))
+        return Target(
+            id=target_id,
+            frames=list(self.frames_by_target[target_id]),
+            simbad_object_type=self.object_types.get(target_id),
+        )
 
     def _list_targets(self) -> list[Target]:
         """Give every target.

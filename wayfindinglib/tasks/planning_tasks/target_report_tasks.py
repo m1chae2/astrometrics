@@ -109,6 +109,7 @@ from wayfindinglib.analytics.result_quality.library_inputs import (
 from wayfindinglib.analytics.result_quality.noise_growth import (
     APERTURE_NOISE_ERROR_FACTOR,
     MINIMUM_FRAMES_NEW_EXPOSURE_LENGTH,
+    TARGET_NOISE_RATIO,
     NoiseModelError,
     StackFrame,
     StackGroup,
@@ -905,6 +906,7 @@ def _more_frames_for_setting(
     noise_model_errors: Mapping[Any, NoiseModelError] | None = None,
     fixed_pattern_history: Mapping[Any, Mapping[str, float]] | None = None,
     target_id: str | None = None,
+    target_noise_ratio: float = TARGET_NOISE_RATIO,
 ) -> list[TargetStatement]:
     """Make the "take N more" statement of one capture setting.
 
@@ -952,6 +954,10 @@ def _more_frames_for_setting(
         median, and the statement says so (decision D23).
     target_id : `str`, optional
         The target, left out of its own borrowed median.
+    target_noise_ratio : `float`, optional
+        The noise after the new frames over the noise now. The default is one
+        doubling of the effective time; a depth goal passes the ratio that
+        reaches its depth.
 
     Returns
     -------
@@ -1063,10 +1069,16 @@ def _more_frames_for_setting(
             new_exposure_seconds=new_exposure,
             electrons_per_adu=electrons_per_adu,
             fixed_pattern=fixed_pattern,
+            target_noise_ratio=target_noise_ratio,
         )
     else:
         result = frames_to_cut_noise(
-            frames, frames, mode, new_exposure_seconds=new_exposure, fixed_pattern=fixed_pattern
+            frames,
+            frames,
+            mode,
+            new_exposure_seconds=new_exposure,
+            fixed_pattern=fixed_pattern,
+            target_noise_ratio=target_noise_ratio,
         )
     used_ids = {frame.frame_id for frame in frames}
     evidence = _references([
@@ -1199,6 +1211,7 @@ def _quality_statements_of_settings(
     has_frame_weights: bool = True,
     noise_model_errors: Mapping[Any, NoiseModelError] | None = None,
     fixed_pattern_history: Mapping[Any, Mapping[str, float]] | None = None,
+    target_noise_ratio: float = TARGET_NOISE_RATIO,
 ) -> list[TargetStatement]:
     """Make the statements that are about the target's own stack and frames.
 
@@ -1241,6 +1254,9 @@ def _quality_statements_of_settings(
         (`read_noise_history`).
     fixed_pattern_history : `Mapping`, optional
         Other targets' fixed-pattern shares by setup (`read_noise_history`).
+    target_noise_ratio : `float`, optional
+        The noise ratio the "take N more" search aims for (see
+        `_more_frames_for_setting`).
 
     Returns
     -------
@@ -1302,6 +1318,7 @@ def _quality_statements_of_settings(
                     noise_model_errors=noise_model_errors,
                     fixed_pattern_history=fixed_pattern_history,
                     target_id=target.id,
+                    target_noise_ratio=target_noise_ratio,
                 )
                 statements.extend(
                     _mark_provisional(more_frames)
@@ -2027,6 +2044,7 @@ def build_target_dataset_report(
     butler: Any,
     config: Any,
     at: datetime | None = None,
+    target_noise_ratio: float = TARGET_NOISE_RATIO,
 ) -> TargetDatasetReport:
     """Build the report on one target's data.
 
@@ -2045,6 +2063,10 @@ def build_target_dataset_report(
     at : `datetime`, optional
         The time the report is for. Used only by the starting point.
         Defaults to now.
+    target_noise_ratio : `float`, optional
+        The noise after the recommended additional frames over the noise now.
+        The default is one doubling of the effective time. The depth goal
+        passes the ratio that reaches its depth.
 
     Returns
     -------
@@ -2227,6 +2249,7 @@ def build_target_dataset_report(
             has_frame_weights=any(row.metric == FRAME_WEIGHT_METRIC for row in stack_rows),
             noise_model_errors=noise_model_errors,
             fixed_pattern_history=noise_history.fixed_pattern_shares,
+            target_noise_ratio=target_noise_ratio,
         )
     )
     statements.extend(_calibration_statements(target, summaries, observations, astrometrics, rows))

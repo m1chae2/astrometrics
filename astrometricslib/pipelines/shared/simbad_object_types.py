@@ -7,6 +7,9 @@ recorded, so both read a result the same way.
 
 from typing import Any
 
+from astropy import units as u
+from astropy.coordinates import SkyCoord
+
 from astrometricslib.models.known_variability import KnownVariability, classify_simbad_object_types
 
 # The column the all-types field arrives in, under the names it has had.
@@ -65,3 +68,39 @@ def read_simbad_object_types(match: Any) -> str:
     if main_type is not None and classify_simbad_object_types(main_type) is not KnownVariability.NOT_LISTED:
         return main_type
     return ""
+
+
+def quote_adql(text: str) -> str:
+    """Write text as an ADQL string literal.
+
+    Parameters
+    ----------
+    text : `str`
+        The text; a single quote inside it is doubled.
+
+    Returns
+    -------
+    literal : `str`
+        The text in single quotes.
+    """
+    return "'" + text.replace("'", "''") + "'"
+
+
+def separation_arcsec(first: tuple[float, float], second: tuple[float, float]) -> float:
+    """Measure the distance between two positions.
+
+    Parameters
+    ----------
+    first, second : `tuple` [`float`, `float`]
+        Right ascension and declination in degrees.
+
+    Returns
+    -------
+    separation : `float`
+        The angle between them, in arcseconds.
+    """
+    return float(
+        SkyCoord(first[0] * u.deg, first[1] * u.deg)
+        .separation(SkyCoord(second[0] * u.deg, second[1] * u.deg))
+        .arcsec
+    )

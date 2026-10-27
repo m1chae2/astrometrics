@@ -366,6 +366,8 @@ export interface ActionRegistry {
     "advisory:target_report": { payload: { target: string }; response: import('../types/backendTypes').TargetDatasetReport };
     "advisory:tonight": { payload: { at?: string }; response: import('../types/backendTypes').TonightRanking };
     "advisory:result": { payload: { target: string; object_id: string }; response: import('../types/backendTypes').TargetStatement[] };
+    "advisory:depth_goal": { payload: { target: string }; response: import('../types/backendTypes').DepthGoalStatus };
+    "advisory:set_depth_goal": { payload: { target: string; level: 'quick_look' | 'good' | 'deep' }; response: import('../types/backendTypes').DepthGoalStatus };
     "history:nights": { payload: { limit?: number }; response: import('../types/backendTypes').NightListEntry[] };
     "history:night_quality": { payload: { session_id: string }; response: import('../types/backendTypes').NightQuality };
     "history:target_changes": { payload: { session_id?: string; limit?: number }; response: import('../types/backendTypes').TargetChange[] };
@@ -524,6 +526,7 @@ const IDEMPOTENT_READ_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
     'advisory:target_report',
     'advisory:tonight',
     'advisory:result',
+    'advisory:depth_goal',
     'history:nights',
     'history:night_quality',
     'history:target_changes',

@@ -399,7 +399,12 @@ def create_target_from_catalog(api: Any, target_id: str, simbad: Any) -> Any:
     if position is None:
         raise NotFoundError(f"The catalog does not know {target_id!r}.", details={"target_id": target_id})
     ra_text, dec_text = format_position(position.coordinate)
-    return create_target(api, normalized_id, ra=ra_text, dec=dec_text)
+    new_target = create_target(api, normalized_id, ra=ra_text, dec=dec_text)
+    if position.object_type:
+        new_target.simbad_object_type = position.object_type
+        _mark_touched(api, new_target.id)
+        save_targets(api)
+    return new_target
 
 
 def update_target(api: Any, target_id: str, updates: dict) -> Any | None:

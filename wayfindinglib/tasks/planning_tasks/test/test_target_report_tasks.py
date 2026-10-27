@@ -667,6 +667,40 @@ def test_more_frames_proposes_a_count_and_says_it_is_tentative(
     assert "new exposure group" in more[0].reason
 
 
+def test_a_lower_target_noise_ratio_asks_for_more_frames(
+    isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch, camera_gain: float
+) -> None:
+    """The depth goal aims the same search at a deeper noise ratio."""
+    from wayfindinglib.analytics.result_quality import forecast
+
+    change = ForecastedChange(noiseChangeFraction=-0.2, tolerance=0.05)
+    checks = [
+        ForecastCheck(
+            stackRunId="r2",
+            forecastWhenPlanned=change,
+            forecastGivenFramesTaken=change,
+            measured=change,
+            weightingMode="equal",
+            paired=True,
+            outcome=ForecastOutcome.AS_FORECAST,
+        )
+    ]
+    monkeypatch.setattr(forecast, "forecast_check", lambda *args, **keywords: checks)
+    library = _Library(runs=TWO_RUNS)
+    (default,) = _of_rule(_report(library, isolated_butler), "more_frames")
+    deeper = build_target_dataset_report(
+        library.target,
+        astrometrics=library,
+        butler=isolated_butler,
+        config=isolated_butler.config,
+        at=NOW,
+        target_noise_ratio=0.35,
+    )
+    (more,) = _of_rule(deeper, "more_frames")
+    assert more.proposed_action.frame_count > default.proposed_action.frame_count
+    assert more.expected_effect.wall_clock_seconds > default.expected_effect.wall_clock_seconds
+
+
 @pytest.mark.parametrize(
     "outcome",
     [None, ForecastOutcome.SHORT_UNKNOWN_REASON, ForecastOutcome.NOT_CHECKABLE],

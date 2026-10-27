@@ -40,6 +40,7 @@ tools:
   - mcp__wayfindinglib-core__planning_deep_catalog_status
   - mcp__wayfindinglib-core__planning_find_sources
   - mcp__wayfindinglib-core__planning_get_advisory
+  - mcp__wayfindinglib-core__planning_get_depth_goal
   - mcp__wayfindinglib-core__planning_get_online_catalog_sources
   - mcp__wayfindinglib-core__planning_get_plan
   - mcp__wayfindinglib-core__planning_get_visibility

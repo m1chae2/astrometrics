@@ -503,7 +503,7 @@ def _build_status(
     base.update(forecast_status=forecast_status)
     now = f"Your image: {level_label(reached)}."
     if state == DepthGoalState.WILL_NOT_HELP:
-        message = f"{now} More frames won't help much here. {advice}".strip()
+        message = f"More frames won't help much here. {advice}".strip()
         return DepthGoalStatus(**base, state=state, message=message)
     if forecast_status == RecommendedAdditionalFramesStatus.NOT_CHECKED:
         return DepthGoalStatus(

@@ -315,8 +315,7 @@ def test_more_frames_will_not_help_names_what_to_fix(butler: DiskButler, forecas
     result = status_of(butler, [row(SURFACE_METRIC, 24.2)], recorder)
     assert result.state == DepthGoalState.WILL_NOT_HELP
     assert result.message == (
-        "Your image: Quick look. More frames won't help much here. "
-        "The noise has a fixed part we can't place yet. Retake flats first."
+        "More frames won't help much here. The noise has a fixed part we can't place yet. Retake flats first."
     )
     assert result.seconds_to_goal is None
 
@@ -357,7 +356,7 @@ def test_each_cause_gives_its_one_sentence(
     ]
     first = status_of(butler, [row(SURFACE_METRIC, 24.2)], Recorder(statements))
     second = status_of(butler, [row(SURFACE_METRIC, 24.2)], Recorder(statements))
-    assert first.message == f"Your image: Quick look. More frames won't help much here. {sentence}"
+    assert first.message == f"More frames won't help much here. {sentence}"
     assert first.message == second.message
 
 

@@ -62,10 +62,10 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 import numpy as np
-from astropy.io import fits
 from scipy.ndimage import gaussian_filter
 
 from astrometricslib.drivers.driver_set import Drivers
+from astrometricslib.drivers.fits_access import open_primary_hdu, write_image
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
@@ -295,9 +295,8 @@ def simulate_frame(real_path: str, output_path: str, sigma_adu: float, rng: np.r
     InvalidArgumentError
         If the frame is not a 2-D image.
     """
-    with fits.open(real_path, memmap=False) as hdul:
-        hdu = next((item for item in hdul if item.data is not None), None)
-        if hdu is None or hdu.data is None or hdu.data.ndim != 2:
+    with open_primary_hdu(real_path) as hdu:
+        if hdu.data is None or hdu.data.ndim != 2:
             raise InvalidArgumentError(f"{real_path} is not a 2-D raw image, so it cannot be simulated.")
         data = np.array(hdu.data)
         header = hdu.header.copy()
@@ -314,7 +313,7 @@ def simulate_frame(real_path: str, output_path: str, sigma_adu: float, rng: np.r
     for key in ("BZERO", "BSCALE", "BITPIX", "NAXIS", "NAXIS1", "NAXIS2", "EXTEND"):
         header.remove(key, ignore_missing=True)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    fits.PrimaryHDU(data=simulated.astype(data.dtype), header=header).writeto(output_path, overwrite=True)
+    write_image(output_path, simulated.astype(data.dtype), header)
 
 
 def summarize_repeats(repeats: Sequence[BiasRepeat]) -> tuple[float | None, float | None]:

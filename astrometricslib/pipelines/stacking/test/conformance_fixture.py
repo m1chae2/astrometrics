@@ -29,6 +29,10 @@ from astrometricslib.models.target import FrameRecord
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
 from astrometricslib.pipelines.stacking.frame_measurement_run import quarantine_measurements_for_frame
 from astrometricslib.pipelines.stacking.metrics import GATE_METRIC_BY_NAME
+from astrometricslib.pipelines.stacking.post_processing.aperture_size_noise import (
+    ApertureSizeNoise,
+    ApertureSizeNoiseOutcome,
+)
 from astrometricslib.pipelines.stacking.post_processing.expected_noise import (
     ExpectedNoise,
     ExpectedNoiseOutcome,
@@ -92,6 +96,16 @@ def fixture_noise_outcome() -> StackNoiseOutcome:
             wcs_source="stack header",
             apertures_created=False,
             aperture_identity="v3-156104df543d",
+            size_noise=ApertureSizeNoiseOutcome(
+                ApertureSizeNoise(
+                    radii_px=(2.0, 4.0, 6.0, 8.0),
+                    pixel_counts=(12.6, 50.3, 113.1, 201.1),
+                    noises=(0.0008, 0.002, 0.0034, 0.0049),
+                    exponent=0.65,
+                    exponent_error=0.08,
+                    aperture_count=100,
+                )
+            ),
         )
     )
 

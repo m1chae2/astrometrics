@@ -951,7 +951,7 @@ def _record_with_captured_rows(
     )
     monkeypatch.setattr(record_quality, "determine_stack_members", lambda *_: None)
     monkeypatch.setattr(record_quality, "compute_stack_science", lambda *_a, **_k: None)
-    monkeypatch.setattr(record_quality, "stacking_measurements", lambda *_: [])
+    monkeypatch.setattr(record_quality, "stacking_measurements", lambda *_, **__: [])
     monkeypatch.setattr(
         record_quality,
         "frame_geometry_measurements",

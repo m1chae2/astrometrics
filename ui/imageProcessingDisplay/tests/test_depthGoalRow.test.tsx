@@ -22,7 +22,7 @@ const baseStatus = {
     targetId: 'M 31', level: 'good', levelLabel: 'Good', options,
     state: 'below_goal', depthKind: 'surface_brightness', depthUnit: 'mag/arcsec2',
     currentDepth: 24.0, goalDepth: 24.7,
-    message: 'Your image: Quick look. About 1 h 20 min more to reach Good.', reason: '',
+    message: 'About 1 h 20 min more to reach this depth.', reason: '',
 };
 
 /** Renders the row inside a fresh query client. */
@@ -54,9 +54,9 @@ describe('DepthGoalRow', () => {
         backend.callBackend.mockResolvedValueOnce(baseStatus);
         renderRow();
         await screen.findByText(baseStatus.message);
-        backend.callBackend.mockResolvedValueOnce({ ...baseStatus, level: 'deep', message: 'Your image: Good ✓' });
+        backend.callBackend.mockResolvedValueOnce({ ...baseStatus, level: 'deep', message: 'Your image has reached this depth.' });
         fireEvent.change(screen.getByRole('combobox'), { target: { value: 'deep' } });
-        expect(await screen.findByText('Your image: Good ✓')).toBeTruthy();
+        expect(await screen.findByText('Your image has reached this depth.')).toBeTruthy();
         expect(backend.callBackend).toHaveBeenCalledWith('advisory:set_depth_goal', { target: 'M 31', level: 'deep' });
     });
 

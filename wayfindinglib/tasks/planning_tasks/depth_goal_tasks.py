@@ -494,14 +494,13 @@ def _build_status(
         return DepthGoalStatus(
             **base,
             state=DepthGoalState.REACHED,
-            message=f"Your image: {level_label(reached)} ✓",
+            message="Your image has reached this depth.",
         )
     ratio = noise_ratio_for_depth_gain(base["goal_depth"], reading.value)
     state, seconds, frames, exposure, advice, forecast_status, reason = _time_to_goal(
         report_for_noise_ratio(ratio)
     )
     base.update(forecast_status=forecast_status)
-    now = f"Your image: {level_label(reached)}."
     if state == DepthGoalState.WILL_NOT_HELP:
         message = f"More frames won't help much here. {advice}".strip()
         return DepthGoalStatus(**base, state=state, message=message)
@@ -510,8 +509,8 @@ def _build_status(
             **base,
             state=state,
             message=(
-                f"{now} The time to reach {LEVEL_LABELS[level]} is not shown yet: the frame forecast "
-                "has not been checked against a new stack."
+                "The time needed is not shown yet: the frame forecast has not been checked against a "
+                "new stack."
             ),
             reason=reason,
         )
@@ -519,7 +518,7 @@ def _build_status(
         return DepthGoalStatus(
             **base,
             state=state,
-            message=f"{now} The time to reach {LEVEL_LABELS[level]} could not be forecast.",
+            message="The time needed could not be forecast.",
             reason=reason,
         )
     provisional = forecast_status == RecommendedAdditionalFramesStatus.PROVISIONAL
@@ -531,5 +530,5 @@ def _build_status(
         frames_to_goal=frames,
         exposure_seconds=exposure,
         provisional=provisional,
-        message=f"{now} About {time_text(seconds)} more to reach {LEVEL_LABELS[level]}{suffix}.",
+        message=f"About {time_text(seconds)} more to reach this depth{suffix}.",
     )

@@ -198,7 +198,7 @@ def test_row_scatter_of_the_sum_well_above_the_difference_is_banding() -> None:
     scatters = LinePatternScatters(
         difference_row=1.0,
         difference_column=1.0,
-        sum_row=1.6,
+        sum_row=2.0,
         sum_column=1.05,
         row_count=100,
         column_count=150,
@@ -224,6 +224,56 @@ def test_equal_row_and_column_scatters_are_no_banding() -> None:
     banding = locate_fixed_pattern(_apertures(19), scatters).test_for(FixedPatternShape.BANDING)
     assert banding is not None
     assert not banding.significant
+
+
+def test_equal_excess_on_rows_and_columns_is_the_sky_not_banding() -> None:
+    """Extended light raises both axes alike: no banding, and why."""
+    scatters = LinePatternScatters(
+        difference_row=1.0,
+        difference_column=1.0,
+        sum_row=4.7,
+        sum_column=5.2,
+        row_count=2978,
+        column_count=2978,
+    )
+    location = locate_fixed_pattern(_apertures(19), scatters)
+    banding = location.test_for(FixedPatternShape.BANDING)
+    assert banding is not None
+    assert not banding.significant
+    assert "structure on all scales" in banding.explanation
+    assert "structure on all scales" in location.sentence()
+    assert FixedPatternShape.BANDING not in _significant(location)
+
+
+def test_a_small_difference_between_the_axes_is_not_a_stripe_signature() -> None:
+    """A contrast under the ratio floor is not banding (M 57)."""
+    scatters = LinePatternScatters(
+        difference_row=1.0,
+        difference_column=1.0,
+        sum_row=2.36,
+        sum_column=2.72,
+        row_count=2978,
+        column_count=2978,
+    )
+    banding = locate_fixed_pattern(_apertures(19), scatters).test_for(FixedPatternShape.BANDING)
+    assert banding is not None
+    assert not banding.significant
+
+
+def test_an_excess_in_the_columns_only_is_banding() -> None:
+    """One axis well above the other is banding (a star field)."""
+    scatters = LinePatternScatters(
+        difference_row=1.0,
+        difference_column=1.0,
+        sum_row=1.5,
+        sum_column=3.0,
+        row_count=2978,
+        column_count=2978,
+    )
+    banding = locate_fixed_pattern(_apertures(19), scatters).test_for(FixedPatternShape.BANDING)
+    assert banding is not None
+    assert banding.significant
+    assert "columns" in banding.statistic
 
 
 def test_without_line_pattern_rows_banding_is_not_tested() -> None:

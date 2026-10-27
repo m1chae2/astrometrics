@@ -50,8 +50,6 @@ LIBRARY_STACK_EXCLUDED_MARKERS = ("#group-", "/groups/")
 
 FIX_FIRST_ADVICE = {
     "retake_flats": "Retake flats first.",
-    "check_gradient_removal": "Check the gradient removal first.",
-    "use_line_pattern_removal": "Turn on line pattern removal first.",
 }
 """The advice a quality statement adds to "more frames will not help"."""
 

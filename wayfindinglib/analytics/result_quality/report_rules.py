@@ -21,10 +21,12 @@ The rules built here are:
   light frame setting.
 * ``more_frames`` and ``more_frames_will_not_help``: "take N more" and the
   stop signal, from `noise_growth`.
-* ``retake_flats``, ``check_gradient_removal`` and
-  ``use_line_pattern_removal``: advice from where the stack's fixed-pattern
-  noise sits (`fixed_pattern_location`). A rise near the target gives no
-  advice.
+* ``retake_flats``: advice from where the stack's fixed-pattern noise sits
+  (`fixed_pattern_location`) when it follows the distance from the image
+  center. A rise near the target, a gradient and banding are explained in the
+  loss account and give no advice: faint light cannot be removed by a
+  calibration frame, and the app has no step that takes a gradient or line
+  pattern out of the science stack.
 
 Nothing here reads a database or the sky. Missing inputs are the caller's to
 report as ``insufficient_data``; a function here never invents a value.
@@ -1779,17 +1781,16 @@ def fixed_pattern_limited_statement(
 
 FIXED_PATTERN_SHAPE_RULES = {
     FixedPatternShape.RADIAL_TREND: "retake_flats",
-    FixedPatternShape.GRADIENT: "check_gradient_removal",
-    FixedPatternShape.BANDING: "use_line_pattern_removal",
 }
-"""The rule that gives the advice for each shape. A rise near the target has no
-rule: faint real light is explained in the loss account and nothing is asked
-for (decision D21)."""
+"""The rule that gives the advice for each shape. Only a radial trend has one:
+new flats are a step the user can take. A rise near the target, a gradient and
+banding have none: they are explained in the loss account and nothing is asked
+for, because no calibration frame removes real light and the app has no step
+that removes a gradient (GraXpert runs on the preview only) or a line pattern
+from the science stack (decision D21, changed 2026-10-27)."""
 
 FIXED_PATTERN_SHAPE_NOTES = {
     FixedPatternShape.RADIAL_TREND: "Retake flats.",
-    FixedPatternShape.GRADIENT: "Check gradient removal.",
-    FixedPatternShape.BANDING: "Use line pattern removal.",
 }
 """The short advice each shape gives, kept as the proposed action's note."""
 
@@ -1801,9 +1802,9 @@ def fixed_pattern_shape_statements(
 ) -> list[TargetStatement]:
     """Turn the significant shapes of a stack's fixed pattern into advice.
 
-    A radial trend asks for new flats, a gradient asks to check the gradient
-    removal, and banding asks for line pattern removal. A rise near the target
-    gives nothing, and a shape that was not found gives nothing.
+    A radial trend asks for new flats. A gradient, banding and a rise near the
+    target give nothing here (the loss account explains them), and a shape
+    that was not found gives nothing.
 
     Parameters
     ----------

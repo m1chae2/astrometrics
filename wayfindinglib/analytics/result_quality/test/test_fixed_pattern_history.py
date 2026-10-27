@@ -382,8 +382,8 @@ def test_the_loss_account_names_the_shape_in_place_of_no_listed_cause() -> None:
     assert "No listed cause accounts for it." in plain_reason
 
 
-def test_shape_advice_is_given_for_radial_gradient_and_banding_only() -> None:
-    """Flats, gradient and line pattern advice; nothing near a target."""
+def test_shape_advice_is_given_for_a_radial_trend_only() -> None:
+    """Flats advice; banding, a gradient and a rise near a target give none."""
     rows = _target_rows("T0", 0.5, detail=True, flat_noise=0.5, dark_noise=0.45)
     run = fc.stack_runs_from_measurements(rows)[0]
     account = fc.fixed_pattern_account_for_run(
@@ -392,19 +392,20 @@ def test_shape_advice_is_given_for_radial_gradient_and_banding_only() -> None:
     statements = fixed_pattern_shape_statements(account, SETTING)
     names = {statement.rule for statement in statements}
     assert FIXED_PATTERN_SHAPE_RULES[FixedPatternShape.RADIAL_TREND] in names
-    assert FIXED_PATTERN_SHAPE_RULES[FixedPatternShape.BANDING] in names
+    assert account is not None
+    assert account.location is not None
+    assert FixedPatternShape.BANDING in account.location.significant_shapes
+    assert names == {"retake_flats"}
     flats = next(s for s in statements if s.rule == "retake_flats")
     assert flats.message.startswith("Retake flats")
     assert flats.proposed_action is not None
     assert flats.proposed_action.calibration_frame_type == "flat"
-    banding = next(s for s in statements if s.rule == "use_line_pattern_removal")
-    assert banding.message.startswith("Use line pattern removal")
-    assert FixedPatternShape.NEAR_TARGET not in FIXED_PATTERN_SHAPE_RULES
+    assert set(FIXED_PATTERN_SHAPE_RULES) == {FixedPatternShape.RADIAL_TREND}
     assert fixed_pattern_shape_statements(None, SETTING) == []
 
 
-def test_the_gradient_advice_text() -> None:
-    """A gradient asks to check the gradient removal."""
+def test_a_gradient_is_explained_and_gives_no_advice() -> None:
+    """A gradient gives no rule: the science stack has no gradient step."""
     rows = _target_rows("T0", 0.5, detail=True, flat_noise=0.5, dark_noise=0.45)
     run = fc.stack_runs_from_measurements(rows)[0]
     rng = np.random.default_rng(8)
@@ -424,11 +425,10 @@ def test_the_gradient_advice_text() -> None:
         fc.single_stack_fixed_pattern_noise(run),
         load_record=lambda _path: {"version": 1, "apertures": entries},
     )
-    statements = fixed_pattern_shape_statements(account, SETTING)
-    assert any(
-        s.rule == "check_gradient_removal" and s.message.startswith("Check gradient removal")
-        for s in statements
-    )
+    assert account is not None
+    assert account.location is not None
+    assert FixedPatternShape.GRADIENT in account.location.significant_shapes
+    assert fixed_pattern_shape_statements(account, SETTING) == []
 
 
 def test_the_share_of_a_run_is_one_minus_random_over_measured_variance() -> None:

@@ -44,6 +44,14 @@ standard errors, and a shape counts as found at `SHAPE_SIGMAS`:
 4. Banding. The scatter of the row (and of the column) averages of the sum
    image over that of the difference image, on the log scale, one-sided. The
    line-pattern rows of the odd-even difference job store the four scatters.
+   Faint extended light (a nebula or a galaxy) that gets past the
+   measurement's star mask raises the row and the column scatter of the sum
+   alike and cancels in the difference, so equal excess on both axes is not
+   banding. Real bands run along one axis, so banding needs one axis's ratio
+   to be clearly larger than the other's (`STRIPE_SIGMAS`,
+   `STRIPE_MINIMUM_RATIO_OF_RATIOS`). Banding and a gradient are explained in
+   the loss account and give no advice, because the app has no step that
+   removes either from the science stack.
 
 When the target sits near the image center, the distance from the target and
 the distance from the center carry the same information. Each is then tested
@@ -96,6 +104,26 @@ for the two-sided radial test; the advice is a recommendation to look, not an
 order. Design estimate (decision D21, 2026-10-26); not tuned on data, register
 row to be added."""
 
+STRIPE_SIGMAS = SHAPE_SIGMAS
+"""Banding needs the log of the row ratio and the log of the column ratio
+(sum scatter over difference scatter) to differ by this many standard errors.
+Each log ratio has the error ``sqrt(2) * 1.17 / sqrt(n)`` (n = the line
+count), the two are independent, so the error of their difference is those two
+added in quadrature. Design estimate; evidence: on the library copy
+(2026-10-27) the nebula and galaxy stacks M 27, M 57, M 81 and NGC 7331 gave
+2.3 to 4.0 standard errors by this test alone, which is more than white-noise
+errors allow for light that is not white, so `STRIPE_MINIMUM_RATIO_OF_RATIOS`
+is also needed. Not yet validated against a stack with known bands."""
+
+STRIPE_MINIMUM_RATIO_OF_RATIOS = 1.25
+"""Banding also needs the larger axis's ratio to be at least this many times
+the smaller axis's ratio. Extended light that leaks past the star mask gave
+1.01 to 1.18 on the library copy (2026-10-27: M 13, M 27 1.11, M 42, M 52,
+M 57 1.15, M 81 1.11, NGC 1893, NGC 2403, NGC 2903, NGC 7331 1.18, Albireo
+1.14), so 1.25 sits just above them. Four star fields gave 1.32 to 2.0
+(Schedar, Mirfak, Mirach, Navi), all with the excess in the columns. Design
+estimate, set from those 15 stacks (a held-out check has not been made)."""
+
 MINIMUM_SHAPE_APERTURES = 20
 """The aperture tests need at least this many apertures with both values. The
 rank correlation's standard error ``1 / sqrt(n - 1)`` is then 0.23, so a
@@ -134,7 +162,9 @@ SHAPE_MEANING = {
     FixedPatternShape.NEAR_TARGET: (
         "a rise near the target (faint real light around it, not a calibration fault)"
     ),
-    FixedPatternShape.BANDING: "bands along rows or columns (line pattern noise)",
+    FixedPatternShape.BANDING: (
+        "bands along rows or columns, more on one axis than the other (line pattern noise)"
+    ),
 }
 """What each shape means, as a phrase for the loss account."""
 
@@ -209,6 +239,10 @@ class ShapeTest(BaseModel):
         The statistic in words, with its value.
     reason : `str`
         One sentence saying what was found or why the test was not made.
+    explanation : `str`
+        A sentence for the loss account when the test is not `significant`
+        and still has something to say (the sky has structure on all scales).
+        Empty otherwise.
     """
 
     model_config = _MODEL_CONFIG
@@ -220,6 +254,7 @@ class ShapeTest(BaseModel):
     ambiguous: bool = False
     statistic: str = ""
     reason: str
+    explanation: str = ""
 
 
 class FixedPatternLocation(BaseModel):
@@ -274,9 +309,11 @@ class FixedPatternLocation(BaseModel):
             saying that none of the tested shapes was found.
         """
         found = [test for test in self.tests if test.significant]
+        explanations = " ".join(test.explanation for test in self.tests if test.explanation)
+        explanations = f" {explanations}" if explanations else ""
         if found:
             parts = [f"{SHAPE_MEANING[test.shape]} ({test.sigmas:.1f} standard errors)" for test in found]
-            return "The fixed pattern shows " + "; and ".join(parts) + "."
+            return "The fixed pattern shows " + "; and ".join(parts) + "." + explanations
         ambiguous = [test for test in self.tests if test.ambiguous]
         tested = [test for test in self.tests if test.tested]
         suffix = ""
@@ -289,7 +326,7 @@ class FixedPatternLocation(BaseModel):
             return "Where the fixed pattern is could not be tested: " + self.tests[0].reason
         return (
             f"None of the tested shapes (trend from the center, gradient, rise near the target, banding) "
-            f"was found at {SHAPE_SIGMAS:g} standard errors.{suffix}"
+            f"was found at {SHAPE_SIGMAS:g} standard errors.{suffix}{explanations}"
         )
 
 
@@ -725,9 +762,13 @@ def _banding_test(scatters: LinePatternScatters | None) -> ShapeTest:
     Returns
     -------
     test : `ShapeTest`
-        The larger of the row and column log ratios over its error. The error
-        of each scatter is `aperture_noise_relative_error` of its line count
-        (the same ``1.17 / sqrt(n)``), and the two errors add in quadrature.
+        Banding is found when the larger of the row and column log ratios
+        is above 0 by `SHAPE_SIGMAS` standard errors and the two log ratios
+        differ by `STRIPE_SIGMAS` and by `STRIPE_MINIMUM_RATIO_OF_RATIOS`
+        (see their notes). The error of each scatter is
+        `aperture_noise_relative_error` of its line count (the same
+        ``1.17 / sqrt(n)``), the sum and the difference errors add in
+        quadrature, and so do the two axes' errors for their difference.
     """
     if scatters is None:
         return ShapeTest(
@@ -735,25 +776,59 @@ def _banding_test(scatters: LinePatternScatters | None) -> ShapeTest:
             tested=False,
             reason="the line-pattern rows of the odd-even difference are not stored for this stack.",
         )
-    results = []
+    log_ratios = {}
+    errors = {}
     for name, sum_value, difference_value, count in (
         ("rows", scatters.sum_row, scatters.difference_row, scatters.row_count),
         ("columns", scatters.sum_column, scatters.difference_column, scatters.column_count),
     ):
-        error = math.sqrt(2.0) * aperture_noise_relative_error(count)
-        ratio = sum_value / difference_value
-        results.append((math.log(ratio) / error, name, ratio))
-    sigmas, name, ratio = max(results)
-    sigmas = _sigmas_from_z(sigmas)
+        errors[name] = math.sqrt(2.0) * aperture_noise_relative_error(count)
+        log_ratios[name] = math.log(sum_value / difference_value)
+    name = max(log_ratios, key=lambda key: log_ratios[key])
+    other = "columns" if name == "rows" else "rows"
+    ratio = math.exp(log_ratios[name])
+    other_ratio = math.exp(log_ratios[other])
+    excess_sigmas = _sigmas_from_z(log_ratios[name] / errors[name])
+    contrast_sigmas = (log_ratios[name] - log_ratios[other]) / math.hypot(errors[name], errors[other])
+    stripe = (
+        excess_sigmas >= SHAPE_SIGMAS
+        and contrast_sigmas >= STRIPE_SIGMAS
+        and ratio / other_ratio >= STRIPE_MINIMUM_RATIO_OF_RATIOS
+    )
+    statistic = (
+        f"scatter of the {name} averages, sum over difference: {ratio:.2f}; of the {other} averages: "
+        f"{other_ratio:.2f}"
+    )
+    if stripe:
+        return ShapeTest(
+            shape=FixedPatternShape.BANDING,
+            sigmas=excess_sigmas,
+            significant=True,
+            statistic=statistic,
+            reason=(
+                f"The {name} averages of the sum scatter {ratio:.2f} times as much as those of the "
+                f"difference ({excess_sigmas:.1f} standard errors), and the {other} averages only "
+                f"{other_ratio:.2f} times."
+            ),
+        )
+    explanation = ""
+    other_sigmas = log_ratios[other] / errors[other]
+    if excess_sigmas >= SHAPE_SIGMAS and other_sigmas >= SHAPE_SIGMAS:
+        explanation = (
+            "The sky has structure on all scales (the rows and the columns both scatter more in the sum), "
+            "likely faint real light or a residual gradient, not banding."
+        )
     return ShapeTest(
         shape=FixedPatternShape.BANDING,
-        sigmas=sigmas,
-        significant=sigmas >= SHAPE_SIGMAS,
-        statistic=f"scatter of the {name} averages, sum over difference: {ratio:.2f}",
+        sigmas=excess_sigmas,
+        significant=False,
+        statistic=statistic,
         reason=(
             f"The {name} averages of the sum scatter {ratio:.2f} times as much as those of the difference "
-            f"({sigmas:.1f} standard errors)."
+            f"and the {other} averages {other_ratio:.2f} times; bands run along one axis, so this is not "
+            f"called banding."
         ),
+        explanation=explanation,
     )
 
 
@@ -852,6 +927,8 @@ __all__ = [
     "COLLINEAR_DISTANCE_CORRELATION",
     "MINIMUM_SHAPE_APERTURES",
     "SHAPE_SIGMAS",
+    "STRIPE_MINIMUM_RATIO_OF_RATIOS",
+    "STRIPE_SIGMAS",
     "CalibrationNoiseBreakdown",
     "FixedPatternAccount",
     "FixedPatternAperture",

@@ -521,57 +521,6 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         computed_by="report_rules",
     ),
     QualityRule(
-        name="check_gradient_removal",
-        statement_kind=StatementKind.RECOMMENDATION,
-        action_class=ActionClass.ADJUSTMENT,
-        requires=[MetricRequirement(name=ODD_EVEN_APERTURE_RECORD_COUNT_METRIC, definition_version=1)],
-        limits=[],
-        register_entry="WAY-D32",
-        confidence=Confidence.DESIGN_ESTIMATE,
-        wording=(
-            "Check gradient removal: the stack's fixed-pattern noise includes a gradient across the image "
-            "({statistic}; {sigmas:.1f} standard errors)."
-        ),
-        plain_wording=(
-            "Check the background (gradient) removal step. The combined picture likely has a smooth "
-            "slope in its brightness that the two half pictures share."
-        ),
-        produces="none",
-        purpose=(
-            "A plane in the sum of the half stacks that is absent in their difference is a sky or background "
-            "gradient that the processing should remove."
-        ),
-        computed_by="report_rules",
-    ),
-    QualityRule(
-        name="use_line_pattern_removal",
-        statement_kind=StatementKind.RECOMMENDATION,
-        action_class=ActionClass.ADJUSTMENT,
-        requires=[
-            MetricRequirement(name=ODD_EVEN_DIFFERENCE_ROW_SCATTER_METRIC, definition_version=1),
-            MetricRequirement(name=ODD_EVEN_DIFFERENCE_COLUMN_SCATTER_METRIC, definition_version=1),
-            MetricRequirement(name=ODD_EVEN_SUM_ROW_SCATTER_METRIC, definition_version=1),
-            MetricRequirement(name=ODD_EVEN_SUM_COLUMN_SCATTER_METRIC, definition_version=1),
-        ],
-        limits=[],
-        register_entry="WAY-D32",
-        confidence=Confidence.DESIGN_ESTIMATE,
-        wording=(
-            "Use line pattern removal: the stack's fixed-pattern noise includes bands along rows or columns "
-            "({statistic}; {sigmas:.1f} standard errors)."
-        ),
-        plain_wording=(
-            "Use the line pattern (banding) removal step. The combined picture likely has faint "
-            "stripes that both half pictures share."
-        ),
-        produces="none",
-        purpose=(
-            "Row or column averages that scatter more in the sum of the half stacks than in their difference "
-            "are line pattern noise, which a line pattern removal step takes out."
-        ),
-        computed_by="report_rules",
-    ),
-    QualityRule(
         name="focus_drift",
         statement_kind=StatementKind.RECOMMENDATION,
         action_class=ActionClass.SESSION_PROCEDURE,

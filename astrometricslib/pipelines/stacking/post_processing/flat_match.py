@@ -314,7 +314,7 @@ PLACEMENT_LIMIT_SIGMAS = 3.1
 # random dust sets at real shadow depths (0.15 to 0.4%) and real noise: the
 # root-mean-square error was 1.06 pixel along x, 0.98 along y and 0.19 degree
 # in rotation (register entry STK-46). It is added in quadrature to the
-# odd/even half-difference, which sees noise only.
+# odd/even odd–even difference, which sees noise only.
 METHOD_SHIFT_ERROR_PX = 1.1
 METHOD_ROTATION_ERROR_DEG = 0.2
 

@@ -159,9 +159,9 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # target's `_subsets` folder, and measure the noise of each result. Each
     # starts a background run and answers at once. Writes (they stack and store
     # rows), so the AI's read-only profile withholds them.
-    "processing:measure_half_difference_noise": (
+    "processing:measure_odd_even_difference_noise": (
         "quality_measurement_service",
-        "start_half_difference_noise",
+        "start_odd_even_difference_noise",
     ),
     "processing:measure_noise_growth": ("quality_measurement_service", "start_noise_growth"),
     "processing:measure_night_contributions": ("quality_measurement_service", "start_night_contributions"),

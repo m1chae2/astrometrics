@@ -31,7 +31,11 @@ creates that table, so it is additive and safe to repeat. Version 4 rounds the
 pixel scale in ``quality_capture_setting`` (as `CaptureSetting` now does),
 merges the rows that become equal into the one with the smallest id, points
 their measurements at it and deletes the others; see
-`QualityStore._migrate_from_version_3`. Take a backup first
+`QualityStore._migrate_from_version_3`. Version 5 renames the stored metric
+names that began ``stacking.half`` plus ``_difference_`` to
+``stacking.odd_even_difference_*`` (the measurement is now called the
+odd-even difference); see
+`QualityStore._migrate_from_version_4`. Take a backup first
 with ``scripts/backup_library_databases.py``. A migration only touches the
 quality tables, view and version table and never any other table.
 
@@ -77,7 +81,7 @@ from astrometricslib.models.quality.measurement import (
 logger = logging.getLogger(__name__)
 
 #: The schema version this code writes and expects.
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 _MEASUREMENT_COLUMNS = (
     "metric",
@@ -668,6 +672,9 @@ class QualityStore:
         if 1 <= version < 4:
             # A new file (version 0) has no rows to merge.
             QualityStore._migrate_from_version_3(connection)
+        if 1 <= version < 5:
+            # A new file (version 0) has no rows to rename.
+            QualityStore._migrate_from_version_4(connection)
         has_version_table = connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'quality_schema_version'"
         ).fetchone()
@@ -765,6 +772,31 @@ class QualityStore:
                     "UPDATE quality_capture_setting SET pixel_scale_arcsec = ? WHERE capture_setting_id = ?",
                     (rounded_scale, kept_id),
                 )
+
+    @staticmethod
+    def _migrate_from_version_4(connection: sqlite3.Connection) -> None:
+        """Rename the stored odd-even difference metric names.
+
+        The measurement was first called the half difference, so its rows
+        carry metric names that start with ``stacking.half`` followed by
+        ``_difference_``. This replaces that start with
+        ``stacking.odd_even_difference_`` and keeps the rest of each name.
+        Only the ``metric`` column of ``quality_measurements`` stores a
+        metric name; the view ``quality_measurements_latest`` reads from it.
+        Row ids, values, times and every other column stay as they are. A
+        second run finds no row with the old start and changes nothing.
+
+        Parameters
+        ----------
+        connection : `sqlite3.Connection`
+            A connection with a write transaction begun.
+        """
+        old_prefix = "stacking.half" + "_difference_"
+        new_prefix = "stacking.odd_even_difference_"
+        connection.execute(
+            "UPDATE quality_measurements SET metric = ? || substr(metric, ?) WHERE substr(metric, 1, ?) = ?",
+            (new_prefix, len(old_prefix) + 1, len(old_prefix), old_prefix),
+        )
 
     def get_or_create_capture_setting(self, setting: CaptureSetting) -> int:
         """Return the id of a capture setting, adding it if it is new.

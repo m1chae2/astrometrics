@@ -3,8 +3,8 @@
 A stack's measured noise in empty apertures (see `stack_noise.py`) says how
 noisy the stack is. This module says how noisy it should be if the only noise
 were the light of the sky (photon noise) and the camera's read noise. The two
-numbers are stored side by side. Their ratio is never stored: a reader divides
-them, and the parts stay visible.
+numbers are stored side by side, and their ratio is stored as its own row
+(`record_science.noise_ratio_measurements`) with the parts still visible.
 
 The model, one frame at a time. Frame ``i`` has ``S_i`` sky electrons in a
 pixel (the sky rate times the exposure), a read noise of ``R_i`` electrons and
@@ -138,8 +138,10 @@ __all__ = [
     "ExpectedNoiseOutcome",
     "ExposureGroupNoiseFacts",
     "FrameNoiseInput",
+    "MasterDarkNoiseOutcome",
     "effective_aperture_area_px",
     "expected_exposure_group_noise",
+    "expected_master_dark_noise",
     "expected_stack_noise",
     "gather_frame_noise_inputs",
     "measure_stack_sky_level",
@@ -277,6 +279,13 @@ class ExpectedNoise:
         Which Siril normalization scale the noise parts were multiplied by, or
         why they were not corrected (see `normalization_scale.py`). Empty
         until the scale step has run.
+    coherent_read_noise : `float` or `None`
+        The read noise of one frame, added up across the frames as the SAME
+        pattern (a weighted mean, not a root sum of squares), in the stack's
+        units for an aperture sum. It is what one dark frame's read noise would
+        add to the stack if the same dark frame were subtracted from every
+        light (see `expected_master_dark_noise`). `None` for a stack of several
+        exposure groups.
     """
 
     sky_noise: float
@@ -288,6 +297,7 @@ class ExpectedNoise:
     predicted_sky_level: float
     assumed_reason: str = ""
     scale_note: str = ""
+    coherent_read_noise: float | None = None
 
 
 @dataclass(frozen=True)
@@ -420,6 +430,17 @@ def expected_stack_noise(
     )
     sky_noise = scale * math.sqrt(area * sky_variance)
     read_noise = scale * math.sqrt(area * read_variance)
+    # A pattern that is the same in every frame adds up linearly, with the
+    # frames' weights and scales, not in quadrature.
+    coherent_read_adu = math.fsum(
+        frame.weight
+        / weight_total
+        * frame.exposure_scale
+        * frame.read_noise_electrons
+        / frame.gain_electrons_per_adu
+        for frame in frames
+    )
+    coherent_read_noise = scale * math.sqrt(area) * coherent_read_adu
     reasons = sorted({frame.assumed_reason for frame in frames if frame.assumed_reason})
     return ExpectedNoiseOutcome(
         ExpectedNoise(
@@ -431,7 +452,92 @@ def expected_stack_noise(
             frame_count=len(frames),
             predicted_sky_level=predicted_sky_level,
             assumed_reason="; ".join(reasons),
+            coherent_read_noise=coherent_read_noise,
         )
+    )
+
+
+@dataclass(frozen=True)
+class MasterDarkNoiseOutcome:
+    """The noise the master dark adds to an aperture sum, or why there is none.
+
+    Parameters
+    ----------
+    value : `float` or `None`
+        The noise in the stack's units, or `None`.
+    reason : `str`
+        Why there is no value. Empty when there is one.
+    assumed_reason : `str`
+        Why the value rests on an assumed input (an unmeasured gain or read
+        noise). Empty when all inputs were measured.
+    dark_frame_count : `int` or `None`
+        The number of dark frames the master was made from.
+    scale_note : `str`
+        Which normalization scale the value was multiplied by, or why not
+        (the expected noise's own note).
+    """
+
+    value: float | None
+    reason: str = ""
+    assumed_reason: str = ""
+    dark_frame_count: int | None = None
+    scale_note: str = ""
+
+
+def expected_master_dark_noise(
+    expected: ExpectedNoise | None,
+    dark_frame_count: int | None,
+    several_exposure_groups: bool,
+) -> MasterDarkNoiseOutcome:
+    """Work out the noise the master dark's own read noise adds to an aperture.
+
+    One dark frame has the read noise of the light frames' setting. A master
+    dark averaged from N dark frames has that noise divided by sqrt(N), per
+    pixel and independent from pixel to pixel. The master is subtracted from
+    every light, so the same noise pattern is in every frame and stacking does
+    not average it away. Its effect on an aperture sum is the per-pixel noise
+    times sqrt(aperture area in pixels), as for the read noise in
+    `expected_stack_noise`, with the frames' read noise added up linearly
+    (`ExpectedNoise.coherent_read_noise`).
+
+    The shot noise of each dark frame's dark current is not included: the
+    camera profile holds no dark-current rate. For a warm sensor the value is
+    therefore a lower bound.
+
+    Parameters
+    ----------
+    expected : `ExpectedNoise` or `None`
+        The stack's expected noise, already multiplied by Siril's
+        normalization scale when that was measured. `None` when there is none.
+    dark_frame_count : `int` or `None`
+        How many dark frames the run applied (`None` when unknown).
+    several_exposure_groups : `bool`
+        Whether the stack combined several exposure groups, which stack darks
+        of several lengths.
+
+    Returns
+    -------
+    outcome : `MasterDarkNoiseOutcome`
+        The value, or the reason there is none.
+    """
+    if expected is None or expected.coherent_read_noise is None:
+        reason = (
+            "the stack combines several exposure groups, each with darks of its own length"
+            if several_exposure_groups
+            else "the stack's expected noise is not available"
+        )
+        return MasterDarkNoiseOutcome(None, reason)
+    if several_exposure_groups:
+        return MasterDarkNoiseOutcome(
+            None, "the stack combines several exposure groups, each with darks of its own length"
+        )
+    if not dark_frame_count or dark_frame_count <= 0:
+        return MasterDarkNoiseOutcome(None, "no dark frame was applied to this stack")
+    return MasterDarkNoiseOutcome(
+        expected.coherent_read_noise / math.sqrt(dark_frame_count),
+        assumed_reason=expected.assumed_reason,
+        dark_frame_count=int(dark_frame_count),
+        scale_note=expected.scale_note,
     )
 
 

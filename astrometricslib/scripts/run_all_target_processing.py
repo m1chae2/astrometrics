@@ -6,12 +6,14 @@ runs the stacking step alone, ``--progress-file`` lets an interrupted run
 resume, ``--camera`` limits the run to one camera, and ``--review-list``
 writes a table (CSV) of what each target's run recorded. A stack-only run also
 stacks the earlier nights of every target whose stack holds two or more
-nights (the earlier member of the forecast check's pair);
-``--no-earlier-nights`` turns that off. It also runs the half-difference
-noise measurement for each target whose stack's measured noise is between
-1.1 and 2.0 times its predicted noise, the range where the model test alone
-cannot say whether the stack has a noise floor; ``--no-half-difference``
-turns that off.
+nights (the earlier member of the forecast check's pair), when that subset
+would hold at least `MINIMUM_EARLIER_NIGHTS_FRAMES` frames;
+``--no-earlier-nights`` turns that off. It also runs the odd–even difference
+noise measurement for every target (the library refuses it, with a stored
+reason, when a half would hold fewer than 8 frames), so each stack has a
+measured random part and a fixed-pattern noise (noise that stays at the same
+place on the sky in every frame, so more frames do not reduce it);
+``--no-odd-even-difference`` turns that off.
 
 The cameras, and their order, come from
 the setups listed in the config file: the primary camera first, then the
@@ -62,9 +64,11 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_EMPTY_APERTURE_NOISE_STACK_UNIT,
     STACKING_EXPECTED_EMPTY_APERTURE_NOISE_STACK_UNIT,
     STACKING_FRAME_WEIGHT,
-    STACKING_HALF_DIFFERENCE_NOISE_STACK_UNIT,
+    STACKING_MEASURED_TO_PREDICTED_NOISE_RATIO,
+    STACKING_ODD_EVEN_DIFFERENCE_NOISE_STACK_UNIT,
 )
 from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import parse_set_aside_action
+from astrometricslib.pipelines.stacking.subset_noise_run import ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF
 from astrometricslib.utilities.parallel_batch import BatchRunSummary
 
 # What a Nikon D5300 target needs in its camera profile before a restack:
@@ -74,18 +78,12 @@ NIKON_REQUIRED_ISO = "800"
 NIKON_REQUIRED_OFFSET = 0
 NIKON_REQUIRED_BINNING = 1
 
-# The range of the stack's measured empty-aperture noise over its predicted
-# noise in which the restack also runs the half-difference measurement.
-# Below the lower ratio the stack agrees with its model, so there is no floor
-# to look for. Above the upper ratio the floor is obvious without the
-# measurement (M 27 read 2.95). Between them the model test cannot tell a
-# noise floor from a model error; M 13 (1.40) is the case: the half-difference
-# showed its random part equals the model and the rest is a fixed pattern.
-# The two limits are design estimates, not tuned on a sample (register entry
-# WAY-D70, status Design estimate). The measurement costs about one library
-# stack per target in range.
-HALF_DIFFERENCE_LOWER_RATIO = 1.1
-HALF_DIFFERENCE_UPPER_RATIO = 2.0
+# The fewest frames the earlier-nights subset may hold for the restack to make
+# it. User decision of 2026-10-26: a smaller first stack is too noisy a check
+# of the forecast (wayfindinglib refuses such a check too). Not tuned on data;
+# register status Design estimate. The general subset minimum
+# (`MINIMUM_SUBSET_FRAMES`, 4) is unchanged.
+MINIMUM_EARLIER_NIGHTS_FRAMES = 8
 
 # Progress-file statuses. A target in `PROGRESS_DONE_STATUSES` is not run
 # again on resume. "failed" is run again only with --retry-failed, and
@@ -103,7 +101,7 @@ REVIEW_COLUMNS = (
     "predicted_noise_present",
     "aperture_set_present",
     "earlier_nights_present",
-    "half_difference",
+    "odd_even_difference",
     "frames_moved_count",
     "frames_moved",
 )
@@ -387,6 +385,8 @@ class ProgressLog:
         self.retry_failed = retry_failed
         self.run_started_at = run_started_at
         self.write_enabled = write_enabled
+        # Run-wide facts stored with every record (see `build_review_row`).
+        self.extra_fields: dict[str, Any] = {}
         self.latest = latest_progress_by_key(read_progress_records(path)) if path else {}
 
     def resume_decision(self, target_id: str, camera_name: str, focal_length_mm: float | None) -> str | None:
@@ -449,6 +449,7 @@ class ProgressLog:
             "error": (error or "")[:PROGRESS_ERROR_TEXT_LIMIT],
             "time": _utc_now_text(),
             "run_started_at": self.run_started_at,
+            **self.extra_fields,
         }
         append_progress_record(self.path, record)
         self.latest[_progress_key(target_id, camera_name, focal_length_mm)] = record
@@ -595,6 +596,12 @@ def _stack_earlier_nights_note(astrometrics: Astrometrics, target: Any, since: d
         frames = _earlier_nights_frames(astrometrics, target, since)
         if not frames:
             return ""
+        if len(frames) < MINIMUM_EARLIER_NIGHTS_FRAMES:
+            print(
+                f"  [{target.id}] earlier-nights stack skipped ({len(frames)} frames, "
+                f"fewer than {MINIMUM_EARLIER_NIGHTS_FRAMES})"
+            )
+            return ""
         astrometrics.processing.stack_subset(
             target, frames, label=EARLIER_NIGHTS_VARIANT, record_forecast_rows=True
         )
@@ -627,7 +634,11 @@ def _measured_value(rows: list[Any]) -> float | None:
 
 
 def _noise_ratio(astrometrics: Any, target_id: str, since: Any) -> float | None:
-    """Divide the library stack's measured noise by its predicted noise.
+    """Give the library stack's measured noise over its predicted noise.
+
+    The stored ``stacking.measured_to_predicted_noise_ratio`` row is read
+    first. A stack stored before that metric existed has no such row, so the
+    ratio is then found from the two noise rows.
 
     Parameters
     ----------
@@ -645,6 +656,16 @@ def _noise_ratio(astrometrics: Any, target_id: str, since: Any) -> float | None:
         when either is missing, not measured, or the predicted noise is not
         above zero.
     """
+    stored = _measured_value(
+        astrometrics.quality.query(
+            metric=STACKING_MEASURED_TO_PREDICTED_NOISE_RATIO,
+            target_id=target_id,
+            since=since,
+            library_only=True,
+        )
+    )
+    if stored is not None:
+        return stored
     measured, predicted = (
         _measured_value(
             astrometrics.quality.query(metric=metric, target_id=target_id, since=since, library_only=True)
@@ -659,30 +680,13 @@ def _noise_ratio(astrometrics: Any, target_id: str, since: Any) -> float | None:
     return measured / predicted
 
 
-def _half_difference_in_range(ratio: float | None) -> bool:
-    """Say whether a noise ratio calls for the half-difference measurement.
+def _odd_even_difference_note(astrometrics: Astrometrics, target: Any, since: datetime) -> str:
+    """Run the odd–even difference for the stack that was just made.
 
-    Parameters
-    ----------
-    ratio : `float` or `None`
-        The measured over predicted noise.
-
-    Returns
-    -------
-    in_range : `bool`
-        `True` when the ratio is between `HALF_DIFFERENCE_LOWER_RATIO` and
-        `HALF_DIFFERENCE_UPPER_RATIO`, ends included.
-    """
-    return ratio is not None and HALF_DIFFERENCE_LOWER_RATIO <= ratio <= HALF_DIFFERENCE_UPPER_RATIO
-
-
-def _half_difference_note(astrometrics: Astrometrics, target: Any, since: datetime) -> str:
-    """Run the half-difference measurement when the model test cannot decide.
-
-    The ratio of the library stack's measured to predicted noise decides
-    (see `HALF_DIFFERENCE_LOWER_RATIO`). One line is printed saying whether
-    the measurement ran or was skipped, and the ratio. A failure is a
-    by-product: it is reported in the returned text and never raised, so the
+    It runs for every stack (decision D19 of 2026-10-26): the library refuses,
+    with a stored reason, when a half would hold fewer than 8 frames. One line
+    is printed with the stack's measured-to-predicted noise ratio. A failure is
+    a by-product: it is reported in the returned text and never raised, so the
     library stack still counts as done.
 
     Parameters
@@ -697,22 +701,19 @@ def _half_difference_note(astrometrics: Astrometrics, target: Any, since: dateti
     Returns
     -------
     note : `str`
-        Empty when the measurement ran or was not needed; otherwise one
-        sentence saying why it failed.
+        Empty when the measurement ran or was refused with a stored reason;
+        otherwise one sentence saying why it failed.
     """
     try:
         ratio = _noise_ratio(astrometrics, target.id, since)
         ratio_text = "no ratio" if ratio is None else f"ratio {ratio:.2f}"
-        if not _half_difference_in_range(ratio):
-            print(f"  [{target.id}] half-difference skipped ({ratio_text})")
-            return ""
-        print(f"  [{target.id}] half-difference run ({ratio_text})")
-        astrometrics.processing.measure_half_difference_noise(target)
-    except Exception as half_difference_error:
+        print(f"  [{target.id}] odd–even difference run ({ratio_text})")
+        astrometrics.processing.measure_odd_even_difference_noise(target)
+    except Exception as odd_even_difference_error:
         # The library stack is already made and recorded; the measurement is
         # an extra. Whatever its cause, it is noted and the run goes on.
-        logging.getLogger(__name__).exception("The half-difference measurement of '%s' failed", target.id)
-        return f"the half-difference measurement failed: {half_difference_error!r}"
+        logging.getLogger(__name__).exception("The odd–even difference measurement of '%s' failed", target.id)
+        return f"the odd–even difference measurement failed: {odd_even_difference_error!r}"
     return ""
 
 
@@ -723,7 +724,7 @@ def _stack_one_target(
     focal_length_mm: float | None,
     force: bool,
     earlier_nights: bool = True,
-    half_difference: bool = True,
+    odd_even_difference: bool = True,
 ) -> tuple[str, str]:
     """Measure and stack one target's imaging frames and do nothing else.
 
@@ -751,17 +752,17 @@ def _stack_one_target(
         After the stack, also stack the target's earlier nights when the
         stack holds two or more nights (see `_stack_earlier_nights_note`).
         Defaults to `True`.
-    half_difference : `bool`, optional
+    odd_even_difference : `bool`, optional
         After the stack (and the earlier-nights stack), run the
-        half-difference measurement when the stack's measured over predicted
-        noise is in range (see `_half_difference_note`). Defaults to `True`.
+        odd–even difference measurement (see `_odd_even_difference_note`).
+        Defaults to `True`.
 
     Returns
     -------
     status, message : `tuple` [`str`, `str`]
         ``"success"`` or ``"skipped"``, and the reason when skipped. A
         ``"success"`` carries a message when the earlier-nights stack or the
-        half-difference measurement failed.
+        odd–even difference measurement failed.
 
     Raises
     ------
@@ -792,8 +793,8 @@ def _stack_one_target(
     notes = []
     if earlier_nights:
         notes.append(_stack_earlier_nights_note(astrometrics, target, stack_started_at))
-    if half_difference:
-        notes.append(_half_difference_note(astrometrics, target, stack_started_at))
+    if odd_even_difference:
+        notes.append(_odd_even_difference_note(astrometrics, target, stack_started_at))
     return "success", "; ".join(note for note in notes if note)
 
 
@@ -817,32 +818,47 @@ def _presence_label(rows: list[Any]) -> str:
     return "assumed" if usable else "no"
 
 
-def _half_difference_label(ratio: float | None, half_difference_rows: list[Any]) -> str:
-    """Say what happened to a target's half-difference measurement.
+# The start of the reason the library stores when a half would hold too few
+# frames (see `subset_noise_run._run_odd_even_difference_noise`).
+ODD_EVEN_DIFFERENCE_TOO_FEW_FRAMES_TEXT = "a half would have"
+
+
+def _odd_even_difference_label(odd_even_difference_rows: list[Any], enabled: bool, stack_made: bool) -> str:
+    """Say what happened to a target's odd–even difference measurement.
 
     Parameters
     ----------
-    ratio : `float` or `None`
-        The library stack's measured over predicted noise.
-    half_difference_rows : `list`
-        The ``stacking.half_difference_noise_stack_unit`` rows made since the
-        run began.
+    odd_even_difference_rows : `list`
+        The ``stacking.odd_even_difference_noise_stack_unit`` rows made
+        since the run began.
+    enabled : `bool`
+        Whether the run was allowed to make the measurement (no
+        ``--no-odd-even-difference``).
+    stack_made : `bool`
+        Whether the target's stack was made in this run.
 
     Returns
     -------
     label : `str`
-        ``"run"`` when a measured row exists, ``"failed"`` when the measurement
-        left only a not-measured row or, with the ratio in range, no row at
-        all, ``"skipped (ratio X)"`` when the ratio is out of range, and
-        ``"n/a"`` when there is no ratio and no row.
+        ``"run"`` when a measured row exists; ``"not run (fewer than 8 frames
+        per half)"`` when the library refused for too few frames;
+        ``"failed: <reason>"`` for any other stored reason, or when the stack
+        was made and no row was stored; ``"skipped
+        (--no-odd-even-difference)"`` when the run was told not to make it;
+        ``"n/a"`` when the stack was not made.
     """
-    if _measured_value(half_difference_rows) is not None:
+    if _measured_value(odd_even_difference_rows) is not None:
         return "run"
-    if half_difference_rows:
-        return "failed"
-    if ratio is None:
+    if not enabled:
+        return "skipped (--no-odd-even-difference)"
+    if not stack_made:
         return "n/a"
-    return "failed" if _half_difference_in_range(ratio) else f"skipped (ratio {ratio:.2f})"
+    if not odd_even_difference_rows:
+        return "failed: no result row was stored"
+    reason = " ".join((odd_even_difference_rows[0].reason or "no reason was stored").split())
+    if reason.startswith(ODD_EVEN_DIFFERENCE_TOO_FEW_FRAMES_TEXT):
+        return f"not run (fewer than {ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF} frames per half)"
+    return f"failed: {reason}"
 
 
 def build_review_row(astrometrics: Any, record: dict) -> dict[str, Any]:
@@ -874,7 +890,7 @@ def build_review_row(astrometrics: Any, record: dict) -> dict[str, Any]:
         "predicted_noise_present": "n/a",
         "aperture_set_present": "n/a",
         "earlier_nights_present": "n/a",
-        "half_difference": "n/a",
+        "odd_even_difference": "n/a",
         "frames_moved_count": "n/a",
         "frames_moved": "",
     }
@@ -907,6 +923,17 @@ def build_review_row(astrometrics: Any, record: dict) -> dict[str, Any]:
         weight.subject.observing_night_id for weight in weight_rows if weight.subject.observing_night_id
     }
     if len(nights) >= 2:
+        # A night's name is its start date, so the largest is the last.
+        earlier_frame_count = sum(
+            1 for weight in weight_rows if weight.subject.observing_night_id not in (None, max(nights))
+        )
+    else:
+        earlier_frame_count = 0
+    if len(nights) >= 2 and earlier_frame_count < MINIMUM_EARLIER_NIGHTS_FRAMES:
+        row["earlier_nights_present"] = (
+            f"skipped ({earlier_frame_count} frames, fewer than {MINIMUM_EARLIER_NIGHTS_FRAMES})"
+        )
+    elif len(nights) >= 2:
         earlier_rows = [
             astrometrics.quality.query(
                 metric=metric,
@@ -919,9 +946,10 @@ def build_review_row(astrometrics: Any, record: dict) -> dict[str, Any]:
         row["earlier_nights_present"] = (
             "yes" if all(_presence_label(rows) != "no" for rows in earlier_rows) else "no"
         )
-    row["half_difference"] = _half_difference_label(
-        _noise_ratio(astrometrics, row["target"], record.get("run_started_at")),
-        query(STACKING_HALF_DIFFERENCE_NOISE_STACK_UNIT),
+    row["odd_even_difference"] = _odd_even_difference_label(
+        query(STACKING_ODD_EVEN_DIFFERENCE_NOISE_STACK_UNIT),
+        record.get("odd_even_difference_enabled", True),
+        status == "success",
     )
     moved_frames = sorted({
         os.path.basename(quarantine_row.subject.subject_id)
@@ -972,7 +1000,7 @@ def _run_stack_only_pass(
     force: bool,
     progress: ProgressLog,
     earlier_nights: bool = True,
-    half_difference: bool = True,
+    odd_even_difference: bool = True,
 ) -> None:
     """Stack each target of one camera pass, one after the other.
 
@@ -998,9 +1026,9 @@ def _run_stack_only_pass(
     earlier_nights : `bool`, optional
         Also stack the earlier nights of each target that holds two or more
         (see `_stack_one_target`). Defaults to `True`.
-    half_difference : `bool`, optional
-        Run the half-difference measurement for each target whose noise ratio
-        is in range (see `_stack_one_target`). Defaults to `True`.
+    odd_even_difference : `bool`, optional
+        Run the odd–even difference measurement for each target whose noise
+        ratio is in range (see `_stack_one_target`). Defaults to `True`.
     """
     target_by_id = {target.id: target for target in targets}
     failed_ids: list[str] = []
@@ -1014,7 +1042,7 @@ def _run_stack_only_pass(
                 focal_length_mm,
                 force,
                 earlier_nights,
-                half_difference,
+                odd_even_difference,
             )
         except Exception as stacking_error:
             # One target's failure, whatever its cause, must not stop the
@@ -1133,13 +1161,12 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--no-half-difference",
+        "--no-odd-even-difference",
         action="store_true",
         help=(
-            "With --stack-only, do not run the half-difference noise measurement. By default it runs "
-            "for each target whose stack's measured empty-aperture noise is between "
-            f"{HALF_DIFFERENCE_LOWER_RATIO:g} and {HALF_DIFFERENCE_UPPER_RATIO:g} times its predicted "
-            "noise, and costs about one library stack."
+            "With --stack-only, do not run the odd–even difference noise measurement. By default it runs "
+            "for every target (the library refuses it when a half would hold fewer than "
+            f"{ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF} frames) and costs about one library stack."
         ),
     )
     parser.add_argument(
@@ -1170,7 +1197,7 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         help=(
             "At the end, write a CSV with one row per target in --progress-file: whether frame weights, "
             "predicted noise and the aperture-set row were recorded, whether the earlier-nights stack's "
-            "rows are there (yes, no, or n/a for a stack of one night), whether the half-difference "
+            "rows are there (yes, no, or n/a for a stack of one night), whether the odd–even difference "
             "measurement ran (run, skipped with its ratio, failed, or n/a), any refusal and its reason, and "
             "the frames the quarantine moved."
         ),
@@ -1357,6 +1384,7 @@ def run_full_processing(argv: list[str] | None = None) -> None:
     progress = ProgressLog(
         arguments.progress_file, arguments.retry_failed, run_started_at, write_enabled=not arguments.dry_run
     )
+    progress.extra_fields["odd_even_difference_enabled"] = not arguments.no_odd_even_difference
 
     if arguments.dry_run:
         # Resolved here too, so a preview shows which optic a real run
@@ -1475,7 +1503,7 @@ def run_full_processing(argv: list[str] | None = None) -> None:
                     arguments.force_restack,
                     progress,
                     not arguments.no_earlier_nights,
-                    not arguments.no_half_difference,
+                    not arguments.no_odd_even_difference,
                 )
                 continue
 

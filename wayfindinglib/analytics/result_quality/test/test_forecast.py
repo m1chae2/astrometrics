@@ -9,13 +9,14 @@ tolerance, the run grouping, the stop signal, and the pinned metric versions.
 
 Part 2b adds the rules that keep a confounded pair out of the check (aperture
 set, calibration, software version, heaviest exposure group, old frames), the
-group-mode pair check, and the noise floor applied to the forecast (with the
-M 27, M 81 and M 57 validation numbers).
+group-mode pair check, and the fixed-pattern noise applied to the forecast
+(with the M 27, M 81 and M 57 validation numbers).
 """
 
 import math
 from datetime import UTC, datetime, timedelta
 
+import numpy as np
 import pytest
 
 from astrometricslib import (
@@ -37,23 +38,24 @@ from astrometricslib.models.quality.calibration_identities import (
 from wayfindinglib.analytics.result_quality import forecast as fc
 from wayfindinglib.analytics.result_quality.efficiency import FrameObservation
 from wayfindinglib.analytics.result_quality.noise_growth import (
+    NoiseModelError,
     StackFrame,
     StackGroup,
     WeightingMode,
-    fit_noise_floor,
+    fit_fixed_pattern_noise,
     forecast_group_noise,
     forecast_stack_noise,
     frame_weights,
     group_coefficients,
-    measure_stack_noise_floor,
-    noise_ratio_with_floor,
+    measure_stack_fixed_pattern_noise,
+    noise_ratio_with_fixed_pattern_noise,
 )
 from wayfindinglib.models.planning.target_report import (
     ForecastBasis,
     ForecastCheck,
     ForecastedChange,
-    ForecastGate,
     ForecastOutcome,
+    RecommendedAdditionalFramesStatus,
 )
 
 SETTING = CaptureSetting(camera="CamA", telescope="Scope", filter_name="L", exposure_seconds=60.0)
@@ -197,8 +199,8 @@ def _run_rows(
     normalized : `float` or `None`
         The normalized noise.
     expected_noise : `float` or `None`, optional
-        The expected noise in stack units. When omitted it equals the
-        measured noise (the stack's noise is all random: no noise floor).
+        The expected noise in stack units. When omitted it equals the measured
+        noise (the stack's noise is all random: no fixed-pattern noise).
     row_id : `int`, optional
         The row id of the normalized noise.
     aperture_identity : `str` or `None`, optional
@@ -561,7 +563,7 @@ def test_runs_ignore_subset_stacks_and_old_definitions() -> None:
 
 
 def _noise_runs(measured_noise: list[float], expected_noise: list[float]) -> list[fc.StackRunRecord]:
-    """Build runs for the floor fit.
+    """Build runs for the fixed-pattern noise fit.
 
     Returns
     -------
@@ -576,10 +578,10 @@ def _noise_runs(measured_noise: list[float], expected_noise: list[float]) -> lis
     return fc.stack_runs_from_measurements(rows)
 
 
-def test_stop_signal_is_raised_by_a_floor_over_several_steps() -> None:
+def test_stop_signal_is_raised_by_a_fixed_pattern_noise_over_several_steps() -> None:
     """Noise that levels off while the model says it should fall is a stop."""
     expected = [8.0, 4.0, 2.0, 1.0]
-    # measured variance = expected variance + a floor of 36.
+    # measured variance = expected variance + fixed-pattern noise of 36.
     measured = [(e**2 + 36.0) ** 0.5 for e in expected]
 
     signal = fc.target_stop_signal(_noise_runs(measured, expected))
@@ -589,21 +591,21 @@ def test_stop_signal_is_raised_by_a_floor_over_several_steps() -> None:
 
 
 def test_stop_signal_is_absent_when_the_history_is_too_short() -> None:
-    """One stack with no floor gives no signal (too little history)."""
+    """One stack with no fixed-pattern noise gives no signal."""
     signal = fc.target_stop_signal(_noise_runs([4.0], [4.0]))
 
     assert signal.stopped is None
 
 
-def test_stop_signal_uses_the_one_stack_floor() -> None:
-    """A floor found from the newest stack alone can raise the stop.
+def test_stop_signal_uses_the_one_stack_fixed_pattern_noise() -> None:
+    """Fixed-pattern noise from the newest stack alone can raise the stop.
 
-    Measured 6.0 against expected 4.0 (1000 apertures) is a floor of 20^0.5
-    that is 125% of the random variance. It stays a floor once the expected
-    noise model's own error is counted (5.0 against 4.0 no longer does).
-    Doubling the data then cuts the noise by about 12%, above the 10% limit,
-    so the signal is "not stopped" with the gain stated; a bigger floor
-    stops.
+    Measured 6.0 against expected 4.0 (1000 apertures) is fixed-pattern noise
+    of 20^0.5 that is 125% of the random variance. It stays fixed-pattern noise
+    once the expected noise model's own error is counted (5.0 against 4.0 no
+    longer does). Doubling the data then cuts the noise by about 12%, above the
+    10% limit, so the signal is "not stopped" with the gain stated; a bigger
+    fixed-pattern noise stops.
     """
     middle = fc.target_stop_signal(_noise_runs([6.0], [4.0]))
     large = fc.target_stop_signal(_noise_runs([12.0], [4.0]))
@@ -625,12 +627,12 @@ def test_pinned_versions_match_the_registry() -> None:
         assert registry[metric].definition_version == version, metric
 
 
-def test_floor_fit_divides_each_stack_by_its_reference_flux() -> None:
+def test_fixed_pattern_noise_fit_divides_each_stack_by_its_reference_flux() -> None:
     """Stacks with different pixel scales are fitted on the normalized scale.
 
     Two runs have the same true noise but different stack units (flux 1000
     and 3000). Without the division the second would look three times
-    noisier and the fit would invent a floor.
+    noisier and the fit would invent fixed-pattern noise.
     """
     runs = []
     for index, (flux, expected) in enumerate([(1000.0, 8.0), (3000.0, 4.0), (1000.0, 2.0), (3000.0, 1.0)]):
@@ -648,9 +650,9 @@ def test_floor_fit_divides_each_stack_by_its_reference_flux() -> None:
         )
     steps = fc.noise_steps_from_runs(runs)
     assert all(step.normalized for step in steps)
-    fit = fit_noise_floor(steps)
+    fit = fit_fixed_pattern_noise(steps)
     assert fit.normalized
-    assert fit.floor_variance == pytest.approx(36.0 / 1000.0**2, rel=1e-3)
+    assert fit.fixed_pattern_variance == pytest.approx(36.0 / 1000.0**2, rel=1e-3)
     without = [run.model_copy(update={"reference_flux": None}) for run in runs]
     assert not any(step.normalized for step in fc.noise_steps_from_runs(without))
 
@@ -827,14 +829,14 @@ def test_added_frames_with_no_start_time_are_not_checkable() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Part 2b: the noise floor in the pair check
+# Part 2b: the fixed-pattern noise in the pair check
 # ---------------------------------------------------------------------------
 
 
-def _floor_pair(
+def _fixed_pattern_pair(
     measured_before: float, expected_before: float, measured_ratio: float, apertures: int
 ) -> tuple[list[fc.StackRunRecord], list[FrameObservation]]:
-    """Build two equal-weight runs whose first stack has a given floor.
+    """Build two equal-weight runs whose first stack has a given fixed_pattern.
 
     Parameters
     ----------
@@ -875,14 +877,14 @@ def _floor_pair(
     return _runs_from(rows), old + new
 
 
-def test_a_floor_in_the_earlier_stack_explains_a_small_gain() -> None:
-    """M 27: measured 3.097 against expected 1.048 is a floor.
+def test_a_fixed_pattern_noise_in_the_earlier_stack_explains_a_small_gain() -> None:
+    """M 27: measured 3.097 against expected 1.048 is fixed-pattern noise.
 
-    Without the floor the forecast is a 29% fall and a fall of 3% would be
-    "short for no known reason". With it the planned fall is about 3%.
+    Without the fixed-pattern noise the forecast is a 29% fall and a fall of 3%
+    would be "short for no known reason". With it the planned fall is about 3%.
     """
     ratio = (((3.097**2 - 1.048**2) + 0.5 * 1.048**2) / 3.097**2) ** 0.5
-    runs, observations = _floor_pair(3.097, 1.048, ratio, apertures=400)
+    runs, observations = _fixed_pattern_pair(3.097, 1.048, ratio, apertures=400)
 
     (check,) = fc.forecast_check(runs, observations)
 
@@ -891,13 +893,13 @@ def test_a_floor_in_the_earlier_stack_explains_a_small_gain() -> None:
     assert check.forecast_when_planned.noise_change_fraction > -0.05
 
 
-def test_without_a_floor_the_forecast_is_the_plain_fall() -> None:
-    """M 81: 1.126 against 0.921 is no floor at 100 apertures.
+def test_without_a_fixed_pattern_noise_the_forecast_is_the_plain_fall() -> None:
+    """M 81: 1.126 against 0.921 is no fixed-pattern noise at 100 apertures.
 
     The forecast is then the plain 29% fall, with nothing held back.
     """
-    assert not measure_stack_noise_floor(1.126, 0.921, 100).floor_detected
-    runs, observations = _floor_pair(1.126, 0.921, 0.75, apertures=100)
+    assert not measure_stack_fixed_pattern_noise(1.126, 0.921, 100).fixed_pattern_noise_detected
+    runs, observations = _fixed_pattern_pair(1.126, 0.921, 0.75, apertures=100)
 
     (check,) = fc.forecast_check(runs, observations)
 
@@ -905,34 +907,34 @@ def test_without_a_floor_the_forecast_is_the_plain_fall() -> None:
     assert check.outcome == ForecastOutcome.AS_FORECAST
 
 
-def test_a_small_gain_without_a_floor_is_short() -> None:
-    """With no floor, a 3% fall against 29% planned is short."""
-    runs, observations = _floor_pair(1.126, 1.126, 0.97, apertures=1000)
+def test_a_small_gain_without_a_fixed_pattern_noise_is_short() -> None:
+    """With no fixed-pattern noise, a 3% fall against 29% planned is short."""
+    runs, observations = _fixed_pattern_pair(1.126, 1.126, 0.97, apertures=1000)
 
     (check,) = fc.forecast_check(runs, observations)
 
     assert check.outcome == ForecastOutcome.SHORT_UNKNOWN_REASON
-    assert "no noise floor" in check.reason
+    assert "no fixed-pattern noise" in check.reason
 
 
-def test_the_m57_numbers_make_a_floor() -> None:
-    """M 57: 1.057 against 0.596 is a floor at 100 apertures."""
-    floor = measure_stack_noise_floor(1.057, 0.596, 100)
+def test_the_m57_numbers_make_a_fixed_pattern_noise() -> None:
+    """M 57: 1.057 against 0.596 is fixed-pattern noise at 100 apertures."""
+    fixed_pattern = measure_stack_fixed_pattern_noise(1.057, 0.596, 100)
 
-    assert floor.floor_detected
-    assert floor.floor_variance_share == pytest.approx(1.0 - (0.596 / 1.057) ** 2, abs=1e-6)
-
-
-def test_single_stack_floor_needs_the_expected_noise_and_two_apertures() -> None:
-    """No expected noise, or one aperture, gives no floor result."""
-    runs, _ = _floor_pair(3.097, 1.048, 0.97, apertures=400)
-
-    assert fc.single_stack_floor(runs[0]) is not None
-    assert fc.single_stack_floor(runs[0].model_copy(update={"expected_noise": None})) is None
-    assert fc.single_stack_floor(runs[0].model_copy(update={"aperture_count": 1})) is None
+    assert fixed_pattern.fixed_pattern_noise_detected
+    assert fixed_pattern.fixed_pattern_variance_share == pytest.approx(1.0 - (0.596 / 1.057) ** 2, abs=1e-6)
 
 
-def _half_difference_rows(
+def test_single_stack_fixed_pattern_noise_needs_the_expected_noise_and_two_apertures() -> None:
+    """No expected noise, or one aperture, gives no fixed-pattern noise."""
+    runs, _ = _fixed_pattern_pair(3.097, 1.048, 0.97, apertures=400)
+
+    assert fc.single_stack_fixed_pattern_noise(runs[0]) is not None
+    assert fc.single_stack_fixed_pattern_noise(runs[0].model_copy(update={"expected_noise": None})) is None
+    assert fc.single_stack_fixed_pattern_noise(runs[0].model_copy(update={"aperture_count": 1})) is None
+
+
+def _odd_even_difference_rows(
     stack_run_id: str,
     day: float,
     difference_normalized: float,
@@ -942,7 +944,7 @@ def _half_difference_rows(
     variance_factor: float | None = 0.1,
     effective_count: float = 40.0,
 ) -> list[QualityMeasurement]:
-    """Build the rows of the half-difference job on one library stack.
+    """Build the rows of the odd–even difference job on one library stack.
 
     The defaults are two disjoint halves of 20 equal frames: the difference
     has the variance factor 20 x (1/20)^2 x 2 = 0.1 and the library stack of
@@ -969,14 +971,14 @@ def _half_difference_rows(
     Returns
     -------
     rows : `list` [`QualityMeasurement`]
-        The half-difference rows, plus the stack's effective-count row.
+        The odd–even difference rows, plus the stack's effective-count row.
     """
     stack = f"T/stack_{stack_run_id}"
     when = START + timedelta(days=day)
     job = f"half_{stack_run_id}_{day}"
     return [
         _row(
-            fc.HALF_DIFFERENCE_NORMALIZED_METRIC,
+            fc.ODD_EVEN_DIFFERENCE_NORMALIZED_METRIC,
             stack,
             difference_normalized,
             job,
@@ -985,20 +987,20 @@ def _half_difference_rows(
             sample_count=apertures,
         ),
         _row(
-            fc.HALF_DIFFERENCE_APERTURE_SET_METRIC,
+            fc.ODD_EVEN_DIFFERENCE_APERTURE_SET_METRIC,
             stack,
             aperture_identity_to_number(aperture_identity),
             job,
             when,
             version=1,
         ),
-        _row(fc.HALF_DIFFERENCE_VARIANCE_FACTOR_METRIC, stack, variance_factor, job, when, version=1),
+        _row(fc.ODD_EVEN_DIFFERENCE_VARIANCE_FACTOR_METRIC, stack, variance_factor, job, when, version=1),
         _row(fc.EFFECTIVE_FRAME_COUNT_METRIC, stack, effective_count, stack_run_id, START, version=1),
     ]
 
 
 def _m13_rows(**half_arguments: float | str | None) -> list[QualityMeasurement]:
-    """Build M 13's one stack with its half-difference rows.
+    """Build M 13's one stack with its odd–even difference rows.
 
     The full stack's normalized noise is 2.056e-4 over 100 apertures. The
     difference is 2 x 1.4295e-4, so the full-stack equivalent is 1.4295e-4
@@ -1012,50 +1014,127 @@ def _m13_rows(**half_arguments: float | str | None) -> list[QualityMeasurement]:
     """
     rows = _run_rows("run1", 0, ["a0"], [1.0], 2.056e-4, expected_noise=0.14298, apertures=100)
     arguments = {"day": 1, "difference_normalized": 2.859e-4, **half_arguments}
-    return rows + _half_difference_rows("run1", **arguments)
+    return rows + _odd_even_difference_rows("run1", **arguments)
 
 
-def test_m13_half_difference_gives_a_floor_at_2_2_sigma() -> None:
-    """M 13: ln F = 0.73 over an error of 0.33 is a floor, from the halves."""
+def test_m13_odd_even_difference_gives_a_fixed_pattern_noise_at_2_2_sigma() -> None:
+    """M 13: ln F = 0.73 over an error of 0.33 is fixed-pattern noise."""
     runs = fc.stack_runs_from_measurements(_m13_rows())
 
-    floor = fc.single_stack_floor(runs[0])
+    fixed_pattern = fc.single_stack_fixed_pattern_noise(runs[0])
 
-    assert floor is not None
-    assert floor.basis == "half_difference"
-    assert floor.floor_detected
-    assert floor.sigmas == pytest.approx(2.2, abs=0.1)
-    assert floor.floor_variance_share == pytest.approx(1.0 - (1.4295 / 2.056) ** 2, abs=1e-3)
-    assert floor.predicted_random_noise == pytest.approx(1.4295e-4 * 1000.0, rel=1e-3)
-    assert "odd and even half stacks" in floor.reason
+    assert fixed_pattern is not None
+    assert fixed_pattern.basis == "odd_even_difference"
+    assert fixed_pattern.fixed_pattern_noise_detected
+    assert fixed_pattern.sigmas == pytest.approx(2.2, abs=0.1)
+    assert fixed_pattern.fixed_pattern_variance_share == pytest.approx(1.0 - (1.4295 / 2.056) ** 2, abs=1e-3)
+    assert fixed_pattern.predicted_random_noise == pytest.approx(1.4295e-4 * 1000.0, rel=1e-3)
+    assert "odd and even half stacks" in fixed_pattern.reason
 
 
-def test_m13_without_a_half_difference_has_no_floor_from_the_model() -> None:
-    """The model test, with its own error, sees no floor on M 13."""
+def test_m13_without_an_odd_even_difference_has_no_fixed_pattern_noise_from_the_model() -> None:
+    """The model test, with its own error, finds none on M 13."""
     runs = fc.stack_runs_from_measurements(_m13_rows()[:-4])
 
-    floor = fc.single_stack_floor(runs[0])
+    fixed_pattern = fc.single_stack_fixed_pattern_noise(runs[0])
 
-    assert floor is not None
-    assert floor.basis == "model"
-    assert not floor.floor_detected
-    assert "half-difference" not in floor.reason
+    assert fixed_pattern is not None
+    assert fixed_pattern.basis == "model"
+    assert not fixed_pattern.fixed_pattern_noise_detected
+    assert "odd–even difference" not in fixed_pattern.reason
 
 
-def test_a_half_difference_equal_to_the_measured_noise_gives_no_floor() -> None:
-    """When the random noise is the whole measured noise, there is no floor."""
+def test_an_odd_even_difference_equal_to_the_measured_noise_gives_no_fixed_pattern_noise() -> None:
+    """When random noise is all the measured noise, there is none."""
     runs = fc.stack_runs_from_measurements(_m13_rows(difference_normalized=2.0 * 2.056e-4))
 
-    floor = fc.single_stack_floor(runs[0])
+    fixed_pattern = fc.single_stack_fixed_pattern_noise(runs[0])
 
-    assert floor is not None
-    assert floor.basis == "half_difference"
-    assert not floor.floor_detected
-    assert floor.sigmas == pytest.approx(0.0, abs=1e-9)
+    assert fixed_pattern is not None
+    assert fixed_pattern.basis == "odd_even_difference"
+    assert not fixed_pattern.fixed_pattern_noise_detected
+    assert fixed_pattern.sigmas == pytest.approx(0.0, abs=1e-9)
+
+
+def _library_of_targets(multipliers: list[float], setting_id: int = 1) -> list[QualityMeasurement]:
+    """Build one M 13-like stack for each target.
+
+    Parameters
+    ----------
+    multipliers : `list` [`float`]
+        Each target's difference noise, as a multiple of M 13's, so the model
+        is off by that factor in noise.
+    setting_id : `int`, optional
+        The capture setting every stack points at.
+
+    Returns
+    -------
+    rows : `list` [`QualityMeasurement`]
+        The stack-level rows of all targets.
+    """
+    rows = []
+    for index, multiplier in enumerate(multipliers):
+        target = f"T{index}"
+        for row in _m13_rows(difference_normalized=2.859e-4 * multiplier):
+            subject = row.subject.model_copy(
+                update={
+                    "subject_id": row.subject.subject_id.replace("T/", f"{target}/", 1),
+                    "target_id": target,
+                    "capture_setting_id": setting_id,
+                }
+            )
+            rows.append(row.model_copy(update={"subject": subject}))
+    return rows
+
+
+_SETTING = CaptureSetting(
+    camera="ZWO ASI533MM Pro", telescope="Scope", gain_setting=100, offset=10, binning=1
+)
+
+
+def test_the_model_error_is_measured_only_from_five_targets_of_a_setting_group() -> None:
+    """Four targets keep the stand-in; five give the measured error (D17)."""
+    settings = {1: _SETTING}
+    multipliers = [0.7, 0.85, 1.0, 1.15, 1.3]
+
+    four = fc.noise_model_errors_by_setting_group(_library_of_targets(multipliers[:4]), settings)
+    five = fc.noise_model_errors_by_setting_group(_library_of_targets(multipliers), settings)
+
+    key = fc.noise_model_setting_key(_SETTING)
+    assert not four[key].measured and four[key].target_count == 4
+    assert five[key].measured and five[key].target_count == 5
+    values = [2.0 * math.log(m * 1.4295 / 1.4298) for m in multipliers]
+    expected = 0.5 * math.sqrt(float(np.var(values, ddof=1)) - (2.0 * 1.17 / 10.0) ** 2)
+    assert five[key].relative_error == pytest.approx(expected, rel=2e-3)
+
+
+def test_the_setting_group_ignores_filter_and_exposure_but_not_gain() -> None:
+    """Camera, optic, gain, offset and binning make the group."""
+    other_filter = _SETTING.model_copy(update={"filter_name": "Ha", "exposure_seconds": 300.0})
+    other_gain = _SETTING.model_copy(update={"gain_setting": 200})
+
+    assert fc.noise_model_setting_key(other_filter) == fc.noise_model_setting_key(_SETTING)
+    assert fc.noise_model_setting_key(other_gain) != fc.noise_model_setting_key(_SETTING)
+    assert fc.noise_model_error_for_setting({}, _SETTING).measured is False
+    assert fc.noise_model_error_for_setting(None, None).relative_error == pytest.approx(0.11)
+
+
+def test_a_measured_model_error_changes_the_model_basis_test_and_names_its_basis() -> None:
+    """A bigger model error lowers the significance and is named."""
+    runs = fc.stack_runs_from_measurements(_m13_rows()[:-4])
+    measured = NoiseModelError(relative_error=0.30, target_count=6, measured=True)
+
+    stand_in = fc.single_stack_fixed_pattern_noise(runs[0])
+    wide = fc.single_stack_fixed_pattern_noise(runs[0], measured)
+
+    assert stand_in is not None and wide is not None
+    assert (wide.sigmas or 0.0) < (stand_in.sigmas or 0.0)
+    assert "measured from 6 targets' odd–even differences" in wide.reason
+    assert "stand-in value" in stand_in.reason
 
 
 def _loss_account_unknown(record: fc.StackRunRecord) -> tuple[float, str]:
-    """Run the loss account's unknown part on a run's half-difference check.
+    """Run the loss account's unknown part on a run's odd–even difference.
 
     Parameters
     ----------
@@ -1069,28 +1148,28 @@ def _loss_account_unknown(record: fc.StackRunRecord) -> tuple[float, str]:
     """
     from wayfindinglib.analytics.result_quality.aggregates import MeasuredNoiseCheck, _unknown_part
 
-    inputs = fc.half_difference_noise_inputs(record)
+    inputs = fc.odd_even_difference_noise_inputs(record)
     assert inputs is not None
-    seconds, reason = _unknown_part(100.0, MeasuredNoiseCheck.from_half_difference(*inputs))
+    seconds, reason = _unknown_part(100.0, MeasuredNoiseCheck.from_odd_even_difference(*inputs))
     assert seconds is not None
     return seconds, reason
 
 
 def test_m13_loss_account_reports_an_unexplained_part_from_the_halves() -> None:
-    """M 13: the loss account and the floor both see the fixed pattern."""
+    """M 13: the loss account and the forecast both see the fixed pattern."""
     record = fc.stack_runs_from_measurements(_m13_rows())[0]
 
     seconds, reason = _loss_account_unknown(record)
-    floor = fc.single_stack_floor(record)
+    fixed_pattern = fc.single_stack_fixed_pattern_noise(record)
 
-    assert floor is not None
-    assert floor.floor_detected
+    assert fixed_pattern is not None
+    assert fixed_pattern.fixed_pattern_noise_detected
     assert seconds == pytest.approx(100.0 * (1.0 - (1.4295 / 2.056) ** 2), abs=0.1)
     assert "odd and even half stacks" in reason
     assert "fixed on the sky" in reason
 
 
-def test_a_half_difference_equal_to_the_measured_noise_is_within_error_in_the_loss_account() -> None:
+def test_an_odd_even_difference_equal_to_the_measured_noise_is_within_error_in_the_loss_account() -> None:
     """With the difference at the measured noise, nothing is unexplained."""
     record = fc.stack_runs_from_measurements(_m13_rows(difference_normalized=2.0 * 2.056e-4))[0]
 
@@ -1101,100 +1180,105 @@ def test_a_half_difference_equal_to_the_measured_noise_is_within_error_in_the_lo
     assert "odd and even half stacks" in reason
 
 
-def test_without_a_usable_half_difference_the_loss_account_keeps_the_model_basis() -> None:
-    """Without a half-difference the model check is used."""
+def test_without_a_usable_odd_even_difference_the_loss_account_keeps_the_model_basis() -> None:
+    """Without an odd–even difference the model check is used."""
     from wayfindinglib.analytics.result_quality.aggregates import MeasuredNoiseCheck, _unknown_part
 
     record = fc.stack_runs_from_measurements(_m13_rows()[:-4])[0]
     other = fc.stack_runs_from_measurements(_m13_rows(aperture_identity=OTHER_APERTURE_SET))[0]
 
-    assert fc.half_difference_noise_inputs(record) is None
-    assert fc.half_difference_noise_inputs(other) is None
+    assert fc.odd_even_difference_noise_inputs(record) is None
+    assert fc.odd_even_difference_noise_inputs(other) is None
     seconds, reason = _unknown_part(100.0, MeasuredNoiseCheck(variance_ratio=1.5, variance_ratio_error=0.1))
     assert seconds == pytest.approx(0.0)
     assert "its frames explain" in reason
     assert "half stacks" not in reason
 
 
-def test_the_floor_and_the_loss_account_agree_on_both_bases_across_ratios() -> None:
-    """A significant floor and an unexplained part go together."""
+def test_the_fixed_pattern_noise_and_the_loss_account_agree_on_both_bases_across_ratios() -> None:
+    """Significant fixed-pattern noise and an unexplained part go together."""
     from wayfindinglib.analytics.result_quality import noise_growth as ng
     from wayfindinglib.analytics.result_quality.aggregates import MeasuredNoiseCheck, _unknown_part
 
     for ratio in (1.0, 1.1, 1.5, 1.9, 2.0, 2.5, 3.0, 4.0, 8.0):
         for apertures in (30, 100, 400):
             measured = math.sqrt(ratio) * 1e-3
-            floor = ng.measure_stack_noise_floor_from_half_difference(measured, apertures, 1e-3, apertures)
-            check = MeasuredNoiseCheck.from_half_difference(measured, apertures, 1e-3, apertures)
+            fixed_pattern = ng.measure_stack_fixed_pattern_noise_from_odd_even_difference(
+                measured, apertures, 1e-3, apertures
+            )
+            check = MeasuredNoiseCheck.from_odd_even_difference(measured, apertures, 1e-3, apertures)
             seconds, _ = _unknown_part(100.0, check)
-            assert floor.floor_detected == (seconds > 0.0), (ratio, apertures)
-            model_floor = ng.measure_stack_noise_floor(measured, 1e-3, apertures)
+            assert fixed_pattern.fixed_pattern_noise_detected == (seconds > 0.0), (ratio, apertures)
+            model_fixed_pattern = ng.measure_stack_fixed_pattern_noise(measured, 1e-3, apertures)
             aperture_error = 2.0 * ng.aperture_noise_relative_error(apertures) * ratio
             model_seconds, _ = _unknown_part(
                 100.0, MeasuredNoiseCheck(variance_ratio=ratio, variance_ratio_error=aperture_error)
             )
-            assert model_floor.floor_detected == (model_seconds > 0.0), (ratio, apertures)
+            assert model_fixed_pattern.fixed_pattern_noise_detected == (model_seconds > 0.0), (
+                ratio,
+                apertures,
+            )
 
 
-def test_a_half_difference_in_other_apertures_falls_back_to_the_model() -> None:
-    """A half-difference of another aperture set is not used, and says so."""
+def test_an_odd_even_difference_in_other_apertures_falls_back_to_the_model() -> None:
+    """An odd–even difference of another aperture set is not used."""
     runs = fc.stack_runs_from_measurements(_m13_rows(aperture_identity=OTHER_APERTURE_SET))
 
-    floor = fc.single_stack_floor(runs[0])
+    fixed_pattern = fc.single_stack_fixed_pattern_noise(runs[0])
 
-    assert floor is not None
-    assert floor.basis == "model"
-    assert "other apertures" in floor.reason
+    assert fixed_pattern is not None
+    assert fixed_pattern.basis == "model"
+    assert "other apertures" in fixed_pattern.reason
 
 
-def test_an_older_half_difference_falls_back_to_the_model() -> None:
-    """A half-difference made before the stack's noise row is not its own."""
+def test_an_older_odd_even_difference_falls_back_to_the_model() -> None:
+    """An odd–even difference made before the noise row is not its own."""
     rows = _run_rows("run1", 5, ["a0"], [1.0], 2.056e-4, expected_noise=0.14298, apertures=100)
-    rows += _half_difference_rows("run1", 1, 2.859e-4)
+    rows += _odd_even_difference_rows("run1", 1, 2.859e-4)
 
     runs = fc.stack_runs_from_measurements(rows)
 
-    assert runs[0].half_difference is None
-    floor = fc.single_stack_floor(runs[0])
-    assert floor is not None
-    assert floor.basis == "model"
+    assert runs[0].odd_even_difference is None
+    fixed_pattern = fc.single_stack_fixed_pattern_noise(runs[0])
+    assert fixed_pattern is not None
+    assert fixed_pattern.basis == "model"
 
 
-def test_a_restack_does_not_inherit_the_earlier_stacks_half_difference() -> None:
-    """A half-difference belongs to the run it followed, not a later one."""
+def test_a_restack_does_not_inherit_the_earlier_stacks_odd_even_difference() -> None:
+    """An odd–even difference belongs to the run it followed."""
     rows = _m13_rows()
     rows += _run_rows("run2", 3, ["a0"], [1.0], 2.056e-4, expected_noise=0.14298, apertures=100)
     runs = fc.stack_runs_from_measurements(rows)
 
-    assert runs[0].half_difference is not None
-    assert runs[1].half_difference is None
+    assert runs[0].odd_even_difference is not None
+    assert runs[1].odd_even_difference is None
 
 
-def test_m27_has_a_floor_from_the_halves_and_from_the_model() -> None:
-    """M 27: 3.097 against a random 1.048 is a floor on either basis."""
+def test_m27_has_a_fixed_pattern_noise_from_the_halves_and_from_the_model() -> None:
+    """M 27: 3.097 against a random 1.048 is fixed-pattern noise either way."""
     rows = _run_rows("run1", 0, ["a0"], [1.0], 3.097e-3, expected_noise=1.048, apertures=100)
-    with_halves = rows + _half_difference_rows("run1", 1, 2.0 * 1.048e-3)
+    with_halves = rows + _odd_even_difference_rows("run1", 1, 2.0 * 1.048e-3)
 
-    from_halves = fc.single_stack_floor(fc.stack_runs_from_measurements(with_halves)[0])
-    from_model = fc.single_stack_floor(fc.stack_runs_from_measurements(rows)[0])
+    from_halves = fc.single_stack_fixed_pattern_noise(fc.stack_runs_from_measurements(with_halves)[0])
+    from_model = fc.single_stack_fixed_pattern_noise(fc.stack_runs_from_measurements(rows)[0])
 
     assert from_halves is not None and from_model is not None
-    assert from_halves.floor_detected and from_model.floor_detected
-    assert from_halves.basis == "half_difference"
+    assert from_halves.fixed_pattern_noise_detected and from_model.fixed_pattern_noise_detected
+    assert from_halves.basis == "odd_even_difference"
     assert from_model.basis == "model"
 
 
-def test_the_floor_sentence_names_the_basis() -> None:
-    """The forecast check says which measurement decided the floor."""
-    halves = fc.single_stack_floor(fc.stack_runs_from_measurements(_m13_rows())[0])
-    model = fc.single_stack_floor(fc.stack_runs_from_measurements(_m13_rows()[:-4])[0])
+def test_the_fixed_pattern_sentence_names_the_basis() -> None:
+    """The forecast check says which measurement decided the fixed pattern."""
+    halves = fc.single_stack_fixed_pattern_noise(fc.stack_runs_from_measurements(_m13_rows())[0])
+    model = fc.single_stack_fixed_pattern_noise(fc.stack_runs_from_measurements(_m13_rows()[:-4])[0])
 
-    assert "odd and even half stacks" in fc._floor_sentence(halves)
-    assert "noise model" in fc._floor_sentence(model)
+    assert "odd and even half stacks" in fc._fixed_pattern_sentence(halves)
+    assert "noise model" in fc._fixed_pattern_sentence(model)
 
 
-def test_the_floor_fit_ignores_runs_from_another_aperture_set() -> None:
-    """The floor fit never mixes aperture sets."""
+def test_the_fixed_pattern_noise_fit_ignores_runs_from_another_aperture_set() -> None:
+    """The fixed-pattern noise fit never mixes aperture sets."""
     expected = [8.0, 4.0, 2.0, 1.0]
     rows = []
     for index, value in enumerate(expected):
@@ -1209,11 +1293,11 @@ def test_the_floor_fit_ignores_runs_from_another_aperture_set() -> None:
         )
     runs = fc.stack_runs_from_measurements(rows)
 
-    floor = fc.noise_floor_for_runs(runs)
+    fixed_pattern = fc.fixed_pattern_noise_for_runs(runs)
 
     # Three steps in the same set (3 - 2 = 1 degree of freedom) are fitted.
-    assert floor is not None
-    assert floor.source == "fit"
+    assert fixed_pattern is not None
+    assert fixed_pattern.source == "fit"
 
 
 # ---------------------------------------------------------------------------
@@ -1378,7 +1462,7 @@ def _group_pair(
         after = forecast_group_noise(groups_of(everyone, new_noises or noises))
         # The measured normalized noise is a fraction of the stars' flux, which
         # follows the mean exposure, so that factor is left out of the ratio.
-        measured_ratio = noise_ratio_with_floor(before, after, None)
+        measured_ratio = noise_ratio_with_fixed_pattern_noise(before, after, None)
         assert measured_ratio is not None
     rows = _group_run_rows("run1", 0, old, noises, 0.010, gains=gains)
     rows += _group_run_rows(
@@ -1443,8 +1527,8 @@ def test_a_group_pair_that_gains_less_than_planned_is_short() -> None:
     assert check.outcome == ForecastOutcome.SHORT_UNKNOWN_REASON
 
 
-def test_a_floor_applies_to_the_group_pair() -> None:
-    """A floor in the earlier group stack lowers the forecast fall."""
+def test_a_fixed_pattern_noise_applies_to_the_group_pair() -> None:
+    """Fixed-pattern noise in the earlier group stack lowers the fall."""
     old = _group_frames("a30_", 12, 30.0) + _group_frames("a60_", 20, 60.0)
     new = _group_frames("b60_", 10, 60.0)
     noises = {30.0: 30.0, 60.0: 40.0}
@@ -1454,7 +1538,7 @@ def test_a_floor_applies_to_the_group_pair() -> None:
 
     (check,) = fc.forecast_check(runs, old + new)
 
-    # Floor variance 10^2 - 4^2 = 84 over a random variance of 16.
+    # Fixed-pattern variance 10^2 - 4^2 = 84 over a random variance of 16.
     assert check.outcome == ForecastOutcome.AS_FORECAST
     assert check.forecast_when_planned.noise_change_fraction > -0.05
 
@@ -1567,7 +1651,7 @@ def _folded_pair(
                 )
             return forecast_group_noise(groups)
 
-        measured_ratio = noise_ratio_with_floor(
+        measured_ratio = noise_ratio_with_fixed_pattern_noise(
             model(old, reference_exposures),
             model(old + new, later),
             None,  # type: ignore[arg-type]
@@ -1599,6 +1683,34 @@ def test_a_folded_group_is_forecast_and_checked_with_its_reference_exposure() ->
     assert check.forecast_given_frames_taken.noise_change_fraction == pytest.approx(
         check.measured.noise_change_fraction, abs=1e-6
     )
+
+
+def test_a_folded_group_that_lost_frames_is_matched_by_its_reference_exposure() -> None:
+    """A stored mean over frames the stacker dropped still finds its group.
+
+    M 27 (run bdc96e28): the stored 120 s group exposure was 127.826 s, the
+    mean over the 23 frames submitted, while the 20 stacked members average
+    129.0 s, 0.9 percent apart. The reference exposure, exactly the folded
+    length, is matched first.
+    """
+    runs, observations = _folded_pair({30.0: 30.0, 60.0: 60.0}, measured_ratio=0.9)
+    run = runs[1]
+    by_id = {observation.frame_id: observation for observation in observations}
+    frames, _problems = fc.stack_frames_from_observations(run.member_frame_ids, by_id)
+    folded = run.groups[1]
+    members_mean = math.fsum(f.exposure_seconds for f in frames if f.exposure_seconds > 45.0) / sum(
+        1 for f in frames if f.exposure_seconds > 45.0
+    )
+    stored_mean = members_mean * (1.0 - 0.0091)
+    assert abs(stored_mean - members_mean) > 0.005 * members_mean
+    lost = run.model_copy(
+        update={"groups": [run.groups[0], folded.model_copy(update={"exposure_seconds": stored_mean})]}
+    )
+
+    result = fc.stack_groups_of_run(lost, frames)
+
+    assert result.reason is None
+    assert result.group_lengths == [30.0, 60.0]
 
 
 def test_a_folded_group_with_no_reference_exposure_row_is_not_checkable() -> None:
@@ -1670,7 +1782,10 @@ def _subset_pair(runs: list[fc.StackRunRecord]) -> list[fc.StackRunRecord]:
     runs : `list` [`StackRunRecord`]
         The same runs with the first marked as a subset.
     """
-    return [runs[0].model_copy(update={"is_earlier_nights_subset": True}), runs[1]]
+    subset = runs[0].model_copy(
+        update={"is_earlier_nights_subset": True, "frames_stacked": fc.MINIMUM_EARLIER_NIGHTS_FRAMES}
+    )
+    return [subset, runs[1]]
 
 
 def _check_of(outcome: ForecastOutcome, basis: ForecastBasis) -> ForecastCheck:
@@ -1718,6 +1833,24 @@ def test_the_earlier_nights_run_is_read_and_marked() -> None:
     assert subset_run.normalized_noise == pytest.approx(0.010)
     assert subset_run.aperture_identity == APERTURE_SET
     assert fc.library_runs(with_subset)[0].run_id == "lib"
+
+
+def test_a_small_earlier_nights_stack_is_not_checkable() -> None:
+    """An earlier-nights stack of 4 frames opens no check."""
+    runs, observations = _plain_pair()
+    pair = _subset_pair(runs)
+    pair[0] = pair[0].model_copy(update={"frames_stacked": 4})
+
+    (check,) = fc.forecast_check(pair, observations)
+
+    assert check.outcome == ForecastOutcome.NOT_CHECKABLE
+    assert check.reason == "The earlier-nights stack holds 4 frames, fewer than the 8 a check needs."
+    assert fc.recommended_additional_frames_status_from_checks([check]) == (
+        RecommendedAdditionalFramesStatus.NOT_CHECKED
+    )
+    pair[0] = pair[0].model_copy(update={"frames_stacked": 8})
+    (enough,) = fc.forecast_check(pair, observations)
+    assert enough.outcome != ForecastOutcome.NOT_CHECKABLE
 
 
 def test_a_subset_pair_is_checked_and_labeled() -> None:
@@ -1909,27 +2042,39 @@ def test_checks_come_in_time_order_with_the_subset_check_first_at_one_stack() ->
         ("lib2", ForecastBasis.LATER_STACK),
     ]
     assert all(c.outcome == ForecastOutcome.AS_FORECAST for c in checks)
-    assert fc.forecast_gate_state(checks) == ForecastGate.CONFIRMED
+    assert (
+        fc.recommended_additional_frames_status_from_checks(checks)
+        == RecommendedAdditionalFramesStatus.CONFIRMED
+    )
 
 
-def test_a_later_real_check_that_agrees_confirms_the_gate() -> None:
-    """A subset check opens the gate as exploratory; a real one confirms."""
+def test_a_later_real_check_that_agrees_confirms_the_count() -> None:
+    """A subset check gives a provisional status; a real one confirms."""
     runs, observations = _three_stacks(1.0)
     only_subset = fc.forecast_check(runs[:2], observations)
 
-    assert fc.forecast_gate_state(only_subset) == ForecastGate.EXPLORATORY
-    assert fc.forecast_gate_state(fc.forecast_check(runs, observations)) == ForecastGate.CONFIRMED
+    assert (
+        fc.recommended_additional_frames_status_from_checks(only_subset)
+        == RecommendedAdditionalFramesStatus.PROVISIONAL
+    )
+    assert (
+        fc.recommended_additional_frames_status_from_checks(fc.forecast_check(runs, observations))
+        == RecommendedAdditionalFramesStatus.CONFIRMED
+    )
 
 
-def test_a_later_real_check_that_disagrees_closes_the_gate() -> None:
-    """A real check that falls short closes the gate again."""
+def test_a_later_real_check_that_disagrees_withdraws_the_count() -> None:
+    """A real check that falls short withdraws the status again."""
     runs, observations = _three_stacks(1.3)
 
     checks = fc.forecast_check(runs, observations)
 
     assert checks[0].outcome == ForecastOutcome.AS_FORECAST
     assert checks[1].outcome in (ForecastOutcome.SHORT_UNKNOWN_REASON, ForecastOutcome.SHORT_KNOWN_REASON)
-    assert fc.forecast_gate_state(checks) == ForecastGate.CLOSED
+    assert (
+        fc.recommended_additional_frames_status_from_checks(checks)
+        == RecommendedAdditionalFramesStatus.NOT_CHECKED
+    )
 
 
 def test_a_subset_with_no_library_run_makes_no_pair() -> None:
@@ -1943,63 +2088,78 @@ def test_a_subset_with_no_library_run_makes_no_pair() -> None:
 @pytest.mark.parametrize(
     ("sequence", "expected"),
     [
-        ([], ForecastGate.CLOSED),
-        ([(ForecastOutcome.AS_FORECAST, ForecastBasis.LATER_STACK)], ForecastGate.CONFIRMED),
-        ([(ForecastOutcome.SHORT_UNKNOWN_REASON, ForecastBasis.LATER_STACK)], ForecastGate.CLOSED),
-        ([(ForecastOutcome.AS_FORECAST, ForecastBasis.EARLIER_NIGHTS_SUBSET)], ForecastGate.EXPLORATORY),
-        ([(ForecastOutcome.SHORT_KNOWN_REASON, ForecastBasis.EARLIER_NIGHTS_SUBSET)], ForecastGate.CLOSED),
-        ([(ForecastOutcome.NOT_CHECKABLE, ForecastBasis.EARLIER_NIGHTS_SUBSET)], ForecastGate.CLOSED),
+        ([], RecommendedAdditionalFramesStatus.NOT_CHECKED),
+        (
+            [(ForecastOutcome.AS_FORECAST, ForecastBasis.LATER_STACK)],
+            RecommendedAdditionalFramesStatus.CONFIRMED,
+        ),
+        (
+            [(ForecastOutcome.SHORT_UNKNOWN_REASON, ForecastBasis.LATER_STACK)],
+            RecommendedAdditionalFramesStatus.NOT_CHECKED,
+        ),
+        (
+            [(ForecastOutcome.AS_FORECAST, ForecastBasis.EARLIER_NIGHTS_SUBSET)],
+            RecommendedAdditionalFramesStatus.PROVISIONAL,
+        ),
+        (
+            [(ForecastOutcome.SHORT_KNOWN_REASON, ForecastBasis.EARLIER_NIGHTS_SUBSET)],
+            RecommendedAdditionalFramesStatus.NOT_CHECKED,
+        ),
+        (
+            [(ForecastOutcome.NOT_CHECKABLE, ForecastBasis.EARLIER_NIGHTS_SUBSET)],
+            RecommendedAdditionalFramesStatus.NOT_CHECKED,
+        ),
         (
             [
                 (ForecastOutcome.AS_FORECAST, ForecastBasis.EARLIER_NIGHTS_SUBSET),
                 (ForecastOutcome.AS_FORECAST, ForecastBasis.LATER_STACK),
             ],
-            ForecastGate.CONFIRMED,
+            RecommendedAdditionalFramesStatus.CONFIRMED,
         ),
         (
             [
                 (ForecastOutcome.AS_FORECAST, ForecastBasis.EARLIER_NIGHTS_SUBSET),
                 (ForecastOutcome.SHORT_UNKNOWN_REASON, ForecastBasis.LATER_STACK),
             ],
-            ForecastGate.CLOSED,
+            RecommendedAdditionalFramesStatus.NOT_CHECKED,
         ),
         (
             [
                 (ForecastOutcome.AS_FORECAST, ForecastBasis.EARLIER_NIGHTS_SUBSET),
                 (ForecastOutcome.NOT_CHECKABLE, ForecastBasis.LATER_STACK),
             ],
-            ForecastGate.EXPLORATORY,
+            RecommendedAdditionalFramesStatus.PROVISIONAL,
         ),
         (
             [
                 (ForecastOutcome.SHORT_UNKNOWN_REASON, ForecastBasis.LATER_STACK),
                 (ForecastOutcome.AS_FORECAST, ForecastBasis.EARLIER_NIGHTS_SUBSET),
             ],
-            ForecastGate.EXPLORATORY,
+            RecommendedAdditionalFramesStatus.PROVISIONAL,
         ),
         (
             [
                 (ForecastOutcome.AS_FORECAST, ForecastBasis.LATER_STACK),
                 (ForecastOutcome.SHORT_UNKNOWN_REASON, ForecastBasis.EARLIER_NIGHTS_SUBSET),
             ],
-            ForecastGate.CONFIRMED,
+            RecommendedAdditionalFramesStatus.CONFIRMED,
         ),
         (
             [
                 (ForecastOutcome.AS_FORECAST, ForecastBasis.EARLIER_NIGHTS_SUBSET),
                 (ForecastOutcome.SHORT_UNKNOWN_REASON, ForecastBasis.EARLIER_NIGHTS_SUBSET),
             ],
-            ForecastGate.CLOSED,
+            RecommendedAdditionalFramesStatus.NOT_CHECKED,
         ),
     ],
 )
-def test_the_gate_state_follows_the_checks_in_order(
-    sequence: list[tuple[ForecastOutcome, ForecastBasis]], expected: ForecastGate
+def test_the_status_follows_the_checks_in_order(
+    sequence: list[tuple[ForecastOutcome, ForecastBasis]], expected: RecommendedAdditionalFramesStatus
 ) -> None:
-    """The gate state follows the order of agreeing and failing checks."""
+    """The status follows the order of agreeing and failing checks."""
     checks = [_check_of(outcome, basis) for outcome, basis in sequence]
 
-    assert fc.forecast_gate_state(checks) == expected
+    assert fc.recommended_additional_frames_status_from_checks(checks) == expected
 
 
 def _rows_as_the_library_writes_a_subset(rows: list[QualityMeasurement]) -> list[QualityMeasurement]:
@@ -2082,11 +2242,13 @@ class _StoreStandIn:
         return self._identities
 
 
-def test_rows_as_the_library_writes_a_subset_give_an_exploratory_gate() -> None:
-    """Subset rows as the library writes them give an exploratory gate."""
+def test_rows_as_the_library_writes_a_subset_give_an_provisional_status() -> None:
+    """Subset rows as the library writes them give a provisional status."""
     from types import SimpleNamespace
 
-    from wayfindinglib.tasks.planning_tasks.target_report_inputs import forecast_gate_of_target
+    from wayfindinglib.tasks.planning_tasks.target_report_inputs import (
+        recommended_additional_frames_status_of_target,
+    )
 
     old = _dark(20, "a")
     new = [_observation(f"b{i}") for i in range(20)]
@@ -2107,8 +2269,10 @@ def test_rows_as_the_library_writes_a_subset_give_an_exploratory_gate() -> None:
 
     runs = fc.stack_runs_from_measurements([*library_rows, *subset_rows], include_earlier_nights=True)
     subset = next(run for run in runs if run.is_earlier_nights_subset)
-    gate = forecast_gate_of_target(astrometrics, "T", store.query(library_only=True), everyone)
+    frames_status = recommended_additional_frames_status_of_target(
+        astrometrics, "T", store.query(library_only=True), everyone
+    )
 
     assert subset.stack_subject_id == subset_subject
     assert subset.member_frame_ids == sorted(o.frame_id for o in old)
-    assert gate == ForecastGate.EXPLORATORY
+    assert frames_status == RecommendedAdditionalFramesStatus.PROVISIONAL

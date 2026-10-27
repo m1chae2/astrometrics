@@ -49,6 +49,11 @@ ELONGATION_METRIC = "frame.star_elongation"
 RAW_FRAME_CLIPPING_METRIC = "stacking.gate_raw_frame_clipping"
 FLAT_NOISE_IN_APERTURE_METRIC = "stacking.flat_noise_in_aperture_stack_unit"
 EMPTY_APERTURE_NOISE_METRIC = "stacking.empty_aperture_noise_stack_unit"
+ODD_EVEN_APERTURE_RECORD_COUNT_METRIC = "stacking.odd_even_difference_aperture_record_count"
+ODD_EVEN_DIFFERENCE_ROW_SCATTER_METRIC = "stacking.odd_even_difference_row_average_scatter_stack_unit"
+ODD_EVEN_DIFFERENCE_COLUMN_SCATTER_METRIC = "stacking.odd_even_difference_column_average_scatter_stack_unit"
+ODD_EVEN_SUM_ROW_SCATTER_METRIC = "stacking.odd_even_sum_row_average_scatter_stack_unit"
+ODD_EVEN_SUM_COLUMN_SCATTER_METRIC = "stacking.odd_even_sum_column_average_scatter_stack_unit"
 FLAT_NOISE_FRACTION_METRIC = "stacking.flat_noise_fraction"
 FLAT_FRAME_COUNT_METRIC = "stacking.flat_frame_count"
 EFFECTIVE_TIME_METRIC = "stacking.effective_time_s"
@@ -241,8 +246,8 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         statement_kind=StatementKind.RECOMMENDATION,
         action_class=ActionClass.CAPTURE_SETTINGS,
         requires=[
-            MetricRequirement(name=SKY_NOISE_METRIC, definition_version=2),
-            MetricRequirement(name=READ_NOISE_METRIC, definition_version=1),
+            MetricRequirement(name=SKY_NOISE_METRIC, definition_version=3),
+            MetricRequirement(name=READ_NOISE_METRIC, definition_version=2),
         ],
         limits=[
             _design_limit(
@@ -427,20 +432,19 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         requires=[
             MetricRequirement(name=EMPTY_APERTURE_NOISE_METRIC, definition_version=3),
             MetricRequirement(name=EFFECTIVE_TIME_METRIC, definition_version=1),
-            MetricRequirement(name=SKY_RATE_METRIC, definition_version=2),
-            MetricRequirement(name=READ_NOISE_METRIC, definition_version=1),
+            MetricRequirement(name=SKY_RATE_METRIC, definition_version=3),
+            MetricRequirement(name=READ_NOISE_METRIC, definition_version=2),
         ],
         limits=[],
         register_entry="WAY-D61",
         confidence=Confidence.DESIGN_ESTIMATE,
         wording=(
-            "Take {frame_count} more at {exposure_text} (about {wall_clock_text}) to cut the noise "
-            "by about {noise_percent:.0f}%."
+            "Recommended additional frames: {frame_count} at {exposure_text} (about {wall_clock_text}), "
+            "which cuts the noise by about {noise_percent:.0f}%."
         ),
         plain_wording=(
-            "Take {frame_count} more {exposure_clause}frames: we expect roughly {noise_percent:.0f}% "
-            "less noise, "
-            "in about {wall_clock_text}."
+            "Recommended additional frames: {frame_count}, using {exposure_phrase}, for roughly "
+            "{noise_percent:.0f}% less noise in about {wall_clock_text}."
         ),
         produces="package_row",
         purpose=(
@@ -468,7 +472,7 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
             "{plain_advice_text}"
         ),
         purpose=(
-            "A noise floor means more frames do not help until the cause (flats, dither, a fixed "
+            "Fixed-pattern noise means more frames do not help until the cause (flats, dither, a fixed "
             "pattern) is fixed."
         ),
         computed_by="report_rules",
@@ -490,6 +494,80 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         purpose=(
             "A calibration frame taken at other settings does not remove the fixed pattern of the "
             "light frames."
+        ),
+        computed_by="report_rules",
+    ),
+    QualityRule(
+        name="retake_flats",
+        statement_kind=StatementKind.RECOMMENDATION,
+        action_class=ActionClass.CALIBRATION,
+        requires=[MetricRequirement(name=ODD_EVEN_APERTURE_RECORD_COUNT_METRIC, definition_version=1)],
+        limits=[],
+        register_entry="WAY-D32",
+        confidence=Confidence.DESIGN_ESTIMATE,
+        wording=(
+            "Retake flats: the stack's fixed-pattern noise changes with the distance from the image center "
+            "({statistic}; {sigmas:.1f} standard errors), as a flat-field or vignetting residual does."
+        ),
+        plain_wording=(
+            "Take new flat frames. The extra noise in the combined picture follows the distance from the "
+            "center, which is what a flat that no longer matches the optics looks like."
+        ),
+        produces="checklist_item",
+        purpose=(
+            "A trend of the fixed pattern with the distance from the center points to a flat-field residual, "
+            "which new flats can remove and more light frames cannot."
+        ),
+        computed_by="report_rules",
+    ),
+    QualityRule(
+        name="check_gradient_removal",
+        statement_kind=StatementKind.RECOMMENDATION,
+        action_class=ActionClass.ADJUSTMENT,
+        requires=[MetricRequirement(name=ODD_EVEN_APERTURE_RECORD_COUNT_METRIC, definition_version=1)],
+        limits=[],
+        register_entry="WAY-D32",
+        confidence=Confidence.DESIGN_ESTIMATE,
+        wording=(
+            "Check gradient removal: the stack's fixed-pattern noise includes a gradient across the image "
+            "({statistic}; {sigmas:.1f} standard errors)."
+        ),
+        plain_wording=(
+            "Check the background (gradient) removal step. The combined picture has a smooth slope in its "
+            "brightness that the two half pictures share."
+        ),
+        produces="none",
+        purpose=(
+            "A plane in the sum of the half stacks that is absent in their difference is a sky or background "
+            "gradient that the processing should remove."
+        ),
+        computed_by="report_rules",
+    ),
+    QualityRule(
+        name="use_line_pattern_removal",
+        statement_kind=StatementKind.RECOMMENDATION,
+        action_class=ActionClass.ADJUSTMENT,
+        requires=[
+            MetricRequirement(name=ODD_EVEN_DIFFERENCE_ROW_SCATTER_METRIC, definition_version=1),
+            MetricRequirement(name=ODD_EVEN_DIFFERENCE_COLUMN_SCATTER_METRIC, definition_version=1),
+            MetricRequirement(name=ODD_EVEN_SUM_ROW_SCATTER_METRIC, definition_version=1),
+            MetricRequirement(name=ODD_EVEN_SUM_COLUMN_SCATTER_METRIC, definition_version=1),
+        ],
+        limits=[],
+        register_entry="WAY-D32",
+        confidence=Confidence.DESIGN_ESTIMATE,
+        wording=(
+            "Use line pattern removal: the stack's fixed-pattern noise includes bands along rows or columns "
+            "({statistic}; {sigmas:.1f} standard errors)."
+        ),
+        plain_wording=(
+            "Use the line pattern (banding) removal step. The combined picture has faint stripes that both "
+            "half pictures share."
+        ),
+        produces="none",
+        purpose=(
+            "Row or column averages that scatter more in the sum of the half stacks than in their difference "
+            "are line pattern noise, which a line pattern removal step takes out."
         ),
         computed_by="report_rules",
     ),
@@ -523,7 +601,7 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         name="sky_cost",
         statement_kind=StatementKind.RECOMMENDATION,
         action_class=ActionClass.SCHEDULING,
-        requires=[MetricRequirement(name=SKY_RATE_METRIC, definition_version=2)],
+        requires=[MetricRequirement(name=SKY_RATE_METRIC, definition_version=3)],
         limits=[],
         register_entry="WAY-D64",
         confidence=Confidence.DESIGN_ESTIMATE,
@@ -549,7 +627,7 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         action_class=ActionClass.SCHEDULING,
         requires=[
             MetricRequirement(name=STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC, definition_version=1),
-            MetricRequirement(name=SKY_RATE_METRIC, definition_version=2),
+            MetricRequirement(name=SKY_RATE_METRIC, definition_version=3),
         ],
         limits=[],
         register_entry="WAY-D65",

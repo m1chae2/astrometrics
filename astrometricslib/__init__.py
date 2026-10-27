@@ -170,10 +170,10 @@ from astrometricslib.models.quality.quality_summary import (
 from astrometricslib.models.quality.row_frames import QualityRowFile, QualityRowResolution
 from astrometricslib.models.quality.subset_stacks import (
     EARLIER_NIGHTS_VARIANT,
-    HalfDifferenceNoiseResult,
     NightContribution,
     NightContributionResult,
     NoiseGrowthResult,
+    OddEvenDifferenceNoiseResult,
     SubsetStackResult,
 )
 from astrometricslib.models.stellar_source import (
@@ -239,6 +239,9 @@ if TYPE_CHECKING:
         aperture_identity_from_number,
         aperture_identity_to_number,
     )
+    from astrometricslib.pipelines.stacking.post_processing.odd_even_apertures import (
+        load_odd_even_aperture_record,
+    )
     from astrometricslib.pipelines.stacking.post_processing.stack_membership import (
         group_frame_weights,
         wfwhm_weights,
@@ -282,6 +285,7 @@ _DEFERRED_EXPORTS = {
     "group_frame_weights": "astrometricslib.pipelines.stacking.post_processing.stack_membership",
     "aperture_identity_from_number": "astrometricslib.pipelines.stacking.post_processing.empty_apertures",
     "aperture_identity_to_number": "astrometricslib.pipelines.stacking.post_processing.empty_apertures",
+    "load_odd_even_aperture_record": "astrometricslib.pipelines.stacking.post_processing.odd_even_apertures",
     "fold_exposure_lengths": "astrometricslib.pipelines.stacking.processing.exposure_groups",
     "check_choice": "astrometricslib.pipelines.shared.api_arguments",
     "check_include": "astrometricslib.pipelines.shared.api_arguments",
@@ -485,7 +489,6 @@ __all__ = [
     "GaiaXpDriver",
     "GenerationDescription",
     "GroupedFrameStat",
-    "HalfDifferenceNoiseResult",
     "HardwareError",
     "ImageProcessing",
     "InputQualityReport",
@@ -505,6 +508,7 @@ __all__ = [
     "NoiseGrowthResult",
     "NotFoundError",
     "NumpyEncoder",
+    "OddEvenDifferenceNoiseResult",
     "OverlayStar",
     "Parameter",
     "ParameterDescription",
@@ -598,6 +602,7 @@ __all__ = [
     "group_frame_weights",
     "has_catalog_magnitude",
     "is_path_inside",
+    "load_odd_even_aperture_record",
     "locks_directory",
     "log_context",
     "new_request_id",

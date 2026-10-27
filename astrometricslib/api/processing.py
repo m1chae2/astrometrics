@@ -37,9 +37,9 @@ from astrometricslib.models.quality.quality_reports import (
 )
 from astrometricslib.models.quality.quality_summary import STACKING_PIPELINE_VERSION
 from astrometricslib.models.quality.subset_stacks import (
-    HalfDifferenceNoiseResult,
     NightContributionResult,
     NoiseGrowthResult,
+    OddEvenDifferenceNoiseResult,
     SubsetStackResult,
 )
 from astrometricslib.models.sensor_noise_measurement import SensorNoiseMeasurement
@@ -897,7 +897,7 @@ class ProcessingPipelines:
         *,
         maximum_steps: int = 4,
         include_night_contributions: bool = False,
-        include_half_difference: bool = True,
+        include_odd_even_difference: bool = True,
         register_job: bool = True,
     ) -> NoiseGrowthResult:
         """Stack growing subsets of a target and measure each one's noise.
@@ -920,7 +920,7 @@ class ProcessingPipelines:
         record are never changed.
 
         Cost: one stack for each subset, four by default, each with fewer
-        frames than the library stack, plus the half-difference noise (two
+        frames than the library stack, plus the odd–even difference noise (two
         stacks of half the frames each, about one library stack's time and
         Siril's temporary disk). Expect the time of about two to four library
         stacks (a design estimate, not a measurement). This job does not
@@ -939,12 +939,12 @@ class ProcessingPipelines:
         include_night_contributions : `bool`, optional
             Also run `measure_night_contributions` in the same job. Defaults
             to `False`, because it costs one more stack for every night.
-        include_half_difference : `bool`, optional
-            Also run `measure_half_difference_noise` in the same job, under
+        include_odd_even_difference : `bool`, optional
+            Also run `measure_odd_even_difference_noise` in the same job, under
             the same lock, after the series. Defaults to `True`: it costs
             about one library stack's time, and it is the noise measure that
             ignores structure the frames share. Its result is in
-            ``half_difference`` and its rows are counted there.
+            ``odd_even_difference`` and its rows are counted there.
         register_job : `bool`, optional
             Record the run in the job list. Defaults to `True`.
 
@@ -959,9 +959,9 @@ class ProcessingPipelines:
             If ``maximum_steps`` is below 1.
         """
         from astrometricslib.pipelines.stacking.subset_noise_run import (
-            run_half_difference_noise,
             run_night_contributions,
             run_noise_growth,
+            run_odd_even_difference_noise,
         )
 
         if maximum_steps < 1:
@@ -993,9 +993,9 @@ class ProcessingPipelines:
                     drivers=self._drivers,
                     stacking_slot=self.acquire_stacking_slot,
                 )
-            if include_half_difference:
+            if include_odd_even_difference:
                 try:
-                    result.half_difference = run_half_difference_noise(
+                    result.odd_even_difference = run_odd_even_difference_noise(
                         resolved,
                         library_stack_path,
                         context=context,
@@ -1004,9 +1004,9 @@ class ProcessingPipelines:
                         stacking_slot=self.acquire_stacking_slot,
                     )
                 except Exception as error:  # the series is already stored; report, do not lose it
-                    logger.exception("The half-difference noise of %s failed", resolved.id)
+                    logger.exception("The odd–even difference noise of %s failed", resolved.id)
                     result.notes.append(
-                        f"The half-difference noise was not measured ({type(error).__name__}: {error})."
+                        f"The odd–even difference noise was not measured ({type(error).__name__}: {error})."
                     )
             return result
 
@@ -1064,9 +1064,9 @@ class ProcessingPipelines:
             )
 
     @background_job("stacking", grace_period_seconds=8.0)
-    def measure_half_difference_noise(
+    def measure_odd_even_difference_noise(
         self, target: str | Target, *, keep_halves: bool = False, register_job: bool = True
-    ) -> HalfDifferenceNoiseResult:
+    ) -> OddEvenDifferenceNoiseResult:
         """Measure a library stack's random noise from two halves.
 
         The library stack's frames are put in order of capture time and split
@@ -1086,8 +1086,9 @@ class ProcessingPipelines:
         ``..._normalized``), the reference flux the normalized value divides
         by, the two halves' effective frame counts, the variance factor, the
         variance ratio with each frame's modeled noise, and the shared
-        frame's two weight shares (all ``stacking.half_difference_*``). Five
-        more rows say what the two halves share at the scale of a few pixels
+        frame's two weight shares (all
+        ``stacking.odd_even_difference_*``). Five more rows say what the two
+        halves share at the scale of a few pixels
         (an upper limit of a fixed pattern on the sensor) and how that
         differs along and across the pointing drift (the
         ``stacking.half_shared_fine_scale_*`` and ``stacking.walking_noise_*``
@@ -1117,18 +1118,18 @@ class ProcessingPipelines:
 
         Returns
         -------
-        result : `HalfDifferenceNoiseResult`
+        result : `OddEvenDifferenceNoiseResult`
             The difference noise, the halves' effective frame counts and the
             library stack's own noise that the difference implies, or the
             reason there are none.
         """
-        from astrometricslib.pipelines.stacking.subset_noise_run import run_half_difference_noise
+        from astrometricslib.pipelines.stacking.subset_noise_run import run_odd_even_difference_noise
 
         resolved = self._resolve(target)
         library_stack_path = self._library_stack_path(resolved, "imaging")
         with registered_job(enabled=register_job, job_type="stacking", target_id=resolved.id) as job:
             context = self._subset_context(resolved, job.job_id)
-            return run_half_difference_noise(
+            return run_odd_even_difference_noise(
                 resolved,
                 library_stack_path,
                 context=context,

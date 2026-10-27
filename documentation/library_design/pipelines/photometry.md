@@ -79,7 +79,7 @@ $$F_\text{net} = \sum_{q \in \text{ap}} I_q - n_\text{pix} \bar{B} \tag{1}$$
 
 where $I_q$ is the value of pixel $q$ in ADU (analog-to-digital units, raw camera counts), $n_\text{pix}$ the number of pixels in the circle, and $\bar{B}$ the median of a sky ring (annulus) from 7 to 12 pixels. Divided by the exposure, it becomes a flux in ADU per second.
 
-**Its error.** The CCD equation adds up every noise source in electrons: the star's own photon noise, the sky, the read noise and the dark current. A large error compared with $F_\text{net}$ means a noisy measurement. In the symbols of the architecture paper's Equation (7), the 1σ error (one standard deviation) in ADU is $\sigma_{\text{ap}} / G$, where
+**Its error.** The CCD equation adds up every noise source in electrons: the star's own photon noise, the sky, the read noise and the dark current. A large error compared with $F_\text{net}$ means a noisy measurement. In the symbols of the architecture paper's Equation (11), the 1σ error (one standard deviation) in ADU is $\sigma_{\text{ap}} / G$, where
 
 $$\sigma_{\text{ap}}^2 = S_\star + n_\text{pix}\left(s_\text{sky} + \sigma_\text{rd}^2 + D\right)
   + \frac{n_\text{pix}^2}{n_\text{sky}}\left(s_\text{sky} + \sigma_\text{rd}^2 + D\right) \tag{2}$$
@@ -90,7 +90,7 @@ Here $G$ is the gain in electrons per ADU, $S_\star = G F_\text{net}$ the star's
 
 **Choosing the comparison stars.** A fixed comparison set is chosen per session. Candidates are measured, unsaturated (not clipped at the sensor's maximum) and positive in every usable frame and not listed as variable. The brightest 2% are skipped, and the band reaches the brightest 30%. Candidates that scatter more than their errors allow are then dropped one at a time, worst first. Dropping stops when no candidate is out of line, or when only 5 remain. At most 20 are kept.
 
-**The ensemble signal.** The symbols follow the architecture paper: $i$ is a star, $c$ a comparison star and $t$ the time of a frame. Each comparison star's flux is divided by its own mean over the session, so a ratio of 1 means "normal". The ensemble signal $L_\text{ens}(t)$ is the weighted average of those ratios in the frame at time $t$, scaled back to flux units by the mean of the comparison stars' session means. The average is inverse-variance weighted: each star counts in proportion to one over its squared fractional error, so precise stars count more than noisy ones. This is Equation (8) of the paper:
+**The ensemble signal.** The symbols follow the architecture paper: $i$ is a star, $c$ a comparison star and $t$ the time of a frame. Each comparison star's flux is divided by its own mean over the session, so a ratio of 1 means "normal". The ensemble signal $L_\text{ens}(t)$ is the weighted average of those ratios in the frame at time $t$, scaled back to flux units by the mean of the comparison stars' session means. The average is inverse-variance weighted: each star counts in proportion to one over its squared fractional error, so precise stars count more than noisy ones. This is Equation (12) of the paper:
 
 $$L_\text{ens}(t) = \bar{\mu}\,\frac{\sum_c w_c(t) \, F_c(t) / \mu_c}{\sum_c w_c(t)}, \qquad
 w_c(t) = \frac{1}{\epsilon_c(t)^2}, \qquad
@@ -113,7 +113,7 @@ Normalization needs at least 2 comparison stars. With fewer, the raw light curve
 
 **The noise model.** A noise model gives the scatter a constant star of instrumental magnitude $m_\text{inst}$ shows in this field, $\sigma_\text{model}(m_\text{inst})$. It is the median measured scatter in brightness bins, so it includes noise the CCD equation leaves out (centroid jitter, flat-field errors). It needs at least 20 stars.
 
-**The three indices.** In each, $\hat{F}_j$ is point $j$ of one star's light curve, $e_j$ its error, $\bar{F}_w$ the error-weighted mean of the points and $n_\text{pts}$ the number of points, as in the paper's Equation (9). When a star's errors are smaller than the noise model's scatter, they are scaled up to it, so a constant star gives the values below.
+**The three indices.** In each, $\hat{F}_j$ is point $j$ of one star's light curve, $e_j$ its error, $\bar{F}_w$ the error-weighted mean of the points and $n_\text{pts}$ the number of points, as in the paper's Equation (13). When a star's errors are smaller than the noise model's scatter, they are scaled up to it, so a constant star gives the values below.
 
 The reduced chi-square $\chi^2_\nu$ asks whether the points scatter more than their error bars allow. A value near 1 means noise only; well above 1 means extra variation:
 
@@ -128,7 +128,7 @@ $$\delta_j = \sqrt{\frac{n_\text{pts}}{n_\text{pts}-1}}\,\frac{\hat{F}_j - \bar{
 
 The excess scatter $E_\sigma$ compares the star's measured scatter (in magnitudes) with what the noise model expects for a star of its brightness. 1 means typical; 2 means twice the usual scatter:
 
-$$E_\sigma = \frac{\sigma_\text{measured}}{\sigma_\text{model}(m_\text{inst})} \tag{7}$$
+$$E_\sigma = \frac{\sigma_\text{obs}}{\sigma_\text{model}(m_\text{inst})} \tag{7}$$
 
 Eq. 6 is the single-band Stetson J (all points in one filter; Stetson also defines a version that pairs points taken in two filters), with consecutive pairs and unit weights (Stetson 1996, PASP 108, 851).
 
@@ -164,7 +164,7 @@ where MAD is the unscaled median absolute deviation (the median distance of the 
 
 A light curve too short to search gets "insufficient data" instead.
 
-**Many searches.** Searching many stars raises the chance that one passes by luck. For $N_s$ independent searches, the chance that at least one reaches probability $p$ by luck is the family-wise false-alarm probability (Equation (11) of the architecture paper)
+**Many searches.** Searching many stars raises the chance that one passes by luck. For $N_s$ independent searches, the chance that at least one reaches probability $p$ by luck is the family-wise false-alarm probability (Equation (15) of the architecture paper)
 
 $$p_\text{corr} = 1 - (1 - p)^{N_s} \tag{10}$$
 
@@ -195,7 +195,7 @@ Symbols follow the architecture paper's [list of symbols](../Astrometrics_Librar
 | $m_\text{inst}$ | Instrumental magnitude | mag |
 | $\bar{F}_\star$ | Mean raw brightness of a star | ADU/s |
 | $\sigma_\text{model}(m_\text{inst})$ | Scatter of a constant star in the field's noise model | mag |
-| $\sigma_\text{measured}$ | Measured scatter of a star | mag |
+| $\sigma_\text{obs}$ | Measured scatter of a star | mag |
 | $\delta_j$, $P_j$ | Normalized residual of point $j$, and the product of neighboring residuals | none |
 | $J$, $J_\text{thr}$ | Stetson J index, and its threshold | none |
 | $E_\sigma$, $E_{\sigma,\text{thr}}$ | Excess scatter, and its threshold | none |

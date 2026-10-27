@@ -15,7 +15,11 @@ What one run does, in order:
    was last measured (`FrameRecord.quality_measured_file_size` and
    `quality_measured_file_modified_ns`). Asking the file system for that
    stamp does not read the pixels, so a second run over an unchanged library
-   costs almost nothing.
+   costs almost nothing. Two kinds of
+   frame are not skipped: one measured with an older set of frame metrics, and
+   one whose stored sky rate says the camera profile had no gain and read
+   noise entry while the profile now has one
+   (`frames_whose_camera_profile_gap_closed`: one store query, no file read).
 4. Find the camera profile, the capture setting row and the bias level for
    each remaining frame. The bias level is the sigma-clipped mean over a few
    bias frames taken at exactly the frame's gain setting, offset and binning.
@@ -87,13 +91,14 @@ from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, collapse_to_2d
 from astrometricslib.drivers.quality_store import QualityStore
 from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.foundation.jobs.runner import JobHandle, get_current_job
-from astrometricslib.models.camera_profile import CameraProfile
+from astrometricslib.models.camera_profile import UNMIGRATED_NOISE_REASON, CameraProfile
 from astrometricslib.models.quality.capture_setting import CaptureSetting
 from astrometricslib.models.quality.frame_measurement_summary import FrameMeasurementSummary
 from astrometricslib.models.quality.measurement import (
     MeasurementOrigin,
     MeasurementStatus,
     QualityMeasurement,
+    SubjectLevel,
 )
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.frame_scanning import file_state_matches
@@ -102,10 +107,14 @@ from astrometricslib.pipelines.shared.quality.frame_measurement import (
     UNREADABLE_FRAME_REASON_PREFIX,
     frame_metric_set_fingerprint,
     frame_subject,
+    frame_subject_id,
     measure_clipped_mean_adu,
     measure_frame,
 )
-from astrometricslib.pipelines.shared.quality.metrics import FRAME_BACKGROUND_LEVEL
+from astrometricslib.pipelines.shared.quality.metrics import (
+    FRAME_BACKGROUND_LEVEL,
+    FRAME_SKY_RATE_E_PER_S_PER_PX,
+)
 from astrometricslib.pipelines.shared.quality.record_measurements import record_measurements
 from astrometricslib.pipelines.stacking.exact_bias_frames import exact_setting_bias_frames
 from astrometricslib.pipelines.stacking.metrics import FRAME_QUARANTINE_ROUNDNESS, FRAME_QUARANTINE_SKY_MEDIAN
@@ -137,6 +146,7 @@ __all__ = [
     "build_capture_setting",
     "frame_needs_measuring",
     "frame_was_cut_short",
+    "frames_whose_camera_profile_gap_closed",
     "measurements_to_store",
     "quarantine_measurements_for_frame",
     "record_frame_measurements_for_target",
@@ -321,6 +331,80 @@ def frame_needs_measuring(frame: FrameRecord, file_state: os.stat_result | None)
     return not file_state_matches(
         file_state, frame.quality_measured_file_size, frame.quality_measured_file_modified_ns
     )
+
+
+# The start of the reason text that `CameraProfile.sensor_noise_gap_reason`
+# gives when the profile holds no gain and read noise entry for a frame's
+# setting. A stored ``not_measured`` sky rate with this start is a profile gap.
+_PROFILE_GAP_REASON_PREFIX = "camera profile has no gain and read noise entry"
+
+# Text in a profile gap reason that marks a gap which a profile edit cannot
+# close: the frame itself is cut off at zero, so no entry of another offset may
+# stand in for it.
+_FRAME_CLIPPED_REASON_TEXT = "is clipped at zero"
+
+
+def frames_whose_camera_profile_gap_closed(
+    store: QualityStore,
+    target_id: str,
+    frames: Sequence[FrameRecord],
+    find_camera_profile: Callable[[FrameRecord], CameraProfile],
+) -> set[str]:
+    """Find frames whose sky lacked only a camera profile entry.
+
+    A frame's file and metric set can be unchanged while its camera profile
+    changes (a gain and read noise entry is added, or the offset fallback is
+    allowed). The frame's stored sky rate then still says "no entry", and the
+    stamp would keep the frame from being measured again. This finds those
+    frames with one query of the quality store, and reads no frame file.
+
+    Parameters
+    ----------
+    store : `QualityStore`
+        The quality store holding the frames' rows.
+    target_id : `str`
+        The target the frames belong to.
+    frames : `Sequence` [`FrameRecord`]
+        The frames to check.
+    find_camera_profile : `Callable`
+        Gives the camera profile now in force for a frame.
+
+    Returns
+    -------
+    paths : `set` [`str`]
+        The paths of the frames whose latest sky rate row is ``not_measured``
+        for a missing profile entry, and whose gain setting, offset and
+        binning the current profile now resolves. The offset fallback is
+        assumed allowed, because the pixels are not read here. A frame that
+        was found clipped at zero is left out, so it is not measured again
+        on every run. Empty when no frame qualifies.
+    """
+    if not frames:
+        return set()
+    rows = store.query(
+        metric=FRAME_SKY_RATE_E_PER_S_PER_PX,
+        level=SubjectLevel.FRAME,
+        target_id=target_id,
+        latest_only=True,
+    )
+    gap_subjects = {
+        row.subject.subject_id
+        for row in rows
+        if row.status == MeasurementStatus.NOT_MEASURED
+        and (row.reason.startswith(_PROFILE_GAP_REASON_PREFIX) or row.reason == UNMIGRATED_NOISE_REASON)
+        and _FRAME_CLIPPED_REASON_TEXT not in row.reason
+    }
+    closed: set[str] = set()
+    for frame in frames:
+        if frame_subject_id(frame.path, target_id) not in gap_subjects:
+            continue
+        profile = find_camera_profile(frame)
+        if (
+            profile.sensor_noise_for(frame.iso, frame.offset, frame.binning, clipped_at_zero=False)
+            is not None
+        ):
+            closed.add(frame.path)
+    return closed
 
 
 def _stamp_frame_as_measured(frame: FrameRecord, file_state: os.stat_result) -> None:
@@ -994,6 +1078,10 @@ def _measure_target_frames(
     lights.sort(key=lambda frame: frame.timestamp if frame.timestamp is not None else -math.inf, reverse=True)
     summary = FrameMeasurementSummary(target_id=target.id, frames_considered=len(lights))
 
+    # One store query finds frames a profile edit made measurable.
+    profile_gap_closed = frames_whose_camera_profile_gap_closed(
+        session.store, target.id, lights, session.camera_profile
+    )
     pending: list[tuple[FrameRecord, os.stat_result, int]] = []
     failure_notes: list[str] = []
     cut_short_notes: list[str] = []
@@ -1004,7 +1092,7 @@ def _measure_target_frames(
             summary.frames_failed += 1
             failure_notes.append(f"{os.path.basename(frame.path)}: the file cannot be read")
             continue
-        if not frame_needs_measuring(frame, file_state):
+        if not frame_needs_measuring(frame, file_state) and frame.path not in profile_gap_closed:
             summary.frames_skipped_unchanged += 1
             continue
         if limit is not None and len(pending) >= limit:
@@ -1196,13 +1284,18 @@ def record_stage_frame_quality(
     """
     frames_by_path = {frame.path: frame for frame in all_checked_frames}
     needing = []
-    for frame in kept_frames:
+    kept_lights = [frame for frame in kept_frames if str(frame.role).upper() == "LIGHT"]
+    profile_gap_closed = frames_whose_camera_profile_gap_closed(
+        QualityStore.from_configuration(recording.configuration),
+        target.id,
+        kept_lights,
+        lambda frame: resolve_camera_profile(frame.camera),
+    )
+    for frame in kept_lights:
         file_state = _stat_or_none(frame.path)
         # A frame whose file is missing is left to the stage's own errors.
-        if (
-            file_state is not None
-            and str(frame.role).upper() == "LIGHT"
-            and frame_needs_measuring(frame, file_state)
+        if file_state is not None and (
+            frame_needs_measuring(frame, file_state) or frame.path in profile_gap_closed
         ):
             needing.append(frame)
     summary = FrameMeasurementSummary(target_id=target.id)

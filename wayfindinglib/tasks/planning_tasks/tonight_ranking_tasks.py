@@ -18,13 +18,14 @@ its stack fall? The answer comes from the same forward model as "take N more"
   autofocus run costs minutes (`capture_overheads`). The overheads come from
   the user's recorded Ekos sessions when there are enough, and from design
   estimates otherwise.
-* The history. A target whose noise has stopped falling, from a noise floor
+* The history. A target whose noise has stopped falling, from fixed-pattern
+noise
   (one stack's measured noise against what its frames predict, or a fit over
   two or more stacks), is ranked at zero with the reason
-  (`forecast.target_stop_signal`). A floor that is not yet a stop still lowers
-  the gain of one more hour. A stack combined from exposure groups is rebuilt
-  from its stored rows, and the new frames are placed the way the stacker would
-  place them (`noise_growth.plan_group_stack`).
+  (`forecast.target_stop_signal`). Fixed-pattern noise that is not yet a stop
+  still lowers the gain of one more hour. A stack combined from exposure groups
+  is rebuilt from its stored rows, and the new frames are placed the way the
+  stacker would place them (`noise_growth.plan_group_stack`).
 
 Targets are ranked in separate lists for imaging, photometry and spectroscopy,
 because their gains are not comparable. Asteroid searches, solar-system
@@ -70,7 +71,8 @@ from wayfindinglib.analytics.result_quality.forecast import (
     FRAME_WEIGHT_METRIC,
     StackRunRecord,
     camera_gain_for_setting,
-    noise_floor_for_runs,
+    fixed_pattern_noise_for_runs,
+    noise_model_error_for_setting,
     stack_frames_from_observations,
     stack_groups_of_run,
     stack_runs_from_measurements,
@@ -83,6 +85,7 @@ from wayfindinglib.analytics.result_quality.library_inputs import (
     target_direction,
 )
 from wayfindinglib.analytics.result_quality.noise_growth import (
+    FIXED_PATTERN_BASIS_SETUP_HISTORY,
     NoiseForecast,
     WeightingMode,
     forecast_group_noise,
@@ -90,7 +93,7 @@ from wayfindinglib.analytics.result_quality.noise_growth import (
     identify_weighting_mode,
     new_frames_like,
     noise_ratio_after_adding,
-    noise_ratio_with_floor,
+    noise_ratio_for_ranking,
     plan_group_stack,
     predict_weighting_mode,
 )
@@ -103,7 +106,7 @@ from wayfindinglib.analytics.result_quality.sky_model import SkyModel, predict_s
 from wayfindinglib.astronomy.coordinate_transforms import compute_altaz, earth_location
 from wayfindinglib.models.equipment_and_site.equipment import Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
-from wayfindinglib.models.planning.target_report import ForecastGate
+from wayfindinglib.models.planning.target_report import RecommendedAdditionalFramesStatus
 from wayfindinglib.models.planning.tonight_ranking import (
     CandidateStatus,
     RankedCandidate,
@@ -114,7 +117,10 @@ from wayfindinglib.models.planning.tonight_ranking import (
     TonightSkyModel,
 )
 from wayfindinglib.models.quality.efficiency import ScienceGoal
-from wayfindinglib.tasks.planning_tasks.target_report_inputs import forecast_gate_of_target
+from wayfindinglib.tasks.planning_tasks.target_report_inputs import (
+    read_noise_history,
+    recommended_additional_frames_status_of_target,
+)
 from wayfindinglib.tasks.planning_tasks.visibility_tasks import effective_altitude_floor, visibility_state_at
 
 TONIGHT_SKY_ENTRY = "WAY-71"
@@ -125,15 +131,16 @@ TONIGHT_RANKING_ENTRY = "WAY-72"
 
 GAIN_TIE_DIGITS = 2
 """Two gains that agree to this many decimals (the whole percent the reason
-text shows) count as tied for the exploratory rule. Among targets tied this
-way, one whose "take N more" count is only exploratory (decision D11,
+text shows) count as tied for the provisional rule. Among targets tied this
+way, one whose recommended additional frames are only provisional (decision
+D11,
 2026-10-26) ranks after the others; otherwise the larger gain ranks first."""
 
-EXPLORATORY_RANKING_REMARK = (
-    "Its count of frames to take is exploratory: it rests on a check made from frames already taken, "
-    "and the next real stack will confirm it or close it."
+PROVISIONAL_RANKING_REMARK = (
+    "Its count of recommended additional frames is provisional: it rests on a check made from frames "
+    "already taken, and the next real stack will confirm it or withdraw it."
 )
-"""The remark added to a ranked target whose count is exploratory."""
+"""The remark added to a ranked target whose count is provisional."""
 
 CLOCK_HOUR_SECONDS = 3600.0
 """The span the gain is worked out for: one hour of real clock time."""
@@ -308,6 +315,8 @@ def score_candidate(
     overheads_for: Callable[[CaptureSetting], CaptureOverheads],
     configured_weight: str | None = None,
     electrons_per_adu_for: Callable[[CaptureSetting], float | None] | None = None,
+    noise_model_errors: Mapping[Any, Any] | None = None,
+    fixed_pattern_history: Mapping[Any, Mapping[str, float]] | None = None,
 ) -> RankedCandidate:
     """Find the gain from one clock hour on one target.
 
@@ -481,7 +490,13 @@ def score_candidate(
         dither_every_frames=DITHER_EVERY_FRAMES,
         autofocus_runs=AUTOFOCUS_RUNS_PER_HOUR,
     )
-    floor = noise_floor_for_runs(runs) if runs else None
+    fixed_pattern = (
+        fixed_pattern_noise_for_runs(
+            runs, noise_model_error_for_setting(noise_model_errors, setting), fixed_pattern_history, target_id
+        )
+        if runs
+        else None
+    )
     if mode == WeightingMode.GROUP and run_groups is not None:
         # A stack of exposure groups: the new frames are placed the way the
         # stacker would place them (a new length needs 5 frames to be a group).
@@ -506,7 +521,17 @@ def score_candidate(
             remarks.append("Some of the new frames would be folded into another exposure group.")
     else:
         later = noise_ratio_after_adding(existing, template, frames_in_hour, mode, exposure_seconds)
-    ratio = noise_ratio_with_floor(current, later, floor)
+    ratio = noise_ratio_for_ranking(current, later, fixed_pattern)
+    if fixed_pattern is not None and fixed_pattern.basis == FIXED_PATTERN_BASIS_SETUP_HISTORY:
+        remarks.append(
+            f"This ranking assumes fixed-pattern noise like other targets of this setup "
+            f"(median of {fixed_pattern.history_target_count} targets), not measured on this one."
+        )
+    if fixed_pattern is not None and fixed_pattern.possible:
+        remarks.append(
+            f"The stack has possible fixed-pattern noise ({fixed_pattern.sigmas or 0.0:.1f}\u03c3, not "
+            "proven), so the gain is the midpoint of the gain with it and without it."
+        )
     if ratio is None:
         return _no_forecast(target_id, use, altitude_deg, "The noise after one more hour could not be found.")
     gain = max(0.0, 1.0 - ratio)
@@ -578,7 +603,7 @@ def build_lists(candidates: Iterable[RankedCandidate]) -> tuple[list[RankedList]
             (c for c in group if c.status == CandidateStatus.RANKED),
             key=lambda c: (
                 -round(c.gain_per_hour_fraction or 0.0, GAIN_TIE_DIGITS),
-                c.forecast_gate == ForecastGate.EXPLORATORY,
+                c.recommended_additional_frames_status == RecommendedAdditionalFramesStatus.PROVISIONAL,
                 -(c.gain_per_hour_fraction or 0.0),
                 c.target_id,
             ),
@@ -800,6 +825,9 @@ def rank_tonight(
         except ConfigurationError:
             return None
 
+    # One library-wide read, not one per target (decision D17).
+    noise_history = read_noise_history(astrometrics)
+    noise_model_errors = noise_history.model_errors
     wanted = set(candidate_target_ids) if candidate_target_ids is not None else None
     skipped: dict[str, int] = defaultdict(int)
     candidates: list[RankedCandidate] = []
@@ -838,11 +866,11 @@ def rank_tonight(
             ),
         ]
         all_runs = stack_runs_from_measurements(history)
-        # Whether the target's "take N more" count is confirmed, exploratory
-        # or closed. Only an exploratory one changes the order
+        # Whether the target's "take N more" count is confirmed, provisional
+        # or not checked. Only a provisional one changes the order
         # (`build_lists`).
         dominant = dominant_setting(all_observations)
-        gate = forecast_gate_of_target(
+        frames_status = recommended_additional_frames_status_of_target(
             astrometrics,
             target.id,
             history,
@@ -875,11 +903,23 @@ def rank_tonight(
                 overheads_for=overheads_for,
                 configured_weight=configured_weight,
                 electrons_per_adu_for=electrons_per_adu_for,
+                noise_model_errors=noise_model_errors,
+                fixed_pattern_history=noise_history.fixed_pattern_shares,
             )
-            if gate != ForecastGate.CLOSED and scored.status == CandidateStatus.RANKED:
-                remark = EXPLORATORY_RANKING_REMARK if gate == ForecastGate.EXPLORATORY else ""
+            if (
+                frames_status != RecommendedAdditionalFramesStatus.NOT_CHECKED
+                and scored.status == CandidateStatus.RANKED
+            ):
+                remark = (
+                    PROVISIONAL_RANKING_REMARK
+                    if frames_status == RecommendedAdditionalFramesStatus.PROVISIONAL
+                    else ""
+                )
                 scored = scored.model_copy(
-                    update={"forecast_gate": gate, "reason": f"{scored.reason} {remark}".strip()}
+                    update={
+                        "recommended_additional_frames_status": frames_status,
+                        "reason": f"{scored.reason} {remark}".strip(),
+                    }
                 )
             candidates.append(scored)
     lists, notes = build_lists(candidates)

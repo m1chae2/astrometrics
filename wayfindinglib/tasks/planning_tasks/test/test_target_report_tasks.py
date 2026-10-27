@@ -12,6 +12,7 @@ stored.
 """
 
 import json
+import re
 from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
@@ -304,9 +305,9 @@ class _Library:
             for metric, value, version in (
                 ("frame.star_width_effective_arcsec", width, 1),
                 ("frame.star_width_moffat_arcsec", width - 0.1, 1),
-                ("frame.sky_rate_e_per_s_per_px", 0.5, 2),
-                ("frame.sky_noise_e", (0.5 * 60.0) ** 0.5, 2),
-                ("frame.read_noise_e", 3.0, 1),
+                ("frame.sky_rate_e_per_s_per_px", 0.5, 3),
+                ("frame.sky_noise_e", (0.5 * 60.0) ** 0.5, 3),
+                ("frame.read_noise_e", 3.0, 2),
                 ("frame.star_elongation", 1.05, 1),
             ):
                 self.rows.append(self._row(metric, value, subject_id, version=version, night=night))
@@ -519,7 +520,8 @@ def _report_with_checks(
 
 TWO_RUNS = [("r1", NOW - timedelta(days=1), 0.0361, 0.0361), ("r2", NOW, 0.0283, 0.0283)]
 """Two stack runs, so the report attempts a forecast check. Each stack's
-expected noise equals its measured noise: no noise floor, so "take N more"
+expected noise equals its measured noise: no fixed-pattern noise, so "take N
+more"
 gives a count."""
 
 CAMERA_GAIN = 0.783
@@ -655,7 +657,7 @@ def test_more_frames_proposes_a_count_and_says_it_is_tentative(
     assert more[0].kind == StatementKind.RECOMMENDATION
     assert more[0].confidence == Confidence.DESIGN_ESTIMATE
     assert more[0].proposed_action.frame_count > 0
-    assert "to cut the noise by about 31%" in more[0].message
+    assert "which cuts the noise by about 31%" in more[0].message
     assert more[0].expected_effect.noise_change_fraction == pytest.approx(-0.29, abs=0.02)
     assert more[0].proposed_action.exposure_seconds > 60.0
     assert "limited by read noise" in more[0].reason
@@ -683,15 +685,15 @@ def test_take_more_is_hidden_until_a_forecast_check_agreed(
     assert "Take more frames and stack them" in more.reason
 
 
-def test_a_floor_that_most_of_the_noise_is_made_of_replaces_the_count(
+def test_a_fixed_pattern_noise_that_most_of_the_noise_is_made_of_replaces_the_count(
     isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch, camera_gain: float
 ) -> None:
-    """A floor above the random noise means more frames cannot reach the goal.
+    """Fixed-pattern noise above the random noise: no count reaches the goal.
 
-    Measured 0.01483 against expected 0.0100 is a floor that is 55% of the
-    noise variance. Doubling the data still cuts the noise by 13%, above the
-    stop limit, so the stop warning is not raised; the report says so in place
-    of a count and names the floor.
+    Measured 0.01483 against expected 0.0100 is fixed-pattern noise that is 55%
+    of the noise variance. Doubling the data still cuts the noise by 13%, above
+    the stop limit, so the stop warning is not raised; the report says so in
+    place of a count and names the fixed-pattern noise.
     """
     runs = [("r1", NOW - timedelta(days=1), 0.01483, 0.0100), ("r2", NOW, 0.01483, 0.0100)]
     report = _report_with_forecast_outcome(
@@ -699,13 +701,13 @@ def test_a_floor_that_most_of_the_noise_is_made_of_replaces_the_count(
     )
 
     assert _of_rule(report, "more_frames") == []
-    (floor,) = _of_rule(report, "more_frames_will_not_help")
+    (fixed_pattern,) = _of_rule(report, "more_frames_will_not_help")
 
-    assert floor.kind == StatementKind.WARNING
-    assert "noise floor" in floor.message
-    assert "55% of the noise" in floor.message
-    assert floor.proposed_action is None
-    assert floor.evidence
+    assert fixed_pattern.kind == StatementKind.WARNING
+    assert "fixed-pattern noise" in fixed_pattern.message
+    assert "55% of the noise" in fixed_pattern.message
+    assert fixed_pattern.proposed_action is None
+    assert fixed_pattern.evidence
 
 
 def test_a_pair_with_no_aperture_identity_keeps_take_more_hidden(isolated_butler: DiskButler) -> None:
@@ -713,7 +715,7 @@ def test_a_pair_with_no_aperture_identity_keeps_take_more_hidden(isolated_butler
 
     The report's own check runs on the two made-up stacks. They have no
     aperture identity and no calibration record, so the check says it could
-    not be made, the gate stays shut, and the hidden statement says why.
+    not be made, no count is shown, and the hidden statement says why.
     """
     library = _Library(runs=TWO_RUNS)
     for run_id, at, noise, _expected in TWO_RUNS:
@@ -742,7 +744,7 @@ def test_a_pair_with_no_aperture_identity_keeps_take_more_hidden(isolated_butler
 
 
 def test_take_more_is_hidden_for_a_target_with_one_stack(isolated_butler: DiskButler) -> None:
-    """A target with a single stack has no check, so the gate is shut."""
+    """A target with a single stack has no check, so no count is shown."""
     report = _report(_Library(), isolated_butler)
 
     (more,) = _of_rule(report, "more_frames")
@@ -947,11 +949,11 @@ def test_a_stack_of_two_settings_goes_to_the_setting_with_most_frames() -> None:
     assert any("2 capture settings" in note for note in notes)
 
 
-def test_a_flat_noise_floor_makes_the_stop_warning_and_drops_take_more(
+def test_a_flat_fixed_pattern_noise_makes_the_stop_warning_and_drops_take_more(
     isolated_butler: DiskButler,
 ) -> None:
     """Noise that levels off stops "take N more" and warns instead."""
-    # Variance = expected variance + 4e-4: the floor is 0.02.
+    # Variance = expected variance + 4e-4: the fixed-pattern noise is 0.02.
     runs = [
         ("r1", NOW - timedelta(days=2), 0.0361, 0.030),
         ("r2", NOW - timedelta(days=1), 0.0283, 0.020),
@@ -1285,10 +1287,10 @@ def test_the_clipping_note_names_the_linearity_limit_when_there_is_one(
     assert "above 60000 ADU (measured: Antonov 2026)" in note
 
 
-def test_an_agreeing_earlier_nights_check_shows_an_exploratory_count(
+def test_an_agreeing_earlier_nights_check_shows_a_provisional_count(
     isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch, camera_gain: float
 ) -> None:
-    """Decision D11: a subset check opens the gate as exploratory."""
+    """Decision D11: a subset check gives a provisional count."""
     report = _report_with_checks(
         _Library(runs=TWO_RUNS),
         isolated_butler,
@@ -1301,18 +1303,15 @@ def test_an_agreeing_earlier_nights_check_shows_an_exploratory_count(
     assert more.kind == StatementKind.RECOMMENDATION
     assert more.proposed_action.frame_count > 0
     assert more.confidence == Confidence.DESIGN_ESTIMATE
-    assert more.values["count_basis"] == "exploratory"
+    assert more.values["count_basis"] == "provisional"
+    assert re.match(r"Recommended additional frames: \d+ \(provisional\) at ", more.message)
     for text in (more.message, more.reason):
-        assert "exploratory" in text
-        assert (
-            "frames already taken (the stack of all nights but the last against the stack of all nights)"
-            in text
-        )
-        assert "next real stack will confirm it or close it again" in text
+        assert "check made from frames already taken" in text
+        assert "next real stack will confirm it or withdraw it" in text
     assert report.forecast_checks[0].basis == ForecastBasis.EARLIER_NIGHTS_SUBSET
 
 
-def test_a_later_real_check_that_agrees_removes_the_exploratory_mark(
+def test_a_later_real_check_that_agrees_removes_the_provisional_mark(
     isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch, camera_gain: float
 ) -> None:
     """A real later stack that agrees confirms the count: no mark."""
@@ -1329,11 +1328,11 @@ def test_a_later_real_check_that_agrees_removes_the_exploratory_mark(
     (more,) = _of_rule(report, "more_frames")
 
     assert more.kind == StatementKind.RECOMMENDATION
-    assert "exploratory" not in more.message
+    assert "provisional" not in more.message
     assert "count_basis" not in more.values
 
 
-def test_a_later_real_check_that_disagrees_closes_an_exploratory_count(
+def test_a_later_real_check_that_disagrees_withdraws_a_provisional_count(
     isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A real check that falls short hides the count again."""
@@ -1371,7 +1370,7 @@ def test_a_disagreeing_earlier_nights_check_keeps_the_count_hidden(
     assert "made from frames already taken" in more.reason
 
 
-def _floor_statement(setting: CaptureSetting = SETTING) -> Any:
+def _fixed_pattern_statement(setting: CaptureSetting = SETTING) -> Any:
     """Make the M 13 diminishing-returns "take N more" statement.
 
     Parameters
@@ -1382,7 +1381,8 @@ def _floor_statement(setting: CaptureSetting = SETTING) -> Any:
     Returns
     -------
     statement : `TargetStatement`
-        The recommendation for 44 more frames, with the floor sentences.
+        The recommendation for 44 more frames, with the fixed-pattern noise
+        sentences.
     """
     from wayfindinglib.analytics.result_quality.capture_overheads import CaptureOverheads
     from wayfindinglib.analytics.result_quality.noise_growth import TakeMoreResult
@@ -1392,8 +1392,8 @@ def _floor_statement(setting: CaptureSetting = SETTING) -> Any:
         target_noise_ratio=0.707,
         added_exposure_seconds=44 * 30.0,
         new_exposure_seconds=30.0,
-        floor_noise=0.583e-3,
-        floor_variance_share=0.49,
+        fixed_pattern_noise=0.583e-3,
+        fixed_pattern_variance_share=0.49,
         practical_limit_applied=True,
         doubling_frames=44,
         doubling_noise_cut=0.137,
@@ -1411,15 +1411,15 @@ def _floor_statement(setting: CaptureSetting = SETTING) -> Any:
     return more_frames_statement(result, setting, overheads, [])
 
 
-def test_the_floor_sentence_points_at_calibration_advice_in_the_same_report() -> None:
+def test_the_fixed_pattern_sentence_points_at_calibration_advice_in_the_same_report() -> None:
     """A calibration_gap statement for the setting swaps the last sentence."""
     from wayfindinglib.analytics.result_quality.report_rules import (
-        FLOOR_CALIBRATION_TEXT,
-        FLOOR_NOT_REMOVED_TEXT,
+        FIXED_PATTERN_CALIBRATION_TEXT,
+        FIXED_PATTERN_NOT_REMOVED_TEXT,
     )
     from wayfindinglib.models.quality.statements import TargetStatement
 
-    floor = _floor_statement()
+    fixed_pattern = _fixed_pattern_statement()
     gap = TargetStatement(
         rule="calibration_gap",
         kind=StatementKind.RECOMMENDATION,
@@ -1430,19 +1430,20 @@ def test_the_floor_sentence_points_at_calibration_advice_in_the_same_report() ->
         confidence=Confidence.DESIGN_ESTIMATE,
     )
 
-    [with_gap, _] = target_report_tasks._point_floor_at_calibration([floor, gap])
-    [without_gap] = target_report_tasks._point_floor_at_calibration([floor])
+    [with_gap, _] = target_report_tasks._point_fixed_pattern_at_calibration([fixed_pattern, gap])
+    [without_gap] = target_report_tasks._point_fixed_pattern_at_calibration([fixed_pattern])
 
-    assert with_gap.message.endswith(FLOOR_CALIBRATION_TEXT)
-    assert FLOOR_NOT_REMOVED_TEXT not in with_gap.message
+    assert with_gap.message.endswith(FIXED_PATTERN_CALIBRATION_TEXT)
+    assert FIXED_PATTERN_NOT_REMOVED_TEXT not in with_gap.message
     assert "calibration recommendations" in with_gap.plain_message
-    assert without_gap.message.endswith(FLOOR_NOT_REMOVED_TEXT)
+    assert without_gap.message.endswith(FIXED_PATTERN_NOT_REMOVED_TEXT)
 
 
-def test_an_exploratory_gate_keeps_its_sentence_on_the_doubling_statement() -> None:
+def test_a_provisional_status_keeps_its_sentence_on_the_doubling_statement() -> None:
     """The D11 sentence and count basis go on the doubling statement too."""
-    [marked] = target_report_tasks._mark_exploratory([_floor_statement()])
+    [marked] = target_report_tasks._mark_provisional([_fixed_pattern_statement()])
 
-    assert target_report_tasks.EXPLORATORY_COUNT_SENTENCE in marked.message
-    assert marked.values["count_basis"] == "exploratory"
+    assert target_report_tasks.PROVISIONAL_COUNT_SENTENCE in marked.message
+    assert marked.message.startswith("Recommended additional frames: 44 (provisional) at 30 s")
+    assert marked.values["count_basis"] == "provisional"
     assert marked.proposed_action.frame_count == 44

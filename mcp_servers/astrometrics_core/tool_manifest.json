@@ -79,7 +79,7 @@
       "interim_block": "",
       "note": "The AI is read-only, so a tool that writes is not offered."
     },
-    "processing_measure_half_difference_noise": {
+    "processing_measure_odd_even_difference_noise": {
       "tool_class": "change-data",
       "category": "image-processing",
       "disposition": "withhold",

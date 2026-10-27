@@ -1,8 +1,10 @@
 """Builds measurements of the expected noise, the flat and the star peaks.
 
 Three families of stack values are made here, next to the ones in
-`record_quality.py`. None of them judges anything. Each is stored as parts,
-and no ratio of one to another is stored.
+`record_quality.py`. None of them judges anything. Each is stored as parts.
+The one ratio stored is the measured noise over the predicted noise
+(`noise_ratio_measurements`), with both parts beside it. The noise the master
+dark adds (`master_dark_noise_measurements`) is stored here too.
 
 - The noise the stack's frames predict in an empty aperture: the sky (photon)
   part, the read part, their sum, and the two numbers that turn a pixel's
@@ -34,9 +36,10 @@ gets none, because its measured noise is not stored either.
 
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any
 
+from astrometricslib.drivers.calibration_library import DARK_FRAME_PATHS_KEY
 from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.drivers.quality_store import QualityStore
 from astrometricslib.models.quality.measurement import (
@@ -57,6 +60,7 @@ from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
 )
 from astrometricslib.pipelines.stacking.metrics import (
     STACKING_EXPECTED_EMPTY_APERTURE_NOISE_STACK_UNIT,
+    STACKING_EXPECTED_MASTER_DARK_NOISE_STACK_UNIT,
     STACKING_EXPECTED_NOISE_APERTURE_AREA_PX,
     STACKING_EXPECTED_NOISE_SCALE_STACK_UNIT_PER_ADU,
     STACKING_EXPECTED_READ_NOISE_STACK_UNIT,
@@ -72,6 +76,7 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_GROUP_PEAK_FRACTION,
     STACKING_GROUP_RAW_SKY_LEVEL_ADU,
     STACKING_GROUP_REFERENCE_EXPOSURE_S,
+    STACKING_MEASURED_TO_PREDICTED_NOISE_RATIO,
     STACKING_METRICS,
     STACKING_NORMALIZATION_SCALE,
     STACKING_STACK_SKY_LEVEL_STACK_UNIT,
@@ -80,7 +85,9 @@ from astrometricslib.pipelines.stacking.post_processing.expected_noise import (
     ExpectedNoiseOutcome,
     ExposureGroupNoiseFacts,
     FrameNoiseInput,
+    MasterDarkNoiseOutcome,
     expected_exposure_group_noise,
+    expected_master_dark_noise,
     expected_stack_noise,
     gather_frame_noise_inputs,
     measure_stack_sky_level,
@@ -117,6 +124,8 @@ __all__ = [
     "frame_noise_inputs_from_store",
     "group_peak_measurements",
     "group_reference_exposure_measurements",
+    "master_dark_noise_measurements",
+    "noise_ratio_measurements",
     "normalization_scale_measurements",
     "resolve_stack_sky_level",
     "scale_expected_noise",
@@ -165,6 +174,11 @@ class StackScience:
         For a stack of exposure groups, the exposure of each combined group's
         registration reference frame (see `stack_membership.group_references`).
         Empty for a stack that is not made of groups.
+    measured_noise : `StackNoiseOutcome` or `None`
+        The stack's measured empty-aperture noise, for the
+        measured-to-predicted ratio. `None` when the caller gave none.
+    master_dark_noise : `MasterDarkNoiseOutcome`
+        The noise the master dark adds, or the reason there is none.
     """
 
     expected_noise: ExpectedNoiseOutcome
@@ -172,6 +186,12 @@ class StackScience:
     stack_sky_level: float | None
     normalization_scale: NormalizationScaleOutcome = _SCALE_NOT_MEASURED
     group_references: tuple[GroupReference, ...] = ()
+    measured_noise: StackNoiseOutcome | None = None
+    master_dark_noise: MasterDarkNoiseOutcome = field(
+        default_factory=lambda: MasterDarkNoiseOutcome(
+            None, "the caller did not work out the master dark's noise"
+        )
+    )
 
 
 def resolve_stack_sky_level(noise: StackNoiseOutcome | None, stack_path: str) -> float | None:
@@ -580,9 +600,135 @@ def compute_stack_science(
     except Exception as error:  # a by-product again
         logger.exception("The flat noise of the stack %s could not be worked out", stack_path)
         flat = FlatNoiseOutcome(None, f"the flat's noise failed: {type(error).__name__}")
+    try:
+        dark_paths = diagnostics.get(DARK_FRAME_PATHS_KEY) or []
+        dark = expected_master_dark_noise(
+            expected.result, len(dark_paths), bool(diagnostics.get("exposure_group_weights"))
+        )
+    except Exception as error:  # a by-product again
+        logger.exception("The master dark's noise for the stack %s could not be worked out", stack_path)
+        dark = MasterDarkNoiseOutcome(None, f"the master dark's noise failed: {type(error).__name__}")
     return StackScience(
-        expected, flat, sky_level, scale, membership.group_references if membership is not None else ()
+        expected,
+        flat,
+        sky_level,
+        scale,
+        membership.group_references if membership is not None else (),
+        measured_noise=noise,
+        master_dark_noise=dark,
     )
+
+
+def noise_ratio_measurements(
+    noise: StackNoiseOutcome | None,
+    expected: ExpectedNoiseOutcome,
+    context: PipelineRunContext,
+    subject: QualitySubject,
+) -> list[QualityMeasurement]:
+    """Build the row that divides the measured noise by the predicted noise.
+
+    Parameters
+    ----------
+    noise : `StackNoiseOutcome` or `None`
+        The stack's measured empty-aperture noise.
+    expected : `ExpectedNoiseOutcome`
+        The noise the stack's frames predict, already multiplied by the
+        normalization scale when that was measured. Both are in the stack's
+        units.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    subject : `QualitySubject`
+        The stack (a subset stack too).
+
+    Returns
+    -------
+    rows : `list` of `QualityMeasurement`
+        One row: measured over predicted, with the measured noise's relative
+        error as its uncertainty (the model's own error is not included), or
+        not measured with the reason when either noise is missing. The row is
+        ``assumed`` when the prediction rests on an assumed input.
+    """
+    spec = _SPEC_BY_NAME[STACKING_MEASURED_TO_PREDICTED_NOISE_RATIO]
+    measured = noise.result if noise is not None else None
+    predicted = expected.result
+    if measured is None:
+        reason = (noise.reason if noise is not None else "") or "the stack's noise was not measured"
+        return [build_measurement(spec, None, context, subject, reason=f"no measured noise: {reason}")]
+    if predicted is None:
+        reason = expected.reason or "the expected noise was not worked out"
+        return [build_measurement(spec, None, context, subject, reason=f"no predicted noise: {reason}")]
+    if not predicted.total_noise > 0:
+        return [
+            build_measurement(spec, None, context, subject, reason="the predicted noise is not above zero")
+        ]
+    ratio = measured.noise_adu / predicted.total_noise
+    relative_error = measured.noise_uncertainty_adu / measured.noise_adu if measured.noise_adu > 0 else None
+    assumed = bool(predicted.assumed_reason)
+    return [
+        build_measurement(
+            spec,
+            ratio,
+            context,
+            subject,
+            uncertainty=None if relative_error is None else ratio * relative_error,
+            sample_count=measured.aperture_count,
+            status=MeasurementStatus.ASSUMED if assumed else MeasurementStatus.MEASURED,
+            reason=predicted.assumed_reason,
+            provenance=predicted.scale_note,
+        )
+    ]
+
+
+def master_dark_noise_measurements(
+    outcome: MasterDarkNoiseOutcome, context: PipelineRunContext, subject: QualitySubject
+) -> list[QualityMeasurement]:
+    """Build the row of the noise the master dark adds to an aperture sum.
+
+    Parameters
+    ----------
+    outcome : `MasterDarkNoiseOutcome`
+        The value or the reason there is none.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    subject : `QualitySubject`
+        The stack.
+
+    Returns
+    -------
+    rows : `list` of `QualityMeasurement`
+        One row; assumed when the read noise or gain behind it is not measured.
+    """
+    spec = _SPEC_BY_NAME[STACKING_EXPECTED_MASTER_DARK_NOISE_STACK_UNIT]
+    if outcome.value is None:
+        return [
+            build_measurement(
+                spec,
+                None,
+                context,
+                subject,
+                reason=outcome.reason or "the master dark's noise was not worked out",
+            )
+        ]
+    return [
+        build_measurement(
+            spec,
+            outcome.value,
+            context,
+            subject,
+            sample_count=outcome.dark_frame_count,
+            status=MeasurementStatus.ASSUMED if outcome.assumed_reason else MeasurementStatus.MEASURED,
+            reason=outcome.assumed_reason,
+            provenance=" ".join(
+                part
+                for part in (
+                    f"Made from {outcome.dark_frame_count} dark frame(s); the dark current's shot noise "
+                    "is not included.",
+                    outcome.scale_note,
+                )
+                if part
+            ),
+        )
+    ]
 
 
 def expected_noise_measurements(
@@ -1052,6 +1198,10 @@ def science_measurements(
             None,
         )
     rows = expected_noise_measurements(science.expected_noise, context, stack_subject)
+    rows.extend(
+        noise_ratio_measurements(science.measured_noise, science.expected_noise, context, stack_subject)
+    )
+    rows.extend(master_dark_noise_measurements(science.master_dark_noise, context, stack_subject))
     rows.extend(normalization_scale_measurements(science.normalization_scale, context, stack_subject))
     rows.extend(flat_noise_measurements(science.flat_noise, science.stack_sky_level, context, stack_subject))
     # `group_subjects` is built from `groups` in the same order (see

@@ -292,6 +292,9 @@ def apply_normalization_scale(
         sky_noise=result.sky_noise * value,
         read_noise=result.read_noise * value,
         total_noise=result.total_noise * value,
+        coherent_read_noise=(
+            None if result.coherent_read_noise is None else result.coherent_read_noise * value
+        ),
         scale_note=(
             f"Multiplied by Siril's normalization scale {value:.3f} +/- {scale.result.uncertainty:.3f} "
             "(see `stacking.normalization_scale`)."

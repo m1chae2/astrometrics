@@ -693,4 +693,80 @@ def test_a_new_database_is_at_the_current_version_and_has_no_settings(tmp_path: 
             (SCHEMA_VERSION,)
         ]
         assert connection.execute("SELECT COUNT(*) FROM quality_capture_setting").fetchone()[0] == 0
-    assert SCHEMA_VERSION == 4
+    assert SCHEMA_VERSION == 5
+
+
+#: The start of the metric names the odd-even difference had before version 5.
+_OLD_ODD_EVEN_PREFIX = "stacking.half" + "_difference_"
+
+
+def _make_version_4_database_with_old_metric_names(path: Path) -> None:
+    """Write a version-4 database whose rows use the old metric names.
+
+    Two rows use the old half difference names, one uses an unrelated
+    name, and one has a similar name that does not start with the old prefix.
+
+    Parameters
+    ----------
+    path : `pathlib.Path`
+        Where to write the database.
+    """
+    QualityStore(str(path)).write_measurements([make_measurement(run_id="seed")])
+    names = [
+        _OLD_ODD_EVEN_PREFIX + "noise_stack_unit",
+        _OLD_ODD_EVEN_PREFIX + "variance_factor",
+        "stacking.frames_stacked",
+        "stacking.other_" + _OLD_ODD_EVEN_PREFIX,
+    ]
+    with sqlite3.connect(path) as connection:
+        connection.execute("DELETE FROM quality_measurements")
+        for number, name in enumerate(names, start=1):
+            connection.execute(
+                "INSERT INTO quality_measurements (row_id, metric, definition_version, subject_level, "
+                "subject_id, status, value, origin, run_id, measured_at) VALUES "
+                "(?, ?, 1, 'stack', 'stack-1', 'measured', ?, 'measured', 'run-0', "
+                "'2026-10-01T00:00:00.000000+00:00')",
+                (number * 10, name, float(number)),
+            )
+        connection.execute("UPDATE quality_schema_version SET version = 4")
+
+
+def test_version_5_renames_the_odd_even_difference_metric_names(tmp_path: Path) -> None:
+    """Old names become new names; ids, values and other names stay."""
+    path = tmp_path / "astrometrics.db"
+    _make_version_4_database_with_old_metric_names(path)
+    QualityStore(str(path)).write_measurements([make_measurement(run_id="after")])
+    with sqlite3.connect(path) as connection:
+        rows = connection.execute(
+            "SELECT row_id, metric, value, measured_at FROM quality_measurements WHERE run_id = 'run-0' "
+            "ORDER BY row_id"
+        ).fetchall()
+        version = connection.execute("SELECT version FROM quality_schema_version").fetchall()
+        latest = connection.execute(
+            "SELECT metric FROM quality_measurements_latest WHERE metric LIKE '%odd_even%'"
+        ).fetchall()
+    stamp = "2026-10-01T00:00:00.000000+00:00"
+    assert rows == [
+        (10, "stacking.odd_even_difference_noise_stack_unit", 1.0, stamp),
+        (20, "stacking.odd_even_difference_variance_factor", 2.0, stamp),
+        (30, "stacking.frames_stacked", 3.0, stamp),
+        (40, "stacking.other_" + _OLD_ODD_EVEN_PREFIX, 4.0, stamp),
+    ]
+    assert version == [(SCHEMA_VERSION,)]
+    assert len(latest) == 2
+
+
+def test_version_5_is_idempotent(tmp_path: Path) -> None:
+    """A second open changes no metric name, id or value."""
+    path = tmp_path / "astrometrics.db"
+    _make_version_4_database_with_old_metric_names(path)
+
+    def snapshot() -> list:
+        with sqlite3.connect(path) as connection:
+            return connection.execute("SELECT * FROM quality_measurements ORDER BY row_id").fetchall()
+
+    QualityStore(str(path)).write_measurements([make_measurement(run_id="after")])
+    first = snapshot()
+    QualityStore(str(path)).write_measurements([make_measurement(run_id="again")])
+    second = snapshot()
+    assert second[: len(first)] == first

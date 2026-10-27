@@ -39,16 +39,16 @@ from astrometricslib.pipelines.shared.quality.pipeline_measurements import Pipel
 from astrometricslib.pipelines.stacking import subset_noise_run
 from astrometricslib.pipelines.stacking.metrics import (
     STACKING_EMPTY_APERTURE_NOISE_NORMALIZED,
-    STACKING_HALF_DIFFERENCE_EVEN_EFFECTIVE_FRAME_COUNT,
-    STACKING_HALF_DIFFERENCE_MODEL_VARIANCE_RATIO,
-    STACKING_HALF_DIFFERENCE_NOISE_NORMALIZED,
-    STACKING_HALF_DIFFERENCE_NOISE_STACK_UNIT,
-    STACKING_HALF_DIFFERENCE_ODD_EFFECTIVE_FRAME_COUNT,
-    STACKING_HALF_DIFFERENCE_REFERENCE_FLUX_STACK_UNIT,
-    STACKING_HALF_DIFFERENCE_SHARED_EVEN_WEIGHT_FRACTION,
-    STACKING_HALF_DIFFERENCE_SHARED_ODD_WEIGHT_FRACTION,
-    STACKING_HALF_DIFFERENCE_VARIANCE_FACTOR,
     STACKING_HALF_SHARED_FINE_SCALE_VARIANCE_RATIO,
+    STACKING_ODD_EVEN_DIFFERENCE_EVEN_EFFECTIVE_FRAME_COUNT,
+    STACKING_ODD_EVEN_DIFFERENCE_MODEL_VARIANCE_RATIO,
+    STACKING_ODD_EVEN_DIFFERENCE_NOISE_NORMALIZED,
+    STACKING_ODD_EVEN_DIFFERENCE_NOISE_STACK_UNIT,
+    STACKING_ODD_EVEN_DIFFERENCE_ODD_EFFECTIVE_FRAME_COUNT,
+    STACKING_ODD_EVEN_DIFFERENCE_REFERENCE_FLUX_STACK_UNIT,
+    STACKING_ODD_EVEN_DIFFERENCE_SHARED_EVEN_WEIGHT_FRACTION,
+    STACKING_ODD_EVEN_DIFFERENCE_SHARED_ODD_WEIGHT_FRACTION,
+    STACKING_ODD_EVEN_DIFFERENCE_VARIANCE_FACTOR,
 )
 from astrometricslib.pipelines.stacking.post_processing.difference_noise import (
     measure_difference_noise,
@@ -61,27 +61,27 @@ from astrometricslib.pipelines.stacking.post_processing.stack_image import signe
 from astrometricslib.pipelines.stacking.post_processing.stack_membership import effective_frame_count
 from astrometricslib.pipelines.stacking.post_processing.stack_noise import measure_stack_noise
 from astrometricslib.pipelines.stacking.subset_noise_run import (
-    HALF_DIFFERENCE_MINIMUM_FRAMES_PER_HALF,
+    ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF,
     difference_variance_factor,
     full_stack_noise_equivalent,
     full_stack_noise_equivalent_from_model,
     model_variance_ratio,
-    run_half_difference_noise,
+    run_odd_even_difference_noise,
     split_into_halves,
 )
 from astrometricslib.pipelines.stacking.target_stack_guard import library_stack_guard
 
 PATTERN_METRICS = PATTERN_ROW_NAMES
 NINE_METRICS = (
-    STACKING_HALF_DIFFERENCE_NOISE_STACK_UNIT,
-    STACKING_HALF_DIFFERENCE_NOISE_NORMALIZED,
-    STACKING_HALF_DIFFERENCE_REFERENCE_FLUX_STACK_UNIT,
-    STACKING_HALF_DIFFERENCE_ODD_EFFECTIVE_FRAME_COUNT,
-    STACKING_HALF_DIFFERENCE_EVEN_EFFECTIVE_FRAME_COUNT,
-    STACKING_HALF_DIFFERENCE_VARIANCE_FACTOR,
-    STACKING_HALF_DIFFERENCE_MODEL_VARIANCE_RATIO,
-    STACKING_HALF_DIFFERENCE_SHARED_ODD_WEIGHT_FRACTION,
-    STACKING_HALF_DIFFERENCE_SHARED_EVEN_WEIGHT_FRACTION,
+    STACKING_ODD_EVEN_DIFFERENCE_NOISE_STACK_UNIT,
+    STACKING_ODD_EVEN_DIFFERENCE_NOISE_NORMALIZED,
+    STACKING_ODD_EVEN_DIFFERENCE_REFERENCE_FLUX_STACK_UNIT,
+    STACKING_ODD_EVEN_DIFFERENCE_ODD_EFFECTIVE_FRAME_COUNT,
+    STACKING_ODD_EVEN_DIFFERENCE_EVEN_EFFECTIVE_FRAME_COUNT,
+    STACKING_ODD_EVEN_DIFFERENCE_VARIANCE_FACTOR,
+    STACKING_ODD_EVEN_DIFFERENCE_MODEL_VARIANCE_RATIO,
+    STACKING_ODD_EVEN_DIFFERENCE_SHARED_ODD_WEIGHT_FRACTION,
+    STACKING_ODD_EVEN_DIFFERENCE_SHARED_EVEN_WEIGHT_FRACTION,
 )
 
 SIZE = 900
@@ -464,7 +464,7 @@ class _Library:
         record_measurements(QualityStore.from_configuration(self.configuration), rows)
 
     def run(self, **keywords: Any) -> Any:
-        """Run the half-difference job.
+        """Run the odd–even difference job.
 
         Parameters
         ----------
@@ -473,7 +473,7 @@ class _Library:
 
         Returns
         -------
-        result : `HalfDifferenceNoiseResult`
+        result : `OddEvenDifferenceNoiseResult`
             The job's result.
         """
         arguments = {
@@ -483,7 +483,7 @@ class _Library:
             "stacking_slot": lambda: _Slot(self.slot_entries),
         }
         arguments.update(keywords)
-        return run_half_difference_noise(self.target, self.stack_path, **arguments)
+        return run_odd_even_difference_noise(self.target, self.stack_path, **arguments)
 
 
 def test_the_split_is_disjoint_alternates_in_time_and_shares_only_the_reference() -> None:
@@ -588,47 +588,47 @@ def test_the_difference_recovers_the_injected_noise_where_the_plain_noise_does_n
 
 
 def test_the_rows_sit_on_the_library_stack_beside_its_own_noise(tmp_path: Path) -> None:
-    """Eighteen stack-level rows are stored on the library stack's subject."""
+    """Twenty-three rows are stored on the library stack's subject."""
     library = _Library(tmp_path)
     library.record_library_count(float(FRAME_COUNT))
     result = library.run()
-    assert result.rows_written == 18
+    assert result.rows_written == 23
     subject_id = f"M 99/{STACK_NAME}"
     for metric in NINE_METRICS:
         rows = library.rows(metric)
         assert len(rows) == 1
         assert rows[0].subject.subject_id == subject_id
         assert rows[0].subject.level == SubjectLevel.STACK
-        if metric == STACKING_HALF_DIFFERENCE_MODEL_VARIANCE_RATIO:
+        if metric == STACKING_ODD_EVEN_DIFFERENCE_MODEL_VARIANCE_RATIO:
             # No sky rates are stored here, so the ratio gives a reason.
             assert rows[0].status == MeasurementStatus.NOT_MEASURED
             assert rows[0].reason
         else:
             assert rows[0].status == MeasurementStatus.MEASURED
-    flux = library.rows(STACKING_HALF_DIFFERENCE_REFERENCE_FLUX_STACK_UNIT)[0]
-    normalized_row = library.rows(STACKING_HALF_DIFFERENCE_NOISE_NORMALIZED)[0]
-    stack_unit_row = library.rows(STACKING_HALF_DIFFERENCE_NOISE_STACK_UNIT)[0]
+    flux = library.rows(STACKING_ODD_EVEN_DIFFERENCE_REFERENCE_FLUX_STACK_UNIT)[0]
+    normalized_row = library.rows(STACKING_ODD_EVEN_DIFFERENCE_NOISE_NORMALIZED)[0]
+    stack_unit_row = library.rows(STACKING_ODD_EVEN_DIFFERENCE_NOISE_STACK_UNIT)[0]
     # The denominator is stored, so the normalized value can be turned back.
     assert flux.value == pytest.approx(result.reference_flux_stack_unit)
     assert stack_unit_row.value / flux.value == pytest.approx(normalized_row.value)
     # The shared frame's two shares and the two counts rebuild the factor.
-    odd_share = library.rows(STACKING_HALF_DIFFERENCE_SHARED_ODD_WEIGHT_FRACTION)[0].value
-    even_share = library.rows(STACKING_HALF_DIFFERENCE_SHARED_EVEN_WEIGHT_FRACTION)[0].value
-    odd_count = library.rows(STACKING_HALF_DIFFERENCE_ODD_EFFECTIVE_FRAME_COUNT)[0].value
-    even_count = library.rows(STACKING_HALF_DIFFERENCE_EVEN_EFFECTIVE_FRAME_COUNT)[0].value
-    factor = library.rows(STACKING_HALF_DIFFERENCE_VARIANCE_FACTOR)[0].value
+    odd_share = library.rows(STACKING_ODD_EVEN_DIFFERENCE_SHARED_ODD_WEIGHT_FRACTION)[0].value
+    even_share = library.rows(STACKING_ODD_EVEN_DIFFERENCE_SHARED_EVEN_WEIGHT_FRACTION)[0].value
+    odd_count = library.rows(STACKING_ODD_EVEN_DIFFERENCE_ODD_EFFECTIVE_FRAME_COUNT)[0].value
+    even_count = library.rows(STACKING_ODD_EVEN_DIFFERENCE_EVEN_EFFECTIVE_FRAME_COUNT)[0].value
+    factor = library.rows(STACKING_ODD_EVEN_DIFFERENCE_VARIANCE_FACTOR)[0].value
     assert 1 / odd_count + 1 / even_count - 2 * odd_share * even_share == pytest.approx(factor)
-    normalized = library.rows(STACKING_HALF_DIFFERENCE_NOISE_NORMALIZED)[0]
+    normalized = library.rows(STACKING_ODD_EVEN_DIFFERENCE_NOISE_NORMALIZED)[0]
     assert normalized.value == pytest.approx(result.difference_noise_normalized)
     assert normalized.uncertainty is not None
     assert normalized.sample_count == result.aperture_count
     assert "f005.fits" in (normalized.reason or "")
     assert library.rows(STACKING_EMPTY_APERTURE_NOISE_NORMALIZED) == []
     # A row of its own names the apertures the halves were measured in.
-    identity_rows = library.rows("stacking.half_difference_aperture_set_number")
+    identity_rows = library.rows("stacking.odd_even_difference_aperture_set_number")
     assert len(identity_rows) == 1 and identity_rows[0].status == MeasurementStatus.MEASURED
     assert aperture_identity_from_number(identity_rows[0].value).startswith("v3-")
-    odd_count = library.rows(STACKING_HALF_DIFFERENCE_ODD_EFFECTIVE_FRAME_COUNT)[0].value
+    odd_count = library.rows(STACKING_ODD_EVEN_DIFFERENCE_ODD_EFFECTIVE_FRAME_COUNT)[0].value
     assert odd_count == result.odd_half_effective_frame_count == len(library.stacker.calls[0])
     # The pattern the halves share is stored on the same subject: a value, or
     # the reason there is none (the test frames carry no registration facts,
@@ -666,8 +666,8 @@ def test_a_failure_building_the_pattern_rows_leaves_the_nine_difference_rows(
     assert result.reason == ""
     for metric in NINE_METRICS:
         assert len(library.rows(metric)) == 1
-    assert library.rows(STACKING_HALF_DIFFERENCE_NOISE_STACK_UNIT)[0].status == MeasurementStatus.MEASURED
-    assert library.rows(STACKING_HALF_DIFFERENCE_VARIANCE_FACTOR)[0].status == MeasurementStatus.MEASURED
+    assert library.rows(STACKING_ODD_EVEN_DIFFERENCE_NOISE_STACK_UNIT)[0].status == MeasurementStatus.MEASURED
+    assert library.rows(STACKING_ODD_EVEN_DIFFERENCE_VARIANCE_FACTOR)[0].status == MeasurementStatus.MEASURED
     for metric in PATTERN_METRICS:
         rows = library.rows(metric)
         assert len(rows) == 1
@@ -722,9 +722,11 @@ def test_the_halves_stack_the_right_frames_and_are_deleted_afterwards(tmp_path: 
     assert result.shared_frame == library.reference
     assert len(library.slot_entries) == 2
     assert not list((folder / "_subsets").glob("*half*"))
-    assert sorted(path.name for path in folder.iterdir() if path.name != "_subsets") == [
-        name for name in before if name != "_subsets"
-    ]
+    # The one new file is the per-aperture record, named for the run (D21).
+    assert sorted(path.name for path in folder.iterdir() if path.name != "_subsets") == sorted([
+        *(name for name in before if name != "_subsets"),
+        "M99_L_Stacked_odd_even_apertures.json",
+    ])
 
 
 def test_the_halves_can_be_kept(tmp_path: Path) -> None:
@@ -770,7 +772,7 @@ def _assert_not_measured(library: _Library, reason_part: str, result: Any) -> No
         The test library.
     reason_part : `str`
         Words the reason must hold.
-    result : `HalfDifferenceNoiseResult`
+    result : `OddEvenDifferenceNoiseResult`
         The job's result.
     """
     assert reason_part in result.reason
@@ -786,9 +788,9 @@ def _assert_not_measured(library: _Library, reason_part: str, result: Any) -> No
 
 def test_too_few_frames_in_a_half_is_not_measured(tmp_path: Path) -> None:
     """Under the minimum per half, nothing is stacked."""
-    library = _Library(tmp_path, count=2 * HALF_DIFFERENCE_MINIMUM_FRAMES_PER_HALF - 4, reference_index=2)
+    library = _Library(tmp_path, count=2 * ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF - 4, reference_index=2)
     result = library.run()
-    _assert_not_measured(library, f"fewer than the {HALF_DIFFERENCE_MINIMUM_FRAMES_PER_HALF}", result)
+    _assert_not_measured(library, f"fewer than the {ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF}", result)
     assert library.stacker.calls == []
 
 
@@ -857,7 +859,7 @@ def test_a_running_library_stack_of_the_target_stops_the_job(tmp_path: Path) -> 
     with library_stack_guard("M 99"), pytest.raises(ConflictError):
         library.run()
     assert library.stacker.attempts == 0
-    assert library.rows(STACKING_HALF_DIFFERENCE_NOISE_NORMALIZED) == []
+    assert library.rows(STACKING_ODD_EVEN_DIFFERENCE_NOISE_NORMALIZED) == []
     # Another target's library stack does not stop it.
     with library_stack_guard("M 100"):
         assert library.run().reason == ""
@@ -914,7 +916,7 @@ def test_the_job_stores_the_model_variance_ratio_from_each_frames_own_noise(
     library_shares = {frame.path: 1 / FRAME_COUNT for frame in members}
     expected = model_variance_ratio(odd_shares, even_shares, library_shares, ordered)
     assert result.model_variance_ratio == pytest.approx(expected)
-    assert library.rows(STACKING_HALF_DIFFERENCE_MODEL_VARIANCE_RATIO)[0].value == pytest.approx(expected)
+    assert library.rows(STACKING_ODD_EVEN_DIFFERENCE_MODEL_VARIANCE_RATIO)[0].value == pytest.approx(expected)
     assert result.full_stack_equivalent_model_normalized == pytest.approx(
         result.difference_noise_normalized / math.sqrt(expected)
     )
@@ -1068,7 +1070,7 @@ def test_a_stacker_failure_is_not_measured_and_the_run_does_not_raise(tmp_path: 
 
 
 def test_the_library_stack_and_the_target_are_left_alone(tmp_path: Path) -> None:
-    """Only _subsets changes in the stack's folder; the target is untouched."""
+    """Only _subsets and the aperture record are new; the target is kept."""
     library = _Library(tmp_path)
     folder = Path(library.stack_path).parent
     before = {
@@ -1077,6 +1079,8 @@ def test_the_library_stack_and_the_target_are_left_alone(tmp_path: Path) -> None
     target_before = library.target.model_dump()
     library.run()
     after = {str(path.relative_to(folder)): path.read_bytes() for path in folder.rglob("*") if path.is_file()}
+    # The per-aperture record (D21) is the only file added; none changes.
+    assert after.pop("M99_L_Stacked_odd_even_apertures.json")
     assert after == before
     assert library.target.model_dump() == target_before
 
@@ -1088,7 +1092,7 @@ def test_without_a_context_nothing_is_stored(tmp_path: Path) -> None:
     assert result.reason == ""
     assert result.rows_written == 0
     assert result.difference_noise_normalized is not None
-    assert library.rows(STACKING_HALF_DIFFERENCE_NOISE_NORMALIZED) == []
+    assert library.rows(STACKING_ODD_EVEN_DIFFERENCE_NOISE_NORMALIZED) == []
 
 
 def test_two_stacks_on_different_grids_are_refused(tmp_path: Path) -> None:
@@ -1100,3 +1104,108 @@ def test_two_stacks_on_different_grids_are_refused(tmp_path: Path) -> None:
     outcome = measure_difference_noise(str(small), str(big), None, str(tmp_path / APERTURE_FILE_NAME))
     assert outcome.result is None
     assert "different pixel grids" in outcome.reason
+
+
+def test_the_per_aperture_record_and_the_line_pattern_are_stored(tmp_path: Path) -> None:
+    """D21: the aperture record file and the line rows are stored."""
+    from astrometricslib.pipelines.stacking.metrics import (
+        STACKING_ODD_EVEN_DIFFERENCE_APERTURE_RECORD_COUNT,
+        STACKING_ODD_EVEN_DIFFERENCE_COLUMN_AVERAGE_SCATTER_STACK_UNIT,
+        STACKING_ODD_EVEN_DIFFERENCE_ROW_AVERAGE_SCATTER_STACK_UNIT,
+        STACKING_ODD_EVEN_SUM_COLUMN_AVERAGE_SCATTER_STACK_UNIT,
+        STACKING_ODD_EVEN_SUM_ROW_AVERAGE_SCATTER_STACK_UNIT,
+    )
+    from astrometricslib.pipelines.stacking.post_processing.odd_even_apertures import (
+        load_odd_even_aperture_record,
+    )
+
+    library = _Library(tmp_path)
+    library.record_library_count(float(FRAME_COUNT))
+    # The test header puts (RA, Dec) = (150, 2) degrees at the image center.
+    library.target.ra = "10 00 00.00"
+    library.target.dec = "+02 00 00.0"
+    result = library.run()
+
+    assert result.reason == ""
+    (count_row,) = library.rows(STACKING_ODD_EVEN_DIFFERENCE_APERTURE_RECORD_COUNT)
+    assert count_row.status == MeasurementStatus.MEASURED
+    assert count_row.value == result.aperture_record_count
+    assert result.aperture_record_path in (count_row.reason or "")
+    record = load_odd_even_aperture_record(result.aperture_record_path)
+    assert record is not None and len(record["apertures"]) == result.aperture_record_count
+    apertures = record["apertures"]
+    assert all(entry["distance_from_target_px"] is not None for entry in apertures)
+    # The target sits at the image center, so the two distances agree.
+    assert all(
+        entry["distance_from_target_px"] == pytest.approx(entry["distance_from_center_px"], abs=1.5)
+        for entry in apertures
+    )
+    sums = np.array([entry["sum"] for entry in apertures])
+    differences = np.array([entry["difference"] for entry in apertures])
+    # The shared texture stays in the sum and cancels in the difference.
+    assert np.std(sums) > 1.2 * np.std(differences)
+    for metric in (
+        STACKING_ODD_EVEN_DIFFERENCE_ROW_AVERAGE_SCATTER_STACK_UNIT,
+        STACKING_ODD_EVEN_DIFFERENCE_COLUMN_AVERAGE_SCATTER_STACK_UNIT,
+        STACKING_ODD_EVEN_SUM_ROW_AVERAGE_SCATTER_STACK_UNIT,
+        STACKING_ODD_EVEN_SUM_COLUMN_AVERAGE_SCATTER_STACK_UNIT,
+    ):
+        (row,) = library.rows(metric)
+        assert row.status == MeasurementStatus.MEASURED and row.value > 0
+        assert row.uncertainty is not None
+    assert set(result.line_pattern_ratios) == {"row", "column"}
+
+
+def test_the_detail_rows_say_why_when_the_difference_was_not_measured(tmp_path: Path) -> None:
+    """A refused run stores the five detail rows as not measured."""
+    from astrometricslib.pipelines.stacking.metrics import (
+        STACKING_ODD_EVEN_DIFFERENCE_APERTURE_RECORD_COUNT,
+        STACKING_ODD_EVEN_SUM_ROW_AVERAGE_SCATTER_STACK_UNIT,
+    )
+
+    library = _Library(tmp_path, count=10)
+    result = library.run()
+
+    assert result.reason.startswith("a half would have")
+    for metric in (
+        STACKING_ODD_EVEN_DIFFERENCE_APERTURE_RECORD_COUNT,
+        STACKING_ODD_EVEN_SUM_ROW_AVERAGE_SCATTER_STACK_UNIT,
+    ):
+        (row,) = library.rows(metric)
+        assert row.status == MeasurementStatus.NOT_MEASURED
+        assert "a half would have" in row.reason
+
+
+def test_the_bias_divides_the_noise_and_its_uncertainty_but_not_the_aperture_sums(tmp_path: Path) -> None:
+    """D16: `measure_difference_noise` applies the bias."""
+    library = _Library(tmp_path)
+    folder = tmp_path / "pair"
+    odd, even = str(folder / "odd.fits"), str(folder / "even.fits")
+    _write(odd, 3.0, seed=1)
+    _write(even, 3.0, seed=2)
+    apertures = str(Path(library.stack_path).parent / APERTURE_FILE_NAME)
+
+    plain = measure_difference_noise(odd, even, library.reference, apertures, bias=1.0)
+    corrected = measure_difference_noise(odd, even, library.reference, apertures, bias=0.8)
+
+    assert plain.result is not None and corrected.result is not None
+    assert corrected.result.noise_adu == pytest.approx(plain.result.noise_adu / 0.8)
+    assert corrected.result.normalized_noise == pytest.approx(plain.result.normalized_noise / 0.8)
+    assert corrected.result.normalized_uncertainty == pytest.approx(plain.result.normalized_uncertainty / 0.8)
+    assert corrected.result.aperture_sums == plain.result.aperture_sums
+
+
+def test_a_bias_that_is_not_positive_is_refused(tmp_path: Path) -> None:
+    """A zero, negative or NaN bias cannot divide a noise."""
+    for bias in (0.0, -1.0, float("nan")):
+        with pytest.raises(ValueError, match="positive"):
+            measure_difference_noise("a", "b", None, str(tmp_path / "x.json"), bias=bias)
+
+
+def test_the_shipped_bias_is_one_until_it_has_been_measured() -> None:
+    """D16: no correction without a measurement (a Design estimate)."""
+    from astrometricslib.pipelines.stacking.post_processing.difference_noise import (
+        ODD_EVEN_DIFFERENCE_NOISE_BIAS,
+    )
+
+    assert ODD_EVEN_DIFFERENCE_NOISE_BIAS == pytest.approx(1.0)

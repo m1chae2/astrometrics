@@ -586,7 +586,7 @@ DECISIONS = {
         "so it reads the stored numbers with quality_query instead.",
         "change-data",
     ),
-    "processing_measure_half_difference_noise": ToolDecision(
+    "processing_measure_odd_even_difference_noise": ToolDecision(
         "withhold",
         "Stacks two halves of a target's frames into the target's _subsets folder (about one library "
         "stack's time in all), subtracts them, and writes the noise of the difference into the quality "

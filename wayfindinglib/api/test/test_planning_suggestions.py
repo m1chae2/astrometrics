@@ -43,7 +43,7 @@ from wayfindinglib.models.planning.observation_package import (
     PackageStatus,
 )
 from wayfindinglib.models.planning.suggestion_log import SuggestionEvent
-from wayfindinglib.models.planning.target_report import ForecastGate
+from wayfindinglib.models.planning.target_report import RecommendedAdditionalFramesStatus
 from wayfindinglib.models.planning.tonight_ranking import (
     CandidateStatus,
     RankedCandidate,
@@ -685,19 +685,24 @@ def test_the_top_three_of_each_use_become_tentative_packages_for_tonight(fixture
     assert len(fixture.planning.get_plan(kind="packages", status="SUGGESTED")) == 3
 
 
-def test_an_exploratory_count_is_said_in_the_ranking_suggestion(fixture: Fixture) -> None:
-    """An exploratory count is said in the suggestion's reason."""
+def test_an_provisional_count_is_said_in_the_ranking_suggestion(fixture: Fixture) -> None:
+    """An provisional count is said in the suggestion's reason."""
     made = ranking("M 81", "M 13")
     candidates = made.lists[0].candidates
-    candidates[1] = candidates[1].model_copy(update={"forecast_gate": ForecastGate.EXPLORATORY})
+    candidates[1] = candidates[1].model_copy(
+        update={"recommended_additional_frames_status": RecommendedAdditionalFramesStatus.PROVISIONAL}
+    )
     fixture.ranking = made
     fixture.planning.refresh_suggestions(register_job=False)
     reasons = {
         package.target_id: package.suggestion.reason
         for package in fixture.planning.get_plan(kind="packages", status="SUGGESTED")
     }
-    assert "exploratory" not in reasons["M 81"]
-    assert "Its count of frames to take is exploratory, so it ranks below a confirmed one" in reasons["M 13"]
+    assert "provisional" not in reasons["M 81"]
+    assert (
+        "Its count of recommended additional frames is provisional, so it ranks below a confirmed one"
+        in reasons["M 13"]
+    )
 
 
 def test_a_ranking_suggestion_is_removed_when_it_falls_out_of_the_top(fixture: Fixture) -> None:

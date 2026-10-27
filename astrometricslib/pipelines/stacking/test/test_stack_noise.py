@@ -41,9 +41,11 @@ from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
     StackDepth,
     analyze_faint_sources,
     faint_source_distance,
+    find_library_set_key,
     load_apertures,
     load_apertures_with_reason,
     place_empty_apertures,
+    record_library_set_key,
     reset_apertures,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_image import (
@@ -55,8 +57,11 @@ from astrometricslib.pipelines.stacking.post_processing.stack_image import (
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
     MEMBER_FRAME_WCS_SOURCE,
+    NEGLIGIBLE_ROTATION_DEG,
+    NEGLIGIBLE_SHIFT_PX,
     NO_WCS_REASON,
     PLATE_SOLVE_WCS_SOURCE,
+    _move_guess_onto_reference_stars,
     measure_stack_noise,
 )
 
@@ -482,26 +487,111 @@ def test_a_header_solution_that_is_a_copied_guess_is_moved_onto_the_stored_stars
     assert first_result.position_note == ""
 
 
-def test_a_stack_rotated_beyond_the_limit_is_refused(tmp_path: Path) -> None:
-    """A rotation of 0.5 degree cannot follow by a shift: no noise."""
-    apertures = str(tmp_path / APERTURE_FILE_NAME)
-    scattered = _scattered_stars(seed=3)
-    first = _write(tmp_path / "first.fits", _sky_image(2.0, seed=1, star_positions=scattered), _sky_header())
-    assert measure_stack_noise(first, None, apertures).result is not None
-    angle = math.radians(0.5)
-    center = SIZE / 2
-    rotated = [
+def _rotated_stars(stars: list[tuple[float, float]], degrees: float) -> list[tuple[float, float]]:
+    """Turn star positions about the image center.
+
+    Parameters
+    ----------
+    stars : `list` of `tuple`
+        (column, row) positions.
+    degrees : `float`
+        The rotation, with x as the column and y as the row.
+
+    Returns
+    -------
+    rotated : `list` of `tuple`
+        The turned (column, row) positions.
+    """
+    angle = math.radians(degrees)
+    center = (SIZE - 1) / 2
+    return [
         (
             center + (x - center) * math.cos(angle) - (y - center) * math.sin(angle),
             center + (x - center) * math.sin(angle) + (y - center) * math.cos(angle),
         )
-        for x, y in scattered
+        for x, y in stars
     ]
+
+
+def test_a_stack_rotated_beyond_the_limit_is_refused(tmp_path: Path) -> None:
+    """A rotation of 1 degree is more than the search follows: no noise."""
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    scattered = _scattered_stars(seed=3)
+    first = _write(tmp_path / "first.fits", _sky_image(2.0, seed=1, star_positions=scattered), _sky_header())
+    assert measure_stack_noise(first, None, apertures).result is not None
+    rotated = _rotated_stars(scattered, 1.0)
     stack = _write(tmp_path / "rotated.fits", _sky_image(2.0, seed=2, star_positions=rotated), _sky_header())
     outcome = measure_stack_noise(stack, None, apertures)
     assert outcome.result is None
-    assert "rotated by" in outcome.reason
-    assert "0.1 deg" in outcome.reason
+    assert "rotated by" in outcome.reason or "agree on a shift and a rotation" in outcome.reason
+    assert "0.5 deg" in outcome.reason
+
+
+@pytest.mark.parametrize("degrees", [0.2, -0.3])
+def test_a_stack_rotated_within_the_limit_is_followed(tmp_path: Path, degrees: float) -> None:
+    """A rotation of a fraction of a degree is found and followed."""
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    scattered = _scattered_stars(seed=3)
+    first = _write(tmp_path / "first.fits", _sky_image(2.0, seed=1, star_positions=scattered), _sky_header())
+    first_result = measure_stack_noise(first, None, apertures).result
+    assert first_result is not None
+    rotated = _rotated_stars(scattered, degrees)
+    stack = _write(tmp_path / "rotated.fits", _sky_image(2.0, seed=2, star_positions=rotated), _sky_header())
+    result = measure_stack_noise(stack, None, apertures).result
+    assert result is not None
+    assert result.reference_star_count >= 5
+    assert result.reference_zero_point == pytest.approx(1.0, abs=0.05)
+    assert "turned by" in result.position_note
+
+
+def test_the_returned_solution_puts_rotated_stars_within_half_a_pixel() -> None:
+    """The moved solution projects every stored star onto its detected star."""
+    scattered = _scattered_stars(seed=3)
+    header = _sky_header()
+    guess = WCS(header)
+    sky = np.array(guess.pixel_to_world_values([x for x, _ in scattered], [y for _, y in scattered])).T
+    rotated = _rotated_stars(scattered, 0.2)
+    plane = _sky_image(2.0, seed=2, star_positions=[(x + 3.0, y - 2.0) for x, y in rotated])
+    moved, reason, alignment = _move_guess_onto_reference_stars(plane, guess, sky)
+    assert moved is not None, reason
+    assert alignment is not None and alignment.rotation_deg == pytest.approx(0.2, abs=0.02)
+    projected = np.array(moved.world_to_pixel_values(sky[:, 0], sky[:, 1])).T
+    truth = np.array([(x + 3.0, y - 2.0) for x, y in rotated])
+    assert np.max(np.hypot(*(projected - truth).T)) < 0.5
+    assert alignment.rms_px < 0.5
+
+
+def test_a_pure_shift_stays_a_pure_shift() -> None:
+    """With no rotation in the stars, none is applied."""
+    scattered = _scattered_stars(seed=3)
+    guess = WCS(_sky_header())
+    sky = np.array(guess.pixel_to_world_values([x for x, _ in scattered], [y for _, y in scattered])).T
+    plane = _sky_image(2.0, seed=2, star_positions=[(x + 25.0, y + 30.0) for x, y in scattered])
+    moved, reason, alignment = _move_guess_onto_reference_stars(plane, guess, sky)
+    assert moved is not None, reason
+    assert alignment.rotation_deg == pytest.approx(0.0, abs=1e-12)
+    assert alignment.shift_row == pytest.approx(30.0, abs=0.3)
+    assert alignment.shift_column == pytest.approx(25.0, abs=0.3)
+    np.testing.assert_allclose(moved.wcs.get_pc(), guess.wcs.get_pc())
+
+
+def test_a_rotation_is_followed_when_the_solution_uses_a_cd_matrix() -> None:
+    """A solution with a CD matrix is turned through that matrix."""
+    scattered = _scattered_stars(seed=3)
+    scale = PIXEL_SCALE_ARCSEC / 3600.0
+    guess = WCS(naxis=2)
+    guess.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    guess.wcs.crval = [150.0, 2.0]
+    guess.wcs.crpix = [SIZE / 2, SIZE / 2]
+    guess.wcs.cd = [[-scale, 0.0], [0.0, scale]]
+    sky = np.array(guess.pixel_to_world_values([x for x, _ in scattered], [y for _, y in scattered])).T
+    rotated = _rotated_stars(scattered, -0.2)
+    plane = _sky_image(2.0, seed=2, star_positions=rotated)
+    moved, reason, _alignment = _move_guess_onto_reference_stars(plane, guess, sky)
+    assert moved is not None, reason
+    assert moved.wcs.has_cd()
+    projected = np.array(moved.world_to_pixel_values(sky[:, 0], sky[:, 1])).T
+    assert np.max(np.hypot(*(projected - np.array(rotated)).T)) < 0.5
 
 
 def test_apertures_are_at_least_the_separation_apart(tmp_path: Path) -> None:
@@ -1380,3 +1470,108 @@ def test_a_missed_header_solution_with_a_failed_stack_solve_gives_both_reasons(
     assert outcome.result is None
     assert "stored reference stars" in outcome.reason
     assert "was tried and found no solution" in outcome.reason
+
+
+def _two_sets(tmp_path: Path) -> str:
+    """Store a 60 second and a 300 second set, the first the deeper.
+
+    Parameters
+    ----------
+    tmp_path : `pathlib.Path`
+        The folder.
+
+    Returns
+    -------
+    apertures : `str`
+        The aperture file's path.
+    """
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    stack_60, frame_60 = _reference_pair(tmp_path, "a60", 60.0)
+    stack_300, frame_300 = _reference_pair(tmp_path, "b300", 300.0, seed=2)
+    assert measure_stack_noise(stack_60, frame_60, apertures, depth=StackDepth(40, 22.1)).result is not None
+    assert measure_stack_noise(stack_300, frame_300, apertures, depth=StackDepth(30, 9.2)).result is not None
+    return apertures
+
+
+def test_the_library_stacks_set_is_recorded_and_preferred_over_a_deeper_stale_set(tmp_path: Path) -> None:
+    """The library stack's set is found, though another is deeper."""
+    apertures = _two_sets(tmp_path)
+    stored = json.loads(Path(apertures).read_text())
+    assert stored["library_set_keys"] == {"unspecified": "unspecified|exp=300"}
+    assert find_library_set_key(apertures, "unspecified|exp=30") == "unspecified|exp=300"
+    assert load_apertures(apertures).setup_key == "unspecified|exp=300"
+    assert sorted(stored["sets"]) == ["unspecified|exp=300", "unspecified|exp=60"]
+    stack_30, frame_30 = _reference_pair(tmp_path, "c30", 30.0, seed=3)
+    subset = measure_stack_noise(stack_30, frame_30, apertures, may_choose_apertures=False).result
+    assert subset is not None
+    assert subset.aperture_identity == load_apertures(apertures, "unspecified|exp=300").identity
+
+
+def test_a_file_without_the_library_record_falls_back_to_the_deepest_set(tmp_path: Path) -> None:
+    """An older file has no record, so the deepest set is used."""
+    apertures = _two_sets(tmp_path)
+    stored = json.loads(Path(apertures).read_text())
+    del stored["library_set_keys"]
+    Path(apertures).write_text(json.dumps(stored))
+    assert find_library_set_key(apertures, "unspecified|exp=30") == "unspecified|exp=60"
+    assert load_apertures(apertures).setup_key == "unspecified|exp=60"
+
+
+def test_a_record_for_a_set_that_is_gone_is_ignored_and_survives_other_writes(tmp_path: Path) -> None:
+    """A record of a missing set is skipped; a good one survives writes."""
+    apertures = _two_sets(tmp_path)
+    assert reset_apertures(apertures, "unspecified|exp=300")
+    assert find_library_set_key(apertures, "unspecified|exp=30") == "unspecified|exp=60"
+    record_library_set_key(apertures, "unspecified|exp=60")
+    stack_120, frame_120 = _reference_pair(tmp_path, "d120", 120.0, seed=4)
+    assert measure_stack_noise(stack_120, frame_120, apertures, depth=StackDepth(5, 5.0)).result is not None
+    stored = json.loads(Path(apertures).read_text())
+    assert stored["library_set_keys"] == {"unspecified": "unspecified|exp=120"}
+
+
+def test_a_library_stack_measures_the_noise_against_aperture_size_and_a_subset_does_not(
+    tmp_path: Path,
+) -> None:
+    """D20: only a stack that may choose apertures does the extra pass."""
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    first = _write(tmp_path / "first.fits", _sky_image(2.0, seed=1), _sky_header())
+    second = _write(tmp_path / "second.fits", _sky_image(2.0, seed=2), _sky_header())
+
+    library = measure_stack_noise(first, None, apertures)
+    subset = measure_stack_noise(second, None, apertures, may_choose_apertures=False)
+
+    assert library.result is not None and subset.result is not None
+    assert library.result.size_noise is not None
+    assert library.result.size_noise.result is not None
+    assert 0.45 < library.result.size_noise.result.exponent < 0.7
+    assert len(library.result.aperture_pixel_positions) == len(library.result.aperture_sums)
+    assert subset.result.size_noise is None
+
+
+def test_a_negligible_fitted_move_returns_the_solution_unchanged() -> None:
+    """Stars where the solution puts them leave it exactly as it was."""
+    scattered = _scattered_stars(seed=3)
+    guess = WCS(_sky_header())
+    sky = np.array(guess.pixel_to_world_values([x for x, _ in scattered], [y for _, y in scattered])).T
+    plane = _sky_image(2.0, seed=2, star_positions=scattered)
+    moved, reason, alignment = _move_guess_onto_reference_stars(plane, guess, sky)
+    assert moved is not None, reason
+    assert alignment is not None and alignment.left_unchanged
+    assert math.hypot(alignment.shift_row, alignment.shift_column) < NEGLIGIBLE_SHIFT_PX
+    assert abs(alignment.rotation_deg) < NEGLIGIBLE_ROTATION_DEG
+    np.testing.assert_array_equal(moved.wcs.crpix, guess.wcs.crpix)
+    np.testing.assert_array_equal(moved.wcs.get_pc(), guess.wcs.get_pc())
+    assert "left as they were" in alignment.describe()
+
+
+def test_a_move_above_the_negligible_size_is_still_applied() -> None:
+    """A shift of 2 px, far above the limit, is applied to the solution."""
+    scattered = _scattered_stars(seed=3)
+    guess = WCS(_sky_header())
+    sky = np.array(guess.pixel_to_world_values([x for x, _ in scattered], [y for _, y in scattered])).T
+    plane = _sky_image(2.0, seed=2, star_positions=[(x + 2.0, y) for x, y in scattered])
+    moved, reason, alignment = _move_guess_onto_reference_stars(plane, guess, sky)
+    assert moved is not None, reason
+    assert alignment is not None and not alignment.left_unchanged
+    assert alignment.shift_column == pytest.approx(2.0, abs=0.2)
+    assert not np.allclose(moved.wcs.crpix, guess.wcs.crpix)

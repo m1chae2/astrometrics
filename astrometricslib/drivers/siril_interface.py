@@ -2493,10 +2493,10 @@ class ImageProcessing:
                     # Two-pass chose a different reference and stacked
                     # 21 of 22 frames.
                     if reference_frame_path is not None:
-                        # The caller names the reference (the half-difference
-                        # job needs both halves on the library stack's
-                        # reference). Siril counts sequence images from 1,
-                        # in the order of the symlinked light frames.
+                        # The caller names the reference (the odd–even
+                        # difference job needs both halves on the library
+                        # stack's reference). Siril counts sequence images
+                        # from 1, in the order of the symlinked light frames.
                         light_paths = self.last_run_diagnostics.get("symlinked_light_paths", [])
                         if reference_frame_path in light_paths:
                             register_commands.append(

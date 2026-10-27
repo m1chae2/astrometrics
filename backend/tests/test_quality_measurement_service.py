@@ -356,7 +356,7 @@ class _SubsetProcessing:
         target_id: str,
         maximum_steps: int = 4,
         include_night_contributions: bool = False,
-        include_half_difference: bool = True,
+        include_odd_even_difference: bool = True,
     ) -> SimpleNamespace:
         """Record the call and report two subsets and, if asked, two nights.
 
@@ -369,7 +369,7 @@ class _SubsetProcessing:
             target_id,
             maximum_steps,
             include_night_contributions,
-            include_half_difference,
+            include_odd_even_difference,
         ))
         nights = (
             SimpleNamespace(
@@ -383,16 +383,16 @@ class _SubsetProcessing:
             rows_written=10,
             subsets=[SimpleNamespace(observing_night_ids=["2026-10-01"])],
             night_contributions=nights,
-            half_difference=SimpleNamespace(rows_written=9) if include_half_difference else None,
+            odd_even_difference=SimpleNamespace(rows_written=9) if include_odd_even_difference else None,
         )
 
-    def measure_half_difference_noise(self, target_id: str) -> SimpleNamespace:
+    def measure_odd_even_difference_noise(self, target_id: str) -> SimpleNamespace:
         """Record the call and report the nine rows the job stores.
 
         Returns
         -------
         result : `SimpleNamespace`
-            The fields of `HalfDifferenceNoiseResult` the service reads.
+            The fields of `OddEvenDifferenceNoiseResult` the service reads.
         """
         self.half_calls.append(target_id)
         return SimpleNamespace(rows_written=9)
@@ -417,7 +417,7 @@ def test_the_subset_jobs_are_declared_and_served_by_the_service() -> None:
     for method, handler in (
         ("processing:measure_noise_growth", "start_noise_growth"),
         ("processing:measure_night_contributions", "start_night_contributions"),
-        ("processing:measure_half_difference_noise", "start_half_difference_noise"),
+        ("processing:measure_odd_even_difference_noise", "start_odd_even_difference_noise"),
     ):
         assert method in RPC_METHODS
         assert rpc_registry._handlers[method] == ("quality_measurement_service", handler)
@@ -436,7 +436,7 @@ def test_the_noise_growth_rpc_starts_the_job_and_announces_its_rows(monkeypatch:
                 "target_id": "M 13",
                 "maximum_steps": 2,
                 "include_night_contributions": True,
-                "include_half_difference": False,
+                "include_odd_even_difference": False,
             },
         )
     )
@@ -476,16 +476,16 @@ def test_the_night_contribution_rpc_starts_the_job_and_announces_its_rows(
     assert sockets.events[0][1]["rowsWritten"] == 6
 
 
-def test_the_half_difference_rpc_starts_the_job_and_announces_its_rows(
+def test_the_odd_even_difference_rpc_starts_the_job_and_announces_its_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The half-difference job runs on its own thread and announces rows."""
+    """The odd–even difference job runs on its own thread, announcing rows."""
     processing, sockets = _SubsetProcessing(), _Sockets()
     service = QualityMeasurementService(SimpleNamespace(processing=processing), sockets)
     monkeypatch.setattr(container, "quality_measurement_service", service, raising=False)
 
     reply = asyncio.run(
-        rpc_registry.execute("processing:measure_half_difference_noise", {"target_id": "M 57"})
+        rpc_registry.execute("processing:measure_odd_even_difference_noise", {"target_id": "M 57"})
     )
 
     assert reply == {"started": True, "target_id": "M 57"}
@@ -495,8 +495,8 @@ def test_the_half_difference_rpc_starts_the_job_and_announces_its_rows(
     assert sockets.events[0][1]["rowsWritten"] == 9
 
 
-def test_the_series_counts_the_half_difference_rows_by_default() -> None:
-    """By default the series' announcement counts the half-difference rows."""
+def test_the_series_counts_the_odd_even_difference_rows_by_default() -> None:
+    """By default the series' announcement counts the odd–even rows."""
     processing, sockets = _SubsetProcessing(), _Sockets()
     service = QualityMeasurementService(SimpleNamespace(processing=processing), sockets)
 

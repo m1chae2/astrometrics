@@ -59,6 +59,7 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_EFFECTIVE_TIME_READ_NOISE_S,
     STACKING_EFFECTIVE_TIME_S,
     STACKING_EMPTY_APERTURE_NOISE_NORMALIZED,
+    STACKING_EMPTY_APERTURE_NOISE_SIZE_EXPONENT,
     STACKING_EMPTY_APERTURE_NOISE_STACK_UNIT,
     STACKING_EXPECTED_STACK_FWHM_PX,
     STACKING_FLAT_FRAME_COUNT,
@@ -83,14 +84,23 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_METRICS,
     STACKING_NEGATIVE_PIXEL_MAX_FRACTION,
     STACKING_NOISE_REFERENCE_FLUX_STACK_UNIT,
+    STACKING_POINT_SOURCE_DEPTH_5SIGMA_MAG,
     STACKING_REGISTRATION_REFERENCE_STAR_COUNT,
     STACKING_REJECTED_PIXEL_FRACTION,
     STACKING_SATURATED_PIXEL_FRACTION,
     STACKING_STACKED_FWHM_PX,
+    STACKING_SURFACE_BRIGHTNESS_LIMIT_3SIGMA_10ARCSEC_MAG_PER_ARCSEC2,
     STACKING_ZERO_PIXEL_FRACTION,
 )
+from astrometricslib.pipelines.stacking.post_processing.aperture_size_noise import ApertureSizeNoiseOutcome
 from astrometricslib.pipelines.stacking.post_processing.calibration_record import (
     record_calibration_identities,
+)
+from astrometricslib.pipelines.stacking.post_processing.depth_limits import (
+    DepthLimit,
+    GaiaLookup,
+    cached_gaia_lookup,
+    measure_depth_limits,
 )
 from astrometricslib.pipelines.stacking.post_processing.difference_noise import (
     discard_noise_sums,
@@ -135,6 +145,7 @@ __all__ = [
     "GATE_LIMIT_SOURCES",
     "FrameGeometryRows",
     "aperture_set_measurement",
+    "depth_limit_measurements",
     "exposure_group_subject",
     "frame_geometry_measurements",
     "frame_weight_measurements",
@@ -144,6 +155,7 @@ __all__ = [
     "membership_count_measurements",
     "noise_measurements",
     "record_stacking_quality",
+    "size_exponent_measurements",
     "stack_depth_of",
     "stacking_measurements",
 ]
@@ -400,7 +412,7 @@ def aperture_set_measurement(
     ----------
     metric_name : `str`
         ``stacking.aperture_set_number`` or
-        ``stacking.half_difference_aperture_set_number``.
+        ``stacking.odd_even_difference_aperture_set_number``.
     identity : `str` or `None`
         The set's identity (`ApertureSet.identity`), or `None` when nothing
         was measured.
@@ -507,10 +519,128 @@ def noise_measurements(
         rows = [row.model_copy(update={"reason": note}) for row in rows]
     # The identity goes in its own row (no reason text), so a reader can tell
     # whether two stacks' noise came from the same apertures.
+    size_rows = size_exponent_measurements(result.size_noise, context, subject)
     return [
         *rows,
         aperture_set_measurement(STACKING_APERTURE_SET_NUMBER, result.aperture_identity, context, subject),
+        *size_rows,
     ]
+
+
+def size_exponent_measurements(
+    size_noise: ApertureSizeNoiseOutcome | None, context: PipelineRunContext, subject: QualitySubject
+) -> list[QualityMeasurement]:
+    """Build the row of the noise-against-aperture-size exponent.
+
+    Parameters
+    ----------
+    size_noise : `ApertureSizeNoiseOutcome` or `None`
+        What the size measurement gave, or `None` when it was not tried (a
+        stack that may not choose apertures). Then no row is made.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    subject : `QualitySubject`
+        The stack.
+
+    Returns
+    -------
+    rows : `list` of `QualityMeasurement`
+        Nothing when the measurement was not tried; otherwise one row: the
+        exponent with its uncertainty and the noise at each radius in the
+        reason, or not measured with the reason.
+    """
+    if size_noise is None:
+        return []
+    spec = _SPEC_BY_NAME[STACKING_EMPTY_APERTURE_NOISE_SIZE_EXPONENT]
+    result = size_noise.result
+    if result is None:
+        return [
+            build_measurement(
+                spec,
+                None,
+                context,
+                subject,
+                reason=size_noise.reason or "the noise against aperture size was not measured",
+            )
+        ]
+    error = result.exponent_error if math.isfinite(result.exponent_error) else None
+    return [
+        build_measurement(
+            spec,
+            result.exponent,
+            context,
+            subject,
+            uncertainty=error,
+            sample_count=result.aperture_count,
+            provenance=result.describe(),
+        )
+    ]
+
+
+def depth_limit_measurements(
+    noise: StackNoiseOutcome,
+    stacked_fwhm_px: float | None,
+    gaia_lookup: GaiaLookup | None,
+    context: PipelineRunContext,
+    subject: QualitySubject,
+) -> list[QualityMeasurement]:
+    """Build the point-source depth and surface-brightness limit of a stack.
+
+    Parameters
+    ----------
+    noise : `StackNoiseOutcome`
+        The stack's noise measurement or the reason there is none.
+    stacked_fwhm_px : `float` or `None`
+        The stack's star width, which sets the point-source aperture.
+    gaia_lookup : `GaiaLookup` or `None`
+        Gives Gaia G magnitudes near a position from the local cache.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    subject : `QualitySubject`
+        The stack.
+
+    Returns
+    -------
+    rows : `list` of `QualityMeasurement`
+        The 5 sigma point-source depth and the 3 sigma surface-brightness
+        limit, each measured (assumed when the noise exponent was replaced
+        by 0.5) or not measured with the reason. A failure while working them
+        out gives not-measured rows, never an exception.
+    """
+    try:
+        limits = measure_depth_limits(noise.result, stacked_fwhm_px, gaia_lookup, noise.reason)
+        pairs = (
+            (STACKING_POINT_SOURCE_DEPTH_5SIGMA_MAG, limits.point_source),
+            (STACKING_SURFACE_BRIGHTNESS_LIMIT_3SIGMA_10ARCSEC_MAG_PER_ARCSEC2, limits.surface_brightness),
+        )
+    except Exception as error:  # a by-product: no failure here may fail the stack
+        logger.exception("The depth limits of a stack could not be worked out")
+        failed = DepthLimit(
+            None, None, None, False, f"the depth could not be worked out: {type(error).__name__}"
+        )
+        pairs = (
+            (STACKING_POINT_SOURCE_DEPTH_5SIGMA_MAG, failed),
+            (STACKING_SURFACE_BRIGHTNESS_LIMIT_3SIGMA_10ARCSEC_MAG_PER_ARCSEC2, failed),
+        )
+    rows = []
+    for name, limit in pairs:
+        if limit.value_mag is None:
+            rows.append(build_measurement(_SPEC_BY_NAME[name], None, context, subject, reason=limit.note))
+        else:
+            rows.append(
+                build_measurement(
+                    _SPEC_BY_NAME[name],
+                    limit.value_mag,
+                    context,
+                    subject,
+                    uncertainty=limit.uncertainty_mag,
+                    sample_count=limit.sample_count,
+                    status=MeasurementStatus.ASSUMED if limit.assumed else MeasurementStatus.MEASURED,
+                    reason=limit.note if limit.assumed else "",
+                    provenance="" if limit.assumed else limit.note,
+                )
+            )
+    return rows
 
 
 def membership_count_measurements(
@@ -718,6 +848,7 @@ def stacking_measurements(
     membership: StackMembership | None,
     membership_reason: str = "",
     science: StackScience | None = None,
+    gaia_lookup: GaiaLookup | None = None,
 ) -> list[QualityMeasurement]:
     """Build every measurement the stacking stage declares for one stack.
 
@@ -740,6 +871,10 @@ def stacking_measurements(
         The expected noise, the master flat's noise, the stack's sky level and
         the exposure groups' star peaks (see `record_science.py`). Left out,
         those values are stored as not measured.
+    gaia_lookup : `GaiaLookup`, optional
+        Gives the Gaia G magnitudes of stars near a position from the local
+        cache, for the stack's zero point. Left out, the two depth rows are
+        not measured.
 
     Returns
     -------
@@ -783,6 +918,9 @@ def stacking_measurements(
         )
 
     measurements.extend(noise_measurements(noise, context, stack_subject))
+    measurements.extend(
+        depth_limit_measurements(noise, metrics.stacked_fwhm_px, gaia_lookup, context, stack_subject)
+    )
     group_subjects = [
         exposure_group_subject(context, stack_file_name, group, index)
         for index, group in enumerate(metrics.exposure_groups)
@@ -953,6 +1091,31 @@ def measure_noise_safely(
     return outcome
 
 
+def _cached_gaia_lookup_for(config: object) -> GaiaLookup | None:
+    """Make the local-cache Gaia lookup for the depth rows, never raising.
+
+    Parameters
+    ----------
+    config : `AppConfiguration` or `None`
+        The application settings; the process-wide ones when `None`.
+
+    Returns
+    -------
+    lookup : `GaiaLookup` or `None`
+        The lookup, or `None` when the settings cannot be read (the depth rows
+        are then not measured).
+    """
+    try:
+        if config is None:
+            from astrometricslib.foundation.config import get_configuration
+
+            config = get_configuration()
+        return cached_gaia_lookup(config)
+    except Exception:  # a by-product: no failure here may fail the stack
+        logger.exception("The Gaia cache for the depth rows could not be set up")
+        return None
+
+
 def stack_depth_of(membership: StackMembership | None) -> StackDepth | None:
     """Give a stack's frame counts from its members.
 
@@ -1060,7 +1223,14 @@ def record_stacking_quality(
             is_spectral=summary.stacking_metrics.is_spectral,
         )
         measurements = stacking_measurements(
-            summary, context, os.path.basename(stack_path), noise, membership, membership_reason, science
+            summary,
+            context,
+            os.path.basename(stack_path),
+            noise,
+            membership,
+            membership_reason,
+            science,
+            gaia_lookup=_cached_gaia_lookup_for(config),
         )
         new_count = record_run_measurements(measurements, config=config)
     except Exception:  # quality rows must never stop a stack

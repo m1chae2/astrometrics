@@ -40,6 +40,10 @@ Last on 2026-10-26: the restack script measures every frame before it stacks, an
 
 Then on 2026-10-26: decisions D13 and D14 (sections 3.11 and 4.1). The floor's random part now comes from the half-difference when one exists, and the model test is the fallback with a shared error budget; the loss account follows. The restack runs the half-difference for targets whose measured over predicted noise is 1.1 to 2.0. All of it is uncommitted on `134-group-weights-nikon` after 9ed5af01, with unit tests and one copy run on M 13 (section 4.5).
 
+Late on 2026-10-26: the full ZWO rerun on the copy found three faults, now fixed and uncommitted (section 3.12); the rerun was stopped after four targets. The user decided new names (D15, being built with a schema version 5 migration) and asked for the algorithm to follow mission practice: decisions D16 to D24 were proposed (section 3.13) and decided the same day: the recommended option for each, D24 deferred. They are built after the rename.
+
+Later on 2026-10-26: D15 to D23, D25 and the metrics of D1 are built (uncommitted on `134-group-weights-nikon` after 817c7da4; unit tests only, no real-data run): the renames and the quality-store schema 5 migration, the rerun fixes, the bias injection script (written, not yet run), the measured model error, the possible band, the odd–even difference for every stack, the aperture-size exponent, the per-aperture record with the line-pattern rows and the shape tests with their three rules, the master dark's predicted noise, the history per setup, the earlier-nights minimum of 8 frames, and the two depth metrics (the 5σ point-source depth and the 3σ surface-brightness limit over 10 arcsec by 10 arcsec). D24 stays deferred. Not built: the per-target depth-level dropdown of D1 (Quick look, Good, Deep), which waits for the user to set the level values from the depths of the copy's processed targets. The papers and the register carry the methods, the stated biases of the depth and the Design estimate rows STK-D30 to STK-D35 and WAY-D88 to WAY-D93.
+
 ## 1. Why suggestions from imaged targets are missing
 
 "Take N more" is a forecast: add these frames and the noise falls this much. The library shows it
@@ -556,6 +560,120 @@ All values are design estimates (register WAY-D30).
 
 **D14, the restack step.** See section 4.1. The half-difference runs only when measured over predicted noise is between `HALF_DIFFERENCE_LOWER_RATIO` (1.1) and `HALF_DIFFERENCE_UPPER_RATIO` (2.0). Below 1.1 the stack agrees with the model. Above 2.0 the floor is clear either way (M 27 is at 2.95). The limits are design estimates (WAY-D70). The evidence is M 13 (section 4.5, register WAY-76).
 
+### 3.12 Names, the rerun fixes and the noise breakdown (decided 2026-10-26)
+
+**D15, names.** The user renamed three ideas so a reader can tell what each one is:
+
+| Before | After | What it is |
+| :--- | :--- | :--- |
+| half-difference | odd–even difference | The difference of the odd-frame and even-frame half stacks. What is fixed on the sky cancels; what is left is the stack's random noise, measured instead of predicted. |
+| noise floor | fixed-pattern noise | Noise that stays at the same place on the sky in every frame, so more frames do not reduce it: fixed-pattern² = measured² − random². "Floor" is kept only for the limit it puts on the gain. |
+| forecast gate | recommended additional frames (with a status) | The count is "recommended additional frames". Its status (not checked, provisional, confirmed) decides whether the count is shown and whether it carries "(provisional)". Reports do not name the status. |
+| measured over predicted noise | measured-to-predicted noise ratio | Stored as `stacking.measured_to_predicted_noise_ratio` when the stack's noise is measured. |
+
+The stored metric names move from `stacking.half_difference_*` to `stacking.odd_even_difference_*` in quality-store schema version 5. The photometry and spectroscopy "noise floor" (a different idea) keeps its name.
+
+**The noise components.** The papers get one table of what the stack's empty-sky noise is made of and how the library gets each part:
+
+| Component | Term | Over many frames | Source | How the library gets it |
+| :--- | :--- | :--- | :--- | :--- |
+| Sky pedestal | $I_{\text{sky}}$ | Constant; subtracted | Sky glow, airglow, light pollution | Background level of each frame |
+| Sky photon noise | $\sigma_{\text{sky}}$ | Averages down as $1/\sqrt{N}$ | Random arrival of sky photons | Predicted from the frame's sky rate and gain |
+| Read noise | $\sigma_{\text{read}}$ | Averages down | Camera electronics | Camera profile |
+| Dark-current noise | $\sigma_{\text{dark}}$ | Averages down | Thermal electrons | Dark frames and temperature |
+| Fixed-pattern noise | $\sigma_{\text{fixed}}$ | Does not shrink | Faint sky structure, unresolved objects, flat-field residuals, gradients | Measured² minus the random part (odd–even difference, or the prediction) |
+
+**Fixes from the copy rerun (built, uncommitted).** The rerun of 2026-10-26 found three faults:
+
+- Frames measured before the D7 fallback kept stale "no profile entry" sky rates, because the frame fingerprint did not change (M 57 lost its predicted noise). The three noise metrics' versions were raised, and a frame is measured again when its camera profile entry appears.
+- A stack that may not choose apertures took the deepest stored set, which on M 81 was a stale 60 s set; its stars were saturated in the 300 s reference frame. The library stack now records its set, and the others use it.
+- The reference-star match moved a solution by a shift only. M 81's earlier-nights stack sits on a frame whose header rotation is about 0.2 degrees off. The match now searches and fits a rotation up to 0.5 degrees.
+
+Open from the rerun: M 81's frame check took 21 minutes (the new profile-gap query is the suspect), M 27's forecast finds no row for its folded 120 s group, and M 13's odd–even difference moved 5% between runs on the same frames and apertures, which moved its fixed-pattern noise from 2.2σ to 1.9σ. Found later the same day: M 27's group row is matched by the mean of the stacked members, but stored as the mean of all frames submitted (fixed by matching the stored reference exposure first). M 13's shift is sampling scatter: the new star match placed the apertures a few hundredths of a pixel differently (mean shift instead of median), and with 99 apertures such a shift changes the estimate by about 2% typically and up to 4.5% (a test on M 13's stack); the split and the half stacks were identical. A negligible fitted shift and rotation will be applied as none, so reruns reproduce. M 81's slow frame check was not reproduced; every piece is fast alone, so contention on the copy is the likely cause, to be checked on the next pass.
+
+### 3.13 Decisions D16 to D24: the noise algorithm and mission practice (decided 2026-10-26)
+
+**Why.** The noise measurement and forecast use methods that space missions use and have tested at scale. Planck (ESA) measured its noise with half-ring difference maps, the same idea as the odd–even difference [P1], [P2], and checked its noise model against them [P3]. Gaia (ESA) adds an "excess noise" in quadrature when a source scatters more than its errors explain, and reports its significance, with values above 2 taken as significant [P5], [P6], [P7]. Hubble deep-field work found that resampling (drizzling) correlates neighboring pixels, so pixel noise understates noise over an area [P8], [P9], and the Hubble surveys measure it with empty apertures of several sizes [P10], [P11], [P12]. TESS (NASA) planned with a fixed systematic floor that flight data later showed too high for bright stars [P13], [P14]. None of these changes needs new frames.
+
+Each decision below gives the options, a recommendation and a question. The user took every recommendation on 2026-10-26 (D24 deferred); the answers to the questions are in the decisions table (section 6).
+
+**D16, bias in the odd–even difference.** Planck found its half-difference biased low by about a percent, from correlations between the halves and from clipping that removes the noise's positive tail [P3], [P4]. Ours has both: the halves share the registration reference frame, and Siril rejects outlier pixels (1.6% on M 13). A low random part makes fixed-pattern noise look larger.
+
+- A: accept and document the bias.
+- B: measure it once with an injection test: stack frames of pure simulated noise, with each frame's predicted noise, through the same steps, and store the ratio of the measured difference to the known noise as a correction (a register entry).
+- C: stack the halves without pixel rejection, so no clipping bias arises, at the cost of noisier halves.
+- Recommendation: B. Question: is a one-time injection test on the copy acceptable as the evidence, or should it rerun per camera setting?
+
+**D17, the model's error measured, not borrowed.** `EXPECTED_NOISE_MODEL_RELATIVE_ERROR` (0.11) comes from one target as a stand-in. Every odd–even difference compares the prediction with a measured random part (M 13 within a few percent, NGC 7331 about 5%), as Planck checked its noise model [P3].
+
+- A: keep 0.11.
+- B: pool the ratio of odd–even random noise to predicted noise over the library's targets, per camera and setting, and use its scatter as the model's error once at least 5 targets have one; until then keep 0.11.
+- Recommendation: B. Question: is 5 targets per setting enough to replace the stand-in?
+
+**D18, a graded fixed-pattern answer.** The 2σ cut makes the advice jump: M 13 went from "about 13%" to "about 29%" when its fixed-pattern significance fell from 2.2σ to 1.9σ. Gaia reports its excess noise with its significance and leaves the cut visible [P5].
+
+- A: keep the hard cut.
+- B: between 1σ and 2σ, give the gain as a range, from "with this fixed-pattern noise" to "with none", and say the fixed-pattern noise is possible but not proven. Above 2σ and below 1σ, as now.
+- C: give one expected gain, weighting the two cases by the evidence.
+- Recommendation: B. Question: should a range-only case still count as a recommendation, or as information?
+
+**D19, run the odd–even difference whenever it can run.** D14 skips it above a ratio of 2.0, so M 27, the largest excess (4.13), has no measured random part and no fixed-pattern size.
+
+- A: keep D14 (1.1 to 2.0).
+- B: run it for every stack with at least 8 frames per half, at the cost of about one stack each.
+- Recommendation: B, which reverses D14. Question: is the extra stacking time in a full restack acceptable (about one stack per target)?
+
+**D20, correlated noise from the aperture size.** Hubble surveys measure empty-aperture noise at several aperture sizes and fit the noise against the number of pixels as a power law; an exponent near 1 (in variance) means independent pixels, near 2 means fully correlated pixels [P10], [P12]. Registration resampling correlates our pixels too, and a fixed pattern adds noise on larger scales.
+
+- A: one aperture size, as now.
+- B: measure the same aperture positions at three or four radii, store the fitted exponent, and report it; change the prediction only when the register shows a steady correction.
+- C: as B, and correct the prediction for resampling at once.
+- Recommendation: B. Question: none beyond approval.
+
+**D21, where the fixed-pattern noise is.** One number cannot say whether the excess is a gradient, a flat residual, faint nebulosity or banding. With the two half stacks in hand, each aperture's sum carries random plus fixed noise and its difference carries random noise only.
+
+- A: one number, as now.
+- B: compare sum and difference per aperture and test four shapes: a trend with distance from the center (flat or vignetting residual), a plane (gradient), a rise near the target (faint real light, likely on M 27), and row or column averages that vary more than random noise (line pattern noise). The loss account names the shape that fits.
+- Recommendation: B. Question: should a named shape change the advice (for example "retake flats" for a radial trend), or only the explanation?
+
+**D22, calibration noise as a known part.** The master flat's and master dark's own noise is the same in every frame, so it is fixed-pattern noise that the library can predict: the master flat's noise is already measured, and the master dark's follows from its frame count.
+
+- A: leave it inside the measured remainder.
+- B: predict it as a named part of the fixed-pattern noise, so the loss account reports how much of the excess the masters explain and what is left.
+- Recommendation: B. Question: none beyond approval.
+
+**D23, fixed-pattern history per setup.** TESS's planned floor gave way to measured values [P14]. Our new targets start with no fixed-pattern noise until measured.
+
+- A: none, as now.
+- B: keep each target's fixed-pattern share by camera, optic and flat set, and start a new target of the same setup from the median share, reset when the flats change.
+- Recommendation: B, after D17 to D21, once enough targets have a measured share. Question: should a share learned from other targets be marked as such in the report?
+
+**D24, gain and read noise from the odd–even differences.** The measured random noise at known sky levels across targets gives the effective gain and read noise, in the manner of the photon transfer method [P15], without a calibration session.
+
+- A: keep the camera profile, with the D7 offset fallback.
+- B: fit them from the odd–even differences as a check on the profile, reported but not used.
+- Recommendation: defer; a real photon transfer session at offset 0 is the better source when the user takes one.
+
+**References for sections 3.12 and 3.13.**
+
+- [P1] Planck Collaboration, "Planck 2013 results. II. Low Frequency Instrument data processing," arXiv:1303.5063. <https://arxiv.org/pdf/1303.5063>
+- [P2] Planck Collaboration, "Planck 2013 results. VI. High Frequency Instrument data processing," arXiv:1303.5067. <https://arxiv.org/pdf/1303.5067>
+- [P3] Planck Collaboration, "Planck 2015 results. XI. CMB power spectra, likelihoods, and robustness of parameters," arXiv:1507.02704. <https://arxiv.org/pdf/1507.02704>
+- [P4] Planck Collaboration, "Planck 2018 results. V. CMB power spectra and likelihoods," arXiv:1907.12875. <https://arxiv.org/pdf/1907.12875>
+- [P5] Gaia astrometric excess noise in DR2 and the search for X-ray binaries, arXiv:2009.07277. <https://arxiv.org/pdf/2009.07277>
+- [P6] Gaia Collaboration, "Gaia Data Release 2: The astrometric solution," arXiv:1804.09366. <https://arxiv.org/pdf/1804.09366>
+- [P7] Astrometric excess noise in Gaia EDR3, arXiv:2201.00833. <https://arxiv.org/pdf/2201.00833>
+- [P8] S. Casertano et al., "WFPC2 observations of the Hubble Deep Field-South," arXiv:astro-ph/0010245. <https://arxiv.org/pdf/astro-ph/0010245>
+- [P9] A catalogue of galaxies in the HDF-South, arXiv:astro-ph/0005204. <https://arxiv.org/pdf/astro-ph/0005204>
+- [P10] The MUSYC wide K-band imaging survey (empty-aperture method after Labbé et al. 2003), arXiv:0803.0763. <https://arxiv.org/pdf/0803.0763>
+- [P11] R. E. Skelton et al., "3D-HST WFC3-selected photometric catalogs," arXiv:1403.3689. <https://arxiv.org/pdf/1403.3689>
+- [P12] 3D-DASH: the widest near-infrared Hubble survey, arXiv:2206.01156. <https://arxiv.org/pdf/2206.01156>
+- [P13] P. W. Sullivan et al., "The Transiting Exoplanet Survey Satellite: simulations of planet detections and astrophysical false positives," arXiv:1506.03845. <https://arxiv.org/pdf/1506.03845>
+- [P14] Predicting the exoplanet yield of the TESS prime and extended missions, arXiv:2202.03656. <https://arxiv.org/pdf/2202.03656>
+- [P15] J. R. Janesick, *Photon Transfer*, SPIE Press, 2007 (not yet checked against the text).
+
+These are plan references. When a decision is built, its method moves into the papers with numbered IEEE references, as the documentation conventions require.
+
 ## 4. The forced restack
 
 ### 4.1 How it runs
@@ -670,9 +788,9 @@ document, the stacking and wayfinding registers, and the READMEs of the changed 
 
 | # | Decision | Options | Status |
 | :--- | :--- | :--- | :--- |
-| D1 | The noise goal after M 57 is measured again | Keep 1.9e-4, or set the goal from M 57's current-placement value; and whether a suggestion needs the noise above the goal by about 2 combined sigma before it is better than Tentative | Open: decide after part 2a's validation |
+| D1 | The noise goal after M 57 is measured again | Keep 1.9e-4, or set the goal from M 57's current-placement value; and whether a suggestion needs the noise above the goal by about 2 combined sigma before it is better than Tentative | Decided 2026-10-26: depth in magnitudes per kind of object, as NASA and ESA projects state it. Two stored metrics per stack: the 5σ point-source depth (in an aperture matched to the stack's star size) and the 3σ surface-brightness limit over 10″ × 10″ boxes (using D20's aperture-size exponent for the box noise), both from the empty-aperture noise and the photometric zero point. The diminishing-returns stop (D12) stays. The user sets the per-type goals from the copy's processed targets once the depths exist; 1.9e-4 stays until then. The goal is chosen per target in the Image Processing Display, in the Frame Analysis panel's Data tab as a "Depth goal" row under Total Exposure, with a dropdown of plain depth levels for a novice (Quick look, Good as the default, Deep), each defined per kind of object in magnitudes; next to it the image's current level and the time to reach the next one, or the diminishing-returns warning. The two depth metrics are built, uncommitted (`stacking.point_source_depth_5sigma_mag`, `stacking.surface_brightness_limit_3sigma_10arcsec_mag_per_arcsec2`); the dropdown is not built and waits for the user to set the level values; the kind of object comes from the catalog |
 | D2 | D5300 calibration frames | Use the library's 111 biases and 125 flats if the flats include pairs at ISO 800, or take a short calibration session | Open: check the library first |
-| D3 | Which issue holds this work | One issue under epic #93 with the pull requests and the restack, or separate issues | Open: one issue recommended |
+| D3 | Which issue holds this work | One issue under epic #93 with the pull requests and the restack, or separate issues | Decided in practice: one issue, #134, with pull request #135 on branch `134-group-weights-nikon` |
 | D4 | Where the calibration identities live | A side table with a schema migration, or a hash stored as a measurement | Decided 2026-10-25: side table |
 | D5 | The older previous stacks the restack deletes | Back up the stacks folder first, or accept the loss | Decided 2026-10-25: accept the loss; only the databases are backed up |
 | D6 | Which camera this work covers | Both cameras, or the ZWO ASI533MM Pro only | Decided 2026-10-26: ZWO ASI533MM Pro only; Nikon deferred |
@@ -683,7 +801,18 @@ document, the stacking and wayfinding registers, and the READMEs of the changed 
 | D10 | How folded exposure groups are handled (section 3.7) | A: leave frames of a length with fewer than 5 frames out of the stack; B: model a folded group so it gets weights and a predicted noise; C: accept no forecast | Decided 2026-10-26: B. Built, uncommitted. Found on a copy restack of M 27: one 300 s frame folded into its 120 s group left all weights and the predicted noise unmeasured. 12 of 31 ZWO targets have folded groups |
 | D12 | What "take N more" says when the noise floor makes the count very large (section 3.10) | A: keep the count however large; B: give a count only within a practical limit of the stack's exposure time, otherwise what one doubling buys | Decided 2026-10-26: B, with the limit at 4 times the stack's exposure time and a floor of a 5% cut for one doubling. Built, uncommitted |
 | D13 | Where the floor's random part comes from, and the loss account (section 3.11) | A: the prediction taken as exact (before); B: the prediction with the model's own error in the test (the shared budget); C: B as the fallback, and the half-difference measurement when a usable one exists, with the loss account reading the same record | Decided 2026-10-26: C. Built, uncommitted |
-| D14 | When the restack runs the half-difference (section 4.1) | A: never; B: for every target; C: only when measured over predicted noise is between 1.1 and 2.0 | Decided 2026-10-26: C. Built, uncommitted |
+| D14 | When the restack runs the half-difference (section 4.1) | A: never; B: for every target; C: only when measured over predicted noise is between 1.1 and 2.0 | Decided 2026-10-26: C. Built, uncommitted. D19 proposes B |
+| D15 | Names (section 3.12) | Odd–even difference, fixed-pattern noise, recommended additional frames, measured-to-predicted noise ratio; stored names migrated in schema version 5 | Decided 2026-10-26. Built, uncommitted |
+| D16 | Bias in the odd–even difference (section 3.13) | A: document; B: injection-measured correction; C: halves without pixel rejection | Decided 2026-10-26: B; the injection test runs once per camera on the copy, and again when the stacker's rejection settings change. Script and module built, uncommitted; not yet run, so the divisor stays 1.0 |
+| D17 | The model's error (section 3.13) | A: keep 0.11; B: pooled from odd–even differences, per setting, from 5 targets | Decided 2026-10-26: B, from 5 targets per setting. Built, uncommitted |
+| D18 | Fixed-pattern noise between 1σ and 2σ (section 3.13) | A: hard 2σ cut; B: a range of gains; C: one evidence-weighted gain | Decided 2026-10-26: B; a range still counts as a recommendation, labeled as a range. Built, uncommitted |
+| D19 | When the odd–even difference runs (section 3.13) | A: D14 (1.1 to 2.0); B: every stack with 8 frames per half | Decided 2026-10-26: B (replaces D14); the extra stack per target is accepted. Built, uncommitted |
+| D20 | Correlated noise from the aperture size (section 3.13) | A: one size; B: three or four radii, store the exponent; C: B and correct the prediction now | Decided 2026-10-26: B. Built, uncommitted |
+| D21 | Where the fixed-pattern noise is (section 3.13) | A: one number; B: per-aperture sum against difference, four shape tests | Decided 2026-10-26: B; a significant shape changes the advice (radial trend: retake flats; gradient: check gradient removal; banding: line pattern removal); a rise near the target is explained, not advised on. Built, uncommitted |
+| D22 | Calibration noise as a known part (section 3.13) | A: inside the remainder; B: predicted as a named part of the fixed-pattern noise | Decided 2026-10-26: B. Built, uncommitted |
+| D23 | Fixed-pattern history per setup (section 3.13) | A: none; B: median share by camera, optic and flat set | Decided 2026-10-26: B, after D17 to D21; a learned share is marked as learned from other targets. Built, uncommitted |
+| D24 | Gain and read noise from odd–even differences (section 3.13) | A: camera profile; B: fitted as a check | Decided 2026-10-26: deferred; not built |
+| D25 | The smallest earlier-nights stack that may make a count provisional | A: the general subset minimum (4 frames); B: 8 frames | Decided 2026-10-26: B. The restack does not make a smaller one, and wayfindinglib refuses its check. Built, uncommitted. M 13's 4-frame first night had opened a provisional count alone. The rule id `more_frames` keeps its name (ids are not shown to readers) |
 
 ## 7. Out of scope
 

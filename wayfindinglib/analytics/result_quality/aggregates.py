@@ -34,12 +34,15 @@ from wayfindinglib.analytics.result_quality.efficiency import (
     assess_efficiency,
     split_kept_frame_deficit,
 )
+from wayfindinglib.analytics.result_quality.fixed_pattern_location import FixedPatternAccount
 from wayfindinglib.analytics.result_quality.noise_growth import (
     EXPECTED_NOISE_MODEL_RELATIVE_ERROR,
-    FLOOR_BASIS_HALF_DIFFERENCE,
-    FLOOR_BASIS_MODEL,
+    FIXED_PATTERN_BASIS_MODEL,
+    FIXED_PATTERN_BASIS_ODD_EVEN_DIFFERENCE,
     MODEL_AGREEMENT_SIGMAS,
-    compare_stack_noise_with_half_difference,
+    NOISE_MODEL_ERROR_STAND_IN_TEXT,
+    POSSIBLE_FIXED_PATTERN_SIGMAS,
+    compare_stack_noise_with_odd_even_difference,
     total_variance_ratio_error,
 )
 from wayfindinglib.models.quality.capture_summary import CaptureSettingSummary
@@ -60,10 +63,10 @@ there is none."""
 class MeasuredNoiseCheck(BaseModel):
     """A stack's measured noise against the noise it should have.
 
-    With a usable half-difference, the stack is compared with the random
+    With a usable odd–even difference, the stack is compared with the random
     noise measured from its odd and even half stacks (`basis` is
-    ``half_difference``, built by `from_half_difference`). Otherwise it is
-    compared with the noise its frames are expected to have, below.
+    ``odd_even_difference``, built by `from_odd_even_difference`). Otherwise it
+    is compared with the noise its frames are expected to have, below.
 
     This is the independent measure of efficiency (decision S15): the
     expected noise comes from the frames' sky and read noise
@@ -82,13 +85,24 @@ class MeasuredNoiseCheck(BaseModel):
     expected_noise_relative_error : `float`
         The expected-noise model's own relative error, as noise. It is added
         in quadrature (doubled for the variance) to `variance_ratio_error`.
-        Not used on the half-difference basis, where no model is compared.
+        Not used on the odd–even difference basis, where no model is compared.
+    model_error_basis : `str`
+        Where `expected_noise_relative_error` came from
+        (`NoiseModelError.basis_text`): measured from other targets'
+        odd–even differences, or the stand-in value.
     basis : `str`
         What the stack was compared with: ``model`` (the expected noise) or
-        ``half_difference`` (the random noise measured from the half stacks).
+        ``odd_even_difference`` (the random noise measured from the half
+        stacks).
     log_ratio_error : `float` or `None`
-        The standard error of ``ln(variance_ratio)`` on the half-difference
+        The standard error of ``ln(variance_ratio)`` on the odd–even difference
         basis; ``None`` on the model basis.
+    fixed_pattern_account : `FixedPatternAccount` or `None`
+        Where the stack's fixed pattern is (the four shape tests) and how much
+        of it the master flat and master dark explain (decisions D21, D22).
+        The loss account names these in place of "no listed cause accounts
+        for it". ``None`` when the stack has no per-aperture record or no
+        master noise.
     """
 
     model_config = _MODEL_CONFIG
@@ -96,11 +110,13 @@ class MeasuredNoiseCheck(BaseModel):
     variance_ratio: float = Field(gt=0.0)
     variance_ratio_error: float = Field(ge=0.0)
     expected_noise_relative_error: float = Field(default=EXPECTED_NOISE_MODEL_RELATIVE_ERROR, ge=0.0)
-    basis: str = FLOOR_BASIS_MODEL
+    model_error_basis: str = NOISE_MODEL_ERROR_STAND_IN_TEXT
+    basis: str = FIXED_PATTERN_BASIS_MODEL
     log_ratio_error: float | None = None
+    fixed_pattern_account: FixedPatternAccount | None = None
 
     @classmethod
-    def from_half_difference(
+    def from_odd_even_difference(
         cls,
         measured_noise: float,
         measured_apertures: int,
@@ -109,9 +125,9 @@ class MeasuredNoiseCheck(BaseModel):
     ) -> MeasuredNoiseCheck:
         """Compare a stack with the random noise its half stacks measured.
 
-        Uses the same test as the noise floor
-        (`noise_growth.compare_stack_noise_with_half_difference`), so the two
-        agree.
+        Uses the same test as the fixed-pattern noise
+        (`noise_growth.compare_stack_noise_with_odd_even_difference`), so the
+        two agree.
 
         Parameters
         ----------
@@ -120,7 +136,7 @@ class MeasuredNoiseCheck(BaseModel):
         measured_apertures : `int`
             The apertures behind it.
         random_noise : `float`
-            The full-stack equivalent of the half-difference noise, in the
+            The full-stack equivalent of the odd–even difference noise, in the
             same unit.
         random_apertures : `int`
             The apertures behind the difference noise.
@@ -128,15 +144,15 @@ class MeasuredNoiseCheck(BaseModel):
         Returns
         -------
         check : `MeasuredNoiseCheck`
-            The check, on the ``half_difference`` basis.
+            The check, on the ``odd_even_difference`` basis.
         """
-        test = compare_stack_noise_with_half_difference(
+        test = compare_stack_noise_with_odd_even_difference(
             measured_noise, measured_apertures, random_noise, random_apertures
         )
         return cls(
             variance_ratio=test.variance_ratio,
             variance_ratio_error=test.variance_ratio * test.log_error,
-            basis=FLOOR_BASIS_HALF_DIFFERENCE,
+            basis=FIXED_PATTERN_BASIS_ODD_EVEN_DIFFERENCE,
             log_ratio_error=test.log_error,
         )
 
@@ -147,14 +163,44 @@ class MeasuredNoiseCheck(BaseModel):
         Returns
         -------
         significant : `bool`
-            On the half-difference basis, ``ln F`` above
+            On the odd–even difference basis, ``ln F`` above
             `MODEL_AGREEMENT_SIGMAS` times its error. On the model basis,
             ``F - 1`` above that many times the total error (the model's own
             error included).
         """
-        if self.basis == FLOOR_BASIS_HALF_DIFFERENCE and self.log_ratio_error is not None:
+        if self.basis == FIXED_PATTERN_BASIS_ODD_EVEN_DIFFERENCE and self.log_ratio_error is not None:
             return math.log(self.variance_ratio) > MODEL_AGREEMENT_SIGMAS * self.log_ratio_error
         return self.variance_ratio - 1.0 > MODEL_AGREEMENT_SIGMAS * self.total_variance_ratio_error
+
+    @property
+    def sigmas(self) -> float:
+        """Say how many standard errors the stack is above its comparison.
+
+        Returns
+        -------
+        sigmas : `float`
+            ``ln F`` over its error on the odd–even difference basis;
+            ``F - 1`` over the total error (the model's own error included) on
+            the model basis. Negative when the stack is quieter.
+        """
+        if self.basis == FIXED_PATTERN_BASIS_ODD_EVEN_DIFFERENCE and self.log_ratio_error:
+            return math.log(self.variance_ratio) / self.log_ratio_error
+        error = self.total_variance_ratio_error
+        return (self.variance_ratio - 1.0) / error if error > 0.0 else 0.0
+
+    @property
+    def is_possible(self) -> bool:
+        """Say whether the excess is possible fixed-pattern noise, not proven.
+
+        Returns
+        -------
+        possible : `bool`
+            True when the stack is not significantly noisier
+            (`is_significant` false) but is above its comparison by at least
+            `POSSIBLE_FIXED_PATTERN_SIGMAS` standard errors, the same band
+            `noise_growth` uses for a possible fixed-pattern noise.
+        """
+        return not self.is_significant and self.sigmas >= POSSIBLE_FIXED_PATTERN_SIGMAS
 
     @property
     def total_variance_ratio_error(self) -> float:
@@ -166,7 +212,7 @@ class MeasuredNoiseCheck(BaseModel):
             The aperture error and ``2 * expected_noise_relative_error *
             variance_ratio`` added in quadrature
             (`noise_growth.total_variance_ratio_error`, the same error the
-            noise floor test uses).
+            fixed-pattern noise test uses).
         """
         return total_variance_ratio_error(
             self.variance_ratio, self.variance_ratio_error, self.expected_noise_relative_error
@@ -291,24 +337,45 @@ def _unknown_part(effective_by_factors: float, check: MeasuredNoiseCheck | None)
     """
     if check is None:
         return None, "Not measured: no stack noise was measured against the noise its frames explain."
-    half = check.basis == FLOOR_BASIS_HALF_DIFFERENCE
+    half = check.basis == FIXED_PATTERN_BASIS_ODD_EVEN_DIFFERENCE
+    if check.is_possible:
+        against = (
+            "the random noise measured from the odd and even half stacks"
+            if half
+            else "the noise its frames explain (the model's own error "
+            f"{check.expected_noise_relative_error:.0%}, "
+            f"{check.model_error_basis})"
+        )
+        return 0.0, (
+            f"Possible fixed-pattern noise: the stack's measured noise is {check.sigmas:.1f} standard errors "
+            f"above {against}, below the {MODEL_AGREEMENT_SIGMAS:g} needed to call it found. It is not "
+            "counted as a loss."
+        )
     if not check.is_significant:
         if half:
             return 0.0, (
                 "The stack's measured noise agrees with the random noise measured from the odd and even "
                 "half stacks, within error."
             )
-        return 0.0, "The stack's measured noise agrees with the noise its frames explain, within error."
+        return 0.0, (
+            "The stack's measured noise agrees with the noise its frames explain, within error "
+            f"(the model's own error is {check.expected_noise_relative_error:.0%}, "
+            f"{check.model_error_basis})."
+        )
     unexplained = effective_by_factors * (1.0 - 1.0 / check.variance_ratio)
+    account = check.fixed_pattern_account
+    named = account.text if account is not None else ""
     if half:
         return unexplained, (
             "The stack is noisier than the random noise measured from the odd and even half stacks. The "
-            "excess is a pattern fixed on the sky (the half-difference cancels it), not random noise the "
-            "frames fail to explain; no listed cause accounts for it."
+            "excess is a pattern fixed on the sky (the odd–even difference cancels it), not random noise the "
+            "frames fail to explain. " + (named if named else "No listed cause accounts for it.")
         )
     return (
         unexplained,
-        "The stack is noisier than its frames' sky and read noise explain; no listed cause accounts for it.",
+        "The stack is noisier than its frames' sky and read noise explain (the model's own error is "
+        f"{check.expected_noise_relative_error:.0%}, {check.model_error_basis}). "
+        + (named if named else "No listed cause accounts for it."),
     )
 
 

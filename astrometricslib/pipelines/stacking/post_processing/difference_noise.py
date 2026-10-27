@@ -44,6 +44,7 @@ from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "ODD_EVEN_DIFFERENCE_NOISE_BIAS",
     "discard_noise_sums",
     "load_noise_sums",
     "measure_difference_noise",
@@ -52,6 +53,22 @@ __all__ = [
     "paired_noise_ratio",
     "save_noise_sums",
 ]
+
+# The ratio of the odd–even difference's measured noise to the true random
+# noise of the same frames: below 1 when the difference reads low. Planck found
+# its half-difference low by about a percent, from correlations between the
+# halves and from clipping that removes the noise's positive tail (plan
+# decision D16, sources [P3], [P4]). Ours has both causes: the halves share the
+# registration reference frame, and Siril rejects outlier pixels. The measured
+# noise is divided by this number in one place, `measure_difference_noise`. 1.0
+# means no correction. It stays 1.0 until `scripts/measure_odd_even_bias.py`
+# has measured it by injection (simulated frames of pure noise through the same
+# half stacks and rejection) and the result is entered here with its register
+# entry. The plan's decision D16 is to rerun that script once for each camera
+# and again whenever the stacker's rejection settings change. Status: Design
+# estimate (no measurement yet). If the script finds the camera matters, the
+# value belongs in the camera profile instead of here.
+ODD_EVEN_DIFFERENCE_NOISE_BIAS = 1.0
 
 # Two stacks measured in the same apertures can be compared aperture by
 # aperture. The library stack's per-aperture sums are kept in a file beside the
@@ -76,6 +93,8 @@ def measure_difference_noise(
     *,
     first_plane: np.ndarray | None = None,
     second_plane: np.ndarray | None = None,
+    target_sky_deg: tuple[float, float] | None = None,
+    bias: float = ODD_EVEN_DIFFERENCE_NOISE_BIAS,
 ) -> StackNoiseOutcome:
     """Measure the noise of the difference of two stacks in empty sky.
 
@@ -104,6 +123,16 @@ def measure_difference_noise(
         The two stacks' images, when the caller has already read them (see
         `read_stack_plane`), so the files are not read again. Both must be
         given, or both are read here.
+    target_sky_deg : `tuple` [`float`, `float`], optional
+        The target's (RA, Dec) in degrees, so the result gives its pixel
+        position on the stack (for the per-aperture record, see
+        `odd_even_apertures.py`).
+    bias : `float`, optional
+        The measured-to-true ratio of the difference's noise
+        (`ODD_EVEN_DIFFERENCE_NOISE_BIAS`). The noise, its normalized value
+        and their uncertainties are divided by it. The bias measurement itself
+        passes 1 to see the uncorrected noise. The per-aperture sums are never
+        corrected.
 
     Returns
     -------
@@ -111,7 +140,14 @@ def measure_difference_noise(
         The measurement of the difference, or the reason there is none (a
         stack with no pixels, stacks on different grids, or any reason
         `measure_stack_noise` gives).
+
+    Raises
+    ------
+    ValueError
+        If ``bias`` is not a positive number.
     """
+    if not (math.isfinite(bias) and bias > 0):
+        raise ValueError(f"the bias must be a positive number, not {bias!r}")
     if first_plane is None or second_plane is None:
         first_plane = read_stack_plane(first_stack_path)
         second_plane = read_stack_plane(second_stack_path)
@@ -131,7 +167,20 @@ def measure_difference_noise(
         False,
         None,
         subtracted_plane=second_plane,
+        target_sky_deg=target_sky_deg,
     )
+    if outcome.result is not None and not math.isclose(bias, 1.0):
+        result = outcome.result
+        outcome = replace(
+            outcome,
+            result=replace(
+                result,
+                noise_adu=result.noise_adu / bias,
+                noise_uncertainty_adu=result.noise_uncertainty_adu / bias,
+                normalized_noise=result.normalized_noise / bias,
+                normalized_uncertainty=result.normalized_uncertainty / bias,
+            ),
+        )
     return replace(outcome, stack_sky_level=sky_level_of_plane(first_plane))
 
 

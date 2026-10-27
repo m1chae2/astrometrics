@@ -20,7 +20,8 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_EMPTY_APERTURE_NOISE_STACK_UNIT,
     STACKING_EXPECTED_EMPTY_APERTURE_NOISE_STACK_UNIT,
     STACKING_FRAME_WEIGHT,
-    STACKING_HALF_DIFFERENCE_NOISE_STACK_UNIT,
+    STACKING_MEASURED_TO_PREDICTED_NOISE_RATIO,
+    STACKING_ODD_EVEN_DIFFERENCE_NOISE_STACK_UNIT,
 )
 
 _EXAMPLE_CONFIG_PATH = Path(__file__).resolve().parents[2] / "astrometrics.config.example.toml"
@@ -146,10 +147,10 @@ class FakeAstrometrics:
         self.measuring_elsewhere: set[str] = set()
         self.earlier_nights_calls: list[dict[str, Any]] = []
         self.earlier_nights_failures: set[str] = set()
-        self.half_difference_calls: list[str] = []
-        self.half_difference_failures: set[str] = set()
+        self.odd_even_difference_calls: list[str] = []
+        self.odd_even_difference_failures: set[str] = set()
         self.processing = SimpleNamespace(
-            measure_half_difference_noise=self.measure_half_difference_noise,
+            measure_odd_even_difference_noise=self.measure_odd_even_difference_noise,
             process_target=self.process_target,
             stack=self.stack,
             stack_subset=self.stack_subset,
@@ -212,8 +213,8 @@ class FakeAstrometrics:
             raise RuntimeError(f"the earlier nights of {target.id} broke")
         return SimpleNamespace()
 
-    def measure_half_difference_noise(self, target: Any, **keywords: Any) -> SimpleNamespace:
-        """Record one half-difference request, or fail it on request.
+    def measure_odd_even_difference_noise(self, target: Any, **keywords: Any) -> SimpleNamespace:
+        """Record one odd–even difference request, or fail it on request.
 
         Returns
         -------
@@ -223,11 +224,11 @@ class FakeAstrometrics:
         Raises
         ------
         RuntimeError
-            If the target is in `half_difference_failures`.
+            If the target is in `odd_even_difference_failures`.
         """
-        self.half_difference_calls.append(target.id)
-        if target.id in self.half_difference_failures:
-            raise RuntimeError(f"the half-difference of {target.id} broke")
+        self.odd_even_difference_calls.append(target.id)
+        if target.id in self.odd_even_difference_failures:
+            raise RuntimeError(f"the odd–even difference of {target.id} broke")
         return SimpleNamespace()
 
     def query_quality(
@@ -554,6 +555,7 @@ def rows_for(
     status: str = "measured",
     nights: tuple[str | None, ...] = (),
     subject_ids: tuple[str, ...] = (),
+    reason: str = "",
 ) -> list[SimpleNamespace]:
     """Build fake quality rows holding the given values.
 
@@ -568,6 +570,8 @@ def rows_for(
         a row past the end of the list has none.
     subject_ids : `tuple` [`str`, ...], optional
         The subject id of each row, in the order of the values.
+    reason : `str`, optional
+        The reason every row carries.
 
     Returns
     -------
@@ -578,6 +582,7 @@ def rows_for(
         SimpleNamespace(
             value=value,
             status=status,
+            reason=reason,
             action_taken=None,
             subject=SimpleNamespace(
                 observing_night_id=nights[index] if index < len(nights) else None,
@@ -695,22 +700,55 @@ TWO_NIGHTS = ("2026-10-01", "2026-10-02")
 BOTH_FRAMES = ("Both/light_0.fit", "Both/light_1.fit")
 
 
-def two_night_rows(target: str = "Both") -> list[SimpleNamespace]:
-    """Build library weight rows for two frames on two nights.
+def two_night_rows(target: str = "Both", earlier: int = 8) -> list[SimpleNamespace]:
+    """Build library weight rows for a stack of two nights.
 
     Parameters
     ----------
     target : `str`, optional
         The target whose frames the rows name.
+    earlier : `int`, optional
+        How many frames the first night holds. The second night holds one.
 
     Returns
     -------
     rows : `list` [`types.SimpleNamespace`]
-        A weight row for ``light_0`` (first night) and ``light_1`` (second).
+        A weight row for each frame: ``light_0`` to the one before ``earlier``
+        on the first night, then one on the second.
     """
     return rows_for(
-        1.0, 1.0, nights=TWO_NIGHTS, subject_ids=(f"{target}/light_0.fit", f"{target}/light_1.fit")
+        *([1.0] * (earlier + 1)),
+        nights=(TWO_NIGHTS[0],) * earlier + (TWO_NIGHTS[1],),
+        subject_ids=tuple(f"{target}/light_{index}.fit" for index in range(earlier + 1)),
     )
+
+
+def give_many_frames(fake: FakeAstrometrics, *target_ids: str, count: int = 9) -> None:
+    """Give the named fake targets ``count`` ASI frames, ``light_0`` upward.
+
+    Parameters
+    ----------
+    fake : `FakeAstrometrics`
+        The installed fake. Its target list is replaced by copies, so the
+        module's shared targets stay as they were.
+    *target_ids : `str`
+        The targets to give frames.
+    count : `int`, optional
+        How many frames each gets.
+    """
+    copies = [
+        SimpleNamespace(
+            id=target.id,
+            frames=[
+                SimpleNamespace(camera=ASI, path=f"{target.id}/light_{index}.fit", filter="L")
+                for index in range(count)
+            ]
+            if target.id in target_ids
+            else target.frames,
+        )
+        for target in fake.targets.list()
+    ]
+    fake.targets.list = lambda: copies
 
 
 def run_stack_only(script: Any, tmp_path: Path, *extra: str) -> list[dict]:
@@ -742,6 +780,7 @@ def test_a_stack_of_two_nights_also_gets_its_earlier_nights_stacked(
     script: Any, fake: FakeAstrometrics, tmp_path: Path
 ) -> None:
     """Check only the target with a two-night stack makes the subset."""
+    give_many_frames(fake, "Both", "AsiOnly")
     fake.quality_rows = {
         f"Both|{STACKING_FRAME_WEIGHT}": two_night_rows(),
         f"AsiOnly|{STACKING_FRAME_WEIGHT}": rows_for(
@@ -753,8 +792,8 @@ def test_a_stack_of_two_nights_also_gets_its_earlier_nights_stacked(
 
     (call,) = fake.earlier_nights_calls
     assert call["target"] == "Both"
-    # Only the first night's frame is picked; the last night's is left out.
-    assert [frame.path for frame in call["frames"]] == ["Both/light_0.fit"]
+    # Only the first night's frames are picked; the last night's is left out.
+    assert [frame.path for frame in call["frames"]] == [f"Both/light_{index}.fit" for index in range(8)]
     assert call["label"] == EARLIER_NIGHTS_VARIANT
     assert call["record_forecast_rows"] is True
     assert [(record["target"], record["status"], record["error"]) for record in records] == [
@@ -781,6 +820,7 @@ def test_a_failed_earlier_nights_stack_is_noted_and_the_library_stack_still_coun
     script: Any, fake: FakeAstrometrics, tmp_path: Path
 ) -> None:
     """Check a failure is noted, the status stays success, the run goes on."""
+    give_many_frames(fake, "Both", "AsiOnly")
     fake.quality_rows = {
         f"Both|{STACKING_FRAME_WEIGHT}": two_night_rows("Both"),
         f"AsiOnly|{STACKING_FRAME_WEIGHT}": two_night_rows("AsiOnly"),
@@ -803,6 +843,7 @@ def test_no_earlier_nights_skips_the_subset_stack(
     script: Any, fake: FakeAstrometrics, tmp_path: Path
 ) -> None:
     """Check --no-earlier-nights leaves the subset out."""
+    give_many_frames(fake, "Both")
     fake.quality_rows = {f"Both|{STACKING_FRAME_WEIGHT}": two_night_rows()}
 
     records = run_stack_only(script, tmp_path, "--no-earlier-nights")
@@ -815,6 +856,7 @@ def test_a_stack_that_failed_makes_no_earlier_nights_stack(
     script: Any, fake: FakeAstrometrics, tmp_path: Path
 ) -> None:
     """Check a failed library stack never reaches the subset step."""
+    give_many_frames(fake, "Both")
     fake.stack_failures = {"Both"}
     fake.quality_rows = {f"Both|{STACKING_FRAME_WEIGHT}": two_night_rows()}
 
@@ -828,6 +870,8 @@ def test_the_review_list_says_whether_the_earlier_nights_rows_are_there(
 ) -> None:
     """Check the column is yes, no or n/a by the library stack's nights."""
     import csv
+
+    give_many_frames(fake, "Both", "AsiOnly")
 
     fake.quality_rows = {
         f"Both|{STACKING_FRAME_WEIGHT}": two_night_rows("Both"),
@@ -846,6 +890,30 @@ def test_the_review_list_says_whether_the_earlier_nights_rows_are_there(
         rows = {row["target"]: row for row in csv.DictReader(handle)}
     # Both has the subset's weights and noise; AsiOnly lacks the noise.
     assert rows["Both"]["earlier_nights_present"] == "yes"
+    assert rows["AsiOnly"]["earlier_nights_present"] == "no"
+
+
+def test_a_first_stack_of_fewer_than_eight_frames_is_not_made_and_the_review_says_so(
+    script: Any, fake: FakeAstrometrics, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Check 7 earlier frames skip the stack, 8 make it, and say so."""
+    import csv
+
+    give_many_frames(fake, "Both", "AsiOnly")
+    fake.quality_rows = {
+        f"Both|{STACKING_FRAME_WEIGHT}": two_night_rows("Both", earlier=7),
+        f"AsiOnly|{STACKING_FRAME_WEIGHT}": two_night_rows("AsiOnly", earlier=8),
+    }
+    review_path = tmp_path / "review.csv"
+
+    records = run_stack_only(script, tmp_path, "--review-list", str(review_path))
+
+    assert [call["target"] for call in fake.earlier_nights_calls] == ["AsiOnly"]
+    assert [record["error"] for record in records] == ["", ""]
+    assert "[Both] earlier-nights stack skipped (7 frames, fewer than 8)" in capsys.readouterr().out
+    with open(review_path, newline="") as handle:
+        rows = {row["target"]: row for row in csv.DictReader(handle)}
+    assert rows["Both"]["earlier_nights_present"] == "skipped (7 frames, fewer than 8)"
     assert rows["AsiOnly"]["earlier_nights_present"] == "no"
 
 
@@ -872,7 +940,7 @@ def test_the_review_list_marks_a_one_night_or_refused_target_not_applicable(
     }
 
 
-# -- The half-difference step (decision of 2026-10-26) ------------------------
+# -- The odd–even difference step (decision of 2026-10-26) ----------------
 
 
 def noise_rows(target: str, ratio: float | None) -> dict[str, list[SimpleNamespace]]:
@@ -896,72 +964,64 @@ def noise_rows(target: str, ratio: float | None) -> dict[str, list[SimpleNamespa
     return rows
 
 
-@pytest.mark.parametrize("ratio", [1.1, 1.4, 2.0])
-def test_the_half_difference_runs_for_a_ratio_inside_the_range(
-    script: Any, fake: FakeAstrometrics, tmp_path: Path, ratio: float
+@pytest.mark.parametrize("ratio", [0.9, 1.4, 2.95, None])
+def test_the_odd_even_difference_runs_whatever_the_ratio_or_without_a_row(
+    script: Any, fake: FakeAstrometrics, tmp_path: Path, ratio: float | None
 ) -> None:
-    """Check a ratio in range (ends included) starts the measurement."""
+    """Check every stack gets the measurement (D19); no ratio gates it."""
     fake.quality_rows = noise_rows("Both", ratio)
 
     records = run_stack_only(script, tmp_path)
 
-    assert fake.half_difference_calls == ["Both"]
+    assert fake.odd_even_difference_calls == ["Both", "AsiOnly"]
     assert [record["status"] for record in records] == ["success", "success"]
 
 
-@pytest.mark.parametrize("ratio", [1.05, 2.95, None])
-def test_the_half_difference_is_skipped_outside_the_range_or_without_a_row(
-    script: Any, fake: FakeAstrometrics, tmp_path: Path, ratio: float | None
-) -> None:
-    """Check a low, a high or a missing ratio makes no measurement."""
-    fake.quality_rows = noise_rows("Both", ratio)
-
-    run_stack_only(script, tmp_path)
-
-    assert fake.half_difference_calls == []
-
-
-def test_the_half_difference_line_says_run_or_skipped_with_the_ratio(
+def test_the_odd_even_difference_line_prints_the_stored_ratio_first(
     script: Any, fake: FakeAstrometrics, tmp_path: Path, capsys: pytest.CaptureFixture
 ) -> None:
-    """Check each target prints one line with its ratio."""
-    fake.quality_rows = {**noise_rows("Both", 1.4), **noise_rows("AsiOnly", 2.95)}
+    """Check the stored ratio is read before the two noise rows."""
+    fake.quality_rows = {
+        **noise_rows("Both", 1.4),
+        f"Both|{STACKING_MEASURED_TO_PREDICTED_NOISE_RATIO}": rows_for(1.5),
+        **noise_rows("AsiOnly", 2.95),
+    }
 
     run_stack_only(script, tmp_path)
 
     output = capsys.readouterr().out
-    assert "[Both] half-difference run (ratio 1.40)" in output
-    assert "[AsiOnly] half-difference skipped (ratio 2.95)" in output
+    assert "[Both] odd–even difference run (ratio 1.50)" in output
+    assert "[AsiOnly] odd–even difference run (ratio 2.95)" in output
 
 
-def test_a_failed_half_difference_is_noted_and_the_run_goes_on(
+def test_a_failed_odd_even_difference_is_noted_and_the_run_goes_on(
     script: Any, fake: FakeAstrometrics, tmp_path: Path
 ) -> None:
     """Check the failure is in the error text, the status stays success."""
     fake.quality_rows = {**noise_rows("Both", 1.4), **noise_rows("AsiOnly", 1.4)}
-    fake.half_difference_failures = {"Both"}
+    fake.odd_even_difference_failures = {"Both"}
 
     records = run_stack_only(script, tmp_path)
 
     assert [record["status"] for record in records] == ["success", "success"]
-    assert "the half-difference measurement failed" in records[0]["error"]
-    assert "the half-difference of Both broke" in records[0]["error"]
-    assert fake.half_difference_calls == ["Both", "AsiOnly"]
+    assert "the odd–even difference measurement failed" in records[0]["error"]
+    assert "the odd–even difference of Both broke" in records[0]["error"]
+    assert fake.odd_even_difference_calls == ["Both", "AsiOnly"]
 
 
-def test_no_half_difference_skips_the_measurement(
+def test_no_odd_even_difference_skips_the_measurement(
     script: Any, fake: FakeAstrometrics, tmp_path: Path
 ) -> None:
-    """Check --no-half-difference leaves the measurement out."""
+    """Check --no-odd-even-difference leaves the measurement out."""
     fake.quality_rows = noise_rows("Both", 1.4)
 
-    records = run_stack_only(script, tmp_path, "--no-half-difference")
+    records = run_stack_only(script, tmp_path, "--no-odd-even-difference")
 
-    assert fake.half_difference_calls == []
+    assert fake.odd_even_difference_calls == []
     assert records[0]["error"] == ""
 
 
-def test_a_stack_that_failed_makes_no_half_difference(
+def test_a_stack_that_failed_makes_no_odd_even_difference(
     script: Any, fake: FakeAstrometrics, tmp_path: Path
 ) -> None:
     """Check a failed stack never reaches the measurement."""
@@ -970,19 +1030,21 @@ def test_a_stack_that_failed_makes_no_half_difference(
 
     run_stack_only(script, tmp_path)
 
-    assert fake.half_difference_calls == []
+    assert fake.odd_even_difference_calls == ["AsiOnly"]
 
 
-def test_the_review_list_says_what_happened_to_the_half_difference(
+def test_the_review_list_says_what_happened_to_the_odd_even_difference(
     script: Any, fake: FakeAstrometrics, tmp_path: Path
 ) -> None:
-    """Check the column is run, skipped (ratio X), failed or n/a."""
+    """Check the column says run, or not run for too few frames."""
     import csv
 
+    few = "a half would have 5 frames, fewer than the 8 the odd–even difference noise needs"
     fake.quality_rows = {
-        **noise_rows("Both", 1.4),
-        f"Both|{STACKING_HALF_DIFFERENCE_NOISE_STACK_UNIT}": rows_for(1.0e-3),
-        **noise_rows("AsiOnly", 2.95),
+        f"Both|{STACKING_ODD_EVEN_DIFFERENCE_NOISE_STACK_UNIT}": rows_for(1.0e-3),
+        f"AsiOnly|{STACKING_ODD_EVEN_DIFFERENCE_NOISE_STACK_UNIT}": rows_for(
+            None, status="not_measured", reason=few
+        ),
     }
     review_path = tmp_path / "review.csv"
 
@@ -990,20 +1052,20 @@ def test_the_review_list_says_what_happened_to_the_half_difference(
 
     with open(review_path, newline="") as handle:
         rows = {row["target"]: row for row in csv.DictReader(handle)}
-    assert rows["Both"]["half_difference"] == "run"
-    assert rows["AsiOnly"]["half_difference"] == "skipped (ratio 2.95)"
+    assert rows["Both"]["odd_even_difference"] == "run"
+    assert rows["AsiOnly"]["odd_even_difference"] == "not run (fewer than 8 frames per half)"
 
 
-def test_the_review_list_marks_a_failed_unmeasured_or_refused_half_difference(
+def test_the_review_list_gives_the_reason_of_a_failed_odd_even_difference(
     script: Any, fake: FakeAstrometrics, tmp_path: Path
 ) -> None:
-    """Check failed (not-measured row, or in range with no row) and n/a."""
+    """Check failed carries the stored reason, or says no row was stored."""
     import csv
 
     fake.quality_rows = {
-        **noise_rows("Both", 1.4),
-        f"Both|{STACKING_HALF_DIFFERENCE_NOISE_STACK_UNIT}": rows_for(None, status="not_measured"),
-        **noise_rows("AsiOnly", 1.4),
+        f"Both|{STACKING_ODD_EVEN_DIFFERENCE_NOISE_STACK_UNIT}": rows_for(
+            None, status="not_measured", reason="the stacker failed on the odd half"
+        ),
     }
     review_path = tmp_path / "review.csv"
 
@@ -1014,8 +1076,23 @@ def test_the_review_list_marks_a_failed_unmeasured_or_refused_half_difference(
 
     with open(review_path, newline="") as handle:
         rows = {row["target"]: row for row in csv.DictReader(handle)}
-    assert {name: row["half_difference"] for name, row in rows.items()} == {
-        "AsiOnly": "failed",
-        "Both": "failed",
+    assert {name: row["odd_even_difference"] for name, row in rows.items()} == {
+        "AsiOnly": "failed: no result row was stored",
+        "Both": "failed: the stacker failed on the odd half",
         "NikonOnly": "n/a",
     }
+
+
+def test_the_review_list_says_when_the_odd_even_difference_was_switched_off(
+    script: Any, fake: FakeAstrometrics, tmp_path: Path
+) -> None:
+    """Check --no-odd-even-difference shows in the column, not as a failure."""
+    import csv
+
+    review_path = tmp_path / "review.csv"
+
+    run_stack_only(script, tmp_path, "--no-odd-even-difference", "--review-list", str(review_path))
+
+    with open(review_path, newline="") as handle:
+        rows = {row["target"]: row for row in csv.DictReader(handle)}
+    assert rows["Both"]["odd_even_difference"] == "skipped (--no-odd-even-difference)"

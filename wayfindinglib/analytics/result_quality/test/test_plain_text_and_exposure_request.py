@@ -211,7 +211,7 @@ def test_no_exposure_anywhere_makes_no_row() -> None:
 
 
 def test_a_diminishing_returns_statement_asks_for_the_doubling_frames() -> None:
-    """The package row of a floor-limited setting asks for 44 frames."""
+    """The package row of a fixed-pattern-limited setting asks 44 frames."""
     from astrometricslib import MeasurementReference
     from wayfindinglib.analytics.result_quality import report_rules
     from wayfindinglib.analytics.result_quality.capture_overheads import CaptureOverheads
@@ -221,8 +221,8 @@ def test_a_diminishing_returns_statement_asks_for_the_doubling_frames() -> None:
         target_noise_ratio=0.707,
         added_exposure_seconds=44 * 30.0,
         new_exposure_seconds=30.0,
-        floor_noise=0.583e-3,
-        floor_variance_share=0.49,
+        fixed_pattern_noise=0.583e-3,
+        fixed_pattern_variance_share=0.49,
         practical_limit_applied=True,
         doubling_frames=44,
         doubling_noise_cut=0.137,

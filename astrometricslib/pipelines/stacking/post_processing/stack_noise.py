@@ -71,21 +71,25 @@ to point at, not a plate solution, and Siril copies it into the stack. The sky
 position of a pixel can then be wrong by tens of pixels, and by a different
 amount on every night. So when a target already has stored apertures, every
 stack, whatever its header says, is first moved onto them: the stored
-reference stars are looked for near where the solution predicts them, the shift
-that most of them agree on is found, and the solution is moved by that shift.
-The stars that agree also give the rotation the solution would need; the stack
-is refused when that rotation is larger than `MAXIMUM_ROTATION_DEG` and is
-more than three times its own error. The leftover position error (how well the
-stars agree after the shift) is reported in the `position_note`. If fewer than
-a few stars agree, no noise is measured.
+reference stars are looked for near where the solution predicts them, at
+each of a few dozen small trial rotations about the image center (up to
+`MAXIMUM_ROTATION_DEG`, in steps that keep the rotation's effect under a pixel
+everywhere). The shift and rotation that most of the stars agree on are found,
+refined by a least-squares fit to those stars, and the solution is shifted and
+turned by them. A rotation that is not significant is dropped, so a pure shift
+stays a pure shift. The stack is refused when the fitted rotation is larger
+than `MAXIMUM_ROTATION_DEG` and more than three times its own error. The
+leftover position error is reported in the `position_note`. If fewer than a few
+stars agree, no noise is measured.
 
 A target keeps one set of apertures for each camera, optic and reference
 exposure length (see `ApertureSet.setup_key`). A stack made with other
 equipment, or lined up on a frame of another exposure length (for a stack of
 exposure groups, the heaviest group's), starts a new set. A stack that may not
-choose apertures (a subset stack or a half-difference job) ignores its own
-exposure length and uses the target's deepest set of the same camera and optic,
-which is the library stack's. To start over for a target, call
+choose apertures (a subset stack or an odd–even difference job) ignores its own
+exposure length and uses the set the target's library stack recorded for the
+same camera and optic (`record_library_set_key`); an older file with no record
+falls back to the deepest set. To start over for a target, call
 `reset_apertures` or delete
 ``quality_apertures.json`` beside its stacks; the next stack chooses new
 apertures. Noise values measured with different sets are not comparable.
@@ -123,6 +127,10 @@ from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.drivers.fits_access import collapse_to_2d, read_data, read_header
 from astrometricslib.models.camera_profile import ProvenanceKind
 from astrometricslib.pipelines.shared.applied_camera_profile import camera_name_from_header
+from astrometricslib.pipelines.stacking.post_processing.aperture_size_noise import (
+    ApertureSizeNoiseOutcome,
+    measure_aperture_size_noise,
+)
 from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
     DETECTED_STAR_COUNT,
     MINIMUM_USABLE_APERTURES,
@@ -137,6 +145,7 @@ from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
     find_library_set_key,
     load_apertures,
     load_apertures_with_reason,
+    record_library_set_key,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_image import (
     MAD_SIGMA_ERROR_FACTOR,
@@ -188,16 +197,43 @@ SEED_SEARCH_RADIUS_PX = 500.0
 SEED_AGREEMENT_PX = WCS_CHECK_TOLERANCE_PX
 
 # The largest rotation, in degrees, between a stack's solution and the stored
-# stars that is accepted. The apertures are moved by a shift only, so a
-# rotation leaves a point at distance d from the field center misplaced by d
-# times the angle. At 0.1 degree (0.00175 radian) a point 2000 px from the
-# center, a typical corner of a 3000 px stack, is misplaced by 3.5 px: about
-# the radius of the 4 px noise aperture, where a star would begin to miss its
-# aperture. A design estimate; no stack with a rotation has been measured.
-MAXIMUM_ROTATION_DEG = 0.1
+# stars that is searched for and accepted. The apertures are placed by a shift
+# and a turn about the image center, so a rotation is followed rather than
+# refused, up to this limit. A header's rotation was off by 0.07 to 0.21 deg on
+# M 81's 2026-01 frames, measured against real plate solves of the same frames;
+# 0.5 deg is more than twice the largest of those. Beyond it a header is
+# probably not a solution at all. Searching a rotation costs chance agreement:
+# the number of trial rotations (about 2 * 0.5 deg / 0.027 deg = 37 for a
+# 3000 px stack) multiplies the chance that a wrong shift, rotation pair
+# finds MINIMUM_USABLE_REFERENCE_STARS agreeing stars. With about 1500 pairs
+# inside the search radius, five stars agreeing by chance at one trial is
+# unlikely, and the factor of 37 does not change that (not measured). A
+# design estimate. The M 81 case (3 of 10 stars agree by shift only, 9 of 10
+# with a rotation of 0.16 to 0.24 deg) is the motivating observation, not a
+# validation.
+MAXIMUM_ROTATION_DEG = 0.5
+
+# Trial rotations are this many pixels apart at the farthest corner of the
+# image (the step is this distance divided by the corner's distance from the
+# center). The nearest trial is then at most half of it off anywhere in the
+# image, well inside SEED_AGREEMENT_PX, so a star at the right rotation always
+# votes with the others.
+ROTATION_STEP_PX = 1.0
 
 # The rotation must also exceed this many times its own error to count.
 ROTATION_SIGNIFICANCE = 3.0
+
+# A fitted move smaller than both of these leaves the solution as it is, so a
+# rerun on the same stack puts the apertures on the same pixels. Shift: a
+# 0.05 px move shifts an aperture by 1/80 of its 4 px radius. Rotation: 0.001
+# deg is 0.026 px at the farthest corner of a 3000 px image. Moves this small
+# are inside the star-position error anyway, but they changed which pixels
+# each of 99 apertures covered: on M 13, shifts of 0.01 to 0.03 px changed the
+# MAD of the 99 apertures by 1.5 to 1.9% rms, and one rerun changed the
+# odd-even difference noise by 5% (sampling scatter). Design estimates;
+# validated only by that M 13 check.
+NEGLIGIBLE_SHIFT_PX = 0.05
+NEGLIGIBLE_ROTATION_DEG = 0.001
 
 NO_WCS_REASON = "no WCS for this stack"
 
@@ -333,6 +369,31 @@ class StackNoiseResult:
         The reference stars' flux in the stack over their flux in the
         registration reference frame, or `None` when the measurement was not
         tried (a difference image).
+    aperture_pixel_positions : `tuple` [`tuple` [`float`, `float`], ...]
+        The (column, row) of every stored aperture on this stack, in the
+        stored order; NaN where the position could not be worked out.
+    added_aperture_sums : `tuple` [`float`, ...]
+        For a difference image only: the sky-subtracted sum at every stored
+        aperture on the sum image A + B of the two stacks (the stacks added,
+        not halved), in the stored order, NaN where not usable. Empty
+        otherwise.
+    target_pixel_position : `tuple` [`float`, `float`] or `None`
+        For a difference image only, when the caller gave the target's sky
+        position: its (column, row) on this stack.
+    size_noise : `ApertureSizeNoiseOutcome` or `None`
+        How the noise grows with the aperture size (see
+        `aperture_size_noise.py`), for a stack that may choose the apertures
+        (a library stack). `None` when it was not tried.
+    pixel_scale_arcsec : `float`
+        The pixel scale of the stack's solution, in arcseconds per pixel
+        (0 when not known). The depth limits turn an area in arcseconds into
+        pixels with it.
+    reference_star_fluxes : `tuple` [`tuple` [`float`, `float`, `float`], ...]
+        For each usable reference star: right ascension and declination in
+        degrees, and its sky-subtracted sum in the large reference aperture
+        of this stack, in the stack's own units (the units of `noise_adu`).
+        The depth limits match these stars to Gaia to find the stack's zero
+        point.
     """
 
     noise_adu: float
@@ -356,6 +417,12 @@ class StackNoiseResult:
     aperture_identity: str = ""
     aperture_definition_note: str = ""
     reference_frame_flux_ratio: ReferenceFrameFluxRatio | None = None
+    aperture_pixel_positions: tuple[tuple[float, float], ...] = ()
+    added_aperture_sums: tuple[float, ...] = ()
+    target_pixel_position: tuple[float, float] | None = None
+    size_noise: ApertureSizeNoiseOutcome | None = None
+    pixel_scale_arcsec: float = 0.0
+    reference_star_fluxes: tuple[tuple[float, float, float], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -388,16 +455,23 @@ class _Alignment:
     Parameters
     ----------
     shift_row, shift_column : `float`
-        The shift applied, in pixels.
+        The shift applied, in pixels, after the rotation about the image
+        center.
     matched_stars : `int`
         How many stored reference stars agreed on it.
     rms_px : `float`
         The root mean square distance, after the shift, between those stars
         and the detected stars they matched.
     rotation_deg : `float`
-        The rotation the matched stars suggest, in degrees.
+        The rotation about the image center that was applied, in degrees
+        (zero when the stars show none that is significant).
     rotation_error_deg : `float`
-        Its 1-sigma error.
+        The 1-sigma error of the rotation fitted to the matched stars.
+    left_unchanged : `bool`
+        True when the fitted move was below `NEGLIGIBLE_SHIFT_PX` and
+        `NEGLIGIBLE_ROTATION_DEG`, so the solution was returned as it was. The
+        shift and rotation fields then hold the fitted values that were not
+        applied.
     """
 
     shift_row: float
@@ -406,6 +480,7 @@ class _Alignment:
     rms_px: float
     rotation_deg: float
     rotation_error_deg: float
+    left_unchanged: bool = False
 
     def describe(self) -> str:
         """Say in words how the solution was moved.
@@ -416,11 +491,20 @@ class _Alignment:
             One sentence with the shift, the stars that agreed, their leftover
             position error and the rotation.
         """
+        if self.left_unchanged:
+            return (
+                f"The stack's sky positions were left as they were: the fitted move "
+                f"({self.shift_row:+.2f} rows, {self.shift_column:+.2f} columns, "
+                f"{self.rotation_deg:+.4f} deg) "
+                f"is below {NEGLIGIBLE_SHIFT_PX} px and {NEGLIGIBLE_ROTATION_DEG} deg, so reruns place the "
+                f"apertures on the same pixels; {self.matched_stars} stored reference stars agree to "
+                f"{self.rms_px:.2f} px rms."
+            )
         return (
             f"The stack's sky positions were moved by {self.shift_row:+.1f} rows and "
-            f"{self.shift_column:+.1f} columns onto {self.matched_stars} stored reference stars; "
-            f"after the move they agree to {self.rms_px:.2f} px rms, and the rotation they suggest is "
-            f"{self.rotation_deg:+.3f} +/- {self.rotation_error_deg:.3f} deg."
+            f"{self.shift_column:+.1f} columns and turned by {self.rotation_deg:+.3f} deg about the image "
+            f"center onto {self.matched_stars} stored reference stars; after the move they agree to "
+            f"{self.rms_px:.2f} px rms (rotation error {self.rotation_error_deg:.3f} deg)."
         )
 
 
@@ -762,20 +846,153 @@ def _agreed_shift(expected: np.ndarray, frame_stars: np.ndarray) -> tuple[float,
             best = (agreeing_stars, size, members)
     if best is None or best[0] < WCS_CHECK_MINIMUM_MATCHES:
         return None
-    mean_shift = shifts[best[2]].mean(axis=0)
-    return float(mean_shift[0]), float(mean_shift[1])
+    median_shift = shifts[best[2]].mean(axis=0)
+    return float(median_shift[0]), float(median_shift[1])
+
+
+def _vote_for_shift(
+    predicted: np.ndarray, detected: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, int] | None:
+    """Vote on the shift that puts most predicted stars onto detected stars.
+
+    Every pair of a predicted star and a detected star suggests a shift. The
+    true shift is the one the most different predicted stars suggest together
+    (within `SEED_AGREEMENT_PX`); when two shifts tie, the smaller one wins.
+
+    Parameters
+    ----------
+    predicted : `numpy.ndarray`
+        Shape ``(k, 2)``: (row, column) of the stored stars, where the
+        solution (and any trial rotation) puts them.
+    detected : `numpy.ndarray`
+        Shape ``(m, 2)``: (row, column) of the detected stars.
+
+    Returns
+    -------
+    vote : `tuple` or `None`
+        `None` when no shift is within `SEED_SEARCH_RADIUS_PX`. Otherwise
+        ``(shifts, owner, pair_detected, members, distinct_count)``: the
+        suggested shifts, shape ``(n, 2)``; for each, the index of its
+        predicted star and of its detected star; the indices (into
+        ``shifts``) of the shifts that agree with the winner; and how many
+        different predicted stars take part in that agreement.
+    """
+    star_index, detected_index = np.meshgrid(
+        np.arange(len(predicted)), np.arange(len(detected)), indexing="ij"
+    )
+    shifts = detected[detected_index.ravel()] - predicted[star_index.ravel()]
+    owner = star_index.ravel()
+    pair_detected = detected_index.ravel()
+    near = np.hypot(shifts[:, 0], shifts[:, 1]) <= SEED_SEARCH_RADIUS_PX
+    shifts, owner, pair_detected = shifts[near], owner[near], pair_detected[near]
+    if len(shifts) == 0:
+        return None
+    tree = cKDTree(shifts)
+    # Each shift counts the distinct stars among the shifts within the
+    # agreement distance of it (itself included). Done on arrays: a list of
+    # sets per shift is too slow when it is repeated for every trial rotation.
+    pairs = tree.query_pairs(r=SEED_AGREEMENT_PX, output_type="ndarray")
+    first = np.concatenate([pairs[:, 0], pairs[:, 1], np.arange(len(shifts))])
+    second = np.concatenate([pairs[:, 1], pairs[:, 0], np.arange(len(shifts))])
+    star_count = len(predicted)
+    distinct_keys = np.unique(first * star_count + owner[second])
+    distinct_counts = np.bincount(distinct_keys // star_count, minlength=len(shifts))
+    tied = np.flatnonzero(distinct_counts == distinct_counts.max())
+    best = int(tied[np.argmin(np.hypot(shifts[tied, 0], shifts[tied, 1]))])
+    members = np.asarray(tree.query_ball_point(shifts[best], r=SEED_AGREEMENT_PX))
+    return shifts, owner, pair_detected, members, int(distinct_counts[best])
+
+
+def _rotate_about(points: np.ndarray, center: np.ndarray, angle_rad: float) -> np.ndarray:
+    """Turn (row, column) points about a center by an angle.
+
+    The angle has the sense used by `_rotation_between`: with x as the column
+    and y as the row, ``x' = x cos - y sin`` and ``y' = x sin + y cos``.
+
+    Parameters
+    ----------
+    points : `numpy.ndarray`
+        Shape ``(n, 2)``, (row, column).
+    center : `numpy.ndarray`
+        The (row, column) that stays fixed.
+    angle_rad : `float`
+        The rotation, in radians.
+
+    Returns
+    -------
+    turned : `numpy.ndarray`
+        The turned points, shape ``(n, 2)``, (row, column).
+    """
+    cosine, sine = math.cos(angle_rad), math.sin(angle_rad)
+    offset = points - center
+    column = offset[:, 1] * cosine - offset[:, 0] * sine
+    row = offset[:, 1] * sine + offset[:, 0] * cosine
+    return center + np.column_stack([row, column])
+
+
+def _turn_and_shift_wcs(wcs: WCS, center_xy: np.ndarray, angle_rad: float, shift_xy: np.ndarray) -> WCS:
+    """Turn a solution about a point and shift it.
+
+    A star the old solution predicts at pixel ``p`` is really at
+    ``R(p - c) + c + s``, so the new solution must give that pixel
+    the sky position the old one gave ``p``. In FITS terms, with ``u`` the
+    offset from the reference pixel: the new reference pixel is
+    ``c + s + R(crpix - c)`` and the linear part (the CD matrix, or the PC
+    matrix when the solution has one) is multiplied by ``R`` inverse.
+
+    A SIP distortion, if the solution has one, is kept as it is. It is a
+    polynomial in ``u`` of the old pixel grid, and a rotation of the grid
+    would turn it too. The error of not turning it is the rotation (at most
+    `MAXIMUM_ROTATION_DEG`, 0.009 radian) times the size of the distortion
+    term, which is a few pixels at the corners of a typical SIP fit: about
+    0.03 px, far below the 3 px agreement the stars are matched to.
+
+    Parameters
+    ----------
+    wcs : `astropy.wcs.WCS`
+        The solution to move. It is not changed.
+    center_xy : `numpy.ndarray`
+        The fixed point ``c`` as (column, row), zero-based pixel coordinates.
+    angle_rad : `float`
+        The rotation ``R``, in radians.
+    shift_xy : `numpy.ndarray`
+        The shift ``s`` as (column, row), in pixels.
+
+    Returns
+    -------
+    moved : `astropy.wcs.WCS`
+        The moved solution.
+    """
+    cosine, sine = math.cos(angle_rad), math.sin(angle_rad)
+    rotation = np.array([[cosine, -sine], [sine, cosine]])
+    moved = wcs.deepcopy()
+    # FITS reference pixels count from 1, the other coordinates here from 0.
+    old_crpix_zero_based = np.asarray(wcs.wcs.crpix, dtype=float) - 1.0
+    new_crpix_zero_based = center_xy + shift_xy + rotation @ (old_crpix_zero_based - center_xy)
+    moved.wcs.crpix = new_crpix_zero_based + 1.0
+    if abs(angle_rad) > 0.0:
+        if wcs.wcs.has_cd():
+            moved.wcs.cd = np.asarray(wcs.wcs.cd, dtype=float) @ rotation.T
+        else:
+            moved.wcs.pc = np.asarray(wcs.wcs.get_pc(), dtype=float) @ rotation.T
+    return moved
 
 
 def _move_guess_onto_reference_stars(
     plane: np.ndarray, wcs: WCS, reference_sky: np.ndarray
 ) -> tuple[WCS | None, str, _Alignment | None]:
-    """Shift a solution so it lands on the stored reference stars.
+    """Shift and turn a solution so it lands on the stored reference stars.
 
-    Every pair of a stored star and a detected star suggests a shift. The true
-    shift is the one the most different stars suggest together; when two
-    shifts tie, the smaller one wins, because a good solution needs little
-    moving. The stars that agree also give a rotation (a least-squares fit of
-    their positions about their own center) and the leftover position error.
+    For each trial rotation about the image center (from minus to plus
+    `MAXIMUM_ROTATION_DEG`, in steps that keep the misplacement at the
+    farthest corner below one pixel), the predicted star positions are turned
+    and every pair of a stored star and a detected star suggests a shift. The
+    trial and shift that the most different stars agree on win; ties go to the
+    smaller rotation and then the smaller shift, because a good solution needs
+    little moving. A rotation and a shift are then fitted to the stars that
+    agree (least squares), and the solution is turned and shifted by them.
+    The fitted rotation is dropped when it is not significant, so a pure
+    shift stays a pure shift.
 
     Parameters
     ----------
@@ -791,7 +1008,7 @@ def _move_guess_onto_reference_stars(
     Returns
     -------
     moved : `astropy.wcs.WCS` or `None`
-        The solution shifted so the reference stars sit on stars of the
+        The solution moved so the reference stars sit on stars of the
         stack, or `None` when too few stars agree or the rotation is too large.
     reason : `str`
         Why there is none. Empty when there is one.
@@ -802,35 +1019,43 @@ def _move_guess_onto_reference_stars(
     detected = detect_star_centroids(plane, count=DETECTED_STAR_COUNT, skip_saturated=False)
     if len(predicted) == 0 or len(detected) == 0:
         return None, "the stored reference stars could not be found: no stars were detected", None
-    star_index, detected_index = np.meshgrid(
-        np.arange(len(predicted)), np.arange(len(detected)), indexing="ij"
-    )
-    shifts = detected[detected_index.ravel()] - predicted[star_index.ravel()]
-    owner = star_index.ravel()
-    pair_detected = detected_index.ravel()
-    near = np.hypot(shifts[:, 0], shifts[:, 1]) <= SEED_SEARCH_RADIUS_PX
-    shifts, owner, pair_detected = shifts[near], owner[near], pair_detected[near]
-    if len(shifts) == 0:
+    center = np.array([(plane.shape[0] - 1) / 2.0, (plane.shape[1] - 1) / 2.0])
+    farthest_corner = float(np.hypot(*center))
+    maximum_rad = math.radians(MAXIMUM_ROTATION_DEG)
+    # The step times the farthest distance is ROTATION_STEP_PX, so the nearest
+    # trial leaves at most half of that misplaced anywhere in the image.
+    step_rad = ROTATION_STEP_PX / max(farthest_corner, 1.0)
+    half_steps = max(math.ceil(maximum_rad / step_rad), 1)
+    trial_angles = np.linspace(-maximum_rad, maximum_rad, 2 * half_steps + 1)
+
+    best = None
+    best_key = None
+    for angle_rad in trial_angles:
+        vote = _vote_for_shift(_rotate_about(predicted, center, float(angle_rad)), detected)
+        if vote is None:
+            continue
+        shifts, _owner, _pair_detected, members, count = vote
+        size = float(np.hypot(*np.median(shifts[members], axis=0)))
+        key = (count, -abs(float(angle_rad)), -size)
+        if best_key is None or key > best_key:
+            best_key, best = key, (float(angle_rad), vote)
+    if best is None:
         return (
             None,
             "the stored reference stars were not found near where the stack's solution puts them",
             None,
         )
-    tree = cKDTree(shifts)
-    neighbors = tree.query_ball_point(shifts, r=SEED_AGREEMENT_PX)
-    distinct_counts = np.array([len(set(owner[members])) for members in neighbors])
-    tied = np.flatnonzero(distinct_counts == distinct_counts.max())
-    best = int(tied[np.argmin(np.hypot(shifts[tied, 0], shifts[tied, 1]))])
-    if distinct_counts[best] < MINIMUM_USABLE_REFERENCE_STARS:
+    trial_rad, (shifts, owner, pair_detected, members, count) = best
+    if count < MINIMUM_USABLE_REFERENCE_STARS:
         return (
             None,
             (
-                f"only {distinct_counts[best]} of {len(predicted)} stored reference stars agree on a shift "
-                "from the stack's solution, so the stack's sky positions cannot be trusted"
+                f"only {count} of {len(predicted)} stored reference stars agree on a shift and a rotation "
+                f"(up to {MAXIMUM_ROTATION_DEG} deg) from the stack's solution, so the stack's sky "
+                "positions cannot be trusted"
             ),
             None,
         )
-    members = np.asarray(neighbors[best])
     shift_row, shift_column = np.median(shifts[members], axis=0)
     # One detected star for each stored star: the one nearest the median shift.
     chosen: dict[int, tuple[float, int]] = {}
@@ -840,14 +1065,26 @@ def _move_guess_onto_reference_stars(
         if star not in chosen or miss < chosen[star][0]:
             chosen[star] = (miss, int(pair_detected[member]))
     stars = np.array(sorted(chosen))
-    from_points = predicted[stars] + (shift_row, shift_column)
+    # The fit: turn about the center by the angle that best carries the
+    # predicted stars onto the detected ones, then shift. The angle comes from
+    # the stars as the trial rotation left them; the trial adds to it.
+    trial_points = _rotate_about(predicted[stars], center, trial_rad)
     to_points = detected[[chosen[int(star)][1] for star in stars]]
-    leftover = to_points - from_points
+    trial_shifted = trial_points + np.array([shift_row, shift_column])
+    trial_rms = float(np.sqrt(np.mean(np.sum((to_points - trial_shifted) ** 2, axis=1))))
+    extra_deg, rotation_error_deg = _rotation_between(trial_shifted, to_points, trial_rms)
+    if abs(extra_deg) <= ROTATION_SIGNIFICANCE * rotation_error_deg:
+        extra_deg = 0.0
+    rotation_rad = trial_rad + math.radians(extra_deg)
+    rotation_deg = math.degrees(rotation_rad)
+    turned = _rotate_about(predicted[stars], center, rotation_rad)
+    # The median, not the mean, so a few mismatched stars do not move it.
+    median_shift = np.median(to_points - turned, axis=0)
+    leftover = to_points - (turned + median_shift)
     rms = float(np.sqrt(np.mean(np.sum(leftover**2, axis=1))))
-    rotation_deg, rotation_error_deg = _rotation_between(from_points, to_points, rms)
     alignment = _Alignment(
-        shift_row=float(shift_row),
-        shift_column=float(shift_column),
+        shift_row=float(median_shift[0]),
+        shift_column=float(median_shift[1]),
         matched_stars=len(stars),
         rms_px=rms,
         rotation_deg=rotation_deg,
@@ -861,15 +1098,18 @@ def _move_guess_onto_reference_stars(
             None,
             (
                 f"the stack's solution is rotated by {rotation_deg:+.3f} deg against the stored reference "
-                f"stars, more than the {MAXIMUM_ROTATION_DEG} deg the apertures can follow by a shift alone"
+                f"stars, more than the {MAXIMUM_ROTATION_DEG} deg the apertures can follow"
             ),
             alignment,
         )
-    moved = wcs.deepcopy()
-    # A star predicted at pixel p that is really at p + shift has the sky
-    # position the guess gives for p, so the reference pixel moves by the
-    # shift.
-    moved.wcs.crpix = [wcs.wcs.crpix[0] + shift_column, wcs.wcs.crpix[1] + shift_row]
+    if float(np.hypot(*median_shift)) < NEGLIGIBLE_SHIFT_PX and abs(rotation_deg) < NEGLIGIBLE_ROTATION_DEG:
+        return wcs.deepcopy(), "", replace(alignment, left_unchanged=True)
+    moved = _turn_and_shift_wcs(
+        wcs,
+        np.array([center[1], center[0]]),
+        rotation_rad,
+        np.array([median_shift[1], median_shift[0]]),
+    )
     return moved, "", alignment
 
 
@@ -1054,6 +1294,7 @@ def _measure_noise_in_plane(
     subtracted_plane: np.ndarray | None = None,
     covered_mask: np.ndarray | None = None,
     member_frame_paths: Sequence[str] = (),
+    target_sky_deg: tuple[float, float] | None = None,
 ) -> StackNoiseOutcome:
     """Measure a stack's noise in the target's fixed apertures on its plane.
 
@@ -1083,6 +1324,9 @@ def _measure_noise_in_plane(
         See `measure_stack_noise`. Used only when apertures are chosen.
     member_frame_paths : `Sequence` of `str`, optional
         See `measure_stack_noise`.
+    target_sky_deg : `tuple` [`float`, `float`], optional
+        The target's (RA, Dec) in degrees. Used only for a difference image,
+        to give the target's pixel position on the stack.
 
     Returns
     -------
@@ -1178,6 +1422,10 @@ def _measure_noise_in_plane(
                     chosen.identity,
                     REPLACEMENT_DEPTH_FACTOR,
                 )
+    if may_choose_apertures:
+        # Tell the stacks that may not choose which set is the library
+        # stack's, so they do not pick a deeper but stale one.
+        record_library_set_key(apertures_path, aperture_set.setup_key)
     scale = _pixel_scale_arcsec(wcs)
     if (
         abs(scale - aperture_set.pixel_scale_arcsec)
@@ -1219,10 +1467,31 @@ def _measure_noise_in_plane(
         summed_plane = plane - subtracted_plane
         summed_plane[(plane == 0) | (subtracted_plane == 0)] = 0.0
     all_sums = _sums_at(summed_plane, wcs, aperture_set.aperture_sky)
+    pixel_positions = _sky_to_pixels(wcs, aperture_set.aperture_sky)
+    added_sums: tuple[float, ...] = ()
+    target_pixel: tuple[float, float] | None = None
+    size_noise: ApertureSizeNoiseOutcome | None = None
+    if subtracted_plane is not None:
+        added_plane = plane + subtracted_plane
+        added_plane[(plane == 0) | (subtracted_plane == 0)] = 0.0
+        added_sums = tuple(float(value) for value in _sums_at(added_plane, wcs, aperture_set.aperture_sky))
+        del added_plane
+        if target_sky_deg is not None:
+            column, row = _sky_to_pixels(wcs, np.array([target_sky_deg], dtype=float))[0]
+            if math.isfinite(column) and math.isfinite(row):
+                target_pixel = (float(column), float(row))
+    elif may_choose_apertures:
+        # One extra pass over the same apertures at other sizes. It is a
+        # by-product: a failure is a reason on the size rows, not a lost noise.
+        try:
+            size_noise = measure_aperture_size_noise(plane, pixel_positions)
+        except Exception as error:
+            logger.exception("The noise against aperture size of %s could not be measured", stack_path)
+            size_noise = ApertureSizeNoiseOutcome(None, f"the measurement failed: {type(error).__name__}")
     sums = all_sums[np.isfinite(all_sums)]
     if sums.size < MINIMUM_USABLE_APERTURES:
         return StackNoiseOutcome(None, f"only {sums.size} of the stored apertures fall on this stack")
-    ratios, saturated_count = _reference_ratios(plane, wcs, aperture_set, saturation)
+    ratios, saturated_count, star_fluxes = _reference_ratios(plane, wcs, aperture_set, saturation)
     flux_ratio = (
         None
         if subtracted_plane is not None
@@ -1275,6 +1544,12 @@ def _measure_noise_in_plane(
             aperture_identity=aperture_set.identity,
             aperture_definition_note=aperture_set.describe_definition(),
             reference_frame_flux_ratio=flux_ratio,
+            aperture_pixel_positions=tuple((float(c), float(r)) for c, r in pixel_positions),
+            added_aperture_sums=added_sums,
+            target_pixel_position=target_pixel,
+            size_noise=size_noise,
+            pixel_scale_arcsec=scale,
+            reference_star_fluxes=tuple(star_fluxes),
             saturation_source=aperture_set.saturation_source
             if created
             else (saturation.source if saturation is not None else aperture_set.saturation_source),
@@ -1406,7 +1681,7 @@ def _flux_ratio_to_reference_frame(
 
 def _reference_ratios(
     plane: np.ndarray, wcs: WCS, aperture_set: ApertureSet, saturation: SaturationCheck | None
-) -> tuple[np.ndarray, int]:
+) -> tuple[np.ndarray, int, list[tuple[float, float, float]]]:
     """Compare each reference star's brightness with its first-stack value.
 
     Parameters
@@ -1430,11 +1705,18 @@ def _reference_ratios(
         on the stack that chose the apertures.
     saturated_count : `int`
         How many stored stars were left out for being saturated.
+    star_fluxes : `list` [`tuple` [`float`, `float`, `float`]]
+        For the same stars as `ratios`, in the same order: right ascension
+        and declination in degrees, and the brightness in this stack's units.
     """
     ratios = []
+    star_fluxes = []
     saturated_count = 0
-    for (column, row), baseline in zip(
-        _sky_to_pixels(wcs, aperture_set.reference_sky), aperture_set.reference_baseline_flux, strict=True
+    for (column, row), baseline, (right_ascension, declination) in zip(
+        _sky_to_pixels(wcs, aperture_set.reference_sky),
+        aperture_set.reference_baseline_flux,
+        aperture_set.reference_sky,
+        strict=True,
     ):
         if not (math.isfinite(column) and math.isfinite(row)):
             continue
@@ -1451,7 +1733,8 @@ def _reference_ratios(
         )
         if flux is not None and flux > 0 and baseline > 0:
             ratios.append(flux / baseline)
-    return np.asarray(ratios, dtype=float), saturated_count
+            star_fluxes.append((float(right_ascension), float(declination), float(flux)))
+    return np.asarray(ratios, dtype=float), saturated_count, star_fluxes
 
 
 def _sums_at(plane: np.ndarray, wcs: WCS, sky: np.ndarray) -> np.ndarray:

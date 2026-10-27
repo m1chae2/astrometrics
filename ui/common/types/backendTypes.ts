@@ -4815,11 +4815,11 @@ export enum RankedUse {
  * ranked one. Empty when there is nothing to add.
  * confidence : `Confidence`
  * Always ``design_estimate`` today.
- * forecast_gate : `ForecastGate`
+ * recommended_additional_frames_status : `RecommendedAdditionalFramesStatus`
  * Whether the target's "take N more" count is confirmed by a check of two
- * library stacks, exploratory (only a check made from frames already
- * taken agreed), or closed (no check agreed). An exploratory target
- * ranks below a confirmed or closed one of about the same gain.
+ * library stacks, provisional (only a check made from frames already
+ * taken agreed), or not checked (no check agreed). A provisional target
+ * ranks below a confirmed or unchecked one of about the same gain.
  * register_entry : `str`
  * The validation register entry behind the ranking.
  * evidence : `list` [`MeasurementReference`]
@@ -4842,7 +4842,7 @@ export interface RankedCandidate {
   thinDataset?: boolean;
   reason?: string;
   confidence?: Confidence;
-  forecastGate?: ForecastGate;
+  recommendedAdditionalFramesStatus?: RecommendedAdditionalFramesStatus;
   registerEntry?: string;
   evidence?: MeasurementReference[];
 }
@@ -5039,13 +5039,14 @@ export enum CandidateStatus {
 /**
  * Whether "take N more" may be shown for a target, and on what footing.
  *
- * ``closed`` hides the count. ``exploratory`` shows it after a check made
- * from frames already taken agreed; the next real stack confirms or closes
- * it. ``confirmed`` shows it after a check of two library stacks agreed.
+ * ``not_checked`` hides the count. ``provisional`` shows it after a check
+ * made from frames already taken agreed; the next real stack confirms or
+ * withdraws it. ``confirmed`` shows it after a check of two library stacks
+ * agreed.
  */
-export enum ForecastGate {
-  CLOSED = "closed",
-  EXPLORATORY = "exploratory",
+export enum RecommendedAdditionalFramesStatus {
+  NOT_CHECKED = "not_checked",
+  PROVISIONAL = "provisional",
   CONFIRMED = "confirmed"
 }
 
@@ -5156,7 +5157,7 @@ export const RPC_METHODS = [
   "processing:jobs_for_target",
   "processing:job_log_tail",
   "processing:record_frame_measurements",
-  "processing:measure_half_difference_noise",
+  "processing:measure_odd_even_difference_noise",
   "processing:measure_noise_growth",
   "processing:measure_night_contributions",
   "quality:query",

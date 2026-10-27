@@ -1407,7 +1407,7 @@ def test_the_folded_frames_scale_reaches_the_earlier_nights_prediction(
     assert scales_unscaled == []
 
 
-def test_the_half_difference_model_ratio_uses_the_halves_exposure_scales() -> None:
+def test_the_odd_even_difference_model_ratio_uses_the_halves_exposure_scales() -> None:
     """A frame with k = 2 has four times the variance in the modeled ratio."""
     from astrometricslib.pipelines.stacking.post_processing.expected_noise import FrameNoiseInput as Input
 

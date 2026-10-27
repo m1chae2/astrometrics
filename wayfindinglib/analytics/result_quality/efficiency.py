@@ -78,11 +78,16 @@ SKY_NOISE_METRIC = "frame.sky_noise_e"
 READ_NOISE_METRIC = "frame.read_noise_e"
 PINNED_METRIC_VERSIONS: dict[str, int] = {
     STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC: 1,
-    SKY_RATE_METRIC: 2,
-    SKY_NOISE_METRIC: 2,
-    READ_NOISE_METRIC: 1,
+    SKY_RATE_METRIC: 3,
+    SKY_NOISE_METRIC: 3,
+    READ_NOISE_METRIC: 2,
 }
-"""The definition version of each metric that this module's formulas assume."""
+"""The definition version of each metric that this module's formulas assume.
+
+The sky rate went from 2 to 3, the sky noise from 2 to 3 and the read noise
+from 1 to 2 without a change of formula: the raise only makes frames be
+measured again that had no gain entry before the offset fallback (decision
+D7). The formulas here are unchanged."""
 
 # --- Reference names and versions. Bump the version when the way a reference
 # is built changes.

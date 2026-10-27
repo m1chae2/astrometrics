@@ -530,7 +530,7 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
     ),
     MetricSpec(
         name=FRAME_SKY_RATE_E_PER_S_PER_PX,
-        definition_version=2,
+        definition_version=3,
         unit="e-/s/px",
         checkpoint=Checkpoint.FRAME,
         levels=_FRAME_ONLY,
@@ -553,7 +553,9 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
             "assumed when the gain is not measured, and when the frame records no sensor temperature "
             "(no CCD-TEMP card, as for a DSLR): that camera has no set-point cooling, so its dark "
             "current and amp glow, which are inside the value, are unknown and no dark was subtracted. "
-            "Version 1 used the clipped median."
+            "Version 1 used the clipped median. Version 3 changed no formula: the offset fallback "
+            "(decision D7) lets a frame at another offset use a profile entry, so frames that had no "
+            "gain are measured again."
         ),
         sample_definition="Every pixel of the plane.",
         band=_PER_PLANE_BAND,
@@ -568,7 +570,7 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
     ),
     MetricSpec(
         name=FRAME_SKY_NOISE_E,
-        definition_version=2,
+        definition_version=3,
         unit="e-",
         checkpoint=Checkpoint.FRAME,
         levels=_FRAME_ONLY,
@@ -582,9 +584,11 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         estimator=(
             "The square root of the sky electrons in one pixel of one exposure (photon counting "
             "noise): the square root of (clipped-mean background minus bias level, in ADU) times the "
-            "gain, with the same estimators and the same assumed status as `frame.sky_rate_e_per_s_per_px`. "
-            "It does not include the read noise, which is stored apart as `frame.read_noise_e`, or the "
-            "dark current's own noise; the ratio of the two is never stored."
+            "gain, with the same estimators and the same assumed status as "
+            "`frame.sky_rate_e_per_s_per_px`. "
+            "Version 3 changed no formula: the offset fallback (decision D7) makes frames measurable that "
+            "had no gain entry. It does not include the read noise, which is stored apart as "
+            "`frame.read_noise_e`, or the dark current's own noise; the ratio of the two is never stored."
         ),
         sample_definition="Every pixel of the plane (through its sigma-clipped mean).",
         band=_PER_PLANE_BAND,
@@ -598,7 +602,7 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
     ),
     MetricSpec(
         name=FRAME_READ_NOISE_E,
-        definition_version=1,
+        definition_version=2,
         unit="e-",
         checkpoint=Checkpoint.FRAME,
         levels=_FRAME_ONLY,
@@ -610,7 +614,8 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
             "binning; not computed from the frame's pixels. When no entry has the frame's offset and "
             "the frame is not clipped at zero, the entry of the same gain and binning at the nearest "
             "other offset is used and the source says 'offset fallback'. Stored as assumed unless the "
-            "profile's value was measured."
+            "profile's value was measured. Version 2 changed no formula: the offset fallback (decision D7) "
+            "makes frames measurable that had no entry."
         ),
         sample_definition="One profile value per frame.",
         band="not applicable",

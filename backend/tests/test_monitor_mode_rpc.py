@@ -210,7 +210,7 @@ LOCAL_WRITE_METHODS = frozenset({
     "plan:tick_checklist_item",
     "processing:cancel",
     "processing:delete_job",
-    "processing:measure_half_difference_noise",
+    "processing:measure_odd_even_difference_noise",
     "processing:measure_night_contributions",
     "processing:measure_noise_growth",
     "processing:record_frame_measurements",

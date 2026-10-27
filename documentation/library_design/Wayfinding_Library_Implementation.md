@@ -1,6 +1,6 @@
 # Wayfinding library implementation
 
-*Version 2.3 · 2026-10-26 · Status: current*
+*Version 2.4 · 2026-10-26 · Status: current*
 
 ## Abstract
 
@@ -122,7 +122,7 @@ The architecture's Table 3 operations are exposed by `ObservatoryControl` (Secti
 
 - **Equipment catalog.** `data_access/equipment_catalog_reader.py` builds the `EquipmentCatalog`. `equipment_activation.py` validates an id before recording the active choice. `EquipmentConfiguration` uses `PLATE_SCALE_CONSTANT` (206.265, Architecture Equation (1)).
 - **Site.** `data_access/site_profile_reader.py` reads `[Observatory.Location]`, falls back to `FALLBACK_SITE` (Denver: 39.7392, -104.9903, 1600 m) with a warning, and seeds the default `SiteProfile`. Control uses `hardware_operations.observer_location` (mount first), so the single-source rule holds for planning only.
-- **Storage.** `drivers/butler.py` holds `DiskButler`, the one storage path: `AbstractButler` from `astrometricslib`, one table per dataset type in `wayfinding.db`. `ControlRecordStore` keeps `alignment_attempts`, `guiding_samples` and `polar_alignments`. An alignment attempt worked out from a frame names it in `source_frame`, so the same frame brought in again, or solved again, updates its one row; `remove_repeated_alignment_attempts` reports, and with `apply=True` deletes, rows stored twice by older versions. When the store opens, it adds the `source_frame` column to an older database.
+- **Storage.** `drivers/butler.py` holds `DiskButler`, the one storage path: `AbstractButler` from `astrometricslib`, one table per dataset type in `wayfinding.db`. `ControlRecordStore` keeps `alignment_attempts`, `guiding_samples` and `polar_alignments`. An alignment attempt from a frame names it in `source_frame`, so the same frame brought in or solved again updates its one row; `remove_repeated_alignment_attempts` reports, and with `apply=True` deletes, rows stored twice. Opening the store adds the `source_frame` column to an older database.
 
 <!-- impl: wayfindinglib.data_access.equipment_catalog_reader.get_equipment_catalog -->
 <!-- impl: wayfindinglib.tasks.control_tasks.equipment_activation.set_active_telescope -->
@@ -360,8 +360,8 @@ All in `tasks/control_tasks/` unless noted.
 | Setting | Value | Where | Basis |
 | --- | --- | --- | --- |
 | Blur tolerance $\phi$ | 0.10 | `DEFAULT_BLUR_TOLERANCE_FRACTION` | Policy choice. 5.6 arcsec star width gives 1.09 arcsec; 19 guide logs show 0.8 to 1.4. |
-| Guide cycles an exposure must span | 3 | `MINIMUM_GUIDE_CYCLES_PER_EXPOSURE` | Measured 3.2 s cycle keeps exposures of 9.6 s or longer. Without it, median width rose 5.6 to 8.0 arcsec. |
-| Baseline spread multiplier $k$; poor sky part (at least the blur tolerance worse, z of at least 3) | 3 | `BASELINE_SPREAD_MULTIPLIER` | Outlier convention. On real data no sky part reached the poor-part test. |
+| Guide cycles an exposure must span | 3 | `MINIMUM_GUIDE_CYCLES_PER_EXPOSURE` | Measured 3.2 s cycle keeps exposures of 9.6 s or longer. |
+| Baseline spread multiplier $k$; poor sky part (at least the blur tolerance worse, z of at least 3) | 3 | `BASELINE_SPREAD_MULTIPLIER` | Outlier convention. |
 | Fewest frames behind a star width; sessions behind a baseline | 20; 5 | `MINIMUM_IMAGE_QUALITY_SAMPLES`, `MINIMUM_BASELINE_SESSIONS` | About one night of one target; a robust spread is unstable below about five values. |
 | Fewest samples for a session; for a run's error | 100; 20 | `MINIMUM_SAMPLES_PER_SESSION`, `MINIMUM_SAMPLES_PER_RUN` | About six minutes of guiding; a robust spread is unstable with fewer. |
 | Guide-scale agreement | 2% | `GUIDE_SCALE_AGREEMENT_FRACTION` | Above log rounding, below any real change of optics. |
@@ -377,9 +377,9 @@ All in `tasks/control_tasks/` unless noted.
 | Clean share for a reliable exposure length; start-time step | 0.5; 0.25 of the exposure | `RELIABLE_CLEAN_FRACTION`, `_STRIDE_FRACTION` | Below 0.5, more exposures are ruined than kept. |
 | Fewest nights per sky part | 3 | `MINIMUM_NIGHTS_PER_BIN` | Smallest number whose middle value is not an extreme. |
 | Fewest measurements per night and per sky part | star width and roundness: 10, 5; guiding error: 3, 1 | `METRIC_SPECS` | A night has tens of frames but only a few guiding runs. |
-| Fewest frames for a night's star quality; exposures for its cancelled share | 10; 20 | `MINIMUM_FRAMES_PER_NIGHT`, `MINIMUM_ATTEMPTS_PER_NIGHT` | Median of 10 has error near 40% of scatter; below 20, one cancellation moves the share 5%. |
+| Fewest frames for a night's star quality; exposures for its cancelled share | 10; 20 | `MINIMUM_FRAMES_PER_NIGHT`, `MINIMUM_ATTEMPTS_PER_NIGHT` | Median of 10 has error near 40% of scatter. |
 | Window to match an Ekos exposure to a frame | 30 s | `MATCH_WINDOW_SECONDS` | Pairs start within about 2 s, a few up to 10 s. |
-| Smallest saturated blob that is a star | 4 pixels | `SATURATED_BLOB_MINIMUM_PIXELS` (science side) | ASI533 cores 9 to 1,700 pixels; D5300 hot pixels 1. Agreed on 67 of 69 groups; two Moon frames differ. |
+| Smallest saturated blob that is a star | 4 pixels | `SATURATED_BLOB_MINIMUM_PIXELS` (science side) | ASI533 cores 9 to 1,700 pixels; D5300 hot pixels 1. |
 | Share of frames that clips an exposure length | 0.5 | `SATURATED_FRAME_FRACTION` (science side) | One clipped frame can be a cosmic ray or satellite streak. |
 | Dark-frame temperature tolerance | 3 °C | `DEFAULT_DARK_TEMPERATURE_TOLERANCE_C` (science side) | Arcturus darks clustered near 0 and -10 °C, nothing between. |
 
@@ -387,13 +387,13 @@ All in `tasks/control_tasks/` unless noted.
 
 | Setting | Value | Basis |
 | --- | --- | --- |
-| Priors: west of the meridian; near the pole; near the horizon | up to 0.10 by hour angle 75°; up to 0.08 above declination 75°; up to 0.40 at the horizon, 1 below it, from altitude 20° | East-heavy balance lets gears float; the declination bearing can stick; air blurs stars. |
+| Priors: west of the meridian; near the pole; near the horizon | up to 0.10 by hour angle 75°; up to 0.08 above declination 75°; up to 0.40 at the horizon, 1 below it, from altitude 20° | Balance, bearing, air. |
 | Jitter that is safe; that trails | below 0.75 pixel; above 1.25 pixels | Scatter of a target's repeated plate solves against pixel scale. |
 | Spread of a target's pull; solves at full weight; largest measured share | 25°, Gaussian; 30; 85% | |
 
 ### 6.10 Quality judgment and advice (Quality Judgment paper)
 
-The theory is in [Wayfinding quality judgment](Wayfinding_Quality_Judgment.md) (Architecture Section 6.11 gives its scope). Planning and Control share the vocabulary in `models/quality/`. The judging code is in `analytics/result_quality/` (Foundation, so both can call it) and is described in its README. The entry points are `get_advisory` (kinds `quality`, `tonight`, `result`, `calibration`) and `control.history.query` (kinds `night_quality`, `nights`, `target_changes`). A rule's confidence is the status label of its register entry (partly measured; see [WAY-01](validation/wayfinding.md#way-01)).
+The theory is in [Wayfinding quality judgment](Wayfinding_Quality_Judgment.md) (Architecture Section 6.11 gives its scope). Planning and Control share the vocabulary in `models/quality/`. The judging code is in `analytics/result_quality/` (see its README). The entry points are `get_advisory` (kinds `quality`, `tonight`, `result`, `calibration`) and `control.history.query` (kinds `night_quality`, `nights`, `target_changes`). A rule's confidence is the status label of its register entry (partly measured; see [WAY-01](validation/wayfinding.md#way-01)).
 
 **Table 12.** Where each part of the judgment lives. Paths are relative to `wayfindinglib/`. Register entries hold the evidence; WAY-D rows hold Table 13's settings.
 
@@ -405,11 +405,13 @@ The theory is in [Wayfinding quality judgment](Wayfinding_Quality_Judgment.md) (
 | Envelope limits the rules read | `envelope_assembly.assemble_performance_envelope`, `performance_envelope.py` (Section 6.8) | [WAY-40](validation/wayfinding.md#way-40), [WAY-41](validation/wayfinding.md#way-41), [WAY-42](validation/wayfinding.md#way-42), [WAY-43](validation/wayfinding.md#way-43), [WAY-44](validation/wayfinding.md#way-44); WAY-D40, WAY-D41, WAY-D42, WAY-D43, WAY-D44 |
 | Efficiency, goal, references | `physical_reference`, `baseline_reference`, `noise_regime`, `assess_efficiency` (`efficiency.py`); `science_goal_for_setting` (`science_goal.py`); `observing_values.py` | [WAY-20](validation/wayfinding.md#way-20); WAY-D01, WAY-D20, WAY-D21, WAY-D22, WAY-D23, WAY-D24, WAY-D25, WAY-D26, WAY-D27, WAY-D28, WAY-D74 |
 | Loss account and night review | `loss_account`, `capture_setting_summaries`, `night_summary`, `target_summary` (`aggregates.py`); `set_aside_reasons` (`library_inputs.py`, reads `Astrometrics.quality.set_aside_frames`); `build_night_quality` (`night_quality_task.py`) | [WAY-74](validation/wayfinding.md#way-74); WAY-D75, WAY-D76 |
-| Noise growth and the stop signal | `forecast_stack_noise`, `frames_to_cut_noise`, `fit_noise_floor`, `stop_signal`, group mode (`forecast_group_noise`, `plan_group_stack`), folded frames (`StackGroup.frame_noise_factors`, `group_frame_rate_variances`), floor (`measure_stack_noise_floor`, `choose_noise_floor`; from the half-difference: `measure_stack_noise_floor_from_half_difference`, `compare_stack_noise_with_half_difference`, `HalfDifferenceTest`, `total_variance_ratio_error`; `StackNoiseFloor.basis`, `sigmas`), practical limit (`TakeMoreResult.practical_limit_applied`, `doubling_frames`, `doubling_noise_cut`, `most_reachable_cut`, `doubling_worthwhile`) (`noise_growth.py`) | [WAY-21](validation/wayfinding.md#way-21), [WAY-76](validation/wayfinding.md#way-76); WAY-D30, WAY-D31, WAY-D32, WAY-D34 |
-| Forecast check | `forecast_check`, `stack_groups_of_run`, `attach_calibration_identities`, `subset_pairs`, `library_runs`, `forecast_gate_state`, `_subset_new_frame_reason`, `HalfDifferenceRecord`, `half_difference_noise_inputs`, `_half_difference_problem` (`forecast.py`; rows `stacking.half_difference_*`, version 1); `MeasuredNoiseCheck.basis`, `from_half_difference` (`aggregates.py`); `StackRunRecord.is_earlier_nights_subset`; `ForecastBasis`, `ForecastGate` (`target_report.py`); confound rules in `_confound_reason`, which compare group lengths (`RunGroups.group_lengths`) | [WAY-70](validation/wayfinding.md#way-70); WAY-D70 |
+| Noise growth and the stop signal | `forecast_stack_noise`, `frames_to_cut_noise`, `fit_fixed_pattern_noise`, `stop_signal`, group mode (`forecast_group_noise`, `plan_group_stack`), fixed-pattern noise (`measure_stack_fixed_pattern_noise`, `choose_fixed_pattern_noise`; from the odd–even difference: `measure_stack_fixed_pattern_noise_from_odd_even_difference`, `compare_stack_noise_with_odd_even_difference`, `total_variance_ratio_error`; `StackFixedPatternNoise.basis`, `sigmas`, `possible`, `if_real`; `noise_ratio_for_ranking`), `measure_noise_model_error`, practical limit (`TakeMoreResult`) (`noise_growth.py`) | [WAY-21](validation/wayfinding.md#way-21), [WAY-76](validation/wayfinding.md#way-76); WAY-D30, WAY-D31, WAY-D32, WAY-D34, WAY-D89, WAY-D90 |
+| Where the fixed-pattern noise sits | `locate_fixed_pattern`, `explain_with_calibration_masters`, `FixedPatternAccount` (`fixed_pattern_location.py`); rules `retake_flats`, `check_gradient_removal`, `use_line_pattern_removal` (`rules.py`) | [WAY-76](validation/wayfinding.md#way-76); WAY-D32, WAY-D91, WAY-D92 |
+| History per setup | `fixed_pattern_setup_key`, `fixed_pattern_shares_by_setup`, `history_fixed_pattern_noise`, `NoiseHistory` (`forecast.py`) | WAY-D93 |
+| Forecast check | `forecast_check`, `stack_groups_of_run`, `subset_pairs`, `recommended_additional_frames_status_from_checks`, `OddEvenDifferenceRecord`, `odd_even_difference_noise_inputs` (`forecast.py`; rows `stacking.odd_even_difference_*`); `MeasuredNoiseCheck.from_odd_even_difference` (`aggregates.py`); `ForecastBasis`, `RecommendedAdditionalFramesStatus` (`target_report.py`); `_confound_reason` | [WAY-70](validation/wayfinding.md#way-70); WAY-D70, WAY-D88 |
 | Target dataset report | `build_target_dataset_report` (`target_report_tasks.py`), `target_report_inputs.py`, `report_rules.py`, `starting_point.py`; `TargetDatasetReport` (`models/planning/target_report.py`) | [WAY-60](validation/wayfinding.md#way-60); WAY-D60, WAY-D61, WAY-D62, WAY-D63, WAY-D64, WAY-D65, WAY-D66, WAY-D67, WAY-D68, WAY-D69 |
 | One star's result | `judge_star_result` (`result_judgment_tasks.py`), `star_result_rules.py` | [WAY-73](validation/wayfinding.md#way-73); WAY-D73 |
-| Sky model, overheads, tonight's ranking | `fit_sky_model` (`sky_model.py`), `estimate_capture_overheads` (`capture_overheads.py`), `rank_tonight`, `score_candidate`, `forecast_gate_of_target` (`tonight_ranking_tasks.py`, `target_report_inputs.py`) | [WAY-71](validation/wayfinding.md#way-71), [WAY-72](validation/wayfinding.md#way-72); WAY-D29, WAY-D33, WAY-D71, WAY-D72 |
+| Sky model, overheads, tonight's ranking | `fit_sky_model` (`sky_model.py`), `estimate_capture_overheads` (`capture_overheads.py`), `rank_tonight`, `score_candidate`, `recommended_additional_frames_status_of_target` (`tonight_ranking_tasks.py`, `target_report_inputs.py`) | [WAY-71](validation/wayfinding.md#way-71), [WAY-72](validation/wayfinding.md#way-72); WAY-D29, WAY-D33, WAY-D71, WAY-D72 |
 | Night plan | `ObservationSession` fields `checklist`, `framing`, `revision`; `PlanChange`, `PlanRevisionConflictError`; `night_plan_tasks.py`; `AllowedCaptureValues`; `SequenceSummary` | [WAY-50](validation/wayfinding.md#way-50), [WAY-51](validation/wayfinding.md#way-51), [WAY-52](validation/wayfinding.md#way-52), [WAY-53](validation/wayfinding.md#way-53), [WAY-54](validation/wayfinding.md#way-54); WAY-D50, WAY-D51, WAY-D52, WAY-D53, WAY-D54 |
 | Night list and target changes | `build_night_list`, `build_night_history` (`night_history.py`); `find_target_changes` (`target_changes.py`) | [WAY-55](validation/wayfinding.md#way-55), [WAY-57](validation/wayfinding.md#way-57); WAY-D55, WAY-D56, WAY-D57 |
 | Monitor mode | `ALLOWED_IN_MONITOR_MODE` and the three `test_monitor_mode_*` tests; guards in `hardware_operations.py` | [WAY-56](validation/wayfinding.md#way-56) |
@@ -423,6 +425,13 @@ The theory is in [Wayfinding quality judgment](Wayfinding_Quality_Judgment.md) (
 <!-- impl: wayfindinglib.analytics.result_quality.science_goal.science_goal_for_setting -->
 <!-- impl: wayfindinglib.analytics.result_quality.aggregates.loss_account -->
 <!-- impl: wayfindinglib.analytics.result_quality.noise_growth.stop_signal -->
+<!-- impl: wayfindinglib.analytics.result_quality.noise_growth.POSSIBLE_FIXED_PATTERN_SIGMAS -->
+<!-- impl: wayfindinglib.analytics.result_quality.noise_growth.MINIMUM_MODEL_ERROR_TARGETS -->
+<!-- impl: wayfindinglib.analytics.result_quality.noise_growth.MINIMUM_HISTORY_TARGETS -->
+<!-- impl: wayfindinglib.analytics.result_quality.fixed_pattern_location.SHAPE_SIGMAS -->
+<!-- impl: wayfindinglib.analytics.result_quality.fixed_pattern_location.MINIMUM_SHAPE_APERTURES -->
+<!-- impl: wayfindinglib.analytics.result_quality.fixed_pattern_location.COLLINEAR_DISTANCE_CORRELATION -->
+<!-- impl: wayfindinglib.analytics.result_quality.forecast.MINIMUM_EARLIER_NIGHTS_FRAMES -->
 <!-- impl: wayfindinglib.analytics.result_quality.forecast.forecast_check -->
 <!-- impl: wayfindinglib.analytics.result_quality.sky_model.fit_sky_model -->
 <!-- impl: wayfindinglib.analytics.result_quality.capture_overheads.estimate_capture_overheads -->
@@ -447,7 +456,7 @@ The theory is in [Wayfinding quality judgment](Wayfinding_Quality_Judgment.md) (
 <!-- impl: wayfindinglib.analytics.result_quality.reply_budget.reply_budget -->
 <!-- impl: wayfindinglib.models.equipment_and_site.site_profile.SiteProfile -->
 
-Without `SiteProfile.typical_seeing_fwhm_arcsec`, the physical reference uses the diffraction limit alone (design estimate; WAY-D01). `DiskButler.put_session_from_execution` <!-- impl: wayfindinglib.drivers.butler.DiskButler.put_session_from_execution --> is the one write Execution uses. It merges the fields Planning owns inside one transaction, so a plan edit survives a checkpoint. A plan edit that changes nothing stores nothing, keeps the revision and sends no `plan:changed` event. The `sequencer:add`, `remove`, `reorder` and `modify` methods edit the queue through the plan service and send the same event.
+Without `SiteProfile.typical_seeing_fwhm_arcsec`, the physical reference uses the diffraction limit alone (design estimate; WAY-D01). `DiskButler.put_session_from_execution` <!-- impl: wayfindinglib.drivers.butler.DiskButler.put_session_from_execution --> is the one write Execution uses. It merges the fields Planning owns inside one transaction, so a plan edit survives a checkpoint. A plan edit that changes nothing stores nothing, keeps the revision and sends no `plan:changed` event. The `sequencer` methods `add`, `remove`, `reorder` and `modify` edit the queue through the plan service.
 
 **Table 13.** Main settings of the quality judgment. Each register identifier gives status and a way to measure.
 
@@ -458,12 +467,14 @@ Without `SiteProfile.typical_seeing_fwhm_arcsec`, the physical reference uses th
 | Noise regimes | sky variance 9 × read-noise variance; source variance 1 × sky | `SKY_LIMITED_VARIANCE_RATIO`, `SOURCE_LIMITED_VARIANCE_RATIO` | WAY-D24 |
 | Sky model | 5 nights, 20 frames; Moon term from 2 moonlit nights | `MINIMUM_NIGHTS_FOR_SKY_MODEL`, `MINIMUM_FRAMES_FOR_SKY_MODEL`, `MINIMUM_MOON_NIGHTS` | WAY-D29 |
 | "Take N more" | noise to 0.707 of today's; new exposure length at least 5 frames; a count only within 4 times the stack's exposure time; one doubling worth at least a 5% cut | `TARGET_NOISE_RATIO`, `MINIMUM_FRAMES_NEW_EXPOSURE_LENGTH`, `PRACTICAL_TIME_FACTOR`, `MINIMUM_DOUBLING_GAIN_FRACTION` | WAY-D30 |
-| Floor and stop signal | 2 standard errors, one-sided (fit only); stop under a 10% cut from doubling | `FLOOR_SIGMAS`, `MINIMUM_GAIN_FRACTION` | WAY-D32 |
-| Model or half-difference agreement (one-stack floor, loss account) | 2 standard errors, one-sided; model error 11% as noise | `MODEL_AGREEMENT_SIGMAS`, `EXPECTED_NOISE_MODEL_RELATIVE_ERROR` | WAY-D34 |
-| Restack runs the half-difference when measured over predicted noise is | 1.1 to 2.0 | `HALF_DIFFERENCE_LOWER_RATIO`, `HALF_DIFFERENCE_UPPER_RATIO` (`run_all_target_processing.py`, `--no-half-difference`) | WAY-D70 |
+| Fixed-pattern noise found at; possible from; stop signal | 2 standard errors, one-sided (fit only); 1 standard error; stop under a 10% cut from doubling | `FIXED_PATTERN_SIGMAS`, `POSSIBLE_FIXED_PATTERN_SIGMAS`, `MINIMUM_GAIN_FRACTION` | WAY-D32, WAY-D89 |
+| Model or odd–even difference agreement (loss account, one-stack test) | 2 standard errors, one-sided; stand-in model error 11% as noise | `MODEL_AGREEMENT_SIGMAS`, `EXPECTED_NOISE_MODEL_RELATIVE_ERROR` | WAY-D34 |
+| Fewest targets: measured model error (per setting); setup history | 5; 3 | `MINIMUM_MODEL_ERROR_TARGETS`, `MINIMUM_HISTORY_TARGETS` | WAY-D90, WAY-D93 |
+| Shape tests: found at; fewest apertures; same measurement above | 2 standard errors; 20; 0.9 | `SHAPE_SIGMAS`, `MINIMUM_SHAPE_APERTURES`, `COLLINEAR_DISTANCE_CORRELATION` | WAY-D91 |
+| Earlier-nights check: fewest frames | 8 | `MINIMUM_EARLIER_NIGHTS_FRAMES` (`forecast.py`; the restack script repeats it) | WAY-D88 |
 | Capture overheads | download 5 s, dither settle 20 s, autofocus 120 s | `DEFAULT_DOWNLOAD_SECONDS`, `DEFAULT_DITHER_SETTLE_SECONDS`, `DEFAULT_AUTOFOCUS_SECONDS` | WAY-D33 |
 | Forecast agreement; dark master compared unless the camera name has zwo or asi | 2 standard errors | `AGREEMENT_TOLERANCES`, `COOLED_CAMERA_NAME_MARKERS` | WAY-D70 |
-| Exploratory count in the ranking: gains tied to | 2 decimals (whole percent) | `GAIN_TIE_DIGITS` | WAY-D70 |
+| Provisional count in the ranking: gains tied to | 2 decimals (whole percent) | `GAIN_TIE_DIGITS` | WAY-D70 |
 | Clock hour of the ranking | dither every 3 frames; 1 autofocus run; thin under 2 h | `DITHER_EVERY_FRAMES`, `AUTOFOCUS_RUNS_PER_HOUR`, `THIN_DATASET_SECONDS` | WAY-D71 |
 | Frames lost warning | 5% of a setting's frames | `FRAME_LOSS_WARNING_FRACTION` | WAY-D60 |
 | Report "take N more" | 10 frames at least; exposure rounded up to 10 s | `MINIMUM_FRAMES_FOR_FORECAST`, `EXPOSURE_ROUNDING_SECONDS` | WAY-D61 |

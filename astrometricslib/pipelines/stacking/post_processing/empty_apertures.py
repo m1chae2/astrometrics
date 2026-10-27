@@ -147,6 +147,7 @@ __all__ = [
     "load_apertures",
     "load_apertures_with_reason",
     "place_empty_apertures",
+    "record_library_set_key",
     "reset_apertures",
 ]
 
@@ -1044,10 +1045,10 @@ def load_apertures(path: str, setup_key: str | None = None) -> ApertureSet | Non
     path : `str`
         The ``quality_apertures.json`` file.
     setup_key : `str`, optional
-        The camera, optic and reference exposure wanted. Left out, the
-        deepest stored set (see `_deepest_key`), which is the one the
-        target's library stack was measured in. A set stored under a key
-        with no exposure (`is_legacy_setup_key`) is never returned.
+        The camera, optic and reference exposure wanted. Left out, the set
+        the library stack recorded (see `record_library_set_key`), or in an
+        older file the deepest stored set (see `_deepest_key`). A set stored
+        under a key with no exposure (`is_legacy_setup_key`) is never returned.
 
     Returns
     -------
@@ -1057,7 +1058,7 @@ def load_apertures(path: str, setup_key: str | None = None) -> ApertureSet | Non
     """
     sets = _read_aperture_file(path)
     if setup_key is None:
-        data = sets.get(_deepest_key(sets) or "")
+        data = sets.get(_default_key(sets, _read_library_keys(path)) or "")
     elif is_legacy_setup_key(setup_key):
         data = None
     else:
@@ -1072,13 +1073,15 @@ def load_apertures(path: str, setup_key: str | None = None) -> ApertureSet | Non
 
 
 def _deepest_key(sets: dict[str, dict], equipment: str | None = None) -> str | None:
-    """Pick the stored set that the target's library stack was measured in.
+    """Pick the deepest stored set, the fallback for the library stack's set.
 
-    A subset stack or a half-difference job has to use the library stack's
-    set, whatever exposure length its own reference frame has. When one
-    target holds several sets (one per reference exposure length), the
-    library stack's is the one chosen on the deepest stack, because a set is
-    stored by a library stack and a shallower one is not stored over it.
+    A subset stack or an odd–even difference job has to use the library stack's
+    set, whatever exposure length its own reference frame has. The record
+    written by `record_library_set_key` names that set. This depth rule is
+    used only when there is no record (a file written before it existed):
+    the library stack's set is then taken to be the one chosen on the deepest
+    stack. It can be wrong, because a stale set from an old stack can be
+    deeper than the current stack's.
 
     Parameters
     ----------
@@ -1108,6 +1111,26 @@ def _deepest_key(sets: dict[str, dict], equipment: str | None = None) -> str | N
     return best_key
 
 
+def _default_key(sets: dict[str, dict], library_keys: dict[str, str]) -> str | None:
+    """Pick the set to use when the caller names no camera or exposure.
+
+    Parameters
+    ----------
+    sets : `dict` [`str`, `dict`]
+        The JSON data of each set, by setup key.
+    library_keys : `dict` [`str`, `str`]
+        The recorded library set key of each camera and optic.
+
+    Returns
+    -------
+    setup_key : `str` or `None`
+        The deepest of the recorded library sets that are still stored, or,
+        when none is recorded, the deepest stored set (`_deepest_key`).
+    """
+    recorded = {key: sets[key] for key in library_keys.values() if key in sets}
+    return _deepest_key(recorded or sets)
+
+
 def find_library_set_key(path: str, setup_key: str) -> str | None:
     """Find the key of the library stack's set for a stack that may not choose.
 
@@ -1121,10 +1144,79 @@ def find_library_set_key(path: str, setup_key: str) -> str | None:
     Returns
     -------
     library_key : `str` or `None`
-        The deepest stored set of the same camera and optic, whatever its
-        exposure length, or `None` when there is none.
+        The set the library stack recorded for the same camera and optic
+        (`record_library_set_key`), whatever its exposure length, when it is
+        still stored. Otherwise (a file written before the record existed)
+        the deepest stored set of that camera and optic, or `None` when there
+        is none. Depth alone can pick a stale set: an old stack of one
+        exposure length can be deeper, by effective frame count, than the
+        current stack of folded exposure groups, whose unequal weights lower
+        its count.
     """
-    return _deepest_key(_read_aperture_file(path), _equipment_of_key(setup_key))
+    sets = _read_aperture_file(path)
+    equipment = _equipment_of_key(setup_key)
+    recorded = _read_library_keys(path).get(equipment)
+    if recorded is not None and recorded in sets and not is_legacy_setup_key(recorded):
+        return recorded
+    return _deepest_key(sets, equipment)
+
+
+def _read_library_keys(path: str) -> dict[str, str]:
+    """Read which set each camera and optic's library stack uses.
+
+    Parameters
+    ----------
+    path : `str`
+        The ``quality_apertures.json`` file.
+
+    Returns
+    -------
+    library_keys : `dict` [`str`, `str`]
+        The setup key of the library stack's set, by camera and optic (see
+        `_equipment_of_key`). Empty when the file is missing, unreadable, of
+        another version, or written before the record existed.
+    """
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+        if data.get("version") != APERTURE_FILE_VERSION:
+            return {}
+        return {
+            str(equipment): str(key) for equipment, key in dict(data.get("library_set_keys") or {}).items()
+        }
+    except OSError, ValueError, AttributeError, TypeError:
+        return {}
+
+
+def record_library_set_key(path: str, setup_key: str) -> None:
+    """Record that a library stack uses a set, so other stacks find that one.
+
+    A library stack (one that may choose apertures) calls this after it has
+    measured its noise in a set, whether it loaded the set or made it. The key
+    is kept under the set's camera and optic and replaces the earlier record.
+    Stale sets are not deleted. The file keeps the same version: an older
+    reader ignores the extra mapping, and a file without it still loads.
+
+    Parameters
+    ----------
+    path : `str`
+        The ``quality_apertures.json`` file.
+    setup_key : `str`
+        The key of the set the library stack used. Nothing is recorded when
+        the file holds no set under that key.
+    """
+    with file_lock(_aperture_lock_path(path), blocking=True):
+        sets = _read_aperture_file(path)
+        if setup_key not in sets or is_legacy_setup_key(setup_key):
+            return
+        library_keys = _read_library_keys(path)
+        equipment = _equipment_of_key(setup_key)
+        if library_keys.get(equipment) == setup_key:
+            return
+        library_keys[equipment] = setup_key
+        _write_aperture_file(path, sets, library_keys)
 
 
 def load_apertures_with_reason(path: str, setup_key: str | None = None) -> tuple[ApertureSet | None, str]:
@@ -1205,7 +1297,9 @@ def _aperture_lock_path(path: str) -> str:
     return os.path.join(locks_directory(), f"quality_apertures_{digest}.lock")
 
 
-def _write_aperture_file(path: str, sets: dict[str, dict]) -> None:
+def _write_aperture_file(
+    path: str, sets: dict[str, dict], library_keys: dict[str, str] | None = None
+) -> None:
     """Write the aperture file whole, in one step.
 
     Parameters
@@ -1214,12 +1308,21 @@ def _write_aperture_file(path: str, sets: dict[str, dict]) -> None:
         The ``quality_apertures.json`` file.
     sets : `dict` [`str`, `dict`]
         The JSON data of each set, by setup key.
+    library_keys : `dict` [`str`, `str`], optional
+        The library stack's set key by camera and optic. Left out, the record
+        already in the file is kept. Entries whose set is not in ``sets`` are
+        dropped.
     """
+    if library_keys is None:
+        library_keys = _read_library_keys(path)
+    library_keys = {equipment: key for equipment, key in library_keys.items() if key in sets}
     directory = os.path.dirname(path) or "."
     descriptor, temporary = tempfile.mkstemp(dir=directory, prefix=".quality_apertures_", suffix=".tmp")
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            json.dump({"version": APERTURE_FILE_VERSION, "sets": sets}, handle)
+            json.dump(
+                {"version": APERTURE_FILE_VERSION, "sets": sets, "library_set_keys": library_keys}, handle
+            )
         os.replace(temporary, path)
     except BaseException:
         if os.path.exists(temporary):

@@ -220,12 +220,12 @@ def stack_frame_subset(
     trim_edges : `bool`, optional
         Whether to trim the noisy edges when the setting asks for it. Left
         `True`, the subset is trimmed like the library stack. Two stacks
-        that will be subtracted (the half stacks of the half-difference
+        that will be subtracted (the half stacks of the odd–even difference
         noise) pass `False`, so both keep the pixel grid of the registration
         reference frame and their pixels line up.
     reference_frame_path : `str`, optional
         The frame the others are lined up with. Left `None`, the stacker
-        chooses its own. The half-difference noise passes the library
+        chooses its own. The odd–even difference noise passes the library
         stack's reference, so a half cannot choose another one.
 
     Returns

@@ -107,70 +107,73 @@ prediction (validation register entry STK-36), so the answer is labeled
 tentative. A new exposure length is never suggested with fewer than 5
 frames, because the stacker would fold a smaller set into another group.
 
-The practical limit. With a floor, the count that reaches the target can be
-very large for a small last gain (M 13: a floor of 49 percent of the noise
-variance asks for 1748 frames to cut the noise by 29 percent, and doubling
-alone cuts it by 14 percent). A count is given only when it needs at most
-`PRACTICAL_TIME_FACTOR` times the stack's exposure time. Beyond that, or when
-the target cannot be reached, the result gives the diminishing-returns answer
-instead: the frames that double the stack's time
-(`TakeMoreResult.doubling_frames`), the noise cut that doubling gives, and
-the most cut any number of frames gives. When doubling would cut the noise
-by less than `MINIMUM_DOUBLING_GAIN_FRACTION`, no frames are suggested.
+The practical limit. With fixed-pattern noise, the count that reaches the
+target can be very large for a small last gain (M 13: fixed-pattern noise of 49
+percent of the noise variance asks for 1748 frames to cut the noise by 29
+percent, and doubling alone cuts it by 14 percent). A count is given only when
+it needs at most `PRACTICAL_TIME_FACTOR` times the stack's exposure time.
+Beyond that, or when the target cannot be reached, the result gives the
+diminishing-returns answer instead: the frames that double the stack's time
+(`TakeMoreResult.doubling_frames`), the noise cut that doubling gives, and the
+most cut any number of frames gives. When doubling would cut the noise by less
+than `MINIMUM_DOUBLING_GAIN_FRACTION`, no frames are suggested.
 
-The floor
+The fixed-pattern noise
 ---------
-One stack's floor (`measure_stack_noise_floor`). A stack's measured
-empty-aperture noise is more than the frames alone predict when something
-fixed is left in the apertures (faint stars, a calibration residual). Both
-numbers are in the stack's units: the measured noise and the stored
+One stack's fixed-pattern noise (`measure_stack_fixed_pattern_noise`). A
+stack's measured empty-aperture noise is more than the frames alone predict
+when something fixed is left in the apertures (faint stars, a calibration
+residual). Both numbers are in the stack's units: the measured noise and the
+stored
 ``stacking.expected_empty_aperture_noise_stack_unit``, which includes Siril's
-normalization scale (``stacking.normalization_scale``). Then
-``floor^2 = measured^2 - random^2``, kept only when the variance ratio is
-above 1 by 2 standard errors. The error is the loss account's
-(`total_variance_ratio_error`): the aperture error of the measured noise
-(see below, applied to the variance) and the expected-noise model's own error
-(11 percent, STK-36), added in quadrature, so one error budget serves both.
-Validation (plan section 3.6.1): M 27 60 s has a clear floor, M 81 has none
-at 2 sigma.
+normalization scale (``stacking.normalization_scale``). Then ``fixed_pattern^2
+= measured^2 - random^2``, kept only when the variance ratio is above 1 by 2
+standard errors. The error is the loss account's
+(`total_variance_ratio_error`): the aperture error of the measured noise (see
+below, applied to the variance) and the expected-noise model's own error (11
+percent, STK-36), added in quadrature, so one error budget serves both.
+Validation (plan section 3.6.1): M 27 60 s has clear fixed-pattern noise, M 81
+has none at 2 sigma.
 
-The forecast carries the floor as a fraction ``f`` of the random variance of
-today's stack, so the model's rate units need no conversion. Today the
-measured variance is ``V_now (1 + f)``; with more frames it is
+The forecast carries the fixed-pattern noise as a fraction ``f`` of the random
+variance of today's stack, so the model's rate units need no conversion. Today
+the measured variance is ``V_now (1 + f)``; with more frames it is
 ``V_later + f V_now`` (in the group mode, times the square of the change of
-``t_bar``, because the floor is taken as a fixed pattern on the sky). When
-the floor is most of the noise (a share of 0.5 or more makes the 0.707
-target unreachable), `frames_to_cut_noise` gives no N: it says more frames
-will not reach the goal and states the floor.
+``t_bar``, because the fixed-pattern noise is taken as a fixed pattern on the
+sky). When the fixed-pattern noise is most of the noise (a share of 0.5 or more
+makes the 0.707 target unreachable), `frames_to_cut_noise` gives no N: it says
+more frames will not reach the goal and states the fixed-pattern noise.
 
-The floor from a direct measurement
-(`measure_stack_noise_floor_from_half_difference`). When the library stack
-has a half-difference measurement, the floor's random part is that
-measurement, not the model. The odd-minus-even difference of two half stacks
-cancels what is fixed on the sky, so, divided by the factor that turns a
-difference of halves into the full stack's variance, it is the full stack's
-random noise. With no floor the measured full-stack variance and this random
-variance are two independent estimates of the same number. The test is their
-ratio ``F`` on the log scale: ``ln F`` has the standard error
-``sqrt(e1^2 + e2^2)`` with ``e = 2 x 1.17 / sqrt(n)`` for each, and a floor is
-kept when ``ln F`` is above 0 by 2 standard errors (one-sided). The model's
-own error is not in this test, because the model is not in it. The floor is
+The fixed-pattern noise from a direct measurement
+(`measure_stack_fixed_pattern_noise_from_odd_even_difference`). When the
+library stack has an odd–even difference measurement, the fixed-pattern noise's
+random part is that measurement, not the model. The odd-minus-even difference
+of two half stacks cancels what is fixed on the sky, so, divided by the factor
+that turns a difference of halves into the full stack's variance, it is the
+full stack's random noise. With no fixed-pattern noise the measured full-stack
+variance and this random variance are two independent estimates of the same
+number. The test is their ratio ``F`` on the log scale: ``ln F`` has the
+standard error ``sqrt(e1^2 + e2^2)`` with ``e = 2 x 1.17 / sqrt(n)`` for each,
+and fixed-pattern noise is kept when ``ln F`` is above 0 by 2 standard errors
+(one-sided). The model's own error is not in this test, because the model is
+not in it. The fixed-pattern noise is
 ``measured^2 - random^2``. The measurement is used only when it is made from
 this library stack (newer than the stack's noise row, in the same aperture
-set); otherwise the floor falls back to the model test above.
+set); otherwise the fixed-pattern noise falls back to the model test above.
 
-Which floor wins (`choose_noise_floor`). A fit over two or more stacks
-(`fit_noise_floor`, below) also finds a floor and does not rely on the
-prediction's scale. A fit with at least one degree of freedom, so that the
-stacks' scatter checks it, wins when it finds a floor. Otherwise the
-one-stack floor is used. A two-stack fit has no check, so it never overrides
-a one-stack result. If there is no one-stack result, a fit that found a
-floor is used as it is.
+Which fixed-pattern noise estimate wins (`choose_fixed_pattern_noise`). A fit
+over two or more stacks (`fit_fixed_pattern_noise`, below) also finds
+fixed-pattern noise and does not rely on the prediction's scale. A fit with at
+least one degree of freedom, so that the stacks' scatter checks it, wins when
+it finds fixed-pattern noise. Otherwise the one-stack fixed-pattern noise is
+used. A two-stack fit has no check, so it never overrides a one-stack result.
+If there is no one-stack result, a fit that found a fixed-pattern noise is used
+as it is.
 
 The fit over stacks. A stack stops improving when a fixed pattern or
-another systematic is left. `fit_noise_floor` fits
+another systematic is left. `fit_fixed_pattern_noise` fits
 ``measured_variance = alpha * expected_variance + b`` over the history of a
-target's stacks. A floor is reported only when b is
+target's stacks. Fixed-pattern noise is reported only when b is
 above 0 by two standard errors. The error of each measured noise is that of
 the empty-aperture estimate, 1.17 / sqrt(n) of the noise for n apertures.
 These errors are unpaired unless a row says it is paired (only the
@@ -183,6 +186,7 @@ import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Any
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
@@ -200,7 +204,7 @@ from wayfindinglib.models.quality.statements import Confidence
 _MODEL_CONFIG = ConfigDict(populate_by_name=True, alias_generator=to_camel)
 
 NOISE_GROWTH_ENTRY = "WAY-21"
-"""Register entry behind the forward model and the floor fit."""
+"""Register entry behind the forward model and the fixed-pattern noise fit."""
 TAKE_MORE_ENTRY = "WAY-D30"
 """Register row behind "take N more" (a design estimate, see STK-36)."""
 
@@ -223,18 +227,19 @@ PRACTICAL_TIME_FACTOR = 4.0
 this many times the stack's present exposure time (so at most 3 times as much
 again). The time is the sum of the exposure of every frame in the stack, not
 the weighted (effective) time, and the new frames are priced at their own
-exposure. Design estimate, register row WAY-D30: with a noise floor of about
-half the noise variance, doubling the time cuts the noise by 14 percent, 4
-times by 21 percent, 10 times by 26 percent and 40 times by 29 percent (the
+exposure. Design estimate, register row WAY-D30: with fixed-pattern noise of
+about half the noise variance, doubling the time cuts the noise by 14 percent,
+4 times by 21 percent, 10 times by 26 percent and 40 times by 29 percent (the
 most any number of frames gives is 30 percent), so the gain flattens past
 about 4 times (M 13, 44 frames of 30 s, a copy of the library)."""
 
 MINIMUM_DOUBLING_GAIN_FRACTION = 0.05
 """Below this cut in the noise, doubling the stack's time is not worth asking
 for, and no frames are suggested. It is half of `MINIMUM_GAIN_FRACTION` (the
-cut below which a target counts as stopped, 10 percent): a doubling between
-the two is still offered, with the diminishing-returns wording, and one below
-5 percent (a floor of about 80 percent of the noise variance or more) is
+cut below which a target counts as stopped, 10 percent): a doubling between the
+two is still offered, with the diminishing-returns wording, and one below 5
+percent (fixed-pattern noise of about 80 percent of the noise variance or more)
+is
 not. Design estimate, register row WAY-D30."""
 
 MAXIMUM_NEW_FRAMES = 5000
@@ -248,11 +253,33 @@ apertures. The noise is 1.4826 times the median absolute deviation, and the
 large-sample variance of that estimate is 1.364 sigma^2 / n, so its standard
 error is sqrt(1.364) = 1.17 sigma / sqrt(n). Derived; register entry WAY-21."""
 
-FLOOR_SIGMAS = 2.0
-"""A floor is reported only when its fitted size is above 0 by this many
-standard errors. The test is one-sided (a floor cannot be negative), so two
-standard errors is a false alarm of about 2.3 percent, not 5. Design estimate,
+FIXED_PATTERN_SIGMAS = 2.0
+"""Fixed-pattern noise is reported only when its fitted size is above 0 by this
+many standard errors. The test is one-sided (fixed-pattern noise cannot be
+negative), so two standard errors is a false alarm of about 2.3 percent, not 5.
+Design estimate,
 register row WAY-D32."""
+
+POSSIBLE_FIXED_PATTERN_SIGMAS = 1.0
+"""Between this many standard errors and `FIXED_PATTERN_SIGMAS` the
+fixed-pattern noise is "possible", not found. It is not proven, so it is not
+assumed; the forecast gives the gain both with it and without it, and the
+advice is a range. Below this, the stack agrees with the random noise, as
+before. One standard error is the usual "worth a second look" level: chance
+alone gives it about 16 percent of the time (one-sided), so most stacks with no
+pattern fall below it. Design estimate (user decision D18, 2026-10-26);
+evidence M 13, whose significance moved from 2.2 to 1.9 between two runs on
+the same frames and moved the advice from about 13 to about 29 percent
+(validation register entry WAY-76). Register row to be added."""
+
+MINIMUM_MODEL_ERROR_TARGETS = 5
+"""The noise model's relative error is measured from odd–even differences only
+when at least this many targets of one capture setting group have one;
+otherwise the stand-in `EXPECTED_NOISE_MODEL_RELATIVE_ERROR` is used and the
+statement says so. Five samples give the scatter of the log ratios a relative
+error of about 1 / sqrt(2 x 4) = 35 percent, enough to tell 0.05 from 0.15 but
+not to claim more. User decision D17, 2026-10-26; design estimate, register row
+to be added."""
 
 MODEL_AGREEMENT_SIGMAS = 2.0
 """The measured stack noise is said to disagree with the model only when its
@@ -270,17 +297,32 @@ so the model's own error is not counted as an unexplained loss. Design
 estimate from STK-36, register row WAY-D34."""
 
 
-FLOOR_BASIS_HALF_DIFFERENCE = "half_difference"
-FLOOR_BASIS_MODEL = "model"
-FLOOR_BASIS_FIT = "fit"
-"""The three ways a floor's random part is found (`StackNoiseFloor.basis`)."""
+FIXED_PATTERN_BASIS_ODD_EVEN_DIFFERENCE = "odd_even_difference"
+FIXED_PATTERN_BASIS_MODEL = "model"
+FIXED_PATTERN_BASIS_FIT = "fit"
+FIXED_PATTERN_BASIS_SETUP_HISTORY = "setup_history"
+"""The ways fixed-pattern noise is found (`StackFixedPatternNoise.basis`). The
+first three measure the target's own stack. ``setup_history`` measures nothing
+on the target: the share is the median of other targets of the same camera,
+optic and flat set (decision D23)."""
 
-FLOOR_BASIS_TEXT = {
-    FLOOR_BASIS_HALF_DIFFERENCE: "measured from the odd and even half stacks",
-    FLOOR_BASIS_MODEL: "found from the noise model",
-    FLOOR_BASIS_FIT: "found from a fit over the earlier stacks",
+MINIMUM_HISTORY_TARGETS = 3
+"""A target with no fixed-pattern measurement of its own borrows the median
+fixed-pattern share of other targets of its setup (camera, optic and flat set)
+only when at least this many other targets have one. The median of 3 is the
+smallest median that a single odd target cannot move; with 2 it is their mean.
+User decision D23, 2026-10-26; design estimate, register row to be added."""
+
+FIXED_PATTERN_BASIS_TEXT = {
+    FIXED_PATTERN_BASIS_ODD_EVEN_DIFFERENCE: "measured from the odd and even half stacks",
+    FIXED_PATTERN_BASIS_MODEL: "found from the noise model",
+    FIXED_PATTERN_BASIS_FIT: "found from a fit over the earlier stacks",
+    FIXED_PATTERN_BASIS_SETUP_HISTORY: (
+        "assumed to be like other targets of this setup, not measured on this one"
+    ),
 }
-"""Words for each basis, used in the statements that name the floor."""
+"""Words for each basis, used in the statements that name the fixed-pattern
+noise."""
 
 MINIMUM_GAIN_FRACTION = 0.10
 """The stop signal is raised when doubling the data is predicted to cut the
@@ -658,20 +700,24 @@ class TakeMoreResult(BaseModel):
         The register row behind the estimate.
     reason : `str` or `None`
         Why N could not be found, or a remark on the answer.
-    floor_noise : `float` or `None`
-        The stack's noise floor, in the stack's units, when one was found
-        (see `StackNoiseFloor`). The noise cannot go below it however many
-        frames are added.
-    floor_variance_share : `float` or `None`
-        The share of today's noise variance that is floor, from 0 to 1.
-    floor_basis : `str` or `None`
-        Where the floor's random part came from (`StackNoiseFloor.basis`), when
-        a floor was found.
-    floor_limited : `bool`
+    fixed_pattern_noise : `float` or `None`
+        The stack's fixed-pattern noise, in the stack's units, when one was
+        found (see `StackFixedPatternNoise`). The noise cannot go below it
+        however many frames are added.
+    fixed_pattern_variance_share : `float` or `None`
+        The share of today's noise variance that is fixed_pattern, from 0 to 1.
+    fixed_pattern_basis : `str` or `None`
+        Where the fixed-pattern noise's random part came from
+        (`StackFixedPatternNoise.basis`), when fixed-pattern noise was found.
+    fixed_pattern_history_targets : `int` or `None`
+        With the ``setup_history`` basis, how many other targets of the setup
+        the assumed share is the median of.
+    fixed_pattern_limited : `bool`
         True when more frames of this kind will not reach the target because
-        of the floor. `frames_needed` is then ``None``.
+        of the fixed-pattern noise. `frames_needed` is then ``None``.
     lowest_reachable_ratio : `float` or `None`
-        With a floor: the ratio that very many more frames would reach.
+        With fixed-pattern noise: the ratio that very many more frames would
+        reach.
     new_exposure_group : `bool`
         True when the new frames make a group of an exposure length the stack
         does not have yet (``group`` mode only).
@@ -679,7 +725,7 @@ class TakeMoreResult(BaseModel):
         True when the new frames would change which group is heaviest, so the
         pair of stacks is confounded (``group`` mode only).
     practical_limit_applied : `bool`
-        True when a floor is present and the target needs more than
+        True when fixed-pattern noise is present and the target needs more than
         `PRACTICAL_TIME_FACTOR` times the stack's exposure time (or cannot be
         reached). `frames_needed` is then ``None`` and the answer is the
         diminishing-returns one: `doubling_frames`, `doubling_noise_cut` and
@@ -693,10 +739,28 @@ class TakeMoreResult(BaseModel):
         the same forecast as the count (0.14 is 14 percent).
     most_reachable_cut : `float` or `None`
         The fraction by which the noise falls after the most frames the search
-        tries (`MAXIMUM_NEW_FRAMES`): the most the floor lets frames give.
+        tries (`MAXIMUM_NEW_FRAMES`): the most the fixed-pattern noise lets
+        frames give.
     doubling_worthwhile : `bool`
         False when `doubling_noise_cut` is below
         `MINIMUM_DOUBLING_GAIN_FRACTION`: no frames are then suggested.
+    possible_fixed_pattern_sigmas : `float` or `None`
+        Set when the stack has possible, unproven fixed-pattern noise
+        (`StackFixedPatternNoise.possible`): the standard errors it was found
+        at. The count and the main cut (`predicted_noise_ratio`) are then for
+        no fixed-pattern noise, and the fields below give the low end.
+    possible_low_noise_cut : `float` or `None`
+        The fraction by which the noise falls after `frames_needed` frames if
+        the possible fixed-pattern noise is real. The high end is
+        ``1 - predicted_noise_ratio``.
+    possible_low_doubling_cut : `float` or `None`
+        With the possible fixed-pattern noise real: the cut that doubling the
+        stack's time gives.
+    possible_low_end_not_worthwhile : `bool`
+        True when, with the possible fixed-pattern noise real, the answer would
+        be the "more frames will not help" warning (the practical-limit logic
+        of `_take_more_result` finds a doubling below
+        `MINIMUM_DOUBLING_GAIN_FRACTION`). The count is still given.
     """
 
     model_config = _MODEL_CONFIG
@@ -709,10 +773,11 @@ class TakeMoreResult(BaseModel):
     confidence: Confidence = Confidence.DESIGN_ESTIMATE
     register_entry: str = TAKE_MORE_ENTRY
     reason: str | None = None
-    floor_noise: float | None = None
-    floor_variance_share: float | None = None
-    floor_basis: str | None = None
-    floor_limited: bool = False
+    fixed_pattern_noise: float | None = None
+    fixed_pattern_variance_share: float | None = None
+    fixed_pattern_basis: str | None = None
+    fixed_pattern_history_targets: int | None = None
+    fixed_pattern_limited: bool = False
     lowest_reachable_ratio: float | None = None
     new_exposure_group: bool = False
     heaviest_group_changed: bool = False
@@ -721,6 +786,10 @@ class TakeMoreResult(BaseModel):
     doubling_noise_cut: float | None = None
     most_reachable_cut: float | None = None
     doubling_worthwhile: bool = True
+    possible_fixed_pattern_sigmas: float | None = None
+    possible_low_noise_cut: float | None = None
+    possible_low_doubling_cut: float | None = None
+    possible_low_end_not_worthwhile: bool = False
 
 
 def _new_frames(
@@ -867,7 +936,7 @@ def frames_to_cut_noise(
     new_exposure_seconds: float | None = None,
     target_noise_ratio: float = TARGET_NOISE_RATIO,
     maximum_new_frames: int = MAXIMUM_NEW_FRAMES,
-    floor: StackNoiseFloor | None = None,
+    fixed_pattern: StackFixedPatternNoise | None = None,
 ) -> TakeMoreResult:
     """Find how many more frames cut the noise ("take N more").
 
@@ -880,12 +949,12 @@ def frames_to_cut_noise(
 
     The search doubles N until the target is reached, then bisects.
 
-    With a `floor`, the noise after adding frames is
-    ``sqrt(floor + random_later)``, in variances (see
-    `noise_ratio_with_floor`).
-    When the floor makes up so much of today's noise that no number of frames
-    reaches the target, no N is given: the result says so and states the
-    floor.
+    With fixed-pattern noise (`fixed_pattern`), the noise after adding frames
+    is
+    ``sqrt(fixed_pattern + random_later)``, in variances (see
+    `noise_ratio_with_fixed_pattern_noise`). When the fixed-pattern noise makes
+    up so much of today's noise that no number of frames reaches the target, no
+    N is given: the result says so and states the fixed-pattern noise.
 
     This function does not describe a stack of exposure groups; use
     `frames_to_cut_noise_in_groups` for the ``group`` mode.
@@ -906,8 +975,8 @@ def frames_to_cut_noise(
         The noise after over the noise now. The default is 0.707.
     maximum_new_frames : `int`, optional
         Where the search gives up.
-    floor : `StackNoiseFloor`, optional
-        The stack's noise floor, when one was found.
+    fixed_pattern : `StackFixedPatternNoise`, optional
+        The stack's fixed-pattern noise, when one was found.
 
     Returns
     -------
@@ -924,13 +993,15 @@ def frames_to_cut_noise(
             reason="There are no past frames of this setting to follow.",
         )
 
-    def ratio_for(count: int) -> float | None:
+    def ratio_for(count: int, pattern: StackFixedPatternNoise | None) -> float | None:
         """Give the predicted noise ratio after adding `count` frames.
 
         Parameters
         ----------
         count : `int`
             Frames to add.
+        pattern : `StackFixedPatternNoise` or `None`
+            The fixed-pattern noise to apply.
 
         Returns
         -------
@@ -938,18 +1009,102 @@ def frames_to_cut_noise(
             New noise over current noise.
         """
         forecast = noise_ratio_after_adding(existing, template, count, mode, new_exposure_seconds)
-        return noise_ratio_with_floor(current, forecast, floor)
+        return noise_ratio_with_fixed_pattern_noise(current, forecast, pattern)
 
     exposure = new_exposure_seconds or float(np.mean([frame.exposure_seconds for frame in template]))
-    return _take_more_result(
+    return _take_more_result_graded(
         ratio_for,
         minimum_count=1,
         maximum_count=maximum_new_frames,
         target_noise_ratio=target_noise_ratio,
         exposure_seconds=exposure,
-        floor=floor,
+        fixed_pattern=fixed_pattern,
         held_exposure_seconds=sum(frame.exposure_seconds for frame in existing),
     )
+
+
+def _take_more_result_graded(
+    ratio_for_pattern: Callable[[int, StackFixedPatternNoise | None], float | None],
+    *,
+    fixed_pattern: StackFixedPatternNoise | None,
+    **search: Any,
+) -> TakeMoreResult:
+    """Search for N, giving a range for a possible fixed-pattern noise.
+
+    Above `FIXED_PATTERN_SIGMAS` or below `POSSIBLE_FIXED_PATTERN_SIGMAS` this
+    is `_take_more_result` with the fixed-pattern noise applied or not, as
+    always.
+    Between them (``fixed_pattern.possible``) the forecast is made twice, with
+    no fixed-pattern noise and with the estimated one (decision D18):
+
+    * The count and the practical-limit decision come from the case without
+      it, so a possible pattern never withholds or inflates the count by
+      itself. The main cut (``predicted_noise_ratio``) is that case's, the high
+      end of the range.
+    * The low end is the cut the same count gives if the pattern is real.
+    * If the case with the pattern would be the "more frames will not help"
+      answer (a doubling below `MINIMUM_DOUBLING_GAIN_FRACTION`),
+      ``possible_low_end_not_worthwhile`` is set and the statement adds one
+      sentence; the count is still given.
+
+    Parameters
+    ----------
+    ratio_for_pattern : `Callable`
+        Takes the frames to add and a `StackFixedPatternNoise` or ``None``;
+        gives a `float` or ``None``.
+        The predicted noise ratio after adding this many frames, with the given
+        fixed-pattern noise applied.
+    fixed_pattern : `StackFixedPatternNoise` or `None`
+        The stack's fixed-pattern noise, found, possible or neither.
+    **search
+        The remaining arguments of `_take_more_result`.
+
+    Returns
+    -------
+    result : `TakeMoreResult`
+        The answer, with the ``possible_*`` fields set for a possible pattern.
+    """
+    if fixed_pattern is None or not fixed_pattern.possible:
+        return _take_more_result(
+            lambda count: ratio_for_pattern(count, fixed_pattern), fixed_pattern=fixed_pattern, **search
+        )
+    real = fixed_pattern.if_real()
+    without = _take_more_result(lambda count: ratio_for_pattern(count, None), fixed_pattern=None, **search)
+    if without.frames_needed is None:
+        return without
+    with_pattern = _take_more_result(
+        lambda count: ratio_for_pattern(count, real), fixed_pattern=real, **search
+    )
+    low_ratio = ratio_for_pattern(without.frames_needed, real)
+    if low_ratio is None:
+        return without
+    return without.model_copy(
+        update={
+            "possible_fixed_pattern_sigmas": fixed_pattern.sigmas,
+            "possible_low_noise_cut": 1.0 - low_ratio,
+            "possible_low_doubling_cut": with_pattern.doubling_noise_cut,
+            "possible_low_end_not_worthwhile": with_pattern.practical_limit_applied
+            and not with_pattern.doubling_worthwhile,
+            "fixed_pattern_basis": fixed_pattern.basis,
+        }
+    )
+
+
+def _noise_in_stack_units_text(noise: float | None) -> str:
+    """Write a fixed-pattern noise for a reason, when it may be unknown.
+
+    Parameters
+    ----------
+    noise : `float` or `None`
+        The noise in stack units, or ``None`` when only its share is known (a
+        share assumed from other targets of the setup has no size of its own).
+
+    Returns
+    -------
+    text : `str`
+        For example ``"0.000583 (stack units)"``, or ``"an unmeasured size"``.
+    """
+    return f"{noise:.3g} (stack units)" if noise is not None else "an unmeasured size"
 
 
 def _take_more_result(
@@ -959,16 +1114,16 @@ def _take_more_result(
     maximum_count: int,
     target_noise_ratio: float,
     exposure_seconds: float,
-    floor: StackNoiseFloor | None,
+    fixed_pattern: StackFixedPatternNoise | None,
     held_exposure_seconds: float | None = None,
 ) -> TakeMoreResult:
-    """Search for N and write the answer, naming the floor when it limits.
+    """Search for N and write the answer, naming fixed-pattern noise.
 
-    With a floor, the count is given only when it is within the practical
-    limit (`PRACTICAL_TIME_FACTOR` times the stack's exposure time). Beyond
-    it, or when the target cannot be reached, the answer is the
-    diminishing-returns one: the frames that double the stack's time, what
-    that cuts, and the most any frames cut.
+    With fixed-pattern noise, the count is given only when it is within the
+    practical limit (`PRACTICAL_TIME_FACTOR` times the stack's exposure time).
+    Beyond it, or when the target cannot be reached, the answer is the
+    diminishing-returns one: the frames that double the stack's time, what that
+    cuts, and the most any frames cut.
 
     Parameters
     ----------
@@ -980,8 +1135,8 @@ def _take_more_result(
         The ratio aimed for.
     exposure_seconds : `float`
         The exposure of one new frame.
-    floor : `StackNoiseFloor` or `None`
-        The stack's noise floor, when one was found.
+    fixed_pattern : `StackFixedPatternNoise` or `None`
+        The stack's fixed-pattern noise, when one was found.
     held_exposure_seconds : `float`, optional
         The sum of the exposure of every frame the stack holds today. Without
         it the practical limit is not applied.
@@ -991,11 +1146,20 @@ def _take_more_result(
     result : `TakeMoreResult`
         The answer.
     """
-    floor_fields: dict[str, float | str | None] = {
-        "floor_basis": floor.basis if floor is not None and floor.floor_detected else None,
-        "floor_noise": floor.floor_noise if floor is not None and floor.floor_detected else None,
-        "floor_variance_share": (
-            floor.floor_variance_share if floor is not None and floor.floor_detected else None
+    fixed_pattern_fields: dict[str, float | int | str | None] = {
+        "fixed_pattern_basis": fixed_pattern.basis
+        if fixed_pattern is not None and fixed_pattern.fixed_pattern_noise_detected
+        else None,
+        "fixed_pattern_history_targets": fixed_pattern.history_target_count
+        if fixed_pattern is not None and fixed_pattern.fixed_pattern_noise_detected
+        else None,
+        "fixed_pattern_noise": fixed_pattern.fixed_pattern_noise
+        if fixed_pattern is not None and fixed_pattern.fixed_pattern_noise_detected
+        else None,
+        "fixed_pattern_variance_share": (
+            fixed_pattern.fixed_pattern_variance_share
+            if fixed_pattern is not None and fixed_pattern.fixed_pattern_noise_detected
+            else None
         ),
     }
 
@@ -1016,12 +1180,12 @@ def _take_more_result(
         return ratio is not None and ratio <= target_noise_ratio
 
     needed = _smallest_count_reaching(reached, minimum_count, maximum_count)
-    floor_present = floor is not None and floor.floor_detected
+    fixed_pattern_present = fixed_pattern is not None and fixed_pattern.fixed_pattern_noise_detected
     beyond_practical_limit = needed is None or (
         held_exposure_seconds is not None
         and needed * exposure_seconds > (PRACTICAL_TIME_FACTOR - 1.0) * held_exposure_seconds
     )
-    if floor_present and beyond_practical_limit and held_exposure_seconds:
+    if fixed_pattern_present and beyond_practical_limit and held_exposure_seconds:
         doubling_frames = max(minimum_count, round(held_exposure_seconds / exposure_seconds))
         doubling_ratio = ratio_for(doubling_frames)
         most_ratio = ratio_for(maximum_count)
@@ -1031,7 +1195,7 @@ def _take_more_result(
                 target_noise_ratio=target_noise_ratio,
                 added_exposure_seconds=doubling_frames * exposure_seconds,
                 new_exposure_seconds=exposure_seconds,
-                floor_limited=needed is None,
+                fixed_pattern_limited=needed is None,
                 lowest_reachable_ratio=most_ratio,
                 practical_limit_applied=True,
                 doubling_frames=doubling_frames,
@@ -1047,38 +1211,45 @@ def _take_more_result(
                         else f"needs {needed} frames, more than {PRACTICAL_TIME_FACTOR - 1.0:g} times the "
                         "stack's exposure time again"
                     )
-                    + f" because of the noise floor, {floor.basis_text} (practical limit "
+                    + f" because of the fixed-pattern noise, {fixed_pattern.basis_text} (practical limit "
                     f"{PRACTICAL_TIME_FACTOR:g} times the stack's exposure time, WAY-D30)."
                 ),
-                **floor_fields,
+                **fixed_pattern_fields,
             )
     if needed is None:
         limit_ratio = ratio_for(maximum_count)
-        if floor is not None and floor.floor_detected and limit_ratio is not None:
+        if (
+            fixed_pattern is not None
+            and fixed_pattern.fixed_pattern_noise_detected
+            and limit_ratio is not None
+        ):
             return TakeMoreResult(
                 target_noise_ratio=target_noise_ratio,
-                floor_limited=True,
+                fixed_pattern_limited=True,
                 lowest_reachable_ratio=limit_ratio,
                 reason=(
-                    f"More frames of this kind will not reach the target: the stack has a noise floor, "
-                    f"{floor.basis_text}, of "
-                    f"{floor.floor_noise:.3g} (stack units), {100 * (floor.floor_variance_share or 0.0):.0f} "
+                    f"More frames of this kind will not reach the target: the stack has fixed-pattern noise "
+                    f"(noise that stays at the same place on the sky in every frame, so more frames do not "
+                    f"reduce it), {fixed_pattern.basis_text}, of "
+                    f"{_noise_in_stack_units_text(fixed_pattern.fixed_pattern_noise)}, "
+                    f"{100 * (fixed_pattern.fixed_pattern_variance_share or 0.0):.0f} "
                     f"percent of today's noise variance, and {maximum_count} more frames would only reach "
-                    f"{limit_ratio:.2f} of today's noise. The floor has to be found and removed first."
+                    f"{limit_ratio:.2f} of today's noise. The fixed-pattern noise has to be found and "
+                    f"removed first."
                 ),
-                **floor_fields,
+                **fixed_pattern_fields,
             )
         return TakeMoreResult(
             target_noise_ratio=target_noise_ratio,
             reason=f"The target was not reached with {maximum_count} more frames.",
-            **floor_fields,
+            **fixed_pattern_fields,
         )
     reason = "A design estimate: real subsets of M 57 came out 9 to 31 percent below the prediction (STK-36)."
-    if floor_fields["floor_noise"] is not None:
+    if fixed_pattern_fields["fixed_pattern_basis"] is not None and fixed_pattern is not None:
         reason += (
-            f" The stack has a noise floor of {floor_fields['floor_noise']:.3g} (stack units), "
-            f"{FLOOR_BASIS_TEXT.get(str(floor_fields['floor_basis']), '')}, that more "
-            "frames do not remove; the answer includes it."
+            " The stack has fixed-pattern noise of "
+            f"{_noise_in_stack_units_text(fixed_pattern.fixed_pattern_noise)}, "
+            f"{fixed_pattern.basis_text}, that more frames do not remove; the answer includes it."
         )
     return TakeMoreResult(
         frames_needed=needed,
@@ -1087,12 +1258,12 @@ def _take_more_result(
         added_exposure_seconds=needed * exposure_seconds,
         new_exposure_seconds=exposure_seconds,
         reason=reason,
-        **floor_fields,
+        **fixed_pattern_fields,
     )
 
 
 # -----------------------------------------------------------------------------
-# The noise floor
+# The fixed-pattern noise
 # -----------------------------------------------------------------------------
 
 
@@ -1129,10 +1300,10 @@ def total_variance_ratio_error(
     The expected-noise model's own error is included.
 
     This is the one error budget. The loss account's "cause unknown" test and
-    the one-stack noise floor test both compare ``variance_ratio - 1`` with
-    `MODEL_AGREEMENT_SIGMAS` times this error, so a stack the loss account
-    calls "within error" never has a significant floor, and the other way
-    round.
+    the one-stack fixed-pattern noise test both compare ``variance_ratio - 1``
+    with `MODEL_AGREEMENT_SIGMAS` times this error, so a stack the loss account
+    calls "within error" never has a significant fixed_pattern, and the other
+    way round.
 
     Parameters
     ----------
@@ -1154,8 +1325,185 @@ def total_variance_ratio_error(
     return math.hypot(aperture_error, 2.0 * model_relative_error * variance_ratio)
 
 
+NOISE_MODEL_ERROR_STAND_IN_TEXT = (
+    "the stand-in value, as too few targets of this capture setting group are measured"
+)
+"""How a statement names the stand-in model error (fewer than
+`MINIMUM_MODEL_ERROR_TARGETS` targets in the group have the measurement)."""
+
+
+class NoiseModelErrorSample(BaseModel):
+    """One target's check of the noise model against its odd–even difference.
+
+    The odd–even difference measures the stack's random noise directly. The
+    noise model predicts the same noise from the frames' sky and read noise.
+    Their log ratio is one sample of how far off the model is.
+
+    Parameters
+    ----------
+    target_id : `str`
+        The target the sample comes from. A target gives one sample to its
+        capture setting group.
+    log_variance_ratio : `float`
+        ``ln((random noise / predicted noise)^2)``, with both noises of the
+        same stack in the same unit. Zero means the model was right; a negative
+        value
+        means the stack was quieter than predicted.
+    apertures : `int`
+        The empty apertures behind the measured random noise (at least 2).
+    """
+
+    model_config = _MODEL_CONFIG
+
+    target_id: str
+    log_variance_ratio: float
+    apertures: int = Field(ge=2)
+
+    @classmethod
+    def from_noises(
+        cls, target_id: str, random_noise: float, predicted_noise: float, apertures: int
+    ) -> NoiseModelErrorSample:
+        """Build a sample from the two noises of one stack.
+
+        Parameters
+        ----------
+        target_id : `str`
+            The target.
+        random_noise : `float`
+            The full-stack equivalent of the odd–even difference noise.
+        predicted_noise : `float`
+            The noise model's prediction for the same stack, in the same unit.
+        apertures : `int`
+            The apertures behind ``random_noise``.
+
+        Returns
+        -------
+        sample : `NoiseModelErrorSample`
+            The sample.
+
+        Raises
+        ------
+        ValueError
+            If a noise is not positive.
+        """
+        if random_noise <= 0.0 or predicted_noise <= 0.0:
+            raise ValueError("Both noise values must be positive.")
+        return cls(
+            target_id=target_id,
+            log_variance_ratio=2.0 * math.log(random_noise / predicted_noise),
+            apertures=apertures,
+        )
+
+    @property
+    def measurement_error(self) -> float:
+        """Give the expected scatter of this sample from measuring alone.
+
+        Returns
+        -------
+        error : `float`
+            The standard error of ``ln(variance)`` of the measured random
+            noise, ``2 x 1.17 / sqrt(n)`` (the error the odd–even test uses for
+            each of its sides). The prediction has no aperture error, so this
+            is the only measurement term.
+        """
+        return 2.0 * aperture_noise_relative_error(self.apertures)
+
+
+class NoiseModelError(BaseModel):
+    """The noise model's own relative error, and where it came from.
+
+    Parameters
+    ----------
+    relative_error : `float`
+        The model's one-standard-error relative error of the predicted noise
+        (not of the variance), as `EXPECTED_NOISE_MODEL_RELATIVE_ERROR` is.
+    target_count : `int`
+        The targets whose odd–even differences were available for this setting
+        group (0 when none were looked for).
+    measured : `bool`
+        True when ``relative_error`` was measured from at least
+        `MINIMUM_MODEL_ERROR_TARGETS` targets; False when it is the stand-in.
+    mean_log_ratio : `float` or `None`
+        The mean of ``ln(random noise / predicted noise)`` over the targets: a
+        bias report only. Negative means the model predicts more noise than the
+        stacks have. It is never applied to a prediction. ``None`` with fewer
+        targets than the minimum.
+    """
+
+    model_config = _MODEL_CONFIG
+
+    relative_error: float = Field(default=EXPECTED_NOISE_MODEL_RELATIVE_ERROR, ge=0.0)
+    target_count: int = Field(default=0, ge=0)
+    measured: bool = False
+    mean_log_ratio: float | None = None
+
+    @property
+    def basis_text(self) -> str:
+        """Say where the relative error came from, for a statement.
+
+        Returns
+        -------
+        text : `str`
+            ``"measured from N targets' odd–even differences"`` or the stand-in
+            wording (`NOISE_MODEL_ERROR_STAND_IN_TEXT`).
+        """
+        if self.measured:
+            return f"measured from {self.target_count} targets' odd–even differences"
+        return NOISE_MODEL_ERROR_STAND_IN_TEXT
+
+
+def measure_noise_model_error(
+    samples: Sequence[NoiseModelErrorSample], *, minimum_targets: int = MINIMUM_MODEL_ERROR_TARGETS
+) -> NoiseModelError:
+    """Measure the noise model's relative error from odd–even differences.
+
+    The samples of one capture setting group, one per target, scatter around
+    their mean for two reasons: the model's own error, and the error of each
+    measurement. The expected scatter from measuring is known for each sample
+    (`NoiseModelErrorSample.measurement_error`), so it is taken out in
+    quadrature (as variances):
+
+        var(model) = var(ln F values) - mean(measurement_error^2)
+
+    floored at zero. ``F`` is a variance ratio, so the log of the noise ratio
+    is half of ``ln F`` and the model's relative error as noise is
+    ``sqrt(var(model)) / 2``. The scatter is taken about the mean, so a steady
+    bias (the model always a little high) is reported separately and does not
+    count as error; the bias is not applied. Planck (ESA) checked its noise
+    model against half-ring differences the same way; plan section 3.13, D17.
+
+    Parameters
+    ----------
+    samples : `Sequence` [`NoiseModelErrorSample`]
+        One sample per target of one capture setting group.
+    minimum_targets : `int`, optional
+        The fewest samples that may replace the stand-in
+        (`MINIMUM_MODEL_ERROR_TARGETS`).
+
+    Returns
+    -------
+    model_error : `NoiseModelError`
+        The measured error, or the stand-in
+        (`EXPECTED_NOISE_MODEL_RELATIVE_ERROR`) with ``measured`` false when
+        there are fewer samples than the minimum.
+    """
+    count = len(samples)
+    if count < max(minimum_targets, 2):
+        return NoiseModelError(target_count=count)
+    values = np.asarray([sample.log_variance_ratio for sample in samples], dtype=float)
+    observed_variance = float(np.var(values, ddof=1))
+    measurement_variance = float(np.mean([sample.measurement_error**2 for sample in samples]))
+    model_variance = max(0.0, observed_variance - measurement_variance)
+    return NoiseModelError(
+        relative_error=0.5 * math.sqrt(model_variance),
+        target_count=count,
+        measured=True,
+        mean_log_ratio=0.5 * float(np.mean(values)),
+    )
+
+
 class NoiseStep(BaseModel):
-    """One stack of a target's history, for the floor fit.
+    """One stack of a target's history, for the fixed-pattern noise fit.
 
     Parameters
     ----------
@@ -1214,8 +1562,8 @@ class NoiseStep(BaseModel):
         return aperture_noise_relative_error(self.apertures)
 
 
-class NoiseFloorFit(BaseModel):
-    """The result of fitting the noise floor.
+class FixedPatternNoiseFit(BaseModel):
+    """The result of fitting the fixed-pattern noise.
 
     Parameters
     ----------
@@ -1226,26 +1574,26 @@ class NoiseFloorFit(BaseModel):
         (1 means the model explains the noise).
     read_noise_scale : `float` or `None`
         The free read-noise factor, when that term was fitted.
-    floor_variance : `float` or `None`
+    fixed_pattern_variance : `float` or `None`
         The fitted constant b, in measured-noise-squared units.
-    floor_variance_error : `float` or `None`
+    fixed_pattern_variance_error : `float` or `None`
         One standard error of b.
-    floor_detected : `bool`
-        True when b is above 0 by `FLOOR_SIGMAS` standard errors.
-    floor_noise : `float` or `None`
+    fixed_pattern_noise_detected : `bool`
+        True when b is above 0 by `FIXED_PATTERN_SIGMAS` standard errors.
+    fixed_pattern_noise : `float` or `None`
         The noise level the stack cannot go below, ``sqrt(b)``, when
         detected.
     error_kind : `str`
         ``"unpaired"``, ``"paired"`` or ``"mixed"``: how the step errors were
         found. The unpaired error is larger, so the fit is cautious.
     normalized : `bool`
-        Whether the fit was made on noise divided by the reference flux.
-        Then `floor_variance` and `floor_noise` are fractions of the
+        Whether the fit was made on noise divided by the reference flux. Then
+        `fixed_pattern_variance` and `fixed_pattern_noise` are fractions of the
         reference stars' brightness, not stack units.
     degrees_of_freedom : `int`
         Steps minus fitted terms. With 0 the line passes through every point
-        exactly, so the floor's error comes only from the assumed aperture
-        errors and has no check from scatter.
+        exactly, so the fixed-pattern noise's error comes only from the assumed
+        aperture errors and has no check from scatter.
     reason : `str`
         What happened, in one sentence.
     """
@@ -1255,18 +1603,20 @@ class NoiseFloorFit(BaseModel):
     steps_used: int
     alpha: float | None = None
     read_noise_scale: float | None = None
-    floor_variance: float | None = None
-    floor_variance_error: float | None = None
-    floor_detected: bool = False
-    floor_noise: float | None = None
+    fixed_pattern_variance: float | None = None
+    fixed_pattern_variance_error: float | None = None
+    fixed_pattern_noise_detected: bool = False
+    fixed_pattern_noise: float | None = None
     error_kind: str = "unpaired"
     normalized: bool = False
     degrees_of_freedom: int = 0
     reason: str
 
 
-def fit_noise_floor(steps: Sequence[NoiseStep], *, read_noise_term_free: bool = False) -> NoiseFloorFit:
-    """Fit the noise floor over the history of a target.
+def fit_fixed_pattern_noise(
+    steps: Sequence[NoiseStep], *, read_noise_term_free: bool = False
+) -> FixedPatternNoiseFit:
+    """Fit the fixed-pattern noise over the history of a target.
 
     The model is ``measured_variance = alpha * expected_variance + b``.
 
@@ -1285,8 +1635,8 @@ def fit_noise_floor(steps: Sequence[NoiseStep], *, read_noise_term_free: bool = 
     checks the model.
     With the read-noise term free, the model is
     ``alpha * (expected - read_part) + c * read_part + b`` and needs at least
-    3 stacks; without it, at least 2. A floor is never inferred from one
-    shortfall.
+    3 stacks; without it, at least 2. Fixed-pattern noise is never inferred
+    from one shortfall.
 
     Parameters
     ----------
@@ -1298,9 +1648,9 @@ def fit_noise_floor(steps: Sequence[NoiseStep], *, read_noise_term_free: bool = 
 
     Returns
     -------
-    fit : `NoiseFloorFit`
-        The fit, or a result with ``floor_detected`` false and the reason
-        ("not enough stack steps") when there are too few.
+    fit : `FixedPatternNoiseFit`
+        The fit, or a result with ``fixed_pattern_noise_detected`` false and
+        the reason ("not enough stack steps") when there are too few.
     """
     parameter_count = 3 if read_noise_term_free else 2
     if any(step.normalized for step in steps):
@@ -1309,13 +1659,13 @@ def fit_noise_floor(steps: Sequence[NoiseStep], *, read_noise_term_free: bool = 
     kinds = {"paired" if step.paired else "unpaired" for step in steps}
     error_kind = kinds.pop() if len(kinds) == 1 else "mixed"
     if len(steps) < parameter_count:
-        return NoiseFloorFit(
+        return FixedPatternNoiseFit(
             steps_used=len(steps),
             error_kind=error_kind,
             reason=f"Not enough stack steps: the fit needs {parameter_count}, and there are {len(steps)}.",
         )
     if read_noise_term_free and any(step.expected_read_noise_variance is None for step in steps):
-        return NoiseFloorFit(
+        return FixedPatternNoiseFit(
             steps_used=len(steps),
             error_kind=error_kind,
             reason="A free read-noise term needs the expected read-noise variance of every step.",
@@ -1345,7 +1695,7 @@ def fit_noise_floor(steps: Sequence[NoiseStep], *, read_noise_term_free: bool = 
                 weighted_design, measured_variance / errors, rcond=None
             )
     if rank < parameter_count:
-        return NoiseFloorFit(
+        return FixedPatternNoiseFit(
             steps_used=len(steps),
             error_kind=error_kind,
             reason=(
@@ -1354,25 +1704,25 @@ def fit_noise_floor(steps: Sequence[NoiseStep], *, read_noise_term_free: bool = 
             ),
         )
     covariance = np.linalg.inv(weighted_design.T @ weighted_design)
-    floor = float(solution[-1])
-    floor_error = float(math.sqrt(covariance[-1, -1]))
-    detected = floor > FLOOR_SIGMAS * floor_error
-    return NoiseFloorFit(
+    fixed_pattern = float(solution[-1])
+    fixed_pattern_error = float(math.sqrt(covariance[-1, -1]))
+    detected = fixed_pattern > FIXED_PATTERN_SIGMAS * fixed_pattern_error
+    return FixedPatternNoiseFit(
         steps_used=len(steps),
         alpha=float(solution[0]),
         read_noise_scale=float(solution[1]) if read_noise_term_free else None,
-        floor_variance=floor,
-        floor_variance_error=floor_error,
-        floor_detected=detected,
-        floor_noise=math.sqrt(floor) if detected else None,
+        fixed_pattern_variance=fixed_pattern,
+        fixed_pattern_variance_error=fixed_pattern_error,
+        fixed_pattern_noise_detected=detected,
+        fixed_pattern_noise=math.sqrt(fixed_pattern) if detected else None,
         error_kind=error_kind,
         normalized=normalized,
         degrees_of_freedom=len(steps) - parameter_count,
         reason=(
             (
-                "A noise floor was found."
+                "Fixed-pattern noise was found."
                 if detected
-                else "No floor: the fitted constant is not above 0 by two standard errors."
+                else "No fixed-pattern noise: the fitted constant is not above 0 by two standard errors."
             )
             + (
                 (
@@ -1393,9 +1743,9 @@ class StopSignal(BaseModel):
     Parameters
     ----------
     stopped : `bool` or `None`
-        True when doubling the data is predicted to cut the noise by less
-        than `MINIMUM_GAIN_FRACTION`. ``None`` when there is no floor fit to
-        say.
+        True when doubling the data is predicted to cut the noise by less than
+        `MINIMUM_GAIN_FRACTION`. ``None`` when there is no fixed-pattern noise
+        fit to say.
     predicted_gain_fraction : `float` or `None`
         The predicted cut in measured noise from doubling the effective time.
     reason : `str`
@@ -1409,7 +1759,7 @@ class StopSignal(BaseModel):
     reason: str
 
 
-def stop_signal(fit: NoiseFloorFit, current_expected_variance: float) -> StopSignal:
+def stop_signal(fit: FixedPatternNoiseFit, current_expected_variance: float) -> StopSignal:
     """Say whether the noise has stopped falling with more frames.
 
     Doubling the effective time halves the expected variance. With the fit
@@ -1418,8 +1768,8 @@ def stop_signal(fit: NoiseFloorFit, current_expected_variance: float) -> StopSig
 
     Parameters
     ----------
-    fit : `NoiseFloorFit`
-        A fit from `fit_noise_floor`.
+    fit : `FixedPatternNoiseFit`
+        A fit from `fit_fixed_pattern_noise`.
     current_expected_variance : `float`
         The expected variance of today's stack, in the fit's units.
 
@@ -1429,12 +1779,14 @@ def stop_signal(fit: NoiseFloorFit, current_expected_variance: float) -> StopSig
         The stop decision. It is ``None`` (no signal) when the fit has no
         alpha, so a missing history never looks like a stop.
     """
-    if fit.alpha is None or fit.floor_variance is None:
+    if fit.alpha is None or fit.fixed_pattern_variance is None:
         return StopSignal(reason=f"No signal: {fit.reason}")
-    if not fit.floor_detected:
-        return StopSignal(stopped=False, reason="No floor was found, so more frames are expected to help.")
-    now = fit.alpha * current_expected_variance + fit.floor_variance
-    after = fit.alpha * current_expected_variance / 2.0 + fit.floor_variance
+    if not fit.fixed_pattern_noise_detected:
+        return StopSignal(
+            stopped=False, reason="No fixed-pattern noise was found, so more frames are expected to help."
+        )
+    now = fit.alpha * current_expected_variance + fit.fixed_pattern_variance
+    after = fit.alpha * current_expected_variance / 2.0 + fit.fixed_pattern_variance
     if now <= 0.0 or after <= 0.0:
         return StopSignal(reason="The fit predicts a non-positive variance, so it cannot be used.")
     gain = 1.0 - math.sqrt(after / now)
@@ -1444,22 +1796,27 @@ def stop_signal(fit: NoiseFloorFit, current_expected_variance: float) -> StopSig
         predicted_gain_fraction=gain,
         reason=(
             f"Doubling the data would cut the noise by {100 * gain:.0f} percent"
-            + (", below the limit; more frames will not help until the floor is fixed." if stopped else ".")
+            + (
+                ", below the limit; more frames will not help until the fixed-pattern noise is fixed."
+                if stopped
+                else "."
+            )
         ),
     )
 
 
 # -----------------------------------------------------------------------------
-# The noise floor of one stack
+# The fixed-pattern noise of one stack
 # -----------------------------------------------------------------------------
 
 
-class StackNoiseFloor(BaseModel):
+class StackFixedPatternNoise(BaseModel):
     """The part of a stack's measured noise that more frames do not remove.
 
-    The floor is found from one stack: its measured empty-aperture noise
-    against the random noise the frames alone predict. Both are in the
-    stack's units (``stacking.empty_aperture_noise_stack_unit`` and
+    The fixed-pattern noise is found from one stack: its measured
+    empty-aperture noise against the random noise the frames alone predict.
+    Both are in the stack's units (``stacking.empty_aperture_noise_stack_unit``
+    and
     ``stacking.expected_empty_aperture_noise_stack_unit``, the second already
     multiplied by Siril's ``stacking.normalization_scale``).
 
@@ -1467,42 +1824,61 @@ class StackNoiseFloor(BaseModel):
     ----------
     source : `str`
         ``"single_stack"`` (measured against predicted, one stack) or
-        ``"fit"`` (`fit_noise_floor` over two or more stacks).
+        ``"fit"`` (`fit_fixed_pattern_noise` over two or more stacks).
     measured_noise : `float` or `None`
         The stack's measured noise, in stack units.
     predicted_random_noise : `float` or `None`
         The noise the frames alone predict, in stack units.
     apertures : `int` or `None`
         The empty apertures behind the measured noise.
-    floor_variance : `float` or `None`
-        ``measured^2 - random^2`` when it is above 0 by `FLOOR_SIGMAS`
+    fixed_pattern_variance : `float` or `None`
+        ``measured^2 - random^2`` when it is above 0 by `FIXED_PATTERN_SIGMAS`
         standard errors; else ``None``.
-    floor_variance_error : `float` or `None`
+    fixed_pattern_variance_error : `float` or `None`
         One standard error of the difference, from the error of the measured
         noise only (the predicted value's error is not stored, so it is taken
         as negligible).
-    floor_detected : `bool`
-        Whether a floor was kept.
-    floor_noise : `float` or `None`
-        ``sqrt(floor_variance)``. In stack units for a ``single_stack`` floor.
-    floor_to_random_variance_ratio : `float` or `None`
-        The floor variance over the random variance of the same stack. This
-        is how the floor enters a forecast (`noise_ratio_with_floor`): a
-        dimensionless fraction of the model's own variance, so it needs no
-        unit conversion between the forecast's rate units and the stack's.
-    floor_variance_share : `float` or `None`
-        The floor's share of the measured variance, from 0 to 1.
+    fixed_pattern_noise_detected : `bool`
+        Whether fixed-pattern noise was kept.
+    fixed_pattern_noise : `float` or `None`
+        ``sqrt(fixed_pattern_variance)``. In stack units for a ``single_stack``
+        fixed_pattern.
+    fixed_pattern_to_random_variance_ratio : `float` or `None`
+        The fixed-pattern noise variance over the random variance of the same
+        stack. This is how the fixed-pattern noise enters a forecast
+        (`noise_ratio_with_fixed_pattern_noise`): a dimensionless fraction of
+        the model's own variance, so it needs no unit conversion between the
+        forecast's rate units and the stack's.
+    fixed_pattern_variance_share : `float` or `None`
+        The fixed-pattern noise's share of the measured variance, from 0 to 1.
     normalized_units : `bool`
-        True when `floor_noise` is a fraction of the reference stars' flux
-        (a fit result with no single stack to convert it).
+        True when `fixed_pattern_noise` is a fraction of the reference stars'
+        flux (a fit result with no single stack to convert it).
     basis : `str`
-        What the floor's random part came from: ``"half_difference"`` (the
-        direct measurement from the odd and even half stacks, errors of
-        measurements only), ``"model"`` (the noise model's prediction, its own
-        error included) or ``"fit"`` (`fit_noise_floor`).
+        What the fixed-pattern noise's random part came from:
+        ``"odd_even_difference"`` (the direct measurement from the odd and even
+        half stacks, errors of measurements only), ``"model"`` (the noise
+        model's prediction, its own error included) or ``"fit"``
+        (`fit_fixed_pattern_noise`).
     sigmas : `float` or `None`
         How many standard errors the test found: ``ln F`` over its error for
-        ``half_difference``, ``(ratio - 1)`` over its error for ``model``.
+        ``odd_even_difference``, ``(ratio - 1)`` over its error for ``model``.
+    possible : `bool`
+        True when the test found fixed-pattern noise between
+        `POSSIBLE_FIXED_PATTERN_SIGMAS` and `MODEL_AGREEMENT_SIGMAS`: possible,
+        not proven. ``fixed_pattern_noise_detected`` is then false, so nothing
+        that reads only "detected" changes, but the size fields
+        (`fixed_pattern_variance`, `fixed_pattern_noise`,
+        `fixed_pattern_to_random_variance_ratio`,
+        `fixed_pattern_variance_share`)
+        are filled so a forecast can also be made as if it were real
+        (`if_real`).
+    model_error_basis : `str` or `None`
+        On the ``model`` basis, where the model's relative error came from
+        (`NoiseModelError.basis_text`); ``None`` on other bases.
+    history_target_count : `int` or `None`
+        On the ``setup_history`` basis, how many other targets of the setup
+        the median share came from; ``None`` on other bases.
     reason : `str`
         One or two sentences saying what was found and why.
     """
@@ -1513,44 +1889,70 @@ class StackNoiseFloor(BaseModel):
     measured_noise: float | None = None
     predicted_random_noise: float | None = None
     apertures: int | None = None
-    floor_variance: float | None = None
-    floor_variance_error: float | None = None
-    floor_detected: bool = False
-    floor_noise: float | None = None
-    floor_to_random_variance_ratio: float | None = None
-    floor_variance_share: float | None = None
+    fixed_pattern_variance: float | None = None
+    fixed_pattern_variance_error: float | None = None
+    fixed_pattern_noise_detected: bool = False
+    fixed_pattern_noise: float | None = None
+    fixed_pattern_to_random_variance_ratio: float | None = None
+    fixed_pattern_variance_share: float | None = None
     normalized_units: bool = False
-    basis: str = FLOOR_BASIS_MODEL
+    basis: str = FIXED_PATTERN_BASIS_MODEL
     sigmas: float | None = None
+    possible: bool = False
+    model_error_basis: str | None = None
+    history_target_count: int | None = None
     reason: str
+
+    def if_real(self) -> StackFixedPatternNoise:
+        """Give this result as it would be if its possible pattern were real.
+
+        Returns
+        -------
+        fixed_pattern : `StackFixedPatternNoise`
+            A copy with ``fixed_pattern_noise_detected`` true and ``possible``
+            false, for the "with fixed-pattern noise" end of a range. A result
+            that is not possible is returned unchanged.
+        """
+        if not self.possible:
+            return self
+        return self.model_copy(update={"fixed_pattern_noise_detected": True, "possible": False})
 
     @property
     def basis_text(self) -> str:
-        """Say in a few words where the floor's random part came from.
+        """Say where the fixed-pattern noise's random part came from.
 
         Returns
         -------
         text : `str`
-            A phrase that completes "The floor is ...".
+            A phrase that completes "The fixed-pattern noise is ...".
         """
-        return FLOOR_BASIS_TEXT.get(self.basis, FLOOR_BASIS_TEXT[FLOOR_BASIS_MODEL])
+        if self.basis == FIXED_PATTERN_BASIS_SETUP_HISTORY and self.history_target_count:
+            return (
+                "assumed to be like other targets of this setup "
+                f"(median of {self.history_target_count} targets), not measured on this one"
+            )
+        return FIXED_PATTERN_BASIS_TEXT.get(self.basis, FIXED_PATTERN_BASIS_TEXT[FIXED_PATTERN_BASIS_MODEL])
 
 
-def measure_stack_noise_floor(
-    measured_noise: float, predicted_random_noise: float, apertures: int
-) -> StackNoiseFloor:
-    """Find a stack's noise floor from its measured and predicted noise.
+def measure_stack_fixed_pattern_noise(
+    measured_noise: float,
+    predicted_random_noise: float,
+    apertures: int,
+    model_error: NoiseModelError | None = None,
+) -> StackFixedPatternNoise:
+    """Find a stack's fixed-pattern noise from measured and predicted noise.
 
-    ``floor^2 = measured^2 - random^2``. It is kept only when the variance
-    ratio ``measured^2 / random^2`` is above 1 by `MODEL_AGREEMENT_SIGMAS`
-    standard errors, where the error is `total_variance_ratio_error`: the
-    aperture error (the measured noise has the relative error
+    ``fixed_pattern^2 = measured^2 - random^2``. It is kept only when the
+    variance ratio ``measured^2 / random^2`` is above 1 by
+    `MODEL_AGREEMENT_SIGMAS` standard errors, where the error is
+    `total_variance_ratio_error`: the aperture error (the measured noise has
+    the relative error
     ``1.17 / sqrt(n)``, `aperture_noise_relative_error`, so its variance has
     twice that) and the expected-noise model's own error (validation register
-    entry STK-36), added in quadrature. This is the same test the loss
-    account uses before it reports "cause unknown", so a stack that account
-    calls "within error" has no floor here. The floor value itself is
-    unchanged by the test.
+    entry STK-36), added in quadrature. This is the same test the loss account
+    uses before it reports "cause unknown", so a stack that account calls
+    "within error" has no fixed-pattern noise here. The fixed-pattern noise
+    value itself is unchanged by the test.
 
     Parameters
     ----------
@@ -1562,12 +1964,18 @@ def measure_stack_noise_floor(
     apertures : `int`
         The number of empty apertures behind the measured noise (at least
         2).
+    model_error : `NoiseModelError`, optional
+        The noise model's own relative error and where it came from. The
+        stand-in `EXPECTED_NOISE_MODEL_RELATIVE_ERROR` when omitted.
 
     Returns
     -------
-    floor : `StackNoiseFloor`
-        The floor, or a result with ``floor_detected`` false and the reason.
-        ``floor_variance_error`` is the total error in variance units.
+    fixed_pattern : `StackFixedPatternNoise`
+        The fixed-pattern noise, or a result with
+        ``fixed_pattern_noise_detected`` false and the reason. Between
+        `POSSIBLE_FIXED_PATTERN_SIGMAS` and `MODEL_AGREEMENT_SIGMAS` the result
+        is ``possible`` (not detected, sizes filled).
+        ``fixed_pattern_variance_error`` is the total error in variance units.
 
     Raises
     ------
@@ -1581,44 +1989,65 @@ def measure_stack_noise_floor(
     random_variance = predicted_random_noise**2
     difference = measured_variance - random_variance
     variance_ratio = measured_variance / random_variance
-    ratio_error = total_variance_ratio_error(variance_ratio, 2.0 * relative_error * variance_ratio)
+    model_error = model_error or NoiseModelError()
+    ratio_error = total_variance_ratio_error(
+        variance_ratio, 2.0 * relative_error * variance_ratio, model_error.relative_error
+    )
     error = ratio_error * random_variance
     common = {
         "source": "single_stack",
         "measured_noise": measured_noise,
         "predicted_random_noise": predicted_random_noise,
         "apertures": apertures,
-        "floor_variance_error": error,
-        "basis": FLOOR_BASIS_MODEL,
+        "fixed_pattern_variance_error": error,
+        "basis": FIXED_PATTERN_BASIS_MODEL,
         "sigmas": (variance_ratio - 1.0) / ratio_error,
+        "model_error_basis": model_error.basis_text,
     }
     if variance_ratio - 1.0 <= MODEL_AGREEMENT_SIGMAS * ratio_error:
-        return StackNoiseFloor(
+        if variance_ratio - 1.0 >= POSSIBLE_FIXED_PATTERN_SIGMAS * ratio_error:
+            return StackFixedPatternNoise(
+                **common,
+                possible=True,
+                fixed_pattern_variance=difference,
+                fixed_pattern_noise=math.sqrt(difference),
+                fixed_pattern_to_random_variance_ratio=difference / random_variance,
+                fixed_pattern_variance_share=difference / measured_variance,
+                reason=(
+                    f"Possible fixed-pattern noise of {math.sqrt(difference):.3g} (stack units), not proven: "
+                    f"the measured noise exceeds the predicted random noise by {common['sigmas']:.1f} "
+                    f"standard errors, below the {MODEL_AGREEMENT_SIGMAS:g} needed, counting the "
+                    f"prediction's own error ({model_error.relative_error:.0%}, {model_error.basis_text})."
+                ),
+            )
+        return StackFixedPatternNoise(
             **common,
             reason=(
-                "No floor: the measured noise does not exceed the predicted random noise by "
+                "No fixed-pattern noise: the measured noise does not exceed the predicted random noise by "
                 f"{MODEL_AGREEMENT_SIGMAS:g} standard errors, counting the prediction's own error "
-                f"({difference / error:.1f} found)."
+                f"({difference / error:.1f} found; the error is {model_error.relative_error:.0%}, "
+                f"{model_error.basis_text})."
             ),
         )
-    return StackNoiseFloor(
+    return StackFixedPatternNoise(
         **common,
-        floor_variance=difference,
-        floor_detected=True,
-        floor_noise=math.sqrt(difference),
-        floor_to_random_variance_ratio=difference / random_variance,
-        floor_variance_share=difference / measured_variance,
+        fixed_pattern_variance=difference,
+        fixed_pattern_noise_detected=True,
+        fixed_pattern_noise=math.sqrt(difference),
+        fixed_pattern_to_random_variance_ratio=difference / random_variance,
+        fixed_pattern_variance_share=difference / measured_variance,
         reason=(
-            f"A floor of {math.sqrt(difference):.3g} (stack units) was found, {difference / error:.1f} "
-            f"standard errors above 0 (counting the prediction's own error) and "
+            f"Fixed-pattern noise of {math.sqrt(difference):.3g} (stack units) was found, "
+            f"{difference / error:.1f} standard errors above 0 (counting the prediction's own error, "
+            f"{model_error.relative_error:.0%}, {model_error.basis_text}) and "
             f"{100 * difference / measured_variance:.0f} percent of the measured noise variance."
         ),
     )
 
 
 @dataclass(frozen=True)
-class HalfDifferenceTest:
-    """The result of comparing a stack's noise with its half-difference noise.
+class OddEvenDifferenceTest:
+    """The result of comparing a stack's noise with its odd–even difference.
 
     Parameters
     ----------
@@ -1646,23 +2075,23 @@ class HalfDifferenceTest:
     significant: bool
 
 
-def compare_stack_noise_with_half_difference(
+def compare_stack_noise_with_odd_even_difference(
     measured_noise: float,
     measured_apertures: int,
     random_noise: float,
     random_apertures: int,
-) -> HalfDifferenceTest:
+) -> OddEvenDifferenceTest:
     """Compare a stack's noise with the random noise its halves measured.
 
-    This is the one test behind both the noise floor and the loss account's
-    "cause unknown" part when a half-difference exists, so the two cannot
-    disagree. With no fixed pattern, the full stack and the full-stack
-    equivalent of the difference have the same variance, and the
-    aperture-to-aperture scatters of the two are independent estimates of
-    it. Each variance has the relative error ``2 x 1.17 / sqrt(n)``
+    This is the one test behind both the fixed-pattern noise and the loss
+    account's "cause unknown" part when an odd–even difference exists, so the
+    two cannot disagree. With no fixed pattern, the full stack and the
+    full-stack equivalent of the difference have the same variance, and the
+    aperture-to-aperture scatters of the two are independent estimates of it.
+    Each variance has the relative error ``2 x 1.17 / sqrt(n)``
     (`aperture_noise_relative_error` doubled), so ``ln F`` has the standard
-    error ``sqrt(e1^2 + e2^2)``. Only measurement errors count: the noise
-    model plays no part.
+    error ``sqrt(e1^2 + e2^2)``. Only measurement errors count: the noise model
+    plays no part.
 
     Parameters
     ----------
@@ -1678,7 +2107,7 @@ def compare_stack_noise_with_half_difference(
 
     Returns
     -------
-    result : `HalfDifferenceTest`
+    result : `OddEvenDifferenceTest`
         The ratio, its errors and whether it is significant.
 
     Raises
@@ -1693,7 +2122,7 @@ def compare_stack_noise_with_half_difference(
     log_error = math.hypot(measured_error, random_error)
     variance_ratio = (measured_noise / random_noise) ** 2
     log_ratio = math.log(variance_ratio)
-    return HalfDifferenceTest(
+    return OddEvenDifferenceTest(
         variance_ratio=variance_ratio,
         log_ratio=log_ratio,
         log_error=log_error,
@@ -1704,28 +2133,29 @@ def compare_stack_noise_with_half_difference(
     )
 
 
-def measure_stack_noise_floor_from_half_difference(
+def measure_stack_fixed_pattern_noise_from_odd_even_difference(
     measured_noise: float,
     measured_apertures: int,
     random_noise: float,
     random_apertures: int,
-) -> StackNoiseFloor:
-    """Find a stack's noise floor from a direct random-noise measurement.
+) -> StackFixedPatternNoise:
+    """Find a stack's fixed-pattern noise from a direct random noise.
 
     The random noise comes from the odd-minus-even difference of two half
-    stacks, which cancels everything fixed on the sky (the library stack's
-    own full-stack equivalent of it, see `StackRunRecord.half_difference`).
-    With no floor, the full stack (odd plus even) and the difference have
-    the same variance, and the aperture-to-aperture scatters of the two are
-    independent estimates of it. The test is the ratio of the two variances,
+    stacks, which cancels everything fixed on the sky (the library stack's own
+    full-stack equivalent of it, see `StackRunRecord.odd_even_difference`).
+    With no fixed-pattern noise, the full stack (odd plus even) and the
+    difference have the same variance, and the aperture-to-aperture scatters of
+    the two are independent estimates of it. The test is the ratio of the two
+    variances,
     ``F = measured^2 / random^2``, on the log scale. Each variance has the
     relative error ``2 x 1.17 / sqrt(n)`` (`aperture_noise_relative_error`
     doubled), so ``ln F`` has the standard error ``sqrt(e1^2 + e2^2)``. A
-    floor is kept when ``ln F`` exceeds `MODEL_AGREEMENT_SIGMAS` times that
-    error (one-sided). Only measurement errors count: the noise model plays
-    no part, so its own error is not added, unlike in
-    `measure_stack_noise_floor`.
-    The floor's value is ``measured^2 - random^2``.
+    fixed-pattern noise is kept when ``ln F`` exceeds `MODEL_AGREEMENT_SIGMAS`
+    times that error (one-sided). Only measurement errors count: the noise
+    model plays no part, so its own error is not added, unlike in
+    `measure_stack_fixed_pattern_noise`. The fixed-pattern noise's value is
+    ``measured^2 - random^2``.
 
     Parameters
     ----------
@@ -1734,20 +2164,21 @@ def measure_stack_noise_floor_from_half_difference(
     measured_apertures : `int`
         The apertures behind ``measured_noise`` (at least 2).
     random_noise : `float`
-        The full-stack equivalent of the half-difference noise, in the same
+        The full-stack equivalent of the odd–even difference noise, in the same
         unit as ``measured_noise``.
     random_apertures : `int`
         The apertures behind the difference noise (at least 2).
 
     Returns
     -------
-    floor : `StackNoiseFloor`
-        The floor, or a result with ``floor_detected`` false and the reason.
-        ``basis`` is ``"half_difference"``; ``floor_variance_error`` is the
+    fixed_pattern : `StackFixedPatternNoise`
+        The fixed-pattern noise, or a result with
+        ``fixed_pattern_noise_detected`` false and the reason. ``basis`` is
+        ``"odd_even_difference"``; ``fixed_pattern_variance_error`` is the
         error of ``measured^2 - random^2`` in variance units, ``sigmas`` is
         ``ln F`` over its error.
     """
-    test = compare_stack_noise_with_half_difference(
+    test = compare_stack_noise_with_odd_even_difference(
         measured_noise, measured_apertures, random_noise, random_apertures
     )
     measured_variance = measured_noise**2
@@ -1762,112 +2193,137 @@ def measure_stack_noise_floor_from_half_difference(
         "measured_noise": measured_noise,
         "predicted_random_noise": random_noise,
         "apertures": measured_apertures,
-        "floor_variance_error": error,
-        "basis": FLOOR_BASIS_HALF_DIFFERENCE,
+        "fixed_pattern_variance_error": error,
+        "basis": FIXED_PATTERN_BASIS_ODD_EVEN_DIFFERENCE,
         "sigmas": sigmas,
     }
-    if not test.significant:
-        return StackNoiseFloor(
+    if not test.significant and sigmas >= POSSIBLE_FIXED_PATTERN_SIGMAS:
+        return StackFixedPatternNoise(
             **common,
+            possible=True,
+            fixed_pattern_variance=difference,
+            fixed_pattern_noise=math.sqrt(difference),
+            fixed_pattern_to_random_variance_ratio=difference / random_variance,
+            fixed_pattern_variance_share=difference / measured_variance,
             reason=(
-                "No floor: the full stack's noise does not exceed the random noise measured from the odd "
-                f"and even half stacks by {MODEL_AGREEMENT_SIGMAS:g} standard errors ({sigmas:.1f} found)."
+                f"Possible fixed-pattern noise of {math.sqrt(difference):.3g} (stack units), not proven: "
+                f"the full stack's noise exceeds the random noise measured from the odd and even half "
+                f"stacks by {sigmas:.1f} standard errors, below the {MODEL_AGREEMENT_SIGMAS:g} needed."
             ),
         )
-    return StackNoiseFloor(
+    if not test.significant:
+        return StackFixedPatternNoise(
+            **common,
+            reason=(
+                "No fixed-pattern noise: the full stack's noise does not exceed the random noise "
+                f"measured from the odd and even half stacks by {MODEL_AGREEMENT_SIGMAS:g} "
+                f"standard errors ({sigmas:.1f} found)."
+            ),
+        )
+    return StackFixedPatternNoise(
         **common,
-        floor_variance=difference,
-        floor_detected=True,
-        floor_noise=math.sqrt(difference),
-        floor_to_random_variance_ratio=difference / random_variance,
-        floor_variance_share=difference / measured_variance,
+        fixed_pattern_variance=difference,
+        fixed_pattern_noise_detected=True,
+        fixed_pattern_noise=math.sqrt(difference),
+        fixed_pattern_to_random_variance_ratio=difference / random_variance,
+        fixed_pattern_variance_share=difference / measured_variance,
         reason=(
-            f"A floor of {math.sqrt(difference):.3g} (stack units) was found, measured from the odd and "
-            f"even half stacks: the full stack's variance is {measured_variance / random_variance:.2f} "
-            f"times the random variance, {sigmas:.1f} standard errors above 1 on the log scale, and "
-            f"the floor is {100 * difference / measured_variance:.0f} percent of the measured noise variance."
+            f"Fixed-pattern noise of {math.sqrt(difference):.3g} (stack units) was found, "
+            f"measured from the odd and even half stacks: the full stack's variance is "
+            f"{measured_variance / random_variance:.2f} times the random variance, {sigmas:.1f} "
+            f"standard errors above 1 on the log scale, and the fixed-pattern noise is "
+            f"{100 * difference / measured_variance:.0f} percent of the measured noise variance."
         ),
     )
 
 
-def choose_noise_floor(
-    single_stack: StackNoiseFloor | None,
-    fit: NoiseFloorFit | None = None,
+def choose_fixed_pattern_noise(
+    single_stack: StackFixedPatternNoise | None,
+    fit: FixedPatternNoiseFit | None = None,
     current_expected_variance: float | None = None,
-) -> StackNoiseFloor | None:
-    """Pick the floor the forecast uses when one or both estimates exist.
+) -> StackFixedPatternNoise | None:
+    """Pick the fixed-pattern noise the forecast uses from the estimates.
 
-    There are two estimates. `measure_stack_noise_floor` uses the one stack
-    being extended and the library's own prediction (whose scale was checked
-    on the half-stack noise, within 1 to 5 percent). `fit_noise_floor` uses
-    two or more stacks and fits the model's scale as well, so it does not
-    depend on the prediction being right in scale. The rule:
+    There are two estimates. `measure_stack_fixed_pattern_noise` uses the one
+    stack being extended and the library's own prediction (whose scale was
+    checked on the half-stack noise, within 1 to 5 percent).
+    `fit_fixed_pattern_noise` uses two or more stacks and fits the model's
+    scale as well, so it does not depend on the prediction being right in
+    scale. The rule:
 
-    0. A floor measured from the odd and even half stacks
-       (`measure_stack_noise_floor_from_half_difference`) is used as it is.
-       It measures the random noise directly, so neither the noise model nor
-       a fit is consulted.
+    0. Fixed-pattern noise measured from the odd and even half stacks
+       (`measure_stack_fixed_pattern_noise_from_odd_even_difference`) is used
+       as it is. It measures the random noise directly, so neither the noise
+       model nor a fit is consulted.
     1. A fit with at least one degree of freedom (the stacks' scatter checks
-       the line) that finds a floor wins. Its floor enters the forecast as a
-       fraction ``b / (alpha * expected_variance)`` of today's stack.
+       the line) that finds fixed-pattern noise wins. Its fixed-pattern noise
+       enters the forecast as a fraction ``b / (alpha * expected_variance)`` of
+       today's stack.
     2. Otherwise the single-stack result is used, found or not. A fit that
-       found no floor with a degree of freedom, or one that has none, is
-       named in the reason but does not override it.
-    3. With no single-stack result, a fit that found a floor is used as it
+       found no fixed-pattern noise with a degree of freedom, or one that has
+       none, is named in the reason but does not override it.
+    3. With no single-stack result, a fit that found fixed-pattern noise is
+    used as it
        is (its reason says it has no check when it has none).
 
     Parameters
     ----------
-    single_stack : `StackNoiseFloor` or `None`
-        The result of `measure_stack_noise_floor`, or ``None`` when the stack
-        has no stored predicted noise.
-    fit : `NoiseFloorFit` or `None`
-        The result of `fit_noise_floor` over the target's stacks, if any.
+    single_stack : `StackFixedPatternNoise` or `None`
+        The result of `measure_stack_fixed_pattern_noise`, or ``None`` when the
+        stack has no stored predicted noise.
+    fit : `FixedPatternNoiseFit` or `None`
+        The result of `fit_fixed_pattern_noise` over the target's stacks, if
+        any.
     current_expected_variance : `float`, optional
         The expected variance of today's stack, in the fit's units. Needed to
         use a fit.
 
     Returns
     -------
-    floor : `StackNoiseFloor` or `None`
-        The chosen floor, or ``None`` when there is no estimate at all.
+    fixed_pattern : `StackFixedPatternNoise` or `None`
+        The chosen fixed_pattern, or ``None`` when there is no estimate at all.
     """
-    if single_stack is not None and single_stack.basis == FLOOR_BASIS_HALF_DIFFERENCE:
+    if single_stack is not None and single_stack.basis == FIXED_PATTERN_BASIS_ODD_EVEN_DIFFERENCE:
         # The direct measurement of the random noise decides (user decision
         # 2026-10-26); a fit that disagrees is not allowed to override it.
         return single_stack
-    fit_floor = None
+    fit_fixed_pattern = None
     fit_note = ""
-    if fit is not None and fit.floor_variance is not None and fit.alpha is not None:
+    if fit is not None and fit.fixed_pattern_variance is not None and fit.alpha is not None:
         if current_expected_variance is None or current_expected_variance <= 0.0 or fit.alpha <= 0.0:
             fit_note = " The fit could not be used: today's expected variance is missing."
-        elif fit.floor_detected and fit.floor_variance > 0.0:
-            ratio = fit.floor_variance / (fit.alpha * current_expected_variance)
+        elif fit.fixed_pattern_noise_detected and fit.fixed_pattern_variance > 0.0:
+            ratio = fit.fixed_pattern_variance / (fit.alpha * current_expected_variance)
             share = ratio / (1.0 + ratio)
             random_noise = single_stack.predicted_random_noise if single_stack is not None else None
             stack_units = random_noise is not None
-            floor_noise = math.sqrt(ratio) * random_noise if random_noise is not None else fit.floor_noise
-            fit_floor = StackNoiseFloor(
+            fixed_pattern_noise = (
+                math.sqrt(ratio) * random_noise if random_noise is not None else fit.fixed_pattern_noise
+            )
+            fit_fixed_pattern = StackFixedPatternNoise(
                 source="fit",
                 measured_noise=single_stack.measured_noise if single_stack else None,
                 predicted_random_noise=single_stack.predicted_random_noise if single_stack else None,
                 apertures=single_stack.apertures if single_stack else None,
-                floor_variance=fit.floor_variance,
-                floor_variance_error=fit.floor_variance_error,
-                floor_detected=True,
-                floor_noise=floor_noise,
-                floor_to_random_variance_ratio=ratio,
-                floor_variance_share=share,
+                fixed_pattern_variance=fit.fixed_pattern_variance,
+                fixed_pattern_variance_error=fit.fixed_pattern_variance_error,
+                fixed_pattern_noise_detected=True,
+                fixed_pattern_noise=fixed_pattern_noise,
+                fixed_pattern_to_random_variance_ratio=ratio,
+                fixed_pattern_variance_share=share,
                 normalized_units=not stack_units,
-                basis=FLOOR_BASIS_FIT,
-                reason=f"The fit over {fit.steps_used} stacks found a floor. {fit.reason}",
+                basis=FIXED_PATTERN_BASIS_FIT,
+                reason=f"The fit over {fit.steps_used} stacks found fixed-pattern noise. {fit.reason}",
             )
             if fit.degrees_of_freedom >= 1 or single_stack is None:
-                return fit_floor
-            fit_note = " A two-stack fit also found a floor, but it has no degree of freedom to check it."
+                return fit_fixed_pattern
+            fit_note = (
+                " A two-stack fit also found fixed-pattern noise, but it has no degree of freedom "
+                "to check it."
+            )
         else:
             fit_note = (
-                f" The fit over {fit.steps_used} stacks found no floor"
+                f" The fit over {fit.steps_used} stacks found no fixed-pattern noise"
                 + ("" if fit.degrees_of_freedom >= 1 else " (and has no degree of freedom)")
                 + "."
             )
@@ -1876,24 +2332,24 @@ def choose_noise_floor(
     return single_stack.model_copy(update={"reason": single_stack.reason + fit_note})
 
 
-def noise_ratio_with_floor(
-    current: NoiseForecast, later: NoiseForecast | None, floor: StackNoiseFloor | None
+def noise_ratio_with_fixed_pattern_noise(
+    current: NoiseForecast, later: NoiseForecast | None, fixed_pattern: StackFixedPatternNoise | None
 ) -> float | None:
-    """Give the predicted noise after over the noise now, floor included.
+    """Give the predicted noise over the noise now, with fixed-pattern noise.
 
-    The model gives the random variance of today's stack, ``V_now``, and of
-    the later stack, ``V_later``, in one set of units. A floor is carried as a
-    fraction ``f`` of ``V_now``
-    (`StackNoiseFloor.floor_to_random_variance_ratio`), so no unit
-    conversion is needed. The measured noise today is
+    The model gives the random variance of today's stack, ``V_now``, and of the
+    later stack, ``V_later``, in one set of units. Fixed-pattern noise is
+    carried as a fraction ``f`` of ``V_now``
+    (`StackFixedPatternNoise.fixed_pattern_to_random_variance_ratio`), so no
+    unit conversion is needed. The measured noise today is
     ``V_now (1 + f)``; later it is ``V_later + f V_now tau^2``, so the ratio is
 
         sqrt((V_later + f V_now tau^2) / (V_now (1 + f))) / tau
 
     where ``tau`` is 1, except in the ``group`` mode, where the combine scales
     the result by the mean exposure ``t_bar`` and ``tau = t_bar_later /
-    t_bar_now``. The floor is taken as a fixed pattern on the sky in rate
-    units (the cause the validation favors: faint stars), so it follows
+    t_bar_now``. The fixed-pattern noise is taken as a fixed pattern on the sky
+    in rate units (the cause the validation favors: faint stars), so it follows
     ``t_bar`` in the stack's scale. The last division by ``tau`` takes the
     ratio back out of the stack's scale. The stack's measured noise is
     compared as a fraction of its reference stars' flux (the normalized
@@ -1907,8 +2363,8 @@ def noise_ratio_with_floor(
         The forecast of today's stack.
     later : `NoiseForecast` or `None`
         The forecast of the larger stack.
-    floor : `StackNoiseFloor` or `None`
-        The floor, if one was found.
+    fixed_pattern : `StackFixedPatternNoise` or `None`
+        The fixed-pattern noise, if one was found.
 
     Returns
     -------
@@ -1923,12 +2379,56 @@ def noise_ratio_with_floor(
     tau = 1.0
     if current.mean_exposure_seconds and later.mean_exposure_seconds:
         tau = later.mean_exposure_seconds / current.mean_exposure_seconds
-    if floor is None or not floor.floor_detected or floor.floor_to_random_variance_ratio is None:
+    if (
+        fixed_pattern is None
+        or not fixed_pattern.fixed_pattern_noise_detected
+        or fixed_pattern.fixed_pattern_to_random_variance_ratio is None
+    ):
         return later.noise / current.noise / tau
-    fraction = floor.floor_to_random_variance_ratio
+    fraction = fixed_pattern.fixed_pattern_to_random_variance_ratio
     later_total = later.variance + fraction * current.variance * tau**2
     now_total = current.variance * (1.0 + fraction)
     return math.sqrt(later_total / now_total) / tau
+
+
+def noise_ratio_for_ranking(
+    current: NoiseForecast, later: NoiseForecast | None, fixed_pattern: StackFixedPatternNoise | None
+) -> float | None:
+    """Give the one noise ratio the tonight ranking uses.
+
+    With found or no fixed-pattern noise this is
+    `noise_ratio_with_fixed_pattern_noise`. With a possible one
+    (`StackFixedPatternNoise.possible`) it is the midpoint of the two cases on
+    the log scale: the geometric mean of the ratio without the pattern and the
+    ratio with it. Why the midpoint and not the low end: the low end would drop
+    a target's gain by the whole range the moment its significance crossed 1
+    standard error, the same cliff the range was made to remove, and would rank
+    unproven noise as if it were found. The midpoint halves each step (at 1 and
+    at 2 standard errors) and is symmetric in the evidence, so a target is
+    neither favored nor penalized for a pattern that is not proven. The target
+    report shows the full range.
+
+    Parameters
+    ----------
+    current : `NoiseForecast`
+        The forecast of today's stack.
+    later : `NoiseForecast` or `None`
+        The forecast of the larger stack.
+    fixed_pattern : `StackFixedPatternNoise` or `None`
+        The stack's fixed-pattern noise, found, possible or neither.
+
+    Returns
+    -------
+    ratio : `float` or `None`
+        Later noise over today's; ``None`` when a forecast is missing.
+    """
+    if fixed_pattern is None or not fixed_pattern.possible:
+        return noise_ratio_with_fixed_pattern_noise(current, later, fixed_pattern)
+    without = noise_ratio_with_fixed_pattern_noise(current, later, None)
+    with_pattern = noise_ratio_with_fixed_pattern_noise(current, later, fixed_pattern.if_real())
+    if without is None or with_pattern is None:
+        return None
+    return math.sqrt(without * with_pattern)
 
 
 # -----------------------------------------------------------------------------
@@ -2697,7 +3197,7 @@ def frames_to_cut_noise_in_groups(
     *,
     new_exposure_seconds: float | None = None,
     electrons_per_adu: float | None = None,
-    floor: StackNoiseFloor | None = None,
+    fixed_pattern: StackFixedPatternNoise | None = None,
     target_noise_ratio: float = TARGET_NOISE_RATIO,
     maximum_new_frames: int = MAXIMUM_NEW_FRAMES,
 ) -> TakeMoreResult:
@@ -2705,10 +3205,11 @@ def frames_to_cut_noise_in_groups(
 
     Each trial adds N copies of the template frames (cycled, as in
     `frames_to_cut_noise`) and builds the later stack with `plan_group_stack`,
-    so the number comes from the model the gate checks. A new exposure length
-    is never suggested with fewer than `MINIMUM_FRAMES_NEW_EXPOSURE_LENGTH`
-    frames: the search starts there, because the stacker would fold a smaller
-    set into another group. A floor is applied as in `frames_to_cut_noise`.
+    so the number comes from the model the forecast check tests. A new
+    exposure length is never suggested with fewer than
+    `MINIMUM_FRAMES_NEW_EXPOSURE_LENGTH` frames: the search starts there,
+    because the stacker would fold a smaller set into another group.
+    Fixed-pattern noise is applied as in `frames_to_cut_noise`.
 
     Parameters
     ----------
@@ -2720,8 +3221,8 @@ def frames_to_cut_noise_in_groups(
         The exposure the new frames will have. ``None`` keeps the template's.
     electrons_per_adu : `float`, optional
         The camera gain, for a new group (see `plan_group_stack`).
-    floor : `StackNoiseFloor`, optional
-        The stack's noise floor, when one was found.
+    fixed_pattern : `StackFixedPatternNoise`, optional
+        The stack's fixed-pattern noise, when one was found.
     target_noise_ratio : `float`, optional
         The noise after over the noise now. The default is 0.707.
     maximum_new_frames : `int`, optional
@@ -2730,10 +3231,10 @@ def frames_to_cut_noise_in_groups(
     Returns
     -------
     result : `TakeMoreResult`
-        N and the predicted ratio, or ``None`` with a reason (a floor that
-        limits the answer, a group the stacker would leave out, a missing
-        fact). The result also says whether the frames start a new group and
-        whether the heaviest group changes.
+        N and the predicted ratio, or ``None`` with a reason (fixed-pattern
+        noise that limits the answer, a group the stacker would leave out, a
+        missing fact). The result also says whether the frames start a new
+        group and whether the heaviest group changes.
     """
     current = forecast_group_noise(existing_groups)
     if current.noise is None:
@@ -2780,28 +3281,30 @@ def frames_to_cut_noise_in_groups(
             new_exposure_group=starts_new_group,
         )
 
-    def ratio_for(count: int) -> float | None:
+    def ratio_for(count: int, pattern: StackFixedPatternNoise | None) -> float | None:
         """Give the predicted noise ratio after adding `count` frames.
 
         Parameters
         ----------
         count : `int`
             Frames to add.
+        pattern : `StackFixedPatternNoise` or `None`
+            The fixed-pattern noise to apply.
 
         Returns
         -------
         ratio : `float` or `None`
             Later noise over today's.
         """
-        return noise_ratio_with_floor(current, plan_for(count).forecast, floor)
+        return noise_ratio_with_fixed_pattern_noise(current, plan_for(count).forecast, pattern)
 
-    result = _take_more_result(
+    result = _take_more_result_graded(
         ratio_for,
         minimum_count=minimum_count,
         maximum_count=maximum_new_frames,
         target_noise_ratio=target_noise_ratio,
         exposure_seconds=exposure,
-        floor=floor,
+        fixed_pattern=fixed_pattern,
         held_exposure_seconds=sum(
             frame.exposure_seconds for group in existing_groups for frame in group.frames
         ),

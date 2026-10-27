@@ -22,6 +22,7 @@ from astrometricslib import (
     frame_subject_id,
 )
 from wayfindinglib.analytics.result_quality.efficiency import (
+    PINNED_METRIC_VERSIONS,
     READ_NOISE_METRIC,
     SKY_NOISE_METRIC,
     SKY_RATE_METRIC,
@@ -130,9 +131,9 @@ def make_rows(
         sky = 1.0 if bad else 0.5
         for metric, version, value in (
             (STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC, 1, width if bad else 2.0),
-            (SKY_RATE_METRIC, 2, sky),
-            (SKY_NOISE_METRIC, 2, (sky * 60.0) ** 0.5),
-            (READ_NOISE_METRIC, 1, 3.0),
+            (SKY_RATE_METRIC, PINNED_METRIC_VERSIONS[SKY_RATE_METRIC], sky),
+            (SKY_NOISE_METRIC, PINNED_METRIC_VERSIONS[SKY_NOISE_METRIC], (sky * 60.0) ** 0.5),
+            (READ_NOISE_METRIC, PINNED_METRIC_VERSIONS[READ_NOISE_METRIC], 3.0),
         ):
             rows.append(make_row(metric, version, value, target, frame))
         if bad:

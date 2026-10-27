@@ -30,6 +30,7 @@ from astrometricslib import (
 from wayfindinglib.analytics.result_quality import forecast as fc
 from wayfindinglib.analytics.result_quality.capture_overheads import CaptureOverheads
 from wayfindinglib.analytics.result_quality.efficiency import (
+    PINNED_METRIC_VERSIONS,
     READ_NOISE_METRIC,
     SKY_NOISE_METRIC,
     SKY_RATE_METRIC,
@@ -44,7 +45,7 @@ from wayfindinglib.analytics.result_quality.noise_growth import (
 )
 from wayfindinglib.analytics.result_quality.sky_model import SkyModel
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
-from wayfindinglib.models.planning.target_report import ForecastGate
+from wayfindinglib.models.planning.target_report import RecommendedAdditionalFramesStatus
 from wayfindinglib.models.planning.tonight_ranking import CandidateStatus, RankedCandidate, RankedUse
 from wayfindinglib.tasks.planning_tasks import tonight_ranking_tasks as tr
 
@@ -131,9 +132,9 @@ def _frame_rows(target: Target, sky: float = 0.5, width: float = 3.0) -> list[Qu
         )
         for metric, version, value in (
             (STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC, 1, width),
-            (SKY_RATE_METRIC, 2, sky),
-            (SKY_NOISE_METRIC, 2, (sky * 60.0) ** 0.5),
-            (READ_NOISE_METRIC, 1, 3.0),
+            (SKY_RATE_METRIC, PINNED_METRIC_VERSIONS[SKY_RATE_METRIC], sky),
+            (SKY_NOISE_METRIC, PINNED_METRIC_VERSIONS[SKY_NOISE_METRIC], (sky * 60.0) ** 0.5),
+            (READ_NOISE_METRIC, PINNED_METRIC_VERSIONS[READ_NOISE_METRIC], 3.0),
         ):
             rows.append(
                 QualityMeasurement(
@@ -397,7 +398,7 @@ def test_a_brighter_sky_lowers_the_gain() -> None:
 
 
 def test_a_target_past_its_stop_signal_is_ranked_at_zero() -> None:
-    """A floor fitted over several stacks ranks the target at zero."""
+    """Fixed-pattern noise fitted over several stacks ranks at zero."""
     stopped = _target(M81, 10)
     healthy = _target(NGC_7331, 10)
     expected = [8.0, 4.0, 2.0, 1.0]
@@ -416,7 +417,7 @@ def test_a_target_past_its_stop_signal_is_ranked_at_zero() -> None:
     assert (second.target_id, second.status) == ("M 81", CandidateStatus.STOPPED)
     assert second.gain_per_hour_fraction == pytest.approx(0.0)
     assert second.rank == 2
-    assert "floor" in second.reason
+    assert "fixed-pattern noise" in second.reason
 
 
 def test_a_target_with_frames_but_no_stack_is_forecast_from_its_frames() -> None:
@@ -610,9 +611,9 @@ def _group_stack_library(measured: float, expected: float) -> FakeLibrary:
         )
         for metric, version, value in (
             (STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC, 1, width),
-            (SKY_RATE_METRIC, 2, sky),
-            (SKY_NOISE_METRIC, 2, (sky * exposure) ** 0.5),
-            (READ_NOISE_METRIC, 1, 3.0),
+            (SKY_RATE_METRIC, PINNED_METRIC_VERSIONS[SKY_RATE_METRIC], sky),
+            (SKY_NOISE_METRIC, PINNED_METRIC_VERSIONS[SKY_NOISE_METRIC], (sky * exposure) ** 0.5),
+            (READ_NOISE_METRIC, PINNED_METRIC_VERSIONS[READ_NOISE_METRIC], 3.0),
         ):
             rows.append(
                 QualityMeasurement(
@@ -708,15 +709,17 @@ def test_a_group_stack_is_ranked_with_the_group_model() -> None:
     assert "weights were not recorded" not in candidate.reason
 
 
-def test_a_noise_floor_lowers_the_gain_of_a_group_stack() -> None:
-    """A floor (measured above expected) lowers the gain per hour."""
+def test_a_fixed_pattern_noise_lowers_the_gain_of_a_group_stack() -> None:
+    """Fixed-pattern noise over expected noise lowers the gain per hour."""
     without = _rank(_group_stack_library(measured=4.0, expected=4.0)).lists[0].candidates[0]
-    with_floor = _rank(_group_stack_library(measured=5.5, expected=4.0)).lists[0].candidates[0]
+    with_fixed_pattern = _rank(_group_stack_library(measured=5.5, expected=4.0)).lists[0].candidates[0]
 
-    assert (with_floor.gain_per_hour_fraction or 0.0) < (without.gain_per_hour_fraction or 0.0)
+    assert (with_fixed_pattern.gain_per_hour_fraction or 0.0) < (without.gain_per_hour_fraction or 0.0)
 
 
-def _candidate(target_id: str, gain: float, gate: ForecastGate) -> RankedCandidate:
+def _candidate(
+    target_id: str, gain: float, frames_status: RecommendedAdditionalFramesStatus
+) -> RankedCandidate:
     """Build a ranked candidate with a given gain and count basis.
 
     Parameters
@@ -725,8 +728,8 @@ def _candidate(target_id: str, gain: float, gate: ForecastGate) -> RankedCandida
         The target.
     gain : `float`
         The gain per hour, as a fraction.
-    gate : `ForecastGate`
-        Whether the target's count is confirmed, exploratory or closed.
+    frames_status : `RecommendedAdditionalFramesStatus`
+        Whether the target's count is confirmed, provisional or not checked.
 
     Returns
     -------
@@ -738,16 +741,16 @@ def _candidate(target_id: str, gain: float, gate: ForecastGate) -> RankedCandida
         use=RankedUse.IMAGING,
         status=CandidateStatus.RANKED,
         gain_per_hour_fraction=gain,
-        forecast_gate=gate,
+        recommended_additional_frames_status=frames_status,
     )
 
 
-def test_an_exploratory_count_ranks_below_a_confirmed_one_of_the_same_gain() -> None:
-    """Gains equal to the whole percent tie; the exploratory one goes last."""
+def test_an_provisional_count_ranks_below_a_confirmed_one_of_the_same_gain() -> None:
+    """Gains equal to the whole percent tie; the provisional one goes last."""
     candidates = [
-        _candidate("A", 0.2040, ForecastGate.EXPLORATORY),
-        _candidate("B", 0.2010, ForecastGate.CONFIRMED),
-        _candidate("C", 0.2000, ForecastGate.CLOSED),
+        _candidate("A", 0.2040, RecommendedAdditionalFramesStatus.PROVISIONAL),
+        _candidate("B", 0.2010, RecommendedAdditionalFramesStatus.CONFIRMED),
+        _candidate("C", 0.2000, RecommendedAdditionalFramesStatus.NOT_CHECKED),
     ]
 
     lists, _notes = tr.build_lists(candidates)
@@ -756,11 +759,11 @@ def test_an_exploratory_count_ranks_below_a_confirmed_one_of_the_same_gain() -> 
     assert order == [("B", 1), ("C", 2), ("A", 3)]
 
 
-def test_a_clearly_larger_gain_still_ranks_first_even_when_exploratory() -> None:
-    """The exploratory rule is a tie-break: a larger gain still wins."""
+def test_a_clearly_larger_gain_still_ranks_first_even_when_provisional() -> None:
+    """The provisional rule is a tie-break: a larger gain still wins."""
     candidates = [
-        _candidate("A", 0.30, ForecastGate.EXPLORATORY),
-        _candidate("B", 0.10, ForecastGate.CONFIRMED),
+        _candidate("A", 0.30, RecommendedAdditionalFramesStatus.PROVISIONAL),
+        _candidate("B", 0.10, RecommendedAdditionalFramesStatus.CONFIRMED),
     ]
 
     lists, _notes = tr.build_lists(candidates)
@@ -768,11 +771,11 @@ def test_a_clearly_larger_gain_still_ranks_first_even_when_exploratory() -> None
     assert [c.target_id for c in lists[0].candidates] == ["A", "B"]
 
 
-def test_without_exploratory_counts_the_order_is_by_gain_as_before() -> None:
-    """Targets with no exploratory count keep the order of their gains."""
+def test_without_provisional_counts_the_order_is_by_gain_as_before() -> None:
+    """Targets with no provisional count keep the order of their gains."""
     candidates = [
-        _candidate("B", 0.2000, ForecastGate.CLOSED),
-        _candidate("A", 0.2040, ForecastGate.CONFIRMED),
+        _candidate("B", 0.2000, RecommendedAdditionalFramesStatus.NOT_CHECKED),
+        _candidate("A", 0.2040, RecommendedAdditionalFramesStatus.CONFIRMED),
     ]
 
     lists, _notes = tr.build_lists(candidates)
@@ -780,27 +783,39 @@ def test_without_exploratory_counts_the_order_is_by_gain_as_before() -> None:
     assert [c.target_id for c in lists[0].candidates] == ["A", "B"]
 
 
-def test_the_ranking_marks_a_target_whose_count_is_exploratory(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Each target's gate is kept on its candidate and said in its reason."""
-    gates = {"M 81": ForecastGate.EXPLORATORY, "NGC 7331": ForecastGate.CONFIRMED}
+def test_the_ranking_marks_a_target_whose_count_is_provisional(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each target's status is kept on its candidate and said in its reason."""
+    statuses = {
+        "M 81": RecommendedAdditionalFramesStatus.PROVISIONAL,
+        "NGC 7331": RecommendedAdditionalFramesStatus.CONFIRMED,
+    }
     monkeypatch.setattr(
         tr,
-        "forecast_gate_of_target",
-        lambda _library, target_id, *_args, **_keywords: gates.get(target_id, ForecastGate.CLOSED),
+        "recommended_additional_frames_status_of_target",
+        lambda _library, target_id, *_args, **_keywords: statuses.get(
+            target_id, RecommendedAdditionalFramesStatus.NOT_CHECKED
+        ),
     )
 
     ranking = _rank(_library())
 
     by_id = {c.target_id: c for c in ranking.lists[0].candidates}
-    assert by_id["M 81"].forecast_gate == ForecastGate.EXPLORATORY
-    assert tr.EXPLORATORY_RANKING_REMARK in by_id["M 81"].reason
-    assert by_id["NGC 7331"].forecast_gate == ForecastGate.CONFIRMED
-    assert tr.EXPLORATORY_RANKING_REMARK not in by_id["NGC 7331"].reason
-    assert by_id["NGC 6946"].forecast_gate == ForecastGate.CLOSED
+    assert by_id["M 81"].recommended_additional_frames_status == RecommendedAdditionalFramesStatus.PROVISIONAL
+    assert tr.PROVISIONAL_RANKING_REMARK in by_id["M 81"].reason
+    assert (
+        by_id["NGC 7331"].recommended_additional_frames_status == RecommendedAdditionalFramesStatus.CONFIRMED
+    )
+    assert tr.PROVISIONAL_RANKING_REMARK not in by_id["NGC 7331"].reason
+    assert (
+        by_id["NGC 6946"].recommended_additional_frames_status
+        == RecommendedAdditionalFramesStatus.NOT_CHECKED
+    )
 
 
-def test_the_real_gate_of_a_target_with_one_stack_is_closed() -> None:
-    """A target with one stack and no subset has no check: closed."""
+def test_the_real_status_of_a_target_with_one_stack_is_not_checked() -> None:
+    """A target with one stack and no subset has no check: not checked."""
     ranking = _rank(_library())
 
-    assert {c.forecast_gate for c in ranking.lists[0].candidates} == {ForecastGate.CLOSED}
+    assert {c.recommended_additional_frames_status for c in ranking.lists[0].candidates} == {
+        RecommendedAdditionalFramesStatus.NOT_CHECKED
+    }

@@ -44,16 +44,17 @@ class ForecastBasis(StrEnum):
     EARLIER_NIGHTS_SUBSET = "earlier_nights_subset"
 
 
-class ForecastGate(StrEnum):
+class RecommendedAdditionalFramesStatus(StrEnum):
     """Whether "take N more" may be shown for a target, and on what footing.
 
-    ``closed`` hides the count. ``exploratory`` shows it after a check made
-    from frames already taken agreed; the next real stack confirms or closes
-    it. ``confirmed`` shows it after a check of two library stacks agreed.
+    ``not_checked`` hides the count. ``provisional`` shows it after a check
+    made from frames already taken agreed; the next real stack confirms or
+    withdraws it. ``confirmed`` shows it after a check of two library stacks
+    agreed.
     """
 
-    CLOSED = "closed"
-    EXPLORATORY = "exploratory"
+    NOT_CHECKED = "not_checked"
+    PROVISIONAL = "provisional"
     CONFIRMED = "confirmed"
 
 

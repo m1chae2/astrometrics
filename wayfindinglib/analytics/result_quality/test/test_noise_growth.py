@@ -3,10 +3,11 @@
 Description: Checks the stack variance for equal weights, noise weights and
 star-width weights on made-up frames, the known penalty of equal weights, the
 moonlit case, mode identification, the take-N-more search, the stacker
-constant it copies, and the noise-floor fit.
+constant it copies, and the fixed-pattern noise fit.
 """
 
 import math
+from collections.abc import Callable
 
 import numpy as np
 import pytest
@@ -433,7 +434,7 @@ def test_take_more_in_groups_for_an_existing_length_matches_the_plan() -> None:
             Later noise over today's.
         """
         later = ng.plan_group_stack(existing, _new_copies(template, count, 60.0)).forecast
-        value = ng.noise_ratio_with_floor(current, later, None)
+        value = ng.noise_ratio_with_fixed_pattern_noise(current, later, None)
         assert value is not None
         return value
 
@@ -465,7 +466,7 @@ def _new_copies(template: list[StackFrame], count: int, exposure: float) -> list
 
 
 # -----------------------------------------------------------------------------
-# The noise floor of one stack (decision D8)
+# The fixed-pattern noise of one stack (decision D8)
 # -----------------------------------------------------------------------------
 
 # Measured and random noise of the validation stacks, in stack units
@@ -474,138 +475,151 @@ def _new_copies(template: list[StackFrame], count: int, exposure: float) -> list
 APERTURES_FOR_11_7_PERCENT = 100
 
 
-def test_m27_has_a_clear_noise_floor() -> None:
+def test_m27_has_a_clear_fixed_pattern_noise() -> None:
     """M 27, 60 s: 3.097e-3 measured against 1.048e-3 random."""
-    floor = ng.measure_stack_noise_floor(3.097e-3, 1.048e-3, APERTURES_FOR_11_7_PERCENT)
-    assert floor.floor_detected
-    assert floor.floor_noise == pytest.approx(math.sqrt(3.097e-3**2 - 1.048e-3**2))
-    assert floor.floor_variance_share is not None
-    assert floor.floor_variance_share > 0.85
-    assert floor.floor_to_random_variance_ratio == pytest.approx((3.097e-3**2 - 1.048e-3**2) / 1.048e-3**2)
+    fixed_pattern = ng.measure_stack_fixed_pattern_noise(3.097e-3, 1.048e-3, APERTURES_FOR_11_7_PERCENT)
+    assert fixed_pattern.fixed_pattern_noise_detected
+    assert fixed_pattern.fixed_pattern_noise == pytest.approx(math.sqrt(3.097e-3**2 - 1.048e-3**2))
+    assert fixed_pattern.fixed_pattern_variance_share is not None
+    assert fixed_pattern.fixed_pattern_variance_share > 0.85
+    assert fixed_pattern.fixed_pattern_to_random_variance_ratio == pytest.approx(
+        (3.097e-3**2 - 1.048e-3**2) / 1.048e-3**2
+    )
 
 
-def test_m81_has_no_floor_at_two_sigma() -> None:
+def test_m81_has_no_fixed_pattern_noise_at_two_sigma() -> None:
     """M 81: 1.126e-3 measured against 0.921e-3 random is within 2 sigma."""
-    floor = ng.measure_stack_noise_floor(1.126e-3, 0.921e-3, APERTURES_FOR_11_7_PERCENT)
-    assert not floor.floor_detected
-    assert floor.floor_noise is None
-    assert "No floor" in floor.reason
+    fixed_pattern = ng.measure_stack_fixed_pattern_noise(1.126e-3, 0.921e-3, APERTURES_FOR_11_7_PERCENT)
+    assert not fixed_pattern.fixed_pattern_noise_detected
+    # 1.03 standard errors is just inside the "possible" band (decision D18).
+    assert fixed_pattern.possible
+    assert fixed_pattern.sigmas == pytest.approx(1.03, abs=0.01)
 
 
 # M 13 on a copy: measured 0.835e-3 against 0.598e-3 predicted. The test uses
 # 100 apertures (the 11.7 percent error); the stored count was not read.
-def test_m13_has_no_floor_once_the_models_own_error_is_counted() -> None:
-    """The loss account and the floor give the same answer on M 13.
+def test_m13_has_no_fixed_pattern_noise_once_the_models_own_error_is_counted() -> None:
+    """The loss account and the fixed-pattern noise agree on M 13.
 
-    The variance ratio is 1.95. With the aperture error alone the floor would
-    be 2.4 standard errors up; with the model error added it is within 2.
+    The variance ratio is 1.95. With the aperture error alone the fixed-pattern
+    noise would be 2.4 standard errors up; with the model error added it is
+    within 2.
     """
     from wayfindinglib.analytics.result_quality.aggregates import MeasuredNoiseCheck, _unknown_part
 
-    floor = ng.measure_stack_noise_floor(0.835e-3, 0.598e-3, APERTURES_FOR_11_7_PERCENT)
-    assert not floor.floor_detected
+    fixed_pattern = ng.measure_stack_fixed_pattern_noise(0.835e-3, 0.598e-3, APERTURES_FOR_11_7_PERCENT)
+    assert not fixed_pattern.fixed_pattern_noise_detected
     ratio = (0.835e-3 / 0.598e-3) ** 2
     aperture_error = 2.0 * ng.aperture_noise_relative_error(APERTURES_FOR_11_7_PERCENT) * ratio
-    assert ratio - 1.0 > ng.FLOOR_SIGMAS * aperture_error
+    assert ratio - 1.0 > ng.FIXED_PATTERN_SIGMAS * aperture_error
     check = MeasuredNoiseCheck(variance_ratio=ratio, variance_ratio_error=aperture_error)
     unknown_seconds, _ = _unknown_part(100.0, check)
     assert unknown_seconds == pytest.approx(0.0)
 
 
-def test_the_floor_and_the_loss_account_agree_across_ratios() -> None:
-    """A significant floor and a "cause unknown" part go together."""
+def test_the_fixed_pattern_noise_and_the_loss_account_agree_across_ratios() -> None:
+    """Significant fixed-pattern noise and "cause unknown" go together."""
     from wayfindinglib.analytics.result_quality.aggregates import MeasuredNoiseCheck, _unknown_part
 
     for ratio in (1.1, 1.5, 1.9, 2.0, 2.5, 3.0, 4.0, 8.0):
-        floor = ng.measure_stack_noise_floor(math.sqrt(ratio) * 1e-3, 1e-3, APERTURES_FOR_11_7_PERCENT)
+        fixed_pattern = ng.measure_stack_fixed_pattern_noise(
+            math.sqrt(ratio) * 1e-3, 1e-3, APERTURES_FOR_11_7_PERCENT
+        )
         aperture_error = 2.0 * ng.aperture_noise_relative_error(APERTURES_FOR_11_7_PERCENT) * ratio
         unknown_seconds, _ = _unknown_part(
             100.0, MeasuredNoiseCheck(variance_ratio=ratio, variance_ratio_error=aperture_error)
         )
-        assert floor.floor_detected == (unknown_seconds != pytest.approx(0.0)), ratio
+        assert fixed_pattern.fixed_pattern_noise_detected == (unknown_seconds != pytest.approx(0.0)), ratio
 
 
-def test_m57_floor_is_found() -> None:
-    """M 57: 1.057e-3 against 0.596e-3 is a floor, more than 2 sigma up."""
-    floor = ng.measure_stack_noise_floor(1.057e-3, 0.596e-3, APERTURES_FOR_11_7_PERCENT)
-    assert floor.floor_detected
-    assert floor.floor_noise == pytest.approx(math.sqrt(1.057e-3**2 - 0.596e-3**2))
+def test_m57_fixed_pattern_noise_is_found() -> None:
+    """M 57: 1.057e-3 against 0.596e-3 is fixed-pattern noise."""
+    fixed_pattern = ng.measure_stack_fixed_pattern_noise(1.057e-3, 0.596e-3, APERTURES_FOR_11_7_PERCENT)
+    assert fixed_pattern.fixed_pattern_noise_detected
+    assert fixed_pattern.fixed_pattern_noise == pytest.approx(math.sqrt(1.057e-3**2 - 0.596e-3**2))
 
 
-def test_a_stack_quieter_than_predicted_has_no_floor() -> None:
-    """Measured below predicted is no floor, and bad input is refused."""
-    assert not ng.measure_stack_noise_floor(0.9e-3, 1.0e-3, 100).floor_detected
+def test_a_stack_quieter_than_predicted_has_no_fixed_pattern_noise() -> None:
+    """Measured below predicted gives none; bad input is refused."""
+    assert not ng.measure_stack_fixed_pattern_noise(0.9e-3, 1.0e-3, 100).fixed_pattern_noise_detected
     with pytest.raises(ValueError, match="positive"):
-        ng.measure_stack_noise_floor(0.0, 1.0e-3, 100)
+        ng.measure_stack_fixed_pattern_noise(0.0, 1.0e-3, 100)
     with pytest.raises(ValueError, match="2 apertures"):
-        ng.measure_stack_noise_floor(1.0e-3, 0.5e-3, 1)
+        ng.measure_stack_fixed_pattern_noise(1.0e-3, 0.5e-3, 1)
 
 
-def test_the_floor_slows_the_noise_ratio() -> None:
-    """With the M 27 floor, doubling the frames barely lowers the noise."""
+def test_the_fixed_pattern_noise_slows_the_noise_ratio() -> None:
+    """With the M 27 fixed-pattern noise, doubling barely lowers the noise."""
     frames = [_frame(i, exposure=60.0, sky=1.0, read=0.0, width=3.0) for i in range(20)]
     current = ng.forecast_stack_noise(frames, WeightingMode.WFWHM)
     doubled = ng.forecast_stack_noise(frames * 2, WeightingMode.WFWHM)
-    bare = ng.noise_ratio_with_floor(current, doubled, None)
-    floor = ng.measure_stack_noise_floor(3.097e-3, 1.048e-3, APERTURES_FOR_11_7_PERCENT)
-    with_floor = ng.noise_ratio_with_floor(current, doubled, floor)
+    bare = ng.noise_ratio_with_fixed_pattern_noise(current, doubled, None)
+    fixed_pattern = ng.measure_stack_fixed_pattern_noise(3.097e-3, 1.048e-3, APERTURES_FOR_11_7_PERCENT)
+    with_fixed_pattern = ng.noise_ratio_with_fixed_pattern_noise(current, doubled, fixed_pattern)
     assert bare == pytest.approx(1 / math.sqrt(2))
-    assert with_floor is not None
-    assert 0.95 < with_floor < 1.0
-    share = floor.floor_variance_share
-    assert with_floor == pytest.approx(math.sqrt(share + (1 - share) / 2))
+    assert with_fixed_pattern is not None
+    assert 0.95 < with_fixed_pattern < 1.0
+    share = fixed_pattern.fixed_pattern_variance_share
+    assert with_fixed_pattern == pytest.approx(math.sqrt(share + (1 - share) / 2))
 
 
-def test_take_more_states_the_floor_instead_of_a_huge_count() -> None:
-    """The M 27 floor is most of the noise: no count reaches 0.707."""
+def test_take_more_states_the_fixed_pattern_noise_instead_of_a_huge_count() -> None:
+    """The M 27 fixed-pattern noise is most of the noise: no count helps."""
     frames = [_frame(i, exposure=60.0, sky=1.0, read=0.0, width=3.0) for i in range(20)]
-    floor = ng.measure_stack_noise_floor(3.097e-3, 1.048e-3, APERTURES_FOR_11_7_PERCENT)
-    result = ng.frames_to_cut_noise(frames, frames, WeightingMode.WFWHM, floor=floor)
+    fixed_pattern = ng.measure_stack_fixed_pattern_noise(3.097e-3, 1.048e-3, APERTURES_FOR_11_7_PERCENT)
+    result = ng.frames_to_cut_noise(frames, frames, WeightingMode.WFWHM, fixed_pattern=fixed_pattern)
     assert result.frames_needed is None
-    assert result.floor_limited
-    assert result.floor_noise == pytest.approx(floor.floor_noise)
+    assert result.fixed_pattern_limited
+    assert result.fixed_pattern_noise == pytest.approx(fixed_pattern.fixed_pattern_noise)
     assert result.lowest_reachable_ratio is not None
     assert result.lowest_reachable_ratio > ng.TARGET_NOISE_RATIO
-    assert "floor" in str(result.reason)
-    # M 81 has no floor, so the same frames give a number.
-    no_floor = ng.measure_stack_noise_floor(1.126e-3, 0.921e-3, APERTURES_FOR_11_7_PERCENT)
-    assert ng.frames_to_cut_noise(frames, frames, WeightingMode.WFWHM, floor=no_floor).frames_needed == 20
+    assert "fixed-pattern noise" in str(result.reason)
+    # M 81 has no fixed-pattern noise, so the same frames give a number.
+    no_fixed_pattern = ng.measure_stack_fixed_pattern_noise(1.126e-3, 0.921e-3, APERTURES_FOR_11_7_PERCENT)
+    assert (
+        ng.frames_to_cut_noise(
+            frames, frames, WeightingMode.WFWHM, fixed_pattern=no_fixed_pattern
+        ).frames_needed
+        == 20
+    )
 
 
-def test_a_small_floor_raises_the_count_and_is_stated() -> None:
-    """A floor of 30 percent of the variance needs more frames."""
+def test_a_small_fixed_pattern_noise_raises_the_count_and_is_stated() -> None:
+    """Fixed-pattern noise of 30 percent of the variance needs more frames."""
     frames = [_frame(i, exposure=60.0, sky=1.0, read=0.0, width=3.0) for i in range(20)]
-    floor = ng.StackNoiseFloor(
+    fixed_pattern = ng.StackFixedPatternNoise(
         source="single_stack",
-        floor_detected=True,
-        floor_noise=1.0e-3,
-        floor_to_random_variance_ratio=0.3 / 0.7,
-        floor_variance_share=0.3,
+        fixed_pattern_noise_detected=True,
+        fixed_pattern_noise=1.0e-3,
+        fixed_pattern_to_random_variance_ratio=0.3 / 0.7,
+        fixed_pattern_variance_share=0.3,
         reason="made up",
     )
     plain = ng.frames_to_cut_noise(frames, frames, WeightingMode.WFWHM)
-    floored = ng.frames_to_cut_noise(frames, frames, WeightingMode.WFWHM, floor=floor)
+    with_fixed_pattern = ng.frames_to_cut_noise(
+        frames, frames, WeightingMode.WFWHM, fixed_pattern=fixed_pattern
+    )
     assert plain.frames_needed == 20
-    assert floored.frames_needed is not None
-    assert floored.frames_needed > 20
-    assert floored.floor_noise == pytest.approx(1.0e-3)
-    assert "noise floor" in str(floored.reason)
+    assert with_fixed_pattern.frames_needed is not None
+    assert with_fixed_pattern.frames_needed > 20
+    assert with_fixed_pattern.fixed_pattern_noise == pytest.approx(1.0e-3)
+    assert "fixed-pattern noise" in str(with_fixed_pattern.reason)
 
 
-def test_the_single_stack_floor_wins_over_a_fit_with_no_check() -> None:
+def test_the_single_stack_fixed_pattern_noise_wins_over_a_fit_with_no_check() -> None:
     """A two-stack fit has no check; the single-stack result decides."""
-    single = ng.measure_stack_noise_floor(1.126e-3, 0.921e-3, APERTURES_FOR_11_7_PERCENT)
+    single = ng.measure_stack_fixed_pattern_noise(1.126e-3, 0.921e-3, APERTURES_FOR_11_7_PERCENT)
     steps = [
         ng.NoiseStep(label="a", expected_variance=1.0, measured_noise=1.2, apertures=2000),
         ng.NoiseStep(label="b", expected_variance=0.5, measured_noise=1.0, apertures=2000),
     ]
-    fit = ng.fit_noise_floor(steps)
-    assert fit.floor_detected
+    fit = ng.fit_fixed_pattern_noise(steps)
+    assert fit.fixed_pattern_noise_detected
     assert fit.degrees_of_freedom == 0
-    chosen = ng.choose_noise_floor(single, fit, current_expected_variance=0.5)
+    chosen = ng.choose_fixed_pattern_noise(single, fit, current_expected_variance=0.5)
     assert chosen is not None
     assert chosen.source == "single_stack"
-    assert not chosen.floor_detected
+    assert not chosen.fixed_pattern_noise_detected
     assert "no degree of freedom" in chosen.reason
 
 
@@ -620,16 +634,16 @@ def test_a_checked_fit_wins_over_the_single_stack_result() -> None:
         )
         for name, expected in (("a", 1.0), ("b", 0.5), ("c", 0.25))
     ]
-    fit = ng.fit_noise_floor(steps)
-    assert fit.floor_detected
+    fit = ng.fit_fixed_pattern_noise(steps)
+    assert fit.fixed_pattern_noise_detected
     assert fit.degrees_of_freedom == 1
-    single = ng.measure_stack_noise_floor(1.126e-3, 0.921e-3, APERTURES_FOR_11_7_PERCENT)
-    chosen = ng.choose_noise_floor(single, fit, current_expected_variance=0.25)
+    single = ng.measure_stack_fixed_pattern_noise(1.126e-3, 0.921e-3, APERTURES_FOR_11_7_PERCENT)
+    chosen = ng.choose_fixed_pattern_noise(single, fit, current_expected_variance=0.25)
     assert chosen is not None
     assert chosen.source == "fit"
-    assert chosen.floor_to_random_variance_ratio == pytest.approx(0.4 / (0.9 * 0.25), rel=0.05)
-    assert ng.choose_noise_floor(None, None) is None
-    only_single = ng.choose_noise_floor(single)
+    assert chosen.fixed_pattern_to_random_variance_ratio == pytest.approx(0.4 / (0.9 * 0.25), rel=0.05)
+    assert ng.choose_fixed_pattern_noise(None, None) is None
+    only_single = ng.choose_fixed_pattern_noise(single)
     assert only_single is not None
     assert only_single.source == "single_stack"
 
@@ -648,7 +662,7 @@ def test_the_group_ratio_leaves_the_mean_exposure_scale_out() -> None:
     current = ng.forecast_group_noise(existing)
     later = ng.plan_group_stack(existing, _new_copies(template, 12, 60.0)).forecast
 
-    ratio = ng.noise_ratio_with_floor(current, later, None)
+    ratio = ng.noise_ratio_with_fixed_pattern_noise(current, later, None)
 
     assert ratio is not None
     tau = later.mean_exposure_seconds / current.mean_exposure_seconds
@@ -919,36 +933,36 @@ def test_a_single_group_of_mixed_lengths_needs_no_per_frame_factor() -> None:
         assert scaled == pytest.approx(plain.variance, rel=1e-12)
 
 
-def _m13_floor() -> ng.StackNoiseFloor:
-    """Make the floor of the M 13 case: 49 percent of the measured variance.
+def _m13_fixed_pattern() -> ng.StackFixedPatternNoise:
+    """Make the M 13 fixed-pattern noise: 49 percent of the variance.
 
     Returns
     -------
-    floor : `StackNoiseFloor`
-        A detected floor of 0.583e-3 with a share of 0.49.
+    fixed_pattern : `StackFixedPatternNoise`
+        Detected fixed-pattern noise of 0.583e-3 with a share of 0.49.
     """
-    return ng.StackNoiseFloor(
+    return ng.StackFixedPatternNoise(
         source="single_stack",
-        floor_detected=True,
-        floor_noise=0.583e-3,
-        floor_to_random_variance_ratio=0.49 / 0.51,
-        floor_variance_share=0.49,
+        fixed_pattern_noise_detected=True,
+        fixed_pattern_noise=0.583e-3,
+        fixed_pattern_to_random_variance_ratio=0.49 / 0.51,
+        fixed_pattern_variance_share=0.49,
         reason="made up like M 13",
     )
 
 
 def test_a_count_beyond_the_practical_limit_gives_one_doubling_instead() -> None:
-    """M 13: 44 frames of 30 s with a floor of 49 percent of the variance.
+    """M 13: 44 frames of 30 s with fixed-pattern noise of 49 percent.
 
     The target needs more than 4 times the time, so the result gives the 44
     frames that double the time (about 14 percent) and the most any frames
     give (about 30 percent).
     """
     frames = [_frame(i, exposure=30.0, sky=1.0, read=0.0) for i in range(44)]
-    result = ng.frames_to_cut_noise(frames, frames, WeightingMode.EQUAL, floor=_m13_floor())
+    result = ng.frames_to_cut_noise(frames, frames, WeightingMode.EQUAL, fixed_pattern=_m13_fixed_pattern())
     assert result.practical_limit_applied
     assert result.frames_needed is None
-    assert not result.floor_limited
+    assert not result.fixed_pattern_limited
     assert result.doubling_frames == 44
     assert result.doubling_noise_cut == pytest.approx(0.14, abs=0.01)
     assert result.most_reachable_cut == pytest.approx(0.30, abs=0.01)
@@ -956,27 +970,27 @@ def test_a_count_beyond_the_practical_limit_gives_one_doubling_instead() -> None
     assert result.added_exposure_seconds == pytest.approx(44 * 30.0)
 
 
-def test_a_floor_limited_target_also_gives_the_doubling() -> None:
-    """A floor of 60 percent cannot reach 0.707 but doubling still helps."""
+def test_a_fixed_pattern_limited_target_also_gives_the_doubling() -> None:
+    """Fixed-pattern noise of 60 percent blocks 0.707 but doubling helps."""
     frames = [_frame(i, exposure=30.0, sky=1.0, read=0.0) for i in range(44)]
-    floor = _m13_floor().model_copy(
-        update={"floor_variance_share": 0.6, "floor_to_random_variance_ratio": 0.6 / 0.4}
+    fixed_pattern = _m13_fixed_pattern().model_copy(
+        update={"fixed_pattern_variance_share": 0.6, "fixed_pattern_to_random_variance_ratio": 0.6 / 0.4}
     )
-    result = ng.frames_to_cut_noise(frames, frames, WeightingMode.EQUAL, floor=floor)
+    result = ng.frames_to_cut_noise(frames, frames, WeightingMode.EQUAL, fixed_pattern=fixed_pattern)
     assert result.practical_limit_applied
-    assert result.floor_limited
+    assert result.fixed_pattern_limited
     assert result.doubling_frames == 44
     assert result.doubling_noise_cut == pytest.approx(1 - math.sqrt(0.6 + 0.4 / 2), abs=0.005)
     assert result.doubling_worthwhile
 
 
 def test_a_count_within_the_practical_limit_is_kept() -> None:
-    """A floor of 30 percent needs 1.4 times the frames: the count stays."""
+    """Fixed-pattern noise of 30 percent needs 1.4 times the frames."""
     frames = [_frame(i, exposure=60.0, sky=1.0, read=0.0) for i in range(20)]
-    floor = _m13_floor().model_copy(
-        update={"floor_variance_share": 0.3, "floor_to_random_variance_ratio": 0.3 / 0.7}
+    fixed_pattern = _m13_fixed_pattern().model_copy(
+        update={"fixed_pattern_variance_share": 0.3, "fixed_pattern_to_random_variance_ratio": 0.3 / 0.7}
     )
-    result = ng.frames_to_cut_noise(frames, frames, WeightingMode.EQUAL, floor=floor)
+    result = ng.frames_to_cut_noise(frames, frames, WeightingMode.EQUAL, fixed_pattern=fixed_pattern)
     assert not result.practical_limit_applied
     assert result.frames_needed is not None
     assert result.frames_needed > 20
@@ -984,10 +998,10 @@ def test_a_count_within_the_practical_limit_is_kept() -> None:
 
 
 def test_a_tiny_doubling_gain_is_not_worthwhile() -> None:
-    """With a floor of 88 percent, doubling cuts under 5 percent."""
+    """At 88 percent fixed-pattern noise, doubling cuts under 5 percent."""
     frames = [_frame(i, exposure=60.0, sky=1.0, read=0.0) for i in range(20)]
-    floor = ng.measure_stack_noise_floor(3.097e-3, 1.048e-3, APERTURES_FOR_11_7_PERCENT)
-    result = ng.frames_to_cut_noise(frames, frames, WeightingMode.EQUAL, floor=floor)
+    fixed_pattern = ng.measure_stack_fixed_pattern_noise(3.097e-3, 1.048e-3, APERTURES_FOR_11_7_PERCENT)
+    result = ng.frames_to_cut_noise(frames, frames, WeightingMode.EQUAL, fixed_pattern=fixed_pattern)
     assert result.practical_limit_applied
     assert result.doubling_noise_cut is not None
     assert result.doubling_noise_cut < ng.MINIMUM_DOUBLING_GAIN_FRACTION
@@ -995,49 +1009,289 @@ def test_a_tiny_doubling_gain_is_not_worthwhile() -> None:
 
 
 # ---------------------------------------------------------------------------
-# The floor measured from the odd and even half stacks
+# The fixed-pattern noise measured from the odd and even half stacks
 # ---------------------------------------------------------------------------
 
 
-def test_the_half_difference_floor_on_m13_numbers() -> None:
+def test_the_odd_even_difference_fixed_pattern_noise_on_m13_numbers() -> None:
     """M 13: 2.056e-4 against a measured random 1.4295e-4 is 2.2 sigma."""
-    floor = ng.measure_stack_noise_floor_from_half_difference(2.056e-4, 100, 1.4295e-4, 100)
+    fixed_pattern = ng.measure_stack_fixed_pattern_noise_from_odd_even_difference(
+        2.056e-4, 100, 1.4295e-4, 100
+    )
 
-    assert floor.basis == "half_difference"
-    assert floor.floor_detected
-    assert floor.sigmas == pytest.approx(2.2, abs=0.1)
-    assert floor.floor_variance == pytest.approx(2.056e-4**2 - 1.4295e-4**2)
-    assert floor.floor_variance_share == pytest.approx(1.0 - (1.4295 / 2.056) ** 2)
+    assert fixed_pattern.basis == "odd_even_difference"
+    assert fixed_pattern.fixed_pattern_noise_detected
+    assert fixed_pattern.sigmas == pytest.approx(2.2, abs=0.1)
+    assert fixed_pattern.fixed_pattern_variance == pytest.approx(2.056e-4**2 - 1.4295e-4**2)
+    assert fixed_pattern.fixed_pattern_variance_share == pytest.approx(1.0 - (1.4295 / 2.056) ** 2)
 
 
-def test_the_half_difference_floor_is_one_sided_and_uses_measurement_errors_only() -> None:
-    """A lower noise is no floor, and the model has a stricter test."""
-    below = ng.measure_stack_noise_floor_from_half_difference(1.0, 100, 1.2, 100)
-    assert not below.floor_detected
+def test_the_odd_even_difference_fixed_pattern_noise_is_one_sided_and_uses_measurement_errors_only() -> None:
+    """A lower noise is not fixed-pattern noise; the model test is stricter."""
+    below = ng.measure_stack_fixed_pattern_noise_from_odd_even_difference(1.0, 100, 1.2, 100)
+    assert not below.fixed_pattern_noise_detected
     assert below.sigmas is not None and below.sigmas < 0.0
-    # The same M 13 ratio has no floor against the model, with its own error.
-    model = ng.measure_stack_noise_floor(2.056e-4, 1.4298e-4, 100)
-    assert not model.floor_detected
+    # The same M 13 ratio has no fixed-pattern noise against the model, with
+    # its own error.
+    model = ng.measure_stack_fixed_pattern_noise(2.056e-4, 1.4298e-4, 100)
+    assert not model.fixed_pattern_noise_detected
     assert model.basis == "model"
     with pytest.raises(ValueError):
-        ng.measure_stack_noise_floor_from_half_difference(0.0, 100, 1.0, 100)
+        ng.measure_stack_fixed_pattern_noise_from_odd_even_difference(0.0, 100, 1.0, 100)
 
 
-def test_the_statements_name_the_basis_of_the_floor() -> None:
-    """M 27's floor limits take-more; the reason says how it was found."""
-    from wayfindinglib.analytics.result_quality.report_rules import floor_limited_statement
+def test_the_statements_name_the_basis_of_the_fixed_pattern_noise() -> None:
+    """M 27's fixed-pattern noise limits take-more; the reason says how."""
+    from wayfindinglib.analytics.result_quality.report_rules import fixed_pattern_limited_statement
 
     frames = [_frame(i, exposure=60.0, sky=1.0, read=0.0, width=3.0) for i in range(20)]
-    halves = ng.measure_stack_noise_floor_from_half_difference(3.097e-3, 100, 1.048e-3, 100)
-    model = ng.measure_stack_noise_floor(3.097e-3, 1.048e-3, APERTURES_FOR_11_7_PERCENT)
+    halves = ng.measure_stack_fixed_pattern_noise_from_odd_even_difference(3.097e-3, 100, 1.048e-3, 100)
+    model = ng.measure_stack_fixed_pattern_noise(3.097e-3, 1.048e-3, APERTURES_FOR_11_7_PERCENT)
 
-    from_halves = ng.frames_to_cut_noise(frames, frames, WeightingMode.WFWHM, floor=halves)
-    from_model = ng.frames_to_cut_noise(frames, frames, WeightingMode.WFWHM, floor=model)
+    from_halves = ng.frames_to_cut_noise(frames, frames, WeightingMode.WFWHM, fixed_pattern=halves)
+    from_model = ng.frames_to_cut_noise(frames, frames, WeightingMode.WFWHM, fixed_pattern=model)
 
-    assert halves.floor_detected and model.floor_detected
-    assert from_halves.floor_limited and from_model.floor_limited
-    assert from_halves.floor_basis == "half_difference"
+    assert halves.fixed_pattern_noise_detected and model.fixed_pattern_noise_detected
+    assert from_halves.fixed_pattern_limited and from_model.fixed_pattern_limited
+    assert from_halves.fixed_pattern_basis == "odd_even_difference"
     assert "measured from the odd and even half stacks" in str(from_halves.reason)
     assert "found from the noise model" in str(from_model.reason)
-    statement = floor_limited_statement(from_halves, None, [])
+    statement = fixed_pattern_limited_statement(from_halves, None, [])
     assert "measured from the odd and even half stacks" in statement.message
+
+
+# -- D17: the noise model's error measured from odd-even differences ---------
+
+
+def _samples(log_variance_ratios: list[float], apertures: int = 100) -> list[ng.NoiseModelErrorSample]:
+    """Make one sample per value, each from its own target.
+
+    Parameters
+    ----------
+    log_variance_ratios : `list` [`float`]
+        The ``ln F`` of each sample.
+    apertures : `int`, optional
+        The apertures behind each.
+
+    Returns
+    -------
+    samples : `list` [`NoiseModelErrorSample`]
+        The samples.
+    """
+    return [
+        ng.NoiseModelErrorSample(target_id=f"T{index}", log_variance_ratio=value, apertures=apertures)
+        for index, value in enumerate(log_variance_ratios)
+    ]
+
+
+def test_fewer_than_five_targets_keep_the_stand_in_and_say_so() -> None:
+    """Four samples give the 0.11 stand-in, named as such."""
+    error = ng.measure_noise_model_error(_samples([-0.5, -0.2, 0.1, 0.4]))
+
+    assert not error.measured
+    assert error.relative_error == ng.EXPECTED_NOISE_MODEL_RELATIVE_ERROR
+    assert error.target_count == 4
+    assert error.mean_log_ratio is None
+    assert "stand-in" in error.basis_text
+
+
+def test_five_targets_give_the_measured_error_and_a_bias_report() -> None:
+    """The scatter, less the measurement scatter, is the model's error."""
+    values = [-0.713, -0.325, 0.0, 0.280, 0.525]
+    error = ng.measure_noise_model_error(_samples(values))
+
+    observed = float(np.var(values, ddof=1))
+    measurement = (2.0 * 1.17 / math.sqrt(100)) ** 2
+    assert error.measured
+    assert error.relative_error == pytest.approx(0.5 * math.sqrt(observed - measurement))
+    assert error.mean_log_ratio == pytest.approx(0.5 * float(np.mean(values)))
+    assert error.basis_text == "measured from 5 targets' odd–even differences"
+
+
+def test_scatter_that_measurement_alone_explains_gives_zero_model_error() -> None:
+    """Measurement scatter is removed in quadrature; the result is floored."""
+    measurement = 2.0 * 1.17 / math.sqrt(100)
+    step = measurement / math.sqrt(2.5)  # var of (-2, -1, 0, 1, 2) steps (ddof 1) is 2.5 step^2
+    exact = ng.measure_noise_model_error(_samples([-2 * step, -step, 0.0, step, 2 * step]))
+    quieter = ng.measure_noise_model_error(_samples([-step, -0.5 * step, 0.0, 0.5 * step, step]))
+
+    assert exact.measured
+    assert exact.relative_error == pytest.approx(0.0, abs=1e-9)
+    assert quieter.relative_error == pytest.approx(0.0, abs=1e-12)
+
+
+def test_fewer_apertures_remove_more_scatter() -> None:
+    """Samples with few apertures scatter more, so less is left."""
+    values = [-0.7, -0.3, 0.0, 0.3, 0.7]
+
+    many = ng.measure_noise_model_error(_samples(values, apertures=400))
+    few = ng.measure_noise_model_error(_samples(values, apertures=25))
+
+    assert few.relative_error < many.relative_error
+
+
+# -- D18: a graded answer between 1 and 2 sigma -------------------------------
+
+
+def _m13_like_fixed_pattern(sigmas: float) -> ng.StackFixedPatternNoise:
+    """Test M 13's numbers (0.2056 over 100 apertures) at a given significance.
+
+    Parameters
+    ----------
+    sigmas : `float`
+        The standard errors ``ln F`` should be.
+
+    Returns
+    -------
+    fixed_pattern : `StackFixedPatternNoise`
+        The odd–even difference result.
+    """
+    log_error = math.hypot(2.0 * 1.17 / 10.0, 2.0 * 1.17 / 10.0)
+    random_noise = 0.2056 / math.sqrt(math.exp(sigmas * log_error))
+    return ng.measure_stack_fixed_pattern_noise_from_odd_even_difference(0.2056, 100, random_noise, 100)
+
+
+def test_the_odd_even_test_has_three_bands() -> None:
+    """2.2 sigma is found, 1.9 is possible, 0.5 is neither."""
+    found = _m13_like_fixed_pattern(2.2)
+    possible = _m13_like_fixed_pattern(1.9)
+    none = _m13_like_fixed_pattern(0.5)
+
+    assert found.fixed_pattern_noise_detected and not found.possible
+    assert not possible.fixed_pattern_noise_detected and possible.possible
+    assert possible.fixed_pattern_noise is not None
+    assert "Possible fixed-pattern noise" in possible.reason
+    assert not none.fixed_pattern_noise_detected and not none.possible
+    assert none.fixed_pattern_noise is None
+
+
+def _synthetic_ratio(
+    fraction: float, existing: int = 44
+) -> Callable[[int, ng.StackFixedPatternNoise | None], float]:
+    """Give a ratio function for a stack of equal frames.
+
+    Parameters
+    ----------
+    fraction : `float`
+        The fixed-pattern variance over the random variance.
+    existing : `int`, optional
+        The frames in the stack today.
+
+    Returns
+    -------
+    ratio_for : `Callable`
+        ``ratio_for(count, pattern)`` as `_take_more_result_graded` wants it.
+    """
+
+    def ratio_for(count: int, pattern: ng.StackFixedPatternNoise | None) -> float:
+        random_later = existing / (existing + count)
+        if pattern is None or not pattern.fixed_pattern_noise_detected:
+            return math.sqrt(random_later)
+        return math.sqrt((random_later + fraction) / (1.0 + fraction))
+
+    return ratio_for
+
+
+def _graded(fixed_pattern: ng.StackFixedPatternNoise | None, fraction: float) -> ng.TakeMoreResult:
+    """Run the graded search on the synthetic stack of 44 frames of 30 s.
+
+    Parameters
+    ----------
+    fixed_pattern : `StackFixedPatternNoise` or `None`
+        The pattern handed to the search.
+    fraction : `float`
+        The pattern's variance fraction.
+
+    Returns
+    -------
+    result : `TakeMoreResult`
+        The answer.
+    """
+    return ng._take_more_result_graded(
+        _synthetic_ratio(fraction),
+        fixed_pattern=fixed_pattern,
+        minimum_count=1,
+        maximum_count=ng.MAXIMUM_NEW_FRAMES,
+        target_noise_ratio=ng.TARGET_NOISE_RATIO,
+        exposure_seconds=30.0,
+        held_exposure_seconds=44 * 30.0,
+    )
+
+
+def _possible_pattern(fraction: float) -> ng.StackFixedPatternNoise:
+    """Make a possible (1.9 sigma) pattern of the given variance fraction.
+
+    Parameters
+    ----------
+    fraction : `float`
+        The fixed-pattern variance over the random variance.
+
+    Returns
+    -------
+    pattern : `StackFixedPatternNoise`
+        The pattern.
+    """
+    return ng.StackFixedPatternNoise(
+        source="single_stack",
+        possible=True,
+        sigmas=1.9,
+        fixed_pattern_variance=fraction,
+        fixed_pattern_noise=math.sqrt(fraction),
+        fixed_pattern_to_random_variance_ratio=fraction,
+        fixed_pattern_variance_share=fraction / (1.0 + fraction),
+        reason="made up",
+    )
+
+
+def test_a_possible_pattern_gives_a_range_with_the_count_of_the_case_without_it() -> None:
+    """M 13-like numbers: the count is for no pattern; cut 13% to 29%."""
+    result = _graded(_possible_pattern(1.0), 1.0)
+    without = _graded(None, 1.0)
+
+    assert result.frames_needed == without.frames_needed
+    assert result.frames_needed in (44, 45)
+    assert 1.0 - (result.predicted_noise_ratio or 0.0) == pytest.approx(0.29, abs=0.01)
+    assert result.possible_low_noise_cut == pytest.approx(0.13, abs=0.01)
+    assert result.possible_fixed_pattern_sigmas == pytest.approx(1.9)
+    assert not result.possible_low_end_not_worthwhile
+
+
+def test_a_detected_pattern_and_no_pattern_are_unchanged() -> None:
+    """Above 2 sigma and below 1 sigma behave as before."""
+    detected = _possible_pattern(1.0).if_real()
+
+    with_pattern = _graded(detected, 1.0)
+    plain = _graded(None, 1.0)
+
+    assert with_pattern.possible_low_noise_cut is None
+    assert plain.possible_low_noise_cut is None
+    assert with_pattern.practical_limit_applied
+    assert not plain.practical_limit_applied
+
+
+def test_a_low_end_that_would_say_more_frames_will_not_help_is_flagged_but_keeps_the_count() -> None:
+    """A big possible pattern flags the low end and still gives the count."""
+    result = _graded(_possible_pattern(30.0), 30.0)
+
+    assert result.frames_needed is not None
+    assert result.possible_low_end_not_worthwhile
+    assert (result.possible_low_doubling_cut or 1.0) < ng.MINIMUM_DOUBLING_GAIN_FRACTION
+
+
+def test_the_ranking_uses_the_midpoint_of_the_log_gains() -> None:
+    """A possible pattern ranks at the geometric mean of the two cases."""
+    forecast_now = ng.NoiseForecast(variance=1.0, noise=1.0, frame_count=44, mode=WeightingMode.EQUAL)
+    forecast_later = ng.NoiseForecast(
+        variance=0.5, noise=math.sqrt(0.5), frame_count=88, mode=WeightingMode.EQUAL
+    )
+    pattern = _possible_pattern(1.0)
+
+    without = ng.noise_ratio_with_fixed_pattern_noise(forecast_now, forecast_later, None)
+    low = ng.noise_ratio_with_fixed_pattern_noise(forecast_now, forecast_later, pattern.if_real())
+    ranked = ng.noise_ratio_for_ranking(forecast_now, forecast_later, pattern)
+
+    assert without is not None and low is not None
+    assert ranked == pytest.approx(math.sqrt(without * low))
+    assert without < ranked < low
+    assert ng.noise_ratio_for_ranking(forecast_now, forecast_later, None) == without
+    assert ng.noise_ratio_for_ranking(forecast_now, forecast_later, pattern.if_real()) == low

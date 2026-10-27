@@ -290,22 +290,22 @@ def test_the_group_sharpness_tradeoff_needs_enough_frames() -> None:
     assert rr.find_sharpness_tradeoff_in_groups(groups, 0, [2.0 + 0.1 * i for i in range(19)]) is None
 
 
-def test_floor_limited_statement_says_the_floor_in_place_of_a_count() -> None:
-    """The warning names the floor share of the noise and the best cut."""
+def test_fixed_pattern_limited_statement_says_the_fixed_pattern_noise_in_place_of_a_count() -> None:
+    """The warning names the fixed-pattern share and the best cut."""
     result = TakeMoreResult(
         target_noise_ratio=0.707,
-        floor_limited=True,
-        floor_noise=2.9e-3,
-        floor_variance_share=0.88,
+        fixed_pattern_limited=True,
+        fixed_pattern_noise=2.9e-3,
+        fixed_pattern_variance_share=0.88,
         lowest_reachable_ratio=0.95,
         reason="More frames of this kind will not reach the target.",
     )
 
-    statement = rr.floor_limited_statement(result, SETTING, [MeasurementReference(row_id=5)])
+    statement = rr.fixed_pattern_limited_statement(result, SETTING, [MeasurementReference(row_id=5)])
 
     assert statement.rule == "more_frames_will_not_help"
     assert statement.kind == StatementKind.WARNING
-    assert "noise floor (0.0029 in stack units, 88% of the noise)" in statement.message
+    assert "fixed-pattern noise (0.0029 in stack units, 88% of the noise)" in statement.message
     assert "only 5%" in statement.message
     assert statement.proposed_action is None
     assert [reference.row_id for reference in statement.evidence] == [5]
@@ -418,8 +418,8 @@ def test_more_frames_statement_gives_the_count_the_time_and_the_noise() -> None:
     assert statement.proposed_action.frame_count == 20
     assert statement.proposed_action.exposure_seconds == pytest.approx(90.0)
     assert (
-        statement.message
-        == "Take 20 more at 90 s (about 32 min with downloads) to cut the noise by about 29%."
+        statement.message == "Recommended additional frames: 20 at 90 s (about 32 min with downloads), "
+        "which cuts the noise by about 29%."
     )
     assert statement.expected_effect.wall_clock_seconds == pytest.approx(1900.0)
     assert rr.more_frames_statement(TakeMoreResult(target_noise_ratio=0.707), SETTING, overheads, []) is None
@@ -699,7 +699,7 @@ def test_every_statement_this_module_builds_has_a_sound_plain_message() -> None:
 
 
 def _m13_result(*, doubling_cut: float = 0.137, worthwhile: bool = True) -> TakeMoreResult:
-    """Make the answer for the M 13 case (a floor of 49 percent of the noise).
+    """Make the answer for the M 13 case (fixed-pattern noise: 49 percent).
 
     Parameters
     ----------
@@ -717,8 +717,8 @@ def _m13_result(*, doubling_cut: float = 0.137, worthwhile: bool = True) -> Take
         target_noise_ratio=0.707,
         added_exposure_seconds=44 * 30.0,
         new_exposure_seconds=30.0,
-        floor_noise=0.583e-3,
-        floor_variance_share=0.49,
+        fixed_pattern_noise=0.583e-3,
+        fixed_pattern_variance_share=0.49,
         lowest_reachable_ratio=0.704,
         practical_limit_applied=True,
         doubling_frames=44,
@@ -749,12 +749,14 @@ def test_beyond_the_practical_limit_the_statement_gives_one_doubling() -> None:
     assert statement is not None
     assert statement.rule == "more_frames"
     assert statement.kind == StatementKind.RECOMMENDATION
-    assert "as many frames again as the stack holds (44 more at 30 s" in statement.message
-    assert "cuts the noise by about 14%" in statement.message
+    assert "Recommended additional frames: 44 at 30 s (about " in statement.message
+    assert "as many frames again as the stack holds, which cuts the noise by about 14%" in statement.message
     assert "at most about 30% in all" in statement.message
-    assert "noise floor of 0.000583 (stack units) makes up about 49% of the noise" in statement.message
-    assert rr.FLOOR_CAUSE_TEXT in statement.message
-    assert statement.message.endswith(rr.FLOOR_NOT_REMOVED_TEXT)
+    assert (
+        "fixed-pattern noise of 0.000583 (stack units) makes up about 49% of the noise" in statement.message
+    )
+    assert rr.FIXED_PATTERN_CAUSE_TEXT in statement.message
+    assert statement.message.endswith(rr.FIXED_PATTERN_NOT_REMOVED_TEXT)
     assert statement.proposed_action.frame_count == 44
     assert statement.expected_effect.noise_change_fraction == pytest.approx(-0.137)
     assert statement.values["practical_limit_applied"] == pytest.approx(1.0)
@@ -763,15 +765,52 @@ def test_beyond_the_practical_limit_the_statement_gives_one_doubling() -> None:
 
 
 def test_a_worthless_doubling_gives_the_stop_warning_in_the_new_shape() -> None:
-    """Under 5 percent: a warning, no proposed frames, same floor sentences."""
+    """Under 5 percent: a warning, no proposed frames, same sentences."""
     result = _m13_result(doubling_cut=0.03, worthwhile=False)
-    result = result.model_copy(update={"floor_variance_share": 0.88, "most_reachable_cut": 0.06})
+    result = result.model_copy(update={"fixed_pattern_variance_share": 0.88, "most_reachable_cut": 0.06})
 
-    statement = rr.floor_limited_statement(result, SETTING, [MeasurementReference(row_id=5)])
+    statement = rr.fixed_pattern_limited_statement(result, SETTING, [MeasurementReference(row_id=5)])
 
     assert statement.rule == "more_frames_will_not_help"
     assert statement.proposed_action is None
     assert "only about 3%" in statement.message
     assert "at most about 6% in all" in statement.message
-    assert rr.FLOOR_CAUSE_TEXT in statement.message
+    assert rr.FIXED_PATTERN_CAUSE_TEXT in statement.message
     assert_plain_message_is_sound(statement)
+
+
+def test_a_possible_fixed_pattern_gives_a_range_and_says_the_low_end_is_not_proven() -> None:
+    """D18: 44 frames at 30 s cut the noise by about 13% to 29%."""
+    result = TakeMoreResult(
+        frames_needed=44,
+        predicted_noise_ratio=0.707,
+        target_noise_ratio=0.707,
+        added_exposure_seconds=1320.0,
+        new_exposure_seconds=30.0,
+        possible_fixed_pattern_sigmas=1.9,
+        possible_low_noise_cut=0.134,
+        possible_low_doubling_cut=0.134,
+    )
+
+    statement = rr.more_frames_statement(result, SETTING, _NO_EXTRA_OVERHEADS, [])
+
+    assert statement is not None
+    assert statement.message.startswith("Recommended additional frames: 44 at 30 s")
+    assert "cuts the noise by about 13% to 29%." in statement.message
+    assert "The low end assumes the possible fixed-pattern noise (1.9\u03c3, not proven) is real." in (
+        statement.message
+    )
+    assert "will not help" not in statement.message
+    assert statement.proposed_action.frame_count == 44
+
+    flagged = rr.more_frames_statement(
+        result.model_copy(
+            update={"possible_low_end_not_worthwhile": True, "possible_low_doubling_cut": 0.01}
+        ),
+        SETTING,
+        _NO_EXTRA_OVERHEADS,
+        [],
+    )
+    assert flagged is not None
+    assert "If it is real, more frames will not help much" in flagged.message
+    assert flagged.proposed_action.frame_count == 44

@@ -49,10 +49,10 @@ fewer than 5 frames, put into the nearest group) also needs
 ``stacking.group_reference_exposure_s``: Siril scales each of its frames to
 the reference frame, which changes the frame's noise
 (`noise_growth.StackGroup.frame_noise_factors`). Without that row the pair is
-not checked. The earlier stack's noise floor is part of every
+not checked. The earlier stack's fixed-pattern noise is part of every
 forecast: the measured empty-aperture noise against the
 expected noise (version 2, which includes Siril's normalization scale), or a
-fit over the history, reconciled by `noise_growth.choose_noise_floor`.
+fit over the history, reconciled by `noise_growth.choose_fixed_pattern_noise`.
 
 A pair is not checkable, and says why, when the two stacks differ in more than
 the added frames (`_confound_reason`): the aperture set
@@ -68,19 +68,29 @@ stored, so it is not checked.
 
 A target with two or more observing nights also has an earlier-nights subset
 stack (all nights but the last). `stack_runs_from_measurements` can read it as
-a run marked ``is_earlier_nights_subset``, and `subset_pairs` pairs it with
-the library run it was cut from. The pair is checked with the same rules,
-except that every frame the library stack added must start on a later observing
-night than the subset's newest frame (`_subset_new_frame_reason`). The check
-carries ``basis="earlier_nights_subset"``. `forecast_gate_state` reads the
-checks in order and says whether "take N more" is closed, exploratory (only a
-subset check agreed) or confirmed (two library stacks agreed).
+a run marked ``is_earlier_nights_subset``, and `subset_pairs` pairs it with the
+library run it was cut from. The pair is checked with the same rules, except
+that every frame the library stack added must start on a later observing night
+than the subset's newest frame (`_subset_new_frame_reason`). The check carries
+``basis="earlier_nights_subset"``.
+`recommended_additional_frames_status_from_checks` reads the checks in order
+and says whether the recommended additional frames are not checked, provisional
+(only a subset check agreed) or confirmed (two library stacks agreed).
 
-The module also turns the run history into the steps of the noise-floor fit
-(`noise_steps_from_runs`) and reads the stop signal from it
+The module also turns the run history into the steps of the fixed-pattern noise
+fit (`noise_steps_from_runs`) and reads the stop signal from it
 (`target_stop_signal`), so the target report and tonight's ranking use the same
-history. The stop signal uses the floor `noise_floor_for_runs` chooses, which
-can come from the newest stack alone.
+history. The stop signal uses the fixed-pattern noise
+`fixed_pattern_noise_for_runs` chooses, which can come from the newest stack
+alone.
+
+The noise model's own relative error is measured from the library's odd–even
+differences, not borrowed (decision D17). `noise_model_error_sample` turns one
+run into a sample (its odd–even random noise against its predicted noise), and
+`noise_model_errors_by_setting_group` pools the samples of one capture setting
+group (`noise_model_setting_key`: camera, optic, gain setting, offset and
+binning) from one library-wide read of stack rows. A group with fewer than
+`MINIMUM_MODEL_ERROR_TARGETS` targets keeps the stand-in value.
 
 The planned forecast is made before the frames exist, so it must assume a
 weighting mode. When that mode weights by star width, the check uses the
@@ -94,8 +104,10 @@ passes (`forecast_check`).
 """
 
 import math
+import re
 from collections import defaultdict
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from itertools import pairwise
 from typing import Any, cast
@@ -113,34 +125,47 @@ from astrometricslib import (
     SubjectLevel,
     aperture_identity_from_number,
     fold_exposure_lengths,
+    load_odd_even_aperture_record,
     observing_night_id,
     resolve_camera_profile,
 )
 from wayfindinglib.analytics.result_quality.efficiency import FrameObservation
+from wayfindinglib.analytics.result_quality.fixed_pattern_location import (
+    FixedPatternAccount,
+    LinePatternScatters,
+    apertures_from_record,
+    explain_with_calibration_masters,
+    locate_fixed_pattern,
+)
 from wayfindinglib.analytics.result_quality.noise_growth import (
-    FLOOR_BASIS_HALF_DIFFERENCE,
+    FIXED_PATTERN_BASIS_ODD_EVEN_DIFFERENCE,
+    FIXED_PATTERN_BASIS_SETUP_HISTORY,
     MINIMUM_GAIN_FRACTION,
+    MINIMUM_HISTORY_TARGETS,
     NoiseForecast,
+    NoiseModelError,
+    NoiseModelErrorSample,
     NoiseStep,
+    StackFixedPatternNoise,
     StackFrame,
     StackGroup,
-    StackNoiseFloor,
     StopSignal,
     WeightingMode,
     aperture_noise_relative_error,
-    choose_noise_floor,
-    fit_noise_floor,
+    choose_fixed_pattern_noise,
+    fit_fixed_pattern_noise,
     forecast_group_noise,
     forecast_noise_with_weights,
     forecast_stack_noise,
     frame_noise_from_group_weight,
     group_frame_rate_variances,
     identify_weighting_mode,
-    measure_stack_noise_floor,
-    measure_stack_noise_floor_from_half_difference,
+    measure_noise_model_error,
+    measure_stack_fixed_pattern_noise,
+    measure_stack_fixed_pattern_noise_from_odd_even_difference,
     new_frames_like,
     noise_ratio_after_adding,
-    noise_ratio_with_floor,
+    noise_ratio_with_fixed_pattern_noise,
     plan_group_stack,
     predict_weighting_mode,
     stop_signal,
@@ -149,8 +174,8 @@ from wayfindinglib.models.planning.target_report import (
     ForecastBasis,
     ForecastCheck,
     ForecastedChange,
-    ForecastGate,
     ForecastOutcome,
+    RecommendedAdditionalFramesStatus,
 )
 
 _MODEL_CONFIG = ConfigDict(populate_by_name=True, alias_generator=to_camel)
@@ -176,10 +201,18 @@ FRAME_WEIGHT_METRIC = "stacking.frame_weight"
 REFERENCE_FLUX_METRIC = "stacking.noise_reference_flux_stack_unit"
 APERTURE_SET_METRIC = "stacking.aperture_set_number"
 EFFECTIVE_FRAME_COUNT_METRIC = "stacking.effective_frame_count"
-HALF_DIFFERENCE_NORMALIZED_METRIC = "stacking.half_difference_noise_normalized"
-HALF_DIFFERENCE_APERTURE_SET_METRIC = "stacking.half_difference_aperture_set_number"
-HALF_DIFFERENCE_VARIANCE_FACTOR_METRIC = "stacking.half_difference_variance_factor"
-HALF_DIFFERENCE_MODEL_RATIO_METRIC = "stacking.half_difference_model_variance_ratio"
+ODD_EVEN_DIFFERENCE_NORMALIZED_METRIC = "stacking.odd_even_difference_noise_normalized"
+ODD_EVEN_DIFFERENCE_APERTURE_SET_METRIC = "stacking.odd_even_difference_aperture_set_number"
+ODD_EVEN_DIFFERENCE_VARIANCE_FACTOR_METRIC = "stacking.odd_even_difference_variance_factor"
+ODD_EVEN_DIFFERENCE_MODEL_RATIO_METRIC = "stacking.odd_even_difference_model_variance_ratio"
+ODD_EVEN_APERTURE_RECORD_COUNT_METRIC = "stacking.odd_even_difference_aperture_record_count"
+ODD_EVEN_DIFFERENCE_ROW_SCATTER_METRIC = "stacking.odd_even_difference_row_average_scatter_stack_unit"
+ODD_EVEN_DIFFERENCE_COLUMN_SCATTER_METRIC = "stacking.odd_even_difference_column_average_scatter_stack_unit"
+ODD_EVEN_SUM_ROW_SCATTER_METRIC = "stacking.odd_even_sum_row_average_scatter_stack_unit"
+ODD_EVEN_SUM_COLUMN_SCATTER_METRIC = "stacking.odd_even_sum_column_average_scatter_stack_unit"
+FLAT_NOISE_IN_APERTURE_METRIC = "stacking.flat_noise_in_aperture_stack_unit"
+EXPECTED_MASTER_DARK_NOISE_METRIC = "stacking.expected_master_dark_noise_stack_unit"
+FRAMES_STACKED_METRIC = "stacking.frames_stacked_count"
 GROUP_EXPOSURE_METRIC = "stacking.group_exposure_s"
 GROUP_FRAMES_STACKED_METRIC = "stacking.group_frames_stacked_count"
 GROUP_GAIN_METRIC = "stacking.group_gain_applied"
@@ -203,10 +236,18 @@ PINNED_STACK_METRICS = {
     REFERENCE_FLUX_METRIC: 3,
     APERTURE_SET_METRIC: 1,
     EFFECTIVE_FRAME_COUNT_METRIC: 1,
-    HALF_DIFFERENCE_NORMALIZED_METRIC: 1,
-    HALF_DIFFERENCE_APERTURE_SET_METRIC: 1,
-    HALF_DIFFERENCE_VARIANCE_FACTOR_METRIC: 1,
-    HALF_DIFFERENCE_MODEL_RATIO_METRIC: 1,
+    FRAMES_STACKED_METRIC: 2,
+    ODD_EVEN_DIFFERENCE_NORMALIZED_METRIC: 1,
+    ODD_EVEN_DIFFERENCE_APERTURE_SET_METRIC: 1,
+    ODD_EVEN_DIFFERENCE_VARIANCE_FACTOR_METRIC: 1,
+    ODD_EVEN_DIFFERENCE_MODEL_RATIO_METRIC: 1,
+    ODD_EVEN_APERTURE_RECORD_COUNT_METRIC: 1,
+    ODD_EVEN_DIFFERENCE_ROW_SCATTER_METRIC: 1,
+    ODD_EVEN_DIFFERENCE_COLUMN_SCATTER_METRIC: 1,
+    ODD_EVEN_SUM_ROW_SCATTER_METRIC: 1,
+    ODD_EVEN_SUM_COLUMN_SCATTER_METRIC: 1,
+    FLAT_NOISE_IN_APERTURE_METRIC: 1,
+    EXPECTED_MASTER_DARK_NOISE_METRIC: 1,
     GROUP_EXPOSURE_METRIC: 1,
     GROUP_FRAMES_STACKED_METRIC: 1,
     GROUP_GAIN_METRIC: 1,
@@ -215,6 +256,15 @@ PINNED_STACK_METRICS = {
 """The metrics read, and the definition version each is pinned to (decision
 S13). A row of another version is not used. A test fails when the registry
 moves past one of these versions."""
+
+MINIMUM_EARLIER_NIGHTS_FRAMES = 8
+"""An earlier-nights forecast check counts only when the earlier-nights stack
+holds at least this many frames (the stack's stored
+``stacking.frames_stacked_count``). A smaller pair is not checkable, so it does
+not make the recommended additional frames provisional. User decision
+2026-10-26: M 13's 4-frame first night opened a provisional count alone. This
+is more than the general `astrometricslib` subset minimum of 4 frames, which is
+unchanged. Design estimate, register row to be added."""
 
 COOLED_CAMERA_NAME_MARKERS = ("zwo", "asi")
 """Words that mark a cooled astronomy camera in its name. A new dark master
@@ -347,28 +397,42 @@ def calibration_summary_from_record(record: Any) -> CalibrationSummary:
     )
 
 
-HALF_DIFFERENCE_METRICS = frozenset({
-    HALF_DIFFERENCE_NORMALIZED_METRIC,
-    HALF_DIFFERENCE_APERTURE_SET_METRIC,
-    HALF_DIFFERENCE_VARIANCE_FACTOR_METRIC,
-    HALF_DIFFERENCE_MODEL_RATIO_METRIC,
+ODD_EVEN_DIFFERENCE_DETAIL_METRICS = frozenset({
+    ODD_EVEN_APERTURE_RECORD_COUNT_METRIC,
+    ODD_EVEN_DIFFERENCE_ROW_SCATTER_METRIC,
+    ODD_EVEN_DIFFERENCE_COLUMN_SCATTER_METRIC,
+    ODD_EVEN_SUM_ROW_SCATTER_METRIC,
+    ODD_EVEN_SUM_COLUMN_SCATTER_METRIC,
 })
-"""The half-difference rows read. They sit on the library stack's subject but
-belong to a later run (the half-difference job runs after the stack), so they
+"""The odd–even difference job's rows about where the fixed pattern is (the
+per-aperture record and the four line-pattern scatters, decision D21). They are
+joined to the run like the rows below, but a missing one is not a problem of
+the noise comparison, so they are read apart."""
+
+ODD_EVEN_DIFFERENCE_METRICS = frozenset({
+    ODD_EVEN_DIFFERENCE_NORMALIZED_METRIC,
+    ODD_EVEN_DIFFERENCE_APERTURE_SET_METRIC,
+    ODD_EVEN_DIFFERENCE_VARIANCE_FACTOR_METRIC,
+    ODD_EVEN_DIFFERENCE_MODEL_RATIO_METRIC,
+})
+"""The odd–even difference rows read. They sit on the library stack's subject
+but belong to a later run (the odd–even difference job runs after the stack),
+so they
 are read apart from the noise rows and joined to the run they follow."""
 
 
-class HalfDifferenceRecord(BaseModel):
-    """The half-difference measurement of one library stack.
+class OddEvenDifferenceRecord(BaseModel):
+    """The odd–even difference measurement of one library stack.
 
     The job takes the odd-minus-even difference of two half stacks, which
-    cancels everything fixed on the sky, so its noise is the random noise
-    alone (see `noise_growth.measure_stack_noise_floor_from_half_difference`).
+    cancels everything fixed on the sky, so its noise is the random noise alone
+    (see
+    `noise_growth.measure_stack_fixed_pattern_noise_from_odd_even_difference`).
 
     Parameters
     ----------
     run_id : `str`
-        The run of the half-difference job.
+        The run of the odd–even difference job.
     measured_at : `datetime`
         When its newest row was stored.
     normalized_noise : `float` or `None`
@@ -384,6 +448,14 @@ class HalfDifferenceRecord(BaseModel):
     model_variance_ratio : `float` or `None`
         The difference's variance in units of the library stack's, with each
         frame's modeled noise. Used only when `variance_factor` is missing.
+    aperture_record_path : `str` or `None`
+        The per-aperture record file beside the stack (read from the reason of
+        ``stacking.odd_even_difference_aperture_record_count``), for the shape
+        tests of the fixed pattern.
+    aperture_record_count : `int` or `None`
+        How many apertures the record holds.
+    line_scatters : `LinePatternScatters` or `None`
+        The four stored line-pattern scatters, when all are measured.
     problems : `dict` [`str`, `str`]
         Why a part is missing, by part name.
     """
@@ -397,6 +469,9 @@ class HalfDifferenceRecord(BaseModel):
     aperture_identity: str | None = None
     variance_factor: float | None = None
     model_variance_ratio: float | None = None
+    aperture_record_path: str | None = None
+    aperture_record_count: int | None = None
+    line_scatters: LinePatternScatters | None = None
     problems: dict[str, str] = Field(default_factory=dict)
 
     def full_stack_equivalent(self, library_effective_count: float | None) -> float | None:
@@ -481,8 +556,8 @@ class StackRunRecord(BaseModel):
     noise_definition_version : `int` or `None`
         The definition version of the stack's noise row.
     noise_measured_at : `datetime` or `None`
-        When the stack's noise row was stored. A half-difference measurement
-        is used only when it is newer.
+        When the stack's noise row was stored. An odd–even difference
+        measurement is used only when it is newer.
     groups : `list` [`RecordedGroup`]
         The exposure groups the run recorded. Empty for a run that stored
         none (a stack made before part 2a) and for a run that made several
@@ -490,9 +565,19 @@ class StackRunRecord(BaseModel):
         stack (see ``problems["groups"]``).
     effective_frame_count : `float` or `None`
         The stack's effective frame count (``stacking.effective_frame_count``).
-    half_difference : `HalfDifferenceRecord` or `None`
-        The newest half-difference measurement made after this run's noise
+    frames_stacked : `int` or `None`
+        The frames the stack holds (``stacking.frames_stacked_count``);
+        ``None`` when not stored.
+    odd_even_difference : `OddEvenDifferenceRecord` or `None`
+        The newest odd–even difference measurement made after this run's noise
         row and before the next run of the same stack, or ``None``.
+    flat_noise : `float` or `None`
+        The noise the master flat adds to an aperture sum, in stack units
+        (``stacking.flat_noise_in_aperture_stack_unit``).
+    master_dark_noise : `float` or `None`
+        The noise the master dark adds, in stack units, a lower bound
+        (``stacking.expected_master_dark_noise_stack_unit``); ``None`` for a
+        stack of several exposure groups.
     calibration : `CalibrationSummary` or `None`
         The calibration the run used. ``None`` until
         `attach_calibration_identities` adds it; a run with no record counts
@@ -526,7 +611,10 @@ class StackRunRecord(BaseModel):
     noise_definition_version: int | None = None
     groups: list[RecordedGroup] = Field(default_factory=list)
     effective_frame_count: float | None = None
-    half_difference: HalfDifferenceRecord | None = None
+    frames_stacked: int | None = None
+    odd_even_difference: OddEvenDifferenceRecord | None = None
+    flat_noise: float | None = None
+    master_dark_noise: float | None = None
     noise_measured_at: datetime | None = None
     calibration: CalibrationSummary | None = None
     is_earlier_nights_subset: bool = False
@@ -660,12 +748,11 @@ def stack_runs_from_measurements(
     measurements : `Iterable` [`QualityMeasurement`]
         All rows of the target, with every run kept (``latest_only=False``).
     include_earlier_nights : `bool`, optional
-        Also build the runs of the earlier-nights subset stack (all nights
-        but the last), whose stack rows have the variant
-        `EARLIER_NIGHTS_VARIANT`. Each is marked
-        ``is_earlier_nights_subset``. Callers that fit a noise floor or read
-        a stop signal must leave this off, because a subset is not part of
-        the library's history. Defaults to `False`.
+        Also build the runs of the earlier-nights subset stack (all nights but
+        the last), whose stack rows have the variant `EARLIER_NIGHTS_VARIANT`.
+        Each is marked ``is_earlier_nights_subset``. Callers that fit
+        fixed-pattern noise or read a stop signal must leave this off, because
+        a subset is not part of the library's history. Defaults to `False`.
 
     Returns
     -------
@@ -681,7 +768,7 @@ def stack_runs_from_measurements(
         if row.metric not in PINNED_STACK_METRICS:
             continue
         variant = row.subject.variant
-        if row.metric in HALF_DIFFERENCE_METRICS:
+        if row.metric in ODD_EVEN_DIFFERENCE_METRICS or row.metric in ODD_EVEN_DIFFERENCE_DETAIL_METRICS:
             # The job's rows follow the stack's own run, so they must not make
             # a run of their own. The earlier-nights subset has none.
             if row.subject.level == SubjectLevel.STACK and variant is None:
@@ -789,6 +876,15 @@ def stack_runs_from_measurements(
         effective_count, _count_reason = _usable_value(
             grouped.get((stack_id, EFFECTIVE_FRAME_COUNT_METRIC), []), EFFECTIVE_FRAME_COUNT_METRIC
         )
+        stacked_count, _stacked_reason = _usable_value(
+            grouped.get((stack_id, FRAMES_STACKED_METRIC), []), FRAMES_STACKED_METRIC
+        )
+        flat_noise, _flat_reason = _usable_value(
+            grouped.get((stack_id, FLAT_NOISE_IN_APERTURE_METRIC), []), FLAT_NOISE_IN_APERTURE_METRIC
+        )
+        dark_noise, _dark_reason = _usable_value(
+            grouped.get((stack_id, EXPECTED_MASTER_DARK_NOISE_METRIC), []), EXPECTED_MASTER_DARK_NOISE_METRIC
+        )
         records.append(
             StackRunRecord(
                 run_id=run_id,
@@ -810,68 +906,157 @@ def stack_runs_from_measurements(
                 ),
                 groups=recorded_groups,
                 effective_frame_count=effective_count,
+                frames_stacked=round(stacked_count) if stacked_count is not None else None,
+                flat_noise=flat_noise if flat_noise is not None and flat_noise > 0.0 else None,
+                master_dark_noise=dark_noise if dark_noise is not None and dark_noise > 0.0 else None,
                 noise_measured_at=max((row.measured_at for row in noise_rows), default=None),
                 is_earlier_nights_subset=is_subset,
                 problems=problems,
             )
         )
     ordered = sorted(records, key=lambda record: (record.measured_at, record.run_id))
-    return _attach_half_differences(ordered, half_rows)
+    return _attach_odd_even_differences(ordered, half_rows)
 
 
-def _half_difference_record(run_id: str, rows: Sequence[QualityMeasurement]) -> HalfDifferenceRecord:
-    """Build one half-difference record from the rows of one job run.
+APERTURE_RECORD_PATH_PATTERN = re.compile(r"(\S.*?_odd_even_apertures\.json)")
+"""Finds the per-aperture record's file name in the reason of the record-count
+row. The pipeline writes the path there; a path may hold spaces, so the match
+runs from the first non-space character up to the file ending."""
+
+
+def _aperture_record_of_rows(
+    grouped: Mapping[tuple[str, str], Sequence[QualityMeasurement]],
+) -> tuple[str | None, int | None]:
+    """Read the per-aperture record's path and count from the job's rows.
+
+    Parameters
+    ----------
+    grouped : `Mapping`
+        The job's newest rows by ``(subject id, metric)``.
+
+    Returns
+    -------
+    path, count : `tuple` [`str` or `None`, `int` or `None`]
+        The file path found in the record-count row's reason (after an
+        optional ``Per-aperture record:`` label) and the count, or ``None``
+        for a part that is missing.
+    """
+    for (_subject, metric), rows in grouped.items():
+        if metric != ODD_EVEN_APERTURE_RECORD_COUNT_METRIC:
+            continue
+        value, _reason = _usable_value(rows, metric)
+        if value is None or value < 1:
+            return None, None
+        for row in rows:
+            reason_text = (row.reason or "").replace("Per-aperture record:", "")
+            match = APERTURE_RECORD_PATH_PATTERN.search(reason_text)
+            if match:
+                return match.group(1).strip(), round(value)
+        return None, round(value)
+    return None, None
+
+
+def _line_scatters_of_rows(
+    grouped: Mapping[tuple[str, str], Sequence[QualityMeasurement]],
+) -> LinePatternScatters | None:
+    """Read the four line-pattern scatters from the job's rows.
+
+    Parameters
+    ----------
+    grouped : `Mapping`
+        The job's newest rows by ``(subject id, metric)``.
+
+    Returns
+    -------
+    scatters : `LinePatternScatters` or `None`
+        The scatters with the line counts from the rows' sample counts (the
+        smaller of the sum's and the difference's, when they differ), or
+        ``None`` when any of the four is missing or not positive.
+    """
+    values: dict[str, float] = {}
+    counts: dict[str, int] = {}
+    wanted = {
+        ODD_EVEN_DIFFERENCE_ROW_SCATTER_METRIC: "difference_row",
+        ODD_EVEN_DIFFERENCE_COLUMN_SCATTER_METRIC: "difference_column",
+        ODD_EVEN_SUM_ROW_SCATTER_METRIC: "sum_row",
+        ODD_EVEN_SUM_COLUMN_SCATTER_METRIC: "sum_column",
+    }
+    for (_subject, metric), rows in grouped.items():
+        name = wanted.get(metric)
+        if name is None:
+            continue
+        value, _reason = _usable_value(rows, metric)
+        count = next((row.sample_count for row in rows if row.sample_count), None)
+        if value is None or value <= 0.0 or count is None or count < 2:
+            return None
+        values[name] = value
+        counts[name] = count
+    if len(values) != len(wanted):
+        return None
+    return LinePatternScatters(
+        **values,
+        row_count=min(counts["difference_row"], counts["sum_row"]),
+        column_count=min(counts["difference_column"], counts["sum_column"]),
+    )
+
+
+def _odd_even_difference_record(run_id: str, rows: Sequence[QualityMeasurement]) -> OddEvenDifferenceRecord:
+    """Build one odd–even difference record from the rows of one job run.
 
     Parameters
     ----------
     run_id : `str`
         The job's run.
     rows : `Sequence` [`QualityMeasurement`]
-        The run's half-difference rows on one library stack.
+        The run's odd–even difference rows on one library stack.
 
     Returns
     -------
-    record : `HalfDifferenceRecord`
+    record : `OddEvenDifferenceRecord`
         The usable values; a missing one is named in ``problems``.
     """
     grouped = _newest_by_subject(rows)
     problems: dict[str, str] = {}
     values: dict[str, float | None] = {}
-    for metric in HALF_DIFFERENCE_METRICS:
+    for metric in ODD_EVEN_DIFFERENCE_METRICS:
         found = [pair for key, pair in grouped.items() if key[1] == metric]
         value, reason = _usable_value(found[0], metric) if found else (None, f"{metric} has no row.")
         values[metric] = value
         if value is None:
             problems[metric] = reason or f"{metric} was not measured."
     normalized_rows = next(
-        (pair for key, pair in grouped.items() if key[1] == HALF_DIFFERENCE_NORMALIZED_METRIC), []
+        (pair for key, pair in grouped.items() if key[1] == ODD_EVEN_DIFFERENCE_NORMALIZED_METRIC), []
     )
     apertures = next((row.sample_count for row in normalized_rows if row.sample_count), None)
     identity = None
-    identity_value = values[HALF_DIFFERENCE_APERTURE_SET_METRIC]
+    identity_value = values[ODD_EVEN_DIFFERENCE_APERTURE_SET_METRIC]
     if identity_value is not None:
         try:
             identity = aperture_identity_from_number(identity_value)
         except ValueError:
-            problems[HALF_DIFFERENCE_APERTURE_SET_METRIC] = (
+            problems[ODD_EVEN_DIFFERENCE_APERTURE_SET_METRIC] = (
                 f"The stored aperture-set number {identity_value!r} is invalid."
             )
-    return HalfDifferenceRecord(
+    record_path, record_count = _aperture_record_of_rows(grouped)
+    return OddEvenDifferenceRecord(
         run_id=run_id,
         measured_at=max(row.measured_at for row in rows),
-        normalized_noise=values[HALF_DIFFERENCE_NORMALIZED_METRIC],
+        normalized_noise=values[ODD_EVEN_DIFFERENCE_NORMALIZED_METRIC],
         apertures=apertures,
         aperture_identity=identity,
-        variance_factor=values[HALF_DIFFERENCE_VARIANCE_FACTOR_METRIC],
-        model_variance_ratio=values[HALF_DIFFERENCE_MODEL_RATIO_METRIC],
+        variance_factor=values[ODD_EVEN_DIFFERENCE_VARIANCE_FACTOR_METRIC],
+        model_variance_ratio=values[ODD_EVEN_DIFFERENCE_MODEL_RATIO_METRIC],
+        aperture_record_path=record_path,
+        aperture_record_count=record_count,
+        line_scatters=_line_scatters_of_rows(grouped),
         problems=problems,
     )
 
 
-def _attach_half_differences(
+def _attach_odd_even_differences(
     records: list[StackRunRecord], half_rows: Mapping[tuple[str, str], Sequence[QualityMeasurement]]
 ) -> list[StackRunRecord]:
-    """Give each library run the half-difference measurement that follows it.
+    """Give each library run the odd–even difference that follows it.
 
     The job measures the halves of a stack after the stack's noise row is
     stored, so a measurement belongs to the newest run of its stack whose
@@ -883,16 +1068,16 @@ def _attach_half_differences(
     records : `list` [`StackRunRecord`]
         The runs, oldest first.
     half_rows : `Mapping`
-        The half-difference rows by ``(job run id, stack subject id)``.
+        The odd–even difference rows by ``(job run id, stack subject id)``.
 
     Returns
     -------
     records : `list` [`StackRunRecord`]
-        The same runs, each with ``half_difference`` set where one belongs.
+        The same runs, each with ``odd_even_difference`` set where one belongs.
     """
-    attached: dict[int, HalfDifferenceRecord] = {}
+    attached: dict[int, OddEvenDifferenceRecord] = {}
     for (run_id, stack_id), rows in half_rows.items():
-        candidate = _half_difference_record(run_id, rows)
+        candidate = _odd_even_difference_record(run_id, rows)
         owners = [
             index
             for index, record in enumerate(records)
@@ -908,7 +1093,7 @@ def _attach_half_differences(
         if current is None or _as_utc(candidate.measured_at) > _as_utc(current.measured_at):
             attached[owner] = candidate
     return [
-        record.model_copy(update={"half_difference": attached[index]}) if index in attached else record
+        record.model_copy(update={"odd_even_difference": attached[index]}) if index in attached else record
         for index, record in enumerate(records)
     ]
 
@@ -1220,10 +1405,22 @@ def stack_groups_of_run(
     group_lengths: list[float] = []
     for length in unique:
         indices = [index for index, group_length in enumerate(lengths) if group_length == length]
-        # A folded group's stored exposure is the mean of its frames, which
-        # can differ from its length, so the mean is tried first.
+        # A folded group's stored exposure is the mean over every frame
+        # submitted to it, including frames the stacker then dropped, so it can
+        # differ from the mean of the listed members (M 27: 127.8 s stored,
+        # 129.0 s over its 20 stacked members, 0.9 percent apart). The group's
+        # reference exposure is exactly its folded length, so it is tried
+        # first; the mean and the length, within 0.5 percent, are the fallback.
         mean_exposure = math.fsum(frames[index].exposure_seconds for index in indices) / len(indices)
         recorded = next(
+            (
+                group
+                for group in run.groups
+                if group.reference_exposure_seconds is not None
+                and math.isclose(group.reference_exposure_seconds, length, rel_tol=1e-9)
+            ),
+            None,
+        ) or next(
             (
                 group
                 for target in (mean_exposure, length)
@@ -1279,8 +1476,8 @@ def stack_groups_of_run(
     )
 
 
-def _half_difference_problem(record: StackRunRecord) -> str | None:
-    """Say why a run's half-difference measurement cannot decide its floor.
+def _odd_even_difference_problem(record: StackRunRecord) -> str | None:
+    """Say why a run's odd–even difference cannot decide the pattern noise.
 
     The measurement must be of this stack (the join in
     `stack_runs_from_measurements` makes it newer than the stack's noise row),
@@ -1297,11 +1494,11 @@ def _half_difference_problem(record: StackRunRecord) -> str | None:
     problem : `str` or `None`
         The reason it cannot be used, or ``None`` when it can.
     """
-    half = record.half_difference
+    half = record.odd_even_difference
     if half is None:
-        return "no half-difference measurement was stored for this stack"
+        return "no odd–even difference measurement was stored for this stack"
     if record.noise_measured_at is None or _as_utc(half.measured_at) < _as_utc(record.noise_measured_at):
-        return "the half-difference measurement is older than the stack's noise measurement"
+        return "the odd–even difference measurement is older than the stack's noise measurement"
     if (
         record.noise is None
         or record.noise <= 0.0
@@ -1311,22 +1508,22 @@ def _half_difference_problem(record: StackRunRecord) -> str | None:
     ):
         return "the stack's own noise was not measured"
     if half.normalized_noise is None or half.apertures is None or half.apertures < 2:
-        return "the half-difference noise was not measured"
+        return "the odd–even difference noise was not measured"
     if record.aperture_identity is None or half.aperture_identity != record.aperture_identity:
-        return "the half-difference was measured in other apertures than the stack"
+        return "the odd–even difference was measured in other apertures than the stack"
     if half.full_stack_equivalent(record.effective_frame_count) is None:
-        return "the half-difference has no variance factor or model ratio to scale it to the full stack"
+        return "the odd–even difference has no variance factor or model ratio to scale it to the full stack"
     return None
 
 
-def half_difference_noise_inputs(record: StackRunRecord) -> tuple[float, int, float, int] | None:
-    """Give the four numbers that compare a stack with its half-difference.
+def odd_even_difference_noise_inputs(record: StackRunRecord) -> tuple[float, int, float, int] | None:
+    """Give the four numbers that compare a stack with its odd–even difference.
 
-    This is the one place that decides whether the half-difference is usable
-    (`_half_difference_problem`) and builds the full-stack equivalent of its
-    noise (`HalfDifferenceRecord.full_stack_equivalent`). The noise floor and
-    the loss account both read it, so they use the same record of the same
-    stack.
+    This is the one place that decides whether the odd–even difference is
+    usable (`_odd_even_difference_problem`) and builds the full-stack
+    equivalent of its noise (`OddEvenDifferenceRecord.full_stack_equivalent`).
+    The fixed-pattern noise and the loss account both read it, so they use the
+    same record of the same stack.
 
     Parameters
     ----------
@@ -1338,10 +1535,10 @@ def half_difference_noise_inputs(record: StackRunRecord) -> tuple[float, int, fl
     inputs : `tuple` [`float`, `int`, `float`, `int`] or `None`
         The stack's measured noise, its apertures, the random noise of the
         full stack (all in stack units) and the difference's apertures, or
-        ``None`` when the half-difference cannot be used.
+        ``None`` when the odd–even difference cannot be used.
     """
-    half = record.half_difference
-    if half is None or _half_difference_problem(record) is not None:
+    half = record.odd_even_difference
+    if half is None or _odd_even_difference_problem(record) is not None:
         return None
     equivalent = half.full_stack_equivalent(record.effective_frame_count)
     if (
@@ -1355,59 +1552,71 @@ def half_difference_noise_inputs(record: StackRunRecord) -> tuple[float, int, fl
     return record.noise, record.aperture_count, equivalent * record.reference_flux, half.apertures
 
 
-def single_stack_floor(record: StackRunRecord) -> StackNoiseFloor | None:
-    """Find a run's noise floor from its own measured noise.
+def single_stack_fixed_pattern_noise(
+    record: StackRunRecord, model_error: NoiseModelError | None = None
+) -> StackFixedPatternNoise | None:
+    """Find a run's fixed-pattern noise from its own measured noise.
 
-    When the run has a usable half-difference measurement
-    (`_half_difference_problem` says none is missing), the random part is that
-    direct measurement, scaled to the full stack
-    (`HalfDifferenceRecord.full_stack_equivalent`), and the test counts
-    measurement errors only (`measure_stack_noise_floor_from_half_difference`).
-    The two noises are compared as normalized noises, so the stack's
-    brightness scale cancels, and are put back in the stack's units with the
-    stack's reference flux. Otherwise the floor falls back to the noise model:
-    the expected noise is version 2 of
+    When the run has a usable odd–even difference measurement
+    (`_odd_even_difference_problem` says none is missing), the random part is
+    that direct measurement, scaled to the full stack
+    (`OddEvenDifferenceRecord.full_stack_equivalent`), and the test counts
+    measurement errors only
+    (`measure_stack_fixed_pattern_noise_from_odd_even_difference`). The two
+    noises are compared as normalized noises, so the stack's brightness scale
+    cancels, and are put back in the stack's units with the stack's reference
+    flux. Otherwise the fixed-pattern noise falls back to the noise model: the
+    expected noise is version 2 of
     ``stacking.expected_empty_aperture_noise_stack_unit``, which includes
     Siril's normalization scale (plan decision D9), and the test counts the
-    model's own error too (`measure_stack_noise_floor`).
+    model's own error too (`measure_stack_fixed_pattern_noise`).
 
     Parameters
     ----------
     record : `StackRunRecord`
         The run.
+    model_error : `NoiseModelError`, optional
+        The noise model's own relative error, used only on the model basis.
+        The stand-in value when omitted.
 
     Returns
     -------
-    floor : `StackNoiseFloor` or `None`
-        The floor result (found or not), or ``None`` when neither basis can
-        be used.
+    fixed_pattern : `StackFixedPatternNoise` or `None`
+        The fixed-pattern noise result (found, possible or neither), or
+        ``None`` when neither basis can be used.
     """
-    problem = _half_difference_problem(record)
-    half = record.half_difference
-    inputs = half_difference_noise_inputs(record)
+    problem = _odd_even_difference_problem(record)
+    half = record.odd_even_difference
+    inputs = odd_even_difference_noise_inputs(record)
     if inputs is not None:
-        return measure_stack_noise_floor_from_half_difference(*inputs)
-    model_floor = _model_single_stack_floor(record)
-    if model_floor is not None and half is not None and problem is not None:
-        return model_floor.model_copy(
-            update={"reason": f"{model_floor.reason} The half-difference was not used: {problem}."}
+        return measure_stack_fixed_pattern_noise_from_odd_even_difference(*inputs)
+    model_fixed_pattern = _model_single_stack_fixed_pattern_noise(record, model_error)
+    if model_fixed_pattern is not None and half is not None and problem is not None:
+        return model_fixed_pattern.model_copy(
+            update={
+                "reason": f"{model_fixed_pattern.reason} The odd–even difference was not used: {problem}."
+            }
         )
-    return model_floor
+    return model_fixed_pattern
 
 
-def _model_single_stack_floor(record: StackRunRecord) -> StackNoiseFloor | None:
-    """Find a run's noise floor against the noise model's prediction.
+def _model_single_stack_fixed_pattern_noise(
+    record: StackRunRecord, model_error: NoiseModelError | None = None
+) -> StackFixedPatternNoise | None:
+    """Find a run's fixed-pattern noise against the noise model's prediction.
 
     Parameters
     ----------
     record : `StackRunRecord`
         The run.
+    model_error : `NoiseModelError`, optional
+        The noise model's own relative error.
 
     Returns
     -------
-    floor : `StackNoiseFloor` or `None`
-        The floor result (found or not), or ``None`` when the run lacks a
-        measured noise, an expected noise or 2 apertures.
+    fixed_pattern : `StackFixedPatternNoise` or `None`
+        The fixed-pattern noise result (found or not), or ``None`` when the run
+        lacks a measured noise, an expected noise or 2 apertures.
     """
     if (
         record.noise is None
@@ -1418,15 +1627,23 @@ def _model_single_stack_floor(record: StackRunRecord) -> StackNoiseFloor | None:
         or record.aperture_count < 2
     ):
         return None
-    return measure_stack_noise_floor(record.noise, record.expected_noise, record.aperture_count)
+    return measure_stack_fixed_pattern_noise(
+        record.noise, record.expected_noise, record.aperture_count, model_error
+    )
 
 
-def noise_floor_for_runs(runs: Sequence[StackRunRecord]) -> StackNoiseFloor | None:
-    """Choose the noise floor of a target's newest stack.
+def fixed_pattern_noise_for_runs(
+    runs: Sequence[StackRunRecord],
+    model_error: NoiseModelError | None = None,
+    history: Mapping[SetupKey, Mapping[str, float]] | None = None,
+    target_id: str | None = None,
+) -> StackFixedPatternNoise | None:
+    """Choose the fixed-pattern noise of a target's newest stack.
 
-    The one-stack floor of the newest run (`single_stack_floor`) and the fit
-    over the runs that share its aperture set (`fit_noise_floor`) are
-    reconciled by `choose_noise_floor`. A fit never mixes aperture sets: the
+    The one-stack fixed-pattern noise of the newest run
+    (`single_stack_fixed_pattern_noise`) and the fit over the runs that share
+    its aperture set (`fit_fixed_pattern_noise`) are reconciled by
+    `choose_fixed_pattern_noise`. A fit never mixes aperture sets: the
     normalized noise of two sets is not on one scale.
 
     Parameters
@@ -1434,11 +1651,23 @@ def noise_floor_for_runs(runs: Sequence[StackRunRecord]) -> StackNoiseFloor | No
     runs : `Sequence` [`StackRunRecord`]
         The target's library stack runs, up to and including the stack being
         extended.
+    model_error : `NoiseModelError`, optional
+        The noise model's own relative error for the target's capture setting
+        group (`noise_model_error_for_setting`), used when the single-stack
+        test is on the model basis.
+    history : `Mapping`, optional
+        The fixed-pattern share of each target by setup
+        (`fixed_pattern_shares_by_setup`). Used only when the target has no
+        measured fixed-pattern noise of its own (decision D23).
+    target_id : `str`, optional
+        The target, so its own share is left out of its borrowed median.
 
     Returns
     -------
-    floor : `StackNoiseFloor` or `None`
-        The chosen floor, or ``None`` when neither estimate can be made.
+    fixed_pattern : `StackFixedPatternNoise` or `None`
+        The chosen fixed_pattern, or ``None`` when neither estimate can be
+        made and the setup has no history of `MINIMUM_HISTORY_TARGETS` other
+        targets.
     """
     ordered = sorted(runs, key=lambda item: (item.measured_at, item.run_id))
     if not ordered:
@@ -1446,9 +1675,380 @@ def noise_floor_for_runs(runs: Sequence[StackRunRecord]) -> StackNoiseFloor | No
     newest = ordered[-1]
     same_set = [record for record in ordered if record.aperture_identity == newest.aperture_identity]
     steps = noise_steps_from_runs(same_set)
-    fit = fit_noise_floor(steps) if steps else None
+    fit = fit_fixed_pattern_noise(steps) if steps else None
     expected_variance = steps[-1].expected_variance if steps and steps[-1].label == newest.run_id else None
-    return choose_noise_floor(single_stack_floor(newest), fit, expected_variance)
+    chosen = choose_fixed_pattern_noise(
+        single_stack_fixed_pattern_noise(newest, model_error), fit, expected_variance
+    )
+    if chosen is None and history:
+        return history_fixed_pattern_noise(history, newest, target_id)
+    return chosen
+
+
+SetupKey = tuple[str | None, str | None, tuple[FileIdentity, ...]]
+"""What a fixed-pattern history is keyed by: the camera, the optic and the set
+of flat masters the stack used (decision D23). A new flat master changes the
+key, so a new flat set starts with no history."""
+
+
+@dataclass(frozen=True)
+class NoiseHistory:
+    """What the library's stacks say about noise, read once for all targets.
+
+    Parameters
+    ----------
+    model_errors : `dict`
+        The noise model's own error by capture setting group
+        (`noise_model_errors_by_setting_group`).
+    fixed_pattern_shares : `dict`
+        Each target's measured fixed-pattern share by setup
+        (`fixed_pattern_shares_by_setup`).
+    """
+
+    model_errors: Mapping[Any, NoiseModelError] = field(default_factory=dict)
+    fixed_pattern_shares: Mapping[SetupKey, Mapping[str, float]] = field(default_factory=dict)
+
+
+def fixed_pattern_setup_key(calibration: CalibrationSummary | None) -> SetupKey | None:
+    """Give the setup a run's fixed-pattern history belongs to.
+
+    Parameters
+    ----------
+    calibration : `CalibrationSummary` or `None`
+        The calibration record of the run
+        (`attach_calibration_identities`).
+
+    Returns
+    -------
+    key : `tuple` or `None`
+        ``(camera, optic, flat masters)`` with the masters as the store names
+        them (path, size, modification time), or ``None`` when the run has no
+        calibration record.
+    """
+    if calibration is None:
+        return None
+    return (calibration.camera, calibration.optic, calibration.flat_masters)
+
+
+def fixed_pattern_share_of_run(record: StackRunRecord) -> float | None:
+    """Give a run's measured fixed-pattern share of its noise variance.
+
+    The share is ``1 - random^2 / measured^2``, from the run's odd–even
+    difference (`odd_even_difference_noise_inputs`), the measurement that does
+    not lean on the noise model. A value below 0 is taken as 0: a stack cannot
+    have less than no fixed pattern. A run with no usable odd–even difference
+    has no share.
+
+    Parameters
+    ----------
+    record : `StackRunRecord`
+        The run.
+
+    Returns
+    -------
+    share : `float` or `None`
+        The share, from 0 to 1.
+    """
+    inputs = odd_even_difference_noise_inputs(record)
+    if inputs is None:
+        return None
+    measured, _measured_apertures, random_noise, _random_apertures = inputs
+    return float(min(1.0, max(0.0, 1.0 - (random_noise / measured) ** 2)))
+
+
+def fixed_pattern_shares_by_setup(
+    measurements: Iterable[QualityMeasurement], identities: Iterable[Any]
+) -> dict[SetupKey, dict[str, float]]:
+    """Collect every target's measured fixed-pattern share by setup.
+
+    The caller makes the one library-wide read of stack rows that
+    `noise_model_errors_by_setting_group` also uses, and one read of the
+    calibration records; this function makes no queries. Each target gives at
+    most one share to a setup: its newest run that has one.
+
+    Parameters
+    ----------
+    measurements : `Iterable` [`QualityMeasurement`]
+        Stack-level rows of every target, with every run kept.
+    identities : `Iterable` [`Any`]
+        The stored calibration records of every run
+        (``QualityRecords.calibration_identities()``).
+
+    Returns
+    -------
+    shares : `dict`
+        For each setup key, the share of each target by target id.
+    """
+    rows = list(measurements)
+    owner_by_stack: dict[str, str] = {}
+    for row in rows:
+        subject = row.subject
+        if subject.level == SubjectLevel.STACK and subject.target_id is not None:
+            owner_by_stack.setdefault(subject.subject_id, subject.target_id)
+    runs = attach_calibration_identities(stack_runs_from_measurements(rows), identities)
+    newest: dict[tuple[SetupKey, str], tuple[datetime, float]] = {}
+    for run in runs:
+        target_id = owner_by_stack.get(run.stack_subject_id)
+        key = fixed_pattern_setup_key(run.calibration)
+        share = fixed_pattern_share_of_run(run)
+        if target_id is None or key is None or share is None:
+            continue
+        stamp = _as_utc(run.measured_at)
+        if (key, target_id) not in newest or stamp > newest[key, target_id][0]:
+            newest[key, target_id] = (stamp, share)
+    shares: dict[SetupKey, dict[str, float]] = defaultdict(dict)
+    for (key, target_id), (_stamp, share) in newest.items():
+        shares[key][target_id] = share
+    return dict(shares)
+
+
+def history_fixed_pattern_noise(
+    history: Mapping[SetupKey, Mapping[str, float]], run: StackRunRecord, target_id: str | None = None
+) -> StackFixedPatternNoise | None:
+    """Start a target's fixed-pattern noise from other targets of its setup.
+
+    Used only for a target with no fixed-pattern noise of its own. The share is
+    the median of the other targets' shares, taken only from at least
+    `MINIMUM_HISTORY_TARGETS` of them. The result is marked (`basis`,
+    `history_target_count`) so every statement that uses it says the noise is
+    assumed, not measured on this target.
+
+    Parameters
+    ----------
+    history : `Mapping`
+        The shares by setup (`fixed_pattern_shares_by_setup`).
+    run : `StackRunRecord`
+        The target's newest library run, with its calibration attached.
+    target_id : `str`, optional
+        The target, whose own share (if any) is left out.
+
+    Returns
+    -------
+    fixed_pattern : `StackFixedPatternNoise` or `None`
+        The assumed fixed-pattern noise, or ``None`` when the run has no
+        setup key or fewer than `MINIMUM_HISTORY_TARGETS` other targets share
+        its setup. A median share of 0 gives a result with nothing detected.
+    """
+    key = fixed_pattern_setup_key(run.calibration)
+    if key is None:
+        return None
+    others = [share for other, share in history.get(key, {}).items() if other != target_id]
+    if len(others) < MINIMUM_HISTORY_TARGETS:
+        return None
+    median_share = float(np.median(others))
+    common = {
+        "source": "setup_history",
+        "basis": FIXED_PATTERN_BASIS_SETUP_HISTORY,
+        "history_target_count": len(others),
+        "normalized_units": False,
+    }
+    words = (
+        f"This assumes fixed-pattern noise like other targets of this setup (median of {len(others)} "
+        "targets), not measured on this one"
+    )
+    if median_share <= 0.0:
+        return StackFixedPatternNoise(
+            **common,
+            fixed_pattern_variance_share=0.0,
+            reason=f"{words}: the median share of the other targets is 0, so none is assumed.",
+        )
+    share = min(median_share, 0.99)
+    return StackFixedPatternNoise(
+        **common,
+        fixed_pattern_noise_detected=True,
+        fixed_pattern_to_random_variance_ratio=share / (1.0 - share),
+        fixed_pattern_variance_share=share,
+        reason=f"{words}: the median fixed-pattern share of their noise variance is {100 * share:.0f}%.",
+    )
+
+
+def fixed_pattern_account_for_run(
+    record: StackRunRecord | None,
+    fixed_pattern: StackFixedPatternNoise | None,
+    *,
+    load_record: Callable[[str], dict | None] = load_odd_even_aperture_record,
+) -> FixedPatternAccount | None:
+    """Say where a run's fixed-pattern noise is and what explains it.
+
+    The shape tests (decision D21) run only for a fixed-pattern noise that was
+    found, never for one that is merely possible, because a pattern that is not
+    proven has no shape to name. They read the per-aperture record the
+    odd–even difference job wrote beside the stack. The calibration account
+    (decision D22) runs for a found or possible fixed-pattern noise measured
+    on this stack in stack units.
+
+    Parameters
+    ----------
+    record : `StackRunRecord` or `None`
+        The run whose fixed-pattern noise was measured.
+    fixed_pattern : `StackFixedPatternNoise` or `None`
+        Its fixed-pattern noise (`fixed_pattern_noise_for_runs`).
+    load_record : `Callable`, optional
+        Reads a per-aperture record file; the library's loader by default.
+
+    Returns
+    -------
+    account : `FixedPatternAccount` or `None`
+        The location and the calibration breakdown, each only when it could be
+        made; ``None`` when neither could.
+    """
+    if record is None or fixed_pattern is None:
+        return None
+    location = None
+    half = record.odd_even_difference
+    if fixed_pattern.fixed_pattern_noise_detected and half is not None and half.aperture_record_path:
+        apertures = apertures_from_record(load_record(half.aperture_record_path))
+        if apertures or half.line_scatters is not None:
+            location = locate_fixed_pattern(apertures, half.line_scatters)
+    calibration = None
+    if (
+        fixed_pattern.source == "single_stack"
+        and not fixed_pattern.normalized_units
+        and fixed_pattern.fixed_pattern_variance is not None
+        and fixed_pattern.fixed_pattern_variance_error is not None
+    ):
+        calibration = explain_with_calibration_masters(
+            fixed_pattern.fixed_pattern_variance,
+            fixed_pattern.fixed_pattern_variance_error,
+            record.flat_noise,
+            record.master_dark_noise,
+        )
+    if location is None and calibration is None:
+        return None
+    return FixedPatternAccount(location=location, calibration=calibration)
+
+
+def noise_model_setting_key(
+    setting: CaptureSetting,
+) -> tuple[str, str | None, int | None, int | None, int | None]:
+    """Give the capture setting group a noise model error is measured for.
+
+    The group is the camera, the optic (telescope or lens), the gain setting,
+    the offset and the binning. These fix the camera's read noise and gain, the
+    sensor scale and the flat-field behavior, which is what the noise model's
+    error depends on. The filter and the exposure are left out on purpose: the
+    model already takes the sky rate and the exposure into account, and
+    including them would split the library into groups too small to reach
+    `MINIMUM_MODEL_ERROR_TARGETS`.
+
+    Parameters
+    ----------
+    setting : `CaptureSetting`
+        The capture setting of a stack or frame.
+
+    Returns
+    -------
+    key : `tuple`
+        ``(camera, telescope, gain_setting, offset, binning)``.
+    """
+    return (setting.camera, setting.telescope, setting.gain_setting, setting.offset, setting.binning)
+
+
+def noise_model_error_sample(record: StackRunRecord, target_id: str) -> NoiseModelErrorSample | None:
+    """Turn one run into a check of the noise model.
+
+    Parameters
+    ----------
+    record : `StackRunRecord`
+        The run, with its odd–even difference attached.
+    target_id : `str`
+        The target the stack belongs to.
+
+    Returns
+    -------
+    sample : `NoiseModelErrorSample` or `None`
+        The full-stack random noise from the odd–even difference
+        (`odd_even_difference_noise_inputs`, the record the fixed-pattern
+        noise reads) against the run's predicted noise, in stack units; or
+        ``None`` when the odd–even difference is unusable or the run has no
+        predicted noise.
+    """
+    inputs = odd_even_difference_noise_inputs(record)
+    if inputs is None or record.expected_noise is None or record.expected_noise <= 0.0:
+        return None
+    _measured, _measured_apertures, random_noise, random_apertures = inputs
+    return NoiseModelErrorSample.from_noises(target_id, random_noise, record.expected_noise, random_apertures)
+
+
+def noise_model_errors_by_setting_group(
+    measurements: Iterable[QualityMeasurement], settings: Mapping[int, CaptureSetting]
+) -> dict[tuple[str, str | None, int | None, int | None, int | None], NoiseModelError]:
+    """Measure the noise model's error for every capture setting group.
+
+    The caller makes one library-wide read of stack-level rows (every run kept,
+    library stacks only) and one read of the capture settings; this function
+    makes no queries. Each stack gives one sample, from its newest run that has
+    a usable odd–even difference, and each target gives at most one sample to a
+    group (its newest). A group's samples go through
+    `measure_noise_model_error`.
+
+    Parameters
+    ----------
+    measurements : `Iterable` [`QualityMeasurement`]
+        Stack-level rows of every target, with every run kept.
+    settings : `Mapping` [`int`, `CaptureSetting`]
+        The capture settings the rows point at, by id.
+
+    Returns
+    -------
+    errors : `dict`
+        A `NoiseModelError` for each setting group (`noise_model_setting_key`)
+        that has at least one sample. A group not in the result has none; look
+        it up with `noise_model_error_for_setting`.
+    """
+    rows = list(measurements)
+    owner_by_stack: dict[str, tuple[str, int]] = {}
+    for row in rows:
+        subject = row.subject
+        if (
+            subject.level == SubjectLevel.STACK
+            and subject.target_id is not None
+            and subject.capture_setting_id in settings
+        ):
+            owner_by_stack.setdefault(subject.subject_id, (subject.target_id, subject.capture_setting_id))
+    newest: dict[tuple[Any, ...], tuple[datetime, NoiseModelErrorSample]] = {}
+    for run in stack_runs_from_measurements(rows):
+        owner = owner_by_stack.get(run.stack_subject_id)
+        if owner is None:
+            continue
+        target_id, setting_id = owner
+        sample = noise_model_error_sample(run, target_id)
+        if sample is None:
+            continue
+        key = (noise_model_setting_key(settings[setting_id]), target_id)
+        stamp = _as_utc(run.measured_at)
+        if key not in newest or stamp > newest[key][0]:
+            newest[key] = (stamp, sample)
+    by_group: dict[
+        tuple[str, str | None, int | None, int | None, int | None], list[NoiseModelErrorSample]
+    ] = defaultdict(list)
+    for (group, _target_id), (_stamp, sample) in newest.items():
+        by_group[group].append(sample)
+    return {group: measure_noise_model_error(samples) for group, samples in by_group.items()}
+
+
+def noise_model_error_for_setting(
+    errors: Mapping[tuple[str, str | None, int | None, int | None, int | None], NoiseModelError] | None,
+    setting: CaptureSetting | None,
+) -> NoiseModelError:
+    """Look up the noise model's error for a capture setting.
+
+    Parameters
+    ----------
+    errors : `Mapping` or `None`
+        The result of `noise_model_errors_by_setting_group`.
+    setting : `CaptureSetting` or `None`
+        The capture setting.
+
+    Returns
+    -------
+    model_error : `NoiseModelError`
+        The group's error, or the stand-in value (zero targets) when the group
+        has no sample or no errors were read.
+    """
+    if errors is None or setting is None:
+        return NoiseModelError()
+    return errors.get(noise_model_setting_key(setting), NoiseModelError())
 
 
 def camera_gain_for_setting(config: Any, setting: CaptureSetting) -> float | None:
@@ -1782,14 +2382,14 @@ def _group_forecast(
     previous_frames: Sequence[StackFrame],
     current_frames: Sequence[StackFrame],
     new_frames: Sequence[StackFrame],
-    floor: StackNoiseFloor | None,
+    fixed_pattern: StackFixedPatternNoise | None,
     electrons_per_adu: float | None,
 ) -> _PairForecast:
     """Forecast a pair of stacks that were both combined from exposure groups.
 
     The planned forecast places the new frames with the stacker's own rule
     (`plan_group_stack`); the forecast given the frames taken uses the
-    recorded weights. Both carry the earlier stack's floor.
+    recorded weights. Both carry the earlier stack's fixed_pattern.
 
     Parameters
     ----------
@@ -1799,8 +2399,8 @@ def _group_forecast(
         Their member frames.
     new_frames : `Sequence` [`StackFrame`]
         The frames only the later stack holds.
-    floor : `StackNoiseFloor` or `None`
-        The earlier stack's noise floor.
+    fixed_pattern : `StackFixedPatternNoise` or `None`
+        The earlier stack's fixed-pattern noise.
     electrons_per_adu : `float` or `None`
         The camera gain, needed to predict the frame noise of a group the new
         frames start.
@@ -1856,8 +2456,8 @@ def _group_forecast(
             or given_after.reason
             or "The group model could not be evaluated.",
         )
-    planned_ratio = noise_ratio_with_floor(before, plan.forecast, floor)
-    given_ratio = noise_ratio_with_floor(given_before, given_after, floor)
+    planned_ratio = noise_ratio_with_fixed_pattern_noise(before, plan.forecast, fixed_pattern)
+    given_ratio = noise_ratio_with_fixed_pattern_noise(given_before, given_after, fixed_pattern)
     if planned_ratio is None or given_ratio is None:
         return _PairForecast(mode_name=mode_name, reason="The group model could not be evaluated.")
     return _PairForecast(planned=planned_ratio - 1.0, given=given_ratio - 1.0, mode_name=mode_name)
@@ -1869,7 +2469,7 @@ def _flat_forecast(
     previous_frames: Sequence[StackFrame],
     current_frames: Sequence[StackFrame],
     new_frames: Sequence[StackFrame],
-    floor: StackNoiseFloor | None,
+    fixed_pattern: StackFixedPatternNoise | None,
     configured_stack_weight: str | None,
 ) -> _PairForecast:
     """Forecast a pair of stacks that are each one exposure group.
@@ -1882,8 +2482,8 @@ def _flat_forecast(
         Their member frames.
     new_frames : `Sequence` [`StackFrame`]
         The frames only the later stack holds.
-    floor : `StackNoiseFloor` or `None`
-        The earlier stack's noise floor.
+    fixed_pattern : `StackFixedPatternNoise` or `None`
+        The earlier stack's fixed-pattern noise.
     configured_stack_weight : `str` or `None`
         The configured stack weight, used for the planned forecast when the
         earlier run's mode is not known.
@@ -1923,8 +2523,8 @@ def _flat_forecast(
             mode_name=mode_name,
             reason=given_after.reason or before.reason or "The forward model could not be evaluated.",
         )
-    planned_ratio = noise_ratio_with_floor(before, planned_after, floor)
-    given_ratio = noise_ratio_with_floor(given_before, given_after, floor)
+    planned_ratio = noise_ratio_with_fixed_pattern_noise(before, planned_after, fixed_pattern)
+    given_ratio = noise_ratio_with_fixed_pattern_noise(given_before, given_after, fixed_pattern)
     if planned_ratio is None or given_ratio is None:
         return _PairForecast(mode_name=mode_name, reason="The forward model could not be evaluated.")
     return _PairForecast(
@@ -1935,32 +2535,39 @@ def _flat_forecast(
     )
 
 
-def _floor_sentence(floor: StackNoiseFloor | None) -> str:
-    """Say in a sentence what the forecast assumed about a noise floor.
+def _fixed_pattern_sentence(fixed_pattern: StackFixedPatternNoise | None) -> str:
+    """Say in a sentence what the forecast assumed about fixed-pattern noise.
 
     Parameters
     ----------
-    floor : `StackNoiseFloor` or `None`
-        The earlier stack's floor.
+    fixed_pattern : `StackFixedPatternNoise` or `None`
+        The earlier stack's fixed_pattern.
 
     Returns
     -------
     text : `str`
-        A sentence naming the floor, or saying none was found or measured.
+        A sentence naming the fixed-pattern noise, or saying none was found or
+        measured.
     """
-    if floor is None:
-        return "No noise floor could be measured for the earlier stack."
-    if not floor.floor_detected:
-        tested = (
-            "tested against the random noise measured from the odd and even half stacks"
-            if floor.basis == FLOOR_BASIS_HALF_DIFFERENCE
-            else "tested against the noise model"
+    if fixed_pattern is None:
+        return "No fixed-pattern noise could be measured for the earlier stack."
+    tested = (
+        "tested against the random noise measured from the odd and even half stacks"
+        if fixed_pattern.basis == FIXED_PATTERN_BASIS_ODD_EVEN_DIFFERENCE
+        else "tested against the noise model"
+    )
+    if fixed_pattern.possible:
+        return (
+            "The earlier stack showed possible fixed-pattern noise "
+            f"({fixed_pattern.sigmas or 0.0:.1f} standard errors, not proven; {tested}); "
+            "the forecast does not include it."
         )
-        return f"The earlier stack showed no noise floor ({tested})."
-    share = 100 * (floor.floor_variance_share or 0.0)
+    if not fixed_pattern.fixed_pattern_noise_detected:
+        return f"The earlier stack showed no fixed-pattern noise ({tested})."
+    share = 100 * (fixed_pattern.fixed_pattern_variance_share or 0.0)
     return (
-        f"The forecast already includes a noise floor that makes up {share:.0f}% of the earlier "
-        f"stack's noise variance ({floor.basis_text})."
+        f"The forecast already includes fixed-pattern noise that makes up {share:.0f}% of the earlier "
+        f"stack's noise variance ({fixed_pattern.basis_text})."
     )
 
 
@@ -1995,8 +2602,8 @@ def _check_pair_unlabeled(
         The ``Processing.Siril.stack_weight`` setting, used only for the
         planned forecast when the earlier run's mode is not known.
     history : `Sequence` [`StackRunRecord`], optional
-        The runs up to and including the earlier run, for the floor fit. The
-        earlier run alone is used when this is left out.
+        The runs up to and including the earlier run, for the fixed-pattern
+        noise fit. The earlier run alone is used when this is left out.
     electrons_per_adu : `float`, optional
         The camera gain, for the frame noise of a group the new frames start.
 
@@ -2018,6 +2625,18 @@ def _check_pair_unlabeled(
     confounded = _confound_reason(previous, current)
     if confounded is not None:
         return _not_checkable(current, confounded, mode_name, evidence)
+    if previous.is_earlier_nights_subset:
+        held = (
+            previous.frames_stacked if previous.frames_stacked is not None else len(previous.member_frame_ids)
+        )
+        if held < MINIMUM_EARLIER_NIGHTS_FRAMES:
+            return _not_checkable(
+                current,
+                f"The earlier-nights stack holds {held} frames, fewer than the "
+                f"{MINIMUM_EARLIER_NIGHTS_FRAMES} a check needs.",
+                mode_name,
+                evidence,
+            )
     previous_relative = previous.normalized_relative_error
     current_relative = current.normalized_relative_error
     if paired_relative_error is None and (previous_relative is None or current_relative is None):
@@ -2084,7 +2703,7 @@ def _check_pair_unlabeled(
             evidence,
             **numbers,
         )
-    floor = noise_floor_for_runs(list(history) if history else [previous])
+    fixed_pattern = fixed_pattern_noise_for_runs(list(history) if history else [previous])
     previous_is_group = _is_group_stack(previous_frames)
     current_is_group = _is_group_stack(current_frames)
     if previous_is_group != current_is_group:
@@ -2098,11 +2717,17 @@ def _check_pair_unlabeled(
         )
     forecast = (
         _group_forecast(
-            previous, current, previous_frames, current_frames, new_frames, floor, electrons_per_adu
+            previous, current, previous_frames, current_frames, new_frames, fixed_pattern, electrons_per_adu
         )
         if current_is_group
         else _flat_forecast(
-            previous, current, previous_frames, current_frames, new_frames, floor, configured_stack_weight
+            previous,
+            current,
+            previous_frames,
+            current_frames,
+            new_frames,
+            fixed_pattern,
+            configured_stack_weight,
         )
     )
     mode_name = forecast.mode_name
@@ -2144,7 +2769,7 @@ def _check_pair_unlabeled(
         reason = (
             f"The noise changed by {100 * measured:.0f}% against {100 * planned:.0f}% planned, and the "
             f"frames taken explain a change of only {100 * given:.0f}%. The cause is not known. "
-            f"{_floor_sentence(floor)}"
+            f"{_fixed_pattern_sentence(fixed_pattern)}"
         )
     return ForecastCheck(
         stack_run_id=current.run_id,
@@ -2189,7 +2814,8 @@ def _check_pair(
     configured_stack_weight : `str` or `None`
         The configured stack weight setting.
     history : `Sequence` [`StackRunRecord`], optional
-        The runs up to and including the earlier run, for the floor fit.
+        The runs up to and including the earlier run, for the fixed-pattern
+        noise fit.
     electrons_per_adu : `float`, optional
         The camera gain.
 
@@ -2256,8 +2882,8 @@ def forecast_check(
     ordered = library_runs(runs)
     # Each entry is (when the later run was made, 0 for a subset check and 1
     # for a real one, run id, check). At a tie the real check sorts after the
-    # subset check, so a real disagreement closes the gate that a subset check
-    # opened at the same stack.
+    # subset check, so a real disagreement withdraws the status that a subset
+    # check gave at the same stack.
     made: list[tuple[datetime, int, str, ForecastCheck]] = []
     for position, (previous, current) in enumerate(pairwise(ordered)):
         paired = (paired_relative_error_by_run or {}).get(current.run_id)
@@ -2371,20 +2997,23 @@ def subset_pairs(runs: Iterable[StackRunRecord]) -> list[tuple[StackRunRecord, S
     return sorted(newest_by_library.values(), key=lambda pair: (_as_utc(pair[0].measured_at), pair[0].run_id))
 
 
-def forecast_gate_state(checks: Iterable[ForecastCheck]) -> ForecastGate:
-    """Say whether "take N more" may be shown, and on what footing.
+def recommended_additional_frames_status_from_checks(
+    checks: Iterable[ForecastCheck],
+) -> RecommendedAdditionalFramesStatus:
+    """Say whether the recommended additional frames may be shown, and why.
 
     The checks are read in the order `forecast_check` returns them (oldest
     first; at one stack a subset check comes before a real one).
 
     * A check of two library stacks that agreed (``as_forecast``) makes the
-      gate ``confirmed``, and it stays so. This is the rule before the
-      earlier-nights check existed, and it is the only way to open the gate
-      for a target with one observing night.
-    * A check of two library stacks that did not agree closes the gate, unless
-      it is already confirmed.
-    * A check from an earlier-nights subset that agreed opens a closed gate as
-      ``exploratory``. One that did not agree closes an exploratory gate.
+      status ``confirmed``, and it stays so. This is the rule before the
+      earlier-nights check existed, and it is the only way to confirm the
+      count for a target with one observing night.
+    * A check of two library stacks that did not agree sets the status to
+      ``not_checked``, unless it is already confirmed.
+    * A check from an earlier-nights subset that agreed sets a ``not_checked``
+      status to ``provisional``. One that did not agree sets a ``provisional``
+      status back to ``not_checked``.
     * A check that could not be made changes nothing.
 
     Parameters
@@ -2394,29 +3023,29 @@ def forecast_gate_state(checks: Iterable[ForecastCheck]) -> ForecastGate:
 
     Returns
     -------
-    gate : `ForecastGate`
-        ``closed``, ``exploratory`` or ``confirmed``.
+    frames_status : `RecommendedAdditionalFramesStatus`
+        ``not_checked``, ``provisional`` or ``confirmed``.
     """
-    gate = ForecastGate.CLOSED
+    frames_status = RecommendedAdditionalFramesStatus.NOT_CHECKED
     for check in checks:
         if check.outcome == ForecastOutcome.NOT_CHECKABLE:
             continue
         agreed = check.outcome == ForecastOutcome.AS_FORECAST
         if check.basis == ForecastBasis.LATER_STACK:
             if agreed:
-                gate = ForecastGate.CONFIRMED
-            elif gate != ForecastGate.CONFIRMED:
-                gate = ForecastGate.CLOSED
+                frames_status = RecommendedAdditionalFramesStatus.CONFIRMED
+            elif frames_status != RecommendedAdditionalFramesStatus.CONFIRMED:
+                frames_status = RecommendedAdditionalFramesStatus.NOT_CHECKED
         elif agreed:
-            if gate == ForecastGate.CLOSED:
-                gate = ForecastGate.EXPLORATORY
-        elif gate == ForecastGate.EXPLORATORY:
-            gate = ForecastGate.CLOSED
-    return gate
+            if frames_status == RecommendedAdditionalFramesStatus.NOT_CHECKED:
+                frames_status = RecommendedAdditionalFramesStatus.PROVISIONAL
+        elif frames_status == RecommendedAdditionalFramesStatus.PROVISIONAL:
+            frames_status = RecommendedAdditionalFramesStatus.NOT_CHECKED
+    return frames_status
 
 
 def noise_steps_from_runs(runs: Sequence[StackRunRecord]) -> list[NoiseStep]:
-    """Turn the run history into the steps of the noise-floor fit.
+    """Turn the run history into the steps of the fixed-pattern noise fit.
 
     Parameters
     ----------
@@ -2468,11 +3097,12 @@ def noise_steps_from_runs(runs: Sequence[StackRunRecord]) -> list[NoiseStep]:
 def target_stop_signal(runs: Sequence[StackRunRecord]) -> StopSignal:
     """Say whether more frames of a target are still worth taking.
 
-    The floor is the one `noise_floor_for_runs` chooses: the fit over two or
-    more stacks, or the one-stack floor of the newest run. Doubling the data
-    then halves the random variance and leaves the floor, so the noise falls
-    from ``sqrt(1 + f)`` to ``sqrt(0.5 + f)`` (in units of today's random
-    noise), with ``f`` the floor's share of the random variance.
+    The fixed-pattern noise is the one `fixed_pattern_noise_for_runs` chooses:
+    the fit over two or more stacks, or the one-stack fixed-pattern noise of
+    the newest run. Doubling the data then halves the random variance and
+    leaves the fixed-pattern noise, so the noise falls from ``sqrt(1 + f)`` to
+    ``sqrt(0.5 + f)`` (in units of today's random noise), with ``f`` the
+    fixed-pattern noise's share of the random variance.
 
     Parameters
     ----------
@@ -2482,11 +3112,11 @@ def target_stop_signal(runs: Sequence[StackRunRecord]) -> StopSignal:
     Returns
     -------
     signal : `StopSignal`
-        ``stopped`` is true only when a floor was found and doubling the data
-        would cut the noise by under 10%. It is ``False`` when a fit over two
-        or more stacks found no floor, and ``None`` (no signal) when the
-        history is too short: a single stack with no floor is not enough to
-        say.
+        ``stopped`` is true only when fixed-pattern noise was found and
+        doubling the data would cut the noise by under 10%. It is ``False``
+        when a fit over two or more stacks found no fixed-pattern noise, and
+        ``None`` (no signal) when the history is too short: a single stack with
+        no fixed-pattern noise is not enough to say.
     """
     ordered = sorted(runs, key=lambda item: (item.measured_at, item.run_id))
     newest_identity = ordered[-1].aperture_identity if ordered else None
@@ -2495,9 +3125,13 @@ def target_stop_signal(runs: Sequence[StackRunRecord]) -> StopSignal:
     ])
     if not steps:
         return StopSignal(reason="No stack run has both a measured and an expected noise.")
-    floor = noise_floor_for_runs(ordered)
-    if floor is not None and floor.floor_detected and floor.floor_to_random_variance_ratio is not None:
-        ratio = floor.floor_to_random_variance_ratio
+    fixed_pattern = fixed_pattern_noise_for_runs(ordered)
+    if (
+        fixed_pattern is not None
+        and fixed_pattern.fixed_pattern_noise_detected
+        and fixed_pattern.fixed_pattern_to_random_variance_ratio is not None
+    ):
+        ratio = fixed_pattern.fixed_pattern_to_random_variance_ratio
         gain = 1.0 - math.sqrt((0.5 + ratio) / (1.0 + ratio))
         stopped = gain < MINIMUM_GAIN_FRACTION
         return StopSignal(
@@ -2506,15 +3140,17 @@ def target_stop_signal(runs: Sequence[StackRunRecord]) -> StopSignal:
             reason=(
                 f"Doubling the data would cut the noise by {100 * gain:.0f} percent"
                 + (
-                    ", below the limit; more frames will not help until the floor is fixed."
+                    ", below the limit; more frames will not help until the fixed-pattern noise is fixed."
                     if stopped
                     else "."
                 )
             ),
         )
-    fit = fit_noise_floor(steps)
-    if floor is not None and fit.steps_used >= 2 and fit.alpha is not None:
-        return StopSignal(stopped=False, reason="No floor was found, so more frames are expected to help.")
+    fit = fit_fixed_pattern_noise(steps)
+    if fixed_pattern is not None and fit.steps_used >= 2 and fit.alpha is not None:
+        return StopSignal(
+            stopped=False, reason="No fixed-pattern noise was found, so more frames are expected to help."
+        )
     return stop_signal(fit, steps[-1].expected_variance)
 
 
@@ -2524,21 +3160,33 @@ __all__ = [
     "FORECAST_CHECK_ENTRY",
     "FORECAST_CHECK_ROW",
     "GROUP_METRICS",
+    "MINIMUM_EARLIER_NIGHTS_FRAMES",
     "PINNED_STACK_METRICS",
     "CalibrationSummary",
+    "NoiseHistory",
     "RecordedGroup",
     "RunGroups",
+    "SetupKey",
     "StackRunRecord",
     "attach_calibration_identities",
     "calibration_summary_from_record",
     "camera_gain_for_setting",
+    "fixed_pattern_account_for_run",
+    "fixed_pattern_noise_for_runs",
+    "fixed_pattern_setup_key",
+    "fixed_pattern_share_of_run",
+    "fixed_pattern_shares_by_setup",
     "forecast_check",
-    "forecast_gate_state",
-    "half_difference_noise_inputs",
+    "history_fixed_pattern_noise",
     "library_runs",
-    "noise_floor_for_runs",
+    "noise_model_error_for_setting",
+    "noise_model_error_sample",
+    "noise_model_errors_by_setting_group",
+    "noise_model_setting_key",
     "noise_steps_from_runs",
-    "single_stack_floor",
+    "odd_even_difference_noise_inputs",
+    "recommended_additional_frames_status_from_checks",
+    "single_stack_fixed_pattern_noise",
     "stack_frames_from_observations",
     "stack_groups_of_run",
     "stack_runs_from_measurements",

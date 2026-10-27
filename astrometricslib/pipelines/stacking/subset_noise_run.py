@@ -46,9 +46,10 @@ frames itself), the share is stored as not measured with that reason. Equal
 weights are never assumed. A share built from assumed weights is stored as
 assumed.
 
-The noise of the difference of two halves (`run_half_difference_noise`). The
-library stack's frames are put in order of capture time and split into two
-disjoint halves, the 1st, 3rd, 5th, ... frame and the 2nd, 4th, 6th, ... frame,
+The noise of the difference of two halves
+(`run_odd_even_difference_noise`). The library stack's frames are put in order
+of capture time and split into two disjoint halves, the 1st, 3rd, 5th, ...
+frame and the 2nd, 4th, 6th, ... frame,
 so both halves span the whole night. The library stack's registration
 reference frame goes into both halves, so that Siril lines both up with it and
 their pixels coincide. The two half stacks are subtracted, and the noise of
@@ -108,10 +109,10 @@ from astrometricslib.models.quality.measurement import (
 )
 from astrometricslib.models.quality.quality_summary import ExposureGroupSummary
 from astrometricslib.models.quality.subset_stacks import (
-    HalfDifferenceNoiseResult,
     NightContribution,
     NightContributionResult,
     NoiseGrowthResult,
+    OddEvenDifferenceNoiseResult,
     SubsetStackResult,
 )
 from astrometricslib.models.target import FrameRecord, Target
@@ -123,23 +124,29 @@ from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
     record_run_measurements,
 )
 from astrometricslib.pipelines.shared.registration_record import build_registration_record
+from astrometricslib.pipelines.shared.target_position import parse_target_position
 from astrometricslib.pipelines.stacking.metrics import (
     STACKING_EFFECTIVE_FRAME_COUNT,
     STACKING_FRAME_WEIGHT,
-    STACKING_HALF_DIFFERENCE_APERTURE_SET_NUMBER,
-    STACKING_HALF_DIFFERENCE_EVEN_EFFECTIVE_FRAME_COUNT,
-    STACKING_HALF_DIFFERENCE_MODEL_VARIANCE_RATIO,
-    STACKING_HALF_DIFFERENCE_NOISE_NORMALIZED,
-    STACKING_HALF_DIFFERENCE_NOISE_STACK_UNIT,
-    STACKING_HALF_DIFFERENCE_ODD_EFFECTIVE_FRAME_COUNT,
-    STACKING_HALF_DIFFERENCE_REFERENCE_FLUX_STACK_UNIT,
-    STACKING_HALF_DIFFERENCE_SHARED_EVEN_WEIGHT_FRACTION,
-    STACKING_HALF_DIFFERENCE_SHARED_ODD_WEIGHT_FRACTION,
-    STACKING_HALF_DIFFERENCE_VARIANCE_FACTOR,
     STACKING_METRICS,
     STACKING_NIGHT_WEIGHT_SHARE,
     STACKING_NOISE_DIFFERENCE_WITHOUT_NIGHT,
     STACKING_NOISE_WITHOUT_NIGHT,
+    STACKING_ODD_EVEN_DIFFERENCE_APERTURE_RECORD_COUNT,
+    STACKING_ODD_EVEN_DIFFERENCE_APERTURE_SET_NUMBER,
+    STACKING_ODD_EVEN_DIFFERENCE_COLUMN_AVERAGE_SCATTER_STACK_UNIT,
+    STACKING_ODD_EVEN_DIFFERENCE_EVEN_EFFECTIVE_FRAME_COUNT,
+    STACKING_ODD_EVEN_DIFFERENCE_MODEL_VARIANCE_RATIO,
+    STACKING_ODD_EVEN_DIFFERENCE_NOISE_NORMALIZED,
+    STACKING_ODD_EVEN_DIFFERENCE_NOISE_STACK_UNIT,
+    STACKING_ODD_EVEN_DIFFERENCE_ODD_EFFECTIVE_FRAME_COUNT,
+    STACKING_ODD_EVEN_DIFFERENCE_REFERENCE_FLUX_STACK_UNIT,
+    STACKING_ODD_EVEN_DIFFERENCE_ROW_AVERAGE_SCATTER_STACK_UNIT,
+    STACKING_ODD_EVEN_DIFFERENCE_SHARED_EVEN_WEIGHT_FRACTION,
+    STACKING_ODD_EVEN_DIFFERENCE_SHARED_ODD_WEIGHT_FRACTION,
+    STACKING_ODD_EVEN_DIFFERENCE_VARIANCE_FACTOR,
+    STACKING_ODD_EVEN_SUM_COLUMN_AVERAGE_SCATTER_STACK_UNIT,
+    STACKING_ODD_EVEN_SUM_ROW_AVERAGE_SCATTER_STACK_UNIT,
     STACKING_SUBSET_EXPECTED_NOISE_RATIO,
 )
 from astrometricslib.pipelines.stacking.post_processing.calibration_record import (
@@ -161,6 +168,12 @@ from astrometricslib.pipelines.stacking.post_processing.half_pattern import (
     half_pattern_measurements,
     measure_half_pattern,
 )
+from astrometricslib.pipelines.stacking.post_processing.odd_even_apertures import (
+    LinePatternOutcome,
+    build_aperture_records,
+    measure_line_pattern,
+    save_odd_even_aperture_record,
+)
 from astrometricslib.pipelines.stacking.post_processing.record_quality import (
     aperture_set_measurement,
     frame_weight_measurements,
@@ -174,6 +187,7 @@ from astrometricslib.pipelines.stacking.post_processing.record_science import (
     expected_noise_measurements,
     frame_noise_inputs_from_store,
     group_reference_exposure_measurements,
+    noise_ratio_measurements,
     normalization_scale_measurements,
     resolve_stack_sky_level,
     scale_expected_noise,
@@ -204,26 +218,28 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "DEFAULT_GROWTH_STEPS",
-    "HALF_DIFFERENCE_MINIMUM_FRAMES_PER_HALF",
+    "ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF",
     "GrowthStep",
     "HalfSplit",
     "LibraryRun",
+    "OddEvenDetail",
+    "detail_measurements",
     "difference_variance_factor",
     "expected_noise_ratio",
     "expected_ratio_measurement",
     "frames_by_night",
     "full_stack_noise_equivalent",
     "full_stack_noise_equivalent_from_model",
-    "half_difference_measurements",
     "library_member_frames",
     "model_variance_ratio",
     "night_measurements",
     "night_weight_shares",
+    "odd_even_difference_measurements",
     "plan_growth_steps",
     "read_library_run",
-    "run_half_difference_noise",
     "run_night_contributions",
     "run_noise_growth",
+    "run_odd_even_difference_noise",
     "split_into_halves",
     "stack_chosen_subset",
     "subset_frame_subject_id",
@@ -237,14 +253,14 @@ _SPEC_BY_NAME = {spec.name: spec for spec in STACKING_METRICS}
 # A design choice; no data set decided it.
 DEFAULT_GROWTH_STEPS = 4
 
-# The fewest frames in each half of the half-difference noise, counting the
+# The fewest frames in each half of the odd–even difference noise, counting the
 # registration reference frame that both halves hold. Sigma-clipping rejection
 # needs at least `MINIMUM_SUBSET_FRAMES` (4) frames to leave a spread to judge
 # by. With 8 or more, the one shared frame is at most an eighth of either
 # half's weight when the weights are equal, a small effect that
 # `full_stack_noise_equivalent` takes into account. A design choice; no data
 # set decided it.
-HALF_DIFFERENCE_MINIMUM_FRAMES_PER_HALF = 8
+ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF = 8
 
 # The parts of one night's frames, in time order, used when a target has a
 # single night: a quarter, a half and three quarters.
@@ -1060,6 +1076,7 @@ def _stack_and_measure(
             None if outcome is None else outcome.diagnostics,
         )
         measurements.extend(expected_noise_measurements(expected, context, subject))
+        measurements.extend(noise_ratio_measurements(noise, expected, context, subject))
         measurements.extend(normalization_scale_measurements(scale, context, subject))
         if outcome is not None and outcome.stack_path is not None:
             measurements.extend(
@@ -1895,7 +1912,192 @@ def _weight_shares(membership: StackMembership | None) -> dict[str, float] | Non
     }
 
 
-def half_difference_measurements(
+@dataclass(frozen=True)
+class OddEvenDetail:
+    """Where the odd–even difference's values sit, and its line pattern.
+
+    Parameters
+    ----------
+    record_count : `int` or `None`
+        How many apertures the per-aperture record holds, or `None` when none
+        was written.
+    record_path : `str` or `None`
+        The per-aperture record file.
+    record_reason : `str`
+        Why there is no record, when there is none.
+    line_pattern : `LinePatternOutcome` or `None`
+        The row and column average scatters, or the reason there are none.
+        `None` when the measurement was not tried.
+    """
+
+    record_count: int | None = None
+    record_path: str | None = None
+    record_reason: str = ""
+    line_pattern: LinePatternOutcome | None = None
+
+
+def _target_sky_degrees(target: Target) -> tuple[float, float] | None:
+    """Give the target's stored position in degrees, if it has one.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target.
+
+    Returns
+    -------
+    position : `tuple` [`float`, `float`] or `None`
+        (RA, Dec) in degrees, or `None` when the target has no usable
+        position. A position taken from the center of an image
+        (``position_unverified``) is still returned: it is where the camera
+        looked.
+    """
+    try:
+        coordinate = parse_target_position(target)
+    except Exception:  # a by-product: no position only drops one column of the record
+        logger.exception("The position of %s could not be read", target.id)
+        return None
+    if coordinate is None:
+        return None
+    return float(coordinate.ra.deg), float(coordinate.dec.deg)
+
+
+def _aperture_detail_safely(
+    library_stack_path: str,
+    noise: StackNoiseOutcome,
+    odd_plane: np.ndarray | None,
+    even_plane: np.ndarray | None,
+) -> OddEvenDetail:
+    """Write the per-aperture record and measure the line pattern safely.
+
+    Both are by-products of the odd–even difference (decision D21): a failure
+    here must not lose the difference's own rows.
+
+    Parameters
+    ----------
+    library_stack_path : `str`
+        The library stack the record goes beside.
+    noise : `StackNoiseOutcome`
+        The difference's noise outcome, holding the apertures' positions and
+        their sum and difference values.
+    odd_plane, even_plane : `numpy.ndarray` or `None`
+        The two half stacks' images.
+
+    Returns
+    -------
+    detail : `OddEvenDetail`
+        The record's count and path, and the line pattern, or the reasons.
+    """
+    result = noise.result
+    count: int | None = None
+    path: str | None = None
+    record_reason = ""
+    line_pattern: LinePatternOutcome | None = None
+    try:
+        if result is None or odd_plane is None:
+            record_reason = "the difference was not measured"
+        elif not result.added_aperture_sums:
+            record_reason = "the sum image was not measured"
+        else:
+            records = build_aperture_records(
+                result.aperture_pixel_positions,
+                result.added_aperture_sums,
+                result.aperture_sums,
+                odd_plane.shape,
+                result.target_pixel_position,
+            )
+            note = (
+                "Values are sky-subtracted aperture sums in the stack's units. 'sum' is taken on A + B "
+                "and 'difference' on A - B of the odd and even half stacks (not halved). Distances are in "
+                "pixels; the target distance is null when the target's position is not known."
+            )
+            path = save_odd_even_aperture_record(library_stack_path, records, result.aperture_identity, note)
+            if path is None:
+                record_reason = "the record file could not be written"
+            else:
+                count = len(records)
+    except Exception as error:
+        logger.exception("The odd–even aperture record of %s could not be built", library_stack_path)
+        record_reason = f"the record could not be built ({type(error).__name__})"
+        path, count = None, None
+    try:
+        if odd_plane is None or even_plane is None:
+            line_pattern = LinePatternOutcome(None, "a half stack file holds no pixels")
+        else:
+            line_pattern = measure_line_pattern(odd_plane, even_plane)
+    except Exception as error:
+        logger.exception(
+            "The line pattern of the half stacks of %s could not be measured", library_stack_path
+        )
+        line_pattern = LinePatternOutcome(None, f"the measurement failed: {type(error).__name__}")
+    return OddEvenDetail(count, path, record_reason, line_pattern)
+
+
+def detail_measurements(
+    detail: OddEvenDetail | None,
+    context: PipelineRunContext,
+    subject: QualitySubject,
+    reason: str,
+    note: str,
+) -> list[QualityMeasurement]:
+    """Build the record-count row and the four line-pattern rows.
+
+    Parameters
+    ----------
+    detail : `OddEvenDetail` or `None`
+        What `_aperture_detail_safely` gave, or `None` when it was not tried.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    subject : `QualitySubject`
+        The library stack.
+    reason : `str`
+        Why the difference has no values, used when ``detail`` is `None`.
+    note : `str`
+        What was done, kept on each measured row.
+
+    Returns
+    -------
+    rows : `list` [`QualityMeasurement`]
+        Five rows, each not measured with the reason when its value is missing.
+    """
+    detail = detail or OddEvenDetail(record_reason=reason, line_pattern=LinePatternOutcome(None, reason))
+    record_row = build_measurement(
+        _SPEC_BY_NAME[STACKING_ODD_EVEN_DIFFERENCE_APERTURE_RECORD_COUNT],
+        None if detail.record_count is None else float(detail.record_count),
+        context,
+        subject,
+        reason=detail.record_reason or reason or "the per-aperture record was not written",
+        sample_count=detail.record_count,
+        provenance=f"Per-aperture record: {detail.record_path}" if detail.record_path else "",
+    )
+    pattern = detail.line_pattern or LinePatternOutcome(None, reason or "the line pattern was not measured")
+    line = pattern.result
+    names = (
+        (STACKING_ODD_EVEN_DIFFERENCE_ROW_AVERAGE_SCATTER_STACK_UNIT, "difference_row", "row_count"),
+        (STACKING_ODD_EVEN_DIFFERENCE_COLUMN_AVERAGE_SCATTER_STACK_UNIT, "difference_column", "column_count"),
+        (STACKING_ODD_EVEN_SUM_ROW_AVERAGE_SCATTER_STACK_UNIT, "sum_row", "row_count"),
+        (STACKING_ODD_EVEN_SUM_COLUMN_AVERAGE_SCATTER_STACK_UNIT, "sum_column", "column_count"),
+    )
+    rows = [record_row]
+    for name, attribute, count_attribute in names:
+        value = None if line is None else getattr(line, attribute)
+        count = None if line is None else getattr(line, count_attribute)
+        rows.append(
+            build_measurement(
+                _SPEC_BY_NAME[name],
+                value,
+                context,
+                subject,
+                reason=pattern.reason or reason or "the line pattern was not measured",
+                uncertainty=None if line is None else line.error(value, count),
+                sample_count=count,
+                provenance=note,
+            )
+        )
+    return rows
+
+
+def odd_even_difference_measurements(
     context: PipelineRunContext,
     subject: QualitySubject,
     noise: StackNoiseOutcome | None,
@@ -1908,8 +2110,9 @@ def half_difference_measurements(
     model_ratio: float | None = None,
     model_ratio_reason: str = "",
     pattern: HalfPatternOutcome | None = None,
+    detail: OddEvenDetail | None = None,
 ) -> list[QualityMeasurement]:
-    """Build the half-difference rows of the library stack.
+    """Build the odd–even difference rows of the library stack.
 
     Parameters
     ----------
@@ -1957,20 +2160,20 @@ def half_difference_measurements(
         noise_rows = [
             build_measurement(_SPEC_BY_NAME[name], None, context, subject, reason=missing)
             for name in (
-                STACKING_HALF_DIFFERENCE_NOISE_STACK_UNIT,
-                STACKING_HALF_DIFFERENCE_NOISE_NORMALIZED,
-                STACKING_HALF_DIFFERENCE_REFERENCE_FLUX_STACK_UNIT,
+                STACKING_ODD_EVEN_DIFFERENCE_NOISE_STACK_UNIT,
+                STACKING_ODD_EVEN_DIFFERENCE_NOISE_NORMALIZED,
+                STACKING_ODD_EVEN_DIFFERENCE_REFERENCE_FLUX_STACK_UNIT,
             )
         ]
         noise_rows.append(
             aperture_set_measurement(
-                STACKING_HALF_DIFFERENCE_APERTURE_SET_NUMBER, None, context, subject, missing
+                STACKING_ODD_EVEN_DIFFERENCE_APERTURE_SET_NUMBER, None, context, subject, missing
             )
         )
     else:
         noise_rows = [
             build_measurement(
-                _SPEC_BY_NAME[STACKING_HALF_DIFFERENCE_NOISE_STACK_UNIT],
+                _SPEC_BY_NAME[STACKING_ODD_EVEN_DIFFERENCE_NOISE_STACK_UNIT],
                 result.noise_adu,
                 context,
                 subject,
@@ -1978,7 +2181,7 @@ def half_difference_measurements(
                 sample_count=result.aperture_count,
             ),
             build_measurement(
-                _SPEC_BY_NAME[STACKING_HALF_DIFFERENCE_NOISE_NORMALIZED],
+                _SPEC_BY_NAME[STACKING_ODD_EVEN_DIFFERENCE_NOISE_NORMALIZED],
                 result.normalized_noise,
                 context,
                 subject,
@@ -1986,7 +2189,7 @@ def half_difference_measurements(
                 sample_count=result.aperture_count,
             ),
             build_measurement(
-                _SPEC_BY_NAME[STACKING_HALF_DIFFERENCE_REFERENCE_FLUX_STACK_UNIT],
+                _SPEC_BY_NAME[STACKING_ODD_EVEN_DIFFERENCE_REFERENCE_FLUX_STACK_UNIT],
                 result.reference_flux_adu,
                 context,
                 subject,
@@ -2001,7 +2204,7 @@ def half_difference_measurements(
             noise_rows = [row.model_copy(update={"reason": kept_note}) for row in noise_rows]
         noise_rows.append(
             aperture_set_measurement(
-                STACKING_HALF_DIFFERENCE_APERTURE_SET_NUMBER, result.aperture_identity, context, subject
+                STACKING_ODD_EVEN_DIFFERENCE_APERTURE_SET_NUMBER, result.aperture_identity, context, subject
             )
         )
     count_rows = [
@@ -2014,22 +2217,22 @@ def half_difference_measurements(
         )
         for name, value in zip(
             (
-                STACKING_HALF_DIFFERENCE_ODD_EFFECTIVE_FRAME_COUNT,
-                STACKING_HALF_DIFFERENCE_EVEN_EFFECTIVE_FRAME_COUNT,
+                STACKING_ODD_EVEN_DIFFERENCE_ODD_EFFECTIVE_FRAME_COUNT,
+                STACKING_ODD_EVEN_DIFFERENCE_EVEN_EFFECTIVE_FRAME_COUNT,
             ),
             counts,
             strict=True,
         )
     ]
     factor_row = build_measurement(
-        _SPEC_BY_NAME[STACKING_HALF_DIFFERENCE_VARIANCE_FACTOR],
+        _SPEC_BY_NAME[STACKING_ODD_EVEN_DIFFERENCE_VARIANCE_FACTOR],
         variance_factor,
         context,
         subject,
         reason=counts_reason or missing or "the halves' weights are unknown",
     )
     model_row = build_measurement(
-        _SPEC_BY_NAME[STACKING_HALF_DIFFERENCE_MODEL_VARIANCE_RATIO],
+        _SPEC_BY_NAME[STACKING_ODD_EVEN_DIFFERENCE_MODEL_VARIANCE_RATIO],
         model_ratio,
         context,
         subject,
@@ -2046,8 +2249,8 @@ def half_difference_measurements(
         )
         for name, value in zip(
             (
-                STACKING_HALF_DIFFERENCE_SHARED_ODD_WEIGHT_FRACTION,
-                STACKING_HALF_DIFFERENCE_SHARED_EVEN_WEIGHT_FRACTION,
+                STACKING_ODD_EVEN_DIFFERENCE_SHARED_ODD_WEIGHT_FRACTION,
+                STACKING_ODD_EVEN_DIFFERENCE_SHARED_EVEN_WEIGHT_FRACTION,
             ),
             shared_fractions,
             strict=True,
@@ -2056,7 +2259,10 @@ def half_difference_measurements(
     pattern_rows = _pattern_rows_safely(
         context, subject, pattern, missing if result is None else "the pattern was not measured", note
     )
-    return [*noise_rows, *count_rows, factor_row, model_row, *share_rows, *pattern_rows]
+    detail_rows = detail_measurements(
+        detail, context, subject, missing if result is None else "the detail was not measured", note
+    )
+    return [*noise_rows, *count_rows, factor_row, model_row, *share_rows, *pattern_rows, *detail_rows]
 
 
 def _pattern_rows_safely(
@@ -2180,7 +2386,7 @@ def _delete_half_folder(library_stack_path: str, label: str) -> None:
         logger.warning("The half stack folder %s could not be deleted: %s", folder, error)
 
 
-def run_half_difference_noise(
+def run_odd_even_difference_noise(
     target: Target,
     library_stack_path: str,
     *,
@@ -2189,7 +2395,7 @@ def run_half_difference_noise(
     drivers: Drivers | None,
     stacking_slot: Callable[[], AbstractContextManager],
     keep_halves: bool = False,
-) -> HalfDifferenceNoiseResult:
+) -> OddEvenDifferenceNoiseResult:
     """Measure the noise of the difference of two halves of the library stack.
 
     The frames of the library stack are split into two disjoint halves that
@@ -2214,7 +2420,7 @@ def run_half_difference_noise(
     spectral; the library stack has no recorded registration reference frame
     or noise sums; the apertures are missing or of another identity than the
     library stack's; a half would have fewer than
-    `HALF_DIFFERENCE_MINIMUM_FRAMES_PER_HALF` frames; Siril fails; or the
+    `ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF` frames; Siril fails; or the
     halves were lined up with different reference frames. No other number is
     put in the place of a missing one.
 
@@ -2237,11 +2443,11 @@ def run_half_difference_noise(
 
     Returns
     -------
-    result : `HalfDifferenceNoiseResult`
+    result : `OddEvenDifferenceNoiseResult`
         The numbers, or the reason there are none.
     """
     with subset_job_guard(target.id):
-        return _run_half_difference_noise(
+        return _run_odd_even_difference_noise(
             target,
             library_stack_path,
             context=context,
@@ -2252,7 +2458,7 @@ def run_half_difference_noise(
         )
 
 
-def _run_half_difference_noise(
+def _run_odd_even_difference_noise(
     target: Target,
     library_stack_path: str,
     *,
@@ -2261,8 +2467,8 @@ def _run_half_difference_noise(
     drivers: Drivers | None,
     stacking_slot: Callable[[], AbstractContextManager],
     keep_halves: bool,
-) -> HalfDifferenceNoiseResult:
-    """Do the work of `run_half_difference_noise` while the guard is held.
+) -> OddEvenDifferenceNoiseResult:
+    """Do the work of `run_odd_even_difference_noise` while the guard is held.
 
     Parameters
     ----------
@@ -2283,10 +2489,10 @@ def _run_half_difference_noise(
 
     Returns
     -------
-    result : `HalfDifferenceNoiseResult`
+    result : `OddEvenDifferenceNoiseResult`
         The numbers, or the reason there are none.
     """
-    result = HalfDifferenceNoiseResult(targetId=target.id, libraryStackPath=library_stack_path)
+    result = OddEvenDifferenceNoiseResult(targetId=target.id, libraryStackPath=library_stack_path)
     subject = context.stack_subject(os.path.basename(library_stack_path)) if context is not None else None
 
     def finish(
@@ -2300,7 +2506,8 @@ def _run_half_difference_noise(
         model_ratio: float | None = None,
         model_ratio_reason: str = "",
         pattern: HalfPatternOutcome | None = None,
-    ) -> HalfDifferenceNoiseResult:
+        detail: OddEvenDetail | None = None,
+    ) -> OddEvenDifferenceNoiseResult:
         """Store the rows and give back the result.
 
         Parameters
@@ -2326,15 +2533,17 @@ def _run_half_difference_noise(
             Why there is no ``model_ratio``.
         pattern : `HalfPatternOutcome`, optional
             What the halves share at a few pixels.
+        detail : `OddEvenDetail`, optional
+            The per-aperture record and the line pattern.
 
         Returns
         -------
-        result : `HalfDifferenceNoiseResult`
+        result : `OddEvenDifferenceNoiseResult`
             The finished result.
         """
         result.reason = reason
         if context is not None and subject is not None:
-            rows = half_difference_measurements(
+            rows = odd_even_difference_measurements(
                 context,
                 subject,
                 noise,
@@ -2347,6 +2556,7 @@ def _run_half_difference_noise(
                 model_ratio,
                 model_ratio_reason,
                 pattern,
+                detail,
             )
             result.rows_written = record_run_measurements(rows, config=configuration)
         return result
@@ -2354,7 +2564,7 @@ def _run_half_difference_noise(
     library = read_library_run(target, library_stack_path, configuration)
     result.notes.extend(library.notes)
     if any(frame_is_spectral(frame) for frame in library.members):
-        return finish("the half-difference noise is measured for imaging stacks only")
+        return finish("the odd–even difference noise is measured for imaging stacks only")
     if library.noise_sums is None:
         return finish(
             "the library stack's per-aperture noise sums were not saved, so the apertures it was measured "
@@ -2377,10 +2587,11 @@ def _run_half_difference_noise(
     if split.left_out:
         result.notes.append(f"{split.left_out} frame(s) have no timestamp and were left out of both halves.")
     smaller = min(len(split.odd), len(split.even))
-    if smaller < HALF_DIFFERENCE_MINIMUM_FRAMES_PER_HALF:
+    if smaller < ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF:
         return finish(
-            f"a half would have {smaller} frames, fewer than the {HALF_DIFFERENCE_MINIMUM_FRAMES_PER_HALF} "
-            "the half-difference noise needs"
+            f"a half would have {smaller} frames, fewer than the "
+            f"{ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF} "
+            "the odd–even difference noise needs"
         )
     library_folder = os.path.dirname(library_stack_path)
     apertures_path = os.path.join(library_folder, APERTURE_FILE_NAME)
@@ -2436,9 +2647,10 @@ def _run_half_difference_noise(
                 apertures_path,
                 first_plane=odd_plane,
                 second_plane=even_plane,
+                target_sky_deg=_target_sky_degrees(target),
             )
         except Exception as error:  # a measurement failure is stored as a reason, never raised
-            logger.exception("The noise of the half difference of %s could not be measured", target.id)
+            logger.exception("The noise of the odd–even difference of %s could not be measured", target.id)
             return finish(f"the difference could not be measured ({type(error).__name__}: {error})")
         if noise.result is None:
             return finish(noise.reason or "the difference was not measured")
@@ -2521,6 +2733,15 @@ def _run_half_difference_noise(
             variance_factor,
             shared_fractions,
         )
+        detail = _aperture_detail_safely(library_stack_path, noise, odd_plane, even_plane)
+        result.aperture_record_path = detail.record_path
+        result.aperture_record_count = detail.record_count
+        line = None if detail.line_pattern is None else detail.line_pattern.result
+        if line is not None and line.difference_row > 0 and line.difference_column > 0:
+            result.line_pattern_ratios = {
+                "row": line.sum_row / line.difference_row,
+                "column": line.sum_column / line.difference_column,
+            }
         del odd_plane, even_plane
         if pattern.result is not None:
             result.shared_fine_scale_variance_ratio = pattern.result.variance_ratio
@@ -2537,6 +2758,7 @@ def _run_half_difference_noise(
             model_ratio,
             model_ratio_reason,
             pattern,
+            detail,
         )
     finally:
         if not keep_halves:

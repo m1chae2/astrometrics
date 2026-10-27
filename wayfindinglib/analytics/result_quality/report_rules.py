@@ -21,6 +21,10 @@ The rules built here are:
   light frame setting.
 * ``more_frames`` and ``more_frames_will_not_help``: "take N more" and the
   stop signal, from `noise_growth`.
+* ``retake_flats``, ``check_gradient_removal`` and
+  ``use_line_pattern_removal``: advice from where the stack's fixed-pattern
+  noise sits (`fixed_pattern_location`). A rise near the target gives no
+  advice.
 
 Nothing here reads a database or the sky. Missing inputs are the caller's to
 report as ``insufficient_data``; a function here never invents a value.
@@ -54,13 +58,18 @@ from wayfindinglib.analytics.result_quality.efficiency import (
     STAR_WIDTH_NIGHTLY_SPREAD_KEY,
     FrameObservation,
 )
+from wayfindinglib.analytics.result_quality.fixed_pattern_location import (
+    FixedPatternAccount,
+    FixedPatternShape,
+)
 from wayfindinglib.analytics.result_quality.guiding_exposure import (
     STAR_WIDTH_BUDGET_FRACTION,
     TARGET_SHARP_FRACTION,
     GuidingExposureOutcome,
 )
 from wayfindinglib.analytics.result_quality.noise_growth import (
-    FLOOR_BASIS_TEXT,
+    FIXED_PATTERN_BASIS_SETUP_HISTORY,
+    FIXED_PATTERN_BASIS_TEXT,
     PRACTICAL_TIME_FACTOR,
     StackFrame,
     StackGroup,
@@ -69,7 +78,7 @@ from wayfindinglib.analytics.result_quality.noise_growth import (
     WeightingMode,
     forecast_group_noise,
     forecast_stack_noise,
-    noise_ratio_with_floor,
+    noise_ratio_with_fixed_pattern_noise,
 )
 from wayfindinglib.analytics.result_quality.plain_text import (
     exposure_phrases,
@@ -877,12 +886,13 @@ def find_sharpness_tradeoff_in_groups(
 ) -> SharpnessTradeoff | None:
     """Work out the sharpness trade-off for one group of a group stack.
 
-    Keeping only the sharpest frames of one exposure group changes that
-    group's weight (``N t^2 / s^2``, with fewer frames) and so its share of
-    the combined stack. The other groups dilute the change, so the noise
-    change is found on the whole stack (`forecast_group_noise`), not on the
-    group alone. The two stacks are compared as a fraction of the stars'
-    flux (`noise_ratio_with_floor`), which leaves the combine's scale out.
+    Keeping only the sharpest frames of one exposure group changes that group's
+    weight (``N t^2 / s^2``, with fewer frames) and so its share of the
+    combined stack. The other groups dilute the change, so the noise change is
+    found on the whole stack (`forecast_group_noise`), not on the group alone.
+    The two stacks are compared as a fraction of the stars' flux
+    (`noise_ratio_with_fixed_pattern_noise`), which leaves the combine's scale
+    out.
 
     Parameters
     ----------
@@ -914,7 +924,7 @@ def find_sharpness_tradeoff_in_groups(
     ]
     all_forecast = forecast_group_noise(groups)
     kept_forecast = forecast_group_noise(kept_groups)
-    ratio = noise_ratio_with_floor(all_forecast, kept_forecast, None)
+    ratio = noise_ratio_with_fixed_pattern_noise(all_forecast, kept_forecast, None)
     if ratio is None:
         return None
     width_change = (
@@ -1377,44 +1387,77 @@ def calibration_gap_statement(finding: CalibrationFinding) -> TargetStatement:
 # -----------------------------------------------------------------------------
 
 
-FLOOR_CAUSE_TEXT = "The floor is a pattern fixed on the sky (faint stars, the flat field, calibration)."
-"""The sentence that says what a noise floor probably is."""
+FIXED_PATTERN_CAUSE_TEXT = (
+    "Fixed-pattern noise is noise that stays at the same place on the sky in every frame, so more frames "
+    "do not reduce it; it probably comes from faint stars, the flat field or calibration."
+)
+"""The sentence that says what fixed-pattern noise probably is."""
 
-FLOOR_NOT_REMOVED_TEXT = "More frames will not remove it."
-"""Ends the floor's cause sentences when the report has no calibration advice
-for the setting. The report builder swaps it for `FLOOR_CALIBRATION_TEXT` when
+FIXED_PATTERN_NOT_REMOVED_TEXT = "More frames will not remove it."
+"""Ends the fixed-pattern noise's cause sentences when the report has no
+calibration advice for the setting. The report builder swaps it for
+`FIXED_PATTERN_CALIBRATION_TEXT` when
 the same report carries a ``calibration_gap`` statement for the setting."""
 
-FLOOR_CALIBRATION_TEXT = "The calibration recommendations in this report may lower it."
-"""What replaces `FLOOR_NOT_REMOVED_TEXT` when calibration advice exists."""
+FIXED_PATTERN_CALIBRATION_TEXT = "The calibration recommendations in this report may lower it."
+"""What replaces `FIXED_PATTERN_NOT_REMOVED_TEXT` when calibration advice
+exists."""
 
-PLAIN_FLOOR_NOT_REMOVED_TEXT = "and more frames will not remove it."
-"""The plain-message ending that says the floor stays. The report builder swaps
-it for `PLAIN_FLOOR_CALIBRATION_TEXT` when calibration advice exists."""
+PLAIN_FIXED_PATTERN_NOT_REMOVED_TEXT = "and more frames will not remove it."
+"""The plain-message ending that says the fixed-pattern noise stays. The report
+builder swaps it for `PLAIN_FIXED_PATTERN_CALIBRATION_TEXT` when calibration
+advice exists."""
 
-PLAIN_FLOOR_CALIBRATION_TEXT = "and the calibration recommendations in this report may lower it."
-"""What replaces `PLAIN_FLOOR_NOT_REMOVED_TEXT` when advice exists."""
+PLAIN_FIXED_PATTERN_CALIBRATION_TEXT = "and the calibration recommendations in this report may lower it."
+"""What replaces `PLAIN_FIXED_PATTERN_NOT_REMOVED_TEXT` when advice exists."""
 
 
-def _floor_basis_sentence(result: TakeMoreResult) -> str:
-    """Say which measurement decided the floor.
+def _fixed_pattern_basis_sentence(result: TakeMoreResult) -> str:
+    """Say which measurement decided the fixed-pattern noise.
 
     Parameters
     ----------
     result : `TakeMoreResult`
-        An answer that may carry a floor.
+        An answer that may carry fixed-pattern noise.
 
     Returns
     -------
     text : `str`
-        For example "The floor was measured from the odd and even half
-        stacks.", or an empty string when the answer names no basis.
+        For example "The fixed-pattern noise was measured from the odd and even
+        half stacks.", or an empty string when the answer names no basis.
     """
-    text = FLOOR_BASIS_TEXT.get(result.floor_basis or "")
-    return f"The floor was {text}." if text else ""
+    if result.fixed_pattern_basis == FIXED_PATTERN_BASIS_SETUP_HISTORY:
+        return _setup_history_sentence(result)
+    text = FIXED_PATTERN_BASIS_TEXT.get(result.fixed_pattern_basis or "")
+    return f"The fixed-pattern noise was {text}." if text else ""
 
 
-def _floor_share_sentence(result: TakeMoreResult) -> str:
+def _setup_history_sentence(result: TakeMoreResult) -> str:
+    """Say that the forecast borrowed its fixed-pattern share (decision D23).
+
+    Parameters
+    ----------
+    result : `TakeMoreResult`
+        An answer whose fixed-pattern noise may come from the setup's history.
+
+    Returns
+    -------
+    text : `str`
+        For example "This forecast assumes fixed-pattern noise like other
+        targets of this setup (median of 4 targets), not measured on this
+        one.", or an empty string for any other basis.
+    """
+    if result.fixed_pattern_basis != FIXED_PATTERN_BASIS_SETUP_HISTORY:
+        return ""
+    count = result.fixed_pattern_history_targets
+    median = f" (median of {count} targets)" if count else ""
+    return (
+        f"This forecast assumes fixed-pattern noise like other targets of this setup{median}, "
+        "not measured on this one."
+    )
+
+
+def _fixed_pattern_share_sentence(result: TakeMoreResult) -> str:
     """Say how much frames can give at most, and why.
 
     Parameters
@@ -1425,16 +1468,21 @@ def _floor_share_sentence(result: TakeMoreResult) -> str:
     Returns
     -------
     text : `str`
-        For example "More frames give less each time: at most about 30% in
-        all, because a noise floor of 0.000583 (stack units) makes up about
+        For example "More frames give less each time: at most about 30% in all,
+        because fixed-pattern noise of 0.000583 (stack units) makes up about
         49% of the noise."
     """
     most_cut = 100.0 * (result.most_reachable_cut or 0.0)
-    share = 100.0 * (result.floor_variance_share or 0.0)
-    floor_text = f" of {result.floor_noise:.3g} (stack units)" if result.floor_noise is not None else ""
+    share = 100.0 * (result.fixed_pattern_variance_share or 0.0)
+    fixed_pattern_text = (
+        f" of {result.fixed_pattern_noise:.3g} (stack units)"
+        if result.fixed_pattern_noise is not None
+        else ""
+    )
     return (
-        f"More frames give less each time: at most about {most_cut:.0f}% in all, because a noise "
-        f"floor{floor_text} makes up about {share:.0f}% of the noise. {_floor_basis_sentence(result)}"
+        f"More frames give less each time: at most about {most_cut:.0f}% in all, because "
+        f"fixed-pattern noise{fixed_pattern_text} makes up about {share:.0f}% of the noise. "
+        f"{_fixed_pattern_basis_sentence(result)}"
     ).strip()
 
 
@@ -1447,10 +1495,10 @@ def _diminishing_returns_statement(
 ) -> TargetStatement | None:
     """Build the recommendation that gives one doubling in place of a count.
 
-    Used when a noise floor puts the target beyond the practical limit
+    Used when fixed-pattern noise puts the target beyond the practical limit
     (`TakeMoreResult.practical_limit_applied`). It asks for the frames that
     double the stack's exposure time, says what that buys, what the most
-    frames could give, and where the floor probably comes from.
+    frames could give, and where the fixed-pattern noise probably comes from.
 
     Parameters
     ----------
@@ -1482,9 +1530,10 @@ def _diminishing_returns_statement(
     cut = 100.0 * result.doubling_noise_cut
     exposure = exposure_text(result.new_exposure_seconds)
     message = (
-        f"Taking as many frames again as the stack holds ({result.doubling_frames} more at {exposure}, "
-        f"about {duration_text(clock.total_seconds)} with downloads) cuts the noise by about {cut:.0f}%. "
-        f"{_floor_share_sentence(result)} {FLOOR_CAUSE_TEXT} {FLOOR_NOT_REMOVED_TEXT}"
+        f"Recommended additional frames: {result.doubling_frames} at {exposure} "
+        f"(about {duration_text(clock.total_seconds)} with downloads), as many frames again as the stack "
+        f"holds, which cuts the noise by about {cut:.0f}%. "
+        f"{_fixed_pattern_share_sentence(result)} {FIXED_PATTERN_CAUSE_TEXT} {FIXED_PATTERN_NOT_REMOVED_TEXT}"
     )
     fields = {
         "frame_count": result.doubling_frames,
@@ -1495,8 +1544,10 @@ def _diminishing_returns_statement(
     plain = (
         f"{format_plain(rule, fields)} Frames after that help less, at most about "
         f"{100.0 * (result.most_reachable_cut or 0.0):.0f}% in all, because part of the noise is a "
-        f"pattern fixed on the sky, {PLAIN_FLOOR_NOT_REMOVED_TEXT}"
+        f"pattern fixed on the sky, {PLAIN_FIXED_PATTERN_NOT_REMOVED_TEXT}"
     )
+    if _setup_history_sentence(result):
+        plain = f"{plain} {_setup_history_sentence(result)}"
     statement = _from_rule(
         "more_frames",
         message,
@@ -1575,15 +1626,24 @@ def more_frames_statement(
         "noise_percent": -change * 100.0,
         **exposure_phrases(result.new_exposure_seconds),
     }
+    message = rule.wording.format_map(fields)
+    plain = format_plain(rule, fields)
+    description = f"Noise down about {-change * 100:.0f}%."
+    if result.possible_low_noise_cut is not None:
+        message, plain, description = _with_possible_range(message, plain, result, -change)
+    history_sentence = _setup_history_sentence(result)
+    if history_sentence:
+        message = f"{message} {history_sentence}"
+        plain = f"{plain} {history_sentence}"
     return _from_rule(
         "more_frames",
-        rule.wording.format_map(fields),
+        message,
         (
             "Doubling the effective time is the step, because it is about the smallest change the eye sees. "
             f"The count follows your own frames' sky and read noise. {result.reason or ''} {exposure_note}"
         ).strip(),
         capture_setting=capture_setting,
-        plain_message=format_plain(rule, fields),
+        plain_message=plain,
         evidence=evidence,
         proposed_action=ProposedAction(
             exposure_seconds=result.new_exposure_seconds, frame_count=result.frames_needed
@@ -1592,66 +1652,121 @@ def more_frames_statement(
             noise_change_fraction=change,
             effective_time_added_seconds=result.added_exposure_seconds,
             wall_clock_seconds=clock.total_seconds,
-            description=f"Noise down about {-change * 100:.0f}%.",
+            description=description,
         ),
     )
 
 
-def floor_limited_statement(
+def _with_possible_range(
+    message: str, plain: str, result: TakeMoreResult, high_cut: float
+) -> tuple[str, str, str]:
+    """Turn the noise cut of a recommendation into a range.
+
+    Used when the stack has possible, unproven fixed-pattern noise (decision
+    D18). The high end is the cut with no fixed-pattern noise (the count's own
+    cut); the low end assumes the possible fixed-pattern noise is real.
+
+    Parameters
+    ----------
+    message, plain : `str`
+        The recommendation's wording and plain wording, each containing
+        "cuts the noise by about N%" or "for roughly N% less noise".
+    result : `TakeMoreResult`
+        The answer, with the ``possible_*`` fields set.
+    high_cut : `float`
+        The cut with no fixed-pattern noise, as a fraction.
+
+    Returns
+    -------
+    message, plain, description : `tuple` [`str`, `str`, `str`]
+        The wording with the range, the plain wording, and the expected-effect
+        description.
+    """
+    high = 100.0 * high_cut
+    low = 100.0 * (result.possible_low_noise_cut or 0.0)
+    sigmas = result.possible_fixed_pattern_sigmas or 0.0
+    old_cut = f"{high:.0f}%"
+    range_text = f"{low:.0f}% to {high:.0f}%"
+    note = f"The low end assumes the possible fixed-pattern noise ({sigmas:.1f}\u03c3, not proven) is real."
+    warning = ""
+    if result.possible_low_end_not_worthwhile:
+        warning = (
+            " If it is real, more frames will not help much: doubling the stack would cut the noise "
+            f"by only about {100.0 * (result.possible_low_doubling_cut or 0.0):.0f}%."
+        )
+    message = message.replace(f"about {old_cut}", f"about {range_text}", 1)
+    plain = plain.replace(f"roughly {old_cut}", f"roughly {range_text}", 1)
+    return (
+        f"{message} {note}{warning}",
+        f"{plain} The low end assumes a possible pattern in the noise that is not proven.{warning}",
+        f"Noise down about {range_text}.",
+    )
+
+
+def fixed_pattern_limited_statement(
     result: TakeMoreResult,
     capture_setting: CaptureSetting | None,
     evidence: Iterable[MeasurementReference],
 ) -> TargetStatement:
-    """Build the warning that a noise floor makes more frames pointless.
+    """Build the warning that fixed-pattern noise makes more frames pointless.
 
-    Used when "take N more" has no count because a floor makes up so much of
-    the stack's noise that the target cannot be reached
-    (`TakeMoreResult.floor_limited`) and one doubling of the stack's time is
-    not worth asking for (`TakeMoreResult.doubling_worthwhile` false). It says
-    so in place of a count, with the same floor sentences as the
-    diminishing-returns recommendation.
+    Used when "take N more" has no count because fixed-pattern noise makes up
+    so much of the stack's noise that the target cannot be reached
+    (`TakeMoreResult.fixed_pattern_limited`) and one doubling of the stack's
+    time is not worth asking for (`TakeMoreResult.doubling_worthwhile` false).
+    It says so in place of a count, with the same fixed-pattern noise sentences
+    as the diminishing-returns recommendation.
 
     Parameters
     ----------
     result : `TakeMoreResult`
-        The answer, with ``floor_limited`` true.
+        The answer, with ``fixed_pattern_limited`` true.
     capture_setting : `CaptureSetting` or `None`
         The setting.
     evidence : `Iterable` [`MeasurementReference`]
-        The rows the floor came from.
+        The rows the fixed-pattern noise came from.
 
     Returns
     -------
     statement : `TargetStatement`
-        The ``more_frames_will_not_help`` warning, worded for a floor.
+        The ``more_frames_will_not_help`` warning, worded for fixed-pattern
+        noise.
     """
     if result.practical_limit_applied:
         doubling_cut = 100.0 * (result.doubling_noise_cut or 0.0)
         message = (
             f"More frames will not help: as many frames again as the stack holds would cut the noise by "
-            f"only about {doubling_cut:.0f}%. {_floor_share_sentence(result)} {FLOOR_CAUSE_TEXT} "
-            f"{FLOOR_NOT_REMOVED_TEXT}"
+            f"only about {doubling_cut:.0f}%. {_fixed_pattern_share_sentence(result)} "
+            f"{FIXED_PATTERN_CAUSE_TEXT} {FIXED_PATTERN_NOT_REMOVED_TEXT}"
         )
         plain = (
             f"More frames probably will not help: doubling the frames would cut the noise by only about "
             f"{doubling_cut:.0f}%, because part of the noise is a pattern fixed on the sky, "
-            f"{PLAIN_FLOOR_NOT_REMOVED_TEXT}"
+            f"{PLAIN_FIXED_PATTERN_NOT_REMOVED_TEXT}"
         )
     else:
-        share = 100.0 * (result.floor_variance_share or 0.0)
+        share = 100.0 * (result.fixed_pattern_variance_share or 0.0)
         best_cut = 100.0 * (1.0 - (result.lowest_reachable_ratio or 1.0))
-        floor_text = f"{result.floor_noise:.3g} in stack units, " if result.floor_noise is not None else ""
-        basis_sentence = _floor_basis_sentence(result)
+        fixed_pattern_text = (
+            f"{result.fixed_pattern_noise:.3g} in stack units, "
+            if result.fixed_pattern_noise is not None
+            else ""
+        )
+        basis_sentence = _fixed_pattern_basis_sentence(result)
         basis_sentence = f"{basis_sentence} " if basis_sentence else ""
         message = (
-            f"More frames will not help much: a noise floor ({floor_text}{share:.0f}% of the noise) does "
+            f"More frames will not help much: fixed-pattern noise "
+            f"({fixed_pattern_text}{share:.0f}% of the noise) does "
             f"not shrink with more frames, so even very many more would cut the noise by only "
-            f"{best_cut:.0f}%. {basis_sentence}{FLOOR_CAUSE_TEXT} {FLOOR_NOT_REMOVED_TEXT}"
+            f"{best_cut:.0f}%. {basis_sentence}{FIXED_PATTERN_CAUSE_TEXT} "
+            f"{FIXED_PATTERN_NOT_REMOVED_TEXT}"
         )
         plain = (
             f"More frames probably will not help: about {share:.0f}% of the noise does not shrink with "
             f"more frames. Find the cause (flats, dither, faint stars in the field) before adding more."
         )
+    if _setup_history_sentence(result):
+        plain = f"{plain} {_setup_history_sentence(result)}"
     return _from_rule(
         "more_frames_will_not_help",
         message,
@@ -1660,6 +1775,75 @@ def floor_limited_statement(
         plain_message=plain,
         evidence=evidence,
     )
+
+
+FIXED_PATTERN_SHAPE_RULES = {
+    FixedPatternShape.RADIAL_TREND: "retake_flats",
+    FixedPatternShape.GRADIENT: "check_gradient_removal",
+    FixedPatternShape.BANDING: "use_line_pattern_removal",
+}
+"""The rule that gives the advice for each shape. A rise near the target has no
+rule: faint real light is explained in the loss account and nothing is asked
+for (decision D21)."""
+
+FIXED_PATTERN_SHAPE_NOTES = {
+    FixedPatternShape.RADIAL_TREND: "Retake flats.",
+    FixedPatternShape.GRADIENT: "Check gradient removal.",
+    FixedPatternShape.BANDING: "Use line pattern removal.",
+}
+"""The short advice each shape gives, kept as the proposed action's note."""
+
+
+def fixed_pattern_shape_statements(
+    account: FixedPatternAccount | None,
+    capture_setting: CaptureSetting | None,
+    evidence: Iterable[MeasurementReference] = (),
+) -> list[TargetStatement]:
+    """Turn the significant shapes of a stack's fixed pattern into advice.
+
+    A radial trend asks for new flats, a gradient asks to check the gradient
+    removal, and banding asks for line pattern removal. A rise near the target
+    gives nothing, and a shape that was not found gives nothing.
+
+    Parameters
+    ----------
+    account : `FixedPatternAccount` or `None`
+        The shape tests of the setting's newest stack.
+    capture_setting : `CaptureSetting` or `None`
+        The setting.
+    evidence : `Iterable` [`MeasurementReference`]
+        The rows the tests read.
+
+    Returns
+    -------
+    statements : `list` [`TargetStatement`]
+        One recommendation for each shape that has a rule and was found.
+    """
+    if account is None or account.location is None:
+        return []
+    statements = []
+    for shape in account.location.significant_shapes:
+        rule_name = FIXED_PATTERN_SHAPE_RULES.get(shape)
+        test = account.location.test_for(shape)
+        if rule_name is None or test is None or test.sigmas is None:
+            continue
+        rule = rule_by_name(rule_name)
+        fields = {"statistic": test.statistic, "sigmas": test.sigmas}
+        is_flat = shape == FixedPatternShape.RADIAL_TREND
+        statement = _from_rule(
+            rule_name,
+            rule.wording.format_map(fields),
+            f"{test.reason} {account.location.sentence()}",
+            capture_setting=capture_setting,
+            plain_message=format_plain(rule, fields),
+            evidence=evidence,
+            proposed_action=ProposedAction(
+                calibration_frame_type=CALIBRATION_FLAT_FRAME_TYPE if is_flat else None,
+                note=FIXED_PATTERN_SHAPE_NOTES[shape],
+            ),
+        )
+        statements.append(statement.model_copy(update={"values": {"shape_sigmas": test.sigmas}}))
+    return statements
 
 
 def stop_statement(

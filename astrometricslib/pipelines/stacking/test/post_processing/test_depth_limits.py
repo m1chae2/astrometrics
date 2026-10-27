@@ -142,6 +142,34 @@ def test_the_zero_point_is_the_median_of_gaia_g_plus_the_instrumental_magnitude(
     assert zero_point.star_count == 4
 
 
+def test_stored_positions_far_from_every_gaia_star_are_named_in_the_reason() -> None:
+    """Positions 30 arcsec off give the position reason, not just a count."""
+    shifted = tuple((ra + 30.0 / 3600.0, dec, flux) for ra, dec, flux in _fluxes())
+
+    def wide(
+        right_ascension: float, declination: float, radius_deg: float
+    ) -> list[tuple[float, float, float]]:
+        """Give the fake Gaia stars within a box 60 arcsec wide.
+
+        Parameters
+        ----------
+        right_ascension, declination, radius_deg : `float`
+            The search circle (the radius is ignored).
+
+        Returns
+        -------
+        rows : `list`
+            The fake stars near the center.
+        """
+        return _gaia_lookup(right_ascension, declination, 60.0 / 3600.0)
+
+    zero_point, reason = gaia_zero_point(shifted, wide, 8.0, PIXEL_SCALE)
+
+    assert zero_point is None
+    assert "do not land on Gaia stars" in reason
+    assert "median nearest separation 30 arcsec" in reason
+
+
 def test_a_crowded_star_is_left_out_of_the_zero_point() -> None:
     """A bright Gaia neighbor in the aperture removes the star."""
 

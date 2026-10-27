@@ -862,8 +862,30 @@ def test_a_set_has_an_identity_that_survives_the_file_and_names_its_depth(tmp_pa
     assert stored.identity in result.aperture_definition_note
 
 
-def test_a_much_deeper_library_stack_replaces_the_set_and_a_close_one_does_not(tmp_path: Path) -> None:
+def test_a_much_deeper_library_stack_replaces_the_set_and_a_close_one_does_not(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Twice the effective frame count makes a new set with a new identity."""
+
+    def solve_from_header(stack_path: str) -> tuple[WCS, str]:
+        """Give the stack's own header as the plate solution.
+
+        Parameters
+        ----------
+        stack_path : `str`
+            The stack to solve.
+
+        Returns
+        -------
+        solution : `tuple` [`astropy.wcs.WCS`, `str`]
+            The header's solution and an empty reason.
+        """
+        return WCS(fits.getheader(stack_path)).celestial, ""
+
+    monkeypatch.setattr(
+        "astrometricslib.pipelines.stacking.post_processing.stack_noise._plate_solve_stack_wcs",
+        solve_from_header,
+    )
     apertures = str(tmp_path / APERTURE_FILE_NAME)
     first = _identity_stack(tmp_path, "first.fits", seed=1)
     old = measure_stack_noise(first, None, apertures, depth=StackDepth(10, 10.0)).result
@@ -1415,23 +1437,26 @@ def test_the_real_stack_solve_turns_an_exception_into_a_reason(
     assert "PlateSolveFailedError" in reason
 
 
-def test_a_stack_with_a_header_solution_is_never_solved(
+def test_a_stack_with_a_header_solution_is_solved_only_to_choose_a_set(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Stacks that already work keep their source, with no solve."""
+    """Stacks that work keep their source; a solve happens once per new set."""
     calls = _fake_stack_solver(monkeypatch, WCS(_sky_header()).celestial)
     stack = _write(tmp_path / "stack.fits", _sky_image(2.0, seed=1), _sky_header())
     outcome = measure_stack_noise(stack, None, str(tmp_path / APERTURE_FILE_NAME))
     assert outcome.result is not None
-    assert outcome.result.wcs_source == "stack header"
+    assert outcome.result.wcs_source == PLATE_SOLVE_WCS_SOURCE
     reference = _write(tmp_path / "reference.fits", _sky_image(2.0, seed=5), _sky_header())
     trimmed = _write(tmp_path / "trimmed.fits", _sky_image(2.0, seed=6)[20:, 10:], None)
     reference_outcome = measure_stack_noise(
         trimmed, reference, str(tmp_path / "other_apertures.json"), crop_offset=(10, 20)
     )
     assert reference_outcome.result is not None
-    assert reference_outcome.result.wcs_source == "registration reference frame"
-    assert calls == []
+    assert reference_outcome.result.wcs_source == PLATE_SOLVE_WCS_SOURCE
+    # Each new set is plate-solved once; a stack that only reads a set is not.
+    assert calls == [stack, trimmed]
+    assert measure_stack_noise(stack, None, str(tmp_path / APERTURE_FILE_NAME)).result is not None
+    assert calls == [stack, trimmed]
 
 
 def test_a_header_solution_that_misses_the_stored_stars_falls_back_to_the_stack_solve(
@@ -1575,3 +1600,187 @@ def test_a_move_above_the_negligible_size_is_still_applied() -> None:
     assert alignment is not None and not alignment.left_unchanged
     assert alignment.shift_column == pytest.approx(2.0, abs=0.2)
     assert not np.allclose(moved.wcs.crpix, guess.wcs.crpix)
+
+
+def _offset_header(columns: float = 5.0) -> fits.Header:
+    """Build a header whose solution is a few pixels off the true one.
+
+    Parameters
+    ----------
+    columns : `float`, optional
+        How far the reference pixel is moved, in pixels.
+
+    Returns
+    -------
+    header : `astropy.io.fits.Header`
+        The true sky header with a moved reference pixel.
+    """
+    header = _sky_header()
+    header["CRPIX1"] = SIZE / 2 + columns
+    return header
+
+
+def test_a_set_is_chosen_with_the_plate_solve_when_the_header_solution_is_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The stored sky positions land on the stars through the true solution."""
+    from astrometricslib.pipelines.stacking.post_processing.stack_image import _sky_to_pixels
+
+    scattered = _scattered_stars(seed=3)
+    true_wcs = WCS(_sky_header()).celestial
+    calls = _fake_stack_solver(monkeypatch, true_wcs)
+    stack = _write(
+        tmp_path / "stack.fits", _sky_image(2.0, seed=1, star_positions=scattered), _offset_header()
+    )
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    result = measure_stack_noise(stack, None, apertures).result
+    assert result is not None
+    assert calls == [stack]
+    assert result.wcs_source == PLATE_SOLVE_WCS_SOURCE
+    assert result.sky_positions_from_plate_solve
+    stored = load_apertures(apertures, next(iter(json.loads(Path(apertures).read_text())["sets"])))
+    assert stored is not None and stored.sky_positions_from_plate_solve
+    assert stored.wcs_source == PLATE_SOLVE_WCS_SOURCE
+    columns_rows = _sky_to_pixels(true_wcs, stored.reference_sky)
+    stars = np.array(scattered)
+    for column_row in columns_rows:
+        assert np.min(np.hypot(*(stars - column_row).T)) < 1.0
+
+
+def test_a_failed_solve_makes_an_untrusted_set_and_the_depth_rows_say_why(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The noise is kept; the depth has no zero point and names the reason."""
+    from astrometricslib.pipelines.stacking.post_processing.depth_limits import (
+        UNTRUSTED_SKY_POSITIONS_REASON,
+        measure_depth_limits,
+    )
+
+    _fake_stack_solver(monkeypatch, None, "plate-solving the stack itself was tried and found no solution")
+    scattered = _scattered_stars(seed=3)
+    stack = _write(
+        tmp_path / "stack.fits", _sky_image(2.0, seed=1, star_positions=scattered), _offset_header()
+    )
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    result = measure_stack_noise(stack, None, apertures).result
+    assert result is not None
+    assert not result.sky_positions_from_plate_solve
+    assert result.wcs_source == "stack header"
+
+    def refuse(*_: float) -> list:
+        """Fail if the depth step looks up Gaia stars.
+
+        Raises
+        ------
+        AssertionError
+            Always.
+        """
+        raise AssertionError("an untrusted set must not be matched to Gaia")
+
+    limits = measure_depth_limits(result, 2.0, refuse)
+    assert limits.point_source.value_mag is None
+    assert UNTRUSTED_SKY_POSITIONS_REASON in limits.point_source.note
+
+
+def _make_untrusted_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scattered: list) -> tuple[str, str]:
+    """Store an untrusted set by measuring a stack whose solve fails.
+
+    Parameters
+    ----------
+    tmp_path : `pathlib.Path`
+        The test folder.
+    monkeypatch : `pytest.MonkeyPatch`
+        Used to make the solve fail.
+    scattered : `list`
+        Star positions of the stack.
+
+    Returns
+    -------
+    apertures : `str`
+        The aperture file.
+    identity : `str`
+        The stored set's identity.
+    """
+    _fake_stack_solver(monkeypatch, None, "plate-solving the stack itself was tried and found no solution")
+    first = _write(
+        tmp_path / "first.fits", _sky_image(2.0, seed=1, star_positions=scattered), _offset_header()
+    )
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    result = measure_stack_noise(first, None, apertures).result
+    assert result is not None and not result.sky_positions_from_plate_solve
+    return apertures, result.aperture_identity
+
+
+def test_an_untrusted_set_is_replaced_by_the_next_library_stack_when_it_solves(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The next library stack that solves makes a trusted set, new identity."""
+    scattered = _scattered_stars(seed=3)
+    apertures, old_identity = _make_untrusted_set(tmp_path, monkeypatch, scattered)
+    calls = _fake_stack_solver(monkeypatch, WCS(_sky_header()).celestial)
+    second = _write(
+        tmp_path / "second.fits", _sky_image(2.0, seed=7, star_positions=scattered), _sky_header()
+    )
+    result = measure_stack_noise(second, None, apertures).result
+    assert result is not None
+    assert calls == [second]
+    assert result.sky_positions_from_plate_solve
+    assert result.aperture_identity != old_identity
+    assert result.apertures_created
+    key = find_library_set_key(apertures, next(iter(json.loads(Path(apertures).read_text())["sets"])))
+    stored = load_apertures(apertures, key)
+    assert stored is not None and stored.sky_positions_from_plate_solve
+    assert stored.identity == result.aperture_identity
+
+
+def test_an_untrusted_set_is_kept_when_the_next_stack_cannot_solve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed solve never replaces the set with another untrusted one."""
+    scattered = _scattered_stars(seed=3)
+    apertures, old_identity = _make_untrusted_set(tmp_path, monkeypatch, scattered)
+    second = _write(
+        tmp_path / "second.fits", _sky_image(2.0, seed=7, star_positions=scattered), _sky_header()
+    )
+    outcome = measure_stack_noise(second, None, apertures)
+    assert outcome.result is not None
+    assert outcome.result.aperture_identity == old_identity
+    assert not outcome.result.sky_positions_from_plate_solve
+    assert "older set" in outcome.result.position_note
+
+
+def test_a_stack_that_may_not_choose_never_replaces_an_untrusted_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Subset and odd-even stacks keep reading the recorded library set."""
+    scattered = _scattered_stars(seed=3)
+    apertures, old_identity = _make_untrusted_set(tmp_path, monkeypatch, scattered)
+    calls = _fake_stack_solver(monkeypatch, WCS(_sky_header()).celestial)
+    subset = _write(
+        tmp_path / "subset.fits", _sky_image(2.0, seed=9, star_positions=scattered), _sky_header()
+    )
+    outcome = measure_stack_noise(subset, None, apertures, may_choose_apertures=False)
+    assert outcome.result is not None
+    assert outcome.result.aperture_identity == old_identity
+    assert calls == []
+
+
+def test_a_stored_set_without_the_field_is_trusted_only_when_it_was_plate_solved() -> None:
+    """Old files: the wcs source decides."""
+    from astrometricslib.pipelines.stacking.post_processing.empty_apertures import ApertureSet
+
+    base = ApertureSet(
+        aperture_sky=np.zeros((1, 2)),
+        reference_sky=np.zeros((1, 2)),
+        wcs_source="registration reference frame",
+        pixel_scale_arcsec=2.0,
+        created_from="a.fits",
+        reference_baseline_flux=np.ones(1),
+        reference_radius_px=5.0,
+        reference_fwhm_px=3.0,
+        saturation_source="x",
+    ).to_json()
+    del base["sky_positions_from_plate_solve"]
+    assert not ApertureSet.from_json(base).sky_positions_from_plate_solve
+    base["wcs_source"] = PLATE_SOLVE_WCS_SOURCE
+    assert ApertureSet.from_json(base).sky_positions_from_plate_solve

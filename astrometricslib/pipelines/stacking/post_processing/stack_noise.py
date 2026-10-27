@@ -135,6 +135,7 @@ from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
     DETECTED_STAR_COUNT,
     MINIMUM_USABLE_APERTURES,
     MINIMUM_USABLE_REFERENCE_STARS,
+    PLATE_SOLVE_WCS_SOURCE,
     REPLACEMENT_DEPTH_FACTOR,
     ApertureSet,
     StackDepth,
@@ -240,10 +241,6 @@ NO_WCS_REASON = "no WCS for this stack"
 # The ``wcs_source`` of a stack whose solution was taken from a member frame
 # of the group it was lined up with, because no reference frame was named.
 MEMBER_FRAME_WCS_SOURCE = "member frame of the reference exposure group"
-
-# The ``wcs_source`` of a stack whose solution came from plate-solving the
-# stack itself, the last source tried.
-PLATE_SOLVE_WCS_SOURCE = "plate solve of the stack"
 
 # How many member frames are tried, in the order given, before giving up. Each
 # try reads one frame and runs the star check, so a few are enough: a frame
@@ -394,6 +391,10 @@ class StackNoiseResult:
         of this stack, in the stack's own units (the units of `noise_adu`).
         The depth limits match these stars to Gaia to find the stack's zero
         point.
+    sky_positions_from_plate_solve : `bool`
+        Whether the aperture set's stored sky positions (and so
+        `reference_star_fluxes`) came from a plate solve of the stack that
+        chose it. When `False` the depth limits do not match them to Gaia.
     """
 
     noise_adu: float
@@ -423,6 +424,7 @@ class StackNoiseResult:
     size_noise: ApertureSizeNoiseOutcome | None = None
     pixel_scale_arcsec: float = 0.0
     reference_star_fluxes: tuple[tuple[float, float, float], ...] = ()
+    sky_positions_from_plate_solve: bool = True
 
 
 @dataclass(frozen=True)
@@ -1387,40 +1389,101 @@ def _measure_noise_in_plane(
     created = False
     keep_note = ""
     mask_does_not_fit = covered_mask is not None and window is None
+    # The stack is plate-solved at most once, and only when a set is chosen or
+    # replaced: the stored sky positions must be true positions, which only a
+    # solve of this stack gives (the header and frame solutions can be tens of
+    # arcseconds off its pixel grid). A solve takes seconds to minutes.
+    solve_attempts: list[tuple[WCS | None, str]] = []
+
+    def plate_solution() -> tuple[WCS | None, str]:
+        """Plate-solve the stack, or give the earlier answer.
+
+        Returns
+        -------
+        wcs : `astropy.wcs.WCS` or `None`
+            The solution on the stack's pixel grid, or `None`.
+        reason : `str`
+            Why there is none. Empty when there is one.
+        """
+        if not solve_attempts:
+            solve_attempts.append(
+                (wcs, "") if wcs_source == PLATE_SOLVE_WCS_SOURCE else _plate_solve_stack_wcs(stack_path)
+            )
+        return solve_attempts[0]
+
     if aperture_set is None:
         if not may_choose_apertures:
             return StackNoiseOutcome(None, load_apertures_with_reason(apertures_path, setup_key)[1])
         if mask_does_not_fit:
             return StackNoiseOutcome(None, UNCOVERED_AREA_MISFIT_REASON)
+        # A set is always created, so the noise measurement is not lost; when
+        # the solve fails its positions are marked as not trusted.
+        solved_wcs, _ = plate_solution()
+        trusted = solved_wcs is not None
         chosen, choice_reason = choose_apertures_with_reason(
-            plane, wcs, wcs_source, os.path.basename(stack_path), setup_key, saturation, depth, window
+            plane,
+            solved_wcs if solved_wcs is not None else wcs,
+            PLATE_SOLVE_WCS_SOURCE if trusted else wcs_source,
+            os.path.basename(stack_path),
+            setup_key,
+            saturation,
+            depth,
+            window,
+            trusted,
         )
         if chosen is None:
             return StackNoiseOutcome(None, choice_reason)
         aperture_set = _store_apertures_once(apertures_path, chosen)
         created = aperture_set is chosen
-    elif may_choose_apertures and _is_much_deeper(depth, aperture_set):
+        if created and solved_wcs is not None:
+            wcs, wcs_source = solved_wcs, PLATE_SOLVE_WCS_SOURCE
+    elif may_choose_apertures and (
+        not aperture_set.sky_positions_from_plate_solve or _is_much_deeper(depth, aperture_set)
+    ):
+        # Replace a set whose positions are not trusted (the next library stack
+        # makes a plate-solved one) or a much deeper stack's. A replacement is
+        # always plate-solved: if the solve or the choice fails, the stored
+        # set is kept.
+        replaced_for_trust = not aperture_set.sky_positions_from_plate_solve
+        solved_wcs, solve_reason = plate_solution()
         if mask_does_not_fit:
             chosen, choice_reason = None, UNCOVERED_AREA_MISFIT_REASON
+        elif solved_wcs is None:
+            chosen, choice_reason = None, solve_reason
         else:
             chosen, choice_reason = choose_apertures_with_reason(
-                plane, wcs, wcs_source, os.path.basename(stack_path), setup_key, saturation, depth, window
+                plane,
+                solved_wcs,
+                PLATE_SOLVE_WCS_SOURCE,
+                os.path.basename(stack_path),
+                setup_key,
+                saturation,
+                depth,
+                window,
+                True,
             )
         if chosen is None:
             keep_note = (
-                f"A set from this deeper stack could not be chosen ({choice_reason}); the older set was kept."
+                f"A plate-solved set could not be chosen ({choice_reason}); the older set, whose sky "
+                "positions are not from a plate solve, was kept."
+                if replaced_for_trust
+                else f"A set from this deeper stack could not be chosen ({choice_reason}); "
+                "the older set was kept."
             )
         else:
             replaced = aperture_set
             aperture_set = _store_apertures_once(apertures_path, chosen, replace_identity=replaced.identity)
             created = aperture_set is chosen
             if created:
+                wcs, wcs_source = solved_wcs, PLATE_SOLVE_WCS_SOURCE
                 logger.info(
-                    "Replaced the noise apertures %s of %s by %s: this stack is at least %.0f times as deep.",
+                    "Replaced the noise apertures %s of %s by %s: %s.",
                     replaced.identity,
                     apertures_path,
                     chosen.identity,
-                    REPLACEMENT_DEPTH_FACTOR,
+                    "the old sky positions were not from a plate solve"
+                    if replaced_for_trust
+                    else f"this stack is at least {REPLACEMENT_DEPTH_FACTOR:.0f} times as deep",
                 )
     if may_choose_apertures:
         # Tell the stacks that may not choose which set is the library
@@ -1447,7 +1510,7 @@ def _measure_noise_in_plane(
             # A frame's own solution can be off (a pointing solve written by
             # the capture program, or a frame that does not share the stack's
             # grid). Before giving up, solve the stack itself and try again.
-            solved_wcs, solve_reason = _plate_solve_stack_wcs(stack_path)
+            solved_wcs, solve_reason = plate_solution()
             if solved_wcs is None:
                 return StackNoiseOutcome(None, f"{reason}; {solve_reason}")
             wcs, retry_reason, alignment = _move_guess_onto_reference_stars(
@@ -1550,6 +1613,7 @@ def _measure_noise_in_plane(
             size_noise=size_noise,
             pixel_scale_arcsec=scale,
             reference_star_fluxes=tuple(star_fluxes),
+            sky_positions_from_plate_solve=aperture_set.sky_positions_from_plate_solve,
             saturation_source=aperture_set.saturation_source
             if created
             else (saturation.source if saturation is not None else aperture_set.saturation_source),

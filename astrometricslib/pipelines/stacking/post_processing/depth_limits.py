@@ -108,6 +108,20 @@ CONTAMINATION_MAGNITUDE_MARGIN = 3.0
 # estimate.
 MINIMUM_ZERO_POINT_STARS = 3
 
+# Why a stack has no zero point when its aperture set's sky positions did not
+# come from a plate solve of the stack that chose it (such positions can be
+# tens of arcseconds off the true ones; a copy of the library, 2026-10-27).
+UNTRUSTED_SKY_POSITIONS_REASON = (
+    "the aperture set's sky positions do not come from a plate solve of the stack"
+)
+
+# When fewer than MINIMUM_ZERO_POINT_STARS stars match, the median distance to
+# the nearest Gaia star is compared with this many match radii. A set with
+# true positions has stars within about 1 arcsec (M 13: 0.1 to 0.9 arcsec); a
+# set with wrong positions has them 11 to 50 arcsec off. Three radii is
+# between the two (a design estimate, to be checked on the next real run).
+POSITION_MISFIT_RADIUS_FACTOR = 3.0
+
 # A Gaia lookup takes a star's right ascension and declination (degrees) and a
 # radius (degrees) and gives the rows ``(right ascension, declination, G)`` of
 # the Gaia stars inside it, or `None` when no Gaia data are at hand. It must
@@ -271,6 +285,7 @@ def gaia_zero_point(
     aperture_arcsec = reference_radius_px * pixel_scale_arcsec
     search_deg = (aperture_arcsec + STAR_MATCH_RADIUS_ARCSEC) / 3600.0
     offsets = []
+    nearest_separations = []
     for right_ascension, declination, flux in star_fluxes:
         if flux <= 0:
             continue
@@ -286,6 +301,7 @@ def gaia_zero_point(
             (table[:, 0] - right_ascension) * cosine, table[:, 1] - declination
         )
         nearest = int(np.argmin(distance_arcsec))
+        nearest_separations.append(float(distance_arcsec[nearest]))
         if distance_arcsec[nearest] > STAR_MATCH_RADIUS_ARCSEC:
             continue
         star_magnitude = float(table[nearest, 2])
@@ -299,6 +315,12 @@ def gaia_zero_point(
             continue
         offsets.append(star_magnitude + 2.5 * math.log10(flux))
     if len(offsets) < MINIMUM_ZERO_POINT_STARS:
+        median_separation = float(np.median(nearest_separations)) if nearest_separations else 0.0
+        if median_separation > POSITION_MISFIT_RADIUS_FACTOR * STAR_MATCH_RADIUS_ARCSEC:
+            return None, (
+                "the stored reference-star positions do not land on Gaia stars "
+                f"(median nearest separation {median_separation:.0f} arcsec)"
+            )
         return None, (
             f"only {len(offsets)} of {len(star_fluxes)} reference stars matched an uncrowded Gaia G "
             f"star in the local cache; {MINIMUM_ZERO_POINT_STARS} are needed"
@@ -435,7 +457,9 @@ def measure_depth_limits(
         missing = _not_measured("the stack's noise is not a usable number")
         return DepthLimits(missing, missing)
     zero_point, zero_point_reason = (
-        gaia_zero_point(
+        (None, UNTRUSTED_SKY_POSITIONS_REASON)
+        if not result.sky_positions_from_plate_solve
+        else gaia_zero_point(
             result.reference_star_fluxes,
             gaia_lookup,
             result.reference_aperture_radius_px,

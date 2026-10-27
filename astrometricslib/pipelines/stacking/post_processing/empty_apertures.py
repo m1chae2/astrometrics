@@ -132,6 +132,7 @@ def aperture_identity_from_number(number: float) -> str:
 
 __all__ = [
     "APERTURE_FILE_NAME",
+    "PLATE_SOLVE_WCS_SOURCE",
     "ApertureSet",
     "ApertureSetMismatchError",
     "FaintSourceAnalysis",
@@ -150,6 +151,14 @@ __all__ = [
     "record_library_set_key",
     "reset_apertures",
 ]
+
+# The ``wcs_source`` of a stack whose solution came from plate-solving the
+# stack itself. Only such a solution is on the stack's own pixel grid, so only
+# a set chosen with it has true sky positions (`ApertureSet`). Measured on a
+# copy of the library (2026-10-27): 9 of 11 sets chosen with the registration
+# reference frame's header had positions 11 to 50 arcsec off the Gaia stars;
+# the two chosen by plate solve (M 13, M 101) were 0.1 to 0.9 arcsec off.
+PLATE_SOLVE_WCS_SOURCE = "plate solve of the stack"
 
 # The file beside a target's stacks that keeps its sky apertures.
 APERTURE_FILE_NAME = "quality_apertures.json"
@@ -350,7 +359,8 @@ class ApertureSet:
         star, in degrees, brightest first.
     wcs_source : `str`
         Where the coordinate solution came from when the set was chosen:
-        ``"stack header"`` or ``"registration reference frame"``.
+        ``"stack header"``, ``"registration reference frame"`` or
+        `PLATE_SOLVE_WCS_SOURCE`.
     pixel_scale_arcsec : `float`
         The pixel scale of the stack the set was chosen on.
     created_from : `str`
@@ -385,6 +395,14 @@ class ApertureSet:
     excluded_fraction : `float` or `None`
         The share within `FAINT_SOURCE_CLEARANCE_PX` of a flagged pixel, where
         no aperture could be placed.
+    sky_positions_from_plate_solve : `bool`
+        True when the stored right ascensions and declinations came from a
+        plate solve of the stack that chose the set, so they are true sky
+        positions. A header or frame solution can be tens of arcseconds off
+        the stack's pixel grid; such a set still works for the noise (each
+        later stack fits the stored stars to its own), but its positions must
+        not be matched to Gaia. A file written before this field existed is
+        trusted only when its ``wcs_source`` is `PLATE_SOLVE_WCS_SOURCE`.
     """
 
     aperture_sky: np.ndarray
@@ -402,6 +420,7 @@ class ApertureSet:
     mask_noise_scales: tuple[float, ...] = ()
     flagged_fraction: float | None = None
     excluded_fraction: float | None = None
+    sky_positions_from_plate_solve: bool = False
 
     @property
     def identity(self) -> str:
@@ -510,6 +529,7 @@ class ApertureSet:
             "mask_noise_scales_normalized": list(self.mask_noise_scales),
             "flagged_fraction": self.flagged_fraction,
             "excluded_fraction": self.excluded_fraction,
+            "sky_positions_from_plate_solve": self.sky_positions_from_plate_solve,
         }
 
     @classmethod
@@ -544,6 +564,9 @@ class ApertureSet:
             mask_noise_scales=tuple(float(value) for value in data.get("mask_noise_scales_normalized", ())),
             flagged_fraction=_optional_number(data.get("flagged_fraction"), float),
             excluded_fraction=_optional_number(data.get("excluded_fraction"), float),
+            sky_positions_from_plate_solve=bool(
+                data.get("sky_positions_from_plate_solve", str(data["wcs_source"]) == PLATE_SOLVE_WCS_SOURCE)
+            ),
         )
 
 
@@ -652,6 +675,7 @@ def choose_apertures(
     saturation: SaturationCheck | None = None,
     depth: StackDepth | None = None,
     covered_mask: np.ndarray | None = None,
+    sky_from_plate_solve: bool = False,
 ) -> ApertureSet | None:
     """Choose empty-sky apertures and reference stars on one stack.
 
@@ -677,6 +701,9 @@ def choose_apertures(
     covered_mask : `numpy.ndarray`, optional
         `True` where every exposure group of a group stack has data (see
         `place_empty_apertures`).
+    sky_from_plate_solve : `bool`, optional
+        True when ``wcs`` is a plate solve of this stack, so the stored sky
+        positions are trusted (see `ApertureSet`).
 
     Returns
     -------
@@ -684,7 +711,7 @@ def choose_apertures(
         See `choose_apertures_with_reason`.
     """
     return choose_apertures_with_reason(
-        plane, wcs, wcs_source, created_from, setup_key, saturation, depth, covered_mask
+        plane, wcs, wcs_source, created_from, setup_key, saturation, depth, covered_mask, sky_from_plate_solve
     )[0]
 
 
@@ -697,6 +724,7 @@ def choose_apertures_with_reason(
     saturation: SaturationCheck | None = None,
     depth: StackDepth | None = None,
     covered_mask: np.ndarray | None = None,
+    sky_from_plate_solve: bool = False,
 ) -> tuple[ApertureSet | None, str]:
     """Choose empty-sky apertures and reference stars, and say why not if none.
 
@@ -724,6 +752,9 @@ def choose_apertures_with_reason(
         `UNCOVERED_CLEARANCE_PX` from any pixel where it is `False`, because
         a group that does not reach a pixel changes how the others are
         weighted there.
+    sky_from_plate_solve : `bool`, optional
+        True when ``wcs`` is a plate solve of this stack, so the stored sky
+        positions are trusted (see `ApertureSet`).
 
     Returns
     -------
@@ -806,6 +837,7 @@ def choose_apertures_with_reason(
             mask_noise_scales=mask_scales,
             flagged_fraction=analysis.flagged_fraction,
             excluded_fraction=analysis.excluded_fraction,
+            sky_positions_from_plate_solve=sky_from_plate_solve,
         ),
         "",
     )

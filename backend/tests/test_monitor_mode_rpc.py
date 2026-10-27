@@ -72,6 +72,7 @@ BACKGROUND_COMMANDS_STARTED_BY_QUEUE = frozenset({"sequencer:begin"})
 own test below, because the queue needs a stored session first."""
 
 READ_ONLY_METHODS = frozenset({
+    "advisory:depth_goal",
     "advisory:result",
     "advisory:target_report",
     "advisory:tonight",
@@ -177,6 +178,7 @@ READ_ONLY_METHODS = frozenset({
 no device."""
 
 LOCAL_WRITE_METHODS = frozenset({
+    "advisory:set_depth_goal",
     "analysis:analyze_image",
     "analysis:cancel",
     "astronomy:delete",

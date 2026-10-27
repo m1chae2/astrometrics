@@ -533,8 +533,8 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
             "({statistic}; {sigmas:.1f} standard errors)."
         ),
         plain_wording=(
-            "Check the background (gradient) removal step. The combined picture has a smooth slope in its "
-            "brightness that the two half pictures share."
+            "Check the background (gradient) removal step. The combined picture likely has a smooth "
+            "slope in its brightness that the two half pictures share."
         ),
         produces="none",
         purpose=(
@@ -561,8 +561,8 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
             "({statistic}; {sigmas:.1f} standard errors)."
         ),
         plain_wording=(
-            "Use the line pattern (banding) removal step. The combined picture has faint stripes that both "
-            "half pictures share."
+            "Use the line pattern (banding) removal step. The combined picture likely has faint "
+            "stripes that both half pictures share."
         ),
         produces="none",
         purpose=(

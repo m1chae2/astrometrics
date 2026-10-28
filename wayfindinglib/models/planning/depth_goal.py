@@ -79,7 +79,7 @@ class DepthLevelOption(BaseModel):
     level : `DepthLevel`
         The level.
     label : `str`
-        The words to show ("Quick look", "Good" or "Deep").
+        The words to show ("Quick look", "Standard" or "Deep").
     goal_depth : `float` or `None`
         The depth that reaches the level, in the status' unit. ``None`` when
         the target has no depth goal.

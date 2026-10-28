@@ -133,7 +133,7 @@ def read_chosen_level(butler: Any, target_id: str) -> DepthLevel:
     Returns
     -------
     level : `DepthLevel`
-        The stored level, or Good when none was stored.
+        The stored level, or Standard when none was stored.
     """
     record = butler.get("target_depth_goal", {"id": target_id})
     return DEFAULT_DEPTH_LEVEL if record is None else record.level

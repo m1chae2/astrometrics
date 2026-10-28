@@ -1,7 +1,7 @@
 /**
  * @file DepthGoalRow.tsx
- * @description The "Depth goal" row of the Image Processing Display's Data tab.
- * The person picks how deep they want the image (Quick look, Good or Deep).
+ * @description The "Integration Goal" row of the Image Processing Display's Data tab.
+ * The person picks how deep they want the image (Quick look, Standard or Deep).
  * The row then says how close the stack is and how much more time it needs.
  */
 import React from 'react';
@@ -74,13 +74,13 @@ export const DepthGoalRow: React.FC<DepthGoalRowProps> = ({ targetId, refreshKey
     return (
         <div className="depth-goal-row">
             <div className="depth-goal-row__choice">
-                <span className="stacked-image-panel__label">Depth goal:</span>
+                <span className="stacked-image-panel__label">Integration Goal:</span>
                 {detail && (
                     <span className="depth-goal-row__info" title={detail} aria-label={detail} role="img">ⓘ</span>
                 )}
                 <select
                     className="file-browser__camera-select"
-                    aria-label="Depth goal"
+                    aria-label="Integration Goal"
                     value={shown.level}
                     disabled={setLevel.isPending}
                     onChange={(event) => setLevel.mutate(event.target.value as DepthLevelChoice)}

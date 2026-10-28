@@ -251,7 +251,7 @@ def status_of(
 
 
 def test_below_goal_gives_the_forecast_time(butler: DiskButler, forecast_status: dict) -> None:
-    """A quick-look image of a galaxy needs time to reach Good."""
+    """A quick-look image of a galaxy needs time to reach Standard."""
     recorder = Recorder([statement("more_frames", StatementKind.RECOMMENDATION, seconds=4800.0, frames=40)])
     result = status_of(butler, [row(SURFACE_METRIC, 24.2)], recorder)
     assert result.state == DepthGoalState.BELOW_GOAL
@@ -300,7 +300,7 @@ def test_at_the_goal_needs_no_forecast(butler: DiskButler) -> None:
 
 
 def test_a_deeper_image_reports_its_own_level(butler: DiskButler) -> None:
-    """A deep image of a Good goal is reached; its own level is kept."""
+    """A deep image of a Standard goal is reached; its own level is kept."""
     result = status_of(butler, [row(SURFACE_METRIC, 25.6)], Recorder([]))
     assert result.state == DepthGoalState.REACHED
     assert result.message == "Integration goal reached."
@@ -459,7 +459,7 @@ def test_a_group_stack_depth_is_not_the_library_depth(butler: DiskButler) -> Non
 
 
 def test_the_chosen_level_round_trips_and_defaults_to_good(butler: DiskButler) -> None:
-    """A stored level is read back; an unset target is Good."""
+    """A stored level is read back; an unset target is Standard."""
     assert tasks.read_chosen_level(butler, "NGC 7331") == DepthLevel.GOOD
     tasks.store_chosen_level(butler, "NGC 7331", DepthLevel.DEEP)
     assert tasks.read_chosen_level(butler, "NGC 7331") == DepthLevel.DEEP

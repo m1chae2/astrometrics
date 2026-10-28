@@ -52,7 +52,7 @@ Now look at the result.
 
 **What you should see.** The Final Stack row names the stack file, and its button now reads Viewing. A Total Exposure line shows the exposure time of the stack. The FITS Viewer shows the stack. It has less noise than a single frame, and faint stars stand out. Scroll to zoom in and drag to move around.
 
-Below Total Exposure is a Depth goal row. Pick how deep you want the image: Quick look, Good or Deep. The line under it says whether you have reached the goal and, if not, about how much more integration time it needs. The time appears once the app has checked its estimate against a second night of this target; until then the line asks you to image the target on another night. Hover over the small info mark to see the goal and your current depth in magnitudes. Some objects, such as planets, have no depth goal, and the row says so.
+Below Total Exposure is an Integration Goal row. Pick how deep you want the image: Quick look, Standard or Deep. The line under it says whether you have reached the goal and, if not, about how much more integration time it needs. The time appears once the app has checked its estimate against a second night of this target; until then the line asks you to image the target on another night. Hover over the small info mark to see the goal and your current depth in magnitudes. Some objects, such as planets, have no integration goal, and the row says so.
 
 ## Step 4: Plate solve and measure the stars
 

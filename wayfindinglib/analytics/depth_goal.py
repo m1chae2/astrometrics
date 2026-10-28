@@ -1,7 +1,7 @@
 """Purpose: The depth levels a novice can choose, per kind of object.
 
 Description: A person picks how deep a target's image should be in plain words:
-Quick look, Good (the default) or Deep. Each word stands for a depth in
+Quick look, Standard (the default) or Deep. Each word stands for a depth in
 magnitudes, and which depth applies depends on the kind of object:
 
 * A galaxy or a nebula (including planetary, emission and reflection nebulae
@@ -50,7 +50,7 @@ LEVEL_ORDER: tuple[DepthLevel, ...] = (DepthLevel.QUICK_LOOK, DepthLevel.GOOD, D
 
 LEVEL_LABELS: Mapping[DepthLevel, str] = {
     DepthLevel.QUICK_LOOK: "Quick look",
-    DepthLevel.GOOD: "Good",
+    DepthLevel.GOOD: "Standard",
     DepthLevel.DEEP: "Deep",
 }
 """The words shown for each level."""
@@ -76,10 +76,10 @@ arcsecond. Larger is deeper for both.
 Derivation (user decision 2026-10-27, option C, time-based): NGC 7331 on the
 copy, with this setup, reached 19.7 mag (5 sigma point source) and 25.1
 mag/arcsec2 (3 sigma, 10 by 10 arcseconds) in 4.1 h. Each level is the depth
-reached in a set time at that rate: Quick look 30 min, Good 2 h, Deep 8 h. The
-depth changes by 1.25 times log10 of the time ratio. (Random noise alone would
-give 1.25 = 2.5 / 2, since noise falls as the square root of the time; the
-same factor is used for both kinds.) For example, 2 h: 19.7 + 1.25 *
+reached in a set time at that rate: Quick look 30 min, Standard 2 h, Deep 8 h.
+The depth changes by 1.25 times log10 of the time ratio. (Random noise
+alone would give 1.25 = 2.5 / 2, since noise falls as the square root of the
+time; the same factor is used for both kinds.) For example, 2 h: 19.7 + 1.25 *
 log10(2 / 4.1) = 19.3. Status: Design estimate, register row WAY-D94; one
 target and one setup, no uncertainty recorded, not held out.
 """

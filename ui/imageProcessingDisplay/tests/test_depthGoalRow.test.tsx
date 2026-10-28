@@ -1,5 +1,5 @@
 /**
- * @fileoverview Tests for the Depth goal row: levels, message, changing the
+ * @fileoverview Tests for the Integration Goal row: levels, message, changing the
  * level, the no-goal state, and the loading and error states.
  */
 import React from 'react';
@@ -14,12 +14,12 @@ vi.mock('../../common/services/backendApi', () => ({ callBackend: (...args: unkn
 
 const options = [
     { level: 'quick_look', label: 'Quick look', goalDepth: 22 },
-    { level: 'good', label: 'Good', goalDepth: 24.7 },
+    { level: 'good', label: 'Standard', goalDepth: 24.7 },
     { level: 'deep', label: 'Deep', goalDepth: 26 },
 ];
 
 const baseStatus = {
-    targetId: 'M 31', level: 'good', levelLabel: 'Good', options,
+    targetId: 'M 31', level: 'good', levelLabel: 'Standard', options,
     state: 'below_goal', depthKind: 'surface_brightness', depthUnit: 'mag/arcsec2',
     currentDepth: 24.0, goalDepth: 24.7,
     message: 'About 1 h 20 min more integration needed.', reason: '',

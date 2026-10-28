@@ -258,7 +258,7 @@ def test_below_goal_gives_the_forecast_time(butler: DiskButler, forecast_status:
     assert result.reached_level == DepthLevel.QUICK_LOOK
     assert result.level == DepthLevel.GOOD
     assert result.seconds_to_goal == pytest.approx(4800.0) and result.frames_to_goal == 40
-    assert result.message == "About 1 h 20 min more to reach this depth."
+    assert result.message == "About 1 h 20 min more integration needed."
     assert not result.provisional
     # The forecast is aimed at the noise ratio of the missing 0.5 magnitude.
     assert recorder.ratios == [pytest.approx(10 ** (-0.4 * 0.5))]
@@ -270,7 +270,7 @@ def test_a_provisional_forecast_is_marked(butler: DiskButler, forecast_status: d
     recorder = Recorder([statement("more_frames", StatementKind.RECOMMENDATION, seconds=4800.0)])
     result = status_of(butler, [row(SURFACE_METRIC, 24.2)], recorder)
     assert result.provisional
-    assert result.message.endswith("to reach this depth (provisional).")
+    assert result.message.endswith("integration needed (provisional).")
 
 
 def test_an_unchecked_forecast_hides_the_time(butler: DiskButler, forecast_status: dict) -> None:
@@ -279,7 +279,7 @@ def test_an_unchecked_forecast_hides_the_time(butler: DiskButler, forecast_statu
     recorder = Recorder([statement("more_frames", StatementKind.INSUFFICIENT_DATA)])
     result = status_of(butler, [row(SURFACE_METRIC, 24.2)], recorder)
     assert result.seconds_to_goal is None
-    assert result.message.startswith("The time needed is not shown yet")
+    assert result.message == "Image this target on another night to get a time estimate."
 
 
 def test_an_image_below_every_level_names_no_level(butler: DiskButler, forecast_status: dict) -> None:
@@ -287,7 +287,7 @@ def test_an_image_below_every_level_names_no_level(butler: DiskButler, forecast_
     recorder = Recorder([statement("more_frames", StatementKind.RECOMMENDATION, seconds=3600.0)])
     result = status_of(butler, [row(SURFACE_METRIC, 22.0)], recorder)
     assert result.reached_level is None
-    assert result.message == "About 1 h more to reach this depth."
+    assert result.message == "About 1 h more integration needed."
 
 
 def test_at_the_goal_needs_no_forecast(butler: DiskButler) -> None:
@@ -295,7 +295,7 @@ def test_at_the_goal_needs_no_forecast(butler: DiskButler) -> None:
     recorder = Recorder([])
     result = status_of(butler, [row(SURFACE_METRIC, 24.7)], recorder)
     assert result.state == DepthGoalState.REACHED
-    assert result.message == "Your image has reached this depth."
+    assert result.message == "Integration goal reached."
     assert recorder.ratios == []
 
 
@@ -303,7 +303,7 @@ def test_a_deeper_image_reports_its_own_level(butler: DiskButler) -> None:
     """A deep image of a Good goal is reached; its own level is kept."""
     result = status_of(butler, [row(SURFACE_METRIC, 25.6)], Recorder([]))
     assert result.state == DepthGoalState.REACHED
-    assert result.message == "Your image has reached this depth."
+    assert result.message == "Integration goal reached."
     assert result.reached_level == DepthLevel.DEEP
 
 
@@ -316,7 +316,8 @@ def test_more_frames_will_not_help_names_what_to_fix(butler: DiskButler, forecas
     result = status_of(butler, [row(SURFACE_METRIC, 24.2)], recorder)
     assert result.state == DepthGoalState.WILL_NOT_HELP
     assert result.message == (
-        "More frames won't help much here. The noise has a fixed part we can't place yet. Retake flats first."
+        "More integration won't help much here. "
+        "The noise has a fixed part we can't place yet. Retake flats first."
     )
     assert result.seconds_to_goal is None
 
@@ -357,7 +358,7 @@ def test_each_cause_gives_its_one_sentence(
     ]
     first = status_of(butler, [row(SURFACE_METRIC, 24.2)], Recorder(statements))
     second = status_of(butler, [row(SURFACE_METRIC, 24.2)], Recorder(statements))
-    assert first.message == f"More frames won't help much here. {sentence}"
+    assert first.message == f"More integration won't help much here. {sentence}"
     assert first.message == second.message
 
 

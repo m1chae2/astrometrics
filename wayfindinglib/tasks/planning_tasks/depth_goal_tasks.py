@@ -494,7 +494,7 @@ def _build_status(
         return DepthGoalStatus(
             **base,
             state=DepthGoalState.REACHED,
-            message="Your image has reached this depth.",
+            message="Integration goal reached.",
         )
     ratio = noise_ratio_for_depth_gain(base["goal_depth"], reading.value)
     state, seconds, frames, exposure, advice, forecast_status, reason = _time_to_goal(
@@ -502,16 +502,13 @@ def _build_status(
     )
     base.update(forecast_status=forecast_status)
     if state == DepthGoalState.WILL_NOT_HELP:
-        message = f"More frames won't help much here. {advice}".strip()
+        message = f"More integration won't help much here. {advice}".strip()
         return DepthGoalStatus(**base, state=state, message=message)
     if forecast_status == RecommendedAdditionalFramesStatus.NOT_CHECKED:
         return DepthGoalStatus(
             **base,
             state=state,
-            message=(
-                "The time needed is not shown yet: the frame forecast has not been checked against a "
-                "new stack."
-            ),
+            message=("Image this target on another night to get a time estimate."),
             reason=reason,
         )
     if seconds is None:
@@ -530,5 +527,5 @@ def _build_status(
         frames_to_goal=frames,
         exposure_seconds=exposure,
         provisional=provisional,
-        message=f"About {time_text(seconds)} more to reach this depth{suffix}.",
+        message=f"About {time_text(seconds)} more integration needed{suffix}.",
     )

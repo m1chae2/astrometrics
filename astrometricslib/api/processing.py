@@ -958,10 +958,10 @@ class ProcessingPipelines:
         InvalidArgumentError
             If ``maximum_steps`` is below 1.
         """
+        from astrometricslib.pipelines.stacking.odd_even_difference_run import run_odd_even_difference_noise
         from astrometricslib.pipelines.stacking.subset_noise_run import (
             run_night_contributions,
             run_noise_growth,
-            run_odd_even_difference_noise,
         )
 
         if maximum_steps < 1:
@@ -1123,7 +1123,7 @@ class ProcessingPipelines:
             library stack's own noise that the difference implies, or the
             reason there are none.
         """
-        from astrometricslib.pipelines.stacking.subset_noise_run import run_odd_even_difference_noise
+        from astrometricslib.pipelines.stacking.odd_even_difference_run import run_odd_even_difference_noise
 
         resolved = self._resolve(target)
         library_stack_path = self._library_stack_path(resolved, "imaging")

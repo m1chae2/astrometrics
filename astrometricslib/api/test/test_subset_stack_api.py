@@ -32,7 +32,7 @@ from astrometricslib.models.quality.subset_stacks import (
     SubsetStackResult,
 )
 from astrometricslib.models.target import FrameRecord, Target
-from astrometricslib.pipelines.stacking import subset_noise_run
+from astrometricslib.pipelines.stacking import odd_even_difference_run, subset_noise_run
 
 LIBRARY_STACK = "/stacks/lights/M 99/M99_L_Stacked.fits"
 
@@ -139,7 +139,7 @@ def test_the_growth_job_records_a_job_and_runs_the_nights_only_when_asked(
     monkeypatch.setattr(subset_noise_run, "run_noise_growth", growth)
     monkeypatch.setattr(subset_noise_run, "run_night_contributions", nights)
     monkeypatch.setattr(
-        subset_noise_run,
+        odd_even_difference_run,
         "run_odd_even_difference_noise",
         lambda target, stack_path, **keywords: OddEvenDifferenceNoiseResult(
             targetId=target.id, libraryStackPath=stack_path
@@ -188,7 +188,7 @@ def test_the_growth_job_runs_the_odd_even_difference_unless_turned_off(
             targetId=target.id, libraryStackPath=stack_path
         ),
     )
-    monkeypatch.setattr(subset_noise_run, "run_odd_even_difference_noise", half)
+    monkeypatch.setattr(odd_even_difference_run, "run_odd_even_difference_noise", half)
     pipelines = _pipelines()
 
     assert pipelines.measure_noise_growth(_target()).odd_even_difference is not None
@@ -209,7 +209,7 @@ def test_the_growth_job_runs_the_odd_even_difference_unless_turned_off(
         """
         raise RuntimeError("Siril stopped")
 
-    monkeypatch.setattr(subset_noise_run, "run_odd_even_difference_noise", fail)
+    monkeypatch.setattr(odd_even_difference_run, "run_odd_even_difference_noise", fail)
     result = pipelines.measure_noise_growth(_target())
     assert result.odd_even_difference is None
     assert any("odd–even difference noise was not measured" in note for note in result.notes)
@@ -232,7 +232,7 @@ def test_the_odd_even_difference_job_runs_with_and_without_a_job_record(
         seen.append({"stack_path": stack_path, **keywords})
         return OddEvenDifferenceNoiseResult(targetId=target.id, libraryStackPath=stack_path)
 
-    monkeypatch.setattr(subset_noise_run, "run_odd_even_difference_noise", half)
+    monkeypatch.setattr(odd_even_difference_run, "run_odd_even_difference_noise", half)
     pipelines = _pipelines()
 
     result = pipelines.measure_odd_even_difference_noise(_target(), keep_halves=True)

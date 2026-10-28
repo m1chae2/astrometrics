@@ -1164,7 +1164,7 @@ _ODD_EVEN_DIFFERENCE_METRICS: tuple[MetricSpec, ...] = (
             "when the stack's noise was not measured", "when the difference was not measured"
         ),
         _ODD_EVEN_DIFFERENCE_SAMPLE,
-        "pipelines.stacking.subset_noise_run.odd_even_difference_measurements",
+        "pipelines.stacking.odd_even_difference_run.odd_even_difference_measurements",
         purpose_reason=_APERTURE_SET_NUMBER_REASON,
         register_entry="STK-42",
     ),
@@ -1237,7 +1237,7 @@ _ODD_EVEN_DIFFERENCE_METRICS: tuple[MetricSpec, ...] = (
             "cannot be rebuilt."
         ),
         "The frames of both halves.",
-        "pipelines.stacking.subset_noise_run.difference_variance_factor",
+        "pipelines.stacking.odd_even_difference_run.difference_variance_factor",
         better=Direction.NONE,
         purpose_reason=_ODD_EVEN_DIFFERENCE_PURPOSE_REASON,
         register_entry="STK-42",
@@ -1285,7 +1285,7 @@ _ODD_EVEN_DIFFERENCE_METRICS: tuple[MetricSpec, ...] = (
             "rate, gain or read noise, or a weight is unknown."
         ),
         "The frames of both halves, with the library stack's weights.",
-        "pipelines.stacking.subset_noise_run.model_variance_ratio",
+        "pipelines.stacking.odd_even_difference_run.model_variance_ratio",
         better=Direction.NONE,
         purpose_reason=_ODD_EVEN_DIFFERENCE_PURPOSE_REASON,
         register_entry="STK-42",
@@ -1301,7 +1301,7 @@ _ODD_EVEN_DIFFERENCE_METRICS: tuple[MetricSpec, ...] = (
             "F = 1 / N_eff,odd + 1 / N_eff,even - 2 a b, where a and b are the two shares."
         ),
         "The one frame that is in both halves.",
-        "pipelines.stacking.subset_noise_run.odd_even_difference_measurements",
+        "pipelines.stacking.odd_even_difference_run.odd_even_difference_measurements",
         purpose_reason=_ODD_EVEN_DIFFERENCE_PURPOSE_REASON,
         register_entry="STK-42",
     ),
@@ -1314,7 +1314,7 @@ _ODD_EVEN_DIFFERENCE_METRICS: tuple[MetricSpec, ...] = (
             "`stacking.odd_even_difference_shared_frame_odd_weight_fraction`)."
         ),
         "The one frame that is in both halves.",
-        "pipelines.stacking.subset_noise_run.odd_even_difference_measurements",
+        "pipelines.stacking.odd_even_difference_run.odd_even_difference_measurements",
         purpose_reason=_ODD_EVEN_DIFFERENCE_PURPOSE_REASON,
         register_entry="STK-42",
     ),

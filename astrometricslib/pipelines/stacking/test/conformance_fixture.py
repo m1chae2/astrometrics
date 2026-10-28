@@ -29,6 +29,10 @@ from astrometricslib.models.target import FrameRecord
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
 from astrometricslib.pipelines.stacking.frame_measurement_run import quarantine_measurements_for_frame
 from astrometricslib.pipelines.stacking.metrics import GATE_METRIC_BY_NAME
+from astrometricslib.pipelines.stacking.odd_even_difference_run import (
+    OddEvenResult,
+    odd_even_difference_measurements,
+)
 from astrometricslib.pipelines.stacking.post_processing.aperture_size_noise import (
     ApertureSizeNoise,
     ApertureSizeNoiseOutcome,
@@ -69,7 +73,6 @@ from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
 from astrometricslib.pipelines.stacking.subset_noise_run import (
     expected_ratio_measurement,
     night_measurements,
-    odd_even_difference_measurements,
 )
 
 FIXTURE_TIME = datetime(2026, 10, 22, tzinfo=UTC)
@@ -409,16 +412,14 @@ def stacking_emitted_measurements() -> list[QualityMeasurement]:
         odd_even_difference_measurements(
             context,
             context.stack_subject("M99_L_Stacked.fits"),
-            fixture_noise_outcome(),
-            "",
-            "",
-            (9.0, 9.5),
-            "",
-            0.2,
-            (0.1, 0.12),
-            1.5,
-            "",
-            fixture_pattern_outcome(),
+            OddEvenResult(
+                noise=fixture_noise_outcome(),
+                counts=(9.0, 9.5),
+                variance_factor=0.2,
+                shared_fractions=(0.1, 0.12),
+                model_ratio=1.5,
+                pattern=fixture_pattern_outcome(),
+            ),
         )
     )
     measurements.extend(

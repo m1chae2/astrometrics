@@ -184,7 +184,7 @@ class OddEvenDifferenceNoiseResult(BaseModel):
     variance_factor : `float` or `None`
         The difference's variance in units of one frame's variance if all
         frames had the same noise (see
-        `subset_noise_run.difference_variance_factor`), or `None`.
+        `odd_even_difference_run.difference_variance_factor`), or `None`.
     shared_frame_odd_weight_fraction : `float` or `None`
         The shared frame's share of the odd half's weight.
     shared_frame_even_weight_fraction : `float` or `None`
@@ -192,7 +192,7 @@ class OddEvenDifferenceNoiseResult(BaseModel):
     model_variance_ratio : `float` or `None`
         The difference's variance in units of the library stack's variance,
         with each frame's own noise from its sky and the camera's read noise
-        (see `subset_noise_run.model_variance_ratio`), or `None`.
+        (see `odd_even_difference_run.model_variance_ratio`), or `None`.
     full_stack_equivalent_normalized : `float` or `None`
         What the difference says about the library stack's own random noise,
         as a fraction of the reference stars' brightness, if every frame had

@@ -67,8 +67,10 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_MEASURED_TO_PREDICTED_NOISE_RATIO,
     STACKING_ODD_EVEN_DIFFERENCE_NOISE_STACK_UNIT,
 )
+from astrometricslib.pipelines.stacking.odd_even_difference_run import (
+    ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF,
+)
 from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import parse_set_aside_action
-from astrometricslib.pipelines.stacking.subset_noise_run import ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF
 from astrometricslib.utilities.parallel_batch import BatchRunSummary
 
 # What a Nikon D5300 target needs in its camera profile before a restack:
@@ -819,7 +821,7 @@ def _presence_label(rows: list[Any]) -> str:
 
 
 # The start of the reason the library stores when a half would hold too few
-# frames (see `subset_noise_run._run_odd_even_difference_noise`).
+# frames (see `odd_even_difference_run._run_odd_even_difference_noise`).
 ODD_EVEN_DIFFERENCE_TOO_FEW_FRAMES_TEXT = "a half would have"
 
 

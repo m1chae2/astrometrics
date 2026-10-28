@@ -36,7 +36,7 @@ from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
     build_measurement,
 )
 from astrometricslib.pipelines.shared.quality.record_measurements import record_measurements
-from astrometricslib.pipelines.stacking import subset_noise_run
+from astrometricslib.pipelines.stacking import odd_even_difference_run, subset_noise_run
 from astrometricslib.pipelines.stacking.metrics import (
     STACKING_APERTURE_SET_NUMBER,
     STACKING_EFFECTIVE_FRAME_COUNT,
@@ -55,6 +55,7 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_NORMALIZATION_SCALE,
     STACKING_SUBSET_EXPECTED_NOISE_RATIO,
 )
+from astrometricslib.pipelines.stacking.odd_even_difference_run import model_variance_ratio
 from astrometricslib.pipelines.stacking.post_processing import record_science
 from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
     APERTURE_FILE_NAME,
@@ -67,7 +68,6 @@ from astrometricslib.pipelines.stacking.subset_noise_run import (
     GrowthStep,
     expected_noise_ratio,
     frames_by_night,
-    model_variance_ratio,
     night_weight_shares,
     plan_growth_steps,
     run_night_contributions,
@@ -1436,9 +1436,9 @@ def test_the_odd_even_difference_model_ratio_uses_the_halves_exposure_scales() -
     odd = {members[0].path: 0.5, members[2].path: 0.5}
     even = {members[1].path: 0.5, members[3].path: 0.5}
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(subset_noise_run, "frame_noise_inputs_from_store", inputs)
-        plain, _ = subset_noise_run._model_ratio_for_library(library, "M 99", None, odd, even)
-        scaled, _ = subset_noise_run._model_ratio_for_library(
+        patch.setattr(odd_even_difference_run, "frame_noise_inputs_from_store", inputs)
+        plain, _ = odd_even_difference_run._model_ratio_for_library(library, "M 99", None, odd, even)
+        scaled, _ = odd_even_difference_run._model_ratio_for_library(
             library, "M 99", None, odd, even, {members[0].path: 2.0}
         )
     assert seen == [[1.0] * 4, [2.0, 1.0, 1.0, 1.0]]

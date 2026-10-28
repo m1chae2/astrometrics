@@ -36,7 +36,7 @@ from astrometricslib.foundation.errors import ConflictError, InvalidArgumentErro
 from astrometricslib.models.quality.measurement import MeasurementStatus, SubjectLevel
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
-from astrometricslib.pipelines.stacking import subset_noise_run
+from astrometricslib.pipelines.stacking import odd_even_difference_run
 from astrometricslib.pipelines.stacking.metrics import (
     STACKING_EMPTY_APERTURE_NOISE_NORMALIZED,
     STACKING_HALF_SHARED_FINE_SCALE_VARIANCE_RATIO,
@@ -50,6 +50,15 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_ODD_EVEN_DIFFERENCE_SHARED_ODD_WEIGHT_FRACTION,
     STACKING_ODD_EVEN_DIFFERENCE_VARIANCE_FACTOR,
 )
+from astrometricslib.pipelines.stacking.odd_even_difference_run import (
+    ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF,
+    difference_variance_factor,
+    full_stack_noise_equivalent,
+    full_stack_noise_equivalent_from_model,
+    model_variance_ratio,
+    run_odd_even_difference_noise,
+    split_into_halves,
+)
 from astrometricslib.pipelines.stacking.post_processing.difference_noise import (
     measure_difference_noise,
     save_noise_sums,
@@ -60,15 +69,6 @@ from astrometricslib.pipelines.stacking.post_processing.half_pattern import PATT
 from astrometricslib.pipelines.stacking.post_processing.stack_image import signed_aperture_sum
 from astrometricslib.pipelines.stacking.post_processing.stack_membership import effective_frame_count
 from astrometricslib.pipelines.stacking.post_processing.stack_noise import measure_stack_noise
-from astrometricslib.pipelines.stacking.subset_noise_run import (
-    ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF,
-    difference_variance_factor,
-    full_stack_noise_equivalent,
-    full_stack_noise_equivalent_from_model,
-    model_variance_ratio,
-    run_odd_even_difference_noise,
-    split_into_halves,
-)
 from astrometricslib.pipelines.stacking.target_stack_guard import library_stack_guard
 
 PATTERN_METRICS = PATTERN_ROW_NAMES
@@ -659,7 +659,7 @@ def test_a_failure_building_the_pattern_rows_leaves_the_nine_difference_rows(
         """
         raise RuntimeError("broken")
 
-    monkeypatch.setattr(subset_noise_run, "half_pattern_measurements", explode)
+    monkeypatch.setattr(odd_even_difference_run, "half_pattern_measurements", explode)
     library = _Library(tmp_path)
     library.record_library_count(float(FRAME_COUNT))
     result = library.run()
@@ -696,7 +696,7 @@ def test_each_half_is_read_once_as_32_bit_and_shared(tmp_path: Path, monkeypatch
         return real(stack_path, dtype)
 
     monkeypatch.setattr(difference_noise, "read_stack_plane", counting)
-    monkeypatch.setattr(subset_noise_run, "read_stack_plane", counting)
+    monkeypatch.setattr(odd_even_difference_run, "read_stack_plane", counting)
     library = _Library(tmp_path)
     library.record_library_count(float(FRAME_COUNT))
     reads.clear()
@@ -901,7 +901,7 @@ def test_the_job_stores_the_model_variance_ratio_from_each_frames_own_noise(
             FrameNoiseInput(1.0, 100.0 + 40.0 * index, 3.8, 0.783) for index, _member in enumerate(members)
         ]
 
-    monkeypatch.setattr(subset_noise_run, "frame_noise_inputs_from_store", inputs)
+    monkeypatch.setattr(odd_even_difference_run, "frame_noise_inputs_from_store", inputs)
     result = library.run()
     assert result.model_variance_ratio is not None
     members = sorted(library.target.frames, key=lambda frame: frame.timestamp)

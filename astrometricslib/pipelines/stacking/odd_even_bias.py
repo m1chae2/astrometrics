@@ -1,8 +1,8 @@
 """Purpose: Measure the bias of the odd–even difference by injection.
 
 Description: The odd–even difference
-(`subset_noise_run.run_odd_even_difference_noise`) measures a stack's random
-noise from the difference of two half stacks. Planck
+(`odd_even_difference_run.run_odd_even_difference_noise`) measures a stack's
+random noise from the difference of two half stacks. Planck
 found its half-difference low by about one percent, from correlations between
 the halves and from clipping that removes the noise's positive tail. Ours has
 both causes: the halves share the registration reference frame, and Siril
@@ -33,9 +33,10 @@ noise:
 The whole simulated stack has only random noise, so its noise in the empty
 apertures is the true random noise of that stack. The difference of the halves,
 turned into the noise of the whole stack the way the production job turns it
-(`subset_noise_run.full_stack_noise_equivalent`), should equal it. The ratio of
-the two is the bias: below 1 when the difference reads low. The production
-measurement divides by it (`difference_noise.ODD_EVEN_DIFFERENCE_NOISE_BIAS`).
+(`odd_even_difference_run.full_stack_noise_equivalent`), should equal it. The
+ratio of the two is the bias: below 1 when the difference reads low. The
+production measurement divides by it
+(`difference_noise.ODD_EVEN_DIFFERENCE_NOISE_BIAS`).
 
 What the ratio contains. It is the bias of the whole production recipe on
 frames of this camera: clipping, the shared reference frame, resampling
@@ -58,7 +59,7 @@ import os
 import shutil
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any
 
 import numpy as np
@@ -69,6 +70,14 @@ from astrometricslib.drivers.fits_access import open_primary_hdu, write_image
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
+from astrometricslib.pipelines.stacking.odd_even_difference_run import (
+    ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF,
+    HalfStacks,
+    difference_variance_factor,
+    full_stack_noise_equivalent,
+    split_into_halves,
+    weight_shares,
+)
 from astrometricslib.pipelines.stacking.post_processing.difference_noise import measure_difference_noise
 from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
     APERTURE_FILE_NAME,
@@ -90,20 +99,8 @@ from astrometricslib.pipelines.stacking.post_processing.stack_membership import 
     effective_frame_count,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_noise import measure_stack_noise
-from astrometricslib.pipelines.stacking.subset_noise_run import (
-    ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF,
-    delete_half_folder,
-    difference_variance_factor,
-    full_stack_noise_equivalent,
-    read_library_run,
-    split_into_halves,
-    weight_shares,
-)
-from astrometricslib.pipelines.stacking.subset_stack import (
-    stack_frame_subset,
-    stack_stem,
-    subset_output_path,
-)
+from astrometricslib.pipelines.stacking.subset_noise_run import read_library_run
+from astrometricslib.pipelines.stacking.subset_stack import stack_stem
 from astrometricslib.pipelines.stacking.target_stack_guard import subset_job_guard
 
 logger = logging.getLogger(__name__)
@@ -494,50 +491,47 @@ def measure_odd_even_bias(
             "each frame's predicted standard deviation; see odd_even_bias.py for what the ratio contains."
         )
         stem = stack_stem(library_stack_path)
-        labels = [f"{stem}.bias-odd", f"{stem}.bias-even", f"{stem}.bias-full"]
+        half_stacks = HalfStacks(
+            target_id=target.id,
+            library_stack_path=library_stack_path,
+            shared_path=reference_path,
+            labels={"odd": f"{stem}.bias-odd", "even": f"{stem}.bias-even", "full": f"{stem}.bias-full"},
+            configuration=configuration,
+            drivers=drivers,
+            stacking_slot=stacking_slot,
+        )
         os.makedirs(work_folder, exist_ok=True)
         try:
             for repeat in range(repeats):
                 outcome = _one_repeat(
-                    target.id,
                     repeat,
                     seed,
                     dated_members,
                     split,
                     sigmas,
                     apertures_path,
-                    library_folder,
-                    labels,
+                    half_stacks,
                     work_folder,
-                    configuration,
-                    drivers,
-                    stacking_slot,
                     measurement,
                     say,
                 )
                 measurement.repeats.append(outcome)
         finally:
-            for label in labels:
-                delete_half_folder(library_stack_path, label)
+            half_stacks.delete_folders()
             shutil.rmtree(os.path.join(work_folder, "simulated"), ignore_errors=True)
         measurement.ratio, measurement.ratio_error = summarize_repeats(measurement.repeats)
         return measurement
 
 
 def _one_repeat(
-    target_id: str,
     repeat: int,
     seed: int,
     members: Sequence[FrameRecord],
     split: Any,
     sigmas: dict[str, float],
     apertures_path: str,
-    library_folder: str,
-    labels: Sequence[str],
+    half_stacks: HalfStacks,
     work_folder: str,
-    configuration: Any,
-    drivers: Drivers | None,
-    stacking_slot: Callable[[], AbstractContextManager],
     measurement: BiasMeasurement,
     say: Callable[[str], None],
 ) -> BiasRepeat:
@@ -545,8 +539,6 @@ def _one_repeat(
 
     Parameters
     ----------
-    target_id : `str`
-        The target, which names Siril's work folder.
     repeat : `int`
         The repeat's number, for the random streams and the folder.
     seed : `int`
@@ -559,18 +551,12 @@ def _one_repeat(
         The noise to inject by real frame path.
     apertures_path : `str`
         The target's stored apertures.
-    library_folder : `str`
-        The folder of the library stack.
-    labels : `Sequence` [`str`]
-        The labels of the odd, even and whole stacks.
+    half_stacks : `HalfStacks`
+        Stacks the odd, even and whole sets. Its shared frame is the real
+        reference frame; this repeat stacks a copy of it with the simulated
+        frames.
     work_folder : `str`
         Holds the simulated frames.
-    configuration : `AppConfiguration`
-        The settings.
-    drivers : `Drivers` or `None`
-        The stacking program.
-    stacking_slot : `Callable`
-        Gives a stacking slot.
     measurement : `BiasMeasurement`
         The result being built; the stacker's weighting mode is set on it.
     say : `Callable`
@@ -599,25 +585,17 @@ def _one_repeat(
         "even": [simulated[frame.path] for frame in split.even],
         "full": [simulated[frame.path] for frame in members],
     }
-    stacked: dict[str, Any] = {}
-    for label, (name, frames) in zip(labels, sets.items(), strict=True):
+    stacks = replace(half_stacks, shared_path=shared, stacked={})
+    for name, frames in sets.items():
         say(f"Repeat {repeat + 1}: stacking the {name} set ({len(frames)} frames)")
-        with stacking_slot():
-            stacked[name] = stack_frame_subset(
-                target_id,
-                frames,
-                subset_output_path(library_folder, label, None),
-                configuration=configuration,
-                drivers=drivers,
-                trim_edges=False,
-                reference_frame_path=shared,
-            )
-        if stacked[name].stack_path is None:
+        stacks.stack(name, frames)
+        if not stacks.made_stack(name):
             raise NotFoundError(f"the stacker made no stack from the simulated {name} set")
-        if stacked[name].registration_reference_frame != shared:
+        if not stacks.lined_up_on_shared(name):
             raise NotFoundError(
                 f"the simulated {name} set was lined up with another reference frame than the shared one"
             )
+    stacked = stacks.stacked
     measurement.stack_weight = stacked["odd"].stack_weight
     say(f"Repeat {repeat + 1}: measuring")
     difference = measure_difference_noise(

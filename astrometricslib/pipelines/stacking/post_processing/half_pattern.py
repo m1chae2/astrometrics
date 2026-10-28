@@ -42,8 +42,8 @@ within three filter widths of either are left out. The rest are split into
 square tiles of `TILE_PX`. The sums over each tile give the covariance, the
 variance of the halves' difference and the lagged covariances, and a
 bootstrap over the tiles gives their errors. The registration reference
-frame is in both halves (`subset_noise_run.split_into_halves`); its random
-noise is shared too and is taken out of the covariance with the same
+frame is in both halves (`odd_even_difference_run.split_into_halves`); its
+random noise is shared too and is taken out of the covariance with the same
 equal-frame-noise model that the variance factor of the difference uses. That
 correction is a model, not a measurement, and the reference is the frame with
 the heaviest weight, so equal noise is least likely to hold for it.
@@ -428,7 +428,7 @@ def measure_half_pattern(
         The two half stacks as 2-D images on one pixel grid.
     variance_factor : `float` or `None`
         The difference's variance in one frame's variances
-        (`subset_noise_run.difference_variance_factor`).
+        (`odd_even_difference_run.difference_variance_factor`).
     shared_fractions : `tuple` [`float` or `None`, `float` or `None`]
         The registration reference frame's share of the odd and of the even
         half's weight.

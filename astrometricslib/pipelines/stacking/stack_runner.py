@@ -558,6 +558,7 @@ def _stack_exposure_groups(
         describe_bright_sky_group,
         describe_group_clipping,
         describe_nonlinear_group,
+        group_weight,
         measure_exposure_group_gains,
         measure_group_frames,
         merge_registration_sequences,
@@ -697,7 +698,7 @@ def _stack_exposure_groups(
     # `group_alignment.refine_alignment_with_stars`); spectral stacks keep
     # the plain shift.
     weights = [
-        count * exposure**2 / noise**2
+        group_weight(count, exposure, noise)
         for count, exposure, noise in zip(counts, exposures, frame_noises, strict=True)
     ]
     reference_index = int(np.argmax(weights))

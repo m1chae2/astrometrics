@@ -10,6 +10,7 @@ import numpy as np
 from astropy.io import fits
 from astropy.wcs import WCS
 
+from astrometricslib.drivers.filter_detection import get_filter_type
 from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, collapse_to_2d
 from astrometricslib.foundation.enums import FilterType
 from astrometricslib.foundation.errors import NotFoundError, StorageError
@@ -228,79 +229,4 @@ class AstrometricsImage:
         string-to-enum mapping. `FilterType.NONE` if no known filter
         name is matched.
         """
-        header = self.header
-        filter_str = str(header.get("FILTER", "")).upper()
-
-        mapping = {
-            "SPECTROSCOPY": FilterType.SPEC,
-            "SPEC": FilterType.SPEC,
-            "H-ALPHA": FilterType.Ha,
-            "HA": FilterType.Ha,
-            "OIII": FilterType.OIII,
-            "SII": FilterType.SII,
-            "LUMINANCE": FilterType.L,
-            "RED": FilterType.R,
-            "GREEN": FilterType.G,
-            "BLUE": FilterType.B,
-            "L": FilterType.L,
-            "R": FilterType.R,
-            "G": FilterType.G,
-            "B": FilterType.B,
-            "NONE": FilterType.NONE,
-        }
-
-        # Sort keys by length descending to match most specific terms first
-        sorted_keys = sorted(mapping.keys(), key=len, reverse=True)
-        for key in sorted_keys:
-            if key in filter_str:
-                return mapping[key]
-
-        return FilterType.NONE
-
-    def get_pixel_coords(self, ra: float, dec: float) -> tuple[float, float] | None:
-        """Convert world coordinates (RA, Dec) to pixel coordinates.
-
-        Parameters
-        ----------
-        ra : `float`
-            Right ascension in degrees.
-        dec : `float`
-            Declination in degrees.
-
-        Returns
-        -------
-        pixel_coords : `tuple` of `float`, or `None`
-            The (x, y) pixel coordinates, or `None` if this image has
-            no WCS solution or the conversion failed.
-        """
-        if self.wcs:
-            try:
-                res = self.wcs.wcs_world2pix(ra, dec, 0)
-                return float(res[0]), float(res[1])
-            except DATA_ERRORS:
-                return None
-        return None
-
-    def get_world_coords(self, x: float, y: float) -> tuple[float, float] | None:
-        """Convert pixel coordinates (X, Y) to world coordinates (RA, Dec).
-
-        Parameters
-        ----------
-        x : `float`
-            Pixel X coordinate.
-        y : `float`
-            Pixel Y coordinate.
-
-        Returns
-        -------
-        world_coords : `tuple` of `float`, or `None`
-            The (ra, dec) world coordinates in degrees, or `None` if
-            this image has no WCS solution or the conversion failed.
-        """
-        if self.wcs:
-            try:
-                res = self.wcs.wcs_pix2world(x, y, 0)
-                return float(res[0]), float(res[1])
-            except DATA_ERRORS:
-                return None
-        return None
+        return get_filter_type(self.header)

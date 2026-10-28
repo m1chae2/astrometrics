@@ -92,15 +92,16 @@ from astrometricslib.pipelines.stacking.post_processing.stack_membership import 
 from astrometricslib.pipelines.stacking.post_processing.stack_noise import measure_stack_noise
 from astrometricslib.pipelines.stacking.subset_noise_run import (
     ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF,
-    _delete_half_folder,
-    _weight_shares,
+    delete_half_folder,
     difference_variance_factor,
     full_stack_noise_equivalent,
     read_library_run,
     split_into_halves,
+    weight_shares,
 )
 from astrometricslib.pipelines.stacking.subset_stack import (
     stack_frame_subset,
+    stack_stem,
     subset_output_path,
 )
 from astrometricslib.pipelines.stacking.target_stack_guard import subset_job_guard
@@ -492,7 +493,7 @@ def measure_odd_even_bias(
             "Simulated frames keep the real frames' sources and calibration and hold Gaussian noise of "
             "each frame's predicted standard deviation; see odd_even_bias.py for what the ratio contains."
         )
-        stem = os.path.splitext(os.path.basename(library_stack_path))[0]
+        stem = stack_stem(library_stack_path)
         labels = [f"{stem}.bias-odd", f"{stem}.bias-even", f"{stem}.bias-full"]
         os.makedirs(work_folder, exist_ok=True)
         try:
@@ -517,7 +518,7 @@ def measure_odd_even_bias(
                 measurement.repeats.append(outcome)
         finally:
             for label in labels:
-                _delete_half_folder(library_stack_path, label)
+                delete_half_folder(library_stack_path, label)
             shutil.rmtree(os.path.join(work_folder, "simulated"), ignore_errors=True)
         measurement.ratio, measurement.ratio_error = summarize_repeats(measurement.repeats)
         return measurement
@@ -636,7 +637,7 @@ def _one_repeat(
         memberships[name] = determine_stack_members(
             sets[name], stacked[name].diagnostics, stacked[name].stack_weight
         )
-        shares[name] = _weight_shares(memberships[name])
+        shares[name] = weight_shares(memberships[name])
     full_weights = shares["full"]
     if full_weights is None or shares["odd"] is None or shares["even"] is None:
         raise NotFoundError("the simulated stacks' weights are unknown")

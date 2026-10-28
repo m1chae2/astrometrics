@@ -53,7 +53,7 @@ from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_image import (
     MAD_SIGMA_ERROR_FACTOR,
-    MAD_TO_SIGMA,
+    robust_sigma,
 )
 
 logger = logging.getLogger(__name__)
@@ -376,7 +376,7 @@ def _line_scatter(image: np.ndarray, usable: np.ndarray, axis: int) -> tuple[flo
     residual = residual[np.isfinite(residual)]
     if residual.size < MINIMUM_LINES:
         return None
-    scatter = MAD_TO_SIGMA * float(np.median(np.abs(residual - np.median(residual))))
+    scatter = float(robust_sigma(residual))
     return scatter, int(residual.size)
 
 

@@ -400,7 +400,7 @@ def _real_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, profile_text: 
     # The shared test fixtures point every settings object at one shared
     # file, so this test points them at its own file instead.
     monkeypatch.setattr(AppConfiguration, "_find_config_file", lambda self: config_path)
-    camera_profile_store._load_profiles_from_config.cache_clear()
+    camera_profile_store.load_profiles_from_config.cache_clear()
     return AppConfiguration()
 
 

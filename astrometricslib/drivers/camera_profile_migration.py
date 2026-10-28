@@ -19,13 +19,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from astrometricslib.drivers.camera_profile_store import (
-    _CAMERA_SECTION_PREFIX,
+    CAMERA_SECTION_PREFIX,
     LEGACY_NOISE_KEYS,
     SENSOR_NOISE_KEY,
-    _build_camera_profile,
-    _build_provenanced_value,
-    _load_profiles_from_config,
     backup_config_file,
+    build_camera_profile,
+    build_provenanced_value,
+    load_profiles_from_config,
     sensor_noise_to_toml_array,
 )
 from astrometricslib.foundation.camera_names import normalize_camera_name
@@ -131,12 +131,12 @@ def migrate_camera_profiles(
     sections: list[tuple[str, dict, MigrationSetting | None]] = []
     matched_names: set[str] = set()
     for section_name in config.app_config.sections():
-        if not section_name.startswith(_CAMERA_SECTION_PREFIX) or section_name == "Observatory.Camera":
+        if not section_name.startswith(CAMERA_SECTION_PREFIX) or section_name == "Observatory.Camera":
             continue
         section = dict(config.app_config[section_name])
         if "clip_ceiling_adu" not in section:
             continue
-        profile = _build_camera_profile(section_name, section)
+        profile = build_camera_profile(section_name, section)
         setting = None
         for name in (profile.camera_name, *profile.name_aliases):
             normalized_name = normalize_camera_name(name)
@@ -194,7 +194,7 @@ def migrate_camera_profiles(
         }
         for key in LEGACY_NOISE_KEYS:
             if key in section:
-                kwargs[key] = _build_provenanced_value(section[key])
+                kwargs[key] = build_provenanced_value(section[key])
         entry = SensorSettingNoise(**kwargs)
         new_arrays[section_name] = entry
         held = " and ".join(key for key in LEGACY_NOISE_KEYS if key in section)
@@ -218,5 +218,5 @@ def migrate_camera_profiles(
                 for key in LEGACY_NOISE_KEYS:
                     config.app_config.remove_key(section_name, key)
             config.save_configuration()
-            _load_profiles_from_config.cache_clear()
+            load_profiles_from_config.cache_clear()
     return MigrationReport(changes=changes, dry_run=dry_run, backup_path=backup_path)

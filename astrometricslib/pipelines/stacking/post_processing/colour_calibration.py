@@ -41,6 +41,10 @@ from photutils.detection import DAOStarFinder
 from photutils.utils.exceptions import NoDetectionsWarning
 
 from astrometricslib.drivers.fits_access import read_data, read_header, write_image
+from astrometricslib.pipelines.stacking.post_processing.stack_image import (
+    MAD_TO_SIGMA,
+    robust_sigma,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -194,7 +198,7 @@ def _sky_noise(channel: np.ndarray, sky_level: float) -> float:
         The standard deviation the sky pixels would have if they were
         Gaussian. Stars barely change the median deviation.
     """
-    return float(1.4826 * np.median(np.abs(channel - sky_level)))
+    return float(MAD_TO_SIGMA * np.median(np.abs(channel - sky_level)))
 
 
 def measure_gains(image: np.ndarray) -> ColourCalibration | None:
@@ -241,7 +245,7 @@ def measure_gains(image: np.ndarray) -> ColourCalibration | None:
         spread : `float`
             1.4826 times the median absolute deviation.
         """
-        return float(1.4826 * np.median(np.abs(values - np.median(values))))
+        return float(robust_sigma(values))
 
     return ColourCalibration(
         red_gain=float(np.exp(-np.median(log_red))),

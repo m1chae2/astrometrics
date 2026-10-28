@@ -29,6 +29,10 @@ from astrometricslib.drivers.fits_access import collapse_to_2d, read_data
 from astrometricslib.foundation.errors import ProcessingError
 from astrometricslib.models.quality.stack_comparison import StackComparison, StackMeasurements
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_fwhm_from_data
+from astrometricslib.pipelines.stacking.post_processing.stack_image import (
+    MAD_TO_SIGMA,
+    robust_sigma,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,10 +61,6 @@ FLATNESS_BLOCK_OUTLIER_SIGMA = 4.0
 # Pixels brighter than the sky by more than this many robust standard
 # deviations are treated as stars and left out of the noise estimate.
 NOISE_STAR_SIGMA = 3.0
-
-# The robust standard deviation (from the median absolute deviation) is
-# 1.4826 times the median absolute deviation for Gaussian noise.
-_MAD_TO_SIGMA = 1.4826
 
 # A change smaller than this fraction is reported as "unchanged". Two
 # measurements of the same stack agree to about this much (the noise
@@ -208,15 +208,15 @@ def measure_stack_array(data: np.ndarray, path: str = "") -> StackMeasurements:
     """
     image = np.asarray(collapse_to_2d(np.asarray(data, dtype=np.float64)))
     sky = float(np.nanmedian(image))
-    robust_sigma = _MAD_TO_SIGMA * float(np.nanmedian(np.abs(image - sky)))
-    if not np.isfinite(sky) or sky <= 0 or robust_sigma <= 0:
+    sky_sigma = MAD_TO_SIGMA * float(np.nanmedian(np.abs(image - sky)))
+    if not np.isfinite(sky) or sky <= 0 or sky_sigma <= 0:
         raise ProcessingError("The stack has no measurable sky.")
 
-    sky_pixels = (image[:, 1:] < sky + NOISE_STAR_SIGMA * robust_sigma) & (
-        image[:, :-1] < sky + NOISE_STAR_SIGMA * robust_sigma
+    sky_pixels = (image[:, 1:] < sky + NOISE_STAR_SIGMA * sky_sigma) & (
+        image[:, :-1] < sky + NOISE_STAR_SIGMA * sky_sigma
     )
     differences = (image[:, 1:] - image[:, :-1])[sky_pixels] / np.sqrt(2.0)
-    noise = _MAD_TO_SIGMA * float(np.median(np.abs(differences - np.median(differences))))
+    noise = float(robust_sigma(differences))
 
     block = FLATNESS_BLOCK_PIXELS
     rows, columns = (image.shape[0] // block) * block, (image.shape[1] // block) * block
@@ -225,7 +225,7 @@ def measure_stack_array(data: np.ndarray, path: str = "") -> StackMeasurements:
     blocks = image[:rows, :columns].reshape(rows // block, block, columns // block, block)
     block_medians = np.median(blocks, axis=(1, 3))
     centre = float(np.median(block_medians))
-    spread = _MAD_TO_SIGMA * float(np.median(np.abs(block_medians - centre)))
+    spread = MAD_TO_SIGMA * float(np.median(np.abs(block_medians - centre)))
     kept = block_medians[block_medians - centre < FLATNESS_BLOCK_OUTLIER_SIGMA * spread]
     if kept.size < 4:
         kept = block_medians.ravel()

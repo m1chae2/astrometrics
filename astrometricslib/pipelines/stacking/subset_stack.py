@@ -45,6 +45,7 @@ __all__ = [
     "SubsetStackOutcome",
     "check_subset_label",
     "stack_frame_subset",
+    "stack_stem",
     "subset_output_path",
     "subset_stack_path",
 ]
@@ -90,6 +91,22 @@ class SubsetStackOutcome:
     crop_offset: tuple[int, int]
     registration_reference_frame: str | None
     is_spectral: bool
+
+
+def stack_stem(stack_path: str) -> str:
+    """Give a stack's file name without its folder and its extension.
+
+    Parameters
+    ----------
+    stack_path : `str`
+        The path of a stack file.
+
+    Returns
+    -------
+    stem : `str`
+        For ``/data/M31_Stacked.fits`` this is ``M31_Stacked``.
+    """
+    return os.path.splitext(os.path.basename(stack_path))[0]
 
 
 def check_subset_label(label: str) -> None:

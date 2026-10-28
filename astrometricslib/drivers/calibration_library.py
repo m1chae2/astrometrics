@@ -1086,49 +1086,6 @@ class CalibrationLibrary(BaseModel):
         except FITS_READ_ERRORS:
             logger.exception("Error adding flat frame %s", image_file)
 
-    def check_for_calibration_frames(
-        self,
-        iso: Any | None = None,
-        exposure: Any | None = None,
-        camera: str | None = None,
-        telescope: str | None = None,
-        filter_type: Any | None = None,
-    ) -> bool:
-        """Check whether dark, bias, and flat frames all exist.
-
-        Parameters
-        ----------
-        iso : `Any`, optional
-            Unused; accepted for call-site compatibility, by default
-            `None`.
-        exposure : `Any`, optional
-            Exposure time to look up dark frames for, by default
-            `None`.
-        camera : `str`, optional
-            Camera name to look up frames for. If `None` (default),
-            falls back to the library's only camera if it has just one.
-        telescope : `str`, optional
-            Telescope name to look up flat frames for. If `None`
-            (default), falls back to the library's only telescope if
-            it has just one.
-        filter_type : `Any`, optional
-            Filter to look up flat frames for, by default `None`.
-
-        Returns
-        -------
-        has_all_frames : `bool`
-            `True` if at least one dark, bias, and flat frame each
-            exist for the given parameters; `False` otherwise
-            (including if a stored exposure or setting cannot be read).
-        """
-        try:
-            darks = self.get_dark_frames(camera=camera, exposure=exposure)
-            biases = self.get_bias_frames(camera=camera)
-            flats = self.get_flat_frames(telescope=telescope, camera=camera, filter_type=filter_type)
-            return bool(darks and biases and flats)
-        except ValueError, TypeError, KeyError:
-            return False
-
     def _find_camera_key(self, frame_dict: dict[str, Any], camera: str) -> str | None:
         """Find the key a camera is filed under, allowing fuzzy matching.
 

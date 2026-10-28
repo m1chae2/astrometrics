@@ -472,31 +472,6 @@ def delete_target(api: Any, target_id: str) -> bool:
     return False
 
 
-def refresh_target(api: Any, target_id: str, prune_missing: bool = False) -> None:
-    """Check the hard drive again for new images for this target.
-
-    Parameters
-    ----------
-    api : `Any`
-        The system that manages the targets.
-    target_id : `str`
-        The name of the target to check.
-    prune_missing : `bool`, optional
-        If True, it will also remove records for files that have been deleted
-        from the hard drive. Defaults to False.
-    """
-    target = get_target(api, target_id)
-    if not target:
-        create_target(api, target_id)
-        return
-
-    if prune_missing:
-        target.frames = []
-
-    reindex_frames(target)
-    save_targets(api)
-
-
 def save_targets(api: Any) -> None:
     """Save changes back to the database.
 

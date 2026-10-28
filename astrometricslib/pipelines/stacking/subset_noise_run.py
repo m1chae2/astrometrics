@@ -153,6 +153,7 @@ from astrometricslib.pipelines.stacking.post_processing.calibration_record impor
     record_calibration_identities,
 )
 from astrometricslib.pipelines.stacking.post_processing.difference_noise import (
+    NoiseSums,
     load_noise_sums,
     measure_difference_noise,
     paired_noise_difference,
@@ -209,6 +210,7 @@ from astrometricslib.pipelines.stacking.subset_stack import (
     SUBSET_FOLDER_NAME,
     check_subset_label,
     stack_frame_subset,
+    stack_stem,
     subset_output_path,
 )
 from astrometricslib.pipelines.stacking.target_stack_guard import subset_job_guard
@@ -223,6 +225,7 @@ __all__ = [
     "HalfSplit",
     "LibraryRun",
     "OddEvenDetail",
+    "delete_half_folder",
     "detail_measurements",
     "difference_variance_factor",
     "expected_noise_ratio",
@@ -243,6 +246,7 @@ __all__ = [
     "split_into_halves",
     "stack_chosen_subset",
     "subset_frame_subject_id",
+    "weight_shares",
 ]
 
 _SPEC_BY_NAME = {spec.name: spec for spec in STACKING_METRICS}
@@ -505,7 +509,7 @@ class LibraryRun:
         Empty otherwise.
     effective_count : `float` or `None`
         The library stack's effective frame count.
-    noise_sums : `tuple` or `None`
+    noise_sums : `NoiseSums` or `None`
         The library stack's per-aperture noise sums, the reference flux they
         are read against and the identity of the apertures they were
         measured in (see `difference_noise.load_noise_sums`); `None` when not
@@ -525,7 +529,7 @@ class LibraryRun:
     weights_reason: str = ""
     assumed_reason: str = ""
     effective_count: float | None = None
-    noise_sums: tuple[np.ndarray, float, str] | None = None
+    noise_sums: NoiseSums | None = None
     store: QualityStore | None = None
     weight_by_path: dict[str, float] | None = None
 
@@ -1157,7 +1161,7 @@ def run_noise_growth(
             notes.append(
                 f"No subset has at least {MINIMUM_SUBSET_FRAMES} frames, so no subset stack was made."
             )
-        stem = os.path.splitext(os.path.basename(library_stack_path))[0]
+        stem = stack_stem(library_stack_path)
         subsets = []
         for index, step in enumerate(steps):
             _report(int(100 * index / len(steps)), f"Stacking subset {step.key} ({len(step.frames)} frames)")
@@ -1266,7 +1270,7 @@ def _run_night_contributions(
         notes.append(
             f"{len(undated)} frame(s) have no timestamp. They stay in every leave-one-night-out stack."
         )
-    stem = os.path.splitext(os.path.basename(library_stack_path))[0]
+    stem = stack_stem(library_stack_path)
     shares, share_reason = night_weight_shares(library.weights)
     share_reason = library.weights_reason or share_reason
     contributions = []
@@ -1385,7 +1389,7 @@ def night_measurements(
     noise: StackNoiseOutcome | None,
     *,
     share_assumed_reason: str = "",
-    library_noise_sums: tuple[np.ndarray, float, str] | None = None,
+    library_noise_sums: NoiseSums | None = None,
 ) -> list[QualityMeasurement]:
     """Build the night's weight share and the noise without the night.
 
@@ -1408,7 +1412,7 @@ def night_measurements(
     share_assumed_reason : `str`, optional
         Why the weights behind the share are assumed. When it is not empty
         the share is stored as assumed.
-    library_noise_sums : `tuple`, optional
+    library_noise_sums : `NoiseSums`, optional
         The library stack's per-aperture sums, its reference flux and the
         identity of the apertures they were measured in. Without it the
         difference from the library stack's noise is not measured.
@@ -1472,17 +1476,21 @@ def night_measurements(
         difference_reason = (
             "the library stack's per-aperture sums were not saved; stack the target again to save them"
         )
-    elif not library_noise_sums[2] or library_noise_sums[2] != outcome.aperture_identity:
+    elif (
+        not library_noise_sums.aperture_identity
+        or library_noise_sums.aperture_identity != outcome.aperture_identity
+    ):
         difference_reason = (
             "the library stack was measured in other apertures than this stack "
-            f"(identities {library_noise_sums[2] or 'unknown'} and {outcome.aperture_identity}); "
+            f"(identities {library_noise_sums.aperture_identity or 'unknown'} "
+            f"and {outcome.aperture_identity}); "
             "stack the target again so the library stack is measured in the current apertures"
         )
     else:
         difference = paired_noise_difference(
-            library_noise_sums[0],
-            library_noise_sums[1],
-            library_noise_sums[2],
+            library_noise_sums.sums,
+            library_noise_sums.reference_flux,
+            library_noise_sums.aperture_identity,
             np.asarray(outcome.aperture_sums, dtype=float),
             outcome.reference_flux_adu,
             outcome.aperture_identity,
@@ -1883,7 +1891,7 @@ def _model_ratio_for_library(
     return ratio, ""
 
 
-def _weight_shares(membership: StackMembership | None) -> dict[str, float] | None:
+def weight_shares(membership: StackMembership | None) -> dict[str, float] | None:
     """Give each member's share of a stack's total weight.
 
     Parameters
@@ -2365,7 +2373,7 @@ def _half_pattern_safely(
         return HalfPatternOutcome(None, f"the measurement failed: {type(error).__name__}")
 
 
-def _delete_half_folder(library_stack_path: str, label: str) -> None:
+def delete_half_folder(library_stack_path: str, label: str) -> None:
     """Delete a half stack's folder from ``_subsets``.
 
     Parameters
@@ -2599,7 +2607,7 @@ def _run_odd_even_difference_noise(
     if stored_apertures is None:
         return finish(apertures_reason)
 
-    stem = os.path.splitext(os.path.basename(library_stack_path))[0]
+    stem = stack_stem(library_stack_path)
     stacked: dict[str, Any] = {}
     labels = {"odd": f"{stem}.half-odd", "even": f"{stem}.half-even"}
     try:
@@ -2654,10 +2662,14 @@ def _run_odd_even_difference_noise(
             return finish(f"the difference could not be measured ({type(error).__name__}: {error})")
         if noise.result is None:
             return finish(noise.reason or "the difference was not measured")
-        if not library.noise_sums[2] or library.noise_sums[2] != noise.result.aperture_identity:
+        if (
+            not library.noise_sums.aperture_identity
+            or library.noise_sums.aperture_identity != noise.result.aperture_identity
+        ):
             return finish(
                 "the library stack was measured in other apertures than the halves "
-                f"(identities {library.noise_sums[2] or 'unknown'} and {noise.result.aperture_identity}); "
+                f"(identities {library.noise_sums.aperture_identity or 'unknown'} "
+                f"and {noise.result.aperture_identity}); "
                 "stack the target again so the library stack is measured in the current apertures"
             )
         memberships: dict[str, StackMembership | None] = {}
@@ -2671,7 +2683,7 @@ def _run_odd_even_difference_noise(
                 logger.exception("The member frames of the %s half stack could not be worked out", name)
                 memberships[name] = None
                 counts_reason = f"the member frames could not be worked out: {type(error).__name__}"
-        shares = {name: _weight_shares(memberships[name]) for name in ("odd", "even")}
+        shares = {name: weight_shares(memberships[name]) for name in ("odd", "even")}
         counts = tuple(
             effective_frame_count(list(shares[name].values())) if shares[name] is not None else None
             for name in ("odd", "even")
@@ -2763,4 +2775,4 @@ def _run_odd_even_difference_noise(
     finally:
         if not keep_halves:
             for label in labels.values():
-                _delete_half_folder(library_stack_path, label)
+                delete_half_folder(library_stack_path, label)

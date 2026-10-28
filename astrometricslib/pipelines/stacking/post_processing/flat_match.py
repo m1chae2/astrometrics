@@ -159,6 +159,10 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_LIGHT_DUST_SPLIT_HALF_CORRELATION,
     STACKING_METRICS,
 )
+from astrometricslib.pipelines.stacking.post_processing.stack_image import (
+    MAD_TO_SIGMA,
+    robust_sigma,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -799,7 +803,7 @@ def _smooth_trend(cells: np.ndarray, usable: np.ndarray) -> np.ndarray:
             break
         coefficients, *_unused = np.linalg.lstsq(design[keep], values[keep], rcond=None)
         residual = values - design @ coefficients
-        spread = 1.4826 * float(np.median(np.abs(residual[keep])))
+        spread = MAD_TO_SIGMA * float(np.median(np.abs(residual[keep])))
         keep = usable[::stride, ::stride].ravel() & (np.abs(residual) < 3.0 * max(spread, 1e-6))
     full = np.polynomial.legendre.legvander2d(
         *(axis.ravel() for axis in np.meshgrid(row_axis, column_axis, indexing="ij")),
@@ -880,7 +884,7 @@ def find_dust_shadows(band: np.ndarray, valid: np.ndarray, noise_sigma: float | 
     if values.size == 0:
         return DustShadows(0, SHADOW_MINIMUM_DEPTH_FRACTION, empty)
     if noise_sigma is None:
-        noise_sigma = 1.4826 * float(np.median(np.abs(values - np.median(values))))
+        noise_sigma = float(robust_sigma(values))
     threshold = max(SHADOW_MINIMUM_SIGMAS * noise_sigma, SHADOW_MINIMUM_DEPTH_FRACTION)
     labels, group_count = ndimage.label((band < -threshold) & valid, structure=np.ones((3, 3), dtype=int))
     if group_count == 0:
@@ -981,7 +985,7 @@ def _star_mask(cells: np.ndarray, local_sigma: float, core_sigmas: float, wing_s
     with np.errstate(divide="ignore", invalid="ignore"):
         residual = cells / local - 1.0
     residual = np.nan_to_num(residual, nan=0.0, posinf=0.0, neginf=0.0)
-    sigma = 1.4826 * float(np.median(np.abs(residual - np.median(residual))))
+    sigma = float(robust_sigma(residual))
     if sigma <= 0:
         return np.zeros(cells.shape, dtype=bool)
     cores = residual > core_sigmas * sigma

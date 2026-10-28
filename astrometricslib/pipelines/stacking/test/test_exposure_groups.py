@@ -29,12 +29,12 @@ from astrometricslib.pipelines.stacking.processing.exposure_groups import (
     combine_exposure_group_images,
     describe_group_clipping,
     estimate_background_noise,
-    estimate_group_gains,
     estimate_saturation_mask_level,
     frame_exposure_seconds,
-    group_frame_noises,
+    group_weight,
     measure_frame_noise,
     measure_group_frames,
+    measure_group_gains,
     merge_registration_sequences,
     merge_rejection_maps,
     representative_exposure_frames,
@@ -57,6 +57,17 @@ def _frames(*exposures: object) -> list[SimpleNamespace]:
     return [
         SimpleNamespace(name=f"frame_{index}", exposure=exposure) for index, exposure in enumerate(exposures)
     ]
+
+
+def _group_gains(per_second_images: list, usable_masks: list, reference_index: int) -> list[float]:
+    """Measure the gains of the groups and keep only the gain numbers.
+
+    Returns
+    -------
+    gains : `list` [`float`]
+        The gain of each group against the reference group.
+    """
+    return [m.gain for m in measure_group_gains(per_second_images, usable_masks, reference_index)]
 
 
 def test_exposure_is_read_from_strings_numbers_and_dictionaries() -> None:
@@ -410,7 +421,7 @@ def test_a_clipped_group_takes_the_noise_of_the_cleanest_group(tmp_path: Path) -
     clean_quiet = ExposureGroup(2.0, _write_raw_frames(tmp_path, 3, mean=60.0, noise=6.0, seed=4))
     clean_noisy = ExposureGroup(5.0, _write_raw_frames(tmp_path, 3, mean=100.0, noise=9.0, seed=5))
 
-    noises = group_frame_noises([clipped, clean_quiet, clean_noisy])
+    noises = measure_group_frames([clipped, clean_quiet, clean_noisy])[0]
 
     assert noises[1] == pytest.approx(6.0, rel=0.15)
     assert noises[2] == pytest.approx(9.0, rel=0.15)
@@ -424,7 +435,7 @@ def test_when_every_group_is_clipped_all_groups_get_the_same_noise(tmp_path: Pat
         ExposureGroup(1.0, _write_raw_frames(tmp_path, 2, mean=2.0, noise=8.0, seed=7)),
     ]
 
-    assert group_frame_noises(groups) == [1.0, 1.0]
+    assert measure_group_frames(groups)[0] == [1.0, 1.0]
 
 
 def test_a_frame_that_cannot_be_read_raises_an_os_error(tmp_path: Path) -> None:
@@ -433,9 +444,9 @@ def test_a_frame_that_cannot_be_read_raises_an_os_error(tmp_path: Path) -> None:
     pathless = ExposureGroup(1.0, [SimpleNamespace()])
 
     with pytest.raises(OSError):
-        group_frame_noises([missing])
+        measure_group_frames([missing])[0]
     with pytest.raises(OSError, match="no file path"):
-        group_frame_noises([pathless])
+        measure_group_frames([pathless])[0]
 
 
 def test_frame_noise_weights_are_frames_times_exposure_squared() -> None:
@@ -542,7 +553,7 @@ def test_group_gains_recover_the_scale_each_stack_was_given() -> None:
     per_second = [truth * 1.0, truth * 0.7 + generator.normal(0, 0.0002, truth.shape), truth * 1.2]
     usable = [np.ones(truth.shape, dtype=bool)] * 3
 
-    gains = estimate_group_gains(per_second, usable, reference_index=0)
+    gains = _group_gains(per_second, usable, reference_index=0)
 
     assert gains == pytest.approx([1.0, 0.7, 1.2], rel=0.02)
 
@@ -551,7 +562,7 @@ def test_too_few_bright_shared_pixels_leave_the_gain_at_one() -> None:
     """A tiny image is not enough to measure a gain from."""
     small = np.random.default_rng(14).uniform(0.1, 1.0, (10, 10))
 
-    assert estimate_group_gains([small, small * 0.5], [np.ones(small.shape, bool)] * 2, 0) == [1.0, 1.0]
+    assert _group_gains([small, small * 0.5], [np.ones(small.shape, bool)] * 2, 0) == [1.0, 1.0]
 
 
 def test_a_different_sky_does_not_pass_for_a_gain() -> None:
@@ -567,7 +578,7 @@ def test_a_different_sky_does_not_pass_for_a_gain() -> None:
     brighter_night = 0.10 + 1.4 * stars + np.random.default_rng(32).normal(0, 0.0002, stars.shape)
     usable = [np.ones(stars.shape, dtype=bool)] * 2
 
-    gains = estimate_group_gains([reference, brighter_night], usable, reference_index=0)
+    gains = _group_gains([reference, brighter_night], usable, reference_index=0)
 
     assert gains[1] == pytest.approx(1.4, rel=0.01)
 
@@ -592,7 +603,7 @@ def test_saturated_pixels_do_not_enter_the_gain() -> None:
     clipped = np.minimum(truth * 2.0, 0.6)
     usable_clipped = clipped < 0.57
 
-    gains = estimate_group_gains([truth, clipped], [np.ones(truth.shape, bool), usable_clipped], 0)
+    gains = _group_gains([truth, clipped], [np.ones(truth.shape, bool), usable_clipped], 0)
 
     assert gains[1] == pytest.approx(2.0, rel=0.02)
 
@@ -608,7 +619,7 @@ def test_an_implausible_gain_is_replaced_by_one_and_cannot_blow_up_the_image() -
     truth = generator.uniform(0.0, 1.0, (300, 300)) ** 3
     nearly_empty = np.full(truth.shape, 1e-20)
 
-    gains = estimate_group_gains([truth, nearly_empty], [np.ones(truth.shape, bool)] * 2, 0)
+    gains = _group_gains([truth, nearly_empty], [np.ones(truth.shape, bool)] * 2, 0)
 
     assert gains == [1.0, 1.0]
     assert PLAUSIBLE_GAIN_RANGE[0] < 0.7 < PLAUSIBLE_GAIN_RANGE[1]
@@ -896,3 +907,9 @@ def test_describe_group_clipping_lists_every_group_and_the_clipped_ones() -> Non
 
     assert [entry["frame_zero_fraction"] for entry in measured] == [0.712, CLIPPED_FRAME_ZERO_FRACTION]
     assert clipped == [{"exposure_seconds": 0.5, "frame_zero_fraction": 0.712}]
+
+
+def test_group_weight_is_frames_times_exposure_squared_over_noise_squared() -> None:
+    """`group_weight` follows count x exposure^2 / noise^2."""
+    assert group_weight(4, 2.0, 0.5) == pytest.approx(64.0)
+    assert group_weight(1, 10.0, 10.0) == pytest.approx(1.0)

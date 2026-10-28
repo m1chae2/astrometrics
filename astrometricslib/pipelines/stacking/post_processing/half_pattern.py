@@ -64,6 +64,7 @@ memory near ten copies of the image (register entry STK-45).
 import logging
 import math
 from dataclasses import dataclass
+from typing import NamedTuple
 
 import numpy as np
 from scipy.ndimage import binary_erosion, gaussian_filter, shift
@@ -172,6 +173,33 @@ CORRECTION_NOTE = (
 PATTERN_NOT_POSITIVE_REASON = (
     "the covariance of the halves is not above zero, so no pattern shows above the scatter of the estimate"
 )
+
+
+class LagZeroTerms(NamedTuple):
+    """The variances worked out from one selection of tiles.
+
+    Attributes
+    ----------
+    covariance : `float`
+        The covariance of the two halves (c).
+    difference_variance : `float`
+        The variance of the halves' difference (D).
+    correction : `float`
+        The reference frame's random part (D / F x a x b).
+    pattern : `float`
+        The pattern variance (c minus the correction).
+    random_variance : `float`
+        The stack's random variance (D / F / N).
+    halves : `float`
+        The geometric mean of the halves' variances.
+    """
+
+    covariance: float
+    difference_variance: float
+    correction: float
+    pattern: float
+    random_variance: float
+    halves: float
 
 
 @dataclass(frozen=True)
@@ -465,7 +493,7 @@ def measure_half_pattern(
     count, cross, odd_square, even_square = (array[used] for array in (count, cross, odd_square, even_square))
     shared_odd, shared_even = (float(value) for value in shared_fractions if value is not None)
 
-    def lag_zero_terms(selection: np.ndarray) -> tuple[float, float, float, float, float, float]:
+    def lag_zero_terms(selection: np.ndarray) -> LagZeroTerms:
         """Work out the pattern and random variances from tile sums.
 
         Parameters
@@ -475,7 +503,7 @@ def measure_half_pattern(
 
         Returns
         -------
-        terms : `tuple` [`float`, `float`, `float`, `float`, `float`, `float`]
+        terms : `LagZeroTerms`
             The covariance (c), the difference's variance (D), the reference
             frame's random part (D / F x a x b), the pattern variance (c minus
             that part), the stack's random variance (D / F / N), and the
@@ -490,7 +518,7 @@ def measure_half_pattern(
         correction = frame_variance * shared_odd * shared_even
         random_variance = frame_variance / effective_count
         halves = math.sqrt((odd_square[selection].sum() / total) * (even_square[selection].sum() / total))
-        return (
+        return LagZeroTerms(
             float(covariance),
             float(difference_variance),
             float(correction),
@@ -500,8 +528,13 @@ def measure_half_pattern(
         )
 
     everything = np.arange(count.size)
-    covariance, difference_variance, correction, pattern, random_variance, halves = lag_zero_terms(everything)
-    if not (random_variance > 0.0 and halves > 0.0):
+    terms = lag_zero_terms(everything)
+    covariance = terms.covariance
+    difference_variance = terms.difference_variance
+    correction = terms.correction
+    pattern = terms.pattern
+    random_variance = terms.random_variance
+    if not (random_variance > 0.0 and terms.halves > 0.0):
         return HalfPatternOutcome(None, "the halves' difference has no variance")
     draws = _bootstrap_indices(count.size)
     covariance_draws = np.empty(BOOTSTRAP_COUNT)
@@ -510,15 +543,12 @@ def measure_half_pattern(
     pattern_draws = np.empty(BOOTSTRAP_COUNT)
     ratio_draws = np.empty(BOOTSTRAP_COUNT)
     for index in range(BOOTSTRAP_COUNT):
-        (
-            covariance_draws[index],
-            difference_draws[index],
-            correction_draws[index],
-            pattern_draws[index],
-            draw_random,
-            _,
-        ) = lag_zero_terms(draws[index])
-        ratio_draws[index] = pattern_draws[index] / draw_random if draw_random > 0 else math.nan
+        draw = lag_zero_terms(draws[index])
+        covariance_draws[index] = draw.covariance
+        difference_draws[index] = draw.difference_variance
+        correction_draws[index] = draw.correction
+        pattern_draws[index] = draw.pattern
+        ratio_draws[index] = draw.pattern / draw.random_variance if draw.random_variance > 0 else math.nan
     rms = math.sqrt(pattern) if pattern > 0.0 else None
     rms_draws = np.sqrt(np.clip(pattern_draws, 0.0, None))
     result_kwargs = {
@@ -579,7 +609,7 @@ def measure_half_pattern(
         correlations : `tuple` [`float`, `float`]
             The correlation coefficients along and across the drift.
         """
-        halves_draw = lag_zero_terms(selection)[5]
+        halves_draw = lag_zero_terms(selection).halves
         values = []
         for counts_sum, cross_sum in zip(lagged_counts, lagged_cross, strict=True):
             total = counts_sum[selection].sum()

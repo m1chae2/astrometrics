@@ -139,26 +139,27 @@ from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
     REPLACEMENT_DEPTH_FACTOR,
     ApertureSet,
     StackDepth,
-    _is_much_deeper,
-    _setup_key,
-    _store_apertures_once,
     choose_apertures_with_reason,
     find_library_set_key,
+    is_much_deeper,
     load_apertures,
     load_apertures_with_reason,
     record_library_set_key,
+    setup_key,
+    store_apertures_once,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_image import (
     MAD_SIGMA_ERROR_FACTOR,
     MAD_TO_SIGMA,
     MEDIAN_ERROR_FACTOR,
     SaturationCheck,
-    _celestial_wcs,
-    _pixel_scale_arcsec,
-    _sky_to_pixels,
+    celestial_wcs,
+    pixel_scale_arcsec,
     read_stack_plane,
+    robust_sigma,
     signed_aperture_sum,
     sky_level_of_plane,
+    sky_to_pixels,
 )
 from astrometricslib.pipelines.stacking.processing.group_alignment import detect_star_centroids
 from astrometricslib.utilities.exceptions import DATA_ERRORS, ONLINE_QUERY_ERRORS, PlateSolveFailedError
@@ -169,6 +170,7 @@ __all__ = [
     "ReferenceFrameFluxRatio",
     "StackNoiseOutcome",
     "StackNoiseResult",
+    "measure_noise_in_plane",
     "measure_stack_noise",
 ]
 
@@ -699,7 +701,7 @@ def _reference_frame_wcs(
         Why there is none. Empty when there is one.
     """
     header = read_header(reference_frame_path)
-    frame_wcs = _celestial_wcs(header)
+    frame_wcs = celestial_wcs(header)
     if frame_wcs is None:
         return None, NO_WCS_REASON
     shifted = frame_wcs.deepcopy()
@@ -772,7 +774,7 @@ def _member_frame_wcs(
     reasons = []
     for frame_path in list(member_frame_paths)[:MEMBER_FRAME_ATTEMPTS]:
         try:
-            frame_wcs = _celestial_wcs(read_header(frame_path))
+            frame_wcs = celestial_wcs(read_header(frame_path))
             frame_data = read_data(frame_path)
         except OSError, ValueError:
             continue
@@ -1017,7 +1019,7 @@ def _move_guess_onto_reference_stars(
     alignment : `_Alignment` or `None`
         What was found (also given when the rotation was refused).
     """
-    predicted = _sky_to_pixels(wcs, reference_sky)[:, ::-1]
+    predicted = sky_to_pixels(wcs, reference_sky)[:, ::-1]
     detected = detect_star_centroids(plane, count=DETECTED_STAR_COUNT, skip_saturated=False)
     if len(predicted) == 0 or len(detected) == 0:
         return None, "the stored reference stars could not be found: no stars were detected", None
@@ -1209,7 +1211,7 @@ def measure_stack_noise(
         return StackNoiseOutcome(None, "the stack file holds no pixels")
     # The plane is read once; the sky level is taken from it here so no later
     # step has to read the stack again.
-    outcome = _measure_noise_in_plane(
+    outcome = measure_noise_in_plane(
         plane,
         stack_path,
         reference_frame_path,
@@ -1285,7 +1287,7 @@ def _reference_exposure_seconds(
     return None
 
 
-def _measure_noise_in_plane(
+def measure_noise_in_plane(
     plane: np.ndarray,
     stack_path: str,
     reference_frame_path: str | None,
@@ -1339,7 +1341,7 @@ def _measure_noise_in_plane(
     if covered_mask is not None:
         window = _covered_window(covered_mask, plane.shape, crop_offset)
     stack_header = read_header(stack_path)
-    wcs = _celestial_wcs(stack_header)
+    wcs = celestial_wcs(stack_header)
     wcs_source = "stack header"
     # The frame that stands in for the reference frame in the header and
     # saturation checks, and where it sits relative to the stack.
@@ -1371,7 +1373,7 @@ def _measure_noise_in_plane(
             else:
                 check_frame_path = reference_frame_path
     reference_header = read_header(check_frame_path) if check_frame_path else fits.Header()
-    setup_key = _setup_key(
+    stack_setup_key = setup_key(
         stack_header,
         reference_header,
         reference_exposure_seconds=_reference_exposure_seconds(reference_header, member_frame_paths),
@@ -1379,13 +1381,13 @@ def _measure_noise_in_plane(
     saturation = _saturation_check(check_frame_path, check_offset)
 
     if may_choose_apertures:
-        aperture_set = load_apertures(apertures_path, setup_key)
+        aperture_set = load_apertures(apertures_path, stack_setup_key)
     else:
         # A stack that may not choose is read in the library stack's set,
         # whatever the exposure length of its own reference frame.
-        library_key = find_library_set_key(apertures_path, setup_key)
-        setup_key = library_key or setup_key
-        aperture_set = load_apertures(apertures_path, setup_key)
+        library_key = find_library_set_key(apertures_path, stack_setup_key)
+        stack_setup_key = library_key or stack_setup_key
+        aperture_set = load_apertures(apertures_path, stack_setup_key)
     created = False
     keep_note = ""
     mask_does_not_fit = covered_mask is not None and window is None
@@ -1413,7 +1415,7 @@ def _measure_noise_in_plane(
 
     if aperture_set is None:
         if not may_choose_apertures:
-            return StackNoiseOutcome(None, load_apertures_with_reason(apertures_path, setup_key)[1])
+            return StackNoiseOutcome(None, load_apertures_with_reason(apertures_path, stack_setup_key)[1])
         if mask_does_not_fit:
             return StackNoiseOutcome(None, UNCOVERED_AREA_MISFIT_REASON)
         # A set is always created, so the noise measurement is not lost; when
@@ -1425,7 +1427,7 @@ def _measure_noise_in_plane(
             solved_wcs if solved_wcs is not None else wcs,
             PLATE_SOLVE_WCS_SOURCE if trusted else wcs_source,
             os.path.basename(stack_path),
-            setup_key,
+            stack_setup_key,
             saturation,
             depth,
             window,
@@ -1433,12 +1435,12 @@ def _measure_noise_in_plane(
         )
         if chosen is None:
             return StackNoiseOutcome(None, choice_reason)
-        aperture_set = _store_apertures_once(apertures_path, chosen)
+        aperture_set = store_apertures_once(apertures_path, chosen)
         created = aperture_set is chosen
         if created and solved_wcs is not None:
             wcs, wcs_source = solved_wcs, PLATE_SOLVE_WCS_SOURCE
     elif may_choose_apertures and (
-        not aperture_set.sky_positions_from_plate_solve or _is_much_deeper(depth, aperture_set)
+        not aperture_set.sky_positions_from_plate_solve or is_much_deeper(depth, aperture_set)
     ):
         # Replace a set whose positions are not trusted (the next library stack
         # makes a plate-solved one) or a much deeper stack's. A replacement is
@@ -1456,7 +1458,7 @@ def _measure_noise_in_plane(
                 solved_wcs,
                 PLATE_SOLVE_WCS_SOURCE,
                 os.path.basename(stack_path),
-                setup_key,
+                stack_setup_key,
                 saturation,
                 depth,
                 window,
@@ -1472,7 +1474,7 @@ def _measure_noise_in_plane(
             )
         else:
             replaced = aperture_set
-            aperture_set = _store_apertures_once(apertures_path, chosen, replace_identity=replaced.identity)
+            aperture_set = store_apertures_once(apertures_path, chosen, replace_identity=replaced.identity)
             created = aperture_set is chosen
             if created:
                 wcs, wcs_source = solved_wcs, PLATE_SOLVE_WCS_SOURCE
@@ -1489,7 +1491,7 @@ def _measure_noise_in_plane(
         # Tell the stacks that may not choose which set is the library
         # stack's, so they do not pick a deeper but stale one.
         record_library_set_key(apertures_path, aperture_set.setup_key)
-    scale = _pixel_scale_arcsec(wcs)
+    scale = pixel_scale_arcsec(wcs)
     if (
         abs(scale - aperture_set.pixel_scale_arcsec)
         > MAXIMUM_PIXEL_SCALE_CHANGE * aperture_set.pixel_scale_arcsec
@@ -1530,7 +1532,7 @@ def _measure_noise_in_plane(
         summed_plane = plane - subtracted_plane
         summed_plane[(plane == 0) | (subtracted_plane == 0)] = 0.0
     all_sums = _sums_at(summed_plane, wcs, aperture_set.aperture_sky)
-    pixel_positions = _sky_to_pixels(wcs, aperture_set.aperture_sky)
+    pixel_positions = sky_to_pixels(wcs, aperture_set.aperture_sky)
     added_sums: tuple[float, ...] = ()
     target_pixel: tuple[float, float] | None = None
     size_noise: ApertureSizeNoiseOutcome | None = None
@@ -1540,7 +1542,7 @@ def _measure_noise_in_plane(
         added_sums = tuple(float(value) for value in _sums_at(added_plane, wcs, aperture_set.aperture_sky))
         del added_plane
         if target_sky_deg is not None:
-            column, row = _sky_to_pixels(wcs, np.array([target_sky_deg], dtype=float))[0]
+            column, row = sky_to_pixels(wcs, np.array([target_sky_deg], dtype=float))[0]
             if math.isfinite(column) and math.isfinite(row):
                 target_pixel = (float(column), float(row))
     elif may_choose_apertures:
@@ -1569,7 +1571,7 @@ def _measure_noise_in_plane(
             f"({saturated_count} are saturated in its reference frame)",
         )
 
-    spread = MAD_TO_SIGMA * float(np.median(np.abs(sums - np.median(sums))))
+    spread = float(robust_sigma(sums))
     spread_error = MAD_SIGMA_ERROR_FACTOR * spread / math.sqrt(sums.size)
     zero_point = float(np.median(ratios))
     zero_point_error = (
@@ -1696,7 +1698,7 @@ def _flux_ratio_to_reference_frame(
     ratios = []
     saturated_count = 0
     for (column, row), baseline in zip(
-        _sky_to_pixels(wcs, aperture_set.reference_sky), aperture_set.reference_baseline_flux, strict=True
+        sky_to_pixels(wcs, aperture_set.reference_sky), aperture_set.reference_baseline_flux, strict=True
     ):
         if not (math.isfinite(column) and math.isfinite(row)) or not baseline > 0:
             continue
@@ -1777,7 +1779,7 @@ def _reference_ratios(
     star_fluxes = []
     saturated_count = 0
     for (column, row), baseline, (right_ascension, declination) in zip(
-        _sky_to_pixels(wcs, aperture_set.reference_sky),
+        sky_to_pixels(wcs, aperture_set.reference_sky),
         aperture_set.reference_baseline_flux,
         aperture_set.reference_sky,
         strict=True,
@@ -1820,7 +1822,7 @@ def _sums_at(plane: np.ndarray, wcs: WCS, sky: np.ndarray) -> np.ndarray:
         NaN where `signed_aperture_sum` did not work.
     """
     values = np.full(len(sky), np.nan)
-    for index, (column, row) in enumerate(_sky_to_pixels(wcs, sky)):
+    for index, (column, row) in enumerate(sky_to_pixels(wcs, sky)):
         if not (math.isfinite(column) and math.isfinite(row)):
             continue
         value = signed_aperture_sum(plane, float(column), float(row))

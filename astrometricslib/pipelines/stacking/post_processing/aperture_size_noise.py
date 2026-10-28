@@ -38,9 +38,9 @@ from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_image import (
     APERTURE_RADIUS_PX,
-    MAD_TO_SIGMA,
     RING_INNER_PX,
     RING_OUTER_PX,
+    robust_sigma,
     signed_aperture_sum,
 )
 
@@ -219,8 +219,7 @@ def measure_aperture_size_noise(
             f"{MINIMUM_USABLE_APERTURES} are needed",
         )
     table = np.asarray(sums)  # shape (n, radii)
-    centers = np.median(table, axis=0)
-    spreads = MAD_TO_SIGMA * np.median(np.abs(table - centers), axis=0)
+    spreads = robust_sigma(table, axis=0)
     if not np.all(spreads > 0):
         return ApertureSizeNoiseOutcome(None, "the sums at one radius have no spread")
     pixel_counts = np.array([math.pi * radius**2 for radius in radii])
@@ -230,8 +229,7 @@ def measure_aperture_size_noise(
         0, table.shape[0], size=(_BOOTSTRAP_COUNT, table.shape[0])
     )
     resampled = table[draws]  # shape (B, n, radii)
-    resampled_centers = np.median(resampled, axis=1, keepdims=True)
-    resampled_spreads = MAD_TO_SIGMA * np.median(np.abs(resampled - resampled_centers), axis=1)
+    resampled_spreads = robust_sigma(resampled, axis=1)
     valid = np.all(resampled_spreads > 0, axis=1)
     slopes = _fitted_slope(log_pixels, np.log(resampled_spreads[valid]))
     error = float(np.std(slopes, ddof=1)) if slopes.size > 1 else float("nan")

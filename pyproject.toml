@@ -418,6 +418,14 @@ source_modules = ["astrometricslib", "wayfindinglib"]
 forbidden_modules = ["mcp_servers"]
 
 [[tool.importlinter.contracts]]
+name = "astrometricslib drivers never import pipelines"
+type = "forbidden"
+# Drivers sit below the pipelines: a pipeline calls a driver, never the
+# other way round.
+source_modules = ["astrometricslib.drivers"]
+forbidden_modules = ["astrometricslib.pipelines"]
+
+[[tool.importlinter.contracts]]
 name = "the library MCP servers, the gap server and the inventory never import the backend"
 type = "forbidden"
 source_modules = [

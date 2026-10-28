@@ -821,30 +821,6 @@ class ProvenanceStore:
         finally:
             conn.close()
 
-    def record_was_attributed_to(self, entity_id: str, agent_id: str, role: str | None = None) -> None:
-        """Record that an agent is responsible for an entity with no generator.
-
-        Parameters
-        ----------
-        entity_id : `str`
-            The entity.
-        agent_id : `str`
-            The responsible agent.
-        role : `str`, optional
-            The agent's function with respect to the entity.
-        """
-        conn = self._connect()
-        try:
-            conn.execute(
-                "INSERT OR IGNORE INTO prov_was_attributed_to (entity_id, agent_id, role) VALUES (?, ?, ?)",
-                (entity_id, agent_id, role),
-            )
-            conn.commit()
-        except sqlite3.Error as error:
-            logger.warning("Could not record attribution for entity %r: %s", entity_id, error)
-        finally:
-            conn.close()
-
     # -- Description layer -----------------------------------------------
 
     def ensure_activity_description(self, description: ActivityDescription) -> None:

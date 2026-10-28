@@ -1604,34 +1604,29 @@ def _record_sky_ratios(measurements: list[GroupGainMeasurement], reference_index
         measurement.sky_too_bright = ratio > SKY_RATIO_LIMIT
 
 
-def estimate_group_gains(
-    per_second_images: list[np.ndarray], usable_masks: list[np.ndarray], reference_index: int
-) -> list[float]:
-    """Measure each group's brightness scale against a reference group.
+def group_weight(count: int, exposure_seconds: float, frame_noise: float) -> float:
+    """Work out how much one exposure group counts when groups are combined.
 
-    This is the gain half of `measure_group_gains`: the median ratio over the
-    mid-range pixels, with the bright-end diagnostic left out.
+    A group's stack carries information in proportion to its frame count
+    times the square of its exposure length, divided by the square of the
+    noise of one frame. The same number picks the alignment reference and
+    sets the combination weight, so both must come from this one function.
 
     Parameters
     ----------
-    per_second_images : `list` [`numpy.ndarray`]
-        Each group's image in counts per second.
-    usable_masks : `list` [`numpy.ndarray`]
-        For each group, `True` where its pixels can be trusted: not
-        saturated and, for a group clipped at zero, above its clipping floor.
-    reference_index : `int`
-        The group the others are compared with. Its gain is 1.
+    count : `int`
+        How many frames the group holds.
+    exposure_seconds : `float`
+        The exposure length of one frame, in seconds.
+    frame_noise : `float`
+        The noise of one raw frame, in counts.
 
     Returns
     -------
-    gains : `list` [`float`]
-        For each group, how many times brighter (per second) it reads than
-        the reference. Dividing a group's image by its gain puts it on the
-        reference group's scale. A group with too few usable mid-range pixels
-        in common with the reference keeps a gain of 1.
+    weight : `float`
+        ``count * exposure_seconds**2 / frame_noise**2``.
     """
-    measurements = measure_group_gains(per_second_images, usable_masks, reference_index)
-    return [measurement.gain for measurement in measurements]
+    return count * exposure_seconds**2 / frame_noise**2
 
 
 def _prepare_group_inputs(
@@ -1691,7 +1686,7 @@ def _prepare_group_inputs(
         ):
             raise InvalidArgumentError("Each group needs one positive frame noise.")
         weights = [
-            count * exposure**2 / noise**2
+            group_weight(count, exposure, noise)
             for count, exposure, noise in zip(frame_counts, exposures_seconds, frame_noises, strict=True)
         ]
     else:
@@ -2061,19 +2056,6 @@ def measure_frame_noise(frame_path: str) -> tuple[float, float]:
     """
     image = np.asarray(read_data(frame_path), dtype=np.float64)
     return estimate_background_noise(image), float(np.mean(image == 0))
-
-
-def group_frame_noises(groups: list[ExposureGroup]) -> list[float]:
-    """Work out the noise of one raw frame in each exposure group.
-
-    This is the first result of `measure_group_frames`; see it for details.
-
-    Returns
-    -------
-    noises : `list` [`float`]
-        The noise to use for one frame of each group, in counts.
-    """
-    return measure_group_frames(groups)[0]
 
 
 def measure_group_frames(groups: list[ExposureGroup]) -> tuple[list[float], list[float]]:

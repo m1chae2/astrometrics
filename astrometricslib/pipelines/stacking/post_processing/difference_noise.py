@@ -23,6 +23,7 @@ import logging
 import math
 import os
 from dataclasses import replace
+from typing import NamedTuple
 
 import numpy as np
 
@@ -31,20 +32,21 @@ from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
     ApertureSetMismatchError,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_image import (
-    MAD_TO_SIGMA,
     read_stack_plane,
+    robust_sigma,
     sky_level_of_plane,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
     StackNoiseOutcome,
     StackNoiseResult,
-    _measure_noise_in_plane,
+    measure_noise_in_plane,
 )
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "ODD_EVEN_DIFFERENCE_NOISE_BIAS",
+    "NoiseSums",
     "discard_noise_sums",
     "load_noise_sums",
     "measure_difference_noise",
@@ -158,7 +160,7 @@ def measure_difference_noise(
             None,
             f"the two stacks are on different pixel grids ({first_plane.shape} and {second_plane.shape})",
         )
-    outcome = _measure_noise_in_plane(
+    outcome = measure_noise_in_plane(
         first_plane,
         first_stack_path,
         reference_frame_path,
@@ -247,7 +249,28 @@ def discard_noise_sums(stack_path: str) -> None:
         logger.warning("The stale per-aperture noise sums of %s could not be removed: %s", stack_path, error)
 
 
-def load_noise_sums(stack_path: str) -> tuple[np.ndarray, float, str] | None:
+class NoiseSums(NamedTuple):
+    """The per-aperture sums that `save_noise_sums` kept for a stack.
+
+    It still unpacks as a plain three-item tuple.
+
+    Attributes
+    ----------
+    sums : `numpy.ndarray`
+        The sums, NaN where an aperture was not usable.
+    reference_flux : `float`
+        The reference flux the sums are read against.
+    aperture_identity : `str`
+        The identity of the apertures the sums were measured in (empty for
+        a file saved before identities existed, which never matches).
+    """
+
+    sums: np.ndarray
+    reference_flux: float
+    aperture_identity: str
+
+
+def load_noise_sums(stack_path: str) -> NoiseSums | None:
     """Read the per-aperture sums that `save_noise_sums` kept for a stack.
 
     Parameters
@@ -267,7 +290,7 @@ def load_noise_sums(stack_path: str) -> tuple[np.ndarray, float, str] | None:
         with open(noise_sums_path(stack_path), encoding="utf-8") as handle:
             data = json.load(handle)
         sums = np.array([np.nan if value is None else value for value in data["aperture_sums"]], dtype=float)
-        return sums, float(data["reference_flux_adu"]), str(data.get("aperture_identity", ""))
+        return NoiseSums(sums, float(data["reference_flux_adu"]), str(data.get("aperture_identity", "")))
     except OSError, ValueError, KeyError, TypeError:
         return None
 
@@ -285,8 +308,7 @@ def _robust_spread(values: np.ndarray) -> np.ndarray:
     spreads : `numpy.ndarray`
         1.4826 times the median absolute deviation of each row.
     """
-    centers = np.median(values, axis=-1, keepdims=True)
-    return MAD_TO_SIGMA * np.median(np.abs(values - centers), axis=-1)
+    return robust_sigma(values, axis=-1)
 
 
 def _different_apertures_message(full_identity: str, other_identity: str) -> str:

@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 from astrometricslib.drivers.camera_profile_store import camera_identity, resolve_camera_profile
 from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
+from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.enums import FilterType
 from astrometricslib.foundation.errors import AstrometricsError, ConflictError, ProcessingError
 from astrometricslib.foundation.jobs.runner import get_current_job
@@ -315,7 +316,6 @@ def _stack_frames_guarded(
     # A frame an earlier run moved into `_excluded` can still be listed on the
     # target, if that run's save of the target did not last. Count it as set
     # aside, not as a frame that was kept.
-    from astrometricslib.foundation.config import get_configuration
     from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
         drop_frames_already_set_aside,
     )
@@ -343,7 +343,6 @@ def _stack_frames_guarded(
     # later one, and `ProcessingPipelines.restore_excluded_frames` puts it
     # back. Spectral frames are skipped: their streaks are the spectra
     # themselves.
-    from astrometricslib.foundation.config import get_configuration
     from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
         GATE_NAME as QUARANTINE_GATE_NAME,
     )
@@ -389,7 +388,6 @@ def _stack_frames_guarded(
     # massive, image-wide changes. Because checking every frame takes extra
     # time, this feature can be turned on or off in the settings using
     # `get_background_homogeneity_check_enabled`.
-    from astrometricslib.foundation.config import get_configuration
 
     background_split = None
     background_check_enabled = get_configuration().get_background_homogeneity_check_enabled()
@@ -954,7 +952,7 @@ def _finish_stack_archive(staging: str | None, output_file: str, target_id: str,
         logger.warning("Could not finish keeping the previous stack of '%s': %s", target_id, error)
 
 
-def _disambiguating_configuration_tag(target, target_frames) -> str:  # ruff: ignore[missing-type-function-argument]
+def _disambiguating_configuration_tag(target: Target, target_frames: list[Any]) -> str:
     """Create a unique filename tag so we don't overwrite existing stacks.
 
     If we image the same target using different equipment setups (like changing
@@ -1005,7 +1003,7 @@ def _disambiguating_configuration_tag(target, target_frames) -> str:  # ruff: ig
     )
 
 
-def _record_configuration_stack(target, target_frames: list[Any], stacked_path: str) -> bool:  # ruff: ignore[missing-type-function-argument]
+def _record_configuration_stack(target: Target, target_frames: list[Any], stacked_path: str) -> bool:
     """Record a stack for one setup and say if it's the preferred one.
 
     This works alongside the older `stacked_image` property so that other
@@ -1218,7 +1216,9 @@ def _base_stack_quality_summary(
     )
 
 
-def _measure_stacked_pixel_fractions(summary, stacked_path: str, diagnostics: dict) -> None:  # ruff: ignore[missing-type-function-argument]
+def _measure_stacked_pixel_fractions(
+    summary: StackQualitySummary, stacked_path: str, diagnostics: dict
+) -> None:
     """Measure the stacked image's rejected and saturated pixel fractions.
 
     The rejected share comes from the engine's report (``diagnostics``);
@@ -1246,7 +1246,7 @@ def _measure_stacked_pixel_fractions(summary, stacked_path: str, diagnostics: di
 
 
 def _update_frame_registration_results(
-    summary,  # ruff: ignore[missing-type-function-argument]
+    summary: StackQualitySummary,
     stacked_path: str,
     target_frames: list[Any],
     diagnostics: dict,
@@ -1514,7 +1514,9 @@ def _measure_fwhm_degradation(
             summary.stacking_metrics.fwhm_degraded = is_stacked_fwhm_degraded(stacked_fwhm, expected)
 
 
-def _check_spectral_registration_quality(summary, stacked_path: str, diagnostics: dict) -> None:  # ruff: ignore[missing-type-function-argument]
+def _check_spectral_registration_quality(
+    summary: StackQualitySummary, stacked_path: str, diagnostics: dict
+) -> None:
     """Flag frames with spectral zero-order-star tracking concerns.
 
     Checks matched star count, fit RMSE, and position/brightness
@@ -1546,7 +1548,7 @@ def _check_spectral_registration_quality(summary, stacked_path: str, diagnostics
         summary.stacking_metrics.spectral_registration_checked = True
 
 
-def _record_exposure_groups(summary, diagnostics: dict) -> None:  # ruff: ignore[missing-type-function-argument]
+def _record_exposure_groups(summary: StackQualitySummary, diagnostics: dict) -> None:
     """Copy the exposure-group entries and recommended exposure from a run.
 
     Parameters
@@ -1565,7 +1567,7 @@ def _record_exposure_groups(summary, diagnostics: dict) -> None:  # ruff: ignore
 
 
 def _measure_calibration_health(
-    summary,  # ruff: ignore[missing-type-function-argument]
+    summary: StackQualitySummary,
     stacked_path: str,
     is_spectral: bool,
     diagnostics: dict,
@@ -1621,7 +1623,7 @@ def _measure_calibration_health(
         metrics.negative_pixels_flagged = is_negative_pixel_percent_significant(negative_percent)
 
 
-def _finalize_stack_quality_flags(summary) -> None:  # ruff: ignore[missing-type-function-argument]
+def _finalize_stack_quality_flags(summary: StackQualitySummary) -> None:
     """Derive `summary.flagged` and `flag_reasons` from the two judgements.
 
     The input and output judgements (`summary.input_quality` and
@@ -1652,8 +1654,8 @@ def _finalize_stack_quality_flags(summary) -> None:  # ruff: ignore[missing-type
         summary.record_gate(output_gate)
 
 
-def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-function]
-    target,  # ruff: ignore[missing-type-function-argument]
+def _build_stack_quality_summary(
+    target: Target,
     is_spectral: bool,
     frames_submitted: int,
     target_frames: list[Any],
@@ -1662,7 +1664,7 @@ def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fu
     background_split: dict | list[dict] | None,
     stacked_path: str | None,
     gate_results: list[GateResult] | None = None,
-):
+) -> StackQualitySummary:
     """Gather diagnostic data into a final `StackQualitySummary`.
 
     This checks the quality of the stack differently depending on the type

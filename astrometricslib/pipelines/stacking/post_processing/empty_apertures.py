@@ -52,8 +52,8 @@ from astrometricslib.pipelines.stacking.post_processing.stack_image import (
     RING_INNER_PX,
     RING_OUTER_PX,
     SaturationCheck,
-    _pixel_scale_arcsec,
-    _pixels_to_sky,
+    pixel_scale_arcsec,
+    pixels_to_sky,
     signed_aperture_sum,
 )
 from astrometricslib.pipelines.stacking.processing.group_alignment import detect_star_centroids
@@ -145,11 +145,14 @@ __all__ = [
     "faint_source_distance",
     "find_library_set_key",
     "is_legacy_setup_key",
+    "is_much_deeper",
     "load_apertures",
     "load_apertures_with_reason",
     "place_empty_apertures",
     "record_library_set_key",
     "reset_apertures",
+    "setup_key",
+    "store_apertures_once",
 ]
 
 # The ``wcs_source`` of a stack whose solution came from plate-solving the
@@ -378,7 +381,7 @@ class ApertureSet:
         How saturated stars were kept out when the set was chosen.
     setup_key : `str`
         The camera, telescope, focal length and reference exposure length the
-        set belongs to (see `_setup_key`).
+        set belongs to (see `setup_key`).
     defining_frame_count : `int` or `None`
         The number of frames in the stack that chose the set; `None` when the
         caller did not know it.
@@ -596,7 +599,7 @@ def _equipment_key(*headers: fits.Header) -> str:
     return UNSPECIFIED_SETUP
 
 
-def _setup_key(*headers: fits.Header, reference_exposure_seconds: float | None = None) -> str:
+def setup_key(*headers: fits.Header, reference_exposure_seconds: float | None = None) -> str:
     """Name the camera, optic and reference exposure of a stack.
 
     The exposure length is the one of the frame the stack was lined up on
@@ -818,10 +821,10 @@ def choose_apertures_with_reason(
     mask_scales = tuple(scale / median_baseline for scale in analysis.noise_scales)
     return (
         ApertureSet(
-            aperture_sky=_pixels_to_sky(wcs, np.array(positions, dtype=float)),
-            reference_sky=_pixels_to_sky(wcs, np.array(reference, dtype=float)),
+            aperture_sky=pixels_to_sky(wcs, np.array(positions, dtype=float)),
+            reference_sky=pixels_to_sky(wcs, np.array(reference, dtype=float)),
             wcs_source=wcs_source,
-            pixel_scale_arcsec=_pixel_scale_arcsec(wcs),
+            pixel_scale_arcsec=pixel_scale_arcsec(wcs),
             created_from=created_from,
             reference_baseline_flux=np.array(baseline, dtype=float),
             reference_radius_px=float(radius),
@@ -1171,7 +1174,7 @@ def find_library_set_key(path: str, setup_key: str) -> str | None:
     path : `str`
         The ``quality_apertures.json`` file.
     setup_key : `str`
-        The key the stack itself would have (see `_setup_key`).
+        The key the stack itself would have (see `setup_key`).
 
     Returns
     -------
@@ -1362,7 +1365,7 @@ def _write_aperture_file(
         raise
 
 
-def _store_apertures_once(
+def store_apertures_once(
     path: str, aperture_set: ApertureSet, replace_identity: str | None = None
 ) -> ApertureSet:
     """Save the set unless another run saved one for the same equipment first.
@@ -1446,7 +1449,7 @@ def reset_apertures(path: str, setup_key: str | None = None) -> bool:
         return True
 
 
-def _is_much_deeper(depth: StackDepth | None, aperture_set: ApertureSet) -> bool:
+def is_much_deeper(depth: StackDepth | None, aperture_set: ApertureSet) -> bool:
     """Say whether a stack is deep enough to replace a stored set of apertures.
 
     Parameters

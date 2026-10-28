@@ -1624,7 +1624,7 @@ def test_a_set_is_chosen_with_the_plate_solve_when_the_header_solution_is_off(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The stored sky positions land on the stars through the true solution."""
-    from astrometricslib.pipelines.stacking.post_processing.stack_image import _sky_to_pixels
+    from astrometricslib.pipelines.stacking.post_processing.stack_image import sky_to_pixels
 
     scattered = _scattered_stars(seed=3)
     true_wcs = WCS(_sky_header()).celestial
@@ -1641,7 +1641,7 @@ def test_a_set_is_chosen_with_the_plate_solve_when_the_header_solution_is_off(
     stored = load_apertures(apertures, next(iter(json.loads(Path(apertures).read_text())["sets"])))
     assert stored is not None and stored.sky_positions_from_plate_solve
     assert stored.wcs_source == PLATE_SOLVE_WCS_SOURCE
-    columns_rows = _sky_to_pixels(true_wcs, stored.reference_sky)
+    columns_rows = sky_to_pixels(true_wcs, stored.reference_sky)
     stars = np.array(scattered)
     for column_row in columns_rows:
         assert np.min(np.hypot(*(stars - column_row).T)) < 1.0
@@ -1784,3 +1784,19 @@ def test_a_stored_set_without_the_field_is_trusted_only_when_it_was_plate_solved
     assert not ApertureSet.from_json(base).sky_positions_from_plate_solve
     base["wcs_source"] = PLATE_SOLVE_WCS_SOURCE
     assert ApertureSet.from_json(base).sky_positions_from_plate_solve
+
+
+def test_robust_sigma_matches_the_median_absolute_deviation_formula() -> None:
+    """`robust_sigma` is the scaled median absolute deviation, on any axis."""
+    from astrometricslib.pipelines.stacking.post_processing.stack_image import MAD_TO_SIGMA, robust_sigma
+
+    samples = np.random.default_rng(11).normal(5.0, 2.0, size=(6, 40))
+    flat = samples.ravel()
+
+    assert MAD_TO_SIGMA == pytest.approx(1.4826)
+    assert robust_sigma(flat) == pytest.approx(1.4826 * np.median(np.abs(flat - np.median(flat))), rel=1e-12)
+    by_row = robust_sigma(samples, axis=1)
+    for row in range(6):
+        expected = 1.4826 * np.median(np.abs(samples[row] - np.median(samples[row])))
+        assert by_row[row] == pytest.approx(expected, rel=1e-12)
+    assert robust_sigma(samples, axis=0).shape == (40,)

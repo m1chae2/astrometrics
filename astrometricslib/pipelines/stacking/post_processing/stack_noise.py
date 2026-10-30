@@ -1287,60 +1287,154 @@ def _reference_exposure_seconds(
     return None
 
 
-def measure_noise_in_plane(
+@dataclass(frozen=True)
+class _WcsChoice:
+    """Which coordinate solution a stack is measured with, and from where.
+
+    Parameters
+    ----------
+    wcs : `astropy.wcs.WCS` or `None`
+        The solution, or `None` when no source gave one.
+    wcs_source : `str`
+        Where the solution came from.
+    check_frame_path : `str` or `None`
+        The frame that stands in for the registration reference frame in the
+        header and saturation checks.
+    check_offset : `tuple` [`int`, `int`]
+        Where that frame sits relative to the stack.
+    failure : `StackNoiseOutcome` or `None`
+        The outcome to return when no source gave a solution.
+    """
+
+    wcs: WCS | None
+    wcs_source: str
+    check_frame_path: str | None
+    check_offset: tuple[int, int]
+    failure: StackNoiseOutcome | None = None
+
+
+class _StackPlateSolve:
+    """Plate-solve one stack at most once, and remember the answer.
+
+    A solve takes seconds to minutes, and the stored sky positions must be
+    true positions, which only a solve of this stack gives (the header and
+    frame solutions can be tens of arcseconds off its pixel grid). So the
+    solve runs only when a set is chosen or replaced, or when a fallback
+    needs it, and never twice for one stack.
+    """
+
+    def __init__(self, stack_path: str) -> None:
+        """Remember which stack to solve.
+
+        Parameters
+        ----------
+        stack_path : `str`
+            The finished stack.
+        """
+        self._stack_path = stack_path
+        self._answer: tuple[WCS | None, str] | None = None
+
+    def solve(self) -> tuple[WCS | None, str]:
+        """Plate-solve the stack, or give the earlier answer.
+
+        Returns
+        -------
+        wcs : `astropy.wcs.WCS` or `None`
+            The solution on the stack's pixel grid, or `None`.
+        reason : `str`
+            Why there is none. Empty when there is one.
+        """
+        if self._answer is None:
+            self._answer = _plate_solve_stack_wcs(self._stack_path)
+        return self._answer
+
+
+@dataclass(frozen=True)
+class _ApertureResolution:
+    """The apertures a stack is measured in, after loading or choosing them.
+
+    Parameters
+    ----------
+    aperture_set : `ApertureSet` or `None`
+        The set to measure in. `None` only when `failure` is given.
+    wcs : `astropy.wcs.WCS` or `None`
+        The solution; replaced by the plate solve when a set was stored.
+    wcs_source : `str`
+        Where `wcs` came from.
+    created : `bool`
+        Whether this stack stored the set.
+    keep_note : `str`
+        Why an older set was kept, when a replacement failed. Else empty.
+    failure : `StackNoiseOutcome` or `None`
+        The outcome to return when there is no usable set.
+    """
+
+    aperture_set: ApertureSet | None
+    wcs: WCS | None
+    wcs_source: str
+    created: bool
+    keep_note: str = ""
+    failure: StackNoiseOutcome | None = None
+
+
+@dataclass(frozen=True)
+class _ApertureSums:
+    """What was summed at the apertures, before the noise is worked out.
+
+    Parameters
+    ----------
+    all_sums : `numpy.ndarray`
+        The sum at each stored aperture (not finite where it misses the image).
+    pixel_positions : `numpy.ndarray`
+        Each aperture's (column, row) on the stack.
+    added_sums : `tuple` of `float`
+        For a difference image, the sums of the two stacks added. Else empty.
+    target_pixel : `tuple` [`float`, `float`] or `None`
+        For a difference image, the target's pixel position.
+    size_noise : `ApertureSizeNoiseOutcome` or `None`
+        For a stack that chose apertures, the noise against aperture size.
+    """
+
+    all_sums: np.ndarray
+    pixel_positions: np.ndarray
+    added_sums: tuple[float, ...]
+    target_pixel: tuple[float, float] | None
+    size_noise: ApertureSizeNoiseOutcome | None
+
+
+def _choose_wcs(
     plane: np.ndarray,
-    stack_path: str,
+    stack_header: fits.Header,
     reference_frame_path: str | None,
-    apertures_path: str,
+    member_frame_paths: Sequence[str],
     crop_offset: tuple[int, int],
-    may_choose_apertures: bool,
-    depth: StackDepth | None,
-    subtracted_plane: np.ndarray | None = None,
-    covered_mask: np.ndarray | None = None,
-    member_frame_paths: Sequence[str] = (),
-    target_sky_deg: tuple[float, float] | None = None,
-) -> StackNoiseOutcome:
-    """Measure a stack's noise in the target's fixed apertures on its plane.
+    plate_solve: _StackPlateSolve,
+) -> _WcsChoice:
+    """Choose the coordinate solution a stack is measured with.
+
+    The sources are tried in order: the stack's header, the registration
+    reference frame, a member frame, then a plate solve of the stack itself.
 
     Parameters
     ----------
     plane : `numpy.ndarray`
-        The stack as one 2-D image (see `measure_stack_noise`).
-    stack_path : `str`
-        The finished stack, for its header and name.
+        The stack as one 2-D image.
+    stack_header : `astropy.io.fits.Header`
+        The stack's header.
     reference_frame_path : `str` or `None`
         The registration reference frame.
-    apertures_path : `str`
-        Where the target's apertures are kept.
+    member_frame_paths : `Sequence` of `str`
+        Frames of the group the stack was lined up with, best first.
     crop_offset : `tuple` [`int`, `int`]
         The (columns, rows) cut from the stack's left and top edges.
-    may_choose_apertures : `bool`
-        See `measure_stack_noise`.
-    depth : `StackDepth` or `None`
-        See `measure_stack_noise`.
-    subtracted_plane : `numpy.ndarray`, optional
-        A second stack on the same pixel grid. When given, the apertures are
-        put on ``plane`` (which holds the stars the positions are checked
-        against) and the sums are taken on ``plane`` minus this image, with
-        every pixel that is exactly zero in either image left at zero (the
-        empty edge). See `measure_difference_noise`.
-    covered_mask : `numpy.ndarray`, optional
-        See `measure_stack_noise`. Used only when apertures are chosen.
-    member_frame_paths : `Sequence` of `str`, optional
-        See `measure_stack_noise`.
-    target_sky_deg : `tuple` [`float`, `float`], optional
-        The target's (RA, Dec) in degrees. Used only for a difference image,
-        to give the target's pixel position on the stack.
+    plate_solve : `_StackPlateSolve`
+        The stack's one plate solve, used as the last source.
 
     Returns
     -------
-    outcome : `StackNoiseOutcome`
-        The measurement, or the reason there is none.
+    choice : `_WcsChoice`
+        The solution and where it came from, or the failure to return.
     """
-    window = None
-    if covered_mask is not None:
-        window = _covered_window(covered_mask, plane.shape, crop_offset)
-    stack_header = read_header(stack_path)
     wcs = celestial_wcs(stack_header)
     wcs_source = "stack header"
     # The frame that stands in for the reference frame in the header and
@@ -1360,9 +1454,10 @@ def measure_noise_in_plane(
         if wcs is None:
             # Last source: solve the stack itself. Its solution is on the
             # stack's own grid, so the trim offset is not applied to it.
-            wcs, solve_reason = _plate_solve_stack_wcs(stack_path)
+            wcs, solve_reason = plate_solve.solve()
             if wcs is None:
-                return StackNoiseOutcome(None, f"{reason}; {solve_reason}")
+                failure = StackNoiseOutcome(None, f"{reason}; {solve_reason}")
+                return _WcsChoice(None, wcs_source, check_frame_path, check_offset, failure)
             wcs_source = PLATE_SOLVE_WCS_SOURCE
             check_offset = crop_offset
             # The reference frame still gives the saturation limit, but only
@@ -1372,14 +1467,62 @@ def measure_noise_in_plane(
                 check_frame_path = None
             else:
                 check_frame_path = reference_frame_path
-    reference_header = read_header(check_frame_path) if check_frame_path else fits.Header()
-    stack_setup_key = setup_key(
-        stack_header,
-        reference_header,
-        reference_exposure_seconds=_reference_exposure_seconds(reference_header, member_frame_paths),
-    )
-    saturation = _saturation_check(check_frame_path, check_offset)
+    return _WcsChoice(wcs, wcs_source, check_frame_path, check_offset)
 
+
+def _resolve_apertures(
+    plane: np.ndarray,
+    stack_path: str,
+    apertures_path: str,
+    stack_setup_key: str,
+    wcs: WCS | None,
+    wcs_source: str,
+    saturation: SaturationCheck | None,
+    may_choose_apertures: bool,
+    depth: StackDepth | None,
+    window: np.ndarray | None,
+    mask_does_not_fit: bool,
+    plate_solve: _StackPlateSolve,
+) -> _ApertureResolution:
+    """Load, choose or replace the apertures a stack is measured in.
+
+    A stack that may choose creates a set when there is none and replaces a
+    set whose sky positions are not from a plate solve, or a much shallower
+    one. A stack that may not choose only reads the library stack's set. The
+    plate solve runs only when a set is created or replaced.
+
+    Parameters
+    ----------
+    plane : `numpy.ndarray`
+        The stack as one 2-D image.
+    stack_path : `str`
+        The finished stack, for the set's file name.
+    apertures_path : `str`
+        Where the target's apertures are kept.
+    stack_setup_key : `str`
+        The camera-and-optic key of this stack.
+    wcs : `astropy.wcs.WCS` or `None`
+        The solution chosen so far.
+    wcs_source : `str`
+        Where `wcs` came from.
+    saturation : `SaturationCheck` or `None`
+        The saturation limit from the reference frame.
+    may_choose_apertures : `bool`
+        See `measure_stack_noise`.
+    depth : `StackDepth` or `None`
+        See `measure_stack_noise`.
+    window : `numpy.ndarray` or `None`
+        The covered area on this stack's grid, for the clearance.
+    mask_does_not_fit : `bool`
+        Whether a covered mask was given but does not fit this stack.
+    plate_solve : `_StackPlateSolve`
+        The stack's one plate solve.
+
+    Returns
+    -------
+    resolution : `_ApertureResolution`
+        The set and the solution to use, or the failure to return.
+    """
     if may_choose_apertures:
         aperture_set = load_apertures(apertures_path, stack_setup_key)
     else:
@@ -1390,37 +1533,16 @@ def measure_noise_in_plane(
         aperture_set = load_apertures(apertures_path, stack_setup_key)
     created = False
     keep_note = ""
-    mask_does_not_fit = covered_mask is not None and window is None
-    # The stack is plate-solved at most once, and only when a set is chosen or
-    # replaced: the stored sky positions must be true positions, which only a
-    # solve of this stack gives (the header and frame solutions can be tens of
-    # arcseconds off its pixel grid). A solve takes seconds to minutes.
-    solve_attempts: list[tuple[WCS | None, str]] = []
-
-    def plate_solution() -> tuple[WCS | None, str]:
-        """Plate-solve the stack, or give the earlier answer.
-
-        Returns
-        -------
-        wcs : `astropy.wcs.WCS` or `None`
-            The solution on the stack's pixel grid, or `None`.
-        reason : `str`
-            Why there is none. Empty when there is one.
-        """
-        if not solve_attempts:
-            solve_attempts.append(
-                (wcs, "") if wcs_source == PLATE_SOLVE_WCS_SOURCE else _plate_solve_stack_wcs(stack_path)
-            )
-        return solve_attempts[0]
-
     if aperture_set is None:
         if not may_choose_apertures:
-            return StackNoiseOutcome(None, load_apertures_with_reason(apertures_path, stack_setup_key)[1])
+            reason = load_apertures_with_reason(apertures_path, stack_setup_key)[1]
+            return _ApertureResolution(None, wcs, wcs_source, False, failure=StackNoiseOutcome(None, reason))
         if mask_does_not_fit:
-            return StackNoiseOutcome(None, UNCOVERED_AREA_MISFIT_REASON)
+            failure = StackNoiseOutcome(None, UNCOVERED_AREA_MISFIT_REASON)
+            return _ApertureResolution(None, wcs, wcs_source, False, failure=failure)
         # A set is always created, so the noise measurement is not lost; when
         # the solve fails its positions are marked as not trusted.
-        solved_wcs, _ = plate_solution()
+        solved_wcs, _ = plate_solve.solve()
         trusted = solved_wcs is not None
         chosen, choice_reason = choose_apertures_with_reason(
             plane,
@@ -1434,7 +1556,8 @@ def measure_noise_in_plane(
             trusted,
         )
         if chosen is None:
-            return StackNoiseOutcome(None, choice_reason)
+            failure = StackNoiseOutcome(None, choice_reason)
+            return _ApertureResolution(None, wcs, wcs_source, False, failure=failure)
         aperture_set = store_apertures_once(apertures_path, chosen)
         created = aperture_set is chosen
         if created and solved_wcs is not None:
@@ -1447,7 +1570,7 @@ def measure_noise_in_plane(
         # always plate-solved: if the solve or the choice fails, the stored
         # set is kept.
         replaced_for_trust = not aperture_set.sky_positions_from_plate_solve
-        solved_wcs, solve_reason = plate_solution()
+        solved_wcs, solve_reason = plate_solve.solve()
         if mask_does_not_fit:
             chosen, choice_reason = None, UNCOVERED_AREA_MISFIT_REASON
         elif solved_wcs is None:
@@ -1491,42 +1614,103 @@ def measure_noise_in_plane(
         # Tell the stacks that may not choose which set is the library
         # stack's, so they do not pick a deeper but stale one.
         record_library_set_key(apertures_path, aperture_set.setup_key)
-    scale = pixel_scale_arcsec(wcs)
-    if (
-        abs(scale - aperture_set.pixel_scale_arcsec)
-        > MAXIMUM_PIXEL_SCALE_CHANGE * aperture_set.pixel_scale_arcsec
-    ):
-        return StackNoiseOutcome(
-            None,
-            f"this stack's pixel scale ({scale:.2f} arcsec) differs from the "
-            f"{aperture_set.pixel_scale_arcsec:.2f} arcsec the stored apertures were chosen at",
-        )
+    return _ApertureResolution(aperture_set, wcs, wcs_source, created, keep_note)
 
-    position_note = ""
-    if not created:
-        # A header's solution can be a first guess even when it exists, and
-        # these apertures were chosen on another stack's solution. Put them
-        # on this stack's stars, whatever the header says.
-        wcs, reason, alignment = _move_guess_onto_reference_stars(plane, wcs, aperture_set.reference_sky)
-        if wcs is None and wcs_source != PLATE_SOLVE_WCS_SOURCE:
-            # A frame's own solution can be off (a pointing solve written by
-            # the capture program, or a frame that does not share the stack's
-            # grid). Before giving up, solve the stack itself and try again.
-            solved_wcs, solve_reason = plate_solution()
-            if solved_wcs is None:
-                return StackNoiseOutcome(None, f"{reason}; {solve_reason}")
-            wcs, retry_reason, alignment = _move_guess_onto_reference_stars(
-                plane, solved_wcs, aperture_set.reference_sky
-            )
-            if wcs is None:
-                return StackNoiseOutcome(
-                    None, f"{reason}; with the plate solve of the stack itself: {retry_reason}"
-                )
-            wcs_source = PLATE_SOLVE_WCS_SOURCE
+
+def _align_to_stored_apertures(
+    plane: np.ndarray,
+    wcs: WCS | None,
+    wcs_source: str,
+    aperture_set: ApertureSet,
+    plate_solve: _StackPlateSolve,
+) -> tuple[WCS | None, str, str, StackNoiseOutcome | None]:
+    """Move a stack's solution onto the stored apertures' stars.
+
+    A header's solution can be a first guess even when it exists, and these
+    apertures were chosen on another stack's solution. When the solution is
+    not from a plate solve and cannot be moved onto the stored stars, the
+    stack is plate-solved and the move tried once more.
+
+    Parameters
+    ----------
+    plane : `numpy.ndarray`
+        The stack as one 2-D image.
+    wcs : `astropy.wcs.WCS` or `None`
+        The solution chosen so far.
+    wcs_source : `str`
+        Where `wcs` came from.
+    aperture_set : `ApertureSet`
+        The stored apertures.
+    plate_solve : `_StackPlateSolve`
+        The stack's one plate solve.
+
+    Returns
+    -------
+    wcs : `astropy.wcs.WCS` or `None`
+        The moved solution.
+    wcs_source : `str`
+        Where it came from.
+    position_note : `str`
+        How the solution was moved. Empty when it was not.
+    failure : `StackNoiseOutcome` or `None`
+        The outcome to return when the solution could not be moved.
+    """
+    wcs, reason, alignment = _move_guess_onto_reference_stars(plane, wcs, aperture_set.reference_sky)
+    if wcs is None and wcs_source != PLATE_SOLVE_WCS_SOURCE:
+        # A frame's own solution can be off (a pointing solve written by
+        # the capture program, or a frame that does not share the stack's
+        # grid). Before giving up, solve the stack itself and try again.
+        solved_wcs, solve_reason = plate_solve.solve()
+        if solved_wcs is None:
+            return None, wcs_source, "", StackNoiseOutcome(None, f"{reason}; {solve_reason}")
+        wcs, retry_reason, alignment = _move_guess_onto_reference_stars(
+            plane, solved_wcs, aperture_set.reference_sky
+        )
         if wcs is None:
-            return StackNoiseOutcome(None, reason)
-        position_note = alignment.describe() if alignment is not None else ""
-    position_note = " ".join(part for part in (position_note, keep_note) if part)
+            failure = StackNoiseOutcome(
+                None, f"{reason}; with the plate solve of the stack itself: {retry_reason}"
+            )
+            return None, wcs_source, "", failure
+        wcs_source = PLATE_SOLVE_WCS_SOURCE
+    if wcs is None:
+        return None, wcs_source, "", StackNoiseOutcome(None, reason)
+    return wcs, wcs_source, alignment.describe() if alignment is not None else "", None
+
+
+def _take_aperture_sums(
+    plane: np.ndarray,
+    wcs: WCS,
+    aperture_set: ApertureSet,
+    subtracted_plane: np.ndarray | None,
+    may_choose_apertures: bool,
+    target_sky_deg: tuple[float, float] | None,
+    stack_path: str,
+) -> _ApertureSums:
+    """Sum the stack at the stored apertures, in the mode the caller asked for.
+
+    Parameters
+    ----------
+    plane : `numpy.ndarray`
+        The stack as one 2-D image.
+    wcs : `astropy.wcs.WCS`
+        The solution to place the apertures with.
+    aperture_set : `ApertureSet`
+        The stored apertures.
+    subtracted_plane : `numpy.ndarray` or `None`
+        For a difference image, the second stack.
+    may_choose_apertures : `bool`
+        Whether this is a library stack, which also measures the noise
+        against aperture size.
+    target_sky_deg : `tuple` [`float`, `float`] or `None`
+        For a difference image, the target's (RA, Dec) in degrees.
+    stack_path : `str`
+        The finished stack, for the log.
+
+    Returns
+    -------
+    sums : `_ApertureSums`
+        The sums and the by-products of the mode.
+    """
     summed_plane = plane
     if subtracted_plane is not None:
         summed_plane = plane - subtracted_plane
@@ -1553,24 +1737,57 @@ def measure_noise_in_plane(
         except Exception as error:
             logger.exception("The noise against aperture size of %s could not be measured", stack_path)
             size_noise = ApertureSizeNoiseOutcome(None, f"the measurement failed: {type(error).__name__}")
-    sums = all_sums[np.isfinite(all_sums)]
-    if sums.size < MINIMUM_USABLE_APERTURES:
-        return StackNoiseOutcome(None, f"only {sums.size} of the stored apertures fall on this stack")
-    ratios, saturated_count, star_fluxes = _reference_ratios(plane, wcs, aperture_set, saturation)
-    flux_ratio = (
-        None
-        if subtracted_plane is not None
-        else _flux_ratio_to_reference_frame(
-            plane, wcs, aperture_set, saturation, reference_frame_path, crop_offset, reference_header
-        )
-    )
-    if ratios.size < MINIMUM_USABLE_REFERENCE_STARS:
-        return StackNoiseOutcome(
-            None,
-            f"only {ratios.size} of the reference stars can be used on this stack "
-            f"({saturated_count} are saturated in its reference frame)",
-        )
+    return _ApertureSums(all_sums, pixel_positions, added_sums, target_pixel, size_noise)
 
+
+def _summarize_sums(
+    aperture_sums: _ApertureSums,
+    sums: np.ndarray,
+    ratios: np.ndarray,
+    saturated_count: int,
+    star_fluxes: Sequence[float],
+    flux_ratio: ReferenceFrameFluxRatio | None,
+    aperture_set: ApertureSet,
+    saturation: SaturationCheck | None,
+    wcs_source: str,
+    created: bool,
+    position_note: str,
+    scale: float,
+) -> StackNoiseOutcome:
+    """Turn the aperture sums and reference-star ratios into the noise result.
+
+    Parameters
+    ----------
+    aperture_sums : `_ApertureSums`
+        What was summed, with the by-products of the mode.
+    sums : `numpy.ndarray`
+        The finite sums, enough of them to measure.
+    ratios : `numpy.ndarray`
+        The reference stars' flux ratios, enough of them to measure.
+    saturated_count : `int`
+        How many reference stars are saturated.
+    star_fluxes : `Sequence` of `float`
+        Each reference star's flux on this stack.
+    flux_ratio : `ReferenceFrameFluxRatio` or `None`
+        The stars' flux ratio against the registration reference frame.
+    aperture_set : `ApertureSet`
+        The apertures measured in.
+    saturation : `SaturationCheck` or `None`
+        The saturation limit from the reference frame.
+    wcs_source : `str`
+        Where the solution came from.
+    created : `bool`
+        Whether this stack stored the set.
+    position_note : `str`
+        How the solution was moved, with any note on a kept set.
+    scale : `float`
+        The stack's pixel scale, in arcseconds per pixel.
+
+    Returns
+    -------
+    outcome : `StackNoiseOutcome`
+        The measurement, or the reason there is none.
+    """
     spread = float(robust_sigma(sums))
     spread_error = MAD_SIGMA_ERROR_FACTOR * spread / math.sqrt(sums.size)
     zero_point = float(np.median(ratios))
@@ -1604,15 +1821,15 @@ def measure_noise_in_plane(
             reference_aperture_radius_px=aperture_set.reference_radius_px,
             saturated_reference_stars=saturated_count,
             position_note=position_note,
-            aperture_sums=tuple(float(value) for value in all_sums),
+            aperture_sums=tuple(float(value) for value in aperture_sums.all_sums),
             aperture_set_origin=aperture_set.created_from,
             aperture_identity=aperture_set.identity,
             aperture_definition_note=aperture_set.describe_definition(),
             reference_frame_flux_ratio=flux_ratio,
-            aperture_pixel_positions=tuple((float(c), float(r)) for c, r in pixel_positions),
-            added_aperture_sums=added_sums,
-            target_pixel_position=target_pixel,
-            size_noise=size_noise,
+            aperture_pixel_positions=tuple((float(c), float(r)) for c, r in aperture_sums.pixel_positions),
+            added_aperture_sums=aperture_sums.added_sums,
+            target_pixel_position=aperture_sums.target_pixel,
+            size_noise=aperture_sums.size_noise,
             pixel_scale_arcsec=scale,
             reference_star_fluxes=tuple(star_fluxes),
             sky_positions_from_plate_solve=aperture_set.sky_positions_from_plate_solve,
@@ -1620,6 +1837,156 @@ def measure_noise_in_plane(
             if created
             else (saturation.source if saturation is not None else aperture_set.saturation_source),
         )
+    )
+
+
+def measure_noise_in_plane(
+    plane: np.ndarray,
+    stack_path: str,
+    reference_frame_path: str | None,
+    apertures_path: str,
+    crop_offset: tuple[int, int],
+    may_choose_apertures: bool,
+    depth: StackDepth | None,
+    subtracted_plane: np.ndarray | None = None,
+    covered_mask: np.ndarray | None = None,
+    member_frame_paths: Sequence[str] = (),
+    target_sky_deg: tuple[float, float] | None = None,
+) -> StackNoiseOutcome:
+    """Measure a stack's noise in the target's fixed apertures on its plane.
+
+    The work is three steps: choose the solution (`_choose_wcs`), resolve the
+    apertures (`_resolve_apertures`, then `_align_to_stored_apertures` for a
+    set this stack did not store), and take and summarize the sums
+    (`_take_aperture_sums`, `_summarize_sums`). The three modes (library,
+    subset, difference) differ only in the flags the steps read:
+    `may_choose_apertures` for the apertures step and the size-noise
+    by-product, `subtracted_plane` for the sums. The flags stay because
+    `measure_stack_noise` and `measure_difference_noise` already are the
+    entry points of the modes, and this function's signature is used by both.
+
+    Parameters
+    ----------
+    plane : `numpy.ndarray`
+        The stack as one 2-D image (see `measure_stack_noise`).
+    stack_path : `str`
+        The finished stack, for its header and name.
+    reference_frame_path : `str` or `None`
+        The registration reference frame.
+    apertures_path : `str`
+        Where the target's apertures are kept.
+    crop_offset : `tuple` [`int`, `int`]
+        The (columns, rows) cut from the stack's left and top edges.
+    may_choose_apertures : `bool`
+        See `measure_stack_noise`.
+    depth : `StackDepth` or `None`
+        See `measure_stack_noise`.
+    subtracted_plane : `numpy.ndarray`, optional
+        A second stack on the same pixel grid. When given, the apertures are
+        put on ``plane`` (which holds the stars the positions are checked
+        against) and the sums are taken on ``plane`` minus this image, with
+        every pixel that is exactly zero in either image left at zero (the
+        empty edge). See `measure_difference_noise`.
+    covered_mask : `numpy.ndarray`, optional
+        See `measure_stack_noise`. Used only when apertures are chosen.
+    member_frame_paths : `Sequence` of `str`, optional
+        See `measure_stack_noise`.
+    target_sky_deg : `tuple` [`float`, `float`], optional
+        The target's (RA, Dec) in degrees. Used only for a difference image,
+        to give the target's pixel position on the stack.
+
+    Returns
+    -------
+    outcome : `StackNoiseOutcome`
+        The measurement, or the reason there is none.
+    """
+    window = None
+    if covered_mask is not None:
+        window = _covered_window(covered_mask, plane.shape, crop_offset)
+    stack_header = read_header(stack_path)
+    plate_solve = _StackPlateSolve(stack_path)
+    choice = _choose_wcs(
+        plane, stack_header, reference_frame_path, member_frame_paths, crop_offset, plate_solve
+    )
+    if choice.failure is not None:
+        return choice.failure
+    reference_header = read_header(choice.check_frame_path) if choice.check_frame_path else fits.Header()
+    stack_setup_key = setup_key(
+        stack_header,
+        reference_header,
+        reference_exposure_seconds=_reference_exposure_seconds(reference_header, member_frame_paths),
+    )
+    saturation = _saturation_check(choice.check_frame_path, choice.check_offset)
+    resolution = _resolve_apertures(
+        plane,
+        stack_path,
+        apertures_path,
+        stack_setup_key,
+        choice.wcs,
+        choice.wcs_source,
+        saturation,
+        may_choose_apertures,
+        depth,
+        window,
+        covered_mask is not None and window is None,
+        plate_solve,
+    )
+    if resolution.failure is not None or resolution.aperture_set is None:
+        return resolution.failure or StackNoiseOutcome(None, "no apertures were resolved")
+    aperture_set = resolution.aperture_set
+    wcs, wcs_source, created = resolution.wcs, resolution.wcs_source, resolution.created
+    scale = pixel_scale_arcsec(wcs)
+    if (
+        abs(scale - aperture_set.pixel_scale_arcsec)
+        > MAXIMUM_PIXEL_SCALE_CHANGE * aperture_set.pixel_scale_arcsec
+    ):
+        return StackNoiseOutcome(
+            None,
+            f"this stack's pixel scale ({scale:.2f} arcsec) differs from the "
+            f"{aperture_set.pixel_scale_arcsec:.2f} arcsec the stored apertures were chosen at",
+        )
+
+    position_note = ""
+    if not created:
+        wcs, wcs_source, position_note, failure = _align_to_stored_apertures(
+            plane, wcs, wcs_source, aperture_set, plate_solve
+        )
+        if failure is not None:
+            return failure
+    position_note = " ".join(part for part in (position_note, resolution.keep_note) if part)
+    aperture_sums = _take_aperture_sums(
+        plane, wcs, aperture_set, subtracted_plane, may_choose_apertures, target_sky_deg, stack_path
+    )
+    sums = aperture_sums.all_sums[np.isfinite(aperture_sums.all_sums)]
+    if sums.size < MINIMUM_USABLE_APERTURES:
+        return StackNoiseOutcome(None, f"only {sums.size} of the stored apertures fall on this stack")
+    ratios, saturated_count, star_fluxes = _reference_ratios(plane, wcs, aperture_set, saturation)
+    flux_ratio = (
+        None
+        if subtracted_plane is not None
+        else _flux_ratio_to_reference_frame(
+            plane, wcs, aperture_set, saturation, reference_frame_path, crop_offset, reference_header
+        )
+    )
+    if ratios.size < MINIMUM_USABLE_REFERENCE_STARS:
+        return StackNoiseOutcome(
+            None,
+            f"only {ratios.size} of the reference stars can be used on this stack "
+            f"({saturated_count} are saturated in its reference frame)",
+        )
+    return _summarize_sums(
+        aperture_sums,
+        sums,
+        ratios,
+        saturated_count,
+        star_fluxes,
+        flux_ratio,
+        aperture_set,
+        saturation,
+        wcs_source,
+        created,
+        position_note,
+        scale,
     )
 
 

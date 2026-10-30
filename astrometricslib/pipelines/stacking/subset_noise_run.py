@@ -134,13 +134,10 @@ from astrometricslib.pipelines.stacking.post_processing.record_quality import (
 )
 from astrometricslib.pipelines.stacking.post_processing.record_science import (
     compute_expected_noise,
-    expected_noise_measurements,
+    expected_noise_row_sequence,
     group_reference_exposure_measurements,
-    noise_ratio_measurements,
-    normalization_scale_measurements,
     resolve_stack_sky_level,
     scale_expected_noise,
-    stack_sky_level_measurements,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_membership import (
     StackMembership,
@@ -1003,15 +1000,18 @@ def _stack_and_measure(
             noise,
             None if outcome is None else outcome.diagnostics,
         )
-        measurements.extend(expected_noise_measurements(expected, context, subject))
-        measurements.extend(noise_ratio_measurements(noise, expected, context, subject))
-        measurements.extend(normalization_scale_measurements(scale, context, subject))
-        if outcome is not None and outcome.stack_path is not None:
-            measurements.extend(
-                stack_sky_level_measurements(
-                    resolve_stack_sky_level(noise, outcome.stack_path), context, subject
-                )
+        has_stack_file = outcome is not None and outcome.stack_path is not None
+        measurements.extend(
+            expected_noise_row_sequence(
+                expected,
+                noise,
+                scale,
+                resolve_stack_sky_level(noise, outcome.stack_path) if has_stack_file else None,
+                context,
+                subject,
+                write_sky_level=has_stack_file,
             )
+        )
         measurements.append(
             expected_ratio_measurement(
                 context, subject, library, result, membership.membership_reason if membership else ""

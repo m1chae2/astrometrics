@@ -120,6 +120,7 @@ __all__ = [
     "compute_expected_noise",
     "compute_stack_science",
     "expected_noise_measurements",
+    "expected_noise_row_sequence",
     "flat_noise_measurements",
     "frame_noise_inputs_from_store",
     "group_peak_measurements",
@@ -1162,6 +1163,66 @@ def group_reference_exposure_measurements(
     return [build_measurement(spec, reference.exposure_seconds, context, subject)]
 
 
+def expected_noise_row_sequence(
+    expected: ExpectedNoiseOutcome,
+    measured_noise: StackNoiseOutcome | None,
+    normalization_scale: NormalizationScaleOutcome,
+    stack_sky_level: float | None,
+    context: PipelineRunContext,
+    subject: QualitySubject,
+    *,
+    master_dark_noise: MasterDarkNoiseOutcome | None = None,
+    flat_noise: FlatNoiseOutcome | None = None,
+    write_sky_level: bool = True,
+) -> list[QualityMeasurement]:
+    """Build the expected-noise rows of one stack, in their stored order.
+
+    Both the library stack and a subset stack store this sequence, so it is
+    written once here. The two paths differ only in the optional parts,
+    which are parameters.
+
+    Parameters
+    ----------
+    expected : `ExpectedNoiseOutcome`
+        The noise the frames predict, already multiplied by the scale.
+    measured_noise : `StackNoiseOutcome` or `None`
+        The measured empty-aperture noise, for the measured-to-predicted ratio.
+    normalization_scale : `NormalizationScaleOutcome`
+        The scale Siril gave the stack, or the reason there is none.
+    stack_sky_level : `float` or `None`
+        The stack's sky level, in the stack's units.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    subject : `QualitySubject`
+        The stack.
+    master_dark_noise : `MasterDarkNoiseOutcome`, optional
+        When given, its rows go between the ratio and the scale (the library
+        path). A subset stack leaves it out.
+    flat_noise : `FlatNoiseOutcome`, optional
+        When given, the sky level and the flat's two rows close the sequence
+        (the library path), and `write_sky_level` is not used.
+    write_sky_level : `bool`, optional
+        Without `flat_noise`: whether to close the sequence with the sky level
+        row. A subset stack with no stack file writes none.
+
+    Returns
+    -------
+    rows : `list` of `QualityMeasurement`
+        Expected noise, ratio, master dark (if asked), scale, then the sky
+        level (with the flat's rows if `flat_noise` is given).
+    """
+    rows = expected_noise_measurements(expected, context, subject)
+    rows.extend(noise_ratio_measurements(measured_noise, expected, context, subject))
+    if master_dark_noise is not None:
+        rows.extend(master_dark_noise_measurements(master_dark_noise, context, subject))
+    rows.extend(normalization_scale_measurements(normalization_scale, context, subject))
+    if flat_noise is not None:
+        rows.extend(flat_noise_measurements(flat_noise, stack_sky_level, context, subject))
+    elif write_sky_level:
+        rows.extend(stack_sky_level_measurements(stack_sky_level, context, subject))
+    return rows
+
+
 def science_measurements(
     science: StackScience | None,
     context: PipelineRunContext,
@@ -1197,13 +1258,16 @@ def science_measurements(
             FlatNoiseOutcome(None, "the caller did not work out the flat's noise"),
             None,
         )
-    rows = expected_noise_measurements(science.expected_noise, context, stack_subject)
-    rows.extend(
-        noise_ratio_measurements(science.measured_noise, science.expected_noise, context, stack_subject)
+    rows = expected_noise_row_sequence(
+        science.expected_noise,
+        science.measured_noise,
+        science.normalization_scale,
+        science.stack_sky_level,
+        context,
+        stack_subject,
+        master_dark_noise=science.master_dark_noise,
+        flat_noise=science.flat_noise,
     )
-    rows.extend(master_dark_noise_measurements(science.master_dark_noise, context, stack_subject))
-    rows.extend(normalization_scale_measurements(science.normalization_scale, context, stack_subject))
-    rows.extend(flat_noise_measurements(science.flat_noise, science.stack_sky_level, context, stack_subject))
     # `group_subjects` is built from `groups` in the same order (see
     # `record_quality.stacking_measurements`); a strict zip makes any drift
     # fail loudly.

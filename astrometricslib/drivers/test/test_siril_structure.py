@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from astrometricslib.drivers import siril_interface
+from astrometricslib.drivers.siril_interface import session
 
 
 def test_image_processing_instances_do_not_pin_after_deletion() -> None:
@@ -21,7 +22,7 @@ def test_image_processing_instances_do_not_pin_after_deletion() -> None:
     mock_library = MagicMock()
 
     driver = siril_interface.ImageProcessing(mock_config, mock_library)
-    assert driver in siril_interface._active_image_processing_instances
+    assert driver in session._active_image_processing_instances
     # Watch this one instance, not the whole registry: another test's
     # instance still alive elsewhere in the run must not fail this one.
     weak_driver = weakref.ref(driver)

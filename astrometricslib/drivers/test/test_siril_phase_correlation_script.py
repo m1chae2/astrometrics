@@ -23,6 +23,7 @@ import pytest
 
 from astrometricslib.drivers import siril_interface
 from astrometricslib.drivers.interfaces.stacking_driver import PipelineSteps
+from astrometricslib.drivers.siril_interface import imaging_stacker, spectral_stacker
 
 
 def _fake_align_frames(paths: list[str], directory: str) -> tuple[list[str], dict[str, int]]:
@@ -88,8 +89,8 @@ def captured_calibration_script(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(
         siril_interface.ImageProcessing, "restore_cached_calibration_masters", lambda self, *a, **k: set()
     )
-    monkeypatch.setattr(siril_interface, "_frames_use_color_filter_array", lambda path: False)
-    monkeypatch.setattr(siril_interface, "siril_process_lock", lambda **kwargs: _NullContext())
+    monkeypatch.setattr(imaging_stacker, "_frames_use_color_filter_array", lambda path: False)
+    monkeypatch.setattr(imaging_stacker, "siril_process_lock", lambda **kwargs: _NullContext())
 
     def run_process_target(
         through_stacking: bool = False, with_alignment_step: bool = True
@@ -112,7 +113,7 @@ def captured_calibration_script(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
             # Pretend the calibrated frames exist, so they are aligned and
             # the second (stacking) Siril run is built too.
             monkeypatch.setattr(
-                siril_interface, "find_calibrated_frame_paths", lambda directory, seq: ["a.fits"]
+                spectral_stacker, "find_calibrated_frame_paths", lambda directory, seq: ["a.fits"]
             )
 
         driver = siril_interface.ImageProcessing(mock_config, MagicMock())
@@ -221,7 +222,7 @@ def test_find_calibrated_frame_paths_matches_sirils_pp_prefix_naming(tmp_path: P
     ):
         (process_directory / name).touch()
 
-    paths = siril_interface.find_calibrated_frame_paths(str(process_directory), "pp_light_source")
+    paths = spectral_stacker.find_calibrated_frame_paths(str(process_directory), "pp_light_source")
 
     assert [Path(path).name for path in paths] == [
         "pp_light_source_00001.fits",

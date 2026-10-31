@@ -2,14 +2,14 @@
 
 Description: `SirilStackingDriver` implements the `StackingDriver`
 interface (`drivers/interfaces/stacking_driver.py`) on top of the Siril
-session class (`ImageProcessing` in `siril_interface.py`). It calls the
-session's `process_target` and returns what the session reported as a
+session class (`ImageProcessing` in the `siril_interface` package). It
+calls the session's `process_target` and returns what the session reported as a
 `StackRunResult`, instead of leaving the report in the session for the
 caller to fetch.
 
 The ``registration`` names are Siril's spectral star detection settings:
 ``"standard"``, ``"relaxed"`` and ``"phase_correlation"`` (see
-`SPECTRAL_STAR_DETECTION_COMMANDS` in `siril_interface.py`).
+`SPECTRAL_STAR_DETECTION_COMMANDS` in `siril_interface/script_builders.py`).
 """
 
 import functools

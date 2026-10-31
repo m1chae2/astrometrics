@@ -1,7 +1,7 @@
 """SA200 spectral registration quality validity check.
 
 Runs Siril's registration step (shift-only transform, matching the
-production spectral stacking path in siril_interface.py) against a
+production spectral stacking path in the siril_interface package) against a
 target's Star Analyzer 200 ("SPEC") frames, then parses the resulting
 .seq registration summary and per-frame .lst star lists to flag
 frames where registration looks untrustworthy: too few matched star
@@ -16,7 +16,7 @@ sweep across filter_wfwhm settings: field-star population is
 typically rich enough in spectral frames too (a diffraction grating
 disperses every star's light, not just the target's, so most stars
 still look like normal point sources), so filter_wfwhm/stack_weight
-are no longer gated to standard-imaging-only in siril_interface.py.
+are no longer gated to standard-imaging-only in the siril_interface package.
 The sweep measures the stacked zero-order star's own FWHM
 specifically -- not a whole-field median FWHM across many stars,
 which is what rejection_threshold_analysis.py uses and which doesn't

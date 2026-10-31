@@ -144,7 +144,7 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 *Located in:* `astrometricslib/drivers/`
 
 - **Interfaces.** `interfaces/` holds `StackingDriver`, `PlateSolveDriver`, `SimbadDriver`, `GaiaXpDriver`, `ReddeningDriver` and the types that cross them. `driver_set.py` (`Drivers`) fills empty slots with the built-in drivers.
-- **Siril.** `siril_stacking_driver.py`, `siril_interface.py`.
+- **Siril.** `siril_stacking_driver.py`, `siril_interface/`.
 - **Catalogs and services.** `astrometry_net_driver.py`, `gaia_cone_driver.py`, `catalog_store.py`, `gaia_xp_driver.py`, `astroquery_simbad_driver.py`.
 - **Stores.** `calibration_library.py`, `camera_profile_store.py`, `provenance_store.py`, `catalog_access.py`.
 - **Images.** `fits_access.py`, `image.py`. The drivers README lists the rest.

@@ -23,6 +23,7 @@ import pytest
 
 from astrometricslib.drivers import siril_interface
 from astrometricslib.drivers.interfaces.stacking_driver import PipelineSteps
+from astrometricslib.drivers.siril_interface import imaging_stacker, spectral_stacker
 
 GOLDEN_PATH = Path(__file__).parent / "golden" / "siril_scripts.json"
 
@@ -178,11 +179,11 @@ def _name_patches(uses_color_filter_array: bool, phase_correlation: bool) -> lis
         ``(module, attribute, replacement)`` entries.
     """
     patches: list[tuple[Any, str, Any]] = [
-        (siril_interface, "_frames_use_color_filter_array", lambda path: uses_color_filter_array),
-        (siril_interface, "siril_process_lock", lambda **kwargs: _NullContext()),
+        (imaging_stacker, "_frames_use_color_filter_array", lambda path: uses_color_filter_array),
+        (imaging_stacker, "siril_process_lock", lambda **kwargs: _NullContext()),
     ]
     if phase_correlation:
-        patches.append((siril_interface, "find_calibrated_frame_paths", lambda directory, seq: ["a.fits"]))
+        patches.append((spectral_stacker, "find_calibrated_frame_paths", lambda directory, seq: ["a.fits"]))
     return patches
 
 

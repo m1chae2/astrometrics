@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 from astrometricslib.drivers import siril_interface
+from astrometricslib.drivers.siril_interface import session
 from astrometricslib.foundation.run_tally import RunTally
 from astrometricslib.pipelines import tasks
 from astrometricslib.pipelines.tasks import (
@@ -59,12 +60,12 @@ def test_a_wait_is_added_to_the_bound_tally_only() -> None:
     """Runs in one process keep separate totals; an unbound wait is dropped."""
     first, second = RunTally(), RunTally()
 
-    siril_interface._record_siril_lock_wait(7.0)  # no run is bound: nothing is kept
+    session._record_siril_lock_wait(7.0)  # no run is bound: nothing is kept
     with siril_interface.bind_lock_wait(first):
-        siril_interface._record_siril_lock_wait(2.0)
+        session._record_siril_lock_wait(2.0)
         with siril_interface.bind_lock_wait(second):
-            siril_interface._record_siril_lock_wait(3.0)
-        siril_interface._record_siril_lock_wait(1.0)
+            session._record_siril_lock_wait(3.0)
+        session._record_siril_lock_wait(1.0)
 
     assert first.total == pytest.approx(3.0)
     assert second.total == pytest.approx(3.0)
@@ -164,7 +165,7 @@ def test_queue_time_does_not_consume_the_stacking_budget(monkeypatch: pytest.Mon
         """
         # The stack waited in the queue; the wait goes to this run's tally,
         # as `siril_process_lock` would add it.
-        siril_interface._record_siril_lock_wait(reported_lock_wait)
+        session._record_siril_lock_wait(reported_lock_wait)
         time.sleep(stack_duration_seconds)
         return "/stacked/output.fits"
 

@@ -3446,7 +3446,7 @@ Stacking has no `AnalysisPipeline` adapter. The entry point is `stage.stack_fram
    discard.
 4. **Stack.** `stack_runner.run_stack` splits the frames by exposure length (and by night for
    spectra) and calls the `StackingDriver`. The Siril driver (`siril_stacking_driver.py`) runs
-   `ImageProcessing` in `siril_interface.py`: masters, calibration, registration (alignment) and
+   `ImageProcessing` in the `siril_interface` package: masters, calibration, registration (alignment) and
    stacking. Spectral registration that loses too many frames is retried with relaxed detection,
    then with phase correlation (aligning whole images by their overall pattern rather than by
    single stars).
@@ -3586,7 +3586,7 @@ The fifth pipeline, stacking, does not use this interface and has no adapter. It
 `stage.stack_frames` through `stack_runner.run_stack` to a `StackingDriver`: the interface for a
 program that calibrates, aligns and combines frames. The one implementation uses Siril, an
 open-source astronomy image processor, through the `ImageProcessing` class in
-`siril_interface.py`.
+the `siril_interface` package.
 
 ```mermaid
 flowchart LR

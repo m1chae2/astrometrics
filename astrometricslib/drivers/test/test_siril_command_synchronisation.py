@@ -26,6 +26,7 @@ import time
 import pytest
 
 from astrometricslib.drivers import siril_interface
+from astrometricslib.drivers.siril_interface import session
 from astrometricslib.foundation.errors import ExternalServiceError
 
 
@@ -112,7 +113,7 @@ def test_send_commands_gives_up_when_no_status_arrives(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A silent Siril bounds the wait rather than hanging forever."""
-    monkeypatch.setattr(siril_interface, "SIRIL_COMMAND_TIMEOUT_SECONDS", 0.1)
+    monkeypatch.setattr(session, "SIRIL_COMMAND_TIMEOUT_SECONDS", 0.1)
     command_pipe = str(tmp_path / "siril_command.in")
     os.mkfifo(command_pipe)
     received: list[str] = []
@@ -166,7 +167,7 @@ def test_open_pipe_or_die_returns_once_a_peer_connects(tmp_path: pathlib.Path) -
         reader = threading.Thread(target=lambda: open(pipe_path).close(), daemon=True)
         reader.start()
 
-        pipe = siril_interface._open_pipe_or_die(pipe_path, "w", process, timeout=5)
+        pipe = session._open_pipe_or_die(pipe_path, "w", process, timeout=5)
         pipe.close()
         reader.join(timeout=5)
     finally:
@@ -184,7 +185,7 @@ def test_open_pipe_or_die_raises_once_the_process_exits(tmp_path: pathlib.Path) 
 
     started_at = time.monotonic()
     with pytest.raises(ExternalServiceError, match="exited"):
-        siril_interface._open_pipe_or_die(pipe_path, "w", process, timeout=30)
+        session._open_pipe_or_die(pipe_path, "w", process, timeout=30)
     elapsed = time.monotonic() - started_at
 
     # The failure must be reported promptly off the dead process, not
@@ -199,7 +200,7 @@ def test_open_pipe_or_die_times_out_on_a_process_that_never_connects(tmp_path: p
     process = subprocess.Popen(["sleep", "30"])
     try:
         with pytest.raises(ExternalServiceError):
-            siril_interface._open_pipe_or_die(pipe_path, "w", process, timeout=0.3)
+            session._open_pipe_or_die(pipe_path, "w", process, timeout=0.3)
     finally:
         process.kill()
         process.wait()

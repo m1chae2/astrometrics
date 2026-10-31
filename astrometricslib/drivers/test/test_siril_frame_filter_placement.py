@@ -29,6 +29,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from astrometricslib.drivers import siril_interface
+from astrometricslib.drivers.siril_interface import imaging_stacker
 
 
 @pytest.fixture
@@ -95,8 +96,8 @@ def captured_siril_script(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Ca
     monkeypatch.setattr(
         siril_interface.ImageProcessing, "restore_cached_calibration_masters", lambda self, *a, **k: set()
     )
-    monkeypatch.setattr(siril_interface, "_frames_use_color_filter_array", lambda path: False)
-    monkeypatch.setattr(siril_interface, "siril_process_lock", lambda **kwargs: _NullContext())
+    monkeypatch.setattr(imaging_stacker, "_frames_use_color_filter_array", lambda path: False)
+    monkeypatch.setattr(imaging_stacker, "siril_process_lock", lambda **kwargs: _NullContext())
 
     def run_process_target(
         is_spectral: bool,

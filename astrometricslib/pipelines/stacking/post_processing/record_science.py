@@ -49,15 +49,13 @@ from astrometricslib.models.quality.measurement import (
     SubjectLevel,
 )
 from astrometricslib.models.quality.quality_summary import ExposureGroupSummary
-from astrometricslib.pipelines.shared.quality.frame_measurement import (
-    frame_subject_id,
-    look_up_frame_sensor_noise,
-)
+from astrometricslib.pipelines.shared.quality.frame_measurement import frame_subject_id
 from astrometricslib.pipelines.shared.quality.metrics import FRAME_SKY_RATE_E_PER_S_PER_PX
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
     PipelineRunContext,
     build_measurement,
 )
+from astrometricslib.pipelines.shared.quality.sky_electrons import look_up_frame_sensor_noise
 from astrometricslib.pipelines.stacking.metrics import (
     STACKING_EXPECTED_EMPTY_APERTURE_NOISE_STACK_UNIT,
     STACKING_EXPECTED_MASTER_DARK_NOISE_STACK_UNIT,

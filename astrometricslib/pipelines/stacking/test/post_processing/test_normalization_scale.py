@@ -30,7 +30,7 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_EXPECTED_SKY_NOISE_STACK_UNIT,
     STACKING_NORMALIZATION_SCALE,
 )
-from astrometricslib.pipelines.stacking.post_processing.empty_apertures import APERTURE_FILE_NAME
+from astrometricslib.pipelines.stacking.post_processing.aperture_storage import APERTURE_FILE_NAME
 from astrometricslib.pipelines.stacking.post_processing.expected_noise import (
     STACK_UNITS_PER_ADU,
     ExpectedNoise,
@@ -54,7 +54,7 @@ from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
     StackNoiseResult,
     measure_stack_noise,
 )
-from astrometricslib.pipelines.stacking.processing.exposure_groups import combine_exposure_group_images
+from astrometricslib.pipelines.stacking.processing.group_combination import combine_exposure_group_images
 
 CONTEXT = PipelineRunContext(
     "M 99", "stacking", "1.3.0", "job-1", "job-1", datetime(2026, 10, 26, tzinfo=UTC)

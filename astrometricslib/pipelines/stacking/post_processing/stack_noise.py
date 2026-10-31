@@ -127,26 +127,30 @@ from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.drivers.fits_access import collapse_to_2d, read_data, read_header
 from astrometricslib.models.camera_profile import ProvenanceKind
 from astrometricslib.pipelines.shared.applied_camera_profile import camera_name_from_header
+from astrometricslib.pipelines.stacking.post_processing.aperture_placement import (
+    DETECTED_STAR_COUNT,
+    MINIMUM_USABLE_APERTURES,
+    MINIMUM_USABLE_REFERENCE_STARS,
+    choose_apertures_with_reason,
+)
 from astrometricslib.pipelines.stacking.post_processing.aperture_size_noise import (
     ApertureSizeNoiseOutcome,
     measure_aperture_size_noise,
 )
+from astrometricslib.pipelines.stacking.post_processing.aperture_storage import (
+    find_library_set_key,
+    load_apertures,
+    load_apertures_with_reason,
+    record_library_set_key,
+    store_apertures_once,
+)
 from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
-    DETECTED_STAR_COUNT,
-    MINIMUM_USABLE_APERTURES,
-    MINIMUM_USABLE_REFERENCE_STARS,
     PLATE_SOLVE_WCS_SOURCE,
     REPLACEMENT_DEPTH_FACTOR,
     ApertureSet,
     StackDepth,
-    choose_apertures_with_reason,
-    find_library_set_key,
     is_much_deeper,
-    load_apertures,
-    load_apertures_with_reason,
-    record_library_set_key,
     setup_key,
-    store_apertures_once,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_image import (
     MAD_SIGMA_ERROR_FACTOR,
@@ -1199,7 +1203,7 @@ def measure_stack_noise(
         For a stack combined from exposure groups, `True` where every group
         has data, on the grid the stack had before its edges were trimmed.
         Apertures this stack chooses keep out of the pixels it marks `False`
-        (see `empty_apertures.UNCOVERED_CLEARANCE_PX`). Left out for a stack
+        (see `aperture_placement.UNCOVERED_CLEARANCE_PX`). Left out for a stack
         of one group.
     member_frame_paths : `Sequence` of `str`, optional
         Frames of the group the stack was lined up with, best first. Used only

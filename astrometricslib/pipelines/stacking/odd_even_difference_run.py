@@ -81,11 +81,11 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_ODD_EVEN_SUM_COLUMN_AVERAGE_SCATTER_STACK_UNIT,
     STACKING_ODD_EVEN_SUM_ROW_AVERAGE_SCATTER_STACK_UNIT,
 )
-from astrometricslib.pipelines.stacking.post_processing.difference_noise import measure_difference_noise
-from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
+from astrometricslib.pipelines.stacking.post_processing.aperture_storage import (
     APERTURE_FILE_NAME,
     load_apertures_with_reason,
 )
+from astrometricslib.pipelines.stacking.post_processing.difference_noise import measure_difference_noise
 from astrometricslib.pipelines.stacking.post_processing.expected_noise import ExpectedNoiseOutcome
 from astrometricslib.pipelines.stacking.post_processing.half_pattern import (
     PATTERN_ROW_NAMES,

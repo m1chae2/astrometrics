@@ -138,7 +138,7 @@ def combined_stack_excluded_mask(path: str, shape: tuple[int, int]) -> np.ndarra
         the whole image.
     """
     from astrometricslib.pipelines.stacking.post_processing.exposure_group_report import GROUPS_FOLDER_NAME
-    from astrometricslib.pipelines.stacking.processing.exposure_groups import saturated_pixel_mask
+    from astrometricslib.pipelines.stacking.processing.group_gains import saturated_pixel_mask
 
     directory = os.path.join(os.path.dirname(path), GROUPS_FOLDER_NAME)
     stem = os.path.splitext(os.path.basename(path))[0]

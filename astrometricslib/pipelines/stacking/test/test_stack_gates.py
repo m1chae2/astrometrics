@@ -44,7 +44,7 @@ from astrometricslib.pipelines.stacking.pre_processing.frame_homogeneity import 
     find_dominant_gain_subset,
     gain_homogeneity_gate,
 )
-from astrometricslib.pipelines.stacking.processing.exposure_groups import CLIPPED_FRAME_ZERO_FRACTION
+from astrometricslib.pipelines.stacking.processing.group_gains import CLIPPED_FRAME_ZERO_FRACTION
 from astrometricslib.pipelines.stacking.test.test_flat_calibration import write_flat
 
 

@@ -33,7 +33,7 @@ From electrons to the stack's units. Siril divides each frame by 65535 when it
 reads it and writes the stack as numbers near 0 to 1. It does so for any
 integer frame, so a 14-bit raw frame (stored without scaling up) is divided by
 65535 too, and one camera ADU is ``1 / 65535`` stack unit
-(`STACK_UNITS_PER_ADU`, from `exposure_groups.FULL_SCALE_COUNTS`). A frame
+(`STACK_UNITS_PER_ADU`, from `constants.FULL_SCALE_COUNTS`). A frame
 stored as floating-point numbers would not follow this, and nothing here
 checks for one. The noise is converted with that factor and the factor is
 stored. The check is the stack's own sky: the weighted mean of the frames'
@@ -119,6 +119,7 @@ import numpy as np
 from photutils.aperture import CircularAnnulus, CircularAperture
 
 from astrometricslib.drivers.fits_access import collapse_to_2d, read_data
+from astrometricslib.foundation.constants import FULL_SCALE_COUNTS
 from astrometricslib.models.camera_profile import ProvenancedValue, ProvenanceKind
 from astrometricslib.models.quality.measurement import MeasurementStatus, QualityMeasurement
 from astrometricslib.pipelines.stacking.post_processing.stack_image import (
@@ -128,7 +129,6 @@ from astrometricslib.pipelines.stacking.post_processing.stack_image import (
     RING_OUTER_PX,
     sky_level_of_plane,
 )
-from astrometricslib.pipelines.stacking.processing.exposure_groups import FULL_SCALE_COUNTS
 
 logger = logging.getLogger(__name__)
 

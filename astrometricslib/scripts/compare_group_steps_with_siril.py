@@ -2,7 +2,7 @@ r"""Compare Siril with our own steps for lining up and combining group stacks.
 
 Stacking by exposure length makes one stack per group, then lines the group
 stacks up (`stacking/processing/group_alignment.py`) and combines them
-(`combine_exposure_group_images` in `exposure_groups.py`). Siril has commands
+(`combine_exposure_group_images` in `group_combination.py`). Siril has commands
 that could do similar work. Before replacing one of our steps with Siril's,
 this script measures whether the replacement would lose quality. It reads the
 group stacks the pipeline already saved (the ``groups`` folder of each target)
@@ -44,7 +44,6 @@ from astrometricslib.drivers.fits_access import read_data
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.paths import siril_work_directory
 from astrometricslib.pipelines.stacking.post_processing.stack_preview import run_preview_script
-from astrometricslib.pipelines.stacking.processing.exposure_groups import estimate_saturation_mask_level
 from astrometricslib.pipelines.stacking.processing.group_alignment import (
     SPECTRAL_ALIGNMENT_CENTER_CROP_FRACTION,
     _center_crop,
@@ -53,6 +52,7 @@ from astrometricslib.pipelines.stacking.processing.group_alignment import (
     align_images_to_reference,
     find_zero_order_position,
 )
+from astrometricslib.pipelines.stacking.processing.group_gains import estimate_saturation_mask_level
 
 logger = logging.getLogger(__name__)
 

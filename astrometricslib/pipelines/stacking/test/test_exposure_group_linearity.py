@@ -26,11 +26,11 @@ from astrometricslib.pipelines.stacking.post_processing.exposure_group_report im
     build_group_summary,
     exposure_group_linearity_gate,
 )
-from astrometricslib.pipelines.stacking.processing.exposure_groups import (
+from astrometricslib.pipelines.stacking.processing.exposure_groups import ExposureGroup
+from astrometricslib.pipelines.stacking.processing.group_combination import measure_exposure_group_gains
+from astrometricslib.pipelines.stacking.processing.group_gains import (
     DEFAULT_GAIN_DISAGREEMENT_TOLERANCE,
-    ExposureGroup,
     GroupGainMeasurement,
-    measure_exposure_group_gains,
     measure_group_gains,
 )
 
@@ -315,7 +315,7 @@ def run_two_groups(tmp_path: Path, group_b_image: np.ndarray) -> tuple[str | Non
     with (
         patch.object(stack_runner, "_stack_one_batch", fake_stack_one_batch),
         patch(
-            "astrometricslib.pipelines.stacking.processing.exposure_groups.measure_group_frames",
+            "astrometricslib.pipelines.stacking.processing.group_combination.measure_group_frames",
             return_value=([1.0, 1.0], [0.0, 0.0]),
         ),
         patch(

@@ -18,30 +18,36 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
+from astrometricslib.foundation.constants import FULL_SCALE_COUNTS
 from astrometricslib.foundation.errors import InvalidArgumentError, ProcessingError
+from astrometricslib.pipelines.shared.frame_grouping import frame_exposure_seconds
+from astrometricslib.pipelines.shared.quality.saturation import SATURATION_MASK_FRACTION_OF_CEILING
 from astrometricslib.pipelines.stacking.processing.exposure_groups import (
-    CLIPPED_FRAME_ZERO_FRACTION,
-    FULL_SCALE_COUNTS,
-    PLAUSIBLE_GAIN_RANGE,
-    SATURATION_FRACTION_OF_FULL_SCALE,
-    SATURATION_MASK_FRACTION_OF_CEILING,
     ExposureGroup,
+    representative_exposure_frames,
+    representative_exposure_seconds,
+    split_frames_by_exposure,
+    split_groups_by_night,
+)
+from astrometricslib.pipelines.stacking.processing.group_combination import (
     combine_exposure_group_images,
-    describe_group_clipping,
-    estimate_background_noise,
-    estimate_saturation_mask_level,
-    frame_exposure_seconds,
     group_weight,
     measure_frame_noise,
     measure_group_frames,
-    measure_group_gains,
+)
+from astrometricslib.pipelines.stacking.processing.group_file_merging import (
     merge_registration_sequences,
     merge_rejection_maps,
-    representative_exposure_frames,
-    representative_exposure_seconds,
+)
+from astrometricslib.pipelines.stacking.processing.group_gains import (
+    CLIPPED_FRAME_ZERO_FRACTION,
+    PLAUSIBLE_GAIN_RANGE,
+    SATURATION_FRACTION_OF_FULL_SCALE,
+    describe_group_clipping,
+    estimate_background_noise,
+    estimate_saturation_mask_level,
+    measure_group_gains,
     saturated_pixel_mask,
-    split_frames_by_exposure,
-    split_groups_by_night,
     stack_data_fraction,
 )
 

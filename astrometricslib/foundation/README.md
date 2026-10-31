@@ -12,6 +12,7 @@ Terms are defined in the [glossary](../../documentation/Glossary.md). This docum
 - `observatory_setups.py`, `observatory_site.py` — read the optics (telescopes and lenses), the camera-and-optic setups and the observatory's location from the config file. The site reader has no default site, because a made-up site would give wrong time corrections.
 - `camera_names.py` — turns the several spellings of one camera name (FITS header, config file, frame record) into one form so they can be compared.
 - `enums.py` — enumerations (fixed sets of named values) shared by the domain models.
+- `constants.py` — numbers that several packages share and that have no better home. It holds `FULL_SCALE_COUNTS`, the stack value of a full 16-bit pixel.
 - `paths.py` — names the folders for temporary working files on the local disk, and treats the two Linux spellings of a mounted-drive path as the same place.
 - `astropy_setup.py` — makes astropy use its bundled Earth-rotation (IERS) table offline and loads that table ahead of first use, so a coordinate conversion never waits on a download.
 - `run_tally.py` — a running total that belongs to one run (the seconds a stack waited for a free Siril slot, the tries a plate solve needed), not to the process. The code that starts the run makes a `RunTally`, binds it for its thread with `bind_tally`, and reads it back; the deep code adds to whichever tally is bound there and does nothing when none is. A thread the run starts binds the tally itself.

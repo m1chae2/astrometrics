@@ -6,6 +6,7 @@ One test also runs the measurement on a real M 13 golden frame (Git LFS) and
 only checks that it runs and returns finite numbers.
 """
 
+import importlib
 import math
 import time
 from datetime import UTC, datetime
@@ -27,21 +28,9 @@ from astrometricslib.models.quality.measurement import MeasurementStatus, Qualit
 from astrometricslib.models.target import FrameRecord
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_fwhm_from_data
 from astrometricslib.pipelines.shared.quality.frame_measurement import (
-    FRAME_MEASUREMENT_TIME_BUDGET_SECONDS,
-    PIXEL_BLUR_FWHM_SQUARED_FACTOR,
-    RegionWidth,
-    StarProfileResult,
-    StarWidthSample,
-    _mean_ellipticity_angle,
-    _Stopwatch,
-    effective_star_width_px,
     frame_subject_id,
-    look_up_frame_sensor_noise,
     measure_clipped_mean_adu,
-    measure_field_region_widths,
     measure_frame,
-    measure_sky_electrons,
-    measure_star_profiles,
 )
 from astrometricslib.pipelines.shared.quality.metric_registry import get_metric_registry
 from astrometricslib.pipelines.shared.quality.metrics import (
@@ -66,7 +55,25 @@ from astrometricslib.pipelines.shared.quality.metrics import (
 from astrometricslib.pipelines.shared.quality.record_measurements import (
     check_measurement_against_registry,
 )
-from astrometricslib.pipelines.stacking.processing.exposure_groups import CLIPPED_FRAME_ZERO_FRACTION
+from astrometricslib.pipelines.shared.quality.sky_electrons import (
+    look_up_frame_sensor_noise,
+    measure_sky_electrons,
+)
+from astrometricslib.pipelines.shared.quality.star_profile_fitting import (
+    PIXEL_BLUR_FWHM_SQUARED_FACTOR,
+    RegionWidth,
+    StarProfileResult,
+    StarWidthSample,
+    _mean_ellipticity_angle,
+    effective_star_width_px,
+    measure_field_region_widths,
+    measure_star_profiles,
+)
+from astrometricslib.pipelines.shared.quality.time_budget import (
+    FRAME_MEASUREMENT_TIME_BUDGET_SECONDS,
+    Stopwatch,
+)
+from astrometricslib.pipelines.stacking.processing.group_gains import CLIPPED_FRAME_ZERO_FRACTION
 from astrometricslib.test.golden import measurements as golden_measurements
 
 # The camera setting of the synthetic frames, and the numbers the profile holds
@@ -585,7 +592,7 @@ def test_without_the_gaussian_function_that_metric_is_not_measured(round_frame_p
 
 def test_the_time_budget_counts_cpu_time_so_a_waiting_thread_does_not_use_it_up() -> None:
     """Sleeping adds nothing to the stopwatch; computing does."""
-    stopwatch = _Stopwatch(0.05)
+    stopwatch = Stopwatch(0.05)
     time.sleep(0.3)
     assert not stopwatch.expired()
     assert stopwatch.elapsed() < 0.05
@@ -859,7 +866,7 @@ def test_lookup_reports_a_profile_entry_that_holds_only_a_gain() -> None:
 
 
 def test_every_new_metric_names_a_function_that_exists() -> None:
-    """The seven new declarations each name a function in this module."""
+    """The seven new declarations each name a function that exists."""
     registry = get_metric_registry()
     for name in (
         FRAME_STAR_WIDTH_MOFFAT_PX,
@@ -870,7 +877,10 @@ def test_every_new_metric_names_a_function_that_exists() -> None:
         FRAME_SKY_NOISE_E,
         FRAME_READ_NOISE_E,
     ):
-        assert registry.get(name).computed_by.startswith("pipelines.shared.quality.frame_measurement.")
+        module_path, function_name = registry.get(name).computed_by.rsplit(".", 1)
+        assert module_path.startswith("pipelines.shared.quality.")
+        module = importlib.import_module(f"astrometricslib.{module_path}")
+        assert callable(getattr(module, function_name))
 
 
 GOLDEN_FRAME = golden_measurements.SAMPLE_FOLDER / f"{golden_measurements.DETECTION_FRAME}.fits"

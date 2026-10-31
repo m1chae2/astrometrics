@@ -145,7 +145,7 @@ def _region_spec(region: str, meaning: str) -> MetricSpec:
         ),
         sample_definition=_REGION_SAMPLE,
         band=_PER_PLANE_BAND,
-        computed_by="pipelines.shared.quality.frame_measurement.measure_field_region_widths",
+        computed_by="pipelines.shared.quality.star_profile_fitting.measure_field_region_widths",
         uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
         uncertainty_method=(
             "Standard deviation of the median over 1000 bootstrap resamples of the region's stars (fixed "
@@ -347,7 +347,7 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         ),
         sample_definition=_MOFFAT_SAMPLE,
         band=_PER_PLANE_BAND,
-        computed_by="pipelines.shared.quality.frame_measurement.measure_star_profiles",
+        computed_by="pipelines.shared.quality.star_profile_fitting.measure_star_profiles",
         uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
         uncertainty_method=(
             "Standard deviation of the median over 1000 bootstrap resamples of the stars (fixed seed). "
@@ -379,7 +379,7 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         ),
         sample_definition=_MOFFAT_SAMPLE,
         band=_PER_PLANE_BAND,
-        computed_by="pipelines.shared.quality.frame_measurement.measure_star_profiles",
+        computed_by="pipelines.shared.quality.star_profile_fitting.measure_star_profiles",
         uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
         uncertainty_method=(
             "The bootstrap error of the pixel width times the pixel scale. The pixel scale is taken as exact."
@@ -415,7 +415,7 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         ),
         sample_definition=_MOFFAT_SAMPLE,
         band=_PER_PLANE_BAND,
-        computed_by="pipelines.shared.quality.frame_measurement.measure_star_profiles",
+        computed_by="pipelines.shared.quality.star_profile_fitting.measure_star_profiles",
         uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
         uncertainty_method="Standard deviation of the median over 1000 bootstrap resamples of the stars.",
         register_entry="AST-17",
@@ -449,7 +449,7 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         ),
         sample_definition=_MOFFAT_SAMPLE,
         band=_PER_PLANE_BAND,
-        computed_by="pipelines.shared.quality.frame_measurement.measure_star_profiles",
+        computed_by="pipelines.shared.quality.star_profile_fitting.measure_star_profiles",
         uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
         uncertainty_method=(
             "Standard deviation of the direction over 1000 bootstrap resamples of the stars. The "
@@ -479,7 +479,7 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         estimator=_EFFECTIVE_WIDTH_ESTIMATOR,
         sample_definition=_MOFFAT_SAMPLE,
         band=_PER_PLANE_BAND,
-        computed_by="pipelines.shared.quality.frame_measurement.effective_star_width_px",
+        computed_by="pipelines.shared.quality.star_profile_fitting.effective_star_width_px",
         uncertainty_kind=UncertaintyKind.MODEL_DERIVED,
         uncertainty_method=(
             "The bootstrap error of `frame.star_width_moffat_px` carried through the formula (times "
@@ -513,7 +513,7 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         ),
         sample_definition=_MOFFAT_SAMPLE,
         band=_PER_PLANE_BAND,
-        computed_by="pipelines.shared.quality.frame_measurement.effective_star_width_px",
+        computed_by="pipelines.shared.quality.star_profile_fitting.effective_star_width_px",
         uncertainty_kind=UncertaintyKind.MODEL_DERIVED,
         uncertainty_method=(
             "The error of `frame.star_width_effective_px` times the pixel scale. The pixel scale is taken "
@@ -559,7 +559,7 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         ),
         sample_definition="Every pixel of the plane.",
         band=_PER_PLANE_BAND,
-        computed_by="pipelines.shared.quality.frame_measurement.measure_sky_electrons",
+        computed_by="pipelines.shared.quality.sky_electrons.measure_sky_electrons",
         uncertainty_kind=UncertaintyKind.NONE,
         uncertainty_method="No uncertainty is reported.",
         purpose=MetricPurpose.DECISION,
@@ -592,7 +592,7 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         ),
         sample_definition="Every pixel of the plane (through its sigma-clipped mean).",
         band=_PER_PLANE_BAND,
-        computed_by="pipelines.shared.quality.frame_measurement.measure_sky_electrons",
+        computed_by="pipelines.shared.quality.sky_electrons.measure_sky_electrons",
         uncertainty_kind=UncertaintyKind.NONE,
         uncertainty_method="No uncertainty is reported.",
         purpose=MetricPurpose.DECISION,
@@ -619,7 +619,7 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         ),
         sample_definition="One profile value per frame.",
         band="not applicable",
-        computed_by="pipelines.shared.quality.frame_measurement.look_up_frame_sensor_noise",
+        computed_by="pipelines.shared.quality.sky_electrons.look_up_frame_sensor_noise",
         uncertainty_kind=UncertaintyKind.NONE,
         uncertainty_method="The profile value is taken as given.",
         purpose=MetricPurpose.DECISION,

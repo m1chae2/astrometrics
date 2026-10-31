@@ -93,6 +93,7 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_ZERO_PIXEL_FRACTION,
 )
 from astrometricslib.pipelines.stacking.post_processing.aperture_size_noise import ApertureSizeNoiseOutcome
+from astrometricslib.pipelines.stacking.post_processing.aperture_storage import APERTURE_FILE_NAME
 from astrometricslib.pipelines.stacking.post_processing.calibration_record import (
     record_calibration_identities,
 )
@@ -107,7 +108,6 @@ from astrometricslib.pipelines.stacking.post_processing.difference_noise import 
     save_noise_sums,
 )
 from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
-    APERTURE_FILE_NAME,
     StackDepth,
     aperture_identity_to_number,
 )

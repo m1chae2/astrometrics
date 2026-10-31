@@ -59,11 +59,11 @@ from astrometricslib.pipelines.stacking.odd_even_difference_run import (
     run_odd_even_difference_noise,
     split_into_halves,
 )
+from astrometricslib.pipelines.stacking.post_processing.aperture_storage import APERTURE_FILE_NAME
 from astrometricslib.pipelines.stacking.post_processing.difference_noise import (
     measure_difference_noise,
     save_noise_sums,
 )
-from astrometricslib.pipelines.stacking.post_processing.empty_apertures import APERTURE_FILE_NAME
 from astrometricslib.pipelines.stacking.post_processing.expected_noise import FrameNoiseInput
 from astrometricslib.pipelines.stacking.post_processing.half_pattern import PATTERN_ROW_NAMES
 from astrometricslib.pipelines.stacking.post_processing.stack_image import signed_aperture_sum

@@ -113,6 +113,10 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_NOISE_WITHOUT_NIGHT,
     STACKING_SUBSET_EXPECTED_NOISE_RATIO,
 )
+from astrometricslib.pipelines.stacking.post_processing.aperture_storage import (
+    APERTURE_FILE_NAME,
+    load_apertures_with_reason,
+)
 from astrometricslib.pipelines.stacking.post_processing.calibration_record import (
     record_calibration_identities,
 )
@@ -120,10 +124,6 @@ from astrometricslib.pipelines.stacking.post_processing.difference_noise import 
     NoiseSums,
     load_noise_sums,
     paired_noise_difference,
-)
-from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
-    APERTURE_FILE_NAME,
-    load_apertures_with_reason,
 )
 from astrometricslib.pipelines.stacking.post_processing.record_quality import (
     frame_weight_measurements,

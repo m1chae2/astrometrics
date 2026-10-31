@@ -20,7 +20,7 @@ from astropy.io import fits
 
 import astrometricslib
 from astrometricslib.pipelines.stacking import stack_runner
-from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
+from astrometricslib.pipelines.stacking.post_processing.aperture_placement import (
     EDGE_MARGIN_PX,
     UNCOVERED_CLEARANCE_PX,
     place_empty_apertures,
@@ -36,11 +36,11 @@ from astrometricslib.pipelines.stacking.post_processing.stack_membership import 
 from astrometricslib.pipelines.stacking.processing.exposure_groups import (
     MINIMUM_FRAMES_PER_EXPOSURE_GROUP,
     ExposureGroup,
-    combine_exposure_group_images,
     exposure_group_holds_folded_frames,
     fold_exposure_lengths,
     split_frames_by_exposure,
 )
+from astrometricslib.pipelines.stacking.processing.group_combination import combine_exposure_group_images
 from astrometricslib.pipelines.stacking.test.test_exposure_group_linearity import (
     TRUE_GAIN,
     make_group_a,
@@ -726,12 +726,12 @@ def _run_two_group_stack(tmp_path: Path, read_noise_fails: bool = False) -> tupl
 
     measure = (
         patch(
-            "astrometricslib.pipelines.stacking.processing.exposure_groups.measure_group_frames",
+            "astrometricslib.pipelines.stacking.processing.group_combination.measure_group_frames",
             side_effect=OSError("unreadable"),
         )
         if read_noise_fails
         else patch(
-            "astrometricslib.pipelines.stacking.processing.exposure_groups.measure_group_frames",
+            "astrometricslib.pipelines.stacking.processing.group_combination.measure_group_frames",
             return_value=([1.0, 1.0], [0.0, 0.0]),
         )
     )

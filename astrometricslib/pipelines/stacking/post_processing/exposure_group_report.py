@@ -31,9 +31,9 @@ from astrometricslib.pipelines.stacking.post_processing.exposure_saturation impo
     measure_frame_saturation,
     recommend_stack_exposure_seconds,
 )
-from astrometricslib.pipelines.stacking.processing.exposure_groups import (
+from astrometricslib.pipelines.stacking.processing.group_combination import FRAMES_SAMPLED_PER_GROUP
+from astrometricslib.pipelines.stacking.processing.group_gains import (
     CLIPPED_FRAME_ZERO_FRACTION,
-    FRAMES_SAMPLED_PER_GROUP,
     GroupGainMeasurement,
 )
 

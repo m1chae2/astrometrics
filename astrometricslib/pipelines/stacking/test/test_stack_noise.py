@@ -19,7 +19,25 @@ from astropy.io import fits
 from astropy.wcs import WCS
 
 from astrometricslib.models.camera_profile import ProvenanceKind
-from astrometricslib.pipelines.stacking.post_processing import empty_apertures
+from astrometricslib.pipelines.stacking.post_processing import aperture_placement
+from astrometricslib.pipelines.stacking.post_processing.aperture_placement import (
+    APERTURE_SEPARATION_PX,
+    FAINT_SOURCE_CLEARANCE_PX,
+    MINIMUM_USABLE_APERTURES,
+    FaintSourceAnalysis,
+    analyze_faint_sources,
+    faint_source_distance,
+    place_empty_apertures,
+)
+from astrometricslib.pipelines.stacking.post_processing.aperture_storage import (
+    APERTURE_FILE_NAME,
+    OLD_APERTURES_REASON,
+    find_library_set_key,
+    load_apertures,
+    load_apertures_with_reason,
+    record_library_set_key,
+    reset_apertures,
+)
 from astrometricslib.pipelines.stacking.post_processing.difference_noise import (
     discard_noise_sums,
     load_noise_sums,
@@ -29,24 +47,10 @@ from astrometricslib.pipelines.stacking.post_processing.difference_noise import 
     save_noise_sums,
 )
 from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
-    APERTURE_FILE_NAME,
     APERTURE_FILE_VERSION,
-    APERTURE_SEPARATION_PX,
-    FAINT_SOURCE_CLEARANCE_PX,
-    MINIMUM_USABLE_APERTURES,
-    OLD_APERTURES_REASON,
     REPLACEMENT_DEPTH_FACTOR,
     ApertureSetMismatchError,
-    FaintSourceAnalysis,
     StackDepth,
-    analyze_faint_sources,
-    faint_source_distance,
-    find_library_set_key,
-    load_apertures,
-    load_apertures_with_reason,
-    place_empty_apertures,
-    record_library_set_key,
-    reset_apertures,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_image import (
     APERTURE_RADIUS_PX,
@@ -778,7 +782,7 @@ def test_too_few_clean_apertures_is_a_reason_not_a_fallback(
 ) -> None:
     """A field with no clean sky gives a reason, never the old placement."""
     monkeypatch.setattr(
-        empty_apertures,
+        aperture_placement,
         "analyze_faint_sources",
         lambda plane: FaintSourceAnalysis(np.zeros(plane.shape), (1.0, 1.0, 1.0), 0.3, 1.0, 0.8),
     )

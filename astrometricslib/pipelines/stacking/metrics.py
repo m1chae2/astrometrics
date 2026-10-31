@@ -694,7 +694,7 @@ _VALUE_METRICS: tuple[MetricSpec, ...] = (
             "few stars. It is the scale applied to the group."
         ),
         f"One exposure group. {_GROUP_NOTE}",
-        "pipelines.stacking.processing.exposure_groups.measure_exposure_group_gains",
+        "pipelines.stacking.processing.group_combination.measure_exposure_group_gains",
         register_entry="STK-19",
     ),
     _context_metric(
@@ -703,7 +703,7 @@ _VALUE_METRICS: tuple[MetricSpec, ...] = (
         "The same brightness ratio, measured only on the brightest stars.",
         "The median flux ratio of the brightest quarter of the stars. It is never applied.",
         f"One exposure group. {_GROUP_NOTE}",
-        "pipelines.stacking.processing.exposure_groups.measure_exposure_group_gains",
+        "pipelines.stacking.processing.group_combination.measure_exposure_group_gains",
         register_entry="STK-20",
     ),
     _context_metric(
@@ -715,7 +715,7 @@ _VALUE_METRICS: tuple[MetricSpec, ...] = (
             "by the gain; for the pixel fallback, abs(bright end ratio - gain) divided by the gain."
         ),
         f"One exposure group. {_GROUP_NOTE}",
-        "pipelines.stacking.processing.exposure_groups.measure_exposure_group_gains",
+        "pipelines.stacking.processing.group_combination.measure_exposure_group_gains",
         better=Direction.LOWER,
         register_entry="STK-20",
     ),
@@ -731,7 +731,7 @@ _VALUE_METRICS: tuple[MetricSpec, ...] = (
             "`stacking.group_gain_mid_range` measurement, which was made before any group was left out."
         ),
         f"One exposure group that was combined. {_GROUP_NOTE}",
-        "pipelines.stacking.processing.exposure_groups.combine_exposure_group_images",
+        "pipelines.stacking.processing.group_combination.combine_exposure_group_images",
         register_entry="STK-19",
     ),
     _context_metric(
@@ -779,7 +779,7 @@ _NOISE_SAMPLE = (
     "sky rings share a pixel. A stack needs at least 20 usable apertures; with fewer clean apertures the "
     "noise is not measured. Sky structure too faint to flag (unresolved stars, a faint halo) stays in the "
     "apertures. The target keeps one set of "
-    "apertures for each camera and optic (see `empty_apertures.reset_apertures`)."
+    "apertures for each camera and optic (see `aperture_storage.reset_apertures`)."
 )
 _NOISE_UNCERTAINTY = (
     "Statistical, 1 sigma: 1.1664 times the spread divided by sqrt(n) for n usable apertures. This is the "

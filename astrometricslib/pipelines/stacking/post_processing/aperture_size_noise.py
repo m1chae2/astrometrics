@@ -32,7 +32,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
+from astrometricslib.pipelines.stacking.post_processing.aperture_placement import (
     MINIMUM_USABLE_APERTURES,
     faint_source_distance,
 )

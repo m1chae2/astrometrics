@@ -95,12 +95,12 @@ from astrometricslib.pipelines.stacking.odd_even_difference_run import (
     split_into_halves,
     weight_shares,
 )
-from astrometricslib.pipelines.stacking.post_processing.difference_noise import measure_difference_noise
-from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
+from astrometricslib.pipelines.stacking.post_processing.aperture_placement import faint_source_distance
+from astrometricslib.pipelines.stacking.post_processing.aperture_storage import (
     APERTURE_FILE_NAME,
-    faint_source_distance,
     load_apertures_with_reason,
 )
+from astrometricslib.pipelines.stacking.post_processing.difference_noise import measure_difference_noise
 from astrometricslib.pipelines.stacking.post_processing.expected_noise import (
     ExpectedNoiseOutcome,
     FrameNoiseInput,

@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from astrometricslib.foundation.constants import FULL_SCALE_COUNTS
 from astrometricslib.models.camera_profile import ProvenancedValue, ProvenanceKind, ValueProvenance
 from astrometricslib.models.quality.measurement import (
     MeasurementStatus,
@@ -37,7 +38,6 @@ from astrometricslib.pipelines.stacking.post_processing.stack_image import (
     signed_aperture_sum,
     sky_level_of_plane,
 )
-from astrometricslib.pipelines.stacking.processing.exposure_groups import FULL_SCALE_COUNTS
 
 GAIN = 0.8
 READ_NOISE = 3.8

@@ -226,15 +226,13 @@ if TYPE_CHECKING:
         resolve_target,
         to_epoch_seconds,
     )
-    from astrometricslib.pipelines.shared.quality.frame_measurement import (
-        PIXEL_BLUR_FWHM_SQUARED_FACTOR,
-        frame_subject_id,
-    )
+    from astrometricslib.pipelines.shared.quality.frame_measurement import frame_subject_id
     from astrometricslib.pipelines.shared.quality.frame_selection import (
         FrameSelection,
         parse_iso_time,
         select_library_frames,
     )
+    from astrometricslib.pipelines.shared.quality.star_profile_fitting import PIXEL_BLUR_FWHM_SQUARED_FACTOR
     from astrometricslib.pipelines.shared.stack_preview_path import preview_path_for
     from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
         aperture_identity_from_number,
@@ -277,7 +275,7 @@ _DEFERRED_EXPORTS = {
     "FrameSelection": "astrometricslib.pipelines.shared.quality.frame_selection",
     "parse_iso_time": "astrometricslib.pipelines.shared.quality.frame_selection",
     "frame_subject_id": "astrometricslib.pipelines.shared.quality.frame_measurement",
-    "PIXEL_BLUR_FWHM_SQUARED_FACTOR": "astrometricslib.pipelines.shared.quality.frame_measurement",
+    "PIXEL_BLUR_FWHM_SQUARED_FACTOR": "astrometricslib.pipelines.shared.quality.star_profile_fitting",
     "MINIMUM_PENALTY_TO_WEIGHT": "astrometricslib.pipelines.stacking.pre_processing.exposure_weighting",
     "NOISE_WEIGHT_MODE": "astrometricslib.pipelines.stacking.pre_processing.exposure_weighting",
     "choose_stack_weight": "astrometricslib.pipelines.stacking.pre_processing.exposure_weighting",

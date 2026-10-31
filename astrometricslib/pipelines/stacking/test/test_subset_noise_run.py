@@ -57,11 +57,11 @@ from astrometricslib.pipelines.stacking.metrics import (
 )
 from astrometricslib.pipelines.stacking.odd_even_difference_run import model_variance_ratio
 from astrometricslib.pipelines.stacking.post_processing import record_science
-from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
+from astrometricslib.pipelines.stacking.post_processing.aperture_storage import (
     APERTURE_FILE_NAME,
-    aperture_identity_to_number,
     load_apertures_with_reason,
 )
+from astrometricslib.pipelines.stacking.post_processing.empty_apertures import aperture_identity_to_number
 from astrometricslib.pipelines.stacking.post_processing.expected_noise import FrameNoiseInput
 from astrometricslib.pipelines.stacking.post_processing.stack_noise import measure_stack_noise
 from astrometricslib.pipelines.stacking.subset_noise_run import (

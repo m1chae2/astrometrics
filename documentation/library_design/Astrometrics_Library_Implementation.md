@@ -64,14 +64,14 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 - **Calibration frames (§3.2).** `calibration_ingest.py`, `astrometricslib/drivers/calibration_library.py`, `pre_processing/flat_calibration.py`.
 - **Gain and read noise (§3.2).** `CalibrationCatalog.measure_sensor_noise` (`astrometricslib/api/processing.py`) calls `sensor_noise_run.py` and `pre_processing/sensor_noise.py`. `save=True` writes the profile. `CameraProfile.sensor_noise_for` matches gain, offset and binning exactly; with `clipped_at_zero=False` it falls back to the nearest other offset at that gain and binning (ties go higher). The flag comes from the frame's share of exact zeros (`CLIPPED_FRAME_ZERO_FRACTION`). <!-- impl: astrometricslib.models.camera_profile.CameraProfile.sensor_noise_for --> Evidence: [STK-35](validation/stacking.md#stk-35); the fallback is a design estimate ([table](validation/stacking.md#design-estimates)).
 - **Rejection and filtering (§3.2).** `astrometricslib/utilities/rejection_thresholds.py`, `stack_filter_floor.py`.
-- **Exposure groups and weights (§3.2).** `processing/exposure_groups.py` and its helpers; `pre_processing/exposure_weighting.py`. `fold_exposure_lengths` assigns each exposure length a group. <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.fold_exposure_lengths --> `combine_exposure_group_images` returns an `ExposureGroupCombination`: each group's applied gain (stored as `stacking.group_gain_applied`), sky level, weight and masks. <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.ExposureGroupCombination --> `post_processing/stack_membership.group_frame_weights` gives frame i of group g the raw weight `W_g * w_i / sum(w)` with `W_g = N t^2 / s^2`, without the gain, and leaves a group's weights unknown, with a reason, in the cases the stacking README lists. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_membership.group_frame_weights --> In a folded group Siril scales frame `i` to the group's reference frame by `k_i = t_ref / t_i` (`group_exposure_scales`; a design estimate). <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_membership.group_exposure_scales --> `group_references` finds the reference frame, and `stacking.group_reference_exposure_s` stores its exposure. A frame with no usable exposure, or an unnamed reference, leaves the weights unknown. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_membership.group_references --> A group stack's reference frame is the identity line of its heaviest group (`registration_reference_from_diagnostics`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_membership.registration_reference_from_diagnostics --> A group's frame noise `s_g` clips neighbor differences at `NOISE_CLIP_SIGMAS`. <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.NOISE_CLIP_SIGMAS --> Empty apertures stay `UNCOVERED_CLEARANCE_PX` from any group's uncovered border. <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.UNCOVERED_CLEARANCE_PX -->
+- **Exposure groups and weights (§3.2).** `processing/exposure_groups.py` and its `group_*.py` helpers; `pre_processing/exposure_weighting.py`. `fold_exposure_lengths` assigns each exposure length a group. <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.fold_exposure_lengths --> `combine_exposure_group_images` returns an `ExposureGroupCombination`: each group's applied gain (stored as `stacking.group_gain_applied`), sky level, weight and masks. <!-- impl: astrometricslib.pipelines.stacking.processing.group_combination.ExposureGroupCombination --> `post_processing/stack_membership.group_frame_weights` gives frame i of group g the raw weight `W_g * w_i / sum(w)` with `W_g = N t^2 / s^2`, without the gain, and leaves a group's weights unknown, with a reason, in the cases the stacking README lists. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_membership.group_frame_weights --> In a folded group Siril scales frame `i` to the group's reference frame by `k_i = t_ref / t_i` (`group_exposure_scales`; a design estimate). <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_membership.group_exposure_scales --> `group_references` finds the reference frame, and `stacking.group_reference_exposure_s` stores its exposure. A frame with no usable exposure, or an unnamed reference, leaves the weights unknown. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_membership.group_references --> A group stack's reference frame is the identity line of its heaviest group (`registration_reference_from_diagnostics`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_membership.registration_reference_from_diagnostics --> A group's frame noise `s_g` clips neighbor differences at `NOISE_CLIP_SIGMAS`. <!-- impl: astrometricslib.pipelines.stacking.processing.group_gains.NOISE_CLIP_SIGMAS --> Empty apertures stay `UNCOVERED_CLEARANCE_PX` from any group's uncovered border. <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_placement.UNCOVERED_CLEARANCE_PX -->
 - **Sequence and restacks (§3.3).** `pre_processing/stack_inputs.py`; `post_processing/previous_stack.py`, `stack_comparison.py`, `interrupted_jobs.py`.
 - **Previews (§3.3).** `post_processing/stack_preview.py` and its helpers, `preview_remake.py`.
 - **Frame measurement (§3.4).** `ProcessingPipelines.record_frame_measurements` (`frame_measurement_run.py`). Evidence: [AST-17](validation/astrometry.md#ast-17), [AST-18](validation/astrometry.md#ast-18).
 - **Frame geometry (§3.4).** `post_processing/field_rotation.py` (`field_rotation_measurements`) stores frame rotations. `shared/registration_record.py` keeps `<stack>_registration_frames.json` for astrometry (§4.2) and the one registration reader (`is_already_registered`). `record_quality.FrameGeometryRows` keeps rotation and pointing rows apart. Evidence: [STK-43](validation/stacking.md#stk-43).
 - **Input screening (§3.4.1).** `pre_processing/frame_quarantine.py`, `frame_homogeneity.py`, `background_homogeneity.py`, `camera_selection.py`, `assess_input_quality.py`.
 - **Output checks (§3.4.2).** `post_processing/assess_output_quality.py`, `stack_quality.py`, `exposure_group_report.py`, `stack_quality_report.py`.
-- **Stack measurements (§3.4).** `stage._record_stack_quality` calls `record_stacking_quality` (`post_processing/record_quality.py`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.record_quality.record_stacking_quality --> Without a plate solution from the header or a named reference frame, the noise step tries up to `MEMBER_FRAME_ATTEMPTS` member frames of the reference group. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.MEMBER_FRAME_ATTEMPTS --> Last, `_plate_solve_stack_wcs` plate-solves the stack in memory (`PLATE_SOLVE_WCS_SOURCE`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.PLATE_SOLVE_WCS_SOURCE --> The aperture set file keeps one set per camera, optic and reference exposure (`camera|telescope|focal|exp=<s>`). Subset and odd–even difference stacks use the library stack's recorded set (`find_library_set_key`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.record_library_set_key --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.find_library_set_key --> `stacking.frames_stacked_count` (definition version 2) counts the frames of the member rows (`stack_membership.count_frames_stacked`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_membership.count_frames_stacked --> `post_processing/normalization_scale.py` measures Siril's normalization scale and stores `stacking.normalization_scale`; the expected-noise rows (definition version 2) are multiplied by it. <!-- impl: astrometricslib.pipelines.stacking.post_processing.normalization_scale.EXPOSURE_MATCH_FRACTION --> The noise and weights come from `post_processing/stack_noise.py`, `empty_apertures.py`, `difference_noise.py`, `stack_image.py`, `stack_membership.py`, `expected_noise.py`, `flat_noise_contribution.py`, `record_science.py`. Evidence: [STK-36](validation/stacking.md#stk-36), [STK-07](validation/stacking.md#stk-07), [STK-38](validation/stacking.md#stk-38), [STK-39](validation/stacking.md#stk-39), [STK-40](validation/stacking.md#stk-40), [STK-41](validation/stacking.md#stk-41).
+- **Stack measurements (§3.4).** `stage._record_stack_quality` calls `record_stacking_quality` (`post_processing/record_quality.py`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.record_quality.record_stacking_quality --> Without a plate solution from the header or a named reference frame, the noise step tries up to `MEMBER_FRAME_ATTEMPTS` member frames of the reference group. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.MEMBER_FRAME_ATTEMPTS --> Last, `_plate_solve_stack_wcs` plate-solves the stack in memory (`PLATE_SOLVE_WCS_SOURCE`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.PLATE_SOLVE_WCS_SOURCE --> The aperture set file keeps one set per camera, optic and reference exposure (`camera|telescope|focal|exp=<s>`). Subset and odd–even difference stacks use the library stack's recorded set (`find_library_set_key`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_storage.record_library_set_key --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_storage.find_library_set_key --> `stacking.frames_stacked_count` (definition version 2) counts the frames of the member rows (`stack_membership.count_frames_stacked`). <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_membership.count_frames_stacked --> `post_processing/normalization_scale.py` measures Siril's normalization scale and stores `stacking.normalization_scale`; the expected-noise rows (definition version 2) are multiplied by it. <!-- impl: astrometricslib.pipelines.stacking.post_processing.normalization_scale.EXPOSURE_MATCH_FRACTION --> The noise and weights come from `post_processing/stack_noise.py`, `empty_apertures.py`, `difference_noise.py`, `stack_image.py`, `stack_membership.py`, `expected_noise.py`, `flat_noise_contribution.py`, `record_science.py`. Evidence: [STK-36](validation/stacking.md#stk-36), [STK-07](validation/stacking.md#stk-07), [STK-38](validation/stacking.md#stk-38), [STK-39](validation/stacking.md#stk-39), [STK-40](validation/stacking.md#stk-40), [STK-41](validation/stacking.md#stk-41).
 - **Predicted noise of an exposure-group stack (§3.4).** `expected_noise.expected_exposure_group_noise` <!-- impl: astrometricslib.pipelines.stacking.post_processing.expected_noise.expected_exposure_group_noise --> gives frame `i` of group `g` the coefficient `W_g ŵ_i / (ΣW · G_g)` in counts per second (`W_g` the combine weight, `ŵ_i` the frame's share, `G_g` the applied gain, 1 when unmeasured, which marks the rows assumed). The noise follows from the squared coefficients times each frame's variance (times `k_i` squared, `FrameNoiseInput.exposure_scale`), the mean exposure, the unit scale and the aperture multiplier. `record_science.compute_expected_noise` refuses (not measured) when `clipped_exposure_groups` is not empty (a clipped single-group stack too), and gives the membership's reason when the weights are unknown. Register entry: [STK-38](validation/stacking.md#stk-38).
 - **Aperture set identity (§3.4).** `stacking.aperture_set_number` (every noise stack) and its odd–even difference twin hold the set's identity as one number (`aperture_identity_to_number`, `aperture_identity_from_number`, `aperture_set_measurement`). Design estimate; evidence: [STK-36](validation/stacking.md#stk-36), [STK-42](validation/stacking.md#stk-42). <!-- impl: astrometricslib.pipelines.stacking.post_processing.record_quality.aperture_set_measurement -->
 - **Subset stacks (§3.4).** `subset_noise_run.py`, `subset_stack.stack_frame_subset`. `stack_subset(..., record_forecast_rows=True)` also stores the forecast rows; the restack labels its all-but-the-last-night subset `EARLIER_NIGHTS_VARIANT`. <!-- impl: astrometricslib.EARLIER_NIGHTS_VARIANT --> Evidence: [STK-37](validation/stacking.md#stk-37), [STK-38](validation/stacking.md#stk-38).
@@ -238,11 +238,11 @@ Tables 3 to 7 list each pipeline's tuned values and the explaining section. Each
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.flat_match.DEFAULT_TIME_LIMIT_SECONDS -->
 <!-- impl: astrometricslib.drivers.calibration_library.FLAT_FRAME_PATHS_KEY -->
 <!-- impl: astrometricslib.drivers.calibration_library.BIAS_FRAME_PATHS_KEY -->
-<!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.FAINT_SOURCE_THRESHOLD_SIGMAS -->
-<!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.FAINT_SOURCE_SMOOTHING_SIGMAS_PX -->
-<!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.FAINT_SOURCE_HIGH_PASS_SIGMA_PX -->
-<!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.FAINT_SOURCE_CLEARANCE_PX -->
-<!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.MINIMUM_USABLE_APERTURES -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_placement.FAINT_SOURCE_THRESHOLD_SIGMAS -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_placement.FAINT_SOURCE_SMOOTHING_SIGMAS_PX -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_placement.FAINT_SOURCE_HIGH_PASS_SIGMA_PX -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_placement.FAINT_SOURCE_CLEARANCE_PX -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_placement.MINIMUM_USABLE_APERTURES -->
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.APERTURE_FILE_VERSION -->
 <!-- impl: astrometricslib.pipelines.stacking.odd_even_difference_run.ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF -->
 <!-- impl: astrometricslib.utilities.rejection_thresholds.rejection_bounds -->
@@ -264,30 +264,30 @@ Tables 3 to 7 list each pipeline's tuned values and the explaining section. Each
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.depth_limits.SURFACE_BRIGHTNESS_BOX_ARCSEC -->
 <!-- impl: astrometricslib.pipelines.stacking.odd_even_bias.SMOOTHING_SIGMA_PX -->
 <!-- impl: astrometricslib.pipelines.stacking.odd_even_bias.KEEP_RADIUS_PX -->
-<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.FRAME_MEASUREMENT_TIME_BUDGET_SECONDS -->
-<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_GRID_CELL_COUNT -->
-<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_CANDIDATES_PER_CELL -->
-<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_FIT_BOX_HALF_WIDTH_PX -->
-<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_ISOLATION_RADIUS_PX -->
-<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_SATURATION_MARGIN_FRACTION -->
-<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_SUBPIXEL_FACTOR -->
-<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_BETA_MINIMUM -->
-<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_BETA_MAXIMUM -->
-<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_BETA_START -->
-<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_MINIMUM_R_SQUARED -->
-<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_MAXIMUM_CENTER_SHIFT_PX -->
-<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_MINIMUM_FWHM_PX -->
-<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_MAXIMUM_FWHM_PX -->
-<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_MINIMUM_STAR_COUNT -->
-<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOMENT_APERTURE_FWHM_MULTIPLE -->
-<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.MOMENT_APERTURE_MINIMUM_RADIUS_PX -->
-<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.BOOTSTRAP_RESAMPLE_COUNT -->
-<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.STAR_FINDER_EXPECTED_FWHM_PX -->
-<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.STAR_FINDER_THRESHOLD_SIGMA -->
-<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.STAR_FINDER_BOX_FRACTION -->
-<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.PIXEL_BLUR_FWHM_SQUARED_FACTOR -->
-<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.FIELD_GRID_CELLS_PER_SIDE -->
-<!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.FIELD_REGION_CELLS_PER_SIDE -->
+<!-- impl: astrometricslib.pipelines.shared.quality.time_budget.FRAME_MEASUREMENT_TIME_BUDGET_SECONDS -->
+<!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.MOFFAT_GRID_CELL_COUNT -->
+<!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.MOFFAT_CANDIDATES_PER_CELL -->
+<!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.MOFFAT_FIT_BOX_HALF_WIDTH_PX -->
+<!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.MOFFAT_ISOLATION_RADIUS_PX -->
+<!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.MOFFAT_SATURATION_MARGIN_FRACTION -->
+<!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.MOFFAT_SUBPIXEL_FACTOR -->
+<!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.MOFFAT_BETA_MINIMUM -->
+<!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.MOFFAT_BETA_MAXIMUM -->
+<!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.MOFFAT_BETA_START -->
+<!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.MOFFAT_MINIMUM_R_SQUARED -->
+<!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.MOFFAT_MAXIMUM_CENTER_SHIFT_PX -->
+<!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.MOFFAT_MINIMUM_FWHM_PX -->
+<!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.MOFFAT_MAXIMUM_FWHM_PX -->
+<!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.MOFFAT_MINIMUM_STAR_COUNT -->
+<!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.MOMENT_APERTURE_FWHM_MULTIPLE -->
+<!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.MOMENT_APERTURE_MINIMUM_RADIUS_PX -->
+<!-- impl: astrometricslib.pipelines.shared.quality.frame_statistics.BOOTSTRAP_RESAMPLE_COUNT -->
+<!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.STAR_FINDER_EXPECTED_FWHM_PX -->
+<!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.STAR_FINDER_THRESHOLD_SIGMA -->
+<!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.STAR_FINDER_BOX_FRACTION -->
+<!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.PIXEL_BLUR_FWHM_SQUARED_FACTOR -->
+<!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.FIELD_GRID_CELLS_PER_SIDE -->
+<!-- impl: astrometricslib.pipelines.shared.quality.star_profile_fitting.FIELD_REGION_CELLS_PER_SIDE -->
 <!-- impl: astrometricslib.pipelines.stacking.frame_measurement_run.MEASUREMENT_WORKER_COUNT -->
 <!-- impl: astrometricslib.pipelines.stacking.frame_measurement_run.BIAS_FRAMES_FOR_LEVEL -->
 <!-- impl: astrometricslib.pipelines.stacking.frame_measurement_run.STACKING_STAGE_MEASUREMENT_LIMIT -->
@@ -297,9 +297,9 @@ Tables 3 to 7 list each pipeline's tuned values and the explaining section. Each
 <!-- impl: astrometricslib.pipelines.stacking.pre_processing.sensor_noise.CENTRAL_REGION_SHAPE_PIXELS -->
 <!-- impl: astrometricslib.drivers.calibration_library.DEFAULT_DARK_TEMPERATURE_TOLERANCE_C -->
 <!-- impl: astrometricslib.utilities.stack_filter_floor.DEFAULT_MINIMUM_SURVIVING_FRAMES -->
-<!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.GAIN_MID_RANGE_PERCENTILES -->
-<!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.GAIN_BRIGHTEST_FRACTION -->
-<!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.DEFAULT_GAIN_DISAGREEMENT_TOLERANCE -->
+<!-- impl: astrometricslib.pipelines.stacking.processing.group_gains.GAIN_MID_RANGE_PERCENTILES -->
+<!-- impl: astrometricslib.pipelines.stacking.processing.group_gains.GAIN_BRIGHTEST_FRACTION -->
+<!-- impl: astrometricslib.pipelines.stacking.processing.group_gains.DEFAULT_GAIN_DISAGREEMENT_TOLERANCE -->
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_quality.DEFAULT_FWHM_DEGRADATION_RATIO -->
 <!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.SESSION_GAP_SECONDS -->
 <!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.MINIMUM_FRAMES_TO_JUDGE -->
@@ -311,8 +311,8 @@ Tables 3 to 7 list each pipeline's tuned values and the explaining section. Each
 <!-- impl: astrometricslib.pipelines.stacking.stack_runner.MINIMUM_REGISTERED_FRACTION -->
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_quality.DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD -->
 <!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.COLOUR_CAMERA_ROUNDNESS_DROP_BELOW_MEDIAN -->
-<!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.STAR_GAIN_MINIMUM_STARS -->
-<!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.SKY_RATIO_LIMIT -->
+<!-- impl: astrometricslib.pipelines.stacking.processing.group_star_gains.STAR_GAIN_MINIMUM_STARS -->
+<!-- impl: astrometricslib.pipelines.stacking.processing.group_gains.SKY_RATIO_LIMIT -->
 
 ### 5.2 Astrometry settings
 

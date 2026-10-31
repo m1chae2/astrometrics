@@ -120,7 +120,7 @@ linearity limit into one limit would lower the ZWO ASI533's saturation level fro
 ### 3.1 How the combine works
 
 `stack_runner._stack_exposure_groups` stacks each exposure length on its own, with Siril's
-weighting (`wfwhm`) inside the group. `exposure_groups.combine_exposure_group_images` then combines
+weighting (`wfwhm`) inside the group. `group_combination.combine_exposure_group_images` then combines
 the groups:
 
 - each group image is divided by its exposure (counts per second);
@@ -427,7 +427,7 @@ The fix (about half a day):
 
 #### 3.6.4 Gap 4, found on the way: `s_g` moves in steps of about 4 ADU
 
-`exposure_groups.estimate_background_noise` takes the median absolute deviation of neighboring
+`group_gains.estimate_background_noise` takes the median absolute deviation of neighboring
 pixel differences. The ZWO stores its 14-bit values in steps of 4, so the median is a multiple
 of 4 and `s_g` can only be 1.048 times a multiple of 4 ADU (M 27: 25.16 = 1.048 × 24, and 37.74 =
 1.048 × 36 for both the 60 s and the 120 s group). At these levels one step is about 11% in `s_g`

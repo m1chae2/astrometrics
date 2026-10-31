@@ -434,7 +434,7 @@ class CameraProfile(BaseModel):
             The frame's binning, such as ``"1x1"`` or ``2``.
         clipped_at_zero : `bool` or `None`, optional
             Whether the frame's pixels are cut off at zero (see
-            `astrometricslib.pipelines.stacking.processing.exposure_groups.
+            `astrometricslib.pipelines.stacking.processing.group_gains.
             CLIPPED_FRAME_ZERO_FRACTION`). `False` allows the offset
             fallback. `True` and `None` (not known) do not, so only an exact
             match is returned.

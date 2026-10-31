@@ -18,7 +18,7 @@ from astrometricslib.pipelines.stacking.post_processing.stack_membership import 
     registration_reference_from_diagnostics,
     wfwhm_weights,
 )
-from astrometricslib.pipelines.stacking.processing.exposure_groups import merge_registration_sequences
+from astrometricslib.pipelines.stacking.processing.group_file_merging import merge_registration_sequences
 
 
 def _frames(count: int, exposure: str = "60") -> list[SimpleNamespace]:

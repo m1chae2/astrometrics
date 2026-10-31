@@ -27,10 +27,8 @@ from typing import NamedTuple
 
 import numpy as np
 
-from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
-    MINIMUM_USABLE_APERTURES,
-    ApertureSetMismatchError,
-)
+from astrometricslib.pipelines.stacking.post_processing.aperture_placement import MINIMUM_USABLE_APERTURES
+from astrometricslib.pipelines.stacking.post_processing.empty_apertures import ApertureSetMismatchError
 from astrometricslib.pipelines.stacking.post_processing.stack_image import (
     read_stack_plane,
     robust_sigma,

@@ -311,7 +311,7 @@ def _is_stack_blank(stack_path: str) -> bool:
     import numpy as np
 
     from astrometricslib.drivers.fits_access import read_data
-    from astrometricslib.pipelines.stacking.processing.exposure_groups import (
+    from astrometricslib.pipelines.stacking.processing.group_gains import (
         MINIMUM_STACK_DATA_FRACTION,
         stack_data_fraction,
     )
@@ -444,13 +444,15 @@ def _describe_single_group(frames: list[Any], diagnostics: dict[str, Any], stack
         recommended_exposure_for_groups,
     )
     from astrometricslib.pipelines.stacking.processing.exposure_groups import (
-        CLIPPING_FLOOR_SIGMAS,
         ExposureGroup,
-        describe_group_clipping,
-        measure_group_frames,
         representative_exposure_frames,
         representative_exposure_seconds,
     )
+    from astrometricslib.pipelines.stacking.processing.group_combination import (
+        CLIPPING_FLOOR_SIGMAS,
+        measure_group_frames,
+    )
+    from astrometricslib.pipelines.stacking.processing.group_gains import describe_group_clipping
 
     exposure = representative_exposure_seconds(frames)
     try:
@@ -796,12 +798,12 @@ def _measure_group_stacks(
 
     from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
     from astrometricslib.drivers.fits_access import read_data
-    from astrometricslib.pipelines.stacking.processing.exposure_groups import (
+    from astrometricslib.pipelines.stacking.processing.group_combination import (
         CLIPPING_FLOOR_SIGMAS,
-        describe_group_clipping,
         measure_group_frames,
     )
     from astrometricslib.pipelines.stacking.processing.group_derotation import derotate_groups_to_common_tilt
+    from astrometricslib.pipelines.stacking.processing.group_gains import describe_group_clipping
 
     # Each group's own registration facts, read while its sequence file is
     # still next to its stack: the frame weights and the reference frame of
@@ -924,15 +926,17 @@ def _align_and_screen_groups(
     import numpy as np
 
     from astrometricslib.foundation.config import get_configuration
-    from astrometricslib.pipelines.stacking.processing.exposure_groups import (
-        describe_bright_sky_group,
-        describe_nonlinear_group,
-        group_weight,
-        measure_exposure_group_gains,
-    )
     from astrometricslib.pipelines.stacking.processing.group_alignment import (
         SPECTRAL_ALIGNMENT_CENTER_CROP_FRACTION,
         align_images_to_reference,
+    )
+    from astrometricslib.pipelines.stacking.processing.group_combination import (
+        group_weight,
+        measure_exposure_group_gains,
+    )
+    from astrometricslib.pipelines.stacking.processing.group_gains import (
+        describe_bright_sky_group,
+        describe_nonlinear_group,
     )
 
     # Line the group stacks up with the group that carries the most weight
@@ -1053,8 +1057,8 @@ def _write_combined_stack(
     """
     from astrometricslib.drivers.fits_access import read_header, write_image
     from astrometricslib.pipelines.stacking.post_processing.exposure_group_report import groups_directory
-    from astrometricslib.pipelines.stacking.processing.exposure_groups import (
-        combine_exposure_group_images,
+    from astrometricslib.pipelines.stacking.processing.group_combination import combine_exposure_group_images
+    from astrometricslib.pipelines.stacking.processing.group_file_merging import (
         merge_registration_sequences,
         merge_rejection_maps,
     )
@@ -1161,7 +1165,7 @@ def _describe_groups(
         measure_group_saturation,
         write_group_manifest,
     )
-    from astrometricslib.pipelines.stacking.processing.exposure_groups import CLIPPED_FRAME_ZERO_FRACTION
+    from astrometricslib.pipelines.stacking.processing.group_gains import CLIPPED_FRAME_ZERO_FRACTION
 
     summaries, details, saturation_by_group = [], [], []
     for result in results:
@@ -1276,7 +1280,7 @@ def _join_group_diagnostics(
         [result.summary_index for result in used],
     )
     # Where every combined group has data. Empty-sky apertures keep out of the
-    # rest (see `empty_apertures.UNCOVERED_CLEARANCE_PX`).
+    # rest (see `aperture_placement.UNCOVERED_CLEARANCE_PX`).
     merged_diagnostics["covered_in_every_group"] = np.logical_and.reduce(combination.covered_masks)
     if stacked_fwhm is not None:
         merged_diagnostics["stacked_fwhm_px"] = stacked_fwhm
@@ -1436,7 +1440,7 @@ def _measure_combined_fwhm(
 
     from astrometricslib.drivers.fits_access import collapse_to_2d
     from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_fwhm_from_data
-    from astrometricslib.pipelines.stacking.processing.exposure_groups import saturated_pixel_mask
+    from astrometricslib.pipelines.stacking.processing.group_gains import saturated_pixel_mask
 
     try:
         plane = collapse_to_2d(np.asarray(combined, dtype=float))

@@ -47,7 +47,7 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 
-from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
+from astrometricslib.pipelines.stacking.post_processing.aperture_placement import (
     FAINT_SOURCE_CLEARANCE_PX,
     faint_source_distance,
 )

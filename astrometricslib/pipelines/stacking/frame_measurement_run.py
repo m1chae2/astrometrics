@@ -103,7 +103,6 @@ from astrometricslib.models.quality.measurement import (
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.frame_scanning import file_state_matches
 from astrometricslib.pipelines.shared.quality.frame_measurement import (
-    TIME_BUDGET_REASON_PREFIX,
     UNREADABLE_FRAME_REASON_PREFIX,
     frame_metric_set_fingerprint,
     frame_subject,
@@ -116,9 +115,10 @@ from astrometricslib.pipelines.shared.quality.metrics import (
     FRAME_SKY_RATE_E_PER_S_PER_PX,
 )
 from astrometricslib.pipelines.shared.quality.record_measurements import record_measurements
+from astrometricslib.pipelines.shared.quality.time_budget import TIME_BUDGET_REASON_PREFIX
 from astrometricslib.pipelines.stacking.exact_bias_frames import exact_setting_bias_frames
 from astrometricslib.pipelines.stacking.metrics import FRAME_QUARANTINE_ROUNDNESS, FRAME_QUARANTINE_SKY_MEDIAN
-from astrometricslib.pipelines.stacking.processing.exposure_groups import CLIPPED_FRAME_ZERO_FRACTION
+from astrometricslib.pipelines.stacking.processing.group_gains import CLIPPED_FRAME_ZERO_FRACTION
 from astrometricslib.utilities.camera_setting_text import (
     canonical_binning_setting,
     canonical_gain_setting,

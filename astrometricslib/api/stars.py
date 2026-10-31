@@ -469,38 +469,6 @@ class StellarCatalog:
         )
         return new_star
 
-    def save_all(self, objects: list[StellarObject], allow_empty: bool = False) -> str:
-        """Save a complete list of stars, replacing the whole catalog.
-
-        Warning: this deletes every star that is not in the new list. To
-        change a few stars, use `update` instead.
-
-        Parameters
-        ----------
-        objects : `list` [`StellarObject`]
-            The full set of stars to record.
-        allow_empty : `bool`, optional
-            Saving an empty list is refused unless this is `True`, so the
-            whole catalog is never deleted by accident.
-
-        Returns
-        -------
-        result : `str`
-            A short note saying the catalog was saved.
-
-        Raises
-        ------
-        InvalidArgumentError
-            If ``objects`` is empty and ``allow_empty`` is `False`.
-        """
-        if not objects and not allow_empty:
-            raise InvalidArgumentError(
-                "save_all() received an empty list, which would delete every star. "
-                "Pass allow_empty=True to clear the catalog on purpose."
-            )
-        self._catalog_access.put(objects, "stellar_catalog", {})
-        return "stellar catalog saved"
-
     def detect_point_sources(
         self,
         image_data: Any,

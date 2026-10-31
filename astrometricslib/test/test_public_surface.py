@@ -332,7 +332,6 @@ SUB_API_MEMBERS = {
         "get",
         "plate_solve",
         "query",
-        "save_all",
         "tune_spectroscopy_calibration",
         "update",
     },

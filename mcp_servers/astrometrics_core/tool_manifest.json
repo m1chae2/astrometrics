@@ -289,13 +289,6 @@
       "interim_block": "",
       "note": "Built 2026-10-03. Library star lookup with hard caps on rows, region size and full records."
     },
-    "star_save_all": {
-      "tool_class": "change-data",
-      "category": "stars",
-      "disposition": "withhold",
-      "interim_block": "",
-      "note": "Replaces the whole star catalog."
-    },
     "star_tune_spectroscopy_calibration": {
       "tool_class": "change-data",
       "category": "stars",

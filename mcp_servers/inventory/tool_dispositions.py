@@ -161,7 +161,6 @@ DECISIONS = {
         "returns the fitted values.",
         "change-data",
     ),
-    "star_save_all": ToolDecision("withhold", "Replaces the whole star catalog."),
     # ---- Fix first ----
     "target_save": ToolDecision("withhold", "Writes the database. The AI is read-only."),
     "star_analyze_periodicity": ToolDecision(

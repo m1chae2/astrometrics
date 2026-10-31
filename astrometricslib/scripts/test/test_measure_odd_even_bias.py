@@ -76,7 +76,7 @@ def test_the_script_prints_the_ratio_and_writes_the_json_file(
     assert call["path"] == "/stacks/M99.fits" and call["repeats"] == 3
     assert call["work_folder"] == str(tmp_path / "work")
     output = capsys.readouterr().out
-    assert "difference noise over true noise: 0.9800 +/- 0.0200" in output
+    assert "difference noise over injected noise: 0.9800 +/- 0.0200" in output
     assert "below 1: the difference reads low" in output
     data = json.loads(json_path.read_text())
     assert data["ratio"] == pytest.approx(0.98) and data["camera"] == "Cam" and len(data["repeats"]) == 1

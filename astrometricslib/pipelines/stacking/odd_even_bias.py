@@ -30,27 +30,44 @@ noise:
    same stacker settings (so the same rejection), the same empty apertures.
    Besides the two halves, the whole set is stacked too.
 
-The whole simulated stack has only random noise, so its noise in the empty
-apertures is the true random noise of that stack. The difference of the halves,
-turned into the noise of the whole stack the way the production job turns it
+The injected noise is known, so it is the reference. Each simulated frame
+holds the noise it was given plus the real frame's smoothed sky, and the
+smoothed sky still carries the real frame's fixed pattern (the same flat-
+field and dark-current pattern, and real sky structure, in every frame). A
+stack of the whole simulated set therefore measures random noise plus that
+fixed pattern in the empty apertures, and comparing the difference with it
+gave a misleading ratio (the register entry has the numbers). So the
+reference is worked out from what was injected: the stack of independent
+noise of the injected size per frame has the variance ``sum(a_i^2 s_i^2)``
+(the frames' weights ``a_i`` and the injected standard deviations ``s_i``),
+turned into the noise in an empty aperture the way the production prediction
+does it (`expected_noise.expected_stack_noise`) and multiplied by the stack's
+Siril normalization scale as the production prediction is
+(`record_science.scale_expected_noise`). The difference of the halves, turned
+into the noise of the whole stack the way the production job turns it
 (`odd_even_difference_run.full_stack_noise_equivalent`), should equal it. The
 ratio of the two is the bias: below 1 when the difference reads low. The
 production measurement divides by it
-(`difference_noise.ODD_EVEN_DIFFERENCE_NOISE_BIAS`).
+(`difference_noise.ODD_EVEN_DIFFERENCE_NOISE_BIAS`). The whole simulated
+stack's measured noise is still kept in each repeat
+(`BiasRepeat.whole_stack_noise_normalized`), because its excess over the
+injected noise shows the fixed pattern the smoothed sky carries.
 
 What the ratio contains. It is the bias of the whole production recipe on
 frames of this camera: clipping, the shared reference frame, resampling
 correlation, and the equal-noise assumption of the conversion (the simulated
-frames differ in noise as the real ones do). It does not contain fixed-pattern
-noise, because the simulated frames hold none beyond what the calibration
-frames add identically to both halves.
+frames differ in noise as the real ones do). It does not contain fixed-
+pattern noise, because the reference is the injected noise, and the fixed
+pattern cancels in the difference.
 
-Limits. The sky of a simulated frame is smooth, so the test says nothing about
-a structured sky. The result belongs to the camera and the stacker settings of
-the run; the plan's decision D16 is to repeat it once for each camera and again
-whenever the rejection settings change. Raw frames of a color camera are
-smoothed within each Bayer position. It is a Design estimate until the result
-is entered in the validation register.
+Limits. The sky of a simulated frame is smooth, so the test says nothing
+about a structured sky. The injected noise is worked out for a stack of one
+exposure group; a stack of several groups is refused. The result belongs to
+the camera and the stacker settings of the run; the plan's decision D16 is to
+repeat it once for each camera and again whenever the rejection settings
+change. Raw frames of a color camera are smoothed within each Bayer position.
+It is a Design estimate until the result is entered in the validation
+register.
 """
 
 import logging
@@ -87,16 +104,20 @@ from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
 from astrometricslib.pipelines.stacking.post_processing.expected_noise import (
     ExpectedNoiseOutcome,
     FrameNoiseInput,
+    expected_stack_noise,
 )
 from astrometricslib.pipelines.stacking.post_processing.flat_noise_contribution import (
     smoothed_noise_factor,
 )
 from astrometricslib.pipelines.stacking.post_processing.record_science import (
     frame_noise_inputs_from_store,
+    scale_expected_noise,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_membership import (
+    StackMembership,
     determine_stack_members,
     effective_frame_count,
+    normalized_weights,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_noise import measure_stack_noise
 from astrometricslib.pipelines.stacking.subset_noise_run import read_library_run
@@ -109,6 +130,7 @@ __all__ = [
     "BiasMeasurement",
     "BiasRepeat",
     "injected_noise_sigma_adu",
+    "injected_stack_noise",
     "measure_odd_even_bias",
     "simulate_frame",
     "smoothed_sky_frame",
@@ -138,15 +160,16 @@ class BiasRepeat:
     equivalent_noise_normalized : `float`
         The whole stack's random noise implied by the halves' difference, as a
         fraction of the reference stars' brightness.
-    true_noise_normalized : `float`
-        The noise of the whole simulated stack in the same apertures, on the
-        same scale. Only random noise went in, so it is the true random noise.
+    injected_noise_normalized : `float`
+        The noise of the whole simulated stack that the injected noise gives in
+        an empty aperture, on the same scale (see `injected_stack_noise`).
     ratio : `float`
-        ``equivalent / true``: below 1 when the difference reads low.
+        ``equivalent / injected``: below 1 when the difference reads low.
     ratio_error : `float`
-        Its 1-sigma uncertainty from the two noises' relative errors added in
-        quadrature. The two share apertures and frames, so they are positively
-        correlated and the true error is smaller.
+        Its 1-sigma uncertainty from the relative errors of the difference,
+        of the reference stars' brightness and of the normalization scale,
+        added in quadrature. The first two share apertures and stars, so they
+        are positively correlated and the true error is smaller.
     difference_noise_normalized : `float`
         The (uncorrected) noise of the difference itself.
     variance_factor : `float`
@@ -155,16 +178,27 @@ class BiasRepeat:
         The whole simulated stack's effective frame count.
     aperture_count : `int`
         The apertures behind the difference noise.
+    whole_stack_noise_normalized : `float` or `None`
+        The measured noise of the whole simulated stack in the same apertures.
+        It is not the reference: it holds the fixed pattern of the smoothed
+        real sky as well. Shown so its excess over the injected noise can be
+        read. `None` when not measured.
+    normalization_scale : `float` or `None`
+        The Siril normalization scale the injected noise was multiplied by, or
+        `None` when it could not be measured and the injected noise is not
+        corrected.
     """
 
     equivalent_noise_normalized: float
-    true_noise_normalized: float
+    injected_noise_normalized: float
     ratio: float
     ratio_error: float
     difference_noise_normalized: float
     variance_factor: float
     full_effective_frame_count: float
     aperture_count: int
+    whole_stack_noise_normalized: float | None = None
+    normalization_scale: float | None = None
 
 
 @dataclass
@@ -178,7 +212,8 @@ class BiasMeasurement:
     camera : `str`
         The camera of those frames.
     ratio : `float` or `None`
-        The mean of the repeats' ratios: the value for
+        The mean of the repeats' ratios (the difference's whole-stack noise
+        over the injected noise): the value for
         `difference_noise.ODD_EVEN_DIFFERENCE_NOISE_BIAS`. `None` when no
         repeat finished.
     ratio_error : `float` or `None`
@@ -264,6 +299,48 @@ def injected_noise_sigma_adu(sky_electrons: float, read_noise_electrons: float, 
         ``sqrt(sky + read^2) / gain`` in ADU.
     """
     return math.sqrt(sky_electrons + read_noise_electrons**2) / gain
+
+
+def injected_stack_noise(
+    membership: StackMembership, sigma_by_path: dict[str, float]
+) -> ExpectedNoiseOutcome:
+    """Work out the noise in an empty aperture that the injected noise gives.
+
+    Each frame is treated as pure noise of the standard deviation that was
+    injected into it, and the stack as the weighted mean the stacker made. The
+    production prediction's arithmetic is used (`expected_stack_noise`), with
+    the injected variance in place of sky plus read noise.
+
+    Parameters
+    ----------
+    membership : `StackMembership`
+        The whole simulated stack's members (simulated paths) and weights.
+    sigma_by_path : `dict` [`str`, `float`]
+        The standard deviation injected into each frame, in ADU, by the
+        simulated frame's path.
+
+    Returns
+    -------
+    outcome : `ExpectedNoiseOutcome`
+        The noise in stack units, or the reason there is none (a member with
+        no injected size, or weights that are unknown).
+    """
+    weights = normalized_weights(membership)
+    inputs = []
+    for member, weight in zip(membership.members, weights, strict=True):
+        sigma = sigma_by_path.get(member.frame.path)
+        if weight is None or sigma is None:
+            return ExpectedNoiseOutcome(None, "a member of the whole simulated stack has no weight or sigma")
+        inputs.append(
+            FrameNoiseInput(
+                weight=weight,
+                sky_electrons=sigma**2,
+                read_noise_electrons=0.0,
+                gain_electrons_per_adu=1.0,
+                exposure_scale=member.exposure_scale,
+            )
+        )
+    return expected_stack_noise(inputs)
 
 
 def simulate_frame(real_path: str, output_path: str, sigma_adu: float, rng: np.random.Generator) -> None:
@@ -488,7 +565,9 @@ def measure_odd_even_bias(
         )
         measurement.notes.append(
             "Simulated frames keep the real frames' sources and calibration and hold Gaussian noise of "
-            "each frame's predicted standard deviation; see odd_even_bias.py for what the ratio contains."
+            "each frame's predicted standard deviation. The difference is compared with that injected "
+            "noise, not with the noise measured on the whole simulated stack, which also holds the "
+            "fixed pattern of the smoothed real sky; see odd_even_bias.py for what the ratio contains."
         )
         stem = stack_stem(library_stack_path)
         half_stacks = HalfStacks(
@@ -625,20 +704,38 @@ def _one_repeat(
     )
     if equivalent is None or full_count is None:
         raise NotFoundError("the whole noise could not be worked out from the difference")
-    true_noise = whole.result.normalized_noise
-    ratio = equivalent / true_noise
-    relative_error = math.hypot(
+    if stacked["full"].diagnostics.get("exposure_group_weights"):
+        raise NotFoundError(
+            "the injected noise is worked out for a stack of one exposure group; "
+            "this stack was made of several"
+        )
+    sigma_by_path = {simulated[path].path: sigma for path, sigma in sigmas.items() if path in simulated}
+    injected = injected_stack_noise(memberships["full"], sigma_by_path)
+    scaled, scale = scale_expected_noise(injected, whole, stacked["full"].diagnostics)
+    if scaled.result is None:
+        raise NotFoundError(f"the injected noise could not be worked out: {scaled.reason}")
+    reference_flux = whole.result.reference_flux_adu
+    injected_noise = scaled.result.total_noise / reference_flux
+    ratio = equivalent / injected_noise
+    relative_errors = [
         difference.result.normalized_uncertainty / difference.result.normalized_noise,
-        whole.result.normalized_uncertainty / true_noise,
-    )
+        whole.result.reference_uncertainty_adu / reference_flux,
+    ]
+    if scale.result is not None:
+        relative_errors.append(scale.result.uncertainty / scale.result.value)
+    else:
+        say(f"Repeat {repeat + 1}: the normalization scale was not measured: {scale.reason}")
+    relative_error = math.hypot(*relative_errors)
     variance_factor = difference_variance_factor(shares["odd"], shares["even"]) or float("nan")
     return BiasRepeat(
         equivalent_noise_normalized=equivalent,
-        true_noise_normalized=true_noise,
+        injected_noise_normalized=injected_noise,
         ratio=ratio,
         ratio_error=ratio * relative_error,
         difference_noise_normalized=difference.result.normalized_noise,
         variance_factor=variance_factor,
         full_effective_frame_count=float(full_count),
         aperture_count=difference.result.aperture_count,
+        whole_stack_noise_normalized=whole.result.normalized_noise,
+        normalization_scale=None if scale.result is None else scale.result.value,
     )

@@ -7,6 +7,7 @@ tested on small synthetic files.
 
 import math
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -18,6 +19,7 @@ from astrometricslib.pipelines.stacking.odd_even_bias import (
     BiasMeasurement,
     BiasRepeat,
     injected_noise_sigma_adu,
+    injected_stack_noise,
     simulate_frame,
     smoothed_sky_frame,
     summarize_repeats,
@@ -209,6 +211,7 @@ def test_the_whole_flow_stacks_two_halves_and_the_whole_and_leaves_no_trace(
 ) -> None:
     """Three stacks per repeat; nothing is kept or stored."""
     from astrometricslib.pipelines.stacking import odd_even_bias
+    from astrometricslib.pipelines.stacking.post_processing.expected_noise import expected_stack_noise
     from astrometricslib.pipelines.stacking.test.test_odd_even_difference_noise import (
         FRAME_COUNT,
         _header,
@@ -240,6 +243,14 @@ def test_the_whole_flow_stacks_two_halves_and_the_whole_and_leaves_no_trace(
     monkeypatch.setattr(
         odd_even_bias, "_noise_sigmas", lambda members, *args: {frame.path: 12.0 for frame in members}
     )
+    # The stand-in stacker writes noise in the units of the injected noise, not
+    # in Siril's (one ADU = 1/65535), so the injected noise is worked out in
+    # those units too.
+    monkeypatch.setattr(
+        odd_even_bias,
+        "expected_stack_noise",
+        lambda frames: expected_stack_noise(frames, stack_units_per_adu=1.0),
+    )
     entries: list[int] = []
     messages: list[str] = []
     work = tmp_path / "work"
@@ -269,6 +280,12 @@ def test_the_whole_flow_stacks_two_halves_and_the_whole_and_leaves_no_trace(
     assert measurement.ratio is not None and 0.2 < measurement.ratio < 1.3
     assert measurement.ratio_error is not None and measurement.ratio_error >= 0
     assert measurement.frame_count == FRAME_COUNT
+    # The reference is the injected noise; the measured stack sits beside it.
+    for repeat in measurement.repeats:
+        expected_ratio = repeat.equivalent_noise_normalized / repeat.injected_noise_normalized
+        assert repeat.ratio == pytest.approx(expected_ratio)
+        assert repeat.whole_stack_noise_normalized is not None
+        assert repeat.whole_stack_noise_normalized != pytest.approx(repeat.injected_noise_normalized)
     assert any("simulating" in text for text in messages)
     # The stacks and simulated frames are gone; no row was stored.
     subsets = Path(library.stack_path).parent / "_subsets"
@@ -295,3 +312,27 @@ def test_a_half_with_too_few_frames_is_refused_before_anything_is_simulated(tmp_
             work_folder=str(tmp_path / "work"),
         )
     assert library.stacker.calls == []
+
+
+def test_the_injected_stack_noise_follows_the_weights_and_the_injected_sizes() -> None:
+    """Equal weights and sigma give sigma over root n, times the aperture."""
+    from astrometricslib.pipelines.stacking.post_processing.expected_noise import effective_aperture_area_px
+    from astrometricslib.pipelines.stacking.post_processing.stack_membership import (
+        StackMember,
+        StackMembership,
+    )
+
+    members = tuple(
+        StackMember(SimpleNamespace(path=f"f{index}.fits"), raw_weight=2.0) for index in range(16)
+    )
+    membership = StackMembership(members, "", "")
+    sigmas = {member.frame.path: 12.0 for member in members}
+
+    outcome = injected_stack_noise(membership, sigmas)
+
+    assert outcome.result is not None
+    expected = 12.0 / math.sqrt(16) * math.sqrt(effective_aperture_area_px()) / 65535.0
+    assert outcome.result.total_noise == pytest.approx(expected)
+    assert outcome.result.read_noise == pytest.approx(0.0)
+    missing = injected_stack_noise(membership, {})
+    assert missing.result is None and "no weight or sigma" in missing.reason

@@ -8,7 +8,9 @@ library stack is replaced by a simulated frame that keeps the real frame's
 stars and calibration but holds Gaussian noise of the frame's predicted size.
 The simulated frames go through the same halves, stacker settings and empty
 apertures as the real ones, and the script prints the ratio of the noise the
-difference implies to the true noise of the whole simulated stack. A ratio
+difference implies to the noise that was injected, worked out for the whole
+stack. (The noise measured on the whole simulated stack is not the reference:
+the smoothed real sky it keeps also carries the real fixed pattern.) A ratio
 below 1 means the difference reads low; the value is entered as
 `ODD_EVEN_DIFFERENCE_NOISE_BIAS` in
 `pipelines/stacking/post_processing/difference_noise.py`. How the simulation
@@ -86,9 +88,16 @@ def print_result(measurement: BiasMeasurement) -> None:
         print("  no repeat finished")
         return
     print(
-        f"  difference noise over true noise: {measurement.ratio:.4f} +/- {measurement.ratio_error:.4f}"
+        f"  difference noise over injected noise: {measurement.ratio:.4f} +/- {measurement.ratio_error:.4f}"
         " (below 1: the difference reads low)"
     )
+    for number, repeat in enumerate(measurement.repeats, start=1):
+        if repeat.whole_stack_noise_normalized is not None:
+            print(
+                f"  repeat {number}: injected {repeat.injected_noise_normalized:.3e}, difference implies "
+                f"{repeat.equivalent_noise_normalized:.3e}, whole simulated stack measured "
+                f"{repeat.whole_stack_noise_normalized:.3e} (includes fixed pattern)"
+            )
     for note in measurement.notes:
         print(f"  note: {note}")
 

@@ -11,13 +11,18 @@ from typing import TYPE_CHECKING, Any
 
 from astrometricslib.drivers.camera_profile_store import camera_identity
 from astrometricslib.drivers.driver_set import Drivers
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.errors import AstrometricsError, ConflictError
 from astrometricslib.foundation.jobs.runner import get_current_job
 from astrometricslib.models.quality.gate_result import GateResult
 from astrometricslib.models.target import Target
+from astrometricslib.pipelines.stacking.calibration_health import measure_calibration_health
 from astrometricslib.pipelines.stacking.frame_screening import screen_frames
+from astrometricslib.pipelines.stacking.fwhm_sampling import measure_fwhm_degradation
+from astrometricslib.pipelines.stacking.registration_records import (
+    check_spectral_registration_quality,
+    update_frame_registration_results,
+)
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 if TYPE_CHECKING:
@@ -944,309 +949,6 @@ def _measure_stacked_pixel_fractions(
         summary.stacking_metrics.saturation_flagged = is_saturation_significant(saturated_fraction)
 
 
-def _update_frame_registration_results(
-    summary: StackQualitySummary,
-    stacked_path: str,
-    target_frames: list[Any],
-    diagnostics: dict,
-) -> None:
-    """Record Siril's per-frame registration facts, find the reference frame.
-
-    Per-frame registration facts (Siril's own findstar pass, computed
-    for free during registration) are recorded onto each `FrameRecord`
-    for later pipelines/runs to read, not used for any verdict here.
-    Frame order in the .seq file follows Siril's own symlink submission
-    order, which can differ from `target_frames`' order (corrupt/wrong-
-    camera frames get filtered during symlinking) --
-    `symlinked_light_paths` is the authoritative alignment reference,
-    same discipline the spectral registration check uses.
-
-    Also identifies the registration reference frame -- the one Siril
-    aligned every other frame to, i.e. the frame whose transform is the
-    identity (no shift of its own) -- and records it onto
-    `summary.stacking_metrics`.
-    """
-    from astrometricslib.pipelines.stacking.post_processing.stack_membership import (
-        registration_reference_from_diagnostics,
-    )
-
-    registration_frames = diagnostics.get("registration_frames", [])
-    registration_frame_paths = diagnostics.get("symlinked_light_paths", [])
-
-    # Siril aligns every frame to one reference, so a poor reference fails the
-    # whole stack -- M 42 aborted with "Found 0 stars in reference" and
-    # nothing recorded which frame that was. The reference is the frame whose
-    # transform is the identity; `registration_reference_from_diagnostics`
-    # names it only when it is certain.
-    reference = registration_reference_from_diagnostics(diagnostics)
-    if reference is not None:
-        summary.stacking_metrics.registration_reference_frame = reference[0]
-        summary.stacking_metrics.registration_reference_star_count = reference[1]
-
-    if len(registration_frame_paths) == len(registration_frames):
-        frame_by_path = {frame.path: frame for frame in target_frames}
-        for frame_path, registration_facts in zip(
-            registration_frame_paths, registration_frames, strict=False
-        ):
-            frame = frame_by_path.get(frame_path)
-            if frame is None:
-                continue
-            # Normally the first run's measurements win, so a
-            # target stacked twice (standard then spectral) does
-            # not have its facts clobbered by the second pass.
-            # The exception is a frame carrying shifts that are
-            # known to be degenerate: runs before the
-            # registration-sequence fix preserved the *registered*
-            # sequence, whose frames are already aligned and so
-            # recorded dx=dy=0 for every frame. A non-zero shift
-            # now available for that same frame is real data
-            # replacing a known-bad zero, so it is allowed
-            # through. A genuine reference frame also has
-            # dx=dy=0, but this run offers 0 for it too, so it is
-            # never rewritten.
-            has_existing_facts = frame.measurements.registration_fwhm_x_px is not None
-            stored_shift_is_degenerate = (
-                not frame.measurements.registration_dx_px and not frame.measurements.registration_dy_px
-            )
-            run_offers_real_shift = bool(registration_facts["dx"] or registration_facts["dy"])
-            if has_existing_facts and not (stored_shift_is_degenerate and run_offers_real_shift):
-                # A frame stacked before these fields existed keeps its
-                # first-run facts. Its empty fields are filled, so a restack
-                # records them.
-                _fill_empty_registration_fields(frame.measurements, registration_facts)
-                continue
-            # `registration_fwhm_y_px` and `registration_rmse` are no longer
-            # filled: their old values were the weighted FWHM and the sky
-            # background level (see `FrameMeasurements`). The field named
-            # `..._fwhm_x_px` holds Siril's plain FWHM.
-            frame.measurements.registration_fwhm_x_px = registration_facts["fwhm_px"]
-            frame.measurements.registration_weighted_fwhm_px = registration_facts["weighted_fwhm_px"]
-            frame.measurements.registration_roundness = registration_facts["roundness"]
-            frame.measurements.registration_quality = registration_facts["quality"]
-            frame.measurements.registration_background_level = registration_facts["background_level"]
-            frame.measurements.registration_rotation_deg = registration_facts["rotation_deg"]
-            frame.measurements.registration_star_count = registration_facts["star_count"]
-            frame.measurements.registration_dx_px = registration_facts["dx"]
-            frame.measurements.registration_dy_px = registration_facts["dy"]
-
-
-# The registration fields that later versions added to a frame's record, and
-# the key of Siril's per-frame facts that fills each. The first-run fields
-# (`registration_fwhm_x_px`, `registration_dx_px` and `registration_dy_px`) are
-# not in this list because a restack never overwrites them.
-_LATER_REGISTRATION_FIELDS: dict[str, str] = {
-    "registration_weighted_fwhm_px": "weighted_fwhm_px",
-    "registration_roundness": "roundness",
-    "registration_quality": "quality",
-    "registration_background_level": "background_level",
-    "registration_rotation_deg": "rotation_deg",
-    "registration_star_count": "star_count",
-}
-
-
-def _fill_empty_registration_fields(measurements: Any, registration_facts: dict[str, Any]) -> None:
-    """Fill a frame's empty later registration fields, and no others.
-
-    Frames stacked before the later fields existed keep their first-run
-    shift and width. A restack gives them the new fields, because it is the
-    only time Siril measures them again.
-
-    Parameters
-    ----------
-    measurements : `FrameMeasurements`
-        The frame's measurements. Only fields that are `None` change.
-    registration_facts : `dict`
-        Siril's facts for the frame in this run, as `parse_seq_file` returns.
-    """
-    for field_name, fact_key in _LATER_REGISTRATION_FIELDS.items():
-        if getattr(measurements, field_name) is None and registration_facts.get(fact_key) is not None:
-            setattr(measurements, field_name, registration_facts[fact_key])
-
-
-def _measure_one_frame_fwhm(path: str) -> float | None:
-    """Measure one frame's star width, or give `None`.
-
-    A module-level function so a worker process can run it. A frame that
-    cannot be read or measured is logged and skipped, not raised.
-
-    Parameters
-    ----------
-    path : `str`
-        Path of the frame to measure.
-
-    Returns
-    -------
-    fwhm : `float` or `None`
-        The median star width in pixels, or `None` if there is no width.
-    """
-    from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_image_fwhm
-
-    try:
-        return measure_image_fwhm(path)
-    except (AstrometricsError, *FITS_READ_ERRORS, *DATA_ERRORS) as exc:
-        logger.debug("Skipping FWHM measurement for '%s': %s", path, exc)
-        return None
-
-
-def _fwhm_worker_count(sample_size: int) -> int:
-    """Choose how many processes measure the sample frames at once.
-
-    Uses the configured inner worker count (``photometry_workers``, the
-    same setting the other per-target parallel steps use), kept within the
-    available memory by `resolve_worker_counts`. One measurement of a 24
-    megapixel frame was measured to use about 1 GB; the helper's default
-    budget of 1.5 GB per worker covers that with margin. The count never
-    exceeds the sample size. A process that is itself a daemon (such as a
-    `multiprocessing.Pool` worker) may not have child processes, so it
-    measures serially.
-
-    Parameters
-    ----------
-    sample_size : `int`
-        Number of frames to measure.
-
-    Returns
-    -------
-    worker_count : `int`
-        Number of worker processes; 1 means measure in this process.
-    """
-    import multiprocessing
-
-    if sample_size < 2 or multiprocessing.current_process().daemon:
-        return 1
-    try:
-        from astrometricslib.foundation.config import get_configuration
-        from astrometricslib.utilities.concurrency import resolve_worker_counts
-
-        counts = resolve_worker_counts("1", get_configuration().get_photometry_workers())
-    except (AstrometricsError, OSError, ValueError) as configuration_error:
-        logger.debug("Measuring FWHM serially; worker count unavailable: %s", configuration_error)
-        return 1
-    return max(1, min(counts.inner_worker_count, sample_size))
-
-
-def _measure_sample_fwhms(paths: list[str], worker_count: int) -> list[float | None]:
-    """Measure the star width of each frame, keeping the order of `paths`.
-
-    Parameters
-    ----------
-    paths : `list` [`str`]
-        Frame paths to measure.
-    worker_count : `int`
-        Number of worker processes; 1 measures in this process.
-
-    Returns
-    -------
-    fwhms : `list` [`float` or `None`]
-        One width per path, in the same order; `None` where a frame was
-        skipped.
-    """
-    if worker_count > 1 and len(paths) > 1:
-        import multiprocessing
-        from concurrent.futures import ProcessPoolExecutor
-        from concurrent.futures.process import BrokenProcessPool
-
-        try:
-            # 'fork' like the photometry pool: 'spawn' re-imports the entry
-            # script, which fails for scripts run as `python script.py`.
-            with ProcessPoolExecutor(
-                max_workers=worker_count, mp_context=multiprocessing.get_context("fork")
-            ) as executor:
-                return list(executor.map(_measure_one_frame_fwhm, paths))
-        except (BrokenProcessPool, OSError) as pool_error:
-            logger.warning("Parallel FWHM measurement failed (%s); measuring serially.", pool_error)
-    return [_measure_one_frame_fwhm(path) for path in paths]
-
-
-def _measure_fwhm_degradation(
-    summary: Any, stacked_path: str, target_frames: list[Any], stacked_fwhm: float | None = None
-) -> None:
-    """Compare the stacked image's sharpness against its input frames.
-
-    Measured with the same `measure_image_fwhm` function on both sides. The
-    input sample is spread evenly over all the frames, so a stack of several
-    nights is judged against all of them and not only the first night. The
-    stack is compared with the width its inputs predict (see
-    `expected_stack_fwhm`), not with their median.
-
-    A stack combined from exposure groups arrives with its width already
-    measured, away from the cores that the combine patched (see
-    `stack_runner._measure_combined_fwhm`); that value is used instead of
-    measuring the file, which would pick those patched cores as its
-    brightest stars.
-
-    Sets `summary.stacking_metrics`' FWHM fields and the degradation
-    flag in place.
-    """
-    from astrometricslib.pipelines.astrometry.pre_processing.fwhm import (
-        FWHM_MEASUREMENT_STAR_COUNT,
-        measure_image_fwhm,
-    )
-    from astrometricslib.pipelines.stacking.post_processing.stack_quality import (
-        expected_stack_fwhm,
-        is_stacked_fwhm_degraded,
-    )
-
-    # A sample of at most 15 frames (matching FWHM_MEASUREMENT_STAR_COUNT),
-    # spaced evenly over the whole set. A median or an RMS only needs a
-    # representative sample, unlike the background-split check, which needs
-    # every frame to avoid missing a split.
-    step = max(1, len(target_frames) // FWHM_MEASUREMENT_STAR_COUNT)
-    sample_paths = [frame.path for frame in target_frames[::step][:FWHM_MEASUREMENT_STAR_COUNT]]
-    input_fwhms = [
-        fwhm
-        for fwhm in _measure_sample_fwhms(sample_paths, _fwhm_worker_count(len(sample_paths)))
-        if fwhm is not None
-    ]
-    expected = expected_stack_fwhm(input_fwhms)
-    if input_fwhms:
-        import statistics as _statistics
-
-        summary.stacking_metrics.median_input_fwhm_px = _statistics.median(input_fwhms)
-        summary.stacking_metrics.expected_stack_fwhm_px = expected
-
-    if stacked_fwhm is None:
-        stacked_fwhm = measure_image_fwhm(stacked_path)
-    if stacked_fwhm is not None:
-        summary.stacking_metrics.stacked_fwhm_px = stacked_fwhm
-        if expected is not None:
-            summary.stacking_metrics.fwhm_degraded = is_stacked_fwhm_degraded(stacked_fwhm, expected)
-
-
-def _check_spectral_registration_quality(
-    summary: StackQualitySummary, stacked_path: str, diagnostics: dict
-) -> None:
-    """Flag frames with spectral zero-order-star tracking concerns.
-
-    Checks matched star count, fit RMSE, and position/brightness
-    stability for the zero-order star -- not a whole-field FWHM
-    comparison -- see `registration_quality.py`'s module docstring for
-    why. Requires `frame_paths`, `seq_frames`, and `zero_order_stars`
-    to be index-aligned; all three are populated by
-    `siril_interface.py` during the same registration pass the real
-    stack already ran (`parse_seq_file` reads the preserved .seq file,
-    mirroring the standard-imaging FWHM check; `zero_order_stars` comes
-    from `diagnostics` since spectral .lst files aren't preserved as
-    files, only parsed in place before the scratch directory is
-    cleaned up).
-
-    Sets `summary.stacking_metrics.spectral_registration_flags` in place.
-    """
-    from astrometricslib.models.quality.quality_summary import ExcludedFrame
-    from astrometricslib.pipelines.spectroscopy.utilities.registration_quality import (
-        evaluate_spectral_registration_quality,
-    )
-
-    seq_frames = diagnostics.get("registration_frames", [])
-    zero_order_stars = diagnostics.get("zero_order_stars", [])
-    frame_paths = diagnostics.get("symlinked_light_paths", [])
-
-    if len(frame_paths) == len(seq_frames) == len(zero_order_stars) and frame_paths:
-        flagged = evaluate_spectral_registration_quality(frame_paths, seq_frames, zero_order_stars)
-        summary.stacking_metrics.spectral_registration_flags = [ExcludedFrame(**entry) for entry in flagged]
-        summary.stacking_metrics.spectral_registration_checked = True
-
-
 def _record_exposure_groups(summary: StackQualitySummary, diagnostics: dict) -> None:
     """Copy the exposure-group entries and recommended exposure from a run.
 
@@ -1263,63 +965,6 @@ def _record_exposure_groups(summary: StackQualitySummary, diagnostics: dict) -> 
         ExposureGroupSummary(**entry) for entry in diagnostics.get("exposure_group_summaries", [])
     ]
     summary.stacking_metrics.recommended_exposure_seconds = diagnostics.get("recommended_exposure_seconds")
-
-
-def _measure_calibration_health(
-    summary: StackQualitySummary,
-    stacked_path: str,
-    is_spectral: bool,
-    diagnostics: dict,
-) -> None:
-    """Record whether calibration left the stack mostly zeros.
-
-    Two signs are used: the share of exactly-zero pixels in the stack (for a
-    colour stack, the share in its worst channel), and the
-    worst "many negative pixels" percentage Siril printed after subtracting the
-    dark. Both are recorded for every stack. The zero share is flagged only for
-    images, because the sky of a spectral stack is legitimately at or below
-    zero.
-
-    Parameters
-    ----------
-    summary : `StackQualitySummary`
-        The summary being built; its metrics are set in place.
-    stacked_path : `str`
-        The stacked image to measure.
-    is_spectral : `bool`
-        Whether the stack is spectral.
-    diagnostics : `dict`
-        What the stacking run reported.
-    """
-    import numpy as np
-
-    from astrometricslib.drivers.fits_access import read_data
-    from astrometricslib.pipelines.stacking.post_processing.stack_quality import (
-        is_negative_pixel_percent_significant,
-        is_zero_fraction_significant,
-        zero_fraction_threshold,
-    )
-
-    metrics = summary.stacking_metrics
-    try:
-        data = np.asarray(read_data(stacked_path))
-    except OSError as read_error:
-        logger.warning("Could not read '%s' to check for a blank stack: %s", stacked_path, read_error)
-    else:
-        # A colour stack is judged by its worst channel: one dead channel
-        # (the red of a Nikon stack whose bias was subtracted twice) gives a
-        # strongly tinted picture even when the other channels are fine.
-        planes = list(data) if data.ndim == 3 else [data]
-        metrics.zero_pixel_fraction = max(
-            float(np.count_nonzero(plane == 0) / plane.size) for plane in planes
-        )
-        metrics.zero_fraction_flagged = is_zero_fraction_significant(
-            metrics.zero_pixel_fraction, zero_fraction_threshold(is_spectral)
-        )
-    negative_percent = diagnostics.get("negative_pixel_max_percent")
-    if negative_percent is not None:
-        metrics.negative_pixel_max_percent = int(negative_percent)
-        metrics.negative_pixels_flagged = is_negative_pixel_percent_significant(negative_percent)
 
 
 def _finalize_stack_quality_flags(summary: StackQualitySummary) -> None:
@@ -1399,11 +1044,11 @@ def _build_stack_quality_summary(
 
     if stacked_path:
         _measure_stacked_pixel_fractions(summary, stacked_path, diagnostics)
-        _measure_calibration_health(summary, stacked_path, is_spectral, diagnostics)
+        measure_calibration_health(summary, stacked_path, is_spectral, diagnostics)
 
         if not is_spectral and summary.quality_processing_applied:
-            _update_frame_registration_results(summary, stacked_path, target_frames, diagnostics)
-            _measure_fwhm_degradation(
+            update_frame_registration_results(summary, stacked_path, target_frames, diagnostics)
+            measure_fwhm_degradation(
                 summary,
                 stacked_path,
                 _frames_in_combined_groups(target_frames, diagnostics),
@@ -1411,7 +1056,7 @@ def _build_stack_quality_summary(
             )
 
         if is_spectral and summary.quality_processing_applied:
-            _check_spectral_registration_quality(summary, stacked_path, diagnostics)
+            check_spectral_registration_quality(summary, stacked_path, diagnostics)
 
     _finalize_stack_quality_flags(summary)
     # Recorded after the flags are rebuilt above, so a failed gate's reason is

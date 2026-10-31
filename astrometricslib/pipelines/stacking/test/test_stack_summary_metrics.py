@@ -20,11 +20,11 @@ from astrometricslib.models.quality.quality_summary import (
     StackingPipelineQualityMetrics,
     StackQualitySummary,
 )
+from astrometricslib.pipelines.stacking.calibration_health import measure_calibration_health
 from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import assess_input_quality
 from astrometricslib.pipelines.stacking.stage import (
     _base_stack_quality_summary,
     _finalize_stack_quality_flags,
-    _measure_calibration_health,
     _record_exposure_groups,
 )
 
@@ -108,7 +108,7 @@ def test_a_mostly_zero_imaging_stack_is_flagged_as_blank(tmp_path: Path) -> None
     """A stack that is 99% zero pixels gets the blank-stack flag."""
     summary = make_summary()
 
-    _measure_calibration_health(summary, write_stack(tmp_path / "blank.fits", 0.99), False, {})
+    measure_calibration_health(summary, write_stack(tmp_path / "blank.fits", 0.99), False, {})
     _finalize_stack_quality_flags(summary)
 
     assert summary.stacking_metrics.zero_pixel_fraction > 0.95
@@ -121,7 +121,7 @@ def test_a_normal_imaging_stack_is_not_flagged(tmp_path: Path) -> None:
     """A stack with almost no zero pixels is left alone."""
     summary = make_summary()
 
-    _measure_calibration_health(summary, write_stack(tmp_path / "fine.fits", 0.01), False, {})
+    measure_calibration_health(summary, write_stack(tmp_path / "fine.fits", 0.01), False, {})
 
     assert not summary.stacking_metrics.zero_fraction_flagged
 
@@ -132,11 +132,11 @@ def test_a_mostly_zero_spectral_stack_is_flagged_but_a_nearly_clean_one_is_not(t
     Library data: clean spectra read at most 0.4%, the bad ones 32% or more.
     """
     flagged = make_summary(is_spectral=True)
-    _measure_calibration_health(flagged, write_stack(tmp_path / "spec_bad.fits", 0.35), True, {})
+    measure_calibration_health(flagged, write_stack(tmp_path / "spec_bad.fits", 0.35), True, {})
     assert flagged.stacking_metrics.zero_fraction_flagged
 
     clean = make_summary(is_spectral=True)
-    _measure_calibration_health(clean, write_stack(tmp_path / "spec_ok.fits", 0.004), True, {})
+    measure_calibration_health(clean, write_stack(tmp_path / "spec_ok.fits", 0.004), True, {})
     assert not clean.stacking_metrics.zero_fraction_flagged
 
 
@@ -145,7 +145,7 @@ def test_the_negative_pixel_warning_from_siril_is_recorded_and_flagged(tmp_path:
     summary = make_summary()
     diagnostics = {"negative_pixel_max_percent": 99, "negative_pixel_frames": 40}
 
-    _measure_calibration_health(summary, write_stack(tmp_path / "s.fits", 0.0), False, diagnostics)
+    measure_calibration_health(summary, write_stack(tmp_path / "s.fits", 0.0), False, diagnostics)
     _finalize_stack_quality_flags(summary)
 
     assert summary.stacking_metrics.negative_pixel_max_percent == 99
@@ -157,7 +157,7 @@ def test_a_small_negative_share_is_recorded_but_not_flagged(tmp_path: Path) -> N
     """Below the limit the percentage is kept without raising a flag."""
     summary = make_summary()
 
-    _measure_calibration_health(
+    measure_calibration_health(
         summary, write_stack(tmp_path / "s.fits", 0.0), False, {"negative_pixel_max_percent": 10}
     )
 
@@ -231,7 +231,7 @@ def test_a_colour_stack_with_one_dead_channel_is_flagged(tmp_path: Path) -> None
     fits.writeto(path, data, overwrite=True)
     summary = make_summary()
 
-    _measure_calibration_health(summary, str(path), False, {})
+    measure_calibration_health(summary, str(path), False, {})
     _finalize_stack_quality_flags(summary)
 
     assert summary.stacking_metrics.zero_pixel_fraction == pytest.approx(0.9, abs=0.03)

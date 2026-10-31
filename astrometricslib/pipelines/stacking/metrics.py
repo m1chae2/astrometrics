@@ -310,6 +310,7 @@ _BAND = (
 )
 _NO_UNCERTAINTY = "No uncertainty is reported. The value is a single count or summary."
 _STAGE = "pipelines.stacking.stage"
+_STACKING = "pipelines.stacking"
 _CONTEXT_REASON = (
     "It is kept so a reader can see how the stack was made and compare stacks of the same target. "
     "No decision uses it directly."
@@ -580,7 +581,7 @@ _VALUE_METRICS: tuple[MetricSpec, ...] = (
         "The share of the stack's pixels that are exactly zero.",
         "The count of pixels equal to zero divided by the pixel count; for a color stack, the worst channel.",
         "Every pixel of the stack.",
-        f"{_STAGE}._measure_calibration_health",
+        f"{_STACKING}.calibration_health.measure_calibration_health",
         better=Direction.LOWER,
         register_entry="STK-26",
     ),
@@ -606,7 +607,7 @@ _VALUE_METRICS: tuple[MetricSpec, ...] = (
             "the same measure taken away from the cores the combine patched."
         ),
         "The brightest unsaturated stars of the stack.",
-        f"{_STAGE}._measure_fwhm_degradation",
+        f"{_STACKING}.fwhm_sampling.measure_fwhm_degradation",
         better=Direction.LOWER,
         register_entry="STK-25",
     ),
@@ -616,7 +617,7 @@ _VALUE_METRICS: tuple[MetricSpec, ...] = (
         "The median star width of a sample of the input frames.",
         "The median of `measure_image_fwhm` over at most 15 frames spaced evenly over the set.",
         "At most 15 input frames.",
-        f"{_STAGE}._measure_fwhm_degradation",
+        f"{_STACKING}.fwhm_sampling.measure_fwhm_degradation",
         better=Direction.LOWER,
         register_entry="STK-25",
     ),
@@ -645,7 +646,7 @@ _VALUE_METRICS: tuple[MetricSpec, ...] = (
         "How many stars Siril found in the frame it aligned all the others to.",
         "Siril's star count for the registration reference frame.",
         "The one reference frame.",
-        f"{_STAGE}._update_frame_registration_results",
+        f"{_STACKING}.registration_records.update_frame_registration_results",
         better=Direction.HIGHER,
     ),
     _context_metric(

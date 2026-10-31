@@ -535,7 +535,6 @@ class AnalysisOrchestrator(BaseBackgroundService):
 
         with self.astrometrics.processing.acquire_job_slot():
             summary, _session_results = self.astrometrics.processing.run_spectroscopy_by_session(
-                self.astrometrics,
                 target,
                 frame_records,
                 max_workers=None,

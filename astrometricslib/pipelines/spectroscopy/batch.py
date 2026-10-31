@@ -402,7 +402,7 @@ def _merge_batch_summaries(summaries: list[parallel_batch.BatchRunSummary]) -> p
 
 
 def process_spectroscopy_frames_by_session(
-    api: Any,
+    config: Any,
     target: Target,
     frame_records: list[FrameRecord],
     max_workers: int | None = None,
@@ -421,8 +421,8 @@ def process_spectroscopy_frames_by_session(
 
     Parameters
     ----------
-    api : `Any`
-        The main program interface.
+    config : `AppConfiguration`
+        The application settings, for the worker counts.
     target : `Target`
         The target the images belong to.
     frame_records : `list` of `FrameRecord`
@@ -460,7 +460,7 @@ def process_spectroscopy_frames_by_session(
     from astrometricslib.pipelines.shared.target_sessions import derive_target_sessions
 
     if max_workers is None:
-        worker_counts = resolve_worker_counts("1", api.config.get_photometry_workers())
+        worker_counts = resolve_worker_counts("1", config.get_photometry_workers())
         max_workers = worker_counts.inner_worker_count
 
     frames_with_timestamp = [frame for frame in frame_records if frame.timestamp is not None]
@@ -500,7 +500,7 @@ def process_spectroscopy_frames_by_session(
                 _process_single_spectroscopy_frame_worker_v2,
                 worker_arguments=(target.id, tracked_stars, session_wcs_header),
                 max_workers=max_workers,
-                niceness=api.config.get_worker_niceness(),
+                niceness=config.get_worker_niceness(),
                 on_item_complete=on_item_complete,
             )
         )

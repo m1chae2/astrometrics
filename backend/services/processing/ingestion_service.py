@@ -43,7 +43,7 @@ class IngestionService(BaseBackgroundService):
         self,
         target_service: TargetService | None = None,
         config_service: AppConfiguration | None = None,
-        calibration_library: Any = None,
+        calibration: Any = None,
         stellar_service: StellarService | None = None,
         job_service: JobService | None = None,
         image_processing_service: ImageProcessingService | None = None,
@@ -54,7 +54,7 @@ class IngestionService(BaseBackgroundService):
         self._quality_measurement_service = quality_measurement_service
         self._target_service = target_service
         self._config_service = config_service
-        self._calibration_library = calibration_library
+        self._calibration = calibration
         self._stellar_service = stellar_service
         self._image_processing_service = image_processing_service
         self._wayfinder = wayfinder
@@ -343,16 +343,16 @@ class IngestionService(BaseBackgroundService):
 
         # 3. Refresh calibration frames
         self._log(job_id, "Scanning dark frames...")
-        self._calibration_library.refresh_dark_frames(prune_missing=True)
+        self._calibration.reindex_frames("dark", prune_missing=True)
 
         self._log(job_id, "Scanning bias frames...")
-        self._calibration_library.refresh_bias_frames(prune_missing=True)
+        self._calibration.reindex_frames("bias", prune_missing=True)
 
         self._log(job_id, "Scanning flat frames...")
-        self._calibration_library.refresh_flat_frames(prune_missing=True)
+        self._calibration.reindex_frames("flat", prune_missing=True)
 
         self._log(job_id, "Calibration frames indexed. Saving library...")
-        self._calibration_library.save_library()
+        self._calibration.save()
 
         # 4. Migrate Stellar Objects to SQLite
         if hasattr(self._target_service, "stellar_service") and self._target_service.stellar_service:
@@ -651,11 +651,10 @@ class IngestionService(BaseBackgroundService):
         if self._target_service:
             # 1. Update Calibration Library
             try:
-                if self._calibration_library:
-                    self._calibration_library.refresh_dark_frames()
-                    self._calibration_library.refresh_bias_frames()
-                    self._calibration_library.refresh_flat_frames()
-                    self._calibration_library.save_library()
+                if self._calibration:
+                    for kind in ("dark", "bias", "flat"):
+                        self._calibration.reindex_frames(kind)
+                    self._calibration.save()
             except (AstrometricsError, *FITS_READ_ERRORS) as e:
                 logger.warning("Failed to refresh calibration library in ingestion job: %s", e)
 

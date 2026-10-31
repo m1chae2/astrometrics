@@ -210,7 +210,7 @@ class CalibrationCatalog:
         self._library: Any = None
 
     @property
-    def library(self) -> Any:
+    def _calibration_library(self) -> Any:
         """The calibration-data model, built the first time it is used.
 
         Returns
@@ -306,9 +306,9 @@ class CalibrationCatalog:
             },
         )
         if refresh:
-            self.library.load_library()
+            self._calibration_library.load_library()
         if detail in ("counts", "match"):
-            stats = self.library.get_stats()
+            stats = self._calibration_library.get_stats()
             wanted = {"dark": "darks", "bias": "biases", "flat": "flats"}
             keyed = {
                 key: [{**row, "row_key": _calibration_row_key(label, row)} for row in stats.get(key, [])]
@@ -346,12 +346,12 @@ class CalibrationCatalog:
         if detail == "target_frames":
             lights = frame_statistics.get_frame_stats(resolved)["lights"]
             return CalibrationQueryResult(detail=detail, target_id=resolved.id, lights=lights)
-        groups = frame_statistics.get_frame_stats_grouped(resolved, self.library, camera_id)
+        groups = frame_statistics.get_frame_stats_grouped(resolved, self._calibration_library, camera_id)
         return CalibrationQueryResult(detail=detail, target_id=resolved.id, groups=groups)
 
     def save(self) -> None:
         """Write the calibration library to its JSON file on disk."""
-        self.library.save_library()
+        self._calibration_library.save_library()
 
     def reindex_frames(self, kind: _CalibrationKind, prune_missing: bool = False) -> CalibrationIngestReport:
         """Rescan one kind of calibration frame and report what was found.
@@ -375,11 +375,11 @@ class CalibrationCatalog:
             each flat set that gained frames.
         """
         check_choice("kind", kind, _CALIBRATION_KINDS)
-        before = flatten_frame_index(getattr(self.library, f"{kind}_frames"))
-        method = getattr(self.library, f"refresh_{kind}_frames")
+        before = flatten_frame_index(getattr(self._calibration_library, f"{kind}_frames"))
+        method = getattr(self._calibration_library, f"refresh_{kind}_frames")
         method(prune_missing=prune_missing)
-        after = flatten_frame_index(getattr(self.library, f"{kind}_frames"))
-        flat_groups = self.library.list_flat_groups() if kind == "flat" else ()
+        after = flatten_frame_index(getattr(self._calibration_library, f"{kind}_frames"))
+        flat_groups = self._calibration_library.list_flat_groups() if kind == "flat" else ()
         return build_ingest_report(kind, before, after, flat_groups)
 
     @background_job("diagnostics", grace_period_seconds=20.0)
@@ -420,7 +420,7 @@ class CalibrationCatalog:
             One assessment per matching set. Empty if no flats match.
         """
         with registered_job(enabled=register_job, job_type="diagnostics", target_id="calibration"):
-            groups = self.library.list_flat_groups(
+            groups = self._calibration_library.list_flat_groups(
                 telescope=telescope, camera=camera_id, filter_type=filter_name, gain=gain, offset=offset
             )
             return [assess_flat_group(group) for group in groups]
@@ -486,7 +486,7 @@ class CalibrationCatalog:
         """
         with registered_job(enabled=register_job, job_type="diagnostics", target_id="calibration"):
             return measure_sensor_noise_from_library(
-                self.library,
+                self._calibration_library,
                 self._config,
                 camera_id,
                 gain,
@@ -819,7 +819,7 @@ class ProcessingPipelines:
             save_targets=self._targets.save,
             drivers=self._drivers,
             measured_at=datetime.now(UTC),
-            quality_recording=FrameQualityRecording(self._config, self.calibration.library),
+            quality_recording=FrameQualityRecording(self._config, self.calibration._calibration_library),
         )
 
     @background_job("stacking", grace_period_seconds=8.0)
@@ -1425,7 +1425,6 @@ class ProcessingPipelines:
 
     def run_spectroscopy_by_session(
         self,
-        astrometrics: Any,
         target: str | Target,
         frame_records: list[Any],
         max_workers: int | None = None,
@@ -1435,8 +1434,6 @@ class ProcessingPipelines:
 
         Parameters
         ----------
-        astrometrics : `astrometricslib.Astrometrics`
-            The parent astrometrics, needed to resolve session boundaries.
         target : `str` or `Target`
             The target whose spectroscopy frames should be processed.
         frame_records : `list`
@@ -1466,7 +1463,7 @@ class ProcessingPipelines:
             failed_message=f"[{resolved.id}] Session-based spectroscopy failed.",
         ) as job:
             return spectroscopy_batch_operations.process_spectroscopy_frames_by_session(
-                astrometrics,
+                self._config,
                 resolved,
                 frame_records,
                 max_workers=max_workers,

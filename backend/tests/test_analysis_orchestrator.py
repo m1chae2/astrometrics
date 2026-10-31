@@ -86,9 +86,8 @@ class TestRunSpectroscopyAnalysis:
         )
 
         call_args = run_spectroscopy_by_session.call_args
-        assert call_args.args[0] is astrometrics
-        assert call_args.args[1] is target
-        assert call_args.args[2] == [frame_a, frame_b]  # unmatched path excluded
+        assert call_args.args[0] is target
+        assert call_args.args[1] == [frame_a, frame_b]  # unmatched path excluded
         assert call_args.kwargs["max_workers"] is None  # resolved internally by the library
 
         assert results["starsProcessed"] == 5
@@ -150,7 +149,7 @@ class TestMasterSpectralStackAnalysis:
         )
 
         process_target.assert_called_once()
-        frame_records = run_by_session.call_args.args[2]
+        frame_records = run_by_session.call_args.args[1]
         assert [frame.path for frame in frame_records] == ["/lib/a.fits"]
         assert results["starsProcessed"] == 3 + 2
 

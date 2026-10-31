@@ -365,7 +365,6 @@ SUB_API_MEMBERS = {
     },
     "processing.calibration": {
         "assess_flats",
-        "library",
         "measure_sensor_noise",
         "query",
         "reindex_frames",

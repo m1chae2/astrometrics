@@ -204,14 +204,14 @@ def test_reading_writes_nothing_and_saving_writes_one_entry(
     original_text = config_path.read_text(encoding="utf-8")
 
     unsaved = measure_sensor_noise_from_library(
-        catalog.library, config, CAMERA, 0, 10, measured_on=date(2026, 10, 22), save=False
+        catalog._calibration_library, config, CAMERA, 0, 10, measured_on=date(2026, 10, 22), save=False
     )
     assert unsaved.status == MeasurementStatus.MEASURED
     assert config_path.read_text(encoding="utf-8") == original_text
     assert list(tmp_path.glob("*.bak")) == []
 
     saved = measure_sensor_noise_from_library(
-        catalog.library, config, CAMERA, 0, 10, measured_on=date(2026, 10, 22), save=True
+        catalog._calibration_library, config, CAMERA, 0, 10, measured_on=date(2026, 10, 22), save=True
     )
 
     assert saved.saved is True

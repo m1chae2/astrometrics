@@ -329,11 +329,7 @@ class TestProcessSpectroscopyFramesBySession:
 
         monkeypatch.setattr(parallel_batch_module, "run_parallel_batch", _fake_run_parallel_batch)
 
-        fake_api = SimpleNamespace(config=config)
-
-        summary, session_results = batch.process_spectroscopy_frames_by_session(
-            fake_api, target, frame_records
-        )
+        summary, session_results = batch.process_spectroscopy_frames_by_session(config, target, frame_records)
 
         assert len(identify_calls) == 2
         assert len(session_results) == 2
@@ -369,11 +365,7 @@ class TestProcessSpectroscopyFramesBySession:
             lambda *a, **k: pytest.fail("should never be called: no sessions to identify"),
         )
 
-        fake_api = SimpleNamespace(config=config)
-
-        summary, session_results = batch.process_spectroscopy_frames_by_session(
-            fake_api, target, frame_records
-        )
+        summary, session_results = batch.process_spectroscopy_frames_by_session(config, target, frame_records)
 
         assert session_results == []
         assert summary.succeeded == []

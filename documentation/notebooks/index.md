@@ -79,6 +79,13 @@ In this tutorial, you will learn how to use the `astrometrics.visualization` reg
 In this User Guide Cookbook, you will learn how to process a single real dataset (M 13) through all the available pipelines in a single workflow.
 :::
 
+:::{grid-item-card} 10. Reviewing a Finished Stack
+:link: /notebooks/astrometrics/user_guide/10_reviewing_a_finished_stack
+:link-type: doc
+
+In this tutorial, you will learn how to check a stack after it is made: make its preview picture again without stacking, see why frames were set aside, and compare the stack with the one before it.
+:::
+
 ::::
 
 ---
@@ -140,6 +147,7 @@ Robotic observatories execute observation queues autonomously throughout the nig
 /notebooks/astrometrics/user_guide/07_stellar_catalogs
 /notebooks/astrometrics/user_guide/08_visualization
 /notebooks/astrometrics/user_guide/09_end_to_end_pipeline_M13
+/notebooks/astrometrics/user_guide/10_reviewing_a_finished_stack
 /notebooks/wayfinding/planning/mosaic_sequence_authoring
 /notebooks/wayfinding/planning/observation_planning
 /notebooks/wayfinding/control/adding_remote_images

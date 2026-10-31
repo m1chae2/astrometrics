@@ -40,7 +40,7 @@ Each sub-API checks its arguments and hands the work to `pipelines/`. Three rule
   - `order` sorts by id, by usefulness (stars with spectra first, then named stars, then stars with photometry, then brightest first), or by spectrum match (stars whose own spectrum best matches a reference spectrum first).
 - Single-frame detections are hidden unless `include_unresolved=True`. Photometry (brightness measurement) saves each point source it finds in one frame under an id ending in `:Star_<n>`. These are working records, not catalog stars, so a normal query leaves them out.
 - `plate_solve` works out where a FITS frame (the standard astronomy image file) points, using the stars in it. It returns the pixel-to-sky mapping (a WCS, World Coordinate System), or `None`. The centering step in wayfindinglib uses it to point the telescope exactly at a target.
-- `detect_point_sources` finds stars in a pixel array.
+- `detect_point_sources` finds stars in a pixel array and returns a `PointSourceDetection`, whose `sources` are `PointSource` records (center, flux, peak, shape numbers and radius), brightest first.
 - `dataset_version` counts the star catalog writes this process has made. A cache of a whole-catalog answer compares it to the number it saw last, to know whether to rebuild.
 - Every other method on `StellarCatalog` changes star records.
 
@@ -67,7 +67,7 @@ Each sub-API checks its arguments and hands the work to `pipelines/`. Three rule
 
 Stored reads:
 
-- `query` reads the quality measurements that earlier runs saved in `astrometrics.db`. It filters by `metric`, `level` (`frame`, `stack` or `run`), `target_id`, `observing_night_id`, `camera`, `telescope` and `since`. It gives the newest row for each subject and metric unless `latest_only=False`, and `row_ids` returns exactly the rows a report cited. `variant` keeps only the rows about one subset stack, and `library_only=True` leaves subset-stack rows out (giving both raises `InvalidArgumentError`). A library with no quality table yet gives an empty list; the read opens the file read-only and creates no file and no table. A `metric` that is not registered raises `InvalidArgumentError`.
+- `query` reads the quality measurements that earlier runs saved in `astrometrics.db` and returns a `QualityQueryResult`: the `rows`, `total_matching`, `offset` and `truncated`. There is no limit unless `limit` is given; `limit` and `offset` page the answer. It filters by `metric`, `level` (`frame`, `stack` or `run`), `target_id`, `observing_night_id`, `camera`, `telescope` and `since`. It gives the newest row for each subject and metric unless `latest_only=False`, and `row_ids` returns exactly the rows a report cited. `variant` keeps only the rows about one subset stack, and `library_only=True` leaves subset-stack rows out (giving both raises `InvalidArgumentError`). A library with no quality table yet gives an empty list; the read opens the file read-only and creates no file and no table. A `metric` that is not registered raises `InvalidArgumentError`.
 - `calibration_identities(run_ids, target_id)` reads which calibration each library stacking run used: the flat, bias and dark masters (path, size, modification time), optic, camera, Siril version and stacking algorithm version. Two runs of a target whose records differ are confounded by a calibration change. An unmigrated or missing database gives an empty list.
 - To tell whether two stacks' noise was measured in the same apertures, read the stack's `stacking.aperture_set_number` row with `query(metric="stacking.aperture_set_number", target_id=..., library_only=True)` and turn each row's `value` into text with `aperture_identity_from_number` (top-level API). Equal text means the same set; a not-measured row or a missing row means unknown. An odd–even difference run stores the same number as `stacking.odd_even_difference_aperture_set_number`.
 - To test where the fixed-pattern noise sits, read the `stacking.odd_even_difference_aperture_record_count` row of the library stack: its reason holds the path of a JSON record (one entry per empty aperture with its position, its distance from the image center and from the target, and its values on the sum A + B and the difference A - B of the two half stacks), which `load_odd_even_aperture_record(path)` (top-level API) reads. It returns `None` for a missing, unreadable or other-version file. The row's four neighbors, `stacking.odd_even_difference_row_average_scatter_stack_unit`, `..._column_...`, `stacking.odd_even_sum_row_average_scatter_stack_unit` and `..._column_...`, give the line pattern.
@@ -105,7 +105,7 @@ Live checks:
 
 ### `jobs.py`
 
-`Jobs` is a read-only view of the job history (running and finished jobs, their log lines, stored results) and of the pipeline runs that produced a target's data. It opens the logs database read-only, so it cannot change it. The MCP tool `jobs_query` calls `Jobs.query`.
+`Jobs` is a read-only view of the job history (running and finished jobs, their log lines, stored results) and of the pipeline runs that produced a target's data. It opens the logs database read-only, so it cannot change it. `Jobs.query` returns a `JobQueryResult`, in which only the fields of the chosen `detail` are filled. The MCP tool `jobs_query` calls `Jobs.query`.
 
 ## Injecting drivers
 

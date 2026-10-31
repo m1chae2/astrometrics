@@ -5,7 +5,7 @@ the numbers in the quality database
 (`astrometrics.processing.record_frame_measurements`). The library also
 guards that work: only one run measures a target at a time, and only one run
 reads frames at a time in the whole process, so this service does not have to.
-It does three small things.
+It does four small things.
 
 - When the app asks for a measurement, it starts the library call on a
   background thread (so the request returns at once) and announces the result.
@@ -20,6 +20,9 @@ It does three small things.
   caller turns it off.
 - When a frame sync or an ingestion has already measured the frames it added,
   it announces the summaries of those runs.
+- When the app asks for the stored quality numbers (`query_measurements`), it
+  reads them from the library and answers with the plain list of rows that the
+  screens expect.
 
 An announcement is the ``quality:measured`` event sent to every connected app
 window, so the screens that show quality numbers can read them again. Every
@@ -32,7 +35,7 @@ import threading
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any, Protocol
 
-from astrometricslib import AstrometricsError
+from astrometricslib import AstrometricsError, QualityMeasurement
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +100,71 @@ class QualityMeasurementService:
         self._astrometrics = astrometrics
         self._socket_manager = socket_manager
         self._suggestion_trigger = suggestion_trigger
+
+    def query_measurements(
+        self,
+        metric: str | None = None,
+        level: str | None = None,
+        target_id: str | None = None,
+        observing_night_id: str | None = None,
+        camera: str | None = None,
+        telescope: str | None = None,
+        since: str | None = None,
+        row_ids: list[int] | None = None,
+        latest_only: bool = True,
+        variant: str | None = None,
+        library_only: bool = False,
+    ) -> list[QualityMeasurement]:
+        """Read the stored quality measurements as a plain list.
+
+        The library answers with a result that holds the rows and the paging;
+        the screens read just the rows, as a list, so this gives them that.
+        Nothing is measured or written, and there is no limit.
+
+        Parameters
+        ----------
+        metric : `str`, optional
+            Only this metric.
+        level : `str`, optional
+            Only subjects of this level (``"frame"``, ``"stack"``, ``"run"``).
+        target_id : `str`, optional
+            Only this target.
+        observing_night_id : `str`, optional
+            Only this observing night.
+        camera : `str`, optional
+            Only measurements made with this camera.
+        telescope : `str`, optional
+            Only measurements made with this telescope.
+        since : `str`, optional
+            Only measurements made at or after this ISO 8601 time.
+        row_ids : `list` [`int`], optional
+            Only these rows, exactly as stored.
+        latest_only : `bool`, optional
+            Give only the newest row for each subject and metric. Defaults to
+            `True`.
+        variant : `str`, optional
+            Only rows about the subset stack with this label.
+        library_only : `bool`, optional
+            Only rows that are not about a subset stack.
+
+        Returns
+        -------
+        rows : `list` [`QualityMeasurement`]
+            The matching measurements, oldest first.
+        """
+        return self._astrometrics.quality.query(
+            metric=metric,
+            level=level,
+            target_id=target_id,
+            observing_night_id=observing_night_id,
+            camera=camera,
+            telescope=telescope,
+            since=since,
+            row_ids=row_ids,
+            latest_only=latest_only,
+            variant=variant,
+            library_only=library_only,
+        ).rows
 
     def start_frame_measurements(self, target_id: str, limit: int | None = None) -> dict[str, Any]:
         """Start measuring a target's light frames in the background.

@@ -136,7 +136,7 @@ class ImageService:
             could not be removed, with the reason).
         """
         resolved_paths = [resolve_mounted_path(path) for path in paths]
-        return self._astrometrics.targets.delete_images(resolved_paths, target=target_id)
+        return self._astrometrics.targets.delete_images(resolved_paths, target=target_id).model_dump()
 
     def get_last_image(self, stretch: bool = True) -> dict[str, Any] | None:
         """Find the most recently created FITS file and draw it.

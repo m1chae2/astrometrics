@@ -109,7 +109,7 @@ def read_target_noise(astrometrics: Astrometrics, target_id: str) -> TargetNoise
             target_id=target_id,
             library_only=True,
             latest_only=True,
-        )
+        ).rows
     except AstrometricsError, OSError:
         return None
     pinned = PINNED_STACK_METRICS[NORMALIZED_NOISE_METRIC]

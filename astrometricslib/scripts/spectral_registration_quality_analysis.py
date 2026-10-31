@@ -155,14 +155,12 @@ def measure_zero_order_stacked_fwhm(astrometrics: Astrometrics, path: str) -> fl
         return None
     data = collapse_to_2d(np.asarray(data, dtype=float))
 
-    sources = astrometrics.stars.detect_point_sources(data)
+    sources = astrometrics.stars.detect_point_sources(data).sources
     if not sources:
         return None
     brightest = sources[0]
-    x = brightest.get("x_centroid", brightest.get("xcentroid"))
-    y = brightest.get("y_centroid", brightest.get("ycentroid"))
-    if x is None or y is None:
-        return None
+    x = brightest.x_centroid
+    y = brightest.y_centroid
 
     box = ZERO_ORDER_FWHM_BOX_RADIUS_PX
     x, y = round(x), round(y)

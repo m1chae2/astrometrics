@@ -56,11 +56,11 @@ with fits.open(path, memmap=False) as hdul:
     data = np.asarray(hdul[0].data, dtype=float)
     header = hdul[0].header
 
-sources = astrometrics.stars.detect_point_sources(data)
+sources = astrometrics.stars.detect_point_sources(data).sources
 centres = []
 for source in sources[:3000]:
-    x = int(round(float(source.get("x_centroid", source.get("xcentroid")))))
-    y = int(round(float(source.get("y_centroid", source.get("ycentroid")))))
+    x = int(round(source.x_centroid))
+    y = int(round(source.y_centroid))
     box = data[y - 7 : y + 8, x - 7 : x + 8]
     if box.shape != (15, 15):
         continue
@@ -624,7 +624,7 @@ astrometrics = Astrometrics()
 for path in ["/path/to/frame1.fits", "/path/to/frame2.fits"]:
     with fits.open(path, memmap=False) as hdul:
         data = np.asarray(hdul[0].data, dtype=float)
-    count = len(astrometrics.stars.detect_point_sources(data))
+    count = len(astrometrics.stars.detect_point_sources(data).sources)
     start = time.monotonic()
     try:
         solved = astrometrics.stars.plate_solve(path) is not None
@@ -782,7 +782,7 @@ print([abs(a - b) / abs(a) for a, b in zip(full, sample)])
       "frame.star_width_gaussian_brightest_px",
       "frame.star_elongation",
   ):
-      for row in astro.quality.query(metric=metric, target_id="M 13"):
+      for row in astro.quality.query(metric=metric, target_id="M 13").rows:
           print(metric, row.subject.subject_id, row.value, row.status.value, row.reason)
   ```
 
@@ -845,7 +845,7 @@ print([abs(a - b) / abs(a) for a, b in zip(full, sample)])
       "frame.star_width_center_px",
       "frame.star_width_corner_xhigh_ylow_px",
   ):
-      for row in astro.quality.query(metric=metric, target_id="M 57"):
+      for row in astro.quality.query(metric=metric, target_id="M 57").rows:
           print(metric, row.subject.subject_id, row.value, row.uncertainty, row.sample_count)
   ```
 
@@ -914,7 +914,7 @@ print([abs(a - b) / abs(a) for a, b in zip(full, sample)])
       "astrometry.frame_target_clipped_fraction",
       "astrometry.frame_target_nonlinear_fraction",
   ):
-      for row in astro.quality.query(metric=metric, target_id="M 57"):
+      for row in astro.quality.query(metric=metric, target_id="M 57").rows:
           print(metric, row.subject.subject_id, row.value, row.sample_count, row.status.value, row.reason[:80])
   ```
 
@@ -995,7 +995,7 @@ for metric in (
     "astrometry.expected_pixel_phase_rms_arcsec",
     "astrometry.expected_gaia_epoch_error_rms_arcsec",
 ):
-    for row in astrometrics.quality.query(metric=metric, target_id="M 57"):
+    for row in astrometrics.quality.query(metric=metric, target_id="M 57").rows:
         print(metric, row.status, row.value, row.reason)
 ```
 

@@ -219,12 +219,13 @@ def test_get_frame_delegates_to_image_conversions(monkeypatch: pytest.MonkeyPatc
 def test_delete_images_delegates_to_image_conversions(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify the catalog itself is forwarded, so frames can be pruned."""
     catalog = _make_catalog()
-    mock = MagicMock(return_value={"deleted": 1})
+    mock = MagicMock(return_value={"deleted": ["/a.fits"], "failed": [{"path": "/b.fits", "reason": "busy"}]})
     monkeypatch.setattr(image_conversions, "delete_images", mock)
 
     result = catalog.delete_images(["/a.fits"], target=Target(id="M13"))
 
-    assert result == {"deleted": 1}
+    assert result.deleted == ["/a.fits"]
+    assert [(item.path, item.reason) for item in result.failed] == [("/b.fits", "busy")]
     mock.assert_called_once_with(["/a.fits"], catalog, "M13")
 
 

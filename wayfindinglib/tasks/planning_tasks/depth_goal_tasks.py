@@ -196,7 +196,7 @@ def read_target_depth(astrometrics: Any, target_id: str, kind: DepthKind) -> Dep
             target_id=target_id,
             library_only=True,
             latest_only=True,
-        )
+        ).rows
         return [
             row
             for row in found

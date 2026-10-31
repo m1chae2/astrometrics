@@ -16,6 +16,7 @@ from astrometricslib import (
     MeasurementOrigin,
     MeasurementStatus,
     QualityMeasurement,
+    QualityQueryResult,
     QualitySubject,
     SubjectLevel,
     Target,
@@ -169,19 +170,21 @@ class FakeLibrary:
         target_id: str | None = None,
         observing_night_id: str | None = None,
         **_: Any,
-    ) -> list[QualityMeasurement]:
+    ) -> QualityQueryResult:
         """Answer ``quality.query`` from the stored rows.
 
         Returns
         -------
-        rows : `list` [`QualityMeasurement`]
+        answer : `QualityQueryResult`
             The rows that match.
         """
-        return [
-            row
-            for row in self.rows
-            if (metric is None or row.metric == metric)
-            and (level is None or row.subject.level.value == level)
-            and (target_id is None or row.subject.target_id == target_id)
-            and (observing_night_id is None or row.subject.observing_night_id == observing_night_id)
-        ]
+        return QualityQueryResult(
+            rows=[
+                row
+                for row in self.rows
+                if (metric is None or row.metric == metric)
+                and (level is None or row.subject.level.value == level)
+                and (target_id is None or row.subject.target_id == target_id)
+                and (observing_night_id is None or row.subject.observing_night_id == observing_night_id)
+            ]
+        )

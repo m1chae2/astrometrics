@@ -16,7 +16,7 @@ from unittest.mock import create_autospec
 
 import pytest
 
-from astrometricslib import AppConfiguration, Target
+from astrometricslib import AppConfiguration, QualityQueryResult, Target
 from backend.services.observatory.plan_service import PlanService
 from backend.services.observatory.target_imaging_executor import TargetImagingExecutor
 from wayfindinglib import ObservationPackage, ObservationPlanning, Telescope
@@ -39,7 +39,9 @@ def executor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TargetImagingEx
         targets=SimpleNamespace(get=lambda target_id, refresh=False: targets.get(target_id)),
         # The library's frame counting also reads frame judgments; no target
         # here has judged frames.
-        quality=SimpleNamespace(capture_settings=lambda ids=None: {}, query=lambda **kwargs: []),
+        quality=SimpleNamespace(
+            capture_settings=lambda ids=None: {}, query=lambda **kwargs: QualityQueryResult()
+        ),
     )
     telescope = Telescope(id="t1", name="Scope", focal_length_mm=450.0, focal_ratio=6.0)
     catalog = SimpleNamespace(

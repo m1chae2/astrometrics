@@ -477,7 +477,7 @@ def build_night_quality(context: ControlContext, night_id: str) -> NightQuality:
     """
     astrometrics = context.astrometrics
     capture_settings = astrometrics.quality.capture_settings()
-    night_rows = astrometrics.quality.query(observing_night_id=night_id, library_only=True)
+    night_rows = astrometrics.quality.query(observing_night_id=night_id, library_only=True).rows
     guiding = _guiding_summary(context, night_id)
     if not night_rows and not guiding.available:
         raise NotFoundError(
@@ -540,7 +540,7 @@ def build_night_quality(context: ControlContext, night_id: str) -> NightQuality:
             moonless or None,
         )
         target_night_rows = rows_by_target[target_id]
-        stack_rows = astrometrics.quality.query(target_id=target_id, level="stack", library_only=True)
+        stack_rows = astrometrics.quality.query(target_id=target_id, level="stack", library_only=True).rows
         statements = _target_statements(
             target_night_rows, stack_rows, capture_settings, _main_setting_id(target_night_rows)
         )

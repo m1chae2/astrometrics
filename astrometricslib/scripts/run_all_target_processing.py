@@ -561,7 +561,7 @@ def _earlier_nights_frames(astrometrics: Astrometrics, target: Any, since: datet
     """
     weight_rows = astrometrics.quality.query(
         metric=STACKING_FRAME_WEIGHT, target_id=target.id, since=since, library_only=True
-    )
+    ).rows
     night_of_subject = {
         row.subject.subject_id: row.subject.observing_night_id
         for row in weight_rows
@@ -671,13 +671,15 @@ def _noise_ratio(astrometrics: Any, target_id: str, since: Any) -> float | None:
             target_id=target_id,
             since=since,
             library_only=True,
-        )
+        ).rows
     )
     if stored is not None:
         return stored
     measured, predicted = (
         _measured_value(
-            astrometrics.quality.query(metric=metric, target_id=target_id, since=since, library_only=True)
+            astrometrics.quality.query(
+                metric=metric, target_id=target_id, since=since, library_only=True
+            ).rows
         )
         for metric in (
             STACKING_EMPTY_APERTURE_NOISE_STACK_UNIT,
@@ -928,7 +930,7 @@ def build_review_row(astrometrics: Any, record: dict) -> dict[str, Any]:
         """
         return astrometrics.quality.query(
             metric=metric, target_id=row["target"], since=record.get("run_started_at"), library_only=True
-        )
+        ).rows
 
     weight_rows = query(STACKING_FRAME_WEIGHT)
     row["weights_known"] = _presence_label(weight_rows)
@@ -956,7 +958,7 @@ def build_review_row(astrometrics: Any, record: dict) -> dict[str, Any]:
                 target_id=row["target"],
                 since=record.get("run_started_at"),
                 variant=EARLIER_NIGHTS_VARIANT,
-            )
+            ).rows
             for metric in (STACKING_FRAME_WEIGHT, STACKING_EXPECTED_EMPTY_APERTURE_NOISE_STACK_UNIT)
         ]
         row["earlier_nights_present"] = (

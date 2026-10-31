@@ -2127,7 +2127,7 @@ def build_target_dataset_report(
         stack_rows.extend(
             astrometrics.quality.query(
                 metric=metric, target_id=target.id, library_only=True, latest_only=False
-            )
+            ).rows
         )
     # The calibration of each run is not a measurement row; it is a record of
     # master file identities. A run with none counts as confounded.

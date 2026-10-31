@@ -9,7 +9,7 @@ arguments and hand off.
 
 import builtins
 from collections.abc import Callable
-from typing import Any, Literal
+from typing import Literal
 
 from astropy.io import fits
 
@@ -19,6 +19,8 @@ from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.jobs.runner import background_job, registered_job
 from astrometricslib.models.catalog_queries import ReindexReport, TargetQueryResult, TargetReindexChange
+from astrometricslib.models.field_centers import FieldCenter, ImagedFieldCenters
+from astrometricslib.models.image_deletion import FailedDeletion, ImageDeletionResult
 from astrometricslib.models.target import Target, TargetObjectType
 from astrometricslib.pipelines.shared.api_arguments import (
     check_choice,
@@ -497,7 +499,9 @@ class TargetCatalog:
         resolved = resolve_target(self, target)
         return image_conversions.get_frame(resolved, iso, exposure, index)
 
-    def delete_images(self, paths: builtins.list[str], target: str | Target | None = None) -> dict:
+    def delete_images(
+        self, paths: builtins.list[str], target: str | Target | None = None
+    ) -> ImageDeletionResult:
         """Delete files from disk, and from a target's frame list if given.
 
         Parameters
@@ -510,14 +514,21 @@ class TargetCatalog:
 
         Returns
         -------
-        result : `dict`
+        result : `ImageDeletionResult`
             ``deleted`` (the paths removed) and ``failed`` (each path that
             could not be removed, with the reason).
         """
         from astrometricslib.pipelines.shared import image_conversions
 
         target_id = resolve_target(self, target).id if target is not None else None
-        return image_conversions.delete_images(paths, self, target_id)
+        outcome = image_conversions.delete_images(paths, self, target_id)
+        return ImageDeletionResult(
+            deleted=[str(path) for path in outcome["deleted"]],
+            failed=[
+                FailedDeletion(path=str(item["path"]), reason=str(item["reason"]))
+                for item in outcome["failed"]
+            ],
+        )
 
     # -- Short descriptions -----------------------------------------------
 
@@ -712,7 +723,7 @@ class TargetCatalog:
     @background_job("diagnostics", grace_period_seconds=20.0)
     def imaged_field_centers(
         self, max_frames_per_target: int = 12, register_job: bool = True
-    ) -> builtins.list[dict[str, Any]]:
+    ) -> ImagedFieldCenters:
         """List the distinct sky positions the library has imaged.
 
         Reads the position from the FITS header of the first few frames of
@@ -728,13 +739,24 @@ class TargetCatalog:
 
         Returns
         -------
-        centers : `list` [`dict`]
+        centers : `ImagedFieldCenters`
             One entry per distinct position, with its coordinates and the
             targets that share it.
         """
         from astrometricslib.pipelines.astrometry.utilities.catalog_seeding import derive_field_centers
 
         with registered_job(enabled=register_job, job_type="diagnostics", target_id="library"):
-            return derive_field_centers(
+            found = derive_field_centers(
                 self._look_at_every_target(), max_frames_per_target=max_frames_per_target
+            )
+            return ImagedFieldCenters(
+                centers=[
+                    FieldCenter(
+                        right_ascension_deg=float(center["right_ascension_deg"]),
+                        declination_deg=float(center["declination_deg"]),
+                        target_ids=[str(target_id) for target_id in center["target_ids"]],
+                        frames_examined=int(center["frames_examined"]),
+                    )
+                    for center in found
+                ]
             )

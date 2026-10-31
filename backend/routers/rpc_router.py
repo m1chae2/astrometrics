@@ -160,10 +160,10 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # starts a background run and answers at once. Writes (they stack and store
     # rows), so the AI's read-only profile withholds them.
     "processing:measure_noise": ("quality_measurement_service", "start_noise_measurement"),
-    # Quality measurements. These read the library's quality root directly:
-    # `query` reads the stored measurements and `metrics` lists the declared
-    # metrics. Neither writes anything.
-    "quality:query": ("astrometrics.quality", "query"),
+    # Quality measurements. `query` reads the stored measurements (the
+    # service gives the screens the plain list of rows) and `metrics` lists
+    # the declared metrics. Neither writes anything.
+    "quality:query": ("quality_measurement_service", "query_measurements"),
     "quality:metrics": ("astrometrics.quality", "metrics"),
     "quality:resolve_rows": ("astrometrics.quality", "resolve_rows"),
     # Photometry and spectroscopy analysis

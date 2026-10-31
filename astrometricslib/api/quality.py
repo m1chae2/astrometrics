@@ -30,6 +30,7 @@ from astrometricslib.models.quality.quality_reports import (
     SpectralFrameCheckReport,
     StackQualityReport,
 )
+from astrometricslib.models.quality.query_result import QualityQueryResult
 from astrometricslib.models.quality.row_frames import QualityRowFile, QualityRowResolution
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.shared.api_arguments import (
@@ -133,12 +134,14 @@ class QualityRecords:
         latest_only: bool = True,
         variant: str | None = None,
         library_only: bool = False,
-    ) -> list[QualityMeasurement]:
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> QualityQueryResult:
         """Read the quality measurements that earlier runs stored.
 
         Nothing is measured and nothing is written. A library with no
-        stored measurements yet gives an empty list, and no database file
-        or table is created by asking.
+        stored measurements yet gives an empty answer, and no database file
+        or table is created by asking. There is no limit unless one is given.
 
         Parameters
         ----------
@@ -169,18 +172,26 @@ class QualityRecords:
         library_only : `bool`, optional
             Only rows that are not about a subset stack. Cannot be combined
             with ``variant``.
+        limit : `int`, optional
+            The most measurements to return. `None` (the default) returns
+            every match.
+        offset : `int`, optional
+            How many matching measurements to skip, for paging. Defaults
+            to 0.
 
         Returns
         -------
-        measurements : `list` [`QualityMeasurement`]
-            The matching measurements, oldest first.
+        answer : `QualityQueryResult`
+            The matching measurements, oldest first, how many matched in all
+            and whether the limit cut the list.
 
         Raises
         ------
         InvalidArgumentError
             If ``metric`` is not registered (the error lists the registered
             names), ``level`` is unknown, ``since`` cannot be read as a
-            time, or both ``variant`` and ``library_only`` are given.
+            time, both ``variant`` and ``library_only`` are given, ``limit``
+            is below 1 or ``offset`` is below 0.
 
         Notes
         -----
@@ -195,6 +206,10 @@ class QualityRecords:
             check_choice("level", level, tuple(member.value for member in SubjectLevel))
         if variant is not None and library_only:
             raise InvalidArgumentError("Give either variant or library_only, not both.")
+        if limit is not None and limit < 1:
+            raise InvalidArgumentError("limit must be at least 1, or None for no limit.")
+        if offset < 0:
+            raise InvalidArgumentError("offset cannot be negative.")
         since_seconds = to_epoch_seconds(since, "since")
         since_time = None if since_seconds is None else datetime.fromtimestamp(since_seconds, tz=UTC)
         rows = QualityStore(quality_database_path(self._config)).query(
@@ -213,7 +228,13 @@ class QualityRecords:
         registry = get_metric_registry()
         for row in rows:
             row.unit = registry.get(row.metric).unit if row.metric in registry.names() else None
-        return rows
+        page = rows[offset:] if limit is None else rows[offset : offset + limit]
+        return QualityQueryResult(
+            rows=page,
+            total_matching=len(rows),
+            offset=offset,
+            truncated=limit is not None and offset + limit < len(rows),
+        )
 
     def resolve_rows(self, row_ids: list[int]) -> QualityRowResolution:
         """Find the picture behind each stored quality row.
@@ -235,7 +256,7 @@ class QualityRecords:
             found has `path` set to `None` and a plain `reason`.
         """
         asked = list(dict.fromkeys(int(row_id) for row_id in row_ids))
-        found = {row.row_id: row for row in self.query(row_ids=asked, latest_only=False)}
+        found = {row.row_id: row for row in self.query(row_ids=asked, latest_only=False).rows}
         frame_paths_by_target: dict[str, dict[str, str]] = {}
         files = []
         for row_id in asked:
@@ -674,7 +695,7 @@ class QualityRecords:
         rows = [
             row
             for metric in (FRAME_QUARANTINE_ROUNDNESS, FRAME_QUARANTINE_SKY_MEDIAN)
-            for row in self.query(metric=metric, target_id=resolved.id, latest_only=True)
+            for row in self.query(metric=metric, target_id=resolved.id, latest_only=True).rows
         ]
         setting_ids = sorted({
             row.subject.capture_setting_id for row in rows if row.subject.capture_setting_id is not None

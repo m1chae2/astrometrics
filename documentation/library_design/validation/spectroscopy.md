@@ -573,7 +573,7 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
   from astrometricslib import Astrometrics
 
   summary = Astrometrics().stars.tune_spectroscopy_calibration("vega_stack.fits", camera_id="ZWO ASI 533MM Pro")
-  print(summary["rms_error_nm"])
+  print(summary.rms_error_nm)
   ```
   <!-- impl: astrometricslib.StellarCatalog.tune_spectroscopy_calibration -->
 - **Acceptance criterion:** An RMS well below one pixel of dispersion (about 1.1 nm). A fit above 10 nm is refused.

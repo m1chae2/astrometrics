@@ -153,7 +153,7 @@ def read_frame_measurements(astrometrics: Any) -> dict[str, dict[str, tuple[floa
     """
     by_frame: dict[str, dict[str, tuple[float, int | None]]] = defaultdict(dict)
     for metric, version in PINNED_FRAME_METRICS.items():
-        for row in astrometrics.quality.query(metric=metric, level="frame", latest_only=True):
+        for row in astrometrics.quality.query(metric=metric, level="frame", latest_only=True).rows:
             if row.definition_version != version:
                 continue
             if row.subject.channel is not None or row.status == MeasurementStatus.NOT_MEASURED:

@@ -115,7 +115,7 @@ def read_target_rows(astrometrics: Any, target_id: str) -> TargetRows:
         The rows and their capture settings. A library with no measurements
         gives empty lists.
     """
-    rows = list(astrometrics.quality.query(target_id=target_id, library_only=True))
+    rows = list(astrometrics.quality.query(target_id=target_id, library_only=True).rows)
     ids = sorted({
         row.subject.capture_setting_id for row in rows if row.subject.capture_setting_id is not None
     })
@@ -147,14 +147,14 @@ def read_earlier_nights_rows(astrometrics: Any, target_id: str) -> list[QualityM
     return [
         *astrometrics.quality.query(
             target_id=target_id, level="stack", variant=EARLIER_NIGHTS_VARIANT, latest_only=False
-        ),
+        ).rows,
         *astrometrics.quality.query(
             target_id=target_id,
             level="frame",
             metric=FRAME_WEIGHT_METRIC,
             variant=EARLIER_NIGHTS_VARIANT,
             latest_only=False,
-        ),
+        ).rows,
     ]
 
 
@@ -208,7 +208,7 @@ def _read_library_stack_rows(astrometrics: Any) -> tuple[list[QualityMeasurement
         One library-wide query of stack-level rows (library stacks, every run
         kept) and one read of the capture settings they point at.
     """
-    rows = list(astrometrics.quality.query(level="stack", library_only=True, latest_only=False))
+    rows = list(astrometrics.quality.query(level="stack", library_only=True, latest_only=False).rows)
     ids = sorted({
         row.subject.capture_setting_id for row in rows if row.subject.capture_setting_id is not None
     })

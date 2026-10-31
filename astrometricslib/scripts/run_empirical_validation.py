@@ -42,9 +42,9 @@ def run_spectroscopy_validation(astrometrics: Astrometrics, camera_name: str) ->
             tune_res = astrometrics.stars.tune_spectroscopy_calibration(
                 vega_target.spectral_stacking.stacked_image, camera_id=camera_name
             )
-            rms_err = tune_res.get("rms_error_nm", 0.0)
+            rms_err = tune_res.rms_error_nm
             print(f"  Vega Calibration RMS Error: {rms_err:.3f} nm")
-            results["vega_calibration"] = tune_res
+            results["vega_calibration"] = tune_res.model_dump()
         except (AstrometricsError, *DATA_ERRORS) as err:
             print(f"  Vega calibration tuning notice: {err}")
 

@@ -19,12 +19,65 @@ from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.catalog_queries import StarQueryResult
+from astrometricslib.models.point_sources import PointSource, PointSourceDetection
+from astrometricslib.models.spectroscopy_calibration import (
+    CalibrationLineFit,
+    SpectroscopyCalibrationResult,
+)
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.shared.api_arguments import check_choice
 
 __all__ = ["StellarCatalog"]
 
 logger = logging.getLogger(__name__)
+
+
+def _optional_float(value: Any) -> float | None:
+    """Turn a NumPy or Python number into a plain float, keeping `None`.
+
+    Parameters
+    ----------
+    value : `Any`
+        A number or `None`.
+
+    Returns
+    -------
+    number : `float` or `None`
+        The number as a Python float.
+    """
+    return None if value is None else float(value)
+
+
+def _to_point_source(row: dict[str, Any]) -> PointSource:
+    """Turn one detector row into a `PointSource` with plain Python numbers.
+
+    Parameters
+    ----------
+    row : `dict` [`str`, `Any`]
+        One star from the source detector. Its numbers may be NumPy values,
+        and the centroid keys may be written ``xcentroid`` or ``x_centroid``.
+
+    Returns
+    -------
+    source : `PointSource`
+        The star.
+    """
+    identifier = row.get("id")
+    pixel_count = row.get("n_pixels")
+    return PointSource(
+        id=None if identifier is None else int(identifier),
+        x_centroid=float(row.get("x_centroid", row.get("xcentroid"))),
+        y_centroid=float(row.get("y_centroid", row.get("ycentroid"))),
+        flux=float(row.get("flux", 0.0)),
+        peak=_optional_float(row.get("peak")),
+        sharpness=_optional_float(row.get("sharpness")),
+        roundness1=_optional_float(row.get("roundness1")),
+        roundness2=_optional_float(row.get("roundness2")),
+        n_pixels=None if pixel_count is None else int(pixel_count),
+        mag=_optional_float(row.get("mag")),
+        daofind_mag=_optional_float(row.get("daofind_mag")),
+        radius_px=_optional_float(row.get("radius_px")),
+    )
 
 
 class StellarCatalog:
@@ -346,7 +399,7 @@ class StellarCatalog:
         camera_id: str | None = None,
         star_x: float | None = None,
         star_y: float | None = None,
-    ) -> dict[str, Any]:
+    ) -> SpectroscopyCalibrationResult:
         """Fit the spectroscope's physical model to one spectrum image.
 
         Parameters
@@ -362,7 +415,7 @@ class StellarCatalog:
 
         Returns
         -------
-        calibration_result : `dict`
+        calibration_result : `SpectroscopyCalibrationResult`
             The fitted calibration values and how well they fit.
         """
         from astrometricslib.pipelines.spectroscopy.utilities.calibration_tuner import (
@@ -371,7 +424,29 @@ class StellarCatalog:
 
         tuner = SpectroscopyCalibrationTuner(config=self._config)
         star_position = (star_x, star_y) if (star_x is not None and star_y is not None) else None
-        return tuner.tune_calibration(image_path, camera_name=camera_id, star_pos=star_position)
+        summary = tuner.tune_calibration(image_path, camera_name=camera_id, star_pos=star_position)
+        maximum_length = summary["max_extraction_length_px"]
+        return SpectroscopyCalibrationResult(
+            status=str(summary["status"]),
+            camera_name=str(summary["camera_name"]),
+            fitted_grating_distance_mm=float(summary["fitted_grating_distance_mm"]),
+            fitted_dispersion_start_px=float(summary["fitted_dispersion_start_px"]),
+            rms_error_nm=float(summary["rms_error_nm"]),
+            detected_angle_degrees=float(summary["detected_angle_degrees"]),
+            detailed_calibration=[
+                CalibrationLineFit(
+                    feature=str(line["feature"]),
+                    extracted_index=int(line["extracted_index"]),
+                    pixel_offset=float(line["pixel_offset"]),
+                    target_wavelength_nm=float(line["target_wavelength_nm"]),
+                    calibrated_wavelength_nm=float(line["calibrated_wavelength_nm"]),
+                    deviation_nm=float(line["deviation_nm"]),
+                )
+                for line in summary["detailed_calibration"]
+            ],
+            use_flare_mask_extraction=bool(summary["use_flare_mask_extraction"]),
+            max_extraction_length_px=None if maximum_length is None else float(maximum_length),
+        )
 
     def delete(self, star_id: str) -> bool:
         """Delete a star from the catalog by its id.
@@ -474,7 +549,7 @@ class StellarCatalog:
         image_data: Any,
         threshold_sigma: float = 5.0,
         fwhm: float = 4.0,
-    ) -> list[dict[str, Any]]:
+    ) -> PointSourceDetection:
         """Find stars (point sources) in an image's pixel data.
 
         Parameters
@@ -489,12 +564,13 @@ class StellarCatalog:
 
         Returns
         -------
-        sources : `list` [`dict`]
+        detection : `PointSourceDetection`
             The stars found, brightest first.
         """
         from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
 
-        return SourceDetector(threshold_sigma=threshold_sigma, fwhm=fwhm).detect(image_data)
+        found = SourceDetector(threshold_sigma=threshold_sigma, fwhm=fwhm).detect(image_data)
+        return PointSourceDetection(sources=[_to_point_source(row) for row in found])
 
     def plate_solve(self, image_path: str) -> Any | None:
         """Work out where on the sky an image points, from its stars.

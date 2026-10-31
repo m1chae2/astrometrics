@@ -63,7 +63,7 @@ Every Python example assumes the library is installed and configured with your o
   from wayfindinglib.analytics.result_quality.judge_results import judge_results, needs_attention
 
   astro = Astrometrics()
-  rows = astro.quality.query(target_id="M 57")
+  rows = astro.quality.query(target_id="M 57").rows
   settings = astro.quality.capture_settings()
   statements = judge_results(rows, capture_settings=settings)
   for statement in statements:
@@ -110,7 +110,7 @@ Every Python example assumes the library is installed and configured with your o
   from wayfindinglib.models.quality.efficiency import ScienceGoal
 
   astro = Astrometrics()
-  rows = astro.quality.query(target_id="M 27", level="frame")  # frame measurement rows
+  rows = astro.quality.query(target_id="M 27", level="frame").rows  # frame measurement rows
   settings = astro.quality.capture_settings()
   observations = frame_observations_from_measurements(rows, settings)
   key = baseline_key(observations[0].capture_setting)
@@ -696,11 +696,11 @@ Every Python example assumes the library is installed and configured with your o
      from wayfindinglib.analytics.result_quality.forecast import forecast_check, stack_runs_from_measurements
 
      astro = Astrometrics()
-     stack_rows = astro.quality.query(target_id="M 57", level="stack", library_only=True, latest_only=False)
+     stack_rows = astro.quality.query(target_id="M 57", level="stack", library_only=True, latest_only=False).rows
      weight_rows = astro.quality.query(
          target_id="M 57", metric="stacking.frame_weight", library_only=True, latest_only=False
-     )
-     frame_rows = astro.quality.query(target_id="M 57", level="frame", library_only=True)
+     ).rows
+     frame_rows = astro.quality.query(target_id="M 57", level="frame", library_only=True).rows
      runs = stack_runs_from_measurements(stack_rows + weight_rows)
      observations = frame_observations_from_measurements(frame_rows, astro.quality.capture_settings())
      for check in forecast_check(runs, observations):
@@ -912,7 +912,7 @@ Every Python example assumes the library is installed and configured with your o
          "stacking.odd_even_difference_aperture_set_number",
          "stacking.effective_frame_count",
      ):
-         for row in astro.quality.query(metric=name, target_id="M 13", library_only=True):
+         for row in astro.quality.query(metric=name, target_id="M 13", library_only=True).rows:
              print(name, row.value, row.status, row.reason)
      report = Wayfinder().planning.get_advisory("quality", target="M 13")
      for statement in report.statements:

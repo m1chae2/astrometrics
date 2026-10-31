@@ -233,7 +233,7 @@ class FakeAstrometrics:
 
     def query_quality(
         self, metric: str, target_id: str, variant: str | None = None, **keywords: Any
-    ) -> list[SimpleNamespace]:
+    ) -> SimpleNamespace:
         """Return the fake quality rows of one metric for one target.
 
         Rows asked for by a subset variant are kept under the key with the
@@ -241,11 +241,11 @@ class FakeAstrometrics:
 
         Returns
         -------
-        rows : `list`
-            The rows the test set up, or none.
+        answer : `types.SimpleNamespace`
+            With ``rows``, the rows the test set up, or none.
         """
         key = f"{target_id}|{metric}" + (f"|{variant}" if variant else "")
-        return self.quality_rows.get(key, [])
+        return SimpleNamespace(rows=self.quality_rows.get(key, []))
 
     def process_target(self, target: list[str] | None, **keywords: Any) -> SimpleNamespace:
         """Record one pass and pretend it succeeded.

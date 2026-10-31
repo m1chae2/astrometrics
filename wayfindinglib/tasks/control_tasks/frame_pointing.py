@@ -153,15 +153,13 @@ def record_frame_pointing_errors(context: ControlContext, paths: list[str]) -> i
     recorded : `int`
         How many alignment attempts were recorded.
     """
-    from astropy.io import fits
-
     recorded = 0
     for path in paths:
         if not path.lower().endswith((".fits", ".fit")):
             continue
         try:
-            with fits.open(path, memmap=False) as frame:
-                attempt = pointing_error_from_header(frame[0].header, path)
+            header = context.astrometrics.targets.read_frame_header(path)
+            attempt = pointing_error_from_header(header, path)
         except FITS_READ_ERRORS as error:
             logger.debug("Skipping %s: %s", path, error)
             continue

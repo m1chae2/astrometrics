@@ -9,11 +9,15 @@ logic of their own (get_header's ownership check, reindex_frames' three
 forms) get behavior tests instead.
 """
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
+from astropy.io import fits
 
 from astrometricslib.api.targets import TargetCatalog
+from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared import frame_grouping, image_conversions, target_records
@@ -272,3 +276,23 @@ class TestGetHeader:
 
         with pytest.raises(InvalidArgumentError, match="does not belong to target"):
             catalog.get_header("/unrelated.fits", target=target)
+
+
+def test_read_frame_header_returns_typed_values_from_the_first_header(tmp_path: Path) -> None:
+    """The first header comes back with its values typed."""
+    path = str(tmp_path / "frame.fits")
+    hdu = fits.PrimaryHDU(np.zeros((4, 4), dtype=np.uint16))
+    hdu.header["FILTER"] = "SPEC"
+    hdu.header["CRVAL1"] = 150.5
+    hdu.writeto(path)
+
+    header = _make_catalog().read_frame_header(path)
+
+    assert header["FILTER"] == "SPEC"
+    assert header["CRVAL1"] == pytest.approx(150.5)
+
+
+def test_read_frame_header_raises_a_fits_read_error_for_a_missing_file(tmp_path: Path) -> None:
+    """A missing file raises a FITS_READ_ERRORS error."""
+    with pytest.raises(FITS_READ_ERRORS):
+        _make_catalog().read_frame_header(str(tmp_path / "missing.fits"))

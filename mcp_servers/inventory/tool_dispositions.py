@@ -501,6 +501,10 @@ DECISIONS = {
         "configuration file. The AI is read-only.",
     ),
     "target_get_header": ToolDecision("keep", "Reads one FITS header."),
+    "target_read_frame_header": ToolDecision(
+        "drop",
+        "Reads a header from any path with typed values. target_get_header already serves an AI client.",
+    ),
     "target_read_saved": ToolDecision(
         "drop",
         "Returns the whole target record, frames and all, which overflows the reply. Use target_query.",

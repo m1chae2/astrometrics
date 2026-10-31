@@ -373,6 +373,13 @@
       "interim_block": "",
       "note": "Built 2026-10-04. Targets as short rows or one grouped record, the cameras used, or each target's frames per camera; replaces target_get and target_list."
     },
+    "target_read_frame_header": {
+      "tool_class": "unclassified",
+      "category": "targets",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Reads a header from any path with typed values. target_get_header already serves an AI client."
+    },
     "target_read_saved": {
       "tool_class": "unclassified",
       "category": "targets",

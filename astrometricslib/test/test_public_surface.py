@@ -317,6 +317,7 @@ SUB_API_MEMBERS = {
         "imaged_field_centers",
         "list",
         "query",
+        "read_frame_header",
         "read_saved",
         "reindex_frames",
         "save",

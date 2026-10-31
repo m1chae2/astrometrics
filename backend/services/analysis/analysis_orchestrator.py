@@ -8,8 +8,6 @@ from collections.abc import Iterator
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from astropy.io import fits
-
 from astrometricslib import (
     FITS_READ_ERRORS,
     AppConfiguration,
@@ -360,20 +358,19 @@ class AnalysisOrchestrator(BaseBackgroundService):
             and (not filter_type or filter_type.upper() in ["NONE", "UNKNOWN", "LUMINANCE", "L", "ALL"])
         ):
             try:
-                with fits.open(unmatched_paths[0], memmap=False) as hdul:
-                    header = hdul[0].header
-                    fit_filter = header.get("FILTER")
-                    if fit_filter and str(fit_filter).upper() in [
-                        "SPEC",
-                        "SPECTROSCOPY",
-                        "STAR ANALYZER 200",
-                    ]:
-                        fallback_is_spec = True
-                        logger.info(
-                            "[%s] Auto-detected spectroscopy from FITS header FILTER: %s",
-                            target_id,
-                            fit_filter,
-                        )
+                header = self.astrometrics.targets.read_frame_header(unmatched_paths[0])
+                fit_filter = header.get("FILTER")
+                if fit_filter and str(fit_filter).upper() in [
+                    "SPEC",
+                    "SPECTROSCOPY",
+                    "STAR ANALYZER 200",
+                ]:
+                    fallback_is_spec = True
+                    logger.info(
+                        "[%s] Auto-detected spectroscopy from FITS header FILTER: %s",
+                        target_id,
+                        fit_filter,
+                    )
             except FITS_READ_ERRORS as e:
                 logger.warning("[%s] Could not read FITS header for auto-detection: %s", target_id, e)
 

@@ -170,6 +170,16 @@ class _FakeAstrometrics:
     def save(self) -> None:
         self.saved = True
 
+    def read_frame_header(self, path: str) -> None:
+        """Refuse to read a frame, as the library does for a missing file.
+
+        Raises
+        ------
+        FileNotFoundError
+            Always.
+        """
+        raise FileNotFoundError(path)
+
 
 def test_download_remote_targets_downloads_and_reindexes_on_success() -> None:
     """Verify a remote download classifies frames and reindexes the target."""

@@ -11,6 +11,8 @@ import builtins
 from collections.abc import Callable
 from typing import Any, Literal
 
+from astropy.io import fits
+
 from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.foundation.config import AppConfiguration
@@ -441,6 +443,30 @@ class TargetCatalog:
         from astrometricslib.pipelines.shared import image_conversions
 
         return image_conversions.get_fits_header(path)
+
+    def read_frame_header(self, path: str) -> fits.Header:
+        """Read the header of a FITS file with its values typed.
+
+        This reads the first block (HDU 0) of the file, where cameras and
+        capture software write their notes. It does not read the pixels.
+        Unlike `get_header`, it does not check the file against a target,
+        and it keeps each value as a number, text or flag, not as text.
+
+        Parameters
+        ----------
+        path : `str`
+            Path to the FITS file.
+
+        Returns
+        -------
+        header : `astropy.io.fits.Header`
+            A copy of the file's first header. It can be used like a
+            dictionary, for example ``header.get("FILTER")``.
+        """
+        # A missing, cut-off or damaged file raises one of FITS_READ_ERRORS.
+        from astrometricslib.drivers.fits_access import read_header
+
+        return read_header(path, first_hdu_only=True)
 
     def get_frame(self, target: str | Target, iso: str, exposure: str, index: int = 0) -> str:
         """Find the path of a target's frame by gain, exposure and order.

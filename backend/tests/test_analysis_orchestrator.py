@@ -218,6 +218,29 @@ class TestStartAnalysisTaskClassification:
         orchestrator._run_spectroscopy_analysis.assert_called_once()
         orchestrator._run_photometry_analysis.assert_not_called()
 
+    def test_unmatched_frame_with_spectral_filter_header_is_spectroscopy(self) -> None:
+        """Verify a spectral FILTER card sends an ad hoc frame to spectra."""
+        target = Target(id="ClassifyHeaderTarget", frames=[])
+        orchestrator = self._make_orchestrator_with_target(target)
+        orchestrator.astrometrics.targets.read_frame_header.return_value = {"FILTER": "Star Analyzer 200"}
+
+        orchestrator._start_analysis_task("job1", "ClassifyHeaderTarget", ["/tmp/adhoc.fits"], "ALL")
+
+        orchestrator.astrometrics.targets.read_frame_header.assert_called_once_with("/tmp/adhoc.fits")
+        orchestrator._run_spectroscopy_analysis.assert_called_once()
+        orchestrator._run_photometry_analysis.assert_not_called()
+
+    def test_unreadable_header_is_logged_and_the_frame_stays_light(self) -> None:
+        """Verify a header read error is caught; the frame stays a light."""
+        target = Target(id="ClassifyBadHeaderTarget", frames=[])
+        orchestrator = self._make_orchestrator_with_target(target)
+        orchestrator.astrometrics.targets.read_frame_header.side_effect = OSError("cut off")
+
+        orchestrator._start_analysis_task("job1", "ClassifyBadHeaderTarget", ["/tmp/adhoc.fits"], "ALL")
+
+        orchestrator._run_spectroscopy_analysis.assert_not_called()
+        orchestrator._run_photometry_analysis.assert_called_once()
+
 
 class TestAnalysisFailures:
     """Verify analysis failures raise, and failed jobs report as data."""

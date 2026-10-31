@@ -16,10 +16,22 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
+from astrometricslib import AppConfiguration, Astrometrics
 from wayfindinglib.tasks.control_tasks import frame_pointing
 
 WHEN = {"DATE-OBS": "2026-09-24T22:00:00"}
 """An observation time, so no test needs a file on disk for the time."""
+
+
+def _context(records: object) -> SimpleNamespace:
+    """Build a control context that reads headers through the real library.
+
+    Returns
+    -------
+    context : `types.SimpleNamespace`
+        Holds ``records`` and an `Astrometrics` over a mock database.
+    """
+    return SimpleNamespace(records=records, astrometrics=Astrometrics(AppConfiguration(), MagicMock()))
 
 
 def _frame(path: Path, **header: object) -> str:
@@ -86,7 +98,7 @@ def test_only_plate_solved_frames_are_recorded(tmp_path: Path) -> None:
         DATE_OBS="2026-09-24T22:00:00",
     )
     unsolved = _frame(tmp_path / "unsolved.fits", RA=150.0, DEC=30.0)
-    context = SimpleNamespace(records=MagicMock())
+    context = _context(MagicMock())
 
     recorded = frame_pointing.record_frame_pointing_errors(
         context, [solved, unsolved, str(tmp_path / "notes.txt")]
@@ -104,7 +116,7 @@ def test_a_frame_brought_in_twice_is_recorded_once(tmp_path: Path) -> None:
     from wayfindinglib.drivers.control_record_store import ControlRecordStore
 
     store = ControlRecordStore(db_path=str(tmp_path / "wayfinding.db"))
-    context = SimpleNamespace(records=store)
+    context = _context(store)
     (tmp_path / "first").mkdir()
     (tmp_path / "again").mkdir()
     when = {"OBJECT": "NGC 6888", "DATE_OBS": "2024-08-05T04:22:14.142", "RA": 303.40, "DEC": 37.20}

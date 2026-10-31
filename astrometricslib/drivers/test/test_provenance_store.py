@@ -221,3 +221,49 @@ def test_was_associated_with_agent_type_round_trips(tmp_path: Path) -> None:
     store.record_was_associated_with("job-1", WasAssociatedWith(agent="agent:x"))
     agent = store.get_agent_for_activity("job-1")
     assert agent.type == AgentType.PERSON
+
+
+def test_the_migration_steps_create_every_table_once_and_in_order(tmp_path: Path) -> None:
+    """Each step names its table; a new database holds them in step order."""
+    import sqlite3
+
+    from astrometricslib.drivers.provenance_store import _MIGRATION_STEPS
+
+    step_names = [name for name, _statements in _MIGRATION_STEPS]
+    assert len(step_names) == len(set(step_names))
+    make_store(tmp_path)
+    connection = sqlite3.connect(str(tmp_path / "provenance.db"))
+    try:
+        created = [
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'prov_%' ORDER BY rowid"
+            )
+        ]
+    finally:
+        connection.close()
+    assert created == step_names
+
+
+def test_a_missing_table_is_added_back_and_recorded_rows_are_kept(tmp_path: Path) -> None:
+    """Opening a store on an older database adds only what is missing."""
+    import sqlite3
+
+    store = make_store(tmp_path)
+    store.record_agent(Agent(id="agent:keep", name="keep", type=AgentType.PERSON))
+    store.record_activity(Activity(id="job-1"), target_id="M13")
+    store.record_was_associated_with("job-1", WasAssociatedWith(agent="agent:keep"))
+    connection = sqlite3.connect(str(tmp_path / "provenance.db"))
+    connection.execute("DROP TABLE prov_parameter")
+    connection.commit()
+    connection.close()
+
+    reopened = make_store(tmp_path)
+
+    connection = sqlite3.connect(str(tmp_path / "provenance.db"))
+    try:
+        tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    finally:
+        connection.close()
+    assert "prov_parameter" in tables
+    assert reopened.get_agent_for_activity("job-1").id == "agent:keep"

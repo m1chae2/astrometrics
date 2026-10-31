@@ -96,6 +96,324 @@ _SEEDED_CONFIG_FILE_DESCRIPTION = ConfigFileDescription(
 )
 
 
+# The provenance tables, in the order they are created. `_init_db` runs the
+# steps one after another, and every statement is `IF NOT EXISTS`, so a
+# database that already has a table is left alone and a missing table or index
+# is added. A change to the schema is a new step at the end of the list. Each
+# step is a name and its statements (a table, then the indexes on it).
+_MIGRATION_STEPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "prov_agent",
+        (
+            """
+                CREATE TABLE IF NOT EXISTS prov_agent (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    type TEXT NOT NULL,
+                    comment TEXT,
+                    email TEXT,
+                    affiliation TEXT,
+                    phone TEXT,
+                    address TEXT,
+                    url TEXT
+                )
+            """,
+        ),
+    ),
+    (
+        "prov_activity_description",
+        (
+            """
+                CREATE TABLE IF NOT EXISTS prov_activity_description (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    version TEXT,
+                    type TEXT,
+                    subtype TEXT,
+                    description TEXT,
+                    docurl TEXT
+                )
+            """,
+        ),
+    ),
+    (
+        "prov_activity",
+        (
+            """
+                CREATE TABLE IF NOT EXISTS prov_activity (
+                    id TEXT PRIMARY KEY,
+                    name TEXT,
+                    target_id TEXT NOT NULL,
+                    start_time TEXT,
+                    end_time TEXT,
+                    comment TEXT,
+                    activity_description_id TEXT
+                )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_prov_activity_target ON prov_activity(target_id)",
+        ),
+    ),
+    (
+        "prov_activity_informant",
+        (
+            """
+                CREATE TABLE IF NOT EXISTS prov_activity_informant (
+                    activity_id TEXT NOT NULL,
+                    informant_activity_id TEXT NOT NULL,
+                    PRIMARY KEY (activity_id, informant_activity_id)
+                )
+            """,
+        ),
+    ),
+    (
+        "prov_entity_description",
+        (
+            """
+                CREATE TABLE IF NOT EXISTS prov_entity_description (
+                    id TEXT PRIMARY KEY,
+                    kind TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    docurl TEXT,
+                    type TEXT,
+                    content_type TEXT,
+                    value_type TEXT,
+                    unit TEXT,
+                    ucd TEXT,
+                    utype TEXT
+                )
+            """,
+        ),
+    ),
+    (
+        "prov_entity",
+        (
+            """
+                CREATE TABLE IF NOT EXISTS prov_entity (
+                    id TEXT PRIMARY KEY,
+                    kind TEXT NOT NULL,
+                    name TEXT,
+                    location TEXT,
+                    value TEXT,
+                    generated_at_time TEXT,
+                    invalidated_at_time TEXT,
+                    comment TEXT,
+                    entity_description_id TEXT
+                )
+            """,
+        ),
+    ),
+    (
+        "prov_entity_used_entity",
+        (
+            """
+                CREATE TABLE IF NOT EXISTS prov_entity_used_entity (
+                    entity_id TEXT NOT NULL,
+                    used_entity_id TEXT NOT NULL,
+                    PRIMARY KEY (entity_id, used_entity_id)
+                )
+            """,
+        ),
+    ),
+    (
+        "prov_usage_description",
+        (
+            """
+                CREATE TABLE IF NOT EXISTS prov_usage_description (
+                    id TEXT PRIMARY KEY,
+                    activity_description_id TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    description TEXT,
+                    type TEXT,
+                    multiplicity TEXT
+                )
+            """,
+        ),
+    ),
+    (
+        "prov_usage_description_entity_description",
+        (
+            """
+                CREATE TABLE IF NOT EXISTS prov_usage_description_entity_description (
+                    usage_description_id TEXT NOT NULL,
+                    entity_description_id TEXT NOT NULL,
+                    PRIMARY KEY (usage_description_id, entity_description_id)
+                )
+            """,
+        ),
+    ),
+    (
+        "prov_generation_description",
+        (
+            """
+                CREATE TABLE IF NOT EXISTS prov_generation_description (
+                    id TEXT PRIMARY KEY,
+                    activity_description_id TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    description TEXT,
+                    type TEXT,
+                    multiplicity TEXT
+                )
+            """,
+        ),
+    ),
+    (
+        "prov_generation_description_entity_description",
+        (
+            """
+                CREATE TABLE IF NOT EXISTS prov_generation_description_entity_description (
+                    generation_description_id TEXT NOT NULL,
+                    entity_description_id TEXT NOT NULL,
+                    PRIMARY KEY (generation_description_id, entity_description_id)
+                )
+            """,
+        ),
+    ),
+    (
+        "prov_used",
+        (
+            """
+                CREATE TABLE IF NOT EXISTS prov_used (
+                    activity_id TEXT NOT NULL,
+                    entity_id TEXT NOT NULL,
+                    role TEXT,
+                    time TEXT,
+                    usage_description_id TEXT,
+                    PRIMARY KEY (activity_id, entity_id, role)
+                )
+            """,
+        ),
+    ),
+    (
+        "prov_was_generated_by",
+        (
+            """
+                CREATE TABLE IF NOT EXISTS prov_was_generated_by (
+                    entity_id TEXT PRIMARY KEY,
+                    activity_id TEXT NOT NULL,
+                    role TEXT,
+                    generation_description_id TEXT
+                )
+            """,
+        ),
+    ),
+    (
+        "prov_was_associated_with",
+        (
+            """
+                CREATE TABLE IF NOT EXISTS prov_was_associated_with (
+                    activity_id TEXT NOT NULL,
+                    agent_id TEXT NOT NULL,
+                    role TEXT,
+                    PRIMARY KEY (activity_id, agent_id)
+                )
+            """,
+        ),
+    ),
+    (
+        "prov_was_attributed_to",
+        (
+            """
+                CREATE TABLE IF NOT EXISTS prov_was_attributed_to (
+                    entity_id TEXT NOT NULL,
+                    agent_id TEXT NOT NULL,
+                    role TEXT,
+                    PRIMARY KEY (entity_id, agent_id)
+                )
+            """,
+        ),
+    ),
+    (
+        "prov_parameter_description",
+        (
+            """
+                CREATE TABLE IF NOT EXISTS prov_parameter_description (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    value_type TEXT NOT NULL,
+                    unit TEXT,
+                    ucd TEXT,
+                    utype TEXT,
+                    min TEXT,
+                    max TEXT,
+                    default_value TEXT,
+                    options TEXT,
+                    description TEXT
+                )
+            """,
+        ),
+    ),
+    (
+        "prov_parameter",
+        (
+            """
+                CREATE TABLE IF NOT EXISTS prov_parameter (
+                    id TEXT PRIMARY KEY,
+                    activity_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    value TEXT NOT NULL,
+                    parameter_description_id TEXT
+                )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_prov_parameter_activity ON prov_parameter(activity_id)",
+        ),
+    ),
+    (
+        "prov_config_file",
+        (
+            """
+                CREATE TABLE IF NOT EXISTS prov_config_file (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    location TEXT NOT NULL,
+                    comment TEXT,
+                    config_file_description_id TEXT
+                )
+            """,
+        ),
+    ),
+    (
+        "prov_config_file_description",
+        (
+            """
+                CREATE TABLE IF NOT EXISTS prov_config_file_description (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    docurl TEXT,
+                    type TEXT
+                )
+            """,
+        ),
+    ),
+    (
+        "prov_was_configured_by",
+        (
+            """
+                CREATE TABLE IF NOT EXISTS prov_was_configured_by (
+                    activity_id TEXT NOT NULL,
+                    artefact_type TEXT NOT NULL,
+                    config_file_id TEXT,
+                    PRIMARY KEY (activity_id, artefact_type)
+                )
+            """,
+        ),
+    ),
+    (
+        "prov_was_configured_by_parameter",
+        (
+            """
+                CREATE TABLE IF NOT EXISTS prov_was_configured_by_parameter (
+                    activity_id TEXT NOT NULL,
+                    parameter_id TEXT NOT NULL,
+                    PRIMARY KEY (activity_id, parameter_id)
+                )
+            """,
+        ),
+    ),
+)
+
+
 class ProvenanceStore:
     """Records and queries the IVOA provenance graph in astrometrics_log.db.
 
@@ -152,7 +470,10 @@ class ProvenanceStore:
         return conn
 
     def _init_db(self) -> None:
-        """Create every provenance table if missing, then seed registries.
+        """Run the migration steps, then seed registries.
+
+        Each step in `_MIGRATION_STEPS` creates one table (and its indexes)
+        when it is missing, in the order of the list.
 
         Raises
         ------
@@ -163,229 +484,9 @@ class ProvenanceStore:
         try:
             cursor = conn.cursor()
 
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS prov_agent (
-                    id TEXT PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    type TEXT NOT NULL,
-                    comment TEXT,
-                    email TEXT,
-                    affiliation TEXT,
-                    phone TEXT,
-                    address TEXT,
-                    url TEXT
-                )
-            """)
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS prov_activity_description (
-                    id TEXT PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    version TEXT,
-                    type TEXT,
-                    subtype TEXT,
-                    description TEXT,
-                    docurl TEXT
-                )
-            """)
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS prov_activity (
-                    id TEXT PRIMARY KEY,
-                    name TEXT,
-                    target_id TEXT NOT NULL,
-                    start_time TEXT,
-                    end_time TEXT,
-                    comment TEXT,
-                    activity_description_id TEXT
-                )
-            """)
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_prov_activity_target ON prov_activity(target_id)")
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS prov_activity_informant (
-                    activity_id TEXT NOT NULL,
-                    informant_activity_id TEXT NOT NULL,
-                    PRIMARY KEY (activity_id, informant_activity_id)
-                )
-            """)
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS prov_entity_description (
-                    id TEXT PRIMARY KEY,
-                    kind TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    description TEXT,
-                    docurl TEXT,
-                    type TEXT,
-                    content_type TEXT,
-                    value_type TEXT,
-                    unit TEXT,
-                    ucd TEXT,
-                    utype TEXT
-                )
-            """)
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS prov_entity (
-                    id TEXT PRIMARY KEY,
-                    kind TEXT NOT NULL,
-                    name TEXT,
-                    location TEXT,
-                    value TEXT,
-                    generated_at_time TEXT,
-                    invalidated_at_time TEXT,
-                    comment TEXT,
-                    entity_description_id TEXT
-                )
-            """)
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS prov_entity_used_entity (
-                    entity_id TEXT NOT NULL,
-                    used_entity_id TEXT NOT NULL,
-                    PRIMARY KEY (entity_id, used_entity_id)
-                )
-            """)
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS prov_usage_description (
-                    id TEXT PRIMARY KEY,
-                    activity_description_id TEXT NOT NULL,
-                    role TEXT NOT NULL,
-                    description TEXT,
-                    type TEXT,
-                    multiplicity TEXT
-                )
-            """)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS prov_usage_description_entity_description (
-                    usage_description_id TEXT NOT NULL,
-                    entity_description_id TEXT NOT NULL,
-                    PRIMARY KEY (usage_description_id, entity_description_id)
-                )
-            """)
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS prov_generation_description (
-                    id TEXT PRIMARY KEY,
-                    activity_description_id TEXT NOT NULL,
-                    role TEXT NOT NULL,
-                    description TEXT,
-                    type TEXT,
-                    multiplicity TEXT
-                )
-            """)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS prov_generation_description_entity_description (
-                    generation_description_id TEXT NOT NULL,
-                    entity_description_id TEXT NOT NULL,
-                    PRIMARY KEY (generation_description_id, entity_description_id)
-                )
-            """)
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS prov_used (
-                    activity_id TEXT NOT NULL,
-                    entity_id TEXT NOT NULL,
-                    role TEXT,
-                    time TEXT,
-                    usage_description_id TEXT,
-                    PRIMARY KEY (activity_id, entity_id, role)
-                )
-            """)
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS prov_was_generated_by (
-                    entity_id TEXT PRIMARY KEY,
-                    activity_id TEXT NOT NULL,
-                    role TEXT,
-                    generation_description_id TEXT
-                )
-            """)
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS prov_was_associated_with (
-                    activity_id TEXT NOT NULL,
-                    agent_id TEXT NOT NULL,
-                    role TEXT,
-                    PRIMARY KEY (activity_id, agent_id)
-                )
-            """)
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS prov_was_attributed_to (
-                    entity_id TEXT NOT NULL,
-                    agent_id TEXT NOT NULL,
-                    role TEXT,
-                    PRIMARY KEY (entity_id, agent_id)
-                )
-            """)
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS prov_parameter_description (
-                    id TEXT PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    value_type TEXT NOT NULL,
-                    unit TEXT,
-                    ucd TEXT,
-                    utype TEXT,
-                    min TEXT,
-                    max TEXT,
-                    default_value TEXT,
-                    options TEXT,
-                    description TEXT
-                )
-            """)
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS prov_parameter (
-                    id TEXT PRIMARY KEY,
-                    activity_id TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    value TEXT NOT NULL,
-                    parameter_description_id TEXT
-                )
-            """)
-            cursor.execute(
-                "CREATE INDEX IF NOT EXISTS idx_prov_parameter_activity ON prov_parameter(activity_id)"
-            )
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS prov_config_file (
-                    id TEXT PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    location TEXT NOT NULL,
-                    comment TEXT,
-                    config_file_description_id TEXT
-                )
-            """)
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS prov_config_file_description (
-                    id TEXT PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    description TEXT,
-                    docurl TEXT,
-                    type TEXT
-                )
-            """)
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS prov_was_configured_by (
-                    activity_id TEXT NOT NULL,
-                    artefact_type TEXT NOT NULL,
-                    config_file_id TEXT,
-                    PRIMARY KEY (activity_id, artefact_type)
-                )
-            """)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS prov_was_configured_by_parameter (
-                    activity_id TEXT NOT NULL,
-                    parameter_id TEXT NOT NULL,
-                    PRIMARY KEY (activity_id, parameter_id)
-                )
-            """)
+            for _step_name, statements in _MIGRATION_STEPS:
+                for statement in statements:
+                    cursor.execute(statement)
 
             conn.commit()
         except sqlite3.Error:

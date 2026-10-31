@@ -111,7 +111,17 @@ def calibration_count_flags(
     return flags
 
 
-def build_bias_master_commands(num_biases: int) -> list[str]:
+# The names of the master bias that calibrates the flats when it differs from
+# the lights' bias: the sequence name Siril gives its converted frames, and the
+# saved master. "flatbias" has no underscore so it cannot be mistaken for the
+# flat frames' own "flat_" names.
+FLAT_BIAS_SEQUENCE_NAME = "flatbias"
+FLAT_BIAS_MASTER_NAME = "flat_bias_stacked"
+
+
+def build_bias_master_commands(
+    num_biases: int, sequence_name: str = "bias", master_name: str = "bias_stacked"
+) -> list[str]:
     """Write the Siril commands that build the master bias.
 
     One bias frame is used as it is, because Siril's ``convert`` writes no
@@ -125,24 +135,31 @@ def build_bias_master_commands(num_biases: int) -> list[str]:
     ----------
     num_biases : `int`
         How many bias frames are staged. Must be at least 1.
+    sequence_name : `str`, optional
+        The name Siril gives the converted frames. The master bias for the
+        flats uses another name, so its frames do not mix with the lights'
+        bias frames in the ``process`` folder.
+    master_name : `str`, optional
+        The name the master is saved under (without ``.fits``).
 
     Returns
     -------
     commands : `list` [`str`]
         The commands, one per entry, starting after ``cd`` into the biases
-        folder and ending with the master saved as ``bias_stacked``.
+        folder and ending with the master saved under `master_name`
+        (``bias_stacked`` unless another name is given).
     """
     if num_biases == 1:
         return [
-            "convert bias -out=../process",
+            f"convert {sequence_name} -out=../process",
             "cd ../process",
-            "load bias_00001.fits",
-            "save bias_stacked",
+            f"load {sequence_name}_00001.fits",
+            f"save {master_name}",
         ]
     return [
-        "convert bias -out=../process -fitseq",
+        f"convert {sequence_name} -out=../process -fitseq",
         "cd ../process",
-        "stack bias rej 3 3 -nonorm -out=bias_stacked",
+        f"stack {sequence_name} rej 3 3 -nonorm -out={master_name}",
     ]
 
 
@@ -182,7 +199,11 @@ def build_dark_master_commands(num_darks: int) -> list[str]:
 
 
 def build_flat_master_commands(
-    num_flats: int, has_bias: bool, color_filter_array_flags: str, smoothing_sigma: float | None
+    num_flats: int,
+    has_bias: bool,
+    color_filter_array_flags: str,
+    smoothing_sigma: float | None,
+    bias_master_name: str = "bias_stacked",
 ) -> list[str]:
     """Write the Siril commands that build the master flat.
 
@@ -214,6 +235,11 @@ def build_flat_master_commands(
         The colour-sensor flags for ``calibrate``, or an empty string.
     smoothing_sigma : `float` or `None`
         The Gaussian width in pixels, or `None` for no blur.
+    bias_master_name : `str`, optional
+        The name of the master bias to subtract (without ``.fits``). It is
+        ``bias_stacked``, the lights' bias, unless the flats were taken at
+        another offset than the lights. Then it is the master bias made from
+        frames at the flats' own gain and offset. Ignored without a bias.
 
     Returns
     -------
@@ -226,7 +252,7 @@ def build_flat_master_commands(
         commands = ["convert flat -out=../process", "cd ../process"]
         if has_bias:
             commands += [
-                f"calibrate_single flat_00001.fits -bias=bias_stacked{color_filter_array_flags}",
+                f"calibrate_single flat_00001.fits -bias={bias_master_name}{color_filter_array_flags}",
                 "load pp_flat_00001.fits",
             ]
         else:
@@ -235,7 +261,7 @@ def build_flat_master_commands(
     commands = [
         "convert flat -out=../process -fitseq",
         "cd ../process",
-        f"calibrate flat {'-bias=bias_stacked' if has_bias else ''}{color_filter_array_flags}",
+        f"calibrate flat {f'-bias={bias_master_name}' if has_bias else ''}{color_filter_array_flags}",
         "stack pp_flat rej 3 3 -norm=mul -out=flat_stacked",
     ]
     if smoothing:
@@ -347,12 +373,17 @@ class StagedFrameCounts:
         counts matter even when a master is restored from the cache: the
         lights' ``calibrate`` command reads them to decide which masters
         to apply.
+    flat_biases : `int`, optional
+        The number of bias frames staged only for the flats, because the
+        flats were taken at another offset than the lights. Zero when the
+        lights' bias frames also calibrate the flats.
     """
 
     biases: int
     darks: int
     flats: int
     lights: int
+    flat_biases: int = 0
 
 
 def build_master_calibration_commands(
@@ -393,17 +424,27 @@ def build_master_calibration_commands(
         script += [f"cd {os.path.join(target_folder, 'biases')}"]
         script += build_bias_master_commands(counts.biases)
 
+    flat_master_is_needed = counts.flats > 0 and "flat" not in restored_master_kinds
+    # The flats' own bias master is built only to make a flat master, so it is
+    # skipped when the flat master itself comes from the cache.
+    if counts.flat_biases > 0 and flat_master_is_needed and "flat_bias" not in restored_master_kinds:
+        script += [f"cd {os.path.join(target_folder, 'flat_biases')}"]
+        script += build_bias_master_commands(
+            counts.flat_biases, FLAT_BIAS_SEQUENCE_NAME, FLAT_BIAS_MASTER_NAME
+        )
+
     if counts.darks > 0 and "dark" not in restored_master_kinds:
         script += [f"cd {os.path.join(target_folder, 'darks')}"]
         script += build_dark_master_commands(counts.darks)
 
-    if counts.flats > 0 and "flat" not in restored_master_kinds:
+    if flat_master_is_needed:
         script += [f"cd {os.path.join(target_folder, 'flats')}"]
         script += build_flat_master_commands(
             counts.flats,
-            counts.biases > 0,
+            counts.biases > 0 or counts.flat_biases > 0,
             color_filter_array_flags(uses_color_filter_array),
             flat_smoothing_sigma,
+            FLAT_BIAS_MASTER_NAME if counts.flat_biases > 0 else "bias_stacked",
         )
     return script
 

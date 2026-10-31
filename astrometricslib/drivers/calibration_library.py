@@ -87,6 +87,10 @@ CALIBRATION_MATCH_BLOCKING_FLAGS_KEY = "calibration_match_blocking_flags"
 # `pipelines/stacking/post_processing/calibration_record.py`).
 FLAT_FRAME_PATHS_KEY = "flat_frame_paths"
 BIAS_FRAME_PATHS_KEY = "bias_frame_paths"
+# The bias frames that calibrate the flats when they differ from the lights'
+# bias frames (the flats were taken at another offset than the lights). Absent
+# when the lights' bias frames also calibrate the flats.
+FLAT_BIAS_FRAME_PATHS_KEY = "flat_bias_frame_paths"
 DARK_FRAME_PATHS_KEY = "dark_frame_paths"
 
 # The binning of a frame whose header names none: no binning at all.
@@ -504,11 +508,16 @@ class CalibrationSelection:
     blocking_flags : `list` [`str`]
         One plain sentence for each mismatch that stopped the frames from
         being used at all (a binning mismatch). `frames` is empty then.
+    chosen_settings : `list` [`CalibrationSetting`]
+        The gain, offset and binning of each library slot the frames came
+        from, so a caller can tell which settings the chosen frames were
+        taken at. Filled for bias and flat selections.
     """
 
     frames: list[str]
     flags: list[str] = field(default_factory=list)
     blocking_flags: list[str] = field(default_factory=list)
+    chosen_settings: list[CalibrationSetting] = field(default_factory=list)
 
 
 def _without_duplicates(paths: list[str]) -> list[str]:
@@ -1469,7 +1478,9 @@ class CalibrationLibrary(BaseModel):
         for flag in [*flags, *blocking_flags]:
             logger.warning(flag)
         frames = _without_duplicates([path for paths in chosen.values() for path in paths])
-        return CalibrationSelection(frames, flags, blocking_flags)
+        return CalibrationSelection(
+            frames, flags, blocking_flags, [parse_calibration_setting_key(key) for key in chosen]
+        )
 
     def get_bias_frames(
         self,
@@ -1579,7 +1590,9 @@ class CalibrationLibrary(BaseModel):
         for flag in [*flags, *blocking_flags]:
             logger.warning(flag)
         frames = _without_duplicates([path for paths in chosen.values() for path in paths])
-        return CalibrationSelection(frames, flags, blocking_flags)
+        return CalibrationSelection(
+            frames, flags, blocking_flags, [parse_calibration_setting_key(key) for key in chosen]
+        )
 
     def get_flat_frames(
         self,

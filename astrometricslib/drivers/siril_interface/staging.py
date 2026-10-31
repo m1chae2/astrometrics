@@ -20,6 +20,7 @@ from astrometricslib.drivers.calibration_library import (
     BIAS_FRAME_PATHS_KEY,
     CALIBRATION_MATCH_BLOCKING_FLAGS_KEY,
     DARK_FRAME_PATHS_KEY,
+    FLAT_BIAS_FRAME_PATHS_KEY,
     FLAT_FRAME_PATHS_KEY,
     CalibrationSelection,
     format_binning,
@@ -112,8 +113,11 @@ def purge_stale_work_directories(
 
 # The three master kinds, mapped to the staging subdirectory holding
 # their source frames and the master filename Siril's script produces.
+# The "flat_bias" master is the bias made at the flats' own gain and offset.
+# It exists only when that differs from the lights' bias.
 _CALIBRATION_MASTER_KINDS = (
     ("bias", "biases", "bias_stacked.fits"),
+    ("flat_bias", "flat_biases", "flat_bias_stacked.fits"),
     ("dark", "darks", "dark_stacked.fits"),
     ("flat", "flats", "flat_stacked.fits"),
 )
@@ -125,17 +129,28 @@ _CALIBRATION_MASTER_KINDS = (
 # a change to how the stacking pipeline's flat assessment picks the blur
 # width. Version 4 subtracts the bias from a lone flat too. Version 5 is
 # saved as 32-bit floating point (the script sets ``set32bits``), not as the
-# 16-bit integers of Siril's default preference.
-FLAT_MASTER_RECIPE = "flat-recipe-5"
+# 16-bit integers of Siril's default preference. Version 6 subtracts a bias
+# taken at the flats' own gain and offset, and the key also holds that bias's
+# fingerprint (see `_master_recipe`). Earlier versions subtracted the lights'
+# bias, which left a pedestal in the flat when the offsets differed, and
+# shared one cached master between runs that used different biases.
+FLAT_MASTER_RECIPE = "flat-recipe-6"
 
 
-def _master_recipe(kind: str) -> str:
+def _master_recipe(kind: str, target_folder: str | None = None) -> str:
     """Name how a master of this kind is built, for its cache key.
+
+    A master flat depends on the bias subtracted from it, so its recipe holds
+    the fingerprint of that bias too. Two runs that subtract different biases
+    from the same flats then keep separate cached masters.
 
     Parameters
     ----------
     kind : `str`
-        The master kind: "bias", "dark" or "flat".
+        The master kind: "bias", "flat_bias", "dark" or "flat".
+    target_folder : `str`, optional
+        The run's staging directory. Without it, a flat's recipe holds no
+        bias fingerprint.
 
     Returns
     -------
@@ -144,7 +159,33 @@ def _master_recipe(kind: str) -> str:
     """
     if kind != "flat":
         return ""
-    return FLAT_MASTER_RECIPE
+    if target_folder is None:
+        return FLAT_MASTER_RECIPE
+    # The bias made for the flats when there is one, else the lights' bias.
+    flat_bias_directory = os.path.join(target_folder, "flat_biases")
+    bias_directory = os.path.join(target_folder, "biases")
+    bias_fingerprint = _calibration_source_fingerprint(
+        flat_bias_directory
+    ) or _calibration_source_fingerprint(bias_directory)
+    return f"{FLAT_MASTER_RECIPE}|bias={bias_fingerprint or 'none'}"
+
+
+def _describe_bias_settings(selection: CalibrationSelection) -> str:
+    """Name the gain and offset of the bias frames a selection chose.
+
+    Parameters
+    ----------
+    selection : `CalibrationSelection`
+        A bias selection.
+
+    Returns
+    -------
+    text : `str`
+        For example ``"gain 100, offset 0"``; several settings are joined
+        with " or ".
+    """
+    pairs = sorted({(setting.gain, setting.offset) for setting in selection.chosen_settings})
+    return " or ".join(f"gain {gain}, offset {offset:g}" for gain, offset in pairs) or "unknown settings"
 
 
 def _calibration_source_fingerprint(frames_directory: str, recipe: str = "") -> str | None:
@@ -420,8 +461,8 @@ class SirilStaging(SirilSession):
         Returns
         -------
         restored_kinds : `set` [`str`]
-            The master kinds ("bias"/"dark"/"flat") now present in the
-            run's ``process`` directory, whose build steps the
+            The master kinds ("bias", "flat_bias", "dark", "flat") now
+            present in the run's ``process`` directory, whose build steps the
             generated Siril script can therefore skip.
         """
         restored_kinds: set[str] = set()
@@ -430,7 +471,7 @@ class SirilStaging(SirilSession):
 
         for kind, frames_subdirectory, master_filename in _CALIBRATION_MASTER_KINDS:
             fingerprint = _calibration_source_fingerprint(
-                os.path.join(target_folder, frames_subdirectory), _master_recipe(kind)
+                os.path.join(target_folder, frames_subdirectory), _master_recipe(kind, target_folder)
             )
             if fingerprint is None:
                 continue
@@ -549,7 +590,7 @@ class SirilStaging(SirilSession):
             if not os.path.exists(built_master_path):
                 continue
             fingerprint = _calibration_source_fingerprint(
-                os.path.join(target_folder, frames_subdirectory), _master_recipe(kind)
+                os.path.join(target_folder, frames_subdirectory), _master_recipe(kind, target_folder)
             )
             if fingerprint is None:
                 continue
@@ -572,6 +613,99 @@ class SirilStaging(SirilSession):
                 continue
             if job_logger:
                 job_logger.info("Cached master %s frame (fingerprint %s).", kind, fingerprint[:12])
+
+    def _select_flat_bias_frames(
+        self,
+        library: Any,
+        camera: str,
+        light_binning: Any,
+        flat_selection: CalibrationSelection,
+        staged_flat_count: int,
+        lights_bias_selection: CalibrationSelection,
+        log: Callable[[str], None],
+        warn: Callable[[str], None],
+    ) -> list[str]:
+        """Choose the bias frames that calibrate the flats, when they differ.
+
+        A flat holds the camera's bias level, and only a bias taken at the
+        flats' own gain and offset removes it. The lights are staged with the
+        bias that matches the lights. The two agree unless the flats were
+        taken at another offset than the lights. Then the lights' bias would
+        leave a pedestal in the flat (an offset step of 10 is about 400 ADU on
+        the ASI533MM).
+
+        This picks the bias at the flats' gain and offset. If it is the same
+        set the lights use, nothing extra is staged and the script is as it
+        was before. If the library holds no bias at the flats' settings, the
+        lights' bias still goes on the flats (the stack keeps running), a soft
+        flag in ``calibration_mismatch_flags`` says so in plain words, and the
+        gate that reads that list reports it. Lights without a dark still use
+        the lights' bias, which is why the two sets are kept apart.
+
+        Parameters
+        ----------
+        library : `CalibrationLibrary`
+            The calibration library.
+        camera : `str`
+            The camera name.
+        light_binning : `Any`
+            The lights' binning, which the flats share.
+        flat_selection : `CalibrationSelection`
+            What the library chose for the flats.
+        staged_flat_count : `int`
+            How many flat frames were staged. With none there is nothing to
+            calibrate.
+        lights_bias_selection : `CalibrationSelection`
+            What the library chose for the lights' bias.
+        log : `Callable` [[`str`], `None`]
+            Writes an information line to the run's log.
+        warn : `Callable` [[`str`], `None`]
+            Writes a warning line to the run's log.
+
+        Returns
+        -------
+        frames : `list` [`str`]
+            The bias frames to stage for the flats only. Empty when the
+            lights' bias frames also serve the flats.
+        """
+        flat_settings = {(setting.gain, setting.offset) for setting in flat_selection.chosen_settings}
+        if staged_flat_count == 0 or not flat_settings or not lights_bias_selection.frames:
+            return []
+        lights_bias_text = _describe_bias_settings(lights_bias_selection)
+        if len(flat_settings) > 1:
+            note = (
+                "The flat frames were taken at several gain and offset settings, so no single bias "
+                f"matches them all; the bias chosen for the lights ({lights_bias_text}) was applied "
+                "to the flats."
+            )
+            self._record_calibration_selection(CalibrationSelection([], [note]), "flat bias", log, warn)
+            return []
+        ((flat_gain, flat_offset),) = flat_settings
+        flat_settings_text = f"gain {flat_gain}, offset {flat_offset:g}"
+        selection = library.select_bias_frames(
+            camera=camera,
+            iso=flat_gain,
+            offset=flat_offset,
+            binning=light_binning,
+            light_label=f"the flat frames ({flat_settings_text})",
+        )
+        if selection.flags:
+            # Nothing at the flats' settings: say which bias is used and why.
+            note = (
+                f"No bias frames matched the flats' {flat_settings_text}, so the bias chosen for the "
+                f"lights ({lights_bias_text}) was applied to the flats. If its offset differs from the "
+                "flats' offset, the master flat keeps a pedestal."
+            )
+            self._record_calibration_selection(CalibrationSelection([], [note]), "flat bias", log, warn)
+            return []
+        if not selection.frames or set(selection.frames) == set(lights_bias_selection.frames):
+            return []
+        log(
+            f"The flats were taken at {flat_settings_text}, which differs from the lights' bias "
+            f"({lights_bias_text}); {len(selection.frames)} bias frame(s) at the flats' settings "
+            "calibrate the flats."
+        )
+        return list(selection.frames)
 
     def _record_calibration_selection(
         self,
@@ -654,7 +788,7 @@ class SirilStaging(SirilSession):
             camera_filter = f.get("camera") if isinstance(f, dict) else getattr(f, "camera", None)
 
         target_folder = os.path.join(self.workdir, id)
-        for folder in ["biases", "darks", "flats", "lights", "process"]:
+        for folder in ["biases", "flat_biases", "darks", "flats", "lights", "process"]:
             folder_path = os.path.join(target_folder, folder)
             if os.path.exists(folder_path):
                 shutil.rmtree(folder_path)
@@ -665,6 +799,7 @@ class SirilStaging(SirilSession):
         light_idx = 0
         dark_idx = 0
         bias_idx = 0
+        flat_bias_idx = 0
         flat_idx = 0
 
         def find_readable_paths(candidate_paths: list[str]) -> set:
@@ -811,13 +946,11 @@ class SirilStaging(SirilSession):
                     except OSError as e:
                         log(f"Error symlinking dark {item}: {e}")
 
+                lights_bias_selection = library.select_bias_frames(
+                    camera=cam, iso=iso, offset=offset, binning=light_binning, light_label=light_label
+                )
                 bias_frame_paths = self._record_calibration_selection(
-                    library.select_bias_frames(
-                        camera=cam, iso=iso, offset=offset, binning=light_binning, light_label=light_label
-                    ),
-                    "bias",
-                    log,
-                    warn,
+                    lights_bias_selection, "bias", log, warn
                 )
                 readable_bias_paths = find_readable_paths(bias_frame_paths)
                 for item in bias_frame_paths:
@@ -834,20 +967,16 @@ class SirilStaging(SirilSession):
                     except OSError as e:
                         log(f"Error symlinking bias {item}: {e}")
 
-                flat_frame_paths = self._record_calibration_selection(
-                    library.select_flat_frames(
-                        telescope=tel,
-                        camera=cam,
-                        filter_type=filt,
-                        iso=iso,
-                        offset=offset,
-                        binning=light_binning,
-                        light_label=light_label,
-                    ),
-                    "flat",
-                    log,
-                    warn,
+                flat_selection = library.select_flat_frames(
+                    telescope=tel,
+                    camera=cam,
+                    filter_type=filt,
+                    iso=iso,
+                    offset=offset,
+                    binning=light_binning,
+                    light_label=light_label,
                 )
+                flat_frame_paths = self._record_calibration_selection(flat_selection, "flat", log, warn)
                 readable_flat_paths = find_readable_paths(flat_frame_paths)
                 for item in flat_frame_paths:
                     if item not in readable_flat_paths:
@@ -862,6 +991,31 @@ class SirilStaging(SirilSession):
                         self.last_run_diagnostics.setdefault(FLAT_FRAME_PATHS_KEY, []).append(item)
                     except OSError as e:
                         log(f"Error symlinking flat {item}: {e}")
+
+                flat_bias_frame_paths = self._select_flat_bias_frames(
+                    library=library,
+                    camera=cam,
+                    light_binning=light_binning,
+                    flat_selection=flat_selection,
+                    staged_flat_count=flat_idx,
+                    lights_bias_selection=lights_bias_selection,
+                    log=log,
+                    warn=warn,
+                )
+                readable_flat_bias_paths = find_readable_paths(flat_bias_frame_paths)
+                for item in flat_bias_frame_paths:
+                    if item not in readable_flat_bias_paths:
+                        log(f"Skipping corrupted/unreadable flat bias frame: {item}")
+                        continue
+                    try:
+                        os.symlink(
+                            item,
+                            os.path.join(target_folder, "flat_biases", f"flat_bias_{flat_bias_idx:05d}.fits"),
+                        )
+                        flat_bias_idx += 1
+                        self.last_run_diagnostics.setdefault(FLAT_BIAS_FRAME_PATHS_KEY, []).append(item)
+                    except OSError as e:
+                        log(f"Error symlinking flat bias {item}: {e}")
 
             return target_folder
 

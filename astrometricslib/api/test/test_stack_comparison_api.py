@@ -145,36 +145,6 @@ def test_comparing_with_the_previous_stack_notes_when_nothing_is_kept(
     assert "No previous stack" in report.notes[0]
 
 
-def test_discard_previous_stack_deletes_it(tmp_path: Path, pipelines: ProcessingPipelines) -> None:
-    """Discarding removes the previous stack and leaves the current one."""
-    stack = tmp_path / "M_27_L_Stacked.fits"
-    keep_old_stack(stack)
-    target = target_with_stack(stack)
-
-    removed = pipelines.discard_previous_stack(target)
-
-    assert len(removed) == 1
-    assert stack.exists()
-    report = _diagnostics().measure_stack(target, compare_to="previous", register_job=False)
-    assert report.comparison is None
-
-
-def test_swap_with_previous_stack_restores_the_old_stack(
-    tmp_path: Path, pipelines: ProcessingPipelines
-) -> None:
-    """After a swap the old, vignetted stack is current again."""
-    stack = tmp_path / "M_27_L_Stacked.fits"
-    keep_old_stack(stack)
-    target = target_with_stack(stack)
-    before = _flatness(stack)
-
-    restored = pipelines.swap_with_previous_stack(target)
-
-    assert len(restored) == 1
-    after = _flatness(stack)
-    assert after > 3 * before
-
-
 def test_a_target_without_a_stack_raises_a_clear_error(pipelines: ProcessingPipelines) -> None:
     """Asking about a missing stack is an error, not a silent no-op."""
     with pytest.raises(NotFoundError, match="has no stack"):

@@ -1502,62 +1502,6 @@ class ProcessingPipelines:
         check_choice("kind", kind, STACK_KINDS)
         return summarize_stack(self._resolve(target), kind)
 
-    def discard_previous_stack(self, target: str | Target, kind: StackKind = "imaging") -> list[str]:
-        """Delete the kept previous stack of a target.
-
-        Use this once the new stack looks good. It deletes the old stack and
-        its pictures, and it cannot be undone. The pipeline never does this by
-        itself; it only replaces the previous stack with a newer one at the
-        next restack.
-
-        Parameters
-        ----------
-        target : `str` or `Target`
-            The target whose previous stack to delete.
-        kind : `str`, optional
-            ``"imaging"`` (default) or ``"spectral"`` stack.
-
-        Returns
-        -------
-        removed : `list` [`str`]
-            The files deleted. Empty if no previous stack was kept.
-        """
-        from astrometricslib.pipelines.stacking.post_processing.previous_stack import discard_previous_stack
-        from astrometricslib.pipelines.stacking.post_processing.stack_quality_report import stack_path_of
-
-        check_choice("kind", kind, STACK_KINDS)
-        return discard_previous_stack(stack_path_of(self._resolve(target), kind))
-
-    def swap_with_previous_stack(self, target: str | Target, kind: StackKind = "imaging") -> list[str]:
-        """Put the previous stack back as the current one.
-
-        Use this when the new stack turned out worse. The current stack
-        moves into ``_previous`` in the same step, so calling this again undoes
-        it. Only the files change places. The stored quality summary describes
-        the stack that was current when it was written, so restack to refresh
-        it.
-
-        Parameters
-        ----------
-        target : `str` or `Target`
-            The target whose stacks to swap.
-        kind : `str`, optional
-            ``"imaging"`` (default) or ``"spectral"`` stacks.
-
-        Returns
-        -------
-        restored : `list` [`str`]
-            The files now current that came from the previous stack. Empty if
-            no previous stack was kept, in which case nothing moves.
-        """
-        from astrometricslib.pipelines.stacking.post_processing.previous_stack import (
-            swap_with_previous_stack,
-        )
-        from astrometricslib.pipelines.stacking.post_processing.stack_quality_report import stack_path_of
-
-        check_choice("kind", kind, STACK_KINDS)
-        return swap_with_previous_stack(stack_path_of(self._resolve(target), kind))
-
     def open_in_siril(self, file_path: str) -> None:
         """Open a stack in the Siril program's window, for a person to inspect.
 

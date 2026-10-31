@@ -11,6 +11,10 @@ Rules the cleanup follows:
 - Changing data uses a clear verb. An optional write is off by default (`save=False`, `apply=False`).
 - A parameter holding an id string is named `<thing>_id`. One that takes an object or an id is named `<thing>`.
 
+## Removed calls
+
+`stars.save_all`, `calibration.add`, `processing.discard_previous_stack` and `processing.swap_with_previous_stack` were removed. `calibration.get` and `calibration.library` became private.
+
 ## Calls
 
 | Old | New |

@@ -380,8 +380,7 @@ preview_colour_calibration_method = "pcc"
 # "true" (the default): before a restack replaces a stack, move the old stack
 # and its pictures into a folder named "_previous" beside it, so the two can be
 # compared. Only one previous version is kept; the next restack replaces it.
-# Nothing deletes it until you call discard_previous_stack. Set "false" to
-# overwrite stacks in place.
+# Set "false" to overwrite stacks in place.
 keep_previous_stack_enabled = "true"
 # "true" (the default): after an imaging stack is made, trim its edges back to
 # where the pixel noise is within 15% of the middle's. Frames shift between

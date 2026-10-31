@@ -571,10 +571,8 @@ DECISIONS = {
     **dict.fromkeys(
         (
             "calibration_reindex_frames",
-            "processing_discard_previous_stack",
             "processing_process_target",
             "processing_restore_excluded_frames",
-            "processing_swap_with_previous_stack",
             "star_create",
             "star_find_or_create_by_position",
             "star_update",

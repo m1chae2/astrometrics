@@ -58,13 +58,6 @@
       "interim_block": "",
       "note": "Needs a NumPy array, which MCP cannot send. Take a frame path."
     },
-    "processing_discard_previous_stack": {
-      "tool_class": "change-data",
-      "category": "image-processing",
-      "disposition": "withhold",
-      "interim_block": "",
-      "note": "The AI is read-only, so a tool that writes is not offered."
-    },
     "processing_measure_noise": {
       "tool_class": "change-data",
       "category": "image-processing",
@@ -134,13 +127,6 @@
       "disposition": "keep",
       "interim_block": "",
       "note": "Built 2026-10-04. One short answer for a target's stack: frames stacked and skipped, rejected fraction, star width against the inputs, flags and each exposure group. Reads the saved summary."
-    },
-    "processing_swap_with_previous_stack": {
-      "tool_class": "change-data",
-      "category": "image-processing",
-      "disposition": "withhold",
-      "interim_block": "",
-      "note": "The AI is read-only, so a tool that writes is not offered."
     },
     "processing_tune_spectroscopy_calibration": {
       "tool_class": "change-data",

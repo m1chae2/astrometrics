@@ -348,7 +348,6 @@ SUB_API_MEMBERS = {
     "processing": {
         "acquire_job_slot",
         "calibration",
-        "discard_previous_stack",
         "process_target",
         "remake_preview",
         "restore_excluded_frames",
@@ -360,7 +359,6 @@ SUB_API_MEMBERS = {
         "stack",
         "stack_subset",
         "stack_summary",
-        "swap_with_previous_stack",
         "tune_spectroscopy_calibration",
     },
     "processing.calibration": {

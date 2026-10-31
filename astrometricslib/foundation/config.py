@@ -989,8 +989,7 @@ class AppConfiguration:
         When on, a restack first moves the current stack and its pictures into
         a ``_previous`` folder beside it (see
         `pipelines/stacking/post_processing/previous_stack.py`). Only one
-        previous version is kept; the next restack replaces it. Nothing
-        deletes it until the user calls `discard_previous_stack`.
+        previous version is kept; the next restack replaces it.
 
         Returns
         -------

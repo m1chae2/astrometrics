@@ -16,6 +16,8 @@ matched stars. The online service returns no such table, so an online solve
 carries no statistics.
 """
 
+import contextlib
+import contextvars
 import http.client
 import logging
 import os
@@ -38,6 +40,7 @@ from astroquery.exceptions import TimeoutError as AstroqueryTimeoutError
 from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.drivers.interfaces.plate_solve_driver import PlateSolveDriver, PlateSolveHeader
 from astrometricslib.foundation.paths import scratch_directory
+from astrometricslib.foundation.run_tally import RunTally, add_to_bound_tally, bind_tally
 
 logger = logging.getLogger(__name__)
 
@@ -103,11 +106,15 @@ ONLINE_SOLVE_ATTEMPT_LIMIT = 3
 # time to recover if it's overloaded.
 ONLINE_SOLVE_RETRY_BACKOFF_SECONDS = 2.0
 
-# Cumulative per-process count of solve uploads, retries included, so a
-# quality summary can distinguish a clean first-try solve from one that
-# only succeeded after dropped connections. Reset by
-# `reset_plate_solve_statistics` at the start of a run.
-_plate_solve_attempts = 0
+# The solve uploads of the current run, retries included, so a quality summary
+# can distinguish a clean first-try solve from one that only succeeded after
+# dropped connections. The run (`pipelines/astrometry/runner.py`) makes a
+# `RunTally`, binds it here with `bind_plate_solve_attempts` around its
+# pipeline, and reads it back; `_call_with_transient_retry` adds one for each
+# upload to the tally bound where it runs, and to none when no run is counting.
+_bound_plate_solve_attempts: contextvars.ContextVar[RunTally | None] = contextvars.ContextVar(
+    "plate_solve_attempts", default=None
+)
 
 
 # The columns of solve-field's ``.corr`` table that the fit statistics use: the
@@ -166,22 +173,21 @@ def read_corr_fit_statistics(corr_path: str) -> tuple[float | None, int | None]:
     return float(rms_arcsec.item()), len(positions)
 
 
-def get_plate_solve_attempt_count() -> int:
-    """Check how many times we've tried to solve an image.
+def bind_plate_solve_attempts(tally: RunTally) -> contextlib.AbstractContextManager[RunTally]:
+    """Count solve uploads in ``tally`` for the code inside a ``with`` block.
+
+    Parameters
+    ----------
+    tally : `RunTally`
+        The run's count of tries, including times it had to retry because
+        the internet dropped.
 
     Returns
     -------
-    attempts : `int`
-        The number of tries, including times it had to retry because
-        the internet dropped.
+    scope : `contextlib.AbstractContextManager`
+        Use it in a ``with`` statement, in the thread that solves.
     """
-    return _plate_solve_attempts
-
-
-def reset_plate_solve_statistics() -> None:
-    """Reset the retry counter back to zero for a new run."""
-    global _plate_solve_attempts
-    _plate_solve_attempts = 0
+    return bind_tally(_bound_plate_solve_attempts, tally)
 
 
 def _is_transient_network_error(error: BaseException) -> bool:
@@ -240,10 +246,9 @@ def _call_with_transient_retry(
     header : `astropy.io.fits.Header` or `None`
         The solved map data, or None if it completely failed.
     """
-    global _plate_solve_attempts
     for attempt_number in range(1, ONLINE_SOLVE_ATTEMPT_LIMIT + 1):
         try:
-            _plate_solve_attempts += 1
+            add_to_bound_tally(_bound_plate_solve_attempts, 1)
             return solve_call()
         except _ONLINE_SOLVE_ERRORS as solve_error:
             if not _is_transient_network_error(solve_error):

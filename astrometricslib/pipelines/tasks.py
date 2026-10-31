@@ -43,6 +43,7 @@ from typing import TYPE_CHECKING, Any
 from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.foundation.errors import ConflictError, InvalidArgumentError, ProcessingError
 from astrometricslib.foundation.jobs.runner import registered_job
+from astrometricslib.foundation.run_tally import RunTally
 from astrometricslib.foundation.storage.process_locks import acquire_resource_slot
 from astrometricslib.models.processing_results import ProcessTargetResult
 from astrometricslib.models.target import FrameRecord, Target
@@ -208,12 +209,16 @@ def stack_frames_with_timeout(
         timeout_seconds = compute_stacking_timeout_seconds(len(frames_to_stack))
 
     outcome: dict[str, Any] = {}
+    # This stack's own total of Siril-lock waiting. The stacking thread binds
+    # it, so the waits of other stacks in the process are not mixed in.
+    lock_wait = RunTally()
 
     def _run_stacking() -> None:
         try:
-            outcome["path"] = _stack_with_job_tracking(
-                target, frames_to_stack, measured_at, quality_recording
-            )
+            with siril_interface.bind_lock_wait(lock_wait):
+                outcome["path"] = _stack_with_job_tracking(
+                    target, frames_to_stack, measured_at, quality_recording
+                )
         except Exception as stacking_error:
             # This runs in its own thread, so any error is kept here and
             # raised again in the calling thread below. The traceback is
@@ -221,7 +226,6 @@ def stack_frames_with_timeout(
             logger.debug("[%s] Stacking thread raised an error.", target.id, exc_info=True)
             outcome["error"] = stacking_error
 
-    siril_interface.reset_siril_lock_wait_seconds()
     stacking_thread = threading.Thread(target=_run_stacking, daemon=True)
     started_at = time.monotonic()
     stacking_thread.start()
@@ -235,11 +239,11 @@ def stack_frames_with_timeout(
         if not stacking_thread.is_alive():
             break
         elapsed_seconds = time.monotonic() - started_at
-        if elapsed_seconds >= timeout_seconds + siril_interface.get_siril_lock_wait_seconds():
+        if elapsed_seconds >= timeout_seconds + lock_wait.total:
             break
 
     if stacking_thread.is_alive():
-        lock_wait_seconds = siril_interface.get_siril_lock_wait_seconds()
+        lock_wait_seconds = lock_wait.total
         logger.warning(
             "[%s] Stacking timed out after %s seconds of working time (%.0fs of Siril-lock wait "
             "excluded). Abandoning this stack.",

@@ -559,7 +559,7 @@ ASTROMETRY_METRICS: tuple[MetricSpec, ...] = (
         "The solve requests made during the run.",
         "A solve that needed retries is told apart from one that worked the first time.",
         better=Direction.LOWER,
-        computed_by="drivers.astrometry_net_driver.get_plate_solve_attempt_count",
+        computed_by="drivers.astrometry_net_driver._call_with_transient_retry",
         levels=_RUN_ONLY,
     ),
     _count_metric(

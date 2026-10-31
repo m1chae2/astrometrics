@@ -125,6 +125,30 @@ def test_successful_first_attempt_does_not_retry() -> None:
     assert len(attempts) == 1
 
 
+def test_each_upload_is_counted_in_the_runs_own_tally() -> None:
+    """Retries count; each run keeps its own total."""
+    from astrometricslib.drivers.astrometry_net_driver import bind_plate_solve_attempts
+    from astrometricslib.foundation.run_tally import RunTally
+
+    calls = []
+
+    def dropped_once():  # ruff: ignore[missing-return-type-private-function]
+        calls.append(1)
+        if len(calls) % 2 == 1:
+            raise ConnectionError("connection refused")
+        return fits.Header()
+
+    first, second = RunTally(), RunTally()
+    _call_with_transient_retry(dropped_once, description="not counted")
+    with bind_plate_solve_attempts(first):
+        _call_with_transient_retry(dropped_once, description="two uploads")
+    with bind_plate_solve_attempts(second):
+        _call_with_transient_retry(dropped_once, description="two uploads")
+
+    assert first.total == pytest.approx(2)
+    assert second.total == pytest.approx(2)
+
+
 def test_solve_skips_the_local_solver_when_too_few_sources_are_detected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

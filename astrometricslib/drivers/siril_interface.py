@@ -44,6 +44,7 @@ from astrometricslib.drivers.siril_output_parsing import (
 from astrometricslib.foundation.errors import ConfigurationError, ExternalServiceError
 from astrometricslib.foundation.jobs.runner import capture_job_logs
 from astrometricslib.foundation.paths import scratch_directory, siril_work_directory
+from astrometricslib.foundation.run_tally import RunTally, add_to_bound_tally, bind_tally
 
 # Declares this module's own public surface. Without it, sphinx-automodapi
 # documents every imported name too, which is what produced the
@@ -563,48 +564,43 @@ def _calibration_source_fingerprint(frames_directory: str, recipe: str = "") -> 
     return digest.hexdigest()
 
 
-# This keeps track of how many seconds this process has spent waiting
-# for the Siril lock. This helps us extend the timeout limit for the
-# stacking process, so targets don't fail just because they had to wait
-# in line for their turn.
-_siril_lock_wait_state_lock = threading.Lock()
-_siril_lock_wait_seconds = 0.0
+# The seconds the current stacking run has spent waiting for the Siril lock.
+# They extend the run's timeout, so targets don't fail just because they had to
+# wait in line for their turn. The run (`tasks.stack_frames_with_timeout`)
+# makes a `RunTally`, binds it here with `bind_lock_wait` in the thread that
+# stacks, and reads it back; `siril_process_lock` adds each wait to the tally
+# that is bound where it runs, and to none when no run is tallying.
+_bound_lock_wait: contextvars.ContextVar[RunTally | None] = contextvars.ContextVar(
+    "siril_lock_wait", default=None
+)
 
 
-def reset_siril_lock_wait_seconds() -> None:
-    """Zero this process's accumulated Siril lock wait.
+def bind_lock_wait(tally: RunTally) -> contextlib.AbstractContextManager[RunTally]:
+    """Count Siril lock waits in ``tally`` inside a ``with`` block.
 
-    Called before a stacking attempt begins so the total describes only
-    that attempt.
-    """
-    global _siril_lock_wait_seconds
-    with _siril_lock_wait_state_lock:
-        _siril_lock_wait_seconds = 0.0
-
-
-def get_siril_lock_wait_seconds() -> float:
-    """Return seconds spent waiting for the Siril lock since the last reset.
+    Parameters
+    ----------
+    tally : `RunTally`
+        The run's tally of waiting seconds.
 
     Returns
     -------
-    wait_seconds : `float`
-        Accumulated blocked time, ``0.0`` when the lock was always free.
+    scope : `contextlib.AbstractContextManager`
+        Use it in a ``with`` statement, in the thread that stacks: a thread
+        started inside the block does not see the binding.
     """
-    with _siril_lock_wait_state_lock:
-        return _siril_lock_wait_seconds
+    return bind_tally(_bound_lock_wait, tally)
 
 
 def _record_siril_lock_wait(wait_seconds: float) -> None:
-    """Add one blocked interval to this process's accumulated wait.
+    """Add one blocked interval to the bound run's accumulated wait.
 
     Parameters
     ----------
     wait_seconds : `float`
         Seconds spent blocked on this acquisition.
     """
-    global _siril_lock_wait_seconds
-    with _siril_lock_wait_state_lock:
-        _siril_lock_wait_seconds += wait_seconds
+    add_to_bound_tally(_bound_lock_wait, wait_seconds)
 
 
 @contextlib.contextmanager

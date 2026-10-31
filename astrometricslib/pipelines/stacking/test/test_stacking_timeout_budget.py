@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 from astrometricslib.drivers import siril_interface
+from astrometricslib.foundation.run_tally import RunTally
 from astrometricslib.pipelines import tasks
 from astrometricslib.pipelines.tasks import (
     STACKING_TIMEOUT_SECONDS,
@@ -49,11 +50,24 @@ def test_a_negative_frame_count_is_not_a_negative_budget() -> None:
     assert compute_stacking_timeout_seconds(-5) == STACKING_TIMEOUT_SECONDS
 
 
-def test_lock_wait_starts_at_zero_after_reset() -> None:
-    """Each stacking attempt measures only its own queueing."""
-    siril_interface.reset_siril_lock_wait_seconds()
+def test_lock_wait_starts_at_zero_for_a_new_run() -> None:
+    """Each stacking attempt has its own tally, which starts empty."""
+    assert RunTally().total == pytest.approx(0.0)
 
-    assert siril_interface.get_siril_lock_wait_seconds() == pytest.approx(0.0)
+
+def test_a_wait_is_added_to_the_bound_tally_only() -> None:
+    """Runs in one process keep separate totals; an unbound wait is dropped."""
+    first, second = RunTally(), RunTally()
+
+    siril_interface._record_siril_lock_wait(7.0)  # no run is bound: nothing is kept
+    with siril_interface.bind_lock_wait(first):
+        siril_interface._record_siril_lock_wait(2.0)
+        with siril_interface.bind_lock_wait(second):
+            siril_interface._record_siril_lock_wait(3.0)
+        siril_interface._record_siril_lock_wait(1.0)
+
+    assert first.total == pytest.approx(3.0)
+    assert second.total == pytest.approx(3.0)
 
 
 def test_an_uncontended_slot_records_a_negligible_wait() -> None:
@@ -64,12 +78,12 @@ def test_an_uncontended_slot_records_a_negligible_wait() -> None:
     exactly zero. What matters is that it is far below the budget it
     would be added to.
     """
-    siril_interface.reset_siril_lock_wait_seconds()
+    tally = RunTally()
 
-    with siril_interface.siril_process_lock(max_concurrent_runs=1):
+    with siril_interface.bind_lock_wait(tally), siril_interface.siril_process_lock(max_concurrent_runs=1):
         pass
 
-    assert siril_interface.get_siril_lock_wait_seconds() < 0.5
+    assert tally.total < 0.5
 
 
 def test_time_blocked_on_a_slot_is_recorded() -> None:
@@ -99,11 +113,15 @@ def test_time_blocked_on_a_slot_is_recorded() -> None:
         "import sys;"
         f"sys.path.insert(0, {repository_root!r});"
         "from astrometricslib.drivers import siril_interface;"
-        "siril_interface.reset_siril_lock_wait_seconds();"
+        "from astrometricslib.foundation.run_tally import RunTally;"
+        "tally = RunTally();"
+        "scope = siril_interface.bind_lock_wait(tally);"
+        "scope.__enter__();"
         "ctx = siril_interface.siril_process_lock(max_concurrent_runs=1);"
         "ctx.__enter__();"
         "ctx.__exit__(None, None, None);"
-        "print(siril_interface.get_siril_lock_wait_seconds(), flush=True)"
+        "scope.__exit__(None, None, None);"
+        "print(tally.total, flush=True)"
     )
 
     holder = subprocess.Popen(  # ruff: ignore[subprocess-without-shell-equals-true] -- fixed argv
@@ -144,6 +162,9 @@ def test_queue_time_does_not_consume_the_stacking_budget(monkeypatch: pytest.Mon
         stacked_path : `str`
             A made-up output path.
         """
+        # The stack waited in the queue; the wait goes to this run's tally,
+        # as `siril_process_lock` would add it.
+        siril_interface._record_siril_lock_wait(reported_lock_wait)
         time.sleep(stack_duration_seconds)
         return "/stacked/output.fits"
 
@@ -151,8 +172,6 @@ def test_queue_time_does_not_consume_the_stacking_budget(monkeypatch: pytest.Mon
     # The stack outlives its nominal budget, but every second of the
     # overrun is attributable to queueing, so it must still be allowed
     # to finish.
-    monkeypatch.setattr(siril_interface, "get_siril_lock_wait_seconds", lambda: reported_lock_wait)
-    monkeypatch.setattr(siril_interface, "reset_siril_lock_wait_seconds", lambda: None)
 
     class _Target:
         id = "NGC 1499"
@@ -183,8 +202,6 @@ def test_a_genuinely_hung_stack_is_still_abandoned(monkeypatch: pytest.MonkeyPat
         return "/never/reached.fits"
 
     monkeypatch.setattr(tasks, "_stack_with_job_tracking", _hung_stack)
-    monkeypatch.setattr(siril_interface, "get_siril_lock_wait_seconds", lambda: 0.0)
-    monkeypatch.setattr(siril_interface, "reset_siril_lock_wait_seconds", lambda: None)
 
     class _Target:
         id = "HungTarget"

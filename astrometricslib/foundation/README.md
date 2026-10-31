@@ -14,6 +14,7 @@ Terms are defined in the [glossary](../../documentation/Glossary.md). This docum
 - `enums.py` — enumerations (fixed sets of named values) shared by the domain models.
 - `paths.py` — names the folders for temporary working files on the local disk, and treats the two Linux spellings of a mounted-drive path as the same place.
 - `astropy_setup.py` — makes astropy use its bundled Earth-rotation (IERS) table offline and loads that table ahead of first use, so a coordinate conversion never waits on a download.
+- `run_tally.py` — a running total that belongs to one run (the seconds a stack waited for a free Siril slot, the tries a plate solve needed), not to the process. The code that starts the run makes a `RunTally`, binds it for its thread with `bind_tally`, and reads it back; the deep code adds to whichever tally is bound there and does nothing when none is. A thread the run starts binds the tally itself.
 - `warn_once.py` — logs a given warning only once per run, so one config mistake met on every frame does not bury other messages.
 - `jobs/` — the job framework. See [jobs/README.md](jobs/README.md).
 - `storage/` — generic storage plumbing. See [storage/README.md](storage/README.md).

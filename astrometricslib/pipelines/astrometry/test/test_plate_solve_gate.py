@@ -9,7 +9,6 @@ from typing import Any
 
 import pytest
 
-from astrometricslib.drivers import astrometry_net_driver
 from astrometricslib.models.quality.gate_result import GateStatus
 from astrometricslib.models.quality.quality_summary import AstrometryQualitySummary
 from astrometricslib.models.target import Target
@@ -43,7 +42,6 @@ def validate_with_options(
         The summary `validate_output` built.
     """
     monkeypatch.setattr(star_identifier, "get_gaia_query_statistics", lambda: {})
-    monkeypatch.setattr(astrometry_net_driver, "get_plate_solve_attempt_count", lambda: 1)
     context = SimpleNamespace(
         stellar_objects=[],
         sources_detected=5,

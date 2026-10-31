@@ -13,7 +13,11 @@ from types import SimpleNamespace
 import pytest
 
 from astrometricslib import InvalidArgumentError, NotFoundError, ProcessingError, ProcessingPipelines, Target
-from astrometricslib.pipelines.shared.stack_preview_path import preview_path_for, processed_fits_path_for
+from astrometricslib.pipelines.shared.stack_preview_path import (
+    preview_path_for,
+    preview_settings_path_for,
+    processed_fits_path_for,
+)
 from astrometricslib.pipelines.stacking.post_processing import preview_remake
 from astrometricslib.pipelines.stacking.post_processing.preview_remake import (
     PREVIOUS_PICTURES_FOLDER,
@@ -37,6 +41,7 @@ def stacked(tmp_path: Path) -> Path:
     path.write_bytes(b"stack")
     Path(preview_path_for(str(path))).write_bytes(b"old jpeg")
     Path(processed_fits_path_for(str(path))).write_bytes(b"old fits")
+    Path(preview_settings_path_for(str(path))).write_bytes(b"old record")
     return path
 
 
@@ -111,6 +116,7 @@ def test_a_remake_replaces_the_pictures_and_leaves_the_stack_alone(
     assert kept == {
         "NGC_7331_L_Stacked_preview.jpg": b"old jpeg",
         "NGC_7331_L_Stacked_processed.fits": b"old fits",
+        "NGC_7331_L_Stacked_preview_settings.json": b"old record",
     }
     assert (stacked.parent / PREVIOUS_PICTURES_FOLDER).is_dir()
 

@@ -50,6 +50,7 @@ if GraXpert, Cosmic Clarity or the star toning fails, the picture is made from
 the result of the step before it, and if Siril fails, there is no picture.
 """
 
+import json
 import logging
 import os
 import re
@@ -60,6 +61,8 @@ import tempfile
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import Any
 
 import numpy as np
 
@@ -76,6 +79,7 @@ from astrometricslib.pipelines.shared.stack_preview_path import (
     is_preview_path,
     is_processed_fits_path,
     preview_path_for,
+    preview_settings_path_for,
     processed_fits_path_for,
 )
 from astrometricslib.pipelines.stacking.post_processing.bright_object import (
@@ -801,6 +805,7 @@ def _picture_script(
     siril_executable: str,
     settings: PreviewSettings | None = None,
     steps_log: list[str] | None = None,
+    settings_used: dict[str, Any] | None = None,
 ) -> list[str] | None:
     """Run the cleanup steps on the scratch copy and choose the final script.
 
@@ -825,6 +830,13 @@ def _picture_script(
     steps_log : `list` [`str`], optional
         If given, the name of each step and whether it ran is added to it,
         so the caller can report what was done.
+    settings_used : `dict`, optional
+        If given, the choices this run really used are put into it: the
+        configured value where the run did not override it, and `False`
+        where a step was skipped (a bright object skips the denoise and the
+        star toning). The keys are ``denoise``, ``denoise_strength``
+        (`None` when the denoise did not run), ``star_toning``, ``starnet``
+        and ``bright_object``.
 
     Returns
     -------
@@ -844,6 +856,10 @@ def _picture_script(
         )
         if steps_log is not None:
             steps_log.append("Bright object: its own stretch, without GraXpert or the denoise")
+        if settings_used is not None:
+            settings_used.update(
+                denoise=False, denoise_strength=None, star_toning=False, starnet=False, bright_object=True
+            )
         return build_bright_object_script(name, "preview", bright_object)
     steps: list[str] = []
     graxpert_executable = configuration.get_graxpert_executable()
@@ -937,6 +953,21 @@ def _picture_script(
         # The stars were stretched apart already, so the formula that dims
         # stars would act twice.
         tone_stars = False
+    if settings_used is not None:
+        strength_used = None
+        if denoise_executable:
+            strength_used = (
+                settings.denoise_strength
+                if settings.denoise_strength is not None
+                else configuration.get_cosmic_clarity_denoise_strength()
+            )
+        settings_used.update(
+            denoise=bool(denoise_executable),
+            denoise_strength=strength_used,
+            star_toning=bool(tone_stars),
+            starnet=stretched_by_starnet,
+            bright_object=False,
+        )
     if not stretched_by_starnet and not denoise_executable and not tone_stars:
         steps.extend(["Siril stretch done in the final script", denoise_note, "Star toning off"])
         logger.info("Preview steps: %s.", "; ".join(steps))
@@ -1040,6 +1071,62 @@ def _copy_observation_header(stacked_path: str, processed_path: str) -> None:
         logger.warning("Could not copy the stack's header into '%s': %s.", processed_path, error)
 
 
+def write_preview_settings(
+    stacked_path: str, settings: PreviewSettings, settings_used: dict[str, Any], steps_run: list[str]
+) -> None:
+    """Save a small record of what made a stack's preview picture.
+
+    The record sits beside the stack. It is not part of the stack's inputs
+    (see `stack_inputs`) and the restack decision never reads it. A failure
+    to write is logged and does not fail the preview.
+
+    Parameters
+    ----------
+    stacked_path : `str`
+        The stack whose picture was just made.
+    settings : `PreviewSettings`
+        The choices this run was given.
+    settings_used : `dict`
+        The choices the run really used, as `_picture_script` reports them.
+    steps_run : `list` [`str`]
+        The sentences describing each step and whether it ran.
+    """
+    record = {
+        "made_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "settings_used": settings_used,
+        "steps_run": steps_run,
+        "custom": settings != PreviewSettings(),
+    }
+    try:
+        with open(preview_settings_path_for(stacked_path), "w", encoding="utf-8") as record_file:
+            json.dump(record, record_file, indent=1)
+    except OSError as error:
+        logger.warning("Could not save the preview settings of '%s': %s", stacked_path, error)
+
+
+def read_preview_settings(stacked_path: str) -> dict[str, Any] | None:
+    """Read the record of what made a stack's preview picture.
+
+    Parameters
+    ----------
+    stacked_path : `str`
+        The stack.
+
+    Returns
+    -------
+    record : `dict` or `None`
+        The record (``made_at``, ``settings_used``, ``steps_run``, ``custom``),
+        or `None` if the file is missing or unreadable. `None` means unknown:
+        a picture made before the record existed has none.
+    """
+    try:
+        with open(preview_settings_path_for(stacked_path), encoding="utf-8") as record_file:
+            record = json.load(record_file)
+    except OSError, ValueError:
+        return None
+    return record if isinstance(record, dict) else None
+
+
 def write_stack_preview(
     stacked_path: str,
     settings: PreviewSettings | None = None,
@@ -1070,7 +1157,7 @@ def write_stack_preview(
     """
     preview_path = preview_path_for(stacked_path)
     processed_path = processed_fits_path_for(stacked_path)
-    for old_picture in (preview_path, processed_path):
+    for old_picture in (preview_path, processed_path, preview_settings_path_for(stacked_path)):
         if os.path.exists(old_picture):
             os.remove(old_picture)
     if not os.path.isfile(stacked_path):
@@ -1086,7 +1173,11 @@ def write_stack_preview(
         _remove_stale_scratch_folders()
         scratch = tempfile.mkdtemp(prefix="stack_preview_", dir=_SCRATCH_ROOT)
         shutil.copyfile(stacked_path, os.path.join(scratch, "stack.fits"))
-        commands = _picture_script(scratch, siril_executable, settings, steps_log)
+        settings_used: dict[str, Any] = {}
+        steps_taken: list[str] = []
+        commands = _picture_script(scratch, siril_executable, settings, steps_taken, settings_used)
+        if steps_log is not None:
+            steps_log.extend(steps_taken)
         succeeded = commands is not None and run_preview_script(scratch, commands, siril_executable)
         picture = os.path.join(scratch, "preview.jpg")
         if not succeeded or not os.path.isfile(picture):
@@ -1099,6 +1190,7 @@ def write_stack_preview(
         if os.path.isfile(stretched_fits):
             shutil.move(stretched_fits, processed_path)
             _copy_observation_header(stacked_path, processed_path)
+        write_preview_settings(stacked_path, settings or PreviewSettings(), settings_used, steps_taken)
     except (OSError, subprocess.SubprocessError) as error:
         logger.warning("No preview made for '%s': %s.", stacked_path, error)
         return None

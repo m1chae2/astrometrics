@@ -21,7 +21,11 @@ from typing import Any
 
 from astrometricslib.foundation.errors import NotFoundError, ProcessingError
 from astrometricslib.models.processing_results import PreviewRemakeResult
-from astrometricslib.pipelines.shared.stack_preview_path import preview_path_for, processed_fits_path_for
+from astrometricslib.pipelines.shared.stack_preview_path import (
+    preview_path_for,
+    preview_settings_path_for,
+    processed_fits_path_for,
+)
 from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
     PreviewSettings,
     record_preview_as_processed_image,
@@ -50,7 +54,11 @@ def _keep_old_pictures(stacked_path: str) -> list[str]:
     """
     folder = os.path.join(os.path.dirname(stacked_path), PREVIOUS_PICTURES_FOLDER)
     kept = []
-    for picture in (preview_path_for(stacked_path), processed_fits_path_for(stacked_path)):
+    for picture in (
+        preview_path_for(stacked_path),
+        processed_fits_path_for(stacked_path),
+        preview_settings_path_for(stacked_path),
+    ):
         if os.path.isfile(picture):
             os.makedirs(folder, exist_ok=True)
             copy = os.path.join(folder, os.path.basename(picture))

@@ -9,13 +9,6 @@
       "interim_block": "",
       "note": "Checks flats. Writes nothing."
     },
-    "calibration_get": {
-      "tool_class": "observe",
-      "category": "calibration",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Replaced by calibration_query."
-    },
     "calibration_measure_sensor_noise": {
       "tool_class": "compute",
       "category": "calibration",

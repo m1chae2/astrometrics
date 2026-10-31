@@ -227,3 +227,39 @@ def test_each_frames_saturation_uses_its_own_cameras_threshold(
 
     assert target.frames[0].measurements.saturated_pixel_fraction == pytest.approx(0.125)
     assert target.frames[1].measurements.saturated_pixel_fraction == pytest.approx(0.0)
+
+
+def test_grouped_stats_ask_the_library_for_matching_darks() -> None:
+    """Each exposure group asks the library for darks of its settings."""
+    requests: list[tuple[str, float]] = []
+
+    class _Library:
+        """A library that has darks only for 30 second exposures."""
+
+        def get_dark_frames(self, camera: str, exposure: float) -> list[str]:
+            """Record the request and return a dark for 30 second exposures.
+
+            Returns
+            -------
+            darks : `list` [`str`]
+                One dark path for a 30 second exposure, otherwise none.
+            """
+            requests.append((camera, exposure))
+            return ["dark.fits"] if abs(exposure - 30.0) < 1e-9 else []
+
+    target = Target(
+        id="Grouped",
+        frames=[
+            FrameRecord(path="a.fits", filter="Luminance", role="LIGHT", camera="Cam", exposure="30.0"),
+            FrameRecord(path="b.fits", filter="Luminance", role="LIGHT", camera="Cam", exposure="30.0"),
+            FrameRecord(path="c.fits", filter="Luminance", role="LIGHT", camera="Cam", exposure="10.0"),
+        ],
+    )
+
+    groups = frame_statistics.get_frame_stats_grouped(target, _Library())
+
+    by_exposure = {group["exposure"]: group for group in groups}
+    assert by_exposure["30"]["count"] == 2
+    assert by_exposure["30"]["darks"] == "1"
+    assert by_exposure["10"]["darks"] == "Missing"
+    assert sorted(requests) == [("Cam", 10.0), ("Cam", 30.0)]

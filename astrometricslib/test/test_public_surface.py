@@ -355,7 +355,6 @@ SUB_API_MEMBERS = {
     },
     "processing.calibration": {
         "assess_flats",
-        "get",
         "library",
         "measure_sensor_noise",
         "query",

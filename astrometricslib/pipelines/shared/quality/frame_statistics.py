@@ -197,7 +197,7 @@ def get_frame_stats_grouped(target: Any, calibration: Any, camera: str | None = 
     ----------
     target : `Any`
         The target to summarize.
-    calibration : `Any`
+    calibration : `CalibrationLibrary`
         The library of calibration frames (dark frames, flat frames, etc).
     camera : `str`, optional
         Only check images from this camera.
@@ -244,7 +244,7 @@ def get_frame_stats_grouped(target: Any, calibration: Any, camera: str | None = 
         count = aggregates[key]
         cam = cameras_by_group.get(key, camera or "Unknown")
 
-        darks = calibration.get("dark", camera=cam, exposure=e)
+        darks = calibration.get_dark_frames(camera=cam, exposure=e)
 
         results.append({
             "filter": f,

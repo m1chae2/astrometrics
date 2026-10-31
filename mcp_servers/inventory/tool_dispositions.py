@@ -654,7 +654,6 @@ DECISIONS = {
         ToolDecision("drop", DEVICE_COMMAND_NOTE),
     ),
     # ---- Replaced by a broader tool ----
-    "calibration_get": ToolDecision("drop", "Replaced by calibration_query."),
     "target_get": ToolDecision("drop", "Replaced by target_query."),
     "target_list": ToolDecision("drop", "Replaced by target_query."),
     "backend_health_check": ToolDecision("drop", "Replaced by app_status."),

@@ -334,33 +334,12 @@ class CalibrationCatalog:
         if detail == "target_frames":
             lights = frame_statistics.get_frame_stats(resolved)["lights"]
             return CalibrationQueryResult(detail=detail, target_id=resolved.id, lights=lights)
-        groups = frame_statistics.get_frame_stats_grouped(resolved, self, camera_id)
+        groups = frame_statistics.get_frame_stats_grouped(resolved, self.library, camera_id)
         return CalibrationQueryResult(detail=detail, target_id=resolved.id, groups=groups)
 
     def save(self) -> None:
         """Write the calibration library to its JSON file on disk."""
         self.library.save_library()
-
-    def get(self, kind: _CalibrationKind, **kwargs: Any) -> list[str]:
-        """Find the calibration frame files of the given kind.
-
-        Parameters
-        ----------
-        kind : {"dark", "bias", "flat"}
-            The calibration frame kind.
-        **kwargs
-            Passed to the kind's own lookup. Common keys are ``camera``,
-            ``exposure`` (darks only), ``telescope`` and ``filter_type``
-            (flats only), and ``validate_paths``.
-
-        Returns
-        -------
-        frames : `list` [`str`]
-            Matching frame file paths.
-        """
-        check_choice("kind", kind, _CALIBRATION_KINDS)
-        method = getattr(self.library, f"get_{kind}_frames")
-        return method(**kwargs)
 
     def refresh(self, kind: _CalibrationKind, prune_missing: bool = False) -> CalibrationIngestReport:
         """Rescan one kind of calibration frame and report what was found.

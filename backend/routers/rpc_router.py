@@ -154,7 +154,7 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # background run and answers at once; the result arrives as the
     # `quality:measured` event. A write, so the AI's read-only profile
     # withholds it.
-    "processing:record_frame_measurements": ("quality_measurement_service", "start_frame_measurements"),
+    "quality:record_frame_measurements": ("quality_measurement_service", "start_frame_measurements"),
     # Stack some of a target's frames apart from its library stack, into the
     # target's `_subsets` folder, and measure the noise of each result. Each
     # starts a background run and answers at once. Writes (they stack and store

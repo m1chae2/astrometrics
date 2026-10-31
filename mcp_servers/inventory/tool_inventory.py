@@ -228,7 +228,9 @@ CLASSIFICATION_RULES = (
         "Pipeline run that writes results to the live catalog or stacks.",
     ),
     _rule(r"^processing_acquire_.+_slot$", "change-data", "low", "Takes a work slot (a lock). Check."),
-    _rule(r"^star_tune_spectroscopy_calibration$", "change-data", "low", "May store a new calibration."),
+    _rule(
+        r"^processing_tune_spectroscopy_calibration$", "change-data", "low", "May store a new calibration."
+    ),
     _rule(
         r"^planning_(edit_queue|edit_package|tick_checklist_item)$",
         "change-data",

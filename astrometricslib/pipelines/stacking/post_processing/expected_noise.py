@@ -175,7 +175,7 @@ _SKY_SAMPLE_STEP = 4
 # The reason shown when the stack was made with equal-looking inputs that carry
 # no per-frame facts.
 NO_FRAME_ROWS_REASON = (
-    "no stored sky measurement was found for the stack's frames; run processing.record_frame_measurements "
+    "no stored sky measurement was found for the stack's frames; run quality.record_frame_measurements "
     "for the target first"
 )
 

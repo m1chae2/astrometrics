@@ -420,14 +420,19 @@ class Astrometrics:
         # The database is the one copy, reached through `self.stars`, which
         # answers each question with a query for just the stars it needs.
         self.targets = TargetCatalog(self.config, self._catalog_access, drivers=drivers)
-        self.stars = StellarCatalog(self.config, self._catalog_access, drivers=drivers)
+        self.stars = StellarCatalog(self.config, self._catalog_access)
         self.processing = ProcessingPipelines(
             self.config, self._catalog_access, targets=self.targets, drivers=drivers
         )
         self.visualization = Visualization(
             self.config, self._catalog_access, targets=self.targets, stars=self.stars
         )
-        self.quality = QualityRecords(self.config, self._catalog_access, targets=self.targets)
+        self.quality = QualityRecords(
+            self.config,
+            self._catalog_access,
+            targets=self.targets,
+            calibration_library=lambda: self.processing.calibration.library,
+        )
         self.jobs = Jobs(self.config, self._catalog_access)
 
 

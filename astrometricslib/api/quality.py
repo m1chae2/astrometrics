@@ -1,19 +1,22 @@
 """The quality root: every quality read starts here.
 
 `QualityRecords` is the child of `Astrometrics` reached as
-`astrometrics.quality`. It answers two kinds of question:
+`astrometrics.quality`. It answers three kinds of question:
 
 * Stored: `query` reads the quality measurements that earlier runs saved,
   and `metrics` lists what each metric means.
 * Live: `measure_frames` and `measure_stack` measure raw frames and finished
   stacks now, without changing anything.
+* Recorded: `record_frame_measurements` measures a target's light frames and
+  stores the numbers that `query` reads.
 
 The argument helpers it shares with `ProcessingPipelines` live in
 `pipelines/shared/api_arguments.py`.
 """
 
+from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Any, Literal
 
 from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib.foundation.config import AppConfiguration
@@ -22,6 +25,7 @@ from astrometricslib.foundation.jobs.runner import background_job, registered_jo
 from astrometricslib.models.quality.calibration_identities import CalibrationIdentities
 from astrometricslib.models.quality.capture_setting import CaptureSetting
 from astrometricslib.models.quality.excluded_frames import QuarantinePreview, SetAsideFrameRecord
+from astrometricslib.models.quality.frame_measurement_summary import FrameMeasurementSummary
 from astrometricslib.models.quality.measurement import QualityMeasurement, SubjectLevel
 from astrometricslib.models.quality.metric_spec import Checkpoint, MetricSpec, MetricSummary
 from astrometricslib.models.quality.quality_reports import (
@@ -32,7 +36,7 @@ from astrometricslib.models.quality.quality_reports import (
 )
 from astrometricslib.models.quality.query_result import QualityQueryResult
 from astrometricslib.models.quality.row_frames import QualityRowFile, QualityRowResolution
-from astrometricslib.models.target import Target
+from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.api_arguments import (
     STACK_KINDS,
     StackKind,
@@ -112,14 +116,24 @@ class QualityRecords:
         The database the library reads and writes.
     targets : `TargetLookup`, optional
         The target catalog, used to turn a target name into a `Target`.
+    calibration_library : `Callable`, optional
+        Gives the calibration library, when `record_frame_measurements`
+        needs the bias frames. The library is built only when it is asked
+        for.
     """
 
     def __init__(
-        self, config: AppConfiguration, storage: AbstractCatalogAccess, *, targets: TargetLookup | None = None
+        self,
+        config: AppConfiguration,
+        storage: AbstractCatalogAccess,
+        *,
+        targets: TargetLookup | None = None,
+        calibration_library: Callable[[], Any] | None = None,
     ) -> None:
         self._config = config
         self._storage = storage
         self._targets = targets
+        self._calibration_library_provider = calibration_library
 
     def query(
         self,
@@ -438,6 +452,23 @@ class QualityRecords:
         if detail == "full":
             return specs
         return [MetricSummary.from_spec(spec) for spec in specs]
+
+    def _calibration_library(self) -> Any:
+        """Give the calibration library, which holds the bias frames.
+
+        Returns
+        -------
+        library : `CalibrationLibrary`
+            The library.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If this object was built without one.
+        """
+        if self._calibration_library_provider is None:
+            raise InvalidArgumentError("This quality root was built without a calibration library.")
+        return self._calibration_library_provider()
 
     def _label(self, target: Target | None, folder_path: str | None = None) -> str:
         """Name the subject of a job.
@@ -775,45 +806,99 @@ class QualityRecords:
         with registered_job(enabled=register_job, job_type="diagnostics", target_id=target_id or stack_path):
             return stack_quality_report(stack_path, target_id, sections, compare_to)
 
-    def flag_value_outliers(
-        self, values: list[float | None], sigma_threshold: float, low_is_bad: bool = False
-    ) -> list[bool]:
-        """Flag entries more than sigma_threshold standard deviations away.
+    @background_job("quality", grace_period_seconds=20.0)
+    def record_frame_measurements(
+        self,
+        target: str | Target,
+        frames: list[FrameRecord] | None = None,
+        limit: int | None = None,
+        register_job: bool = True,
+    ) -> FrameMeasurementSummary:
+        """Measure a target's light frames once and store the numbers.
+
+        Each light frame is read once and measured: the width, elongation
+        and direction of its stars, the sky brightness and noise in
+        electrons, the camera's read noise, the temperatures, and the
+        measurements the library already makes (background level, saturated
+        fraction, Gaussian star width, count of bright regions). The numbers
+        go into the quality database and can be read with
+        ``Astrometrics.quality.query``. A value that cannot be measured is
+        stored as ``not_measured`` with the reason. The sky brightness needs
+        the bias level of the frame's exact camera setting, taken from the
+        calibration library's bias frames; with none at that setting those
+        two metrics are ``not_measured``.
+
+        The frame files are never moved or changed. Each measured frame gets
+        a stamp (the file size and change time at the measurement), saved to
+        the stored target every 20 frames and at the end. Only the stamps are
+        written, so the save never overwrites other changes to the target. A
+        frame whose file still matches its stamp is skipped, so a second call
+        measures nothing again. A frame that fails, for any reason, is
+        counted and tried again next time; one failure does not stop the
+        others. Each frame takes about 12 s of one core, and four frames are
+        measured at once in four worker processes: real data (61 frames of
+        3008 by 3008 pixels) took about 345 s and about 2.7 GB of memory.
+
+        The worker processes are started with "spawn", which imports the
+        calling script again in each worker. A script that calls this method
+        must therefore keep its top-level code under
+        ``if __name__ == "__main__":``, or the workers stop and every frame
+        fails. The backend, the bundled scripts and notebooks run as modules
+        or cells and are not affected.
+
+        Only one run measures a target at a time, and only one run in the
+        process reads frames at a time. A second call for a target that is
+        already being measured returns at once with ``already_running`` set
+        and nothing measured. A call for another target waits for its turn.
 
         Parameters
         ----------
-        values : `list` [`float` or `None`]
-            Values to check; `None` entries are never flagged.
-        sigma_threshold : `float`
-            Number of standard deviations from the mean beyond which a
-            value is flagged.
-        low_is_bad : `bool`, optional
-            If `True`, only flag values below the mean; otherwise flag
-            deviations on either side. Defaults to `False`.
+        target : `str` or `Target`
+            The target whose light frames to measure.
+        frames : `list` [`FrameRecord`], optional
+            Only these frames. All of the target's light frames when omitted.
+        limit : `int`, optional
+            Measure at most this many frames, newest first. The rest wait for
+            the next call.
+        register_job : `bool`, optional
+            Record the run in the job list. Defaults to `True`.
 
         Returns
         -------
-        flags : `list[bool]`
-            A list the same length as values, `True` where the
-            corresponding entry is an outlier.
+        summary : `FrameMeasurementSummary`
+            How many frames were measured, skipped because they had not
+            changed, or failed, and how many rows were written.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If ``limit`` is below 1.
         """
-        from astrometricslib.pipelines.spectroscopy.utilities.registration_quality import flag_outliers
+        from astrometricslib.drivers.quality_store import QualityStore
+        from astrometricslib.pipelines.shared.target_records import save_quality_stamps
+        from astrometricslib.pipelines.stacking.frame_measurement_run import (
+            FrameMeasurementSession,
+            record_frame_measurements_for_target,
+        )
 
-        return flag_outliers(values, sigma_threshold, low_is_bad)
-
-    @property
-    def spectral_registration_thresholds(self) -> dict[str, float]:
-        """The default outlier thresholds for spectral registration checks.
-
-        Returns
-        -------
-        thresholds : `dict` [`str`, `float`]
-            Threshold values keyed by threshold name.
-        """
-        from astrometricslib.pipelines.spectroscopy.utilities import registration_quality as srq
-
-        return {
-            "min_matched_star_pairs": srq.MIN_MATCHED_STAR_PAIRS,
-            "zero_order_amplitude_outlier_sigma": srq.ZERO_ORDER_AMPLITUDE_OUTLIER_SIGMA,
-            "zero_order_position_jump_outlier_sigma": srq.ZERO_ORDER_POSITION_JUMP_OUTLIER_SIGMA,
-        }
+        if limit is not None and limit < 1:
+            raise InvalidArgumentError("limit must be at least 1.")
+        resolved = resolve_target(self._targets, target)
+        with registered_job(enabled=register_job, job_type="quality", target_id=resolved.id) as job:
+            # The run gets its own run id and reports progress only when it
+            # registered (or joined) a job of its own. Called from inside
+            # another job (stacking, ingestion), it leaves that job's
+            # progress and id alone.
+            session = FrameMeasurementSession(
+                QualityStore.from_configuration(self._config),
+                self._calibration_library(),
+                progress_job=job if job.job_id is not None and job.job_type == "quality" else None,
+                measured_at=datetime.now(UTC),
+            )
+            return record_frame_measurements_for_target(
+                resolved,
+                session,
+                frames=frames,
+                limit=limit,
+                save_target=lambda: save_quality_stamps(self._targets, resolved),
+            )

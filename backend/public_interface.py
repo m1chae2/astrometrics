@@ -125,7 +125,7 @@ RPC_METHODS: tuple[str, ...] = (
     "processing:jobs_for_target",
     "processing:job_log_tail",
     # Measures a target's light frames and stores the numbers (a write).
-    "processing:record_frame_measurements",
+    "quality:record_frame_measurements",
     # Stacks some of a target's frames apart from its library stack and
     # measures the noise of each result (writes).
     "processing:measure_noise",

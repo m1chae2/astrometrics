@@ -39,7 +39,7 @@ def run_spectroscopy_validation(astrometrics: Astrometrics, camera_name: str) ->
     if vega_target and vega_target.spectral_stacking.stacked_image:
         print(f"Executing Vega calibration tuning on: {vega_target.spectral_stacking.stacked_image}")
         try:
-            tune_res = astrometrics.stars.tune_spectroscopy_calibration(
+            tune_res = astrometrics.processing.tune_spectroscopy_calibration(
                 vega_target.spectral_stacking.stacked_image, camera_id=camera_name
             )
             rms_err = tune_res.rms_error_nm

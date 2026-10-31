@@ -20,8 +20,8 @@ Terms are defined in the [glossary](../../documentation/Glossary.md). This docum
 - `job_queries.py` — what `Jobs.query` returns: `JobQueryResult`, with `JobSummary`, `JobLogLine` and `LineageRun`.
 - `image_deletion.py` — what `TargetCatalog.delete_images` returns: `ImageDeletionResult`, with `FailedDeletion`.
 - `field_centers.py` — what `TargetCatalog.imaged_field_centers` returns: `ImagedFieldCenters`, a list of `FieldCenter`.
-- `point_sources.py` — what `StellarCatalog.detect_point_sources` returns: `PointSourceDetection`, a list of `PointSource`.
-- `spectroscopy_calibration.py` — what `StellarCatalog.tune_spectroscopy_calibration` returns: `SpectroscopyCalibrationResult`, with `CalibrationLineFit`.
+- `point_sources.py` — what `ProcessingPipelines.detect_point_sources` returns: `PointSourceDetection`, a list of `PointSource`.
+- `spectroscopy_calibration.py` — what `ProcessingPipelines.tune_spectroscopy_calibration` returns: `SpectroscopyCalibrationResult`, with `CalibrationLineFit`.
 - `processing_results.py` — what `ProcessingPipelines` returns: `StackResult` (the frames chosen and, unless only a plan was asked for, the stack and its quality summary), `PreviewRemakeResult` and `ProcessTargetResult`.
 - `wavelength_scale.py` — the wavelength zero-point error of a spectrum: the shift of its whole wavelength scale caused by a misplaced zero-order image (the undispersed image of the star). `WavelengthZeroPointRecord` holds the shift for one spectrum, how sure it is, the lines that gave it and whether the pipeline removed it; `WavelengthScaleSummary` holds the run's scatter, which the `wavelength_scale` gate reads.
 - `calibration_ingest.py` — the results of checking calibration frames: `FlatSetAssessment` (is one set of flats good enough, and if not, why) and `CalibrationIngestReport` (what a rescan of the calibration library added, per group, with an assessment of each new flat set).

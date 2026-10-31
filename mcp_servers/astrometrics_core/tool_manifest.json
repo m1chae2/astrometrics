@@ -51,6 +51,13 @@
       "interim_block": "",
       "note": "Internal concurrency lock exposed by reflection."
     },
+    "processing_detect_point_sources": {
+      "tool_class": "compute",
+      "category": "image-processing",
+      "disposition": "fix",
+      "interim_block": "",
+      "note": "Needs a NumPy array, which MCP cannot send. Take a frame path."
+    },
     "processing_discard_previous_stack": {
       "tool_class": "change-data",
       "category": "image-processing",
@@ -72,19 +79,19 @@
       "interim_block": "",
       "note": "Opens a window on the person's screen. An AI client cannot see it. The app's button uses it."
     },
+    "processing_plate_solve": {
+      "tool_class": "compute",
+      "category": "image-processing",
+      "disposition": "fix",
+      "interim_block": "",
+      "note": "Returns an astropy WCS, which MCP cannot send. Return the solved center and pixel scale."
+    },
     "processing_process_target": {
       "tool_class": "change-data",
       "category": "image-processing",
       "disposition": "withhold",
       "interim_block": "",
       "note": "The AI is read-only, so a tool that writes is not offered."
-    },
-    "processing_record_frame_measurements": {
-      "tool_class": "change-data",
-      "category": "image-processing",
-      "disposition": "withhold",
-      "interim_block": "",
-      "note": "Measures a target's light frames and writes the numbers into the quality database, and stamps each measured frame on the target record. It never changes a frame file. The AI is read-only, so it reads the stored numbers with quality_query instead."
     },
     "processing_remake_preview": {
       "tool_class": "process",
@@ -135,6 +142,13 @@
       "interim_block": "",
       "note": "The AI is read-only, so a tool that writes is not offered."
     },
+    "processing_tune_spectroscopy_calibration": {
+      "tool_class": "change-data",
+      "category": "image-processing",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "Rewrites the live configuration file through update_config. Needs an apply=false mode that only returns the fitted values."
+    },
     "quality_calibration_identities": {
       "tool_class": "observe",
       "category": "image-processing",
@@ -148,13 +162,6 @@
       "disposition": "keep",
       "interim_block": "",
       "note": "Built 2026-10-24. Reads the camera, telescope, filter, exposure, gain setting, offset and binning that stored quality measurements point at, by capture setting id. Writes nothing and creates no table."
-    },
-    "quality_flag_value_outliers": {
-      "tool_class": "compute",
-      "category": "image-processing",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Arithmetic on numbers the caller passes in. The user does not want it."
     },
     "quality_measure_frames": {
       "tool_class": "compute",
@@ -183,6 +190,13 @@
       "disposition": "keep",
       "interim_block": "",
       "note": "Built 2026-10-21. Reads the quality measurements that earlier runs stored (the latest for each subject and metric, or every row). Writes nothing and creates no table."
+    },
+    "quality_record_frame_measurements": {
+      "tool_class": "change-data",
+      "category": "image-processing",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "Measures a target's light frames and writes the numbers into the quality database, and stamps each measured frame on the target record. It never changes a frame file. The AI is read-only, so it reads the stored numbers with quality_query instead."
     },
     "quality_resolve_rows": {
       "tool_class": "observe",
@@ -219,13 +233,6 @@
       "interim_block": "",
       "note": "A change counter for the backend's answer cache. It tells an AI client nothing about the sky."
     },
-    "star_detect_point_sources": {
-      "tool_class": "compute",
-      "category": "stars",
-      "disposition": "fix",
-      "interim_block": "",
-      "note": "Needs a NumPy array, which MCP cannot send. Take a frame path."
-    },
     "star_find_or_create_by_position": {
       "tool_class": "change-data",
       "category": "stars",
@@ -240,26 +247,12 @@
       "interim_block": "",
       "note": "Reads one star's full record by id. Writes nothing."
     },
-    "star_plate_solve": {
-      "tool_class": "compute",
-      "category": "stars",
-      "disposition": "fix",
-      "interim_block": "",
-      "note": "Returns an astropy WCS, which MCP cannot send. Return the solved center and pixel scale."
-    },
     "star_query": {
       "tool_class": "observe",
       "category": "stars",
       "disposition": "keep",
       "interim_block": "",
       "note": "Built 2026-10-03. Library star lookup with hard caps on rows, region size and full records."
-    },
-    "star_tune_spectroscopy_calibration": {
-      "tool_class": "change-data",
-      "category": "stars",
-      "disposition": "withhold",
-      "interim_block": "",
-      "note": "Rewrites the live configuration file through update_config. Needs an apply=false mode that only returns the fitted values."
     },
     "star_update": {
       "tool_class": "change-data",

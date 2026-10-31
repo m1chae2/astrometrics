@@ -90,7 +90,7 @@ def _service(processing: _Processing, sockets: _Sockets) -> QualityMeasurementSe
     service : `QualityMeasurementService`
         A service over the stand-in processing API and socket manager.
     """
-    return QualityMeasurementService(SimpleNamespace(processing=processing), sockets)
+    return QualityMeasurementService(SimpleNamespace(quality=processing), sockets)
 
 
 def _wait_until_idle() -> None:
@@ -102,8 +102,8 @@ def _wait_until_idle() -> None:
 
 def test_the_method_is_declared_and_served_by_the_service() -> None:
     """The RPC is in the public interface and maps to the service's method."""
-    assert "processing:record_frame_measurements" in RPC_METHODS
-    assert rpc_registry._handlers["processing:record_frame_measurements"] == (
+    assert "quality:record_frame_measurements" in RPC_METHODS
+    assert rpc_registry._handlers["quality:record_frame_measurements"] == (
         "quality_measurement_service",
         "start_frame_measurements",
     )
@@ -116,7 +116,7 @@ def test_the_rpc_starts_the_job_and_the_event_follows(monkeypatch: pytest.Monkey
     monkeypatch.setattr(container, "quality_measurement_service", service, raising=False)
 
     reply = asyncio.run(
-        rpc_registry.execute("processing:record_frame_measurements", {"target_id": "M 13", "limit": 5})
+        rpc_registry.execute("quality:record_frame_measurements", {"target_id": "M 13", "limit": 5})
     )
 
     assert reply == {"started": True, "target_id": "M 13"}

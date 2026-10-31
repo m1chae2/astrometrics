@@ -741,7 +741,7 @@ def _stack_one_target(
 
     The frames are chosen as the full pipeline chooses them: one camera, one
     optic, imaging (not spectral) frames. Every one of them is measured first
-    (`ProcessingPipelines.record_frame_measurements`), so the stack's
+    (`QualityRecords.record_frame_measurements`), so the stack's
     predicted noise has the sky of each frame. They then go to the public
     `ProcessingPipelines.stack`, which sets aside bad frames, stacks, and
     records the stack's quality rows. No astrometry, photometry or
@@ -798,7 +798,7 @@ def _stack_one_target(
     # frame. So every imaging frame is measured first, with no limit. Frames
     # measured before and unchanged since are skipped, so a resumed run does
     # not repeat the work.
-    measurement = astrometrics.processing.record_frame_measurements(target, frames=standard_frames)
+    measurement = astrometrics.quality.record_frame_measurements(target, frames=standard_frames)
     if measurement.already_running:
         raise RuntimeError(f"another run is measuring the frames of '{target.id}'; try again later")
     print(

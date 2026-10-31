@@ -198,7 +198,7 @@ BIAS_FRAMES_FOR_LEVEL = 5
 # to a stack. That is long next to a stack of a few minutes; the limit is a
 # cap on how much one stack can be delayed, not a tuned value. The frames that
 # are left wait for the next stack or the next call of
-# `ProcessingPipelines.record_frame_measurements`.
+# `QualityRecords.record_frame_measurements`.
 STACKING_STAGE_MEASUREMENT_LIMIT = 40
 
 # How many newly measured frames are collected before the frames' stamps are

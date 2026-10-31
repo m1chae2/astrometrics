@@ -257,7 +257,7 @@ EXPECTED_PUBLIC_NAMES = frozenset({
 # frame helpers wayfindinglib calls (`FrameSelection`,
 # `select_library_frames`, `derive_target_sessions`,
 # `classify_and_sort_fits_files`, `frame_is_spectral`, the `SATURATED_*`
-# limits). wayfindinglib's plate solving goes through `stars.plate_solve`
+# limits). wayfindinglib's plate solving goes through `processing.plate_solve`
 # and its field-center list through `targets.imaged_field_centers`.
 KEPT_FOR_OUTSIDE_CALLERS = {
     # Both write temporary files on disk instead of in RAM, in the folder this
@@ -340,12 +340,9 @@ SUB_API_MEMBERS = {
         "create",
         "dataset_version",
         "delete",
-        "detect_point_sources",
         "find_or_create_by_position",
         "get",
-        "plate_solve",
         "query",
-        "tune_spectroscopy_calibration",
         "update",
     },
     "processing": {
@@ -353,16 +350,18 @@ SUB_API_MEMBERS = {
         "calibration",
         "discard_previous_stack",
         "process_target",
-        "record_frame_measurements",
         "remake_preview",
         "restore_excluded_frames",
         "run_spectroscopy_by_session",
         "measure_noise",
+        "detect_point_sources",
         "open_in_siril",
+        "plate_solve",
         "stack",
         "stack_subset",
         "stack_summary",
         "swap_with_previous_stack",
+        "tune_spectroscopy_calibration",
     },
     "processing.calibration": {
         "assess_flats",
@@ -375,14 +374,13 @@ SUB_API_MEMBERS = {
     "quality": {
         "calibration_identities",
         "capture_settings",
-        "flag_value_outliers",
         "measure_frames",
         "measure_stack",
         "metrics",
         "query",
+        "record_frame_measurements",
         "resolve_rows",
         "set_aside_frames",
-        "spectral_registration_thresholds",
     },
     "visualization": {"get_last_captured_image", "plot", "render_fits"},
     "jobs": {"query"},

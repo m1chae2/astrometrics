@@ -280,7 +280,6 @@ def test_tools_the_user_declined_are_dropped() -> None:
         "observatory_guiding_compute_correction",
         "observatory_mount_compute_pointing_correction",
         "observatory_mount_run_polar_alignment_assist",
-        "quality_flag_value_outliers",
         "observatory_guiding_drain_external_pulses",
         "observatory_guiding_refit_spectrum",
         "observatory_equipment_save_commissioning_run",

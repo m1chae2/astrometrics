@@ -20,7 +20,7 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib.api.processing import ProcessingPipelines
+from astrometricslib.api.quality import QualityRecords
 from astrometricslib.drivers.calibration_library import CalibrationSelection
 from astrometricslib.drivers.quality_store import QualityStore
 from astrometricslib.foundation.errors import InvalidArgumentError, StorageError
@@ -522,24 +522,24 @@ def test_the_stage_records_quarantine_rows_for_kept_frames(
     assert lights[2].quality_measured_file_size is None
 
 
-def _pipelines(tmp_path: Path, biases: list[str]) -> tuple[ProcessingPipelines, MagicMock]:
-    """Build the processing API over a fake catalog access.
+def _pipelines(tmp_path: Path, biases: list[str]) -> tuple[QualityRecords, MagicMock]:
+    """Build the quality API over a fake catalog access.
 
     Returns
     -------
-    pipelines : `ProcessingPipelines`
+    pipelines : `QualityRecords`
         The API, with a stand-in calibration library holding the biases.
     catalog_access : `MagicMock`
         The stand-in for the stored catalog, whose merge call shows what was
         saved.
     """
     catalog_access = MagicMock()
-    targets = SimpleNamespace(save=MagicMock(), catalog_access=catalog_access)
-    pipelines = ProcessingPipelines(
+    targets = SimpleNamespace(save=MagicMock(), _catalog_access=catalog_access)
+    pipelines = QualityRecords(
         SimpleNamespace(get_library_path=lambda: tmp_path),
         MagicMock(),
         targets=targets,
-        calibration=SimpleNamespace(library=_Library(biases)),
+        calibration_library=lambda: _Library(biases),
     )
     return pipelines, catalog_access
 

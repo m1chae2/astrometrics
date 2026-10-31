@@ -2,7 +2,7 @@
 
 Description: The science library measures a target's light frames and stores
 the numbers in the quality database
-(`astrometrics.processing.record_frame_measurements`). The library also
+(`astrometrics.quality.record_frame_measurements`). The library also
 guards that work: only one run measures a target at a time, and only one run
 reads frames at a time in the whole process, so this service does not have to.
 It does four small things.
@@ -189,7 +189,7 @@ class QualityMeasurementService:
         def run() -> None:
             """Measure the frames; the top of a background thread."""
             try:
-                summary = self._astrometrics.processing.record_frame_measurements(target_id, limit=limit)
+                summary = self._astrometrics.quality.record_frame_measurements(target_id, limit=limit)
             except AstrometricsError as error:
                 logger.warning(
                     "Measuring the frames of %s failed (%s): %s", target_id, error.code, error.message

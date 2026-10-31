@@ -154,9 +154,10 @@ class FakeAstrometrics:
             process_target=self.process_target,
             stack=self.stack,
             stack_subset=self.stack_subset,
-            record_frame_measurements=self.record_frame_measurements,
         )
-        self.quality = SimpleNamespace(query=self.query_quality)
+        self.quality = SimpleNamespace(
+            query=self.query_quality, record_frame_measurements=self.record_frame_measurements
+        )
 
     def record_frame_measurements(self, target: Any, **keywords: Any) -> SimpleNamespace:
         """Record one frame-measurement request.

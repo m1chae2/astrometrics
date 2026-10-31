@@ -176,7 +176,7 @@ def download_remote_targets(
     11 s per frame (real data: 61 frames of 3008 by 3008 pixels took about
     650 s), so this call returns that long after the copy for a big sync. An
     older, never-measured frame is left to an explicit run of
-    ``astrometrics.processing.record_frame_measurements`` or the backend's
+    ``astrometrics.quality.record_frame_measurements`` or the backend's
     re-index.
 
     Parameters
@@ -349,7 +349,7 @@ def record_new_frame_measurements(
 ) -> Any | None:
     """Measure the frames a sync just added and store the numbers.
 
-    Runs `astrometrics.processing.record_frame_measurements` on the frames
+    Runs `astrometrics.quality.record_frame_measurements` on the frames
     that were added (matched to the target's records by path), not on the
     whole target. A frame whose file still matches its measurement stamp is
     skipped. The run is guarded in the library: if the target is already
@@ -376,7 +376,7 @@ def record_new_frame_measurements(
     added = {os.path.normpath(path) for path in added_paths}
     added_frames = [frame for frame in target.frames if os.path.normpath(frame.path) in added]
     try:
-        summary = context.astrometrics.processing.record_frame_measurements(
+        summary = context.astrometrics.quality.record_frame_measurements(
             target, frames=added_frames, register_job=get_current_job() is None
         )
     except Exception:  # a measurement failure must never fail the sync: log it

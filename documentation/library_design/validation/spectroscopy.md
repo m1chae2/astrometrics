@@ -572,10 +572,12 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
   ```python
   from astrometricslib import Astrometrics
 
-  summary = Astrometrics().stars.tune_spectroscopy_calibration("vega_stack.fits", camera_id="ZWO ASI 533MM Pro")
+  summary = Astrometrics().processing.tune_spectroscopy_calibration(
+      "vega_stack.fits", camera_id="ZWO ASI 533MM Pro"
+  )
   print(summary.rms_error_nm)
   ```
-  <!-- impl: astrometricslib.StellarCatalog.tune_spectroscopy_calibration -->
+  <!-- impl: astrometricslib.ProcessingPipelines.tune_spectroscopy_calibration -->
 - **Acceptance criterion:** An RMS well below one pixel of dispersion (about 1.1 nm). A fit above 10 nm is refused.
 - **What to look at:** `rms_error_nm`, the RMS difference between the fitted and the true wavelengths of the three lines, in nm. One pixel of dispersion is about 1.1 nm; an RMS well below that is good. Above 10 nm the fit is refused.
 - **Our result:** Synthetic frames: measured value not recorded (the tests assert the bounds listed under Guarded by tests). On a noisy frame (3000 ADU continuum with Poisson noise), the unfiltered search had found about 60 dips and run for minutes. Real data: Vega session (DS-VEGA), RMS 0.42 nm (4.2 Å) over H-beta, H-gamma and H-delta.
@@ -1117,7 +1119,7 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
 
 - **Claim:** On the M 13 grating session, all 86 frames were extracted with no zero-order tracking failure, and the zero-order position was stable to ±0.2 px.
 - **Settings it supports:**
-  - the registration-quality thresholds (design estimate; see the table below), reached through `QualityRecords.spectral_registration_thresholds`. Relation: sanity check only. <!-- impl: astrometricslib.QualityRecords.spectral_registration_thresholds -->
+  - the registration-quality thresholds (design estimate; see the table below), held as `MIN_MATCHED_STAR_PAIRS`, `ZERO_ORDER_AMPLITUDE_OUTLIER_SIGMA` and `ZERO_ORDER_POSITION_JUMP_OUTLIER_SIGMA`. Relation: sanity check only. <!-- impl: astrometricslib.pipelines.spectroscopy.utilities.registration_quality.MIN_MATCHED_STAR_PAIRS -->
 - **Status:** Partly measured. One session, measured with an earlier version of the extraction (see the first validation campaign, [index.md](index.md#6-validation-sessions) Section 6).
 - **Data you need:** A session of 30 or more grating frames of one field, and Siril installed.
 - **Procedure:** Run the script on the target and date. It registers the frames with Siril's shift-only transform, parses the per-frame star lists and flags frames with too few matched pairs or a zero-order star that jumps or fades. `--sweep-filters` also stacks with several sharpness filters and measures the stacked zero-order FWHM.

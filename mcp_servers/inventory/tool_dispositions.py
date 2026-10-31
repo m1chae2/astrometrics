@@ -155,7 +155,7 @@ DECISIONS = {
     "observatory_safety_apply_promotion_decision": ToolDecision(
         "withhold", "Applies an operator's decision. Needs the operator."
     ),
-    "star_tune_spectroscopy_calibration": ToolDecision(
+    "processing_tune_spectroscopy_calibration": ToolDecision(
         "withhold",
         "Rewrites the live configuration file through update_config. Needs an apply=false mode that only "
         "returns the fitted values.",
@@ -166,10 +166,10 @@ DECISIONS = {
     "star_analyze_periodicity": ToolDecision(
         "fix", "Writes the result into the live star catalog. Needs a save=false option.", "change-data"
     ),
-    "star_detect_point_sources": ToolDecision(
+    "processing_detect_point_sources": ToolDecision(
         "fix", "Needs a NumPy array, which MCP cannot send. Take a frame path."
     ),
-    "star_plate_solve": ToolDecision(
+    "processing_plate_solve": ToolDecision(
         "fix",
         "Returns an astropy WCS, which MCP cannot send. Return the solved center and pixel scale.",
     ),
@@ -567,9 +567,6 @@ DECISIONS = {
     "observatory_mount_compute_pointing_correction": ToolDecision(
         "drop", "Advice for a device command the app will not send. The user does not want it."
     ),
-    "quality_flag_value_outliers": ToolDecision(
-        "drop", "Arithmetic on numbers the caller passes in. The user does not want it."
-    ),
     # ---- Writers with no read-only form ----
     **dict.fromkeys(
         (
@@ -592,7 +589,7 @@ DECISIONS = {
         ),
         ToolDecision("withhold", READ_ONLY_NOTE),
     ),
-    "processing_record_frame_measurements": ToolDecision(
+    "quality_record_frame_measurements": ToolDecision(
         "withhold",
         "Measures a target's light frames and writes the numbers into the quality database, and stamps "
         "each measured frame on the target record. It never changes a frame file. The AI is read-only, "

@@ -5279,7 +5279,7 @@ export const RPC_METHODS = [
   "processing:delete_job",
   "processing:jobs_for_target",
   "processing:job_log_tail",
-  "processing:record_frame_measurements",
+  "quality:record_frame_measurements",
   "processing:measure_noise",
   "quality:query",
   "quality:metrics",

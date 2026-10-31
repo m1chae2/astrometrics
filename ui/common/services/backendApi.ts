@@ -291,7 +291,7 @@ export interface ActionRegistry {
     // Backed by JobService.get_active_jobs(), which returns full ProcessingJob
     // records (with progressCurrent/progressTotal), not the lighter ProcessStatus.
     "processing:active_jobs": { payload: Record<string, never>; response: ProcessingJob[] };
-    "processing:record_frame_measurements": { payload: { target_id: string; limit?: number }; response: { started: boolean; target_id: string } };
+    "quality:record_frame_measurements": { payload: { target_id: string; limit?: number }; response: { started: boolean; target_id: string } };
     // Stack some of a target's frames apart from its library stack and measure the noise of each result.
     "processing:measure_noise": { payload: { target_id: string; kind?: 'growth' | 'night_contributions' | 'odd_even_difference'; maximum_steps?: number; include?: Array<'night_contributions' | 'odd_even_difference'>; keep_halves?: boolean }; response: { started: boolean; target_id: string } };
     "processing:job_log_tail": { payload: { job_id: string; lines?: number }; response: string[] };

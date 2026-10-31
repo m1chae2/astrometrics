@@ -1,6 +1,6 @@
 """What one run of the frame measurement job did.
 
-`ProcessingPipelines.record_frame_measurements` measures each light frame of
+`QualityRecords.record_frame_measurements` measures each light frame of
 a target once and stores the numbers in the quality database. A frame whose
 file has not changed since it was last measured is skipped.
 `FrameMeasurementSummary` counts what happened, so a caller can tell a run

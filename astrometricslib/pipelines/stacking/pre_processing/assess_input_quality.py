@@ -12,6 +12,7 @@ from typing import Any
 from astrometricslib.drivers.calibration_library import CALIBRATION_MATCH_BLOCKING_FLAGS_KEY
 from astrometricslib.models.quality.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
 from astrometricslib.models.quality.stacking_quality import StackingInputQuality
+from astrometricslib.pipelines.stacking.pre_processing.calibration_assessment import THIN_SET_FRAME_COUNT
 from astrometricslib.pipelines.stacking.pre_processing.flat_calibration import (
     BRIGHT_FLAT_ISSUE_PREFIX,
     FAINT_FLAT_ISSUE_PREFIX,
@@ -20,6 +21,11 @@ from astrometricslib.pipelines.stacking.pre_processing.flat_calibration import (
     MINIMUM_FLAT_LEVEL_FRACTION,
     NOISY_FLAT_ISSUE_PREFIX,
     UNREADABLE_FLATS_ISSUE,
+)
+from astrometricslib.pipelines.stacking.pre_processing.stack_calibration_health import (
+    CALIBRATION_COUNT_FLAGS_KEY,
+    CALIBRATION_HEALTH_GATES_KEY,
+    CALIBRATION_UNIQUE_COUNTS_KEY,
 )
 
 # The reasons the pre-checks record on a frame they set aside. Stage code
@@ -99,6 +105,17 @@ def calibration_gates(diagnostics: dict[str, Any]) -> list[GateResult]:
     flag: the stack is still produced, but it is flagged and its reason names
     each short master, so nobody reads it as a fully calibrated stack.
 
+    The ``calibration_frame_count`` gate also fails for a dark or bias master
+    that is thin (fewer than `THIN_SET_FRAME_COUNT` different frames) or built
+    from copies of one file. The pipeline works those sentences out from the
+    stored numbers of the frames (``calibration_count_health_flags``).
+
+    The dark and bias gates come from ``calibration_health_gates``, which
+    `assess_stack_calibration` fills: ``dark_level``, ``dark_noise``,
+    ``dark_zero_pixel_fraction``, ``dark_light_leak``, ``bias_level``,
+    ``bias_noise``, ``bias_zero_pixel_fraction``, ``dark_missing`` and
+    ``light_temperature_spread``. Each only warns.
+
     Parameters
     ----------
     diagnostics : `dict`
@@ -111,7 +128,8 @@ def calibration_gates(diagnostics: dict[str, Any]) -> list[GateResult]:
     -------
     gates : `list` [`GateResult`]
         The ``flat_level``, ``flat_noise``, ``calibration_metadata`` and
-        ``calibration_frame_count`` gates.
+        ``calibration_frame_count`` gates, then the gates above when the run
+        judged them.
     """
     gates: list[GateResult] = []
     flat = diagnostics.get("flat_calibration") or {}
@@ -202,14 +220,22 @@ def calibration_gates(diagnostics: dict[str, Any]) -> list[GateResult]:
         gates.append(passed_gate(CALIBRATION_METADATA_GATE_NAME, 0.0, 0.0))
 
     short_masters = list(diagnostics.get("calibration_blocking_flags", []))
-    if short_masters:
+    # Masters that reach the configured minimum but are thin, or are built from
+    # copies of one file (see `assess_stack_calibration`).
+    thin_masters = list(diagnostics.get(CALIBRATION_COUNT_FLAGS_KEY, []))
+    flagged_masters = [*short_masters, *thin_masters]
+    if flagged_masters:
         gates.append(
             failed_gate(
                 CALIBRATION_FRAME_COUNT_GATE_NAME,
-                "calibration frame count too low: " + "; ".join(short_masters),
-                measured_value=float(len(short_masters)),
+                "calibration frame count too low: " + "; ".join(flagged_masters),
+                measured_value=float(len(flagged_masters)),
                 limit=0.0,
-                limit_source="minimum_calibration_frames setting (default 3)",
+                limit_source=(
+                    "minimum_calibration_frames setting (default 3); a dark or bias master of fewer than "
+                    f"{THIN_SET_FRAME_COUNT} different frames is thin (validation register STK-53, "
+                    "design estimate)"
+                ),
             )
         )
     elif not any(applied.values()):
@@ -221,6 +247,12 @@ def calibration_gates(diagnostics: dict[str, Any]) -> list[GateResult]:
         )
     else:
         gates.append(passed_gate(CALIBRATION_FRAME_COUNT_GATE_NAME, 0.0, 0.0))
+    # The gates for the dark and bias frames, judged by the pipeline from the
+    # stored numbers of the frames the stack used. A run that did not judge
+    # them (a test, or an older caller) has none.
+    gates.extend(
+        GateResult.model_validate(gate) for gate in diagnostics.get(CALIBRATION_HEALTH_GATES_KEY, [])
+    )
     return gates
 
 
@@ -284,6 +316,7 @@ def assess_input_quality(
         The input judgement, with a sentence for each problem found.
     """
     flat = diagnostics.get("flat_calibration") or {}
+    unique_counts = diagnostics.get(CALIBRATION_UNIQUE_COUNTS_KEY) or {}
     mismatches = list(diagnostics.get("calibration_mismatch_flags", []))
     short_masters = list(diagnostics.get("calibration_blocking_flags", []))
     flat_issues = list(flat.get("issues", []))
@@ -316,6 +349,8 @@ def assess_input_quality(
         background_split_detected=detail is not None,
         background_split_detail=detail,
         flat_frame_count=flat.get("frame_count"),
+        dark_unique_frame_count=unique_counts.get("dark"),
+        bias_unique_frame_count=unique_counts.get("bias"),
         flat_noise_fraction=flat.get("noise_fraction"),
         flat_smoothing_sigma_px=flat.get("smoothing_sigma_pixels"),
         flat_calibration_issues=flat_issues,

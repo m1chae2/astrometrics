@@ -532,6 +532,40 @@ def _trim_stack_edges(run: StackRun) -> None:
     )
 
 
+def _judge_calibration_frames(run: StackRun) -> None:
+    """Judge the dark and bias frames the stack used from their stored numbers.
+
+    The answer goes into ``run.diagnostics``, where the stack's calibration
+    gates read it (see `stack_calibration_health.py`). The check only warns and
+    never stops a stack: a failure here is logged and leaves the gates out.
+
+    Parameters
+    ----------
+    run : `StackRun`
+        The run, with the stacking engine's diagnostics.
+    """
+    from astrometricslib.drivers.quality_store import QualityStore, quality_database_path
+    from astrometricslib.pipelines.stacking.pre_processing.stack_calibration_health import (
+        assess_stack_calibration,
+        store_in_diagnostics,
+    )
+
+    recording = run.quality_recording
+    configuration = get_configuration() if recording is None else recording.configuration
+    try:
+        health = assess_stack_calibration(
+            run.diagnostics,
+            run.target_frames,
+            None if recording is None else recording.calibration_library,
+            None if recording is None else QualityStore(quality_database_path(configuration)),
+            configuration,
+        )
+    except Exception:  # a by-product of the stack: no failure here may fail it
+        logger.exception("The calibration frames of the stack of '%s' were not judged", run.target.id)
+        return
+    store_in_diagnostics(run.diagnostics, health)
+
+
 def _summarize_stack(run: StackRun) -> StackQualitySummary:
     """Build the quality summary and store it on the target.
 
@@ -547,6 +581,7 @@ def _summarize_stack(run: StackRun) -> StackQualitySummary:
     summary : `StackQualitySummary`
         The finished summary.
     """
+    _judge_calibration_frames(run)
     summary = _build_stack_quality_summary(
         target=run.target,
         is_spectral=run.has_spectral,

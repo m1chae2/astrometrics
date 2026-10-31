@@ -39,9 +39,6 @@ from astrometricslib.models.camera_profile import CameraProfile
 from astrometricslib.models.quality.gate_result import (
     GateResult,
     GateStatus,
-    failed_gate,
-    passed_gate,
-    unchecked_gate,
 )
 from astrometricslib.pipelines.shared.quality.metrics import (
     FRAME_BLOCK_RANGE,
@@ -54,20 +51,23 @@ from astrometricslib.pipelines.shared.quality.metrics import (
 )
 
 __all__ = [
-    "BIAS_LEVEL_CHECK_NAME",
-    "BIAS_NOISE_CHECK_NAME",
-    "BIAS_ZERO_PIXEL_CHECK_NAME",
+    "BIAS_LEVEL_GATE_NAME",
+    "BIAS_NOISE_GATE_NAME",
+    "BIAS_ZERO_PIXEL_GATE_NAME",
     "CALIBRATION_FRAME_COUNT_CHECK_NAME",
     "DARK_CEILING_SHARE_CHECK_NAME",
-    "DARK_LEVEL_CHECK_NAME",
-    "DARK_LIGHT_LEAK_CHECK_NAME",
-    "DARK_NOISE_CHECK_NAME",
-    "DARK_ZERO_PIXEL_CHECK_NAME",
+    "DARK_LEVEL_GATE_NAME",
+    "DARK_LIGHT_LEAK_GATE_NAME",
+    "DARK_NOISE_GATE_NAME",
+    "DARK_ZERO_PIXEL_GATE_NAME",
     "BiasReference",
     "FrameFacts",
     "SetJudgement",
     "assess_dark_or_bias_frames",
     "build_bias_reference",
+    "check_failed",
+    "check_not_checked",
+    "check_passed",
     "combine_status",
     "flat_set_checks",
     "frame_facts_from_rows",
@@ -75,17 +75,20 @@ __all__ = [
     "summarize_checks",
 ]
 
-# The names of the checks. They are the names of the stack's gates, so the
-# set's health and the stack's gates use one vocabulary. The frame count check
-# is the stack's existing ``calibration_frame_count`` gate.
+# The names of the checks. They are the names of the stack's gates (the
+# constants ending in ``GATE_NAME`` are the ones the gate documentation and the
+# gate conformance test find), so the set's health and the stack's gates use
+# one vocabulary. The frame count check is the stack's existing
+# ``calibration_frame_count`` gate, whose constant lives in
+# `assess_input_quality.py`.
 CALIBRATION_FRAME_COUNT_CHECK_NAME = "calibration_frame_count"
-DARK_ZERO_PIXEL_CHECK_NAME = "dark_zero_pixel_fraction"
-BIAS_ZERO_PIXEL_CHECK_NAME = "bias_zero_pixel_fraction"
-DARK_LEVEL_CHECK_NAME = "dark_level"
-BIAS_LEVEL_CHECK_NAME = "bias_level"
-DARK_NOISE_CHECK_NAME = "dark_noise"
-BIAS_NOISE_CHECK_NAME = "bias_noise"
-DARK_LIGHT_LEAK_CHECK_NAME = "dark_light_leak"
+DARK_ZERO_PIXEL_GATE_NAME = "dark_zero_pixel_fraction"
+BIAS_ZERO_PIXEL_GATE_NAME = "bias_zero_pixel_fraction"
+DARK_LEVEL_GATE_NAME = "dark_level"
+BIAS_LEVEL_GATE_NAME = "bias_level"
+DARK_NOISE_GATE_NAME = "dark_noise"
+BIAS_NOISE_GATE_NAME = "bias_noise"
+DARK_LIGHT_LEAK_GATE_NAME = "dark_light_leak"
 # Set health only; the stack has no gate for it (the light leak gate covers
 # light reaching the sensor by its large-scale pattern).
 DARK_CEILING_SHARE_CHECK_NAME = "dark_ceiling_share"
@@ -151,6 +154,97 @@ _DARK_NOISE_SOURCE = (
     "camera profile read noise, at least 0.9 times (validation register STK-49, partly measured)"
 )
 _COUNT_SOURCE = "configured minimum of frames; thin below 10 frames (validation register STK-53)"
+
+
+def check_passed(
+    name: str,
+    measured_value: float | None = None,
+    limit: float | None = None,
+    limit_source: str | None = None,
+) -> GateResult:
+    """Build the record of a check that ran and passed.
+
+    The record is built directly, not with ``passed_gate``: these are the
+    checks of one set, and the stack's gates are made from them by name (see
+    `stack_calibration_health.py`), so the name is a parameter here.
+
+    Parameters
+    ----------
+    name : `str`
+        The check's name.
+    measured_value, limit : `float` or `None`, optional
+        What was measured and the limit it was compared with.
+    limit_source : `str` or `None`, optional
+        Where the limit came from.
+
+    Returns
+    -------
+    result : `GateResult`
+        A result with status ``passed``.
+    """
+    return GateResult(
+        name=name,
+        status=GateStatus.PASSED,
+        measuredValue=measured_value,
+        limit=limit,
+        limitSource=limit_source,
+    )
+
+
+def check_failed(
+    name: str,
+    detail: str,
+    measured_value: float | None = None,
+    limit: float | None = None,
+    limit_source: str | None = None,
+) -> GateResult:
+    """Build the record of a check that ran and failed.
+
+    Parameters
+    ----------
+    name : `str`
+        The check's name.
+    detail : `str`
+        One sentence saying what is wrong.
+    measured_value, limit : `float` or `None`, optional
+        What was measured and the limit it was compared with.
+    limit_source : `str` or `None`, optional
+        Where the limit came from.
+
+    Returns
+    -------
+    result : `GateResult`
+        A result with status ``failed``.
+    """
+    return GateResult(
+        name=name,
+        status=GateStatus.FAILED,
+        measuredValue=measured_value,
+        limit=limit,
+        limitSource=limit_source,
+        detail=detail,
+    )
+
+
+def check_not_checked(name: str, reason: str, limit_source: str | None = None) -> GateResult:
+    """Build the record of a check that could not run.
+
+    Parameters
+    ----------
+    name : `str`
+        The check's name.
+    reason : `str`
+        One sentence saying why the check could not run.
+    limit_source : `str` or `None`, optional
+        Where the limit comes from, kept so a reader sees what would have
+        been checked.
+
+    Returns
+    -------
+    result : `GateResult`
+        A result with status ``not_checked``.
+    """
+    return GateResult(name=name, status=GateStatus.NOT_CHECKED, limitSource=limit_source, detail=reason)
 
 
 @dataclass(frozen=True)
@@ -425,7 +519,7 @@ def _count_check(
         failed = False
     if failed:
         return (
-            failed_gate(
+            check_failed(
                 CALIBRATION_FRAME_COUNT_CHECK_NAME,
                 detail,
                 float(unique),
@@ -435,7 +529,7 @@ def _count_check(
             unique,
         )
     return (
-        passed_gate(
+        check_passed(
             CALIBRATION_FRAME_COUNT_CHECK_NAME, float(unique), float(THIN_SET_FRAME_COUNT), _COUNT_SOURCE
         ),
         unique,
@@ -470,7 +564,7 @@ def _zero_check(
         if FRAME_ZERO_PIXEL_FRACTION in facts.values
     ]
     if not shares:
-        return unchecked_gate(name, f"no {kind} frame has a stored zero share yet", _ZERO_SOURCE)
+        return check_not_checked(name, f"no {kind} frame has a stored zero share yet", _ZERO_SOURCE)
     worst = max(share for share, _ in shares)
     over = [
         (path, f"{share:.0%} of its pixels are exactly zero")
@@ -479,7 +573,7 @@ def _zero_check(
     ]
     if over:
         concerns.extend(over)
-        return failed_gate(
+        return check_failed(
             name,
             f"{kind} frames are cut off at zero: {len(over)} of {len(shares)} frame(s) have "
             f"{worst:.0%} or less of their pixels at exactly zero, so their noise is lost and the master "
@@ -488,7 +582,7 @@ def _zero_check(
             ZERO_PIXEL_FRACTION_LIMIT,
             _ZERO_SOURCE,
         )
-    return passed_gate(name, worst, ZERO_PIXEL_FRACTION_LIMIT, _ZERO_SOURCE)
+    return check_passed(name, worst, ZERO_PIXEL_FRACTION_LIMIT, _ZERO_SOURCE)
 
 
 def _read_noise_adu(
@@ -554,15 +648,15 @@ def _noise_check(
     """
     source = _NOISE_SOURCE if upper_limit else _DARK_NOISE_SOURCE
     if read_noise_adu is None:
-        return unchecked_gate(name, reason, source)
+        return check_not_checked(name, reason, source)
     noises = [
         facts.values[FRAME_NEIGHBOR_NOISE] for facts in measured if FRAME_NEIGHBOR_NOISE in facts.values
     ]
     if not noises:
-        return unchecked_gate(name, "no frame has a stored noise yet", source)
+        return check_not_checked(name, "no frame has a stored noise yet", source)
     ratio = statistics.median(noises) / read_noise_adu
     if ratio < NOISE_RATIO_LOW:
-        return failed_gate(
+        return check_failed(
             name,
             f"the noise is {ratio:.2f} times the camera's read noise, below {NOISE_RATIO_LOW}: "
             "the frames are "
@@ -572,7 +666,7 @@ def _noise_check(
             source,
         )
     if upper_limit and ratio > NOISE_RATIO_HIGH:
-        return failed_gate(
+        return check_failed(
             name,
             f"the noise is {ratio:.2f} times the camera's read noise, above {NOISE_RATIO_HIGH}: the frames "
             "may be taken at another gain, or the sensor has a fault",
@@ -580,7 +674,7 @@ def _noise_check(
             NOISE_RATIO_HIGH,
             source,
         )
-    return passed_gate(name, ratio, NOISE_RATIO_HIGH if upper_limit else NOISE_RATIO_LOW, source)
+    return check_passed(name, ratio, NOISE_RATIO_HIGH if upper_limit else NOISE_RATIO_LOW, source)
 
 
 def _median_value_step(frames: Sequence[FrameFacts], reference: BiasReference | None) -> float | None:
@@ -630,18 +724,18 @@ def _dark_checks(
     checks : `list` [`GateResult`]
         The zero, light leak, ceiling, level and noise checks.
     """
-    checks = [_zero_check(DARK_ZERO_PIXEL_CHECK_NAME, "dark", measured, concerns)]
+    checks = [_zero_check(DARK_ZERO_PIXEL_GATE_NAME, "dark", measured, concerns)]
     step = _median_value_step(measured, reference)
     no_bias = "there are no measured bias frames at this setting to compare with"
 
     # Light that reached the sensor: a large-scale pattern or saturated pixels.
     ranges = [(f.values[FRAME_BLOCK_RANGE], f.path) for f in measured if FRAME_BLOCK_RANGE in f.values]
     if reference is None or reference.block_range_adu is None:
-        checks.append(unchecked_gate(DARK_LIGHT_LEAK_CHECK_NAME, no_bias, _LEAK_SOURCE))
+        checks.append(check_not_checked(DARK_LIGHT_LEAK_GATE_NAME, no_bias, _LEAK_SOURCE))
     elif not step or not ranges:
         checks.append(
-            unchecked_gate(
-                DARK_LIGHT_LEAK_CHECK_NAME, "the value step of the sensor is not known yet", _LEAK_SOURCE
+            check_not_checked(
+                DARK_LIGHT_LEAK_GATE_NAME, "the value step of the sensor is not known yet", _LEAK_SOURCE
             )
         )
     else:
@@ -661,8 +755,8 @@ def _dark_checks(
         if struck:
             concerns.extend(struck)
             checks.append(
-                failed_gate(
-                    DARK_LIGHT_LEAK_CHECK_NAME,
+                check_failed(
+                    DARK_LIGHT_LEAK_GATE_NAME,
                     f"light probably reached the sensor in {len(struck)} of {len(ranges)} dark frame(s): the "
                     f"large-scale pattern is up to {worst:.1f} value steps above the bias frames' "
                     f"({VALUE_STEP_ALLOWANCE:g} steps allowed). The master subtracts that pattern from "
@@ -673,7 +767,7 @@ def _dark_checks(
                 )
             )
         else:
-            checks.append(passed_gate(DARK_LIGHT_LEAK_CHECK_NAME, worst, VALUE_STEP_ALLOWANCE, _LEAK_SOURCE))
+            checks.append(check_passed(DARK_LIGHT_LEAK_GATE_NAME, worst, VALUE_STEP_ALLOWANCE, _LEAK_SOURCE))
 
     ceilings = [
         (f.values[FRAME_SATURATED_PIXEL_FRACTION], f.path)
@@ -682,7 +776,9 @@ def _dark_checks(
     ]
     if not ceilings:
         checks.append(
-            unchecked_gate(DARK_CEILING_SHARE_CHECK_NAME, "no saturated share is stored yet", _CEILING_SOURCE)
+            check_not_checked(
+                DARK_CEILING_SHARE_CHECK_NAME, "no saturated share is stored yet", _CEILING_SOURCE
+            )
         )
     else:
         worst_share = max(share for share, _ in ceilings)
@@ -695,7 +791,7 @@ def _dark_checks(
         if bright:
             concerns.extend(bright)
             checks.append(
-                failed_gate(
+                check_failed(
                     DARK_CEILING_SHARE_CHECK_NAME,
                     f"{len(bright)} dark frame(s) have up to {worst_share:.0%} of their pixels at the "
                     "saturation "
@@ -707,17 +803,17 @@ def _dark_checks(
             )
         else:
             checks.append(
-                passed_gate(DARK_CEILING_SHARE_CHECK_NAME, worst_share, CEILING_SHARE_LIMIT, _CEILING_SOURCE)
+                check_passed(DARK_CEILING_SHARE_CHECK_NAME, worst_share, CEILING_SHARE_LIMIT, _CEILING_SOURCE)
             )
 
     # Level against the bias level of the same setting.
     levels = [(f.values[FRAME_CLIPPED_MEAN_LEVEL], f.path) for f in measured]
     if reference is None:
-        checks.append(unchecked_gate(DARK_LEVEL_CHECK_NAME, no_bias, _DARK_LEVEL_SOURCE))
+        checks.append(check_not_checked(DARK_LEVEL_GATE_NAME, no_bias, _DARK_LEVEL_SOURCE))
     elif not step or not levels:
         checks.append(
-            unchecked_gate(
-                DARK_LEVEL_CHECK_NAME, "the value step of the sensor is not known yet", _DARK_LEVEL_SOURCE
+            check_not_checked(
+                DARK_LEVEL_GATE_NAME, "the value step of the sensor is not known yet", _DARK_LEVEL_SOURCE
             )
         )
     else:
@@ -737,8 +833,8 @@ def _dark_checks(
         if off:
             concerns.extend(off)
             checks.append(
-                failed_gate(
-                    DARK_LEVEL_CHECK_NAME,
+                check_failed(
+                    DARK_LEVEL_GATE_NAME,
                     f"{len(off)} of {len(levels)} dark frame(s) sit up to {worst:.1f} value steps from "
                     "the bias "
                     f"level of the same setting ({VALUE_STEP_ALLOWANCE:g} steps allowed): a wrong level "
@@ -750,13 +846,13 @@ def _dark_checks(
                 )
             )
         else:
-            checks.append(passed_gate(DARK_LEVEL_CHECK_NAME, worst, VALUE_STEP_ALLOWANCE, _DARK_LEVEL_SOURCE))
+            checks.append(check_passed(DARK_LEVEL_GATE_NAME, worst, VALUE_STEP_ALLOWANCE, _DARK_LEVEL_SOURCE))
 
     zero_clipped = any(
         f.values.get(FRAME_ZERO_PIXEL_FRACTION, 0.0) >= ZERO_PIXEL_FRACTION_LIMIT for f in measured
     )
     read_noise_adu, reason = _read_noise_adu(profile, *setting, zero_clipped)
-    checks.append(_noise_check(DARK_NOISE_CHECK_NAME, measured, read_noise_adu, reason, upper_limit=False))
+    checks.append(_noise_check(DARK_NOISE_GATE_NAME, measured, read_noise_adu, reason, upper_limit=False))
     return checks
 
 
@@ -787,7 +883,7 @@ def _bias_checks(
     checks : `list` [`GateResult`]
         The zero, level and noise checks.
     """
-    checks = [_zero_check(BIAS_ZERO_PIXEL_CHECK_NAME, "bias", measured, concerns)]
+    checks = [_zero_check(BIAS_ZERO_PIXEL_GATE_NAME, "bias", measured, concerns)]
     stored = None if profile is None else profile.bias_level_for(*setting)
     levels = [f.values[FRAME_CLIPPED_MEAN_LEVEL] for f in measured]
     steps = [f.values[FRAME_VALUE_STEP] for f in measured if f.values.get(FRAME_VALUE_STEP)]
@@ -795,15 +891,17 @@ def _bias_checks(
         measurements["mean_level_adu"] = statistics.median(levels)
     if stored is None:
         checks.append(
-            unchecked_gate(
-                BIAS_LEVEL_CHECK_NAME,
+            check_not_checked(
+                BIAS_LEVEL_GATE_NAME,
                 f"the camera profile has no bias level for gain {setting[0]}, offset {setting[1]}",
                 _BIAS_LEVEL_SOURCE,
             )
         )
     elif not levels or not steps:
         checks.append(
-            unchecked_gate(BIAS_LEVEL_CHECK_NAME, "no level or value step is stored yet", _BIAS_LEVEL_SOURCE)
+            check_not_checked(
+                BIAS_LEVEL_GATE_NAME, "no level or value step is stored yet", _BIAS_LEVEL_SOURCE
+            )
         )
     else:
         expected = stored.bias_level_adu.value
@@ -812,8 +910,8 @@ def _bias_checks(
         measurements["profile_bias_level_adu"] = expected
         if excess > VALUE_STEP_ALLOWANCE:
             checks.append(
-                failed_gate(
-                    BIAS_LEVEL_CHECK_NAME,
+                check_failed(
+                    BIAS_LEVEL_GATE_NAME,
                     f"the bias level is {statistics.median(levels):.1f} ADU, {excess:.1f} value steps "
                     "from the "
                     f"{expected:.1f} ADU the camera profile stores ({VALUE_STEP_ALLOWANCE:g} steps "
@@ -826,13 +924,13 @@ def _bias_checks(
             )
         else:
             checks.append(
-                passed_gate(BIAS_LEVEL_CHECK_NAME, excess, VALUE_STEP_ALLOWANCE, _BIAS_LEVEL_SOURCE)
+                check_passed(BIAS_LEVEL_GATE_NAME, excess, VALUE_STEP_ALLOWANCE, _BIAS_LEVEL_SOURCE)
             )
     zero_clipped = any(
         f.values.get(FRAME_ZERO_PIXEL_FRACTION, 0.0) >= ZERO_PIXEL_FRACTION_LIMIT for f in measured
     )
     read_noise_adu, reason = _read_noise_adu(profile, *setting, zero_clipped)
-    checks.append(_noise_check(BIAS_NOISE_CHECK_NAME, measured, read_noise_adu, reason, upper_limit=True))
+    checks.append(_noise_check(BIAS_NOISE_GATE_NAME, measured, read_noise_adu, reason, upper_limit=True))
     return checks
 
 
@@ -884,18 +982,18 @@ def assess_dark_or_bias_frames(
     ]
     names = (
         (
-            DARK_ZERO_PIXEL_CHECK_NAME,
-            DARK_LIGHT_LEAK_CHECK_NAME,
+            DARK_ZERO_PIXEL_GATE_NAME,
+            DARK_LIGHT_LEAK_GATE_NAME,
             DARK_CEILING_SHARE_CHECK_NAME,
-            DARK_LEVEL_CHECK_NAME,
-            DARK_NOISE_CHECK_NAME,
+            DARK_LEVEL_GATE_NAME,
+            DARK_NOISE_GATE_NAME,
         )
         if kind == "dark"
-        else (BIAS_ZERO_PIXEL_CHECK_NAME, BIAS_LEVEL_CHECK_NAME, BIAS_NOISE_CHECK_NAME)
+        else (BIAS_ZERO_PIXEL_GATE_NAME, BIAS_LEVEL_GATE_NAME, BIAS_NOISE_GATE_NAME)
     )
     if not measured:
         reason = f"none of the {len(paths)} {kind} frame(s) has been measured yet; start the measuring job"
-        checks = [count_check, *(unchecked_gate(name, reason) for name in names)]
+        checks = [count_check, *(check_not_checked(name, reason) for name in names)]
     elif kind == "dark":
         checks = [
             count_check,
@@ -1005,7 +1103,7 @@ def flat_set_checks(assessment: FlatSetAssessment, minimum_frames: int) -> list[
         gate for gate in calibration_gates(diagnostics) if gate.name in ("flat_level", "flat_noise")
     ]
     if assessment.frame_count < minimum_frames:
-        count = failed_gate(
+        count = check_failed(
             CALIBRATION_FRAME_COUNT_CHECK_NAME,
             f"too few flat frames: {assessment.frame_count}, fewer than the minimum of {minimum_frames}",
             float(assessment.frame_count),
@@ -1013,7 +1111,7 @@ def flat_set_checks(assessment: FlatSetAssessment, minimum_frames: int) -> list[
             "configured minimum of frames",
         )
     else:
-        count = passed_gate(
+        count = check_passed(
             CALIBRATION_FRAME_COUNT_CHECK_NAME,
             float(assessment.frame_count),
             float(minimum_frames),

@@ -465,6 +465,27 @@ class CalibrationSet:
     temperature_c: float | None = None
     exposure_seconds: float | None = None
 
+    def has_setting_of(self, other: CalibrationSet) -> bool:
+        """Tell whether another set has the same camera and settings.
+
+        Parameters
+        ----------
+        other : `CalibrationSet`
+            The set to compare with, such as the dark set a bias is wanted for.
+
+        Returns
+        -------
+        same : `bool`
+            `True` when the camera (ignoring case), gain, offset and binning
+            agree. Temperature and exposure are not compared.
+        """
+        return (
+            str(self.camera).casefold() == str(other.camera).casefold()
+            and str(self.gain) == str(other.gain)
+            and math.isclose(self.offset, other.offset)
+            and self.binning == other.binning
+        )
+
 
 @dataclass(frozen=True)
 class CalibrationSelection:

@@ -174,22 +174,6 @@ def _calibration_set_matches(
     )
 
 
-def _same_setting(bias_set: Any, dark_set: Any) -> bool:
-    """Tell whether a bias set has the settings of a dark set.
-
-    Returns
-    -------
-    same : `bool`
-        `True` when the bias frames can calibrate the dark's setting.
-    """
-    return (
-        str(bias_set.camera).casefold() == str(dark_set.camera).casefold()
-        and str(bias_set.gain) == str(dark_set.gain)
-        and math.isclose(bias_set.offset, dark_set.offset)
-        and bias_set.binning == dark_set.binning
-    )
-
-
 def _calibration_row_key(kind: str, row: dict[str, Any]) -> str:
     """Make the stable key of one calibration counts row.
 
@@ -681,7 +665,7 @@ class CalibrationCatalog:
             reference = None
             if kind == "dark":
                 same_setting = [
-                    bias_set for bias_set in bias_sets if _same_setting(bias_set, calibration_set)
+                    bias_set for bias_set in bias_sets if bias_set.has_setting_of(calibration_set)
                 ]
                 reference = build_bias_reference([
                     facts[path] for bias_set in same_setting for path in bias_set.paths if path in facts

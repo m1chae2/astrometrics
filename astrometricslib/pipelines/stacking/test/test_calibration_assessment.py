@@ -26,14 +26,14 @@ from astrometricslib.pipelines.shared.quality.metrics import (
     FRAME_ZERO_PIXEL_FRACTION,
 )
 from astrometricslib.pipelines.stacking.pre_processing.calibration_assessment import (
-    BIAS_LEVEL_CHECK_NAME,
-    BIAS_NOISE_CHECK_NAME,
-    BIAS_ZERO_PIXEL_CHECK_NAME,
+    BIAS_LEVEL_GATE_NAME,
+    BIAS_NOISE_GATE_NAME,
+    BIAS_ZERO_PIXEL_GATE_NAME,
     CALIBRATION_FRAME_COUNT_CHECK_NAME,
     DARK_CEILING_SHARE_CHECK_NAME,
-    DARK_LEVEL_CHECK_NAME,
-    DARK_LIGHT_LEAK_CHECK_NAME,
-    DARK_NOISE_CHECK_NAME,
+    DARK_LEVEL_GATE_NAME,
+    DARK_LIGHT_LEAK_GATE_NAME,
+    DARK_NOISE_GATE_NAME,
     BiasReference,
     FrameFacts,
     SetJudgement,
@@ -175,9 +175,9 @@ def test_a_clean_bias_set_passes_every_check() -> None:
     judgement = _judge("bias", [_frame(index) for index in range(20)])
     assert {check.name: check.status for check in judgement.checks} == {
         CALIBRATION_FRAME_COUNT_CHECK_NAME: GateStatus.PASSED,
-        BIAS_ZERO_PIXEL_CHECK_NAME: GateStatus.PASSED,
-        BIAS_LEVEL_CHECK_NAME: GateStatus.PASSED,
-        BIAS_NOISE_CHECK_NAME: GateStatus.PASSED,
+        BIAS_ZERO_PIXEL_GATE_NAME: GateStatus.PASSED,
+        BIAS_LEVEL_GATE_NAME: GateStatus.PASSED,
+        BIAS_NOISE_GATE_NAME: GateStatus.PASSED,
     }
     assert combine_status(judgement.checks) == "good"
     assert judgement.unique_frame_count == 20
@@ -193,9 +193,9 @@ def test_a_zero_clipped_set_fails_on_zero_share_noise_and_level() -> None:
         for index in range(20)
     ]
     judgement = _judge("bias", frames)
-    assert _check(judgement, BIAS_ZERO_PIXEL_CHECK_NAME).status is GateStatus.FAILED
-    assert _check(judgement, BIAS_NOISE_CHECK_NAME).status is GateStatus.FAILED
-    assert _check(judgement, BIAS_LEVEL_CHECK_NAME).status is GateStatus.FAILED
+    assert _check(judgement, BIAS_ZERO_PIXEL_GATE_NAME).status is GateStatus.FAILED
+    assert _check(judgement, BIAS_NOISE_GATE_NAME).status is GateStatus.FAILED
+    assert _check(judgement, BIAS_LEVEL_GATE_NAME).status is GateStatus.FAILED
     assert combine_status(judgement.checks) == "warning"
     assert len(judgement.concerns) == 20
 
@@ -204,22 +204,22 @@ def test_the_zero_share_limit_is_one_tenth_of_a_percent() -> None:
     """Just under the limit passes, at the limit fails."""
     below = _judge("bias", [_frame(i, **{FRAME_ZERO_PIXEL_FRACTION: 0.0009}) for i in range(5)])
     at_limit = _judge("bias", [_frame(i, **{FRAME_ZERO_PIXEL_FRACTION: 0.001}) for i in range(5)])
-    assert _check(below, BIAS_ZERO_PIXEL_CHECK_NAME).status is GateStatus.PASSED
-    assert _check(at_limit, BIAS_ZERO_PIXEL_CHECK_NAME).status is GateStatus.FAILED
+    assert _check(below, BIAS_ZERO_PIXEL_GATE_NAME).status is GateStatus.PASSED
+    assert _check(at_limit, BIAS_ZERO_PIXEL_GATE_NAME).status is GateStatus.FAILED
 
 
 def test_the_bias_level_limit_is_two_value_steps() -> None:
     """A level 2 steps off passes, 3 steps off fails."""
     two = _judge("bias", [_frame(i, **{FRAME_CLIPPED_MEAN_LEVEL: BIAS_LEVEL + 2 * STEP}) for i in range(5)])
     three = _judge("bias", [_frame(i, **{FRAME_CLIPPED_MEAN_LEVEL: BIAS_LEVEL + 3 * STEP}) for i in range(5)])
-    assert _check(two, BIAS_LEVEL_CHECK_NAME).status is GateStatus.PASSED
-    assert _check(three, BIAS_LEVEL_CHECK_NAME).status is GateStatus.FAILED
+    assert _check(two, BIAS_LEVEL_GATE_NAME).status is GateStatus.PASSED
+    assert _check(three, BIAS_LEVEL_GATE_NAME).status is GateStatus.FAILED
 
 
 def test_a_camera_with_no_bias_level_is_not_checked_not_passed() -> None:
     """With no stored level the check says so and gives the reason."""
     judgement = _judge("bias", [_frame(i) for i in range(5)], profile=_profile(with_bias_level=False))
-    check = _check(judgement, BIAS_LEVEL_CHECK_NAME)
+    check = _check(judgement, BIAS_LEVEL_GATE_NAME)
     assert check.status is GateStatus.NOT_CHECKED
     assert "no bias level" in check.detail
 
@@ -227,7 +227,7 @@ def test_a_camera_with_no_bias_level_is_not_checked_not_passed() -> None:
 def test_a_camera_with_no_read_noise_is_not_checked() -> None:
     """With no read noise in the profile the noise checks cannot run."""
     judgement = _judge("bias", [_frame(i) for i in range(5)], profile=_profile(with_noise=False))
-    assert _check(judgement, BIAS_NOISE_CHECK_NAME).status is GateStatus.NOT_CHECKED
+    assert _check(judgement, BIAS_NOISE_GATE_NAME).status is GateStatus.NOT_CHECKED
 
 
 @pytest.mark.parametrize(
@@ -238,7 +238,7 @@ def test_the_bias_noise_band_is_nine_to_eleven_tenths(ratio: float, expected: Ga
     judgement = _judge(
         "bias", [_frame(i, **{FRAME_NEIGHBOR_NOISE: READ_NOISE_ADU * ratio}) for i in range(5)]
     )
-    assert _check(judgement, BIAS_NOISE_CHECK_NAME).status is expected
+    assert _check(judgement, BIAS_NOISE_GATE_NAME).status is expected
 
 
 def test_dark_noise_has_a_lower_limit_only() -> None:
@@ -253,8 +253,8 @@ def test_dark_noise_has_a_lower_limit_only() -> None:
         [_frame(i, **{FRAME_NEIGHBOR_NOISE: READ_NOISE_ADU * 0.5}) for i in range(5)],
         reference=_bias_reference(),
     )
-    assert _check(high, DARK_NOISE_CHECK_NAME).status is GateStatus.PASSED
-    assert _check(low, DARK_NOISE_CHECK_NAME).status is GateStatus.FAILED
+    assert _check(high, DARK_NOISE_GATE_NAME).status is GateStatus.PASSED
+    assert _check(low, DARK_NOISE_GATE_NAME).status is GateStatus.FAILED
 
 
 def test_a_light_struck_dark_is_found_against_the_bias_range() -> None:
@@ -263,7 +263,7 @@ def test_a_light_struck_dark_is_found_against_the_bias_range() -> None:
     frames = [_frame(i, **{FRAME_BLOCK_RANGE: 6.0}) for i in range(19)]
     frames.append(_frame(19, **{FRAME_BLOCK_RANGE: 30.0}))
     judgement = _judge("dark", frames, reference=reference)
-    check = _check(judgement, DARK_LIGHT_LEAK_CHECK_NAME)
+    check = _check(judgement, DARK_LIGHT_LEAK_GATE_NAME)
     assert check.status is GateStatus.FAILED
     assert check.measured_value == pytest.approx((30.0 - 6.0) / STEP)
     assert [concern.path for concern in judgement.concerns] == ["frame_19.fits"]
@@ -274,14 +274,14 @@ def test_the_light_leak_limit_is_two_steps_above_the_bias_range() -> None:
     reference = _bias_reference(**{FRAME_BLOCK_RANGE: 6.0})
     ok = _judge("dark", [_frame(i, **{FRAME_BLOCK_RANGE: 14.0}) for i in range(5)], reference=reference)
     over = _judge("dark", [_frame(i, **{FRAME_BLOCK_RANGE: 15.0}) for i in range(5)], reference=reference)
-    assert _check(ok, DARK_LIGHT_LEAK_CHECK_NAME).status is GateStatus.PASSED
-    assert _check(over, DARK_LIGHT_LEAK_CHECK_NAME).status is GateStatus.FAILED
+    assert _check(ok, DARK_LIGHT_LEAK_GATE_NAME).status is GateStatus.PASSED
+    assert _check(over, DARK_LIGHT_LEAK_GATE_NAME).status is GateStatus.FAILED
 
 
 def test_a_dark_with_no_bias_frames_at_its_setting_is_not_checked() -> None:
     """The light leak and level checks need a bias reference."""
     judgement = _judge("dark", [_frame(i) for i in range(5)], reference=None)
-    for name in (DARK_LIGHT_LEAK_CHECK_NAME, DARK_LEVEL_CHECK_NAME):
+    for name in (DARK_LIGHT_LEAK_GATE_NAME, DARK_LEVEL_GATE_NAME):
         check = _check(judgement, name)
         assert check.status is GateStatus.NOT_CHECKED
         assert "no measured bias frames" in check.detail
@@ -298,7 +298,7 @@ def test_a_dark_far_from_the_bias_level_fails_the_level_check() -> None:
     """A dark already calibrated (level near zero) is found."""
     frames = [_frame(i, **{FRAME_CLIPPED_MEAN_LEVEL: 3.0}) for i in range(5)]
     judgement = _judge("dark", frames, reference=_bias_reference())
-    assert _check(judgement, DARK_LEVEL_CHECK_NAME).status is GateStatus.FAILED
+    assert _check(judgement, DARK_LEVEL_GATE_NAME).status is GateStatus.FAILED
 
 
 def test_the_dark_current_allowance_grows_with_the_exposure() -> None:
@@ -306,8 +306,8 @@ def test_the_dark_current_allowance_grows_with_the_exposure() -> None:
     frames = [_frame(i, **{FRAME_CLIPPED_MEAN_LEVEL: BIAS_LEVEL + 2 * STEP + 1.0}) for i in range(5)]
     short = _judge("dark", frames, reference=_bias_reference(), exposure_seconds=1.0)
     long = _judge("dark", frames, reference=_bias_reference(), exposure_seconds=600.0)
-    assert _check(short, DARK_LEVEL_CHECK_NAME).status is GateStatus.FAILED
-    assert _check(long, DARK_LEVEL_CHECK_NAME).status is GateStatus.PASSED
+    assert _check(short, DARK_LEVEL_GATE_NAME).status is GateStatus.FAILED
+    assert _check(long, DARK_LEVEL_GATE_NAME).status is GateStatus.PASSED
 
 
 @pytest.mark.parametrize(

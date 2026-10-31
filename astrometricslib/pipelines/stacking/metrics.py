@@ -145,6 +145,8 @@ STACKING_FRAMES_EXCLUDED_FOR_GAIN = "stacking.frames_excluded_for_gain_count"
 STACKING_FRAMES_EXCLUDED_FOR_BACKGROUND = "stacking.frames_excluded_for_background_count"
 STACKING_FRAMES_QUARANTINED = "stacking.frames_quarantined_count"
 STACKING_FLAT_FRAME_COUNT = "stacking.flat_frame_count"
+STACKING_DARK_UNIQUE_FRAME_COUNT = "stacking.dark_unique_frame_count"
+STACKING_BIAS_UNIQUE_FRAME_COUNT = "stacking.bias_unique_frame_count"
 STACKING_FLAT_NOISE_FRACTION = "stacking.flat_noise_fraction"
 STACKING_FLAT_SMOOTHING_SIGMA_PX = "stacking.flat_smoothing_sigma_px"
 STACKING_SATURATED_PIXEL_FRACTION = "stacking.saturated_pixel_fraction"
@@ -293,6 +295,15 @@ STACKING_GATE_FLAT_LEVEL = "stacking.gate_flat_level"
 STACKING_GATE_FLAT_NOISE = "stacking.gate_flat_noise"
 STACKING_GATE_CALIBRATION_METADATA = "stacking.gate_calibration_metadata"
 STACKING_GATE_CALIBRATION_FRAME_COUNT = "stacking.gate_calibration_frame_count"
+STACKING_GATE_DARK_LEVEL = "stacking.gate_dark_level"
+STACKING_GATE_DARK_NOISE = "stacking.gate_dark_noise"
+STACKING_GATE_DARK_ZERO_PIXEL_FRACTION = "stacking.gate_dark_zero_pixel_fraction"
+STACKING_GATE_DARK_LIGHT_LEAK = "stacking.gate_dark_light_leak"
+STACKING_GATE_BIAS_LEVEL = "stacking.gate_bias_level"
+STACKING_GATE_BIAS_NOISE = "stacking.gate_bias_noise"
+STACKING_GATE_BIAS_ZERO_PIXEL_FRACTION = "stacking.gate_bias_zero_pixel_fraction"
+STACKING_GATE_DARK_MISSING = "stacking.gate_dark_missing"
+STACKING_GATE_LIGHT_TEMPERATURE_SPREAD = "stacking.gate_light_temperature_spread"
 STACKING_GATE_EXPOSURE_GROUP_LINEARITY = "stacking.gate_exposure_group_linearity"
 STACKING_GATE_EXPOSURE_GROUPS_COMBINED = "stacking.gate_exposure_groups_combined"
 STACKING_GATE_RAW_FRAME_CLIPPING = "stacking.gate_raw_frame_clipping"
@@ -543,6 +554,33 @@ _VALUE_METRICS: tuple[MetricSpec, ...] = (
         "The flat frames used for this stack.",
         "pipelines.stacking.pre_processing.flat_calibration.assess_flats",
         better=Direction.HIGHER,
+    ),
+    _context_metric(
+        STACKING_DARK_UNIQUE_FRAME_COUNT,
+        "count",
+        "How many different frames the master dark was built from, copies counted once.",
+        (
+            "The number of dark frames with different pixels (a checksum of the pixels tells a copy of a "
+            "file from another exposure), summed over the dark sets the stack used. Not stored when the "
+            "stack used no dark, or the dark frames' numbers had not been measured."
+        ),
+        "The dark frames used for this stack.",
+        "pipelines.stacking.pre_processing.stack_calibration_health.assess_stack_calibration",
+        better=Direction.HIGHER,
+        register_entry="STK-53",
+    ),
+    _context_metric(
+        STACKING_BIAS_UNIQUE_FRAME_COUNT,
+        "count",
+        "How many different frames the master bias was built from, copies counted once.",
+        (
+            "The number of bias frames with different pixels, summed over the bias sets the stack used. "
+            "Not stored when the stack used no bias, or the bias frames' numbers had not been measured."
+        ),
+        "The bias frames used for this stack.",
+        "pipelines.stacking.pre_processing.stack_calibration_health.assess_stack_calibration",
+        better=Direction.HIGHER,
+        register_entry="STK-53",
     ),
     _context_metric(
         STACKING_FLAT_NOISE_FRACTION,
@@ -1355,6 +1393,7 @@ _ODD_EVEN_DIFFERENCE_METRICS: tuple[MetricSpec, ...] = (
 )
 
 _ASSESS = "pipelines.stacking.pre_processing.assess_input_quality.calibration_gates"
+_CALIBRATION_HEALTH = "pipelines.stacking.pre_processing.stack_calibration_health.assess_stack_calibration"
 _OUTPUT = "pipelines.stacking.post_processing.assess_output_quality.output_quality_gates"
 _GROUP_GATES = "pipelines.stacking.post_processing.exposure_group_report"
 
@@ -1423,6 +1462,107 @@ _GATE_METRICS: tuple[MetricSpec, ...] = (
         "The number of masters built from too few frames. The limit is 0.",
         f"{_ASSESS}",
         "A master built from a few frames adds its own noise to every light frame.",
+    ),
+    _gate_metric(
+        STACKING_GATE_DARK_LEVEL,
+        "",
+        "Whether the dark frames sat at the bias level of their own setting.",
+        (
+            "The largest distance, in value steps (the smallest step between two pixel values the sensor "
+            "writes), between a dark frame's mean level and the bias level of the same setting, after "
+            "the dark current allowance. The limit is 2 steps. Not stored when the dark or bias numbers "
+            "were not measured."
+        ),
+        _CALIBRATION_HEALTH,
+        "A dark at the wrong level subtracts the wrong amount from every light; a master that was "
+        "already calibrated reads near zero.",
+        register_entry="STK-51",
+    ),
+    _gate_metric(
+        STACKING_GATE_DARK_NOISE,
+        "",
+        "Whether the dark frames were no quieter than the camera's read noise.",
+        (
+            "The median noise of the dark frames divided by the read noise in the camera profile. The "
+            "limit is a ratio of at least 0.9. Not stored when the profile has no read noise for the "
+            "setting."
+        ),
+        _CALIBRATION_HEALTH,
+        "Noise far below the read noise means the frames are cut off at zero or taken at another gain.",
+        register_entry="STK-49",
+    ),
+    _gate_metric(
+        STACKING_GATE_DARK_ZERO_PIXEL_FRACTION,
+        "fraction",
+        "Whether the dark frames were cut off at zero.",
+        "The largest share of exactly-zero pixels in any dark frame the stack used. The limit is 0.1%.",
+        _CALIBRATION_HEALTH,
+        "A pixel cut off at zero has lost its noise, so the master dark has the wrong mean.",
+        register_entry="STK-47",
+    ),
+    _gate_metric(
+        STACKING_GATE_DARK_LIGHT_LEAK,
+        "",
+        "Whether light reached the sensor while the dark frames were taken.",
+        (
+            "The largest excess, in value steps, of a dark frame's large-scale pattern (its block range) "
+            "over the bias frames' at the same setting. The limit is 2 steps. Not stored when no bias "
+            "frames at the setting were measured."
+        ),
+        _CALIBRATION_HEALTH,
+        "A light leak adds a smooth pattern that the master dark subtracts from every light.",
+        register_entry="STK-50",
+    ),
+    _gate_metric(
+        STACKING_GATE_BIAS_LEVEL,
+        "",
+        "Whether the bias frames sat at the level the camera profile stores for their setting.",
+        (
+            "The distance, in value steps, between the bias frames' median mean level and the "
+            "profile's bias level. The limit is 2 steps. Not stored when the profile has no bias level "
+            "for the setting."
+        ),
+        _CALIBRATION_HEALTH,
+        "A bias at the wrong level means a wrong offset, or frames that were already calibrated.",
+        register_entry="STK-48",
+    ),
+    _gate_metric(
+        STACKING_GATE_BIAS_NOISE,
+        "",
+        "Whether the bias frames had the camera's read noise.",
+        (
+            "The median noise of the bias frames divided by the read noise in the camera profile. The "
+            "limit is the band 0.9 to 1.1. Not stored when the profile has no read noise for the setting."
+        ),
+        _CALIBRATION_HEALTH,
+        "Too little noise means clipping; too much means another gain or a fault.",
+        register_entry="STK-49",
+    ),
+    _gate_metric(
+        STACKING_GATE_BIAS_ZERO_PIXEL_FRACTION,
+        "fraction",
+        "Whether the bias frames were cut off at zero.",
+        "The largest share of exactly-zero pixels in any bias frame the stack used. The limit is 0.1%.",
+        _CALIBRATION_HEALTH,
+        "A pixel cut off at zero has lost its noise, so the master bias has the wrong mean.",
+        register_entry="STK-47",
+    ),
+    _gate_metric(
+        STACKING_GATE_DARK_MISSING,
+        "count",
+        "Whether every light frame had a dark at its exposure.",
+        "The number of light frames whose exposure has no dark within 0.1 s. The limit is 0.",
+        _CALIBRATION_HEALTH,
+        "Lights with no dark keep their dark current and hot pixels.",
+    ),
+    _gate_metric(
+        STACKING_GATE_LIGHT_TEMPERATURE_SPREAD,
+        "degC",
+        "Whether the lights of one exposure were taken within the temperature a dark can match.",
+        "The widest span of the sensor temperature among the lights of one exposure. The limit is 3 C.",
+        _CALIBRATION_HEALTH,
+        "The mean temperature of a batch can hide a drift that no single dark matches.",
+        register_entry="STK-55",
     ),
     _gate_metric(
         STACKING_GATE_EXPOSURE_GROUP_LINEARITY,
@@ -2852,6 +2992,15 @@ GATE_METRIC_BY_NAME: dict[str, str] = {
     "flat_noise": STACKING_GATE_FLAT_NOISE,
     "calibration_metadata": STACKING_GATE_CALIBRATION_METADATA,
     "calibration_frame_count": STACKING_GATE_CALIBRATION_FRAME_COUNT,
+    "dark_level": STACKING_GATE_DARK_LEVEL,
+    "dark_noise": STACKING_GATE_DARK_NOISE,
+    "dark_zero_pixel_fraction": STACKING_GATE_DARK_ZERO_PIXEL_FRACTION,
+    "dark_light_leak": STACKING_GATE_DARK_LIGHT_LEAK,
+    "bias_level": STACKING_GATE_BIAS_LEVEL,
+    "bias_noise": STACKING_GATE_BIAS_NOISE,
+    "bias_zero_pixel_fraction": STACKING_GATE_BIAS_ZERO_PIXEL_FRACTION,
+    "dark_missing": STACKING_GATE_DARK_MISSING,
+    "light_temperature_spread": STACKING_GATE_LIGHT_TEMPERATURE_SPREAD,
     "exposure_group_linearity": STACKING_GATE_EXPOSURE_GROUP_LINEARITY,
     "exposure_groups_combined": STACKING_GATE_EXPOSURE_GROUPS_COMBINED,
     "raw_frame_clipping": STACKING_GATE_RAW_FRAME_CLIPPING,

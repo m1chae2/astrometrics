@@ -1834,6 +1834,8 @@ export interface StackingInputQuality {
   flatNoiseFraction?: number | null;
   flatSmoothingSigmaPx?: number | null;
   flatCalibrationIssues?: string[];
+  darkUniqueFrameCount?: number | null;
+  biasUniqueFrameCount?: number | null;
   calibrationMismatchFlags?: string[];
   isFlagged?: boolean;
   flagReasons?: string[];

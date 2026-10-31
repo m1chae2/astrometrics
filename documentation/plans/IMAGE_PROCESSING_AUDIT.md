@@ -150,5 +150,5 @@ before-and-after comparison on the copy (identical stored rows on a few targets)
 | P9 | Run counters | Siril lock-wait and plate-solve counters carried on a run object instead of module globals. | Small |
 | P10 | FITS access | Header-and-data and header-update helpers in `fits_access.py`, then migrate the 18 direct callers. | Medium |
 | P11 | Provenance schema | `_init_db` as an ordered list of migration steps. | Small |
-| D1 | Decision: tested but unused functions | Keep `staleness.py`, the two calibration compatibility checks, `select_frames_for_configuration` and `significance_to_confidence` as planned API, or remove them. | — |
-| D2 | Decision: configuration in drivers | Whether drivers may read the configuration, or take settings when built. | — |
+| D1 | Decision: tested but unused functions | Keep `staleness.py`, the two calibration compatibility checks, `select_frames_for_configuration` and `significance_to_confidence` as planned API, or remove them. | Decided 2026-10-30: removed. |
+| D2 | Decision: configuration in drivers | Whether drivers may read the configuration, or take settings when built. | Decided 2026-10-30: a driver takes a configuration object when built, defaulting to the shared one, and does not read the configuration inside functions. Applied to the Siril driver in P3 and to other drivers when next changed. |

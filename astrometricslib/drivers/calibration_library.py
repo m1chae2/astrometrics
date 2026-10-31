@@ -35,7 +35,6 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from astrometricslib.drivers.camera_profile_store import camera_identity, record_name_for_camera
 from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.utilities.camera_setting_text import UNBINNED_TEXT, canonical_binning_setting
-from astrometricslib.utilities.iso_text import iso_or_gain_values_match
 
 logger = logging.getLogger(__name__)
 
@@ -1756,92 +1755,6 @@ def flat_filter_names(filter_type: Any) -> list[str]:
     """
     name = filter_type.value if hasattr(filter_type, "value") else str(filter_type)
     return list(FLAT_FILTER_ALIASES.get(name, [name]))
-
-
-def is_calibration_gain_compatible(light_gain: str, master_gain: str) -> bool:
-    """Check if the calibration and light frames share the same gain.
-
-    Gain (or ISO) is how sensitive the camera is set to be. All calibration
-    files (darks, bias, and flats) must have the same gain as the light
-    images for the math to work correctly. Gains are compared as numbers, so
-    "800" and "800.0" are the same gain.
-
-    Parameters
-    ----------
-    light_gain : `str`
-        The gain setting of the light images.
-    master_gain : `str`
-        The gain setting of the calibration file.
-
-    Returns
-    -------
-    is_compatible : `bool`
-        True if the gain settings match, False if they don't.
-    """
-    return iso_or_gain_values_match(light_gain, master_gain)
-
-
-def is_calibration_offset_compatible(light_offset: Any, master_offset: Any) -> bool:
-    """Check if the calibration and light frames share the same camera offset.
-
-    The offset is the baseline the camera adds to every pixel. Calibration
-    frames taken at a different offset carry a different baseline, so
-    subtracting them shifts every pixel by the difference. An offset that was
-    not recorded counts as 0.
-
-    Parameters
-    ----------
-    light_offset : `Any`
-        The camera offset of the light images.
-    master_offset : `Any`
-        The camera offset of the calibration file.
-
-    Returns
-    -------
-    is_compatible : `bool`
-        True if the two offsets are the same number.
-    """
-    light_value, master_value = _as_float(light_offset), _as_float(master_offset)
-    return (0.0 if light_value is None else light_value) == (0.0 if master_value is None else master_value)
-
-
-def is_dark_calibration_metadata_compatible(
-    light_exposure: float,
-    light_gain: str,
-    master_exposure: float,
-    master_gain: str,
-    exposure_tolerance_seconds: float = 1.0,
-) -> bool:
-    """Check if a dark calibration file matches the light images.
-
-    Dark frames remove thermal noise, which builds up over time. Because
-    of this, a dark frame must have both the exact same gain AND very
-    close to the same exposure time as the light image.
-
-    (Note: Do not use this for bias or flat files, because their exposure
-    times are supposed to be different from the light images.)
-
-    Parameters
-    ----------
-    light_exposure : `float`
-        The exposure time of the light images, in seconds.
-    light_gain : `str`
-        The gain setting of the light images.
-    master_exposure : `float`
-        The exposure time of the dark file, in seconds.
-    master_gain : `str`
-        The gain setting of the dark file.
-    exposure_tolerance_seconds : `float`, optional
-        How much difference in exposure time is allowed (default 1.0 seconds).
-
-    Returns
-    -------
-    is_compatible : `bool`
-        True if the gain matches perfectly and the exposure is close enough.
-    """
-    if not is_calibration_gain_compatible(light_gain, master_gain):
-        return False
-    return abs(float(light_exposure) - float(master_exposure)) <= exposure_tolerance_seconds
 
 
 def is_dark_calibration_temperature_compatible(

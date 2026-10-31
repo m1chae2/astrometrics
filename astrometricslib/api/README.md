@@ -88,7 +88,7 @@ Live checks:
     - every saturated patch, that is, pixels at the sensor's maximum value, where the true brightness is lost.
 
     Given `predict_exposure_seconds`, it scales the measured peaks to that exposure and says whether the spectrum would saturate ("clip") at that exposure. `exposure_seconds` and `predict_exposure_seconds` apply to this kind only; giving them with another kind raises `InvalidArgumentError`.
-- `measure_stack` measures a stack (star width, the share of rejected pixels, frame registration) and compares it with the previous stack or another stack file.
+- `measure_stack` measures a stack (star width, the share of rejected pixels, frame registration) and compares it with the previous stack or another stack file. The comparison reports the sky level, the noise in empty sky (the target report's `stacking.empty_aperture_noise_normalized`), the flatness and the star width, with one sentence for each and a reason for any number it could not measure.
 
 `CalibrationCatalog` tracks the dark, bias and flat frames (the calibration frames that measure the camera itself; see `drivers/README.md`).
 

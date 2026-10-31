@@ -3668,6 +3668,20 @@ export interface StackReviewStart {
 }
 
 /**
+ * Measurements of one stack, and optionally a comparison with another.
+ */
+export interface StackQualityReport {
+  stack_path: string;
+  target_id?: string | null;
+  included?: string[];
+  fwhm_px?: number | null;
+  rejected_fraction?: number | null;
+  registration?: RegistrationRow[] | null;
+  comparison?: StackComparison | null;
+  notes?: string[];
+}
+
+/**
  * One observation session's overall lifecycle state.
  *
  * `SUSPENDED` means an unsafe verdict halted advancement without ending
@@ -4735,6 +4749,61 @@ export interface PreviewSettingsRecord {
 }
 
 /**
+ * What Siril's registration found for one frame of a stack.
+ *
+ * The fields match the keys that `parse_seq_file` returns for each
+ * registration line of the ``_Registration.seq`` file.
+ *
+ * Attributes
+ * ----------
+ * fwhm_px : `float`
+ * Width of the stars in pixels (Siril's plain FWHM).
+ * weighted_fwhm_px : `float`
+ * Siril's weighted FWHM in pixels, which counts each star by how well
+ * its fit went.
+ * roundness : `float`
+ * Star roundness, 0 to 1 (1 is a perfect circle).
+ * quality : `float`
+ * Siril's registration quality score for the frame.
+ * background_level : `float`
+ * Sky background level, normalized to the 0 to 1 image range.
+ * star_count : `int`
+ * The number of stars Siril matched in the frame.
+ * homography : `list` [`float`]
+ * The 3 by 3 transform that moves the frame onto the reference, as nine
+ * numbers in row order.
+ * dx, dy : `float`
+ * The shift in pixels (the homography's ``h02`` and ``h12``).
+ * rotation_deg : `float`
+ * The rotation in degrees.
+ * scale : `float`
+ * The scale factor (1.0 means the same size as the reference).
+ */
+export interface RegistrationRow {
+  fwhmPx: number;
+  weightedFwhmPx: number;
+  roundness: number;
+  quality: number;
+  backgroundLevel: number;
+  starCount: number;
+  homography: number[];
+  dx: number;
+  dy: number;
+  rotationDeg: number;
+  scale: number;
+}
+
+/**
+ * Two stacks of the same target, measured and compared.
+ */
+export interface StackComparison {
+  before: StackMeasurements;
+  after: StackMeasurements;
+  changes?: Record<string, number | null>;
+  summary?: string[];
+}
+
+/**
  * A package placement request's starting disposition.
  */
 export enum StartTimeMode {
@@ -5211,6 +5280,26 @@ export interface PreviewSettingsUsed {
 }
 
 /**
+ * What was measured on one stacked image.
+ *
+ * A number that could not be measured is `None`, and ``not_measured`` says
+ * why. No number is ever replaced by a default.
+ */
+export interface StackMeasurements {
+  path: string;
+  skyLevel?: number | null;
+  normalizedNoise?: number | null;
+  normalizedNoiseUncertainty?: number | null;
+  fineGrainNoiseFraction?: number | null;
+  flatnessRms?: number | null;
+  flatnessPeakToPeak?: number | null;
+  fwhmPx?: number | null;
+  zeroFraction?: number | null;
+  notMeasured?: Record<string, string>;
+  notes?: string[];
+}
+
+/**
  * The frames captured for one light row of an entry.
  *
  * Parameters
@@ -5391,6 +5480,7 @@ export const RPC_METHODS = [
   "processing:stack_summary",
   "processing:remake_preview",
   "quality:set_aside_frames",
+  "quality:measure_stack",
   "quality:record_frame_measurements",
   "processing:measure_noise",
   "quality:query",

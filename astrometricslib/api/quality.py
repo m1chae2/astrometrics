@@ -744,13 +744,20 @@ class QualityRecords:
     ) -> StackQualityReport:
         """Measure a stack, and optionally compare it with another stack.
 
-        The comparison measures both stacks the same way: sky level, pixel
-        noise, how flat the sky is across the frame, and star width. It
-        gives the numbers, the change in each, and a plain sentence for
-        each. It does not pick a winner, because that depends on what the
-        change was for. New flats should lower the flatness number and leave
-        the noise alone; more frames should lower the noise and leave the
-        flatness alone.
+        The comparison measures both stacks the same way: the sky level (the
+        median of the usable pixels), the noise in empty sky, how flat the sky
+        is across the frame, and star width. The noise is the number the
+        target report stores (``stacking.empty_aperture_noise_normalized``),
+        measured in the apertures the library stack chose. Each stack's
+        reference frame and trimmed edges come from its registration record;
+        the report says when they could not be recovered. A number that cannot
+        be measured is reported as not measured, with the reason. A failed
+        plate solve can take about ten minutes. A fine-grain pixel noise is
+        kept and labelled. The result gives the numbers, the change in each,
+        and a plain sentence for each. It does not pick a winner, because
+        that depends on what the change was for. New flats should lower the
+        flatness number and leave the noise alone; more frames should lower
+        the noise and leave the flatness alone.
 
         Parameters
         ----------
@@ -801,7 +808,7 @@ class QualityRecords:
             resolved = resolve_target(self._targets, path_or_target)
             stack_path, target_id = stack_path_of(resolved, kind), resolved.id
         with registered_job(enabled=register_job, job_type="diagnostics", target_id=target_id or stack_path):
-            return stack_quality_report(stack_path, target_id, sections, compare_to)
+            return stack_quality_report(stack_path, target_id, sections, compare_to, kind == "spectral")
 
     @background_job("quality", grace_period_seconds=20.0)
     def record_frame_measurements(

@@ -167,3 +167,41 @@ def test_the_set_aside_reply_keeps_the_stored_kind_and_the_missing_reason(
     assert plain[0]["reasonSource"] == "stored_row"
     assert plain[1]["kind"] is None
     assert plain[1]["reason"] == ""
+
+
+def test_the_comparison_asks_for_the_previous_stack_only() -> None:
+    """The comparison is with the previous stack, run as a job."""
+    from astrometricslib import StackQualityReport
+
+    assert "quality:measure_stack" in RPC_METHODS
+    assert rpc_registry._handlers["quality:measure_stack"] == (
+        "stack_review_service",
+        "start_stack_comparison",
+    )
+    calls: list[dict[str, Any]] = []
+
+    def measure_stack(target: str, **options: Any) -> StackQualityReport:
+        """Record the call and give an empty report.
+
+        Returns
+        -------
+        report : `StackQualityReport`
+            A report with a note and no comparison.
+        """
+        calls.append({"target": target, **options})
+        return StackQualityReport(
+            stack_path="/s/M_81_Stacked.fits",
+            notes=["No previous stack is kept, so there is nothing to compare with."],
+        )
+
+    service = StackReviewService(SimpleNamespace(quality=SimpleNamespace(measure_stack=measure_stack)))
+
+    reply = service.start_stack_comparison("M 81", "spectral")
+
+    assert reply.status == "completed"
+    assert reply.result is not None
+    assert reply.result["comparison"] is None
+    assert "No previous stack" in reply.result["notes"][0]
+    assert calls == [
+        {"target": "M 81", "kind": "spectral", "include": [], "compare_to": "previous", "register_job": True}
+    ]

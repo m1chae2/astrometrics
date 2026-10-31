@@ -298,6 +298,8 @@ export interface ActionRegistry {
     "processing:stack_summary": { payload: { target: string; kind?: 'imaging' | 'spectral' }; response: import('../types/backendTypes').StackSummary };
     // Makes a stack's preview picture again (a background job): the answer is the result, or the job to follow.
     "processing:remake_preview": { payload: { target_id: string; kind?: 'imaging' | 'spectral'; denoise?: boolean; denoise_strength?: number; star_toning?: boolean }; response: import('../types/backendTypes').StackReviewStart };
+    // Compares a stack with the previous one (a background job): the answer is the report, or the job to follow.
+    "quality:measure_stack": { payload: { target_id: string; kind?: 'imaging' | 'spectral' }; response: import('../types/backendTypes').StackReviewStart };
     // The frames the stacker set aside for a target, each with the reason it has on record.
     "quality:set_aside_frames": { payload: { target: string }; response: import('../types/backendTypes').SetAsideFrameRecord[] };
 

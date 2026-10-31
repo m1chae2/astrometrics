@@ -14,6 +14,7 @@ import { callBackend } from '../../common/services/backendApi';
 import { BackendError } from '../../common/services/backendError';
 import type { StackSummary } from '../../common/types/backendTypes';
 import { PreviewRemakeControl } from './PreviewRemakeControl';
+import { StackComparisonControl } from './StackComparisonControl';
 import { SetAsideFramesList } from './SetAsideFramesList';
 import { formatExposureSeconds } from '../utils/stackFormatting';
 
@@ -279,6 +280,7 @@ export const StackSummaryPanel: React.FC<StackSummaryPanelProps> = ({
                 </table>
             )}
 
+            <StackComparisonControl targetId={targetId} kind={kind} />
             <PreviewRemakeControl targetId={targetId} kind={kind} onShowPicture={onShowPicture} />
         </section>
     );

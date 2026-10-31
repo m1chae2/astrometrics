@@ -163,6 +163,9 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # The frames the stacker set aside for a target, each with the reason.
     # Nothing is moved, measured or written.
     "quality:set_aside_frames": ("astrometrics.quality", "set_aside_frames"),
+    # Compares a target's stack with the previous one. A failed plate solve can
+    # take about ten minutes, so the service starts it as a background job.
+    "quality:measure_stack": ("stack_review_service", "start_stack_comparison"),
     # Measures a target's light frames and stores the numbers. Starts a
     # background run and answers at once; the result arrives as the
     # `quality:measured` event. A write, so the AI's read-only profile

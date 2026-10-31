@@ -131,6 +131,9 @@ RPC_METHODS: tuple[str, ...] = (
     "processing:remake_preview",
     # The frames the stacker set aside for a target, with the reason (a read).
     "quality:set_aside_frames",
+    # Measures a stack and the one before it the same way and compares them
+    # (a background job; it records a job and writes no quality rows).
+    "quality:measure_stack",
     # Measures a target's light frames and stores the numbers (a write).
     "quality:record_frame_measurements",
     # Stacks some of a target's frames apart from its library stack and

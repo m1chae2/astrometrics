@@ -82,3 +82,48 @@ export function previewRemakeResultOf(job: ProcessingJob): PreviewRemakeResult |
     const stored = job.outputMetrics?.result;
     return stored ? (stored as PreviewRemakeResult) : null;
 }
+
+/** One stack's measurements, as the backend sends them inside a job result (snake_case keys). */
+export interface StackMeasurementsView {
+    path: string;
+    sky_level?: number | null;
+    normalized_noise?: number | null;
+    normalized_noise_uncertainty?: number | null;
+    not_measured?: Record<string, string>;
+    notes?: string[];
+}
+
+/** The comparison of two stacks, as the backend sends it inside a job result. */
+export interface StackComparisonView {
+    before: StackMeasurementsView;
+    after: StackMeasurementsView;
+    /** One plain sentence for each number. The comparison does not pick a winner. */
+    summary: string[];
+}
+
+/** The stack report, as the backend sends it inside a job result. */
+export interface StackComparisonReportView {
+    stack_path: string;
+    comparison?: StackComparisonView | null;
+    notes?: string[];
+}
+
+/**
+ * Starts comparing a target's stack with the one before it.
+ * @param targetId The target.
+ * @param kind The imaging or spectral stack.
+ * @return The report when it finished at once, or the job to follow.
+ */
+export async function startStackComparison(targetId: string, kind: StackKind): Promise<StackReviewStart> {
+    return callBackend('quality:measure_stack', { target_id: targetId, kind }, { silent: true });
+}
+
+/**
+ * Reads the stack comparison report out of a finished job.
+ * @param job The job.
+ * @return The report the job stored, or `null` if it has none.
+ */
+export function stackComparisonReportOf(job: ProcessingJob): StackComparisonReportView | null {
+    const stored = job.outputMetrics?.result;
+    return stored ? (stored as StackComparisonReportView) : null;
+}

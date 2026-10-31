@@ -149,3 +149,30 @@ class StackReviewService:
                 register_job=True,
             )
         )
+
+    def start_stack_comparison(self, target_id: str, kind: str = "imaging") -> StackReviewStart:
+        """Compare a target's stack with the previous one, as a job.
+
+        The library measures both stacks the same way. A failed plate solve
+        can take about ten minutes, so this always runs as a job.
+
+        Parameters
+        ----------
+        target_id : `str`
+            The target whose current stack to measure.
+        kind : `str`, optional
+            ``"imaging"`` (default) or ``"spectral"``.
+
+        Returns
+        -------
+        reply : `StackReviewStart`
+            The result, when finished, is a `StackQualityReport` as a dict. A
+            target with no previous stack gives a report with no comparison and
+            a note that says so.
+        """
+        quality = self._astrometrics.quality
+        return self._start(
+            lambda: quality.measure_stack(
+                target_id, kind=kind, include=[], compare_to="previous", register_job=True
+            )
+        )

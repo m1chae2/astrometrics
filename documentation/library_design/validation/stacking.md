@@ -190,12 +190,12 @@ Every Python example assumes the library is installed and configured with your o
   assessment = assess_flats(flats, camera="ZWO ASI533MM Pro")
   print(assessment.frame_count, assessment.noise_fraction, assessment.smoothing_sigma_pixels, assessment.issues)
   report = astro.quality.measure_stack("M 101", compare_to="previous")
-  print(report.comparison.before.noise_fraction, report.comparison.after.noise_fraction)
+  print(report.comparison.before.fine_grain_noise_fraction, report.comparison.after.fine_grain_noise_fraction)
   ```
 
   `assess_flats` is an internal function, not part of the public API; may change. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.flat_calibration.assess_flats --> `CalibrationCatalog.assess_flats` is the public form for flats already in the calibration library. <!-- impl: astrometricslib.api.processing.CalibrationCatalog.assess_flats --> The comparison uses `QualityRecords.measure_stack`. <!-- impl: astrometricslib.api.quality.QualityRecords.measure_stack -->
 - **Acceptance criterion:** If the flat's noise squared is small next to the stack's noise squared, the flat adds nothing visible.
-- **What to look at:** `noise_fraction` of the master flat (standard deviation over mean; 0.005 is 0.5%). The stack's `noise_fraction` (pixel-to-pixel noise over the sky level; lower is cleaner). If the flat's noise squared is small next to the stack's noise squared, the flat adds nothing visible.
+- **What to look at:** `noise_fraction` of the master flat (standard deviation over mean; 0.005 is 0.5%). The stack's `fine_grain_noise_fraction` (pixel-to-pixel noise over the sky level; lower is cleaner; it is not the noise number of the target report, which `measure_stack` now reports as `normalized_noise`, see STK-36). If the flat's noise squared is small next to the stack's noise squared, the flat adds nothing visible.
 - **Our result:** The sky noise of the ZWO ASI533MM Pro stacks of 20 targets was 3% to 6% of the sky level. The master flat of the single-flat library measured 4.5%, and its fixed pattern made up 86% of the fine-scale noise of the undithered M 101 stack. Smoothing that flat halved the stack's noise. Dates not recorded.
 - **Verdict:** Not judged.
 - **Limits:** One bad flat on one stack. A dithered stack hides the pattern, so the same flat would look harmless there.

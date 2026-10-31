@@ -216,6 +216,7 @@ LOCAL_WRITE_METHODS = frozenset({
     "processing:delete_job",
     "processing:measure_noise",
     "processing:remake_preview",
+    "quality:measure_stack",
     "quality:record_frame_measurements",
     "processing:siril_open",
     "processing:stack",

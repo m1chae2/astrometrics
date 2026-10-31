@@ -200,7 +200,7 @@ def test_the_stacking_stage_stores_the_action_for_moved_frames(
 ) -> None:
     """Rows written by the stage carry the action only for the moved frame."""
     from astrometricslib.foundation.config import get_configuration
-    from astrometricslib.pipelines.stacking import stage as stacking_stage
+    from astrometricslib.pipelines.stacking import frame_screening
     from astrometricslib.pipelines.stacking.frame_measurement_run import FrameQualityRecording
 
     monkeypatch.setattr(get_configuration(), "get_library_path", lambda: tmp_path)
@@ -220,7 +220,7 @@ def test_the_stacking_stage_stores_the_action_for_moved_frames(
     )
     recording = FrameQualityRecording(configuration=get_configuration(), calibration_library=library)
 
-    stacking_stage._record_frame_quality(target, [frames[1]], report, frames, MEASURED_AT, recording)
+    frame_screening.record_frame_quality(target, [frames[1]], report, frames, MEASURED_AT, recording)
 
     rows = QualityStore(str(tmp_path / "astrometrics.db")).query(metric=FRAME_QUARANTINE_SKY_MEDIAN)
     actions = {row.subject.subject_id.split("/")[-1]: row.action_taken for row in rows}

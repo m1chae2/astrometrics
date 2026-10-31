@@ -11,12 +11,12 @@ import pytest
 
 from astrometricslib.models.camera_profile import CameraProfile
 from astrometricslib.models.target import FrameMeasurements, FrameRecord
-from astrometricslib.pipelines.stacking.stage import refresh_saturated_pixel_fraction
+from astrometricslib.pipelines.stacking.frame_screening import refresh_saturated_pixel_fraction
 
 MEASURE = (
     "astrometricslib.pipelines.shared.quality.background_measurement.measure_frame_saturated_pixel_fraction"
 )
-RESOLVE = "astrometricslib.pipelines.stacking.stage.resolve_camera_profile"
+RESOLVE = "astrometricslib.pipelines.stacking.frame_screening.resolve_camera_profile"
 PROVENANCE = {"kind": "assumed", "source": "a test"}
 
 

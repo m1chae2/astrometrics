@@ -16,6 +16,7 @@ import pytest
 from astrometricslib.drivers.quality_store import QualityStore
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines import target_batch, tasks
+from astrometricslib.pipelines.stacking import frame_screening
 from astrometricslib.pipelines.stacking import stage as stacking_stage
 from astrometricslib.pipelines.stacking.frame_measurement_run import FrameQualityRecording
 from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import QuarantineReport
@@ -91,7 +92,7 @@ def _stack_that_records_quality(
         report = QuarantineReport(
             measurements=[{"path": f.path, "roundness": 0.9, "sky_median_adu": 500.0} for f in target.frames]
         )
-        stacking_stage._record_frame_quality(
+        frame_screening.record_frame_quality(
             target, [], report, list(target.frames), measured_at, quality_recording
         )
         return "/fake/stack.fits"

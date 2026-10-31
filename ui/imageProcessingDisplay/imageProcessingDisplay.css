@@ -1167,6 +1167,8 @@
   border-radius: 4px;
   border: 1px solid var(--grey-medium, #333333);
   overflow: hidden;
+  /* Keep its full height, so the stack summary is not cut off; the tab scrolls. */
+  flex-shrink: 0;
 }
 
 .stacked-image-panel__row {

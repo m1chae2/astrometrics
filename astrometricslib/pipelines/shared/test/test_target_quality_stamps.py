@@ -85,6 +85,6 @@ def test_the_save_goes_through_the_locked_merge_of_the_catalog() -> None:
     )
     target = Target(id="M 99", frames=[_frame("/a.fits", 1, 2)])
 
-    save_quality_stamps(SimpleNamespace(catalog_access=catalog_access), target)
+    save_quality_stamps(SimpleNamespace(_catalog_access=catalog_access), target)
 
     assert calls == [("target_catalog", [target], merge_quality_stamps)]

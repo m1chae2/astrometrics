@@ -73,6 +73,8 @@ The limits are in `frame_quarantine.py`.
 - `frame_quarantine.py`: the frame-quality check and its limits.
 - `background_homogeneity.py`: the background check.
 - `flat_calibration.py`: the flat check.
+- `calibration_assessment.py`: judges a set of dark or bias frames from the numbers stored for each frame (cut off at zero, light on the sensor, level, noise, frame count and copies), and puts a flat set's check in the same form. It returns `GateResult` records and stores nothing.
+- `stack_calibration_health.py`: builds the stack's dark and bias gates, the missing-dark gate and the light temperature spread gate from the frames a stack used.
 - `sensor_noise.py`: measures a camera's gain and read noise from pairs of flat frames and pairs of bias frames. It is not a step of the stack. The library call `CalibrationCatalog.measure_sensor_noise` uses it. Flat frames are paired by their `DATE-OBS` time, never across a gap of more than 300 s, and a flat above the camera profile's photometric linearity limit is refused. The difference of two frames taken one after the other holds only noise, and half its variance is the noise variance of one frame. Bias pairs give the read noise, and flat pairs give the gain (the bias-subtracted signal over the single-frame variance minus the read variance). It measures the central 1000 by 1000 pixels at one signal level, so it cannot show whether the sensor is linear. Its result matched a hand measurement (measured; see [STK-35](../../../../documentation/library_design/validation/stacking.md#stk-35)).
 - `exposure_weighting.py`: the choice of per-frame weights for mixed exposure lengths.
 - `stack_inputs.py`: the unchanged-stack record.

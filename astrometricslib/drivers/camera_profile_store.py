@@ -41,10 +41,12 @@ from astrometricslib.models.camera_profile import (
     ProvenancedValue,
     QuantumEfficiencyRecord,
     SensorSettingNoise,
+    SettingBiasLevel,
     ValueProvenance,
 )
 
 __all__ = [
+    "BIAS_LEVELS_KEY",
     "CAMERA_SECTION_PREFIX",
     "LEGACY_NOISE_KEYS",
     "MAXIMUM_CONFIG_BACKUPS",
@@ -72,6 +74,10 @@ LEGACY_NOISE_KEYS = ("gain_e_per_adu", "read_noise_e")
 
 # The key of the current layout: an array of inline tables, one per setting.
 SENSOR_NOISE_KEY = "sensor_noise"
+
+# The key of the bias levels: an array of inline tables, one per setting, each
+# holding the setting and a ``bias_level_adu`` value with its provenance.
+BIAS_LEVELS_KEY = "bias_levels"
 
 # How many ``.bak`` copies of one config file are kept. Each saved measurement
 # or migration copies the config first, and the config is a few tens of
@@ -137,6 +143,25 @@ def _build_sensor_setting_noise(field: Mapping[str, Any]) -> SensorSettingNoise:
     return SensorSettingNoise(**kwargs)
 
 
+def _build_setting_bias_level(field: Mapping[str, Any]) -> SettingBiasLevel:
+    """Build a `SettingBiasLevel` from one ``bias_levels`` entry.
+
+    Returns
+    -------
+    entry : `SettingBiasLevel`
+        The bias level recorded for one camera setting.
+    """
+    kwargs: dict[str, Any] = {
+        "gain_setting": str(field["gain_setting"]),
+        "offset": str(field.get("offset", "0")),
+        "binning": str(field.get("binning", "1x1")),
+        "bias_level_adu": build_provenanced_value(field["bias_level_adu"]),
+    }
+    if "temperature_c" in field:
+        kwargs["temperature_c"] = float(field["temperature_c"])
+    return SettingBiasLevel(**kwargs)
+
+
 @functools.cache
 def _warn_once_about_unkeyed_noise(camera_name: str) -> None:
     """Log a warning once per camera with the old noise layout.
@@ -191,6 +216,8 @@ def build_camera_profile(section_name: str, section: dict) -> CameraProfile:
         kwargs["sensor_noise"] = tuple(
             _build_sensor_setting_noise(entry) for entry in section[SENSOR_NOISE_KEY]
         )
+    if BIAS_LEVELS_KEY in section:
+        kwargs["bias_levels"] = tuple(_build_setting_bias_level(entry) for entry in section[BIAS_LEVELS_KEY])
     if any(key in section for key in LEGACY_NOISE_KEYS):
         # Old layout: one value with no setting. It is not applied (decision 7
         # of the quality-metrics plan), only flagged.

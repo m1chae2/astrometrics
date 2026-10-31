@@ -1041,6 +1041,7 @@ class QualityStore:
         latest_only: bool = True,
         variant: str | None = None,
         library_only: bool = False,
+        subject_id_prefix: str | None = None,
     ) -> list[QualityMeasurement]:
         """Read stored measurements.
 
@@ -1073,6 +1074,9 @@ class QualityStore:
             Only rows that are not about a subset stack (their variant is
             empty). The default, `False`, gives library and subset rows
             alike, so a caller that wants one kind asks for it by field.
+        subject_id_prefix : `str`, optional
+            Only subjects whose id starts with this text, such as
+            ``"calibration/dark/"`` for the dark frames.
 
         Returns
         -------
@@ -1115,6 +1119,11 @@ class QualityStore:
         if row_ids is not None:
             conditions.append(f"m.row_id IN ({', '.join('?' * len(row_ids))})")
             parameters.extend(row_ids)
+        if subject_id_prefix is not None:
+            # `substr` compares the start exactly, so a "%" or "_" in the
+            # prefix is not a wildcard.
+            conditions.append("substr(m.subject_id, 1, ?) = ?")
+            parameters.extend([len(subject_id_prefix), subject_id_prefix])
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         with self._read_connection() as connection:
             if connection is None:

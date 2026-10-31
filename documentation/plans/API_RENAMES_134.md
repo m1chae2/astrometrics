@@ -32,13 +32,15 @@ Rules the cleanup follows:
 | `quality.spectral_registration_thresholds` | Removed. Use the constants `MIN_MATCHED_STAR_PAIRS`, `ZERO_ORDER_AMPLITUDE_OUTLIER_SIGMA` and `ZERO_ORDER_POSITION_JUMP_OUTLIER_SIGMA` in the same module |
 | `processing.calibration.library` | Removed. Use `calibration.query(detail="counts")`, `calibration.reindex_frames(kind)` and `calibration.save()` |
 | `processing.run_spectroscopy_by_session(astrometrics, target, frame_records, ...)` | `processing.run_spectroscopy_by_session(target, frame_records, ...)` |
+| `processing.calibration.assess_flats(telescope=, camera_id=, filter_name=, gain=, offset=)` | `processing.calibration.assess(kind="flat", camera_id=, gain=, offset=, binning=, telescope=, filter_name=)`. One call for darks, biases and flats. It returns `list[CalibrationSetHealth]` (checks as `GateResult` records) in place of `list[FlatSetAssessment]`. No alias. MCP tool `calibration_assess_flats` is now `calibration_assess` |
+| (new) | `processing.calibration.measure_frames(kind=None, camera_id=None, force=False)` measures dark and bias frames for `assess`. MCP tool `calibration_measure_frames` (withheld from the AI) |
 
 ## Parameters
 
 | Call | Old | New |
 | --- | --- | --- |
 | `stars.get`, `analyze_periodicity`, `delete`, `update`, `create` | `object_id` | `star_id` |
-| `processing.calibration.assess_flats` | `filter_type` | `filter_name` |
+| `processing.calibration.assess_flats` (now `assess`) | `filter_type` | `filter_name` |
 | `processing.calibration.measure_sensor_noise` | `filter_type`, `temperature` | `filter_name`, `temperature_c` |
 | `targets.reindex_frames` | `filter_type` | `filter_name` |
 | `processing.process_target(photometry={...})` | option `filter_type` | option `filter_name` |

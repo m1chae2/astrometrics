@@ -566,3 +566,29 @@ def test_two_threads_saving_different_settings_both_keep_their_entry(
 
     profile = next(p for p in load_camera_profiles(AppConfiguration()) if p.camera_name == "Test Camera")
     assert sorted(entry.gain_setting for entry in profile.sensor_noise) == sorted(gain_settings)
+
+
+def test_the_shipped_profiles_hold_the_measured_bias_levels() -> None:
+    """The ASI 533 has levels for offsets 10 to 50, the Nikon for two ISOs."""
+    config = _shipped_config()
+    asi = resolve_camera_profile("ZWO ASI533MM Pro", config)
+    assert asi.bias_level_for("0", 10, "1x1").bias_level_adu.value == pytest.approx(394.85)
+    assert asi.bias_level_for(0.0, "50.0", "1x1").bias_level_adu.value == pytest.approx(1994.83)
+    nikon = resolve_camera_profile("Nikon DSLR DSC D5300", config)
+    assert nikon.bias_level_for(800, None, "1x1").bias_level_adu.value == pytest.approx(599.08)
+    assert nikon.bias_level_for(100, 0, "1x1").bias_level_adu.value == pytest.approx(597.93)
+
+
+def test_a_bias_level_is_never_borrowed_from_another_offset() -> None:
+    """The level moves with the offset, so an unlisted offset has no level."""
+    asi = resolve_camera_profile("ZWO ASI533MM Pro", _shipped_config())
+    assert asi.bias_level_for("0", 0, "1x1") is None
+    assert asi.bias_level_for("0", 15, "1x1") is None
+    assert asi.bias_level_for("120", 10, "1x1") is None
+
+
+def test_a_camera_with_no_bias_levels_gives_none() -> None:
+    """The generic profile holds no bias level."""
+    generic = resolve_camera_profile("Some Unlisted Camera", _shipped_config())
+    assert generic.bias_levels == ()
+    assert generic.bias_level_for("0", 10, "1x1") is None

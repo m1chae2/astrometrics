@@ -429,6 +429,65 @@ class FlatGroup:
 
 
 @dataclass(frozen=True)
+class CalibrationSet:
+    """The dark or bias frames filed under one set of settings.
+
+    A set is the unit a master frame is built from: every frame of one camera
+    at one gain, offset and binning (and, for a dark, one temperature slot and
+    one exposure).
+
+    Attributes
+    ----------
+    kind : `str`
+        ``"dark"`` or ``"bias"``.
+    camera : `str`
+        The camera name the frames are filed under.
+    gain : `str`
+        The gain (or ISO) setting, as text.
+    offset : `float`
+        The camera offset (0.0 when the key has none).
+    binning : `str`
+        The binning, such as ``"2x2"``.
+    paths : `list` [`str`]
+        The frame file paths.
+    temperature_c : `float` or `None`
+        The middle of a dark's temperature slot. `None` for a bias.
+    exposure_seconds : `float` or `None`
+        A dark's exposure. `None` for a bias.
+    """
+
+    kind: str
+    camera: str
+    gain: str
+    offset: float
+    binning: str
+    paths: list[str]
+    temperature_c: float | None = None
+    exposure_seconds: float | None = None
+
+    def has_setting_of(self, other: CalibrationSet) -> bool:
+        """Tell whether another set has the same camera and settings.
+
+        Parameters
+        ----------
+        other : `CalibrationSet`
+            The set to compare with, such as the dark set a bias is wanted for.
+
+        Returns
+        -------
+        same : `bool`
+            `True` when the camera (ignoring case), gain, offset and binning
+            agree. Temperature and exposure are not compared.
+        """
+        return (
+            str(self.camera).casefold() == str(other.camera).casefold()
+            and str(self.gain) == str(other.gain)
+            and math.isclose(self.offset, other.offset)
+            and self.binning == other.binning
+        )
+
+
+@dataclass(frozen=True)
 class CalibrationSelection:
     """The calibration frames chosen for a batch of lights, and why.
 
@@ -746,6 +805,14 @@ class CalibrationLibrary(BaseModel):
     dark_frames: dict[str, Any] = Field(default_factory=dict)
     flat_frames: dict[str, Any] = Field(default_factory=dict)
     bias_frames: dict[str, Any] = Field(default_factory=dict)
+    # The file state each dark and bias frame had when its quality was last
+    # measured, by the frame's quality subject id (which does not change when
+    # the frames root moves). Each value holds ``size`` (bytes),
+    # ``modified_ns`` (the last-change time in nanoseconds) and ``metric_set``
+    # (the fingerprint of the metrics measured). A frame whose file still
+    # matches its stamp is not read again. Flats have no stamps: they are not
+    # measured frame by frame.
+    measurement_stamps: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
     # Internal config state, excluded from serialization
     app_config: Any = Field(default=None, exclude=True)
@@ -1635,6 +1702,107 @@ class CalibrationLibrary(BaseModel):
                             )
                             groups.append(group)
         return groups
+
+    def measurement_stamp(self, subject_id: str) -> dict[str, Any] | None:
+        """Give the file state a frame had when its quality was measured.
+
+        Parameters
+        ----------
+        subject_id : `str`
+            The frame's quality subject id.
+
+        Returns
+        -------
+        stamp : `dict` or `None`
+            A copy of the stamp (``size``, ``modified_ns``, ``metric_set``), or
+            `None` when the frame was never measured.
+        """
+        with self._lock:
+            stamp = self.measurement_stamps.get(subject_id)
+            return None if stamp is None else dict(stamp)
+
+    def set_measurement_stamp(self, subject_id: str, size: int, modified_ns: int, metric_set: str) -> None:
+        """Record the file state a frame was measured at.
+
+        Parameters
+        ----------
+        subject_id : `str`
+            The frame's quality subject id.
+        size : `int`
+            The file size in bytes, taken before the file was read, so a file
+            that changed during the measurement still reads as changed.
+        modified_ns : `int`
+            The last-change time in nanoseconds, taken at the same moment.
+        metric_set : `str`
+            The fingerprint of the metrics that were measured.
+        """
+        with self._lock:
+            self.measurement_stamps[subject_id] = {
+                "size": size,
+                "modified_ns": modified_ns,
+                "metric_set": metric_set,
+            }
+
+    def list_calibration_sets(
+        self, kind: str, camera: str | None = None, validate_paths: bool = True
+    ) -> list[CalibrationSet]:
+        """List the dark or bias sets in the library.
+
+        Parameters
+        ----------
+        kind : `str`
+            ``"dark"`` or ``"bias"``.
+        camera : `str`, optional
+            Only this camera's frames. Other spellings of the name match.
+        validate_paths : `bool`, optional
+            Drop files that no longer exist, by default `True`. A set left
+            with no files is dropped.
+
+        Returns
+        -------
+        sets : `list` [`CalibrationSet`]
+            One set per camera, setting key and (for darks) exposure, in the
+            order the library holds them.
+        """
+        index = self.dark_frames if kind == "dark" else self.bias_frames
+        sets: list[CalibrationSet] = []
+        with self._lock:
+            camera_key = None if camera is None else self._find_camera_key(index, camera)
+            if camera is not None and camera_key is None:
+                return []
+            for camera_name, setting_index in index.items():
+                if camera_key is not None and camera_name != camera_key:
+                    continue
+                if not isinstance(setting_index, dict):
+                    continue
+                for setting_key, below in setting_index.items():
+                    setting = parse_calibration_setting_key(setting_key)
+                    # A dark's frames are filed one level deeper, by exposure.
+                    if kind == "dark" and isinstance(below, dict):
+                        groups = [(_as_float(exposure), paths) for exposure, paths in below.items()]
+                    elif kind == "bias" and isinstance(below, list):
+                        groups = [(None, below)]
+                    else:
+                        continue
+                    for exposure_seconds, paths in groups:
+                        if not isinstance(paths, list):
+                            continue
+                        kept = [p for p in paths if os.path.exists(p)] if validate_paths else list(paths)
+                        if not kept:
+                            continue
+                        sets.append(
+                            CalibrationSet(
+                                kind=kind,
+                                camera=camera_name,
+                                gain=setting.gain,
+                                offset=setting.offset,
+                                binning=setting.binning,
+                                paths=kept,
+                                temperature_c=setting.temperature_c if kind == "dark" else None,
+                                exposure_seconds=exposure_seconds,
+                            )
+                        )
+        return sets
 
     def refresh_dark_frames(self, prune_missing: bool = False) -> None:
         """Rescan the dark-frames directory and re-add any FITS files found.

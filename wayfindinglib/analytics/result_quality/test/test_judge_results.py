@@ -330,3 +330,121 @@ def test_needs_attention_counts_warnings_and_finds_the_worst() -> None:
     assert attention.worst_severity == Severity.WARNING
     assert needs_attention([]).warning_count == 0
     assert needs_attention([]).worst_severity is None
+
+
+_CALIBRATION_GATES = {
+    "dark_zero_pixel_fraction": 0.96,
+    "bias_zero_pixel_fraction": 0.96,
+    "dark_light_leak": 8.0,
+    "dark_level": 7.5,
+    "bias_level": 9.0,
+    "dark_noise": 0.4,
+    "bias_noise": 0.35,
+    "calibration_frame_count": 1.0,
+}
+
+
+def _gate_row(name: str, value: float | None, outcome: str) -> QualityMeasurement:
+    """Build the stored row of one of the stack's calibration gates.
+
+    Returns
+    -------
+    row : `QualityMeasurement`
+        A stack-level row with the check outcome. A gate that was not
+        checked has no value and is stored ``not_measured``.
+    """
+    limit = (
+        QualityLimit(
+            value=0.001, unit="", tier=LimitTier.DESIGN_ESTIMATE, derivation="d", registerEntry="STK-47"
+        )
+        if outcome != "not_checked"
+        else None
+    )
+    return _row(
+        f"stacking.gate_{name}",
+        value,
+        level="stack",
+        check_outcome=outcome,
+        check_limit=limit,
+        status="measured" if value is not None else "not_measured",
+        reason="" if value is not None else "the frames were not measured",
+    )
+
+
+def test_a_cut_off_dark_set_is_named_with_the_offset_advice() -> None:
+    """Dark frames cut off at zero ask to raise the offset and retake."""
+    rows = [_gate_row("dark_zero_pixel_fraction", 0.96, "failed"), _gate_row("dark_level", 0.5, "passed")]
+    (statement,) = _of_rule(_judge(rows), "retake_bad_calibration_set")
+    assert statement.kind == StatementKind.RECOMMENDATION
+    assert statement.action_class == ActionClass.CALIBRATION
+    assert "96%" in statement.message
+    assert "offset raised" in statement.message
+    assert statement.proposed_action.calibration_frame_type == "dark"
+    assert [reference.row_id for reference in statement.evidence] == [rows[0].row_id]
+
+
+def test_the_offset_advice_is_not_repeated_when_offset_too_low_fires() -> None:
+    """When the lights are cut off too, the offset advice is given once."""
+    limit = QualityLimit(
+        value=0.2, unit="fraction", tier=LimitTier.VALIDATED_DATASET, derivation="d", registerEntry="STK-22"
+    )
+    rows = [
+        _gate_row("dark_zero_pixel_fraction", 0.96, "failed"),
+        _row(
+            "stacking.gate_raw_frame_clipping", 0.35, level="stack", check_outcome="failed", check_limit=limit
+        ),
+    ]
+    statements = _judge(rows)
+    assert len(_of_rule(statements, "offset_too_low")) == 1
+    (statement,) = _of_rule(statements, "retake_bad_calibration_set")
+    assert "offset" not in statement.message
+    assert "Retake the darks" in statement.message
+
+
+def test_a_light_struck_dark_asks_to_remove_the_frames() -> None:
+    """A light leak asks to remove the struck frames, not raise the offset."""
+    (statement,) = _of_rule(
+        _judge([_gate_row("dark_light_leak", 8.0, "failed")]), "retake_bad_calibration_set"
+    )
+    assert "Remove the struck dark frames" in statement.message
+    assert "offset" not in statement.message
+
+
+def test_a_thin_set_asks_for_more_frames() -> None:
+    """A failed frame count gate asks to take more frames."""
+    (statement,) = _of_rule(
+        _judge([_gate_row("calibration_frame_count", 1.0, "failed")]), "retake_bad_calibration_set"
+    )
+    assert "Take more frames" in statement.message
+
+
+def test_several_conditions_make_one_statement_that_names_each() -> None:
+    """Every failed gate is named once, and the plain message stays short."""
+    rows = [_gate_row(name, value, "failed") for name, value in _CALIBRATION_GATES.items()]
+    (statement,) = _of_rule(_judge(rows), "retake_bad_calibration_set")
+    assert len(statement.evidence) == len(rows)
+    assert statement.message.count("; ") >= len(rows) - 1
+
+
+def test_passed_and_unchecked_gates_make_no_statement() -> None:
+    """A set whose checks passed, or could not run, is not called bad."""
+    rows = [
+        _gate_row("dark_zero_pixel_fraction", 0.0, "passed"),
+        _gate_row("dark_level", None, "not_checked"),
+    ]
+    assert _of_rule(_judge(rows), "retake_bad_calibration_set") == []
+
+
+def test_a_stack_with_no_calibration_gate_rows_says_the_data_are_missing() -> None:
+    """Old stacks have no such rows until they are stacked again."""
+    row = _row("stacking.flat_frame_count", 20.0, level="stack")
+    (statement,) = _of_rule(_judge([row]), "retake_bad_calibration_set")
+    assert statement.kind == StatementKind.INSUFFICIENT_DATA
+    assert "None of the 8 metrics" in statement.reason
+
+
+def test_a_gate_row_of_another_definition_version_is_not_used() -> None:
+    """A row measured under version 2 of a gate says to remeasure."""
+    row = _gate_row("dark_zero_pixel_fraction", 0.96, "failed").model_copy(update={"definition_version": 2})
+    (statement,) = _of_rule(_judge([row]), "retake_bad_calibration_set")
+    assert statement.kind == StatementKind.INSUFFICIENT_DATA

@@ -22,16 +22,22 @@ from contextlib import AbstractContextManager
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
 
+from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.jobs.runner import background_job, registered_job
-from astrometricslib.models.calibration_ingest import CalibrationIngestReport, FlatSetAssessment
+from astrometricslib.models.calibration_ingest import (
+    CalibrationIngestReport,
+    CalibrationMeasurementReport,
+    CalibrationSetHealth,
+)
 from astrometricslib.models.catalog_queries import CalibrationQueryResult
 from astrometricslib.models.point_sources import PointSource, PointSourceDetection
 from astrometricslib.models.processing_results import PreviewRemakeResult, ProcessTargetResult, StackResult
 from astrometricslib.models.quality.excluded_frames import RestoreReport
+from astrometricslib.models.quality.measurement import SubjectLevel
 from astrometricslib.models.quality.quality_reports import (
     StackSummary,
 )
@@ -60,11 +66,18 @@ from astrometricslib.pipelines.shared.api_arguments import (
     resolve_target,
 )
 from astrometricslib.pipelines.shared.camera_passes import resolve_processing_frames
+from astrometricslib.pipelines.shared.quality.metrics import CALIBRATION_FRAME_METRICS, FRAME_METRICS
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
 from astrometricslib.pipelines.stacking.calibration_ingest import (
     assess_flat_group,
     build_ingest_report,
     flatten_frame_index,
+)
+from astrometricslib.pipelines.stacking.calibration_measurement_run import measure_calibration_frames
+from astrometricslib.pipelines.stacking.pre_processing.calibration_assessment import (
+    combine_status,
+    flat_set_checks,
+    summarize_checks,
 )
 from astrometricslib.pipelines.stacking.sensor_noise_run import measure_sensor_noise_from_library
 from astrometricslib.utilities.parallel_batch import BatchRunSummary
@@ -93,6 +106,72 @@ _CALIBRATION_ARGUMENTS = {
     "target_frames": ("target",),
     "match": ("kind", "camera_id", "gain", "offset", "binning", "temperature_c"),
 }
+
+
+_ASSESS_ARGUMENTS = {
+    "dark": ("camera_id", "gain", "offset", "binning", "temperature_c", "exposure_seconds"),
+    "bias": ("camera_id", "gain", "offset", "binning"),
+    "flat": ("camera_id", "gain", "offset", "binning", "telescope", "filter_name"),
+}
+
+# The definition version of each metric a calibration judgement reads. A stored
+# row of another version is not used, so a redefined metric is never mixed
+# with the old numbers.
+_CURRENT_VERSIONS = {
+    spec.name: spec.definition_version for spec in (*FRAME_METRICS, *CALIBRATION_FRAME_METRICS)
+}
+
+# Two dark exposures are the same set when they differ by less than this many
+# seconds. It is the tolerance the library uses to pick a dark for a light
+# (`select_dark_frames`).
+_EXPOSURE_MATCH_TOLERANCE_SECONDS = 0.05
+
+
+def _calibration_set_matches(
+    calibration_set: Any,
+    gain: Any,
+    offset: float | None,
+    binning: Any,
+    temperature_c: float | None,
+    exposure_seconds: float | None,
+) -> bool:
+    """Tell whether a dark or bias set has the asked settings.
+
+    Parameters
+    ----------
+    calibration_set : `CalibrationSet`
+        The set.
+    gain, offset, binning, temperature_c, exposure_seconds : optional
+        The settings to match. A setting left as `None` is not compared.
+        Gains match as numbers when both are numbers. Binning is written in
+        the library's standard form first. The temperature is turned into
+        the library's temperature slot.
+
+    Returns
+    -------
+    matches : `bool`
+        `True` when every given setting matches.
+    """
+    from astrometricslib.drivers.calibration_library import (
+        DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+        temperature_slot_c,
+    )
+
+    row = {"camera": calibration_set.camera, "iso": calibration_set.gain, "offset": calibration_set.offset}
+    row["binning"] = calibration_set.binning
+    row["temperature_c"] = calibration_set.temperature_c
+    if not _calibration_row_matches(
+        calibration_set.kind, row, calibration_set.camera, gain, offset, binning, temperature_c
+    ):
+        return False
+    if temperature_c is not None and calibration_set.temperature_c != temperature_slot_c(
+        temperature_c, DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
+    ):
+        return False
+    return exposure_seconds is None or (
+        calibration_set.exposure_seconds is not None
+        and abs(calibration_set.exposure_seconds - exposure_seconds) < _EXPOSURE_MATCH_TOLERANCE_SECONDS
+    )
 
 
 def _calibration_row_key(kind: str, row: dict[str, Any]) -> str:
@@ -383,47 +462,315 @@ class CalibrationCatalog:
         return build_ingest_report(kind, before, after, flat_groups)
 
     @background_job("diagnostics", grace_period_seconds=20.0)
-    def assess_flats(
+    def assess(
         self,
-        telescope: str | None = None,
+        kind: _CalibrationKind,
         camera_id: str | None = None,
-        filter_name: str | None = None,
-        gain: float | None = None,
+        gain: str | int | float | None = None,
         offset: float | None = None,
+        binning: str | int | None = None,
+        temperature_c: float | None = None,
+        exposure_seconds: float | None = None,
+        telescope: str | None = None,
+        filter_name: str | None = None,
         register_job: bool = True,
-    ) -> list[FlatSetAssessment]:
-        """Check whether the flats in the library are good enough to use.
+    ) -> list[CalibrationSetHealth]:
+        """Check whether the calibration sets in the library are good enough.
 
-        Each set (one telescope, camera, filter, gain and offset) is
-        measured on its own with the check the stacker runs: how many
-        frames, how bright, how noisy the master flat will be, and any
-        problems. Leave an argument out to include every value of it.
+        Each set (the frames of one camera at one setting) is judged on its
+        own, and the answer is one common record for darks, biases and flats.
+        A dark or bias set is judged from the numbers stored for each of its
+        frames by `measure_frames`, against limits taken from the equipment:
+        the camera profile's read noise and bias level, and the bias frames
+        of the same setting. Nothing is stored for the judgement; it is worked
+        out when asked, so a changed limit shows at once. A check that has no
+        reference, or whose numbers are not stored yet, is ``not_checked``
+        with the reason. It never uses a default. A flat set is measured when
+        asked, with the check the stacker runs. Nothing is written.
+
+        Arguments used by each kind (any other argument is refused):
+
+        - ``"dark"``: ``camera_id``, ``gain``, ``offset``, ``binning``,
+          ``temperature_c`` and ``exposure_seconds``.
+        - ``"bias"``: ``camera_id``, ``gain``, ``offset`` and ``binning``.
+        - ``"flat"``: ``camera_id``, ``gain``, ``offset``, ``binning``,
+          ``telescope`` and ``filter_name``.
 
         Parameters
         ----------
-        telescope : `str`, optional
-            Only this telescope's flats.
+        kind : {"dark", "bias", "flat"}
+            The kind of calibration frame.
         camera_id : `str`, optional
-            Only this camera's flats.
+            Only this camera's sets.
+        gain, offset, binning : optional
+            Only sets with this gain (or ISO), camera offset and binning.
+            Binning ``"2"`` and ``"2x2"`` are the same.
+        temperature_c : `float`, optional
+            Darks only: the set whose temperature slot holds this sensor
+            temperature, in degrees Celsius.
+        exposure_seconds : `float`, optional
+            Darks only: the set with this exposure, within 0.05 s.
+        telescope : `str`, optional
+            Flats only: the telescope the flats were taken through.
         filter_name : `str`, optional
-            Only flats for this filter, such as ``"L"`` or ``"SPEC"``.
-        gain : `float`, optional
-            Only flats at this gain.
-        offset : `float`, optional
-            With `gain`, only flats at this camera offset.
+            Flats only: the filter, such as ``"L"`` or ``"SPEC"``.
         register_job : `bool`, optional
             Record the run in the job list. Defaults to `True`.
 
         Returns
         -------
-        assessments : `list` [`FlatSetAssessment`]
-            One assessment per matching set. Empty if no flats match.
+        health : `list` [`CalibrationSetHealth`]
+            One record per matching set. Empty if no set matches. An unknown
+            kind, or an argument the kind does not use, is refused with an
+            `InvalidArgumentError`.
         """
+        check_choice("kind", kind, _CALIBRATION_KINDS)
+        reject_unused_arguments(
+            kind,
+            _ASSESS_ARGUMENTS,
+            {
+                "camera_id": camera_id is not None,
+                "gain": gain is not None,
+                "offset": offset is not None,
+                "binning": binning is not None,
+                "temperature_c": temperature_c is not None,
+                "exposure_seconds": exposure_seconds is not None,
+                "telescope": telescope is not None,
+                "filter_name": filter_name is not None,
+            },
+        )
         with registered_job(enabled=register_job, job_type="diagnostics", target_id="calibration"):
-            groups = self._calibration_library.list_flat_groups(
-                telescope=telescope, camera=camera_id, filter_type=filter_name, gain=gain, offset=offset
+            if kind == "flat":
+                return self._assess_flat_sets(telescope, camera_id, filter_name, gain, offset, binning)
+            return self._assess_dark_or_bias_sets(
+                kind, camera_id, gain, offset, binning, temperature_c, exposure_seconds
             )
-            return [assess_flat_group(group) for group in groups]
+
+    def _assess_flat_sets(
+        self,
+        telescope: str | None,
+        camera_id: str | None,
+        filter_name: str | None,
+        gain: Any,
+        offset: float | None,
+        binning: Any,
+    ) -> list[CalibrationSetHealth]:
+        """Judge the flat sets that match, with the stacker's own flat check.
+
+        Returns
+        -------
+        health : `list` [`CalibrationSetHealth`]
+            One record per matching flat set.
+        """
+        from astrometricslib.drivers.calibration_library import normalize_binning
+
+        minimum_frames = self._config.get_minimum_calibration_frames()
+        groups = self._calibration_library.list_flat_groups(
+            telescope=telescope, camera=camera_id, filter_type=filter_name, gain=gain, offset=offset
+        )
+        health = []
+        for group in groups:
+            if binning is not None and normalize_binning(group.binning) != normalize_binning(binning):
+                continue
+            assessment = assess_flat_group(group)
+            checks = flat_set_checks(assessment, minimum_frames)
+            row = {
+                "camera": group.camera,
+                "filter": group.filter,
+                "iso": group.gain,
+                "offset": group.offset,
+                "binning": group.binning,
+            }
+            health.append(
+                CalibrationSetHealth(
+                    kind="flat",
+                    rowKey=_calibration_row_key("flat", row),
+                    camera=group.camera,
+                    gain=group.gain,
+                    offset=group.offset,
+                    binning=group.binning,
+                    telescope=group.telescope,
+                    filter=group.filter,
+                    frameCount=len(group.paths),
+                    uniqueFrameCount=assessment.frame_count,
+                    status=combine_status(checks),
+                    summary=summarize_checks(checks),
+                    checks=checks,
+                    smoothingSigmaPixels=assessment.smoothing_sigma_pixels,
+                )
+            )
+        return health
+
+    def _assess_dark_or_bias_sets(
+        self,
+        kind: str,
+        camera_id: str | None,
+        gain: Any,
+        offset: float | None,
+        binning: Any,
+        temperature_c: float | None,
+        exposure_seconds: float | None,
+    ) -> list[CalibrationSetHealth]:
+        """Judge the dark or bias sets that match, from the stored numbers.
+
+        Returns
+        -------
+        health : `list` [`CalibrationSetHealth`]
+            One record per matching set.
+        """
+        from astrometricslib.drivers.quality_store import QualityStore, quality_database_path
+        from astrometricslib.pipelines.shared.quality.calibration_frame_measurement import (
+            calibration_subject_id,
+        )
+        from astrometricslib.pipelines.stacking.pre_processing.calibration_assessment import (
+            assess_dark_or_bias_frames,
+            build_bias_reference,
+            frame_facts_from_rows,
+            health_of_judgement,
+        )
+
+        library = self._calibration_library
+        wanted = [
+            calibration_set
+            for calibration_set in library.list_calibration_sets(kind, camera=camera_id)
+            if _calibration_set_matches(
+                calibration_set, gain, offset, binning, temperature_c, exposure_seconds
+            )
+        ]
+        if not wanted:
+            return []
+        store = QualityStore(quality_database_path(self._config))
+        bias_sets = library.list_calibration_sets("bias", camera=camera_id) if kind == "dark" else []
+        subject_paths = {
+            calibration_subject_id(path, "bias"): path for bias_set in bias_sets for path in bias_set.paths
+        }
+        subject_paths.update({
+            calibration_subject_id(path, kind): path
+            for calibration_set in wanted
+            for path in calibration_set.paths
+        })
+        prefixes = {"calibration/bias/", f"calibration/{kind}/"}
+        rows = [
+            row
+            for prefix in sorted(prefixes)
+            for row in store.query(level=SubjectLevel.FRAME, subject_id_prefix=prefix)
+            if row.definition_version == _CURRENT_VERSIONS.get(row.metric)
+        ]
+        facts = frame_facts_from_rows(rows, subject_paths)
+        minimum_frames = self._config.get_minimum_calibration_frames()
+        health = []
+        for calibration_set in wanted:
+            profile = resolve_camera_profile(calibration_set.camera, self._config)
+            setting = (calibration_set.gain, calibration_set.offset, calibration_set.binning)
+            reference = None
+            if kind == "dark":
+                same_setting = [
+                    bias_set for bias_set in bias_sets if bias_set.has_setting_of(calibration_set)
+                ]
+                reference = build_bias_reference([
+                    facts[path] for bias_set in same_setting for path in bias_set.paths if path in facts
+                ])
+            judgement = assess_dark_or_bias_frames(
+                kind,
+                calibration_set.paths,
+                facts,
+                minimum_frames=minimum_frames,
+                profile=profile,
+                setting=setting,
+                exposure_seconds=calibration_set.exposure_seconds,
+                reference=reference,
+            )
+            row = {
+                "camera": calibration_set.camera,
+                "iso": calibration_set.gain,
+                "offset": calibration_set.offset,
+                "binning": calibration_set.binning,
+                "temperature_c": calibration_set.temperature_c,
+                "exposure": calibration_set.exposure_seconds,
+            }
+            health.append(
+                health_of_judgement(
+                    judgement,
+                    kind=kind,
+                    row_key=_calibration_row_key(kind, row),
+                    camera=calibration_set.camera,
+                    gain=calibration_set.gain,
+                    offset=calibration_set.offset,
+                    binning=calibration_set.binning,
+                    temperature_slot_c=calibration_set.temperature_c,
+                    exposure_seconds=calibration_set.exposure_seconds,
+                )
+            )
+        return health
+
+    @background_job("diagnostics", grace_period_seconds=20.0)
+    def measure_frames(
+        self,
+        kind: Literal["dark", "bias"] | None = None,
+        camera_id: str | None = None,
+        force: bool = False,
+        register_job: bool = True,
+    ) -> CalibrationMeasurementReport:
+        """Measure the dark and bias frames that are new or changed.
+
+        Each frame is read once and its numbers (level, zero share, noise,
+        large-scale pattern and so on) are stored, so `assess` can judge the
+        sets. A frame whose file has not changed since it was measured is
+        skipped, so a second run costs almost nothing. The first run over a
+        large library takes a long time (about half a second per frame).
+        This writes rows to the quality store and the frame stamps to the
+        calibration index. It never changes, moves or deletes a frame.
+
+        Parameters
+        ----------
+        kind : {"dark", "bias"}, optional
+            Only this kind. Leave it out for both.
+        camera_id : `str`, optional
+            Only this camera's frames.
+        force : `bool`, optional
+            Measure every frame again, even if its file has not changed.
+        register_job : `bool`, optional
+            Record the run in the job list. Defaults to `True`.
+
+        Returns
+        -------
+        report : `CalibrationMeasurementReport`
+            How many frames were measured, skipped and unreadable. An unknown
+            kind is refused with an `InvalidArgumentError`.
+        """
+        from uuid import uuid4
+
+        from astrometricslib.drivers.quality_store import QualityStore, quality_database_path
+
+        if kind is not None:
+            check_choice("kind", kind, ("dark", "bias"))
+        with registered_job(enabled=register_job, job_type="diagnostics", target_id="calibration") as job:
+
+            def report_progress(done: int, total: int) -> None:
+                """Tell the job how far the run is."""
+                job.stage(int(100 * done / max(total, 1)), f"Measured {done} of {total} calibration frames")
+
+            summary = measure_calibration_frames(
+                self._calibration_library,
+                QualityStore(quality_database_path(self._config)),
+                self._config,
+                run_id=job.job_id or f"calibration-measure-{uuid4().hex}",
+                job_id=job.job_id,
+                measured_at=datetime.now(UTC),
+                kinds=("dark", "bias") if kind is None else (kind,),
+                camera=camera_id,
+                force=force,
+                progress=report_progress,
+            )
+        return CalibrationMeasurementReport(
+            frameCount=summary.frame_count,
+            measuredCount=summary.measured_count,
+            unchangedCount=summary.unchanged_count,
+            unreadableCount=summary.unreadable_count,
+            failedCount=summary.failed_count,
+            rowsStored=summary.rows_stored,
+            notes=summary.notes,
+        )
 
     @background_job("diagnostics", grace_period_seconds=20.0)
     def measure_sensor_noise(

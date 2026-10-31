@@ -130,6 +130,19 @@ export interface HandoffState {
 }
 
 /**
+ * What `calibration:measure_frames` answers: the measuring job's id, and its
+ * result when it finished at once (a library that was measured before).
+ */
+export interface CalibrationMeasurementStart {
+    jobId: string | null;
+    /** Set when the job finished within the first seconds; absent while it runs. */
+    result?: import('../types/backendTypes').CalibrationMeasurementReport;
+    /** "running" while the job goes on in the background. */
+    status?: string;
+    message?: string;
+}
+
+/**
  * The payload and response of every RPC method the backend serves.
  *
  * The keys must be exactly the generated `RpcMethod` names from
@@ -372,6 +385,8 @@ export interface ActionRegistry {
     "history:target_changes": { payload: { session_id?: string; limit?: number }; response: import('../types/backendTypes').TargetChange[] };
     "history:live_session_status": { payload: { window_minutes?: number; include?: string[]; limit?: number }; response: import('../types/backendTypes').LiveSessionStatus };
     "observatory:safety_status": { payload: Record<string, never>; response: import('../types/backendTypes').SafetyStatus };
+    "calibration:assess": { payload: { kind: 'dark' | 'bias' | 'flat'; camera_id?: string; gain?: string | number; offset?: number; binning?: string | number; temperature_c?: number; exposure_seconds?: number; telescope?: string; filter_name?: string }; response: import('../types/backendTypes').CalibrationSetHealth[] };
+    "calibration:measure_frames": { payload: { kind?: 'dark' | 'bias'; camera_id?: string; force?: boolean }; response: CalibrationMeasurementStart };
     "calibration:query": { payload: { kind?: 'dark' | 'bias' | 'flat'; detail?: 'counts' | 'target_match' | 'target_frames' | 'match'; target?: string; camera_id?: string; refresh?: boolean; gain?: string | number; offset?: number; binning?: string | number; temperature_c?: number }; response: import('../types/backendTypes').CalibrationQueryResult };
 
     // Hand-off of the workspace to a paired phone

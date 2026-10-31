@@ -192,6 +192,7 @@ RPC_METHODS: tuple[str, ...] = (
     # Calibration frames
     "calibration:get_stats",
     "calibration:measure_sensor_noise",
+    "calibration:measure_frames",
     # Mosaics
     "mosaic:preview",
     "mosaic:create",
@@ -226,6 +227,7 @@ RPC_METHODS: tuple[str, ...] = (
     "history:live_session_status",
     "observatory:safety_status",
     "calibration:query",
+    "calibration:assess",
     # Sequencer queue
     "sequencer:get_queue",
     "sequencer:create_plan",

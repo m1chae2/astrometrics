@@ -318,7 +318,51 @@ GATE_DESCRIPTIONS: dict[str, str] = {
         "setting, offset or temperature, or refused for a binning mismatch."
     ),
     "calibration_frame_count": (
-        "Fails when a master bias, dark or flat was built from fewer frames than the configured minimum."
+        "Fails when a master bias, dark or flat was built from fewer frames than the configured "
+        "minimum, or when a dark or bias master holds fewer than `THIN_SET_FRAME_COUNT` different "
+        "frames (copies of one file count once). Not checked when no calibration frame was applied."
+    ),
+    "dark_level": (
+        "Fails when a dark frame's mean level is more than `VALUE_STEP_ALLOWANCE` value steps (plus "
+        "the dark current allowance) from the bias level of the same setting. Not checked when the "
+        "frames' numbers are not measured or no bias frame exists at the setting."
+    ),
+    "dark_noise": (
+        "Fails when the noise of the dark frames is below `NOISE_RATIO_LOW` times the read noise "
+        "in the camera profile (frames cut off at zero, or at another gain). Not checked when the "
+        "profile has no read noise for the setting."
+    ),
+    "dark_zero_pixel_fraction": (
+        "Fails when a dark frame has `ZERO_PIXEL_FRACTION_LIMIT` or more of its pixels at exactly "
+        "zero (cut off at zero). Not checked when the frames' numbers are not measured."
+    ),
+    "dark_light_leak": (
+        "Fails when a dark frame's large-scale pattern exceeds that of the bias frames at the same "
+        "setting by more than `VALUE_STEP_ALLOWANCE` value steps (light reached the sensor). Not "
+        "checked when no bias frame at the setting is measured."
+    ),
+    "bias_level": (
+        "Fails when the bias frames' level is more than `VALUE_STEP_ALLOWANCE` value steps from "
+        "the bias level in the camera profile. Not checked when the profile has no bias level for "
+        "the setting."
+    ),
+    "bias_noise": (
+        "Fails when the noise of the bias frames is outside `NOISE_RATIO_LOW` to "
+        "`NOISE_RATIO_HIGH` times the read noise in the camera profile. Not checked when the "
+        "profile has no read noise for the setting."
+    ),
+    "bias_zero_pixel_fraction": (
+        "Fails when a bias frame has `ZERO_PIXEL_FRACTION_LIMIT` or more of its pixels at exactly "
+        "zero (cut off at zero). Not checked when the frames' numbers are not measured."
+    ),
+    "dark_missing": (
+        "Fails when light frames of an exposure have no dark within `DARK_EXPOSURE_MATCH_SECONDS` "
+        "of it. Not checked when the stacking run did not say which calibration it applied."
+    ),
+    "light_temperature_spread": (
+        "Fails when the sensor temperature of the lights of one exposure spans more than "
+        "`DEFAULT_DARK_TEMPERATURE_TOLERANCE_C`, which the batch mean would hide. Not checked when "
+        "the stack used no dark or the lights record no temperature."
     ),
     "rejected_pixel_fraction": (
         "Fails when the share of pixels rejected as outliers in the stack is above "
@@ -3064,6 +3108,7 @@ def build_stacking_doc() -> str:
     gates = discover_gate_names("stacking")
     quality_module = "astrometricslib.pipelines.stacking.post_processing.stack_quality"
     flat_module = "astrometricslib.pipelines.stacking.pre_processing.flat_calibration"
+    assessment_module = "astrometricslib.pipelines.stacking.pre_processing.calibration_assessment"
     values = {
         "version_line": VERSION_LINE,
         "dark_tol": require_symbol(
@@ -3094,6 +3139,12 @@ def build_stacking_doc() -> str:
             "DEFAULT_GAP_RATIO_THRESHOLD",
         ),
         "flat_noise": require_symbol(flat_module, "MAXIMUM_FLAT_NOISE_FRACTION"),
+        "thin_set": require_symbol(assessment_module, "THIN_SET_FRAME_COUNT"),
+        "zero_share": require_symbol(assessment_module, "ZERO_PIXEL_FRACTION_LIMIT"),
+        "step_allowance": require_symbol(assessment_module, "VALUE_STEP_ALLOWANCE"),
+        "noise_low": require_symbol(assessment_module, "NOISE_RATIO_LOW"),
+        "noise_high": require_symbol(assessment_module, "NOISE_RATIO_HIGH"),
+        "dark_current": require_symbol(assessment_module, "DARK_CURRENT_ALLOWANCE_ADU_PER_SECOND"),
         "flat_low": require_symbol(flat_module, "MINIMUM_FLAT_LEVEL_FRACTION"),
         "flat_high": require_symbol(flat_module, "MAXIMUM_FLAT_LEVEL_FRACTION"),
         "saturation": require_symbol(
@@ -3248,6 +3299,48 @@ def build_stacking_doc() -> str:
             f"`{values['saturation']:g}`",
             design_estimate_cell("STK"),
             "Share of saturated pixels at or above which the stack is flagged (`saturated_pixel_fraction`).",
+        ],
+        [
+            "`ZERO_PIXEL_FRACTION_LIMIT`",
+            f"`{values['zero_share']:g}`",
+            status_cell(STATUS_MEASURED, "STK-47"),
+            "Share of exactly-zero pixels in a dark or bias frame at or above which the frame is cut "
+            "off at zero (`dark_zero_pixel_fraction`, `bias_zero_pixel_fraction`). The library's frames "
+            "have none or at least 72%, so the separation is measured; the exact figure inside the "
+            "gap is a design estimate.",
+        ],
+        [
+            "`VALUE_STEP_ALLOWANCE`",
+            f"`{values['step_allowance']:g}` value steps",
+            status_cell(STATUS_PARTLY_MEASURED, "STK-48", "STK-50", "STK-51"),
+            "Largest distance, in value steps (the smallest step between two pixel values the "
+            "sensor writes), of a dark's level or pattern from its reference, and of a bias's level "
+            "from the camera profile's (`dark_level`, `dark_light_leak`, `bias_level`). The clean "
+            "frames of the library all sit inside it; it is untested on held-out data.",
+        ],
+        [
+            "`NOISE_RATIO_LOW` / `NOISE_RATIO_HIGH`",
+            f"`{values['noise_low']:g}` / `{values['noise_high']:g}`",
+            status_cell(STATUS_PARTLY_MEASURED, "STK-49"),
+            "Band, as a multiple of the camera profile's read noise, that the noise of a bias frame "
+            "must lie in (`bias_noise`); a dark has the lower limit only (`dark_noise`). The ratio "
+            "observed was 0.99 to 1.00; the width is a design choice.",
+        ],
+        [
+            "`DARK_CURRENT_ALLOWANCE_ADU_PER_SECOND`",
+            f"`{values['dark_current']:g}` ADU/s",
+            status_cell(STATUS_PARTLY_MEASURED, "STK-54"),
+            "Dark current added to the allowed level difference of a dark, per second of exposure. "
+            "Measured on the ASI 533 at -10 C; used for every camera because it is below one value "
+            "step for any exposure under about 2,000 s.",
+        ],
+        [
+            "`THIN_SET_FRAME_COUNT`",
+            f"`{values['thin_set']}` frames",
+            design_estimate_cell("STK"),
+            "Fewest different frames a dark or bias master may hold before `calibration_frame_count` "
+            "fails. A master of N frames can add up to 1/N of the noise variance of a light, so "
+            "10 frames is a tenth." + see_also("STK-53"),
         ],
     ])
     template = r"""# Astronomical stacking and image calibration pipeline review guide

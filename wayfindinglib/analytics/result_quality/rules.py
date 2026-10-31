@@ -64,6 +64,17 @@ STAR_WIDTH_MOFFAT_ARCSEC_METRIC = "frame.star_width_moffat_arcsec"
 QUARANTINE_ROUNDNESS_METRIC = "frame.quarantine_roundness"
 QUARANTINE_SKY_MEDIAN_METRIC = "frame.quarantine_sky_median_adu"
 DETECTED_REGION_COUNT_METRIC = "frame.detected_region_count"
+# The stack's self-checks of its dark and bias frames (STK-47 to STK-53). The
+# value of each is the number the check measured, written so that it does not
+# depend on the check's limit; the row also holds the outcome.
+DARK_ZERO_PIXEL_GATE_METRIC = "stacking.gate_dark_zero_pixel_fraction"
+BIAS_ZERO_PIXEL_GATE_METRIC = "stacking.gate_bias_zero_pixel_fraction"
+DARK_LIGHT_LEAK_GATE_METRIC = "stacking.gate_dark_light_leak"
+DARK_LEVEL_GATE_METRIC = "stacking.gate_dark_level"
+BIAS_LEVEL_GATE_METRIC = "stacking.gate_bias_level"
+DARK_NOISE_GATE_METRIC = "stacking.gate_dark_noise"
+BIAS_NOISE_GATE_METRIC = "stacking.gate_bias_noise"
+CALIBRATION_FRAME_COUNT_GATE_METRIC = "stacking.gate_calibration_frame_count"
 
 # The brightest star's peak, as a fraction of the room between the sky and the
 # ceiling, at which the star clips. 1.0 is the ceiling by definition, so the
@@ -496,6 +507,39 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
             "light frames."
         ),
         computed_by="report_rules",
+    ),
+    QualityRule(
+        name="retake_bad_calibration_set",
+        statement_kind=StatementKind.RECOMMENDATION,
+        action_class=ActionClass.CALIBRATION,
+        requires=[
+            MetricRequirement(name=metric, definition_version=1, optional=True)
+            for metric in (
+                DARK_ZERO_PIXEL_GATE_METRIC,
+                BIAS_ZERO_PIXEL_GATE_METRIC,
+                DARK_LIGHT_LEAK_GATE_METRIC,
+                DARK_LEVEL_GATE_METRIC,
+                BIAS_LEVEL_GATE_METRIC,
+                DARK_NOISE_GATE_METRIC,
+                BIAS_NOISE_GATE_METRIC,
+                CALIBRATION_FRAME_COUNT_GATE_METRIC,
+            )
+        ],
+        limits=[],
+        register_entry="WAY-D95",
+        confidence=Confidence.DESIGN_ESTIMATE,
+        wording="Retake the bad calibration set: {condition_text}. {advice_text}",
+        plain_wording=(
+            "A set of dark or bias frames is likely not good enough to calibrate these pictures: "
+            "{plain_condition_text}. {plain_advice_text}"
+        ),
+        produces="checklist_item",
+        purpose=(
+            "A master dark or bias that is cut off at zero, struck by light, at the wrong level or built "
+            "from too few frames puts its fault into every light frame, and more light frames cannot "
+            "remove it."
+        ),
+        computed_by=None,
     ),
     QualityRule(
         name="retake_flats",

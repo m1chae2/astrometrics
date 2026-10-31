@@ -726,7 +726,7 @@ def measure_frame(
     clipped_at_zero = (
         None
         if clipped_zero_fraction_limit is None
-        else _frame_zero_fraction(planes) > clipped_zero_fraction_limit
+        else frame_zero_fraction(planes) > clipped_zero_fraction_limit
     )
     gain, read_noise, noise_reason = look_up_frame_sensor_noise(
         camera_profile, frame, clipped_at_zero=clipped_at_zero
@@ -782,7 +782,7 @@ def measure_frame(
     return context.measurements
 
 
-def _frame_zero_fraction(planes: list[tuple[str | None, np.ndarray]]) -> float:
+def frame_zero_fraction(planes: list[tuple[str | None, np.ndarray]]) -> float:
     """Measure the fraction of a frame's pixels that are exactly zero.
 
     Parameters

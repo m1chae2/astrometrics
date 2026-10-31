@@ -193,7 +193,7 @@ Every Python example assumes the library is installed and configured with your o
   print(report.comparison.before.noise_fraction, report.comparison.after.noise_fraction)
   ```
 
-  `assess_flats` is an internal function, not part of the public API; may change. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.flat_calibration.assess_flats --> `CalibrationCatalog.assess_flats` is the public form for flats already in the calibration library. <!-- impl: astrometricslib.api.processing.CalibrationCatalog.assess_flats --> The comparison uses `QualityRecords.measure_stack`. <!-- impl: astrometricslib.api.quality.QualityRecords.measure_stack -->
+  `assess_flats` is an internal function, not part of the public API; may change. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.flat_calibration.assess_flats --> `CalibrationCatalog.assess` (with `kind="flat"`) is the public form for flats already in the calibration library. <!-- impl: astrometricslib.api.processing.CalibrationCatalog.assess --> The comparison uses `QualityRecords.measure_stack`. <!-- impl: astrometricslib.api.quality.QualityRecords.measure_stack -->
 - **Acceptance criterion:** If the flat's noise squared is small next to the stack's noise squared, the flat adds nothing visible.
 - **What to look at:** `noise_fraction` of the master flat (standard deviation over mean; 0.005 is 0.5%). The stack's `noise_fraction` (pixel-to-pixel noise over the sky level; lower is cleaner). If the flat's noise squared is small next to the stack's noise squared, the flat adds nothing visible.
 - **Our result:** The sky noise of the ZWO ASI533MM Pro stacks of 20 targets was 3% to 6% of the sky level. The master flat of the single-flat library measured 4.5%, and its fixed pattern made up 86% of the fine-scale noise of the undithered M 101 stack. Smoothing that flat halved the stack's noise. Dates not recorded.
@@ -2144,6 +2144,356 @@ Every Python example assumes the library is installed and configured with your o
 - **Guarded by tests:** `astrometricslib/pipelines/stacking/test/post_processing/test_flat_match.py` checks the recovery of a known shift and rotation (both signs, a color mosaic), the unrelated-dust, half-turn and no-dust cases, the control correlation, the uncertainty in quadrature, the bias subtraction, the sky requirement and the frames it leaves out, the target disc, the time limit with a fake clock, the member list and its order, every not-measured case, the band pass against a vignetting that is not a polynomial, and that the record step stores the rows in their own call and stores no match row when the step fails. `astrometricslib/drivers/test/test_calibration_matching.py` checks that the staging step records the flat and bias files it linked.
 - **Raw record:** None kept.
 
+### STK-47
+
+**Dark and bias frames cut off at zero**
+
+- **Claim:** A dark or bias frame with 0.1% or more of its pixels at exactly zero has lost its noise, and the mean of a master built from such frames is biased. In the library the frames fall into two groups with nothing between: none have a zero pixel, or at least 72% do. Any limit in that gap separates them.
+- **Settings it supports:**
+  - code constant `ZERO_PIXEL_FRACTION_LIMIT` = 0.001 in `pipelines/stacking/pre_processing/calibration_assessment.py` (changing it means editing the code). Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.calibration_assessment.ZERO_PIXEL_FRACTION_LIMIT -->
+- **Status:** Measured. The separation is a direct pixel count on every frame; where 0.1% sits inside the gap is a design choice that follows the offset test of 2026-10-02.
+- **Data you need:** Dark and bias frames at several camera offsets, including offset 0 if you use it.
+- **Procedure:**
+  1. Measure every dark and bias frame.
+  2. List the share of exactly-zero pixels per setting group, and check that no group has a share between 0 and the limit.
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  astro.processing.calibration.measure_frames()
+  for health in astro.processing.calibration.assess("bias", camera_id="ZWO ASI 533MM Pro"):
+      print(health.row_key, health.status, health.summary)
+      for check in health.checks:
+          print("   ", check.name, check.status.value, check.measured_value, check.limit)
+  ```
+
+  `CalibrationCatalog.measure_frames` measures and stores the frames, and `CalibrationCatalog.assess` judges each set from the stored rows. <!-- impl: astrometricslib.api.processing.CalibrationCatalog.measure_frames --> <!-- impl: astrometricslib.api.processing.CalibrationCatalog.assess -->
+- **Acceptance criterion:** No frame has a zero share between 0 and the limit, so the limit does not decide any frame.
+- **What to look at:** `frame.zero_pixel_fraction` per frame, and the `dark_zero_pixel_fraction` and `bias_zero_pixel_fraction` checks of each set.
+- **Our result:** Code: commit 07894ef1 (tip of `134-integration`). Data: the validation copy of the library: 2,367 dark and bias frames in 73 setting groups (291 biases, 2,076 darks; ZWO ASI 533MM Pro and Nikon D5300), every frame measured, 0 read errors, 2026-10-31. 38 of the 73 groups are cut off at zero: the ASI 533 sets at offset 0 (1 bias set and 37 dark sets, 1,398 frames), with 72% to 97% of their pixels at zero. The other 969 frames have no zero pixel at all, so the two groups do not overlap. 2,170 of the 5,888 lights (37%) are at offset 0 and can only use the clipped sets; 802 of them have sky at exactly 0 as well. No frame was viewed: the flags are pixel counts.
+- **Verdict:** Not judged. The limit was chosen after seeing this library, and no held-out data exists.
+- **Limits:** One camera of the two has clipped frames. The cure for the clipped sets is new frames at a non-zero offset; they cannot be repaired.
+- **To tune for your setup:** Raise the limit only if your library has a frame with a few stray zero pixels that you want to accept.
+- **Regenerate with:** `CalibrationCatalog.measure_frames(force=True)` then `CalibrationCatalog.assess`.
+- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/test_calibration_assessment.py` and `astrometricslib/pipelines/shared/quality/test/test_calibration_frame_measurement.py`.
+- **Raw record:** Kept outside the repository, in the validation folder of issue 134 under `calibration_checks/`: `frames.jsonl` (one line per frame), `groups.jsonl` (per setting group), `match.jsonl` and `flats.jsonl`.
+
+### STK-48
+
+**The bias level of a camera setting**
+
+- **Claim:** The bias level of the ASI 533MM Pro at gain 0 follows the camera offset at 40 ADU per offset unit, less about 5 ADU, and is the same in different sessions. A bias set whose level differs from the level stored in the camera profile by more than two value steps was taken at another offset or was already calibrated.
+- **Settings it supports:**
+  - code constant `VALUE_STEP_ALLOWANCE` = 2 value steps in `pipelines/stacking/pre_processing/calibration_assessment.py` (changing it means editing the code). Relation: confirmed by. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.calibration_assessment.VALUE_STEP_ALLOWANCE -->
+  - config key `[Observatory.Camera.<name>] bias_levels` (the camera profile; the example config holds the measured levels). Relation: derived from this entry. <!-- impl: astrometricslib.models.camera_profile.CameraProfile.bias_level_for -->
+- **Status:** Partly measured. The levels are measured on 20 frames per setting for the ASI 533 and 22 and 89 frames for the Nikon, and agree across sessions; the limit of two steps is untested on new frames.
+- **Data you need:** At least 20 bias frames at each gain and offset you use.
+- **Procedure:**
+  1. Measure the bias frames.
+  2. Compare each set's level with the profile's `bias_levels` entry.
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  astro.processing.calibration.measure_frames()
+  for health in astro.processing.calibration.assess("bias", camera_id="ZWO ASI 533MM Pro"):
+      print(health.row_key, health.status, health.summary)
+      for check in health.checks:
+          print("   ", check.name, check.status.value, check.measured_value, check.limit)
+  ```
+
+  `CalibrationCatalog.measure_frames` measures and stores the frames, and `CalibrationCatalog.assess` judges each set from the stored rows. <!-- impl: astrometricslib.api.processing.CalibrationCatalog.measure_frames --> <!-- impl: astrometricslib.api.processing.CalibrationCatalog.assess -->
+- **Acceptance criterion:** The set's level is within two value steps of the profile's value.
+- **What to look at:** The `bias_level` check (its value is the distance in value steps) and `measurements['mean_level_adu']`.
+- **Our result:** Code: commit 07894ef1 (tip of `134-integration`). ASI 533MM Pro, gain 0, 20 biases per setting: level 394.85 ADU at offset 10 (frame-to-frame spread 0.33), 794.83 at 20, 1194.86 at 30 and 1994.83 at 50; the level follows temperature by 0.075 ADU per degree (r = 0.994, n = 20), 0.75 ADU over 9.8 C, so no temperature limit is needed for biases ([STK-56](#stk-56)). Nikon D5300 (value step 2): 597.93 ADU at ISO 100 (22 biases) and 599.08 at ISO 800 (89 biases); two sessions 5 months apart gave 599.01 and 599.15. No offset between 0 and 10 was measured. The limit was chosen after seeing this library, and no held-out data exists.
+- **Verdict:** Not judged. The limit was chosen after seeing this library, and no held-out data exists.
+- **Limits:** A setting with no entry in the profile reports `not_checked`; no default is used. The Nikon has no offset setting, so its entries use offset 0.
+- **To tune for your setup:** Measure your own camera's levels and add them to its `bias_levels` list; the config needs no other change.
+- **Regenerate with:** `CalibrationCatalog.measure_frames(force=True)` then `CalibrationCatalog.assess`.
+- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/test_calibration_assessment.py` and `astrometricslib/drivers/test/test_camera_profile_store.py`.
+- **Raw record:** Kept outside the repository, in the validation folder of issue 134 under `calibration_checks/`: `frames.jsonl` (one line per frame), `groups.jsonl` (per setting group), `match.jsonl` and `flats.jsonl`.
+
+### STK-49
+
+**Noise as a check on bias and dark frames**
+
+- **Claim:** The noise of a bias frame lies within 0.9 to 1.1 times the camera profile's read noise. A lower value means the frame is cut off at zero; a higher one means another gain or a fault. A dark's noise grows with exposure from hot pixels, so only the lower limit applies to it.
+- **Settings it supports:**
+  - code constant `NOISE_RATIO_LOW` = 0.9 in `pipelines/stacking/pre_processing/calibration_assessment.py` (changing it means editing the code). Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.calibration_assessment.NOISE_RATIO_LOW -->
+  - code constant `NOISE_RATIO_HIGH` = 1.1 in `pipelines/stacking/pre_processing/calibration_assessment.py` (changing it means editing the code). Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.calibration_assessment.NOISE_RATIO_HIGH -->
+- **Status:** Partly measured. The ratio was 0.99 to 1.00 at ASI 533 offsets 10 to 50; the width of the band is a design choice. The per-frame estimator replaces the pair estimator of the first measurement and has been checked on synthetic frames only.
+- **Data you need:** Bias frames at an offset that is not cut off, and a camera profile with a measured read noise for the setting.
+- **Procedure:**
+  1. Measure the bias frames.
+  2. Compare the median frame noise with the profile's read noise in ADU (read noise divided by gain).
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  astro.processing.calibration.measure_frames()
+  for health in astro.processing.calibration.assess("bias", camera_id="ZWO ASI 533MM Pro"):
+      print(health.row_key, health.status, health.summary)
+      for check in health.checks:
+          print("   ", check.name, check.status.value, check.measured_value, check.limit)
+  ```
+
+  `CalibrationCatalog.measure_frames` measures and stores the frames, and `CalibrationCatalog.assess` judges each set from the stored rows. <!-- impl: astrometricslib.api.processing.CalibrationCatalog.measure_frames --> <!-- impl: astrometricslib.api.processing.CalibrationCatalog.assess -->
+- **Acceptance criterion:** The ratio lies within 0.9 to 1.1.
+- **What to look at:** The `bias_noise` and `dark_noise` checks (the value is the ratio) and `measurements['noise_adu']`.
+- **Our result:** Code: commit 07894ef1 (tip of `134-integration`). ASI 533MM Pro, 20 biases per setting, pair noise from up to 9 pairs: 4.84 to 4.86 ADU RMS at offsets 10 to 50 (within 1% of the profile's 4.88 ADU) and 1.58 ADU at offset 0, where clipping removes the noise. Nikon D5300: 1.51 ADU at ISO 100 and 7.19 at ISO 800 (the profile holds no read noise for the Nikon, so its noise checks report `not_checked`). A dark's pair noise grew to 9 ADU at 120 s from flickering hot pixels. The stored metric `frame.neighbor_noise_adu` is the standard deviation of the difference of pixels two columns apart, divided by the square root of 2; on the first measurement's frames it read 4.83 ADU on ASI biases (a median-based version read 4.19, 13% low, because the sensor writes steps of 4 ADU) and 7.65 on Nikon ISO 800 (6% above the pair value). The limit was chosen after seeing this library, and no held-out data exists.
+- **Verdict:** Not judged. The limit was chosen after seeing this library, and no held-out data exists.
+- **Limits:** The neighbor estimator includes fixed column patterns that a pair of frames cancels; they are small on the ASI 533 and larger on the Nikon, where the check is not run.
+- **To tune for your setup:** Measure the read noise of each setting you use with `CalibrationCatalog.measure_sensor_noise` and save it to the profile.
+- **Regenerate with:** `CalibrationCatalog.measure_frames(force=True)` then `CalibrationCatalog.assess`.
+- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/test_calibration_assessment.py`.
+- **Raw record:** Kept outside the repository, in the validation folder of issue 134 under `calibration_checks/`: `frames.jsonl` (one line per frame), `groups.jsonl` (per setting group), `match.jsonl` and `flats.jsonl`.
+
+### STK-50
+
+**Light striking a dark frame**
+
+- **Claim:** A light leak adds a smooth pattern to a dark frame, and the master dark then subtracts that pattern from every light. A dark whose large-scale pattern exceeds the bias frames' at the same setting by more than two value steps was struck by light.
+- **Settings it supports:**
+  - code constant `VALUE_STEP_ALLOWANCE` = 2 value steps in `pipelines/stacking/pre_processing/calibration_assessment.py` (changing it means editing the code). Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.calibration_assessment.VALUE_STEP_ALLOWANCE -->
+- **Status:** Partly measured. 13 of 13 flagged frames were real on inspection, but misses are known and the limit is untested on new frames.
+- **Data you need:** Bias and dark frames at the same setting, and one dark you know is struck by light as a positive control.
+- **Procedure:**
+  1. Measure the bias and dark frames.
+  2. Look at the dark frames the `dark_light_leak` check names, and at some just below the limit.
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  astro.processing.calibration.measure_frames()
+  for health in astro.processing.calibration.assess("dark", camera_id="ZWO ASI 533MM Pro"):
+      print(health.row_key, health.status, health.summary)
+      for check in health.checks:
+          print("   ", check.name, check.status.value, check.measured_value, check.limit)
+  ```
+
+  `CalibrationCatalog.measure_frames` measures and stores the frames, and `CalibrationCatalog.assess` judges each set from the stored rows. <!-- impl: astrometricslib.api.processing.CalibrationCatalog.measure_frames --> <!-- impl: astrometricslib.api.processing.CalibrationCatalog.assess -->
+- **Acceptance criterion:** Every flagged frame shows a pattern a light leak would make, and a deliberately struck frame is flagged.
+- **What to look at:** The `dark_light_leak` check (the value is the excess over the bias range in value steps) and `measurements['block_range_adu']`.
+- **Our result:** Code: commit 07894ef1 (tip of `134-integration`). The check flagged 13 of 438 Nikon darks and 0 of 1,929 ZWO frames (the ZWO's largest range is 4 ADU, one step). I looked at all 13: one is a picture of a star field, one is 35% saturated, and 11 show a bright band with a hard edge across the upper half. They sit in four sets: ISO 800 at 180 s (8 of 43), 120 s (1 of 1) and 600 s (2 of 2), and ISO 100 at 300 s (2 of 20). No header shows it; all 13 are labeled as darks. The Nikon ISO 800 120 s set is one struck frame used as its whole master, matched to 176 lights in 8 targets. Of the 11 frames at range 8, 2 are weak leaks (one flagged, one missed by the ISO 800 limit) and 9 are clean; the clean ones show a sensor glow at the bottom and right edges, which sets how low the limit can go. Precision is 13 of 13 by eye (exact one-sided 95% lower bound 79%); recall is not known, because most frames at range 6 or below were not viewed. With imitated 3σ rejection a master changes by +1.0 ADU in the top half with the 8 struck 180 s frames (median) against +128 ADU for a plain mean; this was done in NumPy on every 16th pixel and has not been confirmed in Siril. The limit was chosen after seeing this library, and no held-out data exists.
+- **Verdict:** Not judged. The limit was chosen after seeing this library, and no held-out data exists.
+- **Limits:** A shape test for the hard edge would find more but would be specific to one camera. Struck frames are reported and not left out of masters (decision D3 of the plan). No ZWO frame was viewed.
+- **To tune for your setup:** The limit is written in value steps and the reference is your own bias frames, so it follows the camera. Test it with one deliberately lit dark.
+- **Regenerate with:** `CalibrationCatalog.measure_frames(force=True)` then `CalibrationCatalog.assess`.
+- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/test_calibration_assessment.py`.
+- **Raw record:** Kept outside the repository, in the validation folder of issue 134 under `calibration_checks/`: `frames.jsonl` (one line per frame), `groups.jsonl` (per setting group), `match.jsonl` and `flats.jsonl`.
+
+### STK-51
+
+**The level of a dark frame against its bias**
+
+- **Claim:** A dark frame sits at the bias level of its own setting, plus the dark current. A dark whose mean differs from the bias mean by more than two value steps plus the dark current allowance has a wrong level, or was calibrated already (a calibrated master reads near zero), and the subtraction would be wrong.
+- **Settings it supports:**
+  - code constant `VALUE_STEP_ALLOWANCE` = 2 value steps in `pipelines/stacking/pre_processing/calibration_assessment.py` (changing it means editing the code). Relation: confirmed by. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.calibration_assessment.VALUE_STEP_ALLOWANCE -->
+- **Status:** Partly measured. The largest difference among the clean frames sits well inside the limit; the limit flags 10 of the 13 struck darks and no others.
+- **Data you need:** Bias and dark frames at the same setting.
+- **Procedure:**
+  1. Measure the bias and dark frames.
+  2. Read the `dark_level` check of each dark set.
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  astro.processing.calibration.measure_frames()
+  for health in astro.processing.calibration.assess("dark", camera_id="ZWO ASI 533MM Pro"):
+      print(health.row_key, health.status, health.summary)
+      for check in health.checks:
+          print("   ", check.name, check.status.value, check.measured_value, check.limit)
+  ```
+
+  `CalibrationCatalog.measure_frames` measures and stores the frames, and `CalibrationCatalog.assess` judges each set from the stored rows. <!-- impl: astrometricslib.api.processing.CalibrationCatalog.measure_frames --> <!-- impl: astrometricslib.api.processing.CalibrationCatalog.assess -->
+- **Acceptance criterion:** The clean darks all pass, and a dark that was calibrated already is flagged.
+- **What to look at:** The `dark_level` check (the value is the excess in value steps) and `measurements['mean_level_adu']`.
+- **Our result:** Code: commit 07894ef1 (tip of `134-integration`). The largest difference among the clean darks was 3.15 ADU on the Nikon (limit 4) and 0.57 ADU on the ASI 533 (limit 8). The check flagged 10 of the 13 struck Nikon darks and no clean ones. Darks pooled within 0.1 s of exposure differ by about 0.1 ADU or less (21 batches, 617 lights). The limit was chosen after seeing this library, and no held-out data exists.
+- **Verdict:** Not judged. The limit was chosen after seeing this library, and no held-out data exists.
+- **Limits:** A dark with no bias frames measured at its setting reports `not_checked`.
+- **To tune for your setup:** Nothing to tune if the bias frames are measured.
+- **Regenerate with:** `CalibrationCatalog.measure_frames(force=True)` then `CalibrationCatalog.assess`.
+- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/test_calibration_assessment.py`.
+- **Raw record:** Kept outside the repository, in the validation folder of issue 134 under `calibration_checks/`: `frames.jsonl` (one line per frame), `groups.jsonl` (per setting group), `match.jsonl` and `flats.jsonl`.
+
+### STK-52
+
+**Saturated pixels in a dark frame**
+
+- **Claim:** A dark should have almost no pixel at the camera's saturation level. A frame with 0.1% or more of its pixels there was struck by light.
+- **Settings it supports:**
+  - code constant `CEILING_SHARE_LIMIT` = 0.001 in `pipelines/stacking/pre_processing/calibration_assessment.py` (changing it means editing the code). Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.calibration_assessment.CEILING_SHARE_LIMIT -->
+- **Status:** Partly measured. The separation is large (35% against at most 8.3e-5) but only one frame is on the bad side.
+- **Data you need:** Dark frames, and one deliberately lit dark as a positive control.
+- **Procedure:**
+  1. Measure the dark frames.
+  2. Read the `dark_ceiling_share` check of each dark set.
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  astro.processing.calibration.measure_frames()
+  for health in astro.processing.calibration.assess("dark", camera_id="ZWO ASI 533MM Pro"):
+      print(health.row_key, health.status, health.summary)
+      for check in health.checks:
+          print("   ", check.name, check.status.value, check.measured_value, check.limit)
+  ```
+
+  `CalibrationCatalog.measure_frames` measures and stores the frames, and `CalibrationCatalog.assess` judges each set from the stored rows. <!-- impl: astrometricslib.api.processing.CalibrationCatalog.measure_frames --> <!-- impl: astrometricslib.api.processing.CalibrationCatalog.assess -->
+- **Acceptance criterion:** No clean dark reaches the limit and a lit one does.
+- **What to look at:** The `dark_ceiling_share` check and `measurements['saturated_pixel_fraction_max']`.
+- **Our result:** Code: commit 07894ef1 (tip of `134-integration`). One Nikon dark has 35% of its pixels saturated (mean 10,491 ADU); the largest share among all other frames was 8.3e-5. The limit was chosen after seeing this library, and no held-out data exists.
+- **Verdict:** Not judged. The limit was chosen after seeing this library, and no held-out data exists.
+- **Limits:** One positive case. The shared metric `frame.saturated_pixel_fraction` counts pixels at the profile's saturation level, which sits at or below the clip ceiling the first measurement used. This check is part of the set health; the stack has no gate of its own for it.
+- **To tune for your setup:** None needed.
+- **Regenerate with:** `CalibrationCatalog.measure_frames(force=True)` then `CalibrationCatalog.assess`.
+- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/test_calibration_assessment.py`.
+- **Raw record:** Kept outside the repository, in the validation folder of issue 134 under `calibration_checks/`: `frames.jsonl` (one line per frame), `groups.jsonl` (per setting group), `match.jsonl` and `flats.jsonl`.
+
+### STK-53
+
+**How many frames a master needs**
+
+- **Claim:** A master built from N frames adds the noise of one frame divided by the square root of N to every light. When read noise dominates this is the worst case, a share 1/N of the noise variance: 33% at N = 3, 10% at N = 10, 3.3% at N = 30. For undithered frames the pattern does not average down. Copies of one file add no information, so a set counts a frame once however many files hold it.
+- **Settings it supports:** None. The limit of 10 different frames is a design estimate ([STK-D36](#design-estimates)); the minimum of 3 is [STK-D01](#design-estimates).
+- **Status:** Partly measured. The 1/N share is arithmetic and the copies were found by a checksum of the pixels; the limit of 10 is a design choice.
+- **Data you need:** Dark and bias sets, and the stored pixel checksum of each frame.
+- **Procedure:**
+  1. Measure the frames.
+  2. Read the `calibration_frame_count` check of each set.
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  astro.processing.calibration.measure_frames()
+  for health in astro.processing.calibration.assess("dark", camera_id="ZWO ASI 533MM Pro"):
+      print(health.row_key, health.status, health.summary)
+      for check in health.checks:
+          print("   ", check.name, check.status.value, check.measured_value, check.limit)
+  ```
+
+  `CalibrationCatalog.measure_frames` measures and stores the frames, and `CalibrationCatalog.assess` judges each set from the stored rows. <!-- impl: astrometricslib.api.processing.CalibrationCatalog.measure_frames --> <!-- impl: astrometricslib.api.processing.CalibrationCatalog.assess -->
+- **Acceptance criterion:** No set holds copies, and a set under 10 different frames is named.
+- **What to look at:** `unique_frame_count` against `frame_count` of each set.
+- **Our result:** Code: commit 07894ef1 (tip of `134-integration`). 49 copies found by a checksum of the pixels: the ASI 533 offset-0, -12 C, 30 s darks hold 98 files and 49 unique frames, because each file is in both a `0.0/30.0` and an `800/30.0` folder (that camera has no gain 800 frames in its headers; the index files them correctly by header). Sets under 3 frames: Nikon 800/120 s (1), 800/600 s (2), 1600/20 s (2) and ASI offset 10/300 s (1), covering 218 Nikon lights and 1 ZWO light. Thin sets (under 10): ASI offset 0, -3 C slot, 2 s (9 frames), 21 ZWO lights. The bias count that matters for flats depends on the flat level: master bias noise on a bright ASI flat at N = 20 is 1.08 ADU against about 29,000 ADU (0.004%), but the Nikon Apertura flats have only about 500 ADU above the pedestal, where N = 89 gives 0.15% (a design estimate that it stay under 0.16%).
+- **Verdict:** Not judged. The limit was chosen after seeing this library, and no held-out data exists.
+- **Limits:** A frame with no stored checksum counts as unique. The files are not moved or removed by the library; that is for you to do.
+- **To tune for your setup:** Raise the limit to 33 frames for a 3% share, which is stricter than the data needs.
+- **Regenerate with:** `CalibrationCatalog.measure_frames(force=True)` then `CalibrationCatalog.assess`.
+- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/test_calibration_assessment.py` and `astrometricslib/pipelines/stacking/test/test_stack_calibration_health.py`.
+- **Raw record:** Kept outside the repository, in the validation folder of issue 134 under `calibration_checks/`: `frames.jsonl` (one line per frame), `groups.jsonl` (per setting group), `match.jsonl` and `flats.jsonl`.
+
+### STK-54
+
+**Dark current of the ASI 533MM Pro**
+
+- **Claim:** At about -10 C, gain 0 and offset 10, the dark current of the ASI 533MM Pro is 0.0020 ADU per second (0.0016 e-/s), far below read noise for any exposure up to several minutes.
+- **Settings it supports:**
+  - code constant `DARK_CURRENT_ALLOWANCE_ADU_PER_SECOND` = 0.002 in `pipelines/stacking/pre_processing/calibration_assessment.py` (changing it means editing the code). Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.calibration_assessment.DARK_CURRENT_ALLOWANCE_ADU_PER_SECOND -->
+- **Status:** Partly measured. Eight exposure groups at one temperature and setting; no fit error was computed.
+- **Data you need:** Dark frames at one temperature and setting over a range of exposures.
+- **Procedure:**
+  1. Measure the dark frames.
+  2. Fit the mean level of each exposure group against the exposure.
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  astro.processing.calibration.measure_frames()
+  for health in astro.processing.calibration.assess("dark", camera_id="ZWO ASI 533MM Pro"):
+      print(health.row_key, health.status, health.summary)
+      for check in health.checks:
+          print("   ", check.name, check.status.value, check.measured_value, check.limit)
+  ```
+
+  `CalibrationCatalog.measure_frames` measures and stores the frames, and `CalibrationCatalog.assess` judges each set from the stored rows. <!-- impl: astrometricslib.api.processing.CalibrationCatalog.measure_frames --> <!-- impl: astrometricslib.api.processing.CalibrationCatalog.assess -->
+- **Acceptance criterion:** The fitted rate is far below the read noise over the exposures you use.
+- **What to look at:** `measurements['mean_level_adu']` of each dark set against its exposure.
+- **Our result:** Code: commit 07894ef1 (tip of `134-integration`). Offset 10, about -10 C, 2 to 120 s (8 groups of 30 frames; each group mean good to about 0.01 ADU): 0.0020 ADU/s, or 0.0016 e-/s. Adding the one 300 s frame gives 0.0014 ADU/s, so the range is 0.0011 to 0.0016 e-/s. In 120 s this is 0.24 ADU. A step of +0.40 ADU appears between 1 s and 2 s (394.34 to 394.74) and row banding falls from about 1.8 to 1.2 ADU there; it may be a readout mode change, the cause is not recorded, and the 0.1 s exposure match never pools across it. Persistent pixels above 25 ADU (offset 0, 10-frame sample, central crop) at about -10 C and about 0 C: 3.0e-5 and 2.7e-4 at 60 s, 1.9e-4 and 7.6e-4 at 120 s, 7.3e-4 and 1.4e-3 at 300 s.
+- **Verdict:** Not judged. The limit was chosen after seeing this library, and no held-out data exists.
+- **Limits:** One camera, one temperature at a non-clipped offset. The allowance is used for every camera because it is below one value step for exposures under about 2,000 s. Hot pixels and dark current are recorded and have no limit: no failing case was seen.
+- **To tune for your setup:** Measure your own rate at the temperatures you use; the allowance matters only for exposures over about 2,000 s.
+- **Regenerate with:** `CalibrationCatalog.measure_frames(force=True)` then `CalibrationCatalog.assess`.
+- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/test_calibration_assessment.py`.
+- **Raw record:** Kept outside the repository, in the validation folder of issue 134 under `calibration_checks/`: `frames.jsonl` (one line per frame), `groups.jsonl` (per setting group), `match.jsonl` and `flats.jsonl`.
+
+### STK-55
+
+**Temperature of the dark against the lights**
+
+- **Claim:** Hot pixels grow with temperature, so a dark has to be taken near the temperature of the lights. A batch of lights whose temperature moves by more than the dark's tolerance of 3 C is matched badly by any one dark, and the batch mean can hide the drift.
+- **Settings it supports:**
+  - code constant `DEFAULT_DARK_TEMPERATURE_TOLERANCE_C` = 3.0 in `drivers/calibration_library.py`, used here for the spread of the lights too (changing it means editing the code). Relation: sanity check only. <!-- impl: astrometricslib.drivers.calibration_library.DEFAULT_DARK_TEMPERATURE_TOLERANCE_C -->
+- **Status:** Design estimate. The growth of hot pixels with temperature supports having a limit, not the value 3 C; only two temperatures exist in the library.
+- **Data you need:** Dark frames at several temperatures at one non-clipped setting, and lights whose temperature drifts.
+- **Procedure:**
+  1. Measure the frames.
+  2. Read the `light_temperature_spread` gate of a stack, and the ratio of persistent pixels at two temperatures.
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  astro.processing.calibration.measure_frames()
+  for health in astro.processing.calibration.assess("dark", camera_id="ZWO ASI 533MM Pro"):
+      print(health.row_key, health.status, health.summary)
+      for check in health.checks:
+          print("   ", check.name, check.status.value, check.measured_value, check.limit)
+  ```
+
+  `CalibrationCatalog.measure_frames` measures and stores the frames, and `CalibrationCatalog.assess` judges each set from the stored rows. <!-- impl: astrometricslib.api.processing.CalibrationCatalog.measure_frames --> <!-- impl: astrometricslib.api.processing.CalibrationCatalog.assess -->
+- **Acceptance criterion:** The spread at which the stack's negative-pixel warning or noise worsens is known.
+- **What to look at:** The `light_temperature_spread` gate (the value is the widest span in degrees C).
+- **Our result:** Code: commit 07894ef1 (tip of `134-integration`). The ratio of persistent pixels above 25 ADU between about 0 C and about -10 C: 9 at 60 s, 4 at 120 s and 1.9 at 300 s (offset 0, 10-frame sample). 10 batches (146 lights) are more than 3 C from their dark by the batch mean; the largest gaps are Vega 5 s at 10.0 C and Arcturus 30 s at 8.0 C. Another 9 batches (227 lights) drift more than 3 C inside the batch, for example Arcturus 0.5 s (59 lights, -10.7 to -2.9 C). The cooler's -10 C is 0.5 C from the edge of a slot at -10.5 C, and 98 indexed frames (49 unique) fall past it.
+- **Verdict:** Not judged. The limit was chosen after seeing this library, and no held-out data exists.
+- **Limits:** Only two temperatures were measured, so 3 C cannot be derived from the data.
+- **To tune for your setup:** Take offset-10 darks at two more temperatures and compare the stack noise; the limit is in `DEFAULT_DARK_TEMPERATURE_TOLERANCE_C`.
+- **Regenerate with:** `CalibrationCatalog.measure_frames(force=True)` then `CalibrationCatalog.assess`.
+- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/test_stack_calibration_health.py`.
+- **Raw record:** Kept outside the repository, in the validation folder of issue 134 under `calibration_checks/`: `frames.jsonl` (one line per frame), `groups.jsonl` (per setting group), `match.jsonl` and `flats.jsonl`.
+
+### STK-56
+
+**Bias frames and temperature**
+
+- **Claim:** On the ASI 533MM Pro the bias level depends on the sensor temperature by only 0.076 ADU per degree, so no temperature limit is needed for biases.
+- **Settings it supports:** None.
+- **Status:** Measured. One set of 20 biases taken while the camera cooled down.
+- **Data you need:** Bias frames taken over a range of sensor temperatures at one setting.
+- **Procedure:**
+  1. Measure the biases.
+  2. Fit the mean level against the sensor temperature.
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  astro.processing.calibration.measure_frames()
+  for health in astro.processing.calibration.assess("bias", camera_id="ZWO ASI 533MM Pro"):
+      print(health.row_key, health.status, health.summary)
+      for check in health.checks:
+          print("   ", check.name, check.status.value, check.measured_value, check.limit)
+  ```
+
+  `CalibrationCatalog.measure_frames` measures and stores the frames, and `CalibrationCatalog.assess` judges each set from the stored rows. <!-- impl: astrometricslib.api.processing.CalibrationCatalog.measure_frames --> <!-- impl: astrometricslib.api.processing.CalibrationCatalog.assess -->
+- **Acceptance criterion:** The slope over the temperatures you use is small against a value step.
+- **What to look at:** `measurements['mean_level_adu']` against `frame.sensor_temperature_degc` of each frame.
+- **Our result:** Code: commit 07894ef1 (tip of `134-integration`). 20 biases at gain 0, offset 10, from -10.3 to -0.5 C: the level follows temperature (r = 0.994) but changes by only 0.75 ADU over 9.8 C, or 0.076 ADU per degree. One set, one camera.
+- **Verdict:** Not judged. The limit was chosen after seeing this library, and no held-out data exists.
+- **Limits:** One set during a cooldown; the Nikon records no sensor temperature at all (438 frames).
+- **To tune for your setup:** Repeat on your camera if you use a wide temperature range.
+- **Regenerate with:** `CalibrationCatalog.measure_frames(force=True)` then `CalibrationCatalog.assess`.
+- **Guarded by tests:** None; the bias check has no temperature term.
+- **Raw record:** Kept outside the repository, in the validation folder of issue 134 under `calibration_checks/`: `frames.jsonl` (one line per frame), `groups.jsonl` (per setting group), `match.jsonl` and `flats.jsonl`.
+
 ## Design estimates
 
 These tuned values have not been measured. Each is a reasoned choice; the last column says how you could measure it on your data.
@@ -2185,3 +2535,4 @@ These tuned values have not been measured. Each is a reasoned choice; the last c
 | STK-D33 | Line pattern of the odd–even halves: fewest usable pixels for a row or column mean; lines in the running mean taken off; fewest lines for a scatter | 100; 31; 20 | code constants `MINIMUM_PIXELS_PER_LINE`, `RUNNING_MEAN_LINES`, `MINIMUM_LINES` in `pipelines/stacking/post_processing/odd_even_apertures.py` <!-- impl: astrometricslib.pipelines.stacking.post_processing.odd_even_apertures.MINIMUM_PIXELS_PER_LINE --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.odd_even_apertures.RUNNING_MEAN_LINES --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.odd_even_apertures.MINIMUM_LINES --> | Banding is missed (the running mean too short removes it) or a gradient is read as banding (too long). | Add a known band of a few lines to a stack's halves and check that the sum's row scatter rises over the difference's. Code uncommitted on `134-group-weights-nikon` after 817c7da4 (#134, 2026-10-26); unit tests only, not run on the real library. |
 | STK-D34 | Depth limits: Gaia match radius for a reference star; companion magnitude margin; fewest stars for the zero point; detection thresholds; surface-brightness box | 3 arcsec; 3 mag; 3; 5σ and 3σ; 10 arcsec | code constants `STAR_MATCH_RADIUS_ARCSEC`, `CONTAMINATION_MAGNITUDE_MARGIN`, `MINIMUM_ZERO_POINT_STARS`, `POINT_SOURCE_SIGMA`, `SURFACE_BRIGHTNESS_SIGMA`, `SURFACE_BRIGHTNESS_BOX_ARCSEC` in `pipelines/stacking/post_processing/depth_limits.py` (the thresholds and the box follow mission practice, Beckwith et al. 2006 and the Euclid preparation XVI paper) <!-- impl: astrometricslib.pipelines.stacking.post_processing.depth_limits.STAR_MATCH_RADIUS_ARCSEC --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.depth_limits.CONTAMINATION_MAGNITUDE_MARGIN --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.depth_limits.MINIMUM_ZERO_POINT_STARS --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.depth_limits.POINT_SOURCE_SIGMA --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.depth_limits.SURFACE_BRIGHTNESS_SIGMA --> | Stated biases: the 94% aperture reads the point-source depth about 0.07 mag shallow; the zero point carries up to 0.03 mag from a contaminating companion; the band is Gaia G with no color term; without a measured exponent the depth is optimistic. A wrong match radius gives a wrong star or no star. | Inject stars of known magnitude into a stack and measure the share recovered at the stated depth, and compare the zero point with a photometry run on the same field. Code uncommitted on `134-group-weights-nikon` after 817c7da4 (#134, 2026-10-26); unit tests only, not run on the real library. |
 | STK-D35 | Odd–even bias test: width of the Gaussian that smooths a real frame's sky; radius kept around flagged pixels | 3 px; 4 px | code constants `SMOOTHING_SIGMA_PX`, `KEEP_RADIUS_PX` in `pipelines/stacking/odd_even_bias.py` <!-- impl: astrometricslib.pipelines.stacking.odd_even_bias.SMOOTHING_SIGMA_PX --> <!-- impl: astrometricslib.pipelines.stacking.odd_even_bias.KEEP_RADIUS_PX --> | Too narrow a smoothing leaves real noise behind (9.4% of the white noise, under 1% of the variance, at 3 px; the added noise is lowered by that amount); too wide flattens real sky structure. A star core smoothed away breaks registration. | Run the bias test with 2, 3 and 4 px and check that the ratio does not move. Code uncommitted on `134-group-weights-nikon` after 817c7da4 (#134, 2026-10-26); unit tests only, not run on the real library. |
+| STK-D36 | Fewest different frames in a dark or bias master before it counts as thin | 10 | code constant `THIN_SET_FRAME_COUNT` in `pipelines/stacking/pre_processing/calibration_assessment.py` (STK-53) <!-- impl: astrometricslib.pipelines.stacking.pre_processing.calibration_assessment.THIN_SET_FRAME_COUNT --> | A master that adds up to a tenth of its noise variance to every light is let through, or a good master is flagged. | Build masters from 5, 10, 20 and 33 frames and compare the stack noise with `QualityRecords.measure_stack(path, compare_to="previous")`. |

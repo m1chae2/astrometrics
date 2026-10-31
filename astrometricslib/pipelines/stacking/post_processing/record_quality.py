@@ -54,6 +54,8 @@ from astrometricslib.pipelines.shared.registration_record import build_registrat
 from astrometricslib.pipelines.stacking.metrics import (
     GATE_METRIC_BY_NAME,
     STACKING_APERTURE_SET_NUMBER,
+    STACKING_BIAS_UNIQUE_FRAME_COUNT,
+    STACKING_DARK_UNIQUE_FRAME_COUNT,
     STACKING_DURATION_S,
     STACKING_EFFECTIVE_FRAME_COUNT,
     STACKING_EFFECTIVE_TIME_READ_NOISE_S,
@@ -188,6 +190,23 @@ _GATE_TIERS: dict[str, tuple[LimitTier, str | None]] = {
     "flat_noise": (LimitTier.PHYSICAL_BUDGET, "STK-05"),
     "calibration_metadata": (LimitTier.GEOMETRY, None),
     "calibration_frame_count": (LimitTier.GEOMETRY, None),
+    # STK-48 to STK-51, STK-55: the dark and bias limits are partly measured
+    # on one library and not tested on held-out data, so they are design
+    # estimates.
+    "dark_level": (LimitTier.DESIGN_ESTIMATE, "STK-51"),
+    "dark_noise": (LimitTier.DESIGN_ESTIMATE, "STK-49"),
+    "dark_light_leak": (LimitTier.DESIGN_ESTIMATE, "STK-50"),
+    "bias_level": (LimitTier.DESIGN_ESTIMATE, "STK-48"),
+    "bias_noise": (LimitTier.DESIGN_ESTIMATE, "STK-49"),
+    # STK-47: no calibration frame in the library has a zero share between 0
+    # and 72%, so any limit in that gap separates the two groups; the 0.1%
+    # figure follows the 2026-10-02 offset test.
+    "dark_zero_pixel_fraction": (LimitTier.VALIDATED_DATASET, "STK-47"),
+    "bias_zero_pixel_fraction": (LimitTier.VALIDATED_DATASET, "STK-47"),
+    # A rule of how the library selects darks: a light needs a dark within
+    # 0.1 s.
+    "dark_missing": (LimitTier.GEOMETRY, None),
+    "light_temperature_spread": (LimitTier.DESIGN_ESTIMATE, "STK-55"),
     # STK-20: the 5% value is a design choice inside a measured range.
     "exposure_group_linearity": (LimitTier.DESIGN_ESTIMATE, "STK-20"),
     "exposure_groups_combined": (LimitTier.GEOMETRY, None),
@@ -264,6 +283,14 @@ _INPUT_FIELDS: dict[str, tuple[str, str]] = {
         "the input quality was not assessed",
     ),
     "frames_quarantined": (STACKING_FRAMES_QUARANTINED, "the input quality was not assessed"),
+    "dark_unique_frame_count": (
+        STACKING_DARK_UNIQUE_FRAME_COUNT,
+        "the stack used no dark, or the dark frames' numbers were not measured",
+    ),
+    "bias_unique_frame_count": (
+        STACKING_BIAS_UNIQUE_FRAME_COUNT,
+        "the stack used no bias, or the bias frames' numbers were not measured",
+    ),
 }
 
 # Fields on `ExposureGroupSummary` that are plain numbers, with the reason

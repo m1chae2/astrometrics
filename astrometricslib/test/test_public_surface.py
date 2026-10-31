@@ -362,7 +362,8 @@ SUB_API_MEMBERS = {
         "tune_spectroscopy_calibration",
     },
     "processing.calibration": {
-        "assess_flats",
+        "assess",
+        "measure_frames",
         "measure_sensor_noise",
         "query",
         "reindex_frames",

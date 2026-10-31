@@ -227,7 +227,7 @@ describe('CalibrationLibraryPanel', () => {
         expect(screen.queryByRole('button', { name: 'Show darks' })).toBeNull();
         const table = screen.getByRole('table', { name: 'Darks' });
         const headers = within(table).getAllByRole('columnheader').map((header) => header.textContent);
-        expect(headers).toEqual(['Exposure', 'Offset', 'Count']);
+        expect(headers).toEqual(['Exposure', 'Offset', 'Temp', 'Count', 'Health']);
         expect(within(table).getAllByRole('row')).toHaveLength(3);
         expect(within(table).getAllByText('60 s')).toHaveLength(2);
         expect(screen.getByText('Darks:').nextSibling?.textContent).toBe('25');
@@ -283,8 +283,8 @@ describe('CalibrationLibraryPanel', () => {
         expect(keyWarnings).toHaveLength(0);
     });
 
-    /** A bias request highlights the Biases total. */
-    it('highlights the Biases total for a bias request', async () => {
+    /** A bias request opens the Biases table and highlights the matching row. */
+    it('shows the Biases table and highlights its row for a bias request', async () => {
         callBackendMock.mockImplementation(answerCalibration(['bias-a']));
         renderWithQuery(<CalibrationLibraryPanel />);
         await screen.findByText('Darks:');
@@ -294,7 +294,9 @@ describe('CalibrationLibraryPanel', () => {
             }));
         });
         await waitFor(() => expect(document.querySelectorAll('[data-highlighted="true"]').length).toBe(1));
-        expect(document.querySelector('[data-highlighted="true"]')?.textContent).toContain('Biases:');
+        expect(screen.getByRole('tab', { name: /Biases:/ }).getAttribute('aria-selected')).toBe('true');
+        expect(within(screen.getByRole('table', { name: 'Biases' })).getByText('30')).toBeTruthy();
+        expect(document.querySelector('[data-highlighted="true"]')?.textContent).toContain('30');
     });
 
     /** The loading state shows while the first read is pending. */

@@ -486,7 +486,16 @@ DECISIONS = {
         "actuate",
     ),
     "calibration_save": ToolDecision("withhold", "Writes the calibration index. The AI is read-only."),
-    "calibration_assess_flats": ToolDecision("keep", "Checks flats. Writes nothing."),
+    "calibration_assess": ToolDecision(
+        "keep",
+        "Judges the dark, bias or flat sets of the library from the stored numbers. "
+        "Flats are measured when asked. Writes nothing.",
+    ),
+    "calibration_measure_frames": ToolDecision(
+        "withhold",
+        "Writes the measured numbers of dark and bias frames to the quality store and their "
+        "stamps to the calibration index. The AI is read-only.",
+    ),
     "calibration_measure_sensor_noise": ToolDecision(
         "withhold",
         "With save on, it writes a measured gain and read noise into the camera profile in the "

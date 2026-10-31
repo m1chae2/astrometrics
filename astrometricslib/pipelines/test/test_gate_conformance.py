@@ -47,6 +47,20 @@ GATE_REGISTRY: dict[str, dict[str, frozenset[str]]] = {
         "calibration_metadata": ALL_THREE,
         # Not checked when no calibration master was applied.
         "calibration_frame_count": ALL_THREE,
+        # Not checked when the frames' numbers are not measured, or the camera
+        # profile or the bias frames give nothing to compare with.
+        "dark_level": ALL_THREE,
+        "dark_noise": ALL_THREE,
+        "dark_zero_pixel_fraction": ALL_THREE,
+        "dark_light_leak": ALL_THREE,
+        "bias_level": ALL_THREE,
+        "bias_noise": ALL_THREE,
+        "bias_zero_pixel_fraction": ALL_THREE,
+        # Not checked when the run did not say which calibration it applied.
+        "dark_missing": ALL_THREE,
+        # Not checked when the stack used no dark or the lights record no
+        # sensor temperature.
+        "light_temperature_spread": ALL_THREE,
         # Not checked for a single-exposure stack.
         "exposure_group_linearity": ALL_THREE,
         # Not checked when the stack has fewer than two exposure groups.

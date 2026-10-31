@@ -1834,6 +1834,8 @@ export interface StackingInputQuality {
   flatNoiseFraction?: number | null;
   flatSmoothingSigmaPx?: number | null;
   flatCalibrationIssues?: string[];
+  darkUniqueFrameCount?: number | null;
+  biasUniqueFrameCount?: number | null;
   calibrationMismatchFlags?: string[];
   isFlagged?: boolean;
   flagReasons?: string[];
@@ -3580,6 +3582,108 @@ export interface CalibrationQueryResult {
 }
 
 /**
+ * How good one set of dark, bias or flat frames is.
+ *
+ * One model for all three kinds. The checks are `GateResult` records, the
+ * same shape the stack's gates use, so a check that did not run
+ * (``not_checked``) is never mistaken for one that passed. A set is judged
+ * when it is asked for, from the numbers stored for each frame and the
+ * current limits; nothing judged is stored.
+ *
+ * Attributes
+ * ----------
+ * kind : `str`
+ * ``"dark"``, ``"bias"`` or ``"flat"``.
+ * row_key : `str`
+ * The key `CalibrationCatalog.query` gives the same set, so a display
+ * can join the two. Two flat sets of different telescopes can share a
+ * key.
+ * camera, gain, offset, binning
+ * The set's camera and settings.
+ * temperature_slot_c : `float` or `None`
+ * A dark's temperature slot.
+ * exposure_seconds : `float` or `None`
+ * A dark's exposure.
+ * telescope, filter : `str` or `None`
+ * A flat's telescope and filter.
+ * frame_count : `int`
+ * The files in the set.
+ * unique_frame_count : `int`
+ * The files with different pixels. Files not measured yet count as
+ * unique.
+ * measured_frame_count : `int`
+ * The files whose numbers are stored. Flats are not measured file by
+ * file, so this is 0 for them.
+ * status : `str`
+ * ``"good"`` (every check that ran passed), ``"warning"`` (one failed)
+ * or ``"not_checked"`` (no check could run).
+ * summary : `str`
+ * One plain sentence: the first problem, or that none was found, or why
+ * nothing was checked.
+ * checks : `list` [`GateResult`]
+ * One record per check.
+ * frames_of_concern : `list` [`FrameConcern`]
+ * The frames a check singled out, at most 25.
+ * measurements : `dict` [`str`, `float` or `None`]
+ * The numbers behind the checks, such as the mean level and the worst
+ * zero share.
+ * smoothing_sigma_pixels : `float` or `None`
+ * For a flat set, the blur the stacker would apply to its master.
+ */
+export interface CalibrationSetHealth {
+  kind: string;
+  rowKey: string;
+  camera: string;
+  gain: string;
+  offset: number;
+  binning?: string | null;
+  temperatureSlotC?: number | null;
+  exposureSeconds?: number | null;
+  telescope?: string | null;
+  filter?: string | null;
+  frameCount: number;
+  uniqueFrameCount: number;
+  measuredFrameCount?: number;
+  status: any;
+  summary: string;
+  checks?: GateResult[];
+  framesOfConcern?: FrameConcern[];
+  measurements?: Record<string, number | null>;
+  smoothingSigmaPixels?: number | null;
+}
+
+/**
+ * What one run of the dark and bias measuring job did.
+ *
+ * Attributes
+ * ----------
+ * frame_count : `int`
+ * The frames the run looked at.
+ * measured_count : `int`
+ * Frames read, measured and stored.
+ * unchanged_count : `int`
+ * Frames skipped because their file has not changed since it was
+ * measured.
+ * unreadable_count : `int`
+ * Frames that could not be read. The next run tries them again.
+ * failed_count : `int`
+ * Frames whose numbers could not be stored.
+ * rows_stored : `int`
+ * The new rows written to the quality store.
+ * notes : `list` [`str`]
+ * One plain sentence for each of the first failures.
+ */
+export interface CalibrationMeasurementReport {
+  frameCount: number;
+  measuredCount: number;
+  unchangedCount: number;
+  unreadableCount: number;
+  failedCount: number;
+  rowsStored: number;
+  notes?: string[];
+}
+
+/**
  * The short description of a target's current stack.
  *
  * It is read from the quality summary that the stacking stage saved with the
@@ -4665,6 +4769,21 @@ export enum NoiseEvidenceStatus {
 }
 
 /**
+ * One calibration frame that a check found fault with.
+ *
+ * Attributes
+ * ----------
+ * path : `str`
+ * The frame's file path.
+ * reason : `str`
+ * One plain sentence saying what is wrong with this frame.
+ */
+export interface FrameConcern {
+  path: string;
+  reason: string;
+}
+
+/**
  * A package placement request's starting disposition.
  */
 export enum StartTimeMode {
@@ -5361,6 +5480,7 @@ export const RPC_METHODS = [
   "images:last",
   "calibration:get_stats",
   "calibration:measure_sensor_noise",
+  "calibration:measure_frames",
   "mosaic:preview",
   "mosaic:create",
   "execution:list_sessions",
@@ -5389,6 +5509,7 @@ export const RPC_METHODS = [
   "history:live_session_status",
   "observatory:safety_status",
   "calibration:query",
+  "calibration:assess",
   "sequencer:get_queue",
   "sequencer:create_plan",
   "sequencer:add",

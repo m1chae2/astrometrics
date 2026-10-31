@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../.
 from astrometricslib import ErrorInfo, FilterType
 from astrometricslib.foundation.jobs.models import ProcessingJob, ProcessStatus
 from astrometricslib.models.applied_camera_profile import AppliedCameraProfile
+from astrometricslib.models.calibration_ingest import CalibrationMeasurementReport, CalibrationSetHealth
 from astrometricslib.models.calibration_inventory import CalibrationEntry, CalibrationStats
 from astrometricslib.models.catalog_queries import CalibrationQueryResult, OverlayStar, TargetStarCount
 from astrometricslib.models.measured_line_spread import MeasuredLineSpread
@@ -649,6 +650,8 @@ def render_types() -> str:
                 SafetyStatus,
                 CameraNoiseSetting,
                 CalibrationQueryResult,
+                CalibrationSetHealth,
+                CalibrationMeasurementReport,
                 StackSummary,
             ],
             written,

@@ -52,6 +52,12 @@ class StackingInputQuality(BaseModel):
     flat_noise_fraction: float | None = Field(default=None, alias="flatNoiseFraction")
     flat_smoothing_sigma_px: float | None = Field(default=None, alias="flatSmoothingSigmaPx")
     flat_calibration_issues: list[str] = Field(default_factory=list, alias="flatCalibrationIssues")
+    # How many different frames (copies counted once) the master dark and
+    # the master bias were built from. `None` when the stack used none of that
+    # kind, or the frames' numbers were not available. The thin-set limit is
+    # judged against these, so a changed limit needs no new stack.
+    dark_unique_frame_count: int | None = Field(default=None, alias="darkUniqueFrameCount")
+    bias_unique_frame_count: int | None = Field(default=None, alias="biasUniqueFrameCount")
     # Metadata differences between the lights and the calibration frames
     # (for example a different gain), one sentence each.
     calibration_mismatch_flags: list[str] = Field(default_factory=list, alias="calibrationMismatchFlags")

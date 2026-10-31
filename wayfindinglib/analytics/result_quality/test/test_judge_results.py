@@ -440,7 +440,7 @@ def test_a_stack_with_no_calibration_gate_rows_says_the_data_are_missing() -> No
     row = _row("stacking.flat_frame_count", 20.0, level="stack")
     (statement,) = _of_rule(_judge([row]), "retake_bad_calibration_set")
     assert statement.kind == StatementKind.INSUFFICIENT_DATA
-    assert "has no measurement" in statement.reason
+    assert "None of the 8 metrics" in statement.reason
 
 
 def test_a_gate_row_of_another_definition_version_is_not_used() -> None:

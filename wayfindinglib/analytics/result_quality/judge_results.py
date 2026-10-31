@@ -1167,7 +1167,16 @@ def judge_results(
             if optional_names and not optional_names & readings.keys():
                 # Every metric of the rule is optional, or the optional ones
                 # are all missing: the rule has nothing to read.
-                problems.extend(optional_problems)
+                names = ", ".join(problem.metric for problem in optional_problems[:2])
+                problems.append(
+                    _Problem(
+                        optional_problems[0].metric,
+                        f"None of the {len(optional_problems)} metrics this rule reads ({names}, ...) has a "
+                        "usable measurement for this capture setting. "
+                        f"{_how_to_get(optional_problems[0].metric)}",
+                        [row for problem in optional_problems for row in problem.rows],
+                    )
+                )
             if problems:
                 statements.append(_insufficient_statement(rule, capture_setting, problems))
                 continue

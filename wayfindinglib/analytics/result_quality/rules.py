@@ -530,7 +530,7 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         confidence=Confidence.DESIGN_ESTIMATE,
         wording="Retake the bad calibration set: {condition_text}. {advice_text}",
         plain_wording=(
-            "A set of dark or bias frames is not good enough to calibrate these pictures: "
+            "A set of dark or bias frames is likely not good enough to calibrate these pictures: "
             "{plain_condition_text}. {plain_advice_text}"
         ),
         produces="checklist_item",

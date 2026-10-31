@@ -150,7 +150,7 @@ class FakeAstrometrics:
         self.odd_even_difference_calls: list[str] = []
         self.odd_even_difference_failures: set[str] = set()
         self.processing = SimpleNamespace(
-            measure_odd_even_difference_noise=self.measure_odd_even_difference_noise,
+            measure_noise=self.measure_noise,
             process_target=self.process_target,
             stack=self.stack,
             stack_subset=self.stack_subset,
@@ -213,7 +213,7 @@ class FakeAstrometrics:
             raise RuntimeError(f"the earlier nights of {target.id} broke")
         return SimpleNamespace()
 
-    def measure_odd_even_difference_noise(self, target: Any, **keywords: Any) -> SimpleNamespace:
+    def measure_noise(self, target: Any, **keywords: Any) -> SimpleNamespace:
         """Record one odd–even difference request, or fail it on request.
 
         Returns

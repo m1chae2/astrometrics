@@ -1343,14 +1343,14 @@ Every Python example assumes the library is installed and configured with your o
   from astrometricslib import Astrometrics
 
   astro = Astrometrics()
-  astro.processing.measure_noise_growth("M 57")
+  astro.processing.measure_noise("M 57")
   for row in astro.quality.query(metric="stacking.empty_aperture_noise_normalized", target_id="M 57"):
       print(row.subject.subject_id, row.value, row.uncertainty)
   ```
 
   To see the placement, call `analyze_faint_sources` <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_placement.analyze_faint_sources --> on the stack's pixels (the distance of every pixel to the nearest flagged pixel, the mask's noise scale at each smoothing, and the flagged and excluded shares) and `place_empty_apertures` <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_placement.place_empty_apertures --> for the positions; to repeat the bias test, call `place_empty_apertures` on pure noise with and without the mask. To repeat the paired test, call `measure_stack_noise` on the library stack (with `depth=StackDepth(frames, effective_frames)`) and on each subset (with `may_choose_apertures=False`), then `paired_noise_ratio` <!-- impl: astrometricslib.pipelines.stacking.post_processing.difference_noise.paired_noise_ratio --> on their `aperture_sums`, reference fluxes and `aperture_identity`. Delete the target's `quality_apertures.json` (or call `reset_apertures`) so the next stack chooses new apertures with the current rule. A set is also replaced by itself when a library stack has twice the effective frame count of the stack that chose it; the new set has a new identity, and the stored rows of the old and new sets are never compared.
 
-  `ProcessingPipelines.measure_noise_growth` <!-- impl: astrometricslib.api.processing.ProcessingPipelines.measure_noise_growth --> splits the library stack's frames by night and stacks subsets with `stack_frame_subset` <!-- impl: astrometricslib.pipelines.stacking.subset_stack.stack_frame_subset -->. The noise comes from `measure_stack_noise`. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.measure_stack_noise -->
+  `ProcessingPipelines.measure_noise` <!-- impl: astrometricslib.api.processing.ProcessingPipelines.measure_noise --> splits the library stack's frames by night and stacks subsets with `stack_frame_subset` <!-- impl: astrometricslib.pipelines.stacking.subset_stack.stack_frame_subset -->. The noise comes from `measure_stack_noise`. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.measure_stack_noise -->
   The aperture set a stack used is stored as the metric `stacking.aperture_set_number` (definition version 1) on every noise stack subject, so that a later comparison of two stacks can tell whether they share one set. The set's identity is the text `v<version>-<12 hex digits>`. It is stored as the whole number `file_version * 2**48 + int(hex, 16)`, which is exact below `2**53` (the version is capped at 31). `aperture_identity_to_number` <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.aperture_identity_to_number --> and `aperture_identity_from_number` <!-- impl: astrometricslib.pipelines.stacking.post_processing.empty_apertures.aperture_identity_from_number --> convert both ways, and `aperture_set_measurement` <!-- impl: astrometricslib.pipelines.stacking.post_processing.record_quality.aperture_set_measurement --> builds the row. The number has no size or direction and is only compared for equality. Stacks made before this row existed have none, and it cannot be added later: the identity was kept only in the text of a row's reason. A pair of stacks with one of them is therefore not checkable by the forecast check ([WAY-70](wayfinding.md#way-70)). Status: design estimate. Only unit tests have run it (round trip, the 2**53 limit, one row per noise stack); no real stack has been re-measured with it.
 
 - **Acceptance criterion:** Each subset's noise is within 5% of the 1/sqrt(n) prediction made from the full stack.
@@ -1428,20 +1428,20 @@ Every Python example assumes the library is installed and configured with your o
 - **Status:** Design estimate. The growth series of one night is measured in [STK-36](#stk-36); leaving a night out has been run on synthetic frames only, and no real target with several nights has been run. The comparison with the library stack uses the paired error (apertures resampled together), the night's share is stored as assumed when the library stack's member list is, and each leave-out stack stores the ratio its own effective frame count predicts (`stacking.subset_expected_noise_ratio`). None of these has been run on real frames of several nights.
 - **Data you need:** A target with frames from at least two observing nights, stacked once, with its aperture file beside the stacks.
 - **Procedure:**
-  1. Call `measure_night_contributions` for the target.
+  1. Call `measure_noise` with `kind="night_contributions"` for the target.
   2. Read `stacking.noise_without_night` and `stacking.night_weight_fraction` for each night.
 
   ```python
   from astrometricslib import Astrometrics
 
   astro = Astrometrics()
-  astro.processing.measure_night_contributions("M 13")
+  astro.processing.measure_noise("M 13", kind="night_contributions")
   for name in ("stacking.noise_without_night", "stacking.night_weight_fraction"):
       for row in astro.quality.query(metric=name, target_id="M 13"):
           print(name, row.subject.subject_id, row.value)
   ```
 
-  `ProcessingPipelines.measure_night_contributions` <!-- impl: astrometricslib.api.processing.ProcessingPipelines.measure_night_contributions --> runs `run_night_contributions`. <!-- impl: astrometricslib.pipelines.stacking.subset_noise_run.run_night_contributions -->
+  `ProcessingPipelines.measure_noise` <!-- impl: astrometricslib.api.processing.ProcessingPipelines.measure_noise --> runs `run_night_contributions`. <!-- impl: astrometricslib.pipelines.stacking.subset_noise_run.run_night_contributions -->
 - **Acceptance criterion:** Not recorded (set after the first real result).
 - **What to look at:** The noise without the night against the noise of the full stack (a higher noise without the night means the night helped), and the night's weight share.
 - **Our result:** Synthetic test only (`test_subset_noise_run.py`: a stacker with noise 6/sqrt(n); the two-night subset has 0.71 times the one-night subset's noise, within 30%). Not yet run on a real target.
@@ -1473,7 +1473,7 @@ Every Python example assumes the library is installed and configured with your o
   astro = Astrometrics()
   astro.processing.record_frame_measurements("M 57")
   astro.processing.stack("M 57", force=True)
-  astro.processing.measure_noise_growth("M 57")
+  astro.processing.measure_noise("M 57")
   for name in (
       "stacking.empty_aperture_noise_stack_unit",
       "stacking.expected_sky_noise_stack_unit",
@@ -1766,7 +1766,7 @@ Every Python example assumes the library is installed and configured with your o
 - **Status:** Partly measured. One synthetic grid (ten cases, six stacks each), one injection of the implied-noise formulas on frames of unequal noise and weight, and one real target, one night, one camera. The real stack has no independent truth, so only its agreement with the model is known; the injections show the difference and the formulas follow the injected noise, not that the M 57 value is right.
 - **Data you need:** A target with a library stack of at least 16 light frames of one setting, stacked by the current code (so the stack's apertures, noise sums, frame weights and registration reference frame are recorded), and the raw frames on disk.
 - **Procedure:**
-  1. Run the job (or `measure_noise_growth`, which runs it by default). Nothing starts it after a stack; a caller does. It splits the library stack's frames by capture time into the odd and the even places, puts the registration reference frame into both halves and hands it to the stacker as the frame to line up with (a half cannot choose its own; the job still refuses when a half reports another one), stacks each half (normal settings, no edge trim, no quarantine), subtracts them and measures the noise of the difference in the stack's stored apertures. Pixels that either half does not cover are left out. The halves are deleted afterwards.
+  1. Run the job (or `measure_noise` with the default kind `growth`, which runs it by default). Nothing starts it after a stack; a caller does. It splits the library stack's frames by capture time into the odd and the even places, puts the registration reference frame into both halves and hands it to the stacker as the frame to line up with (a half cannot choose its own; the job still refuses when a half reports another one), stacks each half (normal settings, no edge trim, no quarantine), subtracts them and measures the noise of the difference in the stack's stored apertures. Pixels that either half does not cover are left out. The halves are deleted afterwards.
   2. Read the nine rows it stores on the library stack and the result it returns.
   3. Compare the library stack's random noise that the difference implies with the model's expected noise and with the empty-aperture noise.
 
@@ -1774,7 +1774,7 @@ Every Python example assumes the library is installed and configured with your o
   from astrometricslib import Astrometrics
 
   astro = Astrometrics()
-  astro.processing.measure_odd_even_difference_noise("M 57")
+  astro.processing.measure_noise("M 57", kind="odd_even_difference")
   for name in (
       "stacking.odd_even_difference_noise_stack_unit",
       "stacking.odd_even_difference_noise_normalized",
@@ -1793,7 +1793,7 @@ Every Python example assumes the library is installed and configured with your o
           print(name, row.value, row.status, row.reason)
   ```
 
-  `ProcessingPipelines.measure_odd_even_difference_noise` <!-- impl: astrometricslib.api.processing.ProcessingPipelines.measure_odd_even_difference_noise --> calls `run_odd_even_difference_noise` <!-- impl: astrometricslib.pipelines.stacking.odd_even_difference_run.run_odd_even_difference_noise -->. The split is `split_into_halves` <!-- impl: astrometricslib.pipelines.stacking.odd_even_difference_run.split_into_halves -->, each half is stacked by `stack_frame_subset` <!-- impl: astrometricslib.pipelines.stacking.subset_stack.stack_frame_subset --> without the edge trim, and the difference is measured by `measure_difference_noise` <!-- impl: astrometricslib.pipelines.stacking.post_processing.difference_noise.measure_difference_noise -->, which puts the stored apertures on the first half's stars and sums the difference image. The library stack's random noise that the difference implies is `full_stack_noise_equivalent` <!-- impl: astrometricslib.pipelines.stacking.odd_even_difference_run.full_stack_noise_equivalent --> from `difference_variance_factor` <!-- impl: astrometricslib.pipelines.stacking.odd_even_difference_run.difference_variance_factor -->. It is returned in the result and not stored; every part of it is. The version with each frame's own noise is `model_variance_ratio` <!-- impl: astrometricslib.pipelines.stacking.odd_even_difference_run.model_variance_ratio --> and `full_stack_noise_equivalent_from_model` <!-- impl: astrometricslib.pipelines.stacking.odd_even_difference_run.full_stack_noise_equivalent_from_model -->. The grid injection is `injection.py`, the injection of the implied-noise formulas is `implied_noise.py` and the real run `real_m57.py` in the session's scratch folder (`science/halfdiff/`).
+  `ProcessingPipelines.measure_noise` <!-- impl: astrometricslib.api.processing.ProcessingPipelines.measure_noise --> calls `run_odd_even_difference_noise` <!-- impl: astrometricslib.pipelines.stacking.odd_even_difference_run.run_odd_even_difference_noise -->. The split is `split_into_halves` <!-- impl: astrometricslib.pipelines.stacking.odd_even_difference_run.split_into_halves -->, each half is stacked by `stack_frame_subset` <!-- impl: astrometricslib.pipelines.stacking.subset_stack.stack_frame_subset --> without the edge trim, and the difference is measured by `measure_difference_noise` <!-- impl: astrometricslib.pipelines.stacking.post_processing.difference_noise.measure_difference_noise -->, which puts the stored apertures on the first half's stars and sums the difference image. The library stack's random noise that the difference implies is `full_stack_noise_equivalent` <!-- impl: astrometricslib.pipelines.stacking.odd_even_difference_run.full_stack_noise_equivalent --> from `difference_variance_factor` <!-- impl: astrometricslib.pipelines.stacking.odd_even_difference_run.difference_variance_factor -->. It is returned in the result and not stored; every part of it is. The version with each frame's own noise is `model_variance_ratio` <!-- impl: astrometricslib.pipelines.stacking.odd_even_difference_run.model_variance_ratio --> and `full_stack_noise_equivalent_from_model` <!-- impl: astrometricslib.pipelines.stacking.odd_even_difference_run.full_stack_noise_equivalent_from_model -->. The grid injection is `injection.py`, the injection of the implied-noise formulas is `implied_noise.py` and the real run `real_m57.py` in the session's scratch folder (`science/halfdiff/`).
 
   The formula. If every frame had the same noise sigma, a half with weight shares a (adding up to 1) has the variance sigma^2 x sum(a^2) = sigma^2 / N_eff, and the difference of the odd half (shares a) and the even half (shares b) has sigma^2 x F, with F = sum((a - b)^2) over all frames (a frame in one half only has 0 in the other). The library stack has sigma^2 / N_eff,library. So its random noise is the difference divided by sqrt(N_eff,library x F). For two disjoint halves of N equal frames F = 2 / N and N_eff,library = 2N, so the factor is 1 / 2. A frame in both halves lowers F by twice the product of its two shares. Frames differ in noise and the star-width weights are not noise weights, so this is an estimate. The second version lets frames differ: with the frame's variance v = (sky electrons + read noise squared) / gain squared in ADU squared, from its stored sky rate, exposure and camera profile (the model of [STK-38](#stk-38)), R = sum((a - b)^2 v) / sum(s^2 v), where s is the frame's share in the library stack, and the library stack's random noise is the difference divided by sqrt(R). With equal v, R = N_eff,library x F. Both are stored as parts: the two shares of the shared frame (so F = 1 / N_eff,odd + 1 / N_eff,even - 2 a b can be rebuilt from the counts), F, R, and the reference flux that the normalized difference divides by.
   The job also stores `stacking.odd_even_difference_aperture_set_number` (definition version 1) on the difference rows, in the same encoding as `stacking.aperture_set_number` in [STK-36](#stk-36). It records which aperture set measured the difference, so that the forecast check can compare it only with a stack that used the same set. When the apertures cannot be read, the row is stored as missing with the reason. It is a tenth row beside the nine listed above. Status: design estimate; unit tests only.
@@ -1988,7 +1988,7 @@ Every Python example assumes the library is installed and configured with your o
   from astrometricslib import Astrometrics
 
   astro = Astrometrics()
-  result = astro.processing.measure_odd_even_difference_noise("M 57")
+  result = astro.processing.measure_noise("M 57", kind="odd_even_difference")
   print(
       result.shared_fine_scale_variance_ratio,
       result.walking_noise_correlation_excess,

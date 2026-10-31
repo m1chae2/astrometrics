@@ -717,7 +717,7 @@ def _odd_even_difference_note(astrometrics: Astrometrics, target: Any, since: da
         ratio = _noise_ratio(astrometrics, target.id, since)
         ratio_text = "no ratio" if ratio is None else f"ratio {ratio:.2f}"
         print(f"  [{target.id}] odd–even difference run ({ratio_text})")
-        astrometrics.processing.measure_odd_even_difference_noise(target)
+        astrometrics.processing.measure_noise(target, kind="odd_even_difference")
     except Exception as odd_even_difference_error:
         # The library stack is already made and recorded; the measurement is
         # an extra. Whatever its cause, it is noted and the run goes on.

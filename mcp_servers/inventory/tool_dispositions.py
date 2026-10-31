@@ -599,26 +599,17 @@ DECISIONS = {
         "so it reads the stored numbers with quality_query instead.",
         "change-data",
     ),
-    "processing_measure_odd_even_difference_noise": ToolDecision(
-        "withhold",
-        "Stacks two halves of a target's frames into the target's _subsets folder (about one library "
-        "stack's time in all), subtracts them, and writes the noise of the difference into the quality "
-        "database. The halves are deleted afterwards, and the library stack, its previews and its "
-        "records are never changed. The AI is read-only, so it reads the stored numbers with "
-        "quality_query instead.",
-        "change-data",
-    ),
     **dict.fromkeys(
         (
             "processing_stack_subset",
-            "processing_measure_noise_growth",
-            "processing_measure_night_contributions",
+            "processing_measure_noise",
         ),
         ToolDecision(
             "withhold",
             "Stacks some of a target's frames into the target's _subsets folder (never over the library "
             "stack, its previews or its records) and writes the noise of each result into the quality "
-            "database. It costs one stack for each subset, so it takes minutes. The AI is read-only, so "
+            "database. It costs one stack for each subset, so it takes minutes (kind=odd_even_difference "
+            "stacks two halves, about one library stack's time in all). The AI is read-only, so "
             "it reads the stored numbers with quality_query instead.",
             "change-data",
         ),

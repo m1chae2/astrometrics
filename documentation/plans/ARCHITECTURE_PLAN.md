@@ -449,8 +449,6 @@ same change.
 Some code handles older data that cannot be upgraded, or formats that other software defines. It
 stays:
 
-- `astrometricslib/pipelines/shared/staleness.py` treats a result with no recorded provenance as
-  "unknown". A migration cannot recreate provenance that was never recorded.
 - `astrometricslib/drivers/image.py` reads the FITS `RADECSYS` keyword.
 - `wayfindinglib/drivers/indi/filter_wheel_controller.py` falls back to the INDI text property.
 - `astrometricslib/pipelines/stacking/stage.py` handles Siril `r_` sequences.

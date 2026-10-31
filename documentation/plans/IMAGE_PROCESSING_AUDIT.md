@@ -71,7 +71,7 @@ stacking flow and the noise measurement, the code that grew fastest in #134.
 | SD-8 | Coupling | `shared/star_catalog_queries` with `shared/star_overlay` | The only import cycle, half-broken by a lazy import. | Medium | PLAN (small) |
 | ORC-6 | Duplication | `stack_request.check_one_camera`, `camera_selection.ensure_single_camera` | Two single-camera checks run in sequence, with different error classes. | Low | PLAN P7 |
 | ORC-7, SD-11 | Dead code | see section 4 | Functions with no caller anywhere, and no test or only their own test. | Low | EASY E1 |
-| SD-10, SD-12, SD-13 | Dead code | `staleness.py` (3), `calibration_library.is_*_compatible` (2), `frame_grouping.select_frames_for_configuration`, `detection_confidence.significance_to_confidence` | No production caller, but tested, and one documented: may be planned API. | Low | Decision |
+| SD-10, SD-12, SD-13 (removed; see D1) | Dead code | `staleness.py` (3), `calibration_library.is_*_compatible` (2), `frame_grouping.select_frames_for_configuration`, `detection_confidence.significance_to_confidence` | No production caller, but tested, and one documented: may be planned API. | Low | Decision |
 | SD-14 | Coupling | many drivers | Drivers read the configuration directly. | Low | Decision |
 | PP-11, PP-12 | Structure | `metrics.py` (2,863 lines), `flat_match.py` (2,045 lines) | Large but not tangled: `metrics.py` is a declarative table and `flat_match.py` is a cohesive set of steps. | Low | Leave |
 
@@ -152,3 +152,27 @@ before-and-after comparison on the copy (identical stored rows on a few targets)
 | P11 | Provenance schema | `_init_db` as an ordered list of migration steps. | Small |
 | D1 | Decision: tested but unused functions | Keep `staleness.py`, the two calibration compatibility checks, `select_frames_for_configuration` and `significance_to_confidence` as planned API, or remove them. | Decided 2026-10-30: removed. |
 | D2 | Decision: configuration in drivers | Whether drivers may read the configuration, or take settings when built. | Decided 2026-10-30: a driver takes a configuration object when built, defaulting to the shared one, and does not read the configuration inside functions. Applied to the Siril driver in P3 and to other drivers when next changed. |
+
+### Outcome of the plan (2026-10-31, issue 134)
+
+Every item above is done, each with the limits below. Stored rows and stack files were compared on the
+copy of the library before and after; the row comparisons are the evidence for "no change".
+
+- **P1, P5:** done as written.
+- **P2:** done. `_stack_frames_guarded` is a list of named steps over `StackRun`. `stage.py` is still about
+  1,000 lines, because `_build_stack_quality_summary` stayed there (many tests patch it).
+- **P3:** done. `ImageProcessing` is built from the layers as a chain of base classes, so tests that patch its
+  methods keep working. A stored copy of the Siril scripts pins the output.
+- **P4:** partly. The steps are split into choosing the solution, resolving the apertures and taking the sums,
+  but mode flags remain, not the three entry points the plan named.
+- **P6:** partly. Only the builder of the expected-noise rows is shared.
+- **P7, P8, P9, P11:** done. P7's single-camera check is one function that still raises two error types, to keep
+  what callers see. P9 changes one thing: two stacks in one process no longer share a lock-wait total.
+- **P10:** partly. 13 files moved to the helpers. The direct `fits.open` calls left need the open file object, or
+  handle errors differently, or read from memory.
+- **D1:** the unused functions were removed.
+- **D2:** only two places read the configuration inside a function; both now take it. `siril_process_lock` still
+  falls back to the shared configuration when it is given none.
+
+The same issue also made the public API consistent (`API_RENAMES_134.md`), and added a record of who holds a job
+slot. Giving up on a stack now stops that stack's Siril, and the cleanup no longer kills the program running it.

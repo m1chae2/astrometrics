@@ -182,7 +182,6 @@ The File Browser toolbar and table have these controls.
 | Header check box | Ticks or clears every listed frame |
 | Row check box | Ticks one frame. Shift-click ticks a range |
 | Column headings Filename, Date, Camera, Filter and Exp (s) | Click a heading to sort by it |
-| FWHM column | Star width of the frame, in pixels, when known |
 | Status column | Shows Included, Rejected or Outlier |
 | Row click | Shows that frame in the FITS Viewer |
 | Row right-click | Turns the Outlier flag on or off. Use it for a frame with cosmic ray hits or a satellite streak |

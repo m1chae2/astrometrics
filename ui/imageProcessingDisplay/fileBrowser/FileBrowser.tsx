@@ -11,7 +11,6 @@ export interface FileItem {
     exposure: string;
     filter: string;
     date: string;
-    fwhmPx?: number | null;
 }
 
 export interface FileBrowserProps {
@@ -272,14 +271,13 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                             <th onClick={() => handleSort('exposure')} className="file-browser__sortable-header">
                                 Exp (s) {getSortIndicator('exposure')}
                             </th>
-                            <th>FWHM</th>
                             <th>Status</th>
                         </tr>
                     </thead>
                     <tbody>
                         {sortedFiles.length === 0 && (
                             <tr>
-                                <td colSpan={8} className="no-data">
+                                <td colSpan={7} className="no-data">
                                     <EmptyState message="No files for this target." />
                                 </td>
                             </tr>
@@ -336,7 +334,6 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                                     <td>{file.camera}</td>
                                     <td>{file.filter}</td>
                                     <td>{file.exposure}</td>
-                                    <td>{file.fwhmPx !== undefined && file.fwhmPx !== null ? `${Number(file.fwhmPx).toFixed(2)}px` : '—'}</td>
                                     {/* REQ: IMG-2.7: The display SHALL visually distinguish "Rejected" frames from "Included" frames. */}
                                     <td className={rejected ? 'status-rejected' : isOutlier ? 'status-warning' : 'status-included'}>
                                         {rejected ? 'Rejected' : isOutlier ? '⚠️ Outlier' : 'Included'}

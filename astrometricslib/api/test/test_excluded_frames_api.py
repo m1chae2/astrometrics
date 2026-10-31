@@ -14,6 +14,7 @@ import pytest
 from astrometricslib.api.processing import ProcessingPipelines
 from astrometricslib.api.quality import QualityRecords
 from astrometricslib.foundation.enums import FilterType
+from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.quarantine_path import QUARANTINE_FOLDER_NAME
 from astrometricslib.pipelines.stacking.pre_processing import frame_quarantine
@@ -278,20 +279,13 @@ def test_restore_with_apply_does_not_rescan_when_nothing_moved(
     pipelines._targets.reindex_frames.assert_not_called()
 
 
-def test_frame_quality_can_include_the_frames_already_set_aside(
-    quality: QualityRecords, tmp_path: Path
-) -> None:
-    """``include=["excluded"]`` adds the manifest's frames to a preview."""
+def test_frame_quality_no_longer_has_an_excluded_section(quality: QualityRecords, tmp_path: Path) -> None:
+    """`include=["excluded"]` is refused; `set_aside_frames` is the listing."""
     folder = camera_folder(tmp_path)
-    write_manifest(folder, [manifest_entry(folder, "frame_003.fits")])
     target = make_target(folder, 12)
 
-    with patch(FINDER, side_effect=with_measurement({})):
-        preview = quality.measure_frames(
-            target, kind="quarantine_preview", include=["excluded"], register_job=False
-        )
-
-    assert [frame.file for frame in preview.excluded] == ["frame_003.fits"]
+    with pytest.raises(InvalidArgumentError):
+        quality.measure_frames(target, kind="quarantine_preview", include=["excluded"], register_job=False)
 
 
 def test_target_folder_names_cover_the_spellings_a_folder_may_have() -> None:

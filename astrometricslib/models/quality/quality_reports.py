@@ -26,7 +26,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from astrometricslib.models.quality.excluded_frames import SetAsideFrame
 from astrometricslib.models.quality.stack_comparison import StackComparison
 
 __all__ = [
@@ -55,8 +54,6 @@ class RawFrameCheckReport(BaseModel):
     # For star width, star count and sky level: how far each moved across
     # the newest frames, with a sentence in ``alerts`` for each worrying drift.
     trends: dict[str, Any] = Field(default_factory=dict)
-    # The frames the stacker has set aside, when ``include=["excluded"]``.
-    excluded: list[SetAsideFrame] | None = None
 
 
 class InputQualityReport(BaseModel):
@@ -80,7 +77,6 @@ class InputQualityReport(BaseModel):
     trends: dict[str, Any] = Field(default_factory=dict)
     frames: list[dict[str, Any]] = Field(default_factory=list)
     note: str = ""
-    excluded: list[SetAsideFrame] | None = None
 
 
 class SpectralFrameCheckReport(BaseModel):

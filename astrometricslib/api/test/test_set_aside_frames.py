@@ -154,6 +154,51 @@ def test_a_folder_without_stored_rows_is_listed_with_its_source(
     assert not (tmp_path / "astrometrics.db").exists()
 
 
+def test_a_frame_without_a_manifest_entry_is_listed_but_not_restored(
+    quality: QualityRecords, tmp_path: Path
+) -> None:
+    """Restore moves manifest frames only; the listing flags the rest."""
+    from astrometricslib.api.processing import ProcessingPipelines
+    from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import restore_quarantined_frames
+
+    folder = _camera_folder(tmp_path)
+    quarantine = _excluded_folder(folder, ["a.fits", "b.fits"], ["a.fits"])
+    other = _camera_folder_sibling(folder, "Camera2")
+    loose = _excluded_folder(other, ["c.fits"], [])
+
+    records = {record.file: record for record in quality.set_aside_frames(Target(id="M 1"))}
+    assert records["a.fits"].restorable is True
+    assert records["a.fits"].restore_note == ""
+    for name in ("b.fits", "c.fits"):
+        assert records[name].restorable is False
+        assert "cannot be restored automatically" in records[name].restore_note
+
+    pipelines = ProcessingPipelines(
+        SimpleNamespace(get_frames_path=lambda: tmp_path / "frames"), None, targets=MagicMock()
+    )
+    report = pipelines.restore_excluded_frames(Target(id="M 1"), apply=True)
+
+    assert report.restored_count == 1
+    assert (folder / "a.fits").exists()
+    assert (quarantine / "b.fits").exists()
+    assert (loose / "c.fits").exists()
+    assert restore_quarantined_frames(str(other)) == []
+    assert (loose / "c.fits").exists()
+
+
+def _camera_folder_sibling(folder: Path, name: str) -> Path:
+    """Make a second camera folder next to a first one.
+
+    Returns
+    -------
+    sibling : `pathlib.Path`
+        The new folder.
+    """
+    sibling = folder.parent / name
+    sibling.mkdir()
+    return sibling
+
+
 def test_a_stored_row_gives_the_reason_exposure_and_setting(quality: QualityRecords, tmp_path: Path) -> None:
     """A stored action wins over the manifest and gives the exposure."""
     folder = _camera_folder(tmp_path)

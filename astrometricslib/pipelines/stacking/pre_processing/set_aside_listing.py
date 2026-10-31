@@ -178,6 +178,13 @@ def build_set_aside_records(
                     exposure_seconds=exposure_seconds,
                     capture_setting_id=capture_setting_id,
                     moved_at=moved_at,
+                    restorable=entry is not None,
+                    restore_note=(
+                        ""
+                        if entry is not None
+                        else "No excluded_frames.json entry records where this frame came from, "
+                        "so it cannot be restored automatically. Move it back by hand."
+                    ),
                 )
             )
     return records

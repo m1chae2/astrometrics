@@ -53,7 +53,7 @@ from astrometricslib.pipelines.shared.api_arguments import (
 __all__ = ["QualityRecords"]
 
 FRAME_QUALITY_KINDS = ("input_quality", "raw_check", "quarantine_preview", "spectral")
-FRAME_QUALITY_SECTIONS = ("fwhm", "spectra", "excluded")
+FRAME_QUALITY_SECTIONS = ("fwhm", "spectra")
 _FRAME_QUALITY_ARGUMENTS = {
     "input_quality": (
         "remeasure",
@@ -80,9 +80,9 @@ _FRAME_QUALITY_ARGUMENTS = {
     "spectral": ("first_file", "last_file", "since", "until", "exposure_seconds", "predict_exposure_seconds"),
 }
 _FRAME_QUALITY_SECTIONS_BY_KIND = {
-    "input_quality": ("fwhm", "spectra", "excluded"),
-    "raw_check": ("spectra", "excluded"),
-    "quarantine_preview": ("excluded",),
+    "input_quality": ("fwhm", "spectra"),
+    "raw_check": ("spectra",),
+    "quarantine_preview": (),
     "spectral": (),
 }
 
@@ -512,13 +512,13 @@ class QualityRecords:
           ``camera_id``, ``limit``, ``filter_name``, ``first_file``,
           ``last_file``, ``since``, ``until``, ``trend_frames``,
           ``trend_threshold_percent``; ``include`` may hold ``"fwhm"``,
-          ``"spectra"`` and ``"excluded"``.
+          and ``"spectra"``.
         - ``"raw_check"``: ``folder_path`` or ``target``, ``limit``,
           ``filter_name``, ``first_file``, ``last_file``, ``since``,
           ``until``, ``trend_frames``, ``trend_threshold_percent``;
-          ``include`` may hold ``"spectra"`` and ``"excluded"``.
+          ``include`` may hold ``"spectra"``.
         - ``"quarantine_preview"``: ``target`` (needed) and ``limit``;
-          ``include`` may hold ``"excluded"``.
+          it takes no ``include`` section.
         - ``"spectral"``: ``target`` (needed), ``limit``, ``first_file``,
           ``last_file``, ``since``, ``until``, ``exposure_seconds`` and
           ``predict_exposure_seconds``; it takes no ``include`` section.
@@ -551,8 +551,8 @@ class QualityRecords:
             Optional sections. ``"fwhm"`` also measures star width (about 50
             times slower per frame). ``"spectra"`` also measures
             spectroscopy frames, whose smeared stars are flagged as trailing.
-            ``"excluded"`` lists the frames the stacker has already set aside
-            for the target.
+            To list the frames the stacker has already set aside, use
+            `set_aside_frames`.
         remeasure : `bool`, optional
             Measure again frames that already have stored values.
         camera_id : `str`, optional
@@ -637,8 +637,6 @@ class QualityRecords:
             raise InvalidArgumentError(
                 f"kind={kind!r} needs a target" + (" or a folder_path." if kind == "raw_check" else ".")
             )
-        if "excluded" in sections and resolved is None:
-            raise InvalidArgumentError('include=["excluded"] needs a target.')
         limit = _clamp(limit, 1, 100 if kind == "spectral" else 300)
         selection = make_frame_selection(
             filter_name, first_file, last_file, since, until, kind == "spectral" or "spectra" in sections
@@ -677,12 +675,6 @@ class QualityRecords:
                     trend_frames,
                     trend_threshold_percent,
                 )
-            if "excluded" in sections:
-                from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
-                    list_set_aside_frames,
-                )
-
-                report.excluded = list_set_aside_frames(str(self._config.get_frames_path()), resolved.id)
             return report
 
     def set_aside_frames(self, target: str | Target) -> list[SetAsideFrameRecord]:

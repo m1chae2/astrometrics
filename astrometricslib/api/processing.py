@@ -1637,7 +1637,7 @@ class ProcessingPipelines:
         saves it. The next stack may set the same frames aside again. To
         keep them in the stack, turn off ``quarantine_bad_frames_enabled`` in
         the configuration first. To only read the list, use
-        ``Astrometrics.quality.measure_frames(include=["excluded"])``.
+        ``Astrometrics.quality.set_aside_frames``.
 
         Parameters
         ----------

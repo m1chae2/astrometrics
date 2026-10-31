@@ -42,6 +42,7 @@ Rules the cleanup follows:
 | `processing.calibration.measure_sensor_noise` | `filter_type`, `temperature` | `filter_name`, `temperature_c` |
 | `targets.reindex_frames` | `filter_type` | `filter_name` |
 | `processing.process_target(photometry={...})` | option `filter_type` | option `filter_name` |
+| `quality.measure_frames` | `include=["excluded"]` (and the `excluded` field of its reports) | Removed, with no alias. `quality.set_aside_frames(target)` is the one listing of set-aside frames; each record now has `restorable` and `restore_note` |
 | `quality.measure_frames` | (none) | new `exposure_seconds` and `predict_exposure_seconds`, for `kind="spectral"` only |
 | `processing.measure_noise` | (none) | `include` takes `"night_contributions"` and `"odd_even_difference"`. Left out, `kind="growth"` includes `"odd_even_difference"`; pass `include=[]` for neither |
 | `quality.query` | (none) | new `limit` (default none) and `offset` |

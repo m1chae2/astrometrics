@@ -54,6 +54,8 @@ Now look at the result.
 
 Below Total Exposure is an Integration Goal row. Pick how deep you want the image: Quick look, Standard or Deep. The line under it says whether you have reached the goal and, if not, about how much more integration time it needs. The time appears once the app has checked its estimate against a second night of this target; until then the line asks you to image the target on another night. Hover over the small info mark to see the goal and your current depth in magnitudes. Some objects, such as planets, have no integration goal, and the row says so.
 
+Below the goal is a Stack Summary. It tells you how the stack was made. It lists the frames used out of those submitted, the frames set aside before stacking, and the frames left out while stacking, with the reason for each. It also shows the share of pixels rejected and the star width in pixels against the width the input frames predict. The Flags line repeats any flag the stacking step raised, or says that none was raised. A table lists each exposure length: how many of its frames were used, whether it clipped, how far it was moved to line up in pixels, and why it was left out of the final image, if it was. A target with no saved summary shows a short note instead. The summary only reports; it does not rate the stack beyond those flags.
+
 ## Step 4: Plate solve and measure the stars
 
 The next job plate solves your frames and then measures the brightness of every star in each frame.

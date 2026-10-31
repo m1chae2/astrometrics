@@ -117,6 +117,7 @@ READ_ONLY_METHODS = frozenset({
     "observatory:list_cameras",
     "observatory:safety_status",
     "plan:get",
+    "processing:stack_summary",
     "plan:current_session",
     "plan:list_packages",
     "plan:package_for_target",

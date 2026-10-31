@@ -124,6 +124,8 @@ RPC_METHODS: tuple[str, ...] = (
     "processing:delete_job",
     "processing:jobs_for_target",
     "processing:job_log_tail",
+    # A target's current stack in one short answer (a read).
+    "processing:stack_summary",
     # Measures a target's light frames and stores the numbers (a write).
     "quality:record_frame_measurements",
     # Stacks some of a target's frames apart from its library stack and

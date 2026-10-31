@@ -58,6 +58,7 @@ from astrometricslib.models.quality.metric_spec import (
     MetricSummary,
     UncertaintyKind,
 )
+from astrometricslib.models.quality.quality_reports import StackSummary
 from astrometricslib.models.quality.quality_summary import (
     AsteroidDetectionPipelineQualityMetrics,
     AsteroidDetectionQualitySummary,
@@ -648,6 +649,7 @@ def render_types() -> str:
                 SafetyStatus,
                 CameraNoiseSetting,
                 CalibrationQueryResult,
+                StackSummary,
             ],
             written,
         )

@@ -295,6 +295,7 @@ export interface ActionRegistry {
     // Stack some of a target's frames apart from its library stack and measure the noise of each result.
     "processing:measure_noise": { payload: { target_id: string; kind?: 'growth' | 'night_contributions' | 'odd_even_difference'; maximum_steps?: number; include?: Array<'night_contributions' | 'odd_even_difference'>; keep_halves?: boolean }; response: { started: boolean; target_id: string } };
     "processing:job_log_tail": { payload: { job_id: string; lines?: number }; response: string[] };
+    "processing:stack_summary": { payload: { target: string; kind?: 'imaging' | 'spectral' }; response: import('../types/backendTypes').StackSummary };
 
     // Quality measurements: the stored ones, and what each metric means.
     // Parameter names are snake_case (target_id, not targetId); the router
@@ -525,6 +526,7 @@ const IDEMPOTENT_READ_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
     'advisory:tonight',
     'advisory:result',
     'advisory:depth_goal',
+    'processing:stack_summary',
     'history:nights',
     'history:night_quality',
     'history:target_changes',

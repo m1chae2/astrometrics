@@ -3580,6 +3580,34 @@ export interface CalibrationQueryResult {
 }
 
 /**
+ * The short description of a target's current stack.
+ *
+ * It is read from the quality summary that the stacking stage saved with the
+ * stack, so nothing is measured again.
+ */
+export interface StackSummary {
+  target_id: string;
+  kind?: any;
+  stack_path?: string | null;
+  made_at: string;
+  frames_submitted: number;
+  frames_stacked: number;
+  frames_skipped: number;
+  skipped_reasons?: Record<string, any>[];
+  frames_set_aside_before_stacking?: number | null;
+  sessions?: Record<string, any>[];
+  rejected_pixel_fraction?: number | null;
+  rejected_fraction_flagged?: boolean | null;
+  star_width_px?: Record<string, any>;
+  saturated_pixel_fraction?: number | null;
+  zero_pixel_fraction?: number | null;
+  exposure_groups?: Record<string, any>[];
+  flagged?: boolean;
+  flag_reasons?: string[];
+  calibration_mismatches?: number;
+}
+
+/**
  * One observation session's overall lifecycle state.
  *
  * `SUSPENDED` means an unsafe verdict halted advancement without ending
@@ -5279,6 +5307,7 @@ export const RPC_METHODS = [
   "processing:delete_job",
   "processing:jobs_for_target",
   "processing:job_log_tail",
+  "processing:stack_summary",
   "quality:record_frame_measurements",
   "processing:measure_noise",
   "quality:query",

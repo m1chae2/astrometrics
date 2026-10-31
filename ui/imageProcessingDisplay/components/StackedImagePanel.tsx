@@ -6,6 +6,7 @@
 import React, { useEffect, useState } from 'react';
 import { fetchTargetFrameHeader } from '../../common/services/targetService';
 import { DepthGoalRow } from './DepthGoalRow';
+import { StackSummaryPanel } from './StackSummaryPanel';
 
 interface StackedImagePanelProps {
     path: string;
@@ -135,6 +136,8 @@ export const StackedImagePanel: React.FC<StackedImagePanelProps> = ({
                 </div>
             )}
             <DepthGoalRow targetId={targetId} refreshKey={depthGoalRefreshKey} />
+            {path && <StackSummaryPanel targetId={targetId} kind="imaging" refreshKey={depthGoalRefreshKey} />}
+            {spectralPath && <StackSummaryPanel targetId={targetId} kind="spectral" refreshKey={depthGoalRefreshKey} />}
         </div>
     );
 };

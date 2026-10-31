@@ -14,6 +14,10 @@ Several terms recur below:
 - A camera profile is the stored description of one camera model (see `camera_profile_store.py`), including its clip ceiling: the pixel value at which the sensor saturates.
 - The stacking README is `../pipelines/stacking/README.md`.
 
+## How a driver gets its settings
+
+A driver that needs the configuration takes an `AppConfiguration` when it is built and keeps it as `self.config`. If none is passed, it uses the shared one. Its methods read `self.config` and never fetch the shared configuration themselves. A module-level driver function that needs settings takes an optional `config` argument in the same way.
+
 ## What each file is for
 
 - `image.py`, `fits_access.py` — `AstrometricsImage`, the main data container for a loaded astronomical image, and the lower-level functions that read pixel data and metadata out of a FITS file.

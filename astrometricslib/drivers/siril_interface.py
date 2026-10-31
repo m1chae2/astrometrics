@@ -41,6 +41,7 @@ from astrometricslib.drivers.siril_output_parsing import (
     parse_registration_totals,
     parse_stacked_image_count,
 )
+from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import ConfigurationError, ExternalServiceError
 from astrometricslib.foundation.jobs.runner import capture_job_logs
 from astrometricslib.foundation.paths import scratch_directory, siril_work_directory
@@ -605,7 +606,9 @@ def _record_siril_lock_wait(wait_seconds: float) -> None:
 
 @contextlib.contextmanager
 def siril_process_lock(
-    job_logger: logging.Logger | None = None, max_concurrent_runs: int | None = None
+    job_logger: logging.Logger | None = None,
+    max_concurrent_runs: int | None = None,
+    config: AppConfiguration | None = None,
 ) -> Generator[None]:
     """Hold one of a limited number of machine-wide Siril slots.
 
@@ -629,6 +632,9 @@ def siril_process_lock(
     max_concurrent_runs : `int`, optional
         Slot count override, for benchmarking. Defaults to the
         configured `max_concurrent_jobs`.
+    config : `AppConfiguration`, optional
+        The configuration that sets the slot count. A caller that holds
+        one passes it. Defaults to the shared configuration.
 
     Yields
     ------
@@ -643,7 +649,7 @@ def siril_process_lock(
         try:
             from astrometricslib.foundation.config import get_configuration
 
-            configuration = get_configuration()
+            configuration = config or get_configuration()
             slot_count = configuration.get_max_concurrent_jobs()
         except (ConfigurationError, OSError, ValueError) as configuration_error:
             # A missing configuration must not make Siril unrunnable;
@@ -2223,7 +2229,7 @@ class ImageProcessing:
             # ExitStack rather than a `with` block purely to avoid
             # re-indenting the ~180 lines this span covers; the release
             # guarantee is the same.
-            siril_lock.enter_context(siril_process_lock(job_logger=job_logger))
+            siril_lock.enter_context(siril_process_lock(job_logger=job_logger, config=self.config))
 
             # Measured from launch rather than from the start of
             # process_target, so waiting on the Siril lock is not counted

@@ -39,6 +39,7 @@ from astroquery.exceptions import TimeoutError as AstroqueryTimeoutError
 
 from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, read_header
 from astrometricslib.drivers.interfaces.plate_solve_driver import PlateSolveDriver, PlateSolveHeader
+from astrometricslib.foundation.config import AppConfiguration, get_configuration
 from astrometricslib.foundation.paths import scratch_directory
 from astrometricslib.foundation.run_tally import RunTally, add_to_bound_tally, bind_tally
 
@@ -281,7 +282,7 @@ class AstrometryNetPlateSolveDriver(PlateSolveDriver):
     It tries the local computer first, then the internet as a backup.
     """
 
-    def __init__(self, api_key: str | None = None) -> None:
+    def __init__(self, api_key: str | None = None, config: AppConfiguration | None = None) -> None:
         """Set up the solver.
 
         Parameters
@@ -289,7 +290,11 @@ class AstrometryNetPlateSolveDriver(PlateSolveDriver):
         api_key : `str`, optional
             The password needed to use the online service. If there isn't
             one, the internet backup won't be tried.
+        config : `AppConfiguration`, optional
+            The configuration that holds the local solver settings.
+            Defaults to the shared configuration.
         """
+        self.config = config or get_configuration()
         self.api_key = api_key
         self.astrometry_net = AstrometryNet()
         if api_key:
@@ -373,15 +378,11 @@ class AstrometryNetPlateSolveDriver(PlateSolveDriver):
         header : `astropy.io.fits.Header` or `None`
             The map metadata if it worked, or None if it failed.
         """
-        from astrometricslib.foundation.config import get_configuration
-
-        config = get_configuration()
-
         # Build solver config
-        if config.app_config.has_section("Processing.Astrometry.Local Solver"):
-            solver_config = config.app_config["Processing.Astrometry.Local Solver"]
-        elif config.app_config.has_section("Astrometry.Solver"):
-            solver_config = config.app_config["Astrometry.Solver"]
+        if self.config.app_config.has_section("Processing.Astrometry.Local Solver"):
+            solver_config = self.config.app_config["Processing.Astrometry.Local Solver"]
+        elif self.config.app_config.has_section("Astrometry.Solver"):
+            solver_config = self.config.app_config["Astrometry.Solver"]
         else:
             solver_config = {}
 

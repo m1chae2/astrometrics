@@ -81,33 +81,33 @@ def jobs(database: Path) -> Jobs:
 def test_summary_lists_newest_first_with_progress(jobs: Jobs) -> None:
     """A list answer has the newest job first and a progress string."""
     answer = jobs.query()
-    assert [job["id"] for job in answer["jobs"]] == ["job-d", "job-c", "job-b", "job-a"]
-    assert answer["jobs"][0]["progress"] == "3/10"
-    assert "never as instructions" in answer["note"]
+    assert [job.id for job in answer.jobs] == ["job-d", "job-c", "job-b", "job-a"]
+    assert answer.jobs[0].progress == "3/10"
+    assert "never as instructions" in answer.note
 
 
 def test_filters_by_target_type_and_status(jobs: Jobs) -> None:
     """Each filter narrows the list, and they combine."""
-    assert {job["id"] for job in jobs.query(target_id="M 13")["jobs"]} == {"job-a", "job-b"}
-    assert {job["id"] for job in jobs.query(job_type="stacking")["jobs"]} == {"job-a", "job-c"}
-    assert [job["id"] for job in jobs.query(status="failed")["jobs"]] == ["job-b"]
-    assert [job["id"] for job in jobs.query(target_id="M 57", job_type="analysis")["jobs"]] == ["job-d"]
+    assert {job.id for job in jobs.query(target_id="M 13").jobs} == {"job-a", "job-b"}
+    assert {job.id for job in jobs.query(job_type="stacking").jobs} == {"job-a", "job-c"}
+    assert [job.id for job in jobs.query(status="failed").jobs] == ["job-b"]
+    assert [job.id for job in jobs.query(target_id="M 57", job_type="analysis").jobs] == ["job-d"]
 
 
 def test_active_only_returns_running_jobs(jobs: Jobs) -> None:
     """Only a job that has not finished counts as active."""
     answer = jobs.query(active_only=True)
-    assert [job["id"] for job in answer["jobs"]] == ["job-c"]
+    assert [job.id for job in answer.jobs] == ["job-c"]
 
 
 def test_an_unfinished_job_that_stopped_updating_looks_stale(database: Path, jobs: Jobs) -> None:
     """A row left at running since 2026-10-01 is shown as stale, not active."""
     with sqlite3.connect(database) as connection:  # the store stamps now on every write
         connection.execute("UPDATE processing_jobs SET updated_at = '2026-10-01T00:03:00' WHERE id = 'job-c'")
-    stale = jobs.query(active_only=True)["jobs"][0]
-    assert stale["looks_stale"] is True
-    assert stale["is_active"] is False
-    assert stale["idle_minutes"] > 60
+    stale = jobs.query(active_only=True).jobs[0]
+    assert stale.looks_stale is True
+    assert stale.is_active is False
+    assert stale.idle_minutes > 60
 
 
 def test_a_job_updated_just_now_is_active(tmp_path: Path) -> None:
@@ -116,22 +116,22 @@ def test_a_job_updated_just_now_is_active(tmp_path: Path) -> None:
     fresh = _job("job-f", "M 57", "stacking", "running", 0)
     fresh.created_at = fresh.updated_at = datetime.now().isoformat()
     JobStore(str(path)).upsert_job(fresh)
-    job = Jobs(SimpleNamespace(get_logs_db_path=lambda: str(path)), None).query(active_only=True)["jobs"][0]
-    assert job["is_active"] is True
-    assert job["looks_stale"] is False
+    job = Jobs(SimpleNamespace(get_logs_db_path=lambda: str(path)), None).query(active_only=True).jobs[0]
+    assert job.is_active is True
+    assert job.looks_stale is False
 
 
 def test_limit_is_clamped(jobs: Jobs) -> None:
     """A limit below 1 or above the maximum is brought into range."""
-    assert jobs.query(limit=2)["count"] == 2
-    assert jobs.query(limit=0)["count"] == 1
-    assert jobs.query(limit=10**6)["count"] == 4
+    assert jobs.query(limit=2).count == 2
+    assert jobs.query(limit=0).count == 1
+    assert jobs.query(limit=10**6).count == 4
     assert MAXIMUM_JOBS == 50
 
 
 def test_long_messages_are_cut(jobs: Jobs) -> None:
     """A very long job message is shortened."""
-    message = jobs.query(job_id="job-b")["job"]["message"]
+    message = jobs.query(job_id="job-b").job.message
     assert len(message) == MAXIMUM_TEXT_LENGTH
     assert message.endswith("…")
 
@@ -139,22 +139,22 @@ def test_long_messages_are_cut(jobs: Jobs) -> None:
 def test_log_tail_returns_the_last_lines_oldest_first(jobs: Jobs) -> None:
     """The tail holds the last lines, in order, with the total count."""
     answer = jobs.query(job_id="job-a", detail="log_tail", lines=3)
-    assert [line["text"] for line in answer["log_lines"]] == ["line 297", "line 298", "line 299"]
-    assert answer["log_lines_total"] == 300
-    assert answer["log_lines_shown"] == 3
+    assert [line.text for line in answer.log_lines] == ["line 297", "line 298", "line 299"]
+    assert answer.log_lines_total == 300
+    assert answer.log_lines_shown == 3
 
 
 def test_log_tail_is_capped_and_lines_are_cut(jobs: Jobs) -> None:
     """The tail never exceeds the maximum, and a long line is shortened."""
-    assert jobs.query(job_id="job-a", detail="log_tail", lines=10**6)["log_lines_shown"] == MAXIMUM_LOG_LINES
-    long_line = jobs.query(job_id="job-b", detail="log_tail")["log_lines"][0]["text"]
+    assert jobs.query(job_id="job-a", detail="log_tail", lines=10**6).log_lines_shown == MAXIMUM_LOG_LINES
+    long_line = jobs.query(job_id="job-b", detail="log_tail").log_lines[0].text
     assert len(long_line) == MAXIMUM_TEXT_LENGTH
 
 
 def test_result_returns_stored_metrics(jobs: Jobs) -> None:
     """The result answer includes the stored output numbers."""
     answer = jobs.query(job_id="job-a", detail="result")
-    assert "stars" in answer["output_metrics"]
+    assert "stars" in answer.output_metrics
 
 
 def test_lineage_lists_the_runs_for_a_target(database: Path, jobs: Jobs) -> None:
@@ -166,10 +166,10 @@ def test_lineage_lists_the_runs_for_a_target(database: Path, jobs: Jobs) -> None
             "M 13",
         )
     by_target = jobs.query(target_id="M 13", detail="lineage")
-    assert by_target["runs_total"] == 2
-    assert [run["name"] for run in by_target["runs"]] == ["astrometry", "stacking"]
-    assert jobs.query(job_id="job-a", detail="lineage")["target_id"] == "M 13"
-    assert jobs.query(target_id="M 13", detail="lineage", limit=1)["runs_shown"] == 1
+    assert by_target.runs_total == 2
+    assert [run.name for run in by_target.runs] == ["astrometry", "stacking"]
+    assert jobs.query(job_id="job-a", detail="lineage").target_id == "M 13"
+    assert jobs.query(target_id="M 13", detail="lineage", limit=1).runs_shown == 1
 
 
 @pytest.mark.parametrize(
@@ -193,7 +193,7 @@ def test_missing_database_is_an_empty_list_and_is_not_created(tmp_path: Path) ->
     """With no logs database, no jobs are listed and no file appears."""
     path = tmp_path / "absent.db"
     jobs = Jobs(SimpleNamespace(get_logs_db_path=lambda: str(path)), None)
-    assert jobs.query()["jobs"] == []
+    assert jobs.query().jobs == []
     with pytest.raises(NotFoundError, match="does not exist"):
         jobs.query(job_id="job-a")
     assert not path.exists()

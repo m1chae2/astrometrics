@@ -155,7 +155,7 @@ DECISIONS = {
     "observatory_safety_apply_promotion_decision": ToolDecision(
         "withhold", "Applies an operator's decision. Needs the operator."
     ),
-    "star_tune_spectroscopy_calibration": ToolDecision(
+    "processing_tune_spectroscopy_calibration": ToolDecision(
         "withhold",
         "Rewrites the live configuration file through update_config. Needs an apply=false mode that only "
         "returns the fitted values.",
@@ -166,10 +166,10 @@ DECISIONS = {
     "star_analyze_periodicity": ToolDecision(
         "fix", "Writes the result into the live star catalog. Needs a save=false option.", "change-data"
     ),
-    "star_detect_point_sources": ToolDecision(
+    "processing_detect_point_sources": ToolDecision(
         "fix", "Needs a NumPy array, which MCP cannot send. Take a frame path."
     ),
-    "star_plate_solve": ToolDecision(
+    "processing_plate_solve": ToolDecision(
         "fix",
         "Returns an astropy WCS, which MCP cannot send. Return the solved center and pixel scale.",
     ),
@@ -223,7 +223,11 @@ DECISIONS = {
         "ingest",
     ),
     "quality_measure_frames": ToolDecision(
-        "keep", "Built 2026-10-03. Statistics on raw frames. Nothing is saved."
+        "keep",
+        "Built 2026-10-03. Statistics on raw frames. Nothing is saved. Since 2026-10-31 kind=spectral "
+        "measures raw spectrum frames (zero-order position, tilt, width, peaks, saturated patches along "
+        "the spectrum, a predicted peak at another exposure, a summary by exposure and pier side); it "
+        "replaces quality_check_spectral_frames.",
     ),
     "observatory_history_get_live_session_status": ToolDecision(
         "keep",
@@ -277,12 +281,6 @@ DECISIONS = {
         "frames into _excluded (never deletes), keeps one previous stack, and saves the target. Since "
         "2026-10-05 it is ProcessingPipelines.stack, which also takes the exact frames to stack.",
         "process",
-    ),
-    "quality_check_spectral_frames": ToolDecision(
-        "keep",
-        "Built 2026-10-04. Measures raw spectrum frames: zero-order position, tilt, width, peaks, saturated "
-        "patches along the spectrum, a predicted peak at another exposure, and a summary by exposure and by "
-        "pier side. Nothing is saved.",
     ),
     "planning_get_imaged_field_centers": ToolDecision(
         "withhold", "Replaced by target_imaged_field_centers, which runs as a background job."
@@ -569,13 +567,10 @@ DECISIONS = {
     "observatory_mount_compute_pointing_correction": ToolDecision(
         "drop", "Advice for a device command the app will not send. The user does not want it."
     ),
-    "quality_flag_value_outliers": ToolDecision(
-        "drop", "Arithmetic on numbers the caller passes in. The user does not want it."
-    ),
     # ---- Writers with no read-only form ----
     **dict.fromkeys(
         (
-            "calibration_refresh",
+            "calibration_reindex_frames",
             "processing_discard_previous_stack",
             "processing_process_target",
             "processing_restore_excluded_frames",
@@ -594,33 +589,24 @@ DECISIONS = {
         ),
         ToolDecision("withhold", READ_ONLY_NOTE),
     ),
-    "processing_record_frame_measurements": ToolDecision(
+    "quality_record_frame_measurements": ToolDecision(
         "withhold",
         "Measures a target's light frames and writes the numbers into the quality database, and stamps "
         "each measured frame on the target record. It never changes a frame file. The AI is read-only, "
         "so it reads the stored numbers with quality_query instead.",
         "change-data",
     ),
-    "processing_measure_odd_even_difference_noise": ToolDecision(
-        "withhold",
-        "Stacks two halves of a target's frames into the target's _subsets folder (about one library "
-        "stack's time in all), subtracts them, and writes the noise of the difference into the quality "
-        "database. The halves are deleted afterwards, and the library stack, its previews and its "
-        "records are never changed. The AI is read-only, so it reads the stored numbers with "
-        "quality_query instead.",
-        "change-data",
-    ),
     **dict.fromkeys(
         (
             "processing_stack_subset",
-            "processing_measure_noise_growth",
-            "processing_measure_night_contributions",
+            "processing_measure_noise",
         ),
         ToolDecision(
             "withhold",
             "Stacks some of a target's frames into the target's _subsets folder (never over the library "
             "stack, its previews or its records) and writes the noise of each result into the quality "
-            "database. It costs one stack for each subset, so it takes minutes. The AI is read-only, so "
+            "database. It costs one stack for each subset, so it takes minutes (kind=odd_even_difference "
+            "stacks two halves, about one library stack's time in all). The AI is read-only, so "
             "it reads the stored numbers with quality_query instead.",
             "change-data",
         ),

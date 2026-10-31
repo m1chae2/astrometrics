@@ -23,7 +23,7 @@ class ImageProcessingService(BaseBackgroundService):
         processing_api: Any = None,
         job_repository: Any = None,
         target_service: Any = None,
-        calibration_library: Any = None,
+        calibration: Any = None,
         config_service: Any = None,
         notification_service: Any = None,
         job_service: Any = None,
@@ -40,8 +40,8 @@ class ImageProcessingService(BaseBackgroundService):
             The database that keeps the job log lines.
         target_service : `Any`, optional
             Service for fetching target metadata and frame sets.
-        calibration_library : `Any`, optional
-            Service for finding matching calibration masters.
+        calibration : `Any`, optional
+            The library's calibration catalog.
         config_service : `Any`, optional
             Provides filesystem paths and application settings.
         notification_service : `Any`, optional
@@ -56,7 +56,7 @@ class ImageProcessingService(BaseBackgroundService):
         self._job_repository = job_repository
 
         self._target_service = target_service
-        self._calibration_library = calibration_library
+        self._calibration = calibration
         self._config_service = config_service
         global LOG_DIR
         LOG_DIR = str(self._config_service.get_logs_path())
@@ -71,7 +71,14 @@ class ImageProcessingService(BaseBackgroundService):
             ``"darks"``, ``"biases"`` and ``"flats"``, each a list of
             per-group counts.
         """
-        return self._calibration_library.get_stats()
+        answer = self._calibration.query(detail="counts")
+        return {
+            key: [
+                {name: value for name, value in row.items() if name != "row_key"}
+                for row in (getattr(answer, key) or [])
+            ]
+            for key in ("darks", "biases", "flats")
+        }
 
     def get_processing_status(self, target_id: str) -> dict:
         """Verify if a target has any running stacking jobs.

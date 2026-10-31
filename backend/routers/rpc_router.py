@@ -154,21 +154,16 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # background run and answers at once; the result arrives as the
     # `quality:measured` event. A write, so the AI's read-only profile
     # withholds it.
-    "processing:record_frame_measurements": ("quality_measurement_service", "start_frame_measurements"),
+    "quality:record_frame_measurements": ("quality_measurement_service", "start_frame_measurements"),
     # Stack some of a target's frames apart from its library stack, into the
     # target's `_subsets` folder, and measure the noise of each result. Each
     # starts a background run and answers at once. Writes (they stack and store
     # rows), so the AI's read-only profile withholds them.
-    "processing:measure_odd_even_difference_noise": (
-        "quality_measurement_service",
-        "start_odd_even_difference_noise",
-    ),
-    "processing:measure_noise_growth": ("quality_measurement_service", "start_noise_growth"),
-    "processing:measure_night_contributions": ("quality_measurement_service", "start_night_contributions"),
-    # Quality measurements. These read the library's quality root directly:
-    # `query` reads the stored measurements and `metrics` lists the declared
-    # metrics. Neither writes anything.
-    "quality:query": ("astrometrics.quality", "query"),
+    "processing:measure_noise": ("quality_measurement_service", "start_noise_measurement"),
+    # Quality measurements. `query` reads the stored measurements (the
+    # service gives the screens the plain list of rows) and `metrics` lists
+    # the declared metrics. Neither writes anything.
+    "quality:query": ("quality_measurement_service", "query_measurements"),
     "quality:metrics": ("astrometrics.quality", "metrics"),
     "quality:resolve_rows": ("astrometrics.quality", "resolve_rows"),
     # Photometry and spectroscopy analysis

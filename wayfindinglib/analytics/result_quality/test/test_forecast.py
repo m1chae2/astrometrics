@@ -26,6 +26,7 @@ from astrometricslib import (
     MeasurementOrigin,
     MeasurementStatus,
     QualityMeasurement,
+    QualityQueryResult,
     QualitySubject,
     SubjectLevel,
     aperture_identity_to_number,
@@ -2214,22 +2215,24 @@ class _StoreStandIn:
         variant: str | None = None,
         library_only: bool = False,
         **_: object,
-    ) -> list[QualityMeasurement]:
+    ) -> QualityQueryResult:
         """Answer ``quality.query`` the way the library does for these filters.
 
         Returns
         -------
-        rows : `list` [`QualityMeasurement`]
+        answer : `QualityQueryResult`
             The rows that match.
         """
-        return [
-            row
-            for row in self._rows
-            if (metric is None or row.metric == metric)
-            and (level is None or row.subject.level.value == level)
-            and (variant is None or row.subject.variant == variant)
-            and not (library_only and row.subject.variant is not None)
-        ]
+        return QualityQueryResult(
+            rows=[
+                row
+                for row in self._rows
+                if (metric is None or row.metric == metric)
+                and (level is None or row.subject.level.value == level)
+                and (variant is None or row.subject.variant == variant)
+                and not (library_only and row.subject.variant is not None)
+            ]
+        )
 
     def calibration_identities(self, **_: object) -> list[CalibrationIdentities]:
         """Give the stored calibration records.
@@ -2270,7 +2273,7 @@ def test_rows_as_the_library_writes_a_subset_give_an_provisional_status() -> Non
     runs = fc.stack_runs_from_measurements([*library_rows, *subset_rows], include_earlier_nights=True)
     subset = next(run for run in runs if run.is_earlier_nights_subset)
     frames_status = recommended_additional_frames_status_of_target(
-        astrometrics, "T", store.query(library_only=True), everyone
+        astrometrics, "T", store.query(library_only=True).rows, everyone
     )
 
     assert subset.stack_subject_id == subset_subject

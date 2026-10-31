@@ -43,6 +43,12 @@ from astrometricslib import DATA_ERRORS, Astrometrics, AstrometricsError, config
 from astrometricslib.drivers.fits_access import collapse_to_2d, read_data
 from astrometricslib.drivers.siril_output_parsing import parse_seq_file, parse_zero_order_star
 from astrometricslib.foundation.paths import siril_work_directory
+from astrometricslib.pipelines.spectroscopy.utilities.registration_quality import (
+    MIN_MATCHED_STAR_PAIRS,
+    ZERO_ORDER_AMPLITUDE_OUTLIER_SIGMA,
+    ZERO_ORDER_POSITION_JUMP_OUTLIER_SIGMA,
+    flag_outliers,
+)
 
 SWEEP_SIGMA = (3.0, 3.0)
 SWEEP_FILTER_WFWHM_GRID: list[str | None] = [None, "90%", "80%"]
@@ -155,14 +161,12 @@ def measure_zero_order_stacked_fwhm(astrometrics: Astrometrics, path: str) -> fl
         return None
     data = collapse_to_2d(np.asarray(data, dtype=float))
 
-    sources = astrometrics.stars.detect_point_sources(data)
+    sources = astrometrics.processing.detect_point_sources(data).sources
     if not sources:
         return None
     brightest = sources[0]
-    x = brightest.get("x_centroid", brightest.get("xcentroid"))
-    y = brightest.get("y_centroid", brightest.get("ycentroid"))
-    if x is None or y is None:
-        return None
+    x = brightest.x_centroid
+    y = brightest.y_centroid
 
     box = ZERO_ORDER_FWHM_BOX_RADIUS_PX
     x, y = round(x), round(y)
@@ -380,14 +384,11 @@ def run_analysis() -> None:
         else:
             position_jumps.append(float(np.hypot(curr["x"] - prev["x"], curr["y"] - prev["y"])))
 
-    thresholds = astrometrics.quality.spectral_registration_thresholds
-    low_star_count_flags = [n < thresholds["min_matched_star_pairs"] for n in nb_stars]
-    dim_zero_order_flags = astrometrics.quality.flag_value_outliers(
-        peak_to_background_ratios, thresholds["zero_order_amplitude_outlier_sigma"], low_is_bad=True
+    low_star_count_flags = [n < MIN_MATCHED_STAR_PAIRS for n in nb_stars]
+    dim_zero_order_flags = flag_outliers(
+        peak_to_background_ratios, ZERO_ORDER_AMPLITUDE_OUTLIER_SIGMA, low_is_bad=True
     )
-    position_jump_flags = astrometrics.quality.flag_value_outliers(
-        position_jumps, thresholds["zero_order_position_jump_outlier_sigma"]
-    )
+    position_jump_flags = flag_outliers(position_jumps, ZERO_ORDER_POSITION_JUMP_OUTLIER_SIGMA)
 
     results = []
     print("\n==========================================")

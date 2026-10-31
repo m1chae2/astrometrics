@@ -13,6 +13,7 @@ from typing import Any
 from astrometricslib import (
     MeasurementStatus,
     QualityMeasurement,
+    QualityQueryResult,
     frame_subject_id,
 )
 from astrometricslib.models.quality.measurement import MeasurementOrigin, QualitySubject, SubjectLevel
@@ -78,14 +79,12 @@ class FakeAstrometrics:
         self.targets = SimpleNamespace(list=lambda: [target])
         self.quality = SimpleNamespace(query=self._query)
 
-    def _query(
-        self, metric: str | None = None, level: str | None = None, **_: Any
-    ) -> list[QualityMeasurement]:
+    def _query(self, metric: str | None = None, level: str | None = None, **_: Any) -> QualityQueryResult:
         """Answer `astrometrics.quality.query` from the made-up rows.
 
         Returns
         -------
-        rows : `list` [`QualityMeasurement`]
+        answer : `QualityQueryResult`
             The rows of the asked metric (all rows when none is asked).
         """
-        return [row for row in self.rows if metric is None or row.metric == metric]
+        return QualityQueryResult(rows=[row for row in self.rows if metric is None or row.metric == metric])

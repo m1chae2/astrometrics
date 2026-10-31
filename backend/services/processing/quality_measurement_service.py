@@ -2,17 +2,17 @@
 
 Description: The science library measures a target's light frames and stores
 the numbers in the quality database
-(`astrometrics.processing.record_frame_measurements`). The library also
+(`astrometrics.quality.record_frame_measurements`). The library also
 guards that work: only one run measures a target at a time, and only one run
 reads frames at a time in the whole process, so this service does not have to.
-It does three small things.
+It does four small things.
 
 - When the app asks for a measurement, it starts the library call on a
   background thread (so the request returns at once) and announces the result.
 - When the app asks for the noise-against-frame-count series, each night's
   contribution or the odd–even difference noise
-  (`astrometrics.processing.measure_noise_growth`,
-  `measure_night_contributions` and `measure_odd_even_difference_noise`), it
+  (`astrometrics.processing.measure_noise` with the kind ``"growth"``,
+  ``"night_contributions"`` or ``"odd_even_difference"``), it
   starts that library call the same way. All of them stack some of a target's
   frames into the target's ``_subsets`` folder, never over the library
   stack, so they take minutes and run only when asked. None starts by itself
@@ -20,6 +20,9 @@ It does three small things.
   caller turns it off.
 - When a frame sync or an ingestion has already measured the frames it added,
   it announces the summaries of those runs.
+- When the app asks for the stored quality numbers (`query_measurements`), it
+  reads them from the library and answers with the plain list of rows that the
+  screens expect.
 
 An announcement is the ``quality:measured`` event sent to every connected app
 window, so the screens that show quality numbers can read them again. Every
@@ -32,7 +35,7 @@ import threading
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any, Protocol
 
-from astrometricslib import AstrometricsError
+from astrometricslib import AstrometricsError, QualityMeasurement
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +101,71 @@ class QualityMeasurementService:
         self._socket_manager = socket_manager
         self._suggestion_trigger = suggestion_trigger
 
+    def query_measurements(
+        self,
+        metric: str | None = None,
+        level: str | None = None,
+        target_id: str | None = None,
+        observing_night_id: str | None = None,
+        camera: str | None = None,
+        telescope: str | None = None,
+        since: str | None = None,
+        row_ids: list[int] | None = None,
+        latest_only: bool = True,
+        variant: str | None = None,
+        library_only: bool = False,
+    ) -> list[QualityMeasurement]:
+        """Read the stored quality measurements as a plain list.
+
+        The library answers with a result that holds the rows and the paging;
+        the screens read just the rows, as a list, so this gives them that.
+        Nothing is measured or written, and there is no limit.
+
+        Parameters
+        ----------
+        metric : `str`, optional
+            Only this metric.
+        level : `str`, optional
+            Only subjects of this level (``"frame"``, ``"stack"``, ``"run"``).
+        target_id : `str`, optional
+            Only this target.
+        observing_night_id : `str`, optional
+            Only this observing night.
+        camera : `str`, optional
+            Only measurements made with this camera.
+        telescope : `str`, optional
+            Only measurements made with this telescope.
+        since : `str`, optional
+            Only measurements made at or after this ISO 8601 time.
+        row_ids : `list` [`int`], optional
+            Only these rows, exactly as stored.
+        latest_only : `bool`, optional
+            Give only the newest row for each subject and metric. Defaults to
+            `True`.
+        variant : `str`, optional
+            Only rows about the subset stack with this label.
+        library_only : `bool`, optional
+            Only rows that are not about a subset stack.
+
+        Returns
+        -------
+        rows : `list` [`QualityMeasurement`]
+            The matching measurements, oldest first.
+        """
+        return self._astrometrics.quality.query(
+            metric=metric,
+            level=level,
+            target_id=target_id,
+            observing_night_id=observing_night_id,
+            camera=camera,
+            telescope=telescope,
+            since=since,
+            row_ids=row_ids,
+            latest_only=latest_only,
+            variant=variant,
+            library_only=library_only,
+        ).rows
+
     def start_frame_measurements(self, target_id: str, limit: int | None = None) -> dict[str, Any]:
         """Start measuring a target's light frames in the background.
 
@@ -121,7 +189,7 @@ class QualityMeasurementService:
         def run() -> None:
             """Measure the frames; the top of a background thread."""
             try:
-                summary = self._astrometrics.processing.record_frame_measurements(target_id, limit=limit)
+                summary = self._astrometrics.quality.record_frame_measurements(target_id, limit=limit)
             except AstrometricsError as error:
                 logger.warning(
                     "Measuring the frames of %s failed (%s): %s", target_id, error.code, error.message
@@ -143,30 +211,40 @@ class QualityMeasurementService:
         threading.Thread(target=run, name=f"quality-measure-{target_id}", daemon=True).start()
         return {"started": True, "target_id": target_id}
 
-    def start_noise_growth(
+    def start_noise_measurement(
         self,
         target_id: str,
-        maximum_steps: int = 4,
-        include_night_contributions: bool = False,
-        include_odd_even_difference: bool = True,
+        kind: str = "growth",
+        maximum_steps: int | None = None,
+        include: list[str] | None = None,
+        keep_halves: bool | None = None,
     ) -> dict[str, Any]:
-        """Start the noise-against-frame-count series in the background.
+        """Start one noise measurement of the library stack in the background.
 
-        Nothing starts this by itself after a stack; a caller asks for it.
+        The kinds are ``"growth"`` (the noise against the number of frames),
+        ``"night_contributions"`` (what each night gave) and
+        ``"odd_even_difference"`` (the noise of the difference of two halves).
+        Nothing starts one by itself after a stack; a caller asks for it.
+        The library refuses an option that the chosen kind does not use, and
+        that error is logged here.
 
         Parameters
         ----------
         target_id : `str`
             The target whose library stack to take frames from.
+        kind : `str`, optional
+            Which measurement to run. Defaults to ``"growth"``.
         maximum_steps : `int`, optional
-            The most subset stacks to make. Defaults to 4.
-        include_night_contributions : `bool`, optional
-            Also stack the library stack's frames without each night. Costs
-            one more stack per night.
-        include_odd_even_difference : `bool`, optional
-            Also measure the noise of the difference of two halves of the
-            library stack's frames. Costs about one library stack's time.
-            Defaults to `True`.
+            ``"growth"`` only: the most subset stacks to make. The library
+            default is 4.
+        include : `list` [`str`], optional
+            ``"growth"`` only: ``"night_contributions"`` also stacks the
+            library stack's frames without each night (one more stack per
+            night); ``"odd_even_difference"`` also measures the noise of the
+            difference of two halves (about one library stack's time). Left
+            out, the series includes the odd–even difference.
+        keep_halves : `bool`, optional
+            ``"odd_even_difference"`` only: keep the two half stacks.
 
         Returns
         -------
@@ -175,21 +253,30 @@ class QualityMeasurementService:
             ``target_id``. A failure is logged. The rows the run stored are
             announced as the ``quality:measured`` event.
         """
+        options: dict[str, Any] = {
+            name: value
+            for name, value in (
+                ("maximum_steps", maximum_steps),
+                ("include", include),
+                ("keep_halves", keep_halves),
+            )
+            if value is not None
+        }
 
         def work() -> tuple[int, list[str]]:
-            """Run the series and count what it stored.
+            """Run the measurement and count what it stored.
 
             Returns
             -------
             counts : `tuple` [`int`, `list` [`str`]]
                 The rows written and the observing nights they belong to.
             """
-            result = self._astrometrics.processing.measure_noise_growth(
-                target_id,
-                maximum_steps=maximum_steps,
-                include_night_contributions=include_night_contributions,
-                include_odd_even_difference=include_odd_even_difference,
-            )
+            result = self._astrometrics.processing.measure_noise(target_id, kind=kind, **options)
+            if kind == "night_contributions":
+                return result.rows_written, sorted(entry.night_id for entry in result.nights)
+            if kind == "odd_even_difference":
+                # The rows belong to the library stack, so no night is listed.
+                return result.rows_written, []
             rows = result.rows_written
             nights = {night for subset in result.subsets for night in subset.observing_night_ids}
             if result.night_contributions is not None:
@@ -199,71 +286,7 @@ class QualityMeasurementService:
                 rows += result.odd_even_difference.rows_written
             return rows, sorted(nights)
 
-        return self._start_subset_job(target_id, "noise-growth", work)
-
-    def start_odd_even_difference_noise(self, target_id: str) -> dict[str, Any]:
-        """Start the odd–even difference noise measurement in the background.
-
-        The library stack's frames are split into two halves, each half is
-        stacked, and the noise of their difference is stored beside the
-        stack's own noise. It costs about one library stack's time. Nothing
-        starts it by itself after a stack; a caller asks for it.
-
-        Parameters
-        ----------
-        target_id : `str`
-            The target whose library stack to take frames from.
-
-        Returns
-        -------
-        result : `dict` [`str`, `Any`]
-            ``started`` (always `True`: the thread was started) and
-            ``target_id``. A failure is logged. The rows the run stored are
-            announced as the ``quality:measured`` event.
-        """
-
-        def work() -> tuple[int, list[str]]:
-            """Run the measurement and count what it stored.
-
-            Returns
-            -------
-            counts : `tuple` [`int`, `list` [`str`]]
-                The rows written and the observing nights they belong to (the
-                rows belong to the library stack, so no night is listed).
-            """
-            result = self._astrometrics.processing.measure_odd_even_difference_noise(target_id)
-            return result.rows_written, []
-
-        return self._start_subset_job(target_id, "odd–even difference", work)
-
-    def start_night_contributions(self, target_id: str) -> dict[str, Any]:
-        """Start each night's contribution measurement in the background.
-
-        Parameters
-        ----------
-        target_id : `str`
-            The target whose library stack to take frames from.
-
-        Returns
-        -------
-        result : `dict` [`str`, `Any`]
-            ``started`` (always `True`: the thread was started) and
-            ``target_id``. A failure is logged. The rows the run stored are
-            announced as the ``quality:measured`` event.
-        """
-
-        def work() -> tuple[int, list[str]]:
-            """Run the night contributions and count what they stored.
-
-            Returns
-            -------
-            counts : `tuple` [`int`, `list` [`str`]]
-                The rows written and the observing nights they belong to.
-            """
-            result = self._astrometrics.processing.measure_night_contributions(target_id)
-            return result.rows_written, sorted(entry.night_id for entry in result.nights)
-
-        return self._start_subset_job(target_id, "night-contributions", work)
+        return self._start_subset_job(target_id, f"noise-{kind}", work)
 
     def _start_subset_job(
         self, target_id: str, name: str, work: Callable[[], tuple[int, list[str]]]

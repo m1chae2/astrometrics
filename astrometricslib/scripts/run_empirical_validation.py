@@ -39,12 +39,12 @@ def run_spectroscopy_validation(astrometrics: Astrometrics, camera_name: str) ->
     if vega_target and vega_target.spectral_stacking.stacked_image:
         print(f"Executing Vega calibration tuning on: {vega_target.spectral_stacking.stacked_image}")
         try:
-            tune_res = astrometrics.stars.tune_spectroscopy_calibration(
+            tune_res = astrometrics.processing.tune_spectroscopy_calibration(
                 vega_target.spectral_stacking.stacked_image, camera_id=camera_name
             )
-            rms_err = tune_res.get("rms_error_nm", 0.0)
+            rms_err = tune_res.rms_error_nm
             print(f"  Vega Calibration RMS Error: {rms_err:.3f} nm")
-            results["vega_calibration"] = tune_res
+            results["vega_calibration"] = tune_res.model_dump()
         except (AstrometricsError, *DATA_ERRORS) as err:
             print(f"  Vega calibration tuning notice: {err}")
 
@@ -104,7 +104,7 @@ def run_photometry_validation(astrometrics: Astrometrics, camera_name: str) -> d
                 res = astrometrics.processing.process_target(
                     target,
                     stages=["photometry"],
-                    photometry={"frames": zwo_frames, "filter_type": "Luminance"},
+                    photometry={"frames": zwo_frames, "filter_name": "Luminance"},
                 ).results["photometry"]
                 status = res.get("status", "completed")
                 stars_found = res.get("starsFound", 0)

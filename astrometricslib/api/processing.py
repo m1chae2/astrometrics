@@ -29,9 +29,9 @@ from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.jobs.runner import background_job, registered_job
 from astrometricslib.models.calibration_ingest import CalibrationIngestReport, FlatSetAssessment
 from astrometricslib.models.catalog_queries import CalibrationQueryResult
+from astrometricslib.models.point_sources import PointSource, PointSourceDetection
 from astrometricslib.models.processing_results import PreviewRemakeResult, ProcessTargetResult, StackResult
 from astrometricslib.models.quality.excluded_frames import RestoreReport
-from astrometricslib.models.quality.frame_measurement_summary import FrameMeasurementSummary
 from astrometricslib.models.quality.quality_reports import (
     StackSummary,
 )
@@ -43,6 +43,10 @@ from astrometricslib.models.quality.subset_stacks import (
     SubsetStackResult,
 )
 from astrometricslib.models.sensor_noise_measurement import SensorNoiseMeasurement
+from astrometricslib.models.spectroscopy_calibration import (
+    CalibrationLineFit,
+    SpectroscopyCalibrationResult,
+)
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.api_arguments import (
     STACK_KINDS,
@@ -50,6 +54,7 @@ from astrometricslib.pipelines.shared.api_arguments import (
     TargetLookup,
     TimeInput,
     check_choice,
+    check_include,
     make_frame_selection,
     reject_unused_arguments,
     resolve_target,
@@ -71,6 +76,13 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["CalibrationCatalog", "ProcessingPipelines"]
 
+NOISE_KINDS = ("growth", "night_contributions", "odd_even_difference")
+NOISE_SECTIONS = ("night_contributions", "odd_even_difference")
+_NOISE_ARGUMENTS = {
+    "growth": ("maximum_steps", "include"),
+    "night_contributions": (),
+    "odd_even_difference": ("keep_halves",),
+}
 _CalibrationKind = Literal["dark", "bias", "flat"]
 _CALIBRATION_KINDS: tuple[str, ...] = ("dark", "bias", "flat")
 
@@ -198,7 +210,7 @@ class CalibrationCatalog:
         self._library: Any = None
 
     @property
-    def library(self) -> Any:
+    def _calibration_library(self) -> Any:
         """The calibration-data model, built the first time it is used.
 
         Returns
@@ -294,9 +306,9 @@ class CalibrationCatalog:
             },
         )
         if refresh:
-            self.library.load_library()
+            self._calibration_library.load_library()
         if detail in ("counts", "match"):
-            stats = self.library.get_stats()
+            stats = self._calibration_library.get_stats()
             wanted = {"dark": "darks", "bias": "biases", "flat": "flats"}
             keyed = {
                 key: [{**row, "row_key": _calibration_row_key(label, row)} for row in stats.get(key, [])]
@@ -334,14 +346,14 @@ class CalibrationCatalog:
         if detail == "target_frames":
             lights = frame_statistics.get_frame_stats(resolved)["lights"]
             return CalibrationQueryResult(detail=detail, target_id=resolved.id, lights=lights)
-        groups = frame_statistics.get_frame_stats_grouped(resolved, self.library, camera_id)
+        groups = frame_statistics.get_frame_stats_grouped(resolved, self._calibration_library, camera_id)
         return CalibrationQueryResult(detail=detail, target_id=resolved.id, groups=groups)
 
     def save(self) -> None:
         """Write the calibration library to its JSON file on disk."""
-        self.library.save_library()
+        self._calibration_library.save_library()
 
-    def refresh(self, kind: _CalibrationKind, prune_missing: bool = False) -> CalibrationIngestReport:
+    def reindex_frames(self, kind: _CalibrationKind, prune_missing: bool = False) -> CalibrationIngestReport:
         """Rescan one kind of calibration frame and report what was found.
 
         Use this after new calibration frames have been downloaded. The
@@ -363,11 +375,11 @@ class CalibrationCatalog:
             each flat set that gained frames.
         """
         check_choice("kind", kind, _CALIBRATION_KINDS)
-        before = flatten_frame_index(getattr(self.library, f"{kind}_frames"))
-        method = getattr(self.library, f"refresh_{kind}_frames")
+        before = flatten_frame_index(getattr(self._calibration_library, f"{kind}_frames"))
+        method = getattr(self._calibration_library, f"refresh_{kind}_frames")
         method(prune_missing=prune_missing)
-        after = flatten_frame_index(getattr(self.library, f"{kind}_frames"))
-        flat_groups = self.library.list_flat_groups() if kind == "flat" else ()
+        after = flatten_frame_index(getattr(self._calibration_library, f"{kind}_frames"))
+        flat_groups = self._calibration_library.list_flat_groups() if kind == "flat" else ()
         return build_ingest_report(kind, before, after, flat_groups)
 
     @background_job("diagnostics", grace_period_seconds=20.0)
@@ -375,7 +387,7 @@ class CalibrationCatalog:
         self,
         telescope: str | None = None,
         camera_id: str | None = None,
-        filter_type: str | None = None,
+        filter_name: str | None = None,
         gain: float | None = None,
         offset: float | None = None,
         register_job: bool = True,
@@ -393,7 +405,7 @@ class CalibrationCatalog:
             Only this telescope's flats.
         camera_id : `str`, optional
             Only this camera's flats.
-        filter_type : `str`, optional
+        filter_name : `str`, optional
             Only flats for this filter, such as ``"L"`` or ``"SPEC"``.
         gain : `float`, optional
             Only flats at this gain.
@@ -408,8 +420,8 @@ class CalibrationCatalog:
             One assessment per matching set. Empty if no flats match.
         """
         with registered_job(enabled=register_job, job_type="diagnostics", target_id="calibration"):
-            groups = self.library.list_flat_groups(
-                telescope=telescope, camera=camera_id, filter_type=filter_type, gain=gain, offset=offset
+            groups = self._calibration_library.list_flat_groups(
+                telescope=telescope, camera=camera_id, filter_type=filter_name, gain=gain, offset=offset
             )
             return [assess_flat_group(group) for group in groups]
 
@@ -420,10 +432,10 @@ class CalibrationCatalog:
         gain: str | float,
         offset: str | float,
         binning: str = "1x1",
-        temperature: float | None = None,
+        temperature_c: float | None = None,
         exposure_seconds: float | None = None,
         telescope: str | None = None,
-        filter_type: str | None = None,
+        filter_name: str | None = None,
         save: bool = False,
         register_job: bool = True,
     ) -> SensorNoiseMeasurement:
@@ -450,14 +462,15 @@ class CalibrationCatalog:
             The camera offset.
         binning : `str`, optional
             The binning, such as ``"1x1"``. Defaults to ``"1x1"``.
-        temperature : `float`, optional
-            Use only frames within 1 degree C of this sensor temperature.
+        temperature_c : `float`, optional
+            Use only frames within 1 degree C of this sensor temperature,
+            in degrees Celsius.
         exposure_seconds : `float`, optional
             Use only flats of this exposure. Needed when the setting's flats
             were taken at several exposures.
         telescope : `str`, optional
             Use only flats taken through this telescope.
-        filter_type : `str`, optional
+        filter_name : `str`, optional
             Use only flats taken through this filter.
         save : `bool`, optional
             Write a measured result into the camera profile, with a backup
@@ -473,19 +486,67 @@ class CalibrationCatalog:
         """
         with registered_job(enabled=register_job, job_type="diagnostics", target_id="calibration"):
             return measure_sensor_noise_from_library(
-                self.library,
+                self._calibration_library,
                 self._config,
                 camera_id,
                 gain,
                 offset,
                 binning,
-                temperature_c=temperature,
+                temperature_c=temperature_c,
                 exposure_seconds=exposure_seconds,
                 telescope=telescope,
-                filter_type=filter_type,
+                filter_type=filter_name,
                 save=save,
                 measured_on=datetime.now(UTC).date(),
             )
+
+
+def _optional_float(value: Any) -> float | None:
+    """Turn a NumPy or Python number into a plain float, keeping `None`.
+
+    Parameters
+    ----------
+    value : `Any`
+        A number or `None`.
+
+    Returns
+    -------
+    number : `float` or `None`
+        The number as a Python float.
+    """
+    return None if value is None else float(value)
+
+
+def _to_point_source(row: dict[str, Any]) -> PointSource:
+    """Turn one detector row into a `PointSource` with plain Python numbers.
+
+    Parameters
+    ----------
+    row : `dict` [`str`, `Any`]
+        One star from the source detector. Its numbers may be NumPy values,
+        and the centroid keys may be written ``xcentroid`` or ``x_centroid``.
+
+    Returns
+    -------
+    source : `PointSource`
+        The star.
+    """
+    identifier = row.get("id")
+    pixel_count = row.get("n_pixels")
+    return PointSource(
+        id=None if identifier is None else int(identifier),
+        x_centroid=float(row.get("x_centroid", row.get("xcentroid"))),
+        y_centroid=float(row.get("y_centroid", row.get("ycentroid"))),
+        flux=float(row.get("flux", 0.0)),
+        peak=_optional_float(row.get("peak")),
+        sharpness=_optional_float(row.get("sharpness")),
+        roundness1=_optional_float(row.get("roundness1")),
+        roundness2=_optional_float(row.get("roundness2")),
+        n_pixels=None if pixel_count is None else int(pixel_count),
+        mag=_optional_float(row.get("mag")),
+        daofind_mag=_optional_float(row.get("daofind_mag")),
+        radius_px=_optional_float(row.get("radius_px")),
+    )
 
 
 class _TargetsOnDemand:
@@ -758,7 +819,7 @@ class ProcessingPipelines:
             save_targets=self._targets.save,
             drivers=self._drivers,
             measured_at=datetime.now(UTC),
-            quality_recording=FrameQualityRecording(self._config, self.calibration.library),
+            quality_recording=FrameQualityRecording(self._config, self.calibration._calibration_library),
         )
 
     @background_job("stacking", grace_period_seconds=8.0)
@@ -854,253 +915,193 @@ class ProcessingPipelines:
             )
 
     @background_job("stacking", grace_period_seconds=8.0)
-    def measure_noise_growth(
+    def measure_noise(
         self,
         target: str | Target,
+        kind: Literal["growth", "night_contributions", "odd_even_difference"] = "growth",
         *,
         maximum_steps: int = 4,
-        include_night_contributions: bool = False,
-        include_odd_even_difference: bool = True,
+        include: list[str] | None = None,
+        keep_halves: bool = False,
         register_job: bool = True,
-    ) -> NoiseGrowthResult:
-        """Stack growing subsets of a target and measure each one's noise.
+    ) -> NoiseGrowthResult | NightContributionResult | OddEvenDifferenceNoiseResult:
+        """Stack parts of a target's library stack and measure the noise.
 
-        The frames of the target's library stack (read from the stack's
-        ``_inputs.json``) are split by observing night. The subsets are the
-        first night, the first two nights, and so on, up to one night fewer
-        than the stack. A stack of one night uses the first quarter, half and
-        three quarters of its frames instead. At most ``maximum_steps``
-        subsets are made, spaced evenly through the possible ones, and a
-        subset with fewer than four frames is left out. The library stack is
-        the last point of the curve and is not stacked again.
+        Each kind stacks some of the library stack's frames (read from the
+        stack's ``_inputs.json``) into the target's ``_subsets`` folder with
+        the normal settings (without the frame quarantine step), and measures
+        the noise in the same sky apertures as the library stack, so the
+        numbers compare. Rows are stored at level ``stack``. The library
+        stack, its previews and its record are never changed. None of the
+        kinds starts by itself after a stack, and none runs inside the stack's
+        own process; a caller starts it. The target must already have the
+        noise apertures that its library stack stored, so stack it once first
+        if it was stacked before they were recorded. A target with no stack,
+        or a stack with no ``_inputs.json``, raises `NotFoundError`.
 
-        Each subset is stacked into the target's ``_subsets`` folder with the
-        normal settings (without the frame quarantine step). Its noise is
-        measured in the same sky apertures as the library stack, so the
-        numbers compare. The noise, the reference flux, the effective frame
-        count and the effective time are stored at level ``stack``, with the
-        subset's label in the subject. The library stack, its previews and its
-        record are never changed.
+        Arguments used by each kind (any other argument is refused):
 
-        Cost: one stack for each subset, four by default, each with fewer
-        frames than the library stack, plus the odd–even difference noise (two
-        stacks of half the frames each, about one library stack's time and
-        Siril's temporary disk). Expect the time of about two to four library
-        stacks (a design estimate, not a measurement). This job does not
-        start by itself after a stack; a caller starts it. The target must
-        already have the noise apertures that its library stack stored, so
-        stack it once first if it was stacked before they were recorded. A
-        target with no stack, or a stack with no ``_inputs.json``, raises
-        `NotFoundError`.
+        - ``"growth"``: ``maximum_steps`` and ``include``; ``include`` may
+          hold ``"night_contributions"`` and ``"odd_even_difference"``.
+        - ``"night_contributions"``: none.
+        - ``"odd_even_difference"``: ``keep_halves``.
 
         Parameters
         ----------
         target : `str` or `Target`
             The target.
+        kind : `str`, optional
+            ``"growth"`` (default): the noise against the number of frames.
+            The frames are split by observing night. The subsets are the first
+            night, the first two nights, and so on, up to one night fewer than
+            the stack. A stack of one night uses the first quarter, half and
+            three quarters of its frames instead. At most ``maximum_steps``
+            subsets are made, spaced evenly through the possible ones, and a
+            subset with fewer than four frames is left out. The library stack
+            is the last point of the curve and is not stacked again. The
+            noise, the reference flux, the effective frame count and the
+            effective time are stored with the subset's label in the subject.
+            The cost is one stack for each subset, four by default, each with
+            fewer frames than the library stack, plus the odd–even difference
+            noise (about one library stack's time and Siril's temporary disk).
+            Expect the time of about two to four library stacks (a design
+            estimate, not a measurement).
+
+            ``"night_contributions"``: what each observing night gave to the
+            library stack. For every night, the stack's frames without that
+            night are stacked, and four numbers are stored on that leave-out
+            stack, with the night in the subject's observing night: the
+            night's share of the library stack's total frame weight
+            (``stacking.night_weight_fraction``), the noise of the stack
+            without the night (``stacking.noise_without_night``), the paired
+            difference from the library stack's noise
+            (``stacking.noise_difference_without_night``) and the ratio the
+            two stacks' effective frame counts predict
+            (``stacking.subset_expected_noise_ratio``). The cost is one stack
+            for every night, each close to the library stack's own cost. A
+            stack of one night has nothing to leave out. A share is stored as
+            not measured when the stack's weights are unknown (Siril weighted
+            the frames itself).
+
+            ``"odd_even_difference"``: the library stack's random noise from
+            two halves. The frames are put in order of capture time and split
+            into the 1st, 3rd, ... and the 2nd, 4th, ... frame. The library
+            stack's registration reference frame goes into both, and it is
+            handed to the stacker as the frame to line up with, so a half
+            cannot choose its own and the two half stacks have the same pixel
+            grid. Each half is stacked (without the edge trim), the
+            difference is taken, and its noise is measured in the library
+            stack's stored empty apertures. The difference cancels what the
+            frames share (sky structure, faint stars, nebula) and keeps their
+            random noise, so it is the more honest noise of a deep or crowded
+            field. Nine rows are stored on the library stack, beside its
+            ``stacking.empty_aperture_noise_*`` rows and never replacing
+            them: the noise (``..._stack_unit`` and ``..._normalized``), the
+            reference flux the normalized value divides by, the two halves'
+            effective frame counts, the variance factor, the variance ratio
+            with each frame's modeled noise, and the shared frame's two
+            weight shares (all ``stacking.odd_even_difference_*``). Five more
+            rows say what the two halves share at the scale of a few pixels
+            (an upper limit of a fixed pattern on the sensor) and how that
+            differs along and across the pointing drift (the
+            ``stacking.half_shared_fine_scale_*`` and
+            ``stacking.walking_noise_*`` metrics). The halves are deleted
+            afterwards. The cost is two stacks of half the frames each, about
+            one library stack's time in all, plus the temporary disk space
+            Siril needs for each. While it runs, no library stack and no
+            other subset job of the target can run. When the measurement
+            cannot be made (a half with under 8 frames, no recorded
+            registration reference, other apertures than the library stack's,
+            a Siril failure), the rows are stored as not measured with the
+            reason, and the result says why.
         maximum_steps : `int`, optional
-            The most subsets to stack. Defaults to 4.
-        include_night_contributions : `bool`, optional
-            Also run `measure_night_contributions` in the same job. Defaults
-            to `False`, because it costs one more stack for every night.
-        include_odd_even_difference : `bool`, optional
-            Also run `measure_odd_even_difference_noise` in the same job, under
-            the same lock, after the series. Defaults to `True`: it costs
-            about one library stack's time, and it is the noise measure that
-            ignores structure the frames share. Its result is in
-            ``odd_even_difference`` and its rows are counted there.
+            Applies to ``"growth"`` only. The most subsets to stack. Defaults
+            to 4.
+        include : `list` [`str`], optional
+            Applies to ``"growth"`` only. Sections to run in the same job,
+            under the same lock, after the series: ``"night_contributions"``
+            (one more stack for every night) and ``"odd_even_difference"``
+            (about one library stack's time, and the noise measure that
+            ignores structure the frames share; its result is in
+            ``odd_even_difference`` and its rows are counted there). `None`
+            means ``["odd_even_difference"]``; pass an empty list for neither.
+        keep_halves : `bool`, optional
+            Applies to ``"odd_even_difference"`` only. Keep the two half
+            stacks in the ``_subsets`` folder. Defaults to `False`.
         register_job : `bool`, optional
             Record the run in the job list. Defaults to `True`.
 
         Returns
         -------
-        result : `NoiseGrowthResult`
-            The subsets, smallest first, with notes about steps left out.
+        result : `NoiseGrowthResult`, `NightContributionResult`, ...
+            For ``"growth"`` a `NoiseGrowthResult` (the subsets, smallest
+            first, with notes about steps left out); for
+            ``"night_contributions"`` a `NightContributionResult` (one entry
+            for each night); for ``"odd_even_difference"`` an
+            `OddEvenDifferenceNoiseResult` (the difference noise, the halves'
+            effective frame counts and the library stack's own noise that the
+            difference implies, or the reason there are none).
 
         Raises
         ------
         InvalidArgumentError
-            If ``maximum_steps`` is below 1.
+            If the kind or an include section is unknown, an argument the
+            kind does not use is given, or ``maximum_steps`` is below 1.
         """
         from astrometricslib.pipelines.stacking.odd_even_difference_run import run_odd_even_difference_noise
         from astrometricslib.pipelines.stacking.subset_noise_run import (
             run_night_contributions,
             run_noise_growth,
         )
-
-        if maximum_steps < 1:
-            raise InvalidArgumentError("maximum_steps must be at least 1.")
         from astrometricslib.pipelines.stacking.target_stack_guard import subset_job_guard
 
+        check_choice("kind", kind, NOISE_KINDS)
+        sections = check_include(include, NOISE_SECTIONS)
+        reject_unused_arguments(
+            kind,
+            _NOISE_ARGUMENTS,
+            {
+                "maximum_steps": maximum_steps != 4,
+                "include": bool(sections),
+                "keep_halves": keep_halves,
+            },
+        )
+        if maximum_steps < 1:
+            raise InvalidArgumentError("maximum_steps must be at least 1.")
+        if kind == "growth" and include is None:
+            sections = frozenset(("odd_even_difference",))
         resolved = self._resolve(target)
         library_stack_path = self._library_stack_path(resolved, "imaging")
-        with (
-            registered_job(enabled=register_job, job_type="stacking", target_id=resolved.id) as job,
-            subset_job_guard(resolved.id),
-        ):
+        with registered_job(enabled=register_job, job_type="stacking", target_id=resolved.id) as job:
             context = self._subset_context(resolved, job.job_id)
-            result = run_noise_growth(
-                resolved,
-                library_stack_path,
-                context=context,
-                configuration=self._config,
-                drivers=self._drivers,
-                stacking_slot=self.acquire_job_slot,
-                maximum_steps=maximum_steps,
-            )
-            if include_night_contributions:
-                result.night_contributions = run_night_contributions(
-                    resolved,
-                    library_stack_path,
-                    context=context,
-                    configuration=self._config,
-                    drivers=self._drivers,
-                    stacking_slot=self.acquire_job_slot,
+            shared = {
+                "context": context,
+                "configuration": self._config,
+                "drivers": self._drivers,
+                "stacking_slot": self.acquire_job_slot,
+            }
+            if kind == "night_contributions":
+                return run_night_contributions(resolved, library_stack_path, **shared)
+            if kind == "odd_even_difference":
+                return run_odd_even_difference_noise(
+                    resolved, library_stack_path, keep_halves=keep_halves, **shared
                 )
-            if include_odd_even_difference:
-                try:
-                    result.odd_even_difference = run_odd_even_difference_noise(
-                        resolved,
-                        library_stack_path,
-                        context=context,
-                        configuration=self._config,
-                        drivers=self._drivers,
-                        stacking_slot=self.acquire_job_slot,
+            with subset_job_guard(resolved.id):
+                result = run_noise_growth(resolved, library_stack_path, maximum_steps=maximum_steps, **shared)
+                if "night_contributions" in sections:
+                    result.night_contributions = run_night_contributions(
+                        resolved, library_stack_path, **shared
                     )
-                except Exception as error:  # the series is already stored; report, do not lose it
-                    logger.exception("The odd–even difference noise of %s failed", resolved.id)
-                    result.notes.append(
-                        f"The odd–even difference noise was not measured ({type(error).__name__}: {error})."
-                    )
-            return result
-
-    @background_job("stacking", grace_period_seconds=8.0)
-    def measure_night_contributions(
-        self, target: str | Target, *, register_job: bool = True
-    ) -> NightContributionResult:
-        """Measure what each observing night gave to a target's library stack.
-
-        For every night of the stack's frames, the stack's frames without that
-        night are stacked into the target's ``_subsets`` folder, and two
-        numbers are stored at level ``stack`` on that leave-out stack, with the
-        night in the subject's observing night: the night's share of the
-        library stack's total frame weight (``stacking.night_weight_fraction``)
-        and the noise of the stack without the night
-        (``stacking.noise_without_night``), with the paired difference from the
-        library stack's noise (``stacking.noise_difference_without_night``)
-        and the ratio the two stacks' effective frame counts predict
-        (``stacking.subset_expected_noise_ratio``).
-
-        Cost: one stack for every night, each close to the library stack's own
-        cost. It never runs by itself after a stack; call it when you want
-        it, or pass ``include_night_contributions`` to
-        `measure_noise_growth`. A stack of one night has nothing to leave out.
-        A target with no stack, or a stack with no ``_inputs.json``, raises
-        `NotFoundError`.
-        A share is stored as not measured when the stack's weights are unknown
-        (Siril weighted the frames itself).
-
-        Parameters
-        ----------
-        target : `str` or `Target`
-            The target.
-        register_job : `bool`, optional
-            Record the run in the job list. Defaults to `True`.
-
-        Returns
-        -------
-        result : `NightContributionResult`
-            One entry for each night.
-        """
-        from astrometricslib.pipelines.stacking.subset_noise_run import run_night_contributions
-
-        resolved = self._resolve(target)
-        library_stack_path = self._library_stack_path(resolved, "imaging")
-        with registered_job(enabled=register_job, job_type="stacking", target_id=resolved.id) as job:
-            context = self._subset_context(resolved, job.job_id)
-            return run_night_contributions(
-                resolved,
-                library_stack_path,
-                context=context,
-                configuration=self._config,
-                drivers=self._drivers,
-                stacking_slot=self.acquire_job_slot,
-            )
-
-    @background_job("stacking", grace_period_seconds=8.0)
-    def measure_odd_even_difference_noise(
-        self, target: str | Target, *, keep_halves: bool = False, register_job: bool = True
-    ) -> OddEvenDifferenceNoiseResult:
-        """Measure a library stack's random noise from two halves.
-
-        The library stack's frames are put in order of capture time and split
-        into two disjoint halves, the 1st, 3rd, ... and the 2nd, 4th, ...
-        frame. The library stack's registration reference frame goes into
-        both, and it is handed to the stacker as the frame to line up with,
-        so a half cannot choose its own and the two half stacks have the same
-        pixel grid. Each half is stacked into the target's ``_subsets``
-        folder (normal settings, without the edge trim and the frame
-        quarantine), the difference is taken, and its noise is measured in
-        the library stack's stored empty apertures. The difference cancels
-        what the frames share (sky structure, faint stars, nebula) and keeps
-        their random noise, so it is the more honest noise of a deep or
-        crowded field. Nine rows are stored on the library stack at level
-        ``stack``, beside its ``stacking.empty_aperture_noise_*`` rows and
-        never replacing them: the noise (``..._stack_unit`` and
-        ``..._normalized``), the reference flux the normalized value divides
-        by, the two halves' effective frame counts, the variance factor, the
-        variance ratio with each frame's modeled noise, and the shared
-        frame's two weight shares (all
-        ``stacking.odd_even_difference_*``). Five more rows say what the two
-        halves share at the scale of a few pixels
-        (an upper limit of a fixed pattern on the sensor) and how that
-        differs along and across the pointing drift (the
-        ``stacking.half_shared_fine_scale_*`` and ``stacking.walking_noise_*``
-        metrics). The halves are deleted afterwards.
-
-        Cost: two stacks of half the frames each, about one library stack's
-        time in all, plus the temporary disk space Siril needs for each
-        (its converted and registered frames, deleted after each stack).
-        Neither this job nor `measure_noise_growth` starts by itself after a
-        stack, and neither runs inside the stack's own process. While it runs,
-        no library stack and no other subset job of the target can run.
-        When the measurement cannot be made (a half with under 8 frames, no
-        recorded registration reference, other apertures than the library
-        stack's, a Siril failure), the rows are stored as not measured with
-        the reason, and the result says why. A target with no stack, or a
-        stack with no recorded frames, raises `NotFoundError`.
-
-        Parameters
-        ----------
-        target : `str` or `Target`
-            The target.
-        keep_halves : `bool`, optional
-            Keep the two half stacks in the ``_subsets`` folder. Defaults to
-            `False`.
-        register_job : `bool`, optional
-            Record the run in the job list. Defaults to `True`.
-
-        Returns
-        -------
-        result : `OddEvenDifferenceNoiseResult`
-            The difference noise, the halves' effective frame counts and the
-            library stack's own noise that the difference implies, or the
-            reason there are none.
-        """
-        from astrometricslib.pipelines.stacking.odd_even_difference_run import run_odd_even_difference_noise
-
-        resolved = self._resolve(target)
-        library_stack_path = self._library_stack_path(resolved, "imaging")
-        with registered_job(enabled=register_job, job_type="stacking", target_id=resolved.id) as job:
-            context = self._subset_context(resolved, job.job_id)
-            return run_odd_even_difference_noise(
-                resolved,
-                library_stack_path,
-                context=context,
-                configuration=self._config,
-                drivers=self._drivers,
-                stacking_slot=self.acquire_job_slot,
-                keep_halves=keep_halves,
-            )
+                if "odd_even_difference" in sections:
+                    try:
+                        result.odd_even_difference = run_odd_even_difference_noise(
+                            resolved, library_stack_path, **shared
+                        )
+                    except Exception as error:  # the series is already stored; report, do not lose it
+                        logger.exception("The odd–even difference noise of %s failed", resolved.id)
+                        reason = f"{type(error).__name__}: {error}"
+                        result.notes.append(f"The odd–even difference noise was not measured ({reason}).")
+                return result
 
     def _library_stack_path(self, target: Target, kind: StackKind, *, must_exist: bool = True) -> str:
         """Find the path of a target's library stack for the subset jobs.
@@ -1310,7 +1311,7 @@ class ProcessingPipelines:
             Options for the astrometry stage: ``path`` (the image to plate
             solve; the stack by default).
         photometry : `dict`, optional
-            Options for the photometry stage: ``frames``, ``filter_type``,
+            Options for the photometry stage: ``frames``, ``filter_name``,
             ``use_astrometry_seed`` and ``max_workers``.
         spectroscopy : `dict`, optional
             Options for the spectroscopy stage: ``path`` and ``limit`` (a
@@ -1424,7 +1425,6 @@ class ProcessingPipelines:
 
     def run_spectroscopy_by_session(
         self,
-        astrometrics: Any,
         target: str | Target,
         frame_records: list[Any],
         max_workers: int | None = None,
@@ -1434,8 +1434,6 @@ class ProcessingPipelines:
 
         Parameters
         ----------
-        astrometrics : `astrometricslib.Astrometrics`
-            The parent astrometrics, needed to resolve session boundaries.
         target : `str` or `Target`
             The target whose spectroscopy frames should be processed.
         frame_records : `list`
@@ -1465,7 +1463,7 @@ class ProcessingPipelines:
             failed_message=f"[{resolved.id}] Session-based spectroscopy failed.",
         ) as job:
             return spectroscopy_batch_operations.process_spectroscopy_frames_by_session(
-                astrometrics,
+                self._config,
                 resolved,
                 frame_records,
                 max_workers=max_workers,
@@ -1577,102 +1575,115 @@ class ProcessingPipelines:
         """
         self._drivers.stacking_or_default().open_in_viewer(file_path)
 
-    @background_job("quality", grace_period_seconds=20.0)
-    def record_frame_measurements(
+    def detect_point_sources(
         self,
-        target: str | Target,
-        frames: list[FrameRecord] | None = None,
-        limit: int | None = None,
-        register_job: bool = True,
-    ) -> FrameMeasurementSummary:
-        """Measure a target's light frames once and store the numbers.
-
-        Each light frame is read once and measured: the width, elongation
-        and direction of its stars, the sky brightness and noise in
-        electrons, the camera's read noise, the temperatures, and the
-        measurements the library already makes (background level, saturated
-        fraction, Gaussian star width, count of bright regions). The numbers
-        go into the quality database and can be read with
-        ``Astrometrics.quality.query``. A value that cannot be measured is
-        stored as ``not_measured`` with the reason. The sky brightness needs
-        the bias level of the frame's exact camera setting, taken from the
-        calibration library's bias frames; with none at that setting those
-        two metrics are ``not_measured``.
-
-        The frame files are never moved or changed. Each measured frame gets
-        a stamp (the file size and change time at the measurement), saved to
-        the stored target every 20 frames and at the end. Only the stamps are
-        written, so the save never overwrites other changes to the target. A
-        frame whose file still matches its stamp is skipped, so a second call
-        measures nothing again. A frame that fails, for any reason, is
-        counted and tried again next time; one failure does not stop the
-        others. Each frame takes about 12 s of one core, and four frames are
-        measured at once in four worker processes: real data (61 frames of
-        3008 by 3008 pixels) took about 345 s and about 2.7 GB of memory.
-
-        The worker processes are started with "spawn", which imports the
-        calling script again in each worker. A script that calls this method
-        must therefore keep its top-level code under
-        ``if __name__ == "__main__":``, or the workers stop and every frame
-        fails. The backend, the bundled scripts and notebooks run as modules
-        or cells and are not affected.
-
-        Only one run measures a target at a time, and only one run in the
-        process reads frames at a time. A second call for a target that is
-        already being measured returns at once with ``already_running`` set
-        and nothing measured. A call for another target waits for its turn.
+        image_data: Any,
+        threshold_sigma: float = 5.0,
+        fwhm: float = 4.0,
+    ) -> PointSourceDetection:
+        """Find stars (point sources) in an image's pixel data.
 
         Parameters
         ----------
-        target : `str` or `Target`
-            The target whose light frames to measure.
-        frames : `list` [`FrameRecord`], optional
-            Only these frames. All of the target's light frames when omitted.
-        limit : `int`, optional
-            Measure at most this many frames, newest first. The rest wait for
-            the next call.
-        register_job : `bool`, optional
-            Record the run in the job list. Defaults to `True`.
+        image_data : `numpy.ndarray`
+            2D pixel array to search.
+        threshold_sigma : `float`, optional
+            Detection threshold, in noise standard deviations above the
+            background. Defaults to 5.0.
+        fwhm : `float`, optional
+            Expected star width (FWHM), in pixels. Defaults to 4.0.
 
         Returns
         -------
-        summary : `FrameMeasurementSummary`
-            How many frames were measured, skipped because they had not
-            changed, or failed, and how many rows were written.
-
-        Raises
-        ------
-        InvalidArgumentError
-            If ``limit`` is below 1.
+        detection : `PointSourceDetection`
+            The stars found, brightest first.
         """
-        from astrometricslib.drivers.quality_store import QualityStore
-        from astrometricslib.pipelines.shared.target_records import save_quality_stamps
-        from astrometricslib.pipelines.stacking.frame_measurement_run import (
-            FrameMeasurementSession,
-            record_frame_measurements_for_target,
+        from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
+
+        found = SourceDetector(threshold_sigma=threshold_sigma, fwhm=fwhm).detect(image_data)
+        return PointSourceDetection(sources=[_to_point_source(row) for row in found])
+
+    def tune_spectroscopy_calibration(
+        self,
+        image_path: str,
+        camera_id: str | None = None,
+        star_x: float | None = None,
+        star_y: float | None = None,
+    ) -> SpectroscopyCalibrationResult:
+        """Fit the spectroscope's physical model to one spectrum image.
+
+        Parameters
+        ----------
+        image_path : `str`
+            Path to the spectroscopy FITS image to calibrate against.
+        camera_id : `str`, optional
+            The camera, used to look up its quantum-efficiency curve.
+        star_x : `float`, optional
+            Zero-order star's x pixel position, if already known.
+        star_y : `float`, optional
+            Zero-order star's y pixel position, if already known.
+
+        Returns
+        -------
+        calibration_result : `SpectroscopyCalibrationResult`
+            The fitted calibration values and how well they fit.
+        """
+        from astrometricslib.pipelines.spectroscopy.utilities.calibration_tuner import (
+            SpectroscopyCalibrationTuner,
         )
 
-        if limit is not None and limit < 1:
-            raise InvalidArgumentError("limit must be at least 1.")
-        resolved = self._resolve(target)
-        with registered_job(enabled=register_job, job_type="quality", target_id=resolved.id) as job:
-            # The run gets its own run id and reports progress only when it
-            # registered (or joined) a job of its own. Called from inside
-            # another job (stacking, ingestion), it leaves that job's
-            # progress and id alone.
-            session = FrameMeasurementSession(
-                QualityStore.from_configuration(self._config),
-                self.calibration.library,
-                progress_job=job if job.job_id is not None and job.job_type == "quality" else None,
-                measured_at=datetime.now(UTC),
-            )
-            return record_frame_measurements_for_target(
-                resolved,
-                session,
-                frames=frames,
-                limit=limit,
-                save_target=lambda: save_quality_stamps(self._targets, resolved),
-            )
+        tuner = SpectroscopyCalibrationTuner(config=self._config)
+        star_position = (star_x, star_y) if (star_x is not None and star_y is not None) else None
+        summary = tuner.tune_calibration(image_path, camera_name=camera_id, star_pos=star_position)
+        maximum_length = summary["max_extraction_length_px"]
+        return SpectroscopyCalibrationResult(
+            status=str(summary["status"]),
+            camera_name=str(summary["camera_name"]),
+            fitted_grating_distance_mm=float(summary["fitted_grating_distance_mm"]),
+            fitted_dispersion_start_px=float(summary["fitted_dispersion_start_px"]),
+            rms_error_nm=float(summary["rms_error_nm"]),
+            detected_angle_degrees=float(summary["detected_angle_degrees"]),
+            detailed_calibration=[
+                CalibrationLineFit(
+                    feature=str(line["feature"]),
+                    extracted_index=int(line["extracted_index"]),
+                    pixel_offset=float(line["pixel_offset"]),
+                    target_wavelength_nm=float(line["target_wavelength_nm"]),
+                    calibrated_wavelength_nm=float(line["calibrated_wavelength_nm"]),
+                    deviation_nm=float(line["deviation_nm"]),
+                )
+                for line in summary["detailed_calibration"]
+            ],
+            use_flare_mask_extraction=bool(summary["use_flare_mask_extraction"]),
+            max_extraction_length_px=None if maximum_length is None else float(maximum_length),
+        )
+
+    def plate_solve(self, image_path: str) -> Any | None:
+        """Work out where on the sky an image points, from its stars.
+
+        Plate solving matches the pattern of stars in the image against a
+        star catalog. The result is a World Coordinate System (WCS): the
+        mapping from each pixel to a sky position.
+
+        Parameters
+        ----------
+        image_path : `str`
+            The FITS file to solve.
+
+        Returns
+        -------
+        wcs : `astropy.wcs.WCS` or `None`
+            The pixel-to-sky mapping, or `None` when the image cannot be
+            read or too few stars are found to try a solve. When a solve is
+            tried and the star pattern cannot be matched, the star
+            identifier raises `PlateSolveFailedError` instead.
+        """
+        from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
+
+        _, wcs = StarIdentifier(config=self._config, drivers=self._drivers).process_image(
+            image_path, attempt_plate_solving=True
+        )
+        return wcs
 
     def restore_excluded_frames(self, target: str | Target, apply: bool = False) -> RestoreReport:
         """List, or move back, the frames the stacker set aside for a target.

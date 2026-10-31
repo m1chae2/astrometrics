@@ -525,7 +525,7 @@ class TargetFrameReader:
         try:
             rows = self._astrometrics.quality.query(
                 target_id=target_id, level=SubjectLevel.FRAME.value, latest_only=True
-            )
+            ).rows
         except (AstrometricsError, OSError) as error:
             logger.warning("Could not read the frame judgments of %s: %s", target_id, error)
             return TargetFrames(

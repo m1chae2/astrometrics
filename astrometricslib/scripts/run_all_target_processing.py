@@ -561,7 +561,7 @@ def _earlier_nights_frames(astrometrics: Astrometrics, target: Any, since: datet
     """
     weight_rows = astrometrics.quality.query(
         metric=STACKING_FRAME_WEIGHT, target_id=target.id, since=since, library_only=True
-    )
+    ).rows
     night_of_subject = {
         row.subject.subject_id: row.subject.observing_night_id
         for row in weight_rows
@@ -671,13 +671,15 @@ def _noise_ratio(astrometrics: Any, target_id: str, since: Any) -> float | None:
             target_id=target_id,
             since=since,
             library_only=True,
-        )
+        ).rows
     )
     if stored is not None:
         return stored
     measured, predicted = (
         _measured_value(
-            astrometrics.quality.query(metric=metric, target_id=target_id, since=since, library_only=True)
+            astrometrics.quality.query(
+                metric=metric, target_id=target_id, since=since, library_only=True
+            ).rows
         )
         for metric in (
             STACKING_EMPTY_APERTURE_NOISE_STACK_UNIT,
@@ -717,7 +719,7 @@ def _odd_even_difference_note(astrometrics: Astrometrics, target: Any, since: da
         ratio = _noise_ratio(astrometrics, target.id, since)
         ratio_text = "no ratio" if ratio is None else f"ratio {ratio:.2f}"
         print(f"  [{target.id}] odd–even difference run ({ratio_text})")
-        astrometrics.processing.measure_odd_even_difference_noise(target)
+        astrometrics.processing.measure_noise(target, kind="odd_even_difference")
     except Exception as odd_even_difference_error:
         # The library stack is already made and recorded; the measurement is
         # an extra. Whatever its cause, it is noted and the run goes on.
@@ -739,7 +741,7 @@ def _stack_one_target(
 
     The frames are chosen as the full pipeline chooses them: one camera, one
     optic, imaging (not spectral) frames. Every one of them is measured first
-    (`ProcessingPipelines.record_frame_measurements`), so the stack's
+    (`QualityRecords.record_frame_measurements`), so the stack's
     predicted noise has the sky of each frame. They then go to the public
     `ProcessingPipelines.stack`, which sets aside bad frames, stacks, and
     records the stack's quality rows. No astrometry, photometry or
@@ -796,7 +798,7 @@ def _stack_one_target(
     # frame. So every imaging frame is measured first, with no limit. Frames
     # measured before and unchanged since are skipped, so a resumed run does
     # not repeat the work.
-    measurement = astrometrics.processing.record_frame_measurements(target, frames=standard_frames)
+    measurement = astrometrics.quality.record_frame_measurements(target, frames=standard_frames)
     if measurement.already_running:
         raise RuntimeError(f"another run is measuring the frames of '{target.id}'; try again later")
     print(
@@ -928,7 +930,7 @@ def build_review_row(astrometrics: Any, record: dict) -> dict[str, Any]:
         """
         return astrometrics.quality.query(
             metric=metric, target_id=row["target"], since=record.get("run_started_at"), library_only=True
-        )
+        ).rows
 
     weight_rows = query(STACKING_FRAME_WEIGHT)
     row["weights_known"] = _presence_label(weight_rows)
@@ -956,7 +958,7 @@ def build_review_row(astrometrics: Any, record: dict) -> dict[str, Any]:
                 target_id=row["target"],
                 since=record.get("run_started_at"),
                 variant=EARLIER_NIGHTS_VARIANT,
-            )
+            ).rows
             for metric in (STACKING_FRAME_WEIGHT, STACKING_EXPECTED_EMPTY_APERTURE_NOISE_STACK_UNIT)
         ]
         row["earlier_nights_present"] = (

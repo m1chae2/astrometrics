@@ -802,7 +802,8 @@ class ObservationPlanning:
             ``right_ascension_deg``, ``declination_deg``, ``target_ids``
             and ``frames_examined``.
         """
-        return self._astrometrics.targets.imaged_field_centers(register_job=False)
+        centers = self._astrometrics.targets.imaged_field_centers(register_job=False).centers
+        return [center.model_dump() for center in centers]
 
     # -- Visibility ---------------------------------------------------------
 

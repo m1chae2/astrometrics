@@ -23,7 +23,7 @@
       "interim_block": "",
       "note": "Built 2026-10-05. Calibration counts, or how a target's light frames match the darks. refresh reloads the index into memory and writes nothing."
     },
-    "calibration_refresh": {
+    "calibration_reindex_frames": {
       "tool_class": "change-data",
       "category": "calibration",
       "disposition": "withhold",
@@ -51,6 +51,13 @@
       "interim_block": "",
       "note": "Internal concurrency lock exposed by reflection."
     },
+    "processing_detect_point_sources": {
+      "tool_class": "compute",
+      "category": "image-processing",
+      "disposition": "fix",
+      "interim_block": "",
+      "note": "Needs a NumPy array, which MCP cannot send. Take a frame path."
+    },
     "processing_discard_previous_stack": {
       "tool_class": "change-data",
       "category": "image-processing",
@@ -58,26 +65,12 @@
       "interim_block": "",
       "note": "The AI is read-only, so a tool that writes is not offered."
     },
-    "processing_measure_night_contributions": {
+    "processing_measure_noise": {
       "tool_class": "change-data",
       "category": "image-processing",
       "disposition": "withhold",
       "interim_block": "",
-      "note": "Stacks some of a target's frames into the target's _subsets folder (never over the library stack, its previews or its records) and writes the noise of each result into the quality database. It costs one stack for each subset, so it takes minutes. The AI is read-only, so it reads the stored numbers with quality_query instead."
-    },
-    "processing_measure_noise_growth": {
-      "tool_class": "change-data",
-      "category": "image-processing",
-      "disposition": "withhold",
-      "interim_block": "",
-      "note": "Stacks some of a target's frames into the target's _subsets folder (never over the library stack, its previews or its records) and writes the noise of each result into the quality database. It costs one stack for each subset, so it takes minutes. The AI is read-only, so it reads the stored numbers with quality_query instead."
-    },
-    "processing_measure_odd_even_difference_noise": {
-      "tool_class": "change-data",
-      "category": "image-processing",
-      "disposition": "withhold",
-      "interim_block": "",
-      "note": "Stacks two halves of a target's frames into the target's _subsets folder (about one library stack's time in all), subtracts them, and writes the noise of the difference into the quality database. The halves are deleted afterwards, and the library stack, its previews and its records are never changed. The AI is read-only, so it reads the stored numbers with quality_query instead."
+      "note": "Stacks some of a target's frames into the target's _subsets folder (never over the library stack, its previews or its records) and writes the noise of each result into the quality database. It costs one stack for each subset, so it takes minutes (kind=odd_even_difference stacks two halves, about one library stack's time in all). The AI is read-only, so it reads the stored numbers with quality_query instead."
     },
     "processing_open_in_siril": {
       "tool_class": "unclassified",
@@ -86,19 +79,19 @@
       "interim_block": "",
       "note": "Opens a window on the person's screen. An AI client cannot see it. The app's button uses it."
     },
+    "processing_plate_solve": {
+      "tool_class": "compute",
+      "category": "image-processing",
+      "disposition": "fix",
+      "interim_block": "",
+      "note": "Returns an astropy WCS, which MCP cannot send. Return the solved center and pixel scale."
+    },
     "processing_process_target": {
       "tool_class": "change-data",
       "category": "image-processing",
       "disposition": "withhold",
       "interim_block": "",
       "note": "The AI is read-only, so a tool that writes is not offered."
-    },
-    "processing_record_frame_measurements": {
-      "tool_class": "change-data",
-      "category": "image-processing",
-      "disposition": "withhold",
-      "interim_block": "",
-      "note": "Measures a target's light frames and writes the numbers into the quality database, and stamps each measured frame on the target record. It never changes a frame file. The AI is read-only, so it reads the stored numbers with quality_query instead."
     },
     "processing_remake_preview": {
       "tool_class": "process",
@@ -133,7 +126,7 @@
       "category": "image-processing",
       "disposition": "withhold",
       "interim_block": "",
-      "note": "Stacks some of a target's frames into the target's _subsets folder (never over the library stack, its previews or its records) and writes the noise of each result into the quality database. It costs one stack for each subset, so it takes minutes. The AI is read-only, so it reads the stored numbers with quality_query instead."
+      "note": "Stacks some of a target's frames into the target's _subsets folder (never over the library stack, its previews or its records) and writes the noise of each result into the quality database. It costs one stack for each subset, so it takes minutes (kind=odd_even_difference stacks two halves, about one library stack's time in all). The AI is read-only, so it reads the stored numbers with quality_query instead."
     },
     "processing_stack_summary": {
       "tool_class": "observe",
@@ -149,6 +142,13 @@
       "interim_block": "",
       "note": "The AI is read-only, so a tool that writes is not offered."
     },
+    "processing_tune_spectroscopy_calibration": {
+      "tool_class": "change-data",
+      "category": "image-processing",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "Rewrites the live configuration file through update_config. Needs an apply=false mode that only returns the fitted values."
+    },
     "quality_calibration_identities": {
       "tool_class": "observe",
       "category": "image-processing",
@@ -163,26 +163,12 @@
       "interim_block": "",
       "note": "Built 2026-10-24. Reads the camera, telescope, filter, exposure, gain setting, offset and binning that stored quality measurements point at, by capture setting id. Writes nothing and creates no table."
     },
-    "quality_check_spectral_frames": {
-      "tool_class": "compute",
-      "category": "image-processing",
-      "disposition": "keep",
-      "interim_block": "",
-      "note": "Built 2026-10-04. Measures raw spectrum frames: zero-order position, tilt, width, peaks, saturated patches along the spectrum, a predicted peak at another exposure, and a summary by exposure and by pier side. Nothing is saved."
-    },
-    "quality_flag_value_outliers": {
-      "tool_class": "compute",
-      "category": "image-processing",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Arithmetic on numbers the caller passes in. The user does not want it."
-    },
     "quality_measure_frames": {
       "tool_class": "compute",
       "category": "image-processing",
       "disposition": "keep",
       "interim_block": "",
-      "note": "Built 2026-10-03. Statistics on raw frames. Nothing is saved."
+      "note": "Built 2026-10-03. Statistics on raw frames. Nothing is saved. Since 2026-10-31 kind=spectral measures raw spectrum frames (zero-order position, tilt, width, peaks, saturated patches along the spectrum, a predicted peak at another exposure, a summary by exposure and pier side); it replaces quality_check_spectral_frames."
     },
     "quality_measure_stack": {
       "tool_class": "compute",
@@ -204,6 +190,13 @@
       "disposition": "keep",
       "interim_block": "",
       "note": "Built 2026-10-21. Reads the quality measurements that earlier runs stored (the latest for each subject and metric, or every row). Writes nothing and creates no table."
+    },
+    "quality_record_frame_measurements": {
+      "tool_class": "change-data",
+      "category": "image-processing",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "Measures a target's light frames and writes the numbers into the quality database, and stamps each measured frame on the target record. It never changes a frame file. The AI is read-only, so it reads the stored numbers with quality_query instead."
     },
     "quality_resolve_rows": {
       "tool_class": "observe",
@@ -240,13 +233,6 @@
       "interim_block": "",
       "note": "A change counter for the backend's answer cache. It tells an AI client nothing about the sky."
     },
-    "star_detect_point_sources": {
-      "tool_class": "compute",
-      "category": "stars",
-      "disposition": "fix",
-      "interim_block": "",
-      "note": "Needs a NumPy array, which MCP cannot send. Take a frame path."
-    },
     "star_find_or_create_by_position": {
       "tool_class": "change-data",
       "category": "stars",
@@ -261,26 +247,12 @@
       "interim_block": "",
       "note": "Reads one star's full record by id. Writes nothing."
     },
-    "star_plate_solve": {
-      "tool_class": "compute",
-      "category": "stars",
-      "disposition": "fix",
-      "interim_block": "",
-      "note": "Returns an astropy WCS, which MCP cannot send. Return the solved center and pixel scale."
-    },
     "star_query": {
       "tool_class": "observe",
       "category": "stars",
       "disposition": "keep",
       "interim_block": "",
       "note": "Built 2026-10-03. Library star lookup with hard caps on rows, region size and full records."
-    },
-    "star_tune_spectroscopy_calibration": {
-      "tool_class": "change-data",
-      "category": "stars",
-      "disposition": "withhold",
-      "interim_block": "",
-      "note": "Rewrites the live configuration file through update_config. Needs an apply=false mode that only returns the fitted values."
     },
     "star_update": {
       "tool_class": "change-data",

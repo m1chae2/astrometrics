@@ -598,7 +598,7 @@ from astrometricslib import Astrometrics
 
 astrometrics = Astrometrics()
 result = astrometrics.processing.process_target(
-    "NGC 2244", stages=["photometry"], photometry={"filter_type": "Luminance"}
+    "NGC 2244", stages=["photometry"], photometry={"filter_name": "Luminance"}
 )
 print(result.quality.photometry.gate("comparison_ensemble").detail)
 ```
@@ -781,7 +781,7 @@ astrometrics.processing.process_target(
 for part in ("photon", "sky", "read"):
     for row in astrometrics.quality.query(
         metric=f"photometry.model_noise_{part}_at_mag12_mag", target_id="M 57"
-    ):
+    ).rows:
         print(part, row.status, row.value)
 ```
 
@@ -816,7 +816,7 @@ for rank in (1, 2, 3):
     for quantity in ("frequency_per_day", "power_fraction"):
         for row in astrometrics.quality.query(
             metric=f"photometry.window_alias_{rank}_{quantity}", target_id="Vega"
-        ):
+        ).rows:
             print(rank, quantity, row.value, row.reason)
 ```
 
@@ -853,7 +853,7 @@ for metric in (
     "photometry.target_phase_coverage_fraction",
     "photometry.target_catalog_amplitude_mag",
 ):
-    for row in astrometrics.quality.query(metric=metric, target_id="Mirach"):
+    for row in astrometrics.quality.query(metric=metric, target_id="Mirach").rows:
         print(metric, row.status, row.value, row.reason)
 ```
 

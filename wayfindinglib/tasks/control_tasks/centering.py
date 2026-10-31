@@ -142,7 +142,7 @@ def _solve(context: ControlContext, path: Path) -> tuple[float, float]:
     PlateSolveFailedError
         If the star pattern could not be matched.
     """
-    wcs = context.astrometrics.stars.plate_solve(str(path))
+    wcs = context.astrometrics.processing.plate_solve(str(path))
     if wcs is None:
         raise PlateSolveFailedError(f"No plate solution for {path.name}.")
     return solved_center(wcs)

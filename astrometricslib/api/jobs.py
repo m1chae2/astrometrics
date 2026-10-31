@@ -21,6 +21,7 @@ from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.foundation.jobs.models import ProcessingJob
 from astrometricslib.foundation.jobs.store import JobStore
+from astrometricslib.models.job_queries import JobLogLine, JobQueryResult, JobSummary, LineageRun
 
 __all__ = ["Jobs"]
 
@@ -131,7 +132,7 @@ class Jobs:
         self._storage = storage
         self._database_path = str(config.get_logs_db_path())
 
-    def _summarize(self, job: ProcessingJob) -> dict[str, Any]:
+    def _summarize(self, job: ProcessingJob) -> JobSummary:
         """Describe one job in a few fields.
 
         Parameters
@@ -141,7 +142,7 @@ class Jobs:
 
         Returns
         -------
-        summary : `dict` [`str`, `Any`]
+        summary : `JobSummary`
             Id, type, target, status, progress, message and times. An
             unfinished job that has not been updated for
             `STALE_AFTER_MINUTES` has ``looks_stale`` set, ``is_active``
@@ -151,20 +152,20 @@ class Jobs:
         unfinished = job.status in ACTIVE_STATUSES
         idle_minutes = _minutes_since(job.updated_at or job.created_at) if unfinished else None
         looks_stale = idle_minutes is not None and idle_minutes > STALE_AFTER_MINUTES
-        return {
-            "id": job.id,
-            "job_type": job.job_type,
-            "target_id": job.target_id,
-            "status": job.status,
-            "progress": f"{job.progress_current}/{job.progress_total}",
-            "message": _shorten(job.message),
-            "created_at": job.created_at,
-            "updated_at": job.updated_at,
-            "completed_at": job.completed_at,
-            "is_active": unfinished and not looks_stale,
-            "looks_stale": looks_stale,
-            "idle_minutes": None if idle_minutes is None else round(idle_minutes),
-        }
+        return JobSummary(
+            id=job.id,
+            job_type=job.job_type,
+            target_id=job.target_id,
+            status=job.status,
+            progress=f"{job.progress_current}/{job.progress_total}",
+            message=_shorten(job.message),
+            created_at=job.created_at,
+            updated_at=job.updated_at,
+            completed_at=job.completed_at,
+            is_active=unfinished and not looks_stale,
+            looks_stale=looks_stale,
+            idle_minutes=None if idle_minutes is None else round(idle_minutes),
+        )
 
     def query(
         self,
@@ -176,7 +177,7 @@ class Jobs:
         detail: str = "summary",
         lines: int = 50,
         limit: int = 20,
-    ) -> dict[str, Any]:
+    ) -> JobQueryResult:
         """List jobs, read one job, tail its log, or show a target's lineage.
 
         Everything here only reads. The answers are short on purpose: a job
@@ -213,7 +214,7 @@ class Jobs:
 
         Returns
         -------
-        answer : `dict` [`str`, `Any`]
+        answer : `JobQueryResult`
             The answer for the chosen detail. With no logs database yet, a
             job list is empty.
 
@@ -240,7 +241,7 @@ class Jobs:
         lines = max(1, min(int(lines), MAXIMUM_LOG_LINES))
         if not Path(self._database_path).is_file():
             if detail == "summary" and not job_id:
-                return {"detail": "summary", "count": 0, "jobs": [], "note": UNTRUSTED_TEXT_NOTE}
+                return JobQueryResult(detail="summary", count=0, jobs=[], note=UNTRUSTED_TEXT_NOTE)
             raise NotFoundError("The logs database does not exist yet, so no jobs are recorded.")
         job_store = JobStore(self._database_path, read_only=True)
 
@@ -251,14 +252,14 @@ class Jobs:
         if job_id:
             return self._one_job(job_store, job_id, "summary", lines)
         jobs = job_store.query_jobs(target_id, job_type, status, active_only, limit)
-        return {
-            "detail": "summary",
-            "count": len(jobs),
-            "jobs": [self._summarize(job) for job in jobs],
-            "note": UNTRUSTED_TEXT_NOTE,
-        }
+        return JobQueryResult(
+            detail="summary",
+            count=len(jobs),
+            jobs=[self._summarize(job) for job in jobs],
+            note=UNTRUSTED_TEXT_NOTE,
+        )
 
-    def _one_job(self, job_store: JobStore, job_id: str, detail: str, lines: int) -> dict[str, Any]:
+    def _one_job(self, job_store: JobStore, job_id: str, detail: str, lines: int) -> JobQueryResult:
         """Answer for one job: its summary, log tail or stored result.
 
         Parameters
@@ -274,7 +275,7 @@ class Jobs:
 
         Returns
         -------
-        answer : `dict` [`str`, `Any`]
+        answer : `JobQueryResult`
             The job's summary plus the extra the detail asks for.
 
         Raises
@@ -285,23 +286,23 @@ class Jobs:
         job = job_store.get_job(job_id)
         if job is None:
             raise NotFoundError(f"No job with id {job_id!r}.", details={"job_id": job_id})
-        answer: dict[str, Any] = {"detail": detail, "job": self._summarize(job), "note": UNTRUSTED_TEXT_NOTE}
+        answer = JobQueryResult(detail=detail, job=self._summarize(job), note=UNTRUSTED_TEXT_NOTE)
         if detail == "log_tail":
             entries, total = job_store.get_recent_log_entries_for_job(job_id, lines)
-            answer["log_lines"] = [
-                {"time": entry["created_at"], "level": entry["level"], "text": _shorten(entry["message"])}
+            answer.log_lines = [
+                JobLogLine(time=entry["created_at"], level=entry["level"], text=_shorten(entry["message"]))
                 for entry in entries
             ]
-            answer["log_lines_total"] = total
-            answer["log_lines_shown"] = len(entries)
+            answer.log_lines_total = total
+            answer.log_lines_shown = len(entries)
         elif detail == "result":
-            answer["input_metrics"] = _shorten(job.input_metrics, MAXIMUM_RESULT_LENGTH)
-            answer["output_metrics"] = _shorten(job.output_metrics, MAXIMUM_RESULT_LENGTH)
+            answer.input_metrics = _shorten(job.input_metrics, MAXIMUM_RESULT_LENGTH)
+            answer.output_metrics = _shorten(job.output_metrics, MAXIMUM_RESULT_LENGTH)
         return answer
 
     def _lineage(
         self, job_store: JobStore, job_id: str | None, target_id: str | None, limit: int
-    ) -> dict[str, Any]:
+    ) -> JobQueryResult:
         """Answer with the pipeline runs that produced a target's data.
 
         Parameters
@@ -317,7 +318,7 @@ class Jobs:
 
         Returns
         -------
-        answer : `dict` [`str`, `Any`]
+        answer : `JobQueryResult`
             The runs, newest first.
 
         Raises
@@ -334,22 +335,22 @@ class Jobs:
             )
         activities = ProvenanceStore(self._database_path, read_only=True).get_lineage(target_id)
         runs = [
-            {
-                "id": activity.id,
-                "name": activity.name,
-                "start_time": activity.start_time.isoformat() if activity.start_time else None,
-                "end_time": activity.end_time.isoformat() if activity.end_time else None,
-                "comment": _shorten(activity.comment),
-                "informed_by": list(activity.informant),
-                "inputs_used": len(activity.used),
-            }
+            LineageRun(
+                id=activity.id,
+                name=activity.name,
+                start_time=activity.start_time.isoformat() if activity.start_time else None,
+                end_time=activity.end_time.isoformat() if activity.end_time else None,
+                comment=_shorten(activity.comment),
+                informed_by=list(activity.informant),
+                inputs_used=len(activity.used),
+            )
             for activity in activities[:MAXIMUM_LINEAGE_RUNS][:limit]
         ]
-        return {
-            "detail": "lineage",
-            "target_id": target_id,
-            "runs_total": len(activities),
-            "runs_shown": len(runs),
-            "runs": runs,
-            "note": UNTRUSTED_TEXT_NOTE,
-        }
+        return JobQueryResult(
+            detail="lineage",
+            target_id=target_id,
+            runs_total=len(activities),
+            runs_shown=len(runs),
+            runs=runs,
+            note=UNTRUSTED_TEXT_NOTE,
+        )

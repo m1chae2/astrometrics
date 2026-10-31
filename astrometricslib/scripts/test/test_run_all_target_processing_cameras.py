@@ -150,13 +150,14 @@ class FakeAstrometrics:
         self.odd_even_difference_calls: list[str] = []
         self.odd_even_difference_failures: set[str] = set()
         self.processing = SimpleNamespace(
-            measure_odd_even_difference_noise=self.measure_odd_even_difference_noise,
+            measure_noise=self.measure_noise,
             process_target=self.process_target,
             stack=self.stack,
             stack_subset=self.stack_subset,
-            record_frame_measurements=self.record_frame_measurements,
         )
-        self.quality = SimpleNamespace(query=self.query_quality)
+        self.quality = SimpleNamespace(
+            query=self.query_quality, record_frame_measurements=self.record_frame_measurements
+        )
 
     def record_frame_measurements(self, target: Any, **keywords: Any) -> SimpleNamespace:
         """Record one frame-measurement request.
@@ -213,7 +214,7 @@ class FakeAstrometrics:
             raise RuntimeError(f"the earlier nights of {target.id} broke")
         return SimpleNamespace()
 
-    def measure_odd_even_difference_noise(self, target: Any, **keywords: Any) -> SimpleNamespace:
+    def measure_noise(self, target: Any, **keywords: Any) -> SimpleNamespace:
         """Record one odd–even difference request, or fail it on request.
 
         Returns
@@ -233,7 +234,7 @@ class FakeAstrometrics:
 
     def query_quality(
         self, metric: str, target_id: str, variant: str | None = None, **keywords: Any
-    ) -> list[SimpleNamespace]:
+    ) -> SimpleNamespace:
         """Return the fake quality rows of one metric for one target.
 
         Rows asked for by a subset variant are kept under the key with the
@@ -241,11 +242,11 @@ class FakeAstrometrics:
 
         Returns
         -------
-        rows : `list`
-            The rows the test set up, or none.
+        answer : `types.SimpleNamespace`
+            With ``rows``, the rows the test set up, or none.
         """
         key = f"{target_id}|{metric}" + (f"|{variant}" if variant else "")
-        return self.quality_rows.get(key, [])
+        return SimpleNamespace(rows=self.quality_rows.get(key, []))
 
     def process_target(self, target: list[str] | None, **keywords: Any) -> SimpleNamespace:
         """Record one pass and pretend it succeeded.

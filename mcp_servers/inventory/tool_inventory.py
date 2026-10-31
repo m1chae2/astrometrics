@@ -214,7 +214,7 @@ CLASSIFICATION_RULES = (
         "high",
         "Adds or changes stars in the catalog.",
     ),
-    _rule(r"^calibration_refresh$", "change-data", "medium", "Probably rebuilds stored calibration."),
+    _rule(r"^calibration_reindex_frames$", "change-data", "medium", "Probably rebuilds stored calibration."),
     _rule(
         r"^processing_(discard_previous_stack|restore_excluded_frames|swap_with_previous_stack|process_target)$",
         "change-data",
@@ -228,7 +228,9 @@ CLASSIFICATION_RULES = (
         "Pipeline run that writes results to the live catalog or stacks.",
     ),
     _rule(r"^processing_acquire_.+_slot$", "change-data", "low", "Takes a work slot (a lock). Check."),
-    _rule(r"^star_tune_spectroscopy_calibration$", "change-data", "low", "May store a new calibration."),
+    _rule(
+        r"^processing_tune_spectroscopy_calibration$", "change-data", "low", "May store a new calibration."
+    ),
     _rule(
         r"^planning_(edit_queue|edit_package|tick_checklist_item)$",
         "change-data",
@@ -367,12 +369,6 @@ CLASSIFICATION_RULES = (
         "observe",
         "high",
         "Reads targets or stars in short, capped records.",
-    ),
-    _rule(
-        r"^quality_check_spectral_frames$",
-        "compute",
-        "high",
-        "Measures raw spectrum frames and returns statistics. Saves nothing.",
     ),
     _rule(
         r"^processing_stack_summary$",

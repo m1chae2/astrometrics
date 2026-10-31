@@ -39,7 +39,7 @@ class Container:
         self.config_service = None
         self.indi_driver = None
         self.indi_worker_client = None
-        self.calibration_library = None
+        self.calibration = None
 
         # Domain Services
         self.astrometrics = None
@@ -134,12 +134,10 @@ class Container:
         self.job_repository = JobStore(str(self.config_service.get_logs_db_path()))
         self.job_service = JobService(self.job_repository)
         self.maintenance_service = MaintenanceService(self.job_service)
-        # Reuse the calibration namespace's single CalibrationLibrary
-        # instance rather than constructing a second one.
-        self.calibration_library = self.astrometrics.processing.calibration.library
-
-        # Load data from disk
-        self.calibration_library.load_library()
+        # Reuse the library's one calibration catalog, and load its index
+        # from disk now (the first question builds and loads it).
+        self.calibration = self.astrometrics.processing.calibration
+        self.calibration.query()
 
         # 3. Initialize Hardware Drivers
         if os.getenv("ASTROMETRICS_TESTING"):
@@ -213,7 +211,7 @@ class Container:
             processing_api=self.astrometrics.processing,
             job_repository=self.job_repository,
             target_service=self.target_service,
-            calibration_library=self.calibration_library,
+            calibration=self.calibration,
             config_service=self.config_service,
             notification_service=self.notification_service,
             job_service=self.job_service,
@@ -286,7 +284,7 @@ class Container:
         self.ingestion_service = IngestionService(
             target_service=self.target_service,
             config_service=self.config_service,
-            calibration_library=self.calibration_library,
+            calibration=self.calibration,
             stellar_service=self.stellar_object_service,
             job_service=self.job_service,
             image_processing_service=self.image_processing_service,

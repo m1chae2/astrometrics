@@ -93,7 +93,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
         self._analyze_submit_lock = threading.Lock()
 
     def analyze_image(
-        self, target_id: str, image_files: Any, filter_type: str | None = None, type: str = "photometry"
+        self, target_id: str, image_files: Any, filter_name: str | None = None, type: str = "photometry"
     ) -> dict[str, Any]:
         """Start a background analysis job.
 
@@ -123,14 +123,14 @@ class AnalysisOrchestrator(BaseBackgroundService):
                 "analysis",
                 self._start_analysis_task,
                 image_files,
-                filter_type,
+                filter_name,
                 type,
                 log_file_path=log_file,
             )
 
         return {"status": "started", "jobId": job_id, "logFile": log_file}
 
-    def get_analysis_results(self, target_id: str, filter_type: str | None = None) -> dict[str, Any] | None:
+    def get_analysis_results(self, target_id: str, filter_name: str | None = None) -> dict[str, Any] | None:
         """Get the results of the analysis job if complete.
 
         Returns
@@ -186,7 +186,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
 
         return None
 
-    def cancel_analysis(self, target_id: str, filter_type: str | None = None) -> bool:
+    def cancel_analysis(self, target_id: str, filter_name: str | None = None) -> bool:
         """Cancel an active analysis job.
 
         Returns
@@ -205,7 +205,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
         job_id: str,
         target_id: str,
         image_files: Any,
-        filter_type: str | None,
+        filter_name: str | None,
         type: str = "photometry",
         **kwargs: Any,
     ) -> dict[str, Any]:
@@ -246,14 +246,14 @@ class AnalysisOrchestrator(BaseBackgroundService):
             log_file_path=job.log_file_path if job else None,
             job_store=self._job_service.repository if self._job_service else None,
         ):
-            return self._run_analysis_task_body(job_id, target_id, image_files, filter_type, type)
+            return self._run_analysis_task_body(job_id, target_id, image_files, filter_name, type)
 
     def _run_analysis_task_body(
         self,
         job_id: str,
         target_id: str,
         image_files: Any,
-        filter_type: str | None,
+        filter_name: str | None,
         type: str = "photometry",
     ) -> dict[str, Any]:
         """Body of `_start_analysis_task`, run with job logging attached.
@@ -296,9 +296,9 @@ class AnalysisOrchestrator(BaseBackgroundService):
                         )
                     elif isinstance(v, list):
                         if (
-                            not filter_type
-                            or k.upper() == filter_type.upper()
-                            or (filter_type.upper() == "L" and k.upper() in ["LUMINANCE", "NONE", "UNKNOWN"])
+                            not filter_name
+                            or k.upper() == filter_name.upper()
+                            or (filter_name.upper() == "L" and k.upper() in ["LUMINANCE", "NONE", "UNKNOWN"])
                         ):
                             yield from v
                     else:
@@ -347,15 +347,15 @@ class AnalysisOrchestrator(BaseBackgroundService):
         fallback_is_spec = type == "spectroscopy"
         if (
             not fallback_is_spec
-            and filter_type
-            and filter_type.upper() in ["SPEC", "SPECTROSCOPY", "STAR ANALYZER 200"]
+            and filter_name
+            and filter_name.upper() in ["SPEC", "SPECTROSCOPY", "STAR ANALYZER 200"]
         ):
             fallback_is_spec = True
 
         if (
             unmatched_paths
             and not fallback_is_spec
-            and (not filter_type or filter_type.upper() in ["NONE", "UNKNOWN", "LUMINANCE", "L", "ALL"])
+            and (not filter_name or filter_name.upper() in ["NONE", "UNKNOWN", "LUMINANCE", "L", "ALL"])
         ):
             try:
                 header = self.astrometrics.targets.read_frame_header(unmatched_paths[0])
@@ -393,10 +393,10 @@ class AnalysisOrchestrator(BaseBackgroundService):
                 len(spec_paths),
             )
             spectroscopy_result = self._run_spectroscopy_analysis(
-                job_id, target_id, spec_paths, filter_type or "SPEC", logger=logger
+                job_id, target_id, spec_paths, filter_name or "SPEC", logger=logger
             )
             photometry_result = self._run_photometry_analysis(
-                job_id, target_id, light_paths, filter_type, logger=logger
+                job_id, target_id, light_paths, filter_name, logger=logger
             )
             return {
                 "status": "finished",
@@ -406,19 +406,19 @@ class AnalysisOrchestrator(BaseBackgroundService):
 
         if spec_paths:
             return self._run_spectroscopy_analysis(
-                job_id, target_id, spec_paths, filter_type or "SPEC", logger=logger
+                job_id, target_id, spec_paths, filter_name or "SPEC", logger=logger
             )
 
         if light_paths or type == "photometry":
-            return self._run_photometry_analysis(job_id, target_id, light_paths, filter_type, logger=logger)
+            return self._run_photometry_analysis(job_id, target_id, light_paths, filter_name, logger=logger)
 
         raise InvalidArgumentError(
-            f"The filter {filter_type!r} is not supported for analysis.",
-            details={"target_id": target_id, "filter_type": filter_type},
+            f"The filter {filter_name!r} is not supported for analysis.",
+            details={"target_id": target_id, "filter_name": filter_name},
         )
 
     def _update_job_progress(
-        self, job_id: str, target_id: str, current: int, total: int, filter_type: str | None = None
+        self, job_id: str, target_id: str, current: int, total: int, filter_name: str | None = None
     ) -> None:
         if self._job_service:
             progress_pct = int((current / total) * 100) if total > 0 else 0
@@ -433,7 +433,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
         job_id: str,
         target_id: str,
         paths: list[str],
-        filter_type: str | None = None,
+        filter_name: str | None = None,
         logger: logging.Logger | None = None,
     ) -> dict[str, Any]:
         """Pipeline for spectroscopy extraction.
@@ -476,7 +476,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
         def _on_frame_complete(
             path: str, frame_result: dict[str, Any], completed_count: int, total_count: int
         ) -> None:
-            self._update_job_progress(job_id, target_id, completed_count, total_count, filter_type="SPEC")
+            self._update_job_progress(job_id, target_id, completed_count, total_count, filter_name="SPEC")
 
         # Stage one: the master stacked spectral image. It is a generated
         # file that lives outside `target.frames`, so it cannot be grouped
@@ -502,7 +502,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
             master_star_count = len((master_result or {}).get("stellar_objects") or [])
             results["starsProcessed"] += master_star_count
             results["spectraExtracted"] += master_star_count
-            self._update_job_progress(job_id, target_id, 1, results["totalImages"], filter_type="SPEC")
+            self._update_job_progress(job_id, target_id, 1, results["totalImages"], filter_name="SPEC")
 
         if not paths:
             try:
@@ -535,7 +535,6 @@ class AnalysisOrchestrator(BaseBackgroundService):
 
         with self.astrometrics.processing.acquire_job_slot():
             summary, _session_results = self.astrometrics.processing.run_spectroscopy_by_session(
-                self.astrometrics,
                 target,
                 frame_records,
                 max_workers=None,
@@ -580,7 +579,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
         job_id: str,
         target_id: str,
         paths: list[str],
-        filter_type: str | None = None,
+        filter_name: str | None = None,
         logger: logging.Logger | None = None,
     ) -> dict[str, Any]:
         """Pipeline for multi-frame aperture photometry.
@@ -602,7 +601,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
         if not target:
             target = self._target_service.create_target(target_id)
 
-        self._update_job_progress(job_id, target_id, 1, 2, filter_type=filter_type)
+        self._update_job_progress(job_id, target_id, 1, 2, filter_name=filter_name)
         try:
             with self.astrometrics.processing.acquire_job_slot():
                 # The worker count comes from the configured photometry
@@ -612,13 +611,13 @@ class AnalysisOrchestrator(BaseBackgroundService):
                 res = self.astrometrics.processing.process_target(
                     target,
                     stages=["photometry"],
-                    photometry={"filter_type": filter_type, "use_astrometry_seed": True},
+                    photometry={"filter_name": filter_name, "use_astrometry_seed": True},
                     # This orchestrator already created and is tracking
                     # its own job (job_id, above) for this exact call, via
                     # _submit_job/job_wrapper, so the stage registers none.
                     register_job=False,
                 ).results["photometry"]
-            self._update_job_progress(job_id, target_id, 2, 2, filter_type=filter_type)
+            self._update_job_progress(job_id, target_id, 2, 2, filter_name=filter_name)
 
             log.info(
                 "[%s] Photometry analysis complete. %s frames processed.",

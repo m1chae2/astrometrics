@@ -26,6 +26,7 @@ from astrometricslib import (
     MeasurementOrigin,
     MeasurementStatus,
     QualityMeasurement,
+    QualityQueryResult,
     QualitySubject,
     SetAsideFrame,
     SubjectLevel,
@@ -101,7 +102,7 @@ class _FakeQuality:
         """
         return []
 
-    def query(self, **filters: Any) -> list[QualityMeasurement]:
+    def query(self, **filters: Any) -> QualityQueryResult:
         """Filter the rows the way the store does.
 
         Parameters
@@ -112,7 +113,7 @@ class _FakeQuality:
 
         Returns
         -------
-        rows : `list` [`QualityMeasurement`]
+        answer : `QualityQueryResult`
             The matching rows.
         """
         rows = self._rows
@@ -129,7 +130,7 @@ class _FakeQuality:
                 if self._settings.get(row.subject.capture_setting_id or -1, SETTING).camera
                 == filters["camera"]
             ]
-        return list(rows)
+        return QualityQueryResult(rows=list(rows))
 
     def calibration_identities(
         self, run_ids: list[str] | None = None, target_id: str | None = None

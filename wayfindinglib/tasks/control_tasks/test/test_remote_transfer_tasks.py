@@ -214,7 +214,7 @@ def _download_with_one_new_frame(
     Parameters
     ----------
     measure : `Mock`
-        Stands in for ``astrometrics.processing.record_frame_measurements``.
+        Stands in for ``astrometrics.quality.record_frame_measurements``.
     measurement_summaries : `list`, optional
         Collects the measurement summary, as the caller of a sync would.
 
@@ -226,7 +226,7 @@ def _download_with_one_new_frame(
         The stand-in science library, to check what was called.
     """
     fake_astrometrics = _FakeAstrometrics(existing=[_FakeTargetRecord("M 81")])
-    fake_astrometrics.processing = SimpleNamespace(record_frame_measurements=measure)
+    fake_astrometrics.quality = SimpleNamespace(record_frame_measurements=measure)
     observatory = _FakeObservatory(Mock())
     observatory.astrometrics = fake_astrometrics
 
@@ -264,7 +264,7 @@ def _summary(**fields: Any) -> FrameMeasurementSummary:
 
 
 def test_a_sync_that_adds_frames_measures_only_those_frames_after_saving_the_target() -> None:
-    """Only the added frames are measured, once, by the processing API."""
+    """Only the added frames are measured, once, by the quality API."""
     measure = Mock(return_value=_summary())
     summaries: list = []
 
@@ -320,7 +320,7 @@ def test_a_sync_that_adds_no_frames_measures_nothing() -> None:
     """With nothing new, the measurement is not started."""
     measure = Mock()
     fake_astrometrics = _FakeAstrometrics(existing=[_FakeTargetRecord("M 81")])
-    fake_astrometrics.processing = SimpleNamespace(record_frame_measurements=measure)
+    fake_astrometrics.quality = SimpleNamespace(record_frame_measurements=measure)
     observatory = _FakeObservatory(Mock())
     observatory.astrometrics = fake_astrometrics
 
@@ -692,7 +692,7 @@ def test_sync_calibration_folder_summarises_what_was_added(
             return frames_path
 
     class _Catalog:
-        def refresh(self, kind: str) -> None:
+        def reindex_frames(self, kind: str) -> None:
             pass
 
         def save(self) -> None:

@@ -18,6 +18,7 @@ from astrometricslib import (
     MeasurementStatus,
     QualityLimit,
     QualityMeasurement,
+    QualityQueryResult,
     QualitySubject,
     SubjectLevel,
     Target,
@@ -217,7 +218,7 @@ class FakeLibrary:
         """
         return [Target(id=target_id) for target_id in self.frames_by_target]
 
-    def _query(self, **arguments: Any) -> list[QualityMeasurement]:
+    def _query(self, **arguments: Any) -> QualityQueryResult:
         """Filter the stored rows the way `quality.query` does.
 
         Parameters
@@ -228,13 +229,15 @@ class FakeLibrary:
 
         Returns
         -------
-        rows : `list` [`QualityMeasurement`]
+        answer : `QualityQueryResult`
             The matching rows.
         """
-        return [
-            row
-            for row in self.rows
-            if (arguments.get("metric") is None or row.metric == arguments["metric"])
-            and (arguments.get("level") is None or row.subject.level.value == arguments["level"])
-            and (arguments.get("target_id") is None or row.subject.target_id == arguments["target_id"])
-        ]
+        return QualityQueryResult(
+            rows=[
+                row
+                for row in self.rows
+                if (arguments.get("metric") is None or row.metric == arguments["metric"])
+                and (arguments.get("level") is None or row.subject.level.value == arguments["level"])
+                and (arguments.get("target_id") is None or row.subject.target_id == arguments["target_id"])
+            ]
+        )

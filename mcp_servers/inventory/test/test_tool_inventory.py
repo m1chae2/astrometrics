@@ -280,7 +280,6 @@ def test_tools_the_user_declined_are_dropped() -> None:
         "observatory_guiding_compute_correction",
         "observatory_mount_compute_pointing_correction",
         "observatory_mount_run_polar_alignment_assist",
-        "quality_flag_value_outliers",
         "observatory_guiding_drain_external_pulses",
         "observatory_guiding_refit_spectrum",
         "observatory_equipment_save_commissioning_run",
@@ -293,7 +292,7 @@ def test_tools_the_user_declined_are_dropped() -> None:
 
 def test_writers_are_withheld_because_the_ai_is_read_only() -> None:
     """A writer with no read-only form is withheld, with the reason."""
-    for name in ("star_create", "star_update", "target_create", "calibration_refresh"):
+    for name in ("star_create", "star_update", "target_create", "calibration_reindex_frames"):
         record = ToolRecord("srv", name, "", tool_class="change-data")
         apply_decisions(record)
         assert record.disposition == "withhold", name

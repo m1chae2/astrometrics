@@ -14,7 +14,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib import AppConfiguration, InvalidArgumentError, NotFoundError, RestoreReport, Target
+from astrometricslib import (
+    AppConfiguration,
+    InvalidArgumentError,
+    NotFoundError,
+    QualityQueryResult,
+    RestoreReport,
+    Target,
+)
 from astrometricslib.models.catalog_queries import CalibrationQueryResult
 from wayfindinglib.api.planning import ObservationPlanning
 from wayfindinglib.drivers.butler import DiskButler
@@ -136,7 +143,7 @@ class _FakeAstrometrics:
         """
         self.targets = _FakeTargetCatalog(targets)
         self.quality = SimpleNamespace(
-            query=lambda **_arguments: [],
+            query=lambda **_arguments: QualityQueryResult(),
             capture_settings=lambda ids=None: {},
             metrics=lambda **_arguments: [],
             set_aside_frames=lambda _target_id: [],

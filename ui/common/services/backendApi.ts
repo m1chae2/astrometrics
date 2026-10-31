@@ -158,9 +158,9 @@ export interface ActionRegistry {
     "astronomy:visible": { payload: Record<string, never>; response: ObjectVisibility[] };
     "astronomy:list": { payload: { target_id?: string; limit?: number; search?: string; filter_type?: string }; response: Spectrum[] };
     "astronomy:count": { payload: { target_id?: string; search?: string; filter_type?: string }; response: number };
-    "astronomy:get": { payload: { object_id: string }; response: Spectrum | null };
-    "astronomy:analyze_periodicity": { payload: { object_id: string }; response: Spectrum | null };
-    "astronomy:delete": { payload: { object_id: string }; response: boolean };
+    "astronomy:get": { payload: { star_id: string }; response: Spectrum | null };
+    "astronomy:analyze_periodicity": { payload: { star_id: string }; response: Spectrum | null };
+    "astronomy:delete": { payload: { star_id: string }; response: boolean };
     "astronomy:save": { payload: Record<string, never>; response: void };
     "astronomy:get_stellar_objects": { payload: { target_id?: string }; response: Spectrum[] };
     "astronomy:get_overlay_stars": { payload: { target_id: string; limit?: number }; response: any[] };
@@ -291,11 +291,9 @@ export interface ActionRegistry {
     // Backed by JobService.get_active_jobs(), which returns full ProcessingJob
     // records (with progressCurrent/progressTotal), not the lighter ProcessStatus.
     "processing:active_jobs": { payload: Record<string, never>; response: ProcessingJob[] };
-    "processing:record_frame_measurements": { payload: { target_id: string; limit?: number }; response: { started: boolean; target_id: string } };
+    "quality:record_frame_measurements": { payload: { target_id: string; limit?: number }; response: { started: boolean; target_id: string } };
     // Stack some of a target's frames apart from its library stack and measure the noise of each result.
-    "processing:measure_odd_even_difference_noise": { payload: { target_id: string }; response: { started: boolean; target_id: string } };
-    "processing:measure_noise_growth": { payload: { target_id: string; maximum_steps?: number; include_night_contributions?: boolean; include_odd_even_difference?: boolean }; response: { started: boolean; target_id: string } };
-    "processing:measure_night_contributions": { payload: { target_id: string }; response: { started: boolean; target_id: string } };
+    "processing:measure_noise": { payload: { target_id: string; kind?: 'growth' | 'night_contributions' | 'odd_even_difference'; maximum_steps?: number; include?: Array<'night_contributions' | 'odd_even_difference'>; keep_halves?: boolean }; response: { started: boolean; target_id: string } };
     "processing:job_log_tail": { payload: { job_id: string; lines?: number }; response: string[] };
 
     // Quality measurements: the stored ones, and what each metric means.
@@ -306,7 +304,7 @@ export interface ActionRegistry {
     "quality:metrics": { payload: { name?: string; checkpoint?: import('../types/backendTypes').Checkpoint; detail?: 'summary' | 'full' }; response: import('../types/backendTypes').MetricSummary[] | import('../types/backendTypes').MetricSpec[] };
 
     // Analysis
-    "analysis:analyze_image": { payload: { target_id: string; filter_type?: string; image_files?: string[]; type?: string }; response: AnalysisResult };
+    "analysis:analyze_image": { payload: { target_id: string; filter_name?: string; image_files?: string[]; type?: string }; response: AnalysisResult };
     "analysis:get_results": { payload: { target_id: string }; response: AnalysisResult | null };
     "analysis:cancel": { payload: { target_id: string }; response: boolean };
 
@@ -327,7 +325,7 @@ export interface ActionRegistry {
 
     // Calibration
     "calibration:get_stats": { payload: Record<string, never>; response: CalibrationStats };
-    "calibration:measure_sensor_noise": { payload: { camera_id: string; gain: string | number; offset: string | number; binning?: string; temperature?: number; exposure_seconds?: number; telescope?: string; filter_type?: string; save?: boolean }; response: import('../types/backendTypes').SensorNoiseMeasurement };
+    "calibration:measure_sensor_noise": { payload: { camera_id: string; gain: string | number; offset: string | number; binning?: string; temperature_c?: number; exposure_seconds?: number; telescope?: string; filter_name?: string; save?: boolean }; response: import('../types/backendTypes').SensorNoiseMeasurement };
 
 
 

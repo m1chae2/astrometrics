@@ -101,8 +101,12 @@ from astrometricslib.models.catalog_queries import (
     TargetReindexChange,
     TargetStarCount,
 )
+from astrometricslib.models.field_centers import FieldCenter, ImagedFieldCenters
+from astrometricslib.models.image_deletion import FailedDeletion, ImageDeletionResult
+from astrometricslib.models.job_queries import JobLogLine, JobQueryResult, JobSummary, LineageRun
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate
 from astrometricslib.models.moving_object_config import MovingObjectConfig
+from astrometricslib.models.point_sources import PointSource, PointSourceDetection
 from astrometricslib.models.processing_results import PreviewRemakeResult, ProcessTargetResult, StackResult
 from astrometricslib.models.provenance import (
     Activity,
@@ -167,6 +171,7 @@ from astrometricslib.models.quality.quality_summary import (
     ExposureGroupSummary,
     TargetSessionContribution,
 )
+from astrometricslib.models.quality.query_result import QualityQueryResult
 from astrometricslib.models.quality.row_frames import QualityRowFile, QualityRowResolution
 from astrometricslib.models.quality.subset_stacks import (
     EARLIER_NIGHTS_VARIANT,
@@ -176,6 +181,7 @@ from astrometricslib.models.quality.subset_stacks import (
     OddEvenDifferenceNoiseResult,
     SubsetStackResult,
 )
+from astrometricslib.models.spectroscopy_calibration import CalibrationLineFit, SpectroscopyCalibrationResult
 from astrometricslib.models.stellar_source import (
     AMBIGUOUS_RMS_GAP,
     NO_GOOD_MATCH_RMS,
@@ -414,14 +420,19 @@ class Astrometrics:
         # The database is the one copy, reached through `self.stars`, which
         # answers each question with a query for just the stars it needs.
         self.targets = TargetCatalog(self.config, self._catalog_access, drivers=drivers)
-        self.stars = StellarCatalog(self.config, self._catalog_access, drivers=drivers)
+        self.stars = StellarCatalog(self.config, self._catalog_access)
         self.processing = ProcessingPipelines(
             self.config, self._catalog_access, targets=self.targets, drivers=drivers
         )
         self.visualization = Visualization(
             self.config, self._catalog_access, targets=self.targets, stars=self.stars
         )
-        self.quality = QualityRecords(self.config, self._catalog_access, targets=self.targets)
+        self.quality = QualityRecords(
+            self.config,
+            self._catalog_access,
+            targets=self.targets,
+            calibration_library=lambda: self.processing.calibration._calibration_library,
+        )
         self.jobs = Jobs(self.config, self._catalog_access)
 
 
@@ -457,6 +468,7 @@ __all__ = [
     "BatchRunSummary",
     "Butler",
     "CalibrationCatalog",
+    "CalibrationLineFit",
     "CalibrationQueryResult",
     "CaptureSetting",
     "CatalogAccess",
@@ -477,6 +489,8 @@ __all__ = [
     "ErrorInfo",
     "ExposureGroupSummary",
     "ExternalServiceError",
+    "FailedDeletion",
+    "FieldCenter",
     "FileItem",
     "FilterType",
     "FitsHeaderEntry",
@@ -487,11 +501,17 @@ __all__ = [
     "GenerationDescription",
     "GroupedFrameStat",
     "HardwareError",
+    "ImageDeletionResult",
+    "ImagedFieldCenters",
     "InputQualityReport",
     "InvalidArgumentError",
+    "JobLogLine",
+    "JobQueryResult",
     "JobStore",
+    "JobSummary",
     "Jobs",
     "LimitTier",
+    "LineageRun",
     "MeasurementOrigin",
     "MeasurementReference",
     "MeasurementStatus",
@@ -514,6 +534,8 @@ __all__ = [
     "PlateSolveFailedError",
     "PlateSolveHeader",
     "PlotData",
+    "PointSource",
+    "PointSourceDetection",
     "PreviewRemakeResult",
     "ProcessTargetResult",
     "ProcessingError",
@@ -522,6 +544,7 @@ __all__ = [
     "ProvenanceStore",
     "QualityLimit",
     "QualityMeasurement",
+    "QualityQueryResult",
     "QualityRecords",
     "QualityRowFile",
     "QualityRowResolution",
@@ -537,6 +560,7 @@ __all__ = [
     "SetAsideFrameRecord",
     "SimbadDriver",
     "SpectralFrameCheckReport",
+    "SpectroscopyCalibrationResult",
     "SpectroscopyResult",
     "StackQualityReport",
     "StackResult",

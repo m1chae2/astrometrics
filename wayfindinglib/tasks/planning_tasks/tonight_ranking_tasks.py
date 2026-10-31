@@ -851,19 +851,19 @@ def rank_tonight(
         if not visible:
             skipped["targets not visible at that time"] += 1
             continue
-        frame_rows = astrometrics.quality.query(target_id=target.id, level="frame", library_only=True)
+        frame_rows = astrometrics.quality.query(target_id=target.id, level="frame", library_only=True).rows
         all_observations = build_target_observations(target, frame_rows, capture_settings)
         history = [
             *astrometrics.quality.query(
                 target_id=target.id, level="stack", library_only=True, latest_only=False
-            ),
+            ).rows,
             *astrometrics.quality.query(
                 target_id=target.id,
                 level="frame",
                 metric=FRAME_WEIGHT_METRIC,
                 library_only=True,
                 latest_only=False,
-            ),
+            ).rows,
         ]
         all_runs = stack_runs_from_measurements(history)
         # Whether the target's "take N more" count is confirmed, provisional

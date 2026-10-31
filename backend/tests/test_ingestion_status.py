@@ -115,7 +115,7 @@ def test_a_library_reindex_starts_a_measurement_for_each_target_that_gained_fram
     calibration = MagicMock()
     service = IngestionService(
         target_service=target_service,
-        calibration_library=calibration,
+        calibration=calibration,
         quality_measurement_service=measurement,
     )
     service._log = MagicMock()

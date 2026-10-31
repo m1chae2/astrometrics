@@ -21,6 +21,7 @@ from astrometricslib import (
     MeasurementOrigin,
     MeasurementStatus,
     QualityMeasurement,
+    QualityQueryResult,
     QualitySubject,
     SubjectLevel,
     Target,
@@ -232,21 +233,23 @@ class FakeLibrary:
         level: str | None = None,
         target_id: str | None = None,
         **_: Any,
-    ) -> list[QualityMeasurement]:
+    ) -> QualityQueryResult:
         """Answer ``quality.query`` from the stored rows.
 
         Returns
         -------
-        rows : `list` [`QualityMeasurement`]
+        answer : `QualityQueryResult`
             The rows that match the metric, level and target.
         """
-        return [
-            row
-            for row in self.rows
-            if (metric is None or row.metric == metric)
-            and (level is None or row.subject.level.value == level)
-            and (target_id is None or row.subject.target_id == target_id)
-        ]
+        return QualityQueryResult(
+            rows=[
+                row
+                for row in self.rows
+                if (metric is None or row.metric == metric)
+                and (level is None or row.subject.level.value == level)
+                and (target_id is None or row.subject.target_id == target_id)
+            ]
+        )
 
 
 def _rank(library: FakeLibrary, **extra: Any) -> Any:

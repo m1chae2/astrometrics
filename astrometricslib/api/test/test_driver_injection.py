@@ -289,13 +289,13 @@ def test_the_astrometry_stage_uses_the_injected_solver_and_simbad(
 
 
 def test_plate_solve_on_the_star_catalog_uses_the_injected_solver(field_image: str) -> None:
-    """`stars.plate_solve` uses the fake solver and the fake SIMBAD."""
+    """`processing.plate_solve` uses the fake solver and the fake SIMBAD."""
     solver, simbad = FakePlateSolver(), FakeSimbad()
     astrometrics = Astrometrics(
         AppConfiguration(), MagicMock(), plate_solve_driver=solver, simbad_driver=simbad
     )
 
-    wcs = astrometrics.stars.plate_solve(field_image)
+    wcs = astrometrics.processing.plate_solve(field_image)
 
     assert len(solver.calls) == 1
     assert simbad.region_calls
@@ -362,10 +362,10 @@ def test_defaults_build_the_real_drivers() -> None:
     assert isinstance(drivers.simbad_or_default(), AstroquerySimbadDriver)
 
     astrometrics = Astrometrics(AppConfiguration(), MagicMock())
-    identifier = StarIdentifier(AppConfiguration(), drivers=astrometrics.stars._drivers)
+    identifier = StarIdentifier(AppConfiguration(), drivers=astrometrics.processing._drivers)
     assert isinstance(identifier.solver, AstrometryNetPlateSolveDriver)
     assert isinstance(identifier.simbad, AstroquerySimbadDriver)
-    assert not astrometrics.stars._drivers.any_chosen
+    assert not astrometrics.processing._drivers.any_chosen
 
 
 def test_a_given_driver_is_used_and_the_others_stay_default() -> None:
@@ -375,7 +375,7 @@ def test_a_given_driver_is_used_and_the_others_stay_default() -> None:
 
     solver = FakePlateSolver()
     astrometrics = Astrometrics(AppConfiguration(), MagicMock(), plate_solve_driver=solver)
-    identifier = StarIdentifier(AppConfiguration(), drivers=astrometrics.stars._drivers)
+    identifier = StarIdentifier(AppConfiguration(), drivers=astrometrics.processing._drivers)
 
     assert identifier.solver is solver
     assert isinstance(identifier.simbad, AstroquerySimbadDriver)

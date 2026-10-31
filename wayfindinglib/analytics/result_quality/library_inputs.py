@@ -581,7 +581,7 @@ class LibraryInputs:
                     rows.extend(
                         self.astrometrics.quality.query(
                             metric=metric, level="frame", camera=camera, library_only=True
-                        )
+                        ).rows
                     )
                 except (AstrometricsError, sqlite3.Error) as error:
                     self.notes.append(f"The library's {metric} rows for {camera} could not be read: {error}")

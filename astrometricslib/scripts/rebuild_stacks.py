@@ -202,12 +202,13 @@ def rebuild_target(astrometrics: Astrometrics, name: str, backup_directory: str)
     backup_directory : `str`
         Where the existing stacks are copied first.
     """
+    from astrometricslib.drivers.calibration_library import CalibrationLibrary
     from astrometricslib.pipelines.stacking.frame_measurement_run import FrameQualityRecording
     from astrometricslib.pipelines.tasks import stack_frames_with_timeout
 
     target = astrometrics.targets.get(name)
     quality_recording = FrameQualityRecording(
-        astrometrics.config, astrometrics.processing.calibration.library
+        astrometrics.config, CalibrationLibrary(app_config=astrometrics.config)
     )
     folder = os.path.join(astrometrics.config.get_frames_path(), "lights", name)
     destination = os.path.join(backup_directory, name.replace(" ", "_"))

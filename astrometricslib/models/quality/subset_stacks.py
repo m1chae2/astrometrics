@@ -8,12 +8,13 @@ measure the noise of each result:
   stores a library stack's forecast rows (frame weights, group rows and a
   calibration record), so the subset can be the earlier member of a forecast
   check's pair.
-- `ProcessingPipelines.measure_noise_growth` stacks the first nights (or the
-  first part of one night) and returns a `NoiseGrowthResult`.
-- `ProcessingPipelines.measure_night_contributions` stacks the library stack's
-  frames without one night at a time and returns a `NightContributionResult`.
-- `ProcessingPipelines.measure_odd_even_difference_noise` stacks two disjoint
-  halves of the library stack's frames, subtracts them, and returns a
+- `ProcessingPipelines.measure_noise` returns the result of its kind. With
+  ``kind="growth"`` it stacks the first nights (or the first part of one
+  night) and returns a `NoiseGrowthResult`. With
+  ``kind="night_contributions"`` it stacks the library stack's frames
+  without one night at a time and returns a `NightContributionResult`. With
+  ``kind="odd_even_difference"`` it stacks two disjoint halves of the
+  library stack's frames, subtracts them, and returns a
   `OddEvenDifferenceNoiseResult`.
 
 The measurements themselves go to the quality database. These records report

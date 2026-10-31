@@ -125,12 +125,10 @@ RPC_METHODS: tuple[str, ...] = (
     "processing:jobs_for_target",
     "processing:job_log_tail",
     # Measures a target's light frames and stores the numbers (a write).
-    "processing:record_frame_measurements",
+    "quality:record_frame_measurements",
     # Stacks some of a target's frames apart from its library stack and
     # measures the noise of each result (writes).
-    "processing:measure_odd_even_difference_noise",
-    "processing:measure_noise_growth",
-    "processing:measure_night_contributions",
+    "processing:measure_noise",
     # Quality measurements: the stored ones, and what each metric means.
     # Parameter names are the library's snake_case names (target_id, not
     # targetId); the router drops names it does not know.

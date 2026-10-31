@@ -122,9 +122,10 @@ def test_the_rebuild_script_path_stores_frame_quality(
     astrometrics = SimpleNamespace(
         targets=SimpleNamespace(get=lambda name: target, save=MagicMock()),
         config=SimpleNamespace(get_frames_path=lambda: tmp_path, get_library_path=lambda: tmp_path),
-        processing=SimpleNamespace(
-            calibration=SimpleNamespace(library=_recording(tmp_path).calibration_library)
-        ),
+    )
+    library = _recording(tmp_path).calibration_library
+    monkeypatch.setattr(
+        "astrometricslib.drivers.calibration_library.CalibrationLibrary", lambda app_config: library
     )
 
     rebuild_stacks.rebuild_target(astrometrics, "M 99", str(tmp_path / "backup"))

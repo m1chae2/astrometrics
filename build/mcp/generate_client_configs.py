@@ -371,7 +371,8 @@ AGENT_PROMPT = (
     "type, features, emission lines, repeating patterns) use `star_query` with `detail` set to "
     "`analysis`. A slow tool returns a job id when it takes longer than 20 seconds: follow it with "
     "`jobs_query`. To judge raw spectrum frames (zero order, tilt, clipping "
-    "along the spectrum, a predicted peak at another exposure), use `quality_check_spectral_frames`. "
+    "along the spectrum, a predicted peak at another exposure), use `quality_measure_frames` "
+    'with `kind="spectral"`. '
     "To tell whether guiding spoiled a frame, use `observatory_history_frame_guiding`. "
     "To plan a night over several hours, use `planning_get_visibility`. "
     "For the live session (pier side, camera temperature, "

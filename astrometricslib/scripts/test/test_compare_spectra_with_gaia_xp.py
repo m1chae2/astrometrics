@@ -12,6 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from astrometricslib.models.catalog_queries import StarQueryResult
 from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObject
 from astrometricslib.scripts import compare_spectra_with_gaia_xp as script
 from astrometricslib.test.synthetic.gaia_xp_spectra import (
@@ -72,27 +73,15 @@ class FakeCatalog:
         """
         self.stars = {star.id: star for star in stars}
 
-    def list_star_summaries(
-        self, target_id: str | None = None, limit: int | None = None
-    ) -> list[SimpleNamespace]:
-        """List every star as a summary with spectra.
+    def query(self, **_arguments: object) -> StarQueryResult:
+        """Give every star as full records, like `StellarCatalog.query`.
 
         Returns
         -------
-        summaries : `list` [`types.SimpleNamespace`]
-            One summary per star.
+        answer : `StarQueryResult`
+            The stars in the ``objects`` field.
         """
-        return [SimpleNamespace(id=star_id, has_spectra=True) for star_id in self.stars]
-
-    def get_by_ids(self, _collection: str, ids: list[str]) -> list[StellarObject]:
-        """Give the stars with these ids.
-
-        Returns
-        -------
-        stars : `list` [`StellarObject`]
-            The stars.
-        """
-        return [self.stars[star_id] for star_id in ids]
+        return StarQueryResult(detail="objects", objects=list(self.stars.values()))
 
 
 def make_astrometrics(stars: list[StellarObject]) -> SimpleNamespace:
@@ -104,7 +93,7 @@ def make_astrometrics(stars: list[StellarObject]) -> SimpleNamespace:
         With a catalog and a config that names the test camera.
     """
     return SimpleNamespace(
-        catalog_access=FakeCatalog(stars),
+        stars=FakeCatalog(stars),
         config=SimpleNamespace(get_primary_camera_name=lambda: CAMERA_NAME),
     )
 

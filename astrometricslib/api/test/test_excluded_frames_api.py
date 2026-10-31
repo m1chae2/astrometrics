@@ -45,7 +45,9 @@ def quality(tmp_path: Path) -> QualityRecords:
     quality : `QualityRecords`
         The quality API on a stub configuration.
     """
-    configuration = SimpleNamespace(get_frames_path=lambda: tmp_path / "frames")
+    configuration = SimpleNamespace(
+        get_frames_path=lambda: tmp_path / "frames", get_quarantine_bad_frames_enabled=lambda: True
+    )
     return QualityRecords(configuration, None, targets=MagicMock())
 
 
@@ -291,3 +293,73 @@ def test_frame_quality_no_longer_has_an_excluded_section(quality: QualityRecords
 def test_target_folder_names_cover_the_spellings_a_folder_may_have() -> None:
     """A folder named with underscores or no spaces still matches."""
     assert frame_quarantine.target_folder_names("M 52") == ["M 52", "M_52", "M52"]
+
+
+def test_preview_names_what_a_real_stack_would_move(tmp_path: Path) -> None:
+    """The preview judges the frames a stack judges, not every light frame.
+
+    Eleven frames share one gain. Frame 11 has another gain and few stars.
+    Before, the preview judged it with the rest and listed it as clouded. A
+    stack leaves it out for its gain first, so it is never moved.
+    """
+    from astrometricslib.api.quality import QualityRecords
+    from astrometricslib.pipelines.stacking import frame_screening
+
+    folder = camera_folder(tmp_path)
+    cloudy = {"frame_011.fits": 100, "frame_005.fits": 100}
+    target = make_target(folder, 12)
+    target.frames[11].iso = "200"
+    configuration = SimpleNamespace(
+        get_frames_path=lambda: tmp_path / "frames",
+        get_quarantine_bad_frames_enabled=lambda: True,
+    )
+    real_finder = frame_quarantine.find_frames_to_quarantine
+
+    def finder(frames: list[FrameRecord], measure: object = None) -> object:
+        """Run the real finder with the made-up measurements.
+
+        Returns
+        -------
+        report : `QuarantineReport`
+            What the real finder decided.
+        """
+        return real_finder(frames, fake_measurement(cloudy))
+
+    with patch(FINDER, side_effect=finder):
+        preview = QualityRecords(configuration, None, targets=MagicMock()).measure_frames(
+            target, kind="quarantine_preview", register_job=False
+        )
+        screening = frame_screening.FrameScreening(frames=list(target.frames))
+        with patch.object(frame_screening, "get_configuration", return_value=configuration):
+            frame_screening._drop_minority_gain(target, screening)
+            frame_screening._drop_frames_already_set_aside(target, screening)
+            frame_screening._quarantine_bad_frames(target, screening, False, None, None)
+
+    moved_by_stack = {frame.file for frame in preview.would_move}
+    stack_kept = {Path(frame.path).name for frame in screening.frames}
+    stack_moved = {f"frame_{index:03d}.fits" for index in range(12)} - stack_kept - {"frame_011.fits"}
+    assert moved_by_stack == stack_moved == {"frame_005.fits"}
+    assert preview.frames_checked == 11
+    assert any("minority gain" in note for note in preview.notes)
+
+
+def test_preview_says_nothing_would_move_when_quarantine_is_off(tmp_path: Path) -> None:
+    """With the setting off the preview measures nothing and says so."""
+    from astrometricslib.api.quality import QualityRecords
+
+    folder = camera_folder(tmp_path)
+    target = make_target(folder, 12)
+    configuration = SimpleNamespace(
+        get_frames_path=lambda: tmp_path / "frames",
+        get_quarantine_bad_frames_enabled=lambda: False,
+    )
+
+    with patch(FINDER, side_effect=AssertionError("must not measure")):
+        preview = QualityRecords(configuration, None, targets=MagicMock()).measure_frames(
+            target, kind="quarantine_preview", register_job=False
+        )
+
+    assert preview.quarantine_enabled is False
+    assert preview.would_move_total == 0
+    assert preview.frames_checked == 0
+    assert "turned off" in preview.notes[0]

@@ -57,7 +57,11 @@ class QuarantinePreview(BaseModel):
 
     kind: Literal["quarantine_preview"] = "quarantine_preview"
     target_id: str = Field(alias="targetId")
-    # Light frames the check measured.
+    # False when ``quarantine_bad_frames_enabled`` is off: a stack then moves
+    # nothing and the preview measured nothing.
+    quarantine_enabled: bool = Field(default=True, alias="quarantineEnabled")
+    # Light frames the check measured: those left after the stacker's earlier
+    # steps (minority gain, frames already set aside).
     frames_checked: int = Field(alias="framesChecked")
     # How many frames it would move. ``would_move`` may list fewer.
     would_move_total: int = Field(default=0, alias="wouldMoveTotal")

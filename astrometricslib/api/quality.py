@@ -661,7 +661,12 @@ class QualityRecords:
                     quarantine_preview_report,
                 )
 
-                report = quarantine_preview_report(resolved, limit)
+                report = quarantine_preview_report(
+                    resolved,
+                    limit,
+                    self._config.get_quarantine_bad_frames_enabled(),
+                    str(self._config.get_frames_path()),
+                )
             else:
                 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_fwhm_from_data
 

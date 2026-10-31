@@ -58,6 +58,7 @@ __all__ = [
     "QuarantineReport",
     "decision_to_set_aside_frame",
     "drop_frames_already_set_aside",
+    "find_frames_already_set_aside",
     "find_frames_to_quarantine",
     "find_quarantine_folders",
     "judge_batch",
@@ -745,17 +746,7 @@ def drop_frames_already_set_aside(
     set_aside_frames : `list`
         The frames that were dropped.
     """
-    target_id = getattr(target, "id", "")
-    set_aside_paths = {
-        os.path.normpath(entry.original_path) for entry in list_set_aside_frames(frames_path, target_id)
-    }
-    if not set_aside_paths:
-        return list(frames), []
-    set_aside_frames = [
-        frame
-        for frame in frames
-        if os.path.normpath(frame.path) in set_aside_paths and not os.path.exists(frame.path)
-    ]
+    set_aside_frames = find_frames_already_set_aside(getattr(target, "id", ""), frames, frames_path)
     if not set_aside_frames:
         return list(frames), []
     dropped_paths = {frame.path for frame in set_aside_frames}
@@ -763,6 +754,40 @@ def drop_frames_already_set_aside(
     target.recalculate_total_exposure()
     kept_frames = [frame for frame in frames if frame.path not in dropped_paths]
     return kept_frames, set_aside_frames
+
+
+def find_frames_already_set_aside(target_id: str, frames: Sequence[Any], frames_path: str) -> list[Any]:
+    """Find the frames that an earlier run moved into `_excluded`.
+
+    A frame counts only when the `_excluded` manifest lists its original path
+    and no file lies there now, so a frame that was restored does not count.
+    Nothing is changed. The stacker (through `drop_frames_already_set_aside`)
+    and the quarantine preview both use this one rule.
+
+    Parameters
+    ----------
+    target_id : `str`
+        The target's id.
+    frames : `Sequence`
+        The frames to look through.
+    frames_path : `str`
+        The library's frames folder, where the `_excluded` folders are found.
+
+    Returns
+    -------
+    set_aside_frames : `list`
+        The frames of `frames` that are already set aside, in their order.
+    """
+    set_aside_paths = {
+        os.path.normpath(entry.original_path) for entry in list_set_aside_frames(frames_path, target_id)
+    }
+    if not set_aside_paths:
+        return []
+    return [
+        frame
+        for frame in frames
+        if os.path.normpath(frame.path) in set_aside_paths and not os.path.exists(frame.path)
+    ]
 
 
 def restore_quarantined_frames(directory: str) -> list[str]:
@@ -829,11 +854,20 @@ def decision_to_set_aside_frame(decision: QuarantineDecision) -> SetAsideFrame:
     )
 
 
-def quarantine_preview_report(target: Target, limit: int) -> QuarantinePreview:
-    """Show which frames the stacker would set aside, without moving any.
+def quarantine_preview_report(
+    target: Target, limit: int, quarantine_enabled: bool, frames_path: str
+) -> QuarantinePreview:
+    """Show which frames a stack would set aside, without moving any.
 
-    It measures every imaging light frame of the target (about a second
-    each), so a large target takes a while.
+    It answers as a real stack of all the target's non-spectral light frames
+    would. The stacker does not judge every light frame: it first leaves out
+    frames of a minority gain setting and frames an earlier run already set
+    aside, and it skips the check when the setting turns it off. The preview
+    runs the same steps (`find_dominant_gain_subset`,
+    `find_frames_already_set_aside` and `find_frames_to_quarantine`), so the
+    frames it names are the ones a real stack would move. It measures each
+    remaining frame (about a second each), so a large target takes a while.
+    It changes neither the target nor any file.
 
     Parameters
     ----------
@@ -841,26 +875,63 @@ def quarantine_preview_report(target: Target, limit: int) -> QuarantinePreview:
         The target to check.
     limit : `int`
         Most frames to list. ``would_move_total`` gives the full count.
+    quarantine_enabled : `bool`
+        The ``quarantine_bad_frames_enabled`` setting. When it is off, a
+        stack moves nothing, so the preview measures nothing.
+    frames_path : `str`
+        The library's frames folder, where the `_excluded` folders are found.
 
     Returns
     -------
     preview : `QuarantinePreview`
         The frames the check would move, with the measurements behind each,
         the batches it would leave alone, and any frame it could not read.
+        ``frames_checked`` counts the frames the check judges after the
+        earlier steps.
     """
+    from astrometricslib.pipelines.stacking.pre_processing.frame_homogeneity import (
+        find_dominant_gain_subset,
+    )
+
+    if not quarantine_enabled:
+        return QuarantinePreview(
+            target_id=target.id,
+            quarantine_enabled=False,
+            frames_checked=0,
+            notes=[
+                "Frame quarantine is turned off in the settings "
+                "(quarantine_bad_frames_enabled), so a stack would move no frames."
+            ],
+        )
     lights = [
         frame
         for frame in target.frames
         if str(frame.role).upper() == "LIGHT" and not frame_is_spectral(frame)
     ]
-    found = find_frames_to_quarantine(lights)
+    same_gain, minority_gain = find_dominant_gain_subset(lights)
+    already_set_aside = {
+        frame.path for frame in find_frames_already_set_aside(target.id, same_gain, frames_path)
+    }
+    judged = [frame for frame in same_gain if frame.path not in already_set_aside]
+    found = find_frames_to_quarantine(judged)
+    notes = list(found.notes)
+    if minority_gain:
+        notes.append(
+            f"{len(minority_gain)} frame(s) with a minority gain setting are left out of a stack "
+            "before this check, so they are not judged."
+        )
+    if already_set_aside:
+        notes.append(
+            f"{len(already_set_aside)} frame(s) that an earlier run set aside are still listed on "
+            "the target; a stack leaves them out before this check."
+        )
     would_move = [decision_to_set_aside_frame(decision) for decision in found.moved]
     return QuarantinePreview(
         target_id=target.id,
-        frames_checked=len(lights),
+        frames_checked=len(judged),
         would_move_total=len(would_move),
         would_move=would_move[:limit],
-        notes=found.notes,
+        notes=notes,
         unreadable=found.unreadable,
     )
 

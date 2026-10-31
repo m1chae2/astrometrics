@@ -196,6 +196,13 @@
     gap: 8px;
 }
 
+/* One line under the planner's fields when no filters are configured. */
+.image-planner__hint {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: var(--small-font-size);
+}
+
 .image-planner__grid {
     display: grid;
     grid-template-columns: 1fr 1fr;

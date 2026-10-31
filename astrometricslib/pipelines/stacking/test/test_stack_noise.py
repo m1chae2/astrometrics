@@ -18,6 +18,7 @@ import pytest
 from astropy.io import fits
 from astropy.wcs import WCS
 
+from astrometricslib.models.camera_profile import ProvenanceKind
 from astrometricslib.pipelines.stacking.post_processing import empty_apertures
 from astrometricslib.pipelines.stacking.post_processing.difference_noise import (
     discard_noise_sums,
@@ -40,9 +41,11 @@ from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
     StackDepth,
     analyze_faint_sources,
     faint_source_distance,
+    find_library_set_key,
     load_apertures,
     load_apertures_with_reason,
     place_empty_apertures,
+    record_library_set_key,
     reset_apertures,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_image import (
@@ -53,7 +56,15 @@ from astrometricslib.pipelines.stacking.post_processing.stack_image import (
     signed_aperture_sum,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
+    MEMBER_FRAME_WCS_SOURCE,
+    NEGLIGIBLE_ROTATION_DEG,
+    NEGLIGIBLE_SHIFT_PX,
     NO_WCS_REASON,
+    PLATE_SOLVE_WCS_SOURCE,
+    POOR_ALIGNMENT_RMS_PX,
+    _align_to_stored_apertures,
+    _Alignment,
+    _move_guess_onto_reference_stars,
     measure_stack_noise,
 )
 
@@ -212,7 +223,9 @@ def test_a_stack_with_no_solution_and_no_reference_frame_is_not_measured(tmp_pat
     stack = _write(tmp_path / "stack.fits", _sky_image(2.0, seed=1), None)
     outcome = measure_stack_noise(stack, None, str(tmp_path / APERTURE_FILE_NAME))
     assert outcome.result is None
-    assert outcome.reason == NO_WCS_REASON
+    # The solve of the stack itself was tried last (the stand-in fails it).
+    assert outcome.reason.startswith(NO_WCS_REASON)
+    assert "plate-solving the stack itself" in outcome.reason
     assert not (tmp_path / APERTURE_FILE_NAME).exists()
 
 
@@ -347,8 +360,10 @@ def _fake_camera_profile(saturation_adu: float) -> object:
         An object with the fields the saturation check reads.
     """
     return SimpleNamespace(
-        saturation_threshold_adu=SimpleNamespace(value=saturation_adu),
-        photometric_linearity_limit_adu=None,
+        usable_peak_level_adu=SimpleNamespace(
+            value=saturation_adu, provenance=SimpleNamespace(kind=ProvenanceKind.MEASURED)
+        ),
+        clip_ceiling_adu=SimpleNamespace(value=65532.0),
         camera_name="Test camera",
         is_generic_fallback=False,
     )
@@ -475,26 +490,111 @@ def test_a_header_solution_that_is_a_copied_guess_is_moved_onto_the_stored_stars
     assert first_result.position_note == ""
 
 
-def test_a_stack_rotated_beyond_the_limit_is_refused(tmp_path: Path) -> None:
-    """A rotation of 0.5 degree cannot follow by a shift: no noise."""
-    apertures = str(tmp_path / APERTURE_FILE_NAME)
-    scattered = _scattered_stars(seed=3)
-    first = _write(tmp_path / "first.fits", _sky_image(2.0, seed=1, star_positions=scattered), _sky_header())
-    assert measure_stack_noise(first, None, apertures).result is not None
-    angle = math.radians(0.5)
-    center = SIZE / 2
-    rotated = [
+def _rotated_stars(stars: list[tuple[float, float]], degrees: float) -> list[tuple[float, float]]:
+    """Turn star positions about the image center.
+
+    Parameters
+    ----------
+    stars : `list` of `tuple`
+        (column, row) positions.
+    degrees : `float`
+        The rotation, with x as the column and y as the row.
+
+    Returns
+    -------
+    rotated : `list` of `tuple`
+        The turned (column, row) positions.
+    """
+    angle = math.radians(degrees)
+    center = (SIZE - 1) / 2
+    return [
         (
             center + (x - center) * math.cos(angle) - (y - center) * math.sin(angle),
             center + (x - center) * math.sin(angle) + (y - center) * math.cos(angle),
         )
-        for x, y in scattered
+        for x, y in stars
     ]
+
+
+def test_a_stack_rotated_beyond_the_limit_is_refused(tmp_path: Path) -> None:
+    """A rotation of 1 degree is more than the search follows: no noise."""
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    scattered = _scattered_stars(seed=3)
+    first = _write(tmp_path / "first.fits", _sky_image(2.0, seed=1, star_positions=scattered), _sky_header())
+    assert measure_stack_noise(first, None, apertures).result is not None
+    rotated = _rotated_stars(scattered, 1.0)
     stack = _write(tmp_path / "rotated.fits", _sky_image(2.0, seed=2, star_positions=rotated), _sky_header())
     outcome = measure_stack_noise(stack, None, apertures)
     assert outcome.result is None
-    assert "rotated by" in outcome.reason
-    assert "0.1 deg" in outcome.reason
+    assert "rotated by" in outcome.reason or "agree on a shift and a rotation" in outcome.reason
+    assert "0.5 deg" in outcome.reason
+
+
+@pytest.mark.parametrize("degrees", [0.2, -0.3])
+def test_a_stack_rotated_within_the_limit_is_followed(tmp_path: Path, degrees: float) -> None:
+    """A rotation of a fraction of a degree is found and followed."""
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    scattered = _scattered_stars(seed=3)
+    first = _write(tmp_path / "first.fits", _sky_image(2.0, seed=1, star_positions=scattered), _sky_header())
+    first_result = measure_stack_noise(first, None, apertures).result
+    assert first_result is not None
+    rotated = _rotated_stars(scattered, degrees)
+    stack = _write(tmp_path / "rotated.fits", _sky_image(2.0, seed=2, star_positions=rotated), _sky_header())
+    result = measure_stack_noise(stack, None, apertures).result
+    assert result is not None
+    assert result.reference_star_count >= 5
+    assert result.reference_zero_point == pytest.approx(1.0, abs=0.05)
+    assert "turned by" in result.position_note
+
+
+def test_the_returned_solution_puts_rotated_stars_within_half_a_pixel() -> None:
+    """The moved solution projects every stored star onto its detected star."""
+    scattered = _scattered_stars(seed=3)
+    header = _sky_header()
+    guess = WCS(header)
+    sky = np.array(guess.pixel_to_world_values([x for x, _ in scattered], [y for _, y in scattered])).T
+    rotated = _rotated_stars(scattered, 0.2)
+    plane = _sky_image(2.0, seed=2, star_positions=[(x + 3.0, y - 2.0) for x, y in rotated])
+    moved, reason, alignment = _move_guess_onto_reference_stars(plane, guess, sky)
+    assert moved is not None, reason
+    assert alignment is not None and alignment.rotation_deg == pytest.approx(0.2, abs=0.02)
+    projected = np.array(moved.world_to_pixel_values(sky[:, 0], sky[:, 1])).T
+    truth = np.array([(x + 3.0, y - 2.0) for x, y in rotated])
+    assert np.max(np.hypot(*(projected - truth).T)) < 0.5
+    assert alignment.rms_px < 0.5
+
+
+def test_a_pure_shift_stays_a_pure_shift() -> None:
+    """With no rotation in the stars, none is applied."""
+    scattered = _scattered_stars(seed=3)
+    guess = WCS(_sky_header())
+    sky = np.array(guess.pixel_to_world_values([x for x, _ in scattered], [y for _, y in scattered])).T
+    plane = _sky_image(2.0, seed=2, star_positions=[(x + 25.0, y + 30.0) for x, y in scattered])
+    moved, reason, alignment = _move_guess_onto_reference_stars(plane, guess, sky)
+    assert moved is not None, reason
+    assert alignment.rotation_deg == pytest.approx(0.0, abs=1e-12)
+    assert alignment.shift_row == pytest.approx(30.0, abs=0.3)
+    assert alignment.shift_column == pytest.approx(25.0, abs=0.3)
+    np.testing.assert_allclose(moved.wcs.get_pc(), guess.wcs.get_pc())
+
+
+def test_a_rotation_is_followed_when_the_solution_uses_a_cd_matrix() -> None:
+    """A solution with a CD matrix is turned through that matrix."""
+    scattered = _scattered_stars(seed=3)
+    scale = PIXEL_SCALE_ARCSEC / 3600.0
+    guess = WCS(naxis=2)
+    guess.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    guess.wcs.crval = [150.0, 2.0]
+    guess.wcs.crpix = [SIZE / 2, SIZE / 2]
+    guess.wcs.cd = [[-scale, 0.0], [0.0, scale]]
+    sky = np.array(guess.pixel_to_world_values([x for x, _ in scattered], [y for _, y in scattered])).T
+    rotated = _rotated_stars(scattered, -0.2)
+    plane = _sky_image(2.0, seed=2, star_positions=rotated)
+    moved, reason, _alignment = _move_guess_onto_reference_stars(plane, guess, sky)
+    assert moved is not None, reason
+    assert moved.wcs.has_cd()
+    projected = np.array(moved.world_to_pixel_values(sky[:, 0], sky[:, 1])).T
+    assert np.max(np.hypot(*(projected - np.array(rotated)).T)) < 0.5
 
 
 def test_apertures_are_at_least_the_separation_apart(tmp_path: Path) -> None:
@@ -530,12 +630,12 @@ def test_each_camera_and_optic_keeps_its_own_apertures_and_they_can_be_reset(tmp
     assert first is not None and other is not None
     assert first.apertures_created and other.apertures_created
     sets = json.loads(Path(apertures).read_text())["sets"]
-    assert sorted(sets) == ["camera a|?|400", "camera b|?|400"]
-    assert load_apertures(apertures, "camera a|?|400").created_from == "a.fits"
+    assert sorted(sets) == ["camera a|?|400|exp=?", "camera b|?|400|exp=?"]
+    assert load_apertures(apertures, "camera a|?|400|exp=?").created_from == "a.fits"
     # Forgetting one camera leaves the other; forgetting all deletes the file.
-    assert reset_apertures(apertures, "camera a|?|400") is True
-    assert sorted(json.loads(Path(apertures).read_text())["sets"]) == ["camera b|?|400"]
-    assert reset_apertures(apertures, "camera a|?|400") is False
+    assert reset_apertures(apertures, "camera a|?|400|exp=?") is True
+    assert sorted(json.loads(Path(apertures).read_text())["sets"]) == ["camera b|?|400|exp=?"]
+    assert reset_apertures(apertures, "camera a|?|400|exp=?") is False
     assert reset_apertures(apertures) is True
     assert not Path(apertures).exists()
     assert measure_stack_noise(stack_a, None, apertures).result.apertures_created is True
@@ -765,8 +865,30 @@ def test_a_set_has_an_identity_that_survives_the_file_and_names_its_depth(tmp_pa
     assert stored.identity in result.aperture_definition_note
 
 
-def test_a_much_deeper_library_stack_replaces_the_set_and_a_close_one_does_not(tmp_path: Path) -> None:
+def test_a_much_deeper_library_stack_replaces_the_set_and_a_close_one_does_not(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Twice the effective frame count makes a new set with a new identity."""
+
+    def solve_from_header(stack_path: str) -> tuple[WCS, str]:
+        """Give the stack's own header as the plate solution.
+
+        Parameters
+        ----------
+        stack_path : `str`
+            The stack to solve.
+
+        Returns
+        -------
+        solution : `tuple` [`astropy.wcs.WCS`, `str`]
+            The header's solution and an empty reason.
+        """
+        return WCS(fits.getheader(stack_path)).celestial, ""
+
+    monkeypatch.setattr(
+        "astrometricslib.pipelines.stacking.post_processing.stack_noise._plate_solve_stack_wcs",
+        solve_from_header,
+    )
     apertures = str(tmp_path / APERTURE_FILE_NAME)
     first = _identity_stack(tmp_path, "first.fits", seed=1)
     old = measure_stack_noise(first, None, apertures, depth=StackDepth(10, 10.0)).result
@@ -851,3 +973,1012 @@ def test_the_paired_ratio_of_a_stack_with_itself_is_one_with_no_error(tmp_path: 
     noisy = sums + 0.5 * generator.normal(size=100)
     _, error, _ = paired_noise_ratio(sums, 1.0, "v3-x", noisy, 1.0, "v3-x")
     assert 0.0 < error < 0.2
+
+
+def test_a_member_frames_solution_is_moved_onto_a_stack_with_no_reference_frame(tmp_path: Path) -> None:
+    """A member frame 12 rows and -9 columns off the stack gives a solution.
+
+    The stack's stars sit where the member frame's stars sit after the shift,
+    so the solution is accepted, moved, and recorded with its source.
+    """
+    scattered = _scattered_stars(seed=11)
+    stack_image = _sky_image(2.0, seed=21, star_positions=scattered)
+    member_image = np.roll(_sky_image(2.0, seed=22, star_positions=scattered), shift=(-12, 9), axis=(0, 1))
+    member = _write(tmp_path / "member.fits", member_image, _sky_header())
+    stack = _write(tmp_path / "stack.fits", stack_image, None)
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    outcome = measure_stack_noise(stack, None, apertures, member_frame_paths=[member])
+    assert outcome.result is not None, outcome.reason
+    assert outcome.result.wcs_source.startswith(MEMBER_FRAME_WCS_SOURCE)
+    assert "member.fits" in outcome.result.wcs_source
+    assert "+12.0 rows" in outcome.result.wcs_source
+    stored = load_apertures(apertures)
+    assert stored is not None
+    assert stored.wcs_source.startswith(MEMBER_FRAME_WCS_SOURCE)
+    # The stack is the unrolled image: its true solution is the header's.
+    truth = _write(tmp_path / "truth.fits", stack_image, _sky_header())
+    truth_outcome = measure_stack_noise(truth, None, str(tmp_path / "truth_apertures.json"))
+    assert truth_outcome.result is not None
+    assert outcome.result.noise_adu == pytest.approx(truth_outcome.result.noise_adu, rel=0.2)
+
+
+def test_a_member_frame_that_does_not_fit_is_skipped_and_a_later_one_used(tmp_path: Path) -> None:
+    """A frame of another field is skipped; the next that lines up is used."""
+    scattered = _scattered_stars(seed=11)
+    wrong = _write(
+        tmp_path / "wrong.fits",
+        _sky_image(2.0, seed=23, star_positions=_scattered_stars(seed=12)),
+        _sky_header(),
+    )
+    right = _write(
+        tmp_path / "right.fits",
+        np.roll(_sky_image(2.0, seed=24, star_positions=scattered), shift=(5, 5), axis=(0, 1)),
+        _sky_header(),
+    )
+    stack = _write(tmp_path / "stack.fits", _sky_image(2.0, seed=25, star_positions=scattered), None)
+    outcome = measure_stack_noise(
+        stack, None, str(tmp_path / APERTURE_FILE_NAME), member_frame_paths=[wrong, right]
+    )
+    assert outcome.result is not None, outcome.reason
+    assert "right.fits" in outcome.result.wcs_source
+
+
+def test_member_frames_that_do_not_fit_the_stack_are_refused(tmp_path: Path) -> None:
+    """No member frame lines up: no measurement, a reason, and no apertures."""
+    wrong = _write(
+        tmp_path / "wrong.fits",
+        _sky_image(2.0, seed=23, star_positions=_scattered_stars(seed=12)),
+        _sky_header(),
+    )
+    stack = _write(
+        tmp_path / "stack.fits", _sky_image(2.0, seed=25, star_positions=_scattered_stars(seed=11)), None
+    )
+    outcome = measure_stack_noise(stack, None, str(tmp_path / APERTURE_FILE_NAME), member_frame_paths=[wrong])
+    assert outcome.result is None
+    assert "no member frame" in outcome.reason
+    assert not (tmp_path / APERTURE_FILE_NAME).exists()
+
+
+def test_member_frames_without_a_solution_leave_the_stack_unmeasured(tmp_path: Path) -> None:
+    """A member frame with no plate solution gives no coordinates."""
+    scattered = _scattered_stars(seed=11)
+    bare = _write(tmp_path / "bare.fits", _sky_image(2.0, seed=24, star_positions=scattered), None)
+    stack = _write(tmp_path / "stack.fits", _sky_image(2.0, seed=25, star_positions=scattered), None)
+    outcome = measure_stack_noise(stack, None, str(tmp_path / APERTURE_FILE_NAME), member_frame_paths=[bare])
+    assert outcome.result is None
+    assert "no member frame" in outcome.reason
+
+
+def _reference_pair(tmp_path: Path, name: str, exposure_seconds: float, seed: int = 1) -> tuple[str, str]:
+    """Write a stack with no solution and a reference frame.
+
+    Parameters
+    ----------
+    tmp_path : `pathlib.Path`
+        The folder.
+    name : `str`
+        A prefix for the two file names.
+    exposure_seconds : `float`
+        The ``EXPTIME`` of the reference frame.
+    seed : `int`, optional
+        Seed of the noise.
+
+    Returns
+    -------
+    stack_path, frame_path : `tuple` [`str`, `str`]
+        The stack and its registration reference frame.
+    """
+    image = _sky_image(2.0, seed=seed)
+    header = _sky_header()
+    header["EXPTIME"] = exposure_seconds
+    frame = _write(tmp_path / f"{name}_frame.fits", image, header)
+    stack = _write(tmp_path / f"{name}_stack.fits", image, None)
+    return stack, frame
+
+
+def test_a_set_chosen_on_a_60_second_reference_is_not_reused_for_a_120_second_reference(
+    tmp_path: Path,
+) -> None:
+    """Each reference exposure gets its own set; the same one reuses it."""
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    stack_60, frame_60 = _reference_pair(tmp_path, "a60", 60.0)
+    stack_120, frame_120 = _reference_pair(tmp_path, "b120", 120.0, seed=2)
+    stack_60_again, frame_60_again = _reference_pair(tmp_path, "c60", 60.0, seed=3)
+    first = measure_stack_noise(stack_60, frame_60, apertures).result
+    second = measure_stack_noise(stack_120, frame_120, apertures).result
+    third = measure_stack_noise(stack_60_again, frame_60_again, apertures).result
+    assert first is not None and second is not None and third is not None
+    assert first.apertures_created and second.apertures_created and not third.apertures_created
+    assert second.aperture_identity != first.aperture_identity
+    assert third.aperture_identity == first.aperture_identity
+    # The set's identity is in the note of every stored row, so rows of the
+    # two sets can be told apart.
+    assert first.aperture_identity in first.aperture_definition_note
+    assert second.aperture_identity in second.aperture_definition_note
+    assert sorted(json.loads(Path(apertures).read_text())["sets"]) == [
+        "unspecified|exp=120",
+        "unspecified|exp=60",
+    ]
+    assert load_apertures(apertures, "unspecified|exp=120").created_from == "b120_stack.fits"
+
+
+def test_a_group_stack_takes_its_reference_exposure_from_a_member_of_the_reference_group(
+    tmp_path: Path,
+) -> None:
+    """With no reference frame, a member frame's exposure is the key."""
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    image = _sky_image(2.0, seed=1)
+    member_header = _sky_header()
+    member_header["EXPTIME"] = 120.0
+    member = _write(tmp_path / "member.fits", image, member_header)
+    stack = _write(tmp_path / "stack.fits", image, _sky_header())
+    result = measure_stack_noise(stack, None, apertures, member_frame_paths=[member]).result
+    assert result is not None and result.apertures_created
+    assert list(json.loads(Path(apertures).read_text())["sets"]) == ["unspecified|exp=120"]
+
+
+def test_an_aperture_file_keyed_without_an_exposure_is_never_used_and_is_replaced_once(
+    tmp_path: Path,
+) -> None:
+    """A key with no exposure matches nothing; one new set replaces it."""
+    apertures = Path(tmp_path / APERTURE_FILE_NAME)
+    stack_a, frame_a = _reference_pair(tmp_path, "a", 60.0)
+    assert measure_stack_noise(stack_a, frame_a, str(apertures)).result is not None
+    data = json.loads(apertures.read_text())
+    data["sets"] = {"unspecified": data["sets"]["unspecified|exp=60"]}
+    apertures.write_text(json.dumps(data))
+    assert load_apertures(str(apertures), "unspecified") is None
+    assert load_apertures(str(apertures)) is None
+    stack_b, frame_b = _reference_pair(tmp_path, "b", 60.0, seed=2)
+    refused = measure_stack_noise(stack_b, frame_b, str(apertures), may_choose_apertures=False)
+    assert refused.result is None and "no usable set" in refused.reason
+    chosen = measure_stack_noise(stack_b, frame_b, str(apertures)).result
+    assert chosen is not None and chosen.apertures_created
+    assert list(json.loads(apertures.read_text())["sets"]) == ["unspecified|exp=60"]
+    reused = measure_stack_noise(stack_b, frame_b, str(apertures)).result
+    assert reused is not None and not reused.apertures_created
+
+
+def test_a_stack_that_may_not_choose_uses_the_library_stacks_set_whatever_its_own_reference(
+    tmp_path: Path,
+) -> None:
+    """A stack that may not choose finds the deepest set of its equipment."""
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    stack_60, frame_60 = _reference_pair(tmp_path, "a60", 60.0)
+    stack_120, frame_120 = _reference_pair(tmp_path, "b120", 120.0, seed=2)
+    shallow = measure_stack_noise(stack_60, frame_60, apertures, depth=StackDepth(10, 10.0)).result
+    library = measure_stack_noise(stack_120, frame_120, apertures, depth=StackDepth(40, 30.0)).result
+    assert shallow is not None and library is not None
+    assert library.aperture_identity != shallow.aperture_identity
+    stack_30, frame_30 = _reference_pair(tmp_path, "c30", 30.0, seed=3)
+    subset = measure_stack_noise(stack_30, frame_30, apertures, may_choose_apertures=False).result
+    bare = measure_stack_noise(stack_30, None, apertures, may_choose_apertures=False)
+    assert subset is not None and subset.aperture_identity == library.aperture_identity
+    assert not subset.apertures_created
+    assert bare.result is None  # no solution at all, so no set is looked for
+    assert load_apertures(apertures).identity == library.aperture_identity
+    assert load_apertures_with_reason(apertures)[0].identity == library.aperture_identity
+    assert sorted(json.loads(Path(apertures).read_text())["sets"]) == [
+        "unspecified|exp=120",
+        "unspecified|exp=60",
+    ]
+
+
+def _scaled_pair(
+    tmp_path: Path, name: str, scale: float, scattered: list[tuple[float, float]]
+) -> tuple[str, str]:
+    """Write a reference frame and a stack with brighter stars.
+
+    Parameters
+    ----------
+    tmp_path : `pathlib.Path`
+        The folder.
+    name : `str`
+        A prefix for the two file names.
+    scale : `float`
+        How many times brighter the stack's stars are than the frame's. The
+        sky and the noise are the same, so only the stars change.
+    scattered : `list` of `tuple`
+        The (column, row) of the stars, the same in both images.
+
+    Returns
+    -------
+    stack_path, frame_path : `tuple` [`str`, `str`]
+        The stack (it has a solution) and its registration reference frame.
+    """
+    header = _sky_header()
+    header["EXPTIME"] = 60.0
+    frame = _write(
+        tmp_path / f"{name}_frame.fits", _sky_image(2.0, seed=11, star_positions=scattered), header
+    )
+    stack = _write(
+        tmp_path / f"{name}_stack.fits",
+        _sky_image(2.0, seed=12, star_positions=scattered, star_amplitude=2000.0 * scale),
+        _sky_header(),
+    )
+    return stack, frame
+
+
+def test_the_stars_flux_ratio_against_the_reference_frame_recovers_a_known_scale(tmp_path: Path) -> None:
+    """Stars 1.4 times as bright in the stack give a ratio of 1.4."""
+    scattered = _scattered_stars(seed=3)
+    stack, frame = _scaled_pair(tmp_path, "a", 1.4, scattered)
+    result = measure_stack_noise(stack, frame, str(tmp_path / APERTURE_FILE_NAME)).result
+    assert result is not None
+    flux_ratio = result.reference_frame_flux_ratio
+    assert flux_ratio is not None and flux_ratio.ratio is not None
+    assert flux_ratio.star_count >= 5
+    assert flux_ratio.uncertainty > 0.0
+    assert flux_ratio.reference_exposure_seconds == pytest.approx(60.0)
+    # The ratio's error is the standard error of the stars' scatter. With noise
+    # of 2 against star fluxes of tens of thousands it is tiny, so allow the
+    # larger of three errors and 0.5%.
+    assert abs(flux_ratio.ratio - 1.4) < max(3.0 * flux_ratio.uncertainty, 0.007)
+
+
+def test_the_flux_ratio_is_a_median_over_stars_and_ignores_one_wrong_star(tmp_path: Path) -> None:
+    """One star far brighter in the stack does not move the median."""
+    scattered = _scattered_stars(seed=3)
+    stack, frame = _scaled_pair(tmp_path, "a", 1.4, scattered)
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    assert measure_stack_noise(stack, frame, apertures).result is not None
+    chosen = load_apertures(apertures)
+    assert chosen is not None
+    wcs = WCS(_sky_header()).celestial
+    column, row = (float(value[0]) for value in wcs.world_to_pixel_values(*chosen.reference_sky[:1].T))
+    brighter = fits.getdata(stack).astype(np.float64)
+    rows, columns = np.mgrid[0:SIZE, 0:SIZE]
+    brighter += 20000.0 * np.exp(-((columns - column) ** 2 + (rows - row) ** 2) / (2 * 2.0**2))
+    second_stack = _write(tmp_path / "second_stack.fits", brighter.astype(np.float32), _sky_header())
+    result = measure_stack_noise(second_stack, frame, apertures).result
+    assert result is not None and result.reference_frame_flux_ratio is not None
+    assert result.reference_frame_flux_ratio.ratio == pytest.approx(1.4, abs=0.02)
+
+
+def test_with_no_named_reference_frame_the_flux_ratio_is_not_measured(tmp_path: Path) -> None:
+    """With no reference frame the ratio is not measured, and says why."""
+    scattered = _scattered_stars(seed=3)
+    stack, _ = _scaled_pair(tmp_path, "a", 1.4, scattered)
+    result = measure_stack_noise(stack, None, str(tmp_path / APERTURE_FILE_NAME)).result
+    assert result is not None
+    flux_ratio = result.reference_frame_flux_ratio
+    assert flux_ratio is not None and flux_ratio.ratio is None
+    assert "no registration reference frame" in flux_ratio.reason
+
+
+def test_a_member_frame_standing_in_for_the_reference_gives_no_flux_ratio(tmp_path: Path) -> None:
+    """A member frame has its own scale, so it is never the reference."""
+    scattered = _scattered_stars(seed=3)
+    stack, frame = _scaled_pair(tmp_path, "a", 1.4, scattered)
+    bare_stack = _write(tmp_path / "bare.fits", fits.getdata(stack), None)
+    result = measure_stack_noise(
+        bare_stack, None, str(tmp_path / APERTURE_FILE_NAME), member_frame_paths=[frame]
+    ).result
+    assert result is not None and result.reference_frame_flux_ratio is not None
+    assert result.reference_frame_flux_ratio.ratio is None
+
+
+def test_too_few_unsaturated_stars_give_no_flux_ratio(tmp_path: Path) -> None:
+    """With fewer than five stars measurable, the ratio is not measured."""
+    scattered = _scattered_stars(seed=3)
+    stack, frame = _scaled_pair(tmp_path, "a", 1.4, scattered)
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    assert measure_stack_noise(stack, frame, apertures).result is not None
+    chosen = load_apertures(apertures)
+    assert chosen is not None
+    wcs = WCS(_sky_header()).celestial
+    columns, rows = wcs.world_to_pixel_values(chosen.reference_sky[:, 0], chosen.reference_sky[:, 1])
+    damaged = fits.getdata(frame).astype(np.float32)
+    ring = int(chosen.reference_ring_inner_px) + 1
+    # An exact zero in the sky ring makes the frame's flux unusable; spoil all
+    # but four of the stars, leaving the stack untouched.
+    for column, row in list(zip(columns, rows, strict=True))[4:]:
+        damaged[round(row) + ring : round(row) + ring + 2, round(column) : round(column) + 2] = 0.0
+    header = _sky_header()
+    header["EXPTIME"] = 60.0
+    damaged_frame = _write(tmp_path / "damaged_frame.fits", damaged, header)
+    second_stack = _write(
+        tmp_path / "second_stack.fits",
+        _sky_image(2.0, seed=13, star_positions=scattered, star_amplitude=2800.0),
+        _sky_header(),
+    )
+    result = measure_stack_noise(second_stack, damaged_frame, apertures).result
+    assert result is not None and result.reference_frame_flux_ratio is not None
+    flux_ratio = result.reference_frame_flux_ratio
+    assert flux_ratio.ratio is None
+    assert "only" in flux_ratio.reason and flux_ratio.star_count < 5
+
+
+def test_a_reference_frame_that_does_not_line_up_gives_no_flux_ratio(tmp_path: Path) -> None:
+    """A frame with the stars elsewhere is refused, not guessed."""
+    scattered = _scattered_stars(seed=3)
+    stack, frame = _scaled_pair(tmp_path, "a", 1.4, scattered)
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    assert measure_stack_noise(stack, frame, apertures).result is not None
+    header = _sky_header()
+    header["EXPTIME"] = 60.0
+    elsewhere = _write(
+        tmp_path / "elsewhere_frame.fits",
+        np.roll(fits.getdata(frame), shift=(40, 40), axis=(0, 1)),
+        header,
+    )
+    second_stack = _write(
+        tmp_path / "second_stack.fits", _sky_image(2.0, seed=13, star_positions=scattered), _sky_header()
+    )
+    result = measure_stack_noise(second_stack, elsewhere, apertures).result
+    assert result is not None and result.reference_frame_flux_ratio is not None
+    assert result.reference_frame_flux_ratio.ratio is None
+    assert "does not line up" in result.reference_frame_flux_ratio.reason
+
+
+def _fake_stack_solver(monkeypatch: pytest.MonkeyPatch, solution: WCS | None, reason: str = "") -> list[str]:
+    """Replace the stack plate solve with a fake and record what it was asked.
+
+    Parameters
+    ----------
+    monkeypatch : `pytest.MonkeyPatch`
+        The fixture that undoes the change.
+    solution : `astropy.wcs.WCS` or `None`
+        What the fake solve returns.
+    reason : `str`, optional
+        The reason it returns with no solution.
+
+    Returns
+    -------
+    calls : `list` [`str`]
+        Filled with the stack path of each solve.
+    """
+    calls: list[str] = []
+
+    def fake(stack_path: str) -> tuple[WCS | None, str]:
+        """Record the call and give the prepared answer.
+
+        Parameters
+        ----------
+        stack_path : `str`
+            The stack to solve.
+
+        Returns
+        -------
+        solution : `tuple` [`astropy.wcs.WCS` or `None`, `str`]
+            The prepared solution and reason.
+        """
+        calls.append(stack_path)
+        return solution, reason
+
+    monkeypatch.setattr(
+        "astrometricslib.pipelines.stacking.post_processing.stack_noise._plate_solve_stack_wcs", fake
+    )
+    return calls
+
+
+def test_a_stack_nobody_solved_is_plate_solved_as_the_last_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no solution anywhere, the stack's own solve gives positions."""
+    calls = _fake_stack_solver(monkeypatch, WCS(_sky_header()).celestial)
+    stack = _write(tmp_path / "stack.fits", _sky_image(2.0, seed=1), None)
+    before = fits.getheader(stack)
+    outcome = measure_stack_noise(stack, None, str(tmp_path / APERTURE_FILE_NAME))
+    assert outcome.result is not None
+    assert outcome.result.wcs_source == PLATE_SOLVE_WCS_SOURCE
+    assert outcome.result.aperture_identity
+    assert calls == [stack]
+    # The stack's header is read only, never written.
+    assert fits.getheader(stack) == before
+
+
+def test_the_solve_of_the_stack_gives_the_reference_frame_flux_ratio(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A frame with no solution still gives the flux ratio."""
+    scattered = _scattered_stars(seed=3)
+    stack, frame = _scaled_pair(tmp_path, "a", 1.4, scattered)
+    bare_frame = _write(tmp_path / "bare_frame.fits", fits.getdata(frame), None)
+    bare_stack = _write(tmp_path / "bare_stack.fits", fits.getdata(stack), None)
+    _fake_stack_solver(monkeypatch, WCS(_sky_header()).celestial)
+    result = measure_stack_noise(bare_stack, bare_frame, str(tmp_path / APERTURE_FILE_NAME)).result
+    assert result is not None
+    assert result.wcs_source == PLATE_SOLVE_WCS_SOURCE
+    assert result.reference_frame_flux_ratio is not None
+    assert result.reference_frame_flux_ratio.ratio == pytest.approx(1.4, abs=0.02)
+
+
+def test_the_solve_is_tried_after_the_member_frames_fail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Member frames with no solution leave the stack's own solve."""
+    scattered = _scattered_stars(seed=11)
+    bare = _write(tmp_path / "bare.fits", _sky_image(2.0, seed=24, star_positions=scattered), None)
+    stack = _write(tmp_path / "stack.fits", _sky_image(2.0, seed=25, star_positions=scattered), None)
+    calls = _fake_stack_solver(monkeypatch, WCS(_sky_header()).celestial)
+    outcome = measure_stack_noise(stack, None, str(tmp_path / APERTURE_FILE_NAME), member_frame_paths=[bare])
+    assert calls == [stack]
+    assert outcome.result is not None
+    assert outcome.result.wcs_source == PLATE_SOLVE_WCS_SOURCE
+
+
+def test_a_failed_solve_of_the_stack_gives_a_reason_and_no_apertures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A solve with no answer leaves the stack unmeasured, with a reason."""
+    _fake_stack_solver(monkeypatch, None, "plate-solving the stack itself was tried and found no solution")
+    stack = _write(tmp_path / "stack.fits", _sky_image(2.0, seed=1), None)
+    outcome = measure_stack_noise(stack, None, str(tmp_path / APERTURE_FILE_NAME))
+    assert outcome.result is None
+    assert NO_WCS_REASON in outcome.reason
+    assert "was tried and found no solution" in outcome.reason
+    assert not (tmp_path / APERTURE_FILE_NAME).exists()
+
+
+def test_the_real_stack_solve_turns_an_exception_into_a_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A solver that raises gives a reason and never fails the stack."""
+    from astrometricslib.pipelines.stacking.post_processing import stack_noise
+    from astrometricslib.utilities.exceptions import PlateSolveFailedError
+
+    class RaisingPipeline:
+        """A stand-in astrometry pipeline whose solve fails."""
+
+        def process(self, image: str, attempt_plate_solving: bool = True) -> None:
+            """Fail as the star identifier does for an unsolvable field.
+
+            Raises
+            ------
+            PlateSolveFailedError
+                Always.
+            """
+            raise PlateSolveFailedError("Plate solving failed: could not solve field.")
+
+    monkeypatch.setattr("astrometricslib.pipelines.astrometry.pipeline.AstrometryPipeline", RaisingPipeline)
+    # The conftest stand-in keeps the real function for this test.
+    real = stack_noise._plate_solve_stack_wcs.real_function  # type: ignore[attr-defined]
+    wcs, reason = real(str(tmp_path / "stack.fits"))
+    assert wcs is None
+    assert "tried and failed" in reason
+    assert "PlateSolveFailedError" in reason
+
+
+def test_a_stack_with_a_header_solution_is_solved_only_to_choose_a_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Stacks that work keep their source; a solve happens once per new set."""
+    calls = _fake_stack_solver(monkeypatch, WCS(_sky_header()).celestial)
+    stack = _write(tmp_path / "stack.fits", _sky_image(2.0, seed=1), _sky_header())
+    outcome = measure_stack_noise(stack, None, str(tmp_path / APERTURE_FILE_NAME))
+    assert outcome.result is not None
+    assert outcome.result.wcs_source == PLATE_SOLVE_WCS_SOURCE
+    reference = _write(tmp_path / "reference.fits", _sky_image(2.0, seed=5), _sky_header())
+    trimmed = _write(tmp_path / "trimmed.fits", _sky_image(2.0, seed=6)[20:, 10:], None)
+    reference_outcome = measure_stack_noise(
+        trimmed, reference, str(tmp_path / "other_apertures.json"), crop_offset=(10, 20)
+    )
+    assert reference_outcome.result is not None
+    assert reference_outcome.result.wcs_source == PLATE_SOLVE_WCS_SOURCE
+    # Each new set is plate-solved once; a stack that only reads a set is not.
+    assert calls == [stack, trimmed]
+    assert measure_stack_noise(stack, None, str(tmp_path / APERTURE_FILE_NAME)).result is not None
+    assert calls == [stack, trimmed]
+
+
+def test_a_header_solution_that_misses_the_stored_stars_falls_back_to_the_stack_solve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A solution 800 px off is replaced by the stack's own solve."""
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    scattered = _scattered_stars(seed=3)
+    first = _write(tmp_path / "first.fits", _sky_image(2.0, seed=1, star_positions=scattered), _sky_header())
+    assert measure_stack_noise(first, None, apertures).result is not None
+    # The stars are where the first stack had them, but the header says they
+    # are 800 px away: farther than the shift search reaches.
+    wrong_header = _sky_header()
+    wrong_header["CRPIX1"] = SIZE / 2 + 800
+    stack = _write(tmp_path / "stack.fits", _sky_image(2.0, seed=7, star_positions=scattered), wrong_header)
+    calls = _fake_stack_solver(monkeypatch, WCS(_sky_header()).celestial)
+    result = measure_stack_noise(stack, None, apertures).result
+    assert calls == [stack]
+    assert result is not None
+    assert result.wcs_source == PLATE_SOLVE_WCS_SOURCE
+
+
+def test_a_missed_header_solution_with_a_failed_stack_solve_gives_both_reasons(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the retry solve finds nothing too, the reason names both."""
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    scattered = _scattered_stars(seed=3)
+    first = _write(tmp_path / "first.fits", _sky_image(2.0, seed=1, star_positions=scattered), _sky_header())
+    assert measure_stack_noise(first, None, apertures).result is not None
+    wrong_header = _sky_header()
+    wrong_header["CRPIX1"] = SIZE / 2 + 800
+    stack = _write(tmp_path / "stack.fits", _sky_image(2.0, seed=7, star_positions=scattered), wrong_header)
+    _fake_stack_solver(monkeypatch, None, "plate-solving the stack itself was tried and found no solution")
+    outcome = measure_stack_noise(stack, None, apertures)
+    assert outcome.result is None
+    assert "stored reference stars" in outcome.reason
+    assert "was tried and found no solution" in outcome.reason
+
+
+def _two_sets(tmp_path: Path) -> str:
+    """Store a 60 second and a 300 second set, the first the deeper.
+
+    Parameters
+    ----------
+    tmp_path : `pathlib.Path`
+        The folder.
+
+    Returns
+    -------
+    apertures : `str`
+        The aperture file's path.
+    """
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    stack_60, frame_60 = _reference_pair(tmp_path, "a60", 60.0)
+    stack_300, frame_300 = _reference_pair(tmp_path, "b300", 300.0, seed=2)
+    assert measure_stack_noise(stack_60, frame_60, apertures, depth=StackDepth(40, 22.1)).result is not None
+    assert measure_stack_noise(stack_300, frame_300, apertures, depth=StackDepth(30, 9.2)).result is not None
+    return apertures
+
+
+def test_the_library_stacks_set_is_recorded_and_preferred_over_a_deeper_stale_set(tmp_path: Path) -> None:
+    """The library stack's set is found, though another is deeper."""
+    apertures = _two_sets(tmp_path)
+    stored = json.loads(Path(apertures).read_text())
+    assert stored["library_set_keys"] == {"unspecified": "unspecified|exp=300"}
+    assert find_library_set_key(apertures, "unspecified|exp=30") == "unspecified|exp=300"
+    assert load_apertures(apertures).setup_key == "unspecified|exp=300"
+    assert sorted(stored["sets"]) == ["unspecified|exp=300", "unspecified|exp=60"]
+    stack_30, frame_30 = _reference_pair(tmp_path, "c30", 30.0, seed=3)
+    subset = measure_stack_noise(stack_30, frame_30, apertures, may_choose_apertures=False).result
+    assert subset is not None
+    assert subset.aperture_identity == load_apertures(apertures, "unspecified|exp=300").identity
+
+
+def test_a_file_without_the_library_record_falls_back_to_the_deepest_set(tmp_path: Path) -> None:
+    """An older file has no record, so the deepest set is used."""
+    apertures = _two_sets(tmp_path)
+    stored = json.loads(Path(apertures).read_text())
+    del stored["library_set_keys"]
+    Path(apertures).write_text(json.dumps(stored))
+    assert find_library_set_key(apertures, "unspecified|exp=30") == "unspecified|exp=60"
+    assert load_apertures(apertures).setup_key == "unspecified|exp=60"
+
+
+def test_a_record_for_a_set_that_is_gone_is_ignored_and_survives_other_writes(tmp_path: Path) -> None:
+    """A record of a missing set is skipped; a good one survives writes."""
+    apertures = _two_sets(tmp_path)
+    assert reset_apertures(apertures, "unspecified|exp=300")
+    assert find_library_set_key(apertures, "unspecified|exp=30") == "unspecified|exp=60"
+    record_library_set_key(apertures, "unspecified|exp=60")
+    stack_120, frame_120 = _reference_pair(tmp_path, "d120", 120.0, seed=4)
+    assert measure_stack_noise(stack_120, frame_120, apertures, depth=StackDepth(5, 5.0)).result is not None
+    stored = json.loads(Path(apertures).read_text())
+    assert stored["library_set_keys"] == {"unspecified": "unspecified|exp=120"}
+
+
+def test_a_library_stack_measures_the_noise_against_aperture_size_and_a_subset_does_not(
+    tmp_path: Path,
+) -> None:
+    """D20: only a stack that may choose apertures does the extra pass."""
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    first = _write(tmp_path / "first.fits", _sky_image(2.0, seed=1), _sky_header())
+    second = _write(tmp_path / "second.fits", _sky_image(2.0, seed=2), _sky_header())
+
+    library = measure_stack_noise(first, None, apertures)
+    subset = measure_stack_noise(second, None, apertures, may_choose_apertures=False)
+
+    assert library.result is not None and subset.result is not None
+    assert library.result.size_noise is not None
+    assert library.result.size_noise.result is not None
+    assert 0.45 < library.result.size_noise.result.exponent < 0.7
+    assert len(library.result.aperture_pixel_positions) == len(library.result.aperture_sums)
+    assert subset.result.size_noise is None
+
+
+def test_a_negligible_fitted_move_returns_the_solution_unchanged() -> None:
+    """Stars where the solution puts them leave it exactly as it was."""
+    scattered = _scattered_stars(seed=3)
+    guess = WCS(_sky_header())
+    sky = np.array(guess.pixel_to_world_values([x for x, _ in scattered], [y for _, y in scattered])).T
+    plane = _sky_image(2.0, seed=2, star_positions=scattered)
+    moved, reason, alignment = _move_guess_onto_reference_stars(plane, guess, sky)
+    assert moved is not None, reason
+    assert alignment is not None and alignment.left_unchanged
+    assert math.hypot(alignment.shift_row, alignment.shift_column) < NEGLIGIBLE_SHIFT_PX
+    assert abs(alignment.rotation_deg) < NEGLIGIBLE_ROTATION_DEG
+    np.testing.assert_array_equal(moved.wcs.crpix, guess.wcs.crpix)
+    np.testing.assert_array_equal(moved.wcs.get_pc(), guess.wcs.get_pc())
+    assert "left as they were" in alignment.describe()
+
+
+def test_a_move_above_the_negligible_size_is_still_applied() -> None:
+    """A shift of 2 px, far above the limit, is applied to the solution."""
+    scattered = _scattered_stars(seed=3)
+    guess = WCS(_sky_header())
+    sky = np.array(guess.pixel_to_world_values([x for x, _ in scattered], [y for _, y in scattered])).T
+    plane = _sky_image(2.0, seed=2, star_positions=[(x + 2.0, y) for x, y in scattered])
+    moved, reason, alignment = _move_guess_onto_reference_stars(plane, guess, sky)
+    assert moved is not None, reason
+    assert alignment is not None and not alignment.left_unchanged
+    assert alignment.shift_column == pytest.approx(2.0, abs=0.2)
+    assert not np.allclose(moved.wcs.crpix, guess.wcs.crpix)
+
+
+def _offset_header(columns: float = 5.0) -> fits.Header:
+    """Build a header whose solution is a few pixels off the true one.
+
+    Parameters
+    ----------
+    columns : `float`, optional
+        How far the reference pixel is moved, in pixels.
+
+    Returns
+    -------
+    header : `astropy.io.fits.Header`
+        The true sky header with a moved reference pixel.
+    """
+    header = _sky_header()
+    header["CRPIX1"] = SIZE / 2 + columns
+    return header
+
+
+def test_a_set_is_chosen_with_the_plate_solve_when_the_header_solution_is_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The stored sky positions land on the stars through the true solution."""
+    from astrometricslib.pipelines.stacking.post_processing.stack_image import sky_to_pixels
+
+    scattered = _scattered_stars(seed=3)
+    true_wcs = WCS(_sky_header()).celestial
+    calls = _fake_stack_solver(monkeypatch, true_wcs)
+    stack = _write(
+        tmp_path / "stack.fits", _sky_image(2.0, seed=1, star_positions=scattered), _offset_header()
+    )
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    result = measure_stack_noise(stack, None, apertures).result
+    assert result is not None
+    assert calls == [stack]
+    assert result.wcs_source == PLATE_SOLVE_WCS_SOURCE
+    assert result.sky_positions_from_plate_solve
+    stored = load_apertures(apertures, next(iter(json.loads(Path(apertures).read_text())["sets"])))
+    assert stored is not None and stored.sky_positions_from_plate_solve
+    assert stored.wcs_source == PLATE_SOLVE_WCS_SOURCE
+    columns_rows = sky_to_pixels(true_wcs, stored.reference_sky)
+    stars = np.array(scattered)
+    for column_row in columns_rows:
+        assert np.min(np.hypot(*(stars - column_row).T)) < 1.0
+
+
+def test_a_failed_solve_makes_an_untrusted_set_and_the_depth_rows_say_why(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The noise is kept; the depth has no zero point and names the reason."""
+    from astrometricslib.pipelines.stacking.post_processing.depth_limits import (
+        UNTRUSTED_SKY_POSITIONS_REASON,
+        measure_depth_limits,
+    )
+
+    _fake_stack_solver(monkeypatch, None, "plate-solving the stack itself was tried and found no solution")
+    scattered = _scattered_stars(seed=3)
+    stack = _write(
+        tmp_path / "stack.fits", _sky_image(2.0, seed=1, star_positions=scattered), _offset_header()
+    )
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    result = measure_stack_noise(stack, None, apertures).result
+    assert result is not None
+    assert not result.sky_positions_from_plate_solve
+    assert result.wcs_source == "stack header"
+
+    def refuse(*_: float) -> list:
+        """Fail if the depth step looks up Gaia stars.
+
+        Raises
+        ------
+        AssertionError
+            Always.
+        """
+        raise AssertionError("an untrusted set must not be matched to Gaia")
+
+    limits = measure_depth_limits(result, 2.0, refuse)
+    assert limits.point_source.value_mag is None
+    assert UNTRUSTED_SKY_POSITIONS_REASON in limits.point_source.note
+
+
+def _make_untrusted_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scattered: list) -> tuple[str, str]:
+    """Store an untrusted set by measuring a stack whose solve fails.
+
+    Parameters
+    ----------
+    tmp_path : `pathlib.Path`
+        The test folder.
+    monkeypatch : `pytest.MonkeyPatch`
+        Used to make the solve fail.
+    scattered : `list`
+        Star positions of the stack.
+
+    Returns
+    -------
+    apertures : `str`
+        The aperture file.
+    identity : `str`
+        The stored set's identity.
+    """
+    _fake_stack_solver(monkeypatch, None, "plate-solving the stack itself was tried and found no solution")
+    first = _write(
+        tmp_path / "first.fits", _sky_image(2.0, seed=1, star_positions=scattered), _offset_header()
+    )
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    result = measure_stack_noise(first, None, apertures).result
+    assert result is not None and not result.sky_positions_from_plate_solve
+    return apertures, result.aperture_identity
+
+
+def test_an_untrusted_set_is_replaced_by_the_next_library_stack_when_it_solves(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The next library stack that solves makes a trusted set, new identity."""
+    scattered = _scattered_stars(seed=3)
+    apertures, old_identity = _make_untrusted_set(tmp_path, monkeypatch, scattered)
+    calls = _fake_stack_solver(monkeypatch, WCS(_sky_header()).celestial)
+    second = _write(
+        tmp_path / "second.fits", _sky_image(2.0, seed=7, star_positions=scattered), _sky_header()
+    )
+    result = measure_stack_noise(second, None, apertures).result
+    assert result is not None
+    assert calls == [second]
+    assert result.sky_positions_from_plate_solve
+    assert result.aperture_identity != old_identity
+    assert result.apertures_created
+    key = find_library_set_key(apertures, next(iter(json.loads(Path(apertures).read_text())["sets"])))
+    stored = load_apertures(apertures, key)
+    assert stored is not None and stored.sky_positions_from_plate_solve
+    assert stored.identity == result.aperture_identity
+
+
+def test_an_untrusted_set_is_kept_when_the_next_stack_cannot_solve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed solve never replaces the set with another untrusted one."""
+    scattered = _scattered_stars(seed=3)
+    apertures, old_identity = _make_untrusted_set(tmp_path, monkeypatch, scattered)
+    second = _write(
+        tmp_path / "second.fits", _sky_image(2.0, seed=7, star_positions=scattered), _sky_header()
+    )
+    outcome = measure_stack_noise(second, None, apertures)
+    assert outcome.result is not None
+    assert outcome.result.aperture_identity == old_identity
+    assert not outcome.result.sky_positions_from_plate_solve
+    assert "older set" in outcome.result.position_note
+
+
+def test_a_stack_that_may_not_choose_never_replaces_an_untrusted_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Subset and odd-even stacks keep reading the recorded library set."""
+    scattered = _scattered_stars(seed=3)
+    apertures, old_identity = _make_untrusted_set(tmp_path, monkeypatch, scattered)
+    calls = _fake_stack_solver(monkeypatch, WCS(_sky_header()).celestial)
+    subset = _write(
+        tmp_path / "subset.fits", _sky_image(2.0, seed=9, star_positions=scattered), _sky_header()
+    )
+    outcome = measure_stack_noise(subset, None, apertures, may_choose_apertures=False)
+    assert outcome.result is not None
+    assert outcome.result.aperture_identity == old_identity
+    assert calls == []
+
+
+def test_a_stored_set_without_the_field_is_trusted_only_when_it_was_plate_solved() -> None:
+    """Old files: the wcs source decides."""
+    from astrometricslib.pipelines.stacking.post_processing.empty_apertures import ApertureSet
+
+    base = ApertureSet(
+        aperture_sky=np.zeros((1, 2)),
+        reference_sky=np.zeros((1, 2)),
+        wcs_source="registration reference frame",
+        pixel_scale_arcsec=2.0,
+        created_from="a.fits",
+        reference_baseline_flux=np.ones(1),
+        reference_radius_px=5.0,
+        reference_fwhm_px=3.0,
+        saturation_source="x",
+    ).to_json()
+    del base["sky_positions_from_plate_solve"]
+    assert not ApertureSet.from_json(base).sky_positions_from_plate_solve
+    base["wcs_source"] = PLATE_SOLVE_WCS_SOURCE
+    assert ApertureSet.from_json(base).sky_positions_from_plate_solve
+
+
+def test_robust_sigma_matches_the_median_absolute_deviation_formula() -> None:
+    """`robust_sigma` is the scaled median absolute deviation, on any axis."""
+    from astrometricslib.pipelines.stacking.post_processing.stack_image import MAD_TO_SIGMA, robust_sigma
+
+    samples = np.random.default_rng(11).normal(5.0, 2.0, size=(6, 40))
+    flat = samples.ravel()
+
+    assert MAD_TO_SIGMA == pytest.approx(1.4826)
+    assert robust_sigma(flat) == pytest.approx(1.4826 * np.median(np.abs(flat - np.median(flat))), rel=1e-12)
+    by_row = robust_sigma(samples, axis=1)
+    for row in range(6):
+        expected = 1.4826 * np.median(np.abs(samples[row] - np.median(samples[row])))
+        assert by_row[row] == pytest.approx(expected, rel=1e-12)
+    assert robust_sigma(samples, axis=0).shape == (40,)
+
+
+class _FakePlateSolve:
+    """A stand-in for the stack's one plate solve that counts its calls."""
+
+    def __init__(self, solution: WCS | None, reason: str = "") -> None:
+        """Remember the answer to give.
+
+        Parameters
+        ----------
+        solution : `astropy.wcs.WCS` or `None`
+            The solution `solve` returns.
+        reason : `str`, optional
+            Why there is none.
+        """
+        self.solution = solution
+        self.reason = reason
+        self.calls = 0
+
+    def solve(self) -> tuple[WCS | None, str]:
+        """Count the call and give the stored answer.
+
+        Returns
+        -------
+        wcs : `astropy.wcs.WCS` or `None`
+            The stored solution.
+        reason : `str`
+            The stored reason.
+        """
+        self.calls += 1
+        return self.solution, self.reason
+
+
+def _alignment_for_poor_fit_tests(rms_px: float) -> _Alignment:
+    """Build an alignment with the given rms and nothing else of note.
+
+    Parameters
+    ----------
+    rms_px : `float`
+        The rms fit, in pixels.
+
+    Returns
+    -------
+    alignment : `_Alignment`
+        The alignment.
+    """
+    return _Alignment(
+        shift_row=1.0,
+        shift_column=1.0,
+        matched_stars=10,
+        rms_px=rms_px,
+        rotation_deg=0.0,
+        rotation_error_deg=0.0,
+    )
+
+
+def _run_alignment_with_fake_moves(
+    monkeypatch: pytest.MonkeyPatch,
+    from_plate_solve: bool,
+    moves: list[tuple[WCS | None, str, _Alignment | None]],
+    plate_solve: _FakePlateSolve,
+    wcs_source: str = "registration reference frame",
+) -> tuple[WCS | None, str, str, object]:
+    """Call `_align_to_stored_apertures` with the reference-star move replaced.
+
+    Parameters
+    ----------
+    monkeypatch : `pytest.MonkeyPatch`
+        Used to replace the move.
+    from_plate_solve : `bool`
+        Whether the stored set holds true sky positions.
+    moves : `list`
+        The answers the move gives, in order.
+    plate_solve : `_FakePlateSolve`
+        The stack's plate solve.
+    wcs_source : `str`, optional
+        Where the starting solution came from.
+
+    Returns
+    -------
+    result : `tuple`
+        What `_align_to_stored_apertures` returns.
+    """
+    from astrometricslib.pipelines.stacking.post_processing.empty_apertures import ApertureSet
+
+    aperture_set = ApertureSet(
+        aperture_sky=np.zeros((1, 2)),
+        reference_sky=np.zeros((1, 2)),
+        wcs_source=PLATE_SOLVE_WCS_SOURCE if from_plate_solve else "registration reference frame",
+        pixel_scale_arcsec=2.0,
+        created_from="a.fits",
+        reference_baseline_flux=np.ones(1),
+        reference_radius_px=5.0,
+        reference_fwhm_px=3.0,
+        saturation_source="x",
+        sky_positions_from_plate_solve=from_plate_solve,
+    )
+    remaining = list(moves)
+    monkeypatch.setattr(
+        "astrometricslib.pipelines.stacking.post_processing.stack_noise._move_guess_onto_reference_stars",
+        lambda *_args: remaining.pop(0),
+    )
+    return _align_to_stored_apertures(
+        np.zeros((4, 4)),
+        WCS(_sky_header()),
+        wcs_source,
+        aperture_set,
+        plate_solve,  # type: ignore[arg-type]
+    )
+
+
+def test_a_poor_fit_on_a_plate_solved_set_uses_the_plate_solve(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A fit worse than the limit plate-solves the stack and moves again."""
+    first, second = WCS(_sky_header()), WCS(_sky_header(1.9))
+    solve = _FakePlateSolve(WCS(_sky_header(1.95)))
+    wcs, source, note, failure = _run_alignment_with_fake_moves(
+        monkeypatch,
+        True,
+        [(first, "", _alignment_for_poor_fit_tests(2.11)), (second, "", _alignment_for_poor_fit_tests(0.02))],
+        solve,
+    )
+    assert failure is None
+    assert solve.calls == 1
+    assert wcs is second
+    assert source == PLATE_SOLVE_WCS_SOURCE
+    assert "0.02 px rms" in note
+
+
+def test_a_good_fit_does_not_plate_solve(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A fit inside the limit keeps the first placement and never solves."""
+    first = WCS(_sky_header())
+    solve = _FakePlateSolve(WCS(_sky_header()))
+    wcs, source, _note, failure = _run_alignment_with_fake_moves(
+        monkeypatch, True, [(first, "", _alignment_for_poor_fit_tests(POOR_ALIGNMENT_RMS_PX - 0.1))], solve
+    )
+    assert failure is None and wcs is first
+    assert source == "registration reference frame"
+    assert solve.calls == 0
+
+
+def test_a_poor_fit_on_a_set_not_from_a_plate_solve_does_not_plate_solve(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sets without true sky positions keep the old behavior."""
+    first = WCS(_sky_header())
+    solve = _FakePlateSolve(WCS(_sky_header()))
+    wcs, source, _note, failure = _run_alignment_with_fake_moves(
+        monkeypatch, False, [(first, "", _alignment_for_poor_fit_tests(2.11))], solve
+    )
+    assert failure is None and wcs is first
+    assert source == "registration reference frame"
+    assert solve.calls == 0
+
+
+def test_a_poor_fit_is_kept_with_a_note_when_the_plate_solve_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With no plate solve, the first placement stays and the note says why."""
+    first = WCS(_sky_header())
+    solve = _FakePlateSolve(None, "the solver found no match")
+    wcs, source, note, failure = _run_alignment_with_fake_moves(
+        monkeypatch, True, [(first, "", _alignment_for_poor_fit_tests(2.11))], solve
+    )
+    assert failure is None and wcs is first
+    assert source == "registration reference frame"
+    assert "poor" in note and "2.11" in note and "the solver found no match" in note
+
+
+def test_a_poor_fit_is_kept_with_a_note_when_the_retry_move_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """If the plate solve cannot be moved, the first placement stays."""
+    first = WCS(_sky_header())
+    solve = _FakePlateSolve(WCS(_sky_header(1.95)))
+    wcs, source, note, failure = _run_alignment_with_fake_moves(
+        monkeypatch,
+        True,
+        [(first, "", _alignment_for_poor_fit_tests(1.5)), (None, "too few stars matched", None)],
+        solve,
+    )
+    assert failure is None and wcs is first
+    assert source == "registration reference frame"
+    assert "poor" in note and "1.50" in note and "too few stars matched" in note

@@ -170,10 +170,14 @@ class CatalogPosition:
     major_axis_arcmin : `float` or `None`
         The apparent major axis in arcminutes, or `None` when SIMBAD gave
         none.
+    object_type : `str` or `None`
+        SIMBAD's main object type code (such as ``"G"``), or `None` when
+        SIMBAD gave none.
     """
 
     coordinate: SkyCoord
     major_axis_arcmin: float | None = None
+    object_type: str | None = None
 
 
 @dataclass(frozen=True)
@@ -220,6 +224,34 @@ def _read_major_axis(result: Any) -> float | None:
     return axis if axis > 0.0 else None
 
 
+def read_object_type(result: Any) -> str | None:
+    """Read SIMBAD's main object type code from the first row of an answer.
+
+    Parameters
+    ----------
+    result : `astropy.table.Table`
+        A SIMBAD answer.
+
+    Returns
+    -------
+    object_type : `str` or `None`
+        The code (such as ``"G"``), or `None` when the column is missing,
+        masked or empty.
+    """
+    for column in ("otype", "OTYPE", "main_type"):
+        if column not in result.colnames:
+            continue
+        value = result[column][0]
+        if getattr(value, "mask", False):
+            continue
+        if isinstance(value, bytes):
+            value = value.decode("utf-8", errors="replace")
+        text = str(value).strip()
+        if text:
+            return text
+    return None
+
+
 def resolve_catalog_position(
     object_name: str, simbad: SimbadDriver, votable_fields: tuple[str, ...] = ()
 ) -> CatalogPosition | None:
@@ -239,7 +271,8 @@ def resolve_catalog_position(
         The SIMBAD driver to ask.
     votable_fields : `tuple` [`str`], optional
         Extra SIMBAD columns, such as ``("galdim_majaxis",)``. The default
-        columns already hold the position.
+        columns already hold the position. The main object type (``otype``)
+        is always requested as well.
 
     Returns
     -------
@@ -251,13 +284,14 @@ def resolve_catalog_position(
     if not name:
         return None
     try:
-        result = simbad.query_object(name, votable_fields=votable_fields)
+        fields = votable_fields if "otype" in votable_fields else ("otype", *votable_fields)
+        result = simbad.query_object(name, votable_fields=fields)
         if result is None or len(result) == 0:
             return None
         coordinate = SkyCoord(
             ra=float(result["ra"][0]) * u.deg, dec=float(result["dec"][0]) * u.deg, frame="icrs"
         )
-        return CatalogPosition(coordinate, _read_major_axis(result))
+        return CatalogPosition(coordinate, _read_major_axis(result), read_object_type(result))
     except (ExternalServiceError, *ONLINE_QUERY_ERRORS, *DATA_ERRORS) as lookup_error:
         logger.warning("Could not resolve '%s' in SIMBAD: %s", name, lookup_error)
         return None
@@ -411,6 +445,8 @@ def fill_target_position(
         old_ra, old_dec = target.ra, target.dec
         target.ra, target.dec = format_position(catalog.coordinate)
         target.position_unverified = False
+        if catalog.object_type:
+            target.simbad_object_type = catalog.object_type
         if had_position:
             logger.warning(
                 "Replaced the unverified position of target %s (%s, %s) with its catalog position (%s, %s).",

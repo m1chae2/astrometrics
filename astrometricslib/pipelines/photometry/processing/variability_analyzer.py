@@ -843,7 +843,7 @@ class VariabilityAnalyzer:
             camera_profile = resolve_camera_profile(
                 reference_header.get("INSTRUME", reference_header.get("CAMERA"))
             )
-            saturation_threshold_adu = camera_profile.saturation_threshold_adu.value
+            saturation_threshold_adu = camera_profile.pixel_saturation_level_adu.value
             self.photometric_linearity_limit_adu = (
                 float(camera_profile.photometric_linearity_limit_adu.value)
                 if camera_profile.photometric_linearity_limit_adu is not None

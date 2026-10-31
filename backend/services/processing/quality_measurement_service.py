@@ -10,13 +10,13 @@ It does three small things.
 - When the app asks for a measurement, it starts the library call on a
   background thread (so the request returns at once) and announces the result.
 - When the app asks for the noise-against-frame-count series, each night's
-  contribution or the half-difference noise
+  contribution or the odd–even difference noise
   (`astrometrics.processing.measure_noise_growth`,
-  `measure_night_contributions` and `measure_half_difference_noise`), it
+  `measure_night_contributions` and `measure_odd_even_difference_noise`), it
   starts that library call the same way. All of them stack some of a target's
   frames into the target's ``_subsets`` folder, never over the library
   stack, so they take minutes and run only when asked. None starts by itself
-  after a stack. The series includes the half-difference noise unless the
+  after a stack. The series includes the odd–even difference noise unless the
   caller turns it off.
 - When a frame sync or an ingestion has already measured the frames it added,
   it announces the summaries of those runs.
@@ -148,7 +148,7 @@ class QualityMeasurementService:
         target_id: str,
         maximum_steps: int = 4,
         include_night_contributions: bool = False,
-        include_half_difference: bool = True,
+        include_odd_even_difference: bool = True,
     ) -> dict[str, Any]:
         """Start the noise-against-frame-count series in the background.
 
@@ -163,7 +163,7 @@ class QualityMeasurementService:
         include_night_contributions : `bool`, optional
             Also stack the library stack's frames without each night. Costs
             one more stack per night.
-        include_half_difference : `bool`, optional
+        include_odd_even_difference : `bool`, optional
             Also measure the noise of the difference of two halves of the
             library stack's frames. Costs about one library stack's time.
             Defaults to `True`.
@@ -188,21 +188,21 @@ class QualityMeasurementService:
                 target_id,
                 maximum_steps=maximum_steps,
                 include_night_contributions=include_night_contributions,
-                include_half_difference=include_half_difference,
+                include_odd_even_difference=include_odd_even_difference,
             )
             rows = result.rows_written
             nights = {night for subset in result.subsets for night in subset.observing_night_ids}
             if result.night_contributions is not None:
                 rows += result.night_contributions.rows_written
                 nights.update(entry.night_id for entry in result.night_contributions.nights)
-            if result.half_difference is not None:
-                rows += result.half_difference.rows_written
+            if result.odd_even_difference is not None:
+                rows += result.odd_even_difference.rows_written
             return rows, sorted(nights)
 
         return self._start_subset_job(target_id, "noise-growth", work)
 
-    def start_half_difference_noise(self, target_id: str) -> dict[str, Any]:
-        """Start the half-difference noise measurement in the background.
+    def start_odd_even_difference_noise(self, target_id: str) -> dict[str, Any]:
+        """Start the odd–even difference noise measurement in the background.
 
         The library stack's frames are split into two halves, each half is
         stacked, and the noise of their difference is stored beside the
@@ -231,10 +231,10 @@ class QualityMeasurementService:
                 The rows written and the observing nights they belong to (the
                 rows belong to the library stack, so no night is listed).
             """
-            result = self._astrometrics.processing.measure_half_difference_noise(target_id)
+            result = self._astrometrics.processing.measure_odd_even_difference_noise(target_id)
             return result.rows_written, []
 
-        return self._start_subset_job(target_id, "half-difference", work)
+        return self._start_subset_job(target_id, "odd–even difference", work)
 
     def start_night_contributions(self, target_id: str) -> dict[str, Any]:
         """Start each night's contribution measurement in the background.

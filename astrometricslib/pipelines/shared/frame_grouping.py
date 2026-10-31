@@ -122,24 +122,6 @@ def frames_missing_focal_length(target: Any, camera_name: str | None = None) -> 
     ]
 
 
-def select_frames_for_configuration(target: Any, configuration_key: str) -> list:
-    """Select the frames belonging to one camera-and-optic configuration.
-
-    Parameters
-    ----------
-    target : `Any`
-        The target whose `frames` are filtered.
-    configuration_key : `str`
-        A key as produced by `frame_configuration_key`.
-
-    Returns
-    -------
-    configuration_frames : `list`
-        The matching frames, in their original order.
-    """
-    return [frame for frame in target.frames or [] if frame_configuration_key(frame) == configuration_key]
-
-
 def frame_is_spectral(frame: Any) -> bool:
     """Decide whether a frame is a spectroscopy frame.
 

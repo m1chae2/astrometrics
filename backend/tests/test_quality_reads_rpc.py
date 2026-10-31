@@ -50,6 +50,8 @@ NEW_READS = {
     "advisory:target_report": "get_target_report",
     "advisory:tonight": "get_tonight_ranking",
     "advisory:result": "get_result_statements",
+    "advisory:depth_goal": "get_depth_goal",
+    "advisory:set_depth_goal": "set_depth_goal",
     "history:nights": "list_nights",
     "history:night_quality": "get_night_quality",
     "history:target_changes": "list_target_changes",
@@ -89,6 +91,16 @@ def test_result_statements_pass_target_and_object() -> None:
     wayfinder = _wayfinder()
     AdvisoryService(wayfinder).get_result_statements("M 81", "star-1")
     wayfinder.planning.get_advisory.assert_called_once_with(kind="result", target="M 81", object_id="star-1")
+
+
+def test_depth_goal_methods_pass_the_target_and_the_level() -> None:
+    """The depth goal read passes the target; the write adds the level."""
+    wayfinder = _wayfinder()
+    service = AdvisoryService(wayfinder)
+    service.get_depth_goal("NGC 7331")
+    wayfinder.planning.get_depth_goal.assert_called_once_with("NGC 7331")
+    service.set_depth_goal("NGC 7331", "deep")
+    wayfinder.planning.set_depth_goal.assert_called_once_with("NGC 7331", "deep")
 
 
 def test_history_reads_register_no_job() -> None:

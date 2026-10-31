@@ -601,7 +601,12 @@ def _target_extra_columns(target: Any) -> dict[str, Any]:
     columns : `dict`
         A dictionary containing the target's name and coordinates.
     """
-    return {"name": target.common_name, "ra": target.ra, "dec": target.dec}
+    return {
+        "name": target.common_name,
+        "ra": target.ra,
+        "dec": target.dec,
+        "simbad_object_type": target.simbad_object_type,
+    }
 
 
 def _coerce_float(value: Any) -> float | None:
@@ -722,8 +727,18 @@ class CatalogAccess(AbstractCatalogAccess):
                 "target_catalog": DatasetSpec(
                     table_name="targets",
                     model_class=Target,
-                    extra_column_types={"name": "TEXT", "ra": "TEXT", "dec": "TEXT"},
+                    extra_column_types={
+                        "name": "TEXT",
+                        "ra": "TEXT",
+                        "dec": "TEXT",
+                        "simbad_object_type": "TEXT",
+                    },
                     extra_columns=_target_extra_columns,
+                    # Targets saved before this column existed keep the value
+                    # (if any) inside their stored JSON; the database copies
+                    # it out once, when the column is first added. Old rows
+                    # without it read as None.
+                    column_backfills={"simbad_object_type": "json_extract(data_json, '$.simbadObjectType')"},
                 ),
                 "stellar_catalog": DatasetSpec(
                     table_name="stellar_objects",

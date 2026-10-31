@@ -156,8 +156,8 @@ def test_assumed_peak_says_so_in_the_reason() -> None:
 def test_underexposed_proposes_a_longer_exposure() -> None:
     """Sky 1.5 and read noise 3 need (3/0.5)^2 = 36 times the exposure."""
     rows = [
-        _row("frame.sky_noise_e", 1.5, version=2),
-        _row("frame.read_noise_e", 3.0, status="assumed", reason="profile value"),
+        _row("frame.sky_noise_e", 1.5, version=3),
+        _row("frame.read_noise_e", 3.0, status="assumed", reason="profile value", version=2),
     ]
     statement = _of_rule(_judge(rows), "underexposed_setting")[0]
     assert statement.kind == StatementKind.RECOMMENDATION
@@ -167,7 +167,7 @@ def test_underexposed_proposes_a_longer_exposure() -> None:
 
 def test_underexposed_is_quiet_when_sky_dominates() -> None:
     """A sky noise of 10 against read noise of 3 makes no statement."""
-    rows = [_row("frame.sky_noise_e", 10.0, version=2), _row("frame.read_noise_e", 3.0)]
+    rows = [_row("frame.sky_noise_e", 10.0, version=3), _row("frame.read_noise_e", 3.0, version=2)]
     assert _of_rule(_judge(rows), "underexposed_setting") == []
 
 
@@ -308,8 +308,8 @@ def test_ordering_puts_warnings_first_and_missing_data_last() -> None:
     rows = [
         _row("stacking.group_brightest_star_peak_fraction", 2.0, level="stack"),
         _row("frame.star_elongation", 1.5),
-        _row("frame.sky_noise_e", 1.5, version=2),
-        _row("frame.read_noise_e", 3.0),
+        _row("frame.sky_noise_e", 1.5, version=3),
+        _row("frame.read_noise_e", 3.0, version=2),
     ]
     statements = _judge(rows)
     kinds = [statement.kind for statement in statements]

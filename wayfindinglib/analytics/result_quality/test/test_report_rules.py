@@ -25,6 +25,7 @@ from wayfindinglib.analytics.result_quality.efficiency import (
 )
 from wayfindinglib.analytics.result_quality.noise_growth import (
     StackFrame,
+    StackGroup,
     StopSignal,
     TakeMoreResult,
     WeightingMode,
@@ -240,6 +241,77 @@ def test_sharpness_tradeoff_is_quiet_when_the_frames_are_alike_or_few() -> None:
     )
 
 
+def test_sharpness_tradeoff_is_not_made_for_a_group_stack_on_one_setting() -> None:
+    """The ``group`` mode is refused: use the group form instead."""
+    widths = [2.0 + 0.1 * index for index in range(20)]
+
+    assert rr.find_sharpness_tradeoff(_frames(20), widths, WeightingMode.GROUP) is None
+
+
+def _stack_group(count: int, exposure: float, frame_noise: float) -> StackGroup:
+    """Make one exposure group of frames with a spread of star widths.
+
+    Returns
+    -------
+    group : `StackGroup`
+        The group.
+    """
+    frames = tuple(
+        StackFrame(
+            frame_id=f"g{exposure:g}_{index}",
+            exposure_seconds=exposure,
+            sky_rate_e_per_s_per_px=1.0,
+            read_noise_e=3.0,
+            star_width=2.0 + 0.1 * index,
+        )
+        for index in range(count)
+    )
+    return StackGroup(frames=frames, frame_noise_adu=frame_noise)
+
+
+def test_the_group_sharpness_tradeoff_is_diluted_by_the_other_groups() -> None:
+    """Dropping frames of one group changes the stack less than the group."""
+    groups = [_stack_group(10, 30.0, 20.0), _stack_group(20, 60.0, 30.0)]
+    widths = [frame.star_width or 0.0 for frame in groups[1].frames]
+
+    in_stack = rr.find_sharpness_tradeoff_in_groups(groups, 1, widths)
+    alone = rr.find_sharpness_tradeoff(list(groups[1].frames), widths, WeightingMode.WFWHM)
+
+    assert in_stack is not None and alone is not None
+    assert in_stack.kept_count == 14
+    assert in_stack.star_width_change == pytest.approx(alone.star_width_change)
+    assert 0.0 < in_stack.noise_change < alone.noise_change
+
+
+def test_the_group_sharpness_tradeoff_needs_enough_frames() -> None:
+    """A group of 19 frames is below the minimum, as for one setting."""
+    groups = [_stack_group(19, 60.0, 30.0), _stack_group(10, 30.0, 20.0)]
+
+    assert rr.find_sharpness_tradeoff_in_groups(groups, 0, [2.0 + 0.1 * i for i in range(19)]) is None
+
+
+def test_fixed_pattern_limited_statement_says_the_fixed_pattern_noise_in_place_of_a_count() -> None:
+    """The warning names the fixed-pattern share and the best cut."""
+    result = TakeMoreResult(
+        target_noise_ratio=0.707,
+        fixed_pattern_limited=True,
+        fixed_pattern_noise=2.9e-3,
+        fixed_pattern_variance_share=0.88,
+        lowest_reachable_ratio=0.95,
+        reason="More frames of this kind will not reach the target.",
+    )
+
+    statement = rr.fixed_pattern_limited_statement(result, SETTING, [MeasurementReference(row_id=5)])
+
+    assert statement.rule == "more_frames_will_not_help"
+    assert statement.kind == StatementKind.WARNING
+    assert "fixed-pattern noise (0.0029 in stack units, 88% of the noise)" in statement.message
+    assert "only 5%" in statement.message
+    assert statement.proposed_action is None
+    assert [reference.row_id for reference in statement.evidence] == [5]
+    assert_plain_message_is_sound(statement)
+
+
 # -- calibration gap ---------------------------------------------------------
 
 DARK_OK = {
@@ -346,8 +418,8 @@ def test_more_frames_statement_gives_the_count_the_time_and_the_noise() -> None:
     assert statement.proposed_action.frame_count == 20
     assert statement.proposed_action.exposure_seconds == pytest.approx(90.0)
     assert (
-        statement.message
-        == "Take 20 more at 90 s (about 32 min with downloads) to cut the noise by about 29%."
+        statement.message == "Recommended additional frames: 20 at 90 s (about 32 min with downloads), "
+        "which cuts the noise by about 29%."
     )
     assert statement.expected_effect.wall_clock_seconds == pytest.approx(1900.0)
     assert rr.more_frames_statement(TakeMoreResult(target_noise_ratio=0.707), SETTING, overheads, []) is None
@@ -624,3 +696,121 @@ def test_every_statement_this_module_builds_has_a_sound_plain_message() -> None:
     for statement in statements:
         assert_plain_message_is_sound(statement)
     assert "roughly 29%" in next(s for s in statements if s.rule == "more_frames").plain_message
+
+
+def _m13_result(*, doubling_cut: float = 0.137, worthwhile: bool = True) -> TakeMoreResult:
+    """Make the answer for the M 13 case (fixed-pattern noise: 49 percent).
+
+    Parameters
+    ----------
+    doubling_cut : `float`, optional
+        The noise cut by doubling.
+    worthwhile : `bool`, optional
+        Whether doubling is worth asking for.
+
+    Returns
+    -------
+    result : `TakeMoreResult`
+        The diminishing-returns answer for 44 frames of 30 s.
+    """
+    return TakeMoreResult(
+        target_noise_ratio=0.707,
+        added_exposure_seconds=44 * 30.0,
+        new_exposure_seconds=30.0,
+        fixed_pattern_noise=0.583e-3,
+        fixed_pattern_variance_share=0.49,
+        lowest_reachable_ratio=0.704,
+        practical_limit_applied=True,
+        doubling_frames=44,
+        doubling_noise_cut=doubling_cut,
+        most_reachable_cut=0.296,
+        doubling_worthwhile=worthwhile,
+        reason="A design estimate.",
+    )
+
+
+_NO_EXTRA_OVERHEADS = CaptureOverheads(
+    download_seconds=5.0,
+    dither_settle_seconds=20.0,
+    autofocus_seconds=120.0,
+    download_from_records=False,
+    dither_from_records=False,
+    autofocus_from_records=False,
+    gaps_used=0,
+)
+
+
+def test_beyond_the_practical_limit_the_statement_gives_one_doubling() -> None:
+    """The M 13 numbers give the diminishing-returns shape, not a count."""
+    statement = rr.more_frames_statement(
+        _m13_result(), SETTING, _NO_EXTRA_OVERHEADS, [MeasurementReference(row_id=3)]
+    )
+
+    assert statement is not None
+    assert statement.rule == "more_frames"
+    assert statement.kind == StatementKind.RECOMMENDATION
+    assert "Recommended additional frames: 44 at 30 s (about " in statement.message
+    assert "as many frames again as the stack holds, which cuts the noise by about 14%" in statement.message
+    assert "at most about 30% in all" in statement.message
+    assert (
+        "fixed-pattern noise of 0.000583 (stack units) makes up about 49% of the noise" in statement.message
+    )
+    assert rr.FIXED_PATTERN_CAUSE_TEXT in statement.message
+    assert statement.message.endswith(rr.FIXED_PATTERN_NOT_REMOVED_TEXT)
+    assert statement.proposed_action.frame_count == 44
+    assert statement.expected_effect.noise_change_fraction == pytest.approx(-0.137)
+    assert statement.values["practical_limit_applied"] == pytest.approx(1.0)
+    assert statement.values["doubling_frames"] == pytest.approx(44.0)
+    assert_plain_message_is_sound(statement)
+
+
+def test_a_worthless_doubling_gives_the_stop_warning_in_the_new_shape() -> None:
+    """Under 5 percent: a warning, no proposed frames, same sentences."""
+    result = _m13_result(doubling_cut=0.03, worthwhile=False)
+    result = result.model_copy(update={"fixed_pattern_variance_share": 0.88, "most_reachable_cut": 0.06})
+
+    statement = rr.fixed_pattern_limited_statement(result, SETTING, [MeasurementReference(row_id=5)])
+
+    assert statement.rule == "more_frames_will_not_help"
+    assert statement.proposed_action is None
+    assert "only about 3%" in statement.message
+    assert "at most about 6% in all" in statement.message
+    assert rr.FIXED_PATTERN_CAUSE_TEXT in statement.message
+    assert_plain_message_is_sound(statement)
+
+
+def test_a_possible_fixed_pattern_gives_a_range_and_says_the_low_end_is_not_proven() -> None:
+    """D18: 44 frames at 30 s cut the noise by about 13% to 29%."""
+    result = TakeMoreResult(
+        frames_needed=44,
+        predicted_noise_ratio=0.707,
+        target_noise_ratio=0.707,
+        added_exposure_seconds=1320.0,
+        new_exposure_seconds=30.0,
+        possible_fixed_pattern_sigmas=1.9,
+        possible_low_noise_cut=0.134,
+        possible_low_doubling_cut=0.134,
+    )
+
+    statement = rr.more_frames_statement(result, SETTING, _NO_EXTRA_OVERHEADS, [])
+
+    assert statement is not None
+    assert statement.message.startswith("Recommended additional frames: 44 at 30 s")
+    assert "cuts the noise by about 13% to 29%." in statement.message
+    assert "The low end assumes the possible fixed-pattern noise (1.9\u03c3, not proven) is real." in (
+        statement.message
+    )
+    assert "will not help" not in statement.message
+    assert statement.proposed_action.frame_count == 44
+
+    flagged = rr.more_frames_statement(
+        result.model_copy(
+            update={"possible_low_end_not_worthwhile": True, "possible_low_doubling_cut": 0.01}
+        ),
+        SETTING,
+        _NO_EXTRA_OVERHEADS,
+        [],
+    )
+    assert flagged is not None
+    assert "If it is real, more frames will not help much" in flagged.message
+    assert flagged.proposed_action.frame_count == 44

@@ -144,6 +144,7 @@ from wayfindinglib.models.equipment_and_site.performance_envelope import (
     PerformanceEnvelope,
     TrackingRiskMap,
 )
+from wayfindinglib.models.planning.depth_goal import DepthGoalStatus, DepthLevelOption
 from wayfindinglib.models.planning.framing import SkyCorner
 from wayfindinglib.models.planning.mosaic import MosaicPanel
 from wayfindinglib.models.planning.observation_package import ExposureRequest, ObservationPackage
@@ -638,6 +639,8 @@ def render_types() -> str:
                 NeedsAttention,
                 TargetDatasetReport,
                 TonightRanking,
+                DepthGoalStatus,
+                DepthLevelOption,
                 NightQuality,
                 NightListEntry,
                 TargetChange,

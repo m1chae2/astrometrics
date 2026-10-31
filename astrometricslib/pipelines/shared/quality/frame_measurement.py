@@ -746,12 +746,7 @@ def _usable_top_level_adu(camera_profile: CameraProfile | None) -> float | None:
     """
     if camera_profile is None:
         return None
-    ceiling = float(camera_profile.clip_ceiling_adu.value)
-    threshold = float(camera_profile.saturation_threshold_adu.value)
-    level = threshold if camera_profile.saturation_threshold_can_be_reached else ceiling
-    if camera_profile.photometric_linearity_limit_adu is not None:
-        level = min(level, float(camera_profile.photometric_linearity_limit_adu.value))
-    return level
+    return float(camera_profile.usable_peak_level_adu.value)
 
 
 def _plateau_saturation_level_adu(plane: np.ndarray) -> float | None:
@@ -1592,13 +1587,16 @@ def _frame_exposure_seconds(frame: FrameRecord) -> float | None:
 
 
 def look_up_frame_sensor_noise(
-    camera_profile: CameraProfile | None, frame: FrameRecord
+    camera_profile: CameraProfile | None, frame: FrameRecord, *, clipped_at_zero: bool | None = None
 ) -> tuple[ProvenancedValue | None, ProvenancedValue | None, str]:
     """Find the gain and read noise the profile holds for a frame's setting.
 
-    The lookup is exact: gain setting, offset and binning must all match. The
-    frame record keeps the gain setting in its ``iso`` field (the header's
-    ``GAIN`` card, or the ISO of a DSLR).
+    An entry whose gain setting, offset and binning all match always wins.
+    The frame record keeps the gain setting in its ``iso`` field (the header's
+    ``GAIN`` card, or the ISO of a DSLR). With ``clipped_at_zero=False`` and
+    no exact entry, the entry of the same gain and binning at the nearest
+    other offset is used (see `CameraProfile.sensor_noise_for`), and its
+    source text says so.
 
     Parameters
     ----------
@@ -1606,6 +1604,9 @@ def look_up_frame_sensor_noise(
         The camera's profile.
     frame : `FrameRecord`
         The frame.
+    clipped_at_zero : `bool` or `None`, optional
+        Whether the frame's pixels are cut off at zero. `False` allows the
+        offset fallback; `True` and `None` (not known) do not.
 
     Returns
     -------
@@ -1618,10 +1619,14 @@ def look_up_frame_sensor_noise(
     """
     if camera_profile is None:
         return None, None, "no camera profile was given for this frame"
-    gap = camera_profile.sensor_noise_gap_reason(frame.iso, frame.offset, frame.binning)
+    gap = camera_profile.sensor_noise_gap_reason(
+        frame.iso, frame.offset, frame.binning, clipped_at_zero=clipped_at_zero
+    )
     if gap is not None:
         return None, None, gap
-    entry = camera_profile.sensor_noise_for(frame.iso, frame.offset, frame.binning)
+    entry = camera_profile.sensor_noise_for(
+        frame.iso, frame.offset, frame.binning, clipped_at_zero=clipped_at_zero
+    )
     if entry is None:
         return None, None, "camera profile has no entry for this setting"
     reasons = []
@@ -1967,6 +1972,7 @@ def measure_frame(
     bias_level_adu: float | None = None,
     measure_gaussian_width: Callable[[np.ndarray], float | None] | None = None,
     bias_level_reason: str = "",
+    clipped_zero_fraction_limit: float | None = None,
 ) -> list[QualityMeasurement]:
     """Measure one light frame and return one measurement per frame metric.
 
@@ -2014,6 +2020,13 @@ def measure_frame(
         Why `bias_level_adu` is `None` (for example, that the calibration
         library holds no bias frames at the frame's setting). It becomes the
         reason of the sky metrics that need the bias level.
+    clipped_zero_fraction_limit : `float` or `None`, optional
+        A frame with more than this fraction of its pixels at exactly zero is
+        clipped at zero. The caller passes
+        ``CLIPPED_FRAME_ZERO_FRACTION`` (this folder may not import the
+        stacking pipeline). A frame at or below it may use the camera
+        profile's gain and read noise from another offset (the offset
+        fallback). `None` turns the fallback off.
 
     Returns
     -------
@@ -2048,13 +2061,23 @@ def measure_frame(
         FRAME_SKY_RATE_E_PER_S_PER_PX,
         FRAME_SKY_NOISE_E,
     )
-    gain, read_noise, noise_reason = look_up_frame_sensor_noise(camera_profile, frame)
     try:
         planes, collapsed, header = _read_planes(path)
     except FITS_READ_ERRORS as read_error:
+        _, read_noise, noise_reason = look_up_frame_sensor_noise(camera_profile, frame)
         context.add_not_measured(pixel_metrics, f"{UNREADABLE_FRAME_REASON_PREFIX}: {read_error}")
         context.add(FRAME_READ_NOISE_E, **_read_noise_arguments(read_noise, noise_reason))
         return context.measurements
+
+    # The offset fallback needs to know the frame is not cut off at zero.
+    clipped_at_zero = (
+        None
+        if clipped_zero_fraction_limit is None
+        else _frame_zero_fraction(planes) > clipped_zero_fraction_limit
+    )
+    gain, read_noise, noise_reason = look_up_frame_sensor_noise(
+        camera_profile, frame, clipped_at_zero=clipped_at_zero
+    )
 
     is_mosaic = bool(str(header.get("BAYERPAT", "")).strip()) and len(planes) == 1
     mosaic_note = (
@@ -2104,6 +2127,26 @@ def measure_frame(
                 result = StarProfileResult(reason=f"the star fits failed: {error}")
         _emit_star_profile_measurements(context, result, channel, mosaic_note)
     return context.measurements
+
+
+def _frame_zero_fraction(planes: list[tuple[str | None, np.ndarray]]) -> float:
+    """Measure the fraction of a frame's pixels that are exactly zero.
+
+    Parameters
+    ----------
+    planes : `list` of `tuple`
+        The planes from `_read_planes`.
+
+    Returns
+    -------
+    zero_fraction : `float`
+        The share of all pixels, over every plane, at exactly zero. A frame
+        cut off at zero has many; a frame with sky well above the offset has
+        none.
+    """
+    total = sum(plane.size for _, plane in planes)
+    zeros = sum(int(np.count_nonzero(plane == 0)) for _, plane in planes)
+    return zeros / total if total else 0.0
 
 
 def _read_noise_arguments(read_noise: ProvenancedValue | None, reason: str) -> dict:
@@ -2236,11 +2279,7 @@ def _emit_background_and_saturation(
             reason="no camera profile was given, so the saturation level is unknown",
         )
     else:
-        threshold = (
-            float(camera_profile.saturation_threshold_adu.value)
-            if camera_profile.saturation_threshold_can_be_reached
-            else float(camera_profile.clip_ceiling_adu.value)
-        )
+        threshold = float(camera_profile.pixel_saturation_level_adu.value)
         context.add(
             FRAME_SATURATED_PIXEL_FRACTION,
             value=compute_saturated_pixel_fraction(collapsed, threshold),

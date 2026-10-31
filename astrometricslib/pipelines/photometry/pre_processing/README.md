@@ -97,7 +97,7 @@ The error does not change the flux. `measure_aperture_photometry` returns both, 
 
 `detector_noise.py` picks the gain (electrons per ADU) and read noise (electrons):
 
-1. The camera's profile: the `sensor_noise` entry in `models/camera_profile.py` for the frame's own gain setting, offset and binning. The setting comes from the header (`ISOSPEED` or `GAIN`, `OFFSET` or `BLKLEVEL`, `XBINNING` and `YBINNING`) or is passed in from a frame record. Each value carries its source (datasheet, measured or assumed). Only an exact match counts. A frame at any other setting gets nothing from the profile, and `DetectorNoise.profile_gap_reason` says why. A profile still holding the old single gain and read noise is treated the same way until it is migrated (`scripts/migrate_camera_profiles.py`).
+1. The camera's profile: the `sensor_noise` entry in `models/camera_profile.py` for the frame's own gain setting, offset and binning. The setting comes from the header (`ISOSPEED` or `GAIN`, `OFFSET` or `BLKLEVEL`, `XBINNING` and `YBINNING`) or is passed in from a frame record. Each value carries its source (datasheet, measured or assumed). An exact match counts. When the caller passes `clipped_at_zero=False`, an entry of the same gain and binning at another offset may stand in (see `models/README.md`); by default no caller does, so a frame at any other setting gets nothing from the profile, and `DetectorNoise.profile_gap_reason` says why. A profile still holding the old single gain and read noise is treated the same way until it is migrated (`scripts/migrate_camera_profiles.py`).
 2. The frame's `EGAIN` card (electrons per ADU) and `RDNOISE` card (electrons).
 3. An assumption: 1 electron per ADU and no read noise.
 

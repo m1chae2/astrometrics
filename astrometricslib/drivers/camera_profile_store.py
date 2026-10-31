@@ -27,7 +27,9 @@ import functools
 import glob
 import logging
 import shutil
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 import tomlkit
 
@@ -42,9 +44,26 @@ from astrometricslib.models.camera_profile import (
     ValueProvenance,
 )
 
+__all__ = [
+    "CAMERA_SECTION_PREFIX",
+    "LEGACY_NOISE_KEYS",
+    "MAXIMUM_CONFIG_BACKUPS",
+    "SENSOR_NOISE_KEY",
+    "backup_config_file",
+    "build_camera_profile",
+    "build_provenanced_value",
+    "camera_identity",
+    "load_camera_profiles",
+    "load_profiles_from_config",
+    "record_name_for_camera",
+    "resolve_camera_profile",
+    "save_sensor_setting_noise",
+    "sensor_noise_to_toml_array",
+]
+
 logger = logging.getLogger(__name__)
 
-_CAMERA_SECTION_PREFIX = "Observatory.Camera."
+CAMERA_SECTION_PREFIX = "Observatory.Camera."
 
 # The keys of the old layout, which held one gain and one read noise for the
 # whole camera, whatever its setting. They are read only to be flagged and
@@ -62,7 +81,7 @@ SENSOR_NOISE_KEY = "sensor_noise"
 MAXIMUM_CONFIG_BACKUPS = 10
 
 
-def _build_provenanced_value(field) -> ProvenancedValue:  # ruff: ignore[missing-type-function-argument]
+def build_provenanced_value(field: Mapping[str, Any]) -> ProvenancedValue:
     """Build a `ProvenancedValue` from a config inline table.
 
     Returns
@@ -76,7 +95,7 @@ def _build_provenanced_value(field) -> ProvenancedValue:  # ruff: ignore[missing
     )
 
 
-def _build_quantum_efficiency(field) -> QuantumEfficiencyRecord:  # ruff: ignore[missing-type-function-argument]
+def _build_quantum_efficiency(field: Mapping[str, Any]) -> QuantumEfficiencyRecord:
     """Build a `QuantumEfficiencyRecord` from a config inline table.
 
     Returns
@@ -91,7 +110,7 @@ def _build_quantum_efficiency(field) -> QuantumEfficiencyRecord:  # ruff: ignore
     )
 
 
-def _build_sensor_setting_noise(field) -> SensorSettingNoise:  # ruff: ignore[missing-type-function-argument]
+def _build_sensor_setting_noise(field: Mapping[str, Any]) -> SensorSettingNoise:
     """Build a `SensorSettingNoise` from one ``sensor_noise`` entry.
 
     Returns
@@ -106,7 +125,7 @@ def _build_sensor_setting_noise(field) -> SensorSettingNoise:  # ruff: ignore[mi
     }
     for name in ("gain_e_per_adu", "read_noise_e"):
         if name in field:
-            kwargs[name] = _build_provenanced_value(field[name])
+            kwargs[name] = build_provenanced_value(field[name])
     if "temperature_c" in field:
         kwargs["temperature_c"] = float(field["temperature_c"])
     for name in ("gain_spread_e_per_adu", "read_noise_adu_robust"):
@@ -138,7 +157,7 @@ def _warn_once_about_unkeyed_noise(camera_name: str) -> None:
     )
 
 
-def _build_camera_profile(section_name: str, section: dict) -> CameraProfile:
+def build_camera_profile(section_name: str, section: dict) -> CameraProfile:
     """Build a `CameraProfile` from one config section.
 
     Returns
@@ -146,7 +165,7 @@ def _build_camera_profile(section_name: str, section: dict) -> CameraProfile:
     profile : `CameraProfile`
         The profile described by `section`.
     """
-    camera_name = section.get("name") or section_name[len(_CAMERA_SECTION_PREFIX) :]
+    camera_name = section.get("name") or section_name[len(CAMERA_SECTION_PREFIX) :]
     name_aliases = tuple(
         alias.strip() for alias in str(section.get("name_aliases", "")).split(",") if alias.strip()
     )
@@ -155,11 +174,11 @@ def _build_camera_profile(section_name: str, section: dict) -> CameraProfile:
         "name_aliases": name_aliases,
         "record_name": section.get("record_name") or None,
         "is_generic_fallback": str(section.get("is_generic_fallback", "false")).strip().lower() == "true",
-        "clip_ceiling_adu": _build_provenanced_value(section["clip_ceiling_adu"]),
-        "saturation_threshold_adu": _build_provenanced_value(section["saturation_threshold_adu"]),
+        "clip_ceiling_adu": build_provenanced_value(section["clip_ceiling_adu"]),
+        "saturation_threshold_adu": build_provenanced_value(section["saturation_threshold_adu"]),
     }
     if "photometric_linearity_limit_adu" in section:
-        kwargs["photometric_linearity_limit_adu"] = _build_provenanced_value(
+        kwargs["photometric_linearity_limit_adu"] = build_provenanced_value(
             section["photometric_linearity_limit_adu"]
         )
     if "quantum_efficiency" in section:
@@ -181,7 +200,7 @@ def _build_camera_profile(section_name: str, section: dict) -> CameraProfile:
 
 
 @functools.cache
-def _load_profiles_from_config(config: AppConfiguration) -> tuple[CameraProfile, ...]:
+def load_profiles_from_config(config: AppConfiguration) -> tuple[CameraProfile, ...]:
     """Read and check every camera profile section in `config`.
 
     Parameters
@@ -205,7 +224,7 @@ def _load_profiles_from_config(config: AppConfiguration) -> tuple[CameraProfile,
     """
     profiles = []
     for section_name in config.app_config.sections():
-        if not section_name.startswith(_CAMERA_SECTION_PREFIX) or section_name == "Observatory.Camera":
+        if not section_name.startswith(CAMERA_SECTION_PREFIX) or section_name == "Observatory.Camera":
             continue
         section = dict(config.app_config[section_name])
         if "clip_ceiling_adu" not in section:
@@ -214,7 +233,7 @@ def _load_profiles_from_config(config: AppConfiguration) -> tuple[CameraProfile,
             # only a section with model-level facts is one.
             continue
         try:
-            profiles.append(_build_camera_profile(section_name, section))
+            profiles.append(build_camera_profile(section_name, section))
         except ValueError as error:  # a number that does not parse, or the model's own checks
             raise ConfigurationError(
                 f"The camera section [{section_name}] is not a valid profile: {error}",
@@ -256,7 +275,7 @@ def load_camera_profiles(config: AppConfiguration | None = None) -> tuple[Camera
     profiles : `tuple` [`CameraProfile`, ...]
         The profiles, in section order.
     """
-    return _load_profiles_from_config(config or get_configuration())
+    return load_profiles_from_config(config or get_configuration())
 
 
 @functools.cache
@@ -388,12 +407,12 @@ def _find_camera_section_name(config: AppConfiguration, camera_name: str) -> str
     """
     wanted_name = normalize_camera_name(camera_name)
     for section_name in config.app_config.sections():
-        if not section_name.startswith(_CAMERA_SECTION_PREFIX) or section_name == "Observatory.Camera":
+        if not section_name.startswith(CAMERA_SECTION_PREFIX) or section_name == "Observatory.Camera":
             continue
         section = dict(config.app_config[section_name])
         if "clip_ceiling_adu" not in section:
             continue
-        profile = _build_camera_profile(section_name, section)
+        profile = build_camera_profile(section_name, section)
         if any(
             normalize_camera_name(name) == wanted_name
             for name in (profile.camera_name, *profile.name_aliases)
@@ -545,5 +564,5 @@ def save_sensor_setting_noise(
         backup_path = backup_config_file(config)
         config.app_config.set_item(section_name, SENSOR_NOISE_KEY, sensor_noise_to_toml_array(merged))
         config.save_configuration()
-        _load_profiles_from_config.cache_clear()
+        load_profiles_from_config.cache_clear()
     return backup_path

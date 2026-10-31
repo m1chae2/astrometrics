@@ -12,6 +12,7 @@ The ``registration`` names are Siril's spectral star detection settings:
 `SPECTRAL_STAR_DETECTION_COMMANDS` in `siril_interface.py`).
 """
 
+import functools
 import re
 import shlex
 import subprocess
@@ -118,6 +119,27 @@ class SirilStackingDriver(StackingDriver):
             engine_name=self.name,
             engine_version=self._version,
         )
+
+
+@functools.cache
+def cached_siril_version(siril_executable: str) -> str | None:
+    """Read Siril's version once per process for a given command.
+
+    The stacking quality step records the version with each run's
+    calibration record; asking Siril once is enough, because the program
+    does not change while the process runs.
+
+    Parameters
+    ----------
+    siril_executable : `str`
+        The command that starts Siril.
+
+    Returns
+    -------
+    version : `str` or `None`
+        The version text, or `None` when Siril cannot be run.
+    """
+    return _siril_version(siril_executable)
 
 
 def _siril_version(siril_executable: str) -> str | None:

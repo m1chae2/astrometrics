@@ -59,6 +59,7 @@ if TYPE_CHECKING:
     from wayfindinglib.models.equipment_and_site.equipment import EquipmentConfiguration, Telescope
     from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
     from wayfindinglib.models.planning.deep_catalog import DeepCatalogEstimate, DeepCatalogStatus
+    from wayfindinglib.models.planning.depth_goal import DepthGoalState, DepthGoalStatus, DepthLevel
     from wayfindinglib.models.planning.mosaic import MosaicPanel, MosaicPlan
     from wayfindinglib.models.planning.observation_package import (
         DitherConfig,
@@ -154,6 +155,9 @@ _LAZY_EXPORTS = {
     "NightConditions": "wayfindinglib.models.planning.visibility",
     "HorizonZone": "wayfindinglib.models.planning.visibility",
     "TargetDatasetReport": "wayfindinglib.models.planning.target_report",
+    "DepthGoalStatus": "wayfindinglib.models.planning.depth_goal",
+    "DepthGoalState": "wayfindinglib.models.planning.depth_goal",
+    "DepthLevel": "wayfindinglib.models.planning.depth_goal",
     "TonightRanking": "wayfindinglib.models.planning.tonight_ranking",
     "TargetStatement": "wayfindinglib.models.quality.statements",
     "CalibrationAdvisory": "wayfindinglib.models.equipment_and_site.calibration",

@@ -57,7 +57,12 @@ dependencies = [
     "photutils>=3.1",
     "Pillow",
     "pydantic>=1.10",
-    "pytest",
+    # Below 9.2: pytest 9.2.0 restores a monkeypatched attribute from the
+    # target's own __dict__, so on a MagicMock (whose children live elsewhere)
+    # undo deletes the attribute and the shared astroquery stand-in in
+    # astrometricslib/conftest.py loses it for every later test. Lift the pin
+    # once those tests patch the mocks another way (#134).
+    "pytest<9.2",
     "pytest-cov",
     "pytest-mock",
     "pytest-xdist", # optional parallel runs: PYTEST_WORKERS=auto ./build/linux/run_tests.sh
@@ -411,6 +416,14 @@ name = "the libraries never import the MCP servers"
 type = "forbidden"
 source_modules = ["astrometricslib", "wayfindinglib"]
 forbidden_modules = ["mcp_servers"]
+
+[[tool.importlinter.contracts]]
+name = "astrometricslib drivers never import pipelines"
+type = "forbidden"
+# Drivers sit below the pipelines: a pipeline calls a driver, never the
+# other way round.
+source_modules = ["astrometricslib.drivers"]
+forbidden_modules = ["astrometricslib.pipelines"]
 
 [[tool.importlinter.contracts]]
 name = "the library MCP servers, the gap server and the inventory never import the backend"

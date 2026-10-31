@@ -27,8 +27,10 @@ import logging
 import math
 import os
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any, NamedTuple
+
+import numpy as np
 
 from astrometricslib.drivers.calibration_library import BIAS_FRAME_PATHS_KEY, FLAT_FRAME_PATHS_KEY
 from astrometricslib.models.quality.gate_result import GateResult
@@ -51,11 +53,13 @@ from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
 from astrometricslib.pipelines.shared.registration_record import build_registration_record
 from astrometricslib.pipelines.stacking.metrics import (
     GATE_METRIC_BY_NAME,
+    STACKING_APERTURE_SET_NUMBER,
     STACKING_DURATION_S,
     STACKING_EFFECTIVE_FRAME_COUNT,
     STACKING_EFFECTIVE_TIME_READ_NOISE_S,
     STACKING_EFFECTIVE_TIME_S,
     STACKING_EMPTY_APERTURE_NOISE_NORMALIZED,
+    STACKING_EMPTY_APERTURE_NOISE_SIZE_EXPONENT,
     STACKING_EMPTY_APERTURE_NOISE_STACK_UNIT,
     STACKING_EXPECTED_STACK_FWHM_PX,
     STACKING_FLAT_FRAME_COUNT,
@@ -72,6 +76,7 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_GROUP_EXPOSURE_S,
     STACKING_GROUP_FRAMES_STACKED,
     STACKING_GROUP_FRAMES_SUBMITTED,
+    STACKING_GROUP_GAIN_APPLIED,
     STACKING_GROUP_GAIN_BRIGHT_END_RATIO,
     STACKING_GROUP_GAIN_DISAGREEMENT,
     STACKING_GROUP_GAIN_MID_RANGE,
@@ -79,11 +84,23 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_METRICS,
     STACKING_NEGATIVE_PIXEL_MAX_FRACTION,
     STACKING_NOISE_REFERENCE_FLUX_STACK_UNIT,
+    STACKING_POINT_SOURCE_DEPTH_5SIGMA_MAG,
     STACKING_REGISTRATION_REFERENCE_STAR_COUNT,
     STACKING_REJECTED_PIXEL_FRACTION,
     STACKING_SATURATED_PIXEL_FRACTION,
     STACKING_STACKED_FWHM_PX,
+    STACKING_SURFACE_BRIGHTNESS_LIMIT_3SIGMA_10ARCSEC_MAG_PER_ARCSEC2,
     STACKING_ZERO_PIXEL_FRACTION,
+)
+from astrometricslib.pipelines.stacking.post_processing.aperture_size_noise import ApertureSizeNoiseOutcome
+from astrometricslib.pipelines.stacking.post_processing.calibration_record import (
+    record_calibration_identities,
+)
+from astrometricslib.pipelines.stacking.post_processing.depth_limits import (
+    DepthLimit,
+    GaiaLookup,
+    cached_gaia_lookup,
+    measure_depth_limits,
 )
 from astrometricslib.pipelines.stacking.post_processing.difference_noise import (
     discard_noise_sums,
@@ -92,6 +109,7 @@ from astrometricslib.pipelines.stacking.post_processing.difference_noise import 
 from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
     APERTURE_FILE_NAME,
     StackDepth,
+    aperture_identity_to_number,
 )
 from astrometricslib.pipelines.stacking.post_processing.field_rotation import (
     MULTI_GROUP_REASON,
@@ -112,6 +130,7 @@ from astrometricslib.pipelines.stacking.post_processing.stack_membership import 
     effective_frame_count,
     effective_read_noise_time_seconds,
     normalized_weights,
+    reference_group_frame_paths,
     registration_reference_from_diagnostics,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
@@ -125,13 +144,18 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "GATE_LIMIT_SOURCES",
     "FrameGeometryRows",
+    "aperture_set_measurement",
+    "depth_limit_measurements",
     "exposure_group_subject",
     "frame_geometry_measurements",
+    "frame_weight_measurements",
     "gate_for_measurement",
+    "group_summary_measurements",
     "measure_noise_safely",
     "membership_count_measurements",
     "noise_measurements",
     "record_stacking_quality",
+    "size_exponent_measurements",
     "stack_depth_of",
     "stacking_measurements",
 ]
@@ -260,6 +284,11 @@ _GROUP_FIELDS: dict[str, tuple[str, str]] = {
         STACKING_GROUP_GAIN_DISAGREEMENT,
         "this is the reference group, or its brightness ratios could not be compared",
     ),
+    "gain_applied": (
+        STACKING_GROUP_GAIN_APPLIED,
+        "the stack is of one exposure group, or the group was left out of the combination, or the "
+        "combination could not measure its gain and applied none",
+    ),
 }
 
 
@@ -360,10 +389,62 @@ def gate_for_measurement(gate: GateResult) -> GateResult:
     )
 
 
+def aperture_set_measurement(
+    metric_name: str,
+    identity: str | None,
+    context: PipelineRunContext,
+    subject: QualitySubject,
+    reason: str = "",
+) -> QualityMeasurement:
+    """Build the row that names the aperture set of a noise measurement.
+
+    Why a row of its own: a row's value is a number, and the set's identity
+    (for example ``"v3-156104df543d"``) is text. The identity is stored as one
+    exact whole number (see `aperture_identity_to_number`), in a separate row
+    per noise family, beside the noise rows. No existing text field fits: the
+    reason is free text that readers must not parse, and the subject's variant
+    names a subset, not a set of apertures. A new column would need a store
+    migration. A reader takes the newest row of this metric for a subject, as
+    for any other metric, and turns the value back into text with
+    `aperture_identity_from_number`.
+
+    Parameters
+    ----------
+    metric_name : `str`
+        ``stacking.aperture_set_number`` or
+        ``stacking.odd_even_difference_aperture_set_number``.
+    identity : `str` or `None`
+        The set's identity (`ApertureSet.identity`), or `None` when nothing
+        was measured.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    subject : `QualitySubject`
+        The stack the noise rows are about.
+    reason : `str`, optional
+        Why there is no identity, when `identity` is `None`.
+
+    Returns
+    -------
+    measurement : `QualityMeasurement`
+        A measured row, or a not-measured one with the reason.
+    """
+    if not identity:
+        return build_measurement(
+            _SPEC_BY_NAME[metric_name],
+            None,
+            context,
+            subject,
+            reason=reason or "the noise was not measured, so no aperture set was used",
+        )
+    return build_measurement(
+        _SPEC_BY_NAME[metric_name], aperture_identity_to_number(identity), context, subject
+    )
+
+
 def noise_measurements(
     outcome: StackNoiseOutcome, context: PipelineRunContext, subject: QualitySubject
 ) -> list[QualityMeasurement]:
-    """Build the three noise measurements of a stack.
+    """Build the noise measurements of a stack and the aperture set they used.
 
     Parameters
     ----------
@@ -377,8 +458,9 @@ def noise_measurements(
     Returns
     -------
     measurements : `list` of `QualityMeasurement`
-        The noise, the reference flux and their ratio; all not measured, with
-        the reason, when there is no result.
+        The noise, the reference flux, their ratio and the number that names
+        the aperture set; all not measured, with the reason, when there is no
+        result.
     """
     result = outcome.result
     reason = outcome.reason or "the noise was not measured"
@@ -390,7 +472,7 @@ def noise_measurements(
                 STACKING_NOISE_REFERENCE_FLUX_STACK_UNIT,
                 STACKING_EMPTY_APERTURE_NOISE_NORMALIZED,
             )
-        ]
+        ] + [aperture_set_measurement(STACKING_APERTURE_SET_NUMBER, None, context, subject, reason)]
     rows = [
         build_measurement(
             _SPEC_BY_NAME[STACKING_EMPTY_APERTURE_NOISE_STACK_UNIT],
@@ -428,10 +510,137 @@ def noise_measurements(
     # Every row says which apertures it was measured in and how deep the stack
     # that chose them was, so rows of different sets are never compared.
     notes.append(result.aperture_definition_note)
+    # Where the sky coordinates came from: the stack header, the registration
+    # reference frame, or a member frame of the reference exposure group.
+    if result.wcs_source:
+        notes.append(f"Sky coordinates from the {result.wcs_source}.")
     note = " ".join(part for part in notes if part)
-    if not note:
-        return rows
-    return [row.model_copy(update={"reason": note}) for row in rows]
+    if note:
+        rows = [row.model_copy(update={"reason": note}) for row in rows]
+    # The identity goes in its own row (no reason text), so a reader can tell
+    # whether two stacks' noise came from the same apertures.
+    size_rows = size_exponent_measurements(result.size_noise, context, subject)
+    return [
+        *rows,
+        aperture_set_measurement(STACKING_APERTURE_SET_NUMBER, result.aperture_identity, context, subject),
+        *size_rows,
+    ]
+
+
+def size_exponent_measurements(
+    size_noise: ApertureSizeNoiseOutcome | None, context: PipelineRunContext, subject: QualitySubject
+) -> list[QualityMeasurement]:
+    """Build the row of the noise-against-aperture-size exponent.
+
+    Parameters
+    ----------
+    size_noise : `ApertureSizeNoiseOutcome` or `None`
+        What the size measurement gave, or `None` when it was not tried (a
+        stack that may not choose apertures). Then no row is made.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    subject : `QualitySubject`
+        The stack.
+
+    Returns
+    -------
+    rows : `list` of `QualityMeasurement`
+        Nothing when the measurement was not tried; otherwise one row: the
+        exponent with its uncertainty and the noise at each radius in the
+        reason, or not measured with the reason.
+    """
+    if size_noise is None:
+        return []
+    spec = _SPEC_BY_NAME[STACKING_EMPTY_APERTURE_NOISE_SIZE_EXPONENT]
+    result = size_noise.result
+    if result is None:
+        return [
+            build_measurement(
+                spec,
+                None,
+                context,
+                subject,
+                reason=size_noise.reason or "the noise against aperture size was not measured",
+            )
+        ]
+    error = result.exponent_error if math.isfinite(result.exponent_error) else None
+    return [
+        build_measurement(
+            spec,
+            result.exponent,
+            context,
+            subject,
+            uncertainty=error,
+            sample_count=result.aperture_count,
+            provenance=result.describe(),
+        )
+    ]
+
+
+def depth_limit_measurements(
+    noise: StackNoiseOutcome,
+    stacked_fwhm_px: float | None,
+    gaia_lookup: GaiaLookup | None,
+    context: PipelineRunContext,
+    subject: QualitySubject,
+) -> list[QualityMeasurement]:
+    """Build the point-source depth and surface-brightness limit of a stack.
+
+    Parameters
+    ----------
+    noise : `StackNoiseOutcome`
+        The stack's noise measurement or the reason there is none.
+    stacked_fwhm_px : `float` or `None`
+        The stack's star width, which sets the point-source aperture.
+    gaia_lookup : `GaiaLookup` or `None`
+        Gives Gaia G magnitudes near a position from the local cache.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    subject : `QualitySubject`
+        The stack.
+
+    Returns
+    -------
+    rows : `list` of `QualityMeasurement`
+        The 5 sigma point-source depth and the 3 sigma surface-brightness
+        limit, each measured (assumed when the noise exponent was replaced
+        by 0.5) or not measured with the reason. A failure while working them
+        out gives not-measured rows, never an exception.
+    """
+    try:
+        limits = measure_depth_limits(noise.result, stacked_fwhm_px, gaia_lookup, noise.reason)
+        pairs = (
+            (STACKING_POINT_SOURCE_DEPTH_5SIGMA_MAG, limits.point_source),
+            (STACKING_SURFACE_BRIGHTNESS_LIMIT_3SIGMA_10ARCSEC_MAG_PER_ARCSEC2, limits.surface_brightness),
+        )
+    except Exception as error:  # a by-product: no failure here may fail the stack
+        logger.exception("The depth limits of a stack could not be worked out")
+        failed = DepthLimit(
+            None, None, None, False, f"the depth could not be worked out: {type(error).__name__}"
+        )
+        pairs = (
+            (STACKING_POINT_SOURCE_DEPTH_5SIGMA_MAG, failed),
+            (STACKING_SURFACE_BRIGHTNESS_LIMIT_3SIGMA_10ARCSEC_MAG_PER_ARCSEC2, failed),
+        )
+    rows = []
+    for name, limit in pairs:
+        if limit.value_mag is None:
+            rows.append(build_measurement(_SPEC_BY_NAME[name], None, context, subject, reason=limit.note))
+        else:
+            rows.append(
+                build_measurement(
+                    _SPEC_BY_NAME[name],
+                    limit.value_mag,
+                    context,
+                    subject,
+                    uncertainty=limit.uncertainty_mag,
+                    sample_count=limit.sample_count,
+                    status=MeasurementStatus.ASSUMED if limit.assumed else MeasurementStatus.MEASURED,
+                    reason=limit.note if limit.assumed else "",
+                    provenance="" if limit.assumed else limit.note,
+                )
+            )
+    return rows
 
 
 def membership_count_measurements(
@@ -499,6 +708,71 @@ def membership_count_measurements(
     ]
 
 
+def frame_weight_measurements(
+    membership: StackMembership | None,
+    unavailable_reason: str,
+    context: PipelineRunContext,
+    subject_for_frame: Callable[[Any], QualitySubject] | None = None,
+) -> list[QualityMeasurement]:
+    """Build one weight row for each member frame of a stack.
+
+    Parameters
+    ----------
+    membership : `StackMembership` or `None`
+        The stack's members, or `None` when they could not be worked out.
+    unavailable_reason : `str`
+        Why there is no membership (not used when there are members; the
+        count rows say it when there are none).
+    context : `PipelineRunContext`
+        The run's shared facts.
+    subject_for_frame : `Callable`, optional
+        Names the subject of a member's weight row from the member's frame
+        record. Left out, it is the frame's own subject (`frame_subject`),
+        which a library stack uses so that its weights join the frame's other
+        rows. A subset stack passes its own naming, so that its weights never
+        replace the library stack's as the newest row of the same frame.
+
+    Returns
+    -------
+    measurements : `list` of `QualityMeasurement`
+        A weight for each member frame, in member order; empty when there are
+        no members. A weight that is unknown is a not-measured record that
+        still records the membership; a member list that may include frames
+        Siril's filters dropped makes every row ``assumed``.
+    """
+    if membership is None or not membership.members:
+        return []
+    weights = normalized_weights(membership)
+    unknown_reason = membership.weights_reason or "the frames' weights are unknown"
+    uncertain = bool(membership.membership_reason)
+    status = MeasurementStatus.ASSUMED if uncertain else MeasurementStatus.MEASURED
+    rows = []
+    weight_spec = _SPEC_BY_NAME[STACKING_FRAME_WEIGHT]
+    for member, weight in zip(membership.members, weights, strict=True):
+        frame = member.frame
+        if subject_for_frame is None:
+            subject = frame_subject(frame.path, context.target_id, frame.timestamp)
+        else:
+            subject = subject_for_frame(frame)
+        if weight is None:
+            reason = unknown_reason
+            if uncertain:
+                reason += "; " + membership.membership_reason
+            rows.append(build_measurement(weight_spec, None, context, subject, reason=reason))
+        else:
+            rows.append(
+                build_measurement(
+                    weight_spec,
+                    weight,
+                    context,
+                    subject,
+                    reason=membership.membership_reason,
+                    status=status,
+                )
+            )
+    return rows
+
+
 def _membership_measurements(
     membership: StackMembership | None,
     unavailable_reason: str,
@@ -522,38 +796,47 @@ def _membership_measurements(
     -------
     measurements : `list` of `QualityMeasurement`
         The effective frame count and time on the stack, and a weight for each
-        member frame. A weight that is unknown is a not-measured record that
-        still records the membership; a member list that may include frames
-        Siril's filters dropped makes every row ``assumed``.
+        member frame (see `frame_weight_measurements`).
     """
     count_rows = membership_count_measurements(membership, unavailable_reason, context, stack_subject)
-    if membership is None or not membership.members:
-        return count_rows
-    weights = normalized_weights(membership)
-    unknown_reason = membership.weights_reason or "the frames' weights are unknown"
-    uncertain = bool(membership.membership_reason)
-    status = MeasurementStatus.ASSUMED if uncertain else MeasurementStatus.MEASURED
-    rows = count_rows
-    weight_spec = _SPEC_BY_NAME[STACKING_FRAME_WEIGHT]
-    for member, weight in zip(membership.members, weights, strict=True):
-        frame = member.frame
-        subject = frame_subject(frame.path, context.target_id, frame.timestamp)
-        if weight is None:
-            reason = unknown_reason
-            if uncertain:
-                reason += "; " + membership.membership_reason
-            rows.append(build_measurement(weight_spec, None, context, subject, reason=reason))
-        else:
-            rows.append(
-                build_measurement(
-                    weight_spec,
-                    weight,
-                    context,
-                    subject,
-                    reason=membership.membership_reason,
-                    status=status,
-                )
-            )
+    return [*count_rows, *frame_weight_measurements(membership, unavailable_reason, context)]
+
+
+def group_summary_measurements(
+    group: ExposureGroupSummary, context: PipelineRunContext, group_subject: QualitySubject
+) -> list[QualityMeasurement]:
+    """Build the summary rows of one exposure group.
+
+    Parameters
+    ----------
+    group : `ExposureGroupSummary`
+        The group, from the stack's summary.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    group_subject : `QualitySubject`
+        The group's stack (see `exposure_group_subject`).
+
+    Returns
+    -------
+    measurements : `list` of `QualityMeasurement`
+        The group's exposure and frame counts, its brightness gain and the
+        gain applied, and how far it was moved to line up. A number the
+        group does not have is not measured, with a reason.
+    """
+    rows = [
+        _value_measurement(metric_name, getattr(group, field_name), reason, context, group_subject)
+        for field_name, (metric_name, reason) in _GROUP_FIELDS.items()
+    ]
+    shift = group.alignment_shift_pixels
+    rows.append(
+        _value_measurement(
+            STACKING_GROUP_ALIGNMENT_SHIFT_PX,
+            None if not shift else math.hypot(*shift),
+            "this is the reference group, or the group could not be lined up",
+            context,
+            group_subject,
+        )
+    )
     return rows
 
 
@@ -565,6 +848,7 @@ def stacking_measurements(
     membership: StackMembership | None,
     membership_reason: str = "",
     science: StackScience | None = None,
+    gaia_lookup: GaiaLookup | None = None,
 ) -> list[QualityMeasurement]:
     """Build every measurement the stacking stage declares for one stack.
 
@@ -587,6 +871,10 @@ def stacking_measurements(
         The expected noise, the master flat's noise, the stack's sky level and
         the exposure groups' star peaks (see `record_science.py`). Left out,
         those values are stored as not measured.
+    gaia_lookup : `GaiaLookup`, optional
+        Gives the Gaia G magnitudes of stars near a position from the local
+        cache, for the stack's zero point. Left out, the two depth rows are
+        not measured.
 
     Returns
     -------
@@ -610,20 +898,7 @@ def stacking_measurements(
 
     for index, group in enumerate(metrics.exposure_groups):
         group_subject = exposure_group_subject(context, stack_file_name, group, index)
-        for field_name, (metric_name, reason) in _GROUP_FIELDS.items():
-            measurements.append(
-                _value_measurement(metric_name, getattr(group, field_name), reason, context, group_subject)
-            )
-        shift = group.alignment_shift_pixels
-        measurements.append(
-            _value_measurement(
-                STACKING_GROUP_ALIGNMENT_SHIFT_PX,
-                None if not shift else math.hypot(*shift),
-                "this is the reference group, or the group could not be lined up",
-                context,
-                group_subject,
-            )
-        )
+        measurements.extend(group_summary_measurements(group, context, group_subject))
 
     for gate in summary.gates:
         metric_name = GATE_METRIC_BY_NAME.get(gate.name)
@@ -643,6 +918,9 @@ def stacking_measurements(
         )
 
     measurements.extend(noise_measurements(noise, context, stack_subject))
+    measurements.extend(
+        depth_limit_measurements(noise, metrics.stacked_fwhm_px, gaia_lookup, context, stack_subject)
+    )
     group_subjects = [
         exposure_group_subject(context, stack_file_name, group, index)
         for index, group in enumerate(metrics.exposure_groups)
@@ -744,6 +1022,8 @@ def measure_noise_safely(
     *,
     may_choose_apertures: bool = True,
     depth: StackDepth | None = None,
+    covered_mask: np.ndarray | None = None,
+    member_frame_paths: Sequence[str] = (),
 ) -> StackNoiseOutcome:
     """Measure the stack's empty-aperture noise, never raising.
 
@@ -769,6 +1049,13 @@ def measure_noise_safely(
     depth : `StackDepth`, optional
         The stack's frame counts, for the rule that keeps the apertures
         matched to the stack's depth.
+    covered_mask : `numpy.ndarray`, optional
+        For a group stack, `True` where every exposure group has data (see
+        `stack_noise.measure_stack_noise`).
+    member_frame_paths : `Sequence` of `str`, optional
+        For a group stack with no named reference frame, frames of the group it
+        was lined up with, which give the coordinate solution instead (see
+        `stack_noise.measure_stack_noise`).
 
     Returns
     -------
@@ -789,6 +1076,8 @@ def measure_noise_safely(
             crop_offset,
             may_choose_apertures=may_choose_apertures,
             depth=depth,
+            covered_mask=covered_mask,
+            member_frame_paths=member_frame_paths,
         )
     except Exception as error:  # the noise is a by-product: no failure here may fail the stack
         logger.exception("The noise of the stack %s could not be measured", stack_path)
@@ -800,6 +1089,31 @@ def measure_noise_safely(
         "" if outcome.result is not None else f" (no result: {outcome.reason or NO_WCS_REASON})",
     )
     return outcome
+
+
+def _cached_gaia_lookup_for(config: object) -> GaiaLookup | None:
+    """Make the local-cache Gaia lookup for the depth rows, never raising.
+
+    Parameters
+    ----------
+    config : `AppConfiguration` or `None`
+        The application settings; the process-wide ones when `None`.
+
+    Returns
+    -------
+    lookup : `GaiaLookup` or `None`
+        The lookup, or `None` when the settings cannot be read (the depth rows
+        are then not measured).
+    """
+    try:
+        if config is None:
+            from astrometricslib.foundation.config import get_configuration
+
+            config = get_configuration()
+        return cached_gaia_lookup(config)
+    except Exception:  # a by-product: no failure here may fail the stack
+        logger.exception("The Gaia cache for the depth rows could not be set up")
+        return None
 
 
 def stack_depth_of(membership: StackMembership | None) -> StackDepth | None:
@@ -885,6 +1199,8 @@ def record_stacking_quality(
             summary.stacking_metrics.is_spectral,
             crop_offset,
             depth=stack_depth_of(membership),
+            covered_mask=diagnostics.get("covered_in_every_group"),
+            member_frame_paths=reference_group_frame_paths(diagnostics),
         )
         if noise.result is not None:
             # The library stack's sums, kept for the leave-one-night-out
@@ -907,7 +1223,14 @@ def record_stacking_quality(
             is_spectral=summary.stacking_metrics.is_spectral,
         )
         measurements = stacking_measurements(
-            summary, context, os.path.basename(stack_path), noise, membership, membership_reason, science
+            summary,
+            context,
+            os.path.basename(stack_path),
+            noise,
+            membership,
+            membership_reason,
+            science,
+            gaia_lookup=_cached_gaia_lookup_for(config),
         )
         new_count = record_run_measurements(measurements, config=config)
     except Exception:  # quality rows must never stop a stack
@@ -927,6 +1250,9 @@ def record_stacking_quality(
                 new_count += record_run_measurements(rows, config=config)
             except Exception:  # a by-product of the stack: no failure here may fail it
                 logger.exception("The frame %s rows of the stack %s were not stored", name, stack_path)
+    # The calibration files the run applied, for the forecast's check that two
+    # stacks were calibrated alike. Its own call, so a failure keeps the rows.
+    record_calibration_identities(context, stack_path, target_frames, diagnostics, config=config)
     # The flat-to-light match reads raw frames, so it too goes in its own call.
     # It samples only the frames that went into the stack.
     try:

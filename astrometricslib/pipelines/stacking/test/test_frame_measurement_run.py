@@ -56,6 +56,7 @@ from astrometricslib.pipelines.stacking.frame_measurement_run import (
     build_capture_setting,
     frame_needs_measuring,
     frame_was_cut_short,
+    frames_whose_camera_profile_gap_closed,
     measurements_to_store,
     quarantine_measurements_for_frame,
     record_frame_measurements_for_target,
@@ -956,3 +957,88 @@ def test_worker_processes_give_the_same_rows_as_worker_threads(
     process_metrics = sorted((row.metric, row.status.value) for row in store.query(target_id="M 99"))
     thread_metrics = sorted((row.metric, row.status.value) for row in thread_store.query(target_id="M 99"))
     assert process_metrics == thread_metrics
+
+
+def _profile_with_entry_at_offset(offset: str) -> CameraProfile:
+    """Build the test profile with its only noise entry at another offset.
+
+    Parameters
+    ----------
+    offset : `str`
+        The offset the entry was measured at.
+
+    Returns
+    -------
+    profile : `CameraProfile`
+        As `_profile`, with the entry's offset changed.
+    """
+    profile = _profile()
+    entry = profile.sensor_noise[0].model_copy(update={"offset": offset})
+    return profile.model_copy(update={"sensor_noise": (entry,)})
+
+
+def _latest_sky_rate_statuses(store: QualityStore) -> set[MeasurementStatus]:
+    """Read the statuses of the newest sky rate rows of the test target.
+
+    Returns
+    -------
+    statuses : `set` [`MeasurementStatus`]
+        The distinct statuses.
+    """
+    rows = store.query(metric=FRAME_SKY_RATE_E_PER_S_PER_PX, target_id="M 99", latest_only=True)
+    return {row.status for row in rows}
+
+
+def test_a_frame_with_a_profile_gap_is_measured_again_when_the_profile_now_resolves(
+    monkeypatch: pytest.MonkeyPatch, target: Target, store: QualityStore, biases: list[str]
+) -> None:
+    """A sky rate missing for lack of a profile entry is retried."""
+    # A profile with no entry for this gain at all.
+    empty_profile = _profile().model_copy(update={"sensor_noise": ()})
+    monkeypatch.setattr(frame_measurement_run, "resolve_camera_profile", lambda name: empty_profile)
+    record_frame_measurements_for_target(target, _session(store, biases))
+    assert _latest_sky_rate_statuses(store) == {MeasurementStatus.NOT_MEASURED}
+
+    # Still no entry: the stamped frames are skipped.
+    unchanged = record_frame_measurements_for_target(target, _session(store, biases))
+    assert unchanged.frames_measured == 0
+
+    # The profile gains an entry at another offset: the fallback resolves it.
+    fixed_profile = _profile_with_entry_at_offset("10")
+    monkeypatch.setattr(frame_measurement_run, "resolve_camera_profile", lambda name: fixed_profile)
+    later_session = _session(store, biases)
+    # The newest row wins by time, so the retry must be measured later.
+    later_session.measured_at = datetime(2026, 10, 23, 6, 0, tzinfo=UTC)
+    later_session.run_id = "run-later"
+    summary = record_frame_measurements_for_target(target, later_session)
+
+    assert summary.frames_measured == 3
+    assert _latest_sky_rate_statuses(store) <= {MeasurementStatus.MEASURED, MeasurementStatus.ASSUMED}
+
+
+def test_the_profile_gap_check_selects_a_frame_only_when_the_profile_resolves(
+    monkeypatch: pytest.MonkeyPatch, target: Target, store: QualityStore, biases: list[str]
+) -> None:
+    """The check selects a frame only when the current profile resolves."""
+    empty_profile = _profile().model_copy(update={"sensor_noise": ()})
+    frames = target.frames[:3]
+    monkeypatch.setattr(frame_measurement_run, "resolve_camera_profile", lambda name: empty_profile)
+    record_frame_measurements_for_target(target, _session(store, biases))
+
+    assert frames_whose_camera_profile_gap_closed(store, "M 99", frames, lambda frame: empty_profile) == set()
+    resolving = _profile_with_entry_at_offset("10")
+    closed = frames_whose_camera_profile_gap_closed(store, "M 99", frames, lambda frame: resolving)
+    assert closed == {frame.path for frame in frames}
+    assert frames_whose_camera_profile_gap_closed(store, "M 99", [], lambda frame: resolving) == set()
+
+
+def test_a_frame_without_a_profile_gap_row_is_never_selected(
+    target: Target, store: QualityStore, biases: list[str]
+) -> None:
+    """A frame measured with a gain is never selected."""
+    record_frame_measurements_for_target(target, _session(store, biases))
+
+    closed = frames_whose_camera_profile_gap_closed(
+        store, "M 99", target.frames[:3], lambda frame: _profile()
+    )
+    assert closed == set()

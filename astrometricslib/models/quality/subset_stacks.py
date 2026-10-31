@@ -4,14 +4,17 @@ Four jobs stack some of a target's frames, apart from the library stack, and
 measure the noise of each result:
 
 - `ProcessingPipelines.stack_subset` stacks exactly the frames it is given and
-  returns a `SubsetStackResult`.
+  returns a `SubsetStackResult`. With ``record_forecast_rows=True`` it also
+  stores a library stack's forecast rows (frame weights, group rows and a
+  calibration record), so the subset can be the earlier member of a forecast
+  check's pair.
 - `ProcessingPipelines.measure_noise_growth` stacks the first nights (or the
   first part of one night) and returns a `NoiseGrowthResult`.
 - `ProcessingPipelines.measure_night_contributions` stacks the library stack's
   frames without one night at a time and returns a `NightContributionResult`.
-- `ProcessingPipelines.measure_half_difference_noise` stacks two disjoint
+- `ProcessingPipelines.measure_odd_even_difference_noise` stacks two disjoint
   halves of the library stack's frames, subtracts them, and returns a
-  `HalfDifferenceNoiseResult`.
+  `OddEvenDifferenceNoiseResult`.
 
 The measurements themselves go to the quality database. These records report
 what was done, so a caller can tell a step that was skipped from one that
@@ -19,6 +22,15 @@ failed.
 """
 
 from pydantic import BaseModel, ConfigDict, Field
+
+EARLIER_NIGHTS_VARIANT = "earlier-nights"
+"""The label, and so the ``variant``, of the stack of all nights but the last.
+
+The restack script stacks all nights of a library stack but the last with this
+label (``stack_subset(..., label=EARLIER_NIGHTS_VARIANT,
+record_forecast_rows=True)``), so the subset's rows carry it as their
+``variant``, and the forecast check finds the earlier member of its pair by the
+field, without parsing a subject id."""
 
 
 class SubsetStackResult(BaseModel):
@@ -132,7 +144,7 @@ class NightContributionResult(BaseModel):
     rows_written: int = Field(default=0, alias="rowsWritten")
 
 
-class HalfDifferenceNoiseResult(BaseModel):
+class OddEvenDifferenceNoiseResult(BaseModel):
     """What the half-stack difference job did and measured.
 
     The job stacks two disjoint halves of the library stack's frames, takes
@@ -172,7 +184,7 @@ class HalfDifferenceNoiseResult(BaseModel):
     variance_factor : `float` or `None`
         The difference's variance in units of one frame's variance if all
         frames had the same noise (see
-        `subset_noise_run.difference_variance_factor`), or `None`.
+        `odd_even_difference_run.difference_variance_factor`), or `None`.
     shared_frame_odd_weight_fraction : `float` or `None`
         The shared frame's share of the odd half's weight.
     shared_frame_even_weight_fraction : `float` or `None`
@@ -180,7 +192,7 @@ class HalfDifferenceNoiseResult(BaseModel):
     model_variance_ratio : `float` or `None`
         The difference's variance in units of the library stack's variance,
         with each frame's own noise from its sky and the camera's read noise
-        (see `subset_noise_run.model_variance_ratio`), or `None`.
+        (see `odd_even_difference_run.model_variance_ratio`), or `None`.
     full_stack_equivalent_normalized : `float` or `None`
         What the difference says about the library stack's own random noise,
         as a fraction of the reference stars' brightness, if every frame had
@@ -199,6 +211,17 @@ class HalfDifferenceNoiseResult(BaseModel):
         across it, or `None`.
     walking_noise_correlation_excess_error : `float` or `None`
         Its bootstrap standard deviation.
+    aperture_record_path : `str` or `None`
+        The per-aperture record written beside the library stack (each
+        aperture's place, sum value and difference value; see
+        `odd_even_apertures.py`), or `None` when none was written.
+    aperture_record_count : `int` or `None`
+        How many apertures the record holds.
+    line_pattern_ratios : `dict` [`str`, `float`] or `None`
+        The ratio of the sum image's scatter to the difference image's scatter
+        of the row averages (``"row"``) and of the column averages
+        (``"column"``) of the empty sky. Near 1 means no line structure shared
+        by the halves. `None` when the line pattern was not measured.
     reason : `str`
         Why there is no measurement. Empty when there is one.
     notes : `list` [`str`]
@@ -242,6 +265,9 @@ class HalfDifferenceNoiseResult(BaseModel):
     walking_noise_correlation_excess_error: float | None = Field(
         default=None, alias="walkingNoiseCorrelationExcessError"
     )
+    aperture_record_path: str | None = Field(default=None, alias="apertureRecordPath")
+    aperture_record_count: int | None = Field(default=None, alias="apertureRecordCount")
+    line_pattern_ratios: dict[str, float] | None = Field(default=None, alias="linePatternRatios")
     reason: str = ""
     notes: list[str] = Field(default_factory=list)
     rows_written: int = Field(default=0, alias="rowsWritten")
@@ -260,13 +286,13 @@ class NoiseGrowthResult(BaseModel):
         The subset stacks, smallest first.
     night_contributions : `NightContributionResult` or `None`
         The each-night's-contribution result when it was asked for.
-    half_difference : `HalfDifferenceNoiseResult` or `None`
-        The half-difference noise result when it was asked for.
+    odd_even_difference : `OddEvenDifferenceNoiseResult` or `None`
+        The odd–even difference noise result when it was asked for.
     notes : `list` [`str`]
         Plain sentences about steps that were not done and why.
     rows_written : `int`
         New rows stored in the quality database by the subset series (the
-        night contributions and the half difference count their own).
+        night contributions and the odd–even difference count their own).
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -275,6 +301,6 @@ class NoiseGrowthResult(BaseModel):
     library_stack_path: str = Field(alias="libraryStackPath")
     subsets: list[SubsetStackResult] = Field(default_factory=list)
     night_contributions: NightContributionResult | None = Field(default=None, alias="nightContributions")
-    half_difference: HalfDifferenceNoiseResult | None = Field(default=None, alias="halfDifference")
+    odd_even_difference: OddEvenDifferenceNoiseResult | None = Field(default=None, alias="oddEvenDifference")
     notes: list[str] = Field(default_factory=list)
     rows_written: int = Field(default=0, alias="rowsWritten")

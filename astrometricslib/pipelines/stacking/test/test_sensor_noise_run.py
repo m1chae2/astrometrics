@@ -199,7 +199,7 @@ def test_reading_writes_nothing_and_saving_writes_one_entry(
         encoding="utf-8",
     )
     monkeypatch.setattr(AppConfiguration, "_find_config_file", lambda self: config_path)
-    camera_profile_store._load_profiles_from_config.cache_clear()
+    camera_profile_store.load_profiles_from_config.cache_clear()
     config = AppConfiguration()
     original_text = config_path.read_text(encoding="utf-8")
 

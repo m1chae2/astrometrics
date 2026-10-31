@@ -3,8 +3,8 @@
 A stack's measured noise in empty apertures (see `stack_noise.py`) says how
 noisy the stack is. This module says how noisy it should be if the only noise
 were the light of the sky (photon noise) and the camera's read noise. The two
-numbers are stored side by side. Their ratio is never stored: a reader divides
-them, and the parts stay visible.
+numbers are stored side by side, and their ratio is stored as its own row
+(`record_science.noise_ratio_measurements`) with the parts still visible.
 
 The model, one frame at a time. Frame ``i`` has ``S_i`` sky electrons in a
 pixel (the sky rate times the exposure), a read noise of ``R_i`` electrons and
@@ -41,12 +41,50 @@ sky, in the same units, must be close to the median of the stack. Both
 numbers are stored (`ExpectedNoise.predicted_sky_level` and the stack's sky
 level), so a reader can repeat the check on every stack.
 
+A stack of several exposure groups. The combine divides each group's stack by
+its exposure (counts per second), puts it on the reference group's brightness
+scale with a gain ``G_g``, averages the groups with the weights ``W_g`` and
+multiplies the result by ``t_bar``, the mean exposure per frame. Frame ``i`` of
+group ``g`` therefore enters with the coefficient ``a_i = W_g w_i / (W G_g)``
+in counts per second, where ``w_i`` is its weight inside the group (the
+weights of a group add to 1) and ``W`` is the sum of the group weights. The
+variance of the combined image, in counts per second squared, is
+``sum(a_i^2 v_i) / t_g^2`` over all frames, and the noise in stack units is
+``t_bar * scale * sqrt(area * variance)``. With one group, ``G = 1`` and
+``t_bar = t``, this is the single-group formula above. The predicted sky is
+the reference group's sky per second times ``t_bar``. A stack with a group
+that is clipped at zero gets no prediction: the combine drops sky pixels near
+zero there, which these weights do not describe (see
+`expected_exposure_group_noise`).
+
+A group that holds frames of another exposure length (a short list of them
+was folded into it) is stacked like any group, but Siril multiplies each frame
+by the scale that matches it to the group's registration reference frame
+(``-norm=addscale``). A frame of ``t_i`` seconds in a group whose reference
+frame has ``t_ref`` seconds is multiplied by about ``k_i = t_ref / t_i``, and
+its noise by the same factor. The variance term of frame ``i`` becomes
+``(a_i k_i / t_g)^2 v_i``, and ``k_i = 1`` for every frame of a group with one
+exposure length, so those stacks are unchanged. The ``k_i`` come from the
+exposure ratio, which is a design estimate: Siril fits each scale from the
+frame's stars, and that fit also absorbs the frame's transparency. The weights
+``a_i`` are the weights on the frames after this scaling, so the effective
+frame count and the effective times (see `stack_membership.py`) keep their
+formulas.
+
+The numbers this module returns are the frames' own noise, with no Siril
+scaling. Siril multiplies each frame by a scale it does not save, which
+multiplies the noise as well. `normalization_scale.py` measures the stack's
+scale from its stars and multiplies the three noise parts by it. The scale is
+stored in its own row, so the unscaled parts can always be found again.
+
 What the model leaves out, so a measured noise above the expected one is
 expected and has these causes:
 
 - Siril normalizes every frame (it matches each frame's background level and
-  scale to the reference) before it averages, which changes the weights
-  slightly.
+  scale to the reference) before it averages. The scale is corrected for the
+  stack as a whole (see above). What stays is that the frames' scales differ
+  from one another, which changes the weights slightly (under about 3% on a
+  noise ratio, a design estimate).
 - A color stack is debayered: the one-shot color camera's mosaic is filled in
   by interpolation, so neighboring pixels are correlated, and the planes are
   averaged here.
@@ -98,8 +136,12 @@ __all__ = [
     "STACK_UNITS_PER_ADU",
     "ExpectedNoise",
     "ExpectedNoiseOutcome",
+    "ExposureGroupNoiseFacts",
     "FrameNoiseInput",
+    "MasterDarkNoiseOutcome",
     "effective_aperture_area_px",
+    "expected_exposure_group_noise",
+    "expected_master_dark_noise",
     "expected_stack_noise",
     "gather_frame_noise_inputs",
     "measure_stack_sky_level",
@@ -155,6 +197,13 @@ class FrameNoiseInput:
     assumed_reason : `str`
         Why one of these numbers is assumed (an unmeasured gain, an uncooled
         camera). Empty when all are measured.
+    exposure_scale : `float`, optional
+        ``k_i``, the factor Siril multiplied the frame by to match it to its
+        group's registration reference frame, about ``t_ref / t_i`` (a design
+        estimate; Siril fits it from the frame's stars). It multiplies the
+        frame's noise in `expected_exposure_group_noise` and
+        `expected_stack_noise`. 1 for a frame of a group (or a stack of one
+        group) with one exposure length.
     """
 
     weight: float
@@ -162,6 +211,41 @@ class FrameNoiseInput:
     read_noise_electrons: float
     gain_electrons_per_adu: float
     assumed_reason: str = ""
+    exposure_scale: float = 1.0
+
+
+@dataclass(frozen=True)
+class ExposureGroupNoiseFacts:
+    """What the noise model needs to know about one exposure group.
+
+    Parameters
+    ----------
+    combine_weight : `float`
+        The group's weight in the combine, ``W_g = N_g t_g^2 / s_g^2``.
+    exposure_seconds : `float`
+        The group's exposure length, ``t_g``, in seconds.
+    frame_count : `int`
+        The number of frames stacked in the group, ``N_g``.
+    gain : `float`
+        The brightness gain the combine applied to the group, ``G_g`` (1 when
+        the combine could not measure one).
+    gain_measured : `bool`
+        Whether the combine measured the gain.
+    sky_level_per_second : `float`
+        The group stack's sky level in counts per second, in stack units.
+    member_paths : `tuple` of `str`, optional
+        The paths of the group's frames. Used to tell whether a frame (the
+        registration reference frame) belongs to the group. Empty when the
+        entry did not list them.
+    """
+
+    combine_weight: float
+    exposure_seconds: float
+    frame_count: int
+    gain: float
+    gain_measured: bool
+    sky_level_per_second: float
+    member_paths: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -191,6 +275,17 @@ class ExpectedNoise:
     assumed_reason : `str`
         Why the numbers are assumed, when they are. Empty when all inputs were
         measured.
+    scale_note : `str`
+        Which Siril normalization scale the noise parts were multiplied by, or
+        why they were not corrected (see `normalization_scale.py`). Empty
+        until the scale step has run.
+    coherent_read_noise : `float` or `None`
+        The read noise of one frame, added up across the frames as the SAME
+        pattern (a weighted mean, not a root sum of squares), in the stack's
+        units for an aperture sum. It is what one dark frame's read noise would
+        add to the stack if the same dark frame were subtracted from every
+        light (see `expected_master_dark_noise`). `None` for a stack of several
+        exposure groups.
     """
 
     sky_noise: float
@@ -201,6 +296,8 @@ class ExpectedNoise:
     frame_count: int
     predicted_sky_level: float
     assumed_reason: str = ""
+    scale_note: str = ""
+    coherent_read_noise: float | None = None
 
 
 @dataclass(frozen=True)
@@ -296,25 +393,54 @@ def expected_stack_noise(
     if weight_total <= 0 or any(frame.weight < 0 for frame in frames):
         return ExpectedNoiseOutcome(None, "the frames' weights are not positive")
     if any(
-        frame.gain_electrons_per_adu <= 0 or frame.sky_electrons < 0 or frame.read_noise_electrons < 0
+        frame.gain_electrons_per_adu <= 0
+        or frame.sky_electrons < 0
+        or frame.read_noise_electrons < 0
+        or not math.isfinite(frame.exposure_scale)
+        or frame.exposure_scale <= 0
         for frame in frames
     ):
-        return ExpectedNoiseOutcome(None, "a frame has a gain, sky or read noise that is not usable")
+        return ExpectedNoiseOutcome(
+            None, "a frame has a gain, sky, read noise or exposure scale that is not usable"
+        )
+    # Each frame enters the stack multiplied by its scale k (1 unless a short
+    # list of frames of another length was folded into the stack), so its
+    # variance and its sky level are multiplied by k^2 and k.
     sky_variance = math.fsum(
-        (frame.weight / weight_total) ** 2 * frame.sky_electrons / frame.gain_electrons_per_adu**2
+        (frame.weight * frame.exposure_scale / weight_total) ** 2
+        * frame.sky_electrons
+        / frame.gain_electrons_per_adu**2
         for frame in frames
     )
     read_variance = math.fsum(
-        (frame.weight / weight_total) ** 2 * frame.read_noise_electrons**2 / frame.gain_electrons_per_adu**2
+        (frame.weight * frame.exposure_scale / weight_total) ** 2
+        * frame.read_noise_electrons**2
+        / frame.gain_electrons_per_adu**2
         for frame in frames
     )
     area = effective_aperture_area_px()
     scale = stack_units_per_adu
     predicted_sky_level = scale * math.fsum(
-        frame.weight / weight_total * frame.sky_electrons / frame.gain_electrons_per_adu for frame in frames
+        frame.weight
+        / weight_total
+        * frame.exposure_scale
+        * frame.sky_electrons
+        / frame.gain_electrons_per_adu
+        for frame in frames
     )
     sky_noise = scale * math.sqrt(area * sky_variance)
     read_noise = scale * math.sqrt(area * read_variance)
+    # A pattern that is the same in every frame adds up linearly, with the
+    # frames' weights and scales, not in quadrature.
+    coherent_read_adu = math.fsum(
+        frame.weight
+        / weight_total
+        * frame.exposure_scale
+        * frame.read_noise_electrons
+        / frame.gain_electrons_per_adu
+        for frame in frames
+    )
+    coherent_read_noise = scale * math.sqrt(area) * coherent_read_adu
     reasons = sorted({frame.assumed_reason for frame in frames if frame.assumed_reason})
     return ExpectedNoiseOutcome(
         ExpectedNoise(
@@ -326,6 +452,222 @@ def expected_stack_noise(
             frame_count=len(frames),
             predicted_sky_level=predicted_sky_level,
             assumed_reason="; ".join(reasons),
+            coherent_read_noise=coherent_read_noise,
+        )
+    )
+
+
+@dataclass(frozen=True)
+class MasterDarkNoiseOutcome:
+    """The noise the master dark adds to an aperture sum, or why there is none.
+
+    Parameters
+    ----------
+    value : `float` or `None`
+        The noise in the stack's units, or `None`.
+    reason : `str`
+        Why there is no value. Empty when there is one.
+    assumed_reason : `str`
+        Why the value rests on an assumed input (an unmeasured gain or read
+        noise). Empty when all inputs were measured.
+    dark_frame_count : `int` or `None`
+        The number of dark frames the master was made from.
+    scale_note : `str`
+        Which normalization scale the value was multiplied by, or why not
+        (the expected noise's own note).
+    """
+
+    value: float | None
+    reason: str = ""
+    assumed_reason: str = ""
+    dark_frame_count: int | None = None
+    scale_note: str = ""
+
+
+def expected_master_dark_noise(
+    expected: ExpectedNoise | None,
+    dark_frame_count: int | None,
+    several_exposure_groups: bool,
+) -> MasterDarkNoiseOutcome:
+    """Work out the noise the master dark's own read noise adds to an aperture.
+
+    One dark frame has the read noise of the light frames' setting. A master
+    dark averaged from N dark frames has that noise divided by sqrt(N), per
+    pixel and independent from pixel to pixel. The master is subtracted from
+    every light, so the same noise pattern is in every frame and stacking does
+    not average it away. Its effect on an aperture sum is the per-pixel noise
+    times sqrt(aperture area in pixels), as for the read noise in
+    `expected_stack_noise`, with the frames' read noise added up linearly
+    (`ExpectedNoise.coherent_read_noise`).
+
+    The shot noise of each dark frame's dark current is not included: the
+    camera profile holds no dark-current rate. For a warm sensor the value is
+    therefore a lower bound.
+
+    Parameters
+    ----------
+    expected : `ExpectedNoise` or `None`
+        The stack's expected noise, already multiplied by Siril's
+        normalization scale when that was measured. `None` when there is none.
+    dark_frame_count : `int` or `None`
+        How many dark frames the run applied (`None` when unknown).
+    several_exposure_groups : `bool`
+        Whether the stack combined several exposure groups, which stack darks
+        of several lengths.
+
+    Returns
+    -------
+    outcome : `MasterDarkNoiseOutcome`
+        The value, or the reason there is none.
+    """
+    if expected is None or expected.coherent_read_noise is None:
+        reason = (
+            "the stack combines several exposure groups, each with darks of its own length"
+            if several_exposure_groups
+            else "the stack's expected noise is not available"
+        )
+        return MasterDarkNoiseOutcome(None, reason)
+    if several_exposure_groups:
+        return MasterDarkNoiseOutcome(
+            None, "the stack combines several exposure groups, each with darks of its own length"
+        )
+    if not dark_frame_count or dark_frame_count <= 0:
+        return MasterDarkNoiseOutcome(None, "no dark frame was applied to this stack")
+    return MasterDarkNoiseOutcome(
+        expected.coherent_read_noise / math.sqrt(dark_frame_count),
+        assumed_reason=expected.assumed_reason,
+        dark_frame_count=int(dark_frame_count),
+        scale_note=expected.scale_note,
+    )
+
+
+def expected_exposure_group_noise(
+    frames: Sequence[FrameNoiseInput],
+    frame_group_indices: Sequence[int],
+    groups: Sequence[ExposureGroupNoiseFacts],
+    stack_units_per_adu: float = STACK_UNITS_PER_ADU,
+) -> ExpectedNoiseOutcome:
+    """Work out the expected noise of a stack combined from exposure groups.
+
+    Frame ``i`` of group ``g`` enters the combined image, in counts per
+    second, with the coefficient ``a_i = W_g w_i / (W G_g)``. Here ``w_i`` is
+    the frame's share inside its group (its weight over the sum of the weights
+    of the group's members, so a group's shares add to 1) and ``W`` is the sum
+    of all the groups' combine weights. The variance in counts per second
+    squared is ``sum(a_i^2 v_i) / t_g^2``, with ``v_i`` the frame's variance in
+    ADU squared (sky electrons plus read noise squared, over the gain
+    squared). The noise in stack units is
+    ``t_bar * scale * sqrt(area * variance)``, with ``t_bar`` the mean exposure
+    per frame, weighted by frame count, that the combine scales back by. The
+    sky part and the read part are summed apart.
+
+    The predicted sky is the reference group's sky per second times ``t_bar``.
+    The reference group is the one with the largest combine weight, which the
+    combine aligns every group to.
+
+    A frame of a group that holds folded frames carries its scale ``k_i``
+    (`FrameNoiseInput.exposure_scale`, about ``t_ref / t_i``): its variance
+    term is multiplied by ``k_i^2``, because Siril multiplied the frame by
+    ``k_i`` before it averaged. The scale comes from the exposure ratio, a
+    design estimate (Siril fits it from the frame's stars). It is 1 for frames
+    of a group with one exposure length, so such a stack gets the same numbers
+    as without it.
+
+    The frames' weights are the stored raw weights ``W_g w_i`` (see
+    `stack_membership.group_frame_weights`); only their ratios inside a group
+    are used here, and `groups` supplies ``W_g``.
+
+    A stack with a group clipped at zero is not handled here. The caller
+    refuses it, because the combine drops that group's sky pixels near zero
+    and these weights do not describe that. That includes a clipped stack of
+    one group, on purpose.
+
+    Parameters
+    ----------
+    frames : `Sequence` [`FrameNoiseInput`]
+        One entry for each member frame; ``weight`` is the raw weight.
+    frame_group_indices : `Sequence` [`int`]
+        For each frame, the position of its group in `groups`.
+    groups : `Sequence` [`ExposureGroupNoiseFacts`]
+        One entry for each combined group.
+    stack_units_per_adu : `float`, optional
+        The stack's units for one camera ADU.
+
+    Returns
+    -------
+    outcome : `ExpectedNoiseOutcome`
+        The noise, or the reason there is none (no frames, a group without
+        member frames, or values that are not usable). A group whose gain was
+        not measured is computed with the combine's gain of 1 and marked
+        assumed.
+    """
+    if not frames or not groups or len(frames) != len(frame_group_indices):
+        return ExpectedNoiseOutcome(None, "the stack has no member frames")
+    if any(
+        group.combine_weight <= 0
+        or group.exposure_seconds <= 0
+        or group.frame_count <= 0
+        or group.gain <= 0
+        or not math.isfinite(group.sky_level_per_second)
+        for group in groups
+    ):
+        return ExpectedNoiseOutcome(
+            None, "an exposure group has a weight, exposure, gain or sky that is not usable"
+        )
+    if any(not 0 <= index < len(groups) for index in frame_group_indices):
+        return ExpectedNoiseOutcome(None, "a member frame belongs to no combined exposure group")
+    if any(
+        frame.weight < 0
+        or frame.gain_electrons_per_adu <= 0
+        or frame.sky_electrons < 0
+        or frame.read_noise_electrons < 0
+        or not math.isfinite(frame.exposure_scale)
+        or frame.exposure_scale <= 0
+        for frame in frames
+    ):
+        return ExpectedNoiseOutcome(
+            None, "a frame has a weight, gain, sky, read noise or exposure scale that is not usable"
+        )
+    raw_totals = [0.0] * len(groups)
+    for frame, index in zip(frames, frame_group_indices, strict=True):
+        raw_totals[index] += frame.weight
+    if any(total <= 0 for total in raw_totals):
+        return ExpectedNoiseOutcome(None, "a combined exposure group has no member frame with a weight")
+    weight_total = math.fsum(group.combine_weight for group in groups)
+    mean_exposure = math.fsum(group.frame_count * group.exposure_seconds for group in groups) / math.fsum(
+        group.frame_count for group in groups
+    )
+    sky_variance = 0.0
+    read_variance = 0.0
+    for frame, index in zip(frames, frame_group_indices, strict=True):
+        group = groups[index]
+        coefficient = group.combine_weight * frame.weight / raw_totals[index] / (weight_total * group.gain)
+        scale_to_rate = (
+            coefficient * frame.exposure_scale / (frame.gain_electrons_per_adu * group.exposure_seconds)
+        )
+        sky_variance += scale_to_rate**2 * frame.sky_electrons
+        read_variance += scale_to_rate**2 * frame.read_noise_electrons**2
+    area = effective_aperture_area_px()
+    scale = stack_units_per_adu
+    sky_noise = mean_exposure * scale * math.sqrt(area * sky_variance)
+    read_noise = mean_exposure * scale * math.sqrt(area * read_variance)
+    reference = max(groups, key=lambda group: group.combine_weight)
+    reasons = {frame.assumed_reason for frame in frames if frame.assumed_reason}
+    for group in groups:
+        if not group.gain_measured:
+            reasons.add(
+                f"the combine could not measure the gain of the {group.exposure_seconds:g} s group and used 1"
+            )
+    return ExpectedNoiseOutcome(
+        ExpectedNoise(
+            sky_noise=sky_noise,
+            read_noise=read_noise,
+            total_noise=math.hypot(sky_noise, read_noise),
+            aperture_area_px=area,
+            stack_units_per_adu=scale,
+            frame_count=len(frames),
+            predicted_sky_level=reference.sky_level_per_second * mean_exposure,
+            assumed_reason="; ".join(sorted(reasons)),
         )
     )
 
@@ -337,8 +679,9 @@ def gather_frame_noise_inputs(
     subject_id_of: Callable[[object], str],
     noise_setting_of: Callable[[object], tuple[ProvenancedValue | None, ProvenancedValue | None, str]],
     weights_reason: str = "",
+    exposure_scales: Sequence[float] | None = None,
 ) -> ExpectedNoiseOutcome | list[FrameNoiseInput]:
-    """Collect each member frame's sky, read noise, gain and weight.
+    """Collect each member frame's sky, read noise, gain, weight and scale.
 
     Parameters
     ----------
@@ -356,6 +699,9 @@ def gather_frame_noise_inputs(
         camera profile's lookup).
     weights_reason : `str`, optional
         Why the weights are unknown.
+    exposure_scales : `Sequence` [`float`], optional
+        Each member's ``k_i`` (see `FrameNoiseInput.exposure_scale`), in the
+        order of `members`. Left out, every frame gets 1.
 
     Returns
     -------
@@ -368,8 +714,11 @@ def gather_frame_noise_inputs(
         return ExpectedNoiseOutcome(None, "the stack has no member frames")
     if any(weight is None for weight in weights):
         return ExpectedNoiseOutcome(None, weights_reason or "the frames' weights are unknown")
+    if exposure_scales is not None and len(exposure_scales) != len(members):
+        return ExpectedNoiseOutcome(None, "the exposure scales do not match the member frames")
+    scales = list(exposure_scales) if exposure_scales is not None else [1.0] * len(members)
     inputs: list[FrameNoiseInput] = []
-    for member, weight in zip(members, weights, strict=True):
+    for member, weight, exposure_scale in zip(members, weights, scales, strict=True):
         row = sky_rate_rows.get(subject_id_of(member))
         if row is None:
             return ExpectedNoiseOutcome(None, NO_FRAME_ROWS_REASON)
@@ -399,6 +748,7 @@ def gather_frame_noise_inputs(
                 read_noise_electrons=read_noise.value,
                 gain_electrons_per_adu=gain.value,
                 assumed_reason="; ".join(reasons),
+                exposure_scale=float(exposure_scale),
             )
         )
     return inputs

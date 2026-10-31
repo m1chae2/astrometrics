@@ -32,12 +32,18 @@ from astrometricslib.drivers.fits_access import collapse_to_2d, read_data
 
 __all__ = [
     "APERTURE_RADIUS_PX",
+    "MAD_TO_SIGMA",
     "RING_INNER_PX",
     "RING_OUTER_PX",
     "SaturationCheck",
+    "celestial_wcs",
+    "pixel_scale_arcsec",
+    "pixels_to_sky",
     "read_stack_plane",
+    "robust_sigma",
     "signed_aperture_sum",
     "sky_level_of_plane",
+    "sky_to_pixels",
 ]
 
 # The aperture and sky ring are the defaults of `measure_aperture_photometry`
@@ -71,6 +77,30 @@ MEDIAN_ERROR_FACTOR = 1.2533
 # is exact in the limit, costs nothing and cannot differ between runs. The
 # apertures do not overlap, so their sums are independent.
 MAD_SIGMA_ERROR_FACTOR = 1.1664
+
+
+def robust_sigma(values: np.ndarray, axis: int | None = None) -> np.ndarray | np.float64:
+    """Give the robust spread of some values.
+
+    This is `MAD_TO_SIGMA` times the median absolute deviation. The
+    deviation is taken from the median of the same values (along the same
+    axis), so a few outliers hardly change the result.
+
+    Parameters
+    ----------
+    values : `numpy.ndarray`
+        The values to measure.
+    axis : `int`, optional
+        The axis to measure along. By default all values are measured
+        together.
+
+    Returns
+    -------
+    spread : `numpy.ndarray` or `numpy.float64`
+        The robust spread, one number for each position along the other axes.
+    """
+    centers = np.median(values, axis=axis, keepdims=True)
+    return MAD_TO_SIGMA * np.median(np.abs(values - centers), axis=axis)
 
 
 @dataclass(frozen=True)
@@ -247,7 +277,7 @@ def sky_level_of_plane(plane: np.ndarray) -> float | None:
     return level if level > 0 else None
 
 
-def _celestial_wcs(header: fits.Header) -> WCS | None:
+def celestial_wcs(header: fits.Header) -> WCS | None:
     """Read a header's sky coordinate solution, if it has one.
 
     Parameters
@@ -269,7 +299,7 @@ def _celestial_wcs(header: fits.Header) -> WCS | None:
     return wcs.celestial
 
 
-def _pixel_scale_arcsec(wcs: WCS) -> float:
+def pixel_scale_arcsec(wcs: WCS) -> float:
     """Give the mean pixel scale of a solution.
 
     Parameters
@@ -285,7 +315,7 @@ def _pixel_scale_arcsec(wcs: WCS) -> float:
     return float(np.mean(proj_plane_pixel_scales(wcs)) * 3600.0)
 
 
-def _pixels_to_sky(wcs: WCS, pixels: np.ndarray) -> np.ndarray:
+def pixels_to_sky(wcs: WCS, pixels: np.ndarray) -> np.ndarray:
     """Convert (row, column) pixel positions to (RA, Dec) in degrees.
 
     Parameters
@@ -306,7 +336,7 @@ def _pixels_to_sky(wcs: WCS, pixels: np.ndarray) -> np.ndarray:
     return np.column_stack([ra, dec]).astype(float)
 
 
-def _sky_to_pixels(wcs: WCS, sky: np.ndarray) -> np.ndarray:
+def sky_to_pixels(wcs: WCS, sky: np.ndarray) -> np.ndarray:
     """Convert (RA, Dec) in degrees to (column, row) pixel positions.
 
     Parameters

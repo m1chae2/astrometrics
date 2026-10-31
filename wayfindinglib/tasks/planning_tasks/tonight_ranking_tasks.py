@@ -18,9 +18,14 @@ its stack fall? The answer comes from the same forward model as "take N more"
   autofocus run costs minutes (`capture_overheads`). The overheads come from
   the user's recorded Ekos sessions when there are enough, and from design
   estimates otherwise.
-* The history. A target whose noise has stopped falling, from a floor fitted
-  over two or more stacks, is ranked at zero with the reason
-  (`forecast.target_stop_signal`).
+* The history. A target whose noise has stopped falling, from fixed-pattern
+noise
+  (one stack's measured noise against what its frames predict, or a fit over
+  two or more stacks), is ranked at zero with the reason
+  (`forecast.target_stop_signal`). Fixed-pattern noise that is not yet a stop
+  still lowers the gain of one more hour. A stack combined from exposure groups
+  is rebuilt from its stored rows, and the new frames are placed the way the
+  stacker would place them (`noise_growth.plan_group_stack`).
 
 Targets are ranked in separate lists for imaging, photometry and spectroscopy,
 because their gains are not comparable. Asteroid searches, solar-system
@@ -65,7 +70,11 @@ from wayfindinglib.analytics.result_quality.efficiency import (
 from wayfindinglib.analytics.result_quality.forecast import (
     FRAME_WEIGHT_METRIC,
     StackRunRecord,
+    camera_gain_for_setting,
+    fixed_pattern_noise_for_runs,
+    noise_model_error_for_setting,
     stack_frames_from_observations,
+    stack_groups_of_run,
     stack_runs_from_measurements,
     target_stop_signal,
 )
@@ -76,10 +85,16 @@ from wayfindinglib.analytics.result_quality.library_inputs import (
     target_direction,
 )
 from wayfindinglib.analytics.result_quality.noise_growth import (
+    FIXED_PATTERN_BASIS_SETUP_HISTORY,
+    NoiseForecast,
     WeightingMode,
+    forecast_group_noise,
     forecast_stack_noise,
     identify_weighting_mode,
+    new_frames_like,
     noise_ratio_after_adding,
+    noise_ratio_for_ranking,
+    plan_group_stack,
     predict_weighting_mode,
 )
 from wayfindinglib.analytics.result_quality.observing_values import sky_geometry
@@ -91,6 +106,7 @@ from wayfindinglib.analytics.result_quality.sky_model import SkyModel, predict_s
 from wayfindinglib.astronomy.coordinate_transforms import compute_altaz, earth_location
 from wayfindinglib.models.equipment_and_site.equipment import Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
+from wayfindinglib.models.planning.target_report import RecommendedAdditionalFramesStatus
 from wayfindinglib.models.planning.tonight_ranking import (
     CandidateStatus,
     RankedCandidate,
@@ -101,6 +117,10 @@ from wayfindinglib.models.planning.tonight_ranking import (
     TonightSkyModel,
 )
 from wayfindinglib.models.quality.efficiency import ScienceGoal
+from wayfindinglib.tasks.planning_tasks.target_report_inputs import (
+    read_noise_history,
+    recommended_additional_frames_status_of_target,
+)
 from wayfindinglib.tasks.planning_tasks.visibility_tasks import effective_altitude_floor, visibility_state_at
 
 TONIGHT_SKY_ENTRY = "WAY-71"
@@ -108,6 +128,19 @@ TONIGHT_SKY_ENTRY = "WAY-71"
 
 TONIGHT_RANKING_ENTRY = "WAY-72"
 """Register entry behind the ranking and its design-estimate row."""
+
+GAIN_TIE_DIGITS = 2
+"""Two gains that agree to this many decimals (the whole percent the reason
+text shows) count as tied for the provisional rule. Among targets tied this
+way, one whose recommended additional frames are only provisional (decision
+D11,
+2026-10-26) ranks after the others; otherwise the larger gain ranks first."""
+
+PROVISIONAL_RANKING_REMARK = (
+    "Its count of recommended additional frames is provisional: it rests on a check made from frames "
+    "already taken, and the next real stack will confirm it or withdraw it."
+)
+"""The remark added to a ranked target whose count is provisional."""
 
 CLOCK_HOUR_SECONDS = 3600.0
 """The span the gain is worked out for: one hour of real clock time."""
@@ -281,6 +314,9 @@ def score_candidate(
     sky_models: Mapping[str, SkyModel],
     overheads_for: Callable[[CaptureSetting], CaptureOverheads],
     configured_weight: str | None = None,
+    electrons_per_adu_for: Callable[[CaptureSetting], float | None] | None = None,
+    noise_model_errors: Mapping[Any, Any] | None = None,
+    fixed_pattern_history: Mapping[Any, Mapping[str, float]] | None = None,
 ) -> RankedCandidate:
     """Find the gain from one clock hour on one target.
 
@@ -312,6 +348,10 @@ def score_candidate(
     configured_weight : `str` or `None`, optional
         The configured ``Processing.Siril.stack_weight``, which decides how
         the stacker will weight the new frames. ``None`` when none is set.
+    electrons_per_adu_for : `Callable`, optional
+        Gives the camera gain of a capture setting (`camera_gain_for_setting`).
+        Needed only to predict the frame noise of an exposure group that the
+        new frames would start.
 
     Returns
     -------
@@ -338,6 +378,8 @@ def score_candidate(
     # measured frame of the main setting (never stacked yet).
     last_run = runs[-1] if runs else None
     mode = WeightingMode.UNKNOWN
+    electrons_per_adu = electrons_per_adu_for(setting) if electrons_per_adu_for is not None else None
+    run_groups = None
     if last_run is not None and last_run.member_frame_ids:
         existing, problems = stack_frames_from_observations(last_run.member_frame_ids, by_id)
         if problems:
@@ -347,7 +389,13 @@ def score_candidate(
                 altitude_deg,
                 "Frame measurements of the last stack are missing: " + problems[0],
             )
-        mode = identify_weighting_mode(existing, last_run.recorded_weights).mode
+        run_groups = stack_groups_of_run(last_run, existing, electrons_per_adu=electrons_per_adu)
+        if run_groups.is_group_stack:
+            if run_groups.reason is not None:
+                return _no_forecast(target_id, use, altitude_deg, run_groups.reason)
+            mode = WeightingMode.GROUP
+        else:
+            mode = identify_weighting_mode(existing, last_run.recorded_weights).mode
         if mode == WeightingMode.UNKNOWN:
             remarks.append(
                 "The last stack's weights were not recorded, so the stacker's default rule predicts them."
@@ -371,7 +419,11 @@ def score_candidate(
             [frame.exposure_seconds for frame in existing],
             is_spectral=use == RankedUse.SPECTROSCOPY,
         )
-    current = forecast_stack_noise(existing, mode)
+    current = (
+        forecast_group_noise(run_groups.groups)
+        if mode == WeightingMode.GROUP and run_groups is not None
+        else forecast_stack_noise(existing, mode)
+    )
     if current.noise is None:
         return _no_forecast(
             target_id, use, altitude_deg, current.reason or "The stack's noise could not be found."
@@ -438,10 +490,51 @@ def score_candidate(
         dither_every_frames=DITHER_EVERY_FRAMES,
         autofocus_runs=AUTOFOCUS_RUNS_PER_HOUR,
     )
-    forecast = noise_ratio_after_adding(existing, template, frames_in_hour, mode, exposure_seconds)
-    if forecast is None or forecast.noise is None:
+    fixed_pattern = (
+        fixed_pattern_noise_for_runs(
+            runs, noise_model_error_for_setting(noise_model_errors, setting), fixed_pattern_history, target_id
+        )
+        if runs
+        else None
+    )
+    if mode == WeightingMode.GROUP and run_groups is not None:
+        # A stack of exposure groups: the new frames are placed the way the
+        # stacker would place them (a new length needs 5 frames to be a group).
+        plan = plan_group_stack(
+            run_groups.groups,
+            new_frames_like(template, frames_in_hour, exposure_seconds),
+            electrons_per_adu=electrons_per_adu,
+        )
+        later: NoiseForecast | None = plan.forecast if plan.forecast.noise is not None else None
+        if later is None:
+            return _no_forecast(
+                target_id,
+                use,
+                altitude_deg,
+                plan.reason or "The noise after one more hour could not be found.",
+            )
+        if plan.heaviest_group_changed:
+            remarks.append(
+                "One more hour would make a different exposure group the heaviest, which rescales the stack."
+            )
+        if plan.folded_group_lengths:
+            remarks.append("Some of the new frames would be folded into another exposure group.")
+    else:
+        later = noise_ratio_after_adding(existing, template, frames_in_hour, mode, exposure_seconds)
+    ratio = noise_ratio_for_ranking(current, later, fixed_pattern)
+    if fixed_pattern is not None and fixed_pattern.basis == FIXED_PATTERN_BASIS_SETUP_HISTORY:
+        remarks.append(
+            f"This ranking assumes fixed-pattern noise like other targets of this setup "
+            f"(median of {fixed_pattern.history_target_count} targets), not measured on this one."
+        )
+    if fixed_pattern is not None and fixed_pattern.possible:
+        remarks.append(
+            f"The stack has possible fixed-pattern noise ({fixed_pattern.sigmas or 0.0:.1f}\u03c3, not "
+            "proven), so the gain is the midpoint of the gain with it and without it."
+        )
+    if ratio is None:
         return _no_forecast(target_id, use, altitude_deg, "The noise after one more hour could not be found.")
-    gain = max(0.0, 1.0 - forecast.noise / current.noise)
+    gain = max(0.0, 1.0 - ratio)
 
     evidence = (
         [MeasurementReference(row_id=last_run.normalized_row_id)]
@@ -508,7 +601,12 @@ def build_lists(candidates: Iterable[RankedCandidate]) -> tuple[list[RankedList]
             continue
         ranked = sorted(
             (c for c in group if c.status == CandidateStatus.RANKED),
-            key=lambda c: (-(c.gain_per_hour_fraction or 0.0), c.target_id),
+            key=lambda c: (
+                -round(c.gain_per_hour_fraction or 0.0, GAIN_TIE_DIGITS),
+                c.recommended_additional_frames_status == RecommendedAdditionalFramesStatus.PROVISIONAL,
+                -(c.gain_per_hour_fraction or 0.0),
+                c.target_id,
+            ),
         )
         stopped = sorted((c for c in group if c.status == CandidateStatus.STOPPED), key=lambda c: c.target_id)
         unranked = sorted(
@@ -707,6 +805,29 @@ def rank_tonight(
             )
         return overhead_cache[key]
 
+    def electrons_per_adu_for(setting: CaptureSetting) -> float | None:
+        """Give the camera gain of a capture setting, or ``None`` when unknown.
+
+        Parameters
+        ----------
+        setting : `CaptureSetting`
+            The setting.
+
+        Returns
+        -------
+        gain : `float` or `None`
+            Electrons per ADU from the camera profile.
+        """
+        if config is None:
+            return None
+        try:
+            return camera_gain_for_setting(config, setting)
+        except ConfigurationError:
+            return None
+
+    # One library-wide read, not one per target (decision D17).
+    noise_history = read_noise_history(astrometrics)
+    noise_model_errors = noise_history.model_errors
     wanted = set(candidate_target_ids) if candidate_target_ids is not None else None
     skipped: dict[str, int] = defaultdict(int)
     candidates: list[RankedCandidate] = []
@@ -745,6 +866,18 @@ def rank_tonight(
             ),
         ]
         all_runs = stack_runs_from_measurements(history)
+        # Whether the target's "take N more" count is confirmed, provisional
+        # or not checked. Only a provisional one changes the order
+        # (`build_lists`).
+        dominant = dominant_setting(all_observations)
+        frames_status = recommended_additional_frames_status_of_target(
+            astrometrics,
+            target.id,
+            history,
+            all_observations,
+            configured_stack_weight=configured_weight,
+            electrons_per_adu=electrons_per_adu_for(dominant) if dominant is not None else None,
+        )
         # A target in several lists is scored once for each, on the frames of
         # that use's settings (user decision U2, 2026-10-24).
         for use in classify_uses(target, {o.capture_setting for o in all_observations}) or []:
@@ -757,21 +890,38 @@ def rank_tonight(
             runs = [
                 run for run in all_runs if not run.member_frame_ids or set(run.member_frame_ids) <= frame_ids
             ]
-            candidates.append(
-                score_candidate(
-                    target.id,
-                    use,
-                    observations,
-                    runs,
-                    epoch_seconds=epoch_seconds,
-                    direction=direction,
-                    altitude_deg=float(altitude_deg),
-                    site=site_profile,
-                    sky_models=models,
-                    overheads_for=overheads_for,
-                    configured_weight=configured_weight,
-                )
+            scored = score_candidate(
+                target.id,
+                use,
+                observations,
+                runs,
+                epoch_seconds=epoch_seconds,
+                direction=direction,
+                altitude_deg=float(altitude_deg),
+                site=site_profile,
+                sky_models=models,
+                overheads_for=overheads_for,
+                configured_weight=configured_weight,
+                electrons_per_adu_for=electrons_per_adu_for,
+                noise_model_errors=noise_model_errors,
+                fixed_pattern_history=noise_history.fixed_pattern_shares,
             )
+            if (
+                frames_status != RecommendedAdditionalFramesStatus.NOT_CHECKED
+                and scored.status == CandidateStatus.RANKED
+            ):
+                remark = (
+                    PROVISIONAL_RANKING_REMARK
+                    if frames_status == RecommendedAdditionalFramesStatus.PROVISIONAL
+                    else ""
+                )
+                scored = scored.model_copy(
+                    update={
+                        "recommended_additional_frames_status": frames_status,
+                        "reason": f"{scored.reason} {remark}".strip(),
+                    }
+                )
+            candidates.append(scored)
     lists, notes = build_lists(candidates)
     for kind, count in sorted(skipped.items()):
         notes.append(f"{count} {kind} not ranked.")

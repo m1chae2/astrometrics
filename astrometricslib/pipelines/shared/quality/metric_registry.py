@@ -37,6 +37,7 @@ KNOWN_UNITS: frozenset[str] = frozenset({
     "e-",
     "e-/s/px",
     "mag",
+    "mag/arcsec2",
     "angstrom",
     "stack_unit",
     "stack_unit^2",

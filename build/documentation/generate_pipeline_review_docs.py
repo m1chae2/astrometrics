@@ -1070,7 +1070,7 @@ NOTATION_LINK = "../Astrometrics_Library_Architecture.md#appendix-a-notation"
 GUIDE_NOTATION: dict[str, list[tuple[str, str, str]]] = {
     "astrometry": [
         (r"$B_\text{sky}(x, y)$", "Background (sky) level at a pixel", "ADU"),
-        (r"$\sigma_\text{sky}$", "Noise of the background", "ADU"),
+        (r"$\sigma_\text{bkg}$", "Noise of the background", "ADU"),
         (r"$k$", "Detection threshold, in units of the background noise", "none"),
         (r"$s$", "Pixel scale", "arcsec/px"),
         (r"$p_\text{px}$", "Pixel pitch (binned pixel size)", "μm"),
@@ -1106,7 +1106,7 @@ GUIDE_NOTATION: dict[str, list[tuple[str, str, str]]] = {
             "Scatter of a constant star in the field's noise model",
             "mag",
         ),
-        (r"$\sigma_\text{measured}$", "Measured scatter of a star", "mag"),
+        (r"$\sigma_\text{obs}$", "Measured scatter of a star", "mag"),
         (
             r"$\delta_j$, $P_j$",
             "Normalized residual of point $j$, and the product of neighboring residuals",
@@ -1505,9 +1505,9 @@ estimate. A small image falls back to one sigma-clipped median.
 
 The test below asks how many noise units a pixel stands above the local sky. A large value means
 a real source; a value near zero means only sky. A source is kept when its peak stands above the
-background $B_\text{sky}$ by the threshold $k$, where $\sigma_\text{sky}$ is the noise of the background:
+background $B_\text{sky}$ by the threshold $k$, where $\sigma_\text{bkg}$ is the noise of the background:
 
-$$\frac{I(x, y) - B_\text{sky}(x, y)}{\sigma_\text{sky}} \ge k = <<threshold>> \tag{1}$$
+$$\frac{I(x, y) - B_\text{sky}(x, y)}{\sigma_\text{bkg}} \ge k = <<threshold>> \tag{1}$$
 
 `DAOStarFinder` (a standard star finder from photutils) also checks shape. Sharpness compares a
 peak's height with its spread; roundness compares its width along the two axes, with 0 meaning
@@ -2012,7 +2012,7 @@ per second.
 
 **Its error.** The CCD equation adds up every noise source in electrons: the star's own photon
 noise, the sky, the read noise and the dark current. A large error compared with $F_\text{net}$
-means a noisy measurement. In the symbols of the architecture paper's Equation (7), the 1σ error
+means a noisy measurement. In the symbols of the architecture paper's Equation (11), the 1σ error
 (one standard deviation) in ADU is $\sigma_{\text{ap}} / G$, where
 
 $$\sigma_{\text{ap}}^2 = S_\star + n_\text{pix}\left(s_\text{sky} + \sigma_\text{rd}^2 + D\right)
@@ -2040,7 +2040,7 @@ mean over the session, so a ratio of 1 means "normal". The ensemble signal $L_\t
 the weighted average of those ratios in the frame at time $t$, scaled back to flux units by the
 mean of the comparison stars' session means. The average is inverse-variance weighted: each star
 counts in proportion to one over its squared fractional error, so precise stars count more than
-noisy ones. This is Equation (8) of the paper:
+noisy ones. This is Equation (12) of the paper:
 
 $$L_\text{ens}(t) = \bar{\mu}\,\frac{\sum_c w_c(t) \, F_c(t) / \mu_c}{\sum_c w_c(t)}, \qquad
 w_c(t) = \frac{1}{\epsilon_c(t)^2}, \qquad
@@ -2085,7 +2085,7 @@ errors). It needs at least <<noise_model_stars>> stars.
 
 **The three indices.** In each, $\hat{F}_j$ is point $j$ of one star's light curve, $e_j$ its
 error, $\bar{F}_w$ the error-weighted mean of the points and $n_\text{pts}$ the number of
-points, as in the paper's Equation (9). When a star's errors are smaller than the noise model's
+points, as in the paper's Equation (13). When a star's errors are smaller than the noise model's
 scatter, they are scaled up to it, so a constant star gives the values below.
 
 The reduced chi-square $\chi^2_\nu$ asks whether the points scatter more than their error bars
@@ -2104,7 +2104,7 @@ $$\delta_j = \sqrt{\frac{n_\text{pts}}{n_\text{pts}-1}}\,\frac{\hat{F}_j - \bar{
 The excess scatter $E_\sigma$ compares the star's measured scatter (in magnitudes) with what the noise
 model expects for a star of its brightness. 1 means typical; 2 means twice the usual scatter:
 
-$$E_\sigma = \frac{\sigma_\text{measured}}{\sigma_\text{model}(m_\text{inst})} \tag{7}$$
+$$E_\sigma = \frac{\sigma_\text{obs}}{\sigma_\text{model}(m_\text{inst})} \tag{7}$$
 
 Eq. 6 is the single-band Stetson J (all points in one filter; Stetson also defines a version
 that pairs points taken in two filters), with consecutive pairs and unit weights (Stetson 1996,
@@ -2166,7 +2166,7 @@ A light curve too short to search gets "insufficient data" instead.
 
 **Many searches.** Searching many stars raises the chance that one passes by luck. For $N_s$
 independent searches, the chance that at least one reaches probability $p$ by luck is the
-family-wise false-alarm probability (Equation (11) of the architecture paper)
+family-wise false-alarm probability (Equation (15) of the architecture paper)
 
 $$p_\text{corr} = 1 - (1 - p)^{N_s} \tag{10}$$
 
@@ -3460,7 +3460,10 @@ Stacking has no `AnalysisPipeline` adapter. The entry point is `stage.stack_fram
    patches, scaled by the flux of reference stars. With star-width weighting the frame weights
    are rebuilt from the sequence file's star widths; with noise or star-count weighting they are
    stored as not measured. When the patches' sky coordinates come from a frame header, they are
-   first moved onto the stored reference stars.
+   first shifted and turned a little (up to half a degree) onto the stored reference stars.
+   The same stage stores the ratio of the measured noise to the predicted noise, the noise of the
+   odd–even difference of two half stacks (a direct measure of the random part), the noise at four
+   aperture sizes, and the stack's depth in magnitudes (architecture paper, Section 3.4.3).
 6. **Preview image.** A JPEG for people to look at is made from a copy of the stack; the stack
    itself is never changed. GraXpert, an AI tool, removes the sky's brightness gradient. Siril
    stretches the brightness so faint parts show. Cosmic Clarity, another AI tool, removes noise.

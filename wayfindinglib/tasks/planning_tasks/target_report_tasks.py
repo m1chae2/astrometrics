@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 import statistics
 from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping, Sequence
@@ -49,6 +50,7 @@ from astrometricslib import (
     MeasurementReference,
     QualityMeasurement,
     Target,
+    fold_exposure_lengths,
     frame_is_spectral,
     observing_night_id,
     resolve_camera_profile,
@@ -73,6 +75,23 @@ from wayfindinglib.analytics.result_quality.efficiency import (
     baseline_key,
 )
 from wayfindinglib.analytics.result_quality.evidence_order import order_statements_evidence
+from wayfindinglib.analytics.result_quality.fixed_pattern_location import (
+    FixedPatternAccount,
+    fixed_pattern_cause,
+)
+from wayfindinglib.analytics.result_quality.forecast import (
+    StackRunRecord,
+    camera_gain_for_setting,
+    fixed_pattern_account_for_run,
+    fixed_pattern_noise_for_runs,
+    library_runs,
+    noise_model_error_for_setting,
+    odd_even_difference_noise_inputs,
+    recommended_additional_frames_status_from_checks,
+    single_stack_fixed_pattern_noise,
+    stack_frames_from_observations,
+    stack_groups_of_run,
+)
 from wayfindinglib.analytics.result_quality.guiding_exposure import (
     GuidingExposureOutcome,
     assess_guiding_exposure,
@@ -92,12 +111,23 @@ from wayfindinglib.analytics.result_quality.library_inputs import (
 )
 from wayfindinglib.analytics.result_quality.noise_growth import (
     APERTURE_NOISE_ERROR_FACTOR,
+    MINIMUM_FRAMES_NEW_EXPOSURE_LENGTH,
+    TARGET_NOISE_RATIO,
+    NoiseModelError,
     StackFrame,
+    StackGroup,
     WeightingMode,
     frames_to_cut_noise,
+    frames_to_cut_noise_in_groups,
+    predict_group_frame_noise_adu,
     predict_weighting_mode,
 )
 from wayfindinglib.analytics.result_quality.report_rules import (
+    FIXED_PATTERN_CALIBRATION_TEXT,
+    FIXED_PATTERN_CAUSE_TEXT,
+    FIXED_PATTERN_NOT_REMOVED_TEXT,
+    PLAIN_FIXED_PATTERN_CALIBRATION_TEXT,
+    PLAIN_FIXED_PATTERN_NOT_REMOVED_TEXT,
     AltitudeSample,
     LightFrameGroup,
     altitude_cost_statement,
@@ -106,6 +136,9 @@ from wayfindinglib.analytics.result_quality.report_rules import (
     find_altitude_cost,
     find_calibration_gaps,
     find_sharpness_tradeoff,
+    find_sharpness_tradeoff_in_groups,
+    fixed_pattern_limited_statement,
+    fixed_pattern_shape_statements,
     frames_lost_statements,
     guiding_limits_statements,
     insufficient,
@@ -132,8 +165,10 @@ from wayfindinglib.analytics.result_quality.starting_point import (
 )
 from wayfindinglib.models.planning.target_report import (
     ContextReading,
+    ForecastBasis,
     ForecastCheck,
     ForecastOutcome,
+    RecommendedAdditionalFramesStatus,
     ScienceOutcomeSummary,
     StartingPoint,
     TargetDatasetReport,
@@ -154,6 +189,8 @@ from wayfindinglib.tasks.planning_tasks.target_report_inputs import (
     frame_sensor_temperatures,
     median_or_none,
     read_calibration_rows,
+    read_forecast_runs,
+    read_noise_history,
     read_target_rows,
     sessions_of_target,
 )
@@ -370,8 +407,15 @@ def _measured_noise_checks(
     rows: Sequence[QualityMeasurement],
     stack_settings: Mapping[str, int],
     settings: Mapping[int, CaptureSetting],
+    runs: Sequence[StackRunRecord] = (),
+    noise_model_errors: Mapping[Any, NoiseModelError] | None = None,
 ) -> dict[CaptureSetting, MeasuredNoiseCheck]:
-    """Compare each stack's measured noise with the noise its frames predict.
+    """Compare each stack's measured noise with the noise it should have.
+
+    A stack with a usable odd–even difference is compared with the random noise
+    measured from its odd and even half stacks, read from its newest library
+    run (`odd_even_difference_noise_inputs`, the record the fixed-pattern noise
+    reads). Any other stack is compared with the noise its frames predict.
 
     Parameters
     ----------
@@ -381,16 +425,36 @@ def _measured_noise_checks(
         The setting id of each stack.
     settings : `Mapping` [`int`, `CaptureSetting`]
         The target's settings.
+    runs : `Sequence` [`StackRunRecord`], optional
+        The target's library stack runs, with odd–even differences attached.
+    noise_model_errors : `Mapping`, optional
+        The noise model's own error by capture setting group
+        (`read_noise_history`), for the stacks on the model basis. The
+        stand-in value when omitted.
 
     Returns
     -------
     checks : `dict` [`CaptureSetting`, `MeasuredNoiseCheck`]
-        For each setting with a stack, the variance ratio and its error. The
-        error is ``2 * 1.17 / sqrt(n)`` times the ratio for n apertures
-        (unpaired). A stack missing either noise value is left out.
+        For each setting with a stack, the variance ratio and its error. On
+        the model basis the error is ``2 * 1.17 / sqrt(n)`` times the ratio
+        for n apertures (unpaired). A stack missing the noise values its
+        basis needs is left out.
     """
+    newest_run_by_stack: dict[str, StackRunRecord] = {}
+    for run in sorted(runs, key=lambda item: (item.measured_at, item.run_id)):
+        newest_run_by_stack[run.stack_subject_id] = run
     checks: dict[CaptureSetting, MeasuredNoiseCheck] = {}
     for stack_id, setting_id in stack_settings.items():
+        newest_run = newest_run_by_stack.get(stack_id)
+        inputs = odd_even_difference_noise_inputs(newest_run) if newest_run is not None else None
+        account = _fixed_pattern_account_of_stack(
+            newest_run, noise_model_error_for_setting(noise_model_errors, settings[setting_id])
+        )
+        if inputs is not None:
+            checks[settings[setting_id]] = MeasuredNoiseCheck.from_odd_even_difference(*inputs).model_copy(
+                update={"fixed_pattern_account": account}
+            )
+            continue
         stack_rows = [row for row in rows if row.subject.subject_id == stack_id]
         measured = _newest(stack_rows, NOISE_METRIC)
         expected = _newest(stack_rows, EXPECTED_NOISE_METRIC)
@@ -407,8 +471,41 @@ def _measured_noise_checks(
             continue
         ratio = (measured.value / expected.value) ** 2
         error = 2.0 * APERTURE_NOISE_ERROR_FACTOR / math.sqrt(measured.sample_count) * ratio
-        checks[settings[setting_id]] = MeasuredNoiseCheck(variance_ratio=ratio, variance_ratio_error=error)
+        model_error = noise_model_error_for_setting(noise_model_errors, settings[setting_id])
+        checks[settings[setting_id]] = MeasuredNoiseCheck(
+            variance_ratio=ratio,
+            variance_ratio_error=error,
+            expected_noise_relative_error=model_error.relative_error,
+            model_error_basis=model_error.basis_text,
+            fixed_pattern_account=account,
+        )
     return checks
+
+
+def _fixed_pattern_account_of_stack(
+    newest_run: StackRunRecord | None, model_error: NoiseModelError
+) -> FixedPatternAccount | None:
+    """Say where a stack's fixed pattern is and what the masters explain.
+
+    Parameters
+    ----------
+    newest_run : `StackRunRecord` or `None`
+        The stack's newest library run.
+    model_error : `NoiseModelError`
+        The noise model's error, for a stack on the model basis.
+
+    Returns
+    -------
+    account : `FixedPatternAccount` or `None`
+        The shape tests and the calibration breakdown of the stack's own
+        fixed-pattern noise (`fixed_pattern_account_for_run`), for the loss
+        account.
+    """
+    if newest_run is None:
+        return None
+    return fixed_pattern_account_for_run(
+        newest_run, single_stack_fixed_pattern_noise(newest_run, model_error)
+    )
 
 
 def _weight_effective_seconds(
@@ -539,7 +636,7 @@ def _stack_frames(
     return frames, used, problems
 
 
-MORE_FRAMES_GATE_REASON = (
+MORE_FRAMES_NOT_CHECKED_REASON = (
     "The forecast of how much one more hour helps has not been checked on this target yet. Take more "
     "frames and stack them; then the report compares the forecast with what the stack did, and once "
     "one check agrees, it will say how many more frames to take."
@@ -549,7 +646,38 @@ decision U1) that the number of frames is shown for a target only after one of
 THAT target's forecast checks came out as forecast."""
 
 
-def _forecast_gate_open(forecast_checks: Sequence[ForecastCheck]) -> bool:
+PROVISIONAL_COUNT_SENTENCE = (
+    "It rests on a check made from frames already taken; the next real stack will confirm it or withdraw it."
+)
+"""What a "take N more" statement says when only an earlier-nights check
+agreed. The user decided on 2026-10-26 (issue #134, decision D11) that such a
+count is shown, marked provisional, and ranked below a count that a real later
+stack confirmed."""
+
+
+def _recommended_additional_frames_status_from_checks(
+    forecast_checks: Sequence[ForecastCheck],
+) -> RecommendedAdditionalFramesStatus:
+    """Say whether "take N more" may be shown, and on what footing.
+
+    Parameters
+    ----------
+    forecast_checks : `Sequence` [`ForecastCheck`]
+        The target's own forecast checks, oldest first
+        (`forecast.forecast_check`).
+
+    Returns
+    -------
+    frames_status : `RecommendedAdditionalFramesStatus`
+        ``confirmed`` once a check of two library stacks agreed;
+        ``provisional`` when only a check made from frames already taken
+        agreed (and no real check has disagreed since); else ``not_checked``.
+        See `forecast.recommended_additional_frames_status_from_checks`.
+    """
+    return recommended_additional_frames_status_from_checks(forecast_checks)
+
+
+def _recommended_additional_frames_status_open(forecast_checks: Sequence[ForecastCheck]) -> bool:
     """Say whether "take N more" may be shown for the target.
 
     Parameters
@@ -560,12 +688,75 @@ def _forecast_gate_open(forecast_checks: Sequence[ForecastCheck]) -> bool:
     Returns
     -------
     open : `bool`
-        `True` once at least one check has the outcome ``as_forecast``.
+        `True` when the status is confirmed or provisional.
     """
-    return any(check.outcome == ForecastOutcome.AS_FORECAST for check in forecast_checks)
+    return (
+        _recommended_additional_frames_status_from_checks(forecast_checks)
+        != RecommendedAdditionalFramesStatus.NOT_CHECKED
+    )
 
 
-def _more_frames_gate_statement(
+def _with_provisional_count(text: str) -> str:
+    """Put "(provisional)" after the count in a recommended-frames text.
+
+    Parameters
+    ----------
+    text : `str`
+        A message that starts "Recommended additional frames: 44".
+
+    Returns
+    -------
+    text : `str`
+        The same text with " (provisional)" after the count; unchanged when it
+        does not start that way.
+    """
+    return re.sub(r"^(Recommended additional frames: \d+)", r"\1 (provisional)", text)
+
+
+def _mark_provisional(statements: Sequence[TargetStatement]) -> list[TargetStatement]:
+    """Say on each recommended-frames count that it is provisional.
+
+    The confidence stays ``design_estimate``, which is what the rule already
+    carries, and no new confidence label exists. The word "(provisional)" goes
+    after the count, and the sentence that says why goes on the message, the
+    plain message and the reason. The statement's values name the basis
+    (``count_basis`` is ``"provisional"``).
+
+    Parameters
+    ----------
+    statements : `Sequence` [`TargetStatement`]
+        The statements made for one setting.
+
+    Returns
+    -------
+    statements : `list` [`TargetStatement`]
+        The same statements; each ``more_frames`` recommendation carries the
+        sentence.
+    """
+    marked = []
+    for statement in statements:
+        if statement.rule == "more_frames" and statement.kind == StatementKind.RECOMMENDATION:
+            statement = statement.model_copy(
+                update={
+                    "message": f"{_with_provisional_count(statement.message)} {PROVISIONAL_COUNT_SENTENCE}",
+                    "plain_message": (
+                        f"{_with_provisional_count(statement.plain_message)} "
+                        f"{PROVISIONAL_COUNT_SENTENCE}".strip()
+                        if statement.plain_message
+                        else ""
+                    ),
+                    "reason": f"{statement.reason} {PROVISIONAL_COUNT_SENTENCE}".strip(),
+                    "values": {
+                        **statement.values,
+                        "count_basis": RecommendedAdditionalFramesStatus.PROVISIONAL.value,
+                    },
+                }
+            )
+        marked.append(statement)
+    return marked
+
+
+def _more_frames_not_checked_statement(
     setting: CaptureSetting, forecast_checks: Sequence[ForecastCheck], has_frame_weights: bool = True
 ) -> TargetStatement:
     """Make the statement that stands in for a hidden "take N more".
@@ -589,6 +780,14 @@ def _more_frames_gate_statement(
     if forecast_checks:
         tried = ", ".join(sorted({check.outcome.value for check in forecast_checks}))
         history = f" {len(forecast_checks)} check(s) so far came out as: {tried}."
+        from_frames_taken = sum(
+            1 for check in forecast_checks if check.basis == ForecastBasis.EARLIER_NIGHTS_SUBSET
+        )
+        if from_frames_taken:
+            history += f" {from_frames_taken} of them were made from frames already taken (earlier nights)."
+        not_checkable = [check for check in forecast_checks if check.outcome == ForecastOutcome.NOT_CHECKABLE]
+        if not_checkable and not _recommended_additional_frames_status_open(forecast_checks):
+            history += f" The latest one that could not be made: {not_checkable[-1].reason}"
     else:
         history = " No stack has followed a forecast yet, so there is no check."
     if not has_frame_weights:
@@ -597,7 +796,104 @@ def _more_frames_gate_statement(
             "afterward), so no check can run yet. Restack this target to record frame weights and noise "
             "apertures."
         )
-    return insufficient("more_frames", MORE_FRAMES_GATE_REASON + history, setting)
+    return insufficient("more_frames", MORE_FRAMES_NOT_CHECKED_REASON + history, setting)
+
+
+def _single_group_of(frames: Sequence[StackFrame], electrons_per_adu: float) -> StackGroup:
+    """Make the one exposure group of a stack that has only one.
+
+    A stack of one exposure length stores no ``s_g`` (the frame noise the
+    combine measures), so it is predicted from the frames' sky and read noise.
+    It is used only to plan a stack that a new exposure length would turn into
+    a group stack.
+
+    Parameters
+    ----------
+    frames : `Sequence` [`StackFrame`]
+        The stack's frames.
+    electrons_per_adu : `float`
+        The camera gain.
+
+    Returns
+    -------
+    group : `StackGroup`
+        The group, with a predicted frame noise.
+    """
+    return StackGroup(
+        frames=tuple(frames),
+        frame_noise_adu=predict_group_frame_noise_adu(frames, electrons_per_adu),
+        electrons_per_adu=electrons_per_adu,
+        noise_predicted=True,
+    )
+
+
+def _camera_gain(config: Any, setting: CaptureSetting) -> float | None:
+    """Look up a setting's camera gain, or give ``None`` when unknown.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The configuration that holds the camera profiles.
+    setting : `CaptureSetting`
+        The setting.
+
+    Returns
+    -------
+    gain : `float` or `None`
+        Electrons per ADU.
+    """
+    try:
+        return camera_gain_for_setting(config, setting)
+    except AstrometricsError:
+        logger.warning("The camera profile of '%s' could not be read.", setting.camera, exc_info=True)
+        return None
+
+
+def _stack_of_setting(
+    observations: Sequence[FrameObservation],
+    fallback_frames: Sequence[StackFrame],
+    runs: Sequence[StackRunRecord],
+    observations_by_id: Mapping[str, FrameObservation],
+    electrons_per_adu: float | None,
+) -> tuple[list[StackRunRecord], StackRunRecord | None, Any, list[StackFrame]]:
+    """Find the newest stack of a setting's frames and rebuild its groups.
+
+    Parameters
+    ----------
+    observations : `Sequence` [`FrameObservation`]
+        The setting's frames.
+    fallback_frames : `Sequence` [`StackFrame`]
+        The setting's usable frames, used as the stack's frames when no stack
+        holds any of them.
+    runs : `Sequence` [`StackRunRecord`]
+        The target's library stack runs.
+    observations_by_id : `Mapping` [`str`, `FrameObservation`]
+        Every frame of the target by id.
+    electrons_per_adu : `float` or `None`
+        The camera gain, kept on the rebuilt groups.
+
+    Returns
+    -------
+    setting_runs, newest_run, run_groups, stack_frames : `tuple`
+        The runs that hold any of the setting's frames (oldest first), the
+        newest of them (or ``None``), its `RunGroups` (or ``None`` when a
+        member frame has no usable measurements) and the newest stack's
+        frames (the fallback frames when there is none).
+    """
+    frame_ids = {observation.frame_id for observation in observations}
+    setting_runs = [run for run in runs if frame_ids & set(run.member_frame_ids)]
+    newest_run = setting_runs[-1] if setting_runs else None
+    if newest_run is None:
+        return setting_runs, None, None, list(fallback_frames)
+    run_frames, run_problems = stack_frames_from_observations(newest_run.member_frame_ids, observations_by_id)
+    if run_problems:
+        return setting_runs, newest_run, None, list(fallback_frames)
+    return (
+        setting_runs,
+        newest_run,
+        stack_groups_of_run(newest_run, run_frames, electrons_per_adu=electrons_per_adu),
+        run_frames,
+    )
 
 
 def _more_frames_for_setting(
@@ -606,12 +902,31 @@ def _more_frames_for_setting(
     rows: Sequence[QualityMeasurement],
     configured_weight: str | None,
     overheads: Any,
+    *,
+    runs: Sequence[StackRunRecord] = (),
+    observations_by_id: Mapping[str, FrameObservation] | None = None,
+    electrons_per_adu: float | None = None,
+    noise_model_errors: Mapping[Any, NoiseModelError] | None = None,
+    fixed_pattern_history: Mapping[Any, Mapping[str, float]] | None = None,
+    target_id: str | None = None,
+    target_noise_ratio: float = TARGET_NOISE_RATIO,
 ) -> list[TargetStatement]:
     """Make the "take N more" statement of one capture setting.
 
     The new frames copy the setting's past frames. When the past frames were
     limited by read noise, the new frames use the exposure at which the sky
     dominates instead (plan section 6.4), and the reason says so.
+
+    The number comes from the model the forecast check used. When the newest
+    stack that holds the setting's frames was combined from exposure groups,
+    the groups are rebuilt from its stored rows and the take-more search places
+    the new frames the way the stacker would (`frames_to_cut_noise_in_groups`:
+    at least 5 frames of a new exposure length, a say when the heaviest group
+    would change). When the new frames would turn a single-group stack into a
+    group stack, the same search is used with the earlier group's frame noise
+    predicted. The stack's noise fixed-pattern noise is applied. When the
+    fixed-pattern noise makes up so much of the noise that more frames cannot
+    reach the target, the statement says so in place of a count.
 
     Parameters
     ----------
@@ -625,12 +940,33 @@ def _more_frames_for_setting(
         The stacker's configured weight mode.
     overheads : `CaptureOverheads`
         Download and settle times.
+    runs : `Sequence` [`StackRunRecord`], optional
+        The target's library stack runs, for the stack's groups and
+        fixed_pattern.
+    observations_by_id : `Mapping` [`str`, `FrameObservation`], optional
+        Every frame of the target by id (the stack may hold frames of other
+        settings).
+    electrons_per_adu : `float`, optional
+        The camera gain at the setting, for the frame noise of a new group.
+    noise_model_errors : `Mapping`, optional
+        The noise model's own error by capture setting group
+        (`read_noise_history`).
+    fixed_pattern_history : `Mapping`, optional
+        Other targets' fixed-pattern shares by setup (`read_noise_history`).
+        A target with no fixed-pattern noise of its own starts from their
+        median, and the statement says so (decision D23).
+    target_id : `str`, optional
+        The target, left out of its own borrowed median.
+    target_noise_ratio : `float`, optional
+        The noise after the new frames over the noise now. The default is one
+        doubling of the effective time; a depth goal passes the ratio that
+        reaches its depth.
 
     Returns
     -------
     statements : `list` [`TargetStatement`]
         One recommendation, or one ``insufficient_data`` statement saying
-        what is missing.
+        what is missing, or the fixed-pattern noise warning.
     """
     frames, used, problems = _stack_frames(observations)
     if len(frames) < MINIMUM_FRAMES_FOR_FORECAST:
@@ -646,7 +982,29 @@ def _more_frames_for_setting(
         [frame.exposure_seconds for frame in frames],
         is_spectral=frame_is_spectral({"filter": setting.filter_name}),
     )
-    if mode == WeightingMode.WFWHM and any(frame.star_width is None for frame in frames):
+    setting_runs, newest_run, run_groups, stack_frames = _stack_of_setting(
+        observations,
+        frames,
+        runs,
+        observations_by_id or {observation.frame_id: observation for observation in observations},
+        electrons_per_adu,
+    )
+    fixed_pattern = (
+        fixed_pattern_noise_for_runs(
+            setting_runs,
+            noise_model_error_for_setting(noise_model_errors, setting),
+            fixed_pattern_history,
+            target_id,
+        )
+        if setting_runs
+        else None
+    )
+    stack_is_groups = run_groups is not None and run_groups.is_group_stack
+    if (
+        mode == WeightingMode.WFWHM
+        and any(frame.star_width is None for frame in frames)
+        and not stack_is_groups
+    ):
         return [
             insufficient(
                 "more_frames",
@@ -674,19 +1032,121 @@ def _more_frames_for_setting(
                     "Check that the brightest star will not clip."
                 )
                 new_exposure = rounded
-    result = frames_to_cut_noise(frames, frames, mode, new_exposure_seconds=new_exposure)
+    # A single-group stack becomes a group stack when the new frames have an
+    # exposure length that is not the stack's: the stacker then makes a new
+    # group of them, and the flat model no longer describes the stack.
+    stack_lengths = [frame.exposure_seconds for frame in stack_frames]
+    becomes_group_stack = not stack_is_groups and (
+        len(
+            set(
+                fold_exposure_lengths([
+                    *stack_lengths,
+                    *([new_exposure] * MINIMUM_FRAMES_NEW_EXPOSURE_LENGTH),
+                ])
+            )
+        )
+        > 1
+    )
+    if stack_is_groups:
+        if run_groups is not None and run_groups.reason is not None:
+            return [insufficient("more_frames", run_groups.reason, setting)]
+        existing_groups = list(run_groups.groups) if run_groups is not None else []
+    elif becomes_group_stack:
+        if electrons_per_adu is None:
+            return [
+                insufficient(
+                    "more_frames",
+                    f"The new {new_exposure:g} s frames would make a new exposure group, and the "
+                    "camera's gain (electrons per ADU) is needed to predict its weight. The camera "
+                    "profile has no gain for this setting.",
+                    setting,
+                )
+            ]
+        existing_groups = [_single_group_of(stack_frames, electrons_per_adu)]
+    else:
+        existing_groups = []
+    if existing_groups:
+        result = frames_to_cut_noise_in_groups(
+            existing_groups,
+            frames,
+            new_exposure_seconds=new_exposure,
+            electrons_per_adu=electrons_per_adu,
+            fixed_pattern=fixed_pattern,
+            target_noise_ratio=target_noise_ratio,
+        )
+    else:
+        result = frames_to_cut_noise(
+            frames,
+            frames,
+            mode,
+            new_exposure_seconds=new_exposure,
+            fixed_pattern=fixed_pattern,
+            target_noise_ratio=target_noise_ratio,
+        )
     used_ids = {frame.frame_id for frame in frames}
     evidence = _references([
         row
         for row in rows
         if row.subject.subject_id in used_ids and row.metric in (SKY_RATE_METRIC, READ_NOISE_METRIC)
     ])
+    if (result.practical_limit_applied and not result.doubling_worthwhile) or (
+        result.fixed_pattern_limited and not result.practical_limit_applied
+    ):
+        fixed_pattern_evidence = (
+            [MeasurementReference(row_id=newest_run.noise_row_id)]
+            if newest_run is not None and newest_run.noise_row_id is not None
+            else []
+        )
+        return [fixed_pattern_limited_statement(result, setting, fixed_pattern_evidence)]
     statement = more_frames_statement(result, setting, overheads, evidence, exposure_note=note)
-    if statement is None or result.frames_needed is None or result.new_exposure_seconds is None:
+    frame_count = result.doubling_frames if result.practical_limit_applied else result.frames_needed
+    if statement is None or frame_count is None or result.new_exposure_seconds is None:
         return [
             insufficient("more_frames", result.reason or "The number of frames could not be found.", setting)
         ]
-    return [_with_full_wall_clock(statement, result.frames_needed, result.new_exposure_seconds, overheads)]
+    return [_with_full_wall_clock(statement, frame_count, result.new_exposure_seconds, overheads)]
+
+
+def _point_fixed_pattern_at_calibration(statements: Sequence[TargetStatement]) -> list[TargetStatement]:
+    """Tell a fixed-pattern statement the report has calibration advice.
+
+    The fixed-pattern noise statements end with "More frames will not remove
+    it." When the same report carries a ``calibration_gap`` statement for the
+    same capture setting, that sentence is replaced by a pointer to it, because
+    a missing flat or dark is a likely cause of fixed-pattern noise.
+
+    Parameters
+    ----------
+    statements : `Sequence` [`TargetStatement`]
+        All the report's statements.
+
+    Returns
+    -------
+    statements : `list` [`TargetStatement`]
+        The same statements; those that carry the fixed-pattern noise sentence
+        and have calibration advice for their setting say so.
+    """
+    calibration_settings = {
+        statement.capture_setting for statement in statements if statement.rule == CALIBRATION_RULE_NAME
+    }
+    pointed = []
+    for statement in statements:
+        if (
+            statement.capture_setting in calibration_settings
+            and FIXED_PATTERN_NOT_REMOVED_TEXT in statement.message
+        ):
+            statement = statement.model_copy(
+                update={
+                    "message": statement.message.replace(
+                        FIXED_PATTERN_NOT_REMOVED_TEXT, FIXED_PATTERN_CALIBRATION_TEXT
+                    ),
+                    "plain_message": statement.plain_message.replace(
+                        PLAIN_FIXED_PATTERN_NOT_REMOVED_TEXT, PLAIN_FIXED_PATTERN_CALIBRATION_TEXT
+                    ),
+                }
+            )
+        pointed.append(statement)
+    return pointed
 
 
 def _with_full_wall_clock(
@@ -752,6 +1212,9 @@ def _quality_statements_of_settings(
     contexts_for_overheads: Sequence[Any],
     forecast_checks: Sequence[ForecastCheck] = (),
     has_frame_weights: bool = True,
+    noise_model_errors: Mapping[Any, NoiseModelError] | None = None,
+    fixed_pattern_history: Mapping[Any, Mapping[str, float]] | None = None,
+    target_noise_ratio: float = TARGET_NOISE_RATIO,
 ) -> list[TargetStatement]:
     """Make the statements that are about the target's own stack and frames.
 
@@ -782,11 +1245,21 @@ def _quality_statements_of_settings(
     contexts_for_overheads : `Sequence` [`EkosSessionContext`]
         The stored Ekos session records, for the download times.
     forecast_checks : `Sequence` [`ForecastCheck`], optional
-        The target's own forecast checks. "Take N more" is shown only when one
-        came out as forecast (user decision U1, 2026-10-24).
+        The target's own forecast checks. The recommended additional frames are
+        shown only when one came out as forecast (user decision U1,
+        2026-10-24). When only a check made from frames already taken agreed,
+        the count is marked provisional (decision D11, 2026-10-26).
     has_frame_weights : `bool`, optional
         Whether the target has any ``stacking.frame_weight`` rows; when it
         has none, the "take N more" reason says to restack.
+    noise_model_errors : `Mapping`, optional
+        The noise model's own error by capture setting group
+        (`read_noise_history`).
+    fixed_pattern_history : `Mapping`, optional
+        Other targets' fixed-pattern shares by setup (`read_noise_history`).
+    target_noise_ratio : `float`, optional
+        The noise ratio the "take N more" search aims for (see
+        `_more_frames_for_setting`).
 
     Returns
     -------
@@ -799,6 +1272,7 @@ def _quality_statements_of_settings(
     altitudes = frame_altitudes(target)
     configured_weight = config.get_stack_weight() if hasattr(config, "get_stack_weight") else None
     stopped = False
+    frames_status = _recommended_additional_frames_status_from_checks(forecast_checks)
     signal = target_stop_signal(runs) if runs else None
     dominant = dominant_setting(observations)
     if signal is not None and signal.stopped:
@@ -825,6 +1299,8 @@ def _quality_statements_of_settings(
     by_setting: dict[CaptureSetting, list[FrameObservation]] = defaultdict(list)
     for observation in observations:
         by_setting[observation.capture_setting].append(observation)
+    observations_by_id = {observation.frame_id: observation for observation in observations}
+    accounts: dict[CaptureSetting, FixedPatternAccount] = {}
     for summary in summaries:
         setting = summary.capture_setting
         setting_observations = by_setting.get(setting, [])
@@ -832,14 +1308,48 @@ def _quality_statements_of_settings(
             overheads = estimate_capture_overheads(
                 contexts_for_overheads, setting.exposure_seconds, setting.filter_name
             )
-            if _forecast_gate_open(forecast_checks):
+            if frames_status != RecommendedAdditionalFramesStatus.NOT_CHECKED:
+                more_frames = _more_frames_for_setting(
+                    setting,
+                    setting_observations,
+                    target_rows.rows,
+                    configured_weight,
+                    overheads,
+                    runs=runs,
+                    observations_by_id=observations_by_id,
+                    electrons_per_adu=_camera_gain(config, setting),
+                    noise_model_errors=noise_model_errors,
+                    fixed_pattern_history=fixed_pattern_history,
+                    target_id=target.id,
+                    target_noise_ratio=target_noise_ratio,
+                )
                 statements.extend(
-                    _more_frames_for_setting(
-                        setting, setting_observations, target_rows.rows, configured_weight, overheads
-                    )
+                    _mark_provisional(more_frames)
+                    if frames_status == RecommendedAdditionalFramesStatus.PROVISIONAL
+                    else more_frames
                 )
             else:
-                statements.append(_more_frames_gate_statement(setting, forecast_checks, has_frame_weights))
+                statements.append(
+                    _more_frames_not_checked_statement(setting, forecast_checks, has_frame_weights)
+                )
+        setting_ids = {observation.frame_id for observation in setting_observations}
+        setting_runs = [run for run in runs if setting_ids & set(run.member_frame_ids)]
+        if setting_runs:
+            setting_fixed_pattern = fixed_pattern_noise_for_runs(
+                setting_runs, noise_model_error_for_setting(noise_model_errors, setting)
+            )
+            account = fixed_pattern_account_for_run(setting_runs[-1], setting_fixed_pattern)
+            if account is not None:
+                accounts[setting] = account
+                statements.extend(
+                    fixed_pattern_shape_statements(
+                        account,
+                        setting,
+                        [MeasurementReference(row_id=setting_runs[-1].noise_row_id)]
+                        if setting_runs[-1].noise_row_id is not None
+                        else [],
+                    )
+                )
         frames, used, _problems = _stack_frames(setting_observations)
         widths = [_width_row_value(target_rows.rows, observation.frame_id) for observation in used]
         if frames and all(width is not None for width in widths):
@@ -848,7 +1358,33 @@ def _quality_statements_of_settings(
                 [frame.exposure_seconds for frame in frames],
                 is_spectral=frame_is_spectral({"filter": setting.filter_name}),
             )
-            tradeoff = find_sharpness_tradeoff(frames, [float(w) for w in widths if w is not None], mode)
+            width_values = [float(w) for w in widths if w is not None]
+            tradeoff = find_sharpness_tradeoff(frames, width_values, mode)
+            _, _, run_groups, _ = _stack_of_setting(
+                setting_observations, frames, runs, observations_by_id, None
+            )
+            if run_groups is not None and run_groups.is_group_stack and run_groups.reason is None:
+                # The stack was combined from exposure groups: the other
+                # groups dilute the change, so it is worked out on the stack.
+                setting_ids = {frame.frame_id for frame in frames}
+                position = next(
+                    (
+                        index
+                        for index, group in enumerate(run_groups.groups)
+                        if setting_ids & {frame.frame_id for frame in group.frames}
+                    ),
+                    None,
+                )
+                tradeoff = None
+                if position is not None:
+                    group_widths = [
+                        _width_row_value(target_rows.rows, frame.frame_id)
+                        for frame in run_groups.groups[position].frames
+                    ]
+                    if all(width is not None for width in group_widths):
+                        tradeoff = find_sharpness_tradeoff_in_groups(
+                            run_groups.groups, position, [float(w) for w in group_widths if w is not None]
+                        )
             if tradeoff is not None:
                 statements.append(
                     sharpness_statement(
@@ -889,7 +1425,62 @@ def _quality_statements_of_settings(
         cost = find_altitude_cost(samples)
         if cost is not None:
             statements.append(altitude_cost_statement(cost, setting, _references(evidence_rows)))
-    return statements
+    return _add_fixed_pattern_accounts(statements, accounts)
+
+
+FIXED_PATTERN_CAUSE_RULES = frozenset({"more_frames", "more_frames_will_not_help"})
+"""The statements that carry the fixed-pattern cause code in their values."""
+
+
+def _add_fixed_pattern_accounts(
+    statements: Sequence[TargetStatement], accounts: Mapping[CaptureSetting, FixedPatternAccount]
+) -> list[TargetStatement]:
+    """Put where the fixed pattern is, and why, into its statements.
+
+    The fixed-pattern noise statements ("take N more" with a diminishing
+    return, and "more frames will not help") carry `FIXED_PATTERN_CAUSE_TEXT`.
+    For a setting whose stack has a fixed-pattern account, its sentences follow
+    that text in the message and are added to the reason, so the statement
+    names the shape that was found and what the master flat and dark explain,
+    in place of only saying the cause is probably the flats or calibration
+    (decisions D21 and D22). The "take N more" and "will not help"
+    statements of a setting with an account also carry the cause code
+    (`fixed_pattern_cause`) in ``values["fixed_pattern_cause"]``.
+
+    Parameters
+    ----------
+    statements : `Sequence` [`TargetStatement`]
+        The statements made so far.
+    accounts : `Mapping`
+        The fixed-pattern account of each setting that has one.
+
+    Returns
+    -------
+    statements : `list` [`TargetStatement`]
+        The same statements; those with the cause text and an account have the
+        account's sentences added.
+    """
+    updated = []
+    for statement in statements:
+        account = accounts.get(statement.capture_setting) if statement.capture_setting is not None else None
+        if account is not None and statement.rule in FIXED_PATTERN_CAUSE_RULES:
+            # The depth goal reads this code to say why frames will not help.
+            statement = statement.model_copy(
+                update={
+                    "values": {**statement.values, "fixed_pattern_cause": fixed_pattern_cause(account).value}
+                }
+            )
+        if account is not None and account.text and FIXED_PATTERN_CAUSE_TEXT in statement.message:
+            statement = statement.model_copy(
+                update={
+                    "message": statement.message.replace(
+                        FIXED_PATTERN_CAUSE_TEXT, f"{FIXED_PATTERN_CAUSE_TEXT} {account.text}"
+                    ),
+                    "reason": f"{statement.reason} {account.text}".strip(),
+                }
+            )
+        updated.append(statement)
+    return updated
 
 
 def _width_row_value(rows: Sequence[QualityMeasurement], frame_id: str) -> float | None:
@@ -1285,7 +1876,7 @@ def _clipping_note(camera_name: str, config: Any, goal: ScienceGoal) -> str:
         profile = resolve_camera_profile(camera_name, config)
     except AstrometricsError:
         return note + " The camera's saturation limits are not known."
-    clip, saturation = profile.clip_ceiling_adu, profile.saturation_threshold_adu
+    clip, saturation = profile.clip_ceiling_adu, profile.pixel_saturation_level_adu
     note += (
         f" The camera's pixels top out at {clip.value:.0f} ADU ({_provenance_text(clip)}); a raw frame "
         f"counts a pixel as saturated at or above {saturation.value:.0f} ADU "
@@ -1293,7 +1884,8 @@ def _clipping_note(camera_name: str, config: Any, goal: ScienceGoal) -> str:
     )
     if not profile.saturation_threshold_can_be_reached:
         note += (
-            " The threshold is above the ceiling, so no pixel can reach it and saturation would go unseen."
+            " The profile's own saturation threshold is above the ceiling, so no pixel could reach it; "
+            "the ceiling is used instead."
         )
     linearity = profile.photometric_linearity_limit_adu
     if linearity is not None:
@@ -1468,6 +2060,7 @@ def build_target_dataset_report(
     butler: Any,
     config: Any,
     at: datetime | None = None,
+    target_noise_ratio: float = TARGET_NOISE_RATIO,
 ) -> TargetDatasetReport:
     """Build the report on one target's data.
 
@@ -1486,6 +2079,10 @@ def build_target_dataset_report(
     at : `datetime`, optional
         The time the report is for. Used only by the starting point.
         Defaults to now.
+    target_noise_ratio : `float`, optional
+        The noise after the recommended additional frames over the noise now.
+        The default is one doubling of the effective time. The depth goal
+        passes the ratio that reaches its depth.
 
     Returns
     -------
@@ -1494,11 +2091,7 @@ def build_target_dataset_report(
         need attention, the starting point when there are no frames, the
         forecast checks and the science outcomes. Nothing is stored.
     """
-    from wayfindinglib.analytics.result_quality.forecast import (
-        PINNED_STACK_METRICS,
-        forecast_check,
-        stack_runs_from_measurements,
-    )
+    from wayfindinglib.analytics.result_quality.forecast import PINNED_STACK_METRICS, forecast_check
 
     now = at or datetime.now(UTC)
     target_rows = read_target_rows(astrometrics, target.id)
@@ -1536,7 +2129,13 @@ def build_target_dataset_report(
                 metric=metric, target_id=target.id, library_only=True, latest_only=False
             )
         )
-    runs = stack_runs_from_measurements(stack_rows)
+    # The calibration of each run is not a measurement row; it is a record of
+    # master file identities. A run with none counts as confounded.
+    all_runs = read_forecast_runs(astrometrics, target.id, stack_rows)
+    # The earlier-nights subset runs serve only the forecast check. The stop
+    # signal, the fixed-pattern noise and the stack map read the library runs
+    # alone.
+    runs = library_runs(all_runs)
     newest_members: dict[str, list[str]] = {}
     for run in runs:
         newest_members[run.stack_subject_id] = run.member_frame_ids
@@ -1565,7 +2164,11 @@ def build_target_dataset_report(
     # Summaries, one group of settings for each science goal.
     moonless = context.moonless_sky_rates(observations)
     weight_seconds = _weight_effective_seconds(rows, stack_setting_by_subject, target_rows.settings)
-    checks = _measured_noise_checks(rows, stack_setting_by_subject, target_rows.settings)
+    noise_history = read_noise_history(astrometrics)
+    noise_model_errors = noise_history.model_errors
+    checks = _measured_noise_checks(
+        rows, stack_setting_by_subject, target_rows.settings, runs, noise_model_errors
+    )
     summaries = []
     for group_goal, group in group_by_goal(
         observations, lambda observation: observation.capture_setting, goal_for_setting
@@ -1633,8 +2236,17 @@ def build_target_dataset_report(
     contexts = butler.get_all("ekos_session_context")
     # The checks come first: "take N more" waits for one that agreed (U1).
     forecast_checks: list[ForecastCheck] = (
-        forecast_check(runs, observations, configured_stack_weight=configured_weight)
-        if len(runs) >= 2
+        forecast_check(
+            all_runs,
+            observations,
+            configured_stack_weight=configured_weight,
+            electrons_per_adu=(
+                _camera_gain(config, dominant_setting(observations))
+                if dominant_setting(observations)
+                else None
+            ),
+        )
+        if len(runs) >= 2 or len(all_runs) > len(runs)
         else []
     )
     statements.extend(
@@ -1651,9 +2263,13 @@ def build_target_dataset_report(
             contexts,
             forecast_checks,
             has_frame_weights=any(row.metric == FRAME_WEIGHT_METRIC for row in stack_rows),
+            noise_model_errors=noise_model_errors,
+            fixed_pattern_history=noise_history.fixed_pattern_shares,
+            target_noise_ratio=target_noise_ratio,
         )
     )
     statements.extend(_calibration_statements(target, summaries, observations, astrometrics, rows))
+    statements = _point_fixed_pattern_at_calibration(statements)
     has_photometry = any(row.metric.startswith("photometry.") for row in rows)
     goals_in_use = {summary.science_goal for summary in summaries} or {target_goal}
     statements.extend(_natural_goal_statements(goals_in_use, rows, has_photometry))

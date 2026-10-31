@@ -196,8 +196,9 @@ def compute_stack_saturated_pixel_fraction(data: np.ndarray, region: np.ndarray 
 def resolve_saturation_threshold(camera_name: str | None) -> tuple[float, str]:
     """Find the level at which this camera's pixels count as saturated.
 
-    The level is the camera profile's saturation threshold. A profile can
-    list a threshold above the value a clipped pixel actually reaches (its
+    The level is the camera profile's `pixel_saturation_level_adu`: its
+    saturation threshold, capped at the clip ceiling. A profile can list a
+    threshold above the value a clipped pixel actually reaches (its
     clip ceiling), which would make saturation impossible to detect. In that
     case the clip ceiling is used instead, and the source text says so. The
     default `SATURATION_ADU` is used only when no profile can be read.
@@ -222,17 +223,16 @@ def resolve_saturation_threshold(camera_name: str | None) -> tuple[float, str]:
         return float(
             SATURATION_ADU
         ), f"default {SATURATION_ADU:g} ADU (no camera profile could be read: {error})"
-    threshold = float(profile.saturation_threshold_adu.value)
+    threshold = float(profile.pixel_saturation_level_adu.value)
     if profile.is_generic_fallback:
         return (
             threshold,
             f"generic fallback camera profile, {threshold:g} ADU (camera {camera_name!r} is not listed)",
         )
-    ceiling = float(profile.clip_ceiling_adu.value)
     if not profile.saturation_threshold_can_be_reached:
-        return ceiling, (
-            f"{profile.camera_name} profile clip ceiling, {ceiling:g} ADU "
-            f"(its saturation threshold of {threshold:g} ADU is above the ceiling and no pixel can reach it)"
+        return threshold, (
+            f"{profile.camera_name} profile clip ceiling, {threshold:g} ADU "
+            "(its saturation threshold is above the ceiling and no pixel can reach it)"
         )
     return threshold, f"{profile.camera_name} profile saturation threshold, {threshold:g} ADU"
 

@@ -293,8 +293,8 @@ export interface ActionRegistry {
     "processing:active_jobs": { payload: Record<string, never>; response: ProcessingJob[] };
     "processing:record_frame_measurements": { payload: { target_id: string; limit?: number }; response: { started: boolean; target_id: string } };
     // Stack some of a target's frames apart from its library stack and measure the noise of each result.
-    "processing:measure_half_difference_noise": { payload: { target_id: string }; response: { started: boolean; target_id: string } };
-    "processing:measure_noise_growth": { payload: { target_id: string; maximum_steps?: number; include_night_contributions?: boolean; include_half_difference?: boolean }; response: { started: boolean; target_id: string } };
+    "processing:measure_odd_even_difference_noise": { payload: { target_id: string }; response: { started: boolean; target_id: string } };
+    "processing:measure_noise_growth": { payload: { target_id: string; maximum_steps?: number; include_night_contributions?: boolean; include_odd_even_difference?: boolean }; response: { started: boolean; target_id: string } };
     "processing:measure_night_contributions": { payload: { target_id: string }; response: { started: boolean; target_id: string } };
     "processing:job_log_tail": { payload: { job_id: string; lines?: number }; response: string[] };
 
@@ -366,6 +366,8 @@ export interface ActionRegistry {
     "advisory:target_report": { payload: { target: string }; response: import('../types/backendTypes').TargetDatasetReport };
     "advisory:tonight": { payload: { at?: string }; response: import('../types/backendTypes').TonightRanking };
     "advisory:result": { payload: { target: string; object_id: string }; response: import('../types/backendTypes').TargetStatement[] };
+    "advisory:depth_goal": { payload: { target: string }; response: import('../types/backendTypes').DepthGoalStatus };
+    "advisory:set_depth_goal": { payload: { target: string; level: 'quick_look' | 'good' | 'deep' }; response: import('../types/backendTypes').DepthGoalStatus };
     "history:nights": { payload: { limit?: number }; response: import('../types/backendTypes').NightListEntry[] };
     "history:night_quality": { payload: { session_id: string }; response: import('../types/backendTypes').NightQuality };
     "history:target_changes": { payload: { session_id?: string; limit?: number }; response: import('../types/backendTypes').TargetChange[] };
@@ -524,6 +526,7 @@ const IDEMPOTENT_READ_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
     'advisory:target_report',
     'advisory:tonight',
     'advisory:result',
+    'advisory:depth_goal',
     'history:nights',
     'history:night_quality',
     'history:target_changes',

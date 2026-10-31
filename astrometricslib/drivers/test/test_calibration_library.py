@@ -1,7 +1,7 @@
 """Purpose: Unit tests for CalibrationLibrary and its compatibility checks.
 
 Description: Verifies addition of dark, bias, and flat calibration frames,
-their recording behavior, and the gain/exposure compatibility checks
+their recording behavior, and the dark temperature compatibility check
 used to flag a mismatched calibration master.
 """
 
@@ -13,8 +13,6 @@ from astropy.io import fits
 
 from astrometricslib.drivers.calibration_library import (
     CalibrationLibrary,
-    is_calibration_gain_compatible,
-    is_dark_calibration_metadata_compatible,
     is_dark_calibration_temperature_compatible,
 )
 
@@ -57,59 +55,6 @@ def test_add_flat_frames(tmp_path: Path) -> None:
         _make_small_fits(p)
         calibration_frames.add_flat_frame(p)
     calibration_frames.save_library()
-
-
-def test_calibration_gain_compatible_matches() -> None:
-    """Verify matching gain values are compatible."""
-    assert is_calibration_gain_compatible(light_gain="100", master_gain="100")
-
-
-def test_calibration_gain_incompatible_on_mismatch() -> None:
-    """Verify any gain mismatch is flagged, independent of calibration type."""
-    assert not is_calibration_gain_compatible(light_gain="100", master_gain="200")
-
-
-def test_dark_calibration_metadata_compatible_matches_within_tolerance() -> None:
-    """Verify a small exposure difference at matching gain is accepted."""
-    assert is_dark_calibration_metadata_compatible(
-        light_exposure=120.0, light_gain="100", master_exposure=120.5, master_gain="100"
-    )
-
-
-def test_dark_calibration_metadata_incompatible_on_gain_mismatch() -> None:
-    """Verify any gain mismatch is flagged regardless of exposure match."""
-    assert not is_dark_calibration_metadata_compatible(
-        light_exposure=120.0, light_gain="100", master_exposure=120.0, master_gain="200"
-    )
-
-
-def test_dark_calibration_metadata_incompatible_beyond_exposure_tolerance() -> None:
-    """Verify a dark's exposure difference beyond tolerance is flagged.
-
-    Even at otherwise matching gain.
-    """
-    assert not is_dark_calibration_metadata_compatible(
-        light_exposure=120.0,
-        light_gain="100",
-        master_exposure=125.0,
-        master_gain="100",
-        exposure_tolerance_seconds=1.0,
-    )
-
-
-def test_dark_calibration_metadata_compatible_ignores_bias_like_short_exposure_only_via_gain_check() -> None:
-    """Verify bias/flat-style short exposures flag incompatible for darks.
-
-    This documents why bias/flat masters must use
-    is_calibration_gain_compatible instead -- a bias master's
-    near-zero exposure would always fail the dark-specific exposure
-    tolerance against a real light exposure, which is expected and
-    correct for darks but would be a false positive if applied to
-    bias/flat masters.
-    """
-    assert not is_dark_calibration_metadata_compatible(
-        light_exposure=30.0, light_gain="0", master_exposure=3.2e-05, master_gain="0"
-    )
 
 
 # ---- dark master sensor temperature ---------------------------------------
@@ -330,15 +275,6 @@ def test_a_library_saved_before_offset_existed_still_works(tmp_path: Path) -> No
     assert library.get_dark_frames(camera=CAMERA, exposure=0.5, iso="0.0", offset="0") == [old]
 
 
-def test_offset_compatibility_treats_a_missing_offset_as_zero() -> None:
-    """Equal offsets match, different ones do not, and unknown means zero."""
-    from astrometricslib.drivers.calibration_library import is_calibration_offset_compatible
-
-    assert is_calibration_offset_compatible("30", 30.0)
-    assert is_calibration_offset_compatible(None, "0")
-    assert not is_calibration_offset_compatible("30", "0")
-
-
 def test_stats_report_the_offset(tmp_path: Path) -> None:
     """The summary lists gain and offset separately."""
     library = _library(tmp_path)
@@ -378,13 +314,6 @@ def test_a_partial_camera_name_still_matches_as_before() -> None:
     library = CalibrationLibrary()
     filed = {"ZWO ASI 533MM Pro": {"0": ["dark.fits"]}, "Nikon DSLR DSC D5300": {"800": ["x.fits"]}}
     assert library._get_camera_dict(filed, "ASI 533") == {"0": ["dark.fits"]}
-
-
-def test_calibration_gain_compatibility_compares_numbers_not_text() -> None:
-    """A master written as 800.0 calibrates lights recorded as 800."""
-    assert is_calibration_gain_compatible("800", "800.0")
-    assert is_calibration_gain_compatible("0.0", "0")
-    assert not is_calibration_gain_compatible("100", "800.0")
 
 
 def test_a_frame_listed_twice_is_returned_once(tmp_path: Path) -> None:

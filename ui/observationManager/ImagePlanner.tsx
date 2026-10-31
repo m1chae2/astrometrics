@@ -1,11 +1,14 @@
 /**
  * @file ImagePlanner.tsx
  * @description The Image Planner panel: choose frame type, count, filter, exposure and delay, add the
- * row to the package's list, or take one test image. Test image is a device command, so the
+ * row to the package's list, or take one test image. The filter list is the observatory's configured
+ * filters, shown by their short names (L, SPEC). Test image is a device command, so the
  * parent can grey it (with a visible reason) while Ekos controls the equipment.
  */
 import React, { useState, useEffect } from 'react';
 import { PlanItem } from './context/PlanningContext';
+import { filterLabel } from './packageModel';
+import { FilterType } from '../common/types/backendTypes';
 import { InfoButton } from '../common/components/InfoButton';
 import { ControlColumn, ParameterRow } from '../common/components/ControlLayoutComponents';
 import '../common/styles/panels.css';
@@ -28,6 +31,11 @@ interface ImagePlannerProps {
     onChange?: (values: ImageConfig) => void;
     /** Why Test image is unavailable (shown beside the button), or null when it may run. Omit for always available. */
     testImageUnavailableReason?: string | null;
+    /**
+     * The observatory's filters as the library names them (`system:filters`), such as "Luminance" or
+     * "Star Analyzer 200". Each is shown by its short name. Empty shows only "None" and a hint.
+     */
+    filterOptions?: string[];
 }
 
 /**
@@ -43,6 +51,7 @@ export const ImagePlanner: React.FC<ImagePlannerProps> = ({
     values,
     onChange,
     testImageUnavailableReason = null,
+    filterOptions = [],
 }) => {
     // Local state for independent usage or edit mode
     const [localType, setLocalType] = useState('Light');
@@ -59,6 +68,11 @@ export const ImagePlanner: React.FC<ImagePlannerProps> = ({
     const exposure = (!isEditing && values?.exposure !== undefined) ? values.exposure : localExposure;
     const filter = (!isEditing && values?.filter !== undefined) ? values.filter : localFilter;
     const delay = (!isEditing && values?.delay !== undefined) ? values.delay : localDelay;
+
+    // The configured filters, plus the row's own filter when it is not among them (an older row), so
+    // editing never silently changes a row's filter. With none configured, only "None" is offered.
+    const baseFilters = filterOptions.length > 0 ? filterOptions : [FilterType.NONE];
+    const shownFilters = filter && !baseFilters.includes(filter) ? [...baseFilters, filter] : baseFilters;
 
     useEffect(() => {
         if (editingItem) {
@@ -153,15 +167,12 @@ export const ImagePlanner: React.FC<ImagePlannerProps> = ({
                         <select
                             className="dropdown"
                             value={filter}
+                            aria-label="Filter"
                             onChange={(e) => update({ filter: e.target.value })}
                         >
-                            <option value="L">L</option>
-                            <option value="R">R</option>
-                            <option value="G">G</option>
-                            <option value="B">B</option>
-                            <option value="Ha">Ha</option>
-                            <option value="OIII">OIII</option>
-                            <option value="SII">SII</option>
+                            {shownFilters.map((value) => (
+                                <option key={value} value={value}>{filterLabel(value)}</option>
+                            ))}
                         </select>
                     </ParameterRow>
 
@@ -187,6 +198,9 @@ export const ImagePlanner: React.FC<ImagePlannerProps> = ({
                     </ParameterRow>
                 </div>
             </ControlColumn>
+            {filterOptions.length === 0 && (
+                <p className="image-planner__hint">No filters set. Add them in Settings, Observatory, Filters.</p>
+            )}
 
             <div className="image-planner__actions">
                 {isEditing ? (

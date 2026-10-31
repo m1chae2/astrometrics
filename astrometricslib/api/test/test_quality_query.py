@@ -16,6 +16,7 @@ from astrometricslib import Astrometrics
 from astrometricslib.api.quality import QualityRecords
 from astrometricslib.drivers.quality_store import QualityStore, quality_database_path
 from astrometricslib.foundation.errors import InvalidArgumentError
+from astrometricslib.models.quality.calibration_identities import CalibrationIdentities
 from astrometricslib.models.quality.capture_setting import CaptureSetting
 from astrometricslib.models.quality.measurement import (
     MeasurementOrigin,
@@ -100,6 +101,21 @@ def test_capture_settings_read_by_id(quality: QualityRecords, tmp_path: Path) ->
     only_first = quality.capture_settings([first, 9999])
     assert list(only_first) == [first]
     assert only_first[first].camera == "ASI533MM"
+
+
+def test_calibration_identities_read_by_run_and_target(quality: QualityRecords, tmp_path: Path) -> None:
+    """The reader returns records by run id and target; no file is created."""
+    assert quality.calibration_identities() == []
+    assert list(tmp_path.iterdir()) == []
+
+    store = QualityStore(str(tmp_path / "astrometrics.db"))
+    for run_id, target_id in (("run-1", "M31"), ("run-2", "M13")):
+        store.write_calibration_identities(
+            CalibrationIdentities(run_id=run_id, subject_id=f"{target_id}/stack.fits", target_id=target_id)
+        )
+
+    assert [record.run_id for record in quality.calibration_identities(run_ids=["run-2"])] == ["run-2"]
+    assert [record.target_id for record in quality.calibration_identities(target_id="M31")] == ["M31"]
 
 
 def test_stored_measurements_come_back_filtered(quality: QualityRecords, tmp_path: Path) -> None:
@@ -275,3 +291,24 @@ def test_resolve_rows_gives_frame_and_stack_paths_and_reasons(tmp_path: Path) ->
     assert "not in the target's frame list" in by_subject["M31/scope/cam/z.fits"].reason
     assert by_subject["run-1"].path is None
     assert next(row.row_id for row in result.rows) == ids["run-1"]
+
+
+def test_the_aperture_set_identity_row_is_read_back_through_the_public_query(
+    quality: QualityRecords, tmp_path: Path
+) -> None:
+    """A stored identity row is read back and turned into its text."""
+    from astrometricslib import aperture_identity_from_number, aperture_identity_to_number
+
+    store = QualityStore(str(tmp_path / "astrometrics.db"))
+    subject = QualitySubject(level=SubjectLevel.STACK, subject_id="M13/M13_Stacked.fits", target_id="M13")
+    store.write_measurements([
+        _measurement(
+            "run-1",
+            BASE_TIME,
+            metric="stacking.aperture_set_number",
+            subject=subject,
+            value=aperture_identity_to_number("v3-156104df543d"),
+        )
+    ])
+    rows = quality.query(metric="stacking.aperture_set_number", target_id="M13", library_only=True)
+    assert [aperture_identity_from_number(row.value) for row in rows] == ["v3-156104df543d"]

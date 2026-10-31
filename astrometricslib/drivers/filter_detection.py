@@ -32,6 +32,7 @@ def get_filter_type(header: dict) -> FilterType:
         "HA": FilterType.Ha,
         "OIII": FilterType.OIII,
         "SII": FilterType.SII,
+        "LUMINANCE": FilterType.L,
         "RED": FilterType.R,
         "GREEN": FilterType.G,
         "BLUE": FilterType.B,

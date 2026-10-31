@@ -9,6 +9,7 @@ into an image that is closer to the truth than an equal-weight average,
 leaves out saturated pixels, and rejects nonsense input.
 """
 
+import math
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -28,12 +29,12 @@ from astrometricslib.pipelines.stacking.processing.exposure_groups import (
     combine_exposure_group_images,
     describe_group_clipping,
     estimate_background_noise,
-    estimate_group_gains,
     estimate_saturation_mask_level,
     frame_exposure_seconds,
-    group_frame_noises,
+    group_weight,
     measure_frame_noise,
     measure_group_frames,
+    measure_group_gains,
     merge_registration_sequences,
     merge_rejection_maps,
     representative_exposure_frames,
@@ -56,6 +57,17 @@ def _frames(*exposures: object) -> list[SimpleNamespace]:
     return [
         SimpleNamespace(name=f"frame_{index}", exposure=exposure) for index, exposure in enumerate(exposures)
     ]
+
+
+def _group_gains(per_second_images: list, usable_masks: list, reference_index: int) -> list[float]:
+    """Measure the gains of the groups and keep only the gain numbers.
+
+    Returns
+    -------
+    gains : `list` [`float`]
+        The gain of each group against the reference group.
+    """
+    return [m.gain for m in measure_group_gains(per_second_images, usable_masks, reference_index)]
 
 
 def test_exposure_is_read_from_strings_numbers_and_dictionaries() -> None:
@@ -175,6 +187,57 @@ def test_the_noise_estimate_ignores_a_smooth_gradient() -> None:
     assert estimate_background_noise(image) == pytest.approx(0.01, rel=0.05)
 
 
+def _stepped_noise_image(
+    sigma: float,
+    step: int,
+    seed: int,
+    shape: tuple[int, int] = (600, 600),
+) -> np.ndarray:
+    """Make a sky of Gaussian noise stored in whole steps of `step` counts.
+
+    Returns
+    -------
+    image : `numpy.ndarray`
+        The noisy image, every value a multiple of `step`.
+    """
+    values = np.random.default_rng(seed).normal(1000.0, sigma, shape)
+    return np.round(values / step) * step
+
+
+@pytest.mark.parametrize("step", [1, 4])
+@pytest.mark.parametrize("sigma", [8.0, 16.0, 40.0])
+def test_the_noise_estimate_is_fine_grained_on_stepped_data(sigma: float, step: int) -> None:
+    """Noise stored in steps of 1 or 4 counts is recovered within 3%.
+
+    The rounding to steps adds its own noise of step/sqrt(12), which a real
+    sensor also has, so the expected value includes it.
+    """
+    expected = math.sqrt(sigma**2 + step**2 / 12.0)
+    estimates = [estimate_background_noise(_stepped_noise_image(sigma, step, seed)) for seed in range(5)]
+
+    assert np.mean(estimates) == pytest.approx(expected, rel=0.03)
+    assert np.std(estimates) / expected < 0.01
+
+
+def test_two_noise_levels_five_percent_apart_are_told_apart_at_step_four() -> None:
+    """The old estimate was stuck on multiples of 4; the new one is not."""
+    quiet = estimate_background_noise(_stepped_noise_image(30.0, 4, 11))
+    louder = estimate_background_noise(_stepped_noise_image(31.5, 4, 12))
+
+    assert louder / quiet == pytest.approx(1.05, abs=0.02)
+    assert louder > quiet * 1.02
+
+
+def test_the_noise_estimate_survives_stars_and_a_gradient_on_stepped_data() -> None:
+    """Stars and a gradient move the stepped-data estimate by under 4%."""
+    image = _stepped_noise_image(20.0, 4, 13, (500, 500)) + np.linspace(0, 400, 500)[None, :]
+    for row, column in ((60, 70), (200, 300), (400, 120), (320, 440)):
+        image[row - 4 : row + 5, column - 4 : column + 5] += 8000.0
+    image = np.round(image / 4) * 4
+
+    assert estimate_background_noise(image) == pytest.approx(math.sqrt(20.0**2 + 16 / 12), rel=0.04)
+
+
 def _bracketed_images(read_noise: float) -> tuple[np.ndarray, list[np.ndarray], list[float]]:
     """Build the same sky at 0.5 s and 5 s with the same camera noise.
 
@@ -197,7 +260,7 @@ def test_combined_image_is_closer_to_the_truth_than_an_equal_weight_average() ->
     signal, images, exposures = _bracketed_images(read_noise=0.01)
     mean_exposure = float(np.mean(exposures))
 
-    combined = combine_exposure_group_images(images, exposures) / mean_exposure
+    combined = combine_exposure_group_images(images, exposures).image / mean_exposure
     equal_weight = np.mean(
         [image / exposure for image, exposure in zip(images, exposures, strict=True)], axis=0
     )
@@ -212,7 +275,7 @@ def test_output_is_scaled_to_the_mean_exposure_per_frame() -> None:
     """The result is comparable in brightness with a normal stack."""
     signal, images, exposures = _bracketed_images(read_noise=0.001)
 
-    combined = combine_exposure_group_images(images, exposures, frame_counts=[60, 20])
+    combined = combine_exposure_group_images(images, exposures, frame_counts=[60, 20]).image
 
     expected_mean_exposure = (60 * 0.5 + 20 * 5.0) / 80
     assert float(np.mean(combined)) == pytest.approx(
@@ -229,7 +292,7 @@ def test_a_saturated_group_is_left_out_where_it_is_saturated() -> None:
     long[30, 30] = 1.0  # clipped at the top of the range
     short[30, 30] = 0.04  # the short frame measured it properly
 
-    combined = combine_exposure_group_images([short, long], [0.5, 5.0])
+    combined = combine_exposure_group_images([short, long], [0.5, 5.0]).image
 
     mean_exposure = 2.75
     # The brightness scale of the groups is measured from the noisy mid-range
@@ -246,7 +309,7 @@ def test_a_pixel_saturated_in_every_group_uses_the_shortest_exposure() -> None:
     short[5, 5] = 0.99
     long[5, 5] = 1.0
 
-    combined = combine_exposure_group_images([short, long], [0.5, 5.0])
+    combined = combine_exposure_group_images([short, long], [0.5, 5.0]).image
 
     assert combined[5, 5] == pytest.approx(0.99 / 0.5 * 2.75, rel=1e-4)
 
@@ -358,7 +421,7 @@ def test_a_clipped_group_takes_the_noise_of_the_cleanest_group(tmp_path: Path) -
     clean_quiet = ExposureGroup(2.0, _write_raw_frames(tmp_path, 3, mean=60.0, noise=6.0, seed=4))
     clean_noisy = ExposureGroup(5.0, _write_raw_frames(tmp_path, 3, mean=100.0, noise=9.0, seed=5))
 
-    noises = group_frame_noises([clipped, clean_quiet, clean_noisy])
+    noises = measure_group_frames([clipped, clean_quiet, clean_noisy])[0]
 
     assert noises[1] == pytest.approx(6.0, rel=0.15)
     assert noises[2] == pytest.approx(9.0, rel=0.15)
@@ -372,7 +435,7 @@ def test_when_every_group_is_clipped_all_groups_get_the_same_noise(tmp_path: Pat
         ExposureGroup(1.0, _write_raw_frames(tmp_path, 2, mean=2.0, noise=8.0, seed=7)),
     ]
 
-    assert group_frame_noises(groups) == [1.0, 1.0]
+    assert measure_group_frames(groups)[0] == [1.0, 1.0]
 
 
 def test_a_frame_that_cannot_be_read_raises_an_os_error(tmp_path: Path) -> None:
@@ -381,9 +444,9 @@ def test_a_frame_that_cannot_be_read_raises_an_os_error(tmp_path: Path) -> None:
     pathless = ExposureGroup(1.0, [SimpleNamespace()])
 
     with pytest.raises(OSError):
-        group_frame_noises([missing])
+        measure_group_frames([missing])[0]
     with pytest.raises(OSError, match="no file path"):
-        group_frame_noises([pathless])
+        measure_group_frames([pathless])[0]
 
 
 def test_frame_noise_weights_are_frames_times_exposure_squared() -> None:
@@ -392,7 +455,9 @@ def test_frame_noise_weights_are_frames_times_exposure_squared() -> None:
     short = 0.05 * 0.5 + generator.normal(0.0, 0.001, (80, 80))
     long = 0.05 * 5.0 + generator.normal(0.0, 0.001, (80, 80))
 
-    combined = combine_exposure_group_images([short, long], [0.5, 5.0], [60, 20], frame_noises=[1.0, 1.0])
+    combined = combine_exposure_group_images(
+        [short, long], [0.5, 5.0], [60, 20], frame_noises=[1.0, 1.0]
+    ).image
 
     long_weight, short_weight = 20 * 5.0**2, 60 * 0.5**2
     expected_per_second = (short_weight * 0.05 + long_weight * 0.05) / (short_weight + long_weight)
@@ -488,7 +553,7 @@ def test_group_gains_recover_the_scale_each_stack_was_given() -> None:
     per_second = [truth * 1.0, truth * 0.7 + generator.normal(0, 0.0002, truth.shape), truth * 1.2]
     usable = [np.ones(truth.shape, dtype=bool)] * 3
 
-    gains = estimate_group_gains(per_second, usable, reference_index=0)
+    gains = _group_gains(per_second, usable, reference_index=0)
 
     assert gains == pytest.approx([1.0, 0.7, 1.2], rel=0.02)
 
@@ -497,7 +562,7 @@ def test_too_few_bright_shared_pixels_leave_the_gain_at_one() -> None:
     """A tiny image is not enough to measure a gain from."""
     small = np.random.default_rng(14).uniform(0.1, 1.0, (10, 10))
 
-    assert estimate_group_gains([small, small * 0.5], [np.ones(small.shape, bool)] * 2, 0) == [1.0, 1.0]
+    assert _group_gains([small, small * 0.5], [np.ones(small.shape, bool)] * 2, 0) == [1.0, 1.0]
 
 
 def test_a_different_sky_does_not_pass_for_a_gain() -> None:
@@ -513,7 +578,7 @@ def test_a_different_sky_does_not_pass_for_a_gain() -> None:
     brighter_night = 0.10 + 1.4 * stars + np.random.default_rng(32).normal(0, 0.0002, stars.shape)
     usable = [np.ones(stars.shape, dtype=bool)] * 2
 
-    gains = estimate_group_gains([reference, brighter_night], usable, reference_index=0)
+    gains = _group_gains([reference, brighter_night], usable, reference_index=0)
 
     assert gains[1] == pytest.approx(1.4, rel=0.01)
 
@@ -525,7 +590,7 @@ def test_combining_groups_of_different_sky_keeps_star_fluxes_and_one_sky() -> No
     other = 0.10 + 1.4 * stars
     combined = combine_exposure_group_images(
         [reference * 10.0, other * 10.0], [10.0, 10.0], frame_counts=[1, 1], frame_noises=[1.0, 1.0]
-    )
+    ).image
 
     sky = float(np.median(combined))
     assert sky == pytest.approx(10.0 * float(np.median(reference)), rel=0.01)
@@ -538,7 +603,7 @@ def test_saturated_pixels_do_not_enter_the_gain() -> None:
     clipped = np.minimum(truth * 2.0, 0.6)
     usable_clipped = clipped < 0.57
 
-    gains = estimate_group_gains([truth, clipped], [np.ones(truth.shape, bool), usable_clipped], 0)
+    gains = _group_gains([truth, clipped], [np.ones(truth.shape, bool), usable_clipped], 0)
 
     assert gains[1] == pytest.approx(2.0, rel=0.02)
 
@@ -554,7 +619,7 @@ def test_an_implausible_gain_is_replaced_by_one_and_cannot_blow_up_the_image() -
     truth = generator.uniform(0.0, 1.0, (300, 300)) ** 3
     nearly_empty = np.full(truth.shape, 1e-20)
 
-    gains = estimate_group_gains([truth, nearly_empty], [np.ones(truth.shape, bool)] * 2, 0)
+    gains = _group_gains([truth, nearly_empty], [np.ones(truth.shape, bool)] * 2, 0)
 
     assert gains == [1.0, 1.0]
     assert PLAUSIBLE_GAIN_RANGE[0] < 0.7 < PLAUSIBLE_GAIN_RANGE[1]
@@ -573,7 +638,7 @@ def test_the_combined_image_stays_finite_when_a_short_group_is_nearly_empty() ->
         [30, 40],
         frame_noises=[16.0, 16.0],
         frame_zero_fractions=[0.9, 0.0],
-    )
+    ).image
 
     assert np.isfinite(combined).all()
     assert combined.max() < 10.0
@@ -594,7 +659,7 @@ def test_groups_with_different_scales_and_saturation_combine_to_one_spectrum() -
     long_unscaled = truth * exposures[1] + generator.normal(0.0, 0.002, truth.shape)
     long = np.minimum(0.7 * long_unscaled, 0.8)  # own scale, clipped core
 
-    combined = combine_exposure_group_images([short, long], exposures)
+    combined = combine_exposure_group_images([short, long], exposures).image
 
     mean_exposure = float(np.mean(exposures))
     relative_error = combined / mean_exposure / truth
@@ -650,14 +715,16 @@ def test_a_clipped_group_no_longer_biases_faint_pixels_upward() -> None:
     frame_counts = [100, 2]
     expected = rate / FULL_SCALE_COUNTS * float(np.average(exposures, weights=frame_counts))
 
-    unaware = combine_exposure_group_images(images, exposures, frame_counts, frame_noises=[noise_counts] * 2)
+    unaware = combine_exposure_group_images(
+        images, exposures, frame_counts, frame_noises=[noise_counts] * 2
+    ).image
     aware = combine_exposure_group_images(
         images,
         exposures,
         frame_counts,
         frame_noises=[noise_counts] * 2,
         frame_zero_fractions=[0.36, 0.0],
-    )
+    ).image
 
     # The clipped group's own stack reads high. The combination without the
     # floor is not compared: on this featureless patch the mid-range gain
@@ -680,7 +747,7 @@ def test_a_clipped_group_still_supplies_pixels_nothing_else_can() -> None:
         [10, 10],
         frame_noises=[8.4, 8.4],
         frame_zero_fractions=[0.7, 0.0],
-    )
+    ).image
 
     assert np.all(np.isfinite(combined))
     assert float(np.mean(combined)) == pytest.approx(5e-5 / 0.5 * 2.75, rel=1e-3)
@@ -840,3 +907,9 @@ def test_describe_group_clipping_lists_every_group_and_the_clipped_ones() -> Non
 
     assert [entry["frame_zero_fraction"] for entry in measured] == [0.712, CLIPPED_FRAME_ZERO_FRACTION]
     assert clipped == [{"exposure_seconds": 0.5, "frame_zero_fraction": 0.712}]
+
+
+def test_group_weight_is_frames_times_exposure_squared_over_noise_squared() -> None:
+    """`group_weight` follows count x exposure^2 / noise^2."""
+    assert group_weight(4, 2.0, 0.5) == pytest.approx(64.0)
+    assert group_weight(1, 10.0, 10.0) == pytest.approx(1.0)

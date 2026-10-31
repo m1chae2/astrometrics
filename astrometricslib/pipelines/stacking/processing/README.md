@@ -16,6 +16,7 @@ These terms appear throughout:
 The steps are:
 
 1. `exposure_groups.py` splits frames by exposure length, then combines the per-group stacks into one image. It weights each group by its noise and leaves a group out where it is saturated or clipped at zero. It also puts every group on the brightness scale of the reference group (see [the brightness scale between exposure groups](#the-brightness-scale-between-exposure-groups)). `saturated_pixel_mask` marks those pixels, so a later check can tell which stars had their cores replaced.
+    - **How the noise of one pixel is measured.** `estimate_background_noise` takes the differences between neighboring pixels, finds a rough scale from their median absolute deviation, keeps the differences within 4 times that scale (`NOISE_CLIP_SIGMAS`; star pixels fall outside), and takes their standard deviation divided by √2. The median alone is too coarse for a camera that stores values in steps, such as the ASI533MM in steps of 4 counts, because every difference is then a multiple of the step. The standard deviation uses every kept value, so it is fine-grained. On synthetic noise of 8 to 40 counts stored in steps of 1 and 4, the result was within 0.1% of the true value, with a spread of 0.12% between images (synthetic check in `test_exposure_groups.py`, not yet on real frames; design estimate).
 2. `group_alignment.py` lines up the group stacks in three sub-steps, described in [how group stacks are lined up](#how-group-stacks-are-lined-up).
 3. `spectral_frame_alignment.py` aligns spectral frames that have no usable star pattern.
 4. `group_derotation.py` turns spectral group stacks to one common trail tilt, the angle at which the spectrum trail crosses the frame.
@@ -104,7 +105,7 @@ A group with too few shared pixels, or a scale factor outside 0.25 to 4, keeps a
 
 ## Files
 
-- `exposure_groups.py`: splits frames by exposure length, measures the group scale factor and combines the group stacks.
+- `exposure_groups.py`: splits frames by exposure length, measures the group scale factor and combines the group stacks. `fold_exposure_lengths` is the one rule that says which group each exposure length lands in (a length with fewer than `MINIMUM_FRAMES_PER_EXPOSURE_GROUP` frames joins the nearest length), and `split_frames_by_exposure` calls it. `combine_exposure_group_images` returns an `ExposureGroupCombination`: the image, the gain applied to each group and whether it was measured, the sky levels, the group weights, the reference group, and the trusted and covered masks.
 - `group_alignment.py`: lines up the group stacks and finds the zero-order target.
 - `star_pattern_candidates.py`: the star-pattern search that `group_alignment.py` falls back to.
 - `spectral_frame_alignment.py`: aligns spectral frames by phase correlation.

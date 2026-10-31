@@ -208,3 +208,40 @@ def test_no_exposure_anywhere_makes_no_row() -> None:
     """With no exposure in the proposal or the setting there is no row."""
     statement = _statement(action=ProposedAction(frame_count=5), setting=_setting(exposure_seconds=None))
     assert exposure_request_from_statement(statement) is None
+
+
+def test_a_diminishing_returns_statement_asks_for_the_doubling_frames() -> None:
+    """The package row of a fixed-pattern-limited setting asks 44 frames."""
+    from astrometricslib import MeasurementReference
+    from wayfindinglib.analytics.result_quality import report_rules
+    from wayfindinglib.analytics.result_quality.capture_overheads import CaptureOverheads
+    from wayfindinglib.analytics.result_quality.noise_growth import TakeMoreResult
+
+    result = TakeMoreResult(
+        target_noise_ratio=0.707,
+        added_exposure_seconds=44 * 30.0,
+        new_exposure_seconds=30.0,
+        fixed_pattern_noise=0.583e-3,
+        fixed_pattern_variance_share=0.49,
+        practical_limit_applied=True,
+        doubling_frames=44,
+        doubling_noise_cut=0.137,
+        most_reachable_cut=0.296,
+    )
+    overheads = CaptureOverheads(
+        download_seconds=5.0,
+        dither_settle_seconds=20.0,
+        autofocus_seconds=120.0,
+        download_from_records=False,
+        dither_from_records=False,
+        autofocus_from_records=False,
+        gaps_used=0,
+    )
+    setting = CaptureSetting(camera="ASI533MM Pro", telescope="RC8", filter_name="L", exposure_seconds=30.0)
+    evidence = [MeasurementReference(row_id=1)]
+    statement = report_rules.more_frames_statement(result, setting, overheads, evidence)
+    assert statement is not None
+    request = exposure_request_from_statement(statement)
+    assert request is not None
+    assert request.count == 44
+    assert request.exposure_sec == pytest.approx(30.0)

@@ -43,6 +43,7 @@ from wayfindinglib.models.planning.observation_package import (
     PackageStatus,
 )
 from wayfindinglib.models.planning.suggestion_log import SuggestionEvent
+from wayfindinglib.models.planning.target_report import RecommendedAdditionalFramesStatus
 from wayfindinglib.models.planning.tonight_ranking import (
     CandidateStatus,
     RankedCandidate,
@@ -66,6 +67,7 @@ NOW = datetime(2026, 10, 24, 20, 0, tzinfo=UTC)
 """The fixed clock: two hours before the first test frame (22:00)."""
 
 NOISE_METRIC = "stacking.empty_aperture_noise_normalized"
+DEPTH_METRIC = "stacking.surface_brightness_limit_3sigma_10arcsec_mag_per_arcsec2"
 
 
 @pytest.fixture
@@ -319,7 +321,7 @@ def fixture(isolated_butler: DiskButler, clock: Clock, monkeypatch: pytest.Monke
         The planning object and its stand-ins. M 81 starts with a noise of
         3e-4, above the goal.
     """
-    library = FakeLibrary({"M 81": [], "M 13": []}, [noise_row(3e-4)])
+    library = FakeLibrary({"M 81": [], "M 13": []}, [noise_row(3e-4)], {"M 81": "Sy2", "M 13": "GlC"})
     planning = ObservationPlanning(isolated_butler.config, isolated_butler, astrometrics=library)
     made = Fixture(planning, library)
 
@@ -519,6 +521,105 @@ def test_a_target_below_the_noise_goal_gets_no_suggestion_and_loses_its_old_one(
     assert fixture.planning.refresh_suggestions(["M 81"], register_job=False).added == []
 
 
+def depth_row(value: float) -> QualityMeasurement:
+    """Build the surface-brightness depth row of the M 81 stack.
+
+    Parameters
+    ----------
+    value : `float`
+        The depth in magnitudes per square arcsecond.
+
+    Returns
+    -------
+    row : `QualityMeasurement`
+        The row.
+    """
+    return noise_row(value).model_copy(update={"metric": DEPTH_METRIC, "definition_version": 1})
+
+
+def patch_depth_report(monkeypatch: pytest.MonkeyPatch, asked: list[float] | None = None) -> None:
+    """Replace the report builder the depth goal calls with an empty one.
+
+    Parameters
+    ----------
+    monkeypatch : `pytest.MonkeyPatch`
+        The patcher.
+    asked : `list` [`float`], optional
+        Receives the noise ratio of each report asked for.
+    """
+    import wayfindinglib.tasks.planning_tasks.target_report_tasks as report_tasks
+
+    def fake_report(_target: object, **arguments: object) -> Report:
+        """Give an empty report and note the noise ratio.
+
+        Parameters
+        ----------
+        _target : `object`
+            Ignored.
+        **arguments : `object`
+            The report arguments; ``target_noise_ratio`` is noted.
+
+        Returns
+        -------
+        report : `Report`
+            A report with no statements and no checks.
+        """
+        if asked is not None:
+            asked.append(float(arguments["target_noise_ratio"]))
+        report = Report([])
+        report.forecast_checks = []
+        return report
+
+    monkeypatch.setattr(report_tasks, "build_target_dataset_report", fake_report)
+
+
+def test_a_reached_depth_goal_deletes_the_suggestion_even_above_the_noise_goal(fixture: Fixture) -> None:
+    """The depth level replaces the noise goal of a galaxy with a depth."""
+    fixture.statements["M 81"] = [more_frames(40)]
+    fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    assert len(suggested(fixture)) == 1
+    # The noise stays above the old goal; the depth now reaches Good.
+    fixture.library.rows = [noise_row(3e-4), depth_row(24.8)]
+    change = fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    assert len(change.deleted) == 1 and suggested(fixture) == []
+    assert ("deleted", "the depth goal is met") in log_events(fixture)
+
+
+def test_a_depth_below_the_goal_keeps_a_suggestion_the_noise_goal_would_end(fixture: Fixture) -> None:
+    """A noise at the old goal does not end a suggestion if depth is short."""
+    fixture.library.rows = [noise_row(DEFAULT_NOISE_GOAL * 0.9), depth_row(24.2)]
+    fixture.statements["M 81"] = [more_frames(40)]
+    change = fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    assert len(change.added) == 1
+
+
+def test_the_chosen_level_sets_the_depth_goal(fixture: Fixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Choosing Deep makes the same depth fall short of the goal."""
+    patch_depth_report(monkeypatch)
+    fixture.library.rows = [noise_row(3e-4), depth_row(24.8)]
+    fixture.statements["M 81"] = [more_frames(40)]
+    assert fixture.planning.refresh_suggestions(["M 81"], register_job=False).added == []
+    fixture.planning.set_depth_goal("M 81", "deep")
+    assert len(fixture.planning.refresh_suggestions(["M 81"], register_job=False).added) == 1
+
+
+def test_the_depth_goal_is_set_and_read_through_the_planning_object(
+    fixture: Fixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Setting a level keeps it, validates it and returns the new status."""
+    asked: list[float] = []
+    patch_depth_report(monkeypatch, asked)
+    fixture.library.rows = [depth_row(24.2)]
+    assert fixture.planning.get_depth_goal("M 81").level.value == "good"
+    status = fixture.planning.set_depth_goal("M 81", "deep")
+    assert status.level.value == "deep" and status.goal_depth == pytest.approx(25.5)
+    assert fixture.planning.get_depth_goal("M 81").level.value == "deep"
+    assert asked and asked[-1] == pytest.approx(10 ** (-0.4 * (25.5 - 24.2)))
+    with pytest.raises(InvalidArgumentError):
+        fixture.planning.set_depth_goal("M 81", "excellent")
+    assert fixture.planning.get_depth_goal("M 81").level.value == "deep"
+
+
 def test_a_stop_rule_deletes_the_suggestion(fixture: Fixture) -> None:
     """A rule that says more frames will not help removes the suggestion."""
     fixture.statements["M 81"] = [more_frames(40)]
@@ -682,6 +783,26 @@ def test_the_top_three_of_each_use_become_tentative_packages_for_tonight(fixture
         assert "roughly" in package.suggestion.reason
     assert fixture.planning.refresh_suggestions(register_job=False).added == []
     assert len(fixture.planning.get_plan(kind="packages", status="SUGGESTED")) == 3
+
+
+def test_an_provisional_count_is_said_in_the_ranking_suggestion(fixture: Fixture) -> None:
+    """An provisional count is said in the suggestion's reason."""
+    made = ranking("M 81", "M 13")
+    candidates = made.lists[0].candidates
+    candidates[1] = candidates[1].model_copy(
+        update={"recommended_additional_frames_status": RecommendedAdditionalFramesStatus.PROVISIONAL}
+    )
+    fixture.ranking = made
+    fixture.planning.refresh_suggestions(register_job=False)
+    reasons = {
+        package.target_id: package.suggestion.reason
+        for package in fixture.planning.get_plan(kind="packages", status="SUGGESTED")
+    }
+    assert "provisional" not in reasons["M 81"]
+    assert (
+        "Its count of recommended additional frames is provisional, so it ranks below a confirmed one"
+        in reasons["M 13"]
+    )
 
 
 def test_a_ranking_suggestion_is_removed_when_it_falls_out_of_the_top(fixture: Fixture) -> None:

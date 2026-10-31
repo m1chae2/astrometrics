@@ -96,3 +96,39 @@ def test_a_missing_file_raises_not_found(tmp_path: Path) -> None:
     """Reading the header of a file that is not there raises NotFoundError."""
     with pytest.raises(NotFoundError, match="Image not found"):
         _ = AstrometricsImage(str(tmp_path / "missing.fits")).header
+
+
+@pytest.mark.parametrize(
+    "filter_value",
+    [
+        "Luminance",
+        "LUMINANCE",
+        "Lum",
+        "L",
+        "Ha",
+        "H-Alpha",
+        "OIII",
+        "SII",
+        "Red",
+        "Green",
+        "Blue",
+        "Spectroscopy",
+        "",
+        "Clear",
+    ],
+)
+def test_filter_type_property_agrees_with_the_filter_detection_table(
+    filter_value: str, tmp_path: Path
+) -> None:
+    """The image property and `get_filter_type` give the same answer."""
+    from astrometricslib.drivers.filter_detection import get_filter_type
+    from astrometricslib.foundation.enums import FilterType
+
+    path = tmp_path / "frame.fits"
+    header = fits.Header()
+    header["FILTER"] = filter_value
+    fits.PrimaryHDU(data=np.zeros((4, 4), dtype=np.float32), header=header).writeto(path)
+
+    assert AstrometricsImage(str(path)).filter_type == get_filter_type({"FILTER": filter_value})
+    if filter_value.upper().startswith("L"):
+        assert get_filter_type({"FILTER": filter_value}) == FilterType.L

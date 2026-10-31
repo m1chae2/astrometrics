@@ -29,23 +29,40 @@ from astrometricslib.models.quality.measurement import (
     QualityMeasurement,
     SubjectLevel,
 )
+from astrometricslib.models.quality.subset_stacks import EARLIER_NIGHTS_VARIANT
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
     PipelineRunContext,
     build_measurement,
 )
 from astrometricslib.pipelines.shared.quality.record_measurements import record_measurements
+from astrometricslib.pipelines.stacking import odd_even_difference_run, subset_noise_run
 from astrometricslib.pipelines.stacking.metrics import (
+    STACKING_APERTURE_SET_NUMBER,
     STACKING_EFFECTIVE_FRAME_COUNT,
     STACKING_EMPTY_APERTURE_NOISE_NORMALIZED,
+    STACKING_EMPTY_APERTURE_NOISE_STACK_UNIT,
+    STACKING_EXPECTED_EMPTY_APERTURE_NOISE_STACK_UNIT,
     STACKING_FRAME_WEIGHT,
+    STACKING_GROUP_EXPOSURE_S,
+    STACKING_GROUP_FRAMES_STACKED,
+    STACKING_GROUP_GAIN_APPLIED,
+    STACKING_GROUP_REFERENCE_EXPOSURE_S,
     STACKING_METRICS,
     STACKING_NIGHT_WEIGHT_SHARE,
     STACKING_NOISE_DIFFERENCE_WITHOUT_NIGHT,
     STACKING_NOISE_WITHOUT_NIGHT,
+    STACKING_NORMALIZATION_SCALE,
     STACKING_SUBSET_EXPECTED_NOISE_RATIO,
 )
-from astrometricslib.pipelines.stacking.post_processing.empty_apertures import APERTURE_FILE_NAME
+from astrometricslib.pipelines.stacking.odd_even_difference_run import model_variance_ratio
+from astrometricslib.pipelines.stacking.post_processing import record_science
+from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
+    APERTURE_FILE_NAME,
+    aperture_identity_to_number,
+    load_apertures_with_reason,
+)
+from astrometricslib.pipelines.stacking.post_processing.expected_noise import FrameNoiseInput
 from astrometricslib.pipelines.stacking.post_processing.stack_noise import measure_stack_noise
 from astrometricslib.pipelines.stacking.subset_noise_run import (
     GrowthStep,
@@ -59,6 +76,7 @@ from astrometricslib.pipelines.stacking.subset_noise_run import (
 )
 from astrometricslib.pipelines.stacking.subset_stack import (
     MINIMUM_SUBSET_FRAMES,
+    SubsetStackOutcome,
     check_subset_label,
     stack_frame_subset,
     subset_stack_path,
@@ -220,6 +238,7 @@ def _configuration(tmp_path: Path) -> SimpleNamespace:
         get_library_path=lambda: str(tmp_path / "library"),
         get_stack_weight=lambda: None,
         get_trim_noisy_stack_edges_enabled=lambda: False,
+        get_siril_executable=lambda: None,
     )
 
 
@@ -1051,3 +1070,385 @@ def test_sums_saved_in_other_apertures_are_not_paired_with_a_subset(tmp_path: Pa
     rows = _rows(library, STACKING_NOISE_DIFFERENCE_WITHOUT_NIGHT)
     assert rows and all(row.status == MeasurementStatus.NOT_MEASURED for row in rows)
     assert all("other apertures" in row.reason and "v3-someotherset" in row.reason for row in rows)
+
+
+# -- The stack of the earlier nights (decision D11) ---------------------------
+
+
+def _earlier_nights(library: _Library, **keywords: Any) -> Any:
+    """Stack all nights but the last as a forecast subset, as the script does.
+
+    Parameters
+    ----------
+    library : `_Library`
+        The test library.
+    **keywords
+        Replacements for the call's keyword arguments.
+
+    Returns
+    -------
+    result : `SubsetStackResult`
+        The earlier-nights stack.
+    """
+    last_night = max(observing_night_id(frame.timestamp) for frame in library.target.frames)
+    frames = [frame for frame in library.target.frames if observing_night_id(frame.timestamp) != last_night]
+    arguments = {
+        "context": library.context("earlier-run"),
+        "configuration": library.configuration,
+        "drivers": library.drivers,
+        "stacking_slot": library.slot,
+        "record_forecast_rows": True,
+    }
+    arguments.update(keywords)
+    return stack_chosen_subset(
+        library.target, frames, EARLIER_NIGHTS_VARIANT, library.stack_path, **arguments
+    )
+
+
+def _earlier_rows(library: _Library, metric: str) -> list[QualityMeasurement]:
+    """Read the stored rows of one metric for the earlier-nights stack.
+
+    Parameters
+    ----------
+    library : `_Library`
+        The test library.
+    metric : `str`
+        The metric.
+
+    Returns
+    -------
+    rows : `list` [`QualityMeasurement`]
+        Every row of the metric with the earlier-nights variant.
+    """
+    return library.store().query(
+        metric=metric, target_id="M 99", variant=EARLIER_NIGHTS_VARIANT, latest_only=False
+    )
+
+
+def test_without_the_option_a_subset_stores_no_forecast_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With the default, no weight, group or calibration row is stored."""
+    library = _Library(tmp_path, nights=3)
+    flat = tmp_path / "master_flat.fits"
+    flat.write_bytes(b"flat")
+    _grouped_stack(monkeypatch, library, flat)
+
+    _earlier_nights(library, record_forecast_rows=False)
+
+    assert _earlier_rows(library, STACKING_FRAME_WEIGHT) == []
+    assert _earlier_rows(library, STACKING_GROUP_EXPOSURE_S) == []
+    assert library.store().get_calibration_identities(["earlier-run"], "M 99") == []
+    # The rows every subset stores are still there.
+    assert len(_earlier_rows(library, STACKING_APERTURE_SET_NUMBER)) == 1
+    assert len(_earlier_rows(library, STACKING_EXPECTED_EMPTY_APERTURE_NOISE_STACK_UNIT)) == 1
+
+
+def test_the_nights_given_are_stacked_into_the_label_folder(
+    tmp_path: Path,
+) -> None:
+    """Nights 0 and 1 are stacked into the label's folder."""
+    library = _Library(tmp_path, nights=3)
+
+    result = _earlier_nights(library)
+
+    (stacked_paths,) = library.stacker.calls
+    assert sorted(Path(path).name[:2] for path in stacked_paths) == ["n0"] * 5 + ["n1"] * 5
+    assert result.label == EARLIER_NIGHTS_VARIANT
+    assert result.frames_submitted == 10
+    assert len(result.observing_night_ids) == 2
+    expected = Path(library.stack_path).parent / "_subsets" / "earlier-nights" / "earlier-nights.fits"
+    assert result.stack_path == str(expected)
+    assert expected.is_file()
+
+
+def test_the_earlier_nights_rows_carry_the_variant_and_the_library_stacks_apertures(tmp_path: Path) -> None:
+    """The subset noise is in the library apertures, under its own run id."""
+    library = _Library(tmp_path, nights=3)
+    library.record_library_weights({0: 1.0, 1: 1.0, 2: 1.0})
+
+    _earlier_nights(library)
+
+    noise_rows = _earlier_rows(library, STACKING_EMPTY_APERTURE_NOISE_STACK_UNIT)
+    assert len(noise_rows) == 1
+    (noise_row,) = noise_rows
+    assert noise_row.subject.variant == EARLIER_NIGHTS_VARIANT
+    assert noise_row.subject.subject_id == "M 99/_subsets/earlier-nights/earlier-nights.fits"
+    assert noise_row.run_id == "earlier-run"
+    library_apertures, _reason = load_apertures_with_reason(
+        str(Path(library.stack_path).parent / APERTURE_FILE_NAME)
+    )
+    (set_row,) = _earlier_rows(library, STACKING_APERTURE_SET_NUMBER)
+    assert set_row.value == aperture_identity_to_number(library_apertures.identity)
+    assert set_row.subject.variant == EARLIER_NIGHTS_VARIANT
+    (count_row,) = _earlier_rows(library, STACKING_EFFECTIVE_FRAME_COUNT)
+    assert count_row.value == pytest.approx(10.0)
+    # The library stack's own rows are untouched.
+    assert [
+        row.run_id for row in library.store().query(metric=STACKING_EFFECTIVE_FRAME_COUNT, library_only=True)
+    ] == ["library-run"]
+
+
+def _grouped_stack(
+    monkeypatch: pytest.MonkeyPatch, library: _Library, calibration_file: Path
+) -> list[list[float]]:
+    """Make the subset stacker report two groups, one with a folded frame.
+
+    The first group holds the first night's five frames, the last of them a
+    180 s frame folded into a 60 s group (the group's registration reference
+    is its first frame, 60 s, so that frame's scale is 1/3). The second group
+    holds the second night's five frames of 120 s. The stand-in writes a real
+    synthetic stack and reports the groups the way the stacker does.
+
+    Parameters
+    ----------
+    monkeypatch : `pytest.MonkeyPatch`
+        Replaces the stacker, and the join of stored sky rates with profiles.
+    library : `_Library`
+        The test library; its frames get their exposure lengths here.
+    calibration_file : `pathlib.Path`
+        A file reported as the flat master the subset applied.
+
+    Returns
+    -------
+    scales_seen : `list` [`list` [`float`]]
+        Filled with the ``k_i`` list each prediction was given.
+    """
+    for frame in library.target.frames:
+        night = int(Path(frame.path).name[1])
+        frame.exposure = "120" if night == 1 else ("180" if frame.path.endswith("n0_04.fits") else "60")
+
+    def stack(
+        target_id: str, frames: list[FrameRecord], output_path: str, **_keywords: Any
+    ) -> SubsetStackOutcome:
+        """Write a stack and report two exposure groups.
+
+        Parameters
+        ----------
+        target_id : `str`
+            The target (unused).
+        frames : `list` [`FrameRecord`]
+            The subset's frames, first night then second.
+        output_path : `str`
+            Where to write the stack.
+
+        Returns
+        -------
+        outcome : `SubsetStackOutcome`
+            The stack and its diagnostics.
+        """
+        _write_stack(output_path, 6.0 / math.sqrt(len(frames)), seed=5)
+        groups = [frames[:5], frames[5:]]
+        exposures = [60.0, 120.0]
+        folder = Path(output_path).parent
+        entries, summaries = [], []
+        for index, (group, exposure) in enumerate(zip(groups, exposures, strict=True)):
+            paths = [frame.path for frame in group]
+            entries.append({
+                "paths": paths,
+                "frame_paths": paths,
+                "registration_frames": [
+                    {
+                        "dx": 0.0 if position == 0 else 1.5,
+                        "dy": 0.0 if position == 0 else -0.5,
+                        "star_count": 50,
+                    }
+                    for position in range(len(paths))
+                ],
+                "registration_included": [True] * len(paths),
+                "weight": len(paths) * exposure**2 / 100.0,
+                "frame_count": len(paths),
+                "exposure_seconds": exposure,
+                "frame_noise_counts": 10.0,
+                "gain": 1.0,
+                "gain_measured": True,
+                "sky_level_per_second": 0.01,
+                "stack_weight": None,
+                "holds_folded_frames": index == 0,
+                "summary_index": index,
+            })
+            summaries.append({
+                "exposure_seconds": exposure,
+                "frames_submitted": len(paths),
+                "frames_stacked": len(paths),
+                "dark_applied": True,
+                "stack_path": str(folder / "groups" / f"earlier-nights_exp{exposure:g}s.fits"),
+                "gain_applied": None if index == 0 else 1.02,
+            })
+        diagnostics = {
+            "combined_frame_paths": [frame.path for frame in frames],
+            "symlinked_light_paths": [frame.path for frame in frames],
+            "registration_included": [True] * len(frames),
+            "images_stacked": len(frames),
+            "exposure_group_weights": entries,
+            "exposure_group_summaries": summaries,
+            "flat_frame_paths": [str(calibration_file)],
+        }
+        return SubsetStackOutcome(output_path, diagnostics, None, (0, 0), None, False)
+
+    scales_seen: list[list[float]] = []
+
+    def inputs(
+        members: list[Any],
+        weights: Any,
+        target_id: str,
+        configuration: Any,
+        store: Any,
+        weights_reason: str = "",
+        exposure_scales: Any = None,
+    ) -> list[FrameNoiseInput]:
+        """Give each frame a fixed sky and keep the scales it was asked with.
+
+        Returns
+        -------
+        inputs : `list` [`FrameNoiseInput`]
+            One entry for each member, carrying its scale.
+        """
+        scales = list(exposure_scales)
+        scales_seen.append(scales)
+        return [
+            FrameNoiseInput(weight, 100.0, 3.8, 0.783, exposure_scale=scale)
+            for weight, scale in zip(weights, scales, strict=True)
+        ]
+
+    monkeypatch.setattr(subset_noise_run, "stack_frame_subset", stack)
+    monkeypatch.setattr(record_science, "frame_noise_inputs_from_store", inputs)
+    return scales_seen
+
+
+def test_the_earlier_nights_store_weights_group_rows_prediction_and_calibration_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Everything the forecast check reads is stored for the subset."""
+    library = _Library(tmp_path, nights=3)
+    library.record_library_weights({0: 1.0, 1: 1.0, 2: 1.0})
+    flat = tmp_path / "master_flat.fits"
+    flat.write_bytes(b"flat")
+    scales_seen = _grouped_stack(monkeypatch, library, flat)
+
+    result = _earlier_nights(library)
+
+    assert result.stack_error == ""
+    # One weight for each of the ten frames, on its own subject, mean 1.
+    weights = _earlier_rows(library, STACKING_FRAME_WEIGHT)
+    assert len(weights) == 10
+    assert all(row.subject.level == SubjectLevel.FRAME for row in weights)
+    assert all(row.subject.variant == EARLIER_NIGHTS_VARIANT for row in weights)
+    assert all(row.subject.subject_id.endswith(f"#{EARLIER_NIGHTS_VARIANT}") for row in weights)
+    assert sum(row.value for row in weights) == pytest.approx(10.0)
+    # Group weights are N t^2 / s^2 = 36 and 144, shared evenly inside a group.
+    by_night = {row.subject.observing_night_id: row.value for row in weights}
+    assert len(by_night) == 2
+    assert max(by_night.values()) / min(by_night.values()) == pytest.approx(4.0)
+    # The library stack's own weights are still the newest rows of its frames.
+    library_weights = library.store().query(metric=STACKING_FRAME_WEIGHT, library_only=True)
+    assert len(library_weights) == 15
+    assert {row.run_id for row in library_weights} == {"library-run"}
+    # The group rows are on the subset's own group subjects.
+    exposures = _earlier_rows(library, STACKING_GROUP_EXPOSURE_S)
+    assert sorted((row.subject.subject_id, row.value) for row in exposures) == [
+        ("M 99/_subsets/earlier-nights/groups/earlier-nights_exp120s.fits", 120.0),
+        ("M 99/_subsets/earlier-nights/groups/earlier-nights_exp60s.fits", 60.0),
+    ]
+    assert all(row.subject.variant == EARLIER_NIGHTS_VARIANT for row in exposures)
+    assert sorted(row.value for row in _earlier_rows(library, STACKING_GROUP_FRAMES_STACKED)) == [5.0, 5.0]
+    applied = {
+        row.subject.subject_id.split("_exp")[1]: row.value
+        for row in _earlier_rows(library, STACKING_GROUP_GAIN_APPLIED)
+    }
+    assert applied["120s.fits"] == pytest.approx(1.02)
+    references = {
+        row.subject.subject_id.split("_exp")[1]: row.value
+        for row in _earlier_rows(library, STACKING_GROUP_REFERENCE_EXPOSURE_S)
+    }
+    assert references == {"60s.fits": 60.0, "120s.fits": 120.0}
+    # The predicted noise and the scale are on the subset's stack.
+    (predicted,) = _earlier_rows(library, STACKING_EXPECTED_EMPTY_APERTURE_NOISE_STACK_UNIT)
+    assert predicted.subject.subject_id == "M 99/_subsets/earlier-nights/earlier-nights.fits"
+    assert predicted.value is not None
+    assert len(_earlier_rows(library, STACKING_NORMALIZATION_SCALE)) == 1
+    # The calibration record is filed under the subset's subject and its run.
+    (record,) = library.store().get_calibration_identities(["earlier-run"], "M 99")
+    assert record.subject_id == "M 99/_subsets/earlier-nights/earlier-nights.fits"
+    assert [master.path for master in record.flat_masters] == [str(flat)]
+    assert scales_seen
+
+
+def test_the_folded_frames_scale_reaches_the_earlier_nights_prediction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A 180 s frame folded into a 60 s group has k = 1/3 in the prediction."""
+    library = _Library(tmp_path, nights=3)
+    library.record_library_weights({0: 1.0, 1: 1.0, 2: 1.0})
+    flat = tmp_path / "master_flat.fits"
+    flat.write_bytes(b"flat")
+    scales_seen = _grouped_stack(monkeypatch, library, flat)
+
+    _earlier_nights(library)
+
+    assert scales_seen[0] == pytest.approx([1.0, 1.0, 1.0, 1.0, 60.0 / 180.0] + [1.0] * 5)
+    # A prediction made with k = 1 differs: the scale changes the stored noise.
+    (predicted,) = _earlier_rows(library, STACKING_EXPECTED_EMPTY_APERTURE_NOISE_STACK_UNIT)
+    library_two = _Library(tmp_path / "again", nights=3)
+    library_two.record_library_weights({0: 1.0, 1: 1.0, 2: 1.0})
+    scales_unscaled = _grouped_stack(monkeypatch, library_two, flat)
+    monkeypatch.setattr(
+        record_science,
+        "frame_noise_inputs_from_store",
+        lambda members, weights, *_a, **_k: [
+            FrameNoiseInput(weight, 100.0, 3.8, 0.783) for weight in weights
+        ],
+    )
+    _earlier_nights(library_two)
+    (unscaled,) = library_two.store().query(
+        metric=STACKING_EXPECTED_EMPTY_APERTURE_NOISE_STACK_UNIT, variant=EARLIER_NIGHTS_VARIANT
+    )
+    assert predicted.value != pytest.approx(unscaled.value)
+    assert scales_unscaled == []
+
+
+def test_the_odd_even_difference_model_ratio_uses_the_halves_exposure_scales() -> None:
+    """A frame with k = 2 has four times the variance in the modeled ratio."""
+    from astrometricslib.pipelines.stacking.post_processing.expected_noise import FrameNoiseInput as Input
+
+    members = [
+        FrameRecord(path=f"/frames/lights/M 99/Scope/Cam/f{index}.fits", camera="Cam") for index in range(4)
+    ]
+    library = subset_noise_run.LibraryRun(
+        members=members,
+        weight_by_path={member.path: 2.0 if index == 0 else 1.0 for index, member in enumerate(members)},
+    )
+    seen: list[Any] = []
+
+    def inputs(
+        members_given: list[Any], weights: Any, *_arguments: Any, exposure_scales: Any = None
+    ) -> list[Input]:
+        """Keep the scales and give every frame the same sky.
+
+        Returns
+        -------
+        inputs : `list` [`FrameNoiseInput`]
+            One entry for each member.
+        """
+        seen.append(list(exposure_scales))
+        return [Input(1.0, 100.0, 3.8, 0.783, exposure_scale=scale) for scale in exposure_scales]
+
+    odd = {members[0].path: 0.5, members[2].path: 0.5}
+    even = {members[1].path: 0.5, members[3].path: 0.5}
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(odd_even_difference_run, "frame_noise_inputs_from_store", inputs)
+        plain, _ = odd_even_difference_run._model_ratio_for_library(library, "M 99", None, odd, even)
+        scaled, _ = odd_even_difference_run._model_ratio_for_library(
+            library, "M 99", None, odd, even, {members[0].path: 2.0}
+        )
+    assert seen == [[1.0] * 4, [2.0, 1.0, 1.0, 1.0]]
+    variance = (100.0 + 3.8**2) / 0.783**2
+    library_shares = {member.path: (2.0 if index == 0 else 1.0) / 5.0 for index, member in enumerate(members)}
+    expected = model_variance_ratio(
+        odd,
+        even,
+        library_shares,
+        {member.path: variance * (4.0 if index == 0 else 1.0) for index, member in enumerate(members)},
+    )
+    assert plain != pytest.approx(scaled)
+    assert scaled == pytest.approx(expected)

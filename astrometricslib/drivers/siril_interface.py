@@ -27,6 +27,7 @@ from typing import Any
 from astrometricslib.drivers.calibration_library import (
     BIAS_FRAME_PATHS_KEY,
     CALIBRATION_MATCH_BLOCKING_FLAGS_KEY,
+    DARK_FRAME_PATHS_KEY,
     FLAT_FRAME_PATHS_KEY,
     CalibrationSelection,
     format_binning,
@@ -1512,6 +1513,8 @@ class ImageProcessing:
                     try:
                         os.symlink(item, os.path.join(target_folder, "darks", f"dark_{dark_idx:05d}.fits"))
                         dark_idx += 1
+                        # Kept for the calibration record: the darks applied.
+                        self.last_run_diagnostics.setdefault(DARK_FRAME_PATHS_KEY, []).append(item)
                     except OSError as e:
                         log(f"Error symlinking dark {item}: {e}")
 
@@ -2490,10 +2493,10 @@ class ImageProcessing:
                     # Two-pass chose a different reference and stacked
                     # 21 of 22 frames.
                     if reference_frame_path is not None:
-                        # The caller names the reference (the half-difference
-                        # job needs both halves on the library stack's
-                        # reference). Siril counts sequence images from 1,
-                        # in the order of the symlinked light frames.
+                        # The caller names the reference (the odd–even
+                        # difference job needs both halves on the library
+                        # stack's reference). Siril counts sequence images
+                        # from 1, in the order of the symlinked light frames.
                         light_paths = self.last_run_diagnostics.get("symlinked_light_paths", [])
                         if reference_frame_path in light_paths:
                             register_commands.append(

@@ -69,9 +69,9 @@ This section covers, in order: finding stars, estimating how much sky a pixel co
 
 A point source is anything in the image that looks like a single star. To find them, the pipeline first estimates the sky background: the faint glow behind the stars. The background is a 2-D map (photutils `Background2D`, median estimator, 3σ clipping). Sigma clipping repeatedly drops pixels more than 3 standard deviations from the median, so stars do not inflate the sky estimate. A small image falls back to one sigma-clipped median.
 
-The test below asks how many noise units a pixel stands above the local sky. A large value means a real source; a value near zero means only sky. A source is kept when its peak stands above the background $B_\text{sky}$ by the threshold $k$, where $\sigma_\text{sky}$ is the noise of the background:
+The test below asks how many noise units a pixel stands above the local sky. A large value means a real source; a value near zero means only sky. A source is kept when its peak stands above the background $B_\text{sky}$ by the threshold $k$, where $\sigma_\text{bkg}$ is the noise of the background:
 
-$$\frac{I(x, y) - B_\text{sky}(x, y)}{\sigma_\text{sky}} \ge k = 5 \tag{1}$$
+$$\frac{I(x, y) - B_\text{sky}(x, y)}{\sigma_\text{bkg}} \ge k = 5 \tag{1}$$
 
 `DAOStarFinder` (a standard star finder from photutils) also checks shape. Sharpness compares a peak's height with its spread; roundness compares its width along the two axes, with 0 meaning round. It keeps sharpness in $[0.2, 1.0]$ and roundness in $[-0.6, +0.6]$, which rejects hot pixels (single pixels that always read high) and filament structure.
 
@@ -146,7 +146,7 @@ Symbols follow the architecture paper's [list of symbols](../Astrometrics_Librar
 | Symbol | Meaning | Unit |
 | --- | --- | --- |
 | $B_\text{sky}(x, y)$ | Background (sky) level at a pixel | ADU |
-| $\sigma_\text{sky}$ | Noise of the background | ADU |
+| $\sigma_\text{bkg}$ | Noise of the background | ADU |
 | $k$ | Detection threshold, in units of the background noise | none |
 | $s$ | Pixel scale | arcsec/px |
 | $p_\text{px}$ | Pixel pitch (binned pixel size) | μm |

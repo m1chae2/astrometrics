@@ -273,7 +273,7 @@ class SpectroscopyCalibrationTuner:
             image,
             extraction_start,
             int(tuned_config.extraction_radius),
-            spec_pipeline.camera_profile.saturation_threshold_adu.value,
+            spec_pipeline.camera_profile.pixel_saturation_level_adu.value,
         )
         max_extraction_length_px = SpectroscopyCalibrationTuner._detect_max_extraction_length_px(
             base_pos, vector, offset_px, length_px, image.data.shape

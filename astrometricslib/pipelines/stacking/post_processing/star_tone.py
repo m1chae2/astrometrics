@@ -34,6 +34,7 @@ import numpy as np
 from scipy import ndimage
 
 from astrometricslib.drivers.fits_access import read_data, read_header, write_image
+from astrometricslib.pipelines.stacking.post_processing.stack_image import robust_sigma
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +132,7 @@ def estimate_noise(image: np.ndarray) -> float:
         blurred copy. Smooth structure and the few stars barely change it.
     """
     detail = image - ndimage.gaussian_filter(image, _NOISE_BLUR_PIXELS)
-    return float(1.4826 * np.median(np.abs(detail - np.median(detail))))
+    return float(robust_sigma(detail))
 
 
 def dim_stars(image: np.ndarray, power: float = STAR_DIMMING_POWER) -> np.ndarray:

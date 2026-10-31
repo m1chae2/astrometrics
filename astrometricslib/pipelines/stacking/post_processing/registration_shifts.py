@@ -85,6 +85,7 @@ from astrometricslib.pipelines.stacking.post_processing.field_rotation import (
     ALREADY_REGISTERED_REASON,
     UNMATCHED_REASON,
 )
+from astrometricslib.pipelines.stacking.post_processing.stack_image import MAD_TO_SIGMA
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 from astrometricslib.utilities.observing_night import observing_night_id
 
@@ -699,7 +700,7 @@ def step_summary(series: ShiftSeries, fits: Sequence[_NightFit] | None = None) -
     values = np.array(steps)
     median = float(np.median(values))
     mad = float(np.median(np.abs(values - median)))
-    threshold = median + STEP_JUMP_SIGMAS * max(1.4826 * mad, MINIMUM_STEP_SCALE_PX)
+    threshold = median + STEP_JUMP_SIGMAS * max(MAD_TO_SIGMA * mad, MINIMUM_STEP_SCALE_PX)
     residual_steps: list[float] = []
     night_fits = fit_nights(series) if fits is None else fits
     for _, column_residuals, row_residuals, _ in night_fits:

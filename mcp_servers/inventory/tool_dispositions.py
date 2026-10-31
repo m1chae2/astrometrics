@@ -353,6 +353,17 @@ DECISIONS = {
     "planning_get_plan": ToolDecision(
         "keep", "Built 2026-10-06. Reads a recorded session or the session list."
     ),
+    "planning_get_depth_goal": ToolDecision(
+        "keep",
+        "Built 2026-10-27 (#134). Reads a target's depth goal: the chosen level, the depth reached and the "
+        "time to reach the level. Saves nothing.",
+    ),
+    "planning_set_depth_goal": ToolDecision(
+        "withhold",
+        "Writes the user's chosen depth level for a target to the database. Not a hardware command, but the "
+        "user decided an AI may not change configuration.",
+        "change-data",
+    ),
     "planning_deep_catalog_status": ToolDecision(
         "keep",
         "Built 2026-10-06. Reads the catalog file; the optional estimate queries the Gaia archive and "
@@ -390,6 +401,13 @@ DECISIONS = {
         "Built 2026-10-24. Reads the camera, telescope, filter, exposure, gain setting, offset and binning "
         "that stored quality measurements point at, by capture setting id. Writes nothing and creates "
         "no table.",
+        tool_class="observe",
+    ),
+    "quality_calibration_identities": ToolDecision(
+        "keep",
+        "Built 2026-10-25. Reads which flat, bias and dark masters, optic, camera, Siril version and "
+        "stacking algorithm version each library stacking run used, by run id or target, so two runs "
+        "confounded by a calibration change can be told apart. Writes nothing and creates no table.",
         tool_class="observe",
     ),
     "quality_resolve_rows": ToolDecision(
@@ -579,7 +597,7 @@ DECISIONS = {
         "so it reads the stored numbers with quality_query instead.",
         "change-data",
     ),
-    "processing_measure_half_difference_noise": ToolDecision(
+    "processing_measure_odd_even_difference_noise": ToolDecision(
         "withhold",
         "Stacks two halves of a target's frames into the target's _subsets folder (about one library "
         "stack's time in all), subtracts them, and writes the noise of the difference into the quality "

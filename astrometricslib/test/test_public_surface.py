@@ -36,6 +36,7 @@ import astrometricslib
 # not a side effect of moving code around internally.
 EXPECTED_PUBLIC_NAMES = frozenset({
     "AMBIGUOUS_RMS_GAP",
+    "EARLIER_NIGHTS_VARIANT",
     "MINIMUM_PENALTY_TO_WEIGHT",
     "NOISE_WEIGHT_MODE",
     "NO_GOOD_MATCH_RMS",
@@ -45,6 +46,11 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "choose_stack_weight",
     "equal_weight_noise_penalty",
     "wfwhm_weights",
+    "group_frame_weights",
+    "fold_exposure_lengths",
+    "aperture_identity_from_number",
+    "load_odd_even_aperture_record",
+    "aperture_identity_to_number",
     "check_choice",
     "check_include",
     "registered_job",
@@ -100,7 +106,7 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "GaiaXpDriver",
     "GenerationDescription",
     "GroupedFrameStat",
-    "HalfDifferenceNoiseResult",
+    "OddEvenDifferenceNoiseResult",
     "HardwareError",
     "ImageProcessing",
     "InputQualityReport",
@@ -222,6 +228,7 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "safe_json_dumps",
     "scratch_directory",
     "select_library_frames",
+    "target_object_category",
     "to_error_info",
     "warm_earth_orientation_data",
 })
@@ -343,7 +350,7 @@ SUB_API_MEMBERS = {
         "remake_preview",
         "restore_excluded_frames",
         "run_spectroscopy_by_session",
-        "measure_half_difference_noise",
+        "measure_odd_even_difference_noise",
         "measure_night_contributions",
         "measure_noise_growth",
         "stack",
@@ -362,6 +369,7 @@ SUB_API_MEMBERS = {
         "save",
     },
     "quality": {
+        "calibration_identities",
         "capture_settings",
         "check_spectral_frames",
         "flag_value_outliers",

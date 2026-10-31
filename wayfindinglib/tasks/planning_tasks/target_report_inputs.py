@@ -43,6 +43,7 @@ from typing import Any
 import numpy as np
 
 from astrometricslib import (
+    EARLIER_NIGHTS_VARIANT,
     AstrometricsError,
     CaptureSetting,
     QualityMeasurement,
@@ -51,6 +52,12 @@ from astrometricslib import (
     frame_subject_id,
 )
 from wayfindinglib.analytics.result_quality.capture_overheads import EXPOSURE_MATCH_SECONDS
+from wayfindinglib.analytics.result_quality.forecast import (
+    NoiseHistory,
+    fixed_pattern_shares_by_setup,
+    noise_model_errors_by_setting_group,
+)
+from wayfindinglib.models.planning.target_report import RecommendedAdditionalFramesStatus
 from wayfindinglib.models.session.observation_session import ObservationSession
 
 logger = logging.getLogger(__name__)
@@ -114,6 +121,211 @@ def read_target_rows(astrometrics: Any, target_id: str) -> TargetRows:
     })
     settings = dict(astrometrics.quality.capture_settings(ids=ids)) if ids else {}
     return TargetRows(rows=rows, settings=settings)
+
+
+def read_earlier_nights_rows(astrometrics: Any, target_id: str) -> list[QualityMeasurement]:
+    """Read the stored rows of a target's earlier-nights subset stacks.
+
+    The subset stack (all observing nights but the last) keeps its rows apart
+    from the library stack's: they carry the variant `EARLIER_NIGHTS_VARIANT`,
+    which a read of the library's own rows leaves out. Every run is kept.
+    Only the stack-level rows and the per-frame weights are read, which is
+    what the forecast check needs.
+
+    Parameters
+    ----------
+    astrometrics : `Astrometrics`
+        The science library handle.
+    target_id : `str`
+        The target.
+
+    Returns
+    -------
+    rows : `list` [`QualityMeasurement`]
+        The rows; empty when the target has no subset stack.
+    """
+    return [
+        *astrometrics.quality.query(
+            target_id=target_id, level="stack", variant=EARLIER_NIGHTS_VARIANT, latest_only=False
+        ),
+        *astrometrics.quality.query(
+            target_id=target_id,
+            level="frame",
+            metric=FRAME_WEIGHT_METRIC,
+            variant=EARLIER_NIGHTS_VARIANT,
+            latest_only=False,
+        ),
+    ]
+
+
+def read_forecast_runs(
+    astrometrics: Any, target_id: str, library_rows: Iterable[QualityMeasurement]
+) -> list[Any]:
+    """Build a target's stack runs, with the subset runs and calibration.
+
+    Parameters
+    ----------
+    astrometrics : `Astrometrics`
+        The science library handle.
+    target_id : `str`
+        The target.
+    library_rows : `Iterable` [`QualityMeasurement`]
+        The target's library stack rows and frame weights with every run kept
+        (``latest_only=False``, ``library_only=True``).
+
+    Returns
+    -------
+    runs : `list` [`StackRunRecord`]
+        The library runs and the earlier-nights subset runs, oldest first,
+        each with its calibration record where one is stored. A library
+        without ``calibration_identities`` (an old one) gives runs with none,
+        and the forecast check then counts them as confounded.
+    """
+    from wayfindinglib.analytics.result_quality.forecast import (
+        attach_calibration_identities,
+        stack_runs_from_measurements,
+    )
+
+    reader = getattr(astrometrics.quality, "calibration_identities", None)
+    identities = list(reader(target_id=target_id)) if callable(reader) else []
+    runs = stack_runs_from_measurements(
+        [*library_rows, *read_earlier_nights_rows(astrometrics, target_id)], include_earlier_nights=True
+    )
+    return attach_calibration_identities(runs, identities)
+
+
+def _read_library_stack_rows(astrometrics: Any) -> tuple[list[QualityMeasurement], dict[int, CaptureSetting]]:
+    """Read every library stack's rows and their capture settings, once.
+
+    Parameters
+    ----------
+    astrometrics : `Astrometrics`
+        The science library handle.
+
+    Returns
+    -------
+    rows, settings : `tuple`
+        One library-wide query of stack-level rows (library stacks, every run
+        kept) and one read of the capture settings they point at.
+    """
+    rows = list(astrometrics.quality.query(level="stack", library_only=True, latest_only=False))
+    ids = sorted({
+        row.subject.capture_setting_id for row in rows if row.subject.capture_setting_id is not None
+    })
+    settings = dict(astrometrics.quality.capture_settings(ids=ids)) if ids else {}
+    return rows, settings
+
+
+def read_noise_history(astrometrics: Any) -> NoiseHistory:
+    """Read what every target's stacks say about noise, in one pass.
+
+    One library-wide query of stack-level rows (library stacks, every run
+    kept), one read of the capture settings and one read of the calibration
+    records. From them it pools the odd–even differences of each capture
+    setting group (camera, optic, gain setting, offset, binning) into the
+    noise model's own error (decision D17), and it collects each target's
+    measured fixed-pattern share by camera, optic and flat set (decision D23).
+    The target report and tonight's ranking both call it once, so neither
+    queries per target.
+
+    Parameters
+    ----------
+    astrometrics : `Astrometrics`
+        The science library handle.
+
+    Returns
+    -------
+    history : `NoiseHistory`
+        ``model_errors``: a `NoiseModelError` for each setting group with at
+        least one sample (a group missing from it has none;
+        `noise_model_error_for_setting` gives the stand-in).
+        ``fixed_pattern_shares``: the shares by setup.
+    """
+    rows, settings = _read_library_stack_rows(astrometrics)
+    reader = getattr(astrometrics.quality, "calibration_identities", None)
+    identities = list(reader()) if callable(reader) else []
+    return NoiseHistory(
+        model_errors=noise_model_errors_by_setting_group(rows, settings),
+        fixed_pattern_shares=fixed_pattern_shares_by_setup(rows, identities),
+    )
+
+
+def read_noise_model_errors(astrometrics: Any) -> dict[Any, Any]:
+    """Measure the noise model's own error from the whole library, in one read.
+
+    One library-wide query of stack-level rows (library stacks, every run
+    kept) and one read of the capture settings, then
+    `noise_model_errors_by_setting_group` pools the odd–even differences of
+    each capture setting group (camera, optic, gain setting, offset,
+    binning). Decision D17. `read_noise_history` does this and also gathers
+    the fixed-pattern history; use it when both are wanted.
+
+    Parameters
+    ----------
+    astrometrics : `Astrometrics`
+        The science library handle.
+
+    Returns
+    -------
+    errors : `dict`
+        A `NoiseModelError` for each setting group with at least one sample,
+        keyed by `noise_model_setting_key`. A group missing from it has none;
+        `noise_model_error_for_setting` gives the stand-in for it.
+    """
+    rows, settings = _read_library_stack_rows(astrometrics)
+    return noise_model_errors_by_setting_group(rows, settings)
+
+
+def recommended_additional_frames_status_of_target(
+    astrometrics: Any,
+    target_id: str,
+    library_rows: Iterable[QualityMeasurement],
+    observations: Sequence[Any],
+    *,
+    configured_stack_weight: str | None = None,
+    electrons_per_adu: float | None = None,
+) -> RecommendedAdditionalFramesStatus:
+    """Work out whether "take N more" is open for a target.
+
+    The target report and tonight's ranking both use this, so they agree.
+
+    Parameters
+    ----------
+    astrometrics : `Astrometrics`
+        The science library handle.
+    target_id : `str`
+        The target.
+    library_rows : `Iterable` [`QualityMeasurement`]
+        The target's library stack rows and frame weights, every run kept.
+    observations : `Sequence` [`FrameObservation`]
+        The target's frames.
+    configured_stack_weight : `str` or `None`, optional
+        The configured stacker weight mode.
+    electrons_per_adu : `float`, optional
+        The camera gain, for the frame noise of a group the new frames start.
+
+    Returns
+    -------
+    frames_status : `RecommendedAdditionalFramesStatus`
+        ``not_checked``, ``provisional`` or ``confirmed``
+        (`recommended_additional_frames_status_from_checks`).
+    """
+    from wayfindinglib.analytics.result_quality.forecast import (
+        forecast_check,
+        recommended_additional_frames_status_from_checks,
+    )
+
+    runs = read_forecast_runs(astrometrics, target_id, library_rows)
+    if not runs:
+        return RecommendedAdditionalFramesStatus.NOT_CHECKED
+    return recommended_additional_frames_status_from_checks(
+        forecast_check(
+            runs,
+            observations,
+            configured_stack_weight=configured_stack_weight,
+            electrons_per_adu=electrons_per_adu,
+        )
+    )
 
 
 def frame_altitudes(target: Target) -> dict[str, float]:

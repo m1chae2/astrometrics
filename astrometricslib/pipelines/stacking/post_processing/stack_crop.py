@@ -34,6 +34,7 @@ import numpy as np
 from scipy.ndimage import median_filter
 
 from astrometricslib.drivers.fits_access import collapse_to_2d, read_data, read_header, write_image
+from astrometricslib.pipelines.stacking.post_processing.stack_image import MAD_TO_SIGMA
 
 logger = logging.getLogger(__name__)
 
@@ -68,10 +69,6 @@ MAXIMUM_TRIM_FRACTION = 0.25
 # A trim this small is not worth making. Dithering of a few pixels leaves
 # margins like this, and cutting them would only change the file size.
 _MINIMUM_WORTH_TRIMMING_PX = 3
-
-# The robust standard deviation (from the median absolute deviation) is 1.4826
-# times the median absolute deviation for Gaussian noise.
-_MAD_TO_SIGMA = 1.4826
 
 # Pixels brighter than the sky by more than this many robust standard
 # deviations are treated as stars and left out of the noise estimate.
@@ -127,7 +124,7 @@ def _strip_noise(strip: np.ndarray, axis: int) -> float:
         usable sky.
     """
     median = float(np.median(strip))
-    sigma = _MAD_TO_SIGMA * float(np.median(np.abs(strip - median)))
+    sigma = MAD_TO_SIGMA * float(np.median(np.abs(strip - median)))
     if median <= 0 or sigma <= 0:
         return float("nan")
     sky = strip < median + _STAR_SIGMA * sigma
@@ -138,7 +135,7 @@ def _strip_noise(strip: np.ndarray, axis: int) -> float:
     if differences.size < 100:
         return float("nan")
     centre = float(np.median(differences))
-    return _MAD_TO_SIGMA * float(np.median(np.abs(differences - centre))) / np.sqrt(2.0) / median
+    return MAD_TO_SIGMA * float(np.median(np.abs(differences - centre))) / np.sqrt(2.0) / median
 
 
 def _trim_from_ends(ratios: np.ndarray) -> tuple[int, int]:

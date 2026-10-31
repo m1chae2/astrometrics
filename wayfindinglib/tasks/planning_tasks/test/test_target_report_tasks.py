@@ -12,6 +12,7 @@ stored.
 """
 
 import json
+import re
 from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
@@ -35,7 +36,12 @@ from astrometricslib.models.catalog_queries import CalibrationQueryResult
 from astrometricslib.models.target import FrameRecord
 from wayfindinglib.analytics.result_quality.reply_budget import MAXIMUM_REPLY_CHARACTERS, fit_reply_to_budget
 from wayfindinglib.drivers.butler import DiskButler
-from wayfindinglib.models.planning.target_report import ForecastCheck, ForecastedChange, ForecastOutcome
+from wayfindinglib.models.planning.target_report import (
+    ForecastBasis,
+    ForecastCheck,
+    ForecastedChange,
+    ForecastOutcome,
+)
 from wayfindinglib.models.quality.efficiency import ScienceGoal
 from wayfindinglib.models.quality.statements import ActionClass, Confidence, Severity, StatementKind
 from wayfindinglib.models.session.observation_session import (
@@ -44,6 +50,7 @@ from wayfindinglib.models.session.observation_session import (
     QueuedObservationPackage,
     StartTimeMode,
 )
+from wayfindinglib.tasks.planning_tasks import target_report_tasks
 from wayfindinglib.tasks.planning_tasks.target_report_inputs import assign_stacks_to_settings
 from wayfindinglib.tasks.planning_tasks.target_report_tasks import build_target_dataset_report
 
@@ -123,6 +130,25 @@ class _FakeQuality:
                 == filters["camera"]
             ]
         return list(rows)
+
+    def calibration_identities(
+        self, run_ids: list[str] | None = None, target_id: str | None = None
+    ) -> list[Any]:
+        """Give the stored calibration records (none in this fake).
+
+        Parameters
+        ----------
+        run_ids : `list` [`str`], optional
+            Only these runs.
+        target_id : `str`, optional
+            Only this target's stacks.
+
+        Returns
+        -------
+        records : `list`
+            Always empty, so every run counts as confounded.
+        """
+        return []
 
     def metrics(self, **_arguments: Any) -> list[Any]:
         """Give the registered metrics, from the real registry.
@@ -279,9 +305,9 @@ class _Library:
             for metric, value, version in (
                 ("frame.star_width_effective_arcsec", width, 1),
                 ("frame.star_width_moffat_arcsec", width - 0.1, 1),
-                ("frame.sky_rate_e_per_s_per_px", 0.5, 2),
-                ("frame.sky_noise_e", (0.5 * 60.0) ** 0.5, 2),
-                ("frame.read_noise_e", 3.0, 1),
+                ("frame.sky_rate_e_per_s_per_px", 0.5, 3),
+                ("frame.sky_noise_e", (0.5 * 60.0) ** 0.5, 3),
+                ("frame.read_noise_e", 3.0, 2),
                 ("frame.star_elongation", 1.05, 1),
             ):
                 self.rows.append(self._row(metric, value, subject_id, version=version, night=night))
@@ -339,7 +365,7 @@ class _Library:
             for metric, value, version in (
                 ("stacking.group_brightest_star_peak_fraction", 2.0, 1),
                 ("stacking.empty_aperture_noise_stack_unit", noise, 3),
-                ("stacking.expected_empty_aperture_noise_stack_unit", expected, 1),
+                ("stacking.expected_empty_aperture_noise_stack_unit", expected, 2),
                 ("stacking.effective_time_s", 1800.0, 1),
             ):
                 rows.append(
@@ -447,8 +473,79 @@ def _report_with_forecast_outcome(
     return _report(library, butler)
 
 
-TWO_RUNS = [("r1", NOW - timedelta(days=1), 0.0361, 0.030), ("r2", NOW, 0.0283, 0.020)]
-"""Two stack runs, so the report attempts a forecast check."""
+def _report_with_checks(
+    library: _Library,
+    butler: DiskButler,
+    monkeypatch: pytest.MonkeyPatch,
+    sequence: list[tuple[ForecastOutcome, ForecastBasis]],
+) -> Any:
+    """Build the report with made-up forecast checks, oldest first.
+
+    Parameters
+    ----------
+    library : `_Library`
+        The library (two stack runs, so a check is attempted).
+    butler : `DiskButler`
+        The storage.
+    monkeypatch : `pytest.MonkeyPatch`
+        Replaces the check function.
+    sequence : `list` [`tuple`]
+        The outcome and basis of each check.
+
+    Returns
+    -------
+    report : `TargetDatasetReport`
+        The report.
+    """
+    from wayfindinglib.analytics.result_quality import forecast
+
+    change = ForecastedChange(noiseChangeFraction=-0.2, tolerance=0.05)
+    checks = [
+        ForecastCheck(
+            stackRunId="r2",
+            forecastWhenPlanned=change,
+            forecastGivenFramesTaken=change,
+            measured=change,
+            weightingMode="equal",
+            paired=True,
+            outcome=outcome,
+            reason="" if outcome == ForecastOutcome.AS_FORECAST else "made up for the test",
+            basis=basis,
+        )
+        for outcome, basis in sequence
+    ]
+    monkeypatch.setattr(forecast, "forecast_check", lambda *args, **keywords: checks)
+    return _report(library, butler)
+
+
+TWO_RUNS = [("r1", NOW - timedelta(days=1), 0.0361, 0.0361), ("r2", NOW, 0.0283, 0.0283)]
+"""Two stack runs, so the report attempts a forecast check. Each stack's
+expected noise equals its measured noise: no fixed-pattern noise, so "take N
+more"
+gives a count."""
+
+CAMERA_GAIN = 0.783
+"""Electrons per ADU of the ZWO ASI533MM Pro at gain 0 (the camera profile's
+measured value). The made-up configuration holds no camera profile, so tests
+that need a gain patch it in."""
+
+
+@pytest.fixture
+def camera_gain(monkeypatch: pytest.MonkeyPatch) -> float:
+    """Give the report a camera gain, as the real camera profile does.
+
+    Parameters
+    ----------
+    monkeypatch : `pytest.MonkeyPatch`
+        Replaces the profile lookup.
+
+    Returns
+    -------
+    gain : `float`
+        The gain, in electrons per ADU.
+    """
+    monkeypatch.setattr(target_report_tasks, "camera_gain_for_setting", lambda _config, _setting: CAMERA_GAIN)
+    return CAMERA_GAIN
 
 
 def _of_rule(report: Any, rule: str) -> list[Any]:
@@ -549,7 +646,7 @@ def test_a_matching_calibration_library_gives_no_gap(isolated_butler: DiskButler
 
 
 def test_more_frames_proposes_a_count_and_says_it_is_tentative(
-    isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch
+    isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch, camera_gain: float
 ) -> None:
     """With 30 frames and an agreeing forecast check, a count is proposed."""
     report = _report_with_forecast_outcome(
@@ -560,11 +657,48 @@ def test_more_frames_proposes_a_count_and_says_it_is_tentative(
     assert more[0].kind == StatementKind.RECOMMENDATION
     assert more[0].confidence == Confidence.DESIGN_ESTIMATE
     assert more[0].proposed_action.frame_count > 0
-    assert "to cut the noise by about 30%" in more[0].message
+    assert "which cuts the noise by about 31%" in more[0].message
     assert more[0].expected_effect.noise_change_fraction == pytest.approx(-0.29, abs=0.02)
     assert more[0].proposed_action.exposure_seconds > 60.0
     assert "limited by read noise" in more[0].reason
     assert more[0].expected_effect.wall_clock_seconds > 0.0
+    # A new exposure length makes a new group: at least 5 frames are asked for.
+    assert more[0].proposed_action.frame_count >= 5
+    assert "new exposure group" in more[0].reason
+
+
+def test_a_lower_target_noise_ratio_asks_for_more_frames(
+    isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch, camera_gain: float
+) -> None:
+    """The depth goal aims the same search at a deeper noise ratio."""
+    from wayfindinglib.analytics.result_quality import forecast
+
+    change = ForecastedChange(noiseChangeFraction=-0.2, tolerance=0.05)
+    checks = [
+        ForecastCheck(
+            stackRunId="r2",
+            forecastWhenPlanned=change,
+            forecastGivenFramesTaken=change,
+            measured=change,
+            weightingMode="equal",
+            paired=True,
+            outcome=ForecastOutcome.AS_FORECAST,
+        )
+    ]
+    monkeypatch.setattr(forecast, "forecast_check", lambda *args, **keywords: checks)
+    library = _Library(runs=TWO_RUNS)
+    (default,) = _of_rule(_report(library, isolated_butler), "more_frames")
+    deeper = build_target_dataset_report(
+        library.target,
+        astrometrics=library,
+        butler=isolated_butler,
+        config=isolated_butler.config,
+        at=NOW,
+        target_noise_ratio=0.35,
+    )
+    (more,) = _of_rule(deeper, "more_frames")
+    assert more.proposed_action.frame_count > default.proposed_action.frame_count
+    assert more.expected_effect.wall_clock_seconds > default.expected_effect.wall_clock_seconds
 
 
 @pytest.mark.parametrize(
@@ -585,8 +719,66 @@ def test_take_more_is_hidden_until_a_forecast_check_agreed(
     assert "Take more frames and stack them" in more.reason
 
 
+def test_a_fixed_pattern_noise_that_most_of_the_noise_is_made_of_replaces_the_count(
+    isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch, camera_gain: float
+) -> None:
+    """Fixed-pattern noise above the random noise: no count reaches the goal.
+
+    Measured 0.01483 against expected 0.0100 is fixed-pattern noise that is 55%
+    of the noise variance. Doubling the data still cuts the noise by 13%, above
+    the stop limit, so the stop warning is not raised; the report says so in
+    place of a count and names the fixed-pattern noise.
+    """
+    runs = [("r1", NOW - timedelta(days=1), 0.01483, 0.0100), ("r2", NOW, 0.01483, 0.0100)]
+    report = _report_with_forecast_outcome(
+        _Library(runs=runs), isolated_butler, monkeypatch, ForecastOutcome.AS_FORECAST
+    )
+
+    assert _of_rule(report, "more_frames") == []
+    (fixed_pattern,) = _of_rule(report, "more_frames_will_not_help")
+
+    assert fixed_pattern.kind == StatementKind.WARNING
+    assert "fixed-pattern noise" in fixed_pattern.message
+    assert "55% of the noise" in fixed_pattern.message
+    assert fixed_pattern.proposed_action is None
+    assert fixed_pattern.evidence
+
+
+def test_a_pair_with_no_aperture_identity_keeps_take_more_hidden(isolated_butler: DiskButler) -> None:
+    """Runs stored before the identity row give no checkable pair.
+
+    The report's own check runs on the two made-up stacks. They have no
+    aperture identity and no calibration record, so the check says it could
+    not be made, no count is shown, and the hidden statement says why.
+    """
+    library = _Library(runs=TWO_RUNS)
+    for run_id, at, noise, _expected in TWO_RUNS:
+        library.rows.append(
+            library._row(
+                "stacking.empty_aperture_noise_normalized",
+                noise / 1000.0,
+                STACK_ID,
+                level=SubjectLevel.STACK,
+                version=3,
+                setting_id=None,
+                run_id=run_id,
+                sample_count=2000,
+                at=at,
+            )
+        )
+    report = _report(library, isolated_butler)
+
+    (check,) = report.forecast_checks
+    (more,) = _of_rule(report, "more_frames")
+
+    assert check.outcome == ForecastOutcome.NOT_CHECKABLE
+    assert "aperture-set identity" in check.reason
+    assert more.kind == StatementKind.INSUFFICIENT_DATA
+    assert "aperture-set identity" in more.reason
+
+
 def test_take_more_is_hidden_for_a_target_with_one_stack(isolated_butler: DiskButler) -> None:
-    """A target with a single stack has no check, so the gate is shut."""
+    """A target with a single stack has no check, so no count is shown."""
     report = _report(_Library(), isolated_butler)
 
     (more,) = _of_rule(report, "more_frames")
@@ -791,11 +983,11 @@ def test_a_stack_of_two_settings_goes_to_the_setting_with_most_frames() -> None:
     assert any("2 capture settings" in note for note in notes)
 
 
-def test_a_flat_noise_floor_makes_the_stop_warning_and_drops_take_more(
+def test_a_flat_fixed_pattern_noise_makes_the_stop_warning_and_drops_take_more(
     isolated_butler: DiskButler,
 ) -> None:
     """Noise that levels off stops "take N more" and warns instead."""
-    # Variance = expected variance + 4e-4: the floor is 0.02.
+    # Variance = expected variance + 4e-4: the fixed-pattern noise is 0.02.
     runs = [
         ("r1", NOW - timedelta(days=2), 0.0361, 0.030),
         ("r2", NOW - timedelta(days=1), 0.0283, 0.020),
@@ -1012,7 +1204,7 @@ def test_the_context_section_goes_first_and_then_the_long_evidence_lists(
 
 
 def test_take_more_prices_dithers_and_refocusing_like_the_ranking(
-    isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch
+    isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch, camera_gain: float
 ) -> None:
     """The time of "take N more" counts dithers and autofocus runs."""
     from wayfindinglib.analytics.result_quality.capture_overheads import (
@@ -1068,3 +1260,224 @@ def test_set_aside_frames_come_from_stored_rows_not_the_frames_folder(isolated_b
     report = _report(library, isolated_butler)
     assert report.capture_settings[0].frames_set_aside == 2
     assert any("not why" in note for note in report.notes)
+
+
+def _provenanced(value: float, kind: str, source: str) -> SimpleNamespace:
+    """Build a stand-in profile value with its provenance.
+
+    Parameters
+    ----------
+    value : `float`
+        The value in ADU.
+    kind : `str`
+        Where it came from, such as ``"measured"``.
+    source : `str`
+        The source text.
+
+    Returns
+    -------
+    provenanced : `SimpleNamespace`
+        An object shaped like a `ProvenancedValue`.
+    """
+    return SimpleNamespace(value=value, provenance=SimpleNamespace(kind=kind, source=source))
+
+
+def test_the_clipping_note_uses_the_ceiling_when_the_threshold_cannot_be_reached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A threshold above the clip ceiling reports the ceiling instead."""
+    from wayfindinglib.tasks.planning_tasks import target_report_tasks
+
+    ceiling = _provenanced(16383, "measured", "raw maximum")
+    profile = SimpleNamespace(
+        clip_ceiling_adu=ceiling,
+        pixel_saturation_level_adu=ceiling,
+        saturation_threshold_can_be_reached=False,
+        photometric_linearity_limit_adu=None,
+    )
+    monkeypatch.setattr(target_report_tasks, "resolve_camera_profile", lambda name, config: profile)
+    note = target_report_tasks._clipping_note("Nikon D5300", None, ScienceGoal.FAINT_POINT_SOURCE)
+    assert "at or above 16383 ADU (measured: raw maximum)" in note
+    assert "the ceiling is used instead" in note
+    assert "proportional" not in note
+
+
+def test_the_clipping_note_names_the_linearity_limit_when_there_is_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A ZWO-like profile keeps its threshold and adds the linearity limit."""
+    from wayfindinglib.tasks.planning_tasks import target_report_tasks
+
+    profile = SimpleNamespace(
+        clip_ceiling_adu=_provenanced(65532, "measured", "raw maximum"),
+        pixel_saturation_level_adu=_provenanced(65000, "assumed", "default"),
+        saturation_threshold_can_be_reached=True,
+        photometric_linearity_limit_adu=_provenanced(60000, "measured", "Antonov 2026"),
+    )
+    monkeypatch.setattr(target_report_tasks, "resolve_camera_profile", lambda name, config: profile)
+    note = target_report_tasks._clipping_note("ZWO ASI 533MM Pro", None, ScienceGoal.FAINT_POINT_SOURCE)
+    assert "at or above 65000 ADU (assumed: default)" in note
+    assert "the ceiling is used instead" not in note
+    assert "above 60000 ADU (measured: Antonov 2026)" in note
+
+
+def test_an_agreeing_earlier_nights_check_shows_a_provisional_count(
+    isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch, camera_gain: float
+) -> None:
+    """Decision D11: a subset check gives a provisional count."""
+    report = _report_with_checks(
+        _Library(runs=TWO_RUNS),
+        isolated_butler,
+        monkeypatch,
+        [(ForecastOutcome.AS_FORECAST, ForecastBasis.EARLIER_NIGHTS_SUBSET)],
+    )
+
+    (more,) = _of_rule(report, "more_frames")
+
+    assert more.kind == StatementKind.RECOMMENDATION
+    assert more.proposed_action.frame_count > 0
+    assert more.confidence == Confidence.DESIGN_ESTIMATE
+    assert more.values["count_basis"] == "provisional"
+    assert re.match(r"Recommended additional frames: \d+ \(provisional\) at ", more.message)
+    for text in (more.message, more.reason):
+        assert "check made from frames already taken" in text
+        assert "next real stack will confirm it or withdraw it" in text
+    assert report.forecast_checks[0].basis == ForecastBasis.EARLIER_NIGHTS_SUBSET
+
+
+def test_a_later_real_check_that_agrees_removes_the_provisional_mark(
+    isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch, camera_gain: float
+) -> None:
+    """A real later stack that agrees confirms the count: no mark."""
+    report = _report_with_checks(
+        _Library(runs=TWO_RUNS),
+        isolated_butler,
+        monkeypatch,
+        [
+            (ForecastOutcome.AS_FORECAST, ForecastBasis.EARLIER_NIGHTS_SUBSET),
+            (ForecastOutcome.AS_FORECAST, ForecastBasis.LATER_STACK),
+        ],
+    )
+
+    (more,) = _of_rule(report, "more_frames")
+
+    assert more.kind == StatementKind.RECOMMENDATION
+    assert "provisional" not in more.message
+    assert "count_basis" not in more.values
+
+
+def test_a_later_real_check_that_disagrees_withdraws_a_provisional_count(
+    isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A real check that falls short hides the count again."""
+    report = _report_with_checks(
+        _Library(runs=TWO_RUNS),
+        isolated_butler,
+        monkeypatch,
+        [
+            (ForecastOutcome.AS_FORECAST, ForecastBasis.EARLIER_NIGHTS_SUBSET),
+            (ForecastOutcome.SHORT_UNKNOWN_REASON, ForecastBasis.LATER_STACK),
+        ],
+    )
+
+    (more,) = _of_rule(report, "more_frames")
+
+    assert more.kind == StatementKind.INSUFFICIENT_DATA
+    assert more.proposed_action is None
+    assert "1 of them were made from frames already taken" in more.reason
+
+
+def test_a_disagreeing_earlier_nights_check_keeps_the_count_hidden(
+    isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A subset check that falls short opens nothing and is named."""
+    report = _report_with_checks(
+        _Library(runs=TWO_RUNS),
+        isolated_butler,
+        monkeypatch,
+        [(ForecastOutcome.SHORT_UNKNOWN_REASON, ForecastBasis.EARLIER_NIGHTS_SUBSET)],
+    )
+
+    (more,) = _of_rule(report, "more_frames")
+
+    assert more.kind == StatementKind.INSUFFICIENT_DATA
+    assert "made from frames already taken" in more.reason
+
+
+def _fixed_pattern_statement(setting: CaptureSetting = SETTING) -> Any:
+    """Make the M 13 diminishing-returns "take N more" statement.
+
+    Parameters
+    ----------
+    setting : `CaptureSetting`, optional
+        The setting it is about.
+
+    Returns
+    -------
+    statement : `TargetStatement`
+        The recommendation for 44 more frames, with the fixed-pattern noise
+        sentences.
+    """
+    from wayfindinglib.analytics.result_quality.capture_overheads import CaptureOverheads
+    from wayfindinglib.analytics.result_quality.noise_growth import TakeMoreResult
+    from wayfindinglib.analytics.result_quality.report_rules import more_frames_statement
+
+    result = TakeMoreResult(
+        target_noise_ratio=0.707,
+        added_exposure_seconds=44 * 30.0,
+        new_exposure_seconds=30.0,
+        fixed_pattern_noise=0.583e-3,
+        fixed_pattern_variance_share=0.49,
+        practical_limit_applied=True,
+        doubling_frames=44,
+        doubling_noise_cut=0.137,
+        most_reachable_cut=0.296,
+    )
+    overheads = CaptureOverheads(
+        download_seconds=5.0,
+        dither_settle_seconds=20.0,
+        autofocus_seconds=120.0,
+        download_from_records=False,
+        dither_from_records=False,
+        autofocus_from_records=False,
+        gaps_used=0,
+    )
+    return more_frames_statement(result, setting, overheads, [])
+
+
+def test_the_fixed_pattern_sentence_points_at_calibration_advice_in_the_same_report() -> None:
+    """A calibration_gap statement for the setting swaps the last sentence."""
+    from wayfindinglib.analytics.result_quality.report_rules import (
+        FIXED_PATTERN_CALIBRATION_TEXT,
+        FIXED_PATTERN_NOT_REMOVED_TEXT,
+    )
+    from wayfindinglib.models.quality.statements import TargetStatement
+
+    fixed_pattern = _fixed_pattern_statement()
+    gap = TargetStatement(
+        rule="calibration_gap",
+        kind=StatementKind.RECOMMENDATION,
+        severity=None,
+        action_class=ActionClass.CALIBRATION,
+        capture_setting=SETTING,
+        message="Take flats.",
+        confidence=Confidence.DESIGN_ESTIMATE,
+    )
+
+    [with_gap, _] = target_report_tasks._point_fixed_pattern_at_calibration([fixed_pattern, gap])
+    [without_gap] = target_report_tasks._point_fixed_pattern_at_calibration([fixed_pattern])
+
+    assert with_gap.message.endswith(FIXED_PATTERN_CALIBRATION_TEXT)
+    assert FIXED_PATTERN_NOT_REMOVED_TEXT not in with_gap.message
+    assert "calibration recommendations" in with_gap.plain_message
+    assert without_gap.message.endswith(FIXED_PATTERN_NOT_REMOVED_TEXT)
+
+
+def test_a_provisional_status_keeps_its_sentence_on_the_doubling_statement() -> None:
+    """The D11 sentence and count basis go on the doubling statement too."""
+    [marked] = target_report_tasks._mark_provisional([_fixed_pattern_statement()])
+
+    assert target_report_tasks.PROVISIONAL_COUNT_SENTENCE in marked.message
+    assert marked.message.startswith("Recommended additional frames: 44 (provisional) at 30 s")
+    assert marked.values["count_basis"] == "provisional"
+    assert marked.proposed_action.frame_count == 44

@@ -146,6 +146,95 @@ def test_the_threshold_can_be_reached_only_when_it_is_not_above_the_ceiling(
     assert profile.saturation_threshold_can_be_reached is expected
 
 
+def _profile_with_limits(
+    threshold: float,
+    ceiling: float,
+    linearity: float | None = None,
+    ceiling_kind: str = "measured",
+    threshold_kind: str = "assumed",
+) -> CameraProfile:
+    """Build a profile with the three saturation numbers set.
+
+    Parameters
+    ----------
+    threshold : `float`
+        The saturation threshold, in ADU.
+    ceiling : `float`
+        The clip ceiling, in ADU.
+    linearity : `float` or `None`
+        The photometric linearity limit, in ADU, or `None` for none.
+    ceiling_kind : `str`
+        The provenance kind of the clip ceiling.
+    threshold_kind : `str`
+        The provenance kind of the saturation threshold.
+
+    Returns
+    -------
+    profile : `CameraProfile`
+        The profile.
+    """
+    overrides: dict[str, object] = {
+        "clip_ceiling_adu": {"value": ceiling, "provenance": {"kind": ceiling_kind, "source": "a test"}},
+        "saturation_threshold_adu": {
+            "value": threshold,
+            "provenance": {"kind": threshold_kind, "source": "a test"},
+        },
+    }
+    if linearity is not None:
+        overrides["photometric_linearity_limit_adu"] = {
+            "value": linearity,
+            "provenance": {"kind": "measured", "source": "a test"},
+        }
+    return CameraProfile.model_validate(make_profile_data(**overrides))
+
+
+def test_pixel_saturation_level_is_the_threshold_when_it_is_reachable() -> None:
+    """Check a ZWO-like profile keeps its threshold level."""
+    profile = _profile_with_limits(65000.0, 65532.0, linearity=60000.0)
+    level = profile.pixel_saturation_level_adu
+    assert level.value == pytest.approx(65000.0)
+    assert level.provenance.kind == ProvenanceKind.ASSUMED
+
+
+def test_pixel_saturation_level_is_capped_at_the_clip_ceiling() -> None:
+    """Check a Nikon-like profile is capped at its measured clip level."""
+    profile = _profile_with_limits(65000.0, 16383.0)
+    level = profile.pixel_saturation_level_adu
+    assert level.value == pytest.approx(16383.0)
+    assert level.provenance.kind == ProvenanceKind.MEASURED
+    assert "clip ceiling" in level.provenance.source
+
+
+def test_an_assumed_clip_ceiling_still_caps_and_stays_assumed() -> None:
+    """Check an assumed ceiling still caps and the level reads assumed."""
+    profile = _profile_with_limits(65000.0, 16383.0, ceiling_kind="assumed")
+    level = profile.pixel_saturation_level_adu
+    assert level.value == pytest.approx(16383.0)
+    assert level.provenance.kind == ProvenanceKind.ASSUMED
+
+
+def test_usable_peak_level_equals_the_pixel_level_without_a_linearity_limit() -> None:
+    """Check the usable peak equals the pixel level with no linearity limit."""
+    nikon = _profile_with_limits(65000.0, 16383.0)
+    assert nikon.usable_peak_level_adu.value == pytest.approx(16383.0)
+    zwo = _profile_with_limits(65000.0, 65532.0)
+    assert zwo.usable_peak_level_adu.value == pytest.approx(65000.0)
+
+
+def test_usable_peak_level_is_capped_at_the_linearity_limit() -> None:
+    """Check a ZWO-like usable peak is 60,000 ADU, its pixel level 65,000."""
+    profile = _profile_with_limits(65000.0, 65532.0, linearity=60000.0)
+    assert profile.usable_peak_level_adu.value == pytest.approx(60000.0)
+    assert profile.usable_peak_level_adu.provenance.kind == ProvenanceKind.MEASURED
+    assert profile.pixel_saturation_level_adu.value == pytest.approx(65000.0)
+
+
+def test_a_linearity_limit_above_the_pixel_level_does_not_raise_it() -> None:
+    """Check the usable peak never exceeds the pixel level."""
+    profile = _profile_with_limits(65000.0, 16383.0, linearity=60000.0)
+    assert profile.usable_peak_level_adu.value == pytest.approx(16383.0)
+
+
 NOISE_VALUE = {"value": 0.78, "provenance": PROVENANCE}
 
 
@@ -196,3 +285,89 @@ def test_the_old_schema_version_is_refused() -> None:
     """Schema 1 held single values; this model only accepts schema 2."""
     with pytest.raises(ValidationError):
         CameraProfile.model_validate(make_profile_data(schema_version=1))
+
+
+def make_offset_profile(*offsets: str, gain_setting: str = "0", binning: str = "1x1") -> CameraProfile:
+    """Build a profile with one measured gain and read noise entry per offset.
+
+    Parameters
+    ----------
+    *offsets : `str`
+        The offsets that get an entry.
+    gain_setting : `str`, optional
+        The gain setting of every entry.
+    binning : `str`, optional
+        The binning of every entry.
+
+    Returns
+    -------
+    profile : `CameraProfile`
+        The profile. The read noise of an entry is 3.8 plus its offset over 100
+        e-, so a test can tell which entry was used.
+    """
+    entries = [
+        make_noise_entry(
+            gain_setting=gain_setting,
+            offset=offset,
+            binning=binning,
+            read_noise_e={
+                "value": 3.8 + float(offset) / 100.0,
+                "provenance": {"kind": "measured", "source": f"bias pairs at offset {offset}"},
+            },
+        )
+        for offset in offsets
+    ]
+    return CameraProfile.model_validate(make_profile_data(sensor_noise=entries))
+
+
+def test_an_exact_entry_wins_over_the_offset_fallback() -> None:
+    """With an entry at the frame's own offset, the fallback is never used."""
+    profile = make_offset_profile("0", "10")
+    entry = profile.sensor_noise_for(0, 0, "1x1", clipped_at_zero=False)
+    assert entry is not None
+    assert entry.offset == "0"
+    assert entry.read_noise_e.value == pytest.approx(3.8)
+    assert "offset fallback" not in entry.read_noise_e.provenance.source
+
+
+def test_an_unclipped_frame_uses_another_offset_and_the_source_says_so() -> None:
+    """The value and its kind are kept; the source names both offsets."""
+    profile = make_offset_profile("10")
+    entry = profile.sensor_noise_for(0, None, "1x1", clipped_at_zero=False)
+    assert entry is not None
+    assert entry.read_noise_e.value == pytest.approx(3.9)
+    assert entry.read_noise_e.provenance.kind == ProvenanceKind.MEASURED
+    for value in (entry.read_noise_e, entry.gain_e_per_adu):
+        assert "offset fallback" in value.provenance.source
+        assert "measured at offset 10 and used at offset 0" in value.provenance.source
+    assert "bias pairs at offset 10" in entry.read_noise_e.provenance.source
+    assert profile.sensor_noise_gap_reason(0, 0, "1x1", clipped_at_zero=False) is None
+
+
+def test_a_clipped_or_unknown_frame_gets_only_an_exact_match() -> None:
+    """A clipped frame, or one not known to be unclipped, gets no fallback."""
+    profile = make_offset_profile("10")
+    assert profile.sensor_noise_for(0, 0, "1x1") is None
+    assert profile.sensor_noise_for(0, 0, "1x1", clipped_at_zero=None) is None
+    assert profile.sensor_noise_for(0, 0, "1x1", clipped_at_zero=True) is None
+    reason = profile.sensor_noise_gap_reason(0, 0, "1x1", clipped_at_zero=True)
+    assert "entry at offset 10 cannot stand in" in reason
+    assert "clipped at zero" in reason
+    assert "not known" in profile.sensor_noise_gap_reason(0, 0, "1x1")
+
+
+def test_the_fallback_needs_the_same_gain_and_binning() -> None:
+    """An entry at another gain or binning is never borrowed."""
+    profile = make_offset_profile("10")
+    assert profile.sensor_noise_for(1, 0, "1x1", clipped_at_zero=False) is None
+    assert profile.sensor_noise_for(0, 0, "2x2", clipped_at_zero=False) is None
+    assert "offset 0" in profile.sensor_noise_gap_reason(1, 0, "1x1", clipped_at_zero=False)
+
+
+def test_the_fallback_picks_the_nearest_offset_and_the_higher_on_a_tie() -> None:
+    """Nearest wins; two equally near offsets resolve to the higher one."""
+    profile = make_offset_profile("5", "30", "1")
+    assert profile.sensor_noise_for(0, 2, "1x1", clipped_at_zero=False).offset == "1"
+    tied = make_offset_profile("10", "20", "5")
+    assert tied.sensor_noise_for(0, 15, "1x1", clipped_at_zero=False).offset == "20"
+    assert tied.sensor_noise_for(0, 12, "1x1", clipped_at_zero=False).offset == "10"

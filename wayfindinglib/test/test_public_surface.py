@@ -85,6 +85,9 @@ EXPECTED_EXPORTS = frozenset({
     "SkyPosition",
     "StartTimeMode",
     "TargetDatasetReport",
+    "DepthGoalStatus",
+    "DepthGoalState",
+    "DepthLevel",
     "TargetStatement",
     "TonightRanking",
     "Telescope",
@@ -101,6 +104,8 @@ EXPECTED_EXPORTS = frozenset({
 PLANNING_MEMBERS = frozenset({
     "get_visibility",
     "get_advisory",
+    "get_depth_goal",
+    "set_depth_goal",
     "calculate_panels",
     "tick_checklist_item",
     "create_mosaic",

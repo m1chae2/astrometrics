@@ -159,9 +159,9 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # target's `_subsets` folder, and measure the noise of each result. Each
     # starts a background run and answers at once. Writes (they stack and store
     # rows), so the AI's read-only profile withholds them.
-    "processing:measure_half_difference_noise": (
+    "processing:measure_odd_even_difference_noise": (
         "quality_measurement_service",
-        "start_half_difference_noise",
+        "start_odd_even_difference_noise",
     ),
     "processing:measure_noise_growth": ("quality_measurement_service", "start_noise_growth"),
     "processing:measure_night_contributions": ("quality_measurement_service", "start_night_contributions"),
@@ -263,6 +263,8 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "advisory:target_report": ("advisory_service", "get_target_report"),
     "advisory:tonight": ("advisory_service", "get_tonight_ranking"),
     "advisory:result": ("advisory_service", "get_result_statements"),
+    "advisory:depth_goal": ("advisory_service", "get_depth_goal"),
+    "advisory:set_depth_goal": ("advisory_service", "set_depth_goal"),
     "history:nights": ("advisory_service", "list_nights"),
     "history:night_quality": ("advisory_service", "get_night_quality"),
     "history:target_changes": ("advisory_service", "list_target_changes"),

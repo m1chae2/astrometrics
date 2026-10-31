@@ -367,7 +367,7 @@ def _record(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[int, list[
     )
     monkeypatch.setattr(record_quality, "determine_stack_members", lambda *_: None)
     monkeypatch.setattr(record_quality, "compute_stack_science", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(record_quality, "stacking_measurements", lambda *_: [_stack_row()])
+    monkeypatch.setattr(record_quality, "stacking_measurements", lambda *_, **__: [_stack_row()])
     # The flat-to-light match has its own tests (test_flat_match.py).
     monkeypatch.setattr(record_quality, "flat_match_rows", lambda *_args, **_kwargs: [])
     frames = _frames(3)

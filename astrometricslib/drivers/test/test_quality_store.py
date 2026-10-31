@@ -2,8 +2,8 @@
 
 Covers a full round trip of every field, re-run safety (including a missing
 channel), the latest view, every query filter, capture-setting get-or-create,
-`StorageError` on a failing write, and an idempotent migration that leaves
-other tables alone.
+`StorageError` on a failing write, an idempotent migration that leaves
+other tables alone, and the version 4 merge of capture settings.
 """
 
 import sqlite3
@@ -522,7 +522,9 @@ def _make_version_1_database(path: Path) -> None:
     """
     with sqlite3.connect(path) as connection:
         connection.execute(
-            "CREATE TABLE quality_capture_setting (capture_setting_id INTEGER PRIMARY KEY, camera TEXT)"
+            "CREATE TABLE quality_capture_setting (capture_setting_id INTEGER PRIMARY KEY, camera TEXT, "
+            "telescope TEXT, focal_length_mm REAL, pixel_scale_arcsec REAL, filter_name TEXT, "
+            "exposure_seconds REAL, gain_setting INTEGER, offset INTEGER, binning INTEGER)"
         )
         connection.execute(_VERSION_1_TABLE_SQL)
         connection.execute(_VERSION_1_VIEW_SQL)
@@ -573,3 +575,198 @@ def test_the_variant_filters_pick_subset_rows_or_library_rows(store: QualityStor
     assert store.query(variant="other") == []
     with pytest.raises(InvalidArgumentError):
         store.query(variant="half", library_only=True)
+
+
+def _make_version_3_database_with_split_settings(path: Path) -> None:
+    """Write a version-3 database with settings split by header precision.
+
+    Settings 1 and 2 are the same setting with the pixel scale written two
+    ways. Setting 3 has another focal length, 4 another exposure, 5 has no
+    pixel scale (NULL), and 7 is a lone unrounded row.
+    One measurement points at each of settings 1 to 7.
+
+    Parameters
+    ----------
+    path : `pathlib.Path`
+        Where to write the database.
+    """
+    QualityStore(str(path)).write_measurements([make_measurement(run_id="seed")])
+    settings = [
+        (1, 1.915279, 300.0, 10.0),
+        (2, 1.9152790075, 300.0, 10.0),
+        (3, 1.915279, 405.0, 10.0),
+        (4, 1.915279, 300.0, 20.0),
+        (5, None, 300.0, 10.0),
+        (7, 3.1234567, 300.0, 10.0),
+    ]
+    with sqlite3.connect(path) as connection:
+        connection.execute("DELETE FROM quality_measurements")
+        connection.execute("DELETE FROM quality_capture_setting")
+        for setting_id, scale, focal_length, exposure in settings:
+            connection.execute(
+                "INSERT INTO quality_capture_setting (capture_setting_id, camera, focal_length_mm, "
+                "pixel_scale_arcsec, exposure_seconds) VALUES (?, 'ASI533MM', ?, ?, ?)",
+                (setting_id, focal_length, scale, exposure),
+            )
+        for setting_id in (1, 2, 3, 4, 5, 7):
+            connection.execute(
+                "INSERT INTO quality_measurements (metric, definition_version, subject_level, subject_id, "
+                "capture_setting_id, status, value, origin, run_id, measured_at) VALUES "
+                "('stacking.frames_stacked', 1, 'stack', ?, ?, 'measured', 5.0, 'measured', 'run-0', "
+                "'2026-10-01T00:00:00.000000+00:00')",
+                (f"stack-{setting_id}", setting_id),
+            )
+        connection.execute("UPDATE quality_schema_version SET version = 3")
+
+
+def test_version_4_merges_settings_that_differ_only_by_pixel_scale_precision(tmp_path: Path) -> None:
+    """Two rows that round to one merge; others stay; measurements follow."""
+    path = tmp_path / "astrometrics.db"
+    _make_version_3_database_with_split_settings(path)
+    store = QualityStore(str(path))
+    store.write_measurements([make_measurement(run_id="after")])
+    with sqlite3.connect(path) as connection:
+        settings = connection.execute(
+            "SELECT capture_setting_id, focal_length_mm, pixel_scale_arcsec, exposure_seconds "
+            "FROM quality_capture_setting ORDER BY capture_setting_id"
+        ).fetchall()
+        pointers = dict(
+            connection.execute(
+                "SELECT subject_id, capture_setting_id FROM quality_measurements WHERE run_id = 'run-0'"
+            ).fetchall()
+        )
+        version = connection.execute("SELECT version FROM quality_schema_version").fetchall()
+    assert version == [(SCHEMA_VERSION,)]
+    assert settings == [
+        (1, 300.0, 1.915, 10.0),
+        (3, 405.0, 1.915, 10.0),
+        (4, 300.0, 1.915, 20.0),
+        (5, 300.0, None, 10.0),
+        (7, 300.0, 3.123, 10.0),
+    ]
+    assert pointers["stack-1"] == pointers["stack-2"] == 1
+    assert [pointers[f"stack-{number}"] for number in (3, 4, 5, 7)] == [3, 4, 5, 7]
+    assert set(store.get_capture_settings()) == {1, 3, 4, 5, 7}
+
+
+def test_version_4_merge_keeps_the_smallest_id_and_matches_the_model(tmp_path: Path) -> None:
+    """After the merge, one id answers for the setting and equals the model."""
+    path = tmp_path / "astrometrics.db"
+    _make_version_3_database_with_split_settings(path)
+    store = QualityStore(str(path))
+    store.write_measurements([make_measurement(run_id="after")])
+    same_setting = CaptureSetting(
+        camera="ASI533MM", focal_length_mm=300.0, pixel_scale_arcsec=1.9152790075, exposure_seconds=10.0
+    )
+    assert store.get_or_create_capture_setting(same_setting) == 1
+    assert store.get_capture_settings([1, 2]) == {1: same_setting}
+
+
+def test_version_4_is_idempotent(tmp_path: Path) -> None:
+    """A second open changes neither the settings nor the measurements."""
+    path = tmp_path / "astrometrics.db"
+    _make_version_3_database_with_split_settings(path)
+    QualityStore(str(path)).write_measurements([make_measurement(run_id="after")])
+
+    def snapshot() -> tuple[list, list]:
+        with sqlite3.connect(path) as connection:
+            return (
+                connection.execute("SELECT * FROM quality_capture_setting ORDER BY 1").fetchall(),
+                connection.execute(
+                    "SELECT row_id, capture_setting_id FROM quality_measurements ORDER BY 1"
+                ).fetchall(),
+            )
+
+    first = snapshot()
+    QualityStore(str(path)).write_measurements([make_measurement(run_id="again")])
+    second = snapshot()
+    assert second[0] == first[0]
+    assert second[1][: len(first[1])] == first[1]
+
+
+def test_a_new_database_is_at_the_current_version_and_has_no_settings(tmp_path: Path) -> None:
+    """A new file gets the current version and nothing to merge."""
+    path = tmp_path / "astrometrics.db"
+    QualityStore(str(path)).write_measurements([make_measurement()])
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("SELECT version FROM quality_schema_version").fetchall() == [
+            (SCHEMA_VERSION,)
+        ]
+        assert connection.execute("SELECT COUNT(*) FROM quality_capture_setting").fetchone()[0] == 0
+    assert SCHEMA_VERSION == 5
+
+
+#: The start of the metric names the odd-even difference had before version 5.
+_OLD_ODD_EVEN_PREFIX = "stacking.half" + "_difference_"
+
+
+def _make_version_4_database_with_old_metric_names(path: Path) -> None:
+    """Write a version-4 database whose rows use the old metric names.
+
+    Two rows use the old half difference names, one uses an unrelated
+    name, and one has a similar name that does not start with the old prefix.
+
+    Parameters
+    ----------
+    path : `pathlib.Path`
+        Where to write the database.
+    """
+    QualityStore(str(path)).write_measurements([make_measurement(run_id="seed")])
+    names = [
+        _OLD_ODD_EVEN_PREFIX + "noise_stack_unit",
+        _OLD_ODD_EVEN_PREFIX + "variance_factor",
+        "stacking.frames_stacked",
+        "stacking.other_" + _OLD_ODD_EVEN_PREFIX,
+    ]
+    with sqlite3.connect(path) as connection:
+        connection.execute("DELETE FROM quality_measurements")
+        for number, name in enumerate(names, start=1):
+            connection.execute(
+                "INSERT INTO quality_measurements (row_id, metric, definition_version, subject_level, "
+                "subject_id, status, value, origin, run_id, measured_at) VALUES "
+                "(?, ?, 1, 'stack', 'stack-1', 'measured', ?, 'measured', 'run-0', "
+                "'2026-10-01T00:00:00.000000+00:00')",
+                (number * 10, name, float(number)),
+            )
+        connection.execute("UPDATE quality_schema_version SET version = 4")
+
+
+def test_version_5_renames_the_odd_even_difference_metric_names(tmp_path: Path) -> None:
+    """Old names become new names; ids, values and other names stay."""
+    path = tmp_path / "astrometrics.db"
+    _make_version_4_database_with_old_metric_names(path)
+    QualityStore(str(path)).write_measurements([make_measurement(run_id="after")])
+    with sqlite3.connect(path) as connection:
+        rows = connection.execute(
+            "SELECT row_id, metric, value, measured_at FROM quality_measurements WHERE run_id = 'run-0' "
+            "ORDER BY row_id"
+        ).fetchall()
+        version = connection.execute("SELECT version FROM quality_schema_version").fetchall()
+        latest = connection.execute(
+            "SELECT metric FROM quality_measurements_latest WHERE metric LIKE '%odd_even%'"
+        ).fetchall()
+    stamp = "2026-10-01T00:00:00.000000+00:00"
+    assert rows == [
+        (10, "stacking.odd_even_difference_noise_stack_unit", 1.0, stamp),
+        (20, "stacking.odd_even_difference_variance_factor", 2.0, stamp),
+        (30, "stacking.frames_stacked", 3.0, stamp),
+        (40, "stacking.other_" + _OLD_ODD_EVEN_PREFIX, 4.0, stamp),
+    ]
+    assert version == [(SCHEMA_VERSION,)]
+    assert len(latest) == 2
+
+
+def test_version_5_is_idempotent(tmp_path: Path) -> None:
+    """A second open changes no metric name, id or value."""
+    path = tmp_path / "astrometrics.db"
+    _make_version_4_database_with_old_metric_names(path)
+
+    def snapshot() -> list:
+        with sqlite3.connect(path) as connection:
+            return connection.execute("SELECT * FROM quality_measurements ORDER BY row_id").fetchall()
+
+    QualityStore(str(path)).write_measurements([make_measurement(run_id="after")])
+    first = snapshot()
+    QualityStore(str(path)).write_measurements([make_measurement(run_id="again")])
+    second = snapshot()
+    assert second[: len(first)] == first

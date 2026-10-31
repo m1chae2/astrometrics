@@ -9,7 +9,10 @@ that the stage stores nothing when the caller gave no time.
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
+import numpy as np
 import pytest
 
 from astrometricslib.drivers.quality_store import QualityStore
@@ -24,6 +27,7 @@ from astrometricslib.pipelines.shared.quality.record_measurements import record_
 from astrometricslib.pipelines.stacking import stage
 from astrometricslib.pipelines.stacking.metrics import (
     GATE_METRIC_BY_NAME,
+    STACKING_APERTURE_SET_NUMBER,
     STACKING_EFFECTIVE_FRAME_COUNT,
     STACKING_EFFECTIVE_TIME_S,
     STACKING_EMPTY_APERTURE_NOISE_NORMALIZED,
@@ -33,6 +37,12 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_GROUP_ALIGNMENT_SHIFT_PX,
     STACKING_NEGATIVE_PIXEL_MAX_FRACTION,
     STACKING_NOISE_REFERENCE_FLUX_STACK_UNIT,
+)
+from astrometricslib.pipelines.stacking.post_processing import record_quality
+from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
+    ApertureSet,
+    aperture_identity_from_number,
+    aperture_identity_to_number,
 )
 from astrometricslib.pipelines.stacking.post_processing.record_quality import (
     measure_noise_safely,
@@ -216,6 +226,15 @@ def test_measured_noise_rows_name_the_apertures_and_the_depth_that_defined_them(
         assert note in _by_metric(measurements, metric)[0].reason
 
 
+def test_measured_noise_rows_name_the_source_of_the_sky_coordinates() -> None:
+    """A noise row says where the stack's sky coordinates came from."""
+    base = fixture_noise_outcome().result
+    source = "member frame of the reference exposure group (frame_007.fits)"
+    outcome = StackNoiseOutcome(StackNoiseResult(**{**base.__dict__, "wcs_source": source}))
+    row = _by_metric(_measurements(noise=outcome), STACKING_EMPTY_APERTURE_NOISE_STACK_UNIT)[0]
+    assert f"Sky coordinates from the {source}." in row.reason
+
+
 def test_the_depth_of_a_stack_comes_from_its_members_weights() -> None:
     """Frame count and effective count come from the members."""
     depth = stack_depth_of(fixture_membership())
@@ -242,6 +261,34 @@ def test_a_failure_while_measuring_noise_is_recorded_as_a_reason(
         outcome = measure_noise_safely(str(tmp_path / "missing.fits"), None, False)
     assert outcome.result is None
     assert "failed" in outcome.reason
+
+
+def test_the_covered_area_reaches_the_noise_measurement(tmp_path: Path) -> None:
+    """The area every exposure group covers reaches the noise step."""
+    covered = np.ones((4, 4), dtype=bool)
+    seen: dict[str, object] = {}
+
+    def fake_measure(*_arguments: object, **keywords: object) -> SimpleNamespace:
+        """Keep the keywords the noise step was called with.
+
+        Parameters
+        ----------
+        *_arguments : `object`
+            The positional arguments, ignored.
+        **keywords : `object`
+            The keyword arguments, kept in ``seen``.
+
+        Returns
+        -------
+        outcome : `types.SimpleNamespace`
+            An outcome with no result.
+        """
+        seen.update(keywords)
+        return SimpleNamespace(result=None, reason="")
+
+    with patch.object(record_quality, "measure_stack_noise", fake_measure):
+        measure_noise_safely(str(tmp_path / "stack.fits"), None, False, covered_mask=covered)
+    assert seen["covered_mask"] is covered
 
 
 def test_one_weight_row_per_member_frame_and_the_weights_have_mean_one() -> None:
@@ -334,3 +381,69 @@ def test_the_stage_stores_the_rows_of_a_stack(tmp_path: Path, monkeypatch: pytes
         _by_metric(stored, STACKING_EMPTY_APERTURE_NOISE_STACK_UNIT)[0].status
         is MeasurementStatus.NOT_MEASURED
     )
+
+
+def test_a_measured_stack_stores_the_aperture_set_identity_as_an_exact_number() -> None:
+    """The identity row turns back into the identity text, with no loss."""
+    row = _by_metric(_measurements(), STACKING_APERTURE_SET_NUMBER)[0]
+    assert row.status is MeasurementStatus.MEASURED
+    assert row.value is not None and row.value < 2**53
+    assert aperture_identity_from_number(row.value) == "v3-156104df543d"
+    assert row.subject.subject_id == f"M 99/{STACK_NAME}"
+
+
+def test_the_stored_number_equals_the_identity_of_a_real_aperture_set() -> None:
+    """Different sets give different numbers; the same set gives one."""
+    positions = np.array([[10.0, 20.0], [11.0, 21.0]])
+    stars = np.array([[10.5, 20.5]])
+    kwargs = {
+        "aperture_sky": positions,
+        "reference_sky": stars,
+        "wcs_source": "test",
+        "pixel_scale_arcsec": 1.0,
+        "created_from": "test",
+        "reference_baseline_flux": np.array([1.0]),
+        "reference_radius_px": 8.0,
+        "reference_fwhm_px": 3.0,
+        "saturation_source": "test",
+    }
+    first = ApertureSet(**kwargs)
+    same = ApertureSet(**kwargs)
+    other = ApertureSet(**{**kwargs, "aperture_sky": positions + 0.5})
+    number = aperture_identity_to_number(first.identity)
+    assert aperture_identity_from_number(number) == first.identity
+    assert aperture_identity_to_number(same.identity) == number
+    assert aperture_identity_to_number(other.identity) != number
+
+
+def test_a_stack_with_no_noise_stores_a_not_measured_identity_with_the_reason() -> None:
+    """No noise means no identity, and the row says why."""
+    rows = _by_metric(
+        _measurements(noise=StackNoiseOutcome(None, NO_WCS_REASON)), STACKING_APERTURE_SET_NUMBER
+    )
+    assert len(rows) == 1
+    assert rows[0].status is MeasurementStatus.NOT_MEASURED
+    assert rows[0].value is None
+    assert rows[0].reason == NO_WCS_REASON
+
+
+def test_the_identity_row_survives_the_store(tmp_path: Path) -> None:
+    """The newest identity row of a stack is read back exactly."""
+    store = QualityStore(str(tmp_path / "astrometrics.db"))
+    record_measurements(store, _measurements())
+    rows = store.query(metric=STACKING_APERTURE_SET_NUMBER)
+    assert [aperture_identity_from_number(row.value) for row in rows] == ["v3-156104df543d"]
+
+
+@pytest.mark.parametrize("bad", ["", "v3", "v3-xyz", "3-156104df543d", "v3-156104df543", "v40-156104df543d"])
+def test_a_text_that_is_not_an_identity_is_refused(bad: str) -> None:
+    """Only a version, a dash and 12 hexadecimal digits convert."""
+    with pytest.raises(ValueError, match=r"identity|file version"):
+        aperture_identity_to_number(bad)
+
+
+@pytest.mark.parametrize("bad", [-1.0, 0.5, float("nan"), float("inf"), 2.0**53])
+def test_a_number_that_is_not_a_stored_identity_is_refused(bad: float) -> None:
+    """Only a whole number below 2**53 converts back."""
+    with pytest.raises(ValueError, match="aperture-set number"):
+        aperture_identity_from_number(bad)

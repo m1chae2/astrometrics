@@ -65,6 +65,14 @@ class FrameMeasurements(BaseModel):
     # hasn't been aligned or stacked yet.
     background_level: float | None = Field(default=None, alias="backgroundLevel")
     saturated_pixel_fraction: float | None = Field(default=None, alias="saturatedPixelFraction")
+    # The level, in ADU, at or above which a pixel was counted as saturated
+    # when `saturated_pixel_fraction` was measured. Records written before
+    # this field existed leave it empty, so the stacking stage measures the
+    # fraction again when this is missing or no longer matches the camera
+    # profile's pixel-saturation level.
+    saturated_pixel_fraction_limit_adu: float | None = Field(
+        default=None, alias="saturatedPixelFractionLimitAdu"
+    )
     # Star sharpness measured directly by the code, rather than by Siril.
     # This number cannot be directly compared to `registration_fwhm_x_px`.
     measured_fwhm_px: float | None = Field(default=None, alias="measuredFwhmPx")
@@ -334,6 +342,12 @@ class Target(BaseModel):
     # outside the image, or its id and common name disagreed). That point is
     # where the camera looked, not necessarily where the object is.
     position_unverified: bool = Field(default=False, alias="positionUnverified")
+    # SIMBAD's main object type code for the object ("G" galaxy, "GlC"
+    # globular cluster, "PN" planetary nebula, "*" star, ...), or None when it
+    # is not known. It is filled in when the position is looked up in SIMBAD,
+    # and by `astrometricslib.scripts.backfill_target_object_types` for targets
+    # saved before it was recorded. `target_object_category` groups the codes.
+    simbad_object_type: str | None = Field(default=None, alias="simbadObjectType")
     field_of_view: str = Field(default="0′", alias="fieldOfView")
     main_camera: str = Field(default="", alias="mainCamera")
     main_scope: str = Field(default="", alias="mainScope")

@@ -44,6 +44,7 @@ import math
 import os
 import re
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
@@ -184,6 +185,15 @@ GAIN_MINIMUM_PIXELS = 200
 # that; noise alone puts fewer than one pixel of a 9-million-pixel image
 # above it. The value is a design choice checked on those two fields.
 GAIN_SOURCE_SIGMAS = 10.0
+
+# How far from the median a neighbour difference may be, in units of the
+# rough (median absolute deviation) scale, and still count as noise in
+# `estimate_background_noise`. 4 cuts only 0.006% of a bell curve, and the
+# rough scale is coarse by up to ~20% for a stepped sensor, so the real cut
+# is 3.2 to 5 sigma: still leaves the bias under 0.5% while star pixels
+# fall outside. Checked on synthetic stepped data by
+# test_the_noise_estimate_is_fine_grained_on_stepped_data.
+NOISE_CLIP_SIGMAS = 4.0
 
 # The sky level of a group is the median of its trusted pixels after
 # repeatedly dropping pixels more than SKY_CLIP_SIGMAS spreads from it (stars
@@ -379,6 +389,108 @@ def frame_exposure_seconds(frame: Any) -> float | None:
     return value
 
 
+def exposure_group_key(exposure_seconds: float) -> float:
+    """Round an exposure length to the value frames are grouped by.
+
+    Three significant figures, not three decimal places: the camera's
+    shortest exposure is 0.000032 s, which rounds to 0.0 at three decimals and
+    made the nearest-group ratio of `fold_exposure_lengths` divide by zero.
+
+    Parameters
+    ----------
+    exposure_seconds : `float`
+        An exposure length in seconds.
+
+    Returns
+    -------
+    key : `float`
+        The length rounded to three significant figures.
+    """
+    return float(f"{exposure_seconds:.3g}")
+
+
+def fold_exposure_lengths(
+    exposures_seconds: Sequence[float | None],
+    minimum_frames_per_group: int = MINIMUM_FRAMES_PER_EXPOSURE_GROUP,
+) -> list[float | None]:
+    """Say which exposure group each frame lands in.
+
+    Frames whose exposure lengths match (to three significant figures, see
+    `exposure_group_key`) share a group. A length that has fewer than
+    `minimum_frames_per_group` frames is folded into the group with the
+    nearest length (nearest in ratio, so 2 s is nearer to 1 s than to 5 s).
+    This one rule is used by `split_frames_by_exposure` to build the groups
+    and by the stack records to find a group that holds frames of another
+    length, whose weights are therefore unknown.
+
+    Parameters
+    ----------
+    exposures_seconds : `Sequence` [`float` or `None`]
+        The exposure length of each frame, in seconds, or `None` for a frame
+        whose length cannot be read.
+    minimum_frames_per_group : `int`, optional
+        The fewest frames a length needs to be stacked on its own.
+
+    Returns
+    -------
+    group_lengths : `list` [`float` or `None`]
+        For each frame, the rounded exposure length of the group it lands in.
+        Every entry is `None` when there are no frames, when any frame has no
+        readable length, or when no length has enough frames. All the frames
+        then stay in one group, which is the same as stacking them together.
+    """
+    count = len(exposures_seconds)
+    if not count or any(exposure is None for exposure in exposures_seconds):
+        return [None] * count
+    keys = [exposure_group_key(exposure) for exposure in exposures_seconds if exposure is not None]
+    frames_per_key: dict[float, int] = defaultdict(int)
+    for key in keys:
+        frames_per_key[key] += 1
+    if len(frames_per_key) == 1:
+        return list(keys)
+    large = [key for key, frames in frames_per_key.items() if frames >= minimum_frames_per_group]
+    if not large:
+        return [None] * count
+    destination: dict[float, float] = {}
+    for key in frames_per_key:
+        if key in large:
+            destination[key] = key
+            continue
+        # An exposure of exactly 0 has no ratio; a tiny stand-in keeps it
+        # nearest to the shortest group instead of raising.
+        destination[key] = min(
+            large,
+            key=lambda large_key, small_key=key: abs(math.log(max(large_key, 1e-9) / max(small_key, 1e-9))),
+        )
+    return [destination[key] for key in keys]
+
+
+def exposure_group_holds_folded_frames(frames: list[Any]) -> bool:
+    """Tell whether a group holds frames of more than one exposure length.
+
+    A group built by `split_frames_by_exposure` holds frames of another length
+    when a short list of them was folded into it (see `fold_exposure_lengths`).
+
+    Parameters
+    ----------
+    frames : `list`
+        The frame records (or dictionaries of them) of one group.
+
+    Returns
+    -------
+    holds_folded : `bool`
+        `True` when the frames with a readable length do not all share one
+        rounded exposure length. A frame whose length cannot be read is
+        ignored: a split into several groups never happens with one.
+    """
+    keys = {
+        exposure_group_key(exposure)
+        for frame in frames
+        if (exposure := frame_exposure_seconds(frame)) is not None
+    }
+    return len(keys) > 1
+
+
 def split_frames_by_exposure(
     frames: list[Any], minimum_frames_per_group: int = MINIMUM_FRAMES_PER_EXPOSURE_GROUP
 ) -> list[ExposureGroup]:
@@ -389,7 +501,8 @@ def split_frames_by_exposure(
     added to the group with the nearest exposure length (nearest in ratio,
     so 2 s is nearer to 1 s than to 5 s). If any frame has no readable
     exposure length, or no group is large enough, everything stays in one
-    group, which is the same as stacking the frames together as before.
+    group, which is the same as stacking the frames together as before. The
+    folding itself is `fold_exposure_lengths`.
 
     Parameters
     ----------
@@ -404,36 +517,18 @@ def split_frames_by_exposure(
         The groups, shortest exposure first. Always at least one.
     """
     exposures = [frame_exposure_seconds(frame) for frame in frames]
-    if not frames or any(exposure is None for exposure in exposures):
+    group_lengths = fold_exposure_lengths(exposures, minimum_frames_per_group)
+    if not frames or group_lengths[0] is None:
         return [ExposureGroup(_mean_exposure(exposures), list(frames))]
+    if len(set(group_lengths)) == 1:
+        return [ExposureGroup(group_lengths[0], list(frames))]
 
-    by_exposure: dict[float, list[Any]] = defaultdict(list)
-    for frame, exposure in zip(frames, exposures, strict=True):
-        # Three significant figures, not three decimal places: the camera's
-        # shortest exposure is 0.000032 s, which rounds to 0.0 at three
-        # decimals and made the nearest-group ratio below divide by zero.
-        by_exposure[float(f"{exposure:.3g}")].append(frame)
-    if len(by_exposure) == 1:
-        return [ExposureGroup(next(iter(by_exposure)), list(frames))]
-
-    large = {key: members for key, members in by_exposure.items() if len(members) >= minimum_frames_per_group}
-    if not large:
-        return [ExposureGroup(_mean_exposure(exposures), list(frames))]
-    for key, members in by_exposure.items():
-        if key in large:
-            continue
-        # An exposure of exactly 0 has no ratio; a tiny stand-in keeps it
-        # nearest to the shortest group instead of raising.
-        nearest = min(
-            large,
-            key=lambda large_key, small_key=key: abs(math.log(max(large_key, 1e-9) / max(small_key, 1e-9))),
-        )
-        large[nearest].extend(members)
-
-    position = {id(frame): index for index, frame in enumerate(frames)}
+    members_by_length: dict[float, list[Any]] = defaultdict(list)
+    for frame, group_length in zip(frames, group_lengths, strict=True):
+        members_by_length[group_length].append(frame)
     groups = []
-    for key in sorted(large):
-        members = sorted(large[key], key=lambda frame: position[id(frame)])
+    for group_length in sorted(members_by_length):
+        members = members_by_length[group_length]
         groups.append(
             ExposureGroup(_mean_exposure([frame_exposure_seconds(frame) for frame in members]), members)
         )
@@ -669,9 +764,20 @@ def estimate_background_noise(image: np.ndarray) -> float:
     The noise is estimated from the difference between neighbouring pixels.
     A smooth background and the few pixels that hold stars barely change
     that difference, while noise does, so the answer is not thrown off by
-    the stars in the frame. The "median absolute deviation" (the middle of
-    the sorted sizes of the differences) makes it robust to the star pixels
-    that do get in.
+    the stars in the frame.
+
+    The estimate takes two passes. The first pass uses the "median absolute
+    deviation" (the middle of the sorted sizes of the differences) as a
+    rough scale. It ignores stars but is coarse: a camera that stores its
+    values in steps (the ZWO ASI533MM keeps 14-bit values in steps of 4)
+    makes every difference a multiple of the step, so the median can only
+    land on a multiple of that step. The second pass keeps the differences
+    within `NOISE_CLIP_SIGMAS` of the median, using that rough scale as the
+    limit, and takes their ordinary standard deviation. A standard deviation
+    uses every kept value, so it is fine-grained even when the data are
+    stepped. The limit is wide enough that the rough scale's error (up to
+    about 20% at one step per sigma) hardly moves it, and tight enough that
+    star pixels, whose differences are many sigma, fall outside it.
 
     Parameters
     ----------
@@ -681,17 +787,29 @@ def estimate_background_noise(image: np.ndarray) -> float:
     Returns
     -------
     noise : `float`
-        The typical noise of one pixel, in the image's own units.
+        The typical noise of one pixel, in the image's own units. It is 0
+        when more than half of the differences are identical (for example
+        an image that is mostly clipped to zero).
     """
     differences = np.asarray(image[:, 1:], dtype=np.float64) - np.asarray(image[:, :-1], dtype=np.float64)
     differences = differences[np.isfinite(differences)]
     if differences.size == 0:
         return float("nan")
-    deviation = np.median(np.abs(differences - np.median(differences)))
+    center = np.median(differences)
     # 1.4826 turns a median absolute deviation into a standard deviation for
-    # bell-curve noise. Dividing by the square root of 2 undoes the extra
-    # noise from taking a difference of two pixels.
-    return float(1.4826 * deviation / math.sqrt(2.0))
+    # bell-curve noise.
+    rough_scale = 1.4826 * np.median(np.abs(differences - center))
+    if rough_scale <= 0:
+        return 0.0
+    kept = differences[np.abs(differences - center) <= NOISE_CLIP_SIGMAS * rough_scale]
+    # Cutting a bell curve at 4 sigma removes 0.05% of its spread (the
+    # standard deviation of a normal curve cut at +-4 sigma is 0.99947 of the
+    # full one), so no correction is applied. If the rough scale is 20% off,
+    # the cut sits at 3.2 to 5 sigma and the bias stays under 0.5% (checked
+    # on synthetic data in test_exposure_groups.py).
+    # Dividing by the square root of 2 undoes the extra noise from taking a
+    # difference of two pixels.
+    return float(np.std(kept) / math.sqrt(2.0))
 
 
 def estimate_saturation_mask_level(
@@ -1486,34 +1604,29 @@ def _record_sky_ratios(measurements: list[GroupGainMeasurement], reference_index
         measurement.sky_too_bright = ratio > SKY_RATIO_LIMIT
 
 
-def estimate_group_gains(
-    per_second_images: list[np.ndarray], usable_masks: list[np.ndarray], reference_index: int
-) -> list[float]:
-    """Measure each group's brightness scale against a reference group.
+def group_weight(count: int, exposure_seconds: float, frame_noise: float) -> float:
+    """Work out how much one exposure group counts when groups are combined.
 
-    This is the gain half of `measure_group_gains`: the median ratio over the
-    mid-range pixels, with the bright-end diagnostic left out.
+    A group's stack carries information in proportion to its frame count
+    times the square of its exposure length, divided by the square of the
+    noise of one frame. The same number picks the alignment reference and
+    sets the combination weight, so both must come from this one function.
 
     Parameters
     ----------
-    per_second_images : `list` [`numpy.ndarray`]
-        Each group's image in counts per second.
-    usable_masks : `list` [`numpy.ndarray`]
-        For each group, `True` where its pixels can be trusted: not
-        saturated and, for a group clipped at zero, above its clipping floor.
-    reference_index : `int`
-        The group the others are compared with. Its gain is 1.
+    count : `int`
+        How many frames the group holds.
+    exposure_seconds : `float`
+        The exposure length of one frame, in seconds.
+    frame_noise : `float`
+        The noise of one raw frame, in counts.
 
     Returns
     -------
-    gains : `list` [`float`]
-        For each group, how many times brighter (per second) it reads than
-        the reference. Dividing a group's image by its gain puts it on the
-        reference group's scale. A group with too few usable mid-range pixels
-        in common with the reference keeps a gain of 1.
+    weight : `float`
+        ``count * exposure_seconds**2 / frame_noise**2``.
     """
-    measurements = measure_group_gains(per_second_images, usable_masks, reference_index)
-    return [measurement.gain for measurement in measurements]
+    return count * exposure_seconds**2 / frame_noise**2
 
 
 def _prepare_group_inputs(
@@ -1573,7 +1686,7 @@ def _prepare_group_inputs(
         ):
             raise InvalidArgumentError("Each group needs one positive frame noise.")
         weights = [
-            count * exposure**2 / noise**2
+            group_weight(count, exposure, noise)
             for count, exposure, noise in zip(frame_counts, exposures_seconds, frame_noises, strict=True)
         ]
     else:
@@ -1689,6 +1802,51 @@ def measure_exposure_group_gains(
     )
 
 
+@dataclass(frozen=True, eq=False)
+class ExposureGroupCombination:
+    """The combined image and how `combine_exposure_group_images` made it.
+
+    Everything here is what the combination used, so a later step (the frame
+    weights, the predicted noise, the choice of empty apertures) can use the
+    same numbers instead of measuring them again. Each tuple has one entry per
+    group, in the order the groups were given.
+
+    Attributes
+    ----------
+    image : `numpy.ndarray`
+        The combined image, as `float32`.
+    gains : `tuple` [`float`]
+        The brightness gain applied to each group (1.0 for the reference group
+        and for a group whose gain could not be measured).
+    gains_measured : `tuple` [`bool`]
+        Whether each group's gain was measured. When `False` the group was
+        combined as it was and its gain of 1.0 is not a measurement.
+    sky_levels : `tuple` [`float`]
+        Each group's own sky level in counts per second.
+    weights : `tuple` [`float`]
+        The weight of each group in the average, set before the gain.
+    reference_index : `int`
+        The group with the most weight, whose brightness scale and sky the
+        others were moved to.
+    trusted_masks : `tuple` [`numpy.ndarray`]
+        For each group, `True` where its pixels counted in the average (not
+        saturated, not outside its covered area, and above the clipping floor
+        when its frames are clipped at zero).
+    covered_masks : `tuple` [`numpy.ndarray`]
+        For each group, `True` where the group holds real data. All `True`
+        when no covered masks were given.
+    """
+
+    image: np.ndarray
+    gains: tuple[float, ...]
+    gains_measured: tuple[bool, ...]
+    sky_levels: tuple[float, ...]
+    weights: tuple[float, ...]
+    reference_index: int
+    trusted_masks: tuple[np.ndarray, ...]
+    covered_masks: tuple[np.ndarray, ...]
+
+
 def combine_exposure_group_images(
     images: list[np.ndarray],
     exposures_seconds: list[float],
@@ -1699,7 +1857,7 @@ def combine_exposure_group_images(
     covered_masks: list[np.ndarray] | None = None,
     clip_ceiling_adu: float | None = None,
     use_star_fluxes: bool = True,
-) -> np.ndarray:
+) -> ExposureGroupCombination:
     """Combine one stacked image per exposure group into a single image.
 
     Each image is first divided by its exposure length to give counts per
@@ -1765,8 +1923,10 @@ def combine_exposure_group_images(
 
     Returns
     -------
-    combined : `numpy.ndarray`
-        The combined image, as `float32`.
+    combination : `ExposureGroupCombination`
+        The combined image (as `float32`) with the gain applied to each group,
+        whether it was measured, the sky levels, the group weights and the
+        trusted and covered masks.
 
     """
     if frame_counts is None:
@@ -1842,7 +2002,20 @@ def combine_exposure_group_images(
         denominator[denominator == 0] = 1.0
 
     mean_exposure = float(np.average(exposures_seconds, weights=frame_counts))
-    return (numerator / denominator * mean_exposure).astype(np.float32)
+    if covered_masks is None:
+        group_covered_masks = tuple(np.ones(images[0].shape[-2:], dtype=bool) for _ in images)
+    else:
+        group_covered_masks = tuple(np.asarray(mask, dtype=bool) for mask in covered_masks)
+    return ExposureGroupCombination(
+        image=(numerator / denominator * mean_exposure).astype(np.float32),
+        gains=tuple(float(gain) for gain in gains),
+        gains_measured=tuple(bool(measurement.measured) for measurement in measurements),
+        sky_levels=tuple(float(measurement.sky_level) for measurement in measurements),
+        weights=tuple(float(weight) for weight in weights),
+        reference_index=reference_index,
+        trusted_masks=tuple(trusted_masks),
+        covered_masks=group_covered_masks,
+    )
 
 
 def _frame_path(frame: Any) -> str:
@@ -1883,19 +2056,6 @@ def measure_frame_noise(frame_path: str) -> tuple[float, float]:
     """
     image = np.asarray(read_data(frame_path), dtype=np.float64)
     return estimate_background_noise(image), float(np.mean(image == 0))
-
-
-def group_frame_noises(groups: list[ExposureGroup]) -> list[float]:
-    """Work out the noise of one raw frame in each exposure group.
-
-    This is the first result of `measure_group_frames`; see it for details.
-
-    Returns
-    -------
-    noises : `list` [`float`]
-        The noise to use for one frame of each group, in counts.
-    """
-    return measure_group_frames(groups)[0]
 
 
 def measure_group_frames(groups: list[ExposureGroup]) -> tuple[list[float], list[float]]:

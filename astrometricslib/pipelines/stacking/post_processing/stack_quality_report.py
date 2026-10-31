@@ -204,6 +204,7 @@ def summarize_stack(target: Target, kind: StackKind) -> StackSummary:
                 "gain_mid_range": group.gain_mid_range,
                 "gain_bright_end_ratio": group.gain_bright_end_ratio,
                 "gain_disagreement": group.gain_disagreement,
+                "gain_applied": group.gain_applied,
                 "gain_nonlinear": group.gain_nonlinear,
                 "left_out_reason": group.left_out_reason,
             }

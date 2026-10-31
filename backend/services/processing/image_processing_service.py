@@ -6,13 +6,19 @@ import sqlite3
 import time
 from typing import Any
 
-from astrometricslib import AstrometricsError, NotFoundError
+from astrometricslib import AstrometricsError, NotFoundError, run_as_background_job
 from backend.services.infrastructure.base_service import BaseBackgroundService
 
 logger = logging.getLogger(__name__)
 
 # Define stable log directory relative to this file
 LOG_DIR = None  # Will be initialized from config
+
+# How long a request to start the calibration measuring job waits for it to
+# finish, in seconds. A library that is already measured finishes at once, so
+# the answer carries the counts. A first pass takes tens of minutes, so the
+# request then returns the job's id and the work goes on in the background.
+CALIBRATION_MEASUREMENT_GRACE_SECONDS = 3.0
 
 
 class ImageProcessingService(BaseBackgroundService):
@@ -79,6 +85,34 @@ class ImageProcessingService(BaseBackgroundService):
             ]
             for key in ("darks", "biases", "flats")
         }
+
+    def start_calibration_measurement(
+        self, kind: str | None = None, camera_id: str | None = None, force: bool = False
+    ) -> dict[str, Any]:
+        """Start the job that measures the dark and bias frames.
+
+        Parameters
+        ----------
+        kind : `str`, optional
+            ``"dark"`` or ``"bias"``. Leave it out for both.
+        camera_id : `str`, optional
+            Only this camera's frames.
+        force : `bool`, optional
+            Measure every frame again, even if its file has not changed.
+
+        Returns
+        -------
+        outcome : `dict` [`str`, `Any`]
+            ``{"jobId", "result"}`` when the job finished at once, else
+            ``{"status": "running", "jobId", ...}``. The job goes on in the
+            background and records its progress in the job list.
+        """
+        return run_as_background_job(
+            lambda: self._calibration.measure_frames(
+                kind=kind, camera_id=camera_id, force=force, register_job=True
+            ),
+            grace_period_seconds=CALIBRATION_MEASUREMENT_GRACE_SECONDS,
+        )
 
     def get_processing_status(self, target_id: str) -> dict:
         """Verify if a target has any running stacking jobs.

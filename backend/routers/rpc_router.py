@@ -228,6 +228,9 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # flat and bias frames. With `save` true it writes the camera profile in
     # the config (after a backup), so the AI's read-only profile withholds it.
     "calibration:measure_sensor_noise": ("astrometrics.processing.calibration", "measure_sensor_noise"),
+    # Starts the job that measures the dark and bias frames and returns at
+    # once with the job's id. It stores numbers; it never changes a frame.
+    "calibration:measure_frames": ("image_processing_service", "start_calibration_measurement"),
     # Mosaics
     "mosaic:preview": ("mosaic_service", "preview_mosaic"),
     "mosaic:create": ("mosaic_service", "create_mosaic"),
@@ -270,6 +273,8 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "history:live_session_status": ("advisory_service", "get_live_session_status"),
     "observatory:safety_status": ("advisory_service", "get_safety_status"),
     "calibration:query": ("astrometrics.processing.calibration", "query"),
+    # Judges the sets of one kind from the stored numbers. A read.
+    "calibration:assess": ("astrometrics.processing.calibration", "assess"),
     # Sequencer queue
     "sequencer:get_queue": ("target_imaging_executor", "get_queue"),
     "sequencer:create_plan": ("target_imaging_executor", "create_plan"),

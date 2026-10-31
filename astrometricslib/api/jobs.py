@@ -177,6 +177,7 @@ class Jobs:
         detail: str = "summary",
         lines: int = 50,
         limit: int = 20,
+        offset: int = 0,
     ) -> JobQueryResult:
         """List jobs, read one job, tail its log, or show a target's lineage.
 
@@ -211,6 +212,9 @@ class Jobs:
             How many log lines to return, from 1 to 200. Defaults to 50.
         limit : `int`, optional
             How many jobs or runs to return, from 1 to 50. Defaults to 20.
+        offset : `int`, optional
+            For a job list, how many of the newest matching jobs to skip, so
+            ``limit=20, offset=20`` gives the next 20. Defaults to 0.
 
         Returns
         -------
@@ -221,8 +225,8 @@ class Jobs:
         Raises
         ------
         InvalidArgumentError
-            If the detail is unknown, or a detail lacks the job or target
-            it needs.
+            If the detail is unknown, a detail lacks the job or target it
+            needs, or ``offset`` is negative.
         NotFoundError
             If the job does not exist, or there is no logs database yet for
             a question about one job or one target.
@@ -237,6 +241,8 @@ class Jobs:
             raise InvalidArgumentError(
                 "detail='lineage' needs a target_id, or a job_id of a job that has one."
             )
+        if offset < 0:
+            raise InvalidArgumentError("offset must be 0 or more.", details={"offset": offset})
         limit = max(1, min(int(limit), MAXIMUM_JOBS))
         lines = max(1, min(int(lines), MAXIMUM_LOG_LINES))
         if not Path(self._database_path).is_file():
@@ -251,11 +257,14 @@ class Jobs:
             return self._one_job(job_store, job_id, detail, lines)
         if job_id:
             return self._one_job(job_store, job_id, "summary", lines)
-        jobs = job_store.query_jobs(target_id, job_type, status, active_only, limit)
+        # One more than asked for, to tell whether the list goes on.
+        jobs = job_store.query_jobs(target_id, job_type, status, active_only, limit + 1, offset)
         return JobQueryResult(
             detail="summary",
-            count=len(jobs),
-            jobs=[self._summarize(job) for job in jobs],
+            count=min(len(jobs), limit),
+            offset=offset,
+            truncated=len(jobs) > limit,
+            jobs=[self._summarize(job) for job in jobs[:limit]],
             note=UNTRUSTED_TEXT_NOTE,
         )
 

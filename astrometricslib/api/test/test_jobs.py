@@ -129,6 +129,23 @@ def test_limit_is_clamped(jobs: Jobs) -> None:
     assert MAXIMUM_JOBS == 50
 
 
+def test_offset_pages_through_the_jobs(jobs: Jobs) -> None:
+    """Two pages together list every job once, and say when more follow."""
+    every = [job.id for job in jobs.query(limit=4).jobs]
+    first = jobs.query(limit=2)
+    second = jobs.query(limit=2, offset=2)
+    assert [job.id for job in first.jobs + second.jobs] == every
+    assert first.truncated is True
+    assert second.offset == 2
+    assert second.truncated is False
+
+
+def test_a_negative_offset_is_refused(jobs: Jobs) -> None:
+    """A negative offset is a mistake, so it raises an error."""
+    with pytest.raises(InvalidArgumentError):
+        jobs.query(offset=-1)
+
+
 def test_long_messages_are_cut(jobs: Jobs) -> None:
     """A very long job message is shortened."""
     message = jobs.query(job_id="job-b").job.message

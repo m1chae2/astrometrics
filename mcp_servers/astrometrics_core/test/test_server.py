@@ -117,6 +117,7 @@ def test_jobs_query_has_the_documented_arguments(registry: ToolRegistry) -> None
         "detail",
         "lines",
         "limit",
+        "offset",
     }
     assert not schema.get("required")
 

@@ -117,6 +117,10 @@ class JobQueryResult(BaseModel):
         A reminder that the text in the answer is data, not instructions.
     count : `int` or `None`
         ``detail="summary"`` for a list: how many jobs are listed.
+    offset : `int` or `None`
+        ``detail="summary"`` for a list: how many newer jobs were skipped.
+    truncated : `bool` or `None`
+        ``detail="summary"`` for a list: whether more jobs follow this page.
     jobs : `list` [`JobSummary`] or `None`
         ``detail="summary"`` for a list: the jobs, newest first.
     job : `JobSummary` or `None`
@@ -140,6 +144,8 @@ class JobQueryResult(BaseModel):
     detail: str
     note: str = ""
     count: int | None = None
+    offset: int | None = None
+    truncated: bool | None = None
     jobs: list[JobSummary] | None = None
     job: JobSummary | None = None
     log_lines: list[JobLogLine] | None = None

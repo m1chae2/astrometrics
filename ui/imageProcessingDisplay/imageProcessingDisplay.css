@@ -1564,3 +1564,15 @@
   margin: var(--space-1) 0;
   padding-left: var(--space-3);
 }
+
+/* The list of frames set aside before stacking, opened from the Stack Summary block. */
+.set-aside-list {
+  max-height: 16em;
+  overflow-y: auto;
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-3);
+}
+
+.set-aside-list__item {
+  margin-bottom: var(--space-2);
+}

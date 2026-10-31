@@ -8,16 +8,19 @@ failure reaches the caller as an error, and that the service never asks the
 library to skip keeping the old pictures. The science library is a stand-in.
 """
 
+import asyncio
 import threading
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from astrometricslib import InvalidArgumentError, PreviewRemakeResult
+from astrometricslib import InvalidArgumentError, PreviewRemakeResult, SetAsideFrameRecord
+from backend.container import container
 from backend.public_interface import RPC_METHODS
 from backend.routers.rpc_router import rpc_registry
 from backend.services.processing.stack_review_service import StackReviewService
+from backend.services.rpc_protocol import serialize_rpc_result
 
 
 def _result() -> PreviewRemakeResult:
@@ -125,3 +128,42 @@ def test_a_quick_failure_reaches_the_caller() -> None:
 
     with pytest.raises(InvalidArgumentError, match="between 0 and 1"):
         service.start_preview_remake("M 81", denoise_strength=3.0)
+
+
+def test_the_set_aside_reply_keeps_the_stored_kind_and_the_missing_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reply keeps the stored kind and invents no reason."""
+    frames = [
+        SetAsideFrameRecord(
+            file="a.fits",
+            path="/x/_excluded/a.fits",
+            kind="trailed",
+            reason="3 stars against a typical 40",
+            reason_source="stored_row",
+        ),
+        SetAsideFrameRecord(file="b.fits", path="/x/_excluded/b.fits", reason_source="folder_only"),
+    ]
+    calls: list[str] = []
+
+    def set_aside_frames(target: str) -> list[SetAsideFrameRecord]:
+        """Record the call and give the frames.
+
+        Returns
+        -------
+        frames : `list` [`SetAsideFrameRecord`]
+            The two frames.
+        """
+        calls.append(target)
+        return frames
+
+    monkeypatch.setattr(container.astrometrics.quality, "set_aside_frames", set_aside_frames)
+
+    reply = asyncio.run(rpc_registry.execute("quality:set_aside_frames", {"target": "M 81"}))
+
+    plain = serialize_rpc_result(reply)
+    assert calls == ["M 81"]
+    assert plain[0]["kind"] == "trailed"
+    assert plain[0]["reasonSource"] == "stored_row"
+    assert plain[1]["kind"] is None
+    assert plain[1]["reason"] == ""

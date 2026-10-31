@@ -32,7 +32,11 @@ class SetAsideFrame(BaseModel):
     file: str
     # Where the frame lies (or lay) in the target's folder.
     original_path: str = Field(alias="originalPath")
-    # "clouded" (few stars) or "trailed" (stars smeared into streaks).
+    # "clouded" (far fewer stars than usual and a brighter sky) or "trailed".
+    # "trailed" also covers a frame with far fewer stars than usual under a
+    # normal sky, so it means "stars smeared, or far fewer than usual". The
+    # stored text of ``reason`` tells which. The name is kept because it is
+    # stored in the quality rows and in each folder's ``excluded_frames.json``.
     kind: str
     # One sentence saying what was measured.
     reason: str
@@ -107,7 +111,8 @@ class SetAsideFrameRecord(BaseModel):
     subject_id: str | None = Field(default=None, alias="subjectId")
     # Where the frame lay before it was moved, when known.
     original_path: str | None = Field(default=None, alias="originalPath")
-    # "clouded", "trailed" or `None` when no source names a kind.
+    # "clouded", "trailed" (see `SetAsideFrame.kind`) or `None` when no source
+    # names a kind.
     kind: str | None = None
     # One sentence saying what was measured. Empty when no source has it.
     reason: str = ""

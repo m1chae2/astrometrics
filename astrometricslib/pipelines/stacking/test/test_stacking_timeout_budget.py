@@ -5,9 +5,11 @@ large stacks take longer, and targets waiting in the queue shouldn't
 be penalized for their wait time.
 """
 
+import contextlib
 import os
 import threading
 import time
+from collections.abc import Generator
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -180,6 +182,56 @@ def test_queue_time_does_not_consume_the_stacking_budget(monkeypatch: pytest.Mon
     result = tasks.stack_frames_with_timeout(_Target(), [], timeout_seconds=0)
 
     assert result == "/stacked/output.fits"
+
+
+def test_a_stack_still_waiting_for_a_slot_is_not_abandoned(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The budget does not run out while the slot wait is still going.
+
+    The wait used to reach the tally only once the slot was free, so a queue
+    longer than the budget abandoned the stack, whose thread then got the slot
+    later and ran with nothing watching it.
+    """
+    release_slot = threading.Event()
+    threading.Timer(0.6, release_slot.set).start()
+
+    @contextlib.contextmanager
+    def _slot_taken_by_another_stack(configuration: object, name: str, slot_count: int) -> Generator[None]:
+        """Stand in for a slot that frees up only after the budget has passed.
+
+        Yields
+        ------
+        None
+            Nothing; the block runs while holding the slot.
+        """
+        release_slot.wait(timeout=10)
+        yield
+
+    def _stack_that_queues(
+        target: object,
+        frames_to_stack: list | None = None,
+        measured_at: datetime | None = None,
+        quality_recording: object | None = None,
+    ) -> str:
+        """Stand in for a stack that only has to wait for its slot.
+
+        Returns
+        -------
+        stacked_path : `str`
+            A made-up output path.
+        """
+        with session.siril_process_lock(max_concurrent_runs=1):
+            return "/stacked/output.fits"
+
+    monkeypatch.setattr(
+        "astrometricslib.foundation.storage.process_locks.acquire_resource_slot", _slot_taken_by_another_stack
+    )
+    monkeypatch.setattr(tasks, "_stack_with_job_tracking", _stack_that_queues)
+    monkeypatch.setattr(tasks, "_STACKING_TIMEOUT_POLL_SECONDS", 0.02)
+
+    class _Target:
+        id = "NGC 1499"
+
+    assert tasks.stack_frames_with_timeout(_Target(), [], timeout_seconds=0.1) == "/stacked/output.fits"
 
 
 def test_a_genuinely_hung_stack_is_still_abandoned(monkeypatch: pytest.MonkeyPatch) -> None:

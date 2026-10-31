@@ -170,19 +170,30 @@ def siril_process_lock(
         job_logger.info(waiting_message)
 
     wait_started_at = time.monotonic()
-    with acquire_resource_slot(configuration, "job", slot_count):
-        # Recorded whether or not the wait was long: the stacking
-        # timeout adds this back to its budget, and a queue that exists
-        # to protect the CPU must not convert into a cascade of
-        # timeouts for the targets waiting their turn.
-        waited_seconds = time.monotonic() - wait_started_at
-        _record_siril_lock_wait(waited_seconds)
-        if waited_seconds >= 1.0:
-            acquired_message = f"Waited {waited_seconds:.1f}s for a Siril slot."
-            logger.info(acquired_message)
-            if job_logger:
-                job_logger.info(acquired_message)
-        yield
+    # A stack's timeout reads this tally from another thread while this one
+    # waits, so the wait must show before the slot is free. Otherwise a long
+    # queue uses up the budget and the stack is abandoned while still waiting.
+    bound_tally = _bound_lock_wait.get()
+    stop_open_wait = bound_tally.start_open_wait() if bound_tally is not None else None
+    try:
+        with acquire_resource_slot(configuration, "job", slot_count):
+            # Recorded whether or not the wait was long: the stacking
+            # timeout adds this back to its budget, and a queue that exists
+            # to protect the CPU must not convert into a cascade of
+            # timeouts for the targets waiting their turn.
+            waited_seconds = time.monotonic() - wait_started_at
+            _record_siril_lock_wait(waited_seconds)
+            if stop_open_wait is not None:
+                stop_open_wait()
+            if waited_seconds >= 1.0:
+                acquired_message = f"Waited {waited_seconds:.1f}s for a Siril slot."
+                logger.info(acquired_message)
+                if job_logger:
+                    job_logger.info(acquired_message)
+            yield
+    finally:
+        if stop_open_wait is not None:
+            stop_open_wait()
 
 
 def _open_pipe_or_die(

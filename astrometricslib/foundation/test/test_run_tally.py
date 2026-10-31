@@ -1,6 +1,7 @@
 """Tests for `RunTally`: a run's own total, handed to deep code by binding."""
 
 import threading
+import time
 from contextvars import ContextVar
 
 import pytest
@@ -56,3 +57,16 @@ def test_a_new_thread_does_not_inherit_the_binding_and_binds_its_own() -> None:
             thread.start()
             thread.join()
     assert tally.total == pytest.approx(3.0)
+
+
+def test_an_open_wait_counts_until_it_stops_and_stopping_twice_is_harmless() -> None:
+    """An open wait shows in the total; only added seconds stay after."""
+    tally = RunTally(total=1.0)
+
+    stop = tally.start_open_wait()
+    time.sleep(0.05)
+    assert tally.total > 1.0
+
+    stop()
+    stop()
+    assert tally.total == pytest.approx(1.0)

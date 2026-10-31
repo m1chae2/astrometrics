@@ -24,6 +24,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, fields
 from typing import Any
 
+from astrometricslib.foundation.errors import ProcessingError
+
 
 @dataclass(frozen=True)
 class StackSettings:
@@ -140,6 +142,24 @@ class StackingDriver(ABC):
         version : `str` or `None`
             The version, or `None` when it cannot be found.
         """
+
+    def open_in_viewer(self, file_path: str) -> None:
+        """Open a file in the program's own window, so a person can inspect it.
+
+        A driver for a program with no window keeps this default, which
+        refuses.
+
+        Parameters
+        ----------
+        file_path : `str`
+            The FITS file to show. An empty string opens the program alone.
+
+        Raises
+        ------
+        ProcessingError
+            If the program has no window to open.
+        """
+        raise ProcessingError(f"{self.name} has no window to open {file_path!r} in.")
 
     @abstractmethod
     def read_stack_artifacts(self, stacked_path: str) -> dict[str, Any]:

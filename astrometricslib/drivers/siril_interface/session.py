@@ -304,6 +304,41 @@ def _cleanup_all_active_image_processing_instances() -> None:
 atexit.register(_cleanup_all_active_image_processing_instances)
 
 
+def launch_siril_gui(siril_executable: str, file_path: str) -> None:
+    """Open a file in the Siril program's window.
+
+    Siril starts in its own session, so it keeps running after the caller
+    exits. A failure to start it is logged, not raised.
+
+    Parameters
+    ----------
+    siril_executable : `str`
+        The command that starts Siril (it may have several words).
+    file_path : `str`
+        Path to the stacked FITS file to open in Siril.
+    """
+    import shlex
+
+    args = [*shlex.split(siril_executable), file_path]
+    try:
+        # Explicitly redirected, not inherited: an unredirected
+        # stdout/stderr would hand this GUI process a copy of the
+        # caller's pipe write-end, so any caller reading this
+        # process's own output via subprocess.run(capture_output=
+        # True) (e.g. the script test harness) would block until
+        # this GUI window is closed, since the pipe never reports
+        # EOF while any process still holds it open.
+        subprocess.Popen(
+            args,
+            cwd=os.path.dirname(file_path),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except (OSError, ValueError) as exc:
+        logger.debug("Failed to launch Siril GUI for '%s': %s", file_path, exc)
+
+
 class SirilSession:
     """Run Siril over named pipes and read what it reports.
 
@@ -739,23 +774,4 @@ class SirilSession:
         file_path : `str`
             Path to the stacked FITS file to open in Siril.
         """
-        import shlex
-
-        args = [*shlex.split(self.siril_executable), file_path]
-        try:
-            # Explicitly redirected, not inherited: an unredirected
-            # stdout/stderr would hand this GUI process a copy of the
-            # caller's pipe write-end, so any caller reading this
-            # process's own output via subprocess.run(capture_output=
-            # True) (e.g. the script test harness) would block until
-            # this GUI window is closed, since the pipe never reports
-            # EOF while any process still holds it open.
-            subprocess.Popen(
-                args,
-                cwd=os.path.dirname(file_path),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
-            )
-        except (OSError, ValueError) as exc:
-            logger.debug("Failed to launch Siril GUI for '%s': %s", file_path, exc)
+        launch_siril_gui(self.siril_executable, file_path)

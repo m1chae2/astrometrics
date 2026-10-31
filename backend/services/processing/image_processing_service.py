@@ -20,7 +20,8 @@ class ImageProcessingService(BaseBackgroundService):
 
     def __init__(
         self,
-        siril_driver: Any = None,
+        processing_api: Any = None,
+        job_repository: Any = None,
         target_service: Any = None,
         calibration_library: Any = None,
         config_service: Any = None,
@@ -32,8 +33,11 @@ class ImageProcessingService(BaseBackgroundService):
 
         Parameters
         ----------
-        siril_driver : `Any`, optional
-            The CLI driver for communicating with Siril.
+        processing_api : `Any`, optional
+            The library's processing API (`astrometrics.processing`). It
+            opens a stack in the Siril window.
+        job_repository : `Any`, optional
+            The database that keeps the job log lines.
         target_service : `Any`, optional
             Service for fetching target metadata and frame sets.
         calibration_library : `Any`, optional
@@ -48,7 +52,8 @@ class ImageProcessingService(BaseBackgroundService):
             Maintains the global event bus.
         """
         super().__init__(job_service=job_service, astrometrics_service=astrometrics_service)
-        self.siril = siril_driver
+        self._processing_api = processing_api
+        self._job_repository = job_repository
 
         self._target_service = target_service
         self._calibration_library = calibration_library
@@ -133,7 +138,7 @@ class ImageProcessingService(BaseBackgroundService):
             `True` if the Siril GUI was launched successfully,
             `False` otherwise.
         """
-        if not self.siril or not self._target_service:
+        if not self._processing_api or not self._target_service:
             return False
 
         target = self._target_service.get_targets(target_id)
@@ -155,7 +160,7 @@ class ImageProcessingService(BaseBackgroundService):
                 path = ""
 
         try:
-            self.siril.launch_siril_gui(path)
+            self._processing_api.open_in_siril(path)
             return True
         except AstrometricsError, OSError, ValueError:
             logger.exception("Failed to launch Siril for %s", target_id)
@@ -218,7 +223,7 @@ class ImageProcessingService(BaseBackgroundService):
             image_files,
             log_file_path=log_file,
             target_service=self._target_service,
-            siril=self.siril,
+            job_repository=self._job_repository,
             notification_service=self._notification_service,
         )
 
@@ -276,7 +281,7 @@ def start_siril_processing_task(
     image_files: list[Any],
     log_file_path: str | None = None,
     target_service: Any = None,
-    siril: Any = None,
+    job_repository: Any = None,
     notification_service: Any = None,
     **kwargs: Any,
 ) -> str | None:
@@ -284,8 +289,8 @@ def start_siril_processing_task(
 
     This is the same stage the batch script runs, so a stack made from the
     viewer gets the same quality summary, provenance record and processed
-    picture as one made in a batch. The ``siril`` driver is used only to
-    reach the job log database; the stage makes its own Siril driver.
+    picture as one made in a batch. The ``job_repository`` is the database
+    that keeps the job log lines.
 
     Returns
     -------
@@ -310,7 +315,6 @@ def start_siril_processing_task(
     # which preview steps ran) through its own module loggers.
     # `capture_job_logs` sends them, and the lines written here, to the job's
     # log file and its database rows, so the job log shows them.
-    job_repository = getattr(siril, "job_repository", None)
     with capture_job_logs(job_id=job_id, log_file_path=log_file_path, job_store=job_repository):
         logger.info("Starting new processing task for %s (Job: %s)", target_id, job_id)
 

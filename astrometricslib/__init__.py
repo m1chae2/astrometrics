@@ -218,7 +218,6 @@ if TYPE_CHECKING:
     from astrometricslib.api.stars import StellarCatalog
     from astrometricslib.api.targets import TargetCatalog
     from astrometricslib.api.visualization import Visualization
-    from astrometricslib.drivers.siril_interface import ImageProcessing
     from astrometricslib.pipelines.shared.api_arguments import (
         check_choice,
         check_include,
@@ -267,7 +266,6 @@ configure_offline_iers()
 register_interrupted_job_cleanup(restore_interrupted_stacks)
 
 _DEFERRED_EXPORTS = {
-    "ImageProcessing": "astrometricslib.drivers.siril_interface",
     "CalibrationCatalog": "astrometricslib.api.processing",
     "ProcessingPipelines": "astrometricslib.api.processing",
     "QualityRecords": "astrometricslib.api.quality",
@@ -489,7 +487,6 @@ __all__ = [
     "GenerationDescription",
     "GroupedFrameStat",
     "HardwareError",
-    "ImageProcessing",
     "InputQualityReport",
     "InvalidArgumentError",
     "JobStore",

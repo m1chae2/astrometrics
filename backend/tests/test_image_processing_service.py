@@ -12,8 +12,16 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from astrometricslib import AppConfiguration, FrameRecord, NotFoundError, ProcessingPipelines, Target
+from astrometricslib import (
+    AppConfiguration,
+    FrameRecord,
+    NotFoundError,
+    ProcessingError,
+    ProcessingPipelines,
+    Target,
+)
 from backend.services.processing.image_processing_service import (
+    ImageProcessingService,
     start_siril_processing_task,
 )
 
@@ -208,3 +216,61 @@ def test_worker_logs_an_error_when_the_saved_record_names_another_stack(tmp_path
     assert "ERROR" in text
     assert "does not name it" in text
     assert "M_42_Stacked.fits" in text
+
+
+def _service(processing_api: MagicMock, target: Target | None) -> ImageProcessingService:
+    """Make an image processing service over a fake library API and target.
+
+    Returns
+    -------
+    service : `ImageProcessingService`
+        The service.
+    """
+    target_service = MagicMock()
+    target_service.get_targets.return_value = target
+    config_service = MagicMock()
+    config_service.get_logs_path.return_value = "/tmp/logs"
+    return ImageProcessingService(
+        processing_api=processing_api, target_service=target_service, config_service=config_service
+    )
+
+
+def test_open_siril_opens_the_stacked_image_through_the_library_api(tmp_path: Path) -> None:
+    """The stack is opened by the library's `open_in_siril`."""
+    stack = tmp_path / "stack.fits"
+    stack.write_bytes(b"")
+    target = Target(id="M 42")
+    target.stacking.stacked_image = str(stack)
+    processing_api = MagicMock()
+
+    assert _service(processing_api, target).open_siril("M 42") is True
+    processing_api.open_in_siril.assert_called_once_with(str(stack))
+
+
+def test_open_siril_falls_back_to_the_first_frame_and_reports_a_library_error() -> None:
+    """Without a stack the first frame opens; a library error returns False."""
+    target = _target_with_frames("M 42", ["/lights/M_42/lum_001.fits"])
+    processing_api = MagicMock()
+
+    assert _service(processing_api, target).open_siril("M 42") is True
+    processing_api.open_in_siril.assert_called_once_with("/lights/M_42/lum_001.fits")
+
+    processing_api.open_in_siril.side_effect = ProcessingError("no window")
+    assert _service(processing_api, target).open_siril("M 42") is False
+
+
+def test_worker_writes_job_log_lines_to_the_given_job_repository() -> None:
+    """The job log capture receives the repository the service was given."""
+    target_service = _target_service(_target_with_frames("M 42", ["/lights/M_42/lum_001.fits"]))
+    repository = MagicMock()
+
+    with patch(STAGE, return_value=None), patch("astrometricslib.capture_job_logs") as capture:
+        start_siril_processing_task(
+            job_id="job-repo",
+            target_id="M 42",
+            image_files=["/lights/M_42/lum_001.fits"],
+            target_service=target_service,
+            job_repository=repository,
+        )
+
+    assert capture.call_args.kwargs["job_store"] is repository

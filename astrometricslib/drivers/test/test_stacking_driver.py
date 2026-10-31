@@ -203,3 +203,46 @@ def test_the_concrete_drivers_implement_their_interfaces() -> None:
     assert issubclass(SirilStackingDriver, StackingDriver)
     assert issubclass(AstrometryNetPlateSolveDriver, PlateSolveDriver)
     assert issubclass(AstroquerySimbadDriver, SimbadDriver)
+
+
+def test_open_in_viewer_launches_siril_with_the_session_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Siril driver opens the file with the session's Siril command."""
+    launches: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "astrometricslib.drivers.siril_interface.session.launch_siril_gui",
+        lambda siril_executable, file_path: launches.append((siril_executable, file_path)),
+    )
+
+    SirilStackingDriver(session=FakeSirilDriver()).open_in_viewer("/stacks/M_42_L_Stacked.fits")
+
+    assert launches == [("siril-not-installed", "/stacks/M_42_L_Stacked.fits")]
+
+
+def test_launch_siril_gui_starts_the_program_detached_and_logs_a_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Siril starts detached beside the file; a start failure is not raised."""
+    from astrometricslib.drivers.siril_interface import session
+
+    calls: list[tuple[list[str], dict[str, Any]]] = []
+    monkeypatch.setattr(session.subprocess, "Popen", lambda args, **kwargs: calls.append((args, kwargs)))
+
+    session.launch_siril_gui("flatpak run org.siril.Siril", "/stacks/M 42/stack.fits")
+
+    args, kwargs = calls[0]
+    assert args == ["flatpak", "run", "org.siril.Siril", "/stacks/M 42/stack.fits"]
+    assert kwargs["cwd"] == "/stacks/M 42"
+    assert kwargs["start_new_session"] is True
+
+    def fail(args: list[str], **kwargs: Any) -> None:
+        """Pretend the program is not installed.
+
+        Raises
+        ------
+        FileNotFoundError
+            Always.
+        """
+        raise FileNotFoundError("no siril")
+
+    monkeypatch.setattr(session.subprocess, "Popen", fail)
+    session.launch_siril_gui("siril", "/stacks/stack.fits")

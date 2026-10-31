@@ -71,7 +71,6 @@ Entry points and sub-APIs
    Jobs
    QualityRecords
    CalibrationCatalog
-   ImageProcessing
 
 Configuration and setup
 ^^^^^^^^^^^^^^^^^^^^^^^

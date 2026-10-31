@@ -108,7 +108,6 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "GroupedFrameStat",
     "OddEvenDifferenceNoiseResult",
     "HardwareError",
-    "ImageProcessing",
     "InputQualityReport",
     "InvalidArgumentError",
     "Jobs",
@@ -248,9 +247,6 @@ EXPECTED_PUBLIC_NAMES = frozenset({
 # limits). wayfindinglib's plate solving goes through `stars.plate_solve`
 # and its field-center list through `targets.imaged_field_centers`.
 KEPT_FOR_OUTSIDE_CALLERS = {
-    # The backend container builds the Siril driver and hands it to its
-    # stacking service.
-    "ImageProcessing": "the backend",
     # Both write temporary files on disk instead of in RAM, in the folder this
     # function names (`foundation/paths.py`). The Siril work folder,
     # `siril_work_directory`, is used only inside the library and stays off the
@@ -353,6 +349,7 @@ SUB_API_MEMBERS = {
         "measure_odd_even_difference_noise",
         "measure_night_contributions",
         "measure_noise_growth",
+        "open_in_siril",
         "stack",
         "stack_subset",
         "stack_summary",

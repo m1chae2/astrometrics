@@ -59,6 +59,21 @@ class SirilStackingDriver(StackingDriver):
             self._version = _siril_version(self.session.siril_executable)
         return self._version
 
+    def open_in_viewer(self, file_path: str) -> None:
+        """Open a file in the Siril program's window.
+
+        The Siril command comes from the session. Nothing is stacked. Siril
+        keeps running after the caller exits.
+
+        Parameters
+        ----------
+        file_path : `str`
+            The FITS file to open. An empty string opens Siril alone.
+        """
+        from astrometricslib.drivers.siril_interface.session import launch_siril_gui
+
+        launch_siril_gui(self.session.siril_executable, file_path)
+
     def read_stack_artifacts(self, stacked_path: str) -> dict[str, Any]:
         """Read Siril's registration sequence and rejection map for a stack.
 

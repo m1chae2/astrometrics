@@ -100,6 +100,13 @@
       "interim_block": "",
       "note": "Stacks two halves of a target's frames into the target's _subsets folder (about one library stack's time in all), subtracts them, and writes the noise of the difference into the quality database. The halves are deleted afterwards, and the library stack, its previews and its records are never changed. The AI is read-only, so it reads the stored numbers with quality_query instead."
     },
+    "processing_open_in_siril": {
+      "tool_class": "unclassified",
+      "category": "image-processing",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Opens a window on the person's screen. An AI client cannot see it. The app's button uses it."
+    },
     "processing_process_target": {
       "tool_class": "change-data",
       "category": "image-processing",

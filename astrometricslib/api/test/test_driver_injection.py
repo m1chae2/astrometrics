@@ -393,3 +393,31 @@ def test_processing_several_targets_refuses_injected_drivers(driver_name: str) -
 
     with pytest.raises(InvalidArgumentError, match="worker process"):
         astrometrics.processing.process_target(None, camera_id="ZWO ASI 533MM Pro")
+
+
+def test_open_in_siril_uses_the_stacking_driver_and_refuses_one_without_a_window() -> None:
+    """`open_in_siril` hands the path to the stacking driver's window."""
+    from astrometricslib import ProcessingError
+
+    class WindowedStacker(FakeStacker):
+        """A fake stacking program that records the files it shows."""
+
+        def __init__(self, output_path: str) -> None:
+            """Start with nothing shown."""
+            super().__init__(output_path)
+            self.shown: list[str] = []
+
+        def open_in_viewer(self, file_path: str) -> None:
+            """Record the path."""
+            self.shown.append(file_path)
+
+    windowed = WindowedStacker("/stacks/x.fits")
+    Astrometrics(AppConfiguration(), MagicMock(), stacking_driver=windowed).processing.open_in_siril(
+        "/stacks/M 42/stack.fits"
+    )
+    assert windowed.shown == ["/stacks/M 42/stack.fits"]
+
+    windowless = FakeStacker("/stacks/x.fits")
+    processing = Astrometrics(AppConfiguration(), MagicMock(), stacking_driver=windowless).processing
+    with pytest.raises(ProcessingError):
+        processing.open_in_siril("/stacks/M 42/stack.fits")

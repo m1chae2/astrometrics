@@ -186,6 +186,9 @@ DECISIONS = {
     "processing_acquire_stacking_slot": ToolDecision(
         "drop", "Internal concurrency lock exposed by reflection."
     ),
+    "processing_open_in_siril": ToolDecision(
+        "drop", "Opens a window on the person's screen. An AI client cannot see it. The app's button uses it."
+    ),
     "planning_get_constellation_lines": ToolDecision(
         "drop",
         "Draws the Planetarium. Returns an empty list because of a wrong file path, and is 89 KB when fixed.",

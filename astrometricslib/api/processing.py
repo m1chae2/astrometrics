@@ -1597,6 +1597,23 @@ class ProcessingPipelines:
         check_choice("kind", kind, STACK_KINDS)
         return swap_with_previous_stack(stack_path_of(self._resolve(target), kind))
 
+    def open_in_siril(self, file_path: str) -> None:
+        """Open a stack in the Siril program's window, for a person to inspect.
+
+        This uses the stacking program chosen for this API (Siril unless a
+        caller chose another one that has a window; one without a window raises
+        `ProcessingError`). Siril starts as its
+        own process and keeps running after the call returns. If the program
+        cannot start, the failure is logged and nothing is raised. Nothing is
+        stacked, read or saved.
+
+        Parameters
+        ----------
+        file_path : `str`
+            The FITS file to open. An empty string opens Siril alone.
+        """
+        self._drivers.stacking_or_default().open_in_viewer(file_path)
+
     @background_job("quality", grace_period_seconds=20.0)
     def record_frame_measurements(
         self,

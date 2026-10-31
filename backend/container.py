@@ -209,15 +209,9 @@ class Container:
 
         self.equipment_service = EquipmentService(observatory_api=self.wayfinder.control)
 
-        from astrometricslib import ImageProcessing
-
-        siril_driver = ImageProcessing(
-            config=self.config_service,
-            calibration_library=self.calibration_library,
-            job_repository=self.job_repository,
-        )
         self.image_processing_service = ImageProcessingService(
-            siril_driver=siril_driver,
+            processing_api=self.astrometrics.processing,
+            job_repository=self.job_repository,
             target_service=self.target_service,
             calibration_library=self.calibration_library,
             config_service=self.config_service,

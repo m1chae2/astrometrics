@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib.foundation.errors import ConflictError
+from astrometricslib.foundation.errors import ConflictError, InvalidArgumentError
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.stacking import stage as stacking_tasks
 from astrometricslib.pipelines.stacking.pre_processing.camera_selection import (
@@ -106,3 +106,14 @@ def test_the_stacking_stage_refuses_mixed_cameras() -> None:
 
     with pytest.raises(ConflictError, match="more than one camera"):
         stacking_tasks.stack_frames(target)
+
+
+def test_a_named_target_gets_the_argument_error_with_the_camera_hint() -> None:
+    """The public stack call's mixed frames raise `InvalidArgumentError`."""
+    with pytest.raises(InvalidArgumentError, match="Pass camera_id") as error:
+        ensure_single_camera(make_frames(NIKON, NIKON, ASI), target_id="M 13")
+
+    assert "'M 13'" in str(error.value)
+    assert f"'{NIKON}' (2 frames)" in str(error.value)
+    assert error.value.details == {"target": "M 13", "cameras": {NIKON: 2, ASI: 1}}
+    ensure_single_camera(make_frames(ASI, ASI), target_id="M 13")

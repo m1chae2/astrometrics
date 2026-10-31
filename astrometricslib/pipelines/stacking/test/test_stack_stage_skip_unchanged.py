@@ -126,7 +126,7 @@ def run_stage(target: Target, engine: Engine, **options: object) -> str | None:
         patch(RUN_STACK, side_effect=engine),
         patch.object(stacking_tasks, "write_stack_preview", MagicMock(return_value=None), create=True),
     ):
-        return stacking_tasks.stack_frames(target, filter_type=FilterType.L, **options)
+        return stacking_tasks.stack_frames(target, **options)
 
 
 def test_the_first_run_builds_the_stack_and_saves_a_record(setup: tuple[Path, list[Path], Engine]) -> None:

@@ -70,6 +70,7 @@ from astrometricslib.models.quality.measurement import (
     SubjectLevel,
 )
 from astrometricslib.models.target import FrameRecord
+from astrometricslib.pipelines.shared.frame_grouping import frame_exposure_seconds
 from astrometricslib.pipelines.shared.quality.frame_statistics import (
     BOOTSTRAP_RESAMPLE_COUNT,
     BOOTSTRAP_SEED,
@@ -1565,27 +1566,6 @@ def _provenance_text(label: str, value: ProvenancedValue) -> str:
     return f"{label} {value.value:g} ({value.provenance.kind.value}: {value.provenance.source})"
 
 
-def _frame_exposure_seconds(frame: FrameRecord) -> float | None:
-    """Read the frame's exposure time.
-
-    Parameters
-    ----------
-    frame : `FrameRecord`
-        The frame record, whose ``exposure`` is the header's ``EXPTIME`` text.
-
-    Returns
-    -------
-    seconds : `float` or `None`
-        The exposure in seconds, or `None` when it is missing, not a number, or
-        not above zero.
-    """
-    try:
-        seconds = float(frame.exposure)
-    except TypeError, ValueError:
-        return None
-    return seconds if math.isfinite(seconds) and seconds > 0.0 else None
-
-
 def look_up_frame_sensor_noise(
     camera_profile: CameraProfile | None, frame: FrameRecord, *, clipped_at_zero: bool | None = None
 ) -> tuple[ProvenancedValue | None, ProvenancedValue | None, str]:
@@ -2095,7 +2075,7 @@ def measure_frame(
         )
     )
     top_level = _usable_top_level_adu(camera_profile)
-    exposure_seconds = _frame_exposure_seconds(frame)
+    exposure_seconds = frame_exposure_seconds(frame)
 
     # Quick metrics first: they are returned even when the budget runs out.
     _emit_background_and_saturation(context, collapsed, camera_profile)

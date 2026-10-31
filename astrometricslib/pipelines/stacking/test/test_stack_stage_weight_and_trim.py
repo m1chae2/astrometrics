@@ -87,7 +87,7 @@ def run_stage(target: Target, fake_run_stack: object) -> str | None:
         patch(RUN_STACK, side_effect=fake_run_stack),
         patch(PREVIEW, MagicMock(return_value=None)),
     ):
-        return stacking_tasks.stack_frames(target, filter_type=FilterType.L)
+        return stacking_tasks.stack_frames(target)
 
 
 def test_mixed_exposures_are_stacked_with_noise_weighting(stacks_folder: Path) -> None:

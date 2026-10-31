@@ -13,7 +13,6 @@ from astrometricslib.drivers.camera_profile_store import camera_identity, resolv
 from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.foundation.config import get_configuration
-from astrometricslib.foundation.enums import FilterType
 from astrometricslib.foundation.errors import AstrometricsError, ConflictError, ProcessingError
 from astrometricslib.foundation.jobs.runner import get_current_job
 from astrometricslib.models.quality.gate_result import GateResult, unchecked_gate
@@ -50,7 +49,6 @@ def stack_frames(
     target: Target,
     log_file: str | None = None,
     frames_to_stack: list[Any] | None = None,
-    filter_type: Any | None = None,
     rejection_sigma: tuple[float, float] | None = None,
     filter_wfwhm: str | None = None,
     filter_round: str | None = None,
@@ -82,8 +80,6 @@ def stack_frames(
     frames_to_stack : `list` of `Any` or `None`, optional
         A specific list of images to use. If None, it uses all images from the
         target.
-    filter_type : `Any` or `None`, optional
-        Only stack images taken with this specific filter (like 'L' or 'HA').
     rejection_sigma : `tuple` of (`float`, `float`) or `None`, optional
         How strict the rejection algorithm should be (lower, upper limits).
     filter_wfwhm : `str` or `None`, optional
@@ -142,7 +138,6 @@ def stack_frames(
             target,
             log_file,
             frames_to_stack,
-            filter_type,
             rejection_sigma,
             filter_wfwhm,
             filter_round,
@@ -162,7 +157,6 @@ def _stack_frames_guarded(
     target: Target,
     log_file: str | None = None,
     frames_to_stack: list[Any] | None = None,
-    filter_type: Any | None = None,
     rejection_sigma: tuple[float, float] | None = None,
     filter_wfwhm: str | None = None,
     filter_round: str | None = None,
@@ -197,24 +191,6 @@ def _stack_frames_guarded(
     """
     if frames_to_stack is not None:
         target_frames = frames_to_stack
-    elif filter_type is not None:
-        from astrometricslib.models.target import FrameRecord
-
-        norm_filter = FrameRecord.normalize_filter(filter_type)
-        if not isinstance(norm_filter, FilterType):
-            for ft in FilterType:
-                if (
-                    ft.name.upper() == str(filter_type).upper()
-                    or ft.value.upper() == str(filter_type).upper()
-                ):
-                    norm_filter = ft
-                    break
-        target_frames = [
-            f
-            for f in target.frames
-            if f.filter == norm_filter
-            and not any(k in f.path.lower() for k in ("_stacked", "starless", "starmask"))
-        ]
     else:
         target_frames = [
             f
@@ -250,11 +226,6 @@ def _stack_frames_guarded(
         filter_tag = None
         if has_spectral:
             filter_tag = "SPEC"
-        elif filter_type is not None:
-            if hasattr(filter_type, "name"):
-                filter_tag = filter_type.name.upper()
-            else:
-                filter_tag = str(filter_type).upper()
         else:
             filters = {getattr(f, "filter", None) for f in target_frames}
             filter_names = {

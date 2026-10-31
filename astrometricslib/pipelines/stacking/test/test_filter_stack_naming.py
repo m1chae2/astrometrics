@@ -64,7 +64,7 @@ def test_filter_stack_naming_and_target_properties() -> None:
 
         # 1. Stack L frames
         mock_driver.process_target.return_value = "/library/lights/M_13/M_13_L_Stacked.fits"
-        stacked_l = stacking_tasks.stack_frames(target, frames_to_stack=l_frames, filter_type=FilterType.L)
+        stacked_l = stacking_tasks.stack_frames(target, frames_to_stack=l_frames)
 
         assert stacked_l == "/library/lights/M_13/M_13_L_Stacked.fits"
         assert target.stacking.stacked_image == "/library/lights/M_13/M_13_L_Stacked.fits"
@@ -72,9 +72,7 @@ def test_filter_stack_naming_and_target_properties() -> None:
 
         # 2. Stack SPEC frames
         mock_driver.process_target.return_value = "/library/lights/M_13/M_13_SPEC_Stacked.fits"
-        stacked_spec = stacking_tasks.stack_frames(
-            target, frames_to_stack=spec_frames, filter_type=FilterType.SPEC
-        )
+        stacked_spec = stacking_tasks.stack_frames(target, frames_to_stack=spec_frames)
 
         assert stacked_spec == "/library/lights/M_13/M_13_SPEC_Stacked.fits"
         assert target.spectral_stacking.stacked_image == "/library/lights/M_13/M_13_SPEC_Stacked.fits"

@@ -82,9 +82,7 @@ def run_stage(
         driver.process_target.return_value = "/library/lights/M_52/M_52_L_Stacked.fits"
         driver_class.return_value = driver
         summary_builder.return_value = dummy_summary
-        stacking_tasks.stack_frames(
-            target, filter_type=FilterType.L, measured_at=measured_at, quality_recording=quality_recording
-        )
+        stacking_tasks.stack_frames(target, measured_at=measured_at, quality_recording=quality_recording)
     return driver, summary_builder
 
 

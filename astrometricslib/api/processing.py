@@ -745,9 +745,9 @@ class ProcessingPipelines:
         """
         from astrometricslib.pipelines.stacking.frame_measurement_run import FrameQualityRecording
         from astrometricslib.pipelines.stacking.post_processing.stack_preview import PreviewSettings
+        from astrometricslib.pipelines.stacking.pre_processing.camera_selection import ensure_single_camera
         from astrometricslib.pipelines.stacking.stack_request import (
             SirilOptions,
-            check_one_camera,
             choose_frames_to_stack,
             run_stack,
         )
@@ -765,7 +765,7 @@ class ProcessingPipelines:
                 )
             if not frames:
                 raise InvalidArgumentError("frames is empty: there is nothing to stack.")
-            check_one_camera(resolved, frames)
+            ensure_single_camera(frames, target_id=resolved.id)
             chosen = list(frames)
         else:
             selection = make_frame_selection(

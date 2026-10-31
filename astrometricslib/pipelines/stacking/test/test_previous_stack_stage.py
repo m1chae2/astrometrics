@@ -85,7 +85,7 @@ def run_stage(fake_run_stack: object) -> str | None:
         patch(RUN_STACK, side_effect=fake_run_stack),
     ):
         with patch.object(stacking_tasks, "write_stack_preview", MagicMock(return_value=None), create=True):
-            return stacking_tasks.stack_frames(make_target(), filter_type=FilterType.L)
+            return stacking_tasks.stack_frames(make_target())
 
 
 def stack_name_used(stacks_folder: Path) -> str:

@@ -55,6 +55,7 @@ from scipy.spatial import cKDTree
 from astrometricslib.drivers.fits_access import read_data, write_image
 from astrometricslib.foundation.errors import InvalidArgumentError, ProcessingError
 from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import measure_aperture_photometry
+from astrometricslib.pipelines.shared.frame_grouping import frame_exposure_seconds
 from astrometricslib.pipelines.shared.quality.saturation import (
     SATURATION_MASK_FRACTION_OF_CEILING,
     find_saturation_plateau_ceiling,
@@ -362,31 +363,6 @@ class ExposureGroup:
     exposure_seconds: float
     frames: list[Any] = field(default_factory=list)
     night: str | None = None
-
-
-def frame_exposure_seconds(frame: Any) -> float | None:
-    """Read a frame's exposure length in seconds.
-
-    Parameters
-    ----------
-    frame : `Any`
-        A frame record, or a dictionary of one, with an ``exposure`` (a
-        number or a string such as ``"0.5"``).
-
-    Returns
-    -------
-    exposure_seconds : `float` or `None`
-        The exposure length, or `None` when it is missing, not a number, or
-        not positive.
-    """
-    raw = frame.get("exposure") if isinstance(frame, dict) else getattr(frame, "exposure", None)
-    try:
-        value = float(raw)
-    except TypeError, ValueError:
-        return None
-    if not math.isfinite(value) or value <= 0:
-        return None
-    return value
 
 
 def exposure_group_key(exposure_seconds: float) -> float:

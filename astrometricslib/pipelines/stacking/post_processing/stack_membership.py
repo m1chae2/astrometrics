@@ -54,6 +54,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from astrometricslib.pipelines.shared.frame_grouping import frame_exposure_seconds
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -526,27 +528,6 @@ class GroupFrameWeights:
     exposure_scales: tuple[tuple[float, ...] | None, ...] = ()
 
 
-def _frame_exposure_seconds(frame: Any) -> float | None:
-    """Read a frame record's exposure length.
-
-    Parameters
-    ----------
-    frame : `Any`
-        A frame record with an ``exposure`` attribute.
-
-    Returns
-    -------
-    exposure_seconds : `float` or `None`
-        The length in seconds, or `None` when it is missing, not a number, not
-        finite or not above zero.
-    """
-    try:
-        value = float(frame.exposure)
-    except AttributeError, TypeError, ValueError:
-        return None
-    return value if math.isfinite(value) and value > 0 else None
-
-
 def group_exposure_scales(
     frame_exposures: Sequence[float | None],
     holds_folded_frames: bool,
@@ -652,7 +633,7 @@ def group_references(
             continue
         path = found[0]
         frame = frame_by_path.get(path)
-        exposure = None if frame is None else _frame_exposure_seconds(frame)
+        exposure = None if frame is None else frame_exposure_seconds(frame)
         if exposure is None:
             references.append(
                 GroupReference(
@@ -931,9 +912,7 @@ def _exposure_group_raw_weights(
         holds_folded_frames=[bool(entry.get("holds_folded_frames")) for entry in group_entries],
         gains_measured=[bool(entry.get("gain_measured")) for entry in group_entries],
         weight_modes=modes,
-        frame_exposures=[
-            [_frame_exposure_seconds(frame) for frame in frames] for frames in members_per_group
-        ],
+        frame_exposures=[[frame_exposure_seconds(frame) for frame in frames] for frames in members_per_group],
         reference_exposures=[reference.exposure_seconds for reference in references],
         reference_reasons=[reference.reason for reference in references],
     )
@@ -1018,7 +997,7 @@ def _single_group_scales(
     """
     from astrometricslib.pipelines.stacking.processing.exposure_groups import exposure_group_key
 
-    lengths = [_frame_exposure_seconds(frame) for frame in candidates]
+    lengths = [frame_exposure_seconds(frame) for frame in candidates]
     readable = [length for length in lengths if length is not None]
     # A 0 s frame is a length of its own for the fold rule, though it has no
     # usable ratio, so the folded test reads the lengths without that check.
@@ -1047,7 +1026,7 @@ def _single_group_scales(
     )
     frame_by_path = {str(frame.path): frame for frame in candidates}
     reference_frame = None if found is None else frame_by_path.get(found[0])
-    reference_exposure = None if reference_frame is None else _frame_exposure_seconds(reference_frame)
+    reference_exposure = None if reference_frame is None else frame_exposure_seconds(reference_frame)
     if found is None or reference_exposure is None:
         reason = (
             f"no single registration reference frame can be identified in {label}, "

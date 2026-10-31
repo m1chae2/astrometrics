@@ -9,6 +9,7 @@ the same way.
 """
 
 import logging
+import math
 import os
 from typing import Any
 
@@ -288,3 +289,32 @@ def add_frame(
     target.frames.append(record)
     target.recalculate_total_exposure()
     return record
+
+
+def frame_exposure_seconds(frame: Any) -> float | None:
+    """Read a frame's exposure length in seconds.
+
+    This is the one reader of a frame record's exposure. Stacking, the frame
+    measurements and the stack membership all use it, so they agree on which
+    exposures are usable.
+
+    Parameters
+    ----------
+    frame : `Any`
+        A frame record, or a dictionary of one, with an ``exposure`` (a
+        number or a string such as ``"0.5"``).
+
+    Returns
+    -------
+    exposure_seconds : `float` or `None`
+        The exposure length, or `None` when it is missing, not a number, not
+        finite, or not positive.
+    """
+    raw = frame.get("exposure") if isinstance(frame, dict) else getattr(frame, "exposure", None)
+    try:
+        value = float(raw)
+    except TypeError, ValueError:
+        return None
+    if not math.isfinite(value) or value <= 0:
+        return None
+    return value

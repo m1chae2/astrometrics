@@ -128,8 +128,8 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
   astrometrics = Astrometrics()
   target = astrometrics.targets.get("M 13")
   astrometrics.processing.process_target(target, stages=["spectroscopy"])
-  ids = [s.id for s in astrometrics._catalog_access.list_star_summaries(target_id=target.id) if s.has_spectra]
-  for star in astrometrics._catalog_access.get_by_ids("stellar_catalog", ids):
+  ids = astrometrics.stars.query(target_id=target.id, has_spectra=True, detail="ids", limit=2000).ids
+  for star in map(astrometrics.stars.get, ids):
       own = star.spectroscopy.self_determined_spectral_type
       if star.spectral_type and own not in ("", "Unknown"):
           print(
@@ -491,8 +491,8 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
   )  # internal
 
   astrometrics = Astrometrics()
-  ids = [s.id for s in astrometrics._catalog_access.list_star_summaries() if s.has_spectra]
-  for star in astrometrics._catalog_access.get_by_ids("stellar_catalog", ids):
+  ids = astrometrics.stars.query(has_spectra=True, detail="ids", limit=2000).ids
+  for star in map(astrometrics.stars.get, ids):
       s = star.spectroscopy
       print(
           star.id,
@@ -1144,14 +1144,8 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
 - **Procedure:**
   1. Select the spectra, degrade each to every grid value with five noise draws, classify, and take medians and the shares of cases whose gap is at least `AMBIGUOUS_RMS_GAP` (0.02). The uncertainty is the 16th and 84th percentile over 400 resamples of the star fields, for the median gap and for each share; the range with each field left out in turn is stored too. Each row also holds the share of copies whose class letter equals the spectrum's own undegraded class, and the table holds the native class agreement for each field.
 
-```python
-from astrometricslib import Astrometrics
-from astrometricslib.scripts.calibrate_class_gap_against_snr import select_samples
-from astrometricslib.pipelines.spectroscopy.processing.class_gap_calibration import class_gap_table
-
-samples = select_samples(Astrometrics()._catalog_access)
-table = class_gap_table(samples)
-print(table.class_reachable_snr, table.subtype_reachable_snr)
+```bash
+python -m astrometricslib.scripts.calibrate_class_gap_against_snr
 ```
 
   The script `astrometricslib/scripts/calibrate_class_gap_against_snr.py` does this and, with `--apply`, stores the table. <!-- impl: astrometricslib.scripts.calibrate_class_gap_against_snr.select_samples --> <!-- impl: astrometricslib.pipelines.spectroscopy.processing.class_gap_calibration.class_gap_table -->

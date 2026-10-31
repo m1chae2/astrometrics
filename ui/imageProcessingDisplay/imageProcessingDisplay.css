@@ -1536,3 +1536,59 @@
   color: var(--text-muted);
   font-size: var(--section-label-size);
 }
+
+/* The "Make the picture again" disclosure in the Stack Summary block. */
+.preview-remake {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.preview-remake__fields {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  margin: var(--space-2) 0;
+}
+
+.preview-remake__hint {
+  grid-column: 2;
+}
+
+.preview-remake__status {
+  min-height: 1.2em;
+}
+
+.preview-remake__result ul {
+  margin: var(--space-1) 0;
+  padding-left: var(--space-3);
+}
+
+/* The list of frames set aside before stacking, opened from the Stack Summary block. */
+.set-aside-list {
+  max-height: 16em;
+  overflow-y: auto;
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-3);
+}
+
+.set-aside-list__item {
+  margin-bottom: var(--space-2);
+}
+
+/* The "Compare with the previous stack" disclosure in the Stack Summary block. */
+.stack-comparison {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.stack-comparison__status {
+  min-height: 1.2em;
+}
+
+.stack-comparison__status ul {
+  margin: var(--space-1) 0;
+  padding-left: var(--space-3);
+}

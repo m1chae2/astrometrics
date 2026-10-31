@@ -414,6 +414,10 @@ def judge_batch(measurements: Sequence[dict[str, Any]]) -> list[QuarantineDecisi
             reason = f"star roundness {roundness:.2f}, below {roundness_limit:.2f}"
         elif star_count < CLOUD_STAR_FRACTION * typical_stars:
             cloudy_sky = typical_sky > 0 and sky > CLOUD_SKY_MULTIPLE * typical_sky
+            # Few stars under a normal sky is stored as "trailed" too. The
+            # name is kept, because it is stored in the quality rows and in
+            # `excluded_frames.json`; readers word it as "stars smeared, or far
+            # fewer than usual".
             kind = "clouded" if cloudy_sky else "trailed"
             reason = f"{star_count} stars against a typical {typical_stars:.0f}" + (
                 f", sky {sky / typical_sky:.1f} times normal" if cloudy_sky else ", sky level normal"

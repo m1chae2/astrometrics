@@ -309,6 +309,12 @@ export interface ActionRegistry {
     "processing:measure_noise": { payload: { target_id: string; kind?: 'growth' | 'night_contributions' | 'odd_even_difference'; maximum_steps?: number; include?: Array<'night_contributions' | 'odd_even_difference'>; keep_halves?: boolean }; response: { started: boolean; target_id: string } };
     "processing:job_log_tail": { payload: { job_id: string; lines?: number }; response: string[] };
     "processing:stack_summary": { payload: { target: string; kind?: 'imaging' | 'spectral' }; response: import('../types/backendTypes').StackSummary };
+    // Makes a stack's preview picture again (a background job): the answer is the result, or the job to follow.
+    "processing:remake_preview": { payload: { target_id: string; kind?: 'imaging' | 'spectral'; denoise?: boolean; denoise_strength?: number; star_toning?: boolean }; response: import('../types/backendTypes').StackReviewStart };
+    // Compares a stack with the previous one (a background job): the answer is the report, or the job to follow.
+    "quality:measure_stack": { payload: { target_id: string; kind?: 'imaging' | 'spectral' }; response: import('../types/backendTypes').StackReviewStart };
+    // The frames the stacker set aside for a target, each with the reason it has on record.
+    "quality:set_aside_frames": { payload: { target: string }; response: import('../types/backendTypes').SetAsideFrameRecord[] };
 
     // Quality measurements: the stored ones, and what each metric means.
     // Parameter names are snake_case (target_id, not targetId); the router
@@ -542,6 +548,7 @@ const IDEMPOTENT_READ_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
     'advisory:result',
     'advisory:depth_goal',
     'processing:stack_summary',
+    'quality:set_aside_frames',
     'history:nights',
     'history:night_quality',
     'history:target_changes',
@@ -976,8 +983,14 @@ export function resolveImageSrc(absolutePath: string | null | undefined): string
  * or open a WebSocket, so every other module downloads files through here.
  * @param url The file's address, from `resolveImageSrc`.
  * @param signal Cancels the download when signalled.
+ * @param revalidate Asks the server whether the file changed before the browser reuses
+ *     its saved copy. Use it for a picture the backend can rewrite at the same path.
  * @return The HTTP response.
  */
-export async function fetchImageFile(url: string, signal?: AbortSignal): Promise<Response> {
-    return fetch(url, { method: 'GET', signal });
+export async function fetchImageFile(
+    url: string,
+    signal?: AbortSignal,
+    revalidate: boolean = false
+): Promise<Response> {
+    return fetch(url, { method: 'GET', signal, cache: revalidate ? 'no-cache' : 'default' });
 }

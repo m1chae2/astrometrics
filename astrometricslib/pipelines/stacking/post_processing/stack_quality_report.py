@@ -66,6 +66,7 @@ def stack_quality_report(
     target_id: str | None,
     include: Collection[str],
     compare_to: str | None,
+    is_spectral: bool = False,
 ) -> StackQualityReport:
     """Measure a stack and, if asked, compare it with another stack.
 
@@ -81,6 +82,9 @@ def stack_quality_report(
         ``"previous"`` compares with the stack the last restack kept in the
         ``_previous`` folder. Any other text is the path of a stack to
         compare with. The other stack is ``before``; this one is ``after``.
+    is_spectral : `bool`, optional
+        Whether the stack is a spectral stack. Its noise in empty sky is then
+        reported as not measured.
 
     Returns
     -------
@@ -123,11 +127,11 @@ def stack_quality_report(
         if previous is None:
             notes.append("No previous stack is kept, so there is nothing to compare with.")
         else:
-            report.comparison = compare_stacks(previous, stack_path)
+            report.comparison = compare_stacks(previous, stack_path, is_spectral=is_spectral)
     elif compare_to:
         if not os.path.isfile(compare_to):
             raise NotFoundError(f"There is no stack file at {compare_to}.", details={"path": compare_to})
-        report.comparison = compare_stacks(compare_to, stack_path)
+        report.comparison = compare_stacks(compare_to, stack_path, is_spectral=is_spectral)
     report.notes = notes
     return report
 

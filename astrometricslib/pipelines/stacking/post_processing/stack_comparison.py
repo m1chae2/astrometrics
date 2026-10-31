@@ -2,11 +2,17 @@
 
 Four numbers describe how good a stacked picture is, apart from what it shows:
 
-- the sky level, to see whether calibration moved the background;
-- the pixel noise, as a fraction of the sky;
+- the sky level (the median of the usable pixels), to see whether calibration
+  moved the background;
+- the noise in empty sky, the same number the target report stores
+  (`stacking.empty_aperture_noise_normalized`), measured in the apertures the
+  library stack chose;
 - the large-scale flatness, which shows leftover vignetting and dust shadows
   (the part a flat frame is meant to fix);
 - the star width (FWHM).
+
+A fine-grain pixel noise is also kept, labelled as such. A number that cannot
+be measured is reported as not measured, with the reason.
 
 The comparison reports each number for both stacks and the change, in plain
 sentences. It does not decide which stack is better, because that depends on
@@ -21,6 +27,7 @@ each other. They are not comparable with numbers from another tool.
 import json
 import logging
 import os
+import warnings
 
 import numpy as np
 from skimage.registration import phase_cross_correlation
@@ -29,10 +36,13 @@ from astrometricslib.drivers.fits_access import collapse_to_2d, read_data
 from astrometricslib.foundation.errors import ProcessingError
 from astrometricslib.models.quality.stack_comparison import StackComparison, StackMeasurements
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_fwhm_from_data
+from astrometricslib.pipelines.stacking.post_processing.aperture_storage import APERTURE_FILE_NAME
 from astrometricslib.pipelines.stacking.post_processing.stack_image import (
     MAD_TO_SIGMA,
     robust_sigma,
+    sky_level_of_plane,
 )
+from astrometricslib.pipelines.stacking.post_processing.stack_noise import StackNoiseOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +71,14 @@ FLATNESS_BLOCK_OUTLIER_SIGMA = 4.0
 # Pixels brighter than the sky by more than this many robust standard
 # deviations are treated as stars and left out of the noise estimate.
 NOISE_STAR_SIGMA = 3.0
+
+# A block of the flatness grid is used only if at least this share of its
+# pixels hold data. The median of a mostly empty block (the ragged edge of a
+# registered stack) reflects the edge, not the sky. A design choice, not tuned.
+MINIMUM_USABLE_BLOCK_SHARE = 0.5
+
+# Fewest usable blocks for a flatness number to mean anything.
+MINIMUM_FLATNESS_BLOCKS = 4
 
 # A change smaller than this fraction is reported as "unchanged". Two
 # measurements of the same stack agree to about this much (the noise
@@ -186,8 +204,31 @@ def measure_stack_fwhm(path: str) -> float | None:
     return measure_fwhm_from_data(image, excluded_mask=combined_stack_excluded_mask(path, image.shape))
 
 
+def _usable_pixels(image: np.ndarray) -> np.ndarray:
+    """Mark the pixels that hold data: finite and not exactly zero.
+
+    The empty edge of a registered stack is exactly zero. Counting it
+    would pull every sky estimate toward zero.
+
+    Parameters
+    ----------
+    image : `numpy.ndarray`
+        The stack as one 2-D image.
+
+    Returns
+    -------
+    usable : `numpy.ndarray`
+        `True` where the pixel is finite and not zero.
+    """
+    return np.isfinite(image) & (image != 0)
+
+
 def measure_stack_array(data: np.ndarray, path: str = "") -> StackMeasurements:
-    """Measure one stacked image held in memory.
+    """Measure one stacked image held in memory, apart from the aperture noise.
+
+    The empty-aperture noise needs the stack's file and its apertures, so
+    `measure_stack` adds it. Pixels that are zero or not finite are left out of
+    the sky, the fine-grain noise and the flatness.
 
     Parameters
     ----------
@@ -199,7 +240,8 @@ def measure_stack_array(data: np.ndarray, path: str = "") -> StackMeasurements:
     Returns
     -------
     measurements : `StackMeasurements`
-        The sky level, noise, flatness, star width and zero fraction.
+        The sky level, fine-grain noise, flatness, star width and zero
+        fraction. ``normalized_noise`` is `None` with a reason.
 
     Raises
     ------
@@ -207,74 +249,221 @@ def measure_stack_array(data: np.ndarray, path: str = "") -> StackMeasurements:
         If the image has no usable sky (blank or too small).
     """
     image = np.asarray(collapse_to_2d(np.asarray(data, dtype=np.float64)))
-    sky = float(np.nanmedian(image))
-    sky_sigma = MAD_TO_SIGMA * float(np.nanmedian(np.abs(image - sky)))
-    if not np.isfinite(sky) or sky <= 0 or sky_sigma <= 0:
+    usable = _usable_pixels(image)
+    sky = sky_level_of_plane(image)
+    if sky is None:
+        raise ProcessingError("The stack has no measurable sky.")
+    sky_sigma = MAD_TO_SIGMA * float(np.median(np.abs(image[usable] - sky)))
+    if sky_sigma <= 0:
         raise ProcessingError("The stack has no measurable sky.")
 
-    sky_pixels = (image[:, 1:] < sky + NOISE_STAR_SIGMA * sky_sigma) & (
-        image[:, :-1] < sky + NOISE_STAR_SIGMA * sky_sigma
+    limit = sky + NOISE_STAR_SIGMA * sky_sigma
+    left, right = image[:, :-1], image[:, 1:]
+    sky_pairs = usable[:, :-1] & usable[:, 1:] & (left < limit) & (right < limit)
+    fine_grain = (
+        float(robust_sigma((right - left)[sky_pairs] / np.sqrt(2.0))) / sky if sky_pairs.any() else None
     )
-    differences = (image[:, 1:] - image[:, :-1])[sky_pixels] / np.sqrt(2.0)
-    noise = float(robust_sigma(differences))
+
+    measurements = StackMeasurements(
+        path=path,
+        sky_level=sky,
+        fine_grain_noise_fraction=fine_grain,
+        normalized_noise=None,
+        zero_fraction=float(np.mean(image == 0)),
+        not_measured={"normalized_noise": "the noise in empty sky is measured on a stack file"},
+    )
+    if fine_grain is None:
+        measurements.not_measured["fine_grain_noise_fraction"] = "no pairs of neighbouring sky pixels"
 
     block = FLATNESS_BLOCK_PIXELS
     rows, columns = (image.shape[0] // block) * block, (image.shape[1] // block) * block
     if rows == 0 or columns == 0:
-        raise ProcessingError("The stack is smaller than one flatness block.")
-    blocks = image[:rows, :columns].reshape(rows // block, block, columns // block, block)
-    block_medians = np.median(blocks, axis=(1, 3))
-    centre = float(np.median(block_medians))
-    spread = MAD_TO_SIGMA * float(np.median(np.abs(block_medians - centre)))
-    kept = block_medians[block_medians - centre < FLATNESS_BLOCK_OUTLIER_SIGMA * spread]
-    if kept.size < 4:
-        kept = block_medians.ravel()
+        reason = "the stack is smaller than one flatness block"
+        measurements.not_measured["flatness_rms"] = measurements.not_measured["flatness_peak_to_peak"] = (
+            reason
+        )
+    else:
+        shape = (rows // block, block, columns // block, block)
+        filled = np.where(usable, image, np.nan)[:rows, :columns].reshape(shape)
+        share = usable[:rows, :columns].reshape(shape).mean(axis=(1, 3))
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            block_medians = np.nanmedian(filled, axis=(1, 3))
+        block_medians = block_medians[share >= MINIMUM_USABLE_BLOCK_SHARE]
+        block_medians = block_medians[np.isfinite(block_medians)]
+        if block_medians.size < MINIMUM_FLATNESS_BLOCKS:
+            reason = f"only {block_medians.size} flatness blocks hold enough data"
+            measurements.not_measured["flatness_rms"] = measurements.not_measured["flatness_peak_to_peak"] = (
+                reason
+            )
+        else:
+            centre = float(np.median(block_medians))
+            spread = MAD_TO_SIGMA * float(np.median(np.abs(block_medians - centre)))
+            kept = block_medians[block_medians - centre < FLATNESS_BLOCK_OUTLIER_SIGMA * spread]
+            if kept.size < 4:
+                kept = block_medians
+            measurements.flatness_rms = float(np.std(kept) / centre)
+            measurements.flatness_peak_to_peak = float((kept.max() - kept.min()) / centre)
 
-    return StackMeasurements(
-        path=path,
-        sky_level=sky,
-        noise_fraction=noise / sky,
-        flatness_rms=float(np.std(kept) / centre),
-        flatness_peak_to_peak=float((kept.max() - kept.min()) / centre),
-        fwhm_px=measure_fwhm_from_data(
-            image, excluded_mask=combined_stack_excluded_mask(path, image.shape) if path else None
-        ),
-        zero_fraction=float(np.mean(image == 0.0)),  # ruff: ignore[float-equality-comparison] -- counting pixels that are exactly zero
+    measurements.fwhm_px = measure_fwhm_from_data(
+        image, excluded_mask=combined_stack_excluded_mask(path, image.shape) if path else None
     )
+    if measurements.fwhm_px is None:
+        measurements.not_measured["fwhm_px"] = "too few stars could be fitted"
+    return measurements
 
 
-def measure_stack(path: str) -> StackMeasurements:
-    """Measure one stacked image on disk.
+def measure_empty_aperture_noise(
+    stack_path: str, apertures_path: str, is_spectral: bool = False
+) -> tuple[StackNoiseOutcome, list[str]]:
+    """Measure a stack's noise in the target's stored empty apertures.
+
+    This is the definition the target report stores
+    (``stacking.empty_aperture_noise_normalized``). The stack never chooses the
+    apertures: it only reads the ones the library stack chose. The reference
+    frame and the trimmed edges come from the registration record beside the
+    stack. A stack with no record falls back to the frames in its
+    ``_inputs.json``, with no trimmed edges known. A stack with neither is
+    measured without them. The notes say which case applied.
+
+    Parameters
+    ----------
+    stack_path : `str`
+        The stack.
+    apertures_path : `str`
+        The target's stored apertures.
+    is_spectral : `bool`, optional
+        Whether the stack is spectral (its noise is not measured).
+
+    Returns
+    -------
+    outcome : `StackNoiseOutcome`
+        The measurement, or the reason there is none.
+    notes : `list` [`str`]
+        How the reference frame was found, and what could not be recovered.
+    """
+    from astrometricslib.pipelines.shared.registration_record import read_registration_record
+    from astrometricslib.pipelines.stacking.post_processing.record_quality import measure_noise_safely
+    from astrometricslib.pipelines.stacking.pre_processing.stack_inputs import read_stack_inputs
+
+    notes: list[str] = []
+    reference: str | None = None
+    crop_offset = (0, 0)
+    member_frames: tuple[str, ...] = ()
+    record = read_registration_record(stack_path)
+    if record is not None:
+        crop_offset = record.crop_offset
+        if record.reference_frame and os.path.isfile(record.reference_frame):
+            reference = record.reference_frame
+        elif record.reference_frame:
+            notes.append("The registration reference frame is no longer on disk.")
+        else:
+            notes.append("The registration record does not name the reference frame.")
+    else:
+        saved = read_stack_inputs(stack_path)
+        if saved is not None:
+            member_frames = tuple(str(entry[0]) for entry in saved["record"].get("frames", []))
+            notes.append(
+                "No registration record was kept, so the reference frame and the trimmed edges are not "
+                "known; the frames listed in _inputs.json stand in for the reference."
+            )
+        else:
+            notes.append(
+                "Neither a registration record nor an _inputs.json was kept, so the reference frame "
+                "and the trimmed edges are not recoverable."
+            )
+    outcome = measure_noise_safely(
+        stack_path,
+        reference,
+        is_spectral,
+        crop_offset,
+        apertures_path,
+        may_choose_apertures=False,
+        member_frame_paths=member_frames,
+    )
+    return outcome, notes
+
+
+def measure_stack(
+    path: str, apertures_path: str | None = None, is_spectral: bool = False
+) -> StackMeasurements:
+    """Measure one stacked image on disk, including its noise in empty sky.
 
     Parameters
     ----------
     path : `str`
         Path of the stack's FITS file.
+    apertures_path : `str`, optional
+        The target's stored apertures. Left out, the file beside the stack.
+    is_spectral : `bool`, optional
+        Whether the stack is spectral.
 
     Returns
     -------
     measurements : `StackMeasurements`
-        See `measure_stack_array`.
+        See `measure_stack_array`. A stack that cannot be read or has no sky
+        comes back with every number `None` and the reason.
     """
-    return measure_stack_array(read_data(path), path)
+    try:
+        measurements = measure_stack_array(read_data(path), path)
+    except (ProcessingError, OSError, ValueError) as error:
+        return StackMeasurements(path=path, not_measured={"all": f"the stack could not be measured: {error}"})
+    if apertures_path is None:
+        apertures_path = os.path.join(os.path.dirname(path), APERTURE_FILE_NAME)
+    outcome, notes = measure_empty_aperture_noise(path, apertures_path, is_spectral)
+    measurements.notes = notes
+    if outcome.result is not None:
+        measurements.normalized_noise = outcome.result.normalized_noise
+        measurements.normalized_noise_uncertainty = outcome.result.normalized_uncertainty
+        measurements.not_measured.pop("normalized_noise", None)
+    else:
+        measurements.not_measured["normalized_noise"] = outcome.reason or "no reason was given"
+    return measurements
 
 
-def _sentence(label: str, before: float | None, after: float | None, unit: str, scale: float = 1.0) -> str:
+def _sentence(
+    label: str,
+    before: float | None,
+    after: float | None,
+    unit: str,
+    scale: float = 1.0,
+    error: float | None = None,
+    reasons: tuple[str, str] = ("", ""),
+) -> str:
     """Describe the change in one measurement in a sentence.
+
+    Parameters
+    ----------
+    label, unit, scale
+        The name, the unit text and the factor into that unit.
+    before, after : `float` or `None`
+        The two values.
+    error : `float`, optional
+        The 1-sigma error of the difference, in the value's own units. A change
+        smaller than it is reported as unchanged within the error.
+    reasons : `tuple` [`str`, `str`], optional
+        Why the before and after values are missing.
 
     Returns
     -------
     sentence : `str`
-        For example ``noise 0.62% to 0.61% (down 2%)``, or a note that the
-        measurement is missing.
+        For example ``noise 0.62% to 0.61% (down 2%)``, or the reason a value
+        was not measured.
     """
     if before is None or after is None:
-        return f"{label}: could not be measured on both stacks."
+        missing = [
+            f"{side} stack: {why}"
+            for side, why, value in (("older", reasons[0], before), ("newer", reasons[1], after))
+            if value is None
+        ]
+        return f"{label}: not measured ({'; '.join(missing)})."
     shown_before, shown_after = before * scale, after * scale
     if before == 0:
         return f"{label} {shown_before:.3g}{unit} to {shown_after:.3g}{unit}."
     change = after / before - 1.0
-    if abs(change) < UNCHANGED_FRACTION:
+    if error is not None and abs(after - before) < error:
+        word = "unchanged within the measurement error"
+    elif error is None and abs(change) < UNCHANGED_FRACTION:
         word = "unchanged"
     else:
         word = f"{'down' if change < 0 else 'up'} {abs(change):.0%}"
@@ -295,26 +484,46 @@ def compare_measurements(before: StackMeasurements, after: StackMeasurements) ->
     -------
     comparison : `StackComparison`
         The two measurements, the relative change of each, and a sentence for
-        each.
+        each. No stack is called better.
     """
     fields = {
         "sky_level": ("sky level", "", 1.0),
-        "noise_fraction": ("pixel noise", "% of the sky", 100.0),
+        "normalized_noise": ("noise in empty sky", "% of the reference stars' brightness", 100.0),
         "flatness_rms": ("large-scale flatness (rms)", "% of the sky", 100.0),
         "flatness_peak_to_peak": ("large-scale flatness (peak to peak)", "% of the sky", 100.0),
         "fwhm_px": ("star width (FWHM)", " px", 1.0),
+        "fine_grain_noise_fraction": (
+            "fine-grain noise (pixel to pixel, not the noise number of the target report)",
+            "% of the sky",
+            100.0,
+        ),
     }
     changes: dict[str, float | None] = {}
     summary = []
     for name, (label, unit, scale) in fields.items():
         old, new = getattr(before, name), getattr(after, name)
         changes[name] = None if old in (None, 0) or new is None else new / old - 1.0
-        summary.append(_sentence(label, old, new, unit, scale))
+        error = None
+        if name == "normalized_noise" and None not in (
+            before.normalized_noise_uncertainty,
+            after.normalized_noise_uncertainty,
+        ):
+            error = float(np.hypot(before.normalized_noise_uncertainty, after.normalized_noise_uncertainty))
+        reasons = (
+            before.not_measured.get(name, before.not_measured.get("all", "not measured")),
+            after.not_measured.get(name, after.not_measured.get("all", "not measured")),
+        )
+        summary.append(_sentence(label, old, new, unit, scale, error, reasons))
     return StackComparison(before=before, after=after, changes=changes, summary=summary)
 
 
-def compare_stacks(before_path: str, after_path: str) -> StackComparison:
+def compare_stacks(
+    before_path: str, after_path: str, apertures_path: str | None = None, is_spectral: bool = False
+) -> StackComparison:
     """Measure two stacks on disk and compare them.
+
+    Both stacks are measured in the same apertures, those beside the newer
+    stack (the library stack), so their noise numbers can be compared.
 
     Parameters
     ----------
@@ -322,10 +531,20 @@ def compare_stacks(before_path: str, after_path: str) -> StackComparison:
         Path of the older stack's FITS file.
     after_path : `str`
         Path of the newer stack's FITS file.
+    apertures_path : `str`, optional
+        The target's stored apertures. Left out, the file beside the
+        newer stack.
+    is_spectral : `bool`, optional
+        Whether the stacks are spectral.
 
     Returns
     -------
     comparison : `StackComparison`
         See `compare_measurements`.
     """
-    return compare_measurements(measure_stack(before_path), measure_stack(after_path))
+    if apertures_path is None:
+        apertures_path = os.path.join(os.path.dirname(after_path), APERTURE_FILE_NAME)
+    return compare_measurements(
+        measure_stack(before_path, apertures_path, is_spectral),
+        measure_stack(after_path, apertures_path, is_spectral),
+    )

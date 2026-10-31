@@ -13,6 +13,10 @@ import { useQuery } from '@tanstack/react-query';
 import { callBackend } from '../../common/services/backendApi';
 import { BackendError } from '../../common/services/backendError';
 import type { StackSummary } from '../../common/types/backendTypes';
+import { PreviewRemakeControl } from './PreviewRemakeControl';
+import { StackComparisonControl } from './StackComparisonControl';
+import { SetAsideFramesList } from './SetAsideFramesList';
+import { formatExposureSeconds } from '../utils/stackFormatting';
 
 /** Which stack to summarize. */
 export type StackSummaryKind = 'imaging' | 'spectral';
@@ -24,6 +28,8 @@ interface StackSummaryPanelProps {
     kind?: StackSummaryKind;
     /** Changes when a stack finishes or the library reloads, so the panel reads again. */
     refreshKey?: string | number;
+    /** Opens the stack's picture in the viewer, called after a new picture is made and on display. */
+    onShowPicture?: (stackPath: string) => void;
 }
 
 /** One exposure group, as the backend sends it inside `StackSummary.exposure_groups`. */
@@ -72,13 +78,7 @@ export const formatPixelShare = (fraction: number | null | undefined): string =>
 export const formatStarWidth = (pixels: number | null | undefined): string =>
     pixels == null ? 'not recorded' : `${pixels.toFixed(2)} px`;
 
-/**
- * Writes an exposure length with its unit.
- * @param seconds The exposure, in seconds.
- * @return Text such as `30 s` or `0.5 s`.
- */
-export const formatExposureSeconds = (seconds: number): string =>
-    `${Number.isInteger(seconds) ? seconds.toFixed(0) : seconds.toFixed(2).replace(/0+$/, '')} s`;
+export { formatExposureSeconds };
 
 /**
  * Says how far an exposure group was moved to line up with the others.
@@ -110,8 +110,12 @@ export const describeGroupClipping = (group: ExposureGroupView): string => {
  * A target with no saved stack summary is a normal case, so the backend's
  * `not_found` answer becomes a muted note and not an error.
  */
-export const StackSummaryPanel: React.FC<StackSummaryPanelProps> = ({ targetId, kind = 'imaging', refreshKey }) => {
+export const StackSummaryPanel: React.FC<StackSummaryPanelProps> = ({
+    targetId, kind = 'imaging', refreshKey, onShowPicture,
+}) => {
     const label = kind === 'spectral' ? 'Spectral stack' : 'Imaging stack';
+    // The set-aside list is read only after a person opens it.
+    const [showSetAside, setShowSetAside] = React.useState(false);
     const { data: summary, isLoading, isError } = useQuery<StackSummary | null>({
         queryKey: ['stackSummary', { target_id: targetId, kind }, refreshKey ?? ''],
         queryFn: async () => {
@@ -166,7 +170,24 @@ export const StackSummaryPanel: React.FC<StackSummaryPanelProps> = ({ targetId, 
                 {summary.frames_set_aside_before_stacking != null && (
                     <>
                         <dt>Set aside before stacking</dt>
-                        <dd>{summary.frames_set_aside_before_stacking} frames</dd>
+                        <dd>
+                            {summary.frames_set_aside_before_stacking} frames
+                            {summary.frames_set_aside_before_stacking > 0 && (
+                                <details
+                                    className="stack-summary__details"
+                                    onToggle={(event) => setShowSetAside(event.currentTarget.open)}
+                                >
+                                    <summary>Why they were set aside</summary>
+                                    {showSetAside && (
+                                        <SetAsideFramesList
+                                            targetId={targetId}
+                                            count={summary.frames_set_aside_before_stacking}
+                                            refreshKey={refreshKey}
+                                        />
+                                    )}
+                                </details>
+                            )}
+                        </dd>
                     </>
                 )}
 
@@ -258,6 +279,9 @@ export const StackSummaryPanel: React.FC<StackSummaryPanelProps> = ({ targetId, 
                     </tbody>
                 </table>
             )}
+
+            <StackComparisonControl targetId={targetId} kind={kind} />
+            <PreviewRemakeControl targetId={targetId} kind={kind} onShowPicture={onShowPicture} />
         </section>
     );
 };

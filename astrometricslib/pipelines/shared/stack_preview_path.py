@@ -16,6 +16,10 @@ PREVIEW_SUFFIX = "_preview"
 PROCESSED_FITS_SUFFIX = "_processed"
 """Added to the stack's file name, before the extension, for its FITS."""
 
+PREVIEW_SETTINGS_SUFFIX = "_preview_settings.json"
+"""Added to the stack's file name, in place of ``.fits``, for the small record
+of what made its preview."""
+
 # JPEG quality, in percent, for the saved picture. Tested once, on the M 13
 # luminosity stack (3008 x 3008 pixels): 90 gave a 3.3 MB file with the faint
 # stars, the cluster core and a small background galaxy all visible. Not tuned
@@ -98,3 +102,21 @@ def is_processed_fits_path(path: str) -> bool:
     """
     stem, extension = os.path.splitext(path)
     return extension.lower() in (".fits", ".fit") and stem.endswith(PROCESSED_FITS_SUFFIX)
+
+
+def preview_settings_path_for(stacked_path: str) -> str:
+    """Name the record of what made a stack's preview picture.
+
+    Parameters
+    ----------
+    stacked_path : `str`
+        Path of the stacked FITS file.
+
+    Returns
+    -------
+    settings_path : `str`
+        The same folder and file name, with `PREVIEW_SETTINGS_SUFFIX` in place
+        of the extension.
+    """
+    stem, _ = os.path.splitext(stacked_path)
+    return f"{stem}{PREVIEW_SETTINGS_SUFFIX}"

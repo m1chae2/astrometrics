@@ -6,6 +6,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { fetchLightFrame, fetchImageByPath } from '../../common/services/imaging/imageService';
 import { reportError } from '../../common/utils/reportError';
+import { on as onEvent } from '../../common/utils/eventBus';
+import { STACK_PICTURE_REMADE_EVENT } from '../../common/services/imaging/stackReviewService';
 
 export interface ImageFrameInfo {
     objectId: string;
@@ -39,6 +41,9 @@ export const useViewerState = (
     const [disableStretch, setDisableStretch] = useState(false);
     const [stretch, setStretch] = useState(true);
     const [prevTarget, setPrevTarget] = useState<string | null>(null);
+    // Counts the pictures remade at a path the viewer already shows. The count is a dependency
+    // of the file effect, so the file is read again and the old picture is not left on screen.
+    const [remadePictureCount, setRemadePictureCount] = useState(0);
 
     const prevFetchedFilePathRef = useRef<string | null>(null);
     const prevSelectedLightRowRef = useRef<number | null>(null);
@@ -57,6 +62,12 @@ export const useViewerState = (
         setError(null);
         setAutoPanTrigger((n) => n + 1);
     }, [selectedTarget]);
+
+    // A preview remade for the stack on screen has the same path, so the viewer is told to reload.
+    useEffect(
+        () => onEvent(STACK_PICTURE_REMADE_EVENT, () => setRemadePictureCount((count) => count + 1)),
+        []
+    );
 
     // Ensure mutual exclusivity: if we have a manual file selection, clear row selection
     useEffect(() => {
@@ -187,7 +198,7 @@ export const useViewerState = (
         return () => {
             aborted = true;
         };
-    }, [externalSelectedFilePath, stretch, selectedTarget]);
+    }, [externalSelectedFilePath, stretch, selectedTarget, remadePictureCount]);
 
     return {
         imageUrl,

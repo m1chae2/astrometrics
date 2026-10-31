@@ -10,7 +10,13 @@ from astrometricslib.pipelines.shared.previous_stack_path import PREVIOUS_STACK_
 from astrometricslib.pipelines.stacking.post_processing import previous_stack
 
 STACK_NAME = "M_27_L_Stacked.fits"
-COMPANIONS = ("_RejMap.fits", "_Registration.seq", "_preview.jpg", "_processed.fits")
+COMPANIONS = (
+    "_RejMap.fits",
+    "_Registration.seq",
+    "_preview.jpg",
+    "_processed.fits",
+    "_preview_settings.json",
+)
 
 
 def write_stack(folder: Path, label: str, name: str = STACK_NAME) -> Path:

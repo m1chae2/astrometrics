@@ -3712,6 +3712,80 @@ export interface StackSummary {
 }
 
 /**
+ * What one call of `ProcessingPipelines.remake_preview` made.
+ */
+export interface PreviewRemakeResult {
+  target_id: string;
+  stack_path: string;
+  preview_path: string;
+  processed_fits_path?: string | null;
+  steps_run?: string[];
+  shown_in_viewer?: boolean;
+  previous_pictures?: string[];
+  stack_file_unchanged?: boolean;
+  preview_settings?: PreviewSettingsRecord | null;
+}
+
+/**
+ * One frame that lies in a target's `_excluded` folder.
+ *
+ * The listing is read-only. Where the reason is known, it comes from the
+ * first source that has it: the stored quality rows of the frame (which
+ * carry the action taken), then the folder's `excluded_frames.json` file.
+ */
+export interface SetAsideFrameRecord {
+  file: string;
+  path: string;
+  subjectId?: string | null;
+  originalPath?: string | null;
+  kind?: string | null;
+  reason?: string;
+  reasonSource: any;
+  actionTaken?: string | null;
+  exposureSeconds?: number | null;
+  captureSettingId?: number | null;
+  movedAt?: string | null;
+  restorable?: boolean;
+  restoreNote?: string;
+}
+
+/**
+ * The answer to starting a slow stack review.
+ *
+ * Attributes
+ * ----------
+ * status : `str`
+ * ``"completed"`` when the work finished within the short wait, or
+ * ``"running"`` when it is still going.
+ * job_id : `str` or `None`
+ * The job to follow with ``processing:get_job``. `None` when the work
+ * has not recorded a job yet, for example because it waits for another
+ * job to finish.
+ * result : `dict` or `None`
+ * The library's result as plain data, when the status is
+ * ``"completed"``.
+ */
+export interface StackReviewStart {
+  status: any;
+  job_id?: string | null;
+  result?: Record<string, any> | null;
+}
+
+/**
+ * Measurements of one stack, and optionally a comparison with another.
+ */
+export interface StackQualityReport {
+  stack_path: string;
+  target_id?: string | null;
+  included?: string[];
+  fwhm_px?: number | null;
+  rejected_fraction?: number | null;
+  registration?: RegistrationRow[] | null;
+  comparison?: StackComparison | null;
+  notes?: string[];
+}
+
+/**
  * One observation session's overall lifecycle state.
  *
  * `SUSPENDED` means an unsafe verdict halted advancement without ending
@@ -4784,6 +4858,71 @@ export interface FrameConcern {
 }
 
 /**
+ * What made a stack's preview picture (its settings record file).
+ */
+export interface PreviewSettingsRecord {
+  made_at: string;
+  settings_used: PreviewSettingsUsed;
+  steps_run?: string[];
+  custom?: boolean;
+}
+
+/**
+ * What Siril's registration found for one frame of a stack.
+ *
+ * The fields match the keys that `parse_seq_file` returns for each
+ * registration line of the ``_Registration.seq`` file.
+ *
+ * Attributes
+ * ----------
+ * fwhm_px : `float`
+ * Width of the stars in pixels (Siril's plain FWHM).
+ * weighted_fwhm_px : `float`
+ * Siril's weighted FWHM in pixels, which counts each star by how well
+ * its fit went.
+ * roundness : `float`
+ * Star roundness, 0 to 1 (1 is a perfect circle).
+ * quality : `float`
+ * Siril's registration quality score for the frame.
+ * background_level : `float`
+ * Sky background level, normalized to the 0 to 1 image range.
+ * star_count : `int`
+ * The number of stars Siril matched in the frame.
+ * homography : `list` [`float`]
+ * The 3 by 3 transform that moves the frame onto the reference, as nine
+ * numbers in row order.
+ * dx, dy : `float`
+ * The shift in pixels (the homography's ``h02`` and ``h12``).
+ * rotation_deg : `float`
+ * The rotation in degrees.
+ * scale : `float`
+ * The scale factor (1.0 means the same size as the reference).
+ */
+export interface RegistrationRow {
+  fwhmPx: number;
+  weightedFwhmPx: number;
+  roundness: number;
+  quality: number;
+  backgroundLevel: number;
+  starCount: number;
+  homography: number[];
+  dx: number;
+  dy: number;
+  rotationDeg: number;
+  scale: number;
+}
+
+/**
+ * Two stacks of the same target, measured and compared.
+ */
+export interface StackComparison {
+  before: StackMeasurements;
+  after: StackMeasurements;
+  changes?: Record<string, number | null>;
+  summary?: string[];
+}
+
+/**
  * A package placement request's starting disposition.
  */
 export enum StartTimeMode {
@@ -5249,6 +5388,37 @@ export interface CapabilityDelegation {
 }
 
 /**
+ * The choices a preview run really used, as recorded beside the stack.
+ */
+export interface PreviewSettingsUsed {
+  denoise: boolean;
+  denoise_strength?: number | null;
+  star_toning: boolean;
+  starnet?: boolean;
+  bright_object?: boolean;
+}
+
+/**
+ * What was measured on one stacked image.
+ *
+ * A number that could not be measured is `None`, and ``not_measured`` says
+ * why. No number is ever replaced by a default.
+ */
+export interface StackMeasurements {
+  path: string;
+  skyLevel?: number | null;
+  normalizedNoise?: number | null;
+  normalizedNoiseUncertainty?: number | null;
+  fineGrainNoiseFraction?: number | null;
+  flatnessRms?: number | null;
+  flatnessPeakToPeak?: number | null;
+  fwhmPx?: number | null;
+  zeroFraction?: number | null;
+  notMeasured?: Record<string, string>;
+  notes?: string[];
+}
+
+/**
  * The frames captured for one light row of an entry.
  *
  * Parameters
@@ -5427,6 +5597,9 @@ export const RPC_METHODS = [
   "processing:jobs_for_target",
   "processing:job_log_tail",
   "processing:stack_summary",
+  "processing:remake_preview",
+  "quality:set_aside_frames",
+  "quality:measure_stack",
   "quality:record_frame_measurements",
   "processing:measure_noise",
   "quality:query",

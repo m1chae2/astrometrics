@@ -329,6 +329,7 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "documentation/notebooks/astrometrics/user_guide/07_stellar_catalogs.ipynb" = ["print"]
 "documentation/notebooks/astrometrics/user_guide/08_visualization.ipynb" = ["print"]
 "documentation/notebooks/astrometrics/user_guide/09_end_to_end_pipeline_M13.ipynb" = ["print"]
+"documentation/notebooks/astrometrics/user_guide/10_reviewing_a_finished_stack.ipynb" = ["print"]
 "documentation/notebooks/wayfinding/control/adding_remote_images.ipynb" = ["print"]
 "documentation/notebooks/wayfinding/control/telescope_slewing_and_tracking.ipynb" = ["print"]
 "documentation/notebooks/wayfinding/execution/observation_execution.ipynb" = ["print"]

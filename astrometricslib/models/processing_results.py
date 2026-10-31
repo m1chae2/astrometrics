@@ -21,7 +21,13 @@ from pydantic import BaseModel, Field
 from astrometricslib.models.quality.quality_summary import StackQualitySummary
 from astrometricslib.models.target import TargetQualitySummaries
 
-__all__ = ["PreviewRemakeResult", "ProcessTargetResult", "StackResult"]
+__all__ = [
+    "PreviewRemakeResult",
+    "PreviewSettingsRecord",
+    "PreviewSettingsUsed",
+    "ProcessTargetResult",
+    "StackResult",
+]
 
 
 class StackResult(BaseModel):
@@ -48,6 +54,34 @@ class StackResult(BaseModel):
     note: str = ""
 
 
+class PreviewSettingsUsed(BaseModel):
+    """The choices a preview run really used, as recorded beside the stack."""
+
+    # Whether Cosmic Clarity's denoise ran (or was due to run).
+    denoise: bool
+    # The denoise strength, from 0 to 1. None when the denoise did not run.
+    denoise_strength: float | None = None
+    # Whether the star toning was on.
+    star_toning: bool
+    # Whether the stars were stretched on their own with StarNet.
+    starnet: bool = False
+    # True when the stack is a bright extended object, which takes its own
+    # stretch and skips GraXpert, the denoise and the star toning.
+    bright_object: bool = False
+
+
+class PreviewSettingsRecord(BaseModel):
+    """What made a stack's preview picture (its settings record file)."""
+
+    # When the picture was made, as an ISO 8601 time in UTC.
+    made_at: str
+    settings_used: PreviewSettingsUsed
+    # The sentence for each step and whether it ran.
+    steps_run: list[str] = Field(default_factory=list)
+    # True when the run overrode the saved settings.
+    custom: bool = False
+
+
 class PreviewRemakeResult(BaseModel):
     """What one call of `ProcessingPipelines.remake_preview` made."""
 
@@ -64,6 +98,9 @@ class PreviewRemakeResult(BaseModel):
     previous_pictures: list[str] = Field(default_factory=list)
     # True when the stack file itself was not touched, as it never should be.
     stack_file_unchanged: bool = True
+    # What made the new picture, read from the record saved beside the stack.
+    # None when the record could not be read, which means unknown.
+    preview_settings: PreviewSettingsRecord | None = None
 
 
 class ProcessTargetResult(BaseModel):

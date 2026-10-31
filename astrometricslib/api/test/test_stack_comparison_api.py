@@ -111,7 +111,8 @@ def test_stack_quality_compares_two_stack_files() -> None:
         comparison = report.comparison
 
     assert comparison.changes["flatness_rms"] < -0.5
-    assert len(comparison.summary) == 5
+    assert len(comparison.summary) == 6
+    assert any("noise in empty sky: not measured" in line for line in comparison.summary)
 
 
 def test_comparing_with_the_previous_stack_uses_the_kept_stack(

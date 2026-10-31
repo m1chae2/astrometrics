@@ -49,7 +49,7 @@ Each sub-API checks its arguments and hands the work to `pipelines/`. Three rule
 `ProcessingPipelines` makes stacks and runs the analysis.
 
 - `stack` chooses a target's frames and stacks them. It chooses by filter (the colored or clear glass in front of the camera that passes one band of light), file range, time window and camera, or takes an exact list. `plan_only=True` only reports the choice.
-- `remake_preview` makes a stack's preview image again without restacking.
+- `remake_preview` makes a stack's preview image again without restacking. The result carries `preview_settings`, read from the record saved beside the stack (`<stack name>_preview_settings.json`), or `None` when the picture has no record.
 - `process_target` has two forms:
   - For one target, it runs the analysis stages (`astrometry`, `photometry`, `spectroscopy` and `asteroids`) on the frames and stack the target already has. It does not stack.
   - For a list of targets, or for every target, it runs the full pipeline: stacking first, then the analysis stages.
@@ -88,7 +88,7 @@ Live checks:
     - every saturated patch, that is, pixels at the sensor's maximum value, where the true brightness is lost.
 
     Given `predict_exposure_seconds`, it scales the measured peaks to that exposure and says whether the spectrum would saturate ("clip") at that exposure. `exposure_seconds` and `predict_exposure_seconds` apply to this kind only; giving them with another kind raises `InvalidArgumentError`.
-- `measure_stack` measures a stack (star width, the share of rejected pixels, frame registration) and compares it with the previous stack or another stack file.
+- `measure_stack` measures a stack (star width, the share of rejected pixels, frame registration) and compares it with the previous stack or another stack file. The comparison reports the sky level, the noise in empty sky (the target report's `stacking.empty_aperture_noise_normalized`), the flatness and the star width, with one sentence for each and a reason for any number it could not measure.
 
 `CalibrationCatalog` tracks the dark, bias and flat frames (the calibration frames that measure the camera itself; see `drivers/README.md`).
 

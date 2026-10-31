@@ -19,11 +19,18 @@ import os
 import shutil
 from typing import Any
 
+from pydantic import ValidationError
+
 from astrometricslib.foundation.errors import NotFoundError, ProcessingError
-from astrometricslib.models.processing_results import PreviewRemakeResult
-from astrometricslib.pipelines.shared.stack_preview_path import preview_path_for, processed_fits_path_for
+from astrometricslib.models.processing_results import PreviewRemakeResult, PreviewSettingsRecord
+from astrometricslib.pipelines.shared.stack_preview_path import (
+    preview_path_for,
+    preview_settings_path_for,
+    processed_fits_path_for,
+)
 from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
     PreviewSettings,
+    read_preview_settings,
     record_preview_as_processed_image,
     write_stack_preview,
 )
@@ -50,7 +57,11 @@ def _keep_old_pictures(stacked_path: str) -> list[str]:
     """
     folder = os.path.join(os.path.dirname(stacked_path), PREVIOUS_PICTURES_FOLDER)
     kept = []
-    for picture in (preview_path_for(stacked_path), processed_fits_path_for(stacked_path)):
+    for picture in (
+        preview_path_for(stacked_path),
+        processed_fits_path_for(stacked_path),
+        preview_settings_path_for(stacked_path),
+    ):
         if os.path.isfile(picture):
             os.makedirs(folder, exist_ok=True)
             copy = os.path.join(folder, os.path.basename(picture))
@@ -72,6 +83,30 @@ def _put_old_pictures_back(stacked_path: str, kept: list[str]) -> None:
     folder = os.path.dirname(stacked_path)
     for copy in kept:
         shutil.copy2(copy, os.path.join(folder, os.path.basename(copy)))
+
+
+def _read_settings_record(stacked_path: str) -> PreviewSettingsRecord | None:
+    """Read the record of what made the new picture.
+
+    Parameters
+    ----------
+    stacked_path : `str`
+        Path of the stack.
+
+    Returns
+    -------
+    record : `PreviewSettingsRecord` or `None`
+        The record, or `None` if it is missing or does not have the expected
+        fields. `None` means unknown.
+    """
+    record = read_preview_settings(stacked_path)
+    if record is None:
+        return None
+    try:
+        return PreviewSettingsRecord.model_validate(record)
+    except ValidationError:
+        logger.warning("The preview settings record of '%s' is not readable.", stacked_path)
+        return None
 
 
 def remake_stack_preview(
@@ -143,4 +178,5 @@ def remake_stack_preview(
         shown_in_viewer=shown,
         previous_pictures=kept,
         stack_file_unchanged=os.path.getmtime(stacked_path) == modified_before,
+        preview_settings=_read_settings_record(stacked_path),
     )

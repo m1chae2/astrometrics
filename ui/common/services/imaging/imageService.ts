@@ -56,7 +56,7 @@ export async function fetchProcessedImage(
             if (!src) {
                 return null;
             }
-            const response = await fetchImageFile(src, signal);
+            const response = await fetchImageFile(src, signal, true);
             if (response.status === 404 || response.status === 204) {
                 return null;
             }
@@ -85,7 +85,7 @@ export async function fetchProcessedImage(
         if (!src) {
             return null;
         }
-        const response = await fetchImageFile(src, signal);
+        const response = await fetchImageFile(src, signal, true);
         if (response.status === 404 || response.status === 204) {
             return null;
         }

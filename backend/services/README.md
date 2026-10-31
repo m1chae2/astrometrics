@@ -10,7 +10,7 @@ Terms are defined in the [glossary](../../documentation/Glossary.md). This file 
 - `data/` serves targets, stars, images and the deletion archive.
 - `infrastructure/` holds shared plumbing: settings, sockets, the scripting terminal, the handoff state and the safety guards.
 - `observatory/` serves the telescope, equipment, guiding, imaging, planning and the sequencer.
-- `processing/` serves ingestion, stacking and image processing, jobs and the frame quality measurement run.
+- `processing/` serves ingestion, stacking and image processing, jobs, the frame quality measurement run and the slow stack reviews (`stack_review_service.py`, which starts a preview remake or a stack comparison as a background job and answers with the result or the job to follow).
 
 ## Planning services (`observatory/`)
 

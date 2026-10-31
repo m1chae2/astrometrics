@@ -50,6 +50,7 @@ class Container:
         self.image_processing_service = None
         self.sync_service = None
         self.quality_measurement_service = None
+        self.stack_review_service = None
         self.socket_manager = None
         self.telescope_service = None
         self.notification_service = None
@@ -233,6 +234,9 @@ class Container:
         self.suggestion_refresh_worker = SuggestionRefreshWorker(
             wayfinder=self.wayfinder, socket_manager=self.socket_manager
         )
+        from backend.services.processing.stack_review_service import StackReviewService
+
+        self.stack_review_service = StackReviewService(astrometrics=self.astrometrics)
         self.quality_measurement_service = QualityMeasurementService(
             astrometrics=self.astrometrics,
             socket_manager=self.socket_manager,

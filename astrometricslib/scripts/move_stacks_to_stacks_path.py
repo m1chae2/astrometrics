@@ -11,7 +11,8 @@ For each target folder it moves:
 
 1. The stack family at the top of the folder: ``*_Stacked*.fits`` and the
    files that go with a stack (``_RejMap.fits``, ``_Registration.seq``,
-   ``_preview.jpg``, ``_processed.fits``), plus any ``starless_`` or
+   ``_preview.jpg``, ``_processed.fits``, ``_preview_settings.json``,
+   ``_inputs.json``, ``_registration_frames.json``), plus any ``starless_`` or
    ``starmask_`` copies.
 2. The whole ``groups`` folder, then rewrites the paths inside its manifest
    files.
@@ -53,7 +54,8 @@ from astrometricslib.foundation.errors import InvalidArgumentError
 # The files that make up a stack at the top of a target folder.
 _STACK_FAMILY = re.compile(
     r"(_Stacked.*\.fits|_Stacked.*_RejMap\.fits|_Stacked.*_Registration\.seq"
-    r"|_Stacked.*_preview\.jpg|_Stacked.*_processed\.fits)$"
+    r"|_Stacked.*_preview\.jpg|_Stacked.*_processed\.fits|_Stacked.*_preview_settings\.json"
+    r"|_Stacked.*_inputs\.json|_Stacked.*_registration_frames\.json)$"
 )
 _PREFIXES = ("starless_", "starmask_")
 # The port the backend listens on, used to refuse a run while it is up.

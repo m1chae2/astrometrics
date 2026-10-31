@@ -341,22 +341,6 @@ class CalibrationCatalog:
         """Write the calibration library to its JSON file on disk."""
         self.library.save_library()
 
-    def add(self, image_file: str, kind: _CalibrationKind, **kwargs: Any) -> None:
-        """Add a calibration frame of the given kind (dark, bias or flat).
-
-        Parameters
-        ----------
-        image_file : `str`
-            Path to the calibration frame FITS file.
-        kind : {"dark", "bias", "flat"}
-            The calibration frame kind.
-        **kwargs
-            Passed to the kind's own adder; ``flat`` accepts ``telescope``.
-        """
-        check_choice("kind", kind, _CALIBRATION_KINDS)
-        method = getattr(self.library, f"add_{kind}_frame")
-        method(image_file, **kwargs)
-
     def get(self, kind: _CalibrationKind, **kwargs: Any) -> list[str]:
         """Find the calibration frame files of the given kind.
 

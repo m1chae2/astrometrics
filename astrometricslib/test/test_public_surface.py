@@ -354,7 +354,6 @@ SUB_API_MEMBERS = {
         "swap_with_previous_stack",
     },
     "processing.calibration": {
-        "add",
         "assess_flats",
         "get",
         "library",

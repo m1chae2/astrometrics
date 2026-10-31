@@ -2,13 +2,6 @@
   "server": "astrometricslib-core",
   "generated_by": "python -m mcp_servers.inventory --write-runtime-manifests",
   "tools": {
-    "calibration_add": {
-      "tool_class": "change-data",
-      "category": "calibration",
-      "disposition": "withhold",
-      "interim_block": "",
-      "note": "The AI is read-only, so a tool that writes is not offered."
-    },
     "calibration_assess_flats": {
       "tool_class": "compute",
       "category": "calibration",

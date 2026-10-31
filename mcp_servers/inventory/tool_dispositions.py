@@ -575,7 +575,6 @@ DECISIONS = {
     # ---- Writers with no read-only form ----
     **dict.fromkeys(
         (
-            "calibration_add",
             "calibration_refresh",
             "processing_discard_previous_stack",
             "processing_process_target",

@@ -23,6 +23,7 @@ from astrometricslib.pipelines.stacking.registration_records import (
     check_spectral_registration_quality,
     update_frame_registration_results,
 )
+from astrometricslib.pipelines.stacking.stack_run_context import StackRun
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 if TYPE_CHECKING:
@@ -178,300 +179,581 @@ def _stack_frames_guarded(
 ) -> str | None:
     """Do the work of `stack_frames` while the target's guard is held.
 
-    Takes the same parameters as `stack_frames`.
+    Takes the same parameters as `stack_frames`. The work is a short list of
+    named steps over one `StackRun`. The order of the steps matters: later
+    steps read what earlier ones found, and several move files or store rows.
+    The comments below name what each step adds.
 
     Returns
     -------
     stacked_path : `str` or `None`
         What `stack_frames` returns.
 
+    Notes
+    -----
+    A `ConflictError` is raised, by the steps, when the target has no frames
+    to stack, mixes spectral and standard imaging frames, or has frames from
+    more than one camera. A `ProcessingError` is raised, by the frame
+    screening, when no usable frames are left after filtering out
+    mismatched or bad frames.
+    """
+    run = StackRun(
+        target,
+        log_file,
+        frames_to_stack,
+        rejection_sigma,
+        filter_wfwhm,
+        filter_round,
+        stack_weight,
+        generate_rejmap,
+        output_file,
+        job_id,
+        force,
+        preview_settings,
+        drivers,
+        measured_at,
+        quality_recording,
+    )
+    _choose_frames(run)  # run.target_frames
+    _check_frame_types(run)  # run.has_spectral
+    _name_output_file(run)  # run.stack_file
+    _screen_frames(run)  # run.target_frames, excluded_frames, gate_results, background_split
+    _prepare_stack(run)  # run.engine, stack_weight, expected_path, inputs_record
+    if _stack_is_unchanged(run):
+        return run.stacked_path
+    _run_stacking_engine(run)  # run.stacked_path, diagnostics
+    _trim_stack_edges(run)  # run.crop_offset, excluded_frames
+    summary = _summarize_stack(run)
+    if run.stacked_path:
+        _finish_made_stack(run, run.stacked_path, summary)
+    return run.stacked_path
+
+
+def _choose_frames(run: StackRun) -> None:
+    """Pick the frames to stack and check they come from one camera.
+
+    Sets ``run.target_frames``. The target's stacked, starless and star-mask
+    pictures are never stacked.
+
+    Parameters
+    ----------
+    run : `StackRun`
+        The run. Updated in place.
+
     Raises
     ------
     ConflictError
-        If the target has no frames to stack, or mixes spectral and
-        standard imaging frames. `ensure_single_camera` raises it too
-        when the frames come from more than one camera.
-
-    Notes
-    -----
-    A `ProcessingError` is raised, by the frame screening, when no usable
-    frames are left after filtering out mismatched or bad frames.
+        If there are no frames, or they come from more than one camera.
     """
-    if frames_to_stack is not None:
-        target_frames = frames_to_stack
+    if run.frames_to_stack is not None:
+        run.target_frames = run.frames_to_stack
     else:
-        target_frames = [
+        run.target_frames = [
             f
-            for f in target.frames
+            for f in run.target.frames
             if not any(k in f.path.lower() for k in ("_stacked", "starless", "starmask"))
         ]
 
-    if not target_frames:
+    if not run.target_frames:
         raise ConflictError("Target has no frames available to stack.")
 
     # Frames from different cameras cannot be stacked together. Without this
-    # check the gain filter below would keep whichever camera had more frames.
+    # check the gain filter in the screening step would keep whichever camera
+    # had more frames.
     from astrometricslib.pipelines.stacking.pre_processing.camera_selection import ensure_single_camera
 
-    ensure_single_camera(target_frames)
+    ensure_single_camera(run.target_frames)
 
-    _report_stage(5, f"Checking {len(target_frames)} frames")
+    _report_stage(5, f"Checking {len(run.target_frames)} frames")
 
-    # Validate that only homogeneous frame types are stacked (no mixed
-    # spectral/standard frames)
+
+def _check_frame_types(run: StackRun) -> None:
+    """Check that the frames are all spectral or all standard imaging.
+
+    Sets ``run.has_spectral``.
+
+    Parameters
+    ----------
+    run : `StackRun`
+        The run. Updated in place.
+
+    Raises
+    ------
+    ConflictError
+        If spectral and standard frames are mixed.
+    """
     from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 
-    has_spectral = any(frame_is_spectral(f) for f in target_frames)
-    has_standard = any(not frame_is_spectral(f) for f in target_frames)
+    has_spectral = any(frame_is_spectral(f) for f in run.target_frames)
+    has_standard = any(not frame_is_spectral(f) for f in run.target_frames)
     if has_spectral and has_standard:
         raise ConflictError(
             "Target contains a mixed set of spectral ('SPEC') and standard imaging frames. "
             "Stacking mixed frame types is not permitted."
         )
+    run.has_spectral = has_spectral
 
-    if output_file is None:
-        safe_target_id = target.id.replace(" ", "_")
-        filter_tag = None
-        if has_spectral:
-            filter_tag = "SPEC"
-        else:
-            filters = {getattr(f, "filter", None) for f in target_frames}
-            filter_names = {
-                f.name.upper() if hasattr(f, "name") else str(f).upper() for f in filters if f is not None
-            }
-            if len(filter_names) == 1:
-                filter_tag = next(iter(filter_names))
 
-        if filter_tag:
-            canonical_mapping = {
-                "LUMINANCE": "L",
-                "RED": "R",
-                "GREEN": "G",
-                "BLUE": "B",
-                "STAR ANALYZER 200": "SPEC",
-                "SPECTROSCOPY": "SPEC",
-            }
-            filter_tag = canonical_mapping.get(filter_tag, filter_tag)
-            output_file = f"{safe_target_id}_{filter_tag}_Stacked.fits"
-        else:
-            output_file = f"{safe_target_id}_Stacked.fits"
+def _name_output_file(run: StackRun) -> None:
+    """Give the stack a file name when the caller did not.
 
-        configuration_tag = _disambiguating_configuration_tag(target, target_frames)
-        if configuration_tag:
-            output_file = output_file.removesuffix(".fits") + f"_{configuration_tag}.fits"
+    The name holds the target, the filter and, when the target has stacks
+    for several optical set-ups, a tag for this set-up. Sets
+    ``run.stack_file`` (the caller's ``output_file`` when it gave one).
 
-    frames_submitted = len(target_frames)
-    from astrometricslib.models.quality.quality_summary import ExcludedFrame
+    Parameters
+    ----------
+    run : `StackRun`
+        The run. Updated in place.
+    """
+    if run.output_file is not None:
+        run.stack_file = run.output_file
+        return
+    safe_target_id = run.target.id.replace(" ", "_")
+    filter_tag = None
+    if run.has_spectral:
+        filter_tag = "SPEC"
+    else:
+        filters = {getattr(f, "filter", None) for f in run.target_frames}
+        filter_names = {
+            f.name.upper() if hasattr(f, "name") else str(f).upper() for f in filters if f is not None
+        }
+        if len(filter_names) == 1:
+            filter_tag = next(iter(filter_names))
 
-    screening = screen_frames(target, target_frames, has_spectral, measured_at, quality_recording)
-    target_frames = screening.frames
-    excluded_frames = screening.excluded_frames
-    gate_results = screening.gate_results
-    background_split = screening.background_split
+    if filter_tag:
+        canonical_mapping = {
+            "LUMINANCE": "L",
+            "RED": "R",
+            "GREEN": "G",
+            "BLUE": "B",
+            "STAR ANALYZER 200": "SPEC",
+            "SPECTROSCOPY": "SPEC",
+        }
+        filter_tag = canonical_mapping.get(filter_tag, filter_tag)
+        output_file = f"{safe_target_id}_{filter_tag}_Stacked.fits"
+    else:
+        output_file = f"{safe_target_id}_Stacked.fits"
 
-    _report_stage(15, f"Frame checks done, {len(target_frames)} frames kept")
+    configuration_tag = _disambiguating_configuration_tag(run.target, run.target_frames)
+    if configuration_tag:
+        output_file = output_file.removesuffix(".fits") + f"_{configuration_tag}.fits"
+    run.stack_file = output_file
 
-    from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
-        record_preview_as_processed_image,
-        write_stack_preview,
+
+def _screen_frames(run: StackRun) -> None:
+    """Leave out the frames that would harm the stack.
+
+    The checks are in `frame_screening.py`. They may move bad frames out of
+    the target's folder and store frame quality rows. Sets
+    ``run.frames_submitted`` and replaces ``run.target_frames`` with the
+    frames that pass.
+
+    Parameters
+    ----------
+    run : `StackRun`
+        The run. Updated in place.
+
+    Notes
+    -----
+    A `ProcessingError` is raised when a check leaves no frames.
+    """
+    run.frames_submitted = len(run.target_frames)
+    screening = screen_frames(
+        run.target, run.target_frames, run.has_spectral, run.measured_at, run.quality_recording
     )
-    from astrometricslib.pipelines.stacking.stack_runner import run_stack
+    run.target_frames = screening.frames
+    run.excluded_frames = screening.excluded_frames
+    run.gate_results = screening.gate_results
+    run.background_split = screening.background_split
+    _report_stage(15, f"Frame checks done, {len(run.target_frames)} frames kept")
 
-    engine = (drivers or Drivers()).stacking_or_default()
+
+def _prepare_stack(run: StackRun) -> None:
+    """Choose the stacking program and weighting, and build the inputs record.
+
+    The inputs record holds the frames, calibration frames, settings and
+    stacking code (see `stack_inputs.py`). The next step compares it with the
+    record of the stack on disk. Sets ``run.engine``, ``run.stack_weight``,
+    ``run.expected_path`` and ``run.inputs_record``.
+
+    Parameters
+    ----------
+    run : `StackRun`
+        The run. Updated in place.
+    """
+    from astrometricslib.pipelines.stacking.pre_processing.stack_inputs import build_stack_inputs_record
     from astrometricslib.pipelines.stacking.stack_settings import choose_weight_for_frames
 
-    stack_weight = choose_weight_for_frames(
-        target_frames, stack_weight, get_configuration(), is_spectral=has_spectral
+    run.engine = (run.drivers or Drivers()).stacking_or_default()
+    run.stack_weight = choose_weight_for_frames(
+        run.target_frames, run.stack_weight, get_configuration(), is_spectral=run.has_spectral
     )
-
-    # Skip a stack that would come out the same: the same frames, the same
-    # calibration frames, the same settings and the same stacking code as when
-    # the stack on disk was made (see `stack_inputs.py`). Adding frames to one
-    # filter then leaves the target's other stacks alone.
-    from astrometricslib.pipelines.stacking.pre_processing.stack_inputs import (
-        build_stack_inputs_record,
-        decide_whether_to_restack,
-        write_stack_inputs,
-    )
-
-    expected_path = _expected_stack_path(target.id, output_file)
-    inputs_record = build_stack_inputs_record(
-        target_frames,
+    run.expected_path = _expected_stack_path(run.target.id, run.stack_file)
+    run.inputs_record = build_stack_inputs_record(
+        run.target_frames,
         get_configuration(),
         {
-            "rejection_sigma": rejection_sigma,
-            "filter_wfwhm": filter_wfwhm,
-            "filter_round": filter_round,
-            "stack_weight": stack_weight,
-            "generate_rejmap": generate_rejmap,
-            "is_spectral": has_spectral,
+            "rejection_sigma": run.rejection_sigma,
+            "filter_wfwhm": run.filter_wfwhm,
+            "filter_round": run.filter_round,
+            "stack_weight": run.stack_weight,
+            "generate_rejmap": run.generate_rejmap,
+            "is_spectral": run.has_spectral,
         },
     )
+
+
+def _stack_is_unchanged(run: StackRun) -> bool:
+    """Say whether the stack on disk can be kept as it is.
+
+    A stack that would come out the same is skipped: the same frames, the same
+    calibration frames, the same settings and the same stacking code as when
+    the stack on disk was made (see `stack_inputs.py`). Adding frames to one
+    filter then leaves the target's other stacks alone. When the stack is
+    skipped, ``run.stacked_path`` is set to the stack that is already there.
+
+    Parameters
+    ----------
+    run : `StackRun`
+        The run. Updated in place when the stack is skipped.
+
+    Returns
+    -------
+    unchanged : `bool`
+        `True` when the stack is kept and the run is over.
+    """
+    from astrometricslib.pipelines.stacking.pre_processing.stack_inputs import decide_whether_to_restack
+
     decision = decide_whether_to_restack(
-        expected_path,
-        inputs_record,
-        force=force,
+        run.expected_path,
+        run.inputs_record,
+        force=run.force,
         enabled=get_configuration().get_skip_unchanged_stacks_enabled(),
     )
     if decision.skip:
         logger.info(
             "Skipping the stack of '%s' at %s: its frames, calibration frames, settings and the "
             "stacking code are the same as when it was made. Pass force=True to rebuild it.",
-            target.id,
-            expected_path,
+            run.target.id,
+            run.expected_path,
         )
-        _record_unchanged_stack(target, target_frames, expected_path, has_spectral)
-        return expected_path
-    if os.path.isfile(expected_path):
-        logger.info("Rebuilding the stack of '%s': %s.", target.id, "; ".join(decision.reasons))
+        _record_unchanged_stack(run.target, run.target_frames, run.expected_path, run.has_spectral)
+        run.stacked_path = run.expected_path
+        return True
+    if os.path.isfile(run.expected_path):
+        logger.info("Rebuilding the stack of '%s': %s.", run.target.id, "; ".join(decision.reasons))
+    return False
 
-    # `run_stack` adds two safeguards for spectroscopy: frames of
-    # different exposure lengths are stacked one length at a time and then
-    # combined, and a registration that loses too many frames is retried with
-    # a different star detection.
-    # A restack overwrites the stack file. The old stack and its pictures wait
-    # in a staging folder until the new stack exists; if the restack fails,
-    # they go back where they were.
-    staging = _archive_stack_before_restack(target.id, output_file)
-    _report_stage(20, f"Calibrating, aligning and stacking {len(target_frames)} frames in Siril")
+
+def _run_stacking_engine(run: StackRun) -> None:
+    """Stack the frames with the stacking program.
+
+    `run_stack` adds two safeguards for spectroscopy: frames of different
+    exposure lengths are stacked one length at a time and then combined, and a
+    registration that loses too many frames is retried with a different star
+    detection. A restack overwrites the stack file. The old stack and its
+    pictures wait in a staging folder until the new stack exists; if the
+    restack fails, they go back where they were. Sets ``run.staging``,
+    ``run.stacked_path`` and ``run.diagnostics``.
+
+    Parameters
+    ----------
+    run : `StackRun`
+        The run. Updated in place.
+
+    Raises
+    ------
+    RuntimeError
+        If the stack was not prepared first.
+    """
+    from astrometricslib.pipelines.stacking.stack_runner import run_stack
+
+    if run.engine is None:
+        raise RuntimeError("The stack must be prepared before the stacking program runs.")
+    run.staging = _archive_stack_before_restack(run.target.id, run.stack_file)
+    _report_stage(20, f"Calibrating, aligning and stacking {len(run.target_frames)} frames in Siril")
     try:
-        stacked_path, diagnostics = run_stack(
-            engine,
-            target_frames,
-            target.id,
-            output_file,
-            log_file,
-            has_spectral,
-            job_id=job_id,
-            rejection_sigma=rejection_sigma,
-            filter_wfwhm=filter_wfwhm,
-            filter_round=filter_round,
-            stack_weight=stack_weight,
-            generate_rejmap=generate_rejmap,
+        run.stacked_path, run.diagnostics = run_stack(
+            run.engine,
+            run.target_frames,
+            run.target.id,
+            run.stack_file,
+            run.log_file,
+            run.has_spectral,
+            job_id=run.job_id,
+            rejection_sigma=run.rejection_sigma,
+            filter_wfwhm=run.filter_wfwhm,
+            filter_round=run.filter_round,
+            stack_weight=run.stack_weight,
+            generate_rejmap=run.generate_rejmap,
         )
     except BaseException:
-        _finish_stack_archive(staging, output_file, target.id, kept=False)
+        _finish_stack_archive(run.staging, run.stack_file, run.target.id, kept=False)
         raise
-    _finish_stack_archive(staging, output_file, target.id, kept=bool(stacked_path))
-    _report_stage(70, "Siril stack finished" if stacked_path else "Siril produced no stack")
+    _finish_stack_archive(run.staging, run.stack_file, run.target.id, kept=bool(run.stacked_path))
+    _report_stage(70, "Siril stack finished" if run.stacked_path else "Siril produced no stack")
 
-    # Frames shift between nights, so the edges of a stack of several nights
-    # are covered by fewer frames and are noisier. Trim them off. The check
-    # leaves a stack with clean edges as it is. It runs before the stack is
-    # measured and pictured, so both describe the trimmed stack.
+
+def _trim_stack_edges(run: StackRun) -> None:
+    """Trim the noisy edges of the stack, and list the corrupt frames.
+
+    Frames shift between nights, so the edges of a stack of several nights
+    are covered by fewer frames and are noisier. Trim them off. The check
+    leaves a stack with clean edges as it is. It runs before the stack is
+    measured and pictured, so both describe the trimmed stack. Sets
+    ``run.crop_offset`` and adds the corrupt frames to
+    ``run.excluded_frames``.
+
+    Parameters
+    ----------
+    run : `StackRun`
+        The run. Updated in place.
+    """
+    from astrometricslib.models.quality.quality_summary import ExcludedFrame
     from astrometricslib.pipelines.stacking.stack_settings import trim_noisy_stack_edges
 
-    crop_offset = trim_noisy_stack_edges(stacked_path, get_configuration(), is_spectral=has_spectral)
-    excluded_frames.extend(
+    run.crop_offset = trim_noisy_stack_edges(
+        run.stacked_path, get_configuration(), is_spectral=run.has_spectral
+    )
+    run.excluded_frames.extend(
         ExcludedFrame(path=path, reason="corrupt or unreadable FITS file")
-        for path in diagnostics.get("corrupt_frames_skipped", [])
+        for path in run.diagnostics.get("corrupt_frames_skipped", [])
     )
 
+
+def _summarize_stack(run: StackRun) -> StackQualitySummary:
+    """Build the quality summary and store it on the target.
+
+    The summary goes on the target's spectral or standard stacking record.
+
+    Parameters
+    ----------
+    run : `StackRun`
+        The run.
+
+    Returns
+    -------
+    summary : `StackQualitySummary`
+        The finished summary.
+    """
     summary = _build_stack_quality_summary(
-        target=target,
-        is_spectral=has_spectral,
-        frames_submitted=frames_submitted,
-        target_frames=target_frames,
-        excluded_frames=excluded_frames,
-        diagnostics=diagnostics,
-        background_split=background_split,
-        stacked_path=stacked_path,
-        gate_results=gate_results,
+        target=run.target,
+        is_spectral=run.has_spectral,
+        frames_submitted=run.frames_submitted,
+        target_frames=run.target_frames,
+        excluded_frames=run.excluded_frames,
+        diagnostics=run.diagnostics,
+        background_split=run.background_split,
+        stacked_path=run.stacked_path,
+        gate_results=run.gate_results,
+    )
+    if run.has_spectral:
+        run.target.spectral_stacking.quality_summary = summary
+    else:
+        run.target.stacking.quality_summary = summary
+    return summary
+
+
+def _finish_made_stack(run: StackRun, stacked_path: str, summary: StackQualitySummary) -> None:
+    """Record a stack that was made: pointers, provenance, rows and picture.
+
+    The order matters. The inputs record is saved last, because a stack with
+    a record is one the next run may skip.
+
+    Parameters
+    ----------
+    run : `StackRun`
+        The run, with a stack made.
+    stacked_path : `str`
+        The stack that was made.
+    summary : `StackQualitySummary`
+        The stack's quality summary.
+    """
+    _point_target_at_stack(run, stacked_path)
+    _record_provenance(run, stacked_path, summary)
+    _save_registration_record(run, stacked_path, summary)
+    _store_stack_quality(run, stacked_path, summary)
+    _make_preview(run, stacked_path)  # run.preview_path
+    _save_stack_inputs(run, stacked_path)
+    _log_finished_stack(run)
+
+
+def _point_target_at_stack(run: StackRun, stacked_path: str) -> None:
+    """Make the target's stacked image the new stack, where that is right.
+
+    Parameters
+    ----------
+    run : `StackRun`
+        The run, with a stack made.
+    stacked_path : `str`
+        The stack that was made.
+    """
+    if run.has_spectral:
+        run.target.spectral_stacking.stacked_image = stacked_path
+    elif _record_configuration_stack(run.target, run.target_frames, stacked_path):
+        run.target.stacking.stacked_image = stacked_path
+
+
+def _record_provenance(run: StackRun, stacked_path: str, summary: StackQualitySummary) -> None:
+    """Record this run as the provenance activity that made the stack.
+
+    Parameters
+    ----------
+    run : `StackRun`
+        The run, with a stack made.
+    stacked_path : `str`
+        The stack that was made.
+    summary : `StackQualitySummary`
+        The stack's quality summary.
+    """
+    from astrometricslib.models.provenance import DatasetEntity
+    from astrometricslib.models.quality.quality_summary import STACKING_PIPELINE_VERSION
+    from astrometricslib.pipelines.shared.provenance_recording import (
+        record_pipeline_run,
+        stacked_image_entity_id,
     )
 
-    if has_spectral:
-        target.spectral_stacking.quality_summary = summary
-    else:
-        target.stacking.quality_summary = summary
+    entity_id = stacked_image_entity_id(run.target.id, stacked_path)
+    record_pipeline_run(
+        summary=summary,
+        job_id=run.job_id,
+        target_id=run.target.id,
+        pipeline_name="stacking",
+        pipeline_version=STACKING_PIPELINE_VERSION,
+        generated_entities={
+            entity_id: DatasetEntity(
+                id=entity_id, location=stacked_path, entity_description="entitydesc:stacked-image"
+            )
+        },
+    )
 
-    if stacked_path:
-        if has_spectral:
-            target.spectral_stacking.stacked_image = stacked_path
-        elif _record_configuration_stack(target, target_frames, stacked_path):
-            target.stacking.stacked_image = stacked_path
 
-        from astrometricslib.models.provenance import DatasetEntity
-        from astrometricslib.models.quality.quality_summary import STACKING_PIPELINE_VERSION
-        from astrometricslib.pipelines.shared.provenance_recording import (
-            record_pipeline_run,
-            stacked_image_entity_id,
-        )
-        from astrometricslib.pipelines.shared.registration_record import (
-            build_registration_record,
-            write_registration_record,
-        )
+def _save_registration_record(run: StackRun, stacked_path: str, summary: StackQualitySummary) -> None:
+    """Keep Siril's transform for each frame beside the stack.
 
-        entity_id = stacked_image_entity_id(target.id, stacked_path)
-        record_pipeline_run(
-            summary=summary,
-            job_id=job_id,
-            target_id=target.id,
-            pipeline_name="stacking",
-            pipeline_version=STACKING_PIPELINE_VERSION,
-            generated_entities={
-                entity_id: DatasetEntity(
-                    id=entity_id, location=stacked_path, entity_description="entitydesc:stacked-image"
-                )
-            },
-        )
-        # Siril's transform for each frame, kept beside the stack for the
-        # astrometry run, which finds the target on each frame with it once the
-        # stack has a plate solution. A failure to write it never fails the
-        # stack.
-        registration_record = build_registration_record(
-            diagnostics,
-            crop_offset,
-            summary.stacking_metrics.registration_reference_frame,
-            is_spectral=summary.stacking_metrics.is_spectral,
-        )
-        if registration_record is not None:
-            write_registration_record(stacked_path, registration_record)
-        # The same summary, the stack's noise in empty sky and the frames
-        # that went in, stored as measurements. A failure here never fails
-        # the stack. The flat-to-light match in it reads up to 16 flat, 24
-        # light and 5 bias frames again from storage, which can take a while
-        # on a network mount (the job's time limit is in the configuration),
-        # so the job's progress says so first.
-        _report_stage(
-            75, "Measuring the stack's quality (reads up to 16 flat, 24 light and 5 bias frames again)"
-        )
-        _record_stack_quality(
-            summary,
-            target.id,
-            stacked_path,
-            target_frames,
-            diagnostics,
-            stack_weight,
-            crop_offset,
-            job_id,
-            measured_at,
-            quality_recording,
-        )
-        # A picture for people to look at. It never changes the stack and a
-        # failure to make it is logged, not raised. The image viewer shows it
-        # through the target's processed image.
-        _report_stage(80, "Making the preview picture (GraXpert, Cosmic Clarity, star toning)")
-        preview_path = write_stack_preview(stacked_path, preview_settings)
-        if preview_path:
-            record_preview_as_processed_image(target, has_spectral, stacked_path, preview_path)
-        # Saved last, once the stack, its quality summary and its picture are
-        # done: a stack with a record is one the next run may skip, so a run
-        # that stopped before this point leaves a stack that is built again.
-        if inputs_record is not None:
-            write_stack_inputs(stacked_path, inputs_record)
-        # One closing line, so a reader of the log does not have to piece the
-        # outcome together. The preview steps line above says which cleanup
-        # programs ran.
-        logger.info(
-            "Stack of '%s' finished: stack %s; preview %s; %d frames submitted, %d set aside.",
-            target.id,
-            stacked_path,
-            preview_path or "not made (see the warning above)",
-            frames_submitted,
-            len(excluded_frames),
-        )
+    The astrometry run finds the target on each frame with it once the stack
+    has a plate solution. A failure to write it never fails the stack.
 
-    return stacked_path
+    Parameters
+    ----------
+    run : `StackRun`
+        The run, with a stack made.
+    stacked_path : `str`
+        The stack that was made.
+    summary : `StackQualitySummary`
+        The stack's quality summary.
+    """
+    from astrometricslib.pipelines.shared.registration_record import (
+        build_registration_record,
+        write_registration_record,
+    )
+
+    registration_record = build_registration_record(
+        run.diagnostics,
+        run.crop_offset,
+        summary.stacking_metrics.registration_reference_frame,
+        is_spectral=summary.stacking_metrics.is_spectral,
+    )
+    if registration_record is not None:
+        write_registration_record(stacked_path, registration_record)
+
+
+def _store_stack_quality(run: StackRun, stacked_path: str, summary: StackQualitySummary) -> None:
+    """Store the summary, the stack's noise and its frames as measurements.
+
+    A failure here never fails the stack. The flat-to-light match in it reads
+    up to 16 flat, 24 light and 5 bias frames again from storage, which can
+    take a while on a network mount (the job's time limit is in the
+    configuration), so the job's progress says so first.
+
+    Parameters
+    ----------
+    run : `StackRun`
+        The run, with a stack made.
+    stacked_path : `str`
+        The stack that was made.
+    summary : `StackQualitySummary`
+        The stack's quality summary.
+    """
+    _report_stage(75, "Measuring the stack's quality (reads up to 16 flat, 24 light and 5 bias frames again)")
+    _record_stack_quality(
+        summary,
+        run.target.id,
+        stacked_path,
+        run.target_frames,
+        run.diagnostics,
+        run.stack_weight,
+        run.crop_offset,
+        run.job_id,
+        run.measured_at,
+        run.quality_recording,
+    )
+
+
+def _make_preview(run: StackRun, stacked_path: str) -> None:
+    """Make a picture of the stack for people to look at.
+
+    It never changes the stack and a failure to make it is logged, not
+    raised. The image viewer shows it through the target's processed image.
+    Sets ``run.preview_path``.
+
+    Parameters
+    ----------
+    run : `StackRun`
+        The run, with a stack made.
+    stacked_path : `str`
+        The stack that was made.
+    """
+    from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
+        record_preview_as_processed_image,
+        write_stack_preview,
+    )
+
+    _report_stage(80, "Making the preview picture (GraXpert, Cosmic Clarity, star toning)")
+    run.preview_path = write_stack_preview(stacked_path, run.preview_settings)
+    if run.preview_path:
+        record_preview_as_processed_image(run.target, run.has_spectral, stacked_path, run.preview_path)
+
+
+def _save_stack_inputs(run: StackRun, stacked_path: str) -> None:
+    """Save the inputs record beside the stack.
+
+    This is done last, once the stack, its quality summary and its picture are
+    done: a stack with a record is one the next run may skip, so a run that
+    stopped before this point leaves a stack that is built again.
+
+    Parameters
+    ----------
+    run : `StackRun`
+        The run, with a stack made and pictured.
+    stacked_path : `str`
+        The stack that was made.
+    """
+    from astrometricslib.pipelines.stacking.pre_processing.stack_inputs import write_stack_inputs
+
+    if run.inputs_record is not None:
+        write_stack_inputs(stacked_path, run.inputs_record)
+
+
+def _log_finished_stack(run: StackRun) -> None:
+    """Write one closing line that sums up the run.
+
+    The preview step's line above says which cleanup programs ran.
+
+    Parameters
+    ----------
+    run : `StackRun`
+        The run, finished.
+    """
+    logger.info(
+        "Stack of '%s' finished: stack %s; preview %s; %d frames submitted, %d set aside.",
+        run.target.id,
+        run.stacked_path,
+        run.preview_path or "not made (see the warning above)",
+        run.frames_submitted,
+        len(run.excluded_frames),
+    )
 
 
 def _record_stack_quality(

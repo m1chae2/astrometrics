@@ -99,7 +99,9 @@ _SEEDED_CONFIG_FILE_DESCRIPTION = ConfigFileDescription(
 # The provenance tables, in the order they are created. `_init_db` runs the
 # steps one after another, and every statement is `IF NOT EXISTS`, so a
 # database that already has a table is left alone and a missing table or index
-# is added. A change to the schema is a new step at the end of the list. Each
+# is added. A change to the schema is a new step at the end of the list, and it
+# must be safe to run again, because every step runs each time a database opens
+# (there is no version table, so a plain `ALTER TABLE` would fail). Each
 # step is a name and its statements (a table, then the indexes on it).
 _MIGRATION_STEPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (

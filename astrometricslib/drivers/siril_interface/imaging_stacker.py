@@ -712,7 +712,7 @@ class SirilImagingStacker(SirilSpectralStacker):
                     stack_header.add_comment(f"Total exposure time summed from {len(image_files)} frames.")
                     return True
 
-                update_first_header(stacked_path, _record_total_exposure)
+                update_first_header(stacked_path, _record_total_exposure, output_verify="exception")
                 job_logger.info("Updated stacked header: EXPTIME=%ss", total_exp)
         except FITS_READ_ERRORS:
             job_logger.exception("Failed to update stacked header EXPTIME")

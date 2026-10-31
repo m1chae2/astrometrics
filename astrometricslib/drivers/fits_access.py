@@ -121,7 +121,9 @@ def read_header_and_data(path: str, *, first_hdu_only: bool = False) -> tuple[fi
         return hdu.header.copy(), hdu.data
 
 
-def update_first_header(path: str, edit_header: Callable[[fits.Header], bool]) -> bool:
+def update_first_header(
+    path: str, edit_header: Callable[[fits.Header], bool], output_verify: str = "fix"
+) -> bool:
     """Change the header of HDU 0 in place, and save it to the file.
 
     The file is opened for updating. ``edit_header`` changes the header
@@ -136,6 +138,10 @@ def update_first_header(path: str, edit_header: Callable[[fits.Header], bool]) -
         Path to the FITS file.
     edit_header : callable
         Takes the header of HDU 0. Returns True if it changed it.
+    output_verify : str
+        What astropy does with a header card that breaks the FITS rules when
+        it writes: ``"fix"`` repairs the card, ``"exception"`` raises an error
+        and leaves the file as it was.
 
     Returns
     -------
@@ -145,7 +151,7 @@ def update_first_header(path: str, edit_header: Callable[[fits.Header], bool]) -
     with fits.open(path, mode="update", memmap=False) as hdul:
         changed = edit_header(hdul[0].header)
         if changed:
-            hdul.flush()
+            hdul.flush(output_verify=output_verify)
     return changed
 
 

@@ -369,12 +369,6 @@ CLASSIFICATION_RULES = (
         "Reads targets or stars in short, capped records.",
     ),
     _rule(
-        r"^quality_check_spectral_frames$",
-        "compute",
-        "high",
-        "Measures raw spectrum frames and returns statistics. Saves nothing.",
-    ),
-    _rule(
         r"^processing_stack_summary$",
         "observe",
         "high",

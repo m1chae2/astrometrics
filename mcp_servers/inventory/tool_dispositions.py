@@ -223,7 +223,11 @@ DECISIONS = {
         "ingest",
     ),
     "quality_measure_frames": ToolDecision(
-        "keep", "Built 2026-10-03. Statistics on raw frames. Nothing is saved."
+        "keep",
+        "Built 2026-10-03. Statistics on raw frames. Nothing is saved. Since 2026-10-31 kind=spectral "
+        "measures raw spectrum frames (zero-order position, tilt, width, peaks, saturated patches along "
+        "the spectrum, a predicted peak at another exposure, a summary by exposure and pier side); it "
+        "replaces quality_check_spectral_frames.",
     ),
     "observatory_history_get_live_session_status": ToolDecision(
         "keep",
@@ -277,12 +281,6 @@ DECISIONS = {
         "frames into _excluded (never deletes), keeps one previous stack, and saves the target. Since "
         "2026-10-05 it is ProcessingPipelines.stack, which also takes the exact frames to stack.",
         "process",
-    ),
-    "quality_check_spectral_frames": ToolDecision(
-        "keep",
-        "Built 2026-10-04. Measures raw spectrum frames: zero-order position, tilt, width, peaks, saturated "
-        "patches along the spectrum, a predicted peak at another exposure, and a summary by exposure and by "
-        "pier side. Nothing is saved.",
     ),
     "planning_get_imaged_field_centers": ToolDecision(
         "withhold", "Replaced by target_imaged_field_centers, which runs as a background job."

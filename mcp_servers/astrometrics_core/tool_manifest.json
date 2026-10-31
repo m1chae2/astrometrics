@@ -163,13 +163,6 @@
       "interim_block": "",
       "note": "Built 2026-10-24. Reads the camera, telescope, filter, exposure, gain setting, offset and binning that stored quality measurements point at, by capture setting id. Writes nothing and creates no table."
     },
-    "quality_check_spectral_frames": {
-      "tool_class": "compute",
-      "category": "image-processing",
-      "disposition": "keep",
-      "interim_block": "",
-      "note": "Built 2026-10-04. Measures raw spectrum frames: zero-order position, tilt, width, peaks, saturated patches along the spectrum, a predicted peak at another exposure, and a summary by exposure and by pier side. Nothing is saved."
-    },
     "quality_flag_value_outliers": {
       "tool_class": "compute",
       "category": "image-processing",
@@ -182,7 +175,7 @@
       "category": "image-processing",
       "disposition": "keep",
       "interim_block": "",
-      "note": "Built 2026-10-03. Statistics on raw frames. Nothing is saved."
+      "note": "Built 2026-10-03. Statistics on raw frames. Nothing is saved. Since 2026-10-31 kind=spectral measures raw spectrum frames (zero-order position, tilt, width, peaks, saturated patches along the spectrum, a predicted peak at another exposure, a summary by exposure and pier side); it replaces quality_check_spectral_frames."
     },
     "quality_measure_stack": {
       "tool_class": "compute",

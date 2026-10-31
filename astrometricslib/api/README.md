@@ -79,14 +79,14 @@ Live checks:
   - `kind="input_quality"` measures them one by one.
   - `kind="raw_check"` checks a folder or a target's frames as a batch.
   - `kind="quarantine_preview"` previews which frames the stacker would set aside.
+  - `kind="spectral"` measures a target's raw slitless-spectrum frames. These are frames taken through a grating with no slit, which spreads each star into a spectrum trail of colors. For each frame it reports:
+    - where the zero order (the undispersed image of the star) sits;
+    - the tilt and width of the spectrum trail, and the sky level;
+    - every saturated patch, that is, pixels at the sensor's maximum value, where the true brightness is lost.
+
+    Given `predict_exposure_seconds`, it scales the measured peaks to that exposure and says whether the spectrum would saturate ("clip") at that exposure. `exposure_seconds` and `predict_exposure_seconds` apply to this kind only; giving them with another kind raises `InvalidArgumentError`.
   - `include=["excluded"]` adds the frames already set aside.
 - `measure_stack` measures a stack (star width, the share of rejected pixels, frame registration) and compares it with the previous stack or another stack file.
-- `check_spectral_frames` measures a target's raw slitless-spectrum frames. These are frames taken through a grating with no slit, which spreads each star into a spectrum trail of colors. For each frame it reports:
-  - where the zero order (the undispersed image of the star) sits;
-  - the tilt and width of the spectrum trail, and the sky level;
-  - every saturated patch, that is, pixels at the sensor's maximum value, where the true brightness is lost.
-
-  Given `predict_exposure_seconds`, it scales the measured peaks to that exposure and says whether the spectrum would saturate ("clip") at that exposure.
 - `flag_value_outliers` marks the entries of a list that lie more than a given number of standard deviations from the mean.
 
 `CalibrationCatalog` tracks the dark, bias and flat frames (the calibration frames that measure the camera itself; see `drivers/README.md`).

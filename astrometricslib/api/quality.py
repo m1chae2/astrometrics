@@ -5,8 +5,8 @@
 
 * Stored: `query` reads the quality measurements that earlier runs saved,
   and `metrics` lists what each metric means.
-* Live: `measure_frames`, `check_spectral_frames` and `measure_stack` measure
-  raw frames and finished stacks now, without changing anything.
+* Live: `measure_frames` and `measure_stack` measure raw frames and finished
+  stacks now, without changing anything.
 
 The argument helpers it shares with `ProcessingPipelines` live in
 `pipelines/shared/api_arguments.py`.
@@ -47,7 +47,7 @@ from astrometricslib.pipelines.shared.api_arguments import (
 
 __all__ = ["QualityRecords"]
 
-FRAME_QUALITY_KINDS = ("input_quality", "raw_check", "quarantine_preview")
+FRAME_QUALITY_KINDS = ("input_quality", "raw_check", "quarantine_preview", "spectral")
 FRAME_QUALITY_SECTIONS = ("fwhm", "spectra", "excluded")
 _FRAME_QUALITY_ARGUMENTS = {
     "input_quality": (
@@ -72,11 +72,13 @@ _FRAME_QUALITY_ARGUMENTS = {
         "trend_threshold_percent",
     ),
     "quarantine_preview": (),
+    "spectral": ("first_file", "last_file", "since", "until", "exposure_seconds", "predict_exposure_seconds"),
 }
 _FRAME_QUALITY_SECTIONS_BY_KIND = {
     "input_quality": ("fwhm", "spectra", "excluded"),
     "raw_check": ("spectra", "excluded"),
     "quarantine_preview": ("excluded",),
+    "spectral": (),
 }
 
 
@@ -431,7 +433,7 @@ class QualityRecords:
         self,
         target: str | Target | None = None,
         folder_path: str | None = None,
-        kind: Literal["input_quality", "raw_check", "quarantine_preview"] = "input_quality",
+        kind: Literal["input_quality", "raw_check", "quarantine_preview", "spectral"] = "input_quality",
         include: list[str] | None = None,
         remeasure: bool = False,
         camera_id: str | None = None,
@@ -443,9 +445,11 @@ class QualityRecords:
         until: TimeInput = None,
         trend_frames: int = 10,
         trend_threshold_percent: float = 15.0,
+        exposure_seconds: float | None = None,
+        predict_exposure_seconds: float | None = None,
         register_job: bool = True,
-    ) -> InputQualityReport | RawFrameCheckReport | QuarantinePreview:
-        """Measure raw light frames, or preview what the stacker sets aside.
+    ) -> InputQualityReport | RawFrameCheckReport | QuarantinePreview | SpectralFrameCheckReport:
+        """Measure raw light or spectrum frames, or preview set-asides.
 
         Nothing is saved. For a target the frames are measured on a copy, so
         the measurements never reach the saved catalog.
@@ -463,6 +467,9 @@ class QualityRecords:
           ``include`` may hold ``"spectra"`` and ``"excluded"``.
         - ``"quarantine_preview"``: ``target`` (needed) and ``limit``;
           ``include`` may hold ``"excluded"``.
+        - ``"spectral"``: ``target`` (needed), ``limit``, ``first_file``,
+          ``last_file``, ``since``, ``until``, ``exposure_seconds`` and
+          ``predict_exposure_seconds``; it takes no ``include`` section.
 
         Parameters
         ----------
@@ -479,6 +486,15 @@ class QualityRecords:
             target's frames), flagging frames with few stars, trailing,
             soft or elongated stars, or a large jump. ``"quarantine_preview"``:
             which frames the stacker would set aside, without moving any.
+            ``"spectral"``: a target's raw slitless-spectrum frames. For each
+            it finds the zero-order star and measures the streak's tilt and
+            width across, the sky level, the peak of the zero order and of
+            the spectrum, and every saturated patch with its distance along
+            the spectrum from the zero order. A clipped zero order is normal;
+            clipped pixels inside the spectrum lose real data. The summary
+            groups the frames by exposure length (how many clip the zero
+            order or the spectrum) and by pier side (the median, smallest and
+            largest tilt), so a tilt that depends on the pier side shows up.
         include : `list` [`str`], optional
             Optional sections. ``"fwhm"`` also measures star width (about 50
             times slower per frame). ``"spectra"`` also measures
@@ -491,8 +507,9 @@ class QualityRecords:
             Only frames from this camera (matched as part of the name,
             ignoring case).
         limit : `int`, optional
-            How many frames to measure and list, from 1 to 300. Defaults to
-            50. A frame takes about a second to measure. With no range or
+            How many frames to measure and list, from 1 to 300 (1 to 100 for
+            ``"spectral"``). Defaults to 50. A frame takes about a second to
+            measure. With no range or
             time given these are the newest frames; with a range or a time
             bound they are the first ones inside it.
         filter_name : `str`, optional
@@ -514,6 +531,14 @@ class QualityRecords:
         trend_threshold_percent : `float`, optional
             How far, as a percentage of its starting level, a number must
             move across those frames to count as a drift. Defaults to 15.
+        exposure_seconds : `float`, optional
+            Applies to ``"spectral"`` only. Only frames with this exposure
+            length.
+        predict_exposure_seconds : `float`, optional
+            Applies to ``"spectral"`` only. An exposure to predict the peaks
+            at, in seconds. The measured peaks are scaled to it and the
+            report says whether the spectrum would clip there (a clipped
+            peak is a lower bound, and the report says so).
         register_job : `bool`, optional
             Record the run in the job list. Defaults to `True`.
 
@@ -521,8 +546,9 @@ class QualityRecords:
         -------
         report : `InputQualityReport`, `RawFrameCheckReport`, ...
             The report for the chosen kind: `InputQualityReport`,
-            `RawFrameCheckReport` or `QuarantinePreview`. Frames are in
-            file-name order, which is time order.
+            `RawFrameCheckReport`, `QuarantinePreview` or
+            `SpectralFrameCheckReport`. Frames are in file-name order, which
+            is time order.
 
         Raises
         ------
@@ -549,6 +575,8 @@ class QualityRecords:
                 "until": until is not None,
                 "trend_frames": trend_frames != 10,
                 "trend_threshold_percent": abs(trend_threshold_percent - 15.0) > 1e-9,
+                "exposure_seconds": exposure_seconds is not None,
+                "predict_exposure_seconds": predict_exposure_seconds is not None,
             },
         )
         reject_unused_arguments(kind, _FRAME_QUALITY_SECTIONS_BY_KIND, dict.fromkeys(sections, True))
@@ -559,13 +587,21 @@ class QualityRecords:
             )
         if "excluded" in sections and resolved is None:
             raise InvalidArgumentError('include=["excluded"] needs a target.')
-        limit = _clamp(limit, 1, 300)
+        limit = _clamp(limit, 1, 100 if kind == "spectral" else 300)
         selection = make_frame_selection(
-            filter_name, first_file, last_file, since, until, "spectra" in sections
+            filter_name, first_file, last_file, since, until, kind == "spectral" or "spectra" in sections
         )
         with registered_job(
             enabled=register_job, job_type="diagnostics", target_id=self._label(resolved, folder_path)
         ):
+            if kind == "spectral":
+                from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_frame_check import (
+                    check_spectral_frames,
+                )
+
+                return check_spectral_frames(
+                    resolved, selection, exposure_seconds, predict_exposure_seconds, limit
+                )
             if kind == "raw_check":
                 report = frame_quality_report.raw_check_report(
                     resolved, folder_path, selection, limit, trend_frames, trend_threshold_percent
@@ -647,75 +683,6 @@ class QualityRecords:
         return build_set_aside_records(
             resolved.id, folders, rows, {key: value.exposure_seconds for key, value in settings.items()}
         )
-
-    @background_job("diagnostics", grace_period_seconds=20.0)
-    def check_spectral_frames(
-        self,
-        target: str | Target,
-        first_file: str | None = None,
-        last_file: str | None = None,
-        since: TimeInput = None,
-        until: TimeInput = None,
-        exposure_seconds: float | None = None,
-        predict_exposure_seconds: float | None = None,
-        limit: int = 30,
-        register_job: bool = True,
-    ) -> SpectralFrameCheckReport:
-        """Measure a target's raw spectrum frames and where they clip.
-
-        For each slitless-spectrum frame it finds the zero-order star and
-        measures the streak's tilt and width across, the sky level, the
-        peak of the zero order and of the spectrum, and every saturated
-        patch with its distance along the spectrum from the zero order. A
-        clipped zero order is normal; clipped pixels inside the spectrum
-        lose real data. Given ``predict_exposure_seconds`` it scales the
-        measured peaks to that exposure and says whether the spectrum would
-        clip there (a clipped peak is a lower bound, and the reply says so).
-
-        The summary groups the frames by exposure length (how many clip the
-        zero order or the spectrum) and by pier side (the median, smallest
-        and largest tilt), so a tilt that depends on the side of the pier
-        shows up. Nothing is saved. A frame takes about a second.
-
-        Parameters
-        ----------
-        target : `str` or `Target`
-            The target whose spectrum frames to measure.
-        first_file : `str`, optional
-            Only frames from this file onward. A bare number such as
-            ``"013"`` means frame 013.
-        last_file : `str`, optional
-            Only frames up to this file or number.
-        since : `str`, `datetime` or `Time`, optional
-            Only frames taken at or after this time (UTC if no offset).
-        until : `str`, `datetime` or `Time`, optional
-            Only frames taken at or before this time.
-        exposure_seconds : `float`, optional
-            Only frames with this exposure length.
-        predict_exposure_seconds : `float`, optional
-            An exposure to predict the peaks at, in seconds.
-        limit : `int`, optional
-            How many frames to measure, from 1 to 100. Defaults to 30. With
-            a range or a time bound these are the first frames inside it,
-            otherwise the newest.
-        register_job : `bool`, optional
-            Record the run in the job list. Defaults to `True`.
-
-        Returns
-        -------
-        report : `SpectralFrameCheckReport`
-            One row per frame and the summary.
-        """
-        from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_frame_check import (
-            check_spectral_frames,
-        )
-
-        resolved = resolve_target(self._targets, target)
-        selection = make_frame_selection(None, first_file, last_file, since, until, True)
-        with registered_job(enabled=register_job, job_type="diagnostics", target_id=resolved.id):
-            return check_spectral_frames(
-                resolved, selection, exposure_seconds, predict_exposure_seconds, _clamp(limit, 1, 100)
-            )
 
     @background_job("diagnostics", grace_period_seconds=20.0)
     def measure_stack(

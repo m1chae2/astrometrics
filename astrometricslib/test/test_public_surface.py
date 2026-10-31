@@ -364,7 +364,6 @@ SUB_API_MEMBERS = {
     "quality": {
         "calibration_identities",
         "capture_settings",
-        "check_spectral_frames",
         "flag_value_outliers",
         "measure_frames",
         "measure_stack",

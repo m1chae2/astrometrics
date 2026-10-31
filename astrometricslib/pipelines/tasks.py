@@ -43,6 +43,7 @@ from typing import TYPE_CHECKING, Any
 from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.foundation.errors import ConflictError, InvalidArgumentError, ProcessingError
 from astrometricslib.foundation.jobs.runner import registered_job
+from astrometricslib.foundation.run_abandonment import RunAbandonedError, RunAbandonment, bind_abandonment
 from astrometricslib.foundation.run_tally import RunTally
 from astrometricslib.foundation.storage.process_locks import acquire_resource_slot
 from astrometricslib.models.processing_results import ProcessTargetResult
@@ -85,6 +86,14 @@ STACKING_TIMEOUT_SECONDS = 600
 # this much, while still letting the deadline pick up lock waits that
 # accrue after the wait began.
 _STACKING_TIMEOUT_POLL_SECONDS = 2.0
+
+# How long to wait, after giving up on a stack and stopping its Siril, for the
+# stack's thread to end and give its slot back. Stopping Siril takes about a
+# quarter of a second (see `run_abandonment.STOP_GRACE_SECONDS`) and the
+# thread's clean-up removes a scratch folder, so ten seconds is generous. A
+# chosen bound, not a measured one: if it passes, the thread is simply left to
+# finish on its own.
+_ABANDONED_THREAD_JOIN_SECONDS = 10.0
 
 
 def compute_stacking_timeout_seconds(frame_count: int) -> int:
@@ -170,7 +179,9 @@ def stack_frames_with_timeout(
     """Run the image stacker with a time limit so it doesn't freeze forever.
 
     The Siril stacking program can sometimes get stuck. This function
-    runs it in the background and will kill it if it takes too long.
+    runs it in the background. If it takes too long, this function stops
+    that stack's own Siril processes (no others), so the background thread
+    ends and gives back its place in the job queue, and returns.
     The time limit only counts time spent actually working, not time
     spent waiting in line for the CPU.
 
@@ -212,13 +223,20 @@ def stack_frames_with_timeout(
     # This stack's own total of Siril-lock waiting. The stacking thread binds
     # it, so the waits of other stacks in the process are not mixed in.
     lock_wait = RunTally()
+    # This stack's own Siril processes. Giving up on the stack stops them (and
+    # only them), so the thread ends and gives its slot back.
+    abandonment = RunAbandonment()
 
     def _run_stacking() -> None:
         try:
-            with siril_interface.bind_lock_wait(lock_wait):
+            with siril_interface.bind_lock_wait(lock_wait), bind_abandonment(abandonment):
                 outcome["path"] = _stack_with_job_tracking(
                     target, frames_to_stack, measured_at, quality_recording
                 )
+        except RunAbandonedError:
+            # The caller gave up and already returned; there is nobody to
+            # report to, and nothing may be recorded as a result.
+            logger.info("[%s] The abandoned stacking thread has stopped.", target.id)
         except Exception as stacking_error:
             # This runs in its own thread, so any error is kept here and
             # raised again in the calling thread below. The traceback is
@@ -251,6 +269,10 @@ def stack_frames_with_timeout(
             timeout_seconds,
             lock_wait_seconds,
         )
+        # Stop this stack's Siril, so its thread ends and gives up its slot.
+        abandonment.abandon()
+        # Let the thread unwind, so the slot is free when this returns.
+        stacking_thread.join(_ABANDONED_THREAD_JOIN_SECONDS)
         # A timeout is a quality event, not just a log line: recorded on
         # the target's existing stack summary when there is one, so the
         # abandoned stack is queryable rather than only discoverable by

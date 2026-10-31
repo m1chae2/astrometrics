@@ -29,6 +29,7 @@ from astrometricslib.drivers.siril_output_parsing import (
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import ConfigurationError, ExternalServiceError
 from astrometricslib.foundation.paths import scratch_directory
+from astrometricslib.foundation.run_abandonment import launch_registered, raise_if_abandoned
 from astrometricslib.foundation.run_tally import RunTally, add_to_bound_tally, bind_tally
 
 logger = logging.getLogger(__name__)
@@ -149,9 +150,16 @@ def siril_process_lock(
     ------
     `None`
         Control returns to the caller holding a slot.
+
+    Notes
+    -----
+    `RunAbandonedError` is raised, before or while waiting, if the run this
+    thread belongs to was given up on.
     """
     from astrometricslib.foundation.storage.process_locks import acquire_resource_slot
 
+    # A run given up on must not queue for a slot it will not use.
+    raise_if_abandoned()
     slot_count = max_concurrent_runs
     configuration = None
     if slot_count is None:
@@ -188,6 +196,8 @@ def siril_process_lock(
             # timeout adds this back to its budget, and a queue that exists
             # to protect the CPU must not convert into a cascade of
             # timeouts for the targets waiting their turn.
+            # A run given up on while it waited gives the slot back at once.
+            raise_if_abandoned()
             waited_seconds = time.monotonic() - wait_started_at
             _record_siril_lock_wait(waited_seconds)
             if stop_open_wait is not None:
@@ -447,7 +457,11 @@ class SirilSession:
         # (flatpak/bwrap/siril) can be killed together via os.killpg
         # later -- signaling process.pid alone can miss the actual
         # siril binary running as a descendant inside the sandbox.
-        process = subprocess.Popen(args, stdout=stdout, stderr=stderr, start_new_session=True)
+        # Registered with the run this thread belongs to, if any, so giving up
+        # on the run stops this process (and refuses a start after that).
+        process = launch_registered(
+            lambda: subprocess.Popen(args, stdout=stdout, stderr=stderr, start_new_session=True)
+        )
         self.subprocesses.append(process)
         time.sleep(2)
         return process

@@ -69,6 +69,7 @@ from astrometricslib.drivers.siril_interface import siril_process_lock
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.errors import NotFoundError, StorageError
 from astrometricslib.foundation.paths import siril_work_directory
+from astrometricslib.foundation.run_abandonment import run_registered
 from astrometricslib.pipelines.shared.image_scaling import AUTOSTRETCH_SHADOWS_CLIP_SIGMA
 from astrometricslib.pipelines.shared.stack_preview_path import (
     PREVIEW_JPEG_QUALITY,
@@ -464,13 +465,8 @@ def run_preview_script(directory: str, commands: list[str], siril_executable: st
         parts.insert(parts.index("run") + 1, "--filesystem=host")
     try:
         with siril_process_lock():
-            completed = subprocess.run(
-                [*parts, "-d", directory, "-s", script_path],
-                capture_output=True,
-                text=True,
-                timeout=PREVIEW_TIMEOUT_SECONDS,
-                check=False,
-            )
+            # Stoppable: giving up on the stack stops this Siril too.
+            completed = run_registered([*parts, "-d", directory, "-s", script_path], PREVIEW_TIMEOUT_SECONDS)
     finally:
         os.remove(script_path)
     return completed.returncode == 0

@@ -48,6 +48,7 @@ from astrometricslib.drivers.siril_interface.staging import (
 )
 from astrometricslib.foundation.errors import ConfigurationError
 from astrometricslib.foundation.jobs.runner import capture_job_logs
+from astrometricslib.foundation.run_abandonment import RunAbandonedError, raise_if_abandoned
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,13 @@ class SirilImagingStacker(SirilSpectralStacker):
         result : `str` or `None`
             Path to the final stacked file, or `None` if the job
             failed.
+
+        Raises
+        ------
+        RunAbandonedError
+            If the caller gave up on this run (see
+            `astrometricslib.foundation.run_abandonment`). Siril is stopped
+            and the slot given back first.
         """
         run = self._begin_run(request)
         try:
@@ -83,8 +91,14 @@ class SirilImagingStacker(SirilSpectralStacker):
             launch = self._launch_siril(run, staged)
             script = self._write_script(run, staged)
             run.result = self._stack(run, staged, launch, script)
+            # A result that arrived as the run was given up on is not used.
+            raise_if_abandoned()
             self._finish_run(run, staged, launch, script)
             return run.result
+        except RunAbandonedError:
+            # The caller gave up on this run. Let the error reach it, rather
+            # than report an ordinary failure; the clean-up below still runs.
+            raise
         except Exception:
             run.job_logger.exception("FATAL: Siril processing stopped with an unexpected error")
             return None

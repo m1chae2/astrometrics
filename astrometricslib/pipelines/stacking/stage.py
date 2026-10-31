@@ -14,6 +14,7 @@ from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.errors import AstrometricsError, ConflictError
 from astrometricslib.foundation.jobs.runner import get_current_job
+from astrometricslib.foundation.run_abandonment import raise_if_abandoned
 from astrometricslib.models.quality.gate_result import GateResult
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.stacking.calibration_health import measure_calibration_health
@@ -466,6 +467,11 @@ def _run_stacking_engine(run: StackRun) -> None:
     ------
     RuntimeError
         If the stack was not prepared first.
+
+    Notes
+    -----
+    `RunAbandonedError` is raised if the caller gave up on the stack while
+    it ran.
     """
     from astrometricslib.pipelines.stacking.stack_runner import run_stack
 
@@ -488,6 +494,10 @@ def _run_stacking_engine(run: StackRun) -> None:
             stack_weight=run.stack_weight,
             generate_rejmap=run.generate_rejmap,
         )
+        # A caller that gave up on this stack must not see it go on to trim,
+        # summarize or record a stack. The restore below puts the old
+        # stack back.
+        raise_if_abandoned()
     except BaseException:
         _finish_stack_archive(run.staging, run.stack_file, run.target.id, kept=False)
         raise

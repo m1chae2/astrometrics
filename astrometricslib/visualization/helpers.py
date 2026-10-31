@@ -108,10 +108,9 @@ def plot_fits_star_field(
         fits_path = target.stacking.stacked_image or fits_path
 
     if image_data is None and fits_path:
-        from astropy.io import fits
+        from astrometricslib.drivers.fits_access import read_data
 
-        with fits.open(fits_path, memmap=False) as hdul:
-            image_data = hdul[0].data
+        image_data = read_data(fits_path, first_hdu_only=True)
 
     if ax is None:
         _fig, ax = plt.subplots(figsize=(8, 8))

@@ -401,17 +401,16 @@ def get_fits_header(path: str) -> list[dict[str, str]]:
     if not os.path.exists(path):
         raise NotFoundError(f"File not found: {path}")
 
-    from astropy.io import fits
+    from astrometricslib.drivers.fits_access import read_header
 
-    with fits.open(path, memmap=False) as hdulist:
-        primary_header = hdulist[0].header
-        header_list = []
-        for key in primary_header.keys():
-            if not key:
-                continue
-            value = primary_header[key]
-            comment = primary_header.comments[key]
-            header_list.append({"key": key, "value": str(value), "comment": str(comment) if comment else ""})
+    primary_header = read_header(path, first_hdu_only=True)
+    header_list = []
+    for key in primary_header.keys():
+        if not key:
+            continue
+        value = primary_header[key]
+        comment = primary_header.comments[key]
+        header_list.append({"key": key, "value": str(value), "comment": str(comment) if comment else ""})
     return header_list
 
 

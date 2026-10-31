@@ -33,7 +33,7 @@ from astrometricslib.drivers.calibration_library import (
     format_binning,
     header_binning,
 )
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, read_header
+from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, read_data, read_header, update_first_header
 from astrometricslib.drivers.frame_prefetch import prefetch_frames
 from astrometricslib.drivers.interfaces.stacking_driver import PipelineSteps
 from astrometricslib.drivers.siril_output_parsing import (
@@ -1095,12 +1095,8 @@ class ImageProcessing:
             if the file is missing data or fails to open.
         """
         try:
-            from astropy.io import fits
-
-            with fits.open(path, memmap=False) as hdul:
-                hdu = hdul[1] if hdul[0].data is None and len(hdul) > 1 else hdul[0]
-                if hdu.data is None:
-                    return False
+            if read_data(path) is None:
+                return False
             return True
         except FITS_READ_ERRORS:
             return False
@@ -2634,12 +2630,28 @@ class ImageProcessing:
                                 logger.debug("Skipping unparsable exposure value '%s': %s", exp, exc)
 
                     if total_exp > 0:
-                        with fits.open(res, mode="update", memmap=False) as hdul:
-                            hdul[0].header["EXPTIME"] = total_exp
-                            hdul[0].header["EXPOSURE"] = total_exp
-                            hdul[0].header.add_comment(
+
+                        def _record_total_exposure(stack_header: fits.Header) -> bool:
+                            """Record the summed exposure time in the header.
+
+                            Parameters
+                            ----------
+                            stack_header : `astropy.io.fits.Header`
+                                The header of the stacked image.
+
+                            Returns
+                            -------
+                            changed : `bool`
+                                Always `True`, because the header is changed.
+                            """
+                            stack_header["EXPTIME"] = total_exp
+                            stack_header["EXPOSURE"] = total_exp
+                            stack_header.add_comment(
                                 f"Total exposure time summed from {len(image_files)} frames."
                             )
+                            return True
+
+                        update_first_header(res, _record_total_exposure)
                         job_logger.info("Updated stacked header: EXPTIME=%ss", total_exp)
                 except FITS_READ_ERRORS:
                     job_logger.exception("Failed to update stacked header EXPTIME")

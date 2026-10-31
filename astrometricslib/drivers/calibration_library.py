@@ -33,7 +33,7 @@ from astropy.io import fits
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from astrometricslib.drivers.camera_profile_store import camera_identity, record_name_for_camera
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
+from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, read_header
 from astrometricslib.utilities.camera_setting_text import UNBINNED_TEXT, canonical_binning_setting
 
 logger = logging.getLogger(__name__)
@@ -638,8 +638,7 @@ def _read_dark_temperature(path: str) -> float | None:
         or `None` if the file cannot be read or records none.
     """
     try:
-        with fits.open(path, memmap=False) as hdu_list:
-            return header_temperature_c(hdu_list[0].header)
+        return header_temperature_c(read_header(path, first_hdu_only=True))
     except FITS_READ_ERRORS:
         return None
 

@@ -42,7 +42,7 @@ from astropy.time import Time
 from photutils.aperture import CircularAnnulus, CircularAperture
 from photutils.centroids import centroid_com
 
-from astrometricslib.drivers.fits_access import collapse_to_2d
+from astrometricslib.drivers.fits_access import collapse_to_2d, read_header_and_data
 from astrometricslib.pipelines.photometry.pre_processing.detector_noise import DetectorNoise
 from astrometricslib.pipelines.shared.quality.saturation import (
     compute_saturated_pixel_fraction,
@@ -1387,16 +1387,15 @@ def _process_single_frame_worker(
 
     try:
         # 1. Load Header & Data
-        with fits.open(path, memmap=False) as fits_handle:
-            header = fits_handle[0].header
-            data = collapse_to_2d(fits_handle[0].data.astype(float))
-            try:
-                timestamp = read_observation_time(header)
-            except ObservationTimeError as error:
-                logger.warning("Rejecting %s: %s", path, error)
-                return path, FrameRejection(str(error))
-            airmass = compute_frame_airmass(header)
-            exposure_seconds = _read_exposure_seconds(header)
+        header, raw_data = read_header_and_data(path, first_hdu_only=True)
+        data = collapse_to_2d(raw_data.astype(float))
+        try:
+            timestamp = read_observation_time(header)
+        except ObservationTimeError as error:
+            logger.warning("Rejecting %s: %s", path, error)
+            return path, FrameRejection(str(error))
+        airmass = compute_frame_airmass(header)
+        exposure_seconds = _read_exposure_seconds(header)
 
         # Use sampling for median to speed up worker
         sampled_data = data[::4, ::4]  # 1/16th of pixels

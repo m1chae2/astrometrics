@@ -206,3 +206,65 @@ def test_collapse_to_2d_handles_a_degenerate_single_channel_cube() -> None:
 
     assert result.shape == (5, 6)
     assert np.array_equal(result, data[0])
+
+
+def test_first_hdu_only_reads_the_bare_hdu0(tmp_path: Path) -> None:
+    """Verify `first_hdu_only` reads the bare HDU 0 of a two-HDU file."""
+    path = _write_two_hdu_frame(tmp_path / "frame.fits", 60, 40)
+
+    header, data = fits_access.read_header_and_data(path, first_hdu_only=True)
+
+    assert data is None
+    assert header["NAXIS"] == 0
+    assert fits_access.read_data(path, first_hdu_only=True) is None
+    assert fits_access.read_header(path, first_hdu_only=True)["NAXIS"] == 0
+
+
+def test_read_header_and_data_falls_back_to_hdu1(tmp_path: Path) -> None:
+    """Verify the header and pixels both come from HDU1 when HDU0 is bare."""
+    path = _write_two_hdu_frame(tmp_path / "frame.fits", 60, 40)
+
+    header, data = fits_access.read_header_and_data(path)
+
+    assert header["NAXIS1"] == 60
+    assert data is not None
+    assert data.shape == (40, 60)
+
+
+def test_update_first_header_saves_a_change(tmp_path: Path) -> None:
+    """Verify a changed header is written back to the file."""
+    path = _write_single_hdu_frame(tmp_path / "frame.fits", 20, 10)
+
+    def _add_keyword(header: fits.Header) -> bool:
+        """Add one keyword and report the change.
+
+        Returns
+        -------
+        changed : `bool`
+            Always `True`.
+        """
+        header["TESTKEY"] = 7
+        return True
+
+    assert fits_access.update_first_header(str(path), _add_keyword) is True
+    assert fits_access.read_header(str(path))["TESTKEY"] == 7
+
+
+def test_update_first_header_leaves_the_file_alone_when_nothing_changed(tmp_path: Path) -> None:
+    """Verify a callback that changes nothing leaves the file as it was."""
+    path = _write_single_hdu_frame(tmp_path / "frame.fits", 20, 10)
+    size_before = Path(path).stat().st_size
+
+    def _decline(header: fits.Header) -> bool:
+        """Report no change.
+
+        Returns
+        -------
+        changed : `bool`
+            Always `False`.
+        """
+        return False
+
+    assert fits_access.update_first_header(str(path), _decline) is False
+    assert Path(path).stat().st_size == size_before
+    assert "TESTKEY" not in fits_access.read_header(str(path))

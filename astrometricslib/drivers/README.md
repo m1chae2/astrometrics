@@ -18,6 +18,7 @@ Several terms recur below:
 
 - `image.py`, `fits_access.py` — `AstrometricsImage`, the main data container for a loaded astronomical image, and the lower-level functions that read pixel data and metadata out of a FITS file.
   - `AstrometricsImage` fixes header keywords that older software writes. It renames `RADECSYS` (a retired spelling of `RADESYS`, the card that names the sky coordinate frame) and fills in a missing `MJD-OBS` (the observation start as a Modified Julian Date, a running day count) from `DATE-OBS`. It makes these fixes in memory only and never rewrites a frame, so a frame on a backed-up network drive stays as it was downloaded.
+  - `fits_access.read_header`, `read_data` and `read_header_and_data` read a file's header and pixels. They look for the pixel data in HDU 0, then HDU 1. Pass `first_hdu_only=True` to read HDU 0 alone. `update_first_header` changes the header of HDU 0 in place. Code outside `fits_access.py` should use these instead of calling `fits.open`.
   - `fits_access.FITS_READ_ERRORS` names the errors that reading a damaged or missing FITS file can raise. Code that reads a file catches that tuple instead of every exception.
 - `filter_detection.py` — reads an image's settings to work out what kind of frame it is: which filter (the colored or clear glass in front of the camera), and whether it is a light, dark, flat or bias.
 - `interfaces/` — the abstract base classes (`*Driver`) the rest of the library uses instead of a particular program or service:

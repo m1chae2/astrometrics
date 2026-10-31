@@ -9,7 +9,7 @@ does not have to worry about this structural difference.
 """
 
 import logging
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 
 import numpy as np
@@ -35,51 +35,60 @@ FITS_READ_ERRORS: tuple[type[Exception], ...] = (
 
 
 @contextmanager
-def open_primary_hdu(path: str) -> Generator[fits.hdu.base._BaseHDU]:
+def open_primary_hdu(path: str, *, first_hdu_only: bool = False) -> Generator[fits.hdu.base._BaseHDU]:
     """Open a FITS file and yield the HDU containing the pixel data.
 
     Parameters
     ----------
     path : str
         Path to the FITS file.
+    first_hdu_only : bool, optional
+        If True, always yield HDU 0, even when it holds no data. Some
+        callers have always read HDU 0 only, so this keeps their
+        results the same. The default looks for the pixel data.
 
     Yields
     ------
     hdu : astropy.io.fits.hdu.base._BaseHDU
         The Header Data Unit (HDU) that holds the actual image data.
-        This is HDU 0, or HDU 1 if HDU 0 has no data.
+        This is HDU 0, or HDU 1 if HDU 0 has no data (unless
+        ``first_hdu_only`` is True).
     """
     with fits.open(path, memmap=False) as hdul:
-        if len(hdul) > 1 and hdul[0].data is None:
+        if not first_hdu_only and len(hdul) > 1 and hdul[0].data is None:
             yield hdul[1]
         else:
             yield hdul[0]
 
 
-def read_header(path: str) -> fits.Header:
+def read_header(path: str, *, first_hdu_only: bool = False) -> fits.Header:
     """Read the header from the HDU that holds the pixel data.
 
     Parameters
     ----------
     path : str
         Path to the FITS file.
+    first_hdu_only : bool, optional
+        If True, read the header of HDU 0 even when it holds no data.
 
     Returns
     -------
     header : astropy.io.fits.Header
         A safe copy of the header dictionary containing the image metadata.
     """
-    with open_primary_hdu(path) as hdu:
+    with open_primary_hdu(path, first_hdu_only=first_hdu_only) as hdu:
         return hdu.header.copy()
 
 
-def read_data(path: str) -> np.ndarray | None:
+def read_data(path: str, *, first_hdu_only: bool = False) -> np.ndarray | None:
     """Read the raw pixel array from the FITS file.
 
     Parameters
     ----------
     path : str
         Path to the FITS file.
+    first_hdu_only : bool, optional
+        If True, read the pixels of HDU 0 even when it holds no data.
 
     Returns
     -------
@@ -87,8 +96,57 @@ def read_data(path: str) -> np.ndarray | None:
         The original pixel array. It is not modified or cast to a
         different data type. Returns None if there is no data.
     """
-    with open_primary_hdu(path) as hdu:
+    with open_primary_hdu(path, first_hdu_only=first_hdu_only) as hdu:
         return hdu.data
+
+
+def read_header_and_data(path: str, *, first_hdu_only: bool = False) -> tuple[fits.Header, np.ndarray | None]:
+    """Read the header and the pixel array in one pass over the file.
+
+    Parameters
+    ----------
+    path : str
+        Path to the FITS file.
+    first_hdu_only : bool, optional
+        If True, read HDU 0 even when it holds no data.
+
+    Returns
+    -------
+    header : astropy.io.fits.Header
+        A safe copy of the header.
+    data : numpy.ndarray or None
+        The original pixel array, or None if there is no data.
+    """
+    with open_primary_hdu(path, first_hdu_only=first_hdu_only) as hdu:
+        return hdu.header.copy(), hdu.data
+
+
+def update_first_header(path: str, edit_header: Callable[[fits.Header], bool]) -> bool:
+    """Change the header of HDU 0 in place, and save it to the file.
+
+    The file is opened for updating. ``edit_header`` changes the header
+    it is given and returns True if it changed the header. A header
+    that was not changed is never written. It must not edit the header
+    and then return False, because astropy saves any edit when the file
+    closes.
+
+    Parameters
+    ----------
+    path : str
+        Path to the FITS file.
+    edit_header : callable
+        Takes the header of HDU 0. Returns True if it changed it.
+
+    Returns
+    -------
+    changed : bool
+        The value ``edit_header`` returned.
+    """
+    with fits.open(path, mode="update", memmap=False) as hdul:
+        changed = edit_header(hdul[0].header)
+        if changed:
+            hdul.flush()
+    return changed
 
 
 def write_image(path: str, data: np.ndarray, header: fits.Header | None = None) -> None:

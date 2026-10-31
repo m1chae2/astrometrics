@@ -22,7 +22,7 @@ from typing import Any, Protocol
 from astropy.io import fits
 from astropy.wcs import WCS, FITSFixedWarning
 
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
+from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, update_first_header
 from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.drivers.interfaces.plate_solve_driver import PlateSolveDriver, read_fit_statistics
 from astrometricslib.models.stellar_source import StellarObject
@@ -141,15 +141,29 @@ def write_wcs_to_fits_header(path: str, wcs: WCS) -> None:
     if not path or not os.path.exists(path):
         return
     try:
-        with fits.open(path, mode="update", memmap=False) as hdul:
-            header = hdul[0].header
+
+        def _write_solved_wcs(header: fits.Header) -> bool:
+            """Replace the old WCS keywords in the header with the solved ones.
+
+            Parameters
+            ----------
+            header : `astropy.io.fits.Header`
+                The header of HDU 0.
+
+            Returns
+            -------
+            changed : `bool`
+                Always `True`, because the header is changed.
+            """
             for keyword in [key for key in header if _STALE_WCS_KEYWORD_PATTERN.match(key)]:
                 del header[keyword]
             for card in wcs.to_header(relax=True).cards:
                 if not card.keyword:
                     continue
                 header[card.keyword] = (card.value, card.comment)
-            hdul.flush()
+            return True
+
+        update_first_header(path, _write_solved_wcs)
         logger.info("Updated FITS file %s header with solved WCS keywords.", path)
     except FITS_READ_ERRORS as wcs_error:
         logger.warning("Failed to update FITS file header with WCS: %s", wcs_error)

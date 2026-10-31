@@ -37,11 +37,10 @@ import time
 from typing import Any
 
 import numpy as np
-from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
 
 from astrometricslib import DATA_ERRORS, Astrometrics, AstrometricsError, configure_logging
-from astrometricslib.drivers.fits_access import collapse_to_2d
+from astrometricslib.drivers.fits_access import collapse_to_2d, read_data
 from astrometricslib.drivers.siril_output_parsing import parse_seq_file, parse_zero_order_star
 from astrometricslib.foundation.paths import siril_work_directory
 
@@ -151,8 +150,7 @@ def measure_zero_order_stacked_fwhm(astrometrics: Astrometrics, path: str) -> fl
     """
     from photutils.morphology import data_properties
 
-    with fits.open(path, memmap=False) as hdul:
-        data = hdul[0].data
+    data = read_data(path, first_hdu_only=True)
     if data is None:
         return None
     data = collapse_to_2d(np.asarray(data, dtype=float))

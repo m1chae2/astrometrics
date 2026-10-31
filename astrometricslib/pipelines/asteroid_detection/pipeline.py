@@ -20,7 +20,7 @@ from astropy.wcs import WCS, FITSFixedWarning
 from astropy.wcs.utils import proj_plane_pixel_scales
 from scipy.spatial import cKDTree
 
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
+from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, read_data, read_header, read_header_and_data
 from astrometricslib.foundation.errors import ConflictError
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate, CascadeStage, FrameDetection
 from astrometricslib.models.moving_object_config import (
@@ -412,10 +412,8 @@ def _detect_sources_in_one_frame(
         A list of all the possible stars/asteroids we found in this photo.
     """
     try:
-        with fits.open(frame_path, memmap=False) as hdul:
-            frame_header = hdul[0].header
-            frame_data = hdul[0].data
-            exposure_seconds = _read_exposure_seconds(frame_header)
+        frame_header, frame_data = read_header_and_data(frame_path, first_hdu_only=True)
+        exposure_seconds = _read_exposure_seconds(frame_header)
     except FITS_READ_ERRORS as read_error:
         logger.warning("Failed to read frame '%s' for asteroid detection: %s", frame_path, read_error)
         return "read_failed", []
@@ -557,7 +555,7 @@ class AsteroidDetectionPipeline:
                 f"Target '{target_id}' has no stacked_image; run analyze_target(type='astrometry') first."
             )
 
-        stack_header = fits.getheader(stacked_image_path)
+        stack_header = read_header(stacked_image_path, first_hdu_only=True)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", FITSFixedWarning)
             stack_wcs = WCS(stack_header, naxis=2)
@@ -638,8 +636,7 @@ class AsteroidDetectionPipeline:
             `_build_reference_star_tree`'s return -- `(tree,
             reference_ra_deg, reference_dec_deg, cos_declination)`.
         """
-        with fits.open(stacked_image_path, memmap=False) as hdul:
-            stack_data = np.asarray(hdul[0].data, dtype=float)
+        stack_data = np.asarray(read_data(stacked_image_path, first_hdu_only=True), dtype=float)
         source_detector = SourceDetector(
             fwhm=self.config.detection_fwhm_px, threshold_sigma=self.config.detection_threshold_sigma
         )

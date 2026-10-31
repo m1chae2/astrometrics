@@ -37,7 +37,7 @@ from astropy.table import Table
 from astroquery.astrometry_net import AstrometryNet
 from astroquery.exceptions import TimeoutError as AstroqueryTimeoutError
 
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
+from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, read_header
 from astrometricslib.drivers.interfaces.plate_solve_driver import PlateSolveDriver, PlateSolveHeader
 from astrometricslib.foundation.paths import scratch_directory
 from astrometricslib.foundation.run_tally import RunTally, add_to_bound_tally, bind_tally
@@ -528,8 +528,7 @@ class AstrometryNetPlateSolveDriver(PlateSolveDriver):
         solved_path = os.path.join(working_directory, "input_image.new")
         if not os.path.exists(solved_path):
             return None
-        with fits.open(solved_path, memmap=False) as hdul:
-            solved_header = hdul[0].header.copy()
+        solved_header = read_header(solved_path, first_hdu_only=True)
         residual_rms_arcsec, matched_star_count = read_corr_fit_statistics(
             os.path.join(working_directory, "input_image.corr")
         )

@@ -10,10 +10,9 @@ import logging
 from collections.abc import Callable
 
 import numpy as np
-from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
 
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, collapse_to_2d
+from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, collapse_to_2d, read_data
 from astrometricslib.pipelines.shared.quality.saturation import (
     compute_saturated_pixel_fraction,
     compute_stack_saturated_pixel_fraction,
@@ -63,13 +62,10 @@ def measure_frame_input_quality(
     }
 
     try:
-        with fits.open(path, memmap=False) as hdul:
-            data = hdul[0].data
-            if data is None and len(hdul) > 1:
-                data = hdul[1].data
-            if data is None:
-                return metrics
-            data = np.asarray(data, dtype=float)
+        data = read_data(path)
+        if data is None:
+            return metrics
+        data = np.asarray(data, dtype=float)
     except FITS_READ_ERRORS as read_error:
         logger.debug("Could not read %s for input-quality measurement: %s", path, read_error)
         return metrics
@@ -117,8 +113,7 @@ def measure_saturated_pixel_fraction(path: str) -> float | None:
     fraction : `float` or `None`
         The fraction (between 0.0 and 1.0) of saturated pixels.
     """
-    with fits.open(path, memmap=False) as hdul:
-        data = hdul[0].data
+    data = read_data(path, first_hdu_only=True)
     if data is None:
         return None
     return compute_stack_saturated_pixel_fraction(np.asarray(data, dtype=float))

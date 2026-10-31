@@ -349,7 +349,7 @@ class CalibrationCatalog:
         """Write the calibration library to its JSON file on disk."""
         self.library.save_library()
 
-    def refresh(self, kind: _CalibrationKind, prune_missing: bool = False) -> CalibrationIngestReport:
+    def reindex_frames(self, kind: _CalibrationKind, prune_missing: bool = False) -> CalibrationIngestReport:
         """Rescan one kind of calibration frame and report what was found.
 
         Use this after new calibration frames have been downloaded. The
@@ -383,7 +383,7 @@ class CalibrationCatalog:
         self,
         telescope: str | None = None,
         camera_id: str | None = None,
-        filter_type: str | None = None,
+        filter_name: str | None = None,
         gain: float | None = None,
         offset: float | None = None,
         register_job: bool = True,
@@ -401,7 +401,7 @@ class CalibrationCatalog:
             Only this telescope's flats.
         camera_id : `str`, optional
             Only this camera's flats.
-        filter_type : `str`, optional
+        filter_name : `str`, optional
             Only flats for this filter, such as ``"L"`` or ``"SPEC"``.
         gain : `float`, optional
             Only flats at this gain.
@@ -417,7 +417,7 @@ class CalibrationCatalog:
         """
         with registered_job(enabled=register_job, job_type="diagnostics", target_id="calibration"):
             groups = self.library.list_flat_groups(
-                telescope=telescope, camera=camera_id, filter_type=filter_type, gain=gain, offset=offset
+                telescope=telescope, camera=camera_id, filter_type=filter_name, gain=gain, offset=offset
             )
             return [assess_flat_group(group) for group in groups]
 
@@ -428,10 +428,10 @@ class CalibrationCatalog:
         gain: str | float,
         offset: str | float,
         binning: str = "1x1",
-        temperature: float | None = None,
+        temperature_c: float | None = None,
         exposure_seconds: float | None = None,
         telescope: str | None = None,
-        filter_type: str | None = None,
+        filter_name: str | None = None,
         save: bool = False,
         register_job: bool = True,
     ) -> SensorNoiseMeasurement:
@@ -458,14 +458,15 @@ class CalibrationCatalog:
             The camera offset.
         binning : `str`, optional
             The binning, such as ``"1x1"``. Defaults to ``"1x1"``.
-        temperature : `float`, optional
-            Use only frames within 1 degree C of this sensor temperature.
+        temperature_c : `float`, optional
+            Use only frames within 1 degree C of this sensor temperature,
+            in degrees Celsius.
         exposure_seconds : `float`, optional
             Use only flats of this exposure. Needed when the setting's flats
             were taken at several exposures.
         telescope : `str`, optional
             Use only flats taken through this telescope.
-        filter_type : `str`, optional
+        filter_name : `str`, optional
             Use only flats taken through this filter.
         save : `bool`, optional
             Write a measured result into the camera profile, with a backup
@@ -487,10 +488,10 @@ class CalibrationCatalog:
                 gain,
                 offset,
                 binning,
-                temperature_c=temperature,
+                temperature_c=temperature_c,
                 exposure_seconds=exposure_seconds,
                 telescope=telescope,
-                filter_type=filter_type,
+                filter_type=filter_name,
                 save=save,
                 measured_on=datetime.now(UTC).date(),
             )
@@ -1258,7 +1259,7 @@ class ProcessingPipelines:
             Options for the astrometry stage: ``path`` (the image to plate
             solve; the stack by default).
         photometry : `dict`, optional
-            Options for the photometry stage: ``frames``, ``filter_type``,
+            Options for the photometry stage: ``frames``, ``filter_name``,
             ``use_astrometry_seed`` and ``max_workers``.
         spectroscopy : `dict`, optional
             Options for the spectroscopy stage: ``path`` and ``limit`` (a

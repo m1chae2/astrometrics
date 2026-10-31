@@ -573,7 +573,7 @@ DECISIONS = {
     # ---- Writers with no read-only form ----
     **dict.fromkeys(
         (
-            "calibration_refresh",
+            "calibration_reindex_frames",
             "processing_discard_previous_stack",
             "processing_process_target",
             "processing_restore_excluded_frames",

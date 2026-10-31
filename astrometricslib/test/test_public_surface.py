@@ -356,7 +356,7 @@ SUB_API_MEMBERS = {
         "library",
         "measure_sensor_noise",
         "query",
-        "refresh",
+        "reindex_frames",
         "save",
     },
     "quality": {

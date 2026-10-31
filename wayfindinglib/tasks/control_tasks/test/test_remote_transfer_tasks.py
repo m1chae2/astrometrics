@@ -692,7 +692,7 @@ def test_sync_calibration_folder_summarises_what_was_added(
             return frames_path
 
     class _Catalog:
-        def refresh(self, kind: str) -> None:
+        def reindex_frames(self, kind: str) -> None:
             pass
 
         def save(self) -> None:

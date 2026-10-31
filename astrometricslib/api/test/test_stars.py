@@ -72,8 +72,8 @@ class TestAnalyzePeriodicity:
         result = catalog.analyze_periodicity("Gaia DR3 1")
 
         assert result.photometry.periodogram is not None
-        object_id, updates = catalog.update.call_args.args
-        assert object_id == "Gaia DR3 1"
+        star_id, updates = catalog.update.call_args.args
+        assert star_id == "Gaia DR3 1"
         assert updates["photometry"].periodogram is not None
 
     def test_returns_a_star_with_too_few_points_without_saving(self) -> None:

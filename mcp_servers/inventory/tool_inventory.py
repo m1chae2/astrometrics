@@ -214,7 +214,7 @@ CLASSIFICATION_RULES = (
         "high",
         "Adds or changes stars in the catalog.",
     ),
-    _rule(r"^calibration_refresh$", "change-data", "medium", "Probably rebuilds stored calibration."),
+    _rule(r"^calibration_reindex_frames$", "change-data", "medium", "Probably rebuilds stored calibration."),
     _rule(
         r"^processing_(discard_previous_stack|restore_excluded_frames|swap_with_previous_stack|process_target)$",
         "change-data",

@@ -208,8 +208,8 @@ class TestStartAnalysisTaskClassification:
         assert "photometry" in result
         assert "spectroscopy" in result
 
-    def test_unmatched_path_falls_back_to_explicit_filter_type(self) -> None:
-        """Verify an unmatched path falls back to the explicit filter_type."""
+    def test_unmatched_path_falls_back_to_explicit_filter_name(self) -> None:
+        """Verify an unmatched path falls back to the explicit filter_name."""
         target = Target(id="ClassifyUnmatchedTarget", frames=[])
         orchestrator = self._make_orchestrator_with_target(target)
 

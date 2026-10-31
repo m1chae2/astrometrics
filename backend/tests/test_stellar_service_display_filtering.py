@@ -353,9 +353,9 @@ async def test_rpc_registry_routes_analyze_periodicity_to_the_stellar_service(
     monkeypatch.setattr(rpc_router.container, "stellar_service", stellar_service, raising=False)
 
     registry = rpc_router.RPCHandlerRegistry()
-    result = await registry.execute("astronomy:analyze_periodicity", {"object_id": "Gaia DR3 1"})
+    result = await registry.execute("astronomy:analyze_periodicity", {"star_id": "Gaia DR3 1"})
 
-    stellar_service.analyze_periodicity.assert_called_once_with(object_id="Gaia DR3 1")
+    stellar_service.analyze_periodicity.assert_called_once_with(star_id="Gaia DR3 1")
     assert result is stellar_service.analyze_periodicity.return_value
 
 
@@ -366,7 +366,7 @@ def test_period_searches_are_limited_to_two_at_a_time() -> None:
     lock = threading.Lock()
     release = threading.Event()
 
-    def slow_search(_object_id: str) -> None:
+    def slow_search(_star_id: str) -> None:
         """Hold a search slot until released, recording the peak count."""
         nonlocal running, peak
         with lock:

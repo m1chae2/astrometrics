@@ -105,7 +105,7 @@ def test_the_photometry_stage_forwards_its_options(
     pipelines.process_target(
         target,
         stages=["photometry"],
-        photometry={"frames": [frame], "filter_type": "L", "use_astrometry_seed": False, "max_workers": 3},
+        photometry={"frames": [frame], "filter_name": "L", "use_astrometry_seed": False, "max_workers": 3},
         register_job=False,
     )
 

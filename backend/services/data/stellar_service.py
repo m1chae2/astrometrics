@@ -572,7 +572,7 @@ class StellarService:
         """
         return "stellar catalog saved"
 
-    def get_object(self, object_id: str) -> StellarObject | None:
+    def get_object(self, star_id: str) -> StellarObject | None:
         """Retrieve a stellar object by ID.
 
         Returns
@@ -580,7 +580,7 @@ class StellarService:
         result : `StellarObject` or `None`
             The matching stellar object, or `None` if not found.
         """
-        return self.astrometrics.stars.get(object_id)
+        return self.astrometrics.stars.get(star_id)
 
     def get_object_fuzzy(self, search_term: str) -> StellarObject | None:
         """Retrieve a stellar object by ID or name.
@@ -597,11 +597,11 @@ class StellarService:
         return self.astrometrics.stars.get(search_term)
 
     def get_object_fuzzy_by_id(
-        self, object_id: str | None = None, search_term: str | None = None
+        self, star_id: str | None = None, search_term: str | None = None
     ) -> StellarObject | None:
         """RPC wrapper to resolve an astronomy object using fuzzy matching.
 
-        Accepts either param name (object_id or search_term).
+        Accepts either param name (star_id or search_term).
 
         Returns
         -------
@@ -611,19 +611,19 @@ class StellarService:
         Raises
         ------
         InvalidArgumentError
-            If neither ``object_id`` nor ``search_term`` is provided.
+            If neither ``star_id`` nor ``search_term`` is provided.
         """
-        term = search_term or object_id
+        term = search_term or star_id
         if not term:
-            raise InvalidArgumentError("Missing search term or object_id")
+            raise InvalidArgumentError("Missing search term or star_id")
         return self.get_object_fuzzy(term)
 
-    def analyze_periodicity(self, object_id: str) -> StellarObject | None:
+    def analyze_periodicity(self, star_id: str) -> StellarObject | None:
         """Search a star's light curve for a repeating pattern, and save it.
 
         Parameters
         ----------
-        object_id : `str`
+        star_id : `str`
             The id of the star to analyze.
 
         Returns
@@ -633,7 +633,7 @@ class StellarService:
             star exists.
         """
         with self._period_search_slots:
-            return self.astrometrics.stars.analyze_periodicity(object_id)
+            return self.astrometrics.stars.analyze_periodicity(star_id)
 
     def add_object(self, new_object: StellarObject) -> None:
         """Add or update a stellar object."""
@@ -645,7 +645,7 @@ class StellarService:
         updates = new_object.serialize()
         self.astrometrics.stars.update(new_object.id, updates)
 
-    def delete_object(self, object_id: str) -> bool:
+    def delete_object(self, star_id: str) -> bool:
         """Remove a stellar object from the database.
 
         Returns
@@ -653,14 +653,14 @@ class StellarService:
         result : `bool`
             `True` if the object was deleted, `False` otherwise.
         """
-        existing = self.astrometrics.stars.get(object_id)
+        existing = self.astrometrics.stars.get(star_id)
         if existing is not None:
             archive_record_before_delete(
                 self.config.get_library_path(), "stellar_object", existing.id, existing.serialize()
             )
-        return self.astrometrics.stars.delete(object_id)
+        return self.astrometrics.stars.delete(star_id)
 
-    def update_object(self, object_id: str, updates: dict) -> StellarObject | None:
+    def update_object(self, star_id: str, updates: dict) -> StellarObject | None:
         """Update stellar object properties.
 
         Returns
@@ -668,7 +668,7 @@ class StellarService:
         result : `StellarObject` or `None`
             The updated stellar object, or `None` if not found.
         """
-        return self.astrometrics.stars.update(object_id, updates)
+        return self.astrometrics.stars.update(star_id, updates)
 
     def get_spectroscopy_list(self) -> list[str]:
         """Get list of objects with processed spectrum data.

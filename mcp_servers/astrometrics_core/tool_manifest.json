@@ -23,7 +23,7 @@
       "interim_block": "",
       "note": "Built 2026-10-05. Calibration counts, or how a target's light frames match the darks. refresh reloads the index into memory and writes nothing."
     },
-    "calibration_refresh": {
+    "calibration_reindex_frames": {
       "tool_class": "change-data",
       "category": "calibration",
       "disposition": "withhold",

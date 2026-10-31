@@ -1288,7 +1288,7 @@ Every Python example assumes the library is installed and configured with your o
 
   astro = Astrometrics()
   result = astro.processing.calibration.measure_sensor_noise(
-      "ZWO ASI 533MM Pro", 0, 10, "1x1", temperature=-10, telescope="Apertura 75Q", filter_type="L"
+      "ZWO ASI 533MM Pro", 0, 10, "1x1", temperature_c=-10, telescope="Apertura 75Q", filter_name="L"
   )
   print(result.gain_e_per_adu, result.gain_spread_e_per_adu, result.read_noise_adu, result.read_noise_e)
   ```

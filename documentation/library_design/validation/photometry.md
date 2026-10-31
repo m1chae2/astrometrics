@@ -598,7 +598,7 @@ from astrometricslib import Astrometrics
 
 astrometrics = Astrometrics()
 result = astrometrics.processing.process_target(
-    "NGC 2244", stages=["photometry"], photometry={"filter_type": "Luminance"}
+    "NGC 2244", stages=["photometry"], photometry={"filter_name": "Luminance"}
 )
 print(result.quality.photometry.gate("comparison_ensemble").detail)
 ```

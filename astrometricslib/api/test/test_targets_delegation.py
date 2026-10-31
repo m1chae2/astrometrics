@@ -132,7 +132,7 @@ def test_reindex_frames_with_paths_adds_each_file_and_saves(monkeypatch: pytest.
     monkeypatch.setattr(catalog, "save", save_mock)
 
     report = catalog.reindex_frames(
-        target, paths=["/frame.fits"], role="DARK", filter_type="Ha", camera_id="ASI294"
+        target, paths=["/frame.fits"], role="DARK", filter_name="Ha", camera_id="ASI294"
     )
 
     mock.assert_called_once_with(target, "/frame.fits", "DARK", "Ha", "ASI294")

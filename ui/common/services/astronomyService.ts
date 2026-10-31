@@ -163,7 +163,7 @@ export async function fetchAstronomyData(
     signal?: AbortSignal
 ): Promise<any> {
     try {
-        const data = await callBackend("astronomy:get", { object_id: name.trim() }, { signal });
+        const data = await callBackend("astronomy:get", { star_id: name.trim() }, { signal });
         return data || null;
     } catch (err: unknown) {
         if ((err as any)?.name === 'AbortError') {
@@ -177,12 +177,12 @@ export async function fetchAstronomyData(
 
 /**
  * Runs the period and transit search on a star's light curve and saves the result.
- * @param objectId The id of the star to analyze.
+ * @param starId The id of the star to analyze.
  * @return The star with any new analysis attached, or null if it does not exist.
  */
-export async function analyzeStarPeriodicity(objectId: string): Promise<Spectrum | null> {
+export async function analyzeStarPeriodicity(starId: string): Promise<Spectrum | null> {
     try {
-        const data = await callBackend("astronomy:analyze_periodicity", { object_id: objectId.trim() });
+        const data = await callBackend("astronomy:analyze_periodicity", { star_id: starId.trim() });
         return (data as Spectrum | null) || null;
     } catch (err: unknown) {
         reportError(err instanceof Error ? err : new Error(String(err)), 'backend');

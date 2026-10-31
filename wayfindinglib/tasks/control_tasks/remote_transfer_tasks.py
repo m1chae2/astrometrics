@@ -31,11 +31,11 @@ if TYPE_CHECKING:
     from wayfindinglib.api.control.context import ControlContext
 
 # Matches the private `_CalibrationKind` literal that
-# `astrometricslib.api.processing.CalibrationCatalog.refresh` accepts.
+# `astrometricslib.api.processing.CalibrationCatalog.reindex_frames` accepts.
 CalibrationKind = Literal["dark", "bias", "flat"]
 
 # Remote folder name (case-insensitive) -> the calibration kind
-# `CalibrationCatalog.refresh` understands. These are calibration-frame
+# `CalibrationCatalog.reindex_frames` understands. These are calibration-frame
 # folders on the telescope, never astronomical targets.
 CALIBRATION_FOLDER_KINDS: dict[str, CalibrationKind] = {"bias": "bias", "dark": "dark", "flat": "flat"}
 
@@ -978,7 +978,7 @@ def sync_calibration_folder(context: ControlContext, remote_folder_name: str) ->
     added_paths: list[str] = []
     classify_and_sort_fits_files([staging_dir], "Calibration", config, _DEFAULT_TELESCOPE_NAME, added_paths)
 
-    astrometrics.processing.calibration.refresh(kind)
+    astrometrics.processing.calibration.reindex_frames(kind)
     astrometrics.processing.calibration.save()
 
     added_by_folder: dict[str, int] = {}

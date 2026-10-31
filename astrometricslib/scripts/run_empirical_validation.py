@@ -104,7 +104,7 @@ def run_photometry_validation(astrometrics: Astrometrics, camera_name: str) -> d
                 res = astrometrics.processing.process_target(
                     target,
                     stages=["photometry"],
-                    photometry={"frames": zwo_frames, "filter_type": "Luminance"},
+                    photometry={"frames": zwo_frames, "filter_name": "Luminance"},
                 ).results["photometry"]
                 status = res.get("status", "completed")
                 stars_found = res.get("starsFound", 0)

@@ -76,7 +76,7 @@ export async function analyzeImage(
         const result = await callBackend('analysis:analyze_image', {
             target_id: objectId,
             image_files: imageFiles,
-            filter_type: filterType,
+            filter_name: filterType,
             type: type
         });
         return result || null;

@@ -413,7 +413,7 @@ DEFAULT_ANALYSIS_STAGES = ("astrometry", "photometry", "spectroscopy")
 
 STAGE_OPTIONS = {
     "astrometry": frozenset({"path"}),
-    "photometry": frozenset({"frames", "filter_type", "use_astrometry_seed", "max_workers"}),
+    "photometry": frozenset({"frames", "filter_name", "use_astrometry_seed", "max_workers"}),
     "spectroscopy": frozenset({"path", "limit"}),
     "asteroids": frozenset({"moving_object_config"}),
 }
@@ -482,6 +482,9 @@ def run_target_stages(
         if stage not in stages:
             continue
         options = dict(stage_options.get(stage) or {})
+        if "filter_name" in options:
+            # The stage runner still names this argument ``filter_type``.
+            options["filter_type"] = options.pop("filter_name")
         if drivers is not None and stage in ("astrometry", "spectroscopy"):
             options["drivers"] = drivers
         if stage == "photometry" and frame_selection is not None:

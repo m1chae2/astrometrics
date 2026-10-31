@@ -71,7 +71,7 @@ def run_pipeline(target_id: str = "M 13") -> None:
     photometry_result = astrometrics.processing.process_target(
         target,
         stages=["photometry"],
-        photometry={"filter_type": "L", "frames": l_frames, "use_astrometry_seed": True},
+        photometry={"filter_name": "L", "frames": l_frames, "use_astrometry_seed": True},
     ).results["photometry"]
     logger.info("Photometry status: %s", photometry_result.get("status"))
 

@@ -233,7 +233,7 @@ class TargetCatalog:
         target: str | Target | None = None,
         paths: builtins.list[str] | None = None,
         role: str = "LIGHT",
-        filter_type: str | None = None,
+        filter_name: str | None = None,
         camera_id: str | None = None,
         prune_missing: bool = False,
         refresh_headers: bool = False,
@@ -244,7 +244,7 @@ class TargetCatalog:
         Three forms:
 
         - ``target`` and ``paths``: add only those files to the target, reading
-          each FITS header. ``role``, ``filter_type`` and ``camera_id``
+          each FITS header. ``role``, ``filter_name`` and ``camera_id``
           override what the header says. A file that is already listed is
           updated. A finished picture (``.jpg``, ``.jpeg``, ``.png``,
           ``.tiff`` or ``.tif``) is not a frame: it becomes the target's
@@ -269,7 +269,7 @@ class TargetCatalog:
         role : `str`, optional
             With ``paths``: the frames' role, such as ``"LIGHT"`` (default),
             ``"DARK"``, ``"BIAS"`` or ``"FLAT"``.
-        filter_type : `str`, optional
+        filter_name : `str`, optional
             With ``paths``: the filter, instead of the one in the header.
         camera_id : `str`, optional
             With ``paths``: the camera name, instead of the one in the header.
@@ -303,13 +303,13 @@ class TargetCatalog:
         reject_unused_arguments(
             form,
             {
-                "paths": ("role", "filter_type", "camera_id"),
+                "paths": ("role", "filter_name", "camera_id"),
                 "target": ("prune_missing", "refresh_headers"),
                 "library": ("prune_missing", "refresh_headers", "on_progress"),
             },
             {
                 "role": role != "LIGHT",
-                "filter_type": filter_type is not None,
+                "filter_name": filter_name is not None,
                 "camera_id": camera_id is not None,
                 "prune_missing": prune_missing,
                 "refresh_headers": refresh_headers,
@@ -332,7 +332,7 @@ class TargetCatalog:
                     resolved.stacking.processed_image = path
                     processed_image = path
                     continue
-                record = add_frame(resolved, path, role, filter_type, camera_id)
+                record = add_frame(resolved, path, role, filter_name, camera_id)
                 added.append(record.path)
         else:
             target_records.reindex_frames(

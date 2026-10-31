@@ -339,6 +339,26 @@ def launch_siril_gui(siril_executable: str, file_path: str) -> None:
         logger.debug("Failed to launch Siril GUI for '%s': %s", file_path, exc)
 
 
+def _kill_other_processes(find_command: list[str]) -> None:
+    """Force-kill the processes a command lists, but never this program.
+
+    This program can have a Siril pipe open itself: the thread that writes
+    commands holds the pipe while it waits for Siril to answer. If Siril dies
+    during that wait, the program is one of the processes using the pipe, so
+    killing everything on the list would kill the program too.
+
+    Parameters
+    ----------
+    find_command : `list` [`str`]
+        A command that prints process ids on standard output, such as
+        ``fuser`` or ``pgrep``. Anything else it prints is ignored.
+    """
+    found = subprocess.run(find_command, capture_output=True, text=True).stdout
+    for process_id in {int(word) for word in found.split() if word.isdigit()} - {os.getpid()}:
+        with contextlib.suppress(OSError):
+            os.kill(process_id, signal.SIGKILL)
+
+
 class SirilSession:
     """Run Siril over named pipes and read what it reports.
 
@@ -400,19 +420,11 @@ class SirilSession:
                 pipes = glob.glob(os.path.join(workdir, "siril_command.*"))
                 for pipe in pipes:
                     try:
-                        subprocess.run(
-                            ["fuser", "-k", "-9", pipe],
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                        )
+                        _kill_other_processes(["fuser", pipe])
                     except (OSError, subprocess.SubprocessError) as exc:
                         logger.debug("fuser cleanup failed for pipe '%s': %s", pipe, exc)
                 # Safety net for sandboxed processes linked to workdir pipes
-                subprocess.run(
-                    ["pkill", "-9", "-f", workdir],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
+                _kill_other_processes(["pgrep", "-f", workdir])
             except (OSError, subprocess.SubprocessError) as exc:
                 logger.debug("Failed to force-kill lingering Siril processes for '%s': %s", workdir, exc)
 

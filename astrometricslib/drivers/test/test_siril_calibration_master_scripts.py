@@ -24,11 +24,13 @@ import pytest
 from astrometricslib.drivers import siril_interface
 from astrometricslib.drivers.siril_interface import (
     CALIBRATION_BLOCKING_FLAGS_KEY,
+    SirilStackRequest,
     build_bias_master_commands,
     build_dark_master_commands,
     build_flat_master_commands,
     build_single_light_commands,
     calibration_count_flags,
+    imaging_stacker,
 )
 from astrometricslib.foundation.config import AppConfiguration
 
@@ -318,8 +320,8 @@ def run_with_staged_frames(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> C
         "assess_staged_flats",
         lambda self, *a, **k: MagicMock(smoothing_sigma_pixels=None, as_diagnostics=lambda: {}),
     )
-    monkeypatch.setattr(siril_interface, "_frames_use_color_filter_array", lambda path: False)
-    monkeypatch.setattr(siril_interface, "siril_process_lock", lambda **kwargs: _NullContext())
+    monkeypatch.setattr(imaging_stacker, "_frames_use_color_filter_array", lambda path: False)
+    monkeypatch.setattr(imaging_stacker, "siril_process_lock", lambda **kwargs: _NullContext())
 
     def run(
         num_biases: int,
@@ -367,10 +369,12 @@ def run_with_staged_frames(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> C
         driver = siril_interface.ImageProcessing(mock_config, MagicMock())
         driver.workdir = str(tmp_path / "work")
         driver.process_target(
-            id="MasterScripts",
-            image_files=[{"path": "a.fits", "camera": "Cam"}],
-            is_spectral=False,
-            rejection_sigma=rejection_sigma,
+            SirilStackRequest(
+                id="MasterScripts",
+                image_files=[{"path": "a.fits", "camera": "Cam"}],
+                is_spectral=False,
+                rejection_sigma=rejection_sigma,
+            )
         )
         logging.getLogger("siril_MasterScripts").handlers.clear()
         return list(sent_commands), driver.last_run_diagnostics

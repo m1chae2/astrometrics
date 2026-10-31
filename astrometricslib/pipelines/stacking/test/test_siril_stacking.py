@@ -11,6 +11,7 @@ a fake Siril driver that writes small real FITS files, so the file handling
 import json
 import logging
 import zlib
+from dataclasses import fields
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -70,7 +71,7 @@ class FakeSirilDriver:
         self.calls: list[dict[str, Any]] = []
         self.last_run_diagnostics: dict[str, Any] = {}
 
-    def process_target(self, **kwargs: Any) -> str | None:
+    def process_target(self, request: Any) -> str | None:
         """Pretend to run Siril.
 
         Returns
@@ -78,6 +79,7 @@ class FakeSirilDriver:
         path : `str` or `None`
             The stacked file this call wrote, or `None` for a failed run.
         """
+        kwargs = {item.name: getattr(request, item.name) for item in fields(request)}
         self.calls.append(kwargs)
         outcome = self.outcomes.pop(0)
         failed, registered = outcome.get("failed", 0), outcome.get("registered", 10)
@@ -138,7 +140,7 @@ def test_standard_imaging_is_one_plain_run(tmp_path: Path) -> None:
 
     assert path == str(tmp_path / "M_42_L_Stacked.fits")
     assert len(driver.calls) == 1
-    assert "spectral_star_detection" not in driver.calls[0]
+    assert driver.calls[0]["spectral_star_detection"] == "standard"  # the request default
     assert driver.calls[0]["is_spectral"] is False
 
 
@@ -461,7 +463,7 @@ def test_imaging_frames_of_different_lengths_are_also_stacked_per_exposure(
 
     assert [len(call["image_files"]) for call in driver.calls] == [6, 6]
     assert [call["is_spectral"] for call in driver.calls] == [False, False]
-    assert "spectral_star_detection" not in driver.calls[0]
+    assert driver.calls[0]["spectral_star_detection"] == "standard"  # the request default
     assert path == str(tmp_path / "NGC_2403_L_Stacked.fits")
     assert [entry["exposure_seconds"] for entry in diagnostics["exposure_group_summaries"]] == [60.0, 300.0]
 
@@ -493,7 +495,7 @@ def test_a_group_that_shares_no_field_with_the_others_is_left_out(tmp_path: Path
     class StrangerDriver(FakeSirilDriver):
         """Writes a different star field for the second call."""
 
-        def process_target(self, **kwargs: Any) -> str | None:
+        def process_target(self, request: Any) -> str | None:
             """Write a stack, then swap the second call's image for a stranger.
 
             Returns
@@ -501,7 +503,7 @@ def test_a_group_that_shares_no_field_with_the_others_is_left_out(tmp_path: Path
             path : `str` or `None`
                 The stack path.
             """
-            path = super().process_target(**kwargs)
+            path = super().process_target(request)
             if len(self.calls) == 2 and path:
                 generator = np.random.default_rng(999)
                 y, x = np.mgrid[0:64, 0:64].astype(np.float64)
@@ -531,7 +533,7 @@ def test_a_group_whose_every_attempt_is_blank_is_left_out_as_not_stacked(tmp_pat
     class BlankGroupDriver(FakeSirilDriver):
         """Blanks every stack of the second group (calls 4 to 6)."""
 
-        def process_target(self, **kwargs: Any) -> str | None:
+        def process_target(self, request: Any) -> str | None:
             """Write a stack, then blank it for the second group.
 
             Returns
@@ -539,7 +541,7 @@ def test_a_group_whose_every_attempt_is_blank_is_left_out_as_not_stacked(tmp_pat
             path : `str` or `None`
                 The stack path.
             """
-            path = super().process_target(**kwargs)
+            path = super().process_target(request)
             if len(self.calls) > 1 and path:
                 fits.writeto(path, np.zeros((64, 64), np.float32), overwrite=True)
             return path
@@ -564,7 +566,7 @@ def test_a_blank_attempt_never_beats_a_real_stack_that_registered_fewer_frames(t
     class BlankLastDriver(FakeSirilDriver):
         """Writes a blank third stack that reports no counts."""
 
-        def process_target(self, **kwargs: Any) -> str | None:
+        def process_target(self, request: Any) -> str | None:
             """Write a stack, then blank the third call's image.
 
             Returns
@@ -572,7 +574,7 @@ def test_a_blank_attempt_never_beats_a_real_stack_that_registered_fewer_frames(t
             path : `str` or `None`
                 The stack path.
             """
-            path = super().process_target(**kwargs)
+            path = super().process_target(request)
             if len(self.calls) == 3 and path:
                 self.last_run_diagnostics.pop("registered_frames")
                 self.last_run_diagnostics.pop("registration_failed_frames")

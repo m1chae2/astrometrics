@@ -11,8 +11,8 @@ from unittest.mock import MagicMock
 from astrometricslib.drivers import siril_interface
 from astrometricslib.drivers.siril_interface import (
     CALIBRATION_MASTER_CACHE_DIRECTORY_NAME,
-    _calibration_source_fingerprint,
 )
+from astrometricslib.drivers.siril_interface.staging import _calibration_source_fingerprint
 
 
 def _make_processor(tmp_path: Path):  # ruff: ignore[missing-return-type-private-function]

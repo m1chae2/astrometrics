@@ -799,7 +799,8 @@ class AppConfiguration:
         the middle value can outvote one bad frame.
 
         A master built from fewer frames is still built, and the stack is
-        flagged (see `calibration_count_flags` in `siril_interface.py`).
+        flagged (see `calibration_count_flags` in
+        `siril_interface/script_builders.py`).
 
         Returns
         -------

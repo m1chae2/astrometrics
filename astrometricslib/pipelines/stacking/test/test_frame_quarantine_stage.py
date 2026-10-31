@@ -107,7 +107,7 @@ def test_stage_stacks_only_the_frames_the_quarantine_step_keeps() -> None:
         driver, summary_builder = run_stage(target)
 
     quarantine_step.assert_called_once()
-    stacked_frames = driver.process_target.call_args.kwargs["image_files"]
+    stacked_frames = driver.process_target.call_args.args[0].image_files
     stacked_paths = [frame["path"] if isinstance(frame, dict) else frame.path for frame in stacked_frames]
     assert moved_path not in stacked_paths
     assert len(stacked_frames) == 9

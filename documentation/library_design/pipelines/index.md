@@ -26,7 +26,7 @@ Stage 1 returns a `Result` object. `run` is skipped only when that object says `
 | Spectroscopy | No-op: returns an empty `Result`. |
 | Asteroid detection | No-op: returns an empty `Result`. |
 
-The fifth pipeline, stacking, does not use this interface and has no adapter. It runs from `stage.stack_frames` through `stack_runner.run_stack` to a `StackingDriver`: the interface for a program that calibrates, aligns and combines frames. The one implementation uses Siril, an open-source astronomy image processor, through the `ImageProcessing` class in `siril_interface.py`.
+The fifth pipeline, stacking, does not use this interface and has no adapter. It runs from `stage.stack_frames` through `stack_runner.run_stack` to a `StackingDriver`: the interface for a program that calibrates, aligns and combines frames. The one implementation uses Siril, an open-source astronomy image processor, through the `ImageProcessing` class in the `siril_interface` package.
 
 ```mermaid
 flowchart LR

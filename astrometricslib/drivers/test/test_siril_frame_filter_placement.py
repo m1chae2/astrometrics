@@ -29,6 +29,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from astrometricslib.drivers import siril_interface
+from astrometricslib.drivers.siril_interface import SirilStackRequest, imaging_stacker
 
 
 @pytest.fixture
@@ -95,8 +96,8 @@ def captured_siril_script(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Ca
     monkeypatch.setattr(
         siril_interface.ImageProcessing, "restore_cached_calibration_masters", lambda self, *a, **k: set()
     )
-    monkeypatch.setattr(siril_interface, "_frames_use_color_filter_array", lambda path: False)
-    monkeypatch.setattr(siril_interface, "siril_process_lock", lambda **kwargs: _NullContext())
+    monkeypatch.setattr(imaging_stacker, "_frames_use_color_filter_array", lambda path: False)
+    monkeypatch.setattr(imaging_stacker, "siril_process_lock", lambda **kwargs: _NullContext())
 
     def run_process_target(
         is_spectral: bool,
@@ -124,13 +125,15 @@ def captured_siril_script(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Ca
         driver = siril_interface.ImageProcessing(mock_config, MagicMock())
         driver.workdir = str(tmp_path / "work")
         driver.process_target(
-            id="FilterPlacement",
-            image_files=[{"path": "a.fits", "camera": "Cam"}],
-            is_spectral=is_spectral,
-            filter_wfwhm=filter_wfwhm,
-            filter_round=filter_round,
-            spectral_star_detection=spectral_star_detection,
-            reference_frame_path=reference_frame_path,
+            SirilStackRequest(
+                id="FilterPlacement",
+                image_files=[{"path": "a.fits", "camera": "Cam"}],
+                is_spectral=is_spectral,
+                filter_wfwhm=filter_wfwhm,
+                filter_round=filter_round,
+                spectral_star_detection=spectral_star_detection,
+                reference_frame_path=reference_frame_path,
+            )
         )
         logging.getLogger("siril_FilterPlacement").handlers.clear()
         return list(sent_commands)

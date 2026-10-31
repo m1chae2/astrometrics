@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 from astropy.io import fits
 
-from astrometricslib.drivers.siril_interface import _frames_use_color_filter_array
+from astrometricslib.drivers.siril_interface.staging import _frames_use_color_filter_array
 
 
 def _write_frame(directory, name, bayer_pattern=None) -> Path:  # ruff: ignore[missing-type-function-argument]

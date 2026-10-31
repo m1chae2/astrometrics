@@ -68,7 +68,7 @@ def test_filter_stack_naming_and_target_properties() -> None:
 
         assert stacked_l == "/library/lights/M_13/M_13_L_Stacked.fits"
         assert target.stacking.stacked_image == "/library/lights/M_13/M_13_L_Stacked.fits"
-        assert mock_driver.process_target.call_args.kwargs["output_file"] == "M_13_L_Stacked.fits"
+        assert mock_driver.process_target.call_args.args[0].output_file == "M_13_L_Stacked.fits"
 
         # 2. Stack SPEC frames
         mock_driver.process_target.return_value = "/library/lights/M_13/M_13_SPEC_Stacked.fits"
@@ -76,4 +76,4 @@ def test_filter_stack_naming_and_target_properties() -> None:
 
         assert stacked_spec == "/library/lights/M_13/M_13_SPEC_Stacked.fits"
         assert target.spectral_stacking.stacked_image == "/library/lights/M_13/M_13_SPEC_Stacked.fits"
-        assert mock_driver.process_target.call_args.kwargs["output_file"] == "M_13_SPEC_Stacked.fits"
+        assert mock_driver.process_target.call_args.args[0].output_file == "M_13_SPEC_Stacked.fits"

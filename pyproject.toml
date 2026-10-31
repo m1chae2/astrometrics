@@ -250,7 +250,7 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 # ssh/rsync/scp to remote StellarMate boxes). Reviewed: every call site uses
 # list-form args (never shell=True, never a string built by interpolating
 # untrusted input into a shell command), which is the safe subprocess pattern.
-"astrometricslib/drivers/siril_interface.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"]
+"astrometricslib/drivers/siril_interface/*.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"]
 "astrometricslib/scripts/spectral_registration_quality_analysis.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "astrometricslib/scripts/backup_library_databases.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "astrometricslib/scripts/restore_library_databases.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]

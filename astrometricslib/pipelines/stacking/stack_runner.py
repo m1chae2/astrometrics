@@ -10,8 +10,9 @@ It adds two things the engine alone does not do:
    enough frames, the stack is tried again with a more relaxed detection,
    and if that still is not enough, with phase correlation in Python instead
    of star matching at all (see `spectral_frame_alignment`, and
-   `siril_interface._stack_phase_correlation_aligned_spectral_frames`) --
-   the better of the three attempts is kept. Losing frames used to happen
+   `_stack_phase_correlation_aligned_spectral_frames` in
+   `siril_interface.spectral_stacker`) -- the better of the three attempts
+   is kept. Losing frames used to happen
    silently; now it is retried and, if it still happens, logged as a
    warning.
 2. Exposure groups. A spectral session shot at several exposure lengths is
@@ -55,8 +56,9 @@ PIPELINE_STEPS = PipelineSteps(assess_flats=assess_flats, align_frames=align_cal
 MINIMUM_REGISTERED_FRACTION = 0.9
 
 # The star-detection settings to try for spectral frames, in order (see
-# `siril_interface.SPECTRAL_STAR_DETECTION_COMMANDS`). "phase_correlation"
-# is not a detection setting at all -- it tells `process_target` to skip
+# `siril_interface.script_builders.SPECTRAL_STAR_DETECTION_COMMANDS`).
+# "phase_correlation" is not a detection setting at all -- it tells
+# `process_target` to skip
 # Siril's own star-based registration entirely and align the frames in
 # Python instead (see `spectral_frame_alignment`). It is tried last, not
 # first, because it is unvalidated against the wide, star-rich fields

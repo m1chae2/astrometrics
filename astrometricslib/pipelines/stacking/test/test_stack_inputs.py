@@ -422,7 +422,7 @@ def test_every_setting_the_stacking_code_reads_is_accounted_for() -> None:
     files = [
         *(root / "pipelines" / "stacking").rglob("*.py"),
         root / "drivers" / "siril_stacking_driver.py",
-        root / "drivers" / "siril_interface.py",
+        *(root / "drivers" / "siril_interface").rglob("*.py"),
     ]
     pattern = re.compile(r"(?:get_configuration\(\)|config|configuration)\.(get_[a-z_]+)\(")
     found: set[str] = set()

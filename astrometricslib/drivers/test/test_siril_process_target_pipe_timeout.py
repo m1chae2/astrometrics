@@ -22,6 +22,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from astrometricslib.drivers import siril_interface
+from astrometricslib.drivers.siril_interface import SirilStackRequest, imaging_stacker, session
 
 
 class _NullContext:
@@ -61,12 +62,12 @@ def test_process_target_does_not_hang_when_siril_dies_at_launch(
     monkeypatch.setattr(
         siril_interface.ImageProcessing, "restore_cached_calibration_masters", lambda self, *a, **k: set()
     )
-    monkeypatch.setattr(siril_interface, "_frames_use_color_filter_array", lambda path: False)
-    monkeypatch.setattr(siril_interface, "siril_process_lock", lambda **kwargs: _NullContext())
+    monkeypatch.setattr(imaging_stacker, "_frames_use_color_filter_array", lambda path: False)
+    monkeypatch.setattr(imaging_stacker, "siril_process_lock", lambda **kwargs: _NullContext())
     # This test's whole point is bounding SIRIL_PIPE_CONNECT_TIMEOUT_SECONDS's
     # wait -- keep it short so a regression fails the test in seconds, not
     # by tying up the suite for the full 30s production default.
-    monkeypatch.setattr(siril_interface, "SIRIL_PIPE_CONNECT_TIMEOUT_SECONDS", 3)
+    monkeypatch.setattr(session, "SIRIL_PIPE_CONNECT_TIMEOUT_SECONDS", 3)
 
     mock_config = MagicMock()
     mock_config.get_siril_executable.return_value = "siril"
@@ -87,8 +88,7 @@ def test_process_target_does_not_hang_when_siril_dies_at_launch(
 
     started_at = time.monotonic()
     result = driver.process_target(
-        id="DeadSirilTarget",
-        image_files=[{"path": "a.fits", "camera": "Cam"}],
+        SirilStackRequest(id="DeadSirilTarget", image_files=[{"path": "a.fits", "camera": "Cam"}])
     )
     elapsed = time.monotonic() - started_at
     logging.getLogger("siril_DeadSirilTarget").handlers.clear()

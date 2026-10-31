@@ -6,6 +6,7 @@ solve without scale hints.
 """
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -139,7 +140,7 @@ def test_a_colour_stack_is_flattened_before_upload(
             uploaded["ndim"] = hdul[0].data.ndim
         return fits.Header({"CRVAL1": 1.0})
 
-    monkeypatch.setattr(solver.astrometry_net, "solve_from_image", _fake_solve_from_image)
+    monkeypatch.setattr(solver, "astrometry_net", SimpleNamespace(solve_from_image=_fake_solve_from_image))
 
     assert solver._solve_online_image(str(colour_path)) is not None
     assert uploaded["ndim"] == 2
@@ -159,7 +160,7 @@ def test_a_mono_stack_is_uploaded_unchanged(
         uploaded["path"] = path
         return fits.Header({"CRVAL1": 1.0})
 
-    monkeypatch.setattr(solver.astrometry_net, "solve_from_image", _fake_solve_from_image)
+    monkeypatch.setattr(solver, "astrometry_net", SimpleNamespace(solve_from_image=_fake_solve_from_image))
     solver._solve_online_image(str(mono_path))
 
     assert uploaded["path"] == str(mono_path)

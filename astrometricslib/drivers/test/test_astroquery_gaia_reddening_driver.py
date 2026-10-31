@@ -335,18 +335,14 @@ def test_a_query_that_does_not_answer_in_time_is_an_error() -> None:
         release.set()
 
 
-def test_the_default_query_function_uses_the_gaia_client(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_the_default_query_function_uses_the_gaia_client(gaia_module: MagicMock) -> None:
     """Verify the built-in path calls ``Gaia.launch_job`` with the query.
 
     The Gaia client is replaced, so nothing is sent over the network.
     """
-    import astroquery.gaia as gaia_module
-
     fake_gaia = MagicMock()
     fake_gaia.launch_job.return_value.get_results.return_value = gaia_table(0.1339, None)
-    monkeypatch.setattr(gaia_module, "Gaia", fake_gaia)
+    gaia_module.Gaia = fake_gaia
 
     estimate = AstroqueryGaiaReddeningDriver().get_reddening(SOURCE_ID)
 

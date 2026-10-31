@@ -304,11 +304,9 @@ def test_a_deeper_request_downloads_again_after_a_shallower_one(
 
 
 def test_the_bulk_seed_records_its_region_and_skips_a_covered_one(
-    config: Any, monkeypatch: pytest.MonkeyPatch
+    config: Any, monkeypatch: pytest.MonkeyPatch, gaia_module: MagicMock
 ) -> None:
     """Seeding leaves a record, so a second seed downloads nothing."""
-    import astroquery.gaia as gaia_module
-
     queries: list[str] = []
     count = 8
     table = Table({

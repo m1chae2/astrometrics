@@ -132,6 +132,32 @@ mock_astroquery.exceptions.TimeoutError = type("TimeoutError", (Exception,), {})
 sys.modules["astroquery.exceptions"] = mock_astroquery.exceptions
 
 
+@pytest.fixture
+def gaia_module(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """Give one test its own stand-in for the ``astroquery.gaia`` module.
+
+    The session-wide stand-in above is shared by every test. A test that
+    patches an attribute of a shared mock (``monkeypatch.setattr`` on it)
+    makes pytest 9.2 and later delete that attribute when the patch is undone,
+    and every later test then finds it missing. Code under test imports
+    ``Gaia`` from ``astroquery.gaia`` when it runs, so a fresh mock in
+    ``sys.modules`` is found there, and it is thrown away after the test.
+
+    Parameters
+    ----------
+    monkeypatch : `pytest.MonkeyPatch`
+        Puts the stand-in into ``sys.modules`` for this test only.
+
+    Returns
+    -------
+    module : `unittest.mock.MagicMock`
+        The stand-in module. Its ``Gaia`` attribute is the client to patch.
+    """
+    own_module = MagicMock(name="astroquery.gaia")
+    monkeypatch.setitem(sys.modules, "astroquery.gaia", own_module)
+    return own_module
+
+
 def pytest_configure(config) -> None:  # ruff: ignore[missing-type-function-argument]
     """Register custom markers to stop pytest from printing warnings."""
     config.addinivalue_line("markers", "slow: marks tests as slow subprocess integration tests")

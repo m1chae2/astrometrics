@@ -14,8 +14,8 @@ import threading
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import MagicMock
 
-import astroquery.gaia as gaia_module
 import numpy as np
 import pytest
 from astropy.table import Table
@@ -58,8 +58,15 @@ def xp_reply(source_id: int = SOURCE_ID) -> dict[str, list[Table]]:
 
 
 @pytest.fixture
-def archive(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+def archive(monkeypatch: pytest.MonkeyPatch, gaia_module: MagicMock) -> SimpleNamespace:
     """Replace the Gaia archive client's download with a controllable one.
+
+    Parameters
+    ----------
+    monkeypatch : `pytest.MonkeyPatch`
+        Replaces the download.
+    gaia_module : `unittest.mock.MagicMock`
+        This test's own stand-in for ``astroquery.gaia`` (see `conftest.py`).
 
     Returns
     -------
@@ -199,7 +206,7 @@ def test_a_table_without_the_flux_columns_is_refused() -> None:
 
 
 def test_a_download_that_never_answers_is_abandoned(
-    tmp_path: Path, archive: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, archive: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, gaia_module: MagicMock
 ) -> None:
     """A stalled archive gives `None` after the timeout instead of hanging."""
     release = threading.Event()

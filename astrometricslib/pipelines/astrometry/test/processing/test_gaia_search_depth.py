@@ -9,6 +9,7 @@ row limit. The limit comes from how deep the frame's own detections go. These
 tests use a fake Gaia client, so no network is needed.
 """
 
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -41,8 +42,8 @@ def fake_gaia(monkeypatch: pytest.MonkeyPatch, row_count: int) -> list[str]:
     queries : `list` [`str`]
         Collects the ADQL text of each query sent.
     """
-    import astroquery.gaia as gaia_module
-
+    gaia_module = MagicMock(name="astroquery.gaia")
+    monkeypatch.setitem(sys.modules, "astroquery.gaia", gaia_module)
     queries: list[str] = []
     table = Table({
         "source_id": np.arange(row_count).astype(str),

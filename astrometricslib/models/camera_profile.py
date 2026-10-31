@@ -253,6 +253,87 @@ class SensorSettingNoise(BaseModel):
         return (self.gain_setting, self.offset, self.binning)
 
 
+class SettingBiasLevel(BaseModel):
+    """The bias level of a camera at one gain, offset and binning.
+
+    The bias level is the pixel value a frame reads with no light and no
+    exposure time: the camera's offset times a constant, plus a small amount.
+    It is measured from bias frames. A bias frame whose level differs from
+    this value is suspect, and so is a dark frame that does not sit near the
+    bias level of its own setting. Unlike gain and read noise, the level
+    changes with the offset, so a value is only ever used for the exact
+    setting it names.
+
+    Attributes
+    ----------
+    gain_setting : `str`
+        The camera's gain setting (or the ISO of a DSLR).
+    offset : `str`
+        The camera's offset.
+    binning : `str`
+        The binning, such as ``"1x1"``.
+    bias_level_adu : `ProvenancedValue`
+        The mean pixel value of a bias frame, in ADU, with how it was found.
+    temperature_c : `float` or `None`
+        The sensor temperature of the measurement. A note, not part of the key.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    gain_setting: str = Field(min_length=1)
+    offset: str = "0"
+    binning: str = "1x1"
+    bias_level_adu: ProvenancedValue
+    temperature_c: float | None = None
+
+    @field_validator("gain_setting", mode="before")
+    @classmethod
+    def write_gain_setting_in_standard_form(cls, value: object) -> str:
+        """Write the gain setting the way frames are compared.
+
+        Returns
+        -------
+        gain_setting : `str`
+            The setting in its standard form.
+        """
+        return canonical_gain_setting(value)
+
+    @field_validator("offset", mode="before")
+    @classmethod
+    def write_offset_in_standard_form(cls, value: object) -> str:
+        """Write the offset the way frames are compared.
+
+        Returns
+        -------
+        offset : `str`
+            The offset in its standard form.
+        """
+        return canonical_offset_setting(value)
+
+    @field_validator("binning", mode="before")
+    @classmethod
+    def write_binning_in_standard_form(cls, value: object) -> str:
+        """Write the binning the way frames are compared.
+
+        Returns
+        -------
+        binning : `str`
+            The binning in its standard form.
+        """
+        return canonical_binning_setting(value)
+
+    @property
+    def setting_key(self) -> tuple[str, str, str]:
+        """Give the setting this entry applies to.
+
+        Returns
+        -------
+        key : `tuple` [`str`, `str`, `str`]
+            The gain setting, offset and binning, each in standard form.
+        """
+        return (self.gain_setting, self.offset, self.binning)
+
+
 # The reason given for a frame when the profile still holds the single,
 # setting-less gain and read noise of the old file layout. Decision 7 of the
 # quality-metrics plan: such a value is never applied, because nobody recorded
@@ -350,6 +431,10 @@ class CameraProfile(BaseModel):
         turn counts into a noise estimate. Each setting appears once. A
         frame uses an entry only when its own setting matches exactly; it
         never borrows the value of a nearby setting.
+    bias_levels : `tuple` [`SettingBiasLevel`, ...]
+        The bias level measured at each gain setting, offset and binning.
+        A setting appears once. A level is only used for the exact setting
+        it names, because the level moves with the offset.
     has_unkeyed_noise_values : `bool`
         `True` when the config still holds the old single gain and read
         noise for this camera. They are ignored, because nobody recorded the
@@ -372,6 +457,7 @@ class CameraProfile(BaseModel):
     photometric_linearity_limit_adu: ProvenancedValue | None = None
     quantum_efficiency: QuantumEfficiencyRecord | None = None
     sensor_noise: tuple[SensorSettingNoise, ...] = ()
+    bias_levels: tuple[SettingBiasLevel, ...] = ()
     has_unkeyed_noise_values: bool = False
     notes: str = ""
 
@@ -397,7 +483,42 @@ class CameraProfile(BaseModel):
                     f"binning {entry.binning}"
                 )
             seen.add(entry.setting_key)
+        seen_levels: set[tuple[str, str, str]] = set()
+        for level in self.bias_levels:
+            if level.setting_key in seen_levels:
+                raise ValueError(
+                    f"two bias_levels entries share gain {level.gain_setting}, offset {level.offset}, "
+                    f"binning {level.binning}"
+                )
+            seen_levels.add(level.setting_key)
         return self
+
+    def bias_level_for(
+        self, gain_setting: object, offset: object, binning: object
+    ) -> SettingBiasLevel | None:
+        """Find the bias level stored for a camera setting.
+
+        Parameters
+        ----------
+        gain_setting : `Any`
+            The gain (or ISO), as text or a number.
+        offset : `Any`
+            The offset. A missing offset counts as 0.
+        binning : `Any`
+            The binning, such as ``"1x1"`` or ``2``.
+
+        Returns
+        -------
+        level : `SettingBiasLevel` or `None`
+            The entry for exactly this setting, or `None`. There is no
+            fallback to another offset: the level changes with the offset.
+        """
+        wanted = (
+            canonical_gain_setting(gain_setting),
+            canonical_offset_setting(offset),
+            canonical_binning_setting(binning),
+        )
+        return next((level for level in self.bias_levels if level.setting_key == wanted), None)
 
     def sensor_noise_for(
         self,

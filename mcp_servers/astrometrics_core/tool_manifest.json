@@ -2,12 +2,19 @@
   "server": "astrometricslib-core",
   "generated_by": "python -m mcp_servers.inventory --write-runtime-manifests",
   "tools": {
-    "calibration_assess_flats": {
+    "calibration_assess": {
       "tool_class": "compute",
       "category": "calibration",
       "disposition": "keep",
       "interim_block": "",
-      "note": "Checks flats. Writes nothing."
+      "note": "Judges the dark, bias or flat sets of the library from the stored numbers. Flats are measured when asked. Writes nothing."
+    },
+    "calibration_measure_frames": {
+      "tool_class": "compute",
+      "category": "calibration",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "Writes the measured numbers of dark and bias frames to the quality store and their stamps to the calibration index. The AI is read-only."
     },
     "calibration_measure_sensor_noise": {
       "tool_class": "compute",

@@ -369,7 +369,9 @@ class SirilImagingStacker(SirilSpectralStacker):
             The running process, its output thread and the launch time.
         """
         siril_debug_log = os.path.join(staged.target_folder, "siril_debug.log")
-        run.siril_lock.enter_context(siril_process_lock(job_logger=run.job_logger, config=self.config))
+        run.siril_lock.enter_context(
+            siril_process_lock(job_logger=run.job_logger, config=self.config, work_name=str(run.request.id))
+        )
 
         # Measured from launch rather than from the start of
         # process_target, so waiting on the Siril lock is not counted

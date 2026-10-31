@@ -113,6 +113,7 @@ def siril_process_lock(
     job_logger: logging.Logger | None = None,
     max_concurrent_runs: int | None = None,
     config: AppConfiguration | None = None,
+    work_name: str = "",
 ) -> Generator[None]:
     """Hold one of a limited number of machine-wide Siril slots.
 
@@ -139,6 +140,10 @@ def siril_process_lock(
     config : `AppConfiguration`, optional
         The configuration that sets the slot count. A caller that holds
         one passes it. Defaults to the shared configuration.
+    work_name : `str`, optional
+        Name of the target or job taking the slot. It is recorded next to
+        the lock, and a long wait reports it with the holders it is behind
+        (to ``job_logger`` too). Defaults to a name for the calling thread.
 
     Yields
     ------
@@ -176,7 +181,9 @@ def siril_process_lock(
     bound_tally = _bound_lock_wait.get()
     stop_open_wait = bound_tally.start_open_wait() if bound_tally is not None else None
     try:
-        with acquire_resource_slot(configuration, "job", slot_count):
+        with acquire_resource_slot(
+            configuration, "job", slot_count, work_name=work_name, wait_logger=job_logger
+        ):
             # Recorded whether or not the wait was long: the stacking
             # timeout adds this back to its budget, and a queue that exists
             # to protect the CPU must not convert into a cascade of

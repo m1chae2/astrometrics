@@ -725,7 +725,7 @@ def _run_photometry_stage(
         The photometry pipeline's result dict.
     """
     logger.info("[%s] Running Photometry/Variability Analysis...", target.id)
-    with acquire_resource_slot(config, "job", max_concurrent_jobs):
+    with acquire_resource_slot(config, "job", max_concurrent_jobs, work_name=f"photometry {target.id}"):
         photometry_results = analyze_target(
             target,
             pipeline_type="photometry",
@@ -762,7 +762,7 @@ def _run_spectroscopy_stage(
         return
 
     logger.info("[%s] Running Spectroscopy Analysis...", target.id)
-    with acquire_resource_slot(config, "job", max_concurrent_jobs):
+    with acquire_resource_slot(config, "job", max_concurrent_jobs, work_name=f"spectroscopy {target.id}"):
         spectroscopy_results = analyze_target(
             target,
             pipeline_type="spectroscopy",

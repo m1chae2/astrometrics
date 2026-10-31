@@ -195,7 +195,9 @@ def test_a_stack_still_waiting_for_a_slot_is_not_abandoned(monkeypatch: pytest.M
     threading.Timer(0.6, release_slot.set).start()
 
     @contextlib.contextmanager
-    def _slot_taken_by_another_stack(configuration: object, name: str, slot_count: int) -> Generator[None]:
+    def _slot_taken_by_another_stack(
+        configuration: object, name: str, slot_count: int, **_: object
+    ) -> Generator[None]:
         """Stand in for a slot that frees up only after the budget has passed.
 
         Yields

@@ -58,14 +58,7 @@
       "interim_block": "",
       "note": "Built 2026-10-03. Reads jobs, log tails, stored results and data lineage from the logs database, opened read-only. A job stuck at 'started' after the app stopped still shows as active."
     },
-    "processing_acquire_analysis_slot": {
-      "tool_class": "change-data",
-      "category": "image-processing",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Internal concurrency lock exposed by reflection."
-    },
-    "processing_acquire_stacking_slot": {
+    "processing_acquire_job_slot": {
       "tool_class": "change-data",
       "category": "image-processing",
       "disposition": "drop",

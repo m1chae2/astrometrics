@@ -340,7 +340,7 @@ def test_processing_stack_uses_the_injected_stacking_driver(tmp_path: Path) -> N
 
     with (
         patch("astrometricslib.pipelines.stacking.stage._build_stack_quality_summary", return_value=summary),
-        patch.object(astrometrics.processing, "acquire_stacking_slot", nullcontext),
+        patch.object(astrometrics.processing, "acquire_job_slot", nullcontext),
         patch.object(astrometrics.processing, "_target_catalog", MagicMock()),
     ):
         result = astrometrics.processing.stack(target, frames=list(target.frames), register_job=False)

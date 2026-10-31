@@ -791,7 +791,7 @@ class ProcessingPipelines:
                 log_file=log_file,
             ),
             register_job=register_job,
-            stacking_slot=self.acquire_stacking_slot,
+            stacking_slot=self.acquire_job_slot,
             save_targets=self._targets.save,
             drivers=self._drivers,
             measured_at=datetime.now(UTC),
@@ -885,7 +885,7 @@ class ProcessingPipelines:
                 context=context,
                 configuration=self._config,
                 drivers=self._drivers,
-                stacking_slot=self.acquire_stacking_slot,
+                stacking_slot=self.acquire_job_slot,
                 output_folder=output_folder,
                 record_forecast_rows=record_forecast_rows,
             )
@@ -981,7 +981,7 @@ class ProcessingPipelines:
                 context=context,
                 configuration=self._config,
                 drivers=self._drivers,
-                stacking_slot=self.acquire_stacking_slot,
+                stacking_slot=self.acquire_job_slot,
                 maximum_steps=maximum_steps,
             )
             if include_night_contributions:
@@ -991,7 +991,7 @@ class ProcessingPipelines:
                     context=context,
                     configuration=self._config,
                     drivers=self._drivers,
-                    stacking_slot=self.acquire_stacking_slot,
+                    stacking_slot=self.acquire_job_slot,
                 )
             if include_odd_even_difference:
                 try:
@@ -1001,7 +1001,7 @@ class ProcessingPipelines:
                         context=context,
                         configuration=self._config,
                         drivers=self._drivers,
-                        stacking_slot=self.acquire_stacking_slot,
+                        stacking_slot=self.acquire_job_slot,
                     )
                 except Exception as error:  # the series is already stored; report, do not lose it
                     logger.exception("The odd–even difference noise of %s failed", resolved.id)
@@ -1060,7 +1060,7 @@ class ProcessingPipelines:
                 context=context,
                 configuration=self._config,
                 drivers=self._drivers,
-                stacking_slot=self.acquire_stacking_slot,
+                stacking_slot=self.acquire_job_slot,
             )
 
     @background_job("stacking", grace_period_seconds=8.0)
@@ -1135,7 +1135,7 @@ class ProcessingPipelines:
                 context=context,
                 configuration=self._config,
                 drivers=self._drivers,
-                stacking_slot=self.acquire_stacking_slot,
+                stacking_slot=self.acquire_job_slot,
                 keep_halves=keep_halves,
             )
 
@@ -1280,7 +1280,7 @@ class ProcessingPipelines:
             star_stretch=star_stretch,
         )
         with (
-            self.acquire_stacking_slot(),
+            self.acquire_job_slot(),
             registered_job(enabled=register_job, job_type="preview", target_id=resolved.id),
         ):
             result = remake_stack_preview(resolved, kind == "spectral", settings, keep_previous)
@@ -1754,37 +1754,19 @@ class ProcessingPipelines:
 
     # -- Limits on how much heavy work runs at once -------------------------
 
-    def acquire_analysis_slot(self) -> AbstractContextManager:
+    def acquire_job_slot(self) -> AbstractContextManager:
         """Limit how many heavy jobs can run at the same time.
 
-        Processing images takes a lot of CPU power. This makes sure the
-        computer is not overwhelmed, by limiting how many jobs run at once.
-        Shares its slot pool with stacking (see `acquire_stacking_slot`);
+        Analyzing and stacking images use a lot of CPU power and memory.
+        This makes sure the computer is not overwhelmed, by limiting how
+        many jobs run at once. Analysis and stacking share one slot pool;
         both draw on ``max_concurrent_jobs``.
 
         Returns
         -------
         slot : `AbstractContextManager`
             Enter to block until a slot is free, then hold it for the
-            analysis run's duration.
-        """
-        from astrometricslib.foundation.storage.process_locks import acquire_resource_slot
-
-        return acquire_resource_slot(self._config, "job", self._config.get_max_concurrent_jobs())
-
-    def acquire_stacking_slot(self) -> AbstractContextManager:
-        """Limit how many stacking programs can run at the same time.
-
-        Stacking images uses a lot of memory and CPU. This makes sure the
-        computer does not run out, by limiting how many stacks run at once.
-        Shares its slot pool with analysis (see `acquire_analysis_slot`);
-        both draw on ``max_concurrent_jobs``.
-
-        Returns
-        -------
-        slot : `AbstractContextManager`
-            Enter to block until a slot is free, then hold it for the
-            stacking run's duration.
+            job's duration.
         """
         from astrometricslib.foundation.storage.process_locks import acquire_resource_slot
 

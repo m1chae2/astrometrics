@@ -180,12 +180,7 @@ DECISIONS = {
         "of pipeline_run.",
     ),
     # ---- Drop ----
-    "processing_acquire_analysis_slot": ToolDecision(
-        "drop", "Internal concurrency lock exposed by reflection."
-    ),
-    "processing_acquire_stacking_slot": ToolDecision(
-        "drop", "Internal concurrency lock exposed by reflection."
-    ),
+    "processing_acquire_job_slot": ToolDecision("drop", "Internal concurrency lock exposed by reflection."),
     "star_dataset_version": ToolDecision(
         "drop",
         "A change counter for the backend's answer cache. It tells an AI client nothing about the sky.",

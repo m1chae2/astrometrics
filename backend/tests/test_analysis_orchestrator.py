@@ -71,7 +71,7 @@ class TestRunSpectroscopyAnalysis:
         astrometrics = SimpleNamespace(
             processing=SimpleNamespace(
                 run_spectroscopy_by_session=run_spectroscopy_by_session,
-                acquire_analysis_slot=lambda: contextlib.nullcontext(),
+                acquire_job_slot=lambda: contextlib.nullcontext(),
             )
         )
 
@@ -120,7 +120,7 @@ class TestMasterSpectralStackAnalysis:
             processing=SimpleNamespace(
                 process_target=process_target,
                 run_spectroscopy_by_session=run_spectroscopy_by_session,
-                acquire_analysis_slot=lambda: contextlib.nullcontext(),
+                acquire_job_slot=lambda: contextlib.nullcontext(),
             ),
         )
         orchestrator = _make_orchestrator(astrometrics=astrometrics)

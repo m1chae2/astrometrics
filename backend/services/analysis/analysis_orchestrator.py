@@ -492,7 +492,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
         paths = [path for path in paths if path not in master_paths]
         for master_path in master_paths:
             log.info("[%s] Analyzing the master stacked spectral image: %s", target_id, master_path)
-            with self.astrometrics.processing.acquire_analysis_slot():
+            with self.astrometrics.processing.acquire_job_slot():
                 master_result = self.astrometrics.processing.process_target(
                     target,
                     stages=["spectroscopy"],
@@ -533,7 +533,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
                 unmatched_paths,
             )
 
-        with self.astrometrics.processing.acquire_analysis_slot():
+        with self.astrometrics.processing.acquire_job_slot():
             summary, _session_results = self.astrometrics.processing.run_spectroscopy_by_session(
                 self.astrometrics,
                 target,
@@ -604,7 +604,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
 
         self._update_job_progress(job_id, target_id, 1, 2, filter_type=filter_type)
         try:
-            with self.astrometrics.processing.acquire_analysis_slot():
+            with self.astrometrics.processing.acquire_job_slot():
                 # The worker count comes from the configured photometry
                 # workers. Each session's stars are identified against a
                 # real catalog (reusing an existing FITS-header WCS when

@@ -128,7 +128,7 @@ def main(arguments: list[str] | None = None) -> int:
         library_stack_path,
         configuration=astrometrics.config,
         drivers=None,
-        stacking_slot=astrometrics.processing.acquire_stacking_slot,
+        stacking_slot=astrometrics.processing.acquire_job_slot,
         work_folder=work_folder,
         repeats=options.repeats,
         seed=options.seed,

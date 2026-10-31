@@ -165,7 +165,7 @@ def make_pipelines(saved: list[int]) -> ProcessingPipelines:
     pipelines = ProcessingPipelines(
         SimpleNamespace(), SimpleNamespace(), targets=SimpleNamespace(save=lambda: saved.append(1))
     )
-    pipelines.acquire_stacking_slot = nullcontext
+    pipelines.acquire_job_slot = nullcontext
     return pipelines
 
 

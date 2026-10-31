@@ -25,7 +25,7 @@ def fake_library(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     astrometrics = SimpleNamespace(
         targets=SimpleNamespace(get=lambda name: target),
         config=object(),
-        processing=SimpleNamespace(acquire_stacking_slot=lambda: None),
+        processing=SimpleNamespace(acquire_job_slot=lambda: None),
     )
 
     def fake_measure(target: Any, library_stack_path: str, **keywords: Any) -> BiasMeasurement:

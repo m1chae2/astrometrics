@@ -337,8 +337,7 @@ SUB_API_MEMBERS = {
         "update",
     },
     "processing": {
-        "acquire_analysis_slot",
-        "acquire_stacking_slot",
+        "acquire_job_slot",
         "calibration",
         "discard_previous_stack",
         "process_target",

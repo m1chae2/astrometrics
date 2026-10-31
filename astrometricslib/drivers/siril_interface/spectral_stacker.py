@@ -10,10 +10,15 @@ import glob
 import logging
 import os
 import queue
-import subprocess
 import threading
-from collections.abc import Callable
+from typing import cast
 
+from astrometricslib.drivers.siril_interface.run_models import (
+    SirilLaunch,
+    SirilScript,
+    SirilStackRun,
+    StagedInputs,
+)
 from astrometricslib.drivers.siril_interface.script_builders import SIRIL_SCRIPT_PREAMBLE
 from astrometricslib.drivers.siril_interface.staging import SirilStaging
 
@@ -72,21 +77,10 @@ class SirilSpectralStacker(SirilStaging):
 
     def _stack_phase_correlation_aligned_spectral_frames(
         self,
-        command_pipe: str,
-        output_pipe: str,
-        process: subprocess.Popen,
-        status_queue: queue.Queue[str],
-        calibration_script: list[str],
-        seq: str,
-        target_folder: str,
-        output_file: str,
-        library_dest: str | None,
-        generate_rejmap: bool,
-        rejection_sigma_low: float,
-        rejection_sigma_high: float,
-        stack_weight: str | None,
-        job_logger: logging.Logger,
-        align_frames: Callable[[list[str], str], tuple[list[str], dict[str, int]]] | None,
+        run: SirilStackRun,
+        staged: StagedInputs,
+        launch: SirilLaunch,
+        script: SirilScript,
     ) -> str | None:
         """Calibrate with Siril, align in Python, then stack with Siril again.
 
@@ -97,52 +91,38 @@ class SirilSpectralStacker(SirilStaging):
         target's) is smeared into a trail rather than a compact dot. See
         `spectral_frame_alignment` for the alignment itself.
 
-        `calibration_script` (everything `process_target` built up
-        through the ``calibrate`` command, with no ``register``/``stack``
-        appended) is sent through the Siril process already running on
-        `command_pipe`. Once it finishes, the calibrated frames it wrote
-        are read back, aligned in Python, and handed to a second,
-        separate Siril process for a plain rejection stack with no
-        registration step at all -- Siril's own ``stack`` command does
-        not require one; the bias, dark and flat master steps earlier in
-        `process_target` already rely on exactly that.
+        `script` (everything `process_target` built up through the
+        ``calibrate`` command, with no ``register``/``stack`` appended) is
+        sent through the Siril process already running on the command
+        pipe. Once it finishes, the calibrated frames it wrote are read
+        back, aligned in Python, and handed to a second, separate Siril
+        process for a plain rejection stack with no registration step at
+        all -- Siril's own ``stack`` command does not require one; the
+        bias, dark and flat master steps earlier in `process_target`
+        already rely on exactly that.
 
         Parameters
         ----------
-        command_pipe : `str`
-            The command FIFO of the Siril process already running,
-            reused to send `calibration_script`.
-        output_pipe : `str`
-            That same process's output FIFO.
-        process : `subprocess.Popen`
+        run : `SirilStackRun`
+            The run: its request (output file name), the library folder to
+            copy the stack to, the stack weight and rejection map setting,
+            the pipeline steps (``steps.align_frames`` does the alignment)
+            and the logger.
+        staged : `StagedInputs`
+            The work folder, the command and output pipes of the Siril
+            process already running, the queue its output reader publishes
+            command status lines to (reused so `send_commands` can pace the
+            calibration script the same way `process_target` always does)
+            and the stack's rejection bounds.
+        launch : `SirilLaunch`
             That already-running Siril process.
-        status_queue : `queue.Queue`
-            The queue `process`'s paired `read_output` call publishes
-            command status lines to, reused so `send_commands` can pace
-            the calibration script the same way `process_target` always
-            does.
-        calibration_script : `list` [`str`]
+        script : `SirilScript`
             The commands to run before alignment: the
             `SIRIL_SCRIPT_PREAMBLE` (``setext`` and ``set32bits``), master
-            calibration generation, `convert`, and `calibrate`.
-        seq : `str`
-            The calibrated sequence's name (``"pp_light_source"``, or
-            plain ``"light_source"`` when there were no calibration
-            masters to apply), used to find the frames `calibrate` wrote.
-        target_folder : `str`
-            This run's working directory.
-        output_file : `str`
-            The stacked file's name.
-        library_dest : `str` or `None`
-            Where to copy the stacked file, forwarded to `read_output`.
-        generate_rejmap : `bool`
-            Whether to also produce a rejection map.
-        rejection_sigma_low, rejection_sigma_high : `float`
-            The stack's sigma-clipping rejection bounds.
-        stack_weight : `str` or `None`
-            Siril's ``-weight`` value, if any.
-        job_logger : `logging.Logger`
-            Logger for this run.
+            calibration generation, `convert`, and `calibrate`; and the
+            calibrated sequence's name (``"pp_light_source"``, or plain
+            ``"light_source"`` when there were no calibration masters to
+            apply), used to find the frames `calibrate` wrote.
 
         Returns
         -------
@@ -151,6 +131,23 @@ class SirilSpectralStacker(SirilStaging):
             Siril run, or the alignment step in between, produced nothing
             to stack.
         """
+        command_pipe = staged.command_pipe
+        output_pipe = staged.output_pipe
+        process = launch.process
+        status_queue = staged.status_queue
+        calibration_script = script.commands
+        # Several lights are staged in this mode, so the sequence has a name.
+        seq = cast(str, script.sequence_name)
+        target_folder = staged.target_folder
+        output_file = cast(str, run.request.output_file)
+        library_dest = run.library_dest
+        generate_rejmap = run.generate_rejmap
+        rejection_sigma_low = staged.rejection.low
+        rejection_sigma_high = staged.rejection.high
+        stack_weight = run.stack_weight
+        job_logger = run.job_logger
+        align_frames = run.steps.align_frames
+
         if align_frames is None:
             job_logger.error(
                 "Phase-correlation registration needs the stacking pipeline's alignment step, "

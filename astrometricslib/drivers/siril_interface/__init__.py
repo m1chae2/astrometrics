@@ -12,6 +12,7 @@ The code is split by job, one module each:
 - `staging`: the work folder, the staged frames and the master cache.
 - `spectral_stacker`: the phase-correlation way to stack spectra.
 - `imaging_stacker`: the run that stacks one target (`process_target`).
+- `run_models`: the request and the state each phase hands to the next.
 - `image_processing`: `ImageProcessing`, which joins them.
 
 The names other code imports are re-exported here, so
@@ -20,6 +21,7 @@ replaces a name for a test must replace it in the module that uses it.
 """
 
 from astrometricslib.drivers.siril_interface.image_processing import ImageProcessing
+from astrometricslib.drivers.siril_interface.run_models import SirilStackRequest
 from astrometricslib.drivers.siril_interface.script_builders import (
     CALIBRATION_BLOCKING_FLAGS_KEY,
     SIRIL_SCRIPT_PREAMBLE,
@@ -60,6 +62,7 @@ __all__ = [
     "SIRIL_SCRIPT_PREAMBLE",
     "SPECTRAL_STAR_DETECTION_COMMANDS",
     "ImageProcessing",
+    "SirilStackRequest",
     "bind_lock_wait",
     "build_bias_master_commands",
     "build_dark_master_commands",

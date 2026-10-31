@@ -9,6 +9,7 @@ at all, and that each driver interface is abstract and implemented.
 """
 
 from collections.abc import Callable
+from dataclasses import fields
 from pathlib import Path
 from typing import Any, cast
 
@@ -29,15 +30,15 @@ class FakeSirilDriver:
         self.calls: list[dict[str, Any]] = []
         self.last_run_diagnostics: dict[str, Any] = {"num_lights": 3}
 
-    def process_target(self, **options: Any) -> str:
-        """Record the options and return a path.
+    def process_target(self, request: Any) -> str:
+        """Record the request's fields and return a path.
 
         Returns
         -------
         path : `str`
             A made-up stack path.
         """
-        self.calls.append(options)
+        self.calls.append({item.name: getattr(request, item.name) for item in fields(request)})
         return "/stacks/M_42_L_Stacked.fits"
 
 
@@ -130,10 +131,10 @@ def test_the_siril_adapter_passes_settings_and_returns_diagnostics() -> None:
 
 
 def test_the_adapter_leaves_registration_out_when_not_given() -> None:
-    """No registration name means no ``spectral_star_detection`` option."""
+    """No registration name leaves ``spectral_star_detection`` default."""
     driver = FakeSirilDriver()
     SirilStackingDriver(driver).stack_batch([], "M 42", "out.fits", None, False, StackSettings())
-    assert "spectral_star_detection" not in driver.calls[0]
+    assert driver.calls[0]["spectral_star_detection"] == "standard"
 
 
 def test_the_runner_works_with_an_engine_that_is_not_siril(tmp_path: Path) -> None:

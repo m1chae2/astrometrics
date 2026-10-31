@@ -6,9 +6,8 @@ imaging stacker) into one class and sets up the settings they share.
 
 from typing import Any
 
-from astrometricslib.drivers.calibration_library import CALIBRATION_MATCH_BLOCKING_FLAGS_KEY
 from astrometricslib.drivers.siril_interface.imaging_stacker import SirilImagingStacker
-from astrometricslib.drivers.siril_interface.script_builders import CALIBRATION_BLOCKING_FLAGS_KEY
+from astrometricslib.drivers.siril_interface.run_models import empty_run_diagnostics
 from astrometricslib.drivers.siril_interface.session import _active_image_processing_instances
 from astrometricslib.foundation.paths import siril_work_directory
 
@@ -42,10 +41,5 @@ class ImageProcessing(SirilImagingStacker):
         # here too so build_directories can also be called standalone
         # (as existing tests do) without requiring a prior
         # process_target call.
-        self.last_run_diagnostics: dict[str, Any] = {
-            "corrupt_frames_skipped": [],
-            "calibration_mismatch_flags": [],
-            CALIBRATION_BLOCKING_FLAGS_KEY: [],
-            CALIBRATION_MATCH_BLOCKING_FLAGS_KEY: [],
-        }
+        self.last_run_diagnostics: dict[str, Any] = empty_run_diagnostics()
         _active_image_processing_instances.add(self)

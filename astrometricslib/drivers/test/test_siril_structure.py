@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from astrometricslib.drivers import siril_interface
-from astrometricslib.drivers.siril_interface import session
+from astrometricslib.drivers.siril_interface import SirilStackRequest, session
 
 
 def test_image_processing_instances_do_not_pin_after_deletion() -> None:
@@ -59,7 +59,7 @@ def test_process_target_closes_logger_handler_on_completion(
     monkeypatch.setattr(siril_interface.ImageProcessing, "build_directories", explode)
 
     driver = siril_interface.ImageProcessing(mock_config, mock_library)
-    result = driver.process_target(id="TestLeakTarget", image_files=[])
+    result = driver.process_target(SirilStackRequest(id="TestLeakTarget", image_files=[]))
 
     assert result is None
     job_logger = logging.getLogger("siril_TestLeakTarget")

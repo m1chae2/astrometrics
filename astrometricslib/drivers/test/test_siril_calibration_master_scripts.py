@@ -24,6 +24,7 @@ import pytest
 from astrometricslib.drivers import siril_interface
 from astrometricslib.drivers.siril_interface import (
     CALIBRATION_BLOCKING_FLAGS_KEY,
+    SirilStackRequest,
     build_bias_master_commands,
     build_dark_master_commands,
     build_flat_master_commands,
@@ -368,10 +369,12 @@ def run_with_staged_frames(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> C
         driver = siril_interface.ImageProcessing(mock_config, MagicMock())
         driver.workdir = str(tmp_path / "work")
         driver.process_target(
-            id="MasterScripts",
-            image_files=[{"path": "a.fits", "camera": "Cam"}],
-            is_spectral=False,
-            rejection_sigma=rejection_sigma,
+            SirilStackRequest(
+                id="MasterScripts",
+                image_files=[{"path": "a.fits", "camera": "Cam"}],
+                is_spectral=False,
+                rejection_sigma=rejection_sigma,
+            )
         )
         logging.getLogger("siril_MasterScripts").handlers.clear()
         return list(sent_commands), driver.last_run_diagnostics

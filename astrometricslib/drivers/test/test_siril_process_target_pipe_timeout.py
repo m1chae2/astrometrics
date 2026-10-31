@@ -22,7 +22,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from astrometricslib.drivers import siril_interface
-from astrometricslib.drivers.siril_interface import imaging_stacker, session
+from astrometricslib.drivers.siril_interface import SirilStackRequest, imaging_stacker, session
 
 
 class _NullContext:
@@ -88,8 +88,7 @@ def test_process_target_does_not_hang_when_siril_dies_at_launch(
 
     started_at = time.monotonic()
     result = driver.process_target(
-        id="DeadSirilTarget",
-        image_files=[{"path": "a.fits", "camera": "Cam"}],
+        SirilStackRequest(id="DeadSirilTarget", image_files=[{"path": "a.fits", "camera": "Cam"}])
     )
     elapsed = time.monotonic() - started_at
     logging.getLogger("siril_DeadSirilTarget").handlers.clear()

@@ -23,7 +23,7 @@ import pytest
 
 from astrometricslib.drivers import siril_interface
 from astrometricslib.drivers.interfaces.stacking_driver import PipelineSteps
-from astrometricslib.drivers.siril_interface import imaging_stacker, spectral_stacker
+from astrometricslib.drivers.siril_interface import SirilStackRequest, imaging_stacker, spectral_stacker
 
 
 def _fake_align_frames(paths: list[str], directory: str) -> tuple[list[str], dict[str, int]]:
@@ -119,11 +119,13 @@ def captured_calibration_script(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         driver = siril_interface.ImageProcessing(mock_config, MagicMock())
         driver.workdir = str(tmp_path / "work")
         result = driver.process_target(
-            id="PhaseCorrelation",
-            image_files=[{"path": "a.fits", "camera": "Cam"}],
-            is_spectral=True,
-            spectral_star_detection="phase_correlation",
-            steps=PipelineSteps(align_frames=_fake_align_frames if with_alignment_step else None),
+            SirilStackRequest(
+                id="PhaseCorrelation",
+                image_files=[{"path": "a.fits", "camera": "Cam"}],
+                is_spectral=True,
+                spectral_star_detection="phase_correlation",
+                steps=PipelineSteps(align_frames=_fake_align_frames if with_alignment_step else None),
+            )
         )
         if not with_alignment_step:
             assert result is None

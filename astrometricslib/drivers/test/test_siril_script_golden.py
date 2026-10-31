@@ -23,7 +23,7 @@ import pytest
 
 from astrometricslib.drivers import siril_interface
 from astrometricslib.drivers.interfaces.stacking_driver import PipelineSteps
-from astrometricslib.drivers.siril_interface import imaging_stacker, spectral_stacker
+from astrometricslib.drivers.siril_interface import SirilStackRequest, imaging_stacker, spectral_stacker
 
 GOLDEN_PATH = Path(__file__).parent / "golden" / "siril_scripts.json"
 
@@ -195,7 +195,7 @@ def _call_process_target(driver: Any, **request_fields: Any) -> str | None:
     result : `str` or `None`
         What `process_target` returned.
     """
-    return driver.process_target(**request_fields)
+    return driver.process_target(SirilStackRequest(**request_fields))
 
 
 def _run_case(name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:

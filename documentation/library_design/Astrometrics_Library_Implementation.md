@@ -250,6 +250,7 @@ Tables 3 to 7 list each pipeline's tuned values and the explaining section. Each
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.ROTATION_STEP_PX -->
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.NEGLIGIBLE_SHIFT_PX -->
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.NEGLIGIBLE_ROTATION_DEG -->
+<!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_noise.POOR_ALIGNMENT_RMS_PX -->
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.difference_noise.ODD_EVEN_DIFFERENCE_NOISE_BIAS -->
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_size_noise.SIZE_RADIUS_MULTIPLES -->
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.odd_even_apertures.MINIMUM_PIXELS_PER_LINE -->

@@ -238,6 +238,15 @@ ROTATION_SIGNIFICANCE = 3.0
 NEGLIGIBLE_SHIFT_PX = 0.05
 NEGLIGIBLE_ROTATION_DEG = 0.001
 
+# A move onto the stored stars that leaves more than this rms is a poor fit.
+# Stored apertures from a plate solve hold true sky positions, so a poor fit
+# means the solution being moved has the wrong pixel scale (a shift and a
+# rotation cannot fix a scale). 0.5 px is 1/8 of the 4 px aperture radius.
+# Plate-solved placements fit to 0.00 px; frame-solution fits on real stacks
+# measured 0.18 px (NGC 2244, kept) and 1.42 to 2.11 px (M 27, M 57, M 81,
+# retried with the plate solve). A design estimate.
+POOR_ALIGNMENT_RMS_PX = 0.5
+
 NO_WCS_REASON = "no WCS for this stack"
 
 # The ``wcs_source`` of a stack whose solution was taken from a member frame
@@ -1629,7 +1638,11 @@ def _align_to_stored_apertures(
     A header's solution can be a first guess even when it exists, and these
     apertures were chosen on another stack's solution. When the solution is
     not from a plate solve and cannot be moved onto the stored stars, the
-    stack is plate-solved and the move tried once more.
+    stack is plate-solved and the move tried once more. Apertures that hold
+    true sky positions (from a plate solve) also get that second try when the
+    first move succeeded but fit the stars worse than `POOR_ALIGNMENT_RMS_PX`;
+    if the second try is not possible, the first placement is kept and the
+    position note says the fit was poor.
 
     Parameters
     ----------
@@ -1674,7 +1687,76 @@ def _align_to_stored_apertures(
         wcs_source = PLATE_SOLVE_WCS_SOURCE
     if wcs is None:
         return None, wcs_source, "", StackNoiseOutcome(None, reason)
-    return wcs, wcs_source, alignment.describe() if alignment is not None else "", None
+    position_note = alignment.describe() if alignment is not None else ""
+    if (
+        aperture_set.sky_positions_from_plate_solve
+        and wcs_source != PLATE_SOLVE_WCS_SOURCE
+        and alignment is not None
+        and alignment.rms_px > POOR_ALIGNMENT_RMS_PX
+    ):
+        wcs, wcs_source, position_note = _retry_poor_fit_with_plate_solve(
+            plane, wcs, wcs_source, position_note, alignment.rms_px, aperture_set, plate_solve
+        )
+    return wcs, wcs_source, position_note, None
+
+
+def _retry_poor_fit_with_plate_solve(
+    plane: np.ndarray,
+    first_wcs: WCS,
+    first_wcs_source: str,
+    first_position_note: str,
+    first_rms_px: float,
+    aperture_set: ApertureSet,
+    plate_solve: _StackPlateSolve,
+) -> tuple[WCS, str, str]:
+    """Try the stack's plate solve when the first move fit the stars poorly.
+
+    A shift and a rotation cannot correct a wrong pixel scale, so a solution
+    with a wrong scale can "succeed" with a large rms. The plate solve gets the
+    scale right. When it cannot be used, the first placement is kept, so the
+    noise is still measured, and the note says the fit was poor.
+
+    Parameters
+    ----------
+    plane : `numpy.ndarray`
+        The stack as one 2-D image.
+    first_wcs : `astropy.wcs.WCS`
+        The solution moved onto the stored stars by the first try.
+    first_wcs_source : `str`
+        Where the first solution came from.
+    first_position_note : `str`
+        How the first try moved it.
+    first_rms_px : `float`
+        The first try's rms fit, in pixels.
+    aperture_set : `ApertureSet`
+        The stored apertures.
+    plate_solve : `_StackPlateSolve`
+        The stack's one plate solve.
+
+    Returns
+    -------
+    wcs : `astropy.wcs.WCS`
+        The solution to use.
+    wcs_source : `str`
+        Where it came from.
+    position_note : `str`
+        How it was moved, with a poor-fit sentence when the first placement
+        was kept.
+    """
+    solved_wcs, solve_reason = plate_solve.solve()
+    why_not_improved = solve_reason
+    if solved_wcs is not None:
+        wcs, retry_reason, alignment = _move_guess_onto_reference_stars(
+            plane, solved_wcs, aperture_set.reference_sky
+        )
+        if wcs is not None:
+            return wcs, PLATE_SOLVE_WCS_SOURCE, alignment.describe() if alignment is not None else ""
+        why_not_improved = f"the plate solve of the stack could not be moved onto the stars: {retry_reason}"
+    poor_fit_note = (
+        f"The fit to the stored stars was poor ({first_rms_px:.2f} px rms), "
+        f"and the plate solve could not improve it: {why_not_improved}."
+    )
+    return first_wcs, first_wcs_source, f"{first_position_note} {poor_fit_note}".strip()
 
 
 def _take_aperture_sums(

@@ -61,6 +61,9 @@ from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
     NEGLIGIBLE_SHIFT_PX,
     NO_WCS_REASON,
     PLATE_SOLVE_WCS_SOURCE,
+    POOR_ALIGNMENT_RMS_PX,
+    _align_to_stored_apertures,
+    _Alignment,
     _move_guess_onto_reference_stars,
     measure_stack_noise,
 )
@@ -1800,3 +1803,182 @@ def test_robust_sigma_matches_the_median_absolute_deviation_formula() -> None:
         expected = 1.4826 * np.median(np.abs(samples[row] - np.median(samples[row])))
         assert by_row[row] == pytest.approx(expected, rel=1e-12)
     assert robust_sigma(samples, axis=0).shape == (40,)
+
+
+class _FakePlateSolve:
+    """A stand-in for the stack's one plate solve that counts its calls."""
+
+    def __init__(self, solution: WCS | None, reason: str = "") -> None:
+        """Remember the answer to give.
+
+        Parameters
+        ----------
+        solution : `astropy.wcs.WCS` or `None`
+            The solution `solve` returns.
+        reason : `str`, optional
+            Why there is none.
+        """
+        self.solution = solution
+        self.reason = reason
+        self.calls = 0
+
+    def solve(self) -> tuple[WCS | None, str]:
+        """Count the call and give the stored answer.
+
+        Returns
+        -------
+        wcs : `astropy.wcs.WCS` or `None`
+            The stored solution.
+        reason : `str`
+            The stored reason.
+        """
+        self.calls += 1
+        return self.solution, self.reason
+
+
+def _alignment_for_poor_fit_tests(rms_px: float) -> _Alignment:
+    """Build an alignment with the given rms and nothing else of note.
+
+    Parameters
+    ----------
+    rms_px : `float`
+        The rms fit, in pixels.
+
+    Returns
+    -------
+    alignment : `_Alignment`
+        The alignment.
+    """
+    return _Alignment(
+        shift_row=1.0,
+        shift_column=1.0,
+        matched_stars=10,
+        rms_px=rms_px,
+        rotation_deg=0.0,
+        rotation_error_deg=0.0,
+    )
+
+
+def _run_alignment_with_fake_moves(
+    monkeypatch: pytest.MonkeyPatch,
+    from_plate_solve: bool,
+    moves: list[tuple[WCS | None, str, _Alignment | None]],
+    plate_solve: _FakePlateSolve,
+    wcs_source: str = "registration reference frame",
+) -> tuple[WCS | None, str, str, object]:
+    """Call `_align_to_stored_apertures` with the reference-star move replaced.
+
+    Parameters
+    ----------
+    monkeypatch : `pytest.MonkeyPatch`
+        Used to replace the move.
+    from_plate_solve : `bool`
+        Whether the stored set holds true sky positions.
+    moves : `list`
+        The answers the move gives, in order.
+    plate_solve : `_FakePlateSolve`
+        The stack's plate solve.
+    wcs_source : `str`, optional
+        Where the starting solution came from.
+
+    Returns
+    -------
+    result : `tuple`
+        What `_align_to_stored_apertures` returns.
+    """
+    from astrometricslib.pipelines.stacking.post_processing.empty_apertures import ApertureSet
+
+    aperture_set = ApertureSet(
+        aperture_sky=np.zeros((1, 2)),
+        reference_sky=np.zeros((1, 2)),
+        wcs_source=PLATE_SOLVE_WCS_SOURCE if from_plate_solve else "registration reference frame",
+        pixel_scale_arcsec=2.0,
+        created_from="a.fits",
+        reference_baseline_flux=np.ones(1),
+        reference_radius_px=5.0,
+        reference_fwhm_px=3.0,
+        saturation_source="x",
+        sky_positions_from_plate_solve=from_plate_solve,
+    )
+    remaining = list(moves)
+    monkeypatch.setattr(
+        "astrometricslib.pipelines.stacking.post_processing.stack_noise._move_guess_onto_reference_stars",
+        lambda *_args: remaining.pop(0),
+    )
+    return _align_to_stored_apertures(
+        np.zeros((4, 4)),
+        WCS(_sky_header()),
+        wcs_source,
+        aperture_set,
+        plate_solve,  # type: ignore[arg-type]
+    )
+
+
+def test_a_poor_fit_on_a_plate_solved_set_uses_the_plate_solve(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A fit worse than the limit plate-solves the stack and moves again."""
+    first, second = WCS(_sky_header()), WCS(_sky_header(1.9))
+    solve = _FakePlateSolve(WCS(_sky_header(1.95)))
+    wcs, source, note, failure = _run_alignment_with_fake_moves(
+        monkeypatch,
+        True,
+        [(first, "", _alignment_for_poor_fit_tests(2.11)), (second, "", _alignment_for_poor_fit_tests(0.02))],
+        solve,
+    )
+    assert failure is None
+    assert solve.calls == 1
+    assert wcs is second
+    assert source == PLATE_SOLVE_WCS_SOURCE
+    assert "0.02 px rms" in note
+
+
+def test_a_good_fit_does_not_plate_solve(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A fit inside the limit keeps the first placement and never solves."""
+    first = WCS(_sky_header())
+    solve = _FakePlateSolve(WCS(_sky_header()))
+    wcs, source, _note, failure = _run_alignment_with_fake_moves(
+        monkeypatch, True, [(first, "", _alignment_for_poor_fit_tests(POOR_ALIGNMENT_RMS_PX - 0.1))], solve
+    )
+    assert failure is None and wcs is first
+    assert source == "registration reference frame"
+    assert solve.calls == 0
+
+
+def test_a_poor_fit_on_a_set_not_from_a_plate_solve_does_not_plate_solve(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sets without true sky positions keep the old behavior."""
+    first = WCS(_sky_header())
+    solve = _FakePlateSolve(WCS(_sky_header()))
+    wcs, source, _note, failure = _run_alignment_with_fake_moves(
+        monkeypatch, False, [(first, "", _alignment_for_poor_fit_tests(2.11))], solve
+    )
+    assert failure is None and wcs is first
+    assert source == "registration reference frame"
+    assert solve.calls == 0
+
+
+def test_a_poor_fit_is_kept_with_a_note_when_the_plate_solve_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With no plate solve, the first placement stays and the note says why."""
+    first = WCS(_sky_header())
+    solve = _FakePlateSolve(None, "the solver found no match")
+    wcs, source, note, failure = _run_alignment_with_fake_moves(
+        monkeypatch, True, [(first, "", _alignment_for_poor_fit_tests(2.11))], solve
+    )
+    assert failure is None and wcs is first
+    assert source == "registration reference frame"
+    assert "poor" in note and "2.11" in note and "the solver found no match" in note
+
+
+def test_a_poor_fit_is_kept_with_a_note_when_the_retry_move_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """If the plate solve cannot be moved, the first placement stays."""
+    first = WCS(_sky_header())
+    solve = _FakePlateSolve(WCS(_sky_header(1.95)))
+    wcs, source, note, failure = _run_alignment_with_fake_moves(
+        monkeypatch,
+        True,
+        [(first, "", _alignment_for_poor_fit_tests(1.5)), (None, "too few stars matched", None)],
+        solve,
+    )
+    assert failure is None and wcs is first
+    assert source == "registration reference frame"
+    assert "poor" in note and "1.50" in note and "too few stars matched" in note

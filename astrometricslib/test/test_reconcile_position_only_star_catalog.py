@@ -45,7 +45,7 @@ class _FakeAstrometrics:
 
     def __init__(self, config: AppConfiguration) -> None:
         self.config = config
-        self.catalog_access = CatalogAccess(config)
+        self._catalog_access = CatalogAccess(config)
 
 
 def _star(id_: str, ra: float, dec: float, target_id: str = "M42") -> StarPosition:
@@ -165,7 +165,7 @@ def test_find_and_apply_clusters_merges_and_deletes_against_a_real_catalog(tmp_p
     unrelated.declination = -26.0
     unrelated.target_ids = ["M42"]
 
-    astrometrics.catalog_access.merge_and_record(
+    astrometrics._catalog_access.merge_and_record(
         "stellar_catalog", [survivor, duplicate, unrelated], lambda _existing, updated: updated
     )
 
@@ -178,7 +178,7 @@ def test_find_and_apply_clusters_merges_and_deletes_against_a_real_catalog(tmp_p
     rows_removed = apply_clusters(astrometrics, clusters_by_target)
 
     assert rows_removed == 1
-    remaining = astrometrics.catalog_access.get_by_ids(
+    remaining = astrometrics._catalog_access.get_by_ids(
         "stellar_catalog", [survivor.id, duplicate.id, unrelated.id]
     )
     remaining_by_id = {obj.id: obj for obj in remaining}
@@ -203,7 +203,7 @@ def test_find_position_only_clusters_respects_target_id_filter(tmp_path: Path) -
         second.right_ascension = 100.0001
         second.declination = 10.0001
         second.target_ids = [target_id]
-        astrometrics.catalog_access.merge_and_record(
+        astrometrics._catalog_access.merge_and_record(
             "stellar_catalog", [first, second], lambda _existing, updated: updated
         )
 

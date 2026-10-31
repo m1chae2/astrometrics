@@ -159,7 +159,7 @@ def find_position_only_clusters(
         that target's clusters (clusters of size 1 are omitted --
         nothing to merge).
     """
-    position_only_stars = astrometrics.catalog_access.list_position_only_stars()
+    position_only_stars = astrometrics._catalog_access.list_position_only_stars()
 
     wanted_targets = {t.strip().casefold() for t in target_ids} if target_ids else None
 
@@ -205,7 +205,9 @@ def apply_clusters(
             # fixed rule keeps a re-run of this script idempotent.
             survivor_id, *duplicate_ids = ids
 
-            hydrated = {obj.id: obj for obj in astrometrics.catalog_access.get_by_ids("stellar_catalog", ids)}
+            hydrated = {
+                obj.id: obj for obj in astrometrics._catalog_access.get_by_ids("stellar_catalog", ids)
+            }
             survivor = hydrated.get(survivor_id)
             if survivor is None:
                 logger.warning(
@@ -219,10 +221,10 @@ def apply_clusters(
                     continue
                 merge_duplicate_into_survivor(survivor, duplicate)
 
-            astrometrics.catalog_access.merge_and_record(
+            astrometrics._catalog_access.merge_and_record(
                 "stellar_catalog", [survivor], lambda _existing, updated: updated
             )
-            astrometrics.catalog_access.delete_by_ids("stellar_catalog", duplicate_ids)
+            astrometrics._catalog_access.delete_by_ids("stellar_catalog", duplicate_ids)
             rows_removed += len(duplicate_ids)
 
     return rows_removed

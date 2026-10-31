@@ -54,7 +54,7 @@ def test_star_summaries_reports_the_expected_fields(tmp_path: Path) -> None:
     betelgeuse = StellarObject(id="Betelgeuse", name="Betelgeuse", target_ids=["Orion Field"])
     betelgeuse.photometry = {"timestamps": ["2026-01-01T00:00:00Z"], "magnitudes": [0.5]}
     empty_star = StellarObject(id="EmptyStar", name="EmptyStar", target_ids=[])
-    catalog.catalog_access.put([vega, betelgeuse, empty_star], "stellar_catalog", {})
+    catalog._catalog_access.put([vega, betelgeuse, empty_star], "stellar_catalog", {})
 
     summaries = {s["id"]: s for s in catalog.query(limit=None).stars}
 
@@ -85,7 +85,7 @@ def test_star_summaries_filters_by_target_id(tmp_path: Path) -> None:
 
     in_field = StellarObject(id="InField", name="InField", target_ids=["M 13"])
     out_of_field = StellarObject(id="OutOfField", name="OutOfField", target_ids=["M 81"])
-    catalog.catalog_access.put([in_field, out_of_field], "stellar_catalog", {})
+    catalog._catalog_access.put([in_field, out_of_field], "stellar_catalog", {})
 
     summaries = catalog.query(target_id="M 13", limit=None).stars
 
@@ -112,7 +112,7 @@ def test_star_summaries_target_id_substring_collision_is_still_exact(tmp_path: P
     in_m1 = StellarObject(id="InM1", name="InM1", target_ids=["M 1"])
     in_m13_only = StellarObject(id="InM13Only", name="InM13Only", target_ids=["M 13"])
     in_both = StellarObject(id="InBoth", name="InBoth", target_ids=["M 1", "M 13"])
-    catalog.catalog_access.put([in_m1, in_m13_only, in_both], "stellar_catalog", {})
+    catalog._catalog_access.put([in_m1, in_m13_only, in_both], "stellar_catalog", {})
 
     summaries = catalog.query(target_id="M 1", limit=None).stars
 
@@ -132,7 +132,7 @@ def test_star_summaries_are_capped_by_the_default_limit(tmp_path: Path) -> None:
 
     config = _make_isolated_config(tmp_path)
     catalog = StellarCatalog(config, CatalogAccess(config))
-    catalog.catalog_access.put(
+    catalog._catalog_access.put(
         [StellarObject(id=f"Star{i:03d}", name=f"Star{i}") for i in range(60)], "stellar_catalog", {}
     )
 
@@ -151,7 +151,7 @@ def test_star_summaries_explicit_limit_overrides_the_default(tmp_path: Path) -> 
 
     config = _make_isolated_config(tmp_path)
     catalog = StellarCatalog(config, CatalogAccess(config))
-    catalog.catalog_access.put(
+    catalog._catalog_access.put(
         [StellarObject(id=f"Star{i}", name=f"Star{i}") for i in range(10)], "stellar_catalog", {}
     )
 
@@ -171,7 +171,7 @@ def test_star_summaries_without_a_limit_return_every_row(tmp_path: Path) -> None
 
     config = _make_isolated_config(tmp_path)
     catalog = StellarCatalog(config, CatalogAccess(config))
-    catalog.catalog_access.put(
+    catalog._catalog_access.put(
         [StellarObject(id=f"Star{i:03d}", name=f"Star{i}") for i in range(60)], "stellar_catalog", {}
     )
 
@@ -197,7 +197,7 @@ def test_star_summaries_matches_the_model_computed_properties(tmp_path: Path) ->
     vega = StellarObject(id="Vega", name="Vega", target_ids=["Lyra Field"])
     vega.spectroscopy = SpectroscopyResult(wavelengths_angstrom=[5000], intensities=[1.0])
     vega.photometry = {"timestamps": ["2026-01-01T00:00:00Z"], "fluxes": [1.0]}
-    catalog.catalog_access.put([vega], "stellar_catalog", {})
+    catalog._catalog_access.put([vega], "stellar_catalog", {})
 
     (summary,) = catalog.query(limit=None).stars
 

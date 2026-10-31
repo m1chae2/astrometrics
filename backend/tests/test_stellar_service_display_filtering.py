@@ -119,13 +119,13 @@ def test_whole_catalog_answers_are_cached_until_the_version_changes() -> None:
     """A repeat is served from memory; a catalog write forces a new answer."""
     service = _service()
     service.astrometrics.stars.query.return_value = StarQueryResult(detail="class_counts", classes=[])
-    service.astrometrics.catalog_access.get_dataset_version.return_value = 1
+    service.astrometrics.stars.dataset_version.return_value = 1
 
     service.get_spectral_class_summary()
     service.get_spectral_class_summary()
     assert service.astrometrics.stars.query.call_count == 1
 
-    service.astrometrics.catalog_access.get_dataset_version.return_value = 2
+    service.astrometrics.stars.dataset_version.return_value = 2
     service.get_spectral_class_summary()
     assert service.astrometrics.stars.query.call_count == 2
 
@@ -149,7 +149,7 @@ def test_warming_the_cache_answers_the_first_requests() -> None:
 def test_simultaneous_requests_for_one_answer_share_one_scan() -> None:
     """A request that arrives mid-scan waits instead of starting a second."""
     service = _service()
-    service.astrometrics.catalog_access.get_dataset_version.return_value = 1
+    service.astrometrics.stars.dataset_version.return_value = 1
     scan_started = threading.Event()
     release_scan = threading.Event()
 
@@ -203,7 +203,7 @@ def test_a_new_catalog_version_is_announced_once() -> None:
     )
     socket_manager = MagicMock()
     service.set_socket_manager(socket_manager)
-    service.astrometrics.catalog_access.get_dataset_version.return_value = 1
+    service.astrometrics.stars.dataset_version.return_value = 1
 
     service.get_spectral_class_summary()
     service.get_target_data_availability()

@@ -401,7 +401,7 @@ class Astrometrics:
         from astrometricslib.drivers.driver_set import Drivers
 
         self.config = config or get_configuration()
-        self.catalog_access = catalog_access or CatalogAccess(self.config)
+        self._catalog_access = catalog_access or CatalogAccess(self.config)
         drivers = Drivers(
             plate_solve=plate_solve_driver,
             stacking=stacking_driver,
@@ -413,16 +413,16 @@ class Astrometrics:
         # There is deliberately no in-memory copy of the star catalog here.
         # The database is the one copy, reached through `self.stars`, which
         # answers each question with a query for just the stars it needs.
-        self.targets = TargetCatalog(self.config, self.catalog_access, drivers=drivers)
-        self.stars = StellarCatalog(self.config, self.catalog_access, drivers=drivers)
+        self.targets = TargetCatalog(self.config, self._catalog_access, drivers=drivers)
+        self.stars = StellarCatalog(self.config, self._catalog_access, drivers=drivers)
         self.processing = ProcessingPipelines(
-            self.config, self.catalog_access, targets=self.targets, drivers=drivers
+            self.config, self._catalog_access, targets=self.targets, drivers=drivers
         )
         self.visualization = Visualization(
-            self.config, self.catalog_access, targets=self.targets, stars=self.stars
+            self.config, self._catalog_access, targets=self.targets, stars=self.stars
         )
-        self.quality = QualityRecords(self.config, self.catalog_access, targets=self.targets)
-        self.jobs = Jobs(self.config, self.catalog_access)
+        self.quality = QualityRecords(self.config, self._catalog_access, targets=self.targets)
+        self.jobs = Jobs(self.config, self._catalog_access)
 
 
 __all__ = [

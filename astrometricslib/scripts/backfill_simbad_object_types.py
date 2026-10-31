@@ -491,7 +491,7 @@ def main(argv: list[str] | None = None) -> int:
     astrometrics = Astrometrics()
     try:
         report = run_backfill(
-            astrometrics.catalog_access,
+            astrometrics._catalog_access,
             AstroquerySimbadDriver(),
             target_id=arguments.target,
             limit=arguments.limit,

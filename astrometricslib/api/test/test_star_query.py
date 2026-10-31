@@ -141,7 +141,7 @@ def test_has_spectra_filters(catalog: StellarCatalog) -> None:
 def test_limits_are_capped(catalog: StellarCatalog) -> None:
     """A huge limit is cut to the cap, and full records to 10."""
     assert len(catalog.query(limit=10_000).stars) == 30
-    catalog.catalog_access.get_by_ids = lambda dataset, ids: [StellarObject(id=i) for i in ids]
+    catalog._catalog_access.get_by_ids = lambda dataset, ids: [StellarObject(id=i) for i in ids]
     assert len(catalog.query(detail="objects", limit=500).objects) == 10
 
 

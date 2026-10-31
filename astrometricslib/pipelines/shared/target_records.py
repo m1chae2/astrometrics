@@ -227,7 +227,7 @@ def list_targets(api: Any) -> list[Any]:
     targets : `list`
         A list of all targets in the database.
     """
-    stored_targets = api.catalog_access.get("target_catalog", {}) or []
+    stored_targets = api._catalog_access.get("target_catalog", {}) or []
     held = {target.id: target for target in api._targets}
     fingerprints = _saved_fingerprints(api)
     merged = []
@@ -273,7 +273,7 @@ def get_target(api: Any, target_id: str) -> Any | None:
 
     if target is None:
         known_ids = {existing.id for existing in api._targets}
-        for fresh_target in api.catalog_access.get("target_catalog", {}) or []:
+        for fresh_target in api._catalog_access.get("target_catalog", {}) or []:
             if fresh_target.id not in known_ids:
                 api._targets.append(fresh_target)
                 remember_stored_state(api, [fresh_target])
@@ -461,10 +461,10 @@ def delete_target(api: Any, target_id: str) -> bool:
     """
     target = get_target(api, target_id)
     if target:
-        targets = api.catalog_access.get("target_catalog", {})
+        targets = api._catalog_access.get("target_catalog", {})
         filtered_targets = [t for t in targets if t.id != target.id]
-        api.catalog_access.put(filtered_targets, "target_catalog", {})
-        api._targets = api.catalog_access.get("target_catalog", {}) or []
+        api._catalog_access.put(filtered_targets, "target_catalog", {})
+        api._targets = api._catalog_access.get("target_catalog", {}) or []
         getattr(api, "_touched_target_ids", set()).discard(target.id)
         _saved_fingerprints(api).pop(target.id, None)
         remember_stored_state(api, api._targets)
@@ -489,8 +489,8 @@ def save_targets(api: Any) -> None:
     if not touched_ids:
         return
 
-    if not hasattr(api.catalog_access, "merge_and_record"):
-        api.catalog_access.put(api._targets, "target_catalog", {})
+    if not hasattr(api._catalog_access, "merge_and_record"):
+        api._catalog_access.put(api._targets, "target_catalog", {})
         remember_stored_state(api, api._targets)
         return
 
@@ -500,7 +500,7 @@ def save_targets(api: Any) -> None:
     if not changed_targets:
         return
 
-    api.catalog_access.merge_and_record(
+    api._catalog_access.merge_and_record(
         "target_catalog", changed_targets, lambda existing_target, updated_target: updated_target
     )
     remember_stored_state(api, changed_targets)
@@ -564,10 +564,10 @@ def save_quality_stamps(api: Any, target: Target) -> None:
     target : `Target`
         The target whose frames were stamped.
     """
-    if not hasattr(api.catalog_access, "merge_and_record"):
+    if not hasattr(api._catalog_access, "merge_and_record"):
         save_targets(api)
         return
-    api.catalog_access.merge_and_record("target_catalog", [target], merge_quality_stamps)
+    api._catalog_access.merge_and_record("target_catalog", [target], merge_quality_stamps)
 
 
 def read_saved_target(api: Any, target_id: str) -> Any | None:
@@ -588,5 +588,5 @@ def read_saved_target(api: Any, target_id: str) -> Any | None:
     target : `Any` or `None`
         The stored target, or `None` if nothing is stored under that id.
     """
-    stored = api.catalog_access.get_by_ids("target_catalog", [target_id])
+    stored = api._catalog_access.get_by_ids("target_catalog", [target_id])
     return stored[0] if stored else None

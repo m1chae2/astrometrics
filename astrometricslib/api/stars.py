@@ -50,7 +50,28 @@ class StellarCatalog:
     ) -> None:
         self._config = config
         self._drivers = drivers or Drivers()
-        self.catalog_access = storage
+        self._catalog_access = storage
+
+    def dataset_version(self) -> int:
+        """Report how many times the star catalog has been written to.
+
+        A caller that keeps an expensive answer built from the whole catalog
+        can remember this number and compare it later. If it is unchanged,
+        no star was saved, changed or deleted through this process.
+
+        This is one in-memory counter per running process. It does not see a
+        write made by another process, and it starts again at 0 when the
+        process restarts. A caller that relies on it for correctness, not
+        only to avoid repeated work, should also expire its answer on a
+        timer.
+
+        Returns
+        -------
+        version : `int`
+            The number of star catalog writes this process has made. It is
+            0 before the first write.
+        """
+        return self._catalog_access.get_dataset_version("stellar_catalog")
 
     def get(self, object_id: str) -> StellarObject | None:
         """Find one star's full record by its id.
@@ -68,7 +89,7 @@ class StellarCatalog:
         """
         from astrometricslib.pipelines.shared.star_catalog_queries import find_star
 
-        return find_star(self.catalog_access, object_id)
+        return find_star(self._catalog_access, object_id)
 
     def query(
         self,
@@ -227,7 +248,7 @@ class StellarCatalog:
         )
         if order is not None:
             check_choice("order", order, QUERY_ORDERS)
-        return run_star_query(self.catalog_access, star_query, detail, limit, offset, order)
+        return run_star_query(self._catalog_access, star_query, detail, limit, offset, order)
 
     def find_or_create_by_position(
         self,
@@ -272,7 +293,7 @@ class StellarCatalog:
         from astrometricslib.pipelines.shared.star_catalog_queries import find_or_create_star
 
         return find_or_create_star(
-            self.catalog_access,
+            self._catalog_access,
             self.update,
             self.create,
             self.delete,
@@ -368,7 +389,7 @@ class StellarCatalog:
         existing = self.get(object_id)
         if existing is None:
             return False
-        self.catalog_access.delete_by_ids("stellar_catalog", [existing.id])
+        self._catalog_access.delete_by_ids("stellar_catalog", [existing.id])
         return True
 
     def update(self, object_id: str, updates: dict[str, Any]) -> StellarObject | None:
@@ -401,7 +422,7 @@ class StellarCatalog:
                     setattr(target_obj, key, value)
             return target_obj
 
-        self.catalog_access.merge_and_record("stellar_catalog", [existing], _apply_updates)
+        self._catalog_access.merge_and_record("stellar_catalog", [existing], _apply_updates)
         return self.get(object_id)
 
     def create(self, object_id: str, ra: str | None = None, dec: str | None = None) -> StellarObject:
@@ -441,7 +462,7 @@ class StellarCatalog:
         if dec:
             new_star.declination = dec
 
-        self.catalog_access.merge_and_record(
+        self._catalog_access.merge_and_record(
             "stellar_catalog",
             [new_star],
             lambda current, updated: current if current is not None else updated,
@@ -477,7 +498,7 @@ class StellarCatalog:
                 "save_all() received an empty list, which would delete every star. "
                 "Pass allow_empty=True to clear the catalog on purpose."
             )
-        self.catalog_access.put(objects, "stellar_catalog", {})
+        self._catalog_access.put(objects, "stellar_catalog", {})
         return "stellar catalog saved"
 
     def detect_point_sources(

@@ -59,7 +59,7 @@ class TestSaveAll:
 
         result = catalog.save_all(objects)
 
-        catalog.catalog_access.put.assert_called_once_with(objects, "stellar_catalog", {})
+        catalog._catalog_access.put.assert_called_once_with(objects, "stellar_catalog", {})
         assert result == "stellar catalog saved"
 
     def test_empty_list_is_refused_by_default(self) -> None:
@@ -74,7 +74,7 @@ class TestSaveAll:
         with pytest.raises(InvalidArgumentError, match="empty list"):
             catalog.save_all([])
 
-        catalog.catalog_access.put.assert_not_called()
+        catalog._catalog_access.put.assert_not_called()
 
     def test_empty_list_allowed_when_explicitly_requested(self) -> None:
         """Deliberately clearing the catalog remains possible."""
@@ -82,8 +82,20 @@ class TestSaveAll:
 
         result = catalog.save_all([], allow_empty=True)
 
-        catalog.catalog_access.put.assert_called_once_with([], "stellar_catalog", {})
+        catalog._catalog_access.put.assert_called_once_with([], "stellar_catalog", {})
         assert result == "stellar catalog saved"
+
+
+class TestDatasetVersion:
+    """Unit test suite for StellarCatalog.dataset_version."""
+
+    def test_reports_the_star_catalog_write_count(self) -> None:
+        """The call asks the database for the stellar catalog's counter."""
+        catalog = _make_catalog()
+        catalog._catalog_access.get_dataset_version.return_value = 7
+
+        assert catalog.dataset_version() == 7
+        catalog._catalog_access.get_dataset_version.assert_called_once_with("stellar_catalog")
 
 
 class TestAnalyzePeriodicity:
@@ -197,7 +209,7 @@ class TestQueriesNeverLoadTheWholeCatalog:
             ],
         )
         mocker.patch.object(
-            catalog.catalog_access._generic, "get_all", side_effect=AssertionError("read the whole catalog")
+            catalog._catalog_access._generic, "get_all", side_effect=AssertionError("read the whole catalog")
         )
         return catalog
 

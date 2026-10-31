@@ -453,7 +453,7 @@ def main(argv: list[str] | None = None) -> int:
     astrometrics = Astrometrics()
     try:
         report = run_backfill(
-            astrometrics.catalog_access,
+            astrometrics._catalog_access,
             AstroquerySimbadDriver(),
             apply=arguments.apply,
             make_backup=lambda: backup_catalog_database(astrometrics.config),

@@ -254,6 +254,13 @@
       "interim_block": "",
       "note": "The AI is read-only, so a tool that writes is not offered."
     },
+    "star_dataset_version": {
+      "tool_class": "unclassified",
+      "category": "stars",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "A change counter for the backend's answer cache. It tells an AI client nothing about the sky."
+    },
     "star_detect_point_sources": {
       "tool_class": "compute",
       "category": "stars",

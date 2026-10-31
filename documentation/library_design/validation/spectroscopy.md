@@ -128,8 +128,8 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
   astrometrics = Astrometrics()
   target = astrometrics.targets.get("M 13")
   astrometrics.processing.process_target(target, stages=["spectroscopy"])
-  ids = [s.id for s in astrometrics.catalog_access.list_star_summaries(target_id=target.id) if s.has_spectra]
-  for star in astrometrics.catalog_access.get_by_ids("stellar_catalog", ids):
+  ids = [s.id for s in astrometrics._catalog_access.list_star_summaries(target_id=target.id) if s.has_spectra]
+  for star in astrometrics._catalog_access.get_by_ids("stellar_catalog", ids):
       own = star.spectroscopy.self_determined_spectral_type
       if star.spectral_type and own not in ("", "Unknown"):
           print(
@@ -491,8 +491,8 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
   )  # internal
 
   astrometrics = Astrometrics()
-  ids = [s.id for s in astrometrics.catalog_access.list_star_summaries() if s.has_spectra]
-  for star in astrometrics.catalog_access.get_by_ids("stellar_catalog", ids):
+  ids = [s.id for s in astrometrics._catalog_access.list_star_summaries() if s.has_spectra]
+  for star in astrometrics._catalog_access.get_by_ids("stellar_catalog", ids):
       s = star.spectroscopy
       print(
           star.id,
@@ -1149,7 +1149,7 @@ from astrometricslib import Astrometrics
 from astrometricslib.scripts.calibrate_class_gap_against_snr import select_samples
 from astrometricslib.pipelines.spectroscopy.processing.class_gap_calibration import class_gap_table
 
-samples = select_samples(Astrometrics().catalog_access)
+samples = select_samples(Astrometrics()._catalog_access)
 table = class_gap_table(samples)
 print(table.class_reachable_snr, table.subtype_reachable_snr)
 ```

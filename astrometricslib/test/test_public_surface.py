@@ -308,7 +308,6 @@ def test_every_public_name_actually_resolves() -> None:
 SUB_API_MEMBERS = {
     "targets": {
         "add",
-        "catalog_access",
         "create",
         "delete",
         "delete_images",
@@ -324,8 +323,8 @@ SUB_API_MEMBERS = {
     },
     "stars": {
         "analyze_periodicity",
-        "catalog_access",
         "create",
+        "dataset_version",
         "delete",
         "detect_point_sources",
         "find_or_create_by_position",
@@ -406,7 +405,6 @@ def test_the_root_object_only_holds_its_sub_apis() -> None:
 
     astrometrics = astrometricslib.Astrometrics(astrometricslib.AppConfiguration(), MagicMock())
     assert _public_members(astrometrics) == {
-        "catalog_access",
         "config",
         "jobs",
         "processing",

@@ -177,7 +177,7 @@ def test_reindex_frames_of_one_target_delegates_with_keyword_arguments(
     catalog.reindex_frames(target, prune_missing=True, refresh_headers=True)
 
     mock.assert_called_once_with(
-        target, prune_missing=True, catalog_access=catalog.catalog_access, refresh_headers=True
+        target, prune_missing=True, catalog_access=catalog._catalog_access, refresh_headers=True
     )
 
 

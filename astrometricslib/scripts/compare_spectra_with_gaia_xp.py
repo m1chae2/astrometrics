@@ -213,11 +213,11 @@ def compare_target(
     line_spread = load_line_spread_profile(camera_name)
     star_ids = [
         summary.id
-        for summary in astrometrics.catalog_access.list_star_summaries(target_id=target_id)
+        for summary in astrometrics._catalog_access.list_star_summaries(target_id=target_id)
         if summary.has_spectra and not summary.id.endswith("::spectroscopy")
     ]
     results = []
-    for star in astrometrics.catalog_access.get_by_ids("stellar_catalog", star_ids) if star_ids else []:
+    for star in astrometrics._catalog_access.get_by_ids("stellar_catalog", star_ids) if star_ids else []:
         comparison = compare_star(star, driver, line_spread)
         if comparison is not None:
             results.append((star.id, comparison))

@@ -366,7 +366,7 @@ def run_recompute(argv: list[str] | None = None) -> int:
 
     star_ids = [
         summary.id
-        for summary in astrometrics.catalog_access.list_star_summaries(target_id=arguments.target)
+        for summary in astrometrics._catalog_access.list_star_summaries(target_id=arguments.target)
         if summary.has_spectra and not summary.id.endswith("::spectroscopy")
     ]
     if not star_ids:
@@ -376,7 +376,7 @@ def run_recompute(argv: list[str] | None = None) -> int:
         )
         return 0
 
-    stars = astrometrics.catalog_access.get_by_ids("stellar_catalog", star_ids)
+    stars = astrometrics._catalog_access.get_by_ids("stellar_catalog", star_ids)
     print(
         f"{len(stars)} star(s) with spectra, camera {camera_name} "
         f"({minimum_wavelength_angstrom:.0f}-{maximum_wavelength_angstrom:.0f} A):"
@@ -418,7 +418,7 @@ def run_recompute(argv: list[str] | None = None) -> int:
         )
         return 1
     print(f"\nBacked up the catalog database to {backup_path}.")
-    astrometrics.catalog_access.merge_and_record(
+    astrometrics._catalog_access.merge_and_record(
         "stellar_catalog", changed_stars, lambda _existing, updated: updated
     )
     print(f"Saved {len(changed_stars)} star(s).")

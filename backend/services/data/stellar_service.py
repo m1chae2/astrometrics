@@ -47,7 +47,7 @@ _MAXIMUM_CONCURRENT_PERIOD_SEARCHES = 2
 
 # The whole-catalog answers (per-target counts, class counts, a class's
 # stars) each read every star's summary, which takes seconds on a large
-# library. They are kept until `CatalogAccess.get_dataset_version`
+# library. They are kept until `StellarCatalog.dataset_version`
 # says a write has happened, not on a timer. This is only the fallback: how
 # long an answer may be served for a version already confirmed current, in
 # case a program outside this process (such as a maintenance script) wrote
@@ -153,7 +153,7 @@ class StellarService:
     def _cached_catalog_answer(self, key: str, compute: Callable[[], _Answer]) -> _Answer:
         """Answer a whole-catalog question, reusing the last answer if current.
 
-        Freshness is checked against `CatalogAccess.get_dataset_version`
+        Freshness is checked against `StellarCatalog.dataset_version`
         rather than a timer, so nothing is recomputed while the catalog is
         unchanged. `_CATALOG_ANSWER_CACHE_FALLBACK_MAX_AGE_SECONDS` is only a
         backstop for a write that counter missed.
@@ -197,7 +197,7 @@ class StellarService:
                 retryable=True,
             )
         try:
-            current_version = self.astrometrics.catalog_access.get_dataset_version("stellar_catalog")
+            current_version = self.astrometrics.stars.dataset_version()
             now = time.monotonic()
             with self._catalog_answers_lock:
                 cached = self._catalog_answers.get(key)

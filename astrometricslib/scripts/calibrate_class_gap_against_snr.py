@@ -299,7 +299,7 @@ def main(argv: list[str] | None = None) -> int:
     """
     arguments = _build_argument_parser().parse_args(argv)
     astrometrics = Astrometrics()
-    samples = select_samples(astrometrics.catalog_access)
+    samples = select_samples(astrometrics._catalog_access)
     if not samples:
         print("No stored spectrum has a catalog type and a signal-to-noise of 30 or more.")
         return 1

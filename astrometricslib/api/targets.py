@@ -86,7 +86,7 @@ class TargetCatalog:
     ) -> None:
         self._config = config
         self._drivers = drivers or Drivers()
-        self.catalog_access = storage
+        self._catalog_access = storage
         self._targets: list = storage.get("target_catalog", {}) or []
         self._touched_target_ids: set = set()
         self._saved_fingerprints: dict[str, str] = {}
@@ -336,7 +336,7 @@ class TargetCatalog:
             target_records.reindex_frames(
                 resolved,
                 prune_missing=prune_missing,
-                catalog_access=self.catalog_access,
+                catalog_access=self._catalog_access,
                 refresh_headers=refresh_headers,
             )
         self._touched_target_ids.add(resolved.id)
@@ -388,7 +388,7 @@ class TargetCatalog:
             target_records.reindex_frames(
                 resolved,
                 prune_missing=prune_missing,
-                catalog_access=self.catalog_access,
+                catalog_access=self._catalog_access,
                 refresh_headers=refresh_headers,
             )
             self._touched_target_ids.add(resolved.id)

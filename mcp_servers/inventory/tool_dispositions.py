@@ -186,6 +186,10 @@ DECISIONS = {
     "processing_acquire_stacking_slot": ToolDecision(
         "drop", "Internal concurrency lock exposed by reflection."
     ),
+    "star_dataset_version": ToolDecision(
+        "drop",
+        "A change counter for the backend's answer cache. It tells an AI client nothing about the sky.",
+    ),
     "processing_open_in_siril": ToolDecision(
         "drop", "Opens a window on the person's screen. An AI client cannot see it. The app's button uses it."
     ),

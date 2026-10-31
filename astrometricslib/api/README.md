@@ -40,6 +40,7 @@ Each sub-API checks its arguments and hands the work to `pipelines/`. Three rule
 - Single-frame detections are hidden unless `include_unresolved=True`. Photometry (brightness measurement) saves each point source it finds in one frame under an id ending in `:Star_<n>`. These are working records, not catalog stars, so a normal query leaves them out.
 - `plate_solve` works out where a FITS frame (the standard astronomy image file) points, using the stars in it. It returns the pixel-to-sky mapping (a WCS, World Coordinate System), or `None`. The centering step in wayfindinglib uses it to point the telescope exactly at a target.
 - `detect_point_sources` finds stars in a pixel array.
+- `dataset_version` counts the star catalog writes this process has made. A cache of a whole-catalog answer compares it to the number it saw last, to know whether to rebuild.
 - Every other method on `StellarCatalog` changes star records.
 
 ### `processing.py`

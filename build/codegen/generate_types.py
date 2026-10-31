@@ -31,8 +31,10 @@ from astrometricslib.models.moving_object import (
     FrameDetection,
     MovingObjectTrack,
 )
+from astrometricslib.models.processing_results import PreviewRemakeResult
 from astrometricslib.models.quality.astrometry_quality import CatalogMatchQuality
 from astrometricslib.models.quality.capture_setting import CaptureSetting
+from astrometricslib.models.quality.excluded_frames import SetAsideFrameRecord
 from astrometricslib.models.quality.gaia_xp_comparison import (
     GaiaXpBandResidual,
     GaiaXpBandSummary,
@@ -137,6 +139,7 @@ from backend.services.infrastructure.system_status_service import (
     SystemPulse,
     TelescopePulse,
 )
+from backend.services.processing.stack_review_service import StackReviewStart
 from wayfindinglib.drivers.indi_interface import TelescopeStatus
 from wayfindinglib.models.control_status import SafetyStatus
 from wayfindinglib.models.equipment_and_site.camera_noise import CameraNoiseSetting
@@ -650,6 +653,9 @@ def render_types() -> str:
                 CameraNoiseSetting,
                 CalibrationQueryResult,
                 StackSummary,
+                PreviewRemakeResult,
+                SetAsideFrameRecord,
+                StackReviewStart,
             ],
             written,
         )

@@ -5,6 +5,7 @@ left alone, the old pictures are kept and put back on a failure, the
 overrides reach the step, and the target's processed image is updated.
 """
 
+import json
 import os
 from contextlib import nullcontext
 from pathlib import Path
@@ -45,6 +46,21 @@ def stacked(tmp_path: Path) -> Path:
     return path
 
 
+RECORD = {
+    "made_at": "2026-10-31T01:02:03+00:00",
+    "settings_used": {
+        "denoise": True,
+        "denoise_strength": 0.5,
+        "star_toning": False,
+        "starnet": False,
+        "bright_object": False,
+    },
+    "steps_run": ["GraXpert done"],
+    "custom": True,
+}
+"""A record as the preview step writes it."""
+
+
 def make_target(stack: Path, spectral: bool = False) -> Target:
     """Make a target that shows the given stack.
 
@@ -60,7 +76,9 @@ def make_target(stack: Path, spectral: bool = False) -> Target:
     return target
 
 
-def fake_preview(monkeypatch: pytest.MonkeyPatch, succeeds: bool = True) -> list[PreviewSettings | None]:
+def fake_preview(
+    monkeypatch: pytest.MonkeyPatch, succeeds: bool = True, write_record: bool = True
+) -> list[PreviewSettings | None]:
     """Replace the preview step with one that writes new pictures.
 
     Returns
@@ -90,6 +108,8 @@ def fake_preview(monkeypatch: pytest.MonkeyPatch, succeeds: bool = True) -> list
             return None
         Path(preview_path_for(stacked_path)).write_bytes(b"new jpeg")
         Path(processed_fits_path_for(stacked_path)).write_bytes(b"new fits")
+        if write_record:
+            Path(preview_settings_path_for(stacked_path)).write_text(json.dumps(RECORD))
         return preview_path_for(stacked_path)
 
     monkeypatch.setattr(preview_remake, "write_stack_preview", write)
@@ -119,6 +139,26 @@ def test_a_remake_replaces_the_pictures_and_leaves_the_stack_alone(
         "NGC_7331_L_Stacked_preview_settings.json": b"old record",
     }
     assert (stacked.parent / PREVIOUS_PICTURES_FOLDER).is_dir()
+
+
+def test_the_result_carries_what_made_the_picture(stacked: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The settings come from the record the preview step saved."""
+    fake_preview(monkeypatch)
+
+    result = remake_stack_preview(make_target(stacked), False, PreviewSettings())
+
+    assert result.preview_settings is not None
+    assert result.preview_settings.settings_used.denoise_strength == pytest.approx(0.5)
+    assert result.preview_settings.custom is True
+
+
+def test_a_missing_record_means_unknown(stacked: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """With no record the settings are None, never a default."""
+    fake_preview(monkeypatch, write_record=False)
+
+    result = remake_stack_preview(make_target(stacked), False, PreviewSettings())
+
+    assert result.preview_settings is None
 
 
 def test_keep_previous_off_copies_nothing(stacked: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -136,8 +136,8 @@ export const StackedImagePanel: React.FC<StackedImagePanelProps> = ({
                 </div>
             )}
             <DepthGoalRow targetId={targetId} refreshKey={depthGoalRefreshKey} />
-            {path && <StackSummaryPanel targetId={targetId} kind="imaging" refreshKey={depthGoalRefreshKey} />}
-            {spectralPath && <StackSummaryPanel targetId={targetId} kind="spectral" refreshKey={depthGoalRefreshKey} />}
+            {path && <StackSummaryPanel targetId={targetId} kind="imaging" refreshKey={depthGoalRefreshKey} onShowPicture={onView} />}
+            {spectralPath && <StackSummaryPanel targetId={targetId} kind="spectral" refreshKey={depthGoalRefreshKey} onShowPicture={onView} />}
         </div>
     );
 };

@@ -3608,6 +3608,66 @@ export interface StackSummary {
 }
 
 /**
+ * What one call of `ProcessingPipelines.remake_preview` made.
+ */
+export interface PreviewRemakeResult {
+  target_id: string;
+  stack_path: string;
+  preview_path: string;
+  processed_fits_path?: string | null;
+  steps_run?: string[];
+  shown_in_viewer?: boolean;
+  previous_pictures?: string[];
+  stack_file_unchanged?: boolean;
+  preview_settings?: PreviewSettingsRecord | null;
+}
+
+/**
+ * One frame that lies in a target's `_excluded` folder.
+ *
+ * The listing is read-only. Where the reason is known, it comes from the
+ * first source that has it: the stored quality rows of the frame (which
+ * carry the action taken), then the folder's `excluded_frames.json` file.
+ */
+export interface SetAsideFrameRecord {
+  file: string;
+  path: string;
+  subjectId?: string | null;
+  originalPath?: string | null;
+  kind?: string | null;
+  reason?: string;
+  reasonSource: any;
+  actionTaken?: string | null;
+  exposureSeconds?: number | null;
+  captureSettingId?: number | null;
+  movedAt?: string | null;
+  restorable?: boolean;
+  restoreNote?: string;
+}
+
+/**
+ * The answer to starting a slow stack review.
+ *
+ * Attributes
+ * ----------
+ * status : `str`
+ * ``"completed"`` when the work finished within the short wait, or
+ * ``"running"`` when it is still going.
+ * job_id : `str` or `None`
+ * The job to follow with ``processing:get_job``. `None` when the work
+ * has not recorded a job yet, for example because it waits for another
+ * job to finish.
+ * result : `dict` or `None`
+ * The library's result as plain data, when the status is
+ * ``"completed"``.
+ */
+export interface StackReviewStart {
+  status: any;
+  job_id?: string | null;
+  result?: Record<string, any> | null;
+}
+
+/**
  * One observation session's overall lifecycle state.
  *
  * `SUSPENDED` means an unsafe verdict halted advancement without ending
@@ -4665,6 +4725,16 @@ export enum NoiseEvidenceStatus {
 }
 
 /**
+ * What made a stack's preview picture (its settings record file).
+ */
+export interface PreviewSettingsRecord {
+  made_at: string;
+  settings_used: PreviewSettingsUsed;
+  steps_run?: string[];
+  custom?: boolean;
+}
+
+/**
  * A package placement request's starting disposition.
  */
 export enum StartTimeMode {
@@ -5130,6 +5200,17 @@ export interface CapabilityDelegation {
 }
 
 /**
+ * The choices a preview run really used, as recorded beside the stack.
+ */
+export interface PreviewSettingsUsed {
+  denoise: boolean;
+  denoise_strength?: number | null;
+  star_toning: boolean;
+  starnet?: boolean;
+  bright_object?: boolean;
+}
+
+/**
  * The frames captured for one light row of an entry.
  *
  * Parameters
@@ -5308,6 +5389,8 @@ export const RPC_METHODS = [
   "processing:jobs_for_target",
   "processing:job_log_tail",
   "processing:stack_summary",
+  "processing:remake_preview",
+  "quality:set_aside_frames",
   "quality:record_frame_measurements",
   "processing:measure_noise",
   "quality:query",

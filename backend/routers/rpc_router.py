@@ -154,6 +154,15 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # stacking stage saved with it. Nothing is measured and nothing is written.
     # A target with no saved stack summary raises `NotFoundError`.
     "processing:stack_summary": ("astrometrics.processing", "stack_summary"),
+    # Makes a stack's preview picture again from the stack that is there. It
+    # takes about a minute, so the service starts it as a background job and
+    # answers at once with the result or the job to follow. A write (pictures
+    # and the target's processed-image pointer), so the AI's read-only
+    # profile withholds it.
+    "processing:remake_preview": ("stack_review_service", "start_preview_remake"),
+    # The frames the stacker set aside for a target, each with the reason.
+    # Nothing is moved, measured or written.
+    "quality:set_aside_frames": ("astrometrics.quality", "set_aside_frames"),
     # Measures a target's light frames and stores the numbers. Starts a
     # background run and answers at once; the result arrives as the
     # `quality:measured` event. A write, so the AI's read-only profile

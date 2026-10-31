@@ -126,6 +126,11 @@ RPC_METHODS: tuple[str, ...] = (
     "processing:job_log_tail",
     # A target's current stack in one short answer (a read).
     "processing:stack_summary",
+    # Makes a stack's preview picture again without restacking (a background
+    # job; writes the pictures and the target's processed-image pointer).
+    "processing:remake_preview",
+    # The frames the stacker set aside for a target, with the reason (a read).
+    "quality:set_aside_frames",
     # Measures a target's light frames and stores the numbers (a write).
     "quality:record_frame_measurements",
     # Stacks some of a target's frames apart from its library stack and

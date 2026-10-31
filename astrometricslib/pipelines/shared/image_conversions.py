@@ -21,8 +21,10 @@ from astrometricslib.pipelines.shared.stack_preview_path import PREVIEW_JPEG_QUA
 logger = logging.getLogger(__name__)
 
 # Shared in-memory cache for rendered PNG frames
+# The key includes the file's modified time and size, so a picture rewritten at
+# the same path (a preview remade without a restack) is drawn again.
 _png_cache: dict[
-    tuple[str, int, float | None, float | None, str, bool],
+    tuple[str, int, float | None, float | None, str, bool, int, int],
     tuple[bytes, float, float, StretchParameters | None],
 ] = {}
 
@@ -112,7 +114,12 @@ class ImageConverter:
             maximum_brightness, stretch_parameters)`. The last is the
             automatic stretch used, or `None` when none was.
         """
-        cache_key = (path, int(max_dimensions), center, width, cmap, stretch)
+        try:
+            file_status = os.stat(path)
+            file_version = (file_status.st_mtime_ns, file_status.st_size)
+        except OSError:
+            file_version = (0, 0)
+        cache_key = (path, int(max_dimensions), center, width, cmap, stretch, *file_version)
         if cache_key in _png_cache:
             return _png_cache[cache_key]
 

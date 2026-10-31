@@ -49,7 +49,7 @@ Each sub-API checks its arguments and hands the work to `pipelines/`. Three rule
 `ProcessingPipelines` makes stacks and runs the analysis.
 
 - `stack` chooses a target's frames and stacks them. It chooses by filter (the colored or clear glass in front of the camera that passes one band of light), file range, time window and camera, or takes an exact list. `plan_only=True` only reports the choice.
-- `remake_preview` makes a stack's preview image again without restacking.
+- `remake_preview` makes a stack's preview image again without restacking. The result carries `preview_settings`, read from the record saved beside the stack (`<stack name>_preview_settings.json`), or `None` when the picture has no record.
 - `process_target` has two forms:
   - For one target, it runs the analysis stages (`astrometry`, `photometry`, `spectroscopy` and `asteroids`) on the frames and stack the target already has. It does not stack.
   - For a list of targets, or for every target, it runs the full pipeline: stacking first, then the analysis stages.

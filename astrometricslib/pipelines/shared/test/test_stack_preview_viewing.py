@@ -125,3 +125,19 @@ def test_an_unreadable_jpeg_falls_back_to_the_png(stack: Path) -> None:
 
     assert result is not None
     assert result.image_data.startswith(_PNG_PREFIX)
+
+
+def test_a_picture_rewritten_at_the_same_path_is_drawn_again(tmp_path: Path) -> None:
+    """A remade preview rewrites a picture; its cached PNG is not reused."""
+    from astrometricslib.pipelines.shared.image_conversions import ImageConverter
+
+    path = tmp_path / "M_13_L_Stacked_processed.fits"
+    ramp = np.tile(np.linspace(0.0, 1.0, 40, dtype=np.float32), (30, 1))
+    fits.writeto(path, ramp)
+    first = ImageConverter.convert_fits_to_png_with_stats(str(path), stretch=False)
+
+    fits.writeto(path, ramp[:, ::-1].copy(), overwrite=True)
+    os.utime(path, ns=(1, 1))
+    second = ImageConverter.convert_fits_to_png_with_stats(str(path), stretch=False)
+
+    assert first[0] != second[0]

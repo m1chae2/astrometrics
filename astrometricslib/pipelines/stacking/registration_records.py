@@ -145,7 +145,7 @@ def check_spectral_registration_quality(
     comparison -- see `registration_quality.py`'s module docstring for
     why. Requires `frame_paths`, `seq_frames`, and `zero_order_stars`
     to be index-aligned; all three are populated by
-    `siril_interface.py` during the same registration pass the real
+    the `siril_interface` package during the same registration pass the real
     stack already ran (`parse_seq_file` reads the preserved .seq file,
     mirroring the standard-imaging FWHM check; `zero_order_stars` comes
     from `diagnostics` since spectral .lst files aren't preserved as

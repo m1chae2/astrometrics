@@ -29,6 +29,7 @@ from typing import Any
 from astrometricslib.drivers.calibration_library import (
     BIAS_FRAME_PATHS_KEY,
     DARK_FRAME_PATHS_KEY,
+    FLAT_BIAS_FRAME_PATHS_KEY,
     FLAT_FRAME_PATHS_KEY,
 )
 from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
@@ -1480,7 +1481,7 @@ def _merge_diagnostics(results: list[tuple[Any, str, dict[str, Any]]]) -> dict[s
         merged[key] = [item for _, _, diagnostics in results for item in diagnostics.get(key, [])]
     # The calibration files every group applied, each once: groups of other
     # exposure lengths use other darks, and the quality step must see them all.
-    for key in (FLAT_FRAME_PATHS_KEY, BIAS_FRAME_PATHS_KEY, DARK_FRAME_PATHS_KEY):
+    for key in (FLAT_FRAME_PATHS_KEY, BIAS_FRAME_PATHS_KEY, FLAT_BIAS_FRAME_PATHS_KEY, DARK_FRAME_PATHS_KEY):
         joined = [item for _, _, diagnostics in results for item in diagnostics.get(key, [])]
         if joined:
             merged[key] = list(dict.fromkeys(joined))

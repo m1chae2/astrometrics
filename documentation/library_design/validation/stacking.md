@@ -2494,6 +2494,41 @@ Every Python example assumes the library is installed and configured with your o
 - **Guarded by tests:** None; the bias check has no temperature term.
 - **Raw record:** Kept outside the repository, in the validation folder of issue 134 under `calibration_checks/`: `frames.jsonl` (one line per frame), `groups.jsonl` (per setting group), `match.jsonl` and `flats.jsonl`.
 
+### STK-57
+
+**Which bias calibrates the flats**
+
+- **Claim:** A master flat keeps a pedestal when the bias subtracted from it was taken at another offset than the flats. On the ASI 533MM Pro an offset step of 10 is about 396 ADU. With a flat level of about 29,600 ADU that is 1.3% of the level, and a dust shadow d deep is under-corrected by about 1.3% of d. The stack now subtracts a bias taken at the flats' own gain and offset, and keys the master flat on that bias.
+- **Settings it supports:** None. The rule has no tuned number.
+- **Status:** Partly measured. The fault was measured on one cached master flat. The fix is guarded by tests only; the before-and-after run on real data has not been done.
+- **Data you need:** Flats taken at one offset, lights at another, and bias sets at both offsets, for the same camera and gain.
+- **Procedure:**
+  1. Find a stack whose lights and flats were taken at different offsets.
+  2. Compare the median of the first raw flat with the median of the cached master flat. The master is normalized to the first flat, so the difference is the bias that was removed.
+  3. Stack the same target again and compare the two differences.
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  astro.processing.calibration.measure_frames()
+  for health in astro.processing.calibration.assess("bias", camera_id="ZWO ASI 533MM Pro"):
+      print(health.row_key, health.status, health.summary)
+      for check in health.checks:
+          print("   ", check.name, check.status.value, check.measured_value, check.limit)
+  ```
+
+  `CalibrationCatalog.measure_frames` measures and stores the frames, and `CalibrationCatalog.assess` judges each set from the stored rows; the bias level of each set at each offset is the quantity to compare. <!-- impl: astrometricslib.api.processing.CalibrationCatalog.measure_frames --> <!-- impl: astrometricslib.api.processing.CalibrationCatalog.assess -->
+- **Acceptance criterion:** The difference between the first raw flat and the master flat equals the level of the bias at the flats' offset, within the noise of the medians.
+- **What to look at:** The difference in ADU, and the soft flag that names the bias used when no bias exists at the flats' offset.
+- **Our result:** Code: this change (the commit that raised `FLAT_MASTER_RECIPE` to `flat-recipe-6`). On the copy of the library, the cached L master flat built 2026-10-25 had a median 21.7 ADU below the first raw flat, where a subtracted offset-10 bias would give about 396 and an offset-0 bias about 0. So the pedestal was left in. The same flat master was shared by an offset-0 run and an offset-10 run, which depended on run order. Corner to center ratio of the L master flat: 0.9711 now, 0.9707 with the pedestal removed, so the error at the corners is about 0.04% (about 0.07% for the spectral flat). Not measured: dust depth, and the effect on a stack.
+- **Verdict:** Not judged. The fix was written after seeing this library, and no held-out data exists.
+- **Limits:** One camera, one filter measured. When no bias exists at the flats' offset, the lights' bias is still used, with a flag, so the pedestal remains in that case.
+- **To tune for your setup:** Take bias frames at the offset you use for flats.
+- **Regenerate with:** `CalibrationCatalog.measure_frames(force=True)` then `CalibrationCatalog.assess`.
+- **Guarded by tests:** `astrometricslib/drivers/test/test_flat_bias_matching.py` and the golden case `imaging_flats_at_another_offset` in `astrometricslib/drivers/test/test_siril_script_golden.py`.
+- **Raw record:** Kept outside the repository, in the validation folder of issue 134 under `calibration_checks/`: see `CALIBRATION_SET_ASIDE_LIST.md`, section 5.
+
 ## Design estimates
 
 These tuned values have not been measured. Each is a reasoned choice; the last column says how you could measure it on your data.

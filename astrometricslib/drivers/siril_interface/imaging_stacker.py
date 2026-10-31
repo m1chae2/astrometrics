@@ -240,6 +240,12 @@ class SirilImagingStacker(SirilSpectralStacker):
         # 'calibrate' or 'stack' commands to fail.
         counts = StagedFrameCounts(
             biases=len(os.listdir(os.path.join(target_folder, "biases"))),
+            # A work folder made without the flats' own bias folder has none.
+            flat_biases=(
+                len(os.listdir(os.path.join(target_folder, "flat_biases")))
+                if os.path.isdir(os.path.join(target_folder, "flat_biases"))
+                else 0
+            ),
             darks=len(os.listdir(os.path.join(target_folder, "darks"))),
             flats=len(os.listdir(os.path.join(target_folder, "flats"))),
             lights=len(os.listdir(os.path.join(target_folder, "lights"))),

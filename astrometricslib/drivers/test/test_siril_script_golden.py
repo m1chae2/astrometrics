@@ -104,6 +104,16 @@ CASES: dict[str, dict[str, Any]] = {
         "config": {"mode": "adaptive", "rejmap": False},
         "restored": {"bias", "dark", "flat"},
     },
+    # The flats were taken at another offset than the lights: 4 bias frames
+    # at the flats' own offset are staged apart, and the flat is calibrated
+    # with their master. The lights still use the lights' own bias.
+    "imaging_flats_at_another_offset": {
+        "counts": (5, 5, 5, 20),
+        "flat_biases": 4,
+        "cfa": False,
+        "options": {},
+        "config": {"mode": "adaptive", "rejmap": False},
+    },
     "imaging_no_calibration": {
         "counts": (0, 0, 0, 10),
         "cfa": False,
@@ -208,6 +218,7 @@ def _run_case(name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dic
     """
     case = CASES[name]
     biases, darks, flats, lights = case["counts"]
+    flat_biases = case.get("flat_biases", 0)
     sent_scripts: list[list[str]] = []
     read_calls: list[dict[str, Any]] = []
 
@@ -244,7 +255,10 @@ def _run_case(name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dic
             ("darks", darks),
             ("flats", flats),
             ("lights", lights),
+            ("flat_biases", flat_biases),
         ):
+            if count:
+                (target_folder / subdirectory).mkdir(parents=True, exist_ok=True)
             for index in range(count):
                 (target_folder / subdirectory / f"{subdirectory}_{index:05d}.fits").touch()
         self.last_run_diagnostics["symlinked_light_paths"] = [

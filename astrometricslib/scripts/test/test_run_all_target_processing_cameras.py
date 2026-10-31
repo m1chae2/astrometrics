@@ -279,6 +279,10 @@ def script(monkeypatch: pytest.MonkeyPatch) -> Any:
     from astrometricslib.scripts import run_all_target_processing
 
     monkeypatch.setattr(siril_interface, "purge_stale_work_directories", lambda *args, **kwargs: (0, 0))
+    # The stand-in targets hold one frame per camera. The tests that are not
+    # about the smallest stack let one frame through; the skip tests below
+    # put the real limit back.
+    monkeypatch.setattr(run_all_target_processing, "MINIMUM_IMAGING_FRAMES_TO_STACK", 1)
     return run_all_target_processing
 
 
@@ -1096,3 +1100,44 @@ def test_the_review_list_says_when_the_odd_even_difference_was_switched_off(
     with open(review_path, newline="") as handle:
         rows = {row["target"]: row for row in csv.DictReader(handle)}
     assert rows["Both"]["odd_even_difference"] == "skipped (--no-odd-even-difference)"
+
+
+def test_a_target_with_one_imaging_frame_is_skipped_with_a_reason_not_failed(
+    script: Any, fake: FakeAstrometrics, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Check a one-frame target is skipped, not measured or stacked."""
+    monkeypatch.setattr(script, "MINIMUM_IMAGING_FRAMES_TO_STACK", 2)
+    progress_path = tmp_path / "progress.jsonl"
+
+    script.run_full_processing([
+        "--skip-reindex", "--stack-only", "--camera", ASI, "--progress-file", str(progress_path),
+    ])  # fmt: skip
+
+    records = read_lines(progress_path)
+    assert [(record["target"], record["status"]) for record in records] == [
+        ("Both", "skipped"),
+        ("AsiOnly", "skipped"),
+    ]
+    assert "Only 1 imaging frame(s)" in records[0]["error"]
+    assert "at least 2" in records[0]["error"]
+    assert fake.measure_calls == []
+    assert fake.stack_calls == []
+
+
+def test_a_target_with_two_imaging_frames_is_stacked(
+    script: Any, fake: FakeAstrometrics, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Check the smallest allowed number of frames still makes a stack."""
+    monkeypatch.setattr(script, "MINIMUM_IMAGING_FRAMES_TO_STACK", 2)
+    target = make_target("TwoFrames", ASI, ASI)
+    fake.targets.list = lambda: [target]
+    progress_path = tmp_path / "progress.jsonl"
+
+    script.run_full_processing([
+        "--skip-reindex", "--stack-only", "--camera", ASI, "--progress-file", str(progress_path),
+    ])  # fmt: skip
+
+    assert [(record["target"], record["status"]) for record in read_lines(progress_path)] == [
+        ("TwoFrames", "success")
+    ]
+    assert [len(call["frames"]) for call in fake.stack_calls] == [2]

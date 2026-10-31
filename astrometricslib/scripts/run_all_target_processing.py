@@ -87,6 +87,13 @@ NIKON_REQUIRED_BINNING = 1
 # (`MINIMUM_SUBSET_FRAMES`, 4) is unchanged.
 MINIMUM_EARLIER_NIGHTS_FRAMES = 8
 
+# The fewest imaging frames a target needs for the restack to stack it. One
+# frame is not a stack: there is nothing to combine or to reject outliers
+# against (Arcturus and Polaris each have one imaging frame). A target with
+# fewer is reported as skipped, with this reason, not as failed. Two is the
+# smallest number that can be combined at all, not a tuned value.
+MINIMUM_IMAGING_FRAMES_TO_STACK = 2
+
 # Progress-file statuses. A target in `PROGRESS_DONE_STATUSES` is not run
 # again on resume. "failed" is run again only with --retry-failed, and
 # "refused" is checked again on every run, since the profile may have changed.
@@ -762,7 +769,9 @@ def _stack_one_target(
     Returns
     -------
     status, message : `tuple` [`str`, `str`]
-        ``"success"`` or ``"skipped"``, and the reason when skipped. A
+        ``"success"`` or ``"skipped"``, and the reason when skipped (no
+        frames for the camera, no imaging frames, or fewer than
+        `MINIMUM_IMAGING_FRAMES_TO_STACK` of them). A
         ``"success"`` carries a message when the earlier-nights stack or the
         odd–even difference measurement failed.
 
@@ -777,6 +786,11 @@ def _stack_one_target(
     standard_frames, _spectral_frames = split_standard_and_spectral_frames(target, camera_frames)
     if not standard_frames:
         return "skipped", "No imaging frames to stack"
+    if len(standard_frames) < MINIMUM_IMAGING_FRAMES_TO_STACK:
+        return "skipped", (
+            f"Only {len(standard_frames)} imaging frame(s); at least "
+            f"{MINIMUM_IMAGING_FRAMES_TO_STACK} are needed to make a stack"
+        )
     # The stack measures at most `STACKING_STAGE_MEASUREMENT_LIMIT` frames
     # that were never measured, and its predicted noise needs the sky of every
     # frame. So every imaging frame is measured first, with no limit. Frames

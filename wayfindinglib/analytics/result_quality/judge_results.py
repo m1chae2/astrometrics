@@ -43,6 +43,14 @@ from wayfindinglib.analytics.result_quality.plain_text import (
     plain_missing_data,
 )
 from wayfindinglib.analytics.result_quality.rules import (
+    BIAS_LEVEL_GATE_METRIC,
+    BIAS_NOISE_GATE_METRIC,
+    BIAS_ZERO_PIXEL_GATE_METRIC,
+    CALIBRATION_FRAME_COUNT_GATE_METRIC,
+    DARK_LEVEL_GATE_METRIC,
+    DARK_LIGHT_LEAK_GATE_METRIC,
+    DARK_NOISE_GATE_METRIC,
+    DARK_ZERO_PIXEL_GATE_METRIC,
     ELONGATION_METRIC,
     EMPTY_APERTURE_NOISE_METRIC,
     FLAT_FRAME_COUNT_METRIC,
@@ -139,13 +147,17 @@ class _Case:
     capture_setting : `CaptureSetting` or `None`
         The setting being judged.
     readings : `dict` [`str`, `_Reading`]
-        The reading of each required metric.
+        The reading of each required metric that has one.
+    fired_rules : `frozenset` [`str`]
+        The names of the rules already judged for this setting that made a
+        statement, for a rule that must not repeat another's advice.
     """
 
     rule: QualityRule
     limits: list[QualityLimit]
     capture_setting: CaptureSetting | None
     readings: dict[str, _Reading]
+    fired_rules: frozenset[str] = frozenset()
 
 
 def _how_to_get(metric: str) -> str:
@@ -794,6 +806,150 @@ def _judge_master_flat_noisy(case: _Case) -> list[TargetStatement]:
     ]
 
 
+# What each stored calibration gate says when it failed: the kind of frame, the
+# short condition, the plain condition and the advice. The advice names the
+# action the observer takes. `{value}` is the number the gate stored.
+_CALIBRATION_FINDINGS: dict[str, tuple[str, str, str, str, str]] = {
+    DARK_ZERO_PIXEL_GATE_METRIC: (
+        "dark",
+        "the dark frames are cut off at zero ({value:.0%} of the pixels read exactly zero in the worst one)",
+        "the dark frames lost their faint detail (about {value:.0%} of the pixels read exactly zero)",
+        "Retake the darks{offset_advice}.",
+        "Take new dark frames{offset_advice}.",
+    ),
+    BIAS_ZERO_PIXEL_GATE_METRIC: (
+        "bias",
+        "the bias frames are cut off at zero ({value:.0%} of the pixels read exactly zero in the worst one)",
+        "the bias frames lost their faint detail (about {value:.0%} of the pixels read exactly zero)",
+        "Retake the biases{offset_advice}.",
+        "Take new bias frames{offset_advice}.",
+    ),
+    DARK_LIGHT_LEAK_GATE_METRIC: (
+        "dark",
+        "light reached the sensor while the darks were taken (their large-scale pattern is {value:.1f} value "
+        "steps above the bias frames')",
+        "light got into some dark frames (their brightness varies {value:.1f} steps more than a dark should)",
+        "Remove the struck dark frames from the set, or retake the darks with the cap on.",
+        "Remove the dark frames that were struck by light, or take new ones with the cap on.",
+    ),
+    DARK_LEVEL_GATE_METRIC: (
+        "dark",
+        "the dark frames sit {value:.1f} value steps from the bias level of the same setting",
+        "the dark frames are at the wrong brightness level ({value:.1f} steps off)",
+        "Check that the darks were taken at the same gain and offset as the lights, and retake them.",
+        "Take new dark frames at the same gain and offset as your pictures.",
+    ),
+    BIAS_LEVEL_GATE_METRIC: (
+        "bias",
+        "the bias frames sit {value:.1f} value steps from the level the camera profile stores "
+        "for the setting",
+        "the bias frames are at the wrong brightness level ({value:.1f} steps off)",
+        "Check the offset the biases were taken at, and retake them.",
+        "Take new bias frames at the same offset as your pictures.",
+    ),
+    DARK_NOISE_GATE_METRIC: (
+        "dark",
+        "the dark frames are {value:.2f} times the camera's read noise, too quiet for a dark",
+        "the dark frames are quieter than the camera should be, so they are probably clipped",
+        "Retake the darks at the gain and offset of the lights.",
+        "Take new dark frames at the same gain and offset as your pictures.",
+    ),
+    BIAS_NOISE_GATE_METRIC: (
+        "bias",
+        "the bias frames are {value:.2f} times the camera's read noise, outside the 0.9 to 1.1 band",
+        "the bias frames do not have the noise the camera should have",
+        "Retake the biases at the gain and offset of the lights.",
+        "Take new bias frames at the same gain and offset as your pictures.",
+    ),
+    CALIBRATION_FRAME_COUNT_GATE_METRIC: (
+        "",
+        "a master calibration frame is built from too few different frames",
+        "a master calibration frame is built from too few different frames",
+        "Take more frames, so the set holds at least 10 different ones.",
+        "Take more calibration frames.",
+    ),
+}
+
+
+def _judge_retake_bad_calibration_set(case: _Case) -> list[TargetStatement]:
+    """Say which condition makes a dark or bias set bad, and what to do.
+
+    The rule reads the stack's stored self-checks of its calibration frames.
+    It makes one statement for the setting, naming each condition that failed
+    and the action for it: raise the offset and retake (frames cut off at
+    zero), remove the struck frames (light reached the sensor), retake at the
+    right gain and offset (a wrong level or noise), or take more frames (a
+    thin set). When ``offset_too_low`` already fired for the same setting, its
+    advice to raise the offset is not repeated.
+
+    Parameters
+    ----------
+    case : `_Case`
+        The rule, setting, readings and the rules that already fired.
+
+    Returns
+    -------
+    statements : `list` [`TargetStatement`]
+        One recommendation, or an empty list when no self-check failed.
+    """
+    offset_known = "offset_too_low" in case.fired_rules
+    conditions: list[str] = []
+    plain_conditions: list[str] = []
+    advice: list[str] = []
+    plain_advice: list[str] = []
+    kinds: set[str] = set()
+    used: list[_Reading] = []
+    for metric, (kind, condition, plain_condition, action, plain_action) in _CALIBRATION_FINDINGS.items():
+        reading = case.readings.get(metric)
+        if reading is None or str(reading.rows[0].check_outcome) != _FAILED_CHECK_OUTCOME:
+            continue
+        offset_advice = "" if offset_known else ", with the camera offset raised"
+        if metric not in (DARK_ZERO_PIXEL_GATE_METRIC, BIAS_ZERO_PIXEL_GATE_METRIC):
+            offset_advice = ""
+        used.append(reading)
+        if kind:
+            kinds.add(kind)
+        conditions.append(condition.format(value=reading.value))
+        plain_conditions.append(plain_condition.format(value=reading.value))
+        advice.append(action.format(offset_advice=offset_advice))
+        plain_advice.append(plain_action.format(offset_advice=offset_advice))
+    if not used:
+        return []
+    fields = {
+        "condition_text": "; ".join(conditions),
+        "advice_text": " ".join(dict.fromkeys(advice)),
+        "plain_condition_text": "; ".join(plain_conditions),
+        # One sentence, so the plain message keeps to its two-sentence limit.
+        "plain_advice_text": (
+            plain_advice[0]
+            if len(set(plain_advice)) == 1
+            else "Take new calibration frames; the reason says what to fix for each set."
+        ),
+    }
+    message = case.rule.wording.format_map(fields)
+    reason = (
+        "The stack's own self-checks of its calibration frames failed: "
+        + ", ".join(reading.metric.removeprefix("stacking.gate_") for reading in used)
+        + ". The checks only warn; the stack was still made."
+    )
+    action = ProposedAction(
+        calibration_frame_type=next(iter(kinds)) if len(kinds) == 1 else None,
+        note=fields["advice_text"],
+    )
+    narrowed = _Case(
+        case.rule, case.limits, case.capture_setting, {reading.metric: reading for reading in used}
+    )
+    return [
+        _statement(
+            narrowed,
+            message,
+            reason,
+            plain_message=format_plain(case.rule, fields),
+            proposed_action=action,
+        )
+    ]
+
+
 _PLAIN_RULE_JUDGES: dict[str, Callable[[_Case], list[TargetStatement]]] = {
     "overexposed_setting": _judge_overexposed_setting,
     "underexposed_setting": _judge_underexposed_setting,
@@ -801,6 +957,7 @@ _PLAIN_RULE_JUDGES: dict[str, Callable[[_Case], list[TargetStatement]]] = {
     "trailed_stars": _judge_trailed_stars,
     "flat_noise_limits_stack": _judge_flat_noise_limits_stack,
     "master_flat_noisy": _judge_master_flat_noisy,
+    "retake_bad_calibration_set": _judge_retake_bad_calibration_set,
 }
 
 PLAIN_RULE_NAMES: frozenset[str] = frozenset(_PLAIN_RULE_JUDGES)
@@ -999,15 +1156,27 @@ def judge_results(
                 continue
             readings: dict[str, _Reading] = {}
             problems: list[_Problem] = []
+            optional_problems: list[_Problem] = []
             for requirement in rule.requires:
                 result = _read_metric(requirement.name, requirement.definition_version, rows)
                 if isinstance(result, _Problem):
-                    problems.append(result)
+                    (optional_problems if requirement.optional else problems).append(result)
                 else:
                     readings[requirement.name] = result
+            optional_names = {requirement.name for requirement in rule.requires if requirement.optional}
+            if optional_names and not optional_names & readings.keys():
+                # Every metric of the rule is optional, or the optional ones
+                # are all missing: the rule has nothing to read.
+                problems.extend(optional_problems)
             if problems:
                 statements.append(_insufficient_statement(rule, capture_setting, problems))
                 continue
-            case = _Case(rule, list(overrides.get(rule.name, rule.limits)), capture_setting, readings)
+            fired = frozenset(
+                statement.rule
+                for statement in statements
+                if statement.capture_setting == capture_setting
+                and statement.kind != StatementKind.INSUFFICIENT_DATA
+            )
+            case = _Case(rule, list(overrides.get(rule.name, rule.limits)), capture_setting, readings, fired)
             statements.extend(judge(case))
     return order_statements(statements)

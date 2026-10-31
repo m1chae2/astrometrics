@@ -72,6 +72,7 @@ DECISION_CATALOG = {
     "Flat noise limits the stack": "flat_noise_limits_stack",
     "Focus drift": "focus_drift",
     "Calibration gap": "calibration_gap",
+    "Retake a bad calibration set": "retake_bad_calibration_set",
     "Sky cost": "sky_cost",
     "Altitude cost": "altitude_cost",
     "Best window": "best_window",
@@ -105,6 +106,22 @@ UNUSED_DECISION_METRICS = {
     "stacking.rejected_pixel_fraction": (
         "issue 97: input of the stacker's rejection check (STK-24), judged by the stacker; its gate "
         "outcome belongs to the pipeline-quality view of issue 97."
+    ),
+    "frame.clipped_mean_level_adu": (
+        "issue 134: input of the dark and bias level checks (STK-48, STK-51), judged by the stacker's "
+        "gates, which the rule retake_bad_calibration_set reads."
+    ),
+    "frame.zero_pixel_fraction": (
+        "issue 134: input of the dark and bias zero-share checks (STK-47), judged by the stacker's gates, "
+        "which the rule retake_bad_calibration_set reads."
+    ),
+    "frame.block_range_adu": (
+        "issue 134: input of the light-strike check on darks (STK-50), judged by the stacker's gate, "
+        "which the rule retake_bad_calibration_set reads."
+    ),
+    "frame.neighbor_noise_adu": (
+        "issue 134: input of the noise checks on dark and bias frames (STK-49), judged by the stacker's "
+        "gates, which the rule retake_bad_calibration_set reads."
     ),
     "astrometry.gaia_fit_rms_arcsec": (
         "issue 96: input of the astrometry self-check (AST-02), judged in astrometricslib."

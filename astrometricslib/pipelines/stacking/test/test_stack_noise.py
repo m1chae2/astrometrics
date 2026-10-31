@@ -1982,3 +1982,21 @@ def test_a_poor_fit_is_kept_with_a_note_when_the_retry_move_fails(monkeypatch: p
     assert failure is None and wcs is first
     assert source == "registration reference frame"
     assert "poor" in note and "1.50" in note and "too few stars matched" in note
+
+
+def test_a_fit_that_stays_poor_with_the_plate_solve_is_used_and_noted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A second move still above the limit is kept; the note says so."""
+    first, second = WCS(_sky_header()), WCS(_sky_header(1.9))
+    solve = _FakePlateSolve(WCS(_sky_header(1.95)))
+    wcs, source, note, failure = _run_alignment_with_fake_moves(
+        monkeypatch,
+        True,
+        [(first, "", _alignment_for_poor_fit_tests(2.11)), (second, "", _alignment_for_poor_fit_tests(0.9))],
+        solve,
+    )
+    assert failure is None
+    assert wcs is second
+    assert source == PLATE_SOLVE_WCS_SOURCE
+    assert "stayed poor" in note and "0.90 px rms" in note and "even with the plate solve" in note

@@ -1642,7 +1642,8 @@ def _align_to_stored_apertures(
     true sky positions (from a plate solve) also get that second try when the
     first move succeeded but fit the stars worse than `POOR_ALIGNMENT_RMS_PX`;
     if the second try is not possible, the first placement is kept and the
-    position note says the fit was poor.
+    position note says the fit was poor. If the second try works
+    but is still poor, it is used and the note says so.
 
     Parameters
     ----------
@@ -1714,7 +1715,9 @@ def _retry_poor_fit_with_plate_solve(
     A shift and a rotation cannot correct a wrong pixel scale, so a solution
     with a wrong scale can "succeed" with a large rms. The plate solve gets the
     scale right. When it cannot be used, the first placement is kept, so the
-    noise is still measured, and the note says the fit was poor.
+    noise is still measured, and the note says the fit was poor. When it is
+    used but the fit is still poor, it is kept and the note says so; the
+    measurement is not refused.
 
     Parameters
     ----------
@@ -1741,7 +1744,7 @@ def _retry_poor_fit_with_plate_solve(
         Where it came from.
     position_note : `str`
         How it was moved, with a poor-fit sentence when the first placement
-        was kept.
+        was kept or when the second fit stayed poor.
     """
     solved_wcs, solve_reason = plate_solve.solve()
     why_not_improved = solve_reason
@@ -1750,7 +1753,15 @@ def _retry_poor_fit_with_plate_solve(
             plane, solved_wcs, aperture_set.reference_sky
         )
         if wcs is not None:
-            return wcs, PLATE_SOLVE_WCS_SOURCE, alignment.describe() if alignment is not None else ""
+            second_note = alignment.describe() if alignment is not None else ""
+            if alignment is not None and alignment.rms_px > POOR_ALIGNMENT_RMS_PX:
+                # The plate solve is still the better-founded solution, so it
+                # is used; the note records that the fit stayed poor.
+                second_note = (
+                    f"{second_note} The fit to the stored stars stayed poor "
+                    f"({alignment.rms_px:.2f} px rms) even with the plate solve."
+                ).strip()
+            return wcs, PLATE_SOLVE_WCS_SOURCE, second_note
         why_not_improved = f"the plate solve of the stack could not be moved onto the stars: {retry_reason}"
     poor_fit_note = (
         f"The fit to the stored stars was poor ({first_rms_px:.2f} px rms), "

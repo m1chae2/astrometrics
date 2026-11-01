@@ -1,7 +1,6 @@
 """Purpose: Gather the stars and targets the Planetarium draws in a sky region.
 
-Description: `ObservationPlanning.get_sources` and
-`ObservationPlanning.get_online_catalog_sources` call these functions. They
+Description: `ObservationPlanning.query_sources` calls these functions. They
 turn the library's targets, the library's own stars, and the stars found by
 online catalogs into `SkySource` records.
 
@@ -12,10 +11,11 @@ The rules applied here:
   no LIGHT frames), so the map still has a picture to show.
 * A target or star whose position cannot be read, or whose right ascension
   or declination is exactly zero (never set), is left out.
-* A star with a real catalog magnitude fainter than ``limiting_magnitude`` is
-  left out. A star with no catalog magnitude (missing, zero or instrumental)
-  is kept only when ``include_stars_without_catalog_magnitude`` is `True`.
-  Targets are never filtered by magnitude.
+* A star with a real catalog magnitude fainter than ``limiting_magnitude``
+  or brighter than ``magnitude_min`` is left out. A star with no catalog
+  magnitude (missing, zero or instrumental) is kept only when
+  ``include_stars_without_catalog_magnitude`` is `True` and no
+  ``magnitude_min`` is given. Targets are never filtered by magnitude.
 
 The library's own stars are read as indexed summary rows, never as full
 records, because loading every star in a wide region in full takes seconds on
@@ -111,6 +111,7 @@ def _keeps_star(
     known_magnitude: bool,
     limiting_magnitude: float | None,
     include_stars_without_catalog_magnitude: bool,
+    magnitude_min: float | None = None,
 ) -> bool:
     """Apply the magnitude limits to one star.
 
@@ -120,8 +121,11 @@ def _keeps_star(
         `True` when the star should be drawn.
     """
     if known_magnitude:
+        if magnitude_min is not None and magnitude < magnitude_min:
+            return False
         return limiting_magnitude is None or magnitude <= limiting_magnitude
-    return include_stars_without_catalog_magnitude
+    # A star with no real magnitude cannot pass a lower magnitude limit.
+    return include_stars_without_catalog_magnitude and magnitude_min is None
 
 
 def _library_star_sources(
@@ -131,6 +135,7 @@ def _library_star_sources(
     radius_deg: float,
     limiting_magnitude: float | None,
     include_stars_without_catalog_magnitude: bool,
+    magnitude_min: float | None = None,
 ) -> list[SkySource]:
     """Read the library's own stars in a region as sky sources.
 
@@ -165,6 +170,7 @@ def _library_star_sources(
             row["hasCatalogMagnitude"],
             limiting_magnitude,
             include_stars_without_catalog_magnitude,
+            magnitude_min,
         ):
             continue
         name = row["name"] or row["id"]
@@ -194,6 +200,8 @@ def collect_sky_sources(
     include_online: bool,
     limiting_magnitude: float | None,
     include_stars_without_catalog_magnitude: bool,
+    include_targets: bool = True,
+    magnitude_min: float | None = None,
 ) -> list[SkySource]:
     """Gather the targets, and optionally stars, inside a sky region.
 
@@ -213,6 +221,11 @@ def collect_sky_sources(
         Faintest catalog magnitude to keep. `None` keeps every star.
     include_stars_without_catalog_magnitude : `bool`
         Keep stars that have no real catalog magnitude.
+    include_targets : `bool`, optional
+        List the library's targets. Defaults to `True`.
+    magnitude_min : `float` or `None`, optional
+        Brightest catalog magnitude to keep. Stars with no catalog
+        magnitude are then left out.
 
     Returns
     -------
@@ -231,7 +244,7 @@ def collect_sky_sources(
     online: list[Any] = []
     for item in found:
         if isinstance(item, Target) and (not include_online or item.id in local_target_ids):
-            source = target_source(item)
+            source = target_source(item) if include_targets else None
             if source is not None:
                 targets.append(source)
         else:
@@ -239,7 +252,13 @@ def collect_sky_sources(
 
     stars = (
         _library_star_sources(
-            sky, ra_deg, dec_deg, radius_deg, limiting_magnitude, include_stars_without_catalog_magnitude
+            sky,
+            ra_deg,
+            dec_deg,
+            radius_deg,
+            limiting_magnitude,
+            include_stars_without_catalog_magnitude,
+            magnitude_min,
         )
         if include_stars
         else []
@@ -259,6 +278,7 @@ def collect_sky_sources(
                 item.has_catalog_magnitude,
                 limiting_magnitude,
                 include_stars_without_catalog_magnitude,
+                magnitude_min,
             ):
                 source = None
         if source is not None:

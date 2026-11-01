@@ -34,9 +34,9 @@ class MosaicService:
         Parameters
         ----------
         center_ra : `float`
-            Right ascension of the grid center.
+            Right ascension of the grid center, in degrees.
         center_dec : `float`
-            Declination of the grid center.
+            Declination of the grid center, in degrees.
         grid : `dict`
             ``rows``, ``cols`` and ``overlap`` (percent); each defaults
             to 1, 1 and 0.
@@ -50,8 +50,8 @@ class MosaicService:
             One panel per grid cell.
         """
         return self.wayfinder.planning.calculate_panels(
-            center_ra=str(center_ra),
-            center_dec=str(center_dec),
+            ra_deg=float(center_ra),
+            dec_deg=float(center_dec),
             rows=grid.get("rows", 1),
             cols=grid.get("cols", 1),
             overlap_percent=float(grid.get("overlap", 0.0)),

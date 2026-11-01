@@ -11,6 +11,7 @@ limited to two at a time.
 """
 
 import threading
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -238,22 +239,34 @@ def _sky_source(source_id: str, kind: str = "star") -> SkySource:
     return SkySource(id=source_id, ra=10.0, dec=20.0, name=source_id, common_name=source_id, type=kind)
 
 
+def _found(sources: list[SkySource]) -> SimpleNamespace:
+    """Wrap sources the way `query_sources` returns them.
+
+    Returns
+    -------
+    result : `types.SimpleNamespace`
+        A stand-in result with the ``sources`` the service reads.
+    """
+    return SimpleNamespace(sources=sources)
+
+
 def test_sky_map_sources_pass_the_limits_and_use_the_planetarium_keys() -> None:
     """The map's limits reach the library, and replies use camelCase keys."""
     service = _service()
-    service.wayfinder.planning.get_sources.return_value = [_sky_source("Vega")]
+    service.wayfinder.planning.query_sources.return_value = _found([_sky_source("Vega")])
 
     (source,) = service.get_sources(
         ra=10.0, dec=20.0, radius=2.0, limiting_magnitude=6.0, include_stars_without_catalog_magnitude=False
     )
 
-    service.wayfinder.planning.get_sources.assert_called_once_with(
+    service.wayfinder.planning.query_sources.assert_called_once_with(
         10.0,
         20.0,
         2.0,
-        include=["stars"],
-        limiting_magnitude=6.0,
+        source=["targets", "stars"],
+        magnitude_max=6.0,
         include_stars_without_catalog_magnitude=False,
+        limit=None,
     )
     assert source["id"] == "Vega"
     assert source["global"] is False
@@ -263,21 +276,27 @@ def test_sky_map_sources_pass_the_limits_and_use_the_planetarium_keys() -> None:
 def test_sky_map_sources_with_the_global_catalog_ask_for_online_objects() -> None:
     """include_catalog adds the online section."""
     service = _service()
-    service.wayfinder.planning.get_sources.return_value = []
+    service.wayfinder.planning.query_sources.return_value = _found([])
 
     service.get_sources(ra=10.0, dec=20.0, radius=2.0, include_catalog=True)
 
-    assert service.wayfinder.planning.get_sources.call_args.kwargs["include"] == ["stars", "online"]
+    assert service.wayfinder.planning.query_sources.call_args.kwargs["source"] == [
+        "targets",
+        "stars",
+        "simbad",
+    ]
 
 
 def test_planetarium_targets_are_every_library_target() -> None:
     """The targets layer asks for targets only, over the whole sky."""
     service = _service()
-    service.wayfinder.planning.get_sources.return_value = [_sky_source("M 13", "target")]
+    service.wayfinder.planning.query_sources.return_value = _found([_sky_source("M 13", "target")])
 
     targets = service.get_planetarium_targets()
 
-    service.wayfinder.planning.get_sources.assert_called_once_with(0.0, 0.0, 180.0, include=[])
+    service.wayfinder.planning.query_sources.assert_called_once_with(
+        0.0, 0.0, 180.0, source=["targets"], limit=None
+    )
     assert targets[0]["id"] == "M 13"
     assert targets[0]["type"] == "target"
 
@@ -286,14 +305,20 @@ def test_online_catalog_sources_pass_the_limiting_magnitude_to_the_drivers() -> 
     """The map's limit travels to the drivers; replies name the driver."""
     service = _service()
     online = _sky_source("Gaia 1").model_copy(update={"is_global": True, "catalog_source": "deep_stars"})
-    service.wayfinder.planning.get_online_catalog_sources.return_value = [online]
+    service.wayfinder.planning.query_sources.return_value = _found([online])
 
     (source,) = service.get_online_catalog_sources(
         ra=250.0, dec=36.0, radius=2.0, enabled_drivers=["deep_stars"], limiting_magnitude=14.0
     )
 
-    service.wayfinder.planning.get_online_catalog_sources.assert_called_once_with(
-        ra_deg=250.0, dec_deg=36.0, radius_deg=2.0, enabled_driver_names=["deep_stars"], magnitude_limit=14.0
+    service.wayfinder.planning.query_sources.assert_called_once_with(
+        ra_deg=250.0,
+        dec_deg=36.0,
+        radius_deg=2.0,
+        source=["catalogs"],
+        catalog_drivers=["deep_stars"],
+        magnitude_max=14.0,
+        limit=None,
     )
     assert source["catalogSource"] == "deep_stars"
     assert source["global"] is True
@@ -302,7 +327,7 @@ def test_online_catalog_sources_pass_the_limiting_magnitude_to_the_drivers() -> 
 def test_deep_catalog_status_adds_the_install_command() -> None:
     """The status the UI sees names the command that downloads the catalog."""
     service = _service()
-    service.wayfinder.planning.deep_catalog_status.return_value = DeepCatalogStatus(
+    service.wayfinder.planning.get_deep_catalog_status.return_value = DeepCatalogStatus(
         installed=False, complete=False, star_count=0, pixels_downloaded=0, size_megabytes=0.0
     )
 

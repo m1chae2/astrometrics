@@ -1,6 +1,6 @@
 """Purpose: Judge whether one star's science result can be trusted.
 
-Description: `get_advisory(kind="result", target_id=..., object_id=...)` tells
+Description: `get_advisory(kind="result", target=..., object_id=...)` tells
 the user how far to trust a spectrum's classification or a variable star's
 period (`QUALITY_METRICS_PLAN.md` Sections 3.3 and 6.1, use case UC5). The
 numbers sit in the star's record, not in the measurement store, so a per-star

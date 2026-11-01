@@ -49,7 +49,7 @@ def test_control_and_planning_work_without_loading_execution() -> None:
         assert not assessment.permits_observing()
 
         planning = ObservationPlanning(config, butler)
-        session = planning.create_plan("empty_session", night_id="2026-08-10")
+        session = planning.create_session(observing_night_id="2026-08-10")
         assert session.queue == []
         """
     )

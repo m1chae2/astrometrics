@@ -1,11 +1,11 @@
 """Purpose: One object to draw on the sky map: a star or a target.
 
-Description: `ObservationPlanning.get_sources` and
-`ObservationPlanning.get_online_catalog_sources` return a list of
-`SkySource`. Each one holds the position in degrees, a name, the brightness
-when known, and what data the library holds for it. The field names turn into
-the camelCase keys the app's Planetarium reads. `has_catalog_magnitude` tells
-the map whether the brightness is a real catalog magnitude it can draw by.
+Description: `ObservationPlanning.query_sources` returns a
+`SourceQueryResult`, which holds a list of `SkySource`. Each one holds the
+position in degrees, a name, the brightness when known, and what data the
+library holds for it. The field names turn into the camelCase keys the app's
+Planetarium reads. `has_catalog_magnitude` tells the map whether the
+brightness is a real catalog magnitude it can draw by.
 """
 
 from typing import Literal
@@ -68,3 +68,13 @@ class SkySource(BaseModel):
         astrometricslib's `has_catalog_magnitude`).
         """
         return has_catalog_magnitude(self.magnitude)
+
+
+class SourceQueryResult(BaseModel):
+    """What `ObservationPlanning.query_sources` found near a point."""
+
+    sources: list[SkySource] = Field(
+        ..., description="Targets first, then stars. Stars are brightest first when the answer is limited."
+    )
+    total_stars: int = Field(..., description="How many stars were found, before any cut at the limit.")
+    stars_truncated: bool = Field(..., description="True when the limit cut the star list short.")

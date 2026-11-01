@@ -232,7 +232,9 @@ CLASSIFICATION_RULES = (
         r"^processing_tune_spectroscopy_calibration$", "change-data", "low", "May store a new calibration."
     ),
     _rule(
-        r"^planning_(edit_queue|edit_package|tick_checklist_item)$",
+        r"^planning_(add_to_queue|reorder_queue|remove_from_queue|set_entry_exposures|add_checklist_items"
+        r"|set_framing|update_package|reopen_package|dismiss_package|undismiss_package|delete_package"
+        r"|tick_checklist_item)$",
         "change-data",
         "high",
         "Changes the saved queue or checklist.",
@@ -250,10 +252,16 @@ CLASSIFICATION_RULES = (
         "Builds or stores catalog or plan data.",
     ),
     _rule(
-        r"^planning_create_plan$",
+        r"^planning_create_(package|session)$",
         "change-data",
         "high",
-        "Records packages and sessions. Only kind=sequence writes nothing.",
+        "Records packages and sessions.",
+    ),
+    _rule(
+        r"^planning_create_sequence$",
+        "change-data",
+        "high",
+        "Builds a sequence plan and writes nothing.",
     ),
     _rule(
         r"^observatory_(safety_apply_promotion_decision|equipment_set_active_.+)$",
@@ -339,7 +347,7 @@ CLASSIFICATION_RULES = (
         "Calculates from stored records and the sky. Saves nothing.",
     ),
     _rule(
-        r"^planning_deep_catalog_status$",
+        r"^planning_get_deep_catalog_status$",
         "compute",
         "high",
         "Reads the catalog file; the estimate queries the Gaia archive. Saves nothing.",
@@ -365,7 +373,8 @@ CLASSIFICATION_RULES = (
     ),
     _rule(r"^star_query$", "observe", "high", "Reads library stars. Row counts are capped."),
     _rule(
-        r"^(target_query|target_imaged_field_centers|planning_find_sources|planning_lookup_coordinates)$",
+        r"^(target_query|target_imaged_field_centers|planning_query_sources|planning_lookup_coordinates"
+        r"|planning_query_plans|planning_query_catalogs)$",
         "observe",
         "high",
         "Reads targets or stars in short, capped records.",

@@ -2,7 +2,7 @@
 
 Description: Verifies that plans are written and read back through one
 storage path: packages check their target, a session built by hand with
-`edit_queue` has the same structure as one placed automatically,
+`add_to_queue` has the same structure as one placed automatically,
 `get_plan` reads sessions back, and every `kind=` method refuses
 arguments its kind does not use. Also checks that the sky engine is built
 once even under concurrent first use, and that using planning in a
@@ -251,8 +251,7 @@ def _package(planning: ObservationPlanning, target_id: str = "M 81") -> Observat
     package : `ObservationPackage`
         The recorded package.
     """
-    return planning.create_plan(
-        "package",
+    return planning.create_package(
         target=target_id,
         exposure_requests=[ExposureRequest(frame_type=FrameType.LIGHT, exposure_sec=60.0, count=1)],
     )
@@ -274,22 +273,27 @@ def test_a_package_for_an_unknown_target_is_refused(isolated_butler: DiskButler)
         _package(planning, "NOT-A-TARGET")
 
 
-def test_create_plan_refuses_arguments_its_kind_does_not_use(isolated_butler: DiskButler) -> None:
-    """A package does not take a night, and a sequence needs its items."""
+def test_create_package_refuses_two_ways_to_name_the_exposures(isolated_butler: DiskButler) -> None:
+    """A package takes exposure_requests or plan_items, not both."""
     planning = _planning(isolated_butler, _target("M 81"))
-    with pytest.raises(InvalidArgumentError, match="night_id"):
-        planning.create_plan("package", target="M 81", exposure_requests=[], night_id="2026-08-10")
-    with pytest.raises(InvalidArgumentError, match="plan_items"):
-        planning.create_plan("sequence", target="M 81")
-    with pytest.raises(InvalidArgumentError, match="kind"):
-        planning.create_plan("weekly", target="M 81")
+    with pytest.raises(InvalidArgumentError, match="not both"):
+        planning.create_package(
+            target="M 81", exposure_requests=[], plan_items=[{"count": 1, "exposure": 60.0, "filter": "L"}]
+        )
+
+
+def test_create_package_refuses_a_malformed_exposure_row(isolated_butler: DiskButler) -> None:
+    """A row that is not an exposure request raises `InvalidArgumentError`."""
+    planning = _planning(isolated_butler, _target("M 81"))
+    with pytest.raises(InvalidArgumentError, match="not valid"):
+        planning.create_package(target="M 81", exposure_requests=[{"count": 1}])
 
 
 def test_a_sequence_plan_adds_up_its_items(isolated_butler: DiskButler) -> None:
     """A sequence plan gives each item's duration and the total."""
     planning = _planning(isolated_butler, _target("M 81"))
-    plan = planning.create_plan(
-        "sequence", target="M 81", plan_items=[{"count": 10, "exposure": 60, "filter": "Ha"}, {"count": 2}]
+    plan = planning.create_sequence(
+        target="M 81", plan_items=[{"count": 10, "exposure": 60, "filter": "Ha"}, {"count": 2}]
     )
     assert isinstance(plan, SequencePlan)
     assert plan.target_name == "M 81"
@@ -298,14 +302,14 @@ def test_a_sequence_plan_adds_up_its_items(isolated_butler: DiskButler) -> None:
 
 
 def test_a_hand_built_queue_matches_the_automatic_structure(isolated_butler: DiskButler) -> None:
-    """edit_queue freezes the package into the queue entry and records it."""
+    """add_to_queue freezes the package into the queue entry and records it."""
     planning = _planning(isolated_butler, _target("M 81"))
-    session = planning.create_plan(
-        "empty_session", site_profile=_site(), telescope=_telescope(), camera_id="c1", night_id="2026-08-10"
+    session = planning.create_session(
+        site_profile=_site(), telescope=_telescope(), camera_id="c1", observing_night_id="2026-08-10"
     )
     package = _package(planning)
 
-    updated = planning.edit_queue(session.id, add=[QueueRequest(package_id=package.id)]).session
+    updated = planning.add_to_queue(session.id, requests=[QueueRequest(package_id=package.id)]).session
 
     assert len(updated.queue) == 1
     entry = updated.queue[0]
@@ -315,31 +319,29 @@ def test_a_hand_built_queue_matches_the_automatic_structure(isolated_butler: Dis
     assert planning.get_plan(session.id).queue[0].id == entry.id
 
 
-def test_edit_queue_reorders_and_refuses_a_wrong_entry_set(isolated_butler: DiskButler) -> None:
+def test_reorder_queue_reorders_and_refuses_a_wrong_entry_set(isolated_butler: DiskButler) -> None:
     """Order must name exactly the entries; then the queue follows it."""
     planning = _planning(isolated_butler, _target("M 81"))
-    session = planning.create_plan(
-        "empty_session", site_profile=_site(), telescope=_telescope(), camera_id="c1", night_id="2026-08-10"
+    session = planning.create_session(
+        site_profile=_site(), telescope=_telescope(), camera_id="c1", observing_night_id="2026-08-10"
     )
     package = _package(planning)
-    filled = planning.edit_queue(
-        session.id, add=[{"package_id": package.id}, {"package_id": package.id}]
+    filled = planning.add_to_queue(
+        session.id, requests=[{"package_id": package.id}, {"package_id": package.id}]
     ).session
     first, second = (entry.id for entry in filled.queue)
 
     with pytest.raises(InvalidArgumentError, match="order"):
-        planning.edit_queue(session.id, order=["nonexistent-entry-id"])
-    reordered = planning.edit_queue(session.id, order=[second, first]).session
+        planning.reorder_queue(session.id, entry_ids=["nonexistent-entry-id"])
+    reordered = planning.reorder_queue(session.id, entry_ids=[second, first]).session
     assert [entry.id for entry in reordered.queue] == [second, first]
 
 
-def test_edit_queue_needs_a_known_session_and_a_change(isolated_butler: DiskButler) -> None:
-    """An unknown session is not found; asking for no change is refused."""
+def test_the_queue_calls_need_a_known_session(isolated_butler: DiskButler) -> None:
+    """An unknown session is not found."""
     planning = _planning(isolated_butler, _target("M 81"))
     with pytest.raises(NotFoundError):
-        planning.edit_queue("does-not-exist", order=[])
-    with pytest.raises(InvalidArgumentError):
-        planning.edit_queue("does-not-exist")
+        planning.reorder_queue("does-not-exist", entry_ids=[])
 
 
 def test_a_scheduled_session_is_placed_and_listed(isolated_butler: DiskButler) -> None:
@@ -347,18 +349,17 @@ def test_a_scheduled_session_is_placed_and_listed(isolated_butler: DiskButler) -
     planning = _planning(isolated_butler, _target("M 81"), _target("M 13", ra="16:41:41", dec="+36:27:35"))
     package = _package(planning)
 
-    session = planning.create_plan(
-        "scheduled_session",
+    session = planning.create_session(
         requests=[QueueRequest(package_id=package.id)],
         site_profile=_site(),
         telescope=_telescope(),
         camera_id="c1",
-        night_id="2026-08-10",
+        observing_night_id="2026-08-10",
     )
 
     assert isinstance(session, ObservationSession)
     assert session.status.value == "PLANNED"
-    summaries = planning.get_plan()
+    summaries = planning.query_plans()
     assert [summary.id for summary in summaries] == [session.id]
     assert str(summaries[0].night_date) == "2026-08-10"
 
@@ -367,38 +368,52 @@ def test_a_bad_night_id_is_refused(isolated_butler: DiskButler) -> None:
     """night_id must be a YYYY-MM-DD date."""
     planning = _planning(isolated_butler)
     with pytest.raises(InvalidArgumentError, match="night_id"):
-        planning.create_plan(
-            "empty_session", site_profile=_site(), telescope=_telescope(), camera_id="c1", night_id="tonight"
+        planning.create_session(
+            site_profile=_site(), telescope=_telescope(), camera_id="c1", observing_night_id="tonight"
         )
 
 
-def test_get_advisory_answers_each_kind_and_refuses_the_wrong_arguments(isolated_butler: DiskButler) -> None:
-    """Quality takes a target; calibration takes a camera and frame type."""
+def test_the_advice_calls_answer_and_refuse_the_wrong_arguments(isolated_butler: DiskButler) -> None:
+    """Quality takes a target; calibration advice, a camera and frame type."""
     planning = _planning(isolated_butler, _target("M 81"))
     report = planning.get_advisory("quality", target="M 81")
     assert isinstance(report, TargetDatasetReport)
     assert report.target_id == "M 81"
     assert report.needs_attention.warning_count == 0
     assert report.starting_point is not None
-    calibration = planning.get_advisory("calibration", camera_id="c1", frame_type=FrameType.DARK)
+    calibration = planning.get_calibration_advice("c1", FrameType.DARK)
     assert isinstance(calibration, CalibrationAdvisory)
     assert calibration.existing_count == 0
-    with pytest.raises(InvalidArgumentError, match="camera_id"):
-        planning.get_advisory("quality", target="M 81", camera_id="c1")
+    with pytest.raises(InvalidArgumentError, match="object_id"):
+        planning.get_advisory("quality", target="M 81", object_id="star-1")
     with pytest.raises(NotFoundError):
         planning.get_advisory("quality", target="NOT-A-TARGET")
-    with pytest.raises(InvalidArgumentError, match="target"):
+    with pytest.raises(InvalidArgumentError, match="kind"):
         planning.get_advisory("tonight", target="M 81")
     with pytest.raises(InvalidArgumentError, match="object_id"):
         planning.get_advisory("result", target="M 81")
     with pytest.raises(InvalidArgumentError, match="ISO 8601"):
-        planning.get_advisory("tonight", at="not a time")
+        planning.get_tonight_advice(at="not a time")
+
+
+def test_a_mosaic_center_is_read_as_degrees_not_hours(isolated_butler: DiskButler) -> None:
+    """A right ascension of 10.684 degrees is not read as 10.684 hours.
+
+    The text form read a bare number as hours, so the Planetarium's
+    degrees came out as 160.26 degrees.
+    """
+    planning = _planning(isolated_butler)
+    (panel,) = planning.calculate_panels(10.684, 41.269, 1, 1, 0.0)
+    assert panel.ra_deg == pytest.approx(10.684, abs=1e-6)
+    assert panel.dec_deg == pytest.approx(41.269, abs=1e-6)
+    with pytest.raises(InvalidArgumentError, match="dec_deg"):
+        planning.calculate_panels(10.684, 91.0, 1, 1, 0.0)
 
 
 def test_create_mosaic_records_one_package_per_panel(isolated_butler: DiskButler) -> None:
     """Panels from calculate_panels become targets and recorded packages."""
     planning = _planning(isolated_butler, _target("NGC 7000", ra="20h 58m 47s", dec="+44° 19′ 48″"))
-    panels = planning.calculate_panels("20h 58m 47s", "+44 19 48", 1, 2, 10.0)
+    panels = planning.calculate_panels(314.695833, 44.33, 1, 2, 10.0)
     plan = planning.create_mosaic(
         "NGC 7000",
         [panel.model_dump() for panel in panels],
@@ -411,16 +426,16 @@ def test_create_mosaic_records_one_package_per_panel(isolated_butler: DiskButler
         planning.create_mosaic("NGC 7000", panels)
 
 
-def test_deep_catalog_status_refuses_estimate_settings_without_the_estimate(
+def test_get_deep_catalog_status_refuses_estimate_settings_without_the_estimate(
     isolated_butler: DiskButler,
 ) -> None:
     """The status is read from disk; estimate settings need the estimate."""
     planning = _planning(isolated_butler)
-    status = planning.deep_catalog_status()
+    status = planning.get_deep_catalog_status()
     assert status.installed is False
     assert status.estimate is None
     with pytest.raises(InvalidArgumentError, match="healpix_level"):
-        planning.deep_catalog_status(healpix_level=3)
+        planning.get_deep_catalog_status(healpix_level=3)
 
 
 def test_get_visibility_refuses_span_arguments_for_one_moment(isolated_butler: DiskButler) -> None:
@@ -445,29 +460,24 @@ def test_sky_browsing_methods_delegate_to_the_sky_engine(mocker: object, isolate
         type(planning), "_sky_engine", new_callable=mocker.PropertyMock, return_value=fake_sky
     )
 
-    planning.resolve_target_coordinates("M 81")
+    fake_sky.resolve_target_coordinates.return_value = Target(id="M 81", ra="9 55 33", dec="69 3 55")
+    assert planning.lookup_coordinates("M 81").id == "M 81"
     fake_sky.resolve_target_coordinates.assert_called_once_with("M 81")
 
-    collect = mocker.patch("wayfindinglib.tasks.planning_tasks.sky_sources.collect_sky_sources")
-    planning.get_sources(1.0, 2.0, 3.0, include=["online"], limiting_magnitude=8.0)
-    collect.assert_called_once_with(
-        fake_sky,
-        1.0,
-        2.0,
-        3.0,
-        include_stars=False,
-        include_online=True,
-        limiting_magnitude=8.0,
-        include_stars_without_catalog_magnitude=True,
-    )
-    with pytest.raises(InvalidArgumentError, match="only apply"):
-        planning.get_sources(1.0, 2.0, 3.0, include=[], limiting_magnitude=8.0)
-
-    planning.get_library_star_summaries(1.0, 2.0, 3.0)
-    fake_sky.get_library_star_summaries.assert_called_once_with(1.0, 2.0, 3.0, None)
-
-    planning.get_constellation_lines()
-    fake_sky.get_constellation_lines.assert_called_once()
+    fake_sky.get_constellation_lines.return_value = [
+        {"constellation": "Ori", "ra1": 1.0, "dec1": 2.0, "ra2": 3.0, "dec2": 4.0}
+    ]
+    (segment,) = planning.get_constellation_lines()
+    assert (segment.constellation, segment.ra2) == ("Ori", 3.0)
+    fake_sky.list_catalog_driver_metadata.return_value = [
+        {"driver_name": "deep_stars", "display_name": "Gaia deep stars", "maximum_query_radius_degrees": 2.0}
+    ]
+    (driver,) = planning.query_catalogs()
+    assert driver.model_dump() == {
+        "driver_name": "deep_stars",
+        "display_name": "Gaia deep stars",
+        "maximum_query_radius_degrees": 2.0,
+    }
 
 
 def test_the_sky_engine_is_lazily_constructed_once(isolated_butler: DiskButler) -> None:
@@ -557,7 +567,7 @@ def test_planning_module_tree_imports_no_device_driver() -> None:
 
         assert get_equipment_catalog(config).active_telescope().mount_protocol == "indi"
         planning = ObservationPlanning(config, DiskButler(app_config=config))
-        session = planning.create_plan("empty_session", night_id="2026-08-10")
+        session = planning.create_session(observing_night_id="2026-08-10")
         assert (session.telescope_id, session.camera_id) == ("Short", "Main A")
         """
     )
@@ -570,8 +580,7 @@ def test_a_package_can_be_built_from_sequence_items(isolated_butler: DiskButler)
     """Sequence items become exposure requests; one source is needed."""
     planning = _planning(isolated_butler, _target("M 81"))
 
-    package = planning.create_plan(
-        "package",
+    package = planning.create_package(
         target="M 81",
         plan_items=[
             {"count": 3, "exposure": 60, "filter": "L"},
@@ -587,18 +596,15 @@ def test_a_package_can_be_built_from_sequence_items(isolated_butler: DiskButler)
     ]
     assert package.exposure_requests[0].frame_type == FrameType.LIGHT
     with pytest.raises(InvalidArgumentError, match="not both"):
-        planning.create_plan(
-            "package",
+        planning.create_package(
             target="M 81",
             exposure_requests=[],
             plan_items=[{"count": 1, "exposure": 1, "filter": "L"}],
         )
     # With neither source, the package has no exposures yet.
-    assert planning.create_plan("package", target="M 81").exposure_requests == []
+    assert planning.create_package(target="M 81").exposure_requests == []
     with pytest.raises(InvalidArgumentError, match="Unknown filter"):
-        planning.create_plan(
-            "package", target="M 81", plan_items=[{"count": 1, "exposure": 1, "filter": "Z"}]
-        )
+        planning.create_package(target="M 81", plan_items=[{"count": 1, "exposure": 1, "filter": "Z"}])
 
 
 def test_an_empty_session_defaults_to_the_site_and_active_equipment(
@@ -614,33 +620,33 @@ def test_an_empty_session_defaults_to_the_site_and_active_equipment(
     catalog = SimpleNamespace(active_telescope=_telescope, active_camera=lambda: SimpleNamespace(id="c1"))
     monkeypatch.setattr(equipment_catalog_reader, "get_equipment_catalog", lambda config: catalog)
 
-    session = planning.create_plan("empty_session", night_id="2026-08-10")
+    session = planning.create_session(observing_night_id="2026-08-10")
 
     assert (session.telescope_id, session.camera_id, session.site_profile_id) == ("t1", "c1", "default")
     empty = SimpleNamespace(active_telescope=lambda: None, active_camera=lambda: None)
     monkeypatch.setattr(equipment_catalog_reader, "get_equipment_catalog", lambda config: empty)
     with pytest.raises(ConfigurationError):
         # A night with no session needs equipment; 08-10 has one.
-        planning.create_plan("empty_session", night_id="2026-08-11")
+        planning.create_session(observing_night_id="2026-08-11")
 
 
-def test_edit_queue_removes_entries_and_refuses_unknown_ones(isolated_butler: DiskButler) -> None:
+def test_remove_from_queue_removes_entries_and_refuses_unknown_ones(isolated_butler: DiskButler) -> None:
     """Removal takes entries out; an unknown entry is not found."""
     planning = _planning(isolated_butler, _target("M 81"))
-    session = planning.create_plan(
-        "empty_session", site_profile=_site(), telescope=_telescope(), camera_id="c1", night_id="2026-08-10"
+    session = planning.create_session(
+        site_profile=_site(), telescope=_telescope(), camera_id="c1", observing_night_id="2026-08-10"
     )
     package = _package(planning)
-    filled = planning.edit_queue(
-        session.id, add=[{"package_id": package.id}, {"package_id": package.id}]
+    filled = planning.add_to_queue(
+        session.id, requests=[{"package_id": package.id}, {"package_id": package.id}]
     ).session
     first, second = (entry.id for entry in filled.queue)
 
-    remaining = planning.edit_queue(session.id, remove=[first]).session
+    remaining = planning.remove_from_queue(session.id, entry_ids=[first]).session
 
     assert [entry.id for entry in remaining.queue] == [second]
     with pytest.raises(NotFoundError):
-        planning.edit_queue(session.id, remove=[first])
+        planning.remove_from_queue(session.id, entry_ids=[first])
 
 
 def _session(planning: ObservationPlanning) -> ObservationSession:
@@ -656,8 +662,8 @@ def _session(planning: ObservationPlanning) -> ObservationSession:
     session : `ObservationSession`
         The recorded, empty session at revision 0.
     """
-    return planning.create_plan(
-        "empty_session", site_profile=_site(), telescope=_telescope(), camera_id="c1", night_id="2026-08-10"
+    return planning.create_session(
+        site_profile=_site(), telescope=_telescope(), camera_id="c1", observing_night_id="2026-08-10"
     )
 
 
@@ -683,7 +689,7 @@ def test_each_plan_write_adds_one_to_the_revision(isolated_butler: DiskButler) -
     package = _package(planning)
     assert session.revision == 0
 
-    change = planning.edit_queue(session.id, add=[{"package_id": package.id}], expected_revision=0)
+    change = planning.add_to_queue(session.id, requests=[{"package_id": package.id}], expected_revision=0)
 
     assert (change.previous_revision, change.revision) == (0, 1)
     assert [item.kind for item in change.changes] == ["queue_added"]
@@ -695,10 +701,10 @@ def test_a_stale_revision_is_refused_and_names_the_current_one(isolated_butler: 
     planning = _planning(isolated_butler, _target("M 81"))
     session = _session(planning)
     package = _package(planning)
-    planning.edit_queue(session.id, add=[{"package_id": package.id}], expected_revision=0)
+    planning.add_to_queue(session.id, requests=[{"package_id": package.id}], expected_revision=0)
 
     with pytest.raises(PlanRevisionConflictError) as caught:
-        planning.edit_queue(session.id, add=[{"package_id": package.id}], expected_revision=0)
+        planning.add_to_queue(session.id, requests=[{"package_id": package.id}], expected_revision=0)
 
     assert caught.value.details["current_revision"] == 1
     assert len(planning.get_plan(session.id).queue) == 1
@@ -725,7 +731,7 @@ def test_a_session_stored_before_the_night_plan_fields_still_loads(isolated_butl
     planning = _planning(isolated_butler, _target("M 81"))
     session = _session(planning)
     package = _package(planning)
-    planning.edit_queue(session.id, add=[{"package_id": package.id}])
+    planning.add_to_queue(session.id, requests=[{"package_id": package.id}])
     database = isolated_butler.library_path / "wayfinding.db"
     connection = sqlite3.connect(database)
     try:
@@ -759,7 +765,7 @@ def test_a_session_stored_before_the_night_plan_fields_still_loads(isolated_butl
     loaded = planning.get_plan(session.id)
     assert (loaded.checklist, loaded.framing, loaded.revision) == ([], None, 0)
     assert loaded.queue[0].exposure_requests[0].gain_setting is None
-    change = planning.edit_queue(session.id, add=[{"package_id": package.id}])
+    change = planning.add_to_queue(session.id, requests=[{"package_id": package.id}])
     assert change.revision == 1
 
 
@@ -770,14 +776,14 @@ def test_exact_duplicates_merge_and_conflicting_ones_are_refused(isolated_butler
     package = _package(planning)
     light = {"frame_type": "LIGHT", "exposure_sec": 60.0, "count": 5}
 
-    change = planning.edit_queue(
-        session.id, add=[{"package_id": package.id, "exposure_requests": [light, dict(light, count=3)]}]
+    change = planning.add_to_queue(
+        session.id, requests=[{"package_id": package.id, "exposure_requests": [light, dict(light, count=3)]}]
     )
     assert [request.count for request in change.session.queue[0].exposure_requests] == [8]
     with pytest.raises(InvalidArgumentError, match="delays"):
-        planning.edit_queue(
+        planning.add_to_queue(
             session.id,
-            add=[{"package_id": package.id, "exposure_requests": [light, dict(light, delay_sec=2.0)]}],
+            requests=[{"package_id": package.id, "exposure_requests": [light, dict(light, delay_sec=2.0)]}],
         )
 
 
@@ -797,13 +803,13 @@ def test_a_measured_camera_refuses_an_unmeasured_setting(
     bad = dict(good, gain_setting=250)
 
     assert (
-        planning.edit_queue(
-            session.id, add=[{"package_id": package.id, "exposure_requests": [good]}]
+        planning.add_to_queue(
+            session.id, requests=[{"package_id": package.id, "exposure_requests": [good]}]
         ).setting_notes
         == []
     )
     with pytest.raises(InvalidArgumentError, match="gain setting 100"):
-        planning.edit_queue(session.id, add=[{"package_id": package.id, "exposure_requests": [bad]}])
+        planning.add_to_queue(session.id, requests=[{"package_id": package.id, "exposure_requests": [bad]}])
     assert len(planning.get_plan(session.id).queue) == 1
 
 
@@ -814,7 +820,9 @@ def test_an_unprofiled_camera_accepts_and_marks_the_setting(isolated_butler: Dis
     package = _package(planning)
     request = {"frame_type": "LIGHT", "exposure_sec": 60.0, "count": 1, "gain_setting": 321}
 
-    change = planning.edit_queue(session.id, add=[{"package_id": package.id, "exposure_requests": [request]}])
+    change = planning.add_to_queue(
+        session.id, requests=[{"package_id": package.id, "exposure_requests": [request]}]
+    )
 
     assert change.session.queue[0].exposure_requests[0].gain_setting == 321
     assert any("setting not measured" in note for note in change.setting_notes)
@@ -825,15 +833,15 @@ def test_set_exposures_changes_a_pending_entry_only(isolated_butler: DiskButler)
     planning = _planning(isolated_butler, _target("M 81"))
     session = _session(planning)
     package = _package(planning)
-    entry_id = planning.edit_queue(session.id, add=[{"package_id": package.id}]).session.queue[0].id
+    entry_id = planning.add_to_queue(session.id, requests=[{"package_id": package.id}]).session.queue[0].id
 
-    change = planning.edit_queue(
-        session.id, set_exposures={entry_id: [{"frame_type": "LIGHT", "exposure_sec": 30.0, "count": 4}]}
+    change = planning.set_entry_exposures(
+        session.id, exposures={entry_id: [{"frame_type": "LIGHT", "exposure_sec": 30.0, "count": 4}]}
     )
 
     assert change.session.queue[0].exposure_requests[0].exposure_sec == pytest.approx(30.0)
     with pytest.raises(NotFoundError):
-        planning.edit_queue(session.id, set_exposures={"missing": []})
+        planning.set_entry_exposures(session.id, exposures={"missing": []})
 
 
 def test_checklist_items_are_added_once_and_ticked(isolated_butler: DiskButler) -> None:
@@ -842,8 +850,8 @@ def test_checklist_items_are_added_once_and_ticked(isolated_butler: DiskButler) 
     session = _session(planning)
     item = {"rule": "refocus_when_temperature_drifts"}
 
-    first = planning.edit_queue(session.id, add_checklist=[item])
-    again = planning.edit_queue(session.id, add_checklist=[item])
+    first = planning.add_checklist_items(session.id, items=[item])
+    again = planning.add_checklist_items(session.id, items=[item])
     item_id = first.session.checklist[0].item_id
     assert [change.kind for change in again.changes] == ["checklist_already_present"]
     assert len(again.session.checklist) == 1
@@ -867,8 +875,7 @@ def test_framing_is_stored_and_the_sequence_summary_follows_ekos_order(isolated_
     """Framing round trips; summary rows follow the Ekos Capture order."""
     planning = _planning(isolated_butler, _target("M 81"))
     session = _session(planning)
-    package = planning.create_plan(
-        "package",
+    package = planning.create_package(
         target="M 81",
         exposure_requests=[
             ExposureRequest(
@@ -882,10 +889,10 @@ def test_framing_is_stored_and_the_sequence_summary_follows_ekos_order(isolated_
         ],
         dither_config=DitherConfig(enabled=True, every_n_frames=4, pixels=5.0),
     )
-    panels = planning.calculate_panels("10:00:00", "+30:00:00", 1, 2, 10.0, rotation_deg=45.0)
-    change = planning.edit_queue(
+    panels = planning.calculate_panels(150.0, 30.0, 1, 2, 10.0, rotation_deg=45.0)
+    planning.add_to_queue(session.id, requests=[{"package_id": package.id}])
+    change = planning.set_framing(
         session.id,
-        add=[{"package_id": package.id}],
         framing={"center_ra_deg": 150.0, "center_dec_deg": 30.0, "rotation_deg": 45.0, "panels": panels},
     )
 
@@ -908,12 +915,12 @@ def test_framing_is_stored_and_the_sequence_summary_follows_ekos_order(isolated_
     assert "Capture" in summary.dither_rows[0].frequency_ekos_screen
 
 
-def test_get_advisory_tonight_and_result_reach_the_task_functions(isolated_butler: DiskButler) -> None:
+def test_tonight_advice_and_a_result_advisory_reach_the_task_functions(isolated_butler: DiskButler) -> None:
     """Tonight gives a ranking; a result for an unknown star is not found."""
     from wayfindinglib.models.planning.tonight_ranking import TonightRanking
 
     planning = _planning(isolated_butler, _target("M 81"))
-    ranking = planning.get_advisory("tonight", at="2026-10-24T04:00:00Z")
+    ranking = planning.get_tonight_advice(at="2026-10-24T04:00:00Z")
     assert isinstance(ranking, TonightRanking)
     with pytest.raises(NotFoundError):
         planning.get_advisory("result", target="M 81", object_id="no-such-star")

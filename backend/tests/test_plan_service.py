@@ -1,7 +1,7 @@
 """Purpose: Test the night plan RPC methods and the ``plan:changed`` event.
 
 Description: The plan service wraps the planning library's `get_plan`,
-`edit_queue` and `tick_checklist_item`. The tests use a stand-in planning
+the queue calls and `tick_checklist_item`. The tests use a stand-in planning
 library and a stand-in socket manager to check that:
 
 * the three methods are declared, served and in the generated event list,
@@ -116,7 +116,7 @@ class _Planning:
         self.calls.append(("get_plan", {"session_id": session_id}))
         return self._session()
 
-    def edit_queue(self, session_id: str, **arguments: Any) -> PlanChange:
+    def remove_from_queue(self, session_id: str, entry_ids: list[str], **arguments: Any) -> PlanChange:
         """Write a queue change.
 
         Returns
@@ -124,7 +124,7 @@ class _Planning:
         change : `PlanChange`
             The change record.
         """
-        self.calls.append(("edit_queue", {"session_id": session_id, **arguments}))
+        self.calls.append(("remove_from_queue", {"session_id": session_id, "remove": entry_ids, **arguments}))
         return self._write("queue_added", arguments.get("expected_revision"))
 
     def tick_checklist_item(self, session_id: str, item_id: str, **arguments: Any) -> PlanChange:
@@ -255,7 +255,7 @@ def test_a_write_that_changed_nothing_announces_nothing() -> None:
     sockets = _Sockets()
     planning = _Planning()
 
-    def unchanged(session_id: str, **arguments: Any) -> PlanChange:
+    def unchanged(session_id: str, items: list[Any], **arguments: Any) -> PlanChange:
         """Answer as the library does for an edit with nothing to change.
 
         Returns
@@ -271,7 +271,7 @@ def test_a_write_that_changed_nothing_announces_nothing() -> None:
             session=planning._session(),
         )
 
-    planning.edit_queue = unchanged
+    planning.add_checklist_items = unchanged
     service = PlanService(SimpleNamespace(planning=planning), sockets)
 
     change = service.edit_plan("night-1", add_checklist=[{"rule": "focus"}])

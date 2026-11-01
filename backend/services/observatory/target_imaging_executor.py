@@ -2,7 +2,7 @@
 
 Description: The app's sequencer queue is the queue of one observing
 session in the wayfinding library. Adding a sequence records an
-observation package and queues it (`ObservationPlanning.edit_queue`);
+observation package and queues it (`ObservationPlanning.add_to_queue`);
 removing, reordering and changing entries edit the same queue; and
 starting the sequencer runs `ObservationExecution.advance_session` on a
 background thread until the queue is done. Each cycle checks safety,
@@ -67,7 +67,7 @@ class TargetImagingExecutor:
         session : `ObservationSession`
             The session whose queue the sequencer shows.
         """
-        return self._wayfinder.planning.create_plan("empty_session", night_id=observing_night_id(time.time()))
+        return self._wayfinder.planning.create_session(observing_night_id=observing_night_id(time.time()))
 
     def _existing_session(self) -> ObservationSession | None:
         """Return tonight's session if it exists, without creating one.
@@ -77,7 +77,7 @@ class TargetImagingExecutor:
         session : `ObservationSession` or `None`
             Tonight's session, or `None` when none was made yet.
         """
-        return self._wayfinder.planning.get_plan(night_id=observing_night_id(time.time()))
+        return self._wayfinder.planning.get_plan(observing_night_id=observing_night_id(time.time()))
 
     @staticmethod
     def _request(package_id: str, timing: dict[str, Any] | None) -> QueueRequest:
@@ -189,7 +189,8 @@ class TargetImagingExecutor:
         )
         new_id = self._queue_sequence(sequence, timing)
         order = [new_id if entry_id == sequence_id else entry_id for entry_id in ids]
-        self._plan_service.edit_plan(session.id, remove=[sequence_id], order=order)
+        self._plan_service.edit_plan(session.id, remove=[sequence_id])
+        self._plan_service.edit_plan(session.id, order=order)
         return True
 
     def reorder(self, sequence_ids: list[str]) -> bool:
@@ -226,7 +227,7 @@ class TargetImagingExecutor:
         plan : `SequencePlan`
             The sequence plan from the wayfinding library's planning.
         """
-        return self._wayfinder.planning.create_plan("sequence", target=target_name, plan_items=items)
+        return self._wayfinder.planning.create_sequence(target=target_name, plan_items=items)
 
     def get_queue(self) -> list[dict[str, Any]]:
         """Return the queue as the sequences the app shows.

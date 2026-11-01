@@ -83,7 +83,7 @@ def test_tonight_ranking_passes_the_planning_time() -> None:
     """The ranking passes only the moment."""
     wayfinder = _wayfinder()
     AdvisoryService(wayfinder).get_tonight_ranking("2026-10-24T22:00:00-06:00")
-    wayfinder.planning.get_advisory.assert_called_once_with(kind="tonight", at="2026-10-24T22:00:00-06:00")
+    wayfinder.planning.get_tonight_advice.assert_called_once_with(at="2026-10-24T22:00:00-06:00")
 
 
 def test_result_statements_pass_target_and_object() -> None:
@@ -135,10 +135,10 @@ def test_safety_status_asks_only_for_the_policy() -> None:
 
 
 def test_plan_create_makes_an_empty_session_for_the_night() -> None:
-    """``plan:create`` wraps ``create_plan(kind="empty_session")``."""
+    """``plan:create`` wraps ``create_session``."""
     wayfinder = _wayfinder()
     PlanService(wayfinder).create_plan(night_id="2026-10-24")
-    wayfinder.planning.create_plan.assert_called_once_with(kind="empty_session", night_id="2026-10-24")
+    wayfinder.planning.create_session.assert_called_once_with(observing_night_id="2026-10-24")
 
 
 def test_mosaic_preview_passes_the_rotation() -> None:
@@ -149,6 +149,7 @@ def test_mosaic_preview_passes_the_rotation() -> None:
     arguments = wayfinder.planning.calculate_panels.call_args.kwargs
     assert arguments["rotation_deg"] == pytest.approx(35.0)
     assert arguments["rows"] == 2
+    assert (arguments["ra_deg"], arguments["dec_deg"]) == (10.0, 20.0)
     service.preview_mosaic(10.0, 20.0, {})
     assert wayfinder.planning.calculate_panels.call_args.kwargs["rotation_deg"] == pytest.approx(0.0)
 

@@ -87,6 +87,79 @@ The reply of `quality:query`, `images:delete` and `calibration:get_stats` keeps 
 | `quality_flag_value_outliers` | Removed |
 | `quality_query` | Same name; new `limit` and `offset` arguments |
 
+## `wayfindinglib` planning (`wayfinder.planning`)
+
+Done on the same branch. No old name is kept as an alias. The MCP tool of each call is `planning_<name>`.
+
+### Planning calls
+
+| Old | New |
+| --- | --- |
+| `planning.resolve_target_coordinates(name)` and `planning.lookup_coordinates(name)` | `planning.lookup_coordinates(name)`, one call. The MCP tool `planning_resolve_target_coordinates` is removed |
+| `planning.find_sources(ra_deg, dec_deg, radius_deg, magnitude_min=, magnitude_max=, include=["targets"], limit=100)` | `planning.query_sources(ra_deg, dec_deg, radius_deg, source=["targets", "stars"], magnitude_min=, magnitude_max=, limit=100)`. `include=[]` (stars only) becomes `source=["stars"]` |
+| `planning.get_sources(ra_deg, dec_deg, radius_deg, include=["stars"], limiting_magnitude=, include_stars_without_catalog_magnitude=)` | `planning.query_sources(..., source=["targets", "stars"], magnitude_max=, include_stars_without_catalog_magnitude=, limit=None)`. The old `include=["online"]` is `source=["simbad"]`; targets are listed only when `source` has `"targets"` |
+| `planning.get_library_star_summaries(ra_deg, dec_deg, radius_deg, magnitude_range=)` | `planning.query_sources(..., source=["stars"], magnitude_min=, magnitude_max=)` |
+| `planning.get_online_catalog_sources(ra_deg, dec_deg, radius_deg, enabled_driver_names, magnitude_limit=)` | `planning.query_sources(..., source=["catalogs"], catalog_drivers=[...], magnitude_max=)` |
+| `planning.get_imaged_field_centers()` | Removed. Use `astrometrics.targets.imaged_field_centers().centers`, a list of `FieldCenter` (read `center.right_ascension_deg`, not `center["right_ascension_deg"]`). The MCP tool `planning_get_imaged_field_centers` was already withheld; `target_imaged_field_centers` stays |
+| `planning.create_plan("sequence", target=, plan_items=)` | `planning.create_sequence(target, plan_items)` |
+| `planning.create_plan("package", target=, exposure_requests=, plan_items=, dither_config=, minimum_altitude_deg=, priority=, quality_weighting_enabled=, notes=)` | `planning.create_package(target, exposure_requests=, plan_items=, dither_config=, minimum_altitude_deg=, priority=, quality_weighting_enabled=, notes=)`. Exposure rows and the dither setting are plain dictionaries, checked by the library. A bad row raises `InvalidArgumentError` |
+| `planning.create_plan("empty_session", night_id=)` | `planning.create_session(observing_night_id)` |
+| `planning.create_plan("scheduled_session", requests=, site_profile=, telescope=, camera_id=, night_id=)` | `planning.create_session(observing_night_id, requests=[...], site_profile=, telescope=, camera_id=)`. `requests` is now what makes the session scheduled. `site_profile`, `telescope` and `camera_id` are optional here too (the recorded site and the active telescope and camera) |
+| `planning.edit_queue(session_id, add=[...])` | `planning.add_to_queue(session_id, requests)` |
+| `planning.edit_queue(session_id, order=[...])` | `planning.reorder_queue(session_id, entry_ids)` |
+| `planning.edit_queue(session_id, remove=[...])` | `planning.remove_from_queue(session_id, entry_ids)` |
+| `planning.edit_queue(session_id, set_exposures={...})` | `planning.set_entry_exposures(session_id, exposures)` |
+| `planning.edit_queue(session_id, add_checklist=[...])` | `planning.add_checklist_items(session_id, items)` |
+| `planning.edit_queue(session_id, framing={...})` | `planning.set_framing(session_id, framing)` |
+| `planning.edit_package(package_id, exposure_requests=, dither_config=, minimum_altitude_deg=, priority=, notes=, name=, framing=)` | `planning.update_package(package_id, exposure_requests=, dither_config=, minimum_altitude_deg=, priority=, notes=, name=, framing=)` |
+| `planning.edit_package(package_id, reopen=True)` | `planning.reopen_package(package_id)`. It can no longer come with value changes in one call |
+| `planning.edit_package(package_id, dismiss=True, source_key=)` | `planning.dismiss_package(package_id, source_key=)` |
+| `planning.edit_package(package_id, undismiss=True, source_key=)` | `planning.undismiss_package(package_id, source_key=)` |
+| `planning.edit_package(package_id, delete=True)` | `planning.delete_package(package_id)` |
+| `planning.edit_queue(session_id)` and `planning.edit_package(package_id)` with nothing to change | No longer possible for the queue, because each verb has one argument that must be given. `planning.update_package(package_id)` with no value still raises `InvalidArgumentError` |
+| `planning.edit_queue(...)` with several changes in one call | One call per change. Each is its own write with its own revision. `expected_revision` stays on every call |
+| `planning.get_plan(session_id)`, `planning.get_plan(night_id=)` | `planning.get_plan(session_id)`, `planning.get_plan(observing_night_id=)`. It reads one session. Neither argument raises `InvalidArgumentError` |
+| `planning.get_plan()` (no argument), `planning.get_plan(include=["progress"])` | `planning.query_plans()`, `planning.query_plans(include=["progress"])` |
+| `planning.get_plan(kind="packages", status=, target=, include_dismissed=)` | `planning.query_plans(kind="packages", status=, target=, include_dismissed=)` |
+| `planning.get_plan(kind="suggestion_log", target=)` | `planning.query_plans(kind="suggestion_log", target=)` |
+| `planning.get_plan(kind="packages", target=, pick="one")` | `planning.get_package_for_target(target)`. A new call, because it reads one package, not a list |
+| `planning.get_advisory("tonight", at=)` | `planning.get_tonight_advice(at=)` |
+| `planning.get_advisory("calibration", camera_id=, frame_type=, exposure_seconds=, filter=, gain_setting=, offset=, binning=, sensor_temperature_c=)` | `planning.get_calibration_advice(camera_id, frame_type, exposure_seconds=, filter_name=, gain=, offset=, binning=, temperature_c=)` |
+| `planning.get_advisory(kind, target, object_id=)` with `kind="quality"` or `"result"` | Stays on `planning` for now, with the two kinds only and `target` required. It becomes `review.get_advisory` when the `review` group is added. The `calibration` and `tonight` kinds, and the arguments they used (`camera_id`, `frame_type`, `at` and the rest), are gone from it |
+| `planning.list_catalog_driver_metadata()` | `planning.query_catalogs()` |
+| `planning.deep_catalog_status(include=, healpix_level=, magnitude_limit=, sample_count=, query_timeout_seconds=, request_delay_seconds=, register_job=)` | `planning.get_deep_catalog_status(include=, healpix_level=, magnitude_max=, sample_count=, query_timeout_seconds=, request_delay_seconds=, register_job=)`. The parameter `magnitude_limit` is `magnitude_max`, as in `query_sources` |
+
+### Planning parameters
+
+| Call | Old | New |
+| --- | --- | --- |
+| `planning.calculate_panels` | `center_ra`, `center_dec` (text; a bare number was read as hours) | `ra_deg`, `dec_deg` (numbers, in degrees). This fixes a real bug: `calculate_panels("10.684", ...)` centered the panels at 160.26 degrees. `dec_deg` outside -90 to 90 raises `InvalidArgumentError`. Sexagesimal text is no longer read; convert it first |
+| `planning.get_advisory("calibration", ...)` (now `get_calibration_advice`) | `filter`, `gain_setting`, `sensor_temperature_c` | `filter_name`, `gain`, `temperature_c` |
+| `planning.get_plan` | `night_id` | `observing_night_id` |
+| `planning.create_session` (was `create_plan` with a session kind) | `night_id` | `observing_night_id` |
+| `planning.refresh_suggestions` | `target_ids` (a list) | `target`: one id or a list of ids |
+| `planning.get_deep_catalog_status` | `magnitude_limit` | `magnitude_max` |
+| `planning.query_sources` (was `find_sources`, `get_sources`, `get_online_catalog_sources`, `get_library_star_summaries`) | `limiting_magnitude`, `magnitude_limit`, `magnitude_range` | `magnitude_max`, with `magnitude_min` for the bright end |
+| `planning.query_sources` (was `get_online_catalog_sources`) | `enabled_driver_names` | `catalog_drivers` |
+
+### Planning return types
+
+| Call | Old | New |
+| --- | --- | --- |
+| `planning.lookup_coordinates` | `dict` | `CoordinateLookup` (`id`, `name`, `kind`, `ra_deg`, `dec_deg`, `ra`, `dec`, `magnitude`, `spectral_type`). `result["ra_deg"]` becomes `result.ra_deg` |
+| `planning.find_sources`, `get_sources`, `get_library_star_summaries`, `get_online_catalog_sources` | `dict`, `list[SkySource]`, `list[dict]`, `list[SkySource]` | `SourceQueryResult` (`sources`, a list of `SkySource`, then `total_stars` and `stars_truncated`). A library star is a `SkySource`, so the `targetIds` of the old summary rows is gone. The RPCs `planetarium:get_sources`, `planetarium:get_targets` and `planetarium:get_catalog_sources` still reply with a list of `SkySource` records |
+| `planning.query_catalogs` (was `list_catalog_driver_metadata`) | `list[dict]` | `list[CatalogDriverInfo]` (`driver_name`, `display_name`, `maximum_query_radius_degrees`). The RPC `planetarium:list_catalog_drivers` still replies with the same dictionaries |
+| `planning.get_constellation_lines` | `list[dict]` | `list[ConstellationLineSegment]` (`constellation`, `ra1`, `dec1`, `ra2`, `dec2`). The RPC `planetarium:get_constellation_lines` still replies with the same dictionaries |
+| `planning.build_deep_star_catalog` | `dict` | `DeepCatalogBuildReport` (`pixels_total`, `pixels_previously_done`, `pixels_downloaded`, `pixels_failed`, `stars_added`, `elapsed_seconds`, `stopped_early`). `report["stars_added"]` becomes `report.stars_added` |
+
+### Planning RPC methods
+
+| Old | New |
+| --- | --- |
+| `plan:edit` payload with more than one of `add`, `order`, `remove`, `set_exposures`, `add_checklist`, `framing` | Refused with `invalid_argument`. Give exactly one. The UI never sent more than one; the payload fields and the reply are the same |
+| `plan:edit_package` with `delete`, `dismiss` or `undismiss` together with a change, or with each other | Refused with `invalid_argument`, as before (the backend now checks it). `reopen` with value changes still works: the backend reopens first, then updates with the new revision. The payload and the reply are the same |
+| `mosaic:preview` payload `center_ra`, `center_dec` (sent in degrees) | Same payload. The backend used to turn the numbers into text, and the library read a bare right ascension as hours, so the panels were centered in the wrong place. They are now centered on the degrees sent |
+
 ## Left as they were, on purpose
 
 - `visualization.get_last_captured_image` is separate from `render_fits`: it finds the newest file itself and

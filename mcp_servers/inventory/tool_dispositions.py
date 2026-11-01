@@ -66,18 +66,6 @@ INTERIM_BLOCKS = {
         "INDI device that is off, and enclosure_state returns unknown in the MCP process. Blocked until "
         "those sections use the connect-only path."
     ),
-    "planning_get_sources": (
-        "Returns whole target records and every star, which overflows the 40,000 character reply. Use "
-        "planning_find_sources, which caps the list, brightest first."
-    ),
-    "planning_get_library_star_summaries": (
-        "Returns every star in the circle, which can overflow the 40,000 character reply. Use "
-        "planning_find_sources, which caps the list, brightest first."
-    ),
-    "planning_resolve_target_coordinates": (
-        "Returns the whole target record, frames and all, which overflows the reply. Use "
-        "planning_lookup_coordinates, which returns the position."
-    ),
     "observatory_imaging_status": (
         "The filters and focuser sections return [] and 0 because the MCP process has no hardware "
         "connection. Use app_status with the telescope section (focuser position, filter, pier side, "
@@ -282,9 +270,6 @@ DECISIONS = {
         "2026-10-05 it is ProcessingPipelines.stack, which also takes the exact frames to stack.",
         "process",
     ),
-    "planning_get_imaged_field_centers": ToolDecision(
-        "withhold", "Replaced by target_imaged_field_centers, which runs as a background job."
-    ),
     "target_imaged_field_centers": ToolDecision(
         "keep",
         "Built 2026-10-04. The distinct sky positions imaged, read from FITS headers (about 35 s on this "
@@ -295,10 +280,11 @@ DECISIONS = {
         "Built 2026-10-04. Targets as short rows or one grouped record, the cameras used, or each "
         "target's frames per camera; replaces target_get and target_list.",
     ),
-    "planning_find_sources": ToolDecision(
+    "planning_query_sources": ToolDecision(
         "keep",
-        "Built 2026-10-04. Library targets and stars near a point, brightest stars first, cut at a limit "
-        "with the total reported.",
+        "Targets and stars near a point from the library, SIMBAD or the online catalogs, brightest stars "
+        "first, cut at a limit with the total reported. Replaces planning_find_sources, "
+        "planning_get_sources, planning_get_library_star_summaries and planning_get_online_catalog_sources.",
     ),
     "planning_lookup_coordinates": ToolDecision(
         "keep", "Built 2026-10-04. The position of a named object, from the library or SIMBAD. Reads only."
@@ -327,17 +313,7 @@ DECISIONS = {
         "Built 2026-10-05. Draws one chart of a target or a star; the registry sends it as a PNG image. "
         "Saves nothing.",
     ),
-    "planning_get_library_star_summaries": ToolDecision("keep", "Reads star summaries for planning."),
-    "planning_get_sources": ToolDecision(
-        "keep", "Lists sources near a position. It also returns targets; target_query will cover those."
-    ),
-    "planning_get_online_catalog_sources": ToolDecision(
-        "keep", "Queries online catalogs over the network. Reads only."
-    ),
-    "planning_list_catalog_driver_metadata": ToolDecision("keep", "Lists the catalog drivers. Reads only."),
-    "planning_resolve_target_coordinates": ToolDecision(
-        "keep", "Looks up an object's position by name. Unknown names go to SIMBAD over the network."
-    ),
+    "planning_query_catalogs": ToolDecision("keep", "Lists the catalog drivers. Reads only."),
     "planning_get_visibility": ToolDecision(
         "keep",
         "Built 2026-10-03. Where objects are now or over a night: altitude, horizon clearance with "
@@ -345,12 +321,24 @@ DECISIONS = {
     ),
     "planning_get_advisory": ToolDecision(
         "keep",
-        "Built 2026-10-06; widened 2026-10-24. The target dataset report (quality), tonight's ranking, "
-        "the trust "
-        "in one star result, or the calibration inventory, worked out on demand. Saves nothing.",
+        "Built 2026-10-06; split 2026-10-31. The target dataset report (quality) or the trust in one star "
+        "result, worked out on demand. Saves nothing. Moves to the review group.",
+    ),
+    "planning_get_tonight_advice": ToolDecision(
+        "keep", "Tonight's ranking of targets, worked out on demand. Saves nothing."
+    ),
+    "planning_get_calibration_advice": ToolDecision(
+        "keep",
+        "How many calibration frames of one kind the library holds, worked out on demand. Saves nothing.",
     ),
     "planning_get_plan": ToolDecision(
-        "keep", "Built 2026-10-06. Reads a recorded session or the session list."
+        "keep", "Built 2026-10-06. Reads one recorded session, by id or by night."
+    ),
+    "planning_query_plans": ToolDecision(
+        "keep", "Lists the recorded sessions, the observation packages or the suggestion log. Reads only."
+    ),
+    "planning_get_package_for_target": ToolDecision(
+        "keep", "Reads the one package that stands for a target. Reads only."
     ),
     "planning_get_depth_goal": ToolDecision(
         "keep",
@@ -363,7 +351,7 @@ DECISIONS = {
         "user decided an AI may not change configuration.",
         "change-data",
     ),
-    "planning_deep_catalog_status": ToolDecision(
+    "planning_get_deep_catalog_status": ToolDecision(
         "keep",
         "Built 2026-10-06. Reads the catalog file; the optional estimate queries the Gaia archive and "
         "saves nothing.",
@@ -620,9 +608,19 @@ DECISIONS = {
             "target_add",
             "target_create",
             "planning_create_mosaic",
-            "planning_create_plan",
-            "planning_edit_queue",
-            "planning_edit_package",
+            "planning_create_sequence",
+            "planning_create_package",
+            "planning_create_session",
+            "planning_add_to_queue",
+            "planning_reorder_queue",
+            "planning_remove_from_queue",
+            "planning_set_entry_exposures",
+            "planning_add_checklist_items",
+            "planning_set_framing",
+            "planning_update_package",
+            "planning_reopen_package",
+            "planning_dismiss_package",
+            "planning_undismiss_package",
             "planning_refresh_suggestions",
             "planning_tick_checklist_item",
         ),

@@ -76,7 +76,7 @@ def _parent() -> Target:
 def test_panels_straddle_the_center_using_the_equipment_field_of_view() -> None:
     """A 1x2 grid puts one panel each side of the center, one field apart."""
     equipment = _equipment()
-    panels = calculate_panels(None, "180", "0", 1, 2, 0.0, equipment)
+    panels = calculate_panels(None, 180.0, 0.0, 1, 2, 0.0, equipment)
     assert [panel.panel_id for panel in panels] == ["P1_1", "P1_2"]
     separation = panels[1].ra_deg - panels[0].ra_deg
     assert separation == pytest.approx(equipment.fov_width_deg, rel=1e-6)
@@ -86,15 +86,15 @@ def test_panels_straddle_the_center_using_the_equipment_field_of_view() -> None:
 def test_a_bad_grid_is_refused() -> None:
     """Zero rows or a 100 percent overlap cannot make a grid."""
     with pytest.raises(InvalidArgumentError):
-        calculate_panels(None, "180", "0", 0, 2, 0.0, _equipment())
+        calculate_panels(None, 180.0, 0.0, 0, 2, 0.0, _equipment())
     with pytest.raises(InvalidArgumentError):
-        calculate_panels(None, "180", "0", 1, 2, 100.0, _equipment())
+        calculate_panels(None, 180.0, 0.0, 1, 2, 100.0, _equipment())
 
 
 def test_create_mosaic_adds_one_target_and_package_per_panel() -> None:
     """A 2x2 grid gives four distinct panel targets and four packages."""
     astrometrics = _FakeAstrometrics()
-    panels = calculate_panels(None, "20h 58m 47s", "+44 19 48", 2, 2, 10.0, _equipment())
+    panels = calculate_panels(None, 314.695833, 44.33, 2, 2, 10.0, _equipment())
     exposure_requests = [ExposureRequest(frame_type=FrameType.LIGHT, exposure_sec=300.0, count=10)]
 
     plan = create_mosaic(astrometrics, _parent(), panels, exposure_requests, None, packages=True)
@@ -112,7 +112,7 @@ def test_create_mosaic_adds_one_target_and_package_per_panel() -> None:
 def test_create_mosaic_can_skip_the_packages() -> None:
     """With packages=False only the panel targets are made."""
     astrometrics = _FakeAstrometrics()
-    panels = calculate_panels(None, "180", "0", 1, 2, 0.0, _equipment())
+    panels = calculate_panels(None, 180.0, 0.0, 1, 2, 0.0, _equipment())
     plan = create_mosaic(astrometrics, _parent(), panels, None, None, packages=False)
     assert plan.packages == []
     assert len(plan.target_ids) == 2
@@ -148,16 +148,16 @@ def _grid_offsets_deg(
 
 def test_zero_rotation_leaves_the_grid_unchanged() -> None:
     """A rotation of 0 gives the same panels as leaving the rotation out."""
-    plain = calculate_panels(object(), "10:00:00", "+30:00:00", 2, 3, 10.0, _equipment())
-    turned = calculate_panels(object(), "10:00:00", "+30:00:00", 2, 3, 10.0, _equipment(), rotation_deg=0.0)
+    plain = calculate_panels(object(), 150.0, 30.0, 2, 3, 10.0, _equipment())
+    turned = calculate_panels(object(), 150.0, 30.0, 2, 3, 10.0, _equipment(), rotation_deg=0.0)
     assert [(p.ra_deg, p.dec_deg) for p in plain] == [(p.ra_deg, p.dec_deg) for p in turned]
 
 
 def test_ninety_degrees_swaps_the_grid_axes() -> None:
     """At 90 degrees the columns run along declination, not right ascension."""
     equipment = _equipment()
-    plain = calculate_panels(object(), "10:00:00", "+0:00:00", 1, 3, 0.0, equipment)
-    turned = calculate_panels(object(), "10:00:00", "+0:00:00", 1, 3, 0.0, equipment, rotation_deg=90.0)
+    plain = calculate_panels(object(), 150.0, 0.0, 1, 3, 0.0, equipment)
+    turned = calculate_panels(object(), 150.0, 0.0, 1, 3, 0.0, equipment, rotation_deg=90.0)
     plain_offsets = _grid_offsets_deg(plain, 150.0, 0.0)
     turned_offsets = _grid_offsets_deg(turned, 150.0, 0.0)
     # A single row of three columns: east-west before, north-south after.
@@ -172,8 +172,8 @@ def test_rotated_panel_centers_round_trip() -> None:
     import math
 
     equipment = _equipment()
-    plain = calculate_panels(object(), "10:00:00", "+20:00:00", 3, 3, 20.0, equipment)
-    turned = calculate_panels(object(), "10:00:00", "+20:00:00", 3, 3, 20.0, equipment, rotation_deg=37.0)
+    plain = calculate_panels(object(), 150.0, 20.0, 3, 3, 20.0, equipment)
+    turned = calculate_panels(object(), 150.0, 20.0, 3, 3, 20.0, equipment, rotation_deg=37.0)
     plain_offsets = _grid_offsets_deg(plain, 150.0, 20.0)
     turned_offsets = _grid_offsets_deg(turned, 150.0, 20.0)
     angle = math.radians(37.0)
@@ -188,15 +188,13 @@ def test_rotated_panel_centers_round_trip() -> None:
 def test_a_non_finite_rotation_is_refused() -> None:
     """A rotation that is not a number raises InvalidArgumentError."""
     with pytest.raises(InvalidArgumentError, match="rotation_deg"):
-        calculate_panels(
-            object(), "10:00:00", "+30:00:00", 1, 1, 0.0, _equipment(), rotation_deg=float("nan")
-        )
+        calculate_panels(object(), 150.0, 30.0, 1, 1, 0.0, _equipment(), rotation_deg=float("nan"))
 
 
 def test_corners_at_zero_rotation_form_the_field_of_view_around_the_center() -> None:
     """With no rotation at declination 0, corners sit half a field away."""
     equipment = _equipment()
-    (panel,) = calculate_panels(None, "180", "0", 1, 1, 0.0, equipment)
+    (panel,) = calculate_panels(None, 180.0, 0.0, 1, 1, 0.0, equipment)
     half_width = equipment.fov_width_deg / 2.0
     half_height = equipment.fov_height_deg / 2.0
     expected = [
@@ -214,7 +212,7 @@ def test_corners_at_zero_rotation_form_the_field_of_view_around_the_center() -> 
 def test_corners_at_ninety_degrees_swap_the_field_axes() -> None:
     """At 90 degrees the field height runs along right ascension."""
     equipment = _equipment()
-    (panel,) = calculate_panels(None, "180", "0", 1, 1, 0.0, equipment, rotation_deg=90.0)
+    (panel,) = calculate_panels(None, 180.0, 0.0, 1, 1, 0.0, equipment, rotation_deg=90.0)
     half_width = equipment.fov_width_deg / 2.0
     half_height = equipment.fov_height_deg / 2.0
     lower_left = panel.corners[0]
@@ -228,7 +226,7 @@ def test_corners_of_a_rotated_panel_stay_a_rectangle_around_the_panel_center() -
     import math
 
     equipment = _equipment()
-    panels = calculate_panels(None, "100", "10", 2, 2, 10.0, equipment, rotation_deg=37.0)
+    panels = calculate_panels(None, 100.0, 10.0, 2, 2, 10.0, equipment, rotation_deg=37.0)
     diagonal = math.hypot(equipment.fov_width_deg, equipment.fov_height_deg)
     for panel in panels:
         mean_ra = sum(corner.ra_deg for corner in panel.corners) / 4.0

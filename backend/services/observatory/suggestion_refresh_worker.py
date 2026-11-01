@@ -168,7 +168,7 @@ class SuggestionRefreshWorker:
             },
         )
         if change.checklist_item_ids:
-            session = self._wayfinder.planning.get_plan(night_id=observing_night_id(time.time()))
+            session = self._wayfinder.planning.get_plan(observing_night_id=observing_night_id(time.time()))
             if session is not None:
                 self._socket_manager.broadcast_ui_event_sync(
                     "plan:changed",

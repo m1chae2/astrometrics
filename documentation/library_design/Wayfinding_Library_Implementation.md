@@ -138,7 +138,7 @@ Folder: `tasks/planning_tasks/`. Facade: `ObservationPlanning` in `api/planning.
 - **Night window and visibility.** `night_window.py` (`resolve_night_window`), `astronomy/solar_position.py`, `visibility_tasks.py` (`visibility_state_at`, `find_earliest_visible_window`, `ever_visible`), `visibility_report.py`, `visibility_operations.py`.
 - **Placement.** `scheduling.py` (`PlacementRequest`, `place`, `schedule_session`, `_apply_advisory_boost`). Reasons: `InfeasibilityReasonCode`. The boost needs `quality_weighting_enabled`.
 - **Mosaics and advice.** `mosaic_tasks.py` (`calculate_panels` takes `rotation_deg`), `calibration_advisory_tasks.py`. The quality judgments are in Section 6.10.
-- **Plans.** `planning_operations.py` (`create_plan` kinds: `sequence`, `package`, `empty_session`, `scheduled_session`; `get_advisory` kinds: `quality`, `calibration`, `tonight`, `result`; `get_plan`, `edit_queue`, `tick_checklist_item`).
+- **Plans.** `planning_operations.py` (`create_sequence`, `create_package`, `create_session`; `get_advisory` kinds: `quality`, `calibration`, `tonight`, `result`; `get_plan`, `add_to_queue`, `tick_checklist_item`).
 - **Sky.** `sky_engine.py` (`SkyEngine`), `sky_sources.py`, `drivers/catalog/`, and the `*_operations.py` calculation modules.
 
 <!-- impl: wayfindinglib.tasks.planning_tasks.scheduling.PlacementRequest -->
@@ -531,8 +531,8 @@ No module applies the gates of the architecture's Table 8. `DivergenceEvidenceSu
 | Align | `control.mount.compute_pointing_correction`, `slew(center=True)` | `pointing_correction.py`, `centering.py` |
 | Focus | `control.imaging.compute_focus_correction` (no autofocus sweep call) | `focus_correction.py` |
 | Guide | `control.guiding.compute_correction`, `status(include=["live"])` | `guiding_correction.py`, `live_guiding.py` |
-| Scheduler | `planning.create_plan(kind="scheduled_session")` | `scheduling.py` |
-| Capture | `planning.create_plan(kind="package")` | `observation_package.py` |
+| Scheduler | `planning.create_session(..., requests=)` | `scheduling.py` |
+| Capture | `planning.create_package` | `observation_package.py` |
 | Dome and weather interlock | `control.safety.execute_safe_state`, `assess` | `safe_state.py` |
 | Session recording | `execution.advance_session`, `create_recorder`, `control.history.query` | `session_runner.py` |
 

@@ -48,14 +48,14 @@ def test_warmup_marks_ready_after_loading_the_catalog(mocker: MockerFixture, unf
 
     startup.warm_start_up_caches()
 
-    fake_container.wayfinder.planning.get_sources.assert_called_once()
+    fake_container.wayfinder.planning.query_sources.assert_called_once()
     assert startup.sky_catalog_warmup_finished.is_set()
 
 
 def test_failed_warmup_still_marks_ready(mocker: MockerFixture, unfinished_warmup: None) -> None:
     """A broken warm-up means a slow first load, not a locked-out app."""
     fake_container = mocker.patch.object(startup, "container")
-    fake_container.wayfinder.planning.get_sources.side_effect = RuntimeError("catalog unreadable")
+    fake_container.wayfinder.planning.query_sources.side_effect = RuntimeError("catalog unreadable")
 
     startup.warm_start_up_caches()
 

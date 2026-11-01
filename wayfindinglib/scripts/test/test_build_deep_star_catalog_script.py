@@ -16,6 +16,7 @@ import pytest
 import requests
 from astropy.table import Table
 
+from astrometricslib import FieldCenter, ImagedFieldCenters
 from wayfindinglib.api.planning import ObservationPlanning
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.drivers.catalog import deep_star_catalog_builder
@@ -232,6 +233,26 @@ def fake_environment_planning() -> ObservationPlanning:
     return script.Wayfinder().planning
 
 
+def imaged_fields(monkeypatch: pytest.MonkeyPatch, fields: list[dict]) -> None:
+    """Make the script's library report these imaged fields.
+
+    Parameters
+    ----------
+    monkeypatch : `pytest.MonkeyPatch`
+        The test's patcher.
+    fields : `list` [`dict`]
+        The fields, each with ``right_ascension_deg``, ``declination_deg`` and
+        ``target_ids``.
+    """
+    centers = [FieldCenter(frames_examined=1, **field) for field in fields]
+    library = types.SimpleNamespace(
+        targets=types.SimpleNamespace(
+            imaged_field_centers=lambda register_job: ImagedFieldCenters(centers=centers)
+        )
+    )
+    monkeypatch.setattr(script, "Astrometrics", lambda config: library)
+
+
 @pytest.mark.parametrize(
     ("seconds", "expected"),
     [(5, "5s"), (125, "2m"), (3 * 3600 + 7 * 60, "3h07m"), (0, "0s")],
@@ -301,7 +322,7 @@ def test_near_targets_uses_the_fields_the_library_has_imaged(
         {"right_ascension_deg": 315.13, "declination_deg": 68.57, "target_ids": ["NGC 7023"]},
         {"right_ascension_deg": 250.42, "declination_deg": 36.46, "target_ids": ["M 13"]},
     ]
-    monkeypatch.setattr(fake_environment_planning(), "get_imaged_field_centers", lambda: fields)
+    imaged_fields(monkeypatch, fields)
 
     exit_code = script.run_catalog_build([
         "--healpix-level",
@@ -324,7 +345,7 @@ def test_near_targets_with_no_imaged_fields_downloads_nothing(
     fake_environment: _FakeGaia, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """An empty library gives a clear message, not a whole-sky download."""
-    monkeypatch.setattr(fake_environment_planning(), "get_imaged_field_centers", lambda: [])
+    imaged_fields(monkeypatch, [])
 
     exit_code = script.run_catalog_build(["--near-targets", "--healpix-level", "4"])
 
@@ -339,7 +360,7 @@ def test_near_and_near_targets_can_be_combined(
 ) -> None:
     """Both kinds of place add up."""
     fields = [{"right_ascension_deg": 250.42, "declination_deg": 36.46, "target_ids": ["M 13"]}]
-    monkeypatch.setattr(fake_environment_planning(), "get_imaged_field_centers", lambda: fields)
+    imaged_fields(monkeypatch, fields)
 
     script.run_catalog_build(["--dry-run", "--healpix-level", "4", "--near-targets", *NEAR_ARGUMENTS])
 

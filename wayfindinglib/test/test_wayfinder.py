@@ -38,13 +38,13 @@ def test_wayfinder_planning() -> None:
 
     # 1. Test calculate panels
     panels = wayfinder.planning.calculate_panels(
-        center_ra="16:41:41.24", center_dec="+36:27:35.5", rows=2, cols=2, overlap_percent=10.0
+        ra_deg=250.172, dec_deg=36.4599, rows=2, cols=2, overlap_percent=10.0
     )
     assert len(panels) == 4
 
     # 2. Test create sequence plan
     plan_items = [{"count": 10, "exposure": 60.0, "filter": "SPEC", "duration": 600.0}]
-    plan = wayfinder.planning.create_plan("sequence", target=Target(id="M 13"), plan_items=plan_items)
+    plan = wayfinder.planning.create_sequence(target=Target(id="M 13"), plan_items=plan_items)
     assert plan.target_name == "M 13"
     assert len(plan.items) == 1
 
@@ -60,6 +60,6 @@ def test_wayfinder_calculate_panels_handles_unsolved_target_placeholder() -> Non
     wayfinder = Wayfinder(config)
 
     panels = wayfinder.planning.calculate_panels(
-        center_ra="0h 0m 0s", center_dec="0° 0′ 0′′", rows=2, cols=2, overlap_percent=10.0
+        ra_deg=0.0, dec_deg=0.0, rows=2, cols=2, overlap_percent=10.0
     )
     assert len(panels) == 4

@@ -1,7 +1,9 @@
 """Purpose: Test the package RPC methods and the ``packages:changed`` event.
 
 Description: The plan service wraps the planning library's `get_plan` (with
-its package list), `create_plan` and `edit_package`. The library is a
+its package list), `create_package`, `create_session` and the package
+verbs (`update_package`, `reopen_package`, `dismiss_package` and the
+others) that `edit_package` chooses between. The library is a
 `create_autospec` of the real `ObservationPlanning`, so a call with a wrong
 argument name fails. The tests check that:
 
@@ -22,6 +24,7 @@ from unittest.mock import create_autospec
 
 import pytest
 
+from astrometricslib import InvalidArgumentError
 from backend.public_interface import RPC_METHODS, UI_EVENTS
 from backend.routers.rpc_router import rpc_registry
 from backend.services.observatory.plan_service import PlanService
@@ -108,25 +111,25 @@ def test_the_new_methods_and_the_event_are_declared_and_served() -> None:
 def test_list_packages_passes_the_filters_through(setup: tuple[Any, _Sockets, PlanService]) -> None:
     """The package filters reach the library; a read announces nothing."""
     planning, sockets, service = setup
-    planning.get_plan.return_value = [_package()]
+    planning.query_plans.return_value = [_package()]
 
     result = service.list_packages(status="planned", target="M 81")
 
     assert result[0].id == "pkg-1"
-    planning.get_plan.assert_called_once_with(
+    planning.query_plans.assert_called_once_with(
         kind="packages", status="planned", target="M 81", include_dismissed=False
     )
     assert sockets.events == []
 
 
 def test_package_for_target_asks_the_library_to_pick_one(setup: tuple[Any, _Sockets, PlanService]) -> None:
-    """The service passes `pick="one"` and the target, and chooses nothing."""
+    """The service passes the target on and chooses nothing."""
     planning, sockets, service = setup
-    planning.get_plan.return_value = _package()
+    planning.get_package_for_target.return_value = _package()
 
     assert service.package_for_target("m_81").id == "pkg-1"
-    planning.get_plan.assert_called_once_with(kind="packages", target="m_81", pick="one")
-    planning.get_plan.return_value = None
+    planning.get_package_for_target.assert_called_once_with("m_81")
+    planning.get_package_for_target.return_value = None
     assert service.package_for_target("M 1") is None
     assert sockets.events == []
 
@@ -141,6 +144,16 @@ def test_plan_get_keeps_the_old_call_working(setup: tuple[Any, _Sockets, PlanSer
     planning.get_plan.assert_called_once_with("night-1")
 
 
+def test_plan_get_without_a_session_lists_every_session(setup: tuple[Any, _Sockets, PlanService]) -> None:
+    """A call with no session id lists the sessions."""
+    planning, _, service = setup
+    planning.query_plans.return_value = []
+
+    assert service.get_plan() == []
+
+    planning.query_plans.assert_called_once_with()
+
+
 def test_current_session_reads_tonights_night_and_creates_nothing(
     setup: tuple[Any, _Sockets, PlanService], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -153,8 +166,8 @@ def test_current_session_reads_tonights_night_and_creates_nothing(
 
     assert service.current_session() is None
 
-    planning.get_plan.assert_called_once_with(night_id="2026-10-24", include=["progress"])
-    planning.create_plan.assert_not_called()
+    planning.get_plan.assert_called_once_with(observing_night_id="2026-10-24", include=["progress"])
+    planning.create_session.assert_not_called()
     assert sockets.events == []
 
 
@@ -174,14 +187,13 @@ def test_current_session_returns_the_session(
 def test_creating_a_package_with_no_exposures_announces_it(setup: tuple[Any, _Sockets, PlanService]) -> None:
     """A package needs only a target name; its creation is announced."""
     planning, sockets, service = setup
-    planning.create_plan.return_value = _package(revision=0)
+    planning.create_package.return_value = _package(revision=0)
 
     result = service.create_package("M 81")
 
     assert result.id == "pkg-1"
-    planning.create_plan.assert_called_once()
-    arguments = planning.create_plan.call_args.kwargs
-    assert arguments["kind"] == "package"
+    planning.create_package.assert_called_once()
+    arguments = planning.create_package.call_args.kwargs
     assert arguments["target"] == "M 81"
     assert arguments["exposure_requests"] is None
     assert sockets.events == [
@@ -189,21 +201,17 @@ def test_creating_a_package_with_no_exposures_announces_it(setup: tuple[Any, _So
     ]
 
 
-def test_creating_a_package_turns_exposure_dicts_into_requests(
+def test_creating_a_package_passes_exposure_dicts_to_the_library(
     setup: tuple[Any, _Sockets, PlanService],
 ) -> None:
-    """Exposure dictionaries become the library's `ExposureRequest`."""
+    """Exposure dictionaries go to the library, which checks them."""
     planning, _, service = setup
-    planning.create_plan.return_value = _package(revision=0)
+    planning.create_package.return_value = _package(revision=0)
+    row = {"frame_type": "LIGHT", "filter": "Ha", "exposure_sec": 60, "count": 3}
 
-    service.create_package(
-        "M 81",
-        exposure_requests=[{"frame_type": "LIGHT", "filter": "Ha", "exposure_sec": 60, "count": 3}],
-    )
+    service.create_package("M 81", exposure_requests=[row])
 
-    (request,) = planning.create_plan.call_args.kwargs["exposure_requests"]
-    assert request.count == 3
-    assert request.exposure_sec == 60
+    assert planning.create_package.call_args.kwargs["exposure_requests"] == [row]
 
 
 def test_creating_a_session_still_asks_for_the_empty_session(
@@ -211,37 +219,37 @@ def test_creating_a_session_still_asks_for_the_empty_session(
 ) -> None:
     """The default kind is the night's session; no package event is sent."""
     planning, sockets, service = setup
-    planning.create_plan.return_value = _session()
+    planning.create_session.return_value = _session()
 
     service.create_plan(night_id="2026-10-24")
 
-    planning.create_plan.assert_called_once_with(kind="empty_session", night_id="2026-10-24")
+    planning.create_session.assert_called_once_with(observing_night_id="2026-10-24")
     assert sockets.events == []
 
 
 @pytest.mark.parametrize(
-    ("arguments", "kind"),
+    ("arguments", "verb", "kind"),
     [
-        ({"priority": 2}, "edited"),
-        ({"reopen": True}, "reopened"),
-        ({"delete": True}, "deleted"),
-        ({"dismiss": True, "source_key": "row-1"}, "dismissed"),
-        ({"undismiss": True}, "undismissed"),
-        ({"framing": {"ra_deg": 1.0}}, "framing"),
-        ({"framing": {"ra_deg": 1.0}, "notes": "x"}, "edited"),
+        ({"priority": 2}, "update_package", "edited"),
+        ({"reopen": True}, "reopen_package", "reopened"),
+        ({"delete": True}, "delete_package", "deleted"),
+        ({"dismiss": True, "source_key": "row-1"}, "dismiss_package", "dismissed"),
+        ({"undismiss": True}, "undismiss_package", "undismissed"),
+        ({"framing": {"ra_deg": 1.0}}, "update_package", "framing"),
+        ({"framing": {"ra_deg": 1.0}, "notes": "x"}, "update_package", "edited"),
     ],
 )
 def test_each_package_write_announces_once_with_its_kind(
-    setup: tuple[Any, _Sockets, PlanService], arguments: dict[str, Any], kind: str
+    setup: tuple[Any, _Sockets, PlanService], arguments: dict[str, Any], verb: str, kind: str
 ) -> None:
     """Edit, reopen and delete each give one event with id and kind."""
     planning, sockets, service = setup
-    planning.edit_package.return_value = _package(revision=2)
+    getattr(planning, verb).return_value = _package(revision=2)
 
     service.edit_package("pkg-1", expected_revision=1, **arguments)
 
-    assert planning.edit_package.call_args.args == ("pkg-1",)
-    assert planning.edit_package.call_args.kwargs["expected_revision"] == 1
+    assert getattr(planning, verb).call_args.args == ("pkg-1",)
+    assert getattr(planning, verb).call_args.kwargs["expected_revision"] == 1
     assert sockets.events == [
         ("packages:changed", {"packageId": "pkg-1", "targetId": "M 81", "kind": kind, "revision": 2})
     ]
@@ -250,7 +258,7 @@ def test_each_package_write_announces_once_with_its_kind(
 def test_a_refused_package_write_announces_nothing(setup: tuple[Any, _Sockets, PlanService]) -> None:
     """A stale revision passes up as an error and sends no event."""
     planning, sockets, service = setup
-    planning.edit_package.side_effect = PlanRevisionConflictError(
+    planning.update_package.side_effect = PlanRevisionConflictError(
         "The package is at a newer revision.", details={"current_revision": 3}
     )
 
@@ -268,13 +276,13 @@ async def test_the_rpc_route_reaches_edit_package(
     from backend.container import container
 
     planning, sockets, service = setup
-    planning.edit_package.return_value = _package(revision=2)
+    planning.update_package.return_value = _package(revision=2)
     monkeypatch.setattr(container, "plan_service", service, raising=False)
 
     result = await rpc_registry.execute("plan:edit_package", {"package_id": "pkg-1", "priority": 4})
 
     assert result.revision == 2
-    assert planning.edit_package.call_args.kwargs["priority"] == 4
+    assert planning.update_package.call_args.kwargs["priority"] == 4
     assert [name for name, _ in sockets.events] == ["packages:changed"]
 
 
@@ -283,7 +291,7 @@ def test_adding_a_suggested_package_to_the_queue_announces_the_promotion(
 ) -> None:
     """A ``package_promoted`` item also gives ``packages:changed``."""
     planning, sockets, service = setup
-    planning.edit_queue.return_value = PlanChange(
+    planning.add_to_queue.return_value = PlanChange(
         session_id="night-1",
         previous_revision=1,
         revision=2,
@@ -301,29 +309,59 @@ def test_adding_a_suggested_package_to_the_queue_announces_the_promotion(
 def test_list_packages_can_include_dismissed_suggestions(setup: tuple[Any, _Sockets, PlanService]) -> None:
     """`include_dismissed` reaches the library."""
     planning, _, service = setup
-    planning.get_plan.return_value = []
+    planning.query_plans.return_value = []
 
     service.list_packages(include_dismissed=True)
 
-    planning.get_plan.assert_called_once_with(
+    planning.query_plans.assert_called_once_with(
         kind="packages", status=None, target=None, include_dismissed=True
     )
 
 
-def test_edit_package_passes_the_suggestion_arguments_to_the_library(
+def test_a_dismissal_passes_its_row_key_to_the_library(setup: tuple[Any, _Sockets, PlanService]) -> None:
+    """The row key of a dismissal reaches the library by name."""
+    planning, _, service = setup
+    planning.dismiss_package.return_value = _package(revision=2)
+
+    service.edit_package("pkg-1", dismiss=True, source_key="row-1")
+
+    assert planning.dismiss_package.call_args.kwargs["source_key"] == "row-1"
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"dismiss": True, "framing": {"ra_deg": 1.0}},
+        {"delete": True, "priority": 1},
+        {"dismiss": True, "undismiss": True},
+        {"source_key": "row-1", "priority": 2},
+        {},
+    ],
+)
+def test_a_package_write_that_mixes_actions_or_gives_none_is_refused(
+    setup: tuple[Any, _Sockets, PlanService], arguments: dict[str, Any]
+) -> None:
+    """Delete and dismissal stand alone; a call must ask for something."""
+    _, sockets, service = setup
+
+    with pytest.raises(InvalidArgumentError):
+        service.edit_package("pkg-1", **arguments)
+
+    assert sockets.events == []
+
+
+def test_reopen_and_a_change_use_the_revision_the_reopen_made(
     setup: tuple[Any, _Sockets, PlanService],
 ) -> None:
-    """Framing, dismiss, undismiss and source_key reach the library by name."""
+    """A change after a reopen names the new revision."""
     planning, _, service = setup
-    planning.edit_package.return_value = _package(revision=2)
+    planning.reopen_package.return_value = _package(revision=5)
+    planning.update_package.return_value = _package(revision=6)
 
-    service.edit_package("pkg-1", framing={"ra_deg": 1.0}, dismiss=True, source_key="row-1")
+    service.edit_package("pkg-1", reopen=True, notes="again", expected_revision=4)
 
-    kwargs = planning.edit_package.call_args.kwargs
-    assert kwargs["framing"] == {"ra_deg": 1.0}
-    assert kwargs["dismiss"] is True
-    assert kwargs["undismiss"] is False
-    assert kwargs["source_key"] == "row-1"
+    assert planning.reopen_package.call_args.kwargs["expected_revision"] == 4
+    assert planning.update_package.call_args.kwargs["expected_revision"] == 5
 
 
 def test_refresh_suggestions_hands_the_targets_to_the_worker() -> None:

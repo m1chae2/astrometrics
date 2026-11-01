@@ -54,7 +54,7 @@ def xp_reply(source_id: int = SOURCE_ID) -> dict[str, list[Table]]:
         "flux": 1e-12 * np.exp(-(((wavelength_nm - 550.0) / 300.0) ** 2)),
         "flux_error": np.full(wavelength_nm.size, 1e-14),
     })
-    return {f"XP_SAMPLED-Gaia DR3 {source_id}.csv": [table]}
+    return {f"XP_SAMPLED_Gaia_DR3_{source_id}.csv": [table]}
 
 
 @pytest.fixture
@@ -76,7 +76,7 @@ def archive(monkeypatch: pytest.MonkeyPatch, gaia_module: MagicMock) -> SimpleNa
     """
     state = SimpleNamespace(calls=[], reply=xp_reply(), error=None)
 
-    def load_data(*, ids: list[int], **_keywords: Any) -> dict[str, list[Table]]:
+    def load_data(*, ids: list[int], **keywords: Any) -> dict[str, list[Table]]:
         """Stand in for ``Gaia.load_data``.
 
         Returns
@@ -87,12 +87,26 @@ def archive(monkeypatch: pytest.MonkeyPatch, gaia_module: MagicMock) -> SimpleNa
 
         """
         state.calls.append(ids[0])
+        state.keywords = keywords
         if state.error is not None:
             raise state.error
         return state.reply
 
     monkeypatch.setattr(gaia_module.Gaia, "load_data", load_data, raising=False)
     return state
+
+
+def test_the_driver_asks_for_a_data_structure_the_archive_accepts(
+    tmp_path: Path, archive: SimpleNamespace
+) -> None:
+    """The request names the one-row-per-wavelength structure the reader needs.
+
+    The archive answers HTTP 500 to the retired ``INDIVIDUAL`` structure, and
+    ``DATAMODEL_GAIA`` holds a whole spectrum in one row.
+    """
+    AstroqueryGaiaXpDriver(cache_directory=tmp_path).sampled_spectrum(SOURCE_ID)
+    assert archive.keywords["data_structure"] == "DATAMODEL_STANDARD"
+    assert archive.keywords["retrieval_type"] == "XP_SAMPLED"
 
 
 def test_the_driver_is_a_gaia_xp_driver(tmp_path: Path) -> None:

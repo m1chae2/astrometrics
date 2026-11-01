@@ -310,7 +310,7 @@ class AstroqueryGaiaXpDriver(GaiaXpDriver):
                     ids=[source_id],
                     data_release="Gaia DR3",
                     retrieval_type="XP_SAMPLED",
-                    data_structure="INDIVIDUAL",
+                    data_structure="DATAMODEL_STANDARD",
                     format="csv",
                 )
             except _DOWNLOAD_ERRORS as fetch_error:

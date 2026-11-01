@@ -33,8 +33,8 @@ async def test_a_reflected_tool_runs(registry: ToolRegistry) -> None:
     reply = await registry.execute(
         "planning_calculate_panels",
         {
-            "center_ra": "16:41:41.24",
-            "center_dec": "+36:27:35.5",
+            "ra_deg": 250.172,
+            "dec_deg": 36.4599,
             "rows": 2,
             "cols": 2,
             "overlap_percent": 10.0,

@@ -1,6 +1,6 @@
 """Purpose: The ranking of candidate targets for tonight.
 
-Description: `get_advisory(kind="tonight", at=...)` ranks the targets the user
+Description: `get_tonight_advice(at=...)` ranks the targets the user
 could image at a chosen time by how much one hour of real clock time would
 help each one (`QUALITY_METRICS_PLAN.md` Section 4.2, use cases UC6 and UC12).
 The ranking is recomputed on each request and never stored.

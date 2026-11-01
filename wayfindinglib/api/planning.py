@@ -2,7 +2,8 @@
 
 Description: `Wayfinder.planning` is an `ObservationPlanning`. It answers
 where objects are in the sky (`get_visibility`), advises on targets and
-calibration frames (`get_advisory`), lays out mosaics
+calibration frames (`get_advisory`, `get_tonight_advice`,
+`get_calibration_advice`), lays out mosaics
 (`calculate_panels`, `create_mosaic`), writes plans (`create_sequence`,
 `create_package`, `create_session`, the queue verbs such as
 `add_to_queue`, the package verbs such as `update_package`, and
@@ -635,8 +636,8 @@ class ObservationPlanning:
             stars_truncated=truncated,
         )
 
-    def list_catalog_driver_metadata(self) -> list[dict[str, Any]]:
-        """Return metadata describing each registered online catalog driver.
+    def query_catalogs(self) -> list[dict[str, Any]]:
+        """List the registered online catalog drivers, with metadata for each.
 
         Returns
         -------
@@ -905,8 +906,8 @@ class ObservationPlanning:
 
     def calculate_panels(
         self,
-        center_ra: str,
-        center_dec: str,
+        ra_deg: float,
+        dec_deg: float,
         rows: int,
         cols: int,
         overlap_percent: float,
@@ -920,10 +921,10 @@ class ObservationPlanning:
 
         Parameters
         ----------
-        center_ra : `str`
-            Right ascension of the grid center, as text (hours) or degrees.
-        center_dec : `str`
-            Declination of the grid center, as text or degrees.
+        ra_deg : `float`
+            Right ascension of the grid center, in degrees.
+        dec_deg : `float`
+            Declination of the grid center, in degrees, from -90 to 90.
         rows : `int`
             Number of panel rows.
         cols : `int`
@@ -946,7 +947,7 @@ class ObservationPlanning:
         from wayfindinglib.tasks.planning_tasks.mosaic_tasks import calculate_panels
 
         return calculate_panels(
-            self._config, center_ra, center_dec, rows, cols, overlap_percent, equipment, rotation_deg
+            self._config, ra_deg, dec_deg, rows, cols, overlap_percent, equipment, rotation_deg
         )
 
     def create_mosaic(
@@ -2834,7 +2835,7 @@ class ObservationPlanning:
 
     @background_job("planning", grace_period_seconds=20.0)
     def refresh_suggestions(
-        self, target_ids: list[str] | None = None, register_job: bool = True
+        self, target: str | list[str] | None = None, register_job: bool = True
     ) -> PackageChange:
         """Update suggested packages, the checklist and finished packages.
 
@@ -2857,7 +2858,7 @@ class ObservationPlanning:
           tonight's ranking become suggested packages with no rows, tied to
           tonight, labeled a design estimate. They are deleted when the
           night ends or the target falls out of the top. The ranking is read
-          only when `target_ids` is `None`.
+          only when `target` is `None`.
         * **Completion.** A planned package whose light rows are all
           captured and judged becomes complete. A complete package that is
           no longer met (frames were set aside) becomes planned again.
@@ -2872,9 +2873,10 @@ class ObservationPlanning:
 
         Parameters
         ----------
-        target_ids : `list` [`str`], optional
-            Refresh only these targets (after new frames were measured).
-            `None` refreshes every library target and the ranking.
+        target : `str` or `list` [`str`], optional
+            One target id, or a list of ids, to refresh (after new frames
+            were measured). `None` refreshes every library target and the
+            ranking.
         register_job : `bool`, optional
             Record the run as a job in the job history, with its log.
             Defaults to `True`.
@@ -2891,7 +2893,7 @@ class ObservationPlanning:
             job_type="planning",
             target_id="package_suggestions",
         ):
-            return self._refresh_suggestions(target_ids)
+            return self._refresh_suggestions([target] if isinstance(target, str) else target)
 
     @staticmethod
     def _refresh_rule_package_of(
@@ -3139,11 +3141,11 @@ class ObservationPlanning:
     # -- Deep-star catalog -------------------------------------------------
 
     @background_job("planning", grace_period_seconds=20.0)
-    def deep_catalog_status(
+    def get_deep_catalog_status(
         self,
         include: list[str] | None = None,
         healpix_level: int | None = None,
-        magnitude_limit: float | None = None,
+        magnitude_max: float | None = None,
         sample_count: int | None = None,
         query_timeout_seconds: float | None = None,
         request_delay_seconds: float | None = None,
@@ -3163,7 +3165,7 @@ class ObservationPlanning:
             ``"estimate"`` adds the size estimate.
         healpix_level : `int`, optional
             How finely the estimate cuts the sky. Estimate only.
-        magnitude_limit : `float`, optional
+        magnitude_max : `float`, optional
             Count only stars brighter than this Gaia G magnitude. Estimate
             only.
         sample_count : `int`, optional
@@ -3191,7 +3193,7 @@ class ObservationPlanning:
         sections = check_include(include, DEEP_CATALOG_SECTIONS)
         settings = {
             "healpix_level": healpix_level,
-            "magnitude_limit": magnitude_limit,
+            "magnitude_limit": magnitude_max,
             "sample_count": sample_count,
             "query_timeout_seconds": query_timeout_seconds,
             "request_delay_seconds": request_delay_seconds,

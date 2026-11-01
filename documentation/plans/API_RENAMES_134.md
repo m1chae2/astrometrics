@@ -126,11 +126,21 @@ Done on the same branch. No old name is kept as an alias. The MCP tool of each c
 | `planning.get_advisory("tonight", at=)` | `planning.get_tonight_advice(at=)` |
 | `planning.get_advisory("calibration", camera_id=, frame_type=, exposure_seconds=, filter=, gain_setting=, offset=, binning=, sensor_temperature_c=)` | `planning.get_calibration_advice(camera_id, frame_type, exposure_seconds=, filter_name=, gain=, offset=, binning=, temperature_c=)` |
 | `planning.get_advisory(kind, target, object_id=)` with `kind="quality"` or `"result"` | Stays on `planning` for now, with the two kinds only and `target` required. It becomes `review.get_advisory` when the `review` group is added. The `calibration` and `tonight` kinds, and the arguments they used (`camera_id`, `frame_type`, `at` and the rest), are gone from it |
+| `planning.list_catalog_driver_metadata()` | `planning.query_catalogs()` |
+| `planning.deep_catalog_status(include=, healpix_level=, magnitude_limit=, sample_count=, query_timeout_seconds=, request_delay_seconds=, register_job=)` | `planning.get_deep_catalog_status(include=, healpix_level=, magnitude_max=, sample_count=, query_timeout_seconds=, request_delay_seconds=, register_job=)`. The parameter `magnitude_limit` is `magnitude_max`, as in `query_sources` |
 
 ### Planning parameters
 
 | Call | Old | New |
 | --- | --- | --- |
+| `planning.calculate_panels` | `center_ra`, `center_dec` (text; a bare number was read as hours) | `ra_deg`, `dec_deg` (numbers, in degrees). This fixes a real bug: `calculate_panels("10.684", ...)` centered the panels at 160.26 degrees. `dec_deg` outside -90 to 90 raises `InvalidArgumentError`. Sexagesimal text is no longer read; convert it first |
+| `planning.get_advisory("calibration", ...)` (now `get_calibration_advice`) | `filter`, `gain_setting`, `sensor_temperature_c` | `filter_name`, `gain`, `temperature_c` |
+| `planning.get_plan` | `night_id` | `observing_night_id` |
+| `planning.create_session` (was `create_plan` with a session kind) | `night_id` | `observing_night_id` |
+| `planning.refresh_suggestions` | `target_ids` (a list) | `target`: one id or a list of ids |
+| `planning.get_deep_catalog_status` | `magnitude_limit` | `magnitude_max` |
+| `planning.query_sources` (was `find_sources`, `get_sources`, `get_online_catalog_sources`, `get_library_star_summaries`) | `limiting_magnitude`, `magnitude_limit`, `magnitude_range` | `magnitude_max`, with `magnitude_min` for the bright end |
+| `planning.query_sources` (was `get_online_catalog_sources`) | `enabled_driver_names` | `catalog_drivers` |
 
 ### Planning return types
 
@@ -145,6 +155,7 @@ Done on the same branch. No old name is kept as an alias. The MCP tool of each c
 | --- | --- |
 | `plan:edit` payload with more than one of `add`, `order`, `remove`, `set_exposures`, `add_checklist`, `framing` | Refused with `invalid_argument`. Give exactly one. The UI never sent more than one; the payload fields and the reply are the same |
 | `plan:edit_package` with `delete`, `dismiss` or `undismiss` together with a change, or with each other | Refused with `invalid_argument`, as before (the backend now checks it). `reopen` with value changes still works: the backend reopens first, then updates with the new revision. The payload and the reply are the same |
+| `mosaic:preview` payload `center_ra`, `center_dec` (sent in degrees) | Same payload. The backend used to turn the numbers into text, and the library read a bare right ascension as hours, so the panels were centered in the wrong place. They are now centered on the degrees sent |
 
 ## Left as they were, on purpose
 

@@ -1,6 +1,6 @@
 """Purpose: Count the calibration frames already held for one request.
 
-Description: `ObservationPlanning.get_advisory(kind="calibration")` uses
+Description: `ObservationPlanning.get_calibration_advice` uses
 this to look up how many dark, bias or flat frames of a given exposure,
 filter, gain setting, offset, binning and sensor temperature the inventory
 already holds for a camera. It is an inventory view only: the advice about

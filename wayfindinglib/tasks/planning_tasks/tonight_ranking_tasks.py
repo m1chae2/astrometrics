@@ -1,7 +1,7 @@
 """Purpose: Rank the candidate targets for tonight by the gain from one hour.
 
 Description: `rank_tonight` is the work behind
-`ObservationPlanning.get_advisory(kind="tonight", at=...)`
+`ObservationPlanning.get_tonight_advice(at=...)`
 (`QUALITY_METRICS_PLAN.md` Section 4.2, use cases UC6 and UC12). For each
 library target that is above the horizon at the planning time, it asks: if the
 user spent the next clock hour on this target, by how much would the noise of

@@ -25,7 +25,7 @@ from typing import Any
 import astropy.units as u
 from astropy.coordinates import SkyCoord
 
-from astrometricslib import InvalidArgumentError, Target, parse_coordinate_string
+from astrometricslib import InvalidArgumentError, Target
 from wayfindinglib.models.equipment_and_site.equipment import EquipmentConfiguration
 from wayfindinglib.models.planning.framing import SkyCorner
 from wayfindinglib.models.planning.mosaic import MosaicPanel, MosaicPlan
@@ -134,8 +134,8 @@ def _grid_offset_to_sky_position(
 
 def calculate_panels(
     config: Any,
-    center_ra: str,
-    center_dec: str,
+    ra_deg: float,
+    dec_deg: float,
     rows: int,
     cols: int,
     overlap_percent: float,
@@ -155,10 +155,10 @@ def calculate_panels(
     ----------
     config : `AppConfiguration`
         Supplies the field of view when `equipment` is not given.
-    center_ra : `str`
-        Right ascension of the grid center, as text (hours) or degrees.
-    center_dec : `str`
-        Declination of the grid center, as text or degrees.
+    ra_deg : `float`
+        Right ascension of the grid center, in degrees.
+    dec_deg : `float`
+        Declination of the grid center, in degrees, from -90 to 90.
     rows : `int`
         Number of panel rows.
     cols : `int`
@@ -179,8 +179,12 @@ def calculate_panels(
     Raises
     ------
     InvalidArgumentError
-        If the grid size, overlap or rotation is out of range.
+        If the center, grid size, overlap or rotation is out of range.
     """
+    if not (math.isfinite(ra_deg) and math.isfinite(dec_deg)):
+        raise InvalidArgumentError("ra_deg and dec_deg must be finite numbers of degrees.")
+    if not -90.0 <= dec_deg <= 90.0:
+        raise InvalidArgumentError(f"dec_deg must be from -90 to 90 degrees, not {dec_deg}.")
     if not math.isfinite(rotation_deg):
         raise InvalidArgumentError("rotation_deg must be a finite number of degrees.")
     if rows < 1 or cols < 1:
@@ -197,8 +201,8 @@ def calculate_panels(
     ra_offsets = [(column - (cols - 1) / 2.0) * step_width_deg for column in range(cols)]
     dec_offsets = [(row - (rows - 1) / 2.0) * step_height_deg for row in range(rows)]
 
-    center_ra_deg = parse_coordinate_string(center_ra, is_ra=True)
-    center_dec_deg = parse_coordinate_string(center_dec, is_ra=False)
+    center_ra_deg = ra_deg
+    center_dec_deg = dec_deg
 
     rotation_sin = math.sin(math.radians(rotation_deg))
     rotation_cos = math.cos(math.radians(rotation_deg))

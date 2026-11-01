@@ -482,6 +482,14 @@ def log_events(fixture: Fixture) -> list[tuple[str, str]]:
 # -- Rule suggestions -------------------------------------------------------
 
 
+def test_one_target_can_be_given_as_a_single_id(fixture: Fixture) -> None:
+    """`target` takes one id or a list of ids."""
+    fixture.statements["M 81"] = [more_frames(40)]
+    change = fixture.planning.refresh_suggestions("M 81", register_job=False)
+    [package] = suggested(fixture)
+    assert change.added == [package.id]
+
+
 def test_a_rule_suggestion_becomes_a_suggested_package_with_a_keyed_row(fixture: Fixture) -> None:
     """A recommendation above the noise goal makes a suggested package."""
     fixture.statements["M 81"] = [more_frames(40)]

@@ -313,7 +313,7 @@ DECISIONS = {
         "Built 2026-10-05. Draws one chart of a target or a star; the registry sends it as a PNG image. "
         "Saves nothing.",
     ),
-    "planning_list_catalog_driver_metadata": ToolDecision("keep", "Lists the catalog drivers. Reads only."),
+    "planning_query_catalogs": ToolDecision("keep", "Lists the catalog drivers. Reads only."),
     "planning_get_visibility": ToolDecision(
         "keep",
         "Built 2026-10-03. Where objects are now or over a night: altitude, horizon clearance with "
@@ -351,7 +351,7 @@ DECISIONS = {
         "user decided an AI may not change configuration.",
         "change-data",
     ),
-    "planning_deep_catalog_status": ToolDecision(
+    "planning_get_deep_catalog_status": ToolDecision(
         "keep",
         "Built 2026-10-06. Reads the catalog file; the optional estimate queries the Gaia archive and "
         "saves nothing.",

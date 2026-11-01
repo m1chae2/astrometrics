@@ -36,16 +36,16 @@ tools:
   - mcp__wayfindinglib-core__observatory_remote_sync_frames
   - mcp__wayfindinglib-core__observatory_remote_sync_logs
   - mcp__wayfindinglib-core__planning_calculate_panels
-  - mcp__wayfindinglib-core__planning_deep_catalog_status
   - mcp__wayfindinglib-core__planning_get_advisory
   - mcp__wayfindinglib-core__planning_get_calibration_advice
+  - mcp__wayfindinglib-core__planning_get_deep_catalog_status
   - mcp__wayfindinglib-core__planning_get_depth_goal
   - mcp__wayfindinglib-core__planning_get_package_for_target
   - mcp__wayfindinglib-core__planning_get_plan
   - mcp__wayfindinglib-core__planning_get_tonight_advice
   - mcp__wayfindinglib-core__planning_get_visibility
-  - mcp__wayfindinglib-core__planning_list_catalog_driver_metadata
   - mcp__wayfindinglib-core__planning_lookup_coordinates
+  - mcp__wayfindinglib-core__planning_query_catalogs
   - mcp__wayfindinglib-core__planning_query_plans
   - mcp__wayfindinglib-core__planning_query_sources
   - mcp__astrometrics-backend__app_controls

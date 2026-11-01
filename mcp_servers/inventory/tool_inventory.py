@@ -347,7 +347,7 @@ CLASSIFICATION_RULES = (
         "Calculates from stored records and the sky. Saves nothing.",
     ),
     _rule(
-        r"^planning_deep_catalog_status$",
+        r"^planning_get_deep_catalog_status$",
         "compute",
         "high",
         "Reads the catalog file; the estimate queries the Gaia archive. Saves nothing.",
@@ -374,7 +374,7 @@ CLASSIFICATION_RULES = (
     _rule(r"^star_query$", "observe", "high", "Reads library stars. Row counts are capped."),
     _rule(
         r"^(target_query|target_imaged_field_centers|planning_query_sources|planning_lookup_coordinates"
-        r"|planning_query_plans)$",
+        r"|planning_query_plans|planning_query_catalogs)$",
         "observe",
         "high",
         "Reads targets or stars in short, capped records.",

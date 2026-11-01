@@ -319,7 +319,7 @@ def test_a_hand_built_queue_matches_the_automatic_structure(isolated_butler: Dis
     assert planning.get_plan(session.id).queue[0].id == entry.id
 
 
-def test_edit_queue_reorders_and_refuses_a_wrong_entry_set(isolated_butler: DiskButler) -> None:
+def test_reorder_queue_reorders_and_refuses_a_wrong_entry_set(isolated_butler: DiskButler) -> None:
     """Order must name exactly the entries; then the queue follows it."""
     planning = _planning(isolated_butler, _target("M 81"))
     session = planning.create_session(
@@ -396,10 +396,24 @@ def test_the_advice_calls_answer_and_refuse_the_wrong_arguments(isolated_butler:
         planning.get_tonight_advice(at="not a time")
 
 
+def test_a_mosaic_center_is_read_as_degrees_not_hours(isolated_butler: DiskButler) -> None:
+    """A right ascension of 10.684 degrees is not read as 10.684 hours.
+
+    The text form read a bare number as hours, so the Planetarium's
+    degrees came out as 160.26 degrees.
+    """
+    planning = _planning(isolated_butler)
+    (panel,) = planning.calculate_panels(10.684, 41.269, 1, 1, 0.0)
+    assert panel.ra_deg == pytest.approx(10.684, abs=1e-6)
+    assert panel.dec_deg == pytest.approx(41.269, abs=1e-6)
+    with pytest.raises(InvalidArgumentError, match="dec_deg"):
+        planning.calculate_panels(10.684, 91.0, 1, 1, 0.0)
+
+
 def test_create_mosaic_records_one_package_per_panel(isolated_butler: DiskButler) -> None:
     """Panels from calculate_panels become targets and recorded packages."""
     planning = _planning(isolated_butler, _target("NGC 7000", ra="20h 58m 47s", dec="+44° 19′ 48″"))
-    panels = planning.calculate_panels("20h 58m 47s", "+44 19 48", 1, 2, 10.0)
+    panels = planning.calculate_panels(314.695833, 44.33, 1, 2, 10.0)
     plan = planning.create_mosaic(
         "NGC 7000",
         [panel.model_dump() for panel in panels],
@@ -412,16 +426,16 @@ def test_create_mosaic_records_one_package_per_panel(isolated_butler: DiskButler
         planning.create_mosaic("NGC 7000", panels)
 
 
-def test_deep_catalog_status_refuses_estimate_settings_without_the_estimate(
+def test_get_deep_catalog_status_refuses_estimate_settings_without_the_estimate(
     isolated_butler: DiskButler,
 ) -> None:
     """The status is read from disk; estimate settings need the estimate."""
     planning = _planning(isolated_butler)
-    status = planning.deep_catalog_status()
+    status = planning.get_deep_catalog_status()
     assert status.installed is False
     assert status.estimate is None
     with pytest.raises(InvalidArgumentError, match="healpix_level"):
-        planning.deep_catalog_status(healpix_level=3)
+        planning.get_deep_catalog_status(healpix_level=3)
 
 
 def test_get_visibility_refuses_span_arguments_for_one_moment(isolated_butler: DiskButler) -> None:
@@ -604,7 +618,7 @@ def test_an_empty_session_defaults_to_the_site_and_active_equipment(
         planning.create_session(observing_night_id="2026-08-11")
 
 
-def test_edit_queue_removes_entries_and_refuses_unknown_ones(isolated_butler: DiskButler) -> None:
+def test_remove_from_queue_removes_entries_and_refuses_unknown_ones(isolated_butler: DiskButler) -> None:
     """Removal takes entries out; an unknown entry is not found."""
     planning = _planning(isolated_butler, _target("M 81"))
     session = planning.create_session(
@@ -863,7 +877,7 @@ def test_framing_is_stored_and_the_sequence_summary_follows_ekos_order(isolated_
         ],
         dither_config=DitherConfig(enabled=True, every_n_frames=4, pixels=5.0),
     )
-    panels = planning.calculate_panels("10:00:00", "+30:00:00", 1, 2, 10.0, rotation_deg=45.0)
+    panels = planning.calculate_panels(150.0, 30.0, 1, 2, 10.0, rotation_deg=45.0)
     planning.add_to_queue(session.id, requests=[{"package_id": package.id}])
     change = planning.set_framing(
         session.id,

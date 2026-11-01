@@ -267,10 +267,10 @@ def _run_estimate(planning: object, arguments: argparse.Namespace) -> int:
     """
     print("Counting a sample of chunks (this asks ESA for a few dozen small answers)...")
     try:
-        estimate = planning.deep_catalog_status(
+        estimate = planning.get_deep_catalog_status(
             include=["estimate"],
             healpix_level=arguments.healpix_level,
-            magnitude_limit=arguments.magnitude_limit,
+            magnitude_max=arguments.magnitude_limit,
             query_timeout_seconds=arguments.timeout_seconds,
             request_delay_seconds=arguments.request_delay_seconds,
             register_job=False,

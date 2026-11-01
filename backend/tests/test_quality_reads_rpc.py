@@ -149,6 +149,7 @@ def test_mosaic_preview_passes_the_rotation() -> None:
     arguments = wayfinder.planning.calculate_panels.call_args.kwargs
     assert arguments["rotation_deg"] == pytest.approx(35.0)
     assert arguments["rows"] == 2
+    assert (arguments["ra_deg"], arguments["dec_deg"]) == (10.0, 20.0)
     service.preview_mosaic(10.0, 20.0, {})
     assert wayfinder.planning.calculate_panels.call_args.kwargs["rotation_deg"] == pytest.approx(0.0)
 

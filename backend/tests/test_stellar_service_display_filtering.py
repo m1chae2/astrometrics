@@ -327,7 +327,7 @@ def test_online_catalog_sources_pass_the_limiting_magnitude_to_the_drivers() -> 
 def test_deep_catalog_status_adds_the_install_command() -> None:
     """The status the UI sees names the command that downloads the catalog."""
     service = _service()
-    service.wayfinder.planning.deep_catalog_status.return_value = DeepCatalogStatus(
+    service.wayfinder.planning.get_deep_catalog_status.return_value = DeepCatalogStatus(
         installed=False, complete=False, star_count=0, pixels_downloaded=0, size_megabytes=0.0
     )
 

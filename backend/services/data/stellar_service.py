@@ -843,10 +843,10 @@ class StellarService:
         dict
             ``installed``, ``complete``, ``star_count``, ``pixels_downloaded``,
             ``pixels_total``, ``healpix_level``, ``magnitude_limit`` and
-            ``size_megabytes`` (from ``planning.deep_catalog_status``),
+            ``size_megabytes`` (from ``planning.get_deep_catalog_status``),
             plus ``installCommand``: the command that downloads it.
         """
-        status = self.wayfinder.planning.deep_catalog_status(register_job=False).model_dump(
+        status = self.wayfinder.planning.get_deep_catalog_status(register_job=False).model_dump(
             mode="json", exclude={"estimate"}
         )
         status["installCommand"] = DEEP_CATALOG_INSTALL_COMMAND
@@ -863,7 +863,7 @@ class StellarService:
 
         REQ: PLN-3.1
         """
-        return self.wayfinder.planning.list_catalog_driver_metadata()
+        return self.wayfinder.planning.query_catalogs()
 
     def get_constellation_lines(self) -> list[dict]:
         """Return all bundled constellation stick-figure line segments.

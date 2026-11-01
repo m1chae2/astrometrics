@@ -115,7 +115,7 @@ def test_time_blocked_on_a_slot_is_recorded() -> None:
     waiter_source = (
         "import sys;"
         f"sys.path.insert(0, {repository_root!r});"
-        "from astrometricslib.drivers import siril_interface;"
+        "from astrometricslib._internal.drivers import siril_interface;"
         "from astrometricslib.foundation.run_tally import RunTally;"
         "tally = RunTally();"
         "scope = siril_interface.bind_lock_wait(tally);"

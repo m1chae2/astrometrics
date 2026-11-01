@@ -23,7 +23,7 @@ The pipeline finds sources in worker processes. Run the examples below as a save
 - **Status:** Partly measured. Synthetic fields only; the grid stops at 150 arcsec per hour and uses round sources.
 - **Data you need:** None for the synthetic grid. To repeat it on your own sky, you need 8 or more light frames of one field taken within one night at a steady cadence, a plate-solved stack of the same field, and `RA`, `DEC` and `DATE-OBS` in every frame header.
 - **Procedure:**
-  1. Build a synthetic field with one injected mover and run the full pipeline on it. The harness writes 8 frames, 256 by 256 pixels, 300 s apart, at 1.8 arcsec/pixel, with 25 fixed stars and Gaussian sky noise. It then calls the same pipeline class a normal run uses. Both the harness and the pipeline class are internal (internal functions, not part of the public API; may change). <!-- impl: astrometricslib.scripts.validate_asteroid_detection.make_mover --> <!-- impl: astrometricslib.scripts.validate_asteroid_detection.write_synthetic_field --> <!-- impl: astrometricslib.scripts.validate_asteroid_detection.run_trial --> <!-- impl: astrometricslib.pipelines.asteroid_detection.pipeline.AsteroidDetectionPipeline -->
+  1. Build a synthetic field with one injected mover and run the full pipeline on it. The harness writes 8 frames, 256 by 256 pixels, 300 s apart, at 1.8 arcsec/pixel, with 25 fixed stars and Gaussian sky noise. It then calls the same pipeline class a normal run uses. Both the harness and the pipeline class are internal (internal functions, not part of the public API; may change). The settings are a plain dictionary of the `[Processing.MovingObject]` keys, the same dictionary `Astrometrics().processing.process_target(..., asteroids={"moving_object_config": {...}})` takes; the internal helper `moving_object_config_from_options` checks it and refuses a key that names no setting. <!-- impl: astrometricslib.pipelines.asteroid_detection.runner.moving_object_config_from_options --> <!-- impl: astrometricslib.scripts.validate_asteroid_detection.make_mover --> <!-- impl: astrometricslib.scripts.validate_asteroid_detection.write_synthetic_field --> <!-- impl: astrometricslib.scripts.validate_asteroid_detection.run_trial --> <!-- impl: astrometricslib.pipelines.asteroid_detection.pipeline.AsteroidDetectionPipeline -->
   2. Count the mover as recovered when a confirmed track lies within 3 pixels of the injected position in at least 3 frames. <!-- impl: astrometricslib.scripts.validate_asteroid_detection.candidate_follows_mover --> <!-- impl: astrometricslib.scripts.validate_asteroid_detection.MATCH_TOLERANCE_PX -->
   3. Repeat for 12 fields per cell of a grid of peak brightness (3, 5, 8, 12, 20σ) against rate (5, 20, 60, 150 arcsec per hour). <!-- impl: astrometricslib.scripts.validate_asteroid_detection.recovery_grid --> <!-- impl: astrometricslib.scripts.validate_asteroid_detection.format_recovery -->
   4. The confirmed tracks are sent to SkyBoT (the online list of known solar-system bodies). The script does not stub that query. Offline, the queries fail and the track stays at `rate_linearity_confirmed`, which still counts as confirmed. To run offline on purpose, give the cross-matcher a client that knows no bodies, as below. Save the example as a script and run it: the pipeline finds sources in worker processes, so the calls must sit under `if __name__ == "__main__":`. <!-- impl: astrometricslib.pipelines.asteroid_detection.ephemeris.EphemerisCrossMatcher -->
@@ -33,8 +33,8 @@ from unittest import mock
 
 import numpy as np
 
-from astrometricslib.models.moving_object_config import MovingObjectConfig  # internal
 from astrometricslib.pipelines.asteroid_detection import pipeline as pipeline_module  # internal
+from astrometricslib.pipelines.asteroid_detection.runner import moving_object_config_from_options  # internal
 from astrometricslib.scripts import validate_asteroid_detection as harness  # internal
 
 
@@ -62,7 +62,7 @@ if __name__ == "__main__":
         print(harness.format_recovery(grid, snrs, rates))
 
         # One cell with a setting changed: 12 fields, 8σ, 60 arcsec/h.
-        config = MovingObjectConfig(detection_threshold_sigma=4.0)
+        config = moving_object_config_from_options({"detection_threshold_sigma": 4.0})
         generator = np.random.default_rng(0)
         hits = sum(
             harness.run_trial(
@@ -250,11 +250,13 @@ for gate in summary.gates:
   2. Collect `astrometric_error_arcsec` from every detection of every returned candidate, one value per frame.
 
 ```python
-from astrometricslib.models.moving_object_config import MovingObjectConfig  # internal
 from astrometricslib.pipelines.asteroid_detection.pipeline import AsteroidDetectionPipeline  # internal
+from astrometricslib.pipelines.asteroid_detection.runner import moving_object_config_from_options  # internal
 
 frames = [("/data/frame_001.fits", 1700000000.0), ("/data/frame_002.fits", 1700000300.0)]
-candidates = AsteroidDetectionPipeline(MovingObjectConfig()).process("my-target", "/data/stack.fits", frames)
+candidates = AsteroidDetectionPipeline(moving_object_config_from_options({})).process(
+    "my-target", "/data/stack.fits", frames
+)
 per_frame = {}
 for candidate in candidates:
     for detection in candidate.frame_detections:
@@ -288,12 +290,12 @@ print(min(per_frame.values()), max(per_frame.values()))
 ```python
 import time
 
-from astrometricslib.models.moving_object_config import MovingObjectConfig  # internal
 from astrometricslib.pipelines.asteroid_detection.detection import MovingObjectDetector  # internal
+from astrometricslib.pipelines.asteroid_detection.runner import moving_object_config_from_options  # internal
 
 detections = [d for candidate in candidates for d in candidate.frame_detections]
 start = time.perf_counter()
-MovingObjectDetector(MovingObjectConfig()).detect_candidates("my-target", detections)
+MovingObjectDetector(moving_object_config_from_options({})).detect_candidates("my-target", detections)
 print(f"{len(detections)} detections chained in {time.perf_counter() - start:.1f} s")
 ```
 

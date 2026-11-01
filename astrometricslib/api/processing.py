@@ -1658,7 +1658,10 @@ class ProcessingPipelines:
             cap on how many stars to process).
         asteroids : `dict`, optional
             Options for the asteroid search: ``moving_object_config`` (a
-            `MovingObjectConfig`).
+            dictionary of settings, such as
+            ``{"detection_threshold_sigma": 4.0}``; a key left out keeps its
+            default value, and a key that names no setting raises
+            `InvalidArgumentError`).
         camera_id : `str`, optional
             Only frames from this camera are processed (the full name, or
             part of it). Needed for several targets. For one target, it
@@ -1748,6 +1751,9 @@ class ProcessingPipelines:
                     f"Unknown {stage} option(s): {', '.join(unknown)}. "
                     f"Choose from: {', '.join(sorted(tasks.STAGE_OPTIONS[stage]))}."
                 )
+        from astrometricslib.pipelines.asteroid_detection.runner import moving_object_config_from_options
+
+        moving_object_config_from_options((asteroids or {}).get("moving_object_config"))
         resolved = self._resolve(target)
         frame_selection = None
         if "photometry" in chosen_stages or "spectroscopy" in chosen_stages:

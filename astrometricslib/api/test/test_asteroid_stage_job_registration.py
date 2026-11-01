@@ -164,3 +164,55 @@ def test_the_api_supplies_the_time_so_the_analysis_run_stores_quality_rows(
     assert rows
     assert all(row.measured_at.tzinfo is not None for row in rows)
     assert all(row.job_id for row in rows)
+
+
+def test_a_dictionary_of_settings_reaches_the_pipeline(
+    isolated_job_logging: tuple[str, AppConfiguration], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A settings dictionary given to `process_target` reaches the pipeline."""
+    _, config = isolated_job_logging
+    seen: list[float] = []
+
+    def remember_settings(self: AsteroidDetectionPipeline, *args: object, **kwargs: object) -> list:
+        """Record the threshold the pipeline was built with.
+
+        Returns
+        -------
+        candidates : `list`
+            Always empty.
+        """
+        seen.append(self.config.detection_threshold_sigma)
+        return _fake_process_with_zero_candidates(self)
+
+    monkeypatch.setattr(AsteroidDetectionPipeline, "process", remember_settings)
+
+    _pipelines(config).process_target(
+        Target(id="AsteroidSettingsTarget"),
+        stages=["asteroids"],
+        asteroids={"moving_object_config": {"detection_threshold_sigma": 4.0}},
+    )
+
+    assert seen == [4.0]
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [{"detection_treshold_sigma": 4.0}, {"detection_threshold_sigma": "high"}, 4.0],
+    ids=["unknown key", "wrong kind of value", "not a dictionary"],
+)
+def test_bad_settings_are_refused_before_any_work(
+    isolated_job_logging: tuple[str, AppConfiguration], settings: object
+) -> None:
+    """A misspelled key, a bad value or a non-dictionary is refused."""
+    from astrometricslib.foundation.errors import InvalidArgumentError
+
+    logs_database_path, config = isolated_job_logging
+
+    with pytest.raises(InvalidArgumentError):
+        _pipelines(config).process_target(
+            Target(id="AsteroidRefusedTarget"),
+            stages=["asteroids"],
+            asteroids={"moving_object_config": settings},
+        )
+
+    assert _read_jobs(logs_database_path, "AsteroidRefusedTarget") == []

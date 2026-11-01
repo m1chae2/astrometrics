@@ -60,9 +60,7 @@ def capture_library(
     """
     key = ("library", telescope_name, camera_name)
     if key not in library_cache:
-        library_cache[key] = read_capture_frames(
-            context.astrometrics, telescope_name, camera_name, context.config
-        )
+        library_cache[key] = read_capture_frames(context.astrometrics, telescope_name, camera_name)
     return library_cache[key]
 
 
@@ -298,6 +296,7 @@ def capture_night_analysis(
         The analysis, or `None` if no equipment is active, or the night has
         neither frames from this equipment nor an Ekos record.
     """
+    from wayfindinglib.session_analysis.capture.limits import read_capture_limits
     from wayfindinglib.session_analysis.capture.pipeline import (
         CaptureAnalysisRequest,
         analyze_capture_session_request,
@@ -326,6 +325,7 @@ def capture_night_analysis(
         aborted_captures=aborted,
         has_ekos_record=has_record,
         sensor_pixel_count=camera.sensor_width_px * camera.sensor_height_px,
+        limits=read_capture_limits(context.astrometrics),
     )
     return analyze_capture_session_request(request)
 

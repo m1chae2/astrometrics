@@ -39,6 +39,7 @@ from wayfindinglib.models.session.observation_session import (
     QueueRequest,
     StartTimeMode,
 )
+from wayfindinglib.test.camera_profile_support import no_camera_profiles_processing
 
 
 class _FakeTargetCatalog:
@@ -72,6 +73,31 @@ class _FakeTargetCatalog:
             The target, or `None`.
         """
         return self._targets.get(target_id)
+
+    def resolve(self, target: str | Target) -> Target:
+        """Turn a target id into its `Target`, as the library does.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            A target id or a target.
+
+        Returns
+        -------
+        resolved : `Target`
+            The target.
+
+        Raises
+        ------
+        NotFoundError
+            If no target has the id.
+        """
+        if isinstance(target, Target):
+            return target
+        found = self.get(target, refresh=True)
+        if found is None:
+            raise NotFoundError(f"No target with id {target!r} in the library.")
+        return found
 
     def list(self) -> list[Target]:
         """Give every target.
@@ -153,7 +179,8 @@ class _FakeAstrometrics:
             calibration=SimpleNamespace(
                 query=lambda **_arguments: CalibrationQueryResult(
                     detail="counts", darks=[], biases=[], flats=[]
-                )
+                ),
+                camera_profile=no_camera_profiles_processing().calibration.camera_profile,
             ),
         )
 
@@ -787,12 +814,10 @@ def test_a_measured_camera_refuses_an_unmeasured_setting(
     isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A gain setting the profile never measured is refused."""
-    from wayfindinglib.analytics.result_quality import allowed_capture_values
-
-    monkeypatch.setattr(
-        allowed_capture_values, "resolve_camera_profile", lambda name, config=None: _measured_profile()
-    )
     planning = _planning(isolated_butler, _target("M 81"))
+    monkeypatch.setattr(
+        planning._astrometrics.processing.calibration, "camera_profile", lambda name: _measured_profile()
+    )
     session = _session(planning)
     package = _package(planning)
     good = {"frame_type": "LIGHT", "exposure_sec": 60.0, "count": 1, "gain_setting": 100, "offset": 10}

@@ -23,6 +23,7 @@ from wayfindinglib.models.session.capture_quality import (
 from wayfindinglib.session_analysis.capture.post_processing.recommend_for_capture import (
     recommend_for_capture as _recommend_for_capture,
 )
+from wayfindinglib.session_analysis.capture.test.conftest import CAPTURE_LIMITS
 from wayfindinglib.test.plain_wording_support import assert_plain_message_is_sound
 
 
@@ -123,6 +124,7 @@ def _performance(clipping: list[ExposureClipping] | None = None, **star: object)
         clipping=clipping or [],
         star_quality=StarQuality(**star),
         efficiency=CaptureEfficiency(light_exposure_seconds=100.0, span_seconds=200.0, duty_cycle=0.5),
+        limits=CAPTURE_LIMITS,
     )
 
 

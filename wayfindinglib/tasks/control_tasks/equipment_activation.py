@@ -19,7 +19,7 @@ frontend's `observatory:list_cameras` and
 import logging
 from typing import Any
 
-from astrometricslib import AppConfiguration, resolve_camera_profile
+from astrometricslib import AppConfiguration
 from astrometricslib.exceptions import ConfigurationError
 from wayfindinglib.data_access.equipment_catalog_reader import (
     ACTIVE_CAMERA_KEY,
@@ -172,13 +172,14 @@ def _noise_status(values: list[CameraNoiseValue]) -> NoiseEvidenceStatus:
     return NoiseEvidenceStatus.PARTLY_MEASURED if measured_count else NoiseEvidenceStatus.DESIGN_ESTIMATE
 
 
-def list_camera_noise(config: Any, camera_name: str) -> list[CameraNoiseSetting]:
+def list_camera_noise(astrometrics: Any, camera_name: str) -> list[CameraNoiseSetting]:
     """Return the gain and read noise recorded for a camera.
 
     Parameters
     ----------
-    config : `AppConfiguration`
-        The application configuration.
+    astrometrics : `Any`
+        The science library's high-level interface (``Astrometrics``); it
+        holds the camera profiles.
     camera_name : `str`
         The camera's name in the configuration.
 
@@ -190,7 +191,7 @@ def list_camera_noise(config: Any, camera_name: str) -> list[CameraNoiseSetting]
         has no profile or no entries ("not measured").
     """
     try:
-        profile = resolve_camera_profile(camera_name, config)
+        profile = astrometrics.processing.calibration.camera_profile(camera_name)
     except ConfigurationError:
         logger.warning("Camera profiles could not be read for '%s'", camera_name, exc_info=True)
         return []
@@ -215,13 +216,16 @@ def list_camera_noise(config: Any, camera_name: str) -> list[CameraNoiseSetting]
     return settings
 
 
-def list_camera_profiles(config: Any) -> list[dict[str, Any]]:
+def list_camera_profiles(config: Any, astrometrics: Any) -> list[dict[str, Any]]:
     """Return every configured camera's sensor profile and recorded noise.
 
     Parameters
     ----------
     config : `AppConfiguration`
         The application configuration.
+    astrometrics : `Any`
+        The science library's high-level interface (``Astrometrics``); it
+        holds the camera profiles.
 
     Returns
     -------
@@ -236,7 +240,7 @@ def list_camera_profiles(config: Any) -> list[dict[str, Any]]:
             **_camera_profile(camera),
             "sensorNoise": [
                 setting.model_dump(by_alias=True, mode="json")
-                for setting in list_camera_noise(config, camera.name)
+                for setting in list_camera_noise(astrometrics, camera.name)
             ],
         }
         for camera in list_cameras(config)

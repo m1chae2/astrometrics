@@ -116,12 +116,6 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
-from astrometricslib import (
-    aperture_identity_from_number,
-    fold_exposure_lengths,
-    load_odd_even_aperture_record,
-    resolve_camera_profile,
-)
 from astrometricslib.reports import (
     EARLIER_NIGHTS_VARIANT,
     CaptureSetting,
@@ -156,6 +150,7 @@ from wayfindinglib.analytics.result_quality.noise_growth import (
     aperture_noise_relative_error,
     choose_fixed_pattern_noise,
     fit_fixed_pattern_noise,
+    fold_exposure_lengths,
     forecast_group_noise,
     forecast_noise_with_weights,
     forecast_stack_noise,
@@ -678,6 +673,43 @@ def _newest_by_subject(rows: Iterable[QualityMeasurement]) -> dict[tuple[str, st
     for (subject_id, metric, _channel), row in newest.items():
         grouped[subject_id, metric].append(row)
     return grouped
+
+
+_IDENTITY_HASH_BITS = 48
+"""The low bits of a stored aperture-set number that hold the set's digest."""
+
+_IDENTITY_HASH_DIGITS = 12
+"""The hexadecimal digits of the digest in the identity text."""
+
+
+def aperture_identity_from_number(number: float) -> str:
+    """Turn a stored aperture-set number back into the identity text.
+
+    This copies the science library's rule, which packs the version and a
+    digest of the aperture set into one stored number. Two stored rows were
+    measured in the same apertures exactly when this gives the same text for
+    both. A test checks it against the library's own packing.
+
+    Parameters
+    ----------
+    number : `float`
+        The value of a ``stacking.aperture_set_number`` row.
+
+    Returns
+    -------
+    identity : `str`
+        For example ``"v3-1a2b3c4d5e6f"``.
+
+    Raises
+    ------
+    ValueError
+        If the number is not a whole number from 0 up to 2**53.
+    """
+    if not math.isfinite(number) or number != int(number) or not 0 <= number < 2**53:
+        raise ValueError(f"not a stored aperture-set number: {number!r}")
+    whole = int(number)
+    version, digest = whole >> _IDENTITY_HASH_BITS, whole & ((1 << _IDENTITY_HASH_BITS) - 1)
+    return f"v{version}-{digest:0{_IDENTITY_HASH_DIGITS}x}"
 
 
 def _usable_value(rows: Sequence[QualityMeasurement], metric: str) -> tuple[float | None, str | None]:
@@ -1878,11 +1910,46 @@ def history_fixed_pattern_noise(
     )
 
 
+def aperture_record_reader(astrometrics: Any) -> Callable[[str], dict[str, Any] | None]:
+    """Make the reader of per-aperture noise record files.
+
+    Parameters
+    ----------
+    astrometrics : `Any`
+        The science library's high-level interface (``Astrometrics``).
+
+    Returns
+    -------
+    reader : `Callable` [[`str`], `dict` or `None`]
+        Reads a record file (`QualityRecords.get_aperture_record`) and gives
+        its content as a dictionary. It gives `None` for a file that is
+        missing, unreadable or of another version.
+    """
+
+    def read(path: str) -> dict[str, Any] | None:
+        """Read one record file.
+
+        Parameters
+        ----------
+        path : `str`
+            The record file.
+
+        Returns
+        -------
+        record : `dict` or `None`
+            The file's content, or `None`.
+        """
+        record = astrometrics.quality.get_aperture_record(path)
+        return None if record is None else record.model_dump()
+
+    return read
+
+
 def fixed_pattern_account_for_run(
     record: StackRunRecord | None,
     fixed_pattern: StackFixedPatternNoise | None,
     *,
-    load_record: Callable[[str], dict | None] = load_odd_even_aperture_record,
+    load_record: Callable[[str], Mapping[str, Any] | None],
 ) -> FixedPatternAccount | None:
     """Say where a run's fixed-pattern noise is and what explains it.
 
@@ -1899,8 +1966,9 @@ def fixed_pattern_account_for_run(
         The run whose fixed-pattern noise was measured.
     fixed_pattern : `StackFixedPatternNoise` or `None`
         Its fixed-pattern noise (`fixed_pattern_noise_for_runs`).
-    load_record : `Callable`, optional
-        Reads a per-aperture record file; the library's loader by default.
+    load_record : `Callable`
+        Reads a per-aperture record file and gives it as a mapping, or `None`
+        (see `aperture_record_reader`).
 
     Returns
     -------
@@ -2067,7 +2135,7 @@ def noise_model_error_for_setting(
     return errors.get(noise_model_setting_key(setting), NoiseModelError())
 
 
-def camera_gain_for_setting(config: Any, setting: CaptureSetting) -> float | None:
+def camera_gain_for_setting(astrometrics: Any, setting: CaptureSetting) -> float | None:
     """Look up a camera's gain, in electrons per ADU, at a capture setting.
 
     The camera profile holds it for each gain setting, offset and binning. The
@@ -2077,8 +2145,9 @@ def camera_gain_for_setting(config: Any, setting: CaptureSetting) -> float | Non
 
     Parameters
     ----------
-    config : `Any`
-        The application configuration (the camera profiles live in it).
+    astrometrics : `Any`
+        The science library's high-level interface (``Astrometrics``); it
+        holds the camera profiles.
     setting : `CaptureSetting`
         The capture setting of the planned frames.
 
@@ -2088,7 +2157,7 @@ def camera_gain_for_setting(config: Any, setting: CaptureSetting) -> float | Non
         Electrons per ADU, or ``None`` when the camera has no profile or no
         entry for the setting.
     """
-    profile = resolve_camera_profile(setting.camera, config)
+    profile = astrometrics.processing.calibration.camera_profile(setting.camera)
     if profile.is_generic_fallback:
         return None
     entry = profile.sensor_noise_for(
@@ -3191,6 +3260,8 @@ __all__ = [
     "RunGroups",
     "SetupKey",
     "StackRunRecord",
+    "aperture_identity_from_number",
+    "aperture_record_reader",
     "attach_calibration_identities",
     "calibration_summary_from_record",
     "camera_gain_for_setting",

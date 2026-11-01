@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from astrometricslib import AppConfiguration
+from astrometricslib._internal.frames import frame_is_spectral
 from astrometricslib.reports import observing_night_id
 from wayfindinglib.analytics.capture_history import (
     BACKGROUND_METRIC,
@@ -112,6 +113,7 @@ def _library_frame(**overrides: Any) -> SimpleNamespace:
         "binning": 1,
     }
     fields.update(overrides)
+    fields["is_spectral"] = frame_is_spectral({"filter": fields["filter"]})
     return SimpleNamespace(**fields)
 
 
@@ -125,7 +127,9 @@ _STORED = {
 
 
 def _astrometrics(
-    frames: list[SimpleNamespace], stored: dict[str, float | None] | None = None
+    frames: list[SimpleNamespace],
+    stored: dict[str, float | None] | None = None,
+    camera_config: Any = None,
 ) -> FakeAstrometrics:
     """Build a science-library stand-in holding one target.
 
@@ -137,13 +141,15 @@ def _astrometrics(
         Offers ``targets.list()`` and ``quality.query``.
     """
     values = _STORED if stored is None else stored
-    return FakeAstrometrics(frames, {frame.path: values for frame in frames})
+    return FakeAstrometrics(frames, {frame.path: values for frame in frames}, camera_config=camera_config)
 
 
 def test_star_width_and_roundness_come_from_the_stored_measurements(camera_profile_config: Any) -> None:
     """Verify width is the stored value and roundness is 1 / elongation."""
     (frame,) = collect_capture_frames(
-        _astrometrics([_library_frame()]), "Apertura 75Q", "ZWO ASI 533MM Pro", camera_profile_config
+        _astrometrics([_library_frame()], camera_config=camera_profile_config),
+        "Apertura 75Q",
+        "ZWO ASI 533MM Pro",
     )
 
     assert frame.star_width_arcsec == pytest.approx(5.0)
@@ -160,7 +166,9 @@ def test_a_failed_fit_is_not_a_measurement(camera_profile_config: Any) -> None:
     stored = {STAR_WIDTH_METRIC: 0.0, STAR_ELONGATION_METRIC: None, SATURATED_FRACTION_METRIC: None}
 
     (frame,) = collect_capture_frames(
-        _astrometrics([_library_frame()], stored), "Apertura 75Q", "ZWO ASI 533MM Pro", camera_profile_config
+        _astrometrics([_library_frame()], stored, camera_config=camera_profile_config),
+        "Apertura 75Q",
+        "ZWO ASI 533MM Pro",
     )
 
     assert frame.star_width_arcsec is None
@@ -172,7 +180,9 @@ def test_a_failed_fit_is_not_a_measurement(camera_profile_config: Any) -> None:
 def test_a_frame_with_no_stored_rows_has_missing_measurements(camera_profile_config: Any) -> None:
     """Verify an unmeasured frame is collected with measurements missing."""
     (frame,) = collect_capture_frames(
-        _astrometrics([_library_frame()], {}), "Apertura 75Q", "ZWO ASI 533MM Pro", camera_profile_config
+        _astrometrics([_library_frame()], {}, camera_config=camera_profile_config),
+        "Apertura 75Q",
+        "ZWO ASI 533MM Pro",
     )
 
     assert frame.star_width_arcsec is None
@@ -182,14 +192,12 @@ def test_a_frame_with_no_stored_rows_has_missing_measurements(camera_profile_con
 
 def test_a_row_of_another_definition_version_is_not_used(camera_profile_config: Any) -> None:
     """Verify a pinned metric ignores rows of another definition."""
-    astrometrics = _astrometrics([_library_frame()])
+    astrometrics = _astrometrics([_library_frame()], camera_config=camera_profile_config)
     for row in astrometrics.rows:
         if row.metric == STAR_WIDTH_METRIC:
             row.definition_version = 2
 
-    (frame,) = collect_capture_frames(
-        astrometrics, "Apertura 75Q", "ZWO ASI 533MM Pro", camera_profile_config
-    )
+    (frame,) = collect_capture_frames(astrometrics, "Apertura 75Q", "ZWO ASI 533MM Pro")
 
     assert frame.star_width_arcsec is None
     assert frame.saturated_pixel_fraction == pytest.approx(0.0)
@@ -206,13 +214,11 @@ def test_the_pinned_versions_match_the_registered_metrics() -> None:
 
 def test_channel_rows_are_not_used_for_the_whole_frame(camera_profile_config: Any) -> None:
     """Verify a per-color-plane row never stands in for the whole frame."""
-    astrometrics = _astrometrics([_library_frame()])
+    astrometrics = _astrometrics([_library_frame()], camera_config=camera_profile_config)
     for row in astrometrics.rows:
         row.subject.channel = "R"
 
-    (frame,) = collect_capture_frames(
-        astrometrics, "Apertura 75Q", "ZWO ASI 533MM Pro", camera_profile_config
-    )
+    (frame,) = collect_capture_frames(astrometrics, "Apertura 75Q", "ZWO ASI 533MM Pro")
 
     assert frame.measurement_rows == {}
 
@@ -226,7 +232,7 @@ def test_frames_of_other_equipment_are_left_out(camera_profile_config: Any) -> N
     ]
 
     result = collect_capture_frames(
-        _astrometrics(frames), "Apertura 75Q", "ZWO ASI 533MM Pro", camera_profile_config
+        _astrometrics(frames, camera_config=camera_profile_config), "Apertura 75Q", "ZWO ASI 533MM Pro"
     )
 
     assert len(result) == 1
@@ -235,10 +241,9 @@ def test_frames_of_other_equipment_are_left_out(camera_profile_config: Any) -> N
 def test_a_cameras_other_spellings_are_accepted(camera_profile_config: Any) -> None:
     """Verify the FITS header's spelling of the camera still matches."""
     result = collect_capture_frames(
-        _astrometrics([_library_frame(camera="ZWO CCD ASI533MM Pro")]),
+        _astrometrics([_library_frame(camera="ZWO CCD ASI533MM Pro")], camera_config=camera_profile_config),
         "Apertura 75Q",
         "ZWO ASI 533MM Pro",
-        camera_profile_config,
     )
 
     assert len(result) == 1
@@ -253,7 +258,7 @@ def test_calibration_frames_and_frames_with_no_time_are_left_out(camera_profile_
     ]
 
     result = collect_capture_frames(
-        _astrometrics(frames), "Apertura 75Q", "ZWO ASI 533MM Pro", camera_profile_config
+        _astrometrics(frames, camera_config=camera_profile_config), "Apertura 75Q", "ZWO ASI 533MM Pro"
     )
 
     assert len(result) == 1
@@ -267,7 +272,7 @@ def test_post_processing_output_recorded_as_a_light_frame_is_left_out(camera_pro
     ]
 
     result = collect_capture_frames(
-        _astrometrics(frames), "Apertura 75Q", "ZWO ASI 533MM Pro", camera_profile_config
+        _astrometrics(frames, camera_config=camera_profile_config), "Apertura 75Q", "ZWO ASI 533MM Pro"
     )
 
     assert [frame.exposure_seconds for frame in result] == [60.0]
@@ -281,7 +286,7 @@ def test_frames_come_back_oldest_first(camera_profile_config: Any) -> None:
     ]
 
     result = collect_capture_frames(
-        _astrometrics(frames), "Apertura 75Q", "ZWO ASI 533MM Pro", camera_profile_config
+        _astrometrics(frames, camera_config=camera_profile_config), "Apertura 75Q", "ZWO ASI 533MM Pro"
     )
 
     assert [frame.timestamp for frame in result] == [_NIGHT_ONE, _NIGHT_ONE + 100.0]

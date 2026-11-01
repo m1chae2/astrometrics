@@ -404,7 +404,7 @@ class GuidingControl(ControlChild):
         contexts, runs = night_analysis.recorded_sessions(context)
         envelope = night_analysis.performance_envelope(context, None, None, contexts, runs, {})
         ceiling = envelope_assembly.sensor_limits_for_camera(
-            guide_camera.name, context.config
+            context.astrometrics, guide_camera.name
         ).clip_ceiling_adu
         frames = guide_exposure_ladder_tasks.capture_guide_ladder(
             lambda seconds, camera_gain: hardware_operations.guide_expose(context, seconds, camera_gain),

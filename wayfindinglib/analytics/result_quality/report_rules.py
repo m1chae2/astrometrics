@@ -40,7 +40,6 @@ from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
-from astrometricslib import DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
 from astrometricslib.reports import CaptureSetting, LimitTier, MeasurementReference, QualityLimit
 from wayfindinglib.analytics.capture_history import normalize_name
 from wayfindinglib.analytics.result_quality.capture_overheads import (
@@ -1071,12 +1070,16 @@ class CalibrationFinding:
     nearest_row_text : `str`
         The nearest row the library holds and what differs, or a sentence
         saying the library has none for the camera.
+    dark_temperature_tolerance_c : `float` or `None`
+        For a dark, how far its temperature may differ from the light
+        frames' and still match, in degrees Celsius. `None` for a flat.
     """
 
     frame_type: str
     group: LightFrameGroup
     setting_text: str
     nearest_row_text: str
+    dark_temperature_tolerance_c: float | None = None
 
 
 def _row_text(kind: str, row: Mapping[str, object]) -> str:
@@ -1196,12 +1199,13 @@ def find_calibration_gaps(
     groups: Sequence[LightFrameGroup],
     dark_rows: Sequence[Mapping[str, object]],
     flat_rows: Sequence[Mapping[str, object]],
+    dark_temperature_tolerance_c: float,
 ) -> list[CalibrationFinding]:
     """Find the darks and flats the library lacks for the light frames.
 
     A dark matches when its camera, gain, offset, binning and exposure agree
     (the exposure to within `EXPOSURE_MATCH_SECONDS`) and its sensor
-    temperature is within `DEFAULT_DARK_TEMPERATURE_TOLERANCE_C` of the light
+    temperature is within `dark_temperature_tolerance_c` of the light
     frames' when both are known. A flat matches when its camera, filter, gain,
     offset and binning agree. Biases are not asked for: darks of the same
     exposure carry the bias.
@@ -1213,6 +1217,10 @@ def find_calibration_gaps(
     dark_rows, flat_rows : `Sequence` [`Mapping`]
         The rows of ``CalibrationCatalog.query(detail="counts")`` for darks
         and flats.
+    dark_temperature_tolerance_c : `float`
+        How far a dark's temperature may differ from the light frames', in
+        degrees Celsius. It is the tolerance the same query reports
+        (``dark_temperature_tolerance_c``).
 
     Returns
     -------
@@ -1238,7 +1246,7 @@ def find_calibration_gaps(
             if (
                 group.sensor_temperature_c is not None
                 and temperature is not None
-                and abs(temperature - group.sensor_temperature_c) > DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
+                and abs(temperature - group.sensor_temperature_c) > dark_temperature_tolerance_c
             ):
                 continue
             matching_darks.append(row)
@@ -1248,7 +1256,14 @@ def find_calibration_gaps(
                     CALIBRATION_DARK_FRAME_TYPE,
                     group,
                     _setting_words(setting, group.sensor_temperature_c, True),
-                    _nearest_text("dark", setting, group.sensor_temperature_c, camera_darks),
+                    _nearest_text(
+                        "dark",
+                        setting,
+                        group.sensor_temperature_c,
+                        camera_darks,
+                        dark_temperature_tolerance_c,
+                    ),
+                    dark_temperature_tolerance_c,
                 )
             )
         # Flats
@@ -1268,7 +1283,7 @@ def find_calibration_gaps(
                     CALIBRATION_FLAT_FRAME_TYPE,
                     group,
                     _setting_words(setting, None, False),
-                    _nearest_text("flat", setting, None, camera_flats),
+                    _nearest_text("flat", setting, None, camera_flats, dark_temperature_tolerance_c),
                 )
             )
     return findings
@@ -1279,6 +1294,7 @@ def _nearest_text(
     setting: CaptureSetting,
     temperature_c: float | None,
     camera_rows: Sequence[Mapping[str, object]],
+    dark_temperature_tolerance_c: float,
 ) -> str:
     """Name the library row closest to what is needed, or say there is none.
 
@@ -1292,6 +1308,8 @@ def _nearest_text(
         The light frames' sensor temperature.
     camera_rows : `Sequence` [`Mapping`]
         The library rows of the same camera that hold frames.
+    dark_temperature_tolerance_c : `float`
+        How far a dark's temperature may differ and still match.
 
     Returns
     -------
@@ -1326,7 +1344,7 @@ def _nearest_text(
             if (
                 temperature_c is not None
                 and temperature is not None
-                and abs(temperature - temperature_c) > DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
+                and abs(temperature - temperature_c) > dark_temperature_tolerance_c
             ):
                 found.append("temperature")
         elif (
@@ -1366,7 +1384,7 @@ def calibration_gap_statement(finding: CalibrationFinding) -> TargetStatement:
             f"{finding.group.frame_count} light frames need them. {finding.nearest_row_text} "
             f"The match uses the camera, gain, offset, binning and "
             + (
-                f"exposure and sensor temperature (within {DEFAULT_DARK_TEMPERATURE_TOLERANCE_C:g} C)."
+                f"exposure and sensor temperature (within {finding.dark_temperature_tolerance_c:g} C)."
                 if finding.frame_type == CALIBRATION_DARK_FRAME_TYPE
                 else "filter."
             )

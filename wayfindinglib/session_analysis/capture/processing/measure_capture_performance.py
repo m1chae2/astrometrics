@@ -22,7 +22,6 @@ import statistics
 from collections import defaultdict
 from collections.abc import Sequence
 
-from astrometricslib import SATURATED_BLOB_MINIMUM_PIXELS, SATURATED_FRAME_FRACTION
 from astrometricslib.reports import MeasurementReference
 from wayfindinglib.analytics.capture_history import (
     SATURATED_FRACTION_METRIC,
@@ -36,6 +35,7 @@ from wayfindinglib.models.equipment_and_site.performance_envelope import Perform
 from wayfindinglib.models.session.capture_frame import CaptureFrame
 from wayfindinglib.models.session.capture_quality import (
     CaptureEfficiency,
+    CaptureLimits,
     CapturePerformance,
     ExposureClipping,
     StarQuality,
@@ -124,7 +124,7 @@ def _most_extreme_first(
 
 
 def measure_clipping(
-    frames: Sequence[CaptureFrame], sensor_pixel_count: int | None
+    frames: Sequence[CaptureFrame], sensor_pixel_count: int | None, limits: CaptureLimits
 ) -> list[ExposureClipping]:
     """Find, for each target and exposure length, whether a star clips.
 
@@ -135,6 +135,8 @@ def measure_clipping(
     sensor_pixel_count : `int` or `None`
         Pixels on the camera's sensor with no binning. Without it a frame's
         saturated-pixel fraction cannot be turned into a count.
+    limits : `CaptureLimits`
+        The library's clipping limits.
 
     Returns
     -------
@@ -160,7 +162,7 @@ def measure_clipping(
             if sensor_pixel_count
             else []
         )
-        clipped_frames = sum(1 for count in counts if count >= SATURATED_BLOB_MINIMUM_PIXELS)
+        clipped_frames = sum(1 for count in counts if count >= limits.saturated_star_minimum_pixels)
         if not counts:
             continue
         clipped_fraction = clipped_frames / len(counts) if counts else 0.0
@@ -172,7 +174,7 @@ def measure_clipping(
                 frames=len(counts),
                 clipped_frames=clipped_frames,
                 clipped_fraction=clipped_fraction,
-                is_clipped=clipped_fraction >= SATURATED_FRAME_FRACTION,
+                is_clipped=clipped_fraction >= limits.clipped_frame_fraction,
                 evidence=_references(measured, SATURATED_FRACTION_METRIC),
             )
         )
@@ -262,8 +264,22 @@ def measure_capture_performance(
     sensor_pixel_count: int | None,
     envelope: PerformanceEnvelope | None,
     limits_equipment_match: str,
+    limits: CaptureLimits,
 ) -> CapturePerformance:
     """Measure what the night's frames show.
+
+    Parameters
+    ----------
+    frames : `Sequence` [`CaptureFrame`]
+        The night's light frames.
+    sensor_pixel_count : `int` or `None`
+        Pixels on the camera's sensor with no binning.
+    envelope : `PerformanceEnvelope` or `None`
+        The equipment-derived limits.
+    limits_equipment_match : `str`
+        How well the night's equipment matches the one the limits are for.
+    limits : `CaptureLimits`
+        The library's clipping limits.
 
     Returns
     -------
@@ -271,7 +287,8 @@ def measure_capture_performance(
         Clipping, star quality and efficiency.
     """
     return CapturePerformance(
-        clipping=measure_clipping(frames, sensor_pixel_count),
+        clipping=measure_clipping(frames, sensor_pixel_count, limits),
         star_quality=measure_star_quality(frames, envelope, limits_equipment_match),
         efficiency=measure_efficiency(frames),
+        limits=limits,
     )

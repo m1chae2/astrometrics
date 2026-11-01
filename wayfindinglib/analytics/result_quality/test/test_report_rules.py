@@ -314,6 +314,9 @@ def test_fixed_pattern_limited_statement_says_the_fixed_pattern_noise_in_place_o
 
 # -- calibration gap ---------------------------------------------------------
 
+DARK_TEMPERATURE_TOLERANCE_C = 3.0
+"""The dark temperature tolerance the library's calibration query reports."""
+
 DARK_OK = {
     "camera": "ASI533MM Pro",
     "iso": "100",
@@ -346,7 +349,7 @@ def _group(temperature: float | None = -10.0) -> rr.LightFrameGroup:
 
 def test_calibration_gap_is_quiet_when_darks_and_flats_match() -> None:
     """A dark and a flat that match in every setting leave no gap."""
-    assert rr.find_calibration_gaps([_group()], [DARK_OK], [FLAT_OK]) == []
+    assert rr.find_calibration_gaps([_group()], [DARK_OK], [FLAT_OK], DARK_TEMPERATURE_TOLERANCE_C) == []
 
 
 @pytest.mark.parametrize(
@@ -361,7 +364,9 @@ def test_calibration_gap_is_quiet_when_darks_and_flats_match() -> None:
 )
 def test_calibration_gap_names_the_setting_that_differs(change: dict, differs: str) -> None:
     """A dark that differs in one setting does not match."""
-    findings = rr.find_calibration_gaps([_group()], [{**DARK_OK, **change}], [FLAT_OK])
+    findings = rr.find_calibration_gaps(
+        [_group()], [{**DARK_OK, **change}], [FLAT_OK], DARK_TEMPERATURE_TOLERANCE_C
+    )
     assert [finding.frame_type for finding in findings] == ["dark"]
     statement = rr.calibration_gap_statement(findings[0])
     assert statement.kind == StatementKind.RECOMMENDATION
@@ -377,15 +382,22 @@ def test_calibration_gap_names_the_setting_that_differs(change: dict, differs: s
 
 def test_calibration_gap_accepts_a_temperature_within_the_tolerance() -> None:
     """A dark 2 degrees from the lights still matches (the tolerance is 3)."""
-    assert rr.find_calibration_gaps([_group()], [{**DARK_OK, "temperature_c": -8.0}], [FLAT_OK]) == []
+    assert (
+        rr.find_calibration_gaps(
+            [_group()], [{**DARK_OK, "temperature_c": -8.0}], [FLAT_OK], DARK_TEMPERATURE_TOLERANCE_C
+        )
+        == []
+    )
 
 
 def test_calibration_gap_flat_needs_the_filter_and_says_when_a_camera_has_none() -> None:
     """A flat for another filter is a gap; a camera with no flats says so."""
-    findings = rr.find_calibration_gaps([_group()], [DARK_OK], [{**FLAT_OK, "filter": "Ha"}])
+    findings = rr.find_calibration_gaps(
+        [_group()], [DARK_OK], [{**FLAT_OK, "filter": "Ha"}], DARK_TEMPERATURE_TOLERANCE_C
+    )
     assert [finding.frame_type for finding in findings] == ["flat"]
     assert "differs in filter" in findings[0].nearest_row_text
-    none = rr.find_calibration_gaps([_group()], [DARK_OK], [])
+    none = rr.find_calibration_gaps([_group()], [DARK_OK], [], DARK_TEMPERATURE_TOLERANCE_C)
     assert "no flats for the camera ASI533MM Pro" in none[0].nearest_row_text
 
 
@@ -662,7 +674,9 @@ def test_every_statement_this_module_builds_has_a_sound_plain_message() -> None:
     tradeoff = rr.find_sharpness_tradeoff(_frames(20), widths, WeightingMode.EQUAL)
     assert tradeoff is not None
     statements.append(rr.sharpness_statement(tradeoff, SETTING, []))
-    for finding in rr.find_calibration_gaps([_group()], [{**DARK_OK, "binning": "2x2"}], [FLAT_OK]):
+    for finding in rr.find_calibration_gaps(
+        [_group()], [{**DARK_OK, "binning": "2x2"}], [FLAT_OK], DARK_TEMPERATURE_TOLERANCE_C
+    ):
         statements.append(rr.calibration_gap_statement(finding))
     result = TakeMoreResult(
         frames_needed=20,

@@ -8,7 +8,6 @@ pattern.
 """
 
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -28,6 +27,7 @@ from wayfindinglib.tasks.control_tasks.equipment_activation import (
     set_active_camera,
     set_active_telescope,
 )
+from wayfindinglib.test.camera_profile_support import library_with_camera_profiles
 
 
 @pytest.fixture
@@ -95,7 +95,7 @@ def test_list_camera_profiles_returns_configured_cameras_as_dicts(app_config: Ap
             "sensor_height_px": "4176",
         },
     })
-    profiles = list_camera_profiles(app_config)
+    profiles = list_camera_profiles(app_config, library_with_camera_profiles(app_config))
     assert len(profiles) == 1
     assert profiles[0]["name"] == "ASI2600MM"
 
@@ -318,7 +318,7 @@ def test_camera_noise_reports_the_measured_setting_with_its_status_word(
     shipped_config: AppConfiguration,
 ) -> None:
     """The shipped ASI533 entry is measured, with its numbers and source."""
-    (setting,) = list_camera_noise(shipped_config, "ZWO ASI533MM Pro")
+    (setting,) = list_camera_noise(library_with_camera_profiles(shipped_config), "ZWO ASI533MM Pro")
     assert (setting.gain_setting, setting.offset, setting.binning) == ("0", "10", "1x1")
     assert setting.status == "measured"
     assert setting.temperature_c == pytest.approx(-10.0)
@@ -350,10 +350,9 @@ def test_camera_noise_status_is_partly_measured_when_only_one_number_is(
     )
     base = resolve_camera_profile("ZWO ASI533MM Pro", shipped_config)
     profile = CameraProfile(**{**dict(base), "sensor_noise": (entry,)})
-    with patch(
-        "wayfindinglib.tasks.control_tasks.equipment_activation.resolve_camera_profile", return_value=profile
-    ):
-        (setting,) = list_camera_noise(shipped_config, "ZWO ASI533MM Pro")
+    library = library_with_camera_profiles(shipped_config)
+    library.processing.calibration.camera_profile = lambda name: profile
+    (setting,) = list_camera_noise(library, "ZWO ASI533MM Pro")
     assert setting.status == "partly_measured"
     assert setting.gain.status == "measured"
     assert setting.read_noise.status == "design_estimate"
@@ -361,13 +360,16 @@ def test_camera_noise_status_is_partly_measured_when_only_one_number_is(
 
 def test_camera_without_a_profile_or_entries_reports_none(shipped_config: AppConfiguration) -> None:
     """An unknown camera, or one with no entries, gives an empty list."""
-    assert list_camera_noise(shipped_config, "No Such Camera") == []
-    assert list_camera_noise(shipped_config, "Nikon D5300") == []
+    assert list_camera_noise(library_with_camera_profiles(shipped_config), "No Such Camera") == []
+    assert list_camera_noise(library_with_camera_profiles(shipped_config), "Nikon D5300") == []
 
 
 def test_camera_profiles_carry_the_noise_in_camel_case(shipped_config: AppConfiguration) -> None:
     """The profile list gives each camera its `sensorNoise` entries."""
-    profiles = {profile["name"]: profile for profile in list_camera_profiles(shipped_config)}
+    profiles = {
+        profile["name"]: profile
+        for profile in list_camera_profiles(shipped_config, library_with_camera_profiles(shipped_config))
+    }
     first = profiles["ZWO ASI533MM Pro"]["sensorNoise"][0]
     assert first["gainSetting"] == "0"
     assert first["readNoise"]["status"] == "measured"

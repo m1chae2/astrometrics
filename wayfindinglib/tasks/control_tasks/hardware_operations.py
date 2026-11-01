@@ -414,11 +414,9 @@ def resolve_destination(context: ControlContext, destination: str | Target | Sky
             f"Target '{target.id}' has no coordinates yet — it hasn't been plate-solved."
         )
 
-    from astrometricslib import parse_coordinate_string
-
     try:
-        ra_deg = parse_coordinate_string(target.ra, is_ra=True)
-        dec_deg = parse_coordinate_string(target.dec, is_ra=False)
+        ra_deg = target.ra_deg
+        dec_deg = target.dec_deg
     except InvalidArgumentError as error:
         raise InvalidArgumentError(
             f"Target '{target.id}' has invalid coordinate format: {error!s}"

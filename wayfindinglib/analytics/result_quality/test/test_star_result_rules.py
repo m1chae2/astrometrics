@@ -260,3 +260,10 @@ def test_period_results_use_the_result_kind() -> None:
     use = next(s for s in statements if s.rule == sr.PERIOD_USE_RESULT)
     assert use.kind == StatementKind.RESULT
     assert use.action_class is None and use.proposed_action is None
+
+
+def test_the_copied_match_limits_agree_with_the_spectroscopy_result() -> None:
+    """The rule table's copies equal the limits a spectrum result carries."""
+    result = SpectroscopyResult()
+    assert sr.POOR_MATCH_RMS_LIMIT == result.poor_match_rms_limit
+    assert sr.AMBIGUOUS_RMS_GAP_LIMIT == result.ambiguous_rms_gap_limit

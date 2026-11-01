@@ -34,7 +34,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any
 
-from astrometricslib import Target, frame_is_spectral
+from astrometricslib import Target
 from astrometricslib.reports import CaptureSetting
 from wayfindinglib.models.quality.efficiency import ScienceGoal
 
@@ -56,7 +56,7 @@ def science_goal_for_target(target: Target) -> ScienceGoal:
         The goal its efficiency is judged for.
     """
     lights = [frame for frame in target.frames if str(frame.role).upper().endswith("LIGHT")]
-    if lights and sum(frame_is_spectral(frame) for frame in lights) > len(lights) / 2:
+    if lights and sum(frame.is_spectral for frame in lights) > len(lights) / 2:
         return ScienceGoal.SLITLESS_SPECTRAL_RESOLUTION
     if target.quality.photometry is not None:
         return ScienceGoal.BRIGHT_STAR_PHOTOMETRY
@@ -116,8 +116,8 @@ def setting_is_spectral(setting: CaptureSetting, frames: Sequence[Any] = ()) -> 
     """Say whether a capture setting is a spectroscopy setting.
 
     The filter name is checked the way the library checks a frame
-    (`frame_is_spectral`). When the setting has no filter name, the frames
-    of the setting decide: it is spectral if most of them are.
+    (`CaptureSetting.is_spectral`). When the setting has no filter name,
+    the frames of the setting decide: it is spectral if most of them are.
 
     Parameters
     ----------
@@ -133,8 +133,8 @@ def setting_is_spectral(setting: CaptureSetting, frames: Sequence[Any] = ()) -> 
         `True` for a grating (spectroscopy) setting.
     """
     if setting.filter_name is not None:
-        return frame_is_spectral({"filter": setting.filter_name})
-    return bool(frames) and sum(frame_is_spectral(frame) for frame in frames) > len(frames) / 2
+        return setting.is_spectral
+    return bool(frames) and sum(frame.is_spectral for frame in frames) > len(frames) / 2
 
 
 def science_goal_for_setting(

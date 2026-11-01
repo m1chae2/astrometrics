@@ -25,7 +25,7 @@ a large library.
 import logging
 from typing import Any
 
-from astrometricslib import StellarObject, Target, parse_coordinate_string
+from astrometricslib import StellarObject, Target
 from astrometricslib.exceptions import InvalidArgumentError
 from wayfindinglib.models.planning.sky_source import SkySource
 
@@ -85,8 +85,8 @@ def target_source(target: Target, is_global: bool = False) -> SkySource | None:
     if not target.ra or not target.dec:
         return None
     try:
-        ra_deg = parse_coordinate_string(str(target.ra), is_ra=True)
-        dec_deg = parse_coordinate_string(str(target.dec), is_ra=False)
+        ra_deg = target.ra_deg
+        dec_deg = target.dec_deg
     except (InvalidArgumentError, ValueError, TypeError) as error:
         logger.warning("Failed to parse coordinates for target '%s': %s", target.id, error)
         return None

@@ -404,28 +404,16 @@ class ObservationReview(ControlChild):
         report : `FrameGuidingReport`
             ``frames`` (one row per frame) and ``group`` (the median error
             and the frames well above it). An unknown target raises
-            `NotFoundError`.
-
-        Raises
-        ------
-        InvalidArgumentError
-            If `since` or `until` is not an ISO 8601 time, or `include`
-            names an unknown section.
+            `NotFoundError`. A `since` or `until` that is not an ISO 8601
+            time, or an `include` that names an unknown section, raises
+            `InvalidArgumentError`.
         """
-        from astrometricslib import FrameSelection, parse_iso_time
         from wayfindinglib.tasks.control_tasks import frame_guiding, hardware_operations
 
         sections = hardware_operations.check_sections(include or [], FRAME_GUIDING_SECTIONS)
-        try:
-            selection = FrameSelection(
-                filter_name=filter_name,
-                first_file=first_file,
-                last_file=last_file,
-                since=parse_iso_time(since),
-                until=parse_iso_time(until),
-            )
-        except ValueError as error:
-            raise InvalidArgumentError(f"since and until must be ISO 8601 times: {error}") from error
+        selection = frame_guiding.FrameRange(
+            filter_name=filter_name, first_file=first_file, last_file=last_file, since=since, until=until
+        )
         target_id = target if isinstance(target, str) else target.id
         return FrameGuidingReport.model_validate(
             frame_guiding.link_frames_to_guiding(

@@ -27,12 +27,11 @@ import statistics
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from astrometricslib import DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
 from wayfindinglib.analytics.capture_history import capture_kind
 from wayfindinglib.analytics.performance_envelope import MINIMUM_FRAMES_PER_NIGHT
 from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
 from wayfindinglib.models.session.capture_frame import CaptureFrame
-from wayfindinglib.models.session.capture_quality import CaptureInputQuality
+from wayfindinglib.models.session.capture_quality import CaptureInputQuality, CaptureLimits
 from wayfindinglib.models.session.ekos_session import EkosCapture
 
 MATCH_WINDOW_SECONDS = 30.0
@@ -155,6 +154,7 @@ def assess_capture_input_quality(
     has_ekos_record: bool,
     envelope: PerformanceEnvelope | None,
     limits_equipment_match: str,
+    limits: CaptureLimits,
 ) -> CaptureInputQuality:
     """Assess how complete and usable a night's capture data is.
 
@@ -172,6 +172,8 @@ def assess_capture_input_quality(
         The equipment-derived limits.
     limits_equipment_match : `str`
         How well the night's equipment matches the one the limits are for.
+    limits : `CaptureLimits`
+        The library's limits; the dark temperature tolerance is used here.
 
     Returns
     -------
@@ -185,7 +187,7 @@ def assess_capture_input_quality(
         has_ekos_record=has_ekos_record,
         has_enough_frames=len(frames) >= MINIMUM_FRAMES_PER_NIGHT,
         limits_equipment_match=limits_equipment_match,
-        dark_temperature_tolerance_c=DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+        dark_temperature_tolerance_c=limits.dark_temperature_tolerance_c,
     )
     quality.frames_missing_measurements = _missing_measurements(frames)
     quality.has_missing_measurements = bool(quality.frames_missing_measurements)
@@ -197,7 +199,7 @@ def assess_capture_input_quality(
         quality.frames_outside_dark_tolerance = sum(
             1
             for temperature in temperatures
-            if abs(temperature - median_temperature) > DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
+            if abs(temperature - median_temperature) > limits.dark_temperature_tolerance_c
         )
 
     if not has_ekos_record:

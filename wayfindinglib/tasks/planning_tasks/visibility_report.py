@@ -33,8 +33,9 @@ import numpy as np
 from astropy.coordinates import AltAz, SkyCoord, get_body, get_sun
 from astropy.time import Time
 
-from astrometricslib import StellarObject, Target, parse_coordinate_string, to_epoch_seconds
+from astrometricslib import StellarObject, Target
 from astrometricslib.exceptions import InvalidArgumentError
+from wayfindinglib._internal.arguments import to_epoch_seconds
 from wayfindinglib.models.planning.visibility import (
     HorizonZone,
     MeridianCrossing,
@@ -345,8 +346,8 @@ def _object_coordinates(sky_object: Target | StellarObject) -> tuple[float, floa
         if isinstance(sky_object, StellarObject):
             return float(sky_object.right_ascension), float(sky_object.declination)
         return (
-            parse_coordinate_string(str(sky_object.ra), is_ra=True),
-            parse_coordinate_string(str(sky_object.dec), is_ra=False),
+            sky_object.ra_deg,
+            sky_object.dec_deg,
         )
     except (TypeError, ValueError, InvalidArgumentError) as error:  # float() or the coordinate parser
         logger.debug("Skipping %s, which has no usable position: %s", sky_object.id, error)

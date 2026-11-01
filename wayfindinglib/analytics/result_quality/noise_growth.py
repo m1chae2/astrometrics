@@ -192,13 +192,7 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
-from astrometricslib import (
-    NOISE_WEIGHT_MODE,
-    choose_stack_weight,
-    fold_exposure_lengths,
-    group_frame_weights,
-    wfwhm_weights,
-)
+from astrometricslib import ProcessingPipelines
 from wayfindinglib.models.quality.statements import Confidence
 
 _MODEL_CONFIG = ConfigDict(populate_by_name=True, alias_generator=to_camel)
@@ -426,10 +420,10 @@ def predict_weighting_mode(
 ) -> WeightingMode:
     """Predict the mode the stacker will use for a future stack.
 
-    This calls ``choose_stack_weight`` of the stacker: a configured mode
-    wins; with none, the stacker weights by noise when equal weights would
-    leave the stack at least 5 percent noisier
-    (``sqrt(mean(1/t) * mean(t)) >= 1.05``).
+    This asks the library (`ProcessingPipelines.predict_stack_weights`),
+    which runs the stacker's own rule: a configured mode wins; with none, the
+    stacker weights by noise when equal weights would leave the stack at
+    least 5 percent noisier (``sqrt(mean(1/t) * mean(t)) >= 1.05``).
 
     Parameters
     ----------
@@ -448,14 +442,61 @@ def predict_weighting_mode(
         ``equal``; ``unknown`` for a configured mode the forward model does
         not know (such as star count).
     """
-    if len(set(fold_exposure_lengths(list(exposure_seconds)))) > 1:
-        return WeightingMode.GROUP
-    chosen = choose_stack_weight(list(exposure_seconds), configured_weight, is_spectral=is_spectral)
-    if chosen is None:
-        return WeightingMode.EQUAL
-    if chosen == NOISE_WEIGHT_MODE:
-        return WeightingMode.NOISE
-    return {"wfwhm": WeightingMode.WFWHM}.get(chosen, WeightingMode.UNKNOWN)
+    prediction = ProcessingPipelines.predict_stack_weights(
+        list(exposure_seconds), configured_weight, is_spectral=is_spectral
+    )
+    return {
+        "group": WeightingMode.GROUP,
+        "equal": WeightingMode.EQUAL,
+        "noise": WeightingMode.NOISE,
+        "wfwhm": WeightingMode.WFWHM,
+    }.get(prediction.mode, WeightingMode.UNKNOWN)
+
+
+def fold_exposure_lengths(exposure_seconds: Sequence[float | None]) -> list[float | None]:
+    """Give the exposure group each frame would land in.
+
+    The stacker stacks each exposure length on its own. A length with too few
+    frames is folded into the nearest length that has enough. The rule is the
+    stacker's own, asked of the library
+    (`ProcessingPipelines.predict_stack_weights`).
+
+    Parameters
+    ----------
+    exposure_seconds : `Sequence` [`float` or `None`]
+        The exposure of each frame, in seconds.
+
+    Returns
+    -------
+    lengths : `list` [`float` or `None`]
+        The group length of each frame. Every entry is `None` when a length
+        cannot be read, because the frames then stay in one group.
+    """
+    return ProcessingPipelines.predict_stack_weights(list(exposure_seconds)).folded_exposure_lengths
+
+
+def star_width_weights(widths_px: Sequence[float]) -> list[float] | None:
+    """Give the stacker's star-width weights for frames of one group.
+
+    The sharpest frame weighs most and the blurriest least; the weights have
+    mean 1 (the stacker's ``-weight=wfwhm`` rule, asked of the library with
+    equal exposure lengths so that the frames stay in one group).
+
+    Parameters
+    ----------
+    widths_px : `Sequence` [`float`]
+        The weighted star width of each frame, in pixels.
+
+    Returns
+    -------
+    weights : `list` [`float`] or `None`
+        One weight per frame, or `None` when there are no frames.
+    """
+    if not widths_px:
+        return None
+    return ProcessingPipelines.predict_stack_weights(
+        [1.0] * len(widths_px), "wfwhm", star_width_px=list(widths_px)
+    ).weights
 
 
 def frame_weights(frames: Sequence[StackFrame], mode: WeightingMode) -> list[float] | None:
@@ -487,7 +528,7 @@ def frame_weights(frames: Sequence[StackFrame], mode: WeightingMode) -> list[flo
         widths = [frame.star_width for frame in frames]
         if any(width is None for width in widths) or not widths:
             return None
-        return wfwhm_weights([float(width) for width in widths if width is not None])
+        return star_width_weights([float(width) for width in widths if width is not None])
     return None
 
 
@@ -2658,7 +2699,7 @@ def _in_group_weights(group: StackGroup) -> list[float] | None:
     """
     widths = [frame.star_width for frame in group.frames]
     if group.frames and all(width is not None for width in widths):
-        return wfwhm_weights([float(width) for width in widths if width is not None])
+        return star_width_weights([float(width) for width in widths if width is not None])
     if group.in_group_weights is not None and len(group.in_group_weights) == len(group.frames):
         return list(group.in_group_weights)
     return None
@@ -2723,11 +2764,66 @@ class GroupCoefficients(BaseModel):
     reason: str | None = None
 
 
+def combine_group_weights(
+    in_group_weights: Sequence[Sequence[float] | None],
+    exposures_seconds: Sequence[float],
+    frame_counts: Sequence[int],
+    frame_noises: Sequence[float | None],
+) -> tuple[list[list[float] | None], list[str]]:
+    """Give each frame of an exposure-group stack its raw weight.
+
+    The combine averages the groups with the weight ``W = N t^2 / s^2``
+    (``N`` frames, exposure ``t`` seconds, frame noise ``s`` counts). Frame
+    ``i`` of group ``g`` counts ``W_g w_i / sum(w)``, where the sum runs over
+    the group's frames. This is a copy of the rule of the stacker's own
+    records, for groups that are already known; a test checks it against
+    `ProcessingPipelines.predict_stack_weights`.
+
+    Parameters
+    ----------
+    in_group_weights : `Sequence` of (`Sequence` of `float` or `None`)
+        For each group, the weight of each frame inside the group, or `None`
+        when they are not known.
+    exposures_seconds : `Sequence` [`float`]
+        The exposure length of each group, in seconds.
+    frame_counts : `Sequence` [`int`]
+        The number of frames stacked in each group.
+    frame_noises : `Sequence` [`float` or `None`]
+        The noise of one raw frame of each group, in counts.
+
+    Returns
+    -------
+    weights : `list` [`list` [`float`] or `None`]
+        The raw weight of each frame, group by group. `None` for a group whose
+        weights cannot be stated.
+    reasons : `list` [`str`]
+        For each group, why its weights are unknown. Empty text when known.
+    """
+    weights: list[list[float] | None] = []
+    reasons: list[str] = []
+    for index, group_weights in enumerate(in_group_weights):
+        label = f"the {exposures_seconds[index]:g} s exposure group"
+        noise = frame_noises[index]
+        total = math.fsum(group_weights) if group_weights else 0.0
+        if noise is None or not math.isfinite(noise) or noise <= 0:
+            weights.append(None)
+            reasons.append(f"the frame noise of {label} could not be read")
+        elif not group_weights or total <= 0 or any(weight < 0 for weight in group_weights):
+            weights.append(None)
+            reasons.append(f"Siril did not report the frame weights of {label} and they cannot be rebuilt")
+        else:
+            combine_weight = frame_counts[index] * exposures_seconds[index] ** 2 / noise**2
+            weights.append([combine_weight * weight / total for weight in group_weights])
+            reasons.append("")
+    return weights, reasons
+
+
 def group_coefficients(groups: Sequence[StackGroup]) -> GroupCoefficients:
     """Work out each frame's raw weight with the library's group rule.
 
-    Uses ``astrometricslib.group_frame_weights``, the rule the stacker's own
-    records use, so the forecast and the record cannot differ.
+    Uses `combine_group_weights`, a copy of the rule the stacker's own
+    records use (``W_g = N_g t_g^2 / s_g^2``); a test compares it with the
+    library's prediction.
 
     Parameters
     ----------
@@ -2756,17 +2852,17 @@ def group_coefficients(groups: Sequence[StackGroup]) -> GroupCoefficients:
     noises = [group.frame_noise_adu for group in groups]
     if any(noise is None for noise in noises):
         return GroupCoefficients(reason="A group has no frame noise (s_g), so its weight is unknown.")
-    result = group_frame_weights(
+    group_weights, reasons = combine_group_weights(
         in_group,
         [group.mean_exposure_seconds for group in groups],
         [len(group.frames) for group in groups],
         noises,
     )
-    if any(weights is None for weights in result.weights):
-        return GroupCoefficients(reason="; ".join(reason for reason in result.reasons if reason))
+    if any(weights is None for weights in group_weights):
+        return GroupCoefficients(reason="; ".join(reason for reason in reasons if reason))
     raw: list[float] = []
     gains: list[float] = []
-    for group, weights in zip(groups, result.weights, strict=True):
+    for group, weights in zip(groups, group_weights, strict=True):
         raw.extend(weights or ())
         gains.extend([group.gain] * len(group.frames))
     total = math.fsum(raw)

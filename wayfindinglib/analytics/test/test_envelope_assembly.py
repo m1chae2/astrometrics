@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from astrometricslib import AppConfiguration
+from astrometricslib._internal.frames import frame_is_spectral
 from astrometricslib.reports import observing_night_id
 from wayfindinglib.analytics.capture_history import STAR_WIDTH_METRIC
 from wayfindinglib.analytics.envelope_assembly import (
@@ -26,6 +27,7 @@ from wayfindinglib.analytics.test.frame_measurement_helpers import FakeAstrometr
 from wayfindinglib.drivers.control_record_store import ControlRecordStore
 from wayfindinglib.models.session.ekos_session import EkosSessionContext, SessionEquipmentAttribution
 from wayfindinglib.models.session.guiding_run import GuidingRunSummary
+from wayfindinglib.test.camera_profile_support import library_with_camera_profiles
 
 
 @pytest.fixture
@@ -81,9 +83,10 @@ class _Frame:
         self.pixel_scale_arcsec = 2.0
         self.role = role
         self.filter = filter_name
+        self.is_spectral = frame_is_spectral({"filter": filter_name})
 
 
-def _fake_astrometrics(frames: list[_Frame]) -> FakeAstrometrics:
+def _fake_astrometrics(frames: list[_Frame], config: AppConfiguration) -> FakeAstrometrics:
     """Build a science-library stand-in whose frames have stored star widths.
 
     Returns
@@ -92,11 +95,13 @@ def _fake_astrometrics(frames: list[_Frame]) -> FakeAstrometrics:
         Holds the frames and a stored star-width row for each with a width.
     """
     return FakeAstrometrics(
-        frames, {frame.path: {STAR_WIDTH_METRIC: frame.stored_width_arcsec} for frame in frames}
+        frames,
+        {frame.path: {STAR_WIDTH_METRIC: frame.stored_width_arcsec} for frame in frames},
+        camera_config=config,
     )
 
 
-def _measure(astrometrics: FakeAstrometrics, config: AppConfiguration) -> MeasuredImageQuality | None:
+def _measure(astrometrics: FakeAstrometrics) -> MeasuredImageQuality | None:
     """Measure star width for this observatory's rig with a 10 second cut.
 
     Returns
@@ -104,7 +109,7 @@ def _measure(astrometrics: FakeAstrometrics, config: AppConfiguration) -> Measur
     quality : `MeasuredImageQuality` or `None`
         The measured star width, if any frame qualified.
     """
-    return measure_image_quality(astrometrics, "Apertura 75Q", "ZWO ASI 533MM Pro", 10.0, config)
+    return measure_image_quality(astrometrics, "Apertura 75Q", "ZWO ASI 533MM Pro", 10.0)
 
 
 def test_star_width_is_the_median_of_the_stored_widths(
@@ -113,7 +118,7 @@ def test_star_width_is_the_median_of_the_stored_widths(
     """Verify the star width is the median of the stored arcsecond widths."""
     frames = [_Frame(width_arcsec=6.0), _Frame(width_arcsec=4.0), _Frame(width_arcsec=8.0)]
 
-    quality = _measure(_fake_astrometrics(frames), camera_profile_config)
+    quality = _measure(_fake_astrometrics(frames, camera_profile_config))
 
     assert quality.fwhm_arcsec == pytest.approx(6.0)
     assert quality.sample_count == 3
@@ -132,11 +137,10 @@ def test_short_exposures_are_left_out(camera_profile_config: AppConfiguration) -
     short_saturated_frames = [_Frame(width_arcsec=16.0, exposure=2.0) for _ in range(20)]
 
     quality = measure_image_quality(
-        _fake_astrometrics(long_frames + short_saturated_frames),
+        _fake_astrometrics(long_frames + short_saturated_frames, camera_profile_config),
         "Apertura 75Q",
         "ZWO ASI 533MM Pro",
         10.0,
-        camera_profile_config,
     )
 
     assert quality.fwhm_arcsec == pytest.approx(6.0)
@@ -151,7 +155,7 @@ def test_frames_of_other_equipment_are_left_out(camera_profile_config: AppConfig
         _Frame(width_arcsec=40.0, telescope="Nikkor 300mm"),
     ]
 
-    quality = _measure(_fake_astrometrics(frames), camera_profile_config)
+    quality = _measure(_fake_astrometrics(frames, camera_profile_config))
 
     assert quality.sample_count == 1
 
@@ -160,7 +164,7 @@ def test_a_cameras_other_spellings_are_accepted(camera_profile_config: AppConfig
     """Verify the FITS-header spelling matches the library one."""
     frames = [_Frame(camera="ZWO CCD ASI533MM Pro", width_arcsec=6.0)]
 
-    quality = _measure(_fake_astrometrics(frames), camera_profile_config)
+    quality = _measure(_fake_astrometrics(frames, camera_profile_config))
 
     assert quality is not None
     assert quality.sample_count == 1
@@ -174,7 +178,7 @@ def test_spectroscopy_and_calibration_frames_are_left_out(camera_profile_config:
         _Frame(width_arcsec=60.0, role="DARK"),
     ]
 
-    quality = _measure(_fake_astrometrics(frames), camera_profile_config)
+    quality = _measure(_fake_astrometrics(frames, camera_profile_config))
 
     assert quality.sample_count == 1
 
@@ -183,19 +187,21 @@ def test_frames_with_no_measured_width_are_left_out(camera_profile_config: AppCo
     """Verify an unmeasured frame is skipped, not counted as zero."""
     frames = [_Frame(width_arcsec=6.0), _Frame(width_arcsec=None)]
 
-    quality = _measure(_fake_astrometrics(frames), camera_profile_config)
+    quality = _measure(_fake_astrometrics(frames, camera_profile_config))
 
     assert quality.sample_count == 1
 
 
 def test_no_matching_frames_gives_none(camera_profile_config: AppConfiguration) -> None:
     """Verify equipment with no frames has no measured star width."""
-    assert _measure(_fake_astrometrics([]), camera_profile_config) is None
+    assert _measure(_fake_astrometrics([], camera_profile_config)) is None
 
 
 def test_sensor_limits_come_from_the_camera_profile(camera_profile_config: AppConfiguration) -> None:
     """Verify saturation facts and provenance come from the profile."""
-    limits = sensor_limits_for_camera("ZWO ASI 533MM Pro", camera_profile_config)
+    limits = sensor_limits_for_camera(
+        library_with_camera_profiles(camera_profile_config), "ZWO ASI 533MM Pro"
+    )
 
     assert limits.clip_ceiling_adu == pytest.approx(65532.0)
     assert limits.clip_ceiling_source.startswith("measured:")
@@ -205,7 +211,9 @@ def test_sensor_limits_come_from_the_camera_profile(camera_profile_config: AppCo
 def test_an_unlisted_camera_gets_the_generic_stand_in(camera_profile_config: AppConfiguration) -> None:
     """Verify a camera without a profile is marked as a stand-in."""
     assert (
-        sensor_limits_for_camera("Some Unlisted Camera 9000", camera_profile_config).is_generic_fallback
+        sensor_limits_for_camera(
+            library_with_camera_profiles(camera_profile_config), "Some Unlisted Camera 9000"
+        ).is_generic_fallback
         is True
     )
 

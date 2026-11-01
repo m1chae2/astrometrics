@@ -19,7 +19,7 @@ magnitudes, and which depth applies depends on the kind of object:
 
 The kind comes from the target's stored SIMBAD object type, which the library
 records when it looks the target up in SIMBAD
-(`astrometricslib.target_object_category` groups the codes into galaxy, nebula,
+(`Target.object_category` groups the codes into galaxy, nebula,
 cluster and star; see `depth_kind_of_target`). A target id that names two
 objects ("M 52 - Bubble Nebula") is typed from its first designation.
 
@@ -32,7 +32,7 @@ is deeper for both depths. The time to reach a level comes from the existing
 import re
 from collections.abc import Mapping
 
-from astrometricslib import target_object_category
+from astrometricslib import Target
 from wayfindinglib.analytics.result_quality.forecast import (
     POINT_SOURCE_DEPTH_METRIC,
     SURFACE_BRIGHTNESS_LIMIT_METRIC,
@@ -107,11 +107,11 @@ _DEEP_SKY_DESIGNATION = re.compile(r"^(NGC|IC)[\s_]*\d", re.IGNORECASE)
 """An NGC or IC designation at the start of a target id, such as "NGC 6888"."""
 
 
-def depth_kind_of_target(target_id: str, simbad_object_type: str | None) -> tuple[DepthKind | None, str]:
+def depth_kind_of_target(target: Target) -> tuple[DepthKind | None, str]:
     """Say which depth a target is judged by.
 
     The kind comes from the target's stored SIMBAD object type, grouped by
-    `target_object_category`: a galaxy or nebula is judged by surface
+    `Target.object_category`: a galaxy or nebula is judged by surface
     brightness, a cluster by the point-source depth, and a star or a body of
     the solar system has no depth goal. A target whose type is not stored, or
     is a kind of object the grouping does not know, is judged by the
@@ -120,11 +120,10 @@ def depth_kind_of_target(target_id: str, simbad_object_type: str | None) -> tupl
 
     Parameters
     ----------
-    target_id : `str`
-        The target id, such as "M 81" or "Moon". A planet, the Moon, the Sun
-        or a comet has no depth goal even when no SIMBAD type is stored.
-    simbad_object_type : `str` or `None`
-        The target's stored SIMBAD main object type code, or ``None``.
+    target : `Target`
+        The target. Its id (such as "M 81" or "Moon") and its stored SIMBAD
+        main object type code decide the kind. A planet, the Moon, the Sun or
+        a comet has no depth goal even when no SIMBAD type is stored.
 
     Returns
     -------
@@ -142,7 +141,7 @@ def depth_kind_of_target(target_id: str, simbad_object_type: str | None) -> tupl
     typed by SIMBAD from its first designation (M 52, an open cluster). That is
     accepted, and the cluster type gives the point-source depth.
     """
-    category = target_object_category(simbad_object_type, target_id)
+    category = target.object_category
     if category in ("galaxy", "nebula"):
         return DepthKind.SURFACE_BRIGHTNESS, ""
     if category == "cluster":
@@ -153,7 +152,7 @@ def depth_kind_of_target(target_id: str, simbad_object_type: str | None) -> tupl
         # An NGC or IC object is a deep-sky catalog entry, so it always gets a
         # goal: SIMBAD types NGC 6888, the Crescent Nebula, as its Wolf-Rayet
         # star. It is treated as of unknown type (user decision 2026-10-27).
-        if _DEEP_SKY_DESIGNATION.match(target_id.strip()):
+        if _DEEP_SKY_DESIGNATION.match(target.id.strip()):
             return DepthKind.POINT_SOURCE, UNKNOWN_TYPE_REASON
         return None, NO_GOAL_REASON
     return DepthKind.POINT_SOURCE, UNKNOWN_TYPE_REASON

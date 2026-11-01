@@ -429,3 +429,8 @@ def test_observations_from_measurements_pin_versions_and_use_the_newest_row() ->
     assert found["f1"].capture_setting == SETTING
     assert found["f2"].star_width_effective_arcsec == pytest.approx(4.0)
     assert found["f3"].missing_reasons["sky_rate_e_per_s_per_px"] == "no gain"
+
+
+def test_the_copied_pixel_blur_factor_agrees_with_the_science_library() -> None:
+    """The local constant equals the science library's constant."""
+    assert eff.PIXEL_BLUR_FWHM_SQUARED_FACTOR == pytest.approx(PIXEL_BLUR_FWHM_SQUARED_FACTOR, rel=1e-15)

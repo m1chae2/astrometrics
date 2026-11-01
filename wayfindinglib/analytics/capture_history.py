@@ -26,7 +26,6 @@ from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from typing import Any
 
-from astrometricslib import frame_is_spectral, frame_subject_id, resolve_camera_profile
 from astrometricslib.reports import MeasurementStatus, observing_night_id
 from wayfindinglib.analytics.performance_envelope import (
     MINIMUM_ATTEMPTS_PER_NIGHT,
@@ -88,16 +87,16 @@ def normalize_name(name: str | None) -> str:
     return re.sub(r"[^a-z0-9]", "", (name or "").lower())
 
 
-def equipment_spellings(camera_name: str, config: Any = None) -> set[str]:
+def equipment_spellings(astrometrics: Any, camera_name: str) -> set[str]:
     """List every normalized spelling of a camera's name.
 
     Parameters
     ----------
+    astrometrics : `Any`
+        The science library's high-level interface (``Astrometrics``); it
+        holds the camera profiles.
     camera_name : `str`
         The camera's name, written in any spelling.
-    config : `AppConfiguration`, optional
-        The configuration holding the camera profiles. The process-wide one
-        is used when left out.
 
     Returns
     -------
@@ -105,7 +104,7 @@ def equipment_spellings(camera_name: str, config: Any = None) -> set[str]:
         The name itself, the profile's name, its record name and its
         aliases, each normalized.
     """
-    profile = resolve_camera_profile(camera_name, config)
+    profile = astrometrics.processing.calibration.camera_profile(camera_name)
     return {
         normalize_name(name)
         for name in (camera_name, profile.camera_name, profile.record_name, *profile.name_aliases)
@@ -140,8 +139,7 @@ def read_frame_measurements(astrometrics: Any) -> dict[str, dict[str, tuple[floa
     Returns
     -------
     measurements : `dict`
-        Keyed by frame key (see `frame_subject_id` in `astrometricslib`),
-        then by metric: the
+        Keyed by frame key (see `Target.frame_subject_id`), then by metric: the
         `tuple` of each metric's value (`float`) and row id (`int` or `None`)
         of the stored measurement it came from.
         and the row id of the stored measurement it came from.
@@ -158,9 +156,7 @@ def read_frame_measurements(astrometrics: Any) -> dict[str, dict[str, tuple[floa
     return by_frame
 
 
-def collect_capture_frames(
-    astrometrics: Any, telescope_name: str, camera_name: str, config: Any = None
-) -> list[CaptureFrame]:
+def collect_capture_frames(astrometrics: Any, telescope_name: str, camera_name: str) -> list[CaptureFrame]:
     """Read every light frame taken with this telescope and camera.
 
     Parameters
@@ -171,8 +167,6 @@ def collect_capture_frames(
         Name of the imaging telescope.
     camera_name : `str`
         Name of the imaging camera, in any spelling its profile knows.
-    config : `AppConfiguration`, optional
-        The configuration holding the camera profiles.
 
     Returns
     -------
@@ -183,7 +177,7 @@ def collect_capture_frames(
         A measurement the frame lacks (or has only at another definition
         version) stays `None`.
     """
-    camera_spellings = equipment_spellings(camera_name, config)
+    camera_spellings = equipment_spellings(astrometrics, camera_name)
     telescope_spelling = normalize_name(telescope_name)
     stored = read_frame_measurements(astrometrics)
     frames = []
@@ -197,7 +191,7 @@ def collect_capture_frames(
                 continue
             if normalize_name(frame.telescope) != telescope_spelling:
                 continue
-            values = stored.get(frame_subject_id(frame.path, target.id), {})
+            values = stored.get(target.frame_subject_id(frame), {})
             pixel_scale = _positive(frame.pixel_scale_arcsec)
             elongation = values.get(STAR_ELONGATION_METRIC)
             frames.append(
@@ -207,7 +201,7 @@ def collect_capture_frames(
                     timestamp=float(frame.timestamp),
                     exposure_seconds=float(frame.exposure or 0.0),
                     filter_name=str(getattr(frame.filter, "value", frame.filter)),
-                    is_spectral=frame_is_spectral(frame),
+                    is_spectral=frame.is_spectral,
                     sensor_temperature_c=frame.sensor_temperature_c,
                     saturated_pixel_fraction=values.get(SATURATED_FRACTION_METRIC, (None, None))[0],
                     background_adu=values.get(BACKGROUND_METRIC, (None, None))[0],

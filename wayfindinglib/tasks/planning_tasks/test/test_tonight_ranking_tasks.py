@@ -40,6 +40,7 @@ from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
 from wayfindinglib.models.planning.target_report import RecommendedAdditionalFramesStatus
 from wayfindinglib.models.planning.tonight_ranking import CandidateStatus, RankedCandidate, RankedUse
 from wayfindinglib.tasks.planning_tasks import tonight_ranking_tasks as tr
+from wayfindinglib.test.camera_profile_support import no_camera_profiles_processing
 
 SITE = SiteProfile(id="site", name="Home", latitude_deg=45.76, longitude_deg=-110.74, elevation_m=1400.0)
 SETTING = CaptureSetting(
@@ -213,6 +214,7 @@ class FakeLibrary:
         """
         self.rows = rows
         self.targets = SimpleNamespace(list=lambda: targets)
+        self.processing = no_camera_profiles_processing()
         self.quality = SimpleNamespace(
             query=self._query,
             capture_settings=lambda ids=None: {1: SETTING, 2: SPECTRAL_SETTING, 3: SHORT_SETTING},

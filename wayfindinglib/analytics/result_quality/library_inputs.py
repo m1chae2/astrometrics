@@ -45,7 +45,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from astrometricslib import Target, frame_subject_id, parse_coordinate_string
+from astrometricslib import Target
 from astrometricslib.exceptions import AstrometricsError
 from astrometricslib.reports import CaptureSetting, QualityMeasurement, SubjectLevel
 from wayfindinglib.analytics.capture_history import normalize_name
@@ -144,7 +144,7 @@ def frame_times(target: Target) -> dict[str, float]:
         if not str(frame.role).upper().endswith("LIGHT") or frame.timestamp is None:
             continue
         half = (frame_exposure_seconds(frame.exposure) or 0.0) / 2.0
-        times[frame_subject_id(frame.path, target.id)] = float(frame.timestamp) + half
+        times[target.frame_subject_id(frame)] = float(frame.timestamp) + half
     return times
 
 
@@ -169,8 +169,8 @@ def target_direction(target: Target) -> tuple[float, float] | None:
         return None
     try:
         return (
-            float(parse_coordinate_string(target.ra, is_ra=True)),
-            float(parse_coordinate_string(target.dec, is_ra=False)),
+            float(target.ra_deg),
+            float(target.dec_deg),
         )
     except ValueError, TypeError:
         return None

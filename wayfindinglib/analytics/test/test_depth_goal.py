@@ -9,6 +9,7 @@ import math
 
 import pytest
 
+from astrometricslib import Target
 from wayfindinglib.analytics import depth_goal as dg
 from wayfindinglib.models.planning.depth_goal import DepthKind, DepthLevel
 
@@ -56,7 +57,7 @@ def test_galaxies_and_nebulae_use_surface_brightness_and_clusters_use_point_sour
     target_id: str, object_type: str, kind: DepthKind
 ) -> None:
     """The kind follows the stored object type."""
-    assert dg.depth_kind_of_target(target_id, object_type) == (kind, "")
+    assert dg.depth_kind_of_target(Target(id=target_id, simbad_object_type=object_type)) == (kind, "")
 
 
 @pytest.mark.parametrize(
@@ -67,7 +68,7 @@ def test_stars_and_solar_system_bodies_have_no_depth_goal_and_say_why(
     target_id: str, object_type: str | None
 ) -> None:
     """A star, planet, Moon, Sun or double star has no goal."""
-    kind, reason = dg.depth_kind_of_target(target_id, object_type)
+    kind, reason = dg.depth_kind_of_target(Target(id=target_id, simbad_object_type=object_type))
     assert kind is None
     assert reason == dg.NO_GOAL_REASON
 
@@ -75,7 +76,7 @@ def test_stars_and_solar_system_bodies_have_no_depth_goal_and_say_why(
 @pytest.mark.parametrize("object_type", [None, "", "Pl", "SomethingNew"])
 def test_an_unknown_type_defaults_to_the_point_source_depth(object_type: str | None) -> None:
     """No stored type, or an unknown one, gives the point-source depth."""
-    kind, reason = dg.depth_kind_of_target("Mystery Field", object_type)
+    kind, reason = dg.depth_kind_of_target(Target(id="Mystery Field", simbad_object_type=object_type))
     assert kind == DepthKind.POINT_SOURCE
     assert reason == dg.UNKNOWN_TYPE_REASON
     assert "object type is not known" in reason
@@ -83,7 +84,8 @@ def test_an_unknown_type_defaults_to_the_point_source_depth(object_type: str | N
 
 def test_a_name_that_names_two_objects_takes_the_first_designation() -> None:
     """SIMBAD types "M 52 - Bubble Nebula" as M 52, an open cluster."""
-    assert dg.depth_kind_of_target("M 52 - Bubble Nebula", "OpC") == (DepthKind.POINT_SOURCE, "")
+    target = Target(id="M 52 - Bubble Nebula", simbad_object_type="OpC")
+    assert dg.depth_kind_of_target(target) == (DepthKind.POINT_SOURCE, "")
 
 
 def test_level_reached_is_the_deepest_level_met() -> None:
@@ -124,6 +126,6 @@ def test_an_ngc_or_ic_object_typed_as_a_star_keeps_a_point_source_goal(
     target_id: str, object_type: str
 ) -> None:
     """A deep-sky catalog object that SIMBAD calls a star still gets a goal."""
-    kind, reason = dg.depth_kind_of_target(target_id, object_type)
+    kind, reason = dg.depth_kind_of_target(Target(id=target_id, simbad_object_type=object_type))
     assert kind == DepthKind.POINT_SOURCE
     assert reason == dg.UNKNOWN_TYPE_REASON

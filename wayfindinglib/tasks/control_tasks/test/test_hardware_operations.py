@@ -15,6 +15,7 @@ import pytest
 from astropy.time import Time
 from pytest_mock import MockerFixture
 
+from astrometricslib import Target
 from astrometricslib.exceptions import (
     ConfigurationError,
     ConflictError,
@@ -306,7 +307,7 @@ def test_resolve_destination_raises_for_unresolved_placeholder_coordinates(mocke
 
 def test_resolve_destination_reads_a_target_s_coordinates(mocker: MockerFixture) -> None:
     """Verify a target id becomes its plate-solved position in degrees."""
-    target = mocker.Mock(ra="12h 00m 00s", dec="+45d 00m 00s")
+    target = Target(id="M 81", ra="12h 00m 00s", dec="+45d 00m 00s")
     manager = _FakeManager(config=mocker.Mock())
     manager.astrometrics.targets.get.return_value = target
 

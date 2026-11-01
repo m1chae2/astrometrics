@@ -13,15 +13,11 @@ from typing import Any, cast
 
 from pydantic import BaseModel
 
-from astrometricslib import (
-    DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
-    SATURATED_BLOB_MINIMUM_PIXELS,
-    SATURATED_FRAME_FRACTION,
-)
 from wayfindinglib.models.quality.statements import StatementKind
 from wayfindinglib.models.session.capture_frame import CaptureFrame
 from wayfindinglib.models.session.capture_quality import (
     CaptureInputQuality,
+    CaptureLimits,
     CapturePerformance,
     CaptureSessionAnalysis,
 )
@@ -49,7 +45,7 @@ _RECORDED_LIMITS = (
 """The limits copied into a summary, so a result can be traced."""
 
 
-@dataclass
+@dataclass(kw_only=True)
 class CaptureAnalysisRequest(SessionAnalysisRequest):
     """Everything the capture analysis needs for one night.
 
@@ -65,8 +61,12 @@ class CaptureAnalysisRequest(SessionAnalysisRequest):
         Whether any Ekos session record exists for the night.
     sensor_pixel_count : `int` or `None`
         Pixels on the camera's sensor with no binning.
+    limits : `CaptureLimits`
+        The science library's clipping limits and dark tolerance, read by
+        `read_capture_limits`.
     """
 
+    limits: CaptureLimits
     frames: list[CaptureFrame] = field(default_factory=list)
     captures: list[EkosCapture] = field(default_factory=list)
     aborted_captures: int = 0
@@ -104,6 +104,7 @@ class CaptureSessionPipeline(SessionAnalysisPipeline):
             request.has_ekos_record,
             request.envelope,
             request.limits_equipment_match,
+            request.limits,
         )
         return SessionAnalysisResult(has_work=input_quality.has_enough_frames, input_quality=input_quality)
 
@@ -120,6 +121,7 @@ class CaptureSessionPipeline(SessionAnalysisPipeline):
             request.sensor_pixel_count,
             request.envelope,
             request.limits_equipment_match,
+            request.limits,
         )
         return result
 
@@ -140,9 +142,9 @@ class CaptureSessionPipeline(SessionAnalysisPipeline):
         warnings = [r for r in recommendations if r.kind == StatementKind.WARNING]
         resolved: dict[str, Any] = {
             "limits_equipment_match": request.limits_equipment_match,
-            "saturated_star_minimum_pixels": SATURATED_BLOB_MINIMUM_PIXELS,
-            "clipped_frame_fraction": SATURATED_FRAME_FRACTION,
-            "dark_temperature_tolerance_c": DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+            "saturated_star_minimum_pixels": request.limits.saturated_star_minimum_pixels,
+            "clipped_frame_fraction": request.limits.clipped_frame_fraction,
+            "dark_temperature_tolerance_c": request.limits.dark_temperature_tolerance_c,
         }
         if request.envelope is not None:
             for name in _RECORDED_LIMITS:

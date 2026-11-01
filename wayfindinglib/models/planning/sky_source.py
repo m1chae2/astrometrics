@@ -8,11 +8,45 @@ Planetarium reads. `has_catalog_magnitude` tells the map whether the
 brightness is a real catalog magnitude it can draw by.
 """
 
+import math
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
-from astrometricslib import has_catalog_magnitude
+BRIGHTEST_CATALOG_MAGNITUDE = -2.0
+"""The brightest value that counts as a catalog magnitude.
+
+A copy of the science library's limit of the same name. A value below it is an
+instrument reading from photometry, not a catalog magnitude. A test checks
+that the two rules still agree.
+"""
+
+
+def has_catalog_magnitude(magnitude: object) -> bool:
+    """Tell whether a star's magnitude is a real catalog magnitude.
+
+    This copies the science library's rule, so that a source that did not come
+    from a `StellarObject` follows the same rule.
+
+    Parameters
+    ----------
+    magnitude : `object`
+        The raw magnitude. It may be a number, `None`, or an empty string.
+
+    Returns
+    -------
+    has_magnitude : `bool`
+        `True` for a finite number at or above `BRIGHTEST_CATALOG_MAGNITUDE`
+        that is not exactly zero. Zero is what is saved for a star whose
+        catalog gave no magnitude, so it means "unknown", not "very bright".
+    """
+    return bool(
+        isinstance(magnitude, int | float)
+        and not isinstance(magnitude, bool)
+        and math.isfinite(magnitude)
+        and magnitude >= BRIGHTEST_CATALOG_MAGNITUDE
+        and magnitude != 0
+    )
 
 
 class SkySource(BaseModel):
@@ -65,7 +99,7 @@ class SkySource(BaseModel):
 
         `False` for a missing magnitude, an instrument reading from
         photometry, or the 0 saved when a catalog gave none (see
-        astrometricslib's `has_catalog_magnitude`).
+        the module function `has_catalog_magnitude`).
         """
         return has_catalog_magnitude(self.magnitude)
 

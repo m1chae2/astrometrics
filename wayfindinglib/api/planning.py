@@ -40,13 +40,10 @@ from astrometricslib import (
     FilterType,
     StellarObject,
     Target,
-    check_choice,
-    check_include,
-    reject_unused_arguments,
-    resolve_target,
 )
 from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError, NotFoundError
 from astrometricslib.jobs import background_job, get_current_job, registered_job
+from wayfindinglib._internal.arguments import check_choice, check_include, reject_unused_arguments
 from wayfindinglib.analytics.frame_counting import (
     EquipmentNames,
     TargetFrameReader,
@@ -320,7 +317,7 @@ class ObservationPlanning:
         target : `Target`
             The library target.
         """
-        return resolve_target(self._astrometrics.targets, target)
+        return self._astrometrics.targets.resolve(target)
 
     def _package(self, package_id: str) -> ObservationPackage:
         """Load one recorded observation package.
@@ -493,8 +490,6 @@ class ObservationPlanning:
             also has its position as saved text; a star has its magnitude
             and spectral type.
         """
-        from astrometricslib import parse_coordinate_string
-
         found = self._sky_engine.resolve_target_coordinates(name)
         if isinstance(found, StellarObject):
             return CoordinateLookup(
@@ -510,8 +505,8 @@ class ObservationPlanning:
             id=found.id,
             name=found.common_name or None,
             kind="target",
-            ra_deg=round(parse_coordinate_string(found.ra, True), 6),
-            dec_deg=round(parse_coordinate_string(found.dec, False), 6),
+            ra_deg=round(found.ra_deg, 6),
+            dec_deg=round(found.dec_deg, 6),
             ra=found.ra,
             dec=found.dec,
         )
@@ -895,6 +890,10 @@ class ObservationPlanning:
         """
         from wayfindinglib.tasks.planning_tasks.calibration_advisory_tasks import build_calibration_advisory
 
+        tolerance = None
+        if FrameType(frame_type) == FrameType.DARK and temperature_c is not None:
+            answer = self._astrometrics.processing.calibration.query(kind="dark")
+            tolerance = answer.dark_temperature_tolerance_c
         return build_calibration_advisory(
             self._butler,
             camera_id,
@@ -905,6 +904,7 @@ class ObservationPlanning:
             offset=offset,
             binning=binning,
             sensor_temperature_c=temperature_c,
+            dark_temperature_tolerance_c=tolerance,
         )
 
     # -- Mosaics -------------------------------------------------------------
@@ -1370,7 +1370,7 @@ class ObservationPlanning:
 
         # A library with no quality records gives an empty dictionary.
         return allowed_capture_values_for_camera(
-            session.camera_id, self._config, self._astrometrics.quality.capture_settings().values()
+            self._astrometrics, session.camera_id, self._astrometrics.quality.capture_settings().values()
         )
 
     def add_to_queue(

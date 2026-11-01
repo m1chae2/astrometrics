@@ -109,7 +109,12 @@ def test_gain_offset_binning_and_temperature_narrow_the_match(isolated_butler: D
             The matching frame count.
         """
         return build_calibration_advisory(
-            isolated_butler, "c1", FrameType.DARK, exposure_seconds=60.0, **keywords
+            isolated_butler,
+            "c1",
+            FrameType.DARK,
+            exposure_seconds=60.0,
+            dark_temperature_tolerance_c=3.0,
+            **keywords,
         ).existing_count
 
     assert count() == 28

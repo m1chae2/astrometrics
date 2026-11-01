@@ -15,6 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from astrometricslib import Target
 from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError
 from astrometricslib.reports import SubjectLevel
 from wayfindinglib.analytics.depth_goal import (
@@ -241,7 +242,7 @@ def read_depth_kind(astrometrics: Any, target_id: str) -> tuple[DepthKind | None
         stored type, so it gets the unknown-type default.
     """
     target = astrometrics.targets.get(target_id)
-    return depth_kind_of_target(target_id, None if target is None else target.simbad_object_type)
+    return depth_kind_of_target(Target(id=target_id) if target is None else target)
 
 
 def depth_goal_met(astrometrics: Any, butler: Any, target_id: str) -> bool | None:

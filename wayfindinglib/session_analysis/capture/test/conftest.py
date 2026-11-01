@@ -11,6 +11,11 @@ from typing import Any
 
 import pytest
 
+from astrometricslib._internal.stacking import (
+    DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+    SATURATED_BLOB_MINIMUM_PIXELS,
+    SATURATED_FRAME_FRACTION,
+)
 from wayfindinglib.analytics.performance_envelope import MeasuredImageQuality, derive_performance_envelope
 from wayfindinglib.models.equipment_and_site.equipment import (
     Camera,
@@ -19,6 +24,7 @@ from wayfindinglib.models.equipment_and_site.equipment import (
     Telescope,
 )
 from wayfindinglib.models.session.capture_frame import CaptureFrame
+from wayfindinglib.models.session.capture_quality import CaptureLimits
 from wayfindinglib.models.session.ekos_session import EkosCapture
 
 NIGHT_START = 1790217108.0
@@ -26,6 +32,13 @@ NIGHT_START = 1790217108.0
 
 SENSOR_PIXELS = 3008 * 3008
 """Pixels on the ASI533 sensor."""
+
+CAPTURE_LIMITS = CaptureLimits(
+    saturated_star_minimum_pixels=SATURATED_BLOB_MINIMUM_PIXELS,
+    clipped_frame_fraction=SATURATED_FRAME_FRACTION,
+    dark_temperature_tolerance_c=DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+)
+"""The science library's limits, as the capture analysis reads them."""
 
 GOOD_CAPTURE_BASELINE = {
     "night_star_width": [5.2, 5.6, 5.4, 5.8, 5.5, 5.3],

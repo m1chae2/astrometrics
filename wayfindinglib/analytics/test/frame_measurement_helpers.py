@@ -14,6 +14,7 @@ from astrometricslib._internal.frames import frame_subject_id
 from astrometricslib._internal.quality import QualityQueryResult
 from astrometricslib.models.quality.measurement import MeasurementOrigin, QualitySubject, SubjectLevel
 from astrometricslib.reports import MeasurementStatus, QualityMeasurement
+from wayfindinglib.test.camera_profile_support import camera_profile_processing, no_camera_profiles_processing
 
 
 def stored_measurement(
@@ -57,6 +58,9 @@ class FakeAstrometrics:
         has no stored rows.
     target_id : `str`, optional
         The target's id.
+    camera_config : `AppConfiguration`, optional
+        The configuration that holds the camera profiles. Without it the
+        stand-in knows no camera profiles.
     """
 
     def __init__(
@@ -64,6 +68,7 @@ class FakeAstrometrics:
         frames: list[Any],
         values_by_path: dict[str, dict[str, float | None]] | None = None,
         target_id: str = "Target",
+        camera_config: Any = None,
     ) -> None:
         """Keep the frames and build the stored rows."""
         self.rows: list[QualityMeasurement] = []
@@ -72,9 +77,18 @@ class FakeAstrometrics:
             for metric, value in values.items():
                 self.rows.append(stored_measurement(metric, frame_subject_id(path, target_id), value, row_id))
                 row_id += 1
-        target = SimpleNamespace(id=target_id, frames=frames)
+        target = SimpleNamespace(
+            id=target_id,
+            frames=frames,
+            frame_subject_id=lambda frame: frame_subject_id(frame.path, target_id),
+        )
         self.targets = SimpleNamespace(list=lambda: [target])
         self.quality = SimpleNamespace(query=self._query)
+        self.processing = (
+            camera_profile_processing(camera_config)
+            if camera_config is not None
+            else no_camera_profiles_processing()
+        )
 
     def _query(self, metric: str | None = None, level: str | None = None, **_: Any) -> QualityQueryResult:
         """Answer `astrometrics.quality.query` from the made-up rows.

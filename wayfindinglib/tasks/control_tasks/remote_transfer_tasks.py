@@ -221,7 +221,7 @@ def download_remote_targets(
         `True` if the download (or local ingest) and reindex
         completed successfully.
     """
-    from astrometricslib import classify_and_sort_fits_files, get_configuration
+    from astrometricslib import get_configuration
 
     config = get_configuration()
     astrometrics = context.astrometrics
@@ -329,8 +329,7 @@ def download_remote_targets(
     if success:
         from wayfindinglib.tasks.control_tasks.frame_pointing import record_frame_pointing_errors
 
-        added_paths: list[str] = []
-        classify_and_sort_fits_files(scan_list, target_id, config, telescope_name, added_paths)
+        added_paths = astrometrics.targets.add_frames(scan_list, target, telescope=telescope_name)
         astrometrics.targets.reindex_frames(target, prune_missing=prune_missing)
         astrometrics.targets.save()
         # After the copy: the new frames that hold a plate solve give the
@@ -916,7 +915,7 @@ def sync_calibration_folder(context: ControlContext, remote_folder_name: str) ->
         Raised if `remote_folder_name` does not match Bias, Dark, or
         Flat.
     """
-    from astrometricslib import Target, classify_and_sort_fits_files, get_configuration
+    from astrometricslib import Target, get_configuration
 
     kind = CALIBRATION_FOLDER_KINDS.get(remote_folder_name.strip().lower())
     if not kind:
@@ -977,8 +976,9 @@ def sync_calibration_folder(context: ControlContext, remote_folder_name: str) ->
 
     # The sorter reports where it put each new file, so the summary needs no
     # walk of the whole calibration library (slow on a network drive).
-    added_paths: list[str] = []
-    classify_and_sort_fits_files([staging_dir], "Calibration", config, _DEFAULT_TELESCOPE_NAME, added_paths)
+    added_paths = astrometrics.processing.calibration.add_frames(
+        [staging_dir], telescope=_DEFAULT_TELESCOPE_NAME
+    )
 
     astrometrics.processing.calibration.reindex_frames(kind)
     astrometrics.processing.calibration.save()

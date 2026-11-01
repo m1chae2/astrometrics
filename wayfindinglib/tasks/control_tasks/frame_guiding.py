@@ -15,10 +15,10 @@ from __future__ import annotations
 
 import os
 import statistics
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib import FrameSelection, select_library_frames
 from astrometricslib.exceptions import NotFoundError
 from wayfindinglib.analytics.result_quality.guiding_join import (
     FrameWindow,
@@ -28,6 +28,42 @@ from wayfindinglib.analytics.result_quality.guiding_join import (
 
 if TYPE_CHECKING:
     from wayfindinglib.api.control.context import ControlContext
+
+
+@dataclass(frozen=True)
+class FrameRange:
+    """Which of a target's light frames a guiding report covers.
+
+    Parameters
+    ----------
+    filter_name : `str` or `None`
+        Keep frames whose filter matches this text, ignoring case.
+    first_file, last_file : `str` or `None`
+        Keep frames from this file name to that one. A short bound such as
+        ``"013"`` means the frame numbered 013.
+    since, until : `str` or `None`
+        Keep frames that began from this ISO 8601 time to that one. No offset
+        means UTC.
+    """
+
+    filter_name: str | None = None
+    first_file: str | None = None
+    last_file: str | None = None
+    since: str | None = None
+    until: str | None = None
+
+    @property
+    def has_bounds(self) -> bool:
+        """Whether a file range or time range was given.
+
+        Returns
+        -------
+        has_bounds : `bool`
+            `True` when the first frames of the range, not the newest, are
+            the ones to keep.
+        """
+        return any(value is not None for value in (self.first_file, self.last_file, self.since, self.until))
+
 
 GUIDE_LOG_SOURCE = "ekos_guide_log"
 """The guiding samples that are real star measurements."""
@@ -74,7 +110,7 @@ def _iso(seconds: float) -> str:
 
 
 def _add_image_quality(
-    astrometrics: Any, target: Any, selection: FrameSelection, frames: list[dict[str, Any]]
+    astrometrics: Any, target: Any, selection: FrameRange, frames: list[dict[str, Any]]
 ) -> str:
     """Measure the frames' images and put the numbers on the guiding rows.
 
@@ -84,7 +120,7 @@ def _add_image_quality(
         The library, for the frame quality check.
     target : `Target`
         The target the frames belong to.
-    selection : `FrameSelection`
+    selection : `FrameRange`
         The same selection used for the guiding rows.
     frames : `list` [`dict`]
         The guiding rows, changed in place.
@@ -101,7 +137,6 @@ def _add_image_quality(
         report = astrometrics.quality.measure_frames(
             target=target,
             kind="raw_check",
-            include=["spectra"] if selection.include_spectra else None,
             filter_name=selection.filter_name,
             first_file=wanted[0],
             last_file=wanted[-1],
@@ -128,7 +163,7 @@ def _add_image_quality(
 def link_frames_to_guiding(
     context: ControlContext,
     target_id: str,
-    selection: FrameSelection,
+    selection: FrameRange,
     limit: int,
     include_quality: bool = False,
 ) -> dict[str, Any]:
@@ -140,7 +175,7 @@ def link_frames_to_guiding(
         Supplies the science library and the guiding records.
     target_id : `str`
         The library target whose light frames to match.
-    selection : `FrameSelection`
+    selection : `FrameRange`
         Which frames: filter, file range, time range.
     limit : `int`
         How many frames to cover, from 1 to `MAXIMUM_FRAMES`. With a range
@@ -168,9 +203,14 @@ def link_frames_to_guiding(
         raise NotFoundError(
             f"No target with id {target_id!r} in the library.", details={"target_id": target_id}
         )
-    lights = [frame for frame in target.frames if str(frame.role).upper() == "LIGHT"]
-    chosen = select_library_frames(lights, selection)
-    chosen = [frame for frame in chosen if frame.timestamp is not None]
+    chosen = context.astrometrics.targets.select_frames(
+        target,
+        filter_name=selection.filter_name,
+        first_file=selection.first_file,
+        last_file=selection.last_file,
+        since=selection.since,
+        until=selection.until,
+    )
     matching = len(chosen)
     chosen = chosen[:limit] if selection.has_bounds else chosen[-limit:]
     if not chosen:

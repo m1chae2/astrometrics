@@ -16,7 +16,7 @@ from wayfindinglib.session_analysis.capture.pipeline import (
     CaptureSessionPipeline,
     analyze_capture_session_request,
 )
-from wayfindinglib.session_analysis.capture.test.conftest import SENSOR_PIXELS
+from wayfindinglib.session_analysis.capture.test.conftest import CAPTURE_LIMITS, SENSOR_PIXELS
 from wayfindinglib.session_analysis.pipeline_base import run_session_pipeline
 
 
@@ -37,6 +37,7 @@ def _request(make_envelope: Any, frames: list, captures: list, **overrides: Any)
         "captures": captures,
         "has_ekos_record": True,
         "sensor_pixel_count": SENSOR_PIXELS,
+        "limits": CAPTURE_LIMITS,
     }
     fields.update(overrides)
     return CaptureAnalysisRequest(**fields)

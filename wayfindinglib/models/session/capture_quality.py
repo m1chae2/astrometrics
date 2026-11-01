@@ -31,6 +31,31 @@ CAPTURE_ANALYSIS_VERSION = "1.0.0"
 """Bumped whenever the capture analysis changes what it measures or reports."""
 
 
+class CaptureLimits(BaseModel):
+    """The science library's limits that the capture analysis quotes.
+
+    The values come from the library's own rows (the saturated-pixel metric
+    and the dark-matching tolerance of a calibration query), not from copies.
+
+    Attributes
+    ----------
+    saturated_star_minimum_pixels : `int`
+        The fewest saturated pixels that make a frame's star count as clipped.
+    clipped_frame_fraction : `float`
+        The share of an exposure length's frames that must clip for the
+        exposure length to count as clipped.
+    dark_temperature_tolerance_c : `float`
+        How far, in degrees Celsius, a dark frame's temperature may differ
+        from a light frame's and still calibrate it.
+    """
+
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
+
+    saturated_star_minimum_pixels: int = Field(alias="saturatedStarMinimumPixels")
+    clipped_frame_fraction: float = Field(alias="clippedFrameFraction")
+    dark_temperature_tolerance_c: float = Field(alias="darkTemperatureToleranceC")
+
+
 class CaptureInputQuality(BaseModel):
     """Pre-processing: how good the night's capture data is.
 
@@ -237,6 +262,9 @@ class CapturePerformance(BaseModel):
         How sharp and round the stars were.
     efficiency : `CaptureEfficiency`
         How much of the night was spent exposing.
+    limits : `CaptureLimits` or `None`
+        The library limits the clipping was judged with. `None` when the
+        measurements were made without them.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -244,6 +272,7 @@ class CapturePerformance(BaseModel):
     clipping: list[ExposureClipping] = Field(default_factory=list)
     star_quality: StarQuality = Field(default_factory=StarQuality, alias="starQuality")
     efficiency: CaptureEfficiency = Field(default_factory=CaptureEfficiency)
+    limits: CaptureLimits | None = None
 
 
 class CaptureSessionAnalysis(BaseModel):

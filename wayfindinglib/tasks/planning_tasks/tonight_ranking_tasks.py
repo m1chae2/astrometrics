@@ -818,7 +818,7 @@ def rank_tonight(
         if config is None:
             return None
         try:
-            return camera_gain_for_setting(config, setting)
+            return camera_gain_for_setting(astrometrics, setting)
         except ConfigurationError:
             return None
 

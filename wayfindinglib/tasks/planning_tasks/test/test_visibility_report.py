@@ -14,6 +14,7 @@ import pytest
 from astropy.coordinates import EarthLocation
 from astropy.time import Time
 
+from astrometricslib import Target
 from astrometricslib.exceptions import InvalidArgumentError
 from wayfindinglib.models.planning.visibility import HorizonZone, VisibilityReport
 from wayfindinglib.tasks.planning_tasks.visibility_report import build_visibility_report
@@ -57,7 +58,7 @@ def _sky() -> SimpleNamespace:
     )
 
 
-def _object_crossing_after(sky: SimpleNamespace, hours: float) -> SimpleNamespace:
+def _object_crossing_after(sky: SimpleNamespace, hours: float) -> Target:
     """Make an object that crosses the meridian a set time after the start.
 
     Parameters
@@ -69,7 +70,7 @@ def _object_crossing_after(sky: SimpleNamespace, hours: float) -> SimpleNamespac
 
     Returns
     -------
-    sky_object : `types.SimpleNamespace`
+    sky_object : `Target`
         An object whose coordinates are text, like a library target.
     """
     sidereal_start = sky.get_local_sidereal_time(Time(START, format="unix"))
@@ -78,17 +79,17 @@ def _object_crossing_after(sky: SimpleNamespace, hours: float) -> SimpleNamespac
     # 5.76 degrees below the site's latitude, so the object peaks about 84
     # degrees up: under the 89 degree limit of the blocked-range test.
     declination = sky.latitude - 5.76
-    return SimpleNamespace(id="X", ra=str(right_ascension_hours), dec=f"{declination:.2f}", common_name="X")
+    return Target(id="X", ra=str(right_ascension_hours), dec=f"{declination:.2f}", common_name="X")
 
 
-def _table(sky: SimpleNamespace, sky_object: SimpleNamespace, **overrides: object) -> VisibilityReport:
+def _table(sky: SimpleNamespace, sky_object: Target, **overrides: object) -> VisibilityReport:
     """Build a 12 hour report with default settings.
 
     Parameters
     ----------
     sky : `types.SimpleNamespace`
         The stand-in sky.
-    sky_object : `types.SimpleNamespace`
+    sky_object : `Target`
         The object to tabulate.
     **overrides : `object`
         Arguments to change from the defaults. ``end_epoch`` sets the end

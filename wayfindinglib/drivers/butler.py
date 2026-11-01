@@ -25,7 +25,6 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from astrometricslib import safe_json_dumps
 from astrometricslib.drivers import AbstractButler, DatasetSpec, connect_db
 from astrometricslib.drivers import Butler as _GenericButler
 from astrometricslib.exceptions import InvalidArgumentError
@@ -405,7 +404,7 @@ class DiskButler(AbstractButler):
         """
         # Reading first makes sure the table exists.
         self._generic.get("observation_session", {"id": session.id})
-        payload = safe_json_dumps(session.model_dump(mode="json", by_alias=True))
+        payload = json.dumps(session.model_dump(mode="json", by_alias=True))
         connection = connect_db(str(self.library_path / "wayfinding.db"))
         try:
             cursor = connection.execute(
@@ -463,7 +462,7 @@ class DiskButler(AbstractButler):
             if existing is not None:
                 connection.rollback()
                 return existing
-            payload = safe_json_dumps(session.model_dump(mode="json", by_alias=True))
+            payload = json.dumps(session.model_dump(mode="json", by_alias=True))
             connection.execute(
                 "INSERT INTO wayfinding_observation_sessions (id, data_json) VALUES (?, ?)",
                 (session.id, payload),
@@ -505,7 +504,7 @@ class DiskButler(AbstractButler):
         """
         # Reading first makes sure the table exists.
         self._generic.get("observation_package", {"id": package.id})
-        payload = safe_json_dumps(package.model_dump(mode="json", by_alias=True))
+        payload = json.dumps(package.model_dump(mode="json", by_alias=True))
         connection = connect_db(str(self.library_path / "wayfinding.db"))
         try:
             cursor = connection.execute(
@@ -607,7 +606,7 @@ class DiskButler(AbstractButler):
             if row is not None:
                 stored = ObservationSession.model_validate(json.loads(row["data_json"]))
                 _merge_planning_fields(session, stored)
-            payload = safe_json_dumps(session.model_dump(mode="json", by_alias=True))
+            payload = json.dumps(session.model_dump(mode="json", by_alias=True))
             connection.execute(
                 "INSERT OR REPLACE INTO wayfinding_observation_sessions (id, data_json) VALUES (?, ?)",
                 (session.id, payload),

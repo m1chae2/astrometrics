@@ -25,8 +25,8 @@ import os
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib import parse_coordinate_string
 from astrometricslib.exceptions import FITS_READ_ERRORS, InvalidArgumentError
+from wayfindinglib._internal.coordinates import parse_coordinate_string
 from wayfindinglib.astronomy.coordinate_transforms import signed_offset_components_arcsec
 
 if TYPE_CHECKING:

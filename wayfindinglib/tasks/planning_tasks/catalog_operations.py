@@ -17,15 +17,9 @@ import astropy.units as u
 import numpy as np
 from astropy.coordinates import SkyCoord
 
-from astrometricslib import (
-    DATA_ERRORS,
-    ONLINE_QUERY_ERRORS,
-    Astrometrics,
-    StellarObject,
-    Target,
-    parse_coordinate_string,
-)
+from astrometricslib import Astrometrics, StellarObject, Target
 from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError
+from wayfindinglib._internal.errors import DATA_ERRORS, ONLINE_QUERY_ERRORS
 from wayfindinglib.drivers.catalog import (
     CatalogDriver,
     DeepStarCatalogDriver,
@@ -175,8 +169,8 @@ def _parse_target_positions(targets: list[Target]) -> list[tuple[str, float, flo
         if is_blank or is_placeholder:
             continue
         try:
-            ra_deg = parse_coordinate_string(target.ra, is_ra=True)
-            dec_deg = parse_coordinate_string(target.dec, is_ra=False)
+            ra_deg = target.ra_deg
+            dec_deg = target.dec_deg
         except InvalidArgumentError as parse_error:
             logger.warning("Failed to parse coordinates for local target %s: %s", target.id, parse_error)
             continue

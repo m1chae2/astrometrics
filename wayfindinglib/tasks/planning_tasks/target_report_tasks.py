@@ -43,13 +43,7 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from astrometricslib import (
-    UNKNOWN_CAPTURE_SETTING_CAMERA,
-    Target,
-    fold_exposure_lengths,
-    frame_is_spectral,
-    resolve_camera_profile,
-)
+from astrometricslib import Target
 from astrometricslib.exceptions import AstrometricsError
 from astrometricslib.reports import (
     CaptureSetting,
@@ -83,6 +77,7 @@ from wayfindinglib.analytics.result_quality.fixed_pattern_location import (
 )
 from wayfindinglib.analytics.result_quality.forecast import (
     StackRunRecord,
+    aperture_record_reader,
     camera_gain_for_setting,
     fixed_pattern_account_for_run,
     fixed_pattern_noise_for_runs,
@@ -119,6 +114,7 @@ from wayfindinglib.analytics.result_quality.noise_growth import (
     StackFrame,
     StackGroup,
     WeightingMode,
+    fold_exposure_lengths,
     frames_to_cut_noise,
     frames_to_cut_noise_in_groups,
     predict_group_frame_noise_adu,
@@ -411,6 +407,7 @@ def _measured_noise_checks(
     settings: Mapping[int, CaptureSetting],
     runs: Sequence[StackRunRecord] = (),
     noise_model_errors: Mapping[Any, NoiseModelError] | None = None,
+    load_record: Callable[[str], Mapping[str, Any] | None] = lambda _path: None,
 ) -> dict[CaptureSetting, MeasuredNoiseCheck]:
     """Compare each stack's measured noise with the noise it should have.
 
@@ -433,6 +430,9 @@ def _measured_noise_checks(
         The noise model's own error by capture setting group
         (`read_noise_history`), for the stacks on the model basis. The
         stand-in value when omitted.
+    load_record : `Callable`, optional
+        Reads a per-aperture record file (`aperture_record_reader`). By
+        default no file is read, so the shape tests are left out.
 
     Returns
     -------
@@ -450,7 +450,7 @@ def _measured_noise_checks(
         newest_run = newest_run_by_stack.get(stack_id)
         inputs = odd_even_difference_noise_inputs(newest_run) if newest_run is not None else None
         account = _fixed_pattern_account_of_stack(
-            newest_run, noise_model_error_for_setting(noise_model_errors, settings[setting_id])
+            newest_run, noise_model_error_for_setting(noise_model_errors, settings[setting_id]), load_record
         )
         if inputs is not None:
             checks[settings[setting_id]] = MeasuredNoiseCheck.from_odd_even_difference(*inputs).model_copy(
@@ -485,7 +485,9 @@ def _measured_noise_checks(
 
 
 def _fixed_pattern_account_of_stack(
-    newest_run: StackRunRecord | None, model_error: NoiseModelError
+    newest_run: StackRunRecord | None,
+    model_error: NoiseModelError,
+    load_record: Callable[[str], Mapping[str, Any] | None],
 ) -> FixedPatternAccount | None:
     """Say where a stack's fixed pattern is and what the masters explain.
 
@@ -495,6 +497,8 @@ def _fixed_pattern_account_of_stack(
         The stack's newest library run.
     model_error : `NoiseModelError`
         The noise model's error, for a stack on the model basis.
+    load_record : `Callable`
+        Reads a per-aperture record file (`aperture_record_reader`).
 
     Returns
     -------
@@ -506,7 +510,7 @@ def _fixed_pattern_account_of_stack(
     if newest_run is None:
         return None
     return fixed_pattern_account_for_run(
-        newest_run, single_stack_fixed_pattern_noise(newest_run, model_error)
+        newest_run, single_stack_fixed_pattern_noise(newest_run, model_error), load_record=load_record
     )
 
 
@@ -581,7 +585,7 @@ def _set_aside_parts(
     unassigned: Counter = Counter()
     for frame_id, reason in reasons_by_frame.items():
         observation = by_id.get(frame_id)
-        if observation is None or observation.capture_setting.camera == UNKNOWN_CAPTURE_SETTING_CAMERA:
+        if observation is None or observation.capture_setting.is_unknown:
             unassigned[reason] += 1
             continue
         reasons_by_setting[observation.capture_setting][reason] += 1
@@ -829,13 +833,14 @@ def _single_group_of(frames: Sequence[StackFrame], electrons_per_adu: float) -> 
     )
 
 
-def _camera_gain(config: Any, setting: CaptureSetting) -> float | None:
+def _camera_gain(astrometrics: Any, setting: CaptureSetting) -> float | None:
     """Look up a setting's camera gain, or give ``None`` when unknown.
 
     Parameters
     ----------
-    config : `AppConfiguration`
-        The configuration that holds the camera profiles.
+    astrometrics : `Any`
+        The science library's high-level interface (``Astrometrics``); it
+        holds the camera profiles.
     setting : `CaptureSetting`
         The setting.
 
@@ -845,7 +850,7 @@ def _camera_gain(config: Any, setting: CaptureSetting) -> float | None:
         Electrons per ADU.
     """
     try:
-        return camera_gain_for_setting(config, setting)
+        return camera_gain_for_setting(astrometrics, setting)
     except AstrometricsError:
         logger.warning("The camera profile of '%s' could not be read.", setting.camera, exc_info=True)
         return None
@@ -982,7 +987,7 @@ def _more_frames_for_setting(
     mode = predict_weighting_mode(
         configured_weight,
         [frame.exposure_seconds for frame in frames],
-        is_spectral=frame_is_spectral({"filter": setting.filter_name}),
+        is_spectral=setting.is_spectral,
     )
     setting_runs, newest_run, run_groups, stack_frames = _stack_of_setting(
         observations,
@@ -1319,7 +1324,7 @@ def _quality_statements_of_settings(
                     overheads,
                     runs=runs,
                     observations_by_id=observations_by_id,
-                    electrons_per_adu=_camera_gain(config, setting),
+                    electrons_per_adu=_camera_gain(context.astrometrics, setting),
                     noise_model_errors=noise_model_errors,
                     fixed_pattern_history=fixed_pattern_history,
                     target_id=target.id,
@@ -1340,7 +1345,11 @@ def _quality_statements_of_settings(
             setting_fixed_pattern = fixed_pattern_noise_for_runs(
                 setting_runs, noise_model_error_for_setting(noise_model_errors, setting)
             )
-            account = fixed_pattern_account_for_run(setting_runs[-1], setting_fixed_pattern)
+            account = fixed_pattern_account_for_run(
+                setting_runs[-1],
+                setting_fixed_pattern,
+                load_record=aperture_record_reader(context.astrometrics),
+            )
             if account is not None:
                 accounts[setting] = account
                 statements.extend(
@@ -1358,7 +1367,7 @@ def _quality_statements_of_settings(
             mode = predict_weighting_mode(
                 configured_weight,
                 [frame.exposure_seconds for frame in frames],
-                is_spectral=frame_is_spectral({"filter": setting.filter_name}),
+                is_spectral=setting.is_spectral,
             )
             width_values = [float(w) for w in widths if w is not None]
             tradeoff = find_sharpness_tradeoff(frames, width_values, mode)
@@ -1536,9 +1545,14 @@ def _calibration_statements(
     """
     if not summaries:
         return []
-    darks, flats, problem = read_calibration_rows(astrometrics)
-    if problem is not None:
-        return [insufficient(CALIBRATION_RULE_NAME, problem)]
+    darks, flats, tolerance, problem = read_calibration_rows(astrometrics)
+    if problem is not None or tolerance is None:
+        return [
+            insufficient(
+                CALIBRATION_RULE_NAME,
+                problem or "The calibration library did not give its dark temperature tolerance.",
+            )
+        ]
     temperatures = frame_sensor_temperatures(target)
     for row in rows:
         if row.metric == SENSOR_TEMPERATURE_METRIC and row.value is not None:
@@ -1553,7 +1567,8 @@ def _calibration_statements(
                 frame_count=summary.frames_taken,
             )
         )
-    return [calibration_gap_statement(finding) for finding in find_calibration_gaps(groups, darks, flats)]
+    findings = find_calibration_gaps(groups, darks, flats, tolerance)
+    return [calibration_gap_statement(finding) for finding in findings]
 
 
 def _natural_goal_statements(
@@ -1794,7 +1809,7 @@ def _checklist_returns(
 # -----------------------------------------------------------------------------
 
 
-def _camera_spellings(camera_name: str, config: Any) -> list[str]:
+def _camera_spellings(astrometrics: Any, camera_name: str) -> list[str]:
     """List the names a camera may be stored under in the measurement store.
 
     The catalog name, the FITS header name and the library record name can
@@ -1802,22 +1817,22 @@ def _camera_spellings(camera_name: str, config: Any) -> list[str]:
 
     Parameters
     ----------
+    astrometrics : `Any`
+        The science library's high-level interface (``Astrometrics``); it
+        holds the camera profiles.
     camera_name : `str`
         The camera's name in the equipment catalog.
-    config : `AppConfiguration`
-        The configuration that holds the camera profiles.
 
     Returns
     -------
     spellings : `list` [`str`]
         The catalog name first, then the profile's names, without repeats.
     """
-    from astrometricslib import resolve_camera_profile
     from astrometricslib.exceptions import ConfigurationError
 
     names = [camera_name]
     try:
-        profile = resolve_camera_profile(camera_name, config)
+        profile = astrometrics.processing.calibration.camera_profile(camera_name)
     except ConfigurationError:
         return names
     names.extend([profile.camera_name, profile.record_name, *profile.name_aliases])
@@ -1840,7 +1855,7 @@ def _provenance_text(value: Any) -> str:
     return f"{value.provenance.kind}: {value.provenance.source}"
 
 
-def _clipping_note(camera_name: str, config: Any, goal: ScienceGoal) -> str:
+def _clipping_note(astrometrics: Any, camera_name: str, goal: ScienceGoal) -> str:
     """Write what is known about the camera's limits and the star's peak.
 
     The numbers come from the camera's stored profile and are never typed in
@@ -1851,10 +1866,11 @@ def _clipping_note(camera_name: str, config: Any, goal: ScienceGoal) -> str:
 
     Parameters
     ----------
+    astrometrics : `Any`
+        The science library's high-level interface (``Astrometrics``); it
+        holds the camera profiles.
     camera_name : `str`
         The active camera.
-    config : `AppConfiguration`
-        The configuration that holds the camera profiles.
     goal : `ScienceGoal`
         The target's goal. A slitless spectrum is capped by its zero-order
         image, a different star peak, and says so.
@@ -1876,7 +1892,7 @@ def _clipping_note(camera_name: str, config: Any, goal: ScienceGoal) -> str:
             "cannot be predicted."
         )
     try:
-        profile = resolve_camera_profile(camera_name, config)
+        profile = astrometrics.processing.calibration.camera_profile(camera_name)
     except AstrometricsError:
         return note + " The camera's saturation limits are not known."
     clip, saturation = profile.clip_ceiling_adu, profile.pixel_saturation_level_adu
@@ -1959,7 +1975,7 @@ def _starting_point(
             "No camera is active in the equipment catalog, so there is no equipment to start from."
         )
     observations: list[FrameObservation] = []
-    for spelling in _camera_spellings(camera.name, config):
+    for spelling in _camera_spellings(context.astrometrics, camera.name):
         observations = [o for o in context.camera_observations(spelling) if o.set_aside_reason is None]
         if observations:
             break
@@ -1969,11 +1985,7 @@ def _starting_point(
             "read noise are not known for it."
         )
     wants_spectral = goal == ScienceGoal.SLITLESS_SPECTRAL_RESOLUTION
-    suited = [
-        o
-        for o in observations
-        if frame_is_spectral({"filter": o.capture_setting.filter_name}) == wants_spectral
-    ]
+    suited = [o for o in observations if o.capture_setting.is_spectral == wants_spectral]
     goal_note = ""
     if not suited:
         suited = observations
@@ -2046,7 +2058,7 @@ def _starting_point(
             read_noise_note=read_note,
             peak_rate_adu_per_s=None,
             room_adu=None,
-            clipping_note=_clipping_note(camera.name, config, goal),
+            clipping_note=_clipping_note(context.astrometrics, camera.name, goal),
         )
     )
 
@@ -2170,7 +2182,12 @@ def build_target_dataset_report(
     noise_history = read_noise_history(astrometrics)
     noise_model_errors = noise_history.model_errors
     checks = _measured_noise_checks(
-        rows, stack_setting_by_subject, target_rows.settings, runs, noise_model_errors
+        rows,
+        stack_setting_by_subject,
+        target_rows.settings,
+        runs,
+        noise_model_errors,
+        aperture_record_reader(astrometrics),
     )
     summaries = []
     for group_goal, group in group_by_goal(
@@ -2244,7 +2261,7 @@ def build_target_dataset_report(
             observations,
             configured_stack_weight=configured_weight,
             electrons_per_adu=(
-                _camera_gain(config, dominant_setting(observations))
+                _camera_gain(astrometrics, dominant_setting(observations))
                 if dominant_setting(observations)
                 else None
             ),

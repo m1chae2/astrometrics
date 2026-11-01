@@ -2300,3 +2300,10 @@ def test_rows_as_the_library_writes_a_subset_give_an_provisional_status() -> Non
     assert subset.stack_subject_id == subset_subject
     assert subset.member_frame_ids == sorted(o.frame_id for o in old)
     assert frames_status == RecommendedAdditionalFramesStatus.PROVISIONAL
+
+
+def test_the_aperture_identity_copy_undoes_the_librarys_packing() -> None:
+    """Text packed into a number by the library comes back unchanged."""
+    assert fc.aperture_identity_from_number(aperture_identity_to_number(APERTURE_SET)) == APERTURE_SET
+    with pytest.raises(ValueError, match="aperture-set number"):
+        fc.aperture_identity_from_number(-1.0)

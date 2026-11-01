@@ -42,7 +42,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from astrometricslib import Astrometrics, FilterType, FrameRecord, frame_subject_id
+from astrometricslib import Astrometrics, FilterType, FrameRecord, Target
 from astrometricslib.exceptions import AstrometricsError, NotFoundError
 from astrometricslib.reports import QualityMeasurement, SubjectLevel
 from wayfindinglib.analytics.result_quality.capture_overheads import EXPOSURE_MATCH_SECONDS
@@ -552,6 +552,7 @@ def judgments_by_path(
     judgments : `dict` [`str`, `FrameJudgment`]
         The judgment of each frame that has at least one row, by frame path.
     """
+    target = Target(id=target_id)
     flags_by_subject: dict[str, set[str]] = {}
     for row in rows:
         if row.subject.level != SubjectLevel.FRAME:
@@ -562,7 +563,7 @@ def judgments_by_path(
             flags.add(row.metric)
     judgments: dict[str, FrameJudgment] = {}
     for frame in frames:
-        subject_id = frame_subject_id(frame.path, target_id)
+        subject_id = target.frame_subject_id(frame)
         if subject_id in flags_by_subject:
             judgments[frame.path] = FrameJudgment(
                 judged=True, flags=tuple(sorted(flags_by_subject[subject_id]))

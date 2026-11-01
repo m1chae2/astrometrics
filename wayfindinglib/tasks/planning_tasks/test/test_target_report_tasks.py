@@ -49,6 +49,7 @@ from wayfindinglib.models.session.observation_session import (
 from wayfindinglib.tasks.planning_tasks import target_report_tasks
 from wayfindinglib.tasks.planning_tasks.target_report_inputs import assign_stacks_to_settings
 from wayfindinglib.tasks.planning_tasks.target_report_tasks import build_target_dataset_report
+from wayfindinglib.test.camera_profile_support import no_camera_profiles_processing
 
 NOW = datetime(2026, 10, 20, 22, 0, tzinfo=UTC)
 SETTING = CaptureSetting(
@@ -202,8 +203,13 @@ class _Library:
         self.processing = SimpleNamespace(
             calibration=SimpleNamespace(
                 query=lambda **_arguments: CalibrationQueryResult(
-                    detail="counts", darks=darks or [], biases=[], flats=flats or []
-                )
+                    detail="counts",
+                    darks=darks or [],
+                    biases=[],
+                    flats=flats or [],
+                    dark_temperature_tolerance_c=3.0,
+                ),
+                camera_profile=no_camera_profiles_processing().calibration.camera_profile,
             ),
         )
 
@@ -1271,8 +1277,10 @@ def test_the_clipping_note_uses_the_ceiling_when_the_threshold_cannot_be_reached
         saturation_threshold_can_be_reached=False,
         photometric_linearity_limit_adu=None,
     )
-    monkeypatch.setattr(target_report_tasks, "resolve_camera_profile", lambda name, config: profile)
-    note = target_report_tasks._clipping_note("Nikon D5300", None, ScienceGoal.FAINT_POINT_SOURCE)
+    library = SimpleNamespace(
+        processing=SimpleNamespace(calibration=SimpleNamespace(camera_profile=lambda name: profile))
+    )
+    note = target_report_tasks._clipping_note(library, "Nikon D5300", ScienceGoal.FAINT_POINT_SOURCE)
     assert "at or above 16383 ADU (measured: raw maximum)" in note
     assert "the ceiling is used instead" in note
     assert "proportional" not in note
@@ -1290,8 +1298,10 @@ def test_the_clipping_note_names_the_linearity_limit_when_there_is_one(
         saturation_threshold_can_be_reached=True,
         photometric_linearity_limit_adu=_provenanced(60000, "measured", "Antonov 2026"),
     )
-    monkeypatch.setattr(target_report_tasks, "resolve_camera_profile", lambda name, config: profile)
-    note = target_report_tasks._clipping_note("ZWO ASI 533MM Pro", None, ScienceGoal.FAINT_POINT_SOURCE)
+    library = SimpleNamespace(
+        processing=SimpleNamespace(calibration=SimpleNamespace(camera_profile=lambda name: profile))
+    )
+    note = target_report_tasks._clipping_note(library, "ZWO ASI 533MM Pro", ScienceGoal.FAINT_POINT_SOURCE)
     assert "at or above 65000 ADU (assumed: default)" in note
     assert "the ceiling is used instead" not in note
     assert "above 60000 ADU (measured: Antonov 2026)" in note

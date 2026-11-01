@@ -1295,3 +1295,40 @@ def test_the_ranking_uses_the_midpoint_of_the_log_gains() -> None:
     assert without < ranked < low
     assert ng.noise_ratio_for_ranking(forecast_now, forecast_later, None) == without
     assert ng.noise_ratio_for_ranking(forecast_now, forecast_later, pattern.if_real()) == low
+
+
+def test_the_group_weight_copy_agrees_with_the_librarys_prediction() -> None:
+    """`combine_group_weights` gives what `predict_stack_weights` gives."""
+    from astrometricslib import ProcessingPipelines
+    from wayfindinglib.analytics.result_quality.noise_growth import combine_group_weights, star_width_weights
+
+    exposures = [10.0] * 8 + [60.0] * 6
+    widths = [2.0 + 0.1 * index for index in range(14)]
+    noises = {10.0: 12.0, 60.0: 30.0}
+    prediction = ProcessingPipelines.predict_stack_weights(
+        exposures, star_width_px=widths, group_frame_noise_adu=noises
+    )
+    assert prediction.mode == "group"
+    assert prediction.weights is not None
+
+    groups = [(10.0, widths[:8]), (60.0, widths[8:])]
+    weights, reasons = combine_group_weights(
+        [star_width_weights(group_widths) for _, group_widths in groups],
+        [length for length, _ in groups],
+        [len(group_widths) for _, group_widths in groups],
+        [noises[length] for length, _ in groups],
+    )
+    assert reasons == ["", ""]
+    flat = [weight for group in weights for weight in group or ()]
+    assert flat == pytest.approx(prediction.weights)
+
+
+def test_star_width_weights_match_the_stackers_rule() -> None:
+    """The sharpest frame weighs most; the weights have mean 1."""
+    from wayfindinglib.analytics.result_quality.noise_growth import star_width_weights
+
+    weights = star_width_weights([2.0, 3.0, 4.0])
+    assert weights is not None
+    assert sum(weights) / 3 == pytest.approx(1.0)
+    assert weights[0] > weights[1] > weights[2]
+    assert star_width_weights([]) is None

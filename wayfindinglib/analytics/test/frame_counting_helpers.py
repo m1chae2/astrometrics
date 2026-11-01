@@ -13,6 +13,7 @@ from typing import Any
 from astrometricslib import FilterType, FrameRecord, Target
 from astrometricslib._internal.frames import frame_subject_id
 from astrometricslib._internal.quality import MeasurementOrigin, QualityQueryResult, QualitySubject
+from astrometricslib.exceptions import NotFoundError
 from astrometricslib.reports import (
     LimitTier,
     MeasurementStatus,
@@ -21,6 +22,7 @@ from astrometricslib.reports import (
     SubjectLevel,
 )
 from wayfindinglib.analytics.frame_counting import EquipmentNames
+from wayfindinglib.test.camera_profile_support import no_camera_profiles_processing
 
 NIGHT_START = datetime(2026, 10, 24, 22, 0, tzinfo=UTC)
 """A time during the night of 2026-10-24, used as frame time zero."""
@@ -167,12 +169,40 @@ class FakeLibrary:
         self.rows = rows or []
         self.object_types = object_types or {}
         self.read_failures: set[str] = set()
-        self.targets = SimpleNamespace(get=self._get_target, list=self._list_targets)
+        self.targets = SimpleNamespace(
+            get=self._get_target, list=self._list_targets, resolve=self._resolve_target
+        )
+        self.processing = no_camera_profiles_processing()
         self.quality = SimpleNamespace(
             query=self._query,
             set_aside_frames=lambda _target: [],
             capture_settings=lambda ids=None: {},
         )
+
+    def _resolve_target(self, target: str | Target) -> Target:
+        """Turn a target id into its `Target`, as the library does.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            A target id or a target.
+
+        Returns
+        -------
+        resolved : `Target`
+            The target.
+
+        Raises
+        ------
+        NotFoundError
+            If no target has the id.
+        """
+        if isinstance(target, Target):
+            return target
+        found = self._get_target(target, refresh=True)
+        if found is None:
+            raise NotFoundError(f"No target with id {target!r} in the library.")
+        return found
 
     def _get_target(self, target_id: str, refresh: bool = False) -> Target | None:
         """Give a target holding the frames, or `None` for an unknown id.

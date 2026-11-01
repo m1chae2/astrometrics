@@ -261,3 +261,77 @@ dictionary. A name the model does not list is kept as an extra field.
   memory alone.
 - `astronomy:list` and `astronomy:count` keep `filter_type`, which picks a kind of star list, not a filter.
 - `wayfindinglib` keeps its own `get_advisory(object_id=)` and the sync RPC `object_id`.
+
+## `wayfindinglib` uses only public `astrometricslib` names
+
+`wayfindinglib` code outside its tests no longer imports `astrometricslib._internal` or any name that left the
+`astrometricslib` root. No old name is kept as an alias.
+
+### What replaced each name
+
+| Old (from the `astrometricslib` root) | New in `wayfindinglib` |
+| --- | --- |
+| `DATA_ERRORS`, `ONLINE_QUERY_ERRORS` | Copies in `wayfindinglib/_internal/errors.py` |
+| `check_choice`, `check_include`, `reject_unused_arguments`, `to_epoch_seconds` | Copies in `wayfindinglib/_internal/arguments.py` |
+| `parse_coordinate_string` for a target's `ra` and `dec` | `Target.ra_deg` and `Target.dec_deg` |
+| `parse_coordinate_string` for typed or header text (`frame_pointing.py`) | Copy in `wayfindinglib/_internal/coordinates.py` |
+| `safe_json_dumps` (the butler, four places) | `json.dumps`; the input is already plain JSON from `model_dump(mode="json")` |
+| `has_catalog_magnitude` | Copy in `wayfindinglib/models/planning/sky_source.py`, with a test that pins it to the library's rule |
+| `PIXEL_BLUR_FWHM_SQUARED_FACTOR` | Copy in `analytics/result_quality/efficiency.py` (a mathematical value), with a pin test |
+| `UNKNOWN_CAPTURE_SETTING_CAMERA` | `CaptureSetting.unknown()` and `CaptureSetting.is_unknown` |
+| `frame_is_spectral(frame)` | `FrameRecord.is_spectral` |
+| `frame_is_spectral({"filter": name})` | `CaptureSetting.is_spectral` |
+| `frame_subject_id(frame.path, target.id)` | `Target.frame_subject_id(frame)` (also takes a path) |
+| `target_object_category(simbad_type, id)` | `Target.object_category`; `depth_kind_of_target` now takes the `Target` |
+| `resolve_target(targets, target)` | `targets.resolve(target)` |
+| `FrameSelection`, `select_library_frames`, `parse_iso_time` | `targets.select_frames(...)`; `wayfindinglib` keeps a small `FrameRange` in `tasks/control_tasks/frame_guiding.py` for the arguments |
+| `classify_and_sort_fits_files` | `targets.add_frames(paths, target, telescope=)` and `processing.calibration.add_frames(paths, telescope=)` |
+| `derive_target_sessions` | `targets.sessions(target, night_date=)` |
+| `resolve_camera_profile(name, config)` | `processing.calibration.camera_profile(name)`. The functions that took `config` for this now take the `Astrometrics` handle (see below) |
+| `NO_GOOD_MATCH_RMS`, `AMBIGUOUS_RMS_GAP` | `SpectroscopyResult.poor_match_rms_limit` and `.ambiguous_rms_gap_limit` in the statement text. The static rule table keeps two copies (`POOR_MATCH_RMS_LIMIT`, `AMBIGUOUS_RMS_GAP_LIMIT`) with a pin test |
+| `DEFAULT_DARK_TEMPERATURE_TOLERANCE_C` | `CalibrationQueryResult.dark_temperature_tolerance_c` |
+| `SATURATED_BLOB_MINIMUM_PIXELS`, `SATURATED_FRAME_FRACTION` | The limits of the `frame.saturated_pixel_fraction` metric (`quality.metrics(name=..., detail="full")`), read by `read_capture_limits` |
+| `choose_stack_weight`, `wfwhm_weights`, `group_frame_weights`, `NOISE_WEIGHT_MODE`, `fold_exposure_lengths` | `ProcessingPipelines.predict_stack_weights(...)` (now a static method). See the notes below for the one rule that is copied |
+| `load_odd_even_aperture_record` | `quality.get_aperture_record(path)`, which now returns `OddEvenApertureRecord` or `None` |
+| `aperture_identity_from_number` | Copy in `analytics/result_quality/forecast.py`, with a pin test against the library's packing |
+
+### Changes to the library
+
+| Call | Change |
+| --- | --- |
+| `Target.frame_subject_id(frame)` | New. The id that the quality rows of one frame carry |
+| `CaptureSetting.unknown()`, `.is_unknown`, `.is_spectral` | New |
+| `quality.get_aperture_record(path)` | Returns `OddEvenApertureRecord` (`version`, `stack`, `aperture_identity`, `note`, `apertures` as `ApertureNoiseRow`) or `None`, not a dictionary |
+| `processing.predict_stack_weights(...)` | Now a static method, so code with no `Astrometrics` handle can call `ProcessingPipelines.predict_stack_weights(...)` |
+| `frame_subject_id`, `frame_is_spectral` | Moved to `astrometricslib/utilities/frame_identity.py`, below the models. The old modules still import them |
+
+### Changes to `wayfindinglib` functions
+
+| Function | Old | New |
+| --- | --- | --- |
+| `capture_history.equipment_spellings` | `(camera_name, config=None)` | `(astrometrics, camera_name)` |
+| `capture_history.collect_capture_frames`, `envelope_assembly.read_capture_frames` | `(astrometrics, telescope, camera, config=None)` | `(astrometrics, telescope, camera)` |
+| `envelope_assembly.measure_image_quality` | `(..., minimum_exposure_seconds, config=None)` | `(..., minimum_exposure_seconds)` |
+| `envelope_assembly.sensor_limits_for_camera` | `(camera_name, config=None)` | `(astrometrics, camera_name)` |
+| `allowed_capture_values.camera_names_match` | `(first, second, config=None)` | `(astrometrics, first, second)` |
+| `allowed_capture_values.allowed_capture_values_for_camera` | `(camera_name, config, library_settings)` | `(astrometrics, camera_name, library_settings)` |
+| `forecast.camera_gain_for_setting` | `(config, setting)` | `(astrometrics, setting)` |
+| `equipment_activation.list_camera_noise` | `(config, camera_name)` | `(astrometrics, camera_name)` |
+| `equipment_activation.list_camera_profiles` | `(config)` | `(config, astrometrics)` |
+| `forecast.fixed_pattern_account_for_run` | `load_record=` defaulted to the library loader | `load_record=` is required; `forecast.aperture_record_reader(astrometrics)` makes one |
+| `report_rules.find_calibration_gaps` | `(groups, dark_rows, flat_rows)` | `(groups, dark_rows, flat_rows, dark_temperature_tolerance_c)` |
+| `target_report_inputs.read_calibration_rows` | `(darks, flats, problem)` | `(darks, flats, tolerance, problem)` |
+| `calibration_advisory_tasks.build_calibration_advisory` | none | new optional `dark_temperature_tolerance_c=`; without it temperature is not compared |
+| `session_analysis.capture` stages | judged with library constants | `assess_capture_input_quality`, `measure_capture_performance` and `measure_clipping` take a `CaptureLimits`; `CaptureAnalysisRequest` has a required `limits`; `capture.limits.read_capture_limits(astrometrics)` reads it |
+| `frame_guiding.link_frames_to_guiding` | `FrameSelection` (times as seconds) | `FrameRange` (times as ISO text); the library parses them and raises `InvalidArgumentError` |
+| `depth_goal.depth_kind_of_target` | `(target_id, simbad_object_type)` | `(target)` |
+| `noise_growth` | `choose_stack_weight`, `group_frame_weights`, `wfwhm_weights` | `fold_exposure_lengths` and `star_width_weights` call `predict_stack_weights`; `combine_group_weights` is a copy of the group rule, pinned by a test |
+
+### Notes
+
+- A target added through `targets.add_frames` is filed under the id the library resolves (`targets.get` matches
+  loosely), where the old call used the id the caller gave. The two differ only when the caller's spelling is not the
+  stored one.
+- `targets.sessions(target)` takes the resolved target's id for the session ids, for the same reason.
+- `read_capture_limits` makes one `processing.calibration.query(kind="dark")` call per night analysis to read the dark
+  tolerance.

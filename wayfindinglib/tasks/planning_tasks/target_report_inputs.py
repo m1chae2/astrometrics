@@ -42,7 +42,7 @@ from typing import Any
 
 import numpy as np
 
-from astrometricslib import Target, frame_subject_id
+from astrometricslib import Target
 from astrometricslib.exceptions import AstrometricsError
 from astrometricslib.reports import EARLIER_NIGHTS_VARIANT, CaptureSetting, QualityMeasurement, SubjectLevel
 from wayfindinglib.analytics.result_quality.capture_overheads import EXPOSURE_MATCH_SECONDS
@@ -337,7 +337,7 @@ def frame_altitudes(target: Target) -> dict[str, float]:
         frame with none is left out.
     """
     return {
-        frame_subject_id(frame.path, target.id): float(frame.altitude_degrees)
+        target.frame_subject_id(frame): float(frame.altitude_degrees)
         for frame in target.frames
         if frame.altitude_degrees is not None and str(frame.role).upper().endswith("LIGHT")
     }
@@ -357,7 +357,7 @@ def frame_sensor_temperatures(target: Target) -> dict[str, float]:
         The temperature in degrees Celsius. A frame with none is left out.
     """
     return {
-        frame_subject_id(frame.path, target.id): float(frame.sensor_temperature_c)
+        target.frame_subject_id(frame): float(frame.sensor_temperature_c)
         for frame in target.frames
         if frame.sensor_temperature_c is not None and str(frame.role).upper().endswith("LIGHT")
     }
@@ -467,7 +467,9 @@ def assign_stacks_to_settings(
 # -----------------------------------------------------------------------------
 
 
-def read_calibration_rows(astrometrics: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str | None]:
+def read_calibration_rows(
+    astrometrics: Any,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], float | None, str | None]:
     """Read the calibration library's dark and flat rows.
 
     Parameters
@@ -477,15 +479,17 @@ def read_calibration_rows(astrometrics: Any) -> tuple[list[dict[str, Any]], list
 
     Returns
     -------
-    darks, flats, problem : `tuple`
-        The rows of ``processing.calibration.query(detail="counts")`` and a
-        sentence saying why they could not be read (``None`` when they could).
+    darks, flats, tolerance, problem : `tuple`
+        The rows of ``processing.calibration.query(detail="counts")``, the
+        dark temperature tolerance the same answer reports (degrees Celsius),
+        and a sentence saying why they could not be read (``None`` when they
+        could).
     """
     try:
         answer = astrometrics.processing.calibration.query(detail="counts")
     except (AstrometricsError, OSError) as error:
-        return [], [], f"The calibration library could not be read: {error}"
-    return list(answer.darks or []), list(answer.flats or []), None
+        return [], [], None, f"The calibration library could not be read: {error}"
+    return list(answer.darks or []), list(answer.flats or []), answer.dark_temperature_tolerance_c, None
 
 
 def sessions_of_target(butler: Any, target_id: str) -> list[ObservationSession]:

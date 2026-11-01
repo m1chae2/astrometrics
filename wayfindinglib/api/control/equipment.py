@@ -89,7 +89,9 @@ class EquipmentControl(ControlChild):
         if "guide_camera" in sections:
             status.guide_camera = context.active_guide_camera()
         if "camera_profiles" in sections:
-            status.camera_profiles = equipment_activation.list_camera_profiles(context.config)
+            status.camera_profiles = equipment_activation.list_camera_profiles(
+                context.config, context.astrometrics
+            )
         if "configuration" in sections:
             status.configuration = equipment_activation.get_equipment_configuration(context.config)
         if "observer_location" in sections:

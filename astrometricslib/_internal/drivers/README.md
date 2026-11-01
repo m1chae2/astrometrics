@@ -180,6 +180,6 @@ To add a pipeline step that needs a driver:
 2. Ask `(drivers or Drivers())` for the driver, for example `.simbad_or_default()`.
 3. Do not import or call a built-in driver class in `pipelines/`. `test/test_driver_construction.py` fails if a pipeline module does.
 
-A built-in driver class is not exported from the package root. Code outside the library cannot import `astrometricslib.drivers` (ruff's `TID251` ban in `pyproject.toml`), and code inside it goes through `Drivers`.
+A built-in driver class is not public. It lives in `astrometricslib._internal.drivers`, which only `astrometricslib` may import, and code inside the library goes through `Drivers`.
 
 For exact behavior, read the code.

@@ -539,6 +539,7 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
                 skipped_no_trail_star_count=spectroscopy.last_run_skipped_no_trail_count,
                 skipped_unidentified_star_count=spectroscopy.last_run_skipped_unidentified_count,
                 below_feature_limit_star_count=spectroscopy.last_run_below_feature_limit_count,
+                gaia_xp_download_failed_star_count=spectroscopy.last_run_gaia_xp_download_failed_count,
                 poor_match_classification_count=poor_match_count,
                 ambiguous_classification_count=ambiguous_count,
                 stage_quality_summary=summarize_stage_quality(quality_rows) or None,

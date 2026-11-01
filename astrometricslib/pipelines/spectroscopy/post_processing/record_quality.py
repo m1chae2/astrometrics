@@ -102,6 +102,7 @@ from astrometricslib.pipelines.spectroscopy.metrics import (
     STAGE_NAMES,
     below_feature_limit_notice_spec,
     gaia_xp_band_metric_name,
+    gaia_xp_download_failed_notice_spec,
     stage_metric_name,
     stage_spectrum_count_name,
 )
@@ -810,6 +811,38 @@ def below_feature_limit_notice_measurement(
     )
 
 
+def gaia_xp_download_failed_notice_measurement(
+    star_count: int, context: PipelineRunContext, subject: QualitySubject
+) -> QualityMeasurement:
+    """Build the row that says some Gaia XP downloads failed.
+
+    Parameters
+    ----------
+    star_count : `int`
+        How many stars could not be compared with Gaia because the download
+        failed.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    subject : `QualitySubject`
+        The run.
+
+    Returns
+    -------
+    measurement : `QualityMeasurement`
+        A failed notice whose value is the number of stars. Their spectra are
+        unaffected; they only have no Gaia comparison.
+    """
+    return notice_measurement(
+        gaia_xp_download_failed_notice_spec(),
+        float(star_count),
+        context,
+        subject,
+        f"{star_count} star(s) could not be compared with Gaia because the download of their Gaia XP "
+        "spectrum failed; their spectra are otherwise unaffected",
+        action_taken="left the stars without a Gaia comparison and went on",
+    )
+
+
 def spectroscopy_run_measurements(
     metrics: SpectroscopyPipelineQualityMetrics,
     gates: Sequence[GateResult],
@@ -856,6 +889,12 @@ def spectroscopy_run_measurements(
     if metrics.below_feature_limit_star_count > 0:
         measurements.append(
             below_feature_limit_notice_measurement(metrics.below_feature_limit_star_count, context, subject)
+        )
+    if metrics.gaia_xp_download_failed_star_count > 0:
+        measurements.append(
+            gaia_xp_download_failed_notice_measurement(
+                metrics.gaia_xp_download_failed_star_count, context, subject
+            )
         )
 
     gates_by_name = {gate.name: gate for gate in gates}

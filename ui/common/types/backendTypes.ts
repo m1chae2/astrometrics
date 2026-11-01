@@ -2057,6 +2057,7 @@ export interface SpectroscopyPipelineQualityMetrics {
   skippedNoTrailStarCount?: number;
   skippedUnidentifiedStarCount?: number;
   belowFeatureLimitStarCount?: number;
+  gaiaXpDownloadFailedStarCount?: number;
   stageQualitySummary?: StageQualityRollup[] | null;
   gaiaXpSummary?: GaiaXpRunSummary | null;
   wavelengthScaleSummary?: WavelengthScaleSummary | null;

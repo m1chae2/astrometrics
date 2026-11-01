@@ -38,6 +38,7 @@ from astrometricslib.pipelines.spectroscopy.post_processing.assess_output_qualit
     output_quality_checkpoint,
 )
 from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp import (
+    REASON_XP_DOWNLOAD_FAILED,
     compare_to_gaia_xp,
     gaia_xp_precheck,
 )
@@ -940,11 +941,13 @@ class SpectroscopyPipeline:
         # the overall image quality later.
         self.last_run_zero_order_saturation_fractions: list[float] = []
         # How many candidate stars the latest run left out before extraction,
-        # and how many analyzed stars were below the feature-analysis limit.
+        # how many analyzed stars were below the feature-analysis limit, and
+        # how many stars had no Gaia XP comparison because the download failed.
         # Read by the runner for the run's quality metrics.
         self.last_run_skipped_no_trail_count = 0
         self.last_run_skipped_unidentified_count = 0
         self.last_run_below_feature_limit_count = 0
+        self.last_run_gaia_xp_download_failed_count = 0
 
     def _noise_model_for(self, image: Any) -> PixelNoiseModel:
         """Give the camera noise to use for the samples read from an image.
@@ -1362,6 +1365,7 @@ class SpectroscopyPipeline:
             carrying its original `star_source` object.
         """
         self.last_run_below_feature_limit_count = 0
+        self.last_run_gaia_xp_download_failed_count = 0
         neighbor_only_ids = {id(star) for star in (neighbor_only_stars or [])}
         extracted: list[tuple[Any, bool, dict[str, Any]]] = []
         batch = target_stars if limit is None else target_stars[:limit]
@@ -1534,6 +1538,8 @@ class SpectroscopyPipeline:
         -------
         comparison : `GaiaXpComparison`
             The comparison, or a ``not_checked`` record that says why not.
+            A failed download is also added to
+            `last_run_gaia_xp_download_failed_count`.
         """
         source_id = gaia_dr3_source_id_of(star)
         response_corrected = analysis.response_corrected_intensity
@@ -1542,7 +1548,7 @@ class SpectroscopyPipeline:
             return not_checked
         if self._gaia_xp_driver is None:
             self._gaia_xp_driver = self._drivers.gaia_xp_or_default()
-        return compare_to_gaia_xp(
+        comparison = compare_to_gaia_xp(
             self._gaia_xp_driver,
             source_id,
             wavelengths_angstrom,
@@ -1551,6 +1557,9 @@ class SpectroscopyPipeline:
             line_spread=self.line_spread_profile,
             fallback_resolution_angstrom=analysis.resolution_element_angstrom,
         )
+        if comparison.not_checked_reason == REASON_XP_DOWNLOAD_FAILED:
+            self.last_run_gaia_xp_download_failed_count += 1
+        return comparison
 
     def _apply_result_to_stellar_object(
         self, star: StellarObject, result: dict[str, Any], image: AstrometricsImage

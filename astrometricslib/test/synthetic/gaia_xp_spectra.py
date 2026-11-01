@@ -11,7 +11,7 @@ instrument's resolution, then tilted and shifted by amounts the test chooses.
 
 import numpy as np
 
-from astrometricslib._internal.drivers.interfaces.gaia_xp_driver import GaiaXpDriver
+from astrometricslib._internal.drivers.interfaces.gaia_xp_driver import GaiaXpDownloadError, GaiaXpDriver
 from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp import (
     SLOPE_REFERENCE_ANGSTROM,
     xp_resolution_fwhm_angstrom,
@@ -38,17 +38,27 @@ class FakeGaiaXpDriver(GaiaXpDriver):
     spectra : `dict` [`int`, `tuple`], optional
         For each Gaia source id, the three arrays a real driver gives. A
         source not listed has no XP spectrum.
+    download_fails : `bool`, optional
+        If `True`, every request raises `GaiaXpDownloadError`, as a driver
+        does when the network is down.
     """
 
-    def __init__(self, spectra: dict[int, tuple[np.ndarray, np.ndarray, np.ndarray]] | None = None) -> None:
+    def __init__(
+        self,
+        spectra: dict[int, tuple[np.ndarray, np.ndarray, np.ndarray]] | None = None,
+        download_fails: bool = False,
+    ) -> None:
         """Keep the spectra and start the request log.
 
         Parameters
         ----------
         spectra : `dict` [`int`, `tuple`], optional
             The spectra to serve, by Gaia source id.
+        download_fails : `bool`, optional
+            Whether every request should fail like a failed download.
         """
         self.spectra = dict(spectra or {})
+        self.download_fails = download_fails
         self.requested_ids: list[int] = []
 
     def sampled_spectrum(self, source_id: int) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
@@ -63,8 +73,15 @@ class FakeGaiaXpDriver(GaiaXpDriver):
         -------
         spectrum : `tuple` or `None`
             The stored arrays, or `None` for a source that was not stored.
+
+        Raises
+        ------
+        GaiaXpDownloadError
+            If the fake was built with ``download_fails``.
         """
         self.requested_ids.append(int(source_id))
+        if self.download_fails:
+            raise GaiaXpDownloadError("the fake download failed")
         return self.spectra.get(int(source_id))
 
 

@@ -4,7 +4,7 @@ Description: The driver fetches Gaia DR3 XP spectra with astroquery and keeps
 each answer in a compressed NumPy file. These tests replace astroquery's
 download with a function that returns a canned reply or fails, and check that
 the cache round-trips and records the download date, that a source with no XP
-spectrum is remembered, that a failed download returns `None` without raising
+spectrum is remembered, that a failed download raises `GaiaXpDownloadError`
 and is logged once, and that the cache folder follows the same location rule
 as the Gaia star catalog cache. No network is used.
 """
@@ -28,7 +28,7 @@ from astrometricslib._internal.drivers.gaia_xp_driver import (
     _spectrum_from_files,
     gaia_xp_cache_path,
 )
-from astrometricslib._internal.drivers.interfaces.gaia_xp_driver import GaiaXpDriver
+from astrometricslib._internal.drivers.interfaces.gaia_xp_driver import GaiaXpDownloadError, GaiaXpDriver
 
 SOURCE_ID = 3225773709225508736
 
@@ -169,16 +169,18 @@ def test_a_source_without_xp_gives_none_and_is_remembered(tmp_path: Path, archiv
     assert driver.download_date(SOURCE_ID) is not None
 
 
-def test_a_failed_download_gives_none_is_not_cached_and_is_logged_once(
+def test_a_failed_download_raises_is_not_cached_and_is_logged_once(
     tmp_path: Path, archive: SimpleNamespace, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """A network failure never raises, is logged once, and is not cached."""
+    """A network failure raises, is logged once, and is not cached."""
     archive.error = OSError("network is down")
     driver = AstroqueryGaiaXpDriver(cache_directory=tmp_path)
 
     with caplog.at_level(logging.WARNING, logger=driver_module.logger.name):
-        assert driver.sampled_spectrum(SOURCE_ID) is None
-        assert driver.sampled_spectrum(SOURCE_ID + 1) is None
+        with pytest.raises(GaiaXpDownloadError, match="could not be downloaded"):
+            driver.sampled_spectrum(SOURCE_ID)
+        with pytest.raises(GaiaXpDownloadError):
+            driver.sampled_spectrum(SOURCE_ID + 1)
 
     warnings = [record for record in caplog.records if "Gaia XP download failed" in record.getMessage()]
     assert len(warnings) == 1
@@ -191,8 +193,10 @@ def test_after_a_failure_downloads_are_paused_until_the_retry_time(
     """A run with the network down pays for one failure, not one per star."""
     archive.error = OSError("network is down")
     driver = AstroqueryGaiaXpDriver(cache_directory=tmp_path)
-    driver.sampled_spectrum(SOURCE_ID)
-    driver.sampled_spectrum(SOURCE_ID + 1)
+    with pytest.raises(GaiaXpDownloadError):
+        driver.sampled_spectrum(SOURCE_ID)
+    with pytest.raises(GaiaXpDownloadError, match="paused"):
+        driver.sampled_spectrum(SOURCE_ID + 1)
     assert archive.calls == [SOURCE_ID]
 
     # Time passes, and the network comes back.
@@ -202,17 +206,18 @@ def test_after_a_failure_downloads_are_paused_until_the_retry_time(
     assert archive.calls == [SOURCE_ID, SOURCE_ID + 1]
 
 
-def test_a_reply_that_cannot_be_read_gives_none(tmp_path: Path, archive: SimpleNamespace) -> None:
+def test_a_reply_that_cannot_be_read_raises(tmp_path: Path, archive: SimpleNamespace) -> None:
     """A reply that is not a dictionary of tables is a failed download."""
     archive.reply = "not a reply"
     driver = AstroqueryGaiaXpDriver(cache_directory=tmp_path)
 
-    assert driver.sampled_spectrum(SOURCE_ID) is None
+    with pytest.raises(GaiaXpDownloadError):
+        driver.sampled_spectrum(SOURCE_ID)
     assert not list(tmp_path.glob("*.npz"))
 
 
 def test_a_table_without_the_flux_columns_is_refused() -> None:
-    """A table missing a column is an error the driver turns into `None`."""
+    """A stalled archive raises after the timeout, not a hang."""
     with pytest.raises(ValueError, match="lacks"):
         _spectrum_from_files({"file.csv": [Table({"wavelength": [1.0, 2.0]})]})
     with pytest.raises(ValueError, match="too few"):
@@ -222,7 +227,7 @@ def test_a_table_without_the_flux_columns_is_refused() -> None:
 def test_a_download_that_never_answers_is_abandoned(
     tmp_path: Path, archive: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, gaia_module: MagicMock
 ) -> None:
-    """A stalled archive gives `None` after the timeout instead of hanging."""
+    """A stalled archive raises after the timeout instead of hanging."""
     release = threading.Event()
 
     def stalled(**_keywords: Any) -> dict[str, list[Table]]:
@@ -241,7 +246,8 @@ def test_a_download_that_never_answers_is_abandoned(
     driver = AstroqueryGaiaXpDriver(cache_directory=tmp_path)
 
     try:
-        assert driver.sampled_spectrum(SOURCE_ID) is None
+        with pytest.raises(GaiaXpDownloadError):
+            driver.sampled_spectrum(SOURCE_ID)
     finally:
         release.set()
     assert not list(tmp_path.glob("*.npz"))

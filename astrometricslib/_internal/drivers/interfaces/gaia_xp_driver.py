@@ -15,6 +15,17 @@ from abc import ABC, abstractmethod
 import numpy as np
 
 
+class GaiaXpDownloadError(Exception):
+    """A Gaia XP spectrum could not be fetched.
+
+    This is different from a source that has no XP spectrum. A missing
+    spectrum is a normal answer (`GaiaXpDriver.sampled_spectrum` gives
+    `None`). A download error means the answer is not known, for example
+    because the network is down, so the caller must not treat the source as
+    having no spectrum.
+    """
+
+
 class GaiaXpDriver(ABC):
     """What the library needs from the Gaia DR3 XP spectra."""
 
@@ -37,8 +48,13 @@ class GaiaXpDriver(ABC):
             Three `numpy.ndarray` of equal length: the wavelengths in
             Angstroms (increasing), the flux in W m^-2 nm^-1 (energy per
             second per square metre per nanometre of wavelength) and the
-            flux's one-sigma error in the same unit. `None` when the source
-            has no XP spectrum, or when the spectrum could not be fetched
-            (for example, the network is down). A driver never raises for
-            these cases, so a spectrum check can not stop a pipeline.
+            flux's one-sigma error in the same unit. `None` only when the
+            source has no XP spectrum.
+
+        Raises
+        ------
+        GaiaXpDownloadError
+            If the spectrum could not be fetched (for example, the network
+            is down), so it is not known whether the source has one. A
+            caller that must not stop on this catches it.
         """

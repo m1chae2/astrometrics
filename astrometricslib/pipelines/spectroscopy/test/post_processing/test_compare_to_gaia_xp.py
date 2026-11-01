@@ -30,6 +30,7 @@ from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp i
     REASON_NO_SOURCE_ID,
     REASON_NO_SPECTRUM,
     REASON_NO_XP,
+    REASON_XP_DOWNLOAD_FAILED,
     compare_spectrum_to_xp,
     compare_to_gaia_xp,
     gaia_xp_gate,
@@ -192,6 +193,19 @@ def test_a_source_with_no_xp_spectrum_is_not_checked() -> None:
     assert comparison.not_checked_reason == REASON_NO_XP
     assert comparison.gaia_source_id == SOURCE_ID
     assert driver.requested_ids == [SOURCE_ID]
+
+
+def test_a_failed_download_is_not_checked_with_its_own_reason() -> None:
+    """A failed download is told apart from a source with no XP spectrum."""
+    wavelength, intensity = make_calibrated_spectrum("G2V")
+    driver = FakeGaiaXpDriver({SOURCE_ID: make_xp_spectrum("G2V")}, download_fails=True)
+
+    comparison = compare_to_gaia_xp(driver, SOURCE_ID, wavelength, intensity)
+
+    assert comparison.status == "not_checked"
+    assert comparison.not_checked_reason == REASON_XP_DOWNLOAD_FAILED
+    assert comparison.not_checked_reason != REASON_NO_XP
+    assert comparison.gaia_source_id == SOURCE_ID
 
 
 def test_a_star_with_no_response_corrected_spectrum_is_not_checked() -> None:

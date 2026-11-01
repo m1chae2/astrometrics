@@ -276,6 +276,7 @@ def test_the_single_image_runner_writes_one_row_per_metric_and_a_repeat_writes_n
         last_run_skipped_no_trail_count=0,
         last_run_skipped_unidentified_count=0,
         last_run_below_feature_limit_count=0,
+        last_run_gaia_xp_download_failed_count=0,
         config=SimpleNamespace(camera=SimpleNamespace(name="ZWO ASI 533MM Pro")),
     )
     result = Result(
@@ -318,6 +319,7 @@ def test_a_run_without_a_time_stores_nothing(tmp_path: Path, monkeypatch: pytest
         last_run_skipped_no_trail_count=0,
         last_run_skipped_unidentified_count=0,
         last_run_below_feature_limit_count=0,
+        last_run_gaia_xp_download_failed_count=0,
         config=SimpleNamespace(camera=SimpleNamespace(name="ZWO ASI 533MM Pro")),
     )
     result = Result(
@@ -358,6 +360,7 @@ def test_a_storage_failure_does_not_fail_the_run(
         last_run_skipped_no_trail_count=0,
         last_run_skipped_unidentified_count=0,
         last_run_below_feature_limit_count=0,
+        last_run_gaia_xp_download_failed_count=0,
         config=SimpleNamespace(camera=SimpleNamespace(name="ZWO ASI 533MM Pro")),
     )
     result = Result(
@@ -424,6 +427,20 @@ def test_spectra_below_the_feature_limit_are_stored_as_a_notice() -> None:
     notices = [m for m in stored if m.metric == "spectroscopy.notice_stars_below_feature_limit"]
     assert len(notices) == 1
     assert notices[0].value == pytest.approx(3.0)
+    assert notices[0].check_outcome is GateStatus.FAILED
+    assert not [m for m in quiet if ".notice_" in m.metric]
+
+
+def test_failed_gaia_xp_downloads_are_stored_as_a_notice() -> None:
+    """Failed Gaia downloads give a failed notice, only when there are some."""
+    metrics = healthy_summary_metrics().model_copy(update={"gaia_xp_download_failed_star_count": 5})
+
+    stored = rg.spectroscopy_run_measurements(metrics, healthy_gates(), run_context())
+    quiet = rg.spectroscopy_run_measurements(healthy_summary_metrics(), healthy_gates(), run_context())
+
+    notices = [m for m in stored if m.metric == "spectroscopy.notice_gaia_xp_download_failed"]
+    assert len(notices) == 1
+    assert notices[0].value == pytest.approx(5.0)
     assert notices[0].check_outcome is GateStatus.FAILED
     assert not [m for m in quiet if ".notice_" in m.metric]
 

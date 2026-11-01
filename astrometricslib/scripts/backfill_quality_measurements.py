@@ -1737,6 +1737,7 @@ SUMMARY_KINDS: tuple[SummaryKind, ...] = (
             "spectroscopy.skipped_no_trail_star_count",
             "spectroscopy.skipped_unidentified_star_count",
             "spectroscopy.notice_stars_below_feature_limit",
+            "spectroscopy.notice_gaia_xp_download_failed",
         ),
     ),
     SummaryKind(

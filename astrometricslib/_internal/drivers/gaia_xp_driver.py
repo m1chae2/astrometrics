@@ -16,11 +16,12 @@ changes, so a cached file is never refreshed. A source that the archive says
 has no XP spectrum is cached too, as a file with empty arrays, so it is not
 asked about again.
 
-The driver never raises into the pipeline. A source with no XP spectrum and a
-failed download both give `None`. A failed download (no network, a server
-error, a reply that cannot be read, or no answer inside
-`DOWNLOAD_TIMEOUT_SECONDS`) is logged once per driver. It is not cached, but
-the driver then skips downloads for `RETRY_AFTER_FAILURE_SECONDS`, so a run
+A source with no XP spectrum gives `None`. A failed download (no network, a
+server error, a reply that cannot be read, or no answer inside
+`DOWNLOAD_TIMEOUT_SECONDS`) raises `GaiaXpDownloadError`, so the caller can
+tell it from a missing spectrum. A failed download is logged once per driver.
+It is not cached, but the driver then skips downloads for
+`RETRY_AFTER_FAILURE_SECONDS` and raises at once during that pause, so a run
 with the network down does not wait for a timeout on every star of every
 frame.
 """
@@ -37,7 +38,7 @@ from typing import Any
 
 import numpy as np
 
-from astrometricslib._internal.drivers.interfaces.gaia_xp_driver import GaiaXpDriver
+from astrometricslib._internal.drivers.interfaces.gaia_xp_driver import GaiaXpDownloadError, GaiaXpDriver
 from astrometricslib.foundation.config import AppConfiguration, get_configuration
 from astrometricslib.foundation.paths import catalog_cache_directory
 from astrometricslib.utilities.exceptions import ONLINE_QUERY_ERRORS
@@ -175,15 +176,20 @@ class AstroqueryGaiaXpDriver(GaiaXpDriver):
         -------
         spectrum : `tuple` or `None`
             The wavelengths in Angstroms, the flux in W m^-2 nm^-1 and its
-            error, or `None` when the source has no XP spectrum or the
-            download failed. This method does not raise.
+            error, or `None` when the source has no XP spectrum.
+
+        Raises
+        ------
+        GaiaXpDownloadError
+            If the download failed, or if downloads are paused after an
+            earlier failure.
         """
         source_id = int(source_id)
         cached = self._read_cache(source_id)
         if cached is not None:
             return cached if cached[0].size else None
         if time.monotonic() < self._skip_downloads_until:
-            return None
+            raise GaiaXpDownloadError("Gaia XP downloads are paused after an earlier failure")
         with self._download_lock:
             # A second caller waited on the lock: the first may have cached it.
             cached = self._read_cache(source_id)
@@ -193,7 +199,9 @@ class AstroqueryGaiaXpDriver(GaiaXpDriver):
                 spectrum = self._download(source_id)
             except _DOWNLOAD_ERRORS as download_error:
                 self._note_failure(source_id, download_error)
-                return None
+                raise GaiaXpDownloadError(
+                    f"the Gaia XP spectrum of source {source_id} could not be downloaded: {download_error}"
+                ) from download_error
             self._write_cache(source_id, spectrum)
         return spectrum
 

@@ -110,6 +110,10 @@ UNUSED_DECISION_METRICS = {
         "(SPE-31), so a job can list them as a warning. No rule reads it yet; the pipeline-quality view "
         "of issue 97 decides how it is shown."
     ),
+    "spectroscopy.notice_gaia_xp_download_failed": (
+        "issue 97: counts the stars whose Gaia XP spectrum could not be downloaded, so a job can list them "
+        "as a warning. No rule reads it yet; the pipeline-quality view of issue 97 decides how it is shown."
+    ),
     "asteroid_detection.notice_camera_without_profile": _NOTICE_ROW_REASON,
     "asteroid_detection.notice_ephemeris_query_cap_reached": _NOTICE_ROW_REASON,
     "stacking.abandoned_after_s": (

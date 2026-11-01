@@ -64,6 +64,7 @@ SPECTROSCOPY_UNRESOLVED_STAR_COUNT = "spectroscopy.unresolved_star_count"
 SPECTROSCOPY_SKIPPED_NO_TRAIL_STAR_COUNT = "spectroscopy.skipped_no_trail_star_count"
 SPECTROSCOPY_SKIPPED_UNIDENTIFIED_STAR_COUNT = "spectroscopy.skipped_unidentified_star_count"
 SPECTROSCOPY_NOTICE_BELOW_FEATURE_LIMIT = "spectroscopy.notice_stars_below_feature_limit"
+SPECTROSCOPY_NOTICE_GAIA_XP_DOWNLOAD_FAILED = "spectroscopy.notice_gaia_xp_download_failed"
 SPECTROSCOPY_POOR_MATCH_CLASSIFICATION_COUNT = "spectroscopy.poor_match_classification_count"
 SPECTROSCOPY_AMBIGUOUS_CLASSIFICATION_COUNT = "spectroscopy.ambiguous_classification_count"
 
@@ -946,6 +947,33 @@ def _gaia_xp_metrics() -> tuple[MetricSpec, ...]:
     return tuple(specs)
 
 
+def gaia_xp_download_failed_notice_spec() -> MetricSpec:
+    """Declare the notice for Gaia XP spectra that could not be downloaded.
+
+    Returns
+    -------
+    spec : `MetricSpec`
+        A run-level notice. Its value is the number of stars whose Gaia XP
+        spectrum could not be downloaded, so they were not compared with
+        Gaia; the row is stored only when there was at least one.
+    """
+    return notice_spec(
+        SPECTROSCOPY_NOTICE_GAIA_XP_DOWNLOAD_FAILED,
+        Checkpoint.SPECTROSCOPY,
+        SubjectLevel.RUN,
+        "count",
+        "Whether some stars could not be compared with Gaia because the download failed.",
+        "The number of stars whose Gaia XP spectrum could not be downloaded (no network, a server error or "
+        "no answer in time). A star with no XP spectrum is not counted. These stars are not compared with "
+        "Gaia; their own spectra are unaffected.",
+        "pipelines.spectroscopy.post_processing.record_quality.gaia_xp_download_failed_notice_measurement",
+        (
+            "A run in which every download failed would otherwise look like one in which no star has a Gaia "
+            "spectrum, and the Gaia check of the instrument response would be missing without a sign."
+        ),
+    )
+
+
 def below_feature_limit_notice_spec() -> MetricSpec:
     """Declare the notice for spectra below the feature-analysis limit.
 
@@ -1243,4 +1271,5 @@ SPECTROSCOPY_METRICS: tuple[MetricSpec, ...] = (
     ),
     camera_without_profile_spec("spectroscopy"),
     below_feature_limit_notice_spec(),
+    gaia_xp_download_failed_notice_spec(),
 )

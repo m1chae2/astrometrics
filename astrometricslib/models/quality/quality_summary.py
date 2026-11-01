@@ -678,6 +678,11 @@ class SpectroscopyPipelineQualityMetrics(StarIdentificationMetrics):
     # spectrum and get no feature detection or classification. The single-
     # image run counts them; a summary saved before this was recorded reads 0.
     below_feature_limit_star_count: int = Field(default=0, alias="belowFeatureLimitStarCount")
+    # How many stars could not be compared with Gaia XP because the download of
+    # their XP spectrum failed (a star with no XP spectrum is not counted).
+    # Their spectra are otherwise unaffected. The single-image run counts them;
+    # a summary saved before this was recorded reads 0.
+    gaia_xp_download_failed_star_count: int = Field(default=0, alias="gaiaXpDownloadFailedStarCount")
     # How each quality checkpoint went across the run's spectra, in stage
     # order: for each of the four stages, how many spectra were checked, how
     # many had a failed metric, and the median of each numeric metric (see

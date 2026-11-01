@@ -154,11 +154,11 @@ def test_recover_guide_star_loss_delegates_to_task_function() -> None:
 
 
 def test_record_divergence_delegates_to_task_function() -> None:
-    """Verify record_divergence builds a DivergenceRecord."""
+    """Verify build_divergence_record builds a DivergenceRecord."""
     from wayfindinglib.models.policy.delegation import ObservatoryCapability
 
     execution = ObservationExecution()
-    record = execution.record_divergence(
+    record = execution.build_divergence_record(
         "div-1",
         "session-1",
         "entry-1",

@@ -253,7 +253,7 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "execution:get_session": ("execution_service", "get_session"),
     "execution:abort_session": ("execution_service", "abort_session"),
     "execution:reconcile_session": ("execution_service", "reconcile_session"),
-    "execution:record_divergence": ("execution_service", "record_divergence"),
+    "execution:build_divergence_record": ("execution_service", "build_divergence_record"),
     # Night plan and observation packages. `plan:get` reads (no `session_id`
     # lists all), `plan:list_packages` lists the package library and
     # `plan:current_session` reads tonight's session. `plan:edit` and

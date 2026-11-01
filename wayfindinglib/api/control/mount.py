@@ -13,6 +13,7 @@ from typing import Any
 
 from astrometricslib import Target
 from wayfindinglib.api.control.context import ControlChild
+from wayfindinglib.models.control_status import MountControlStatus
 from wayfindinglib.models.session.correction_result import PointingCorrection
 from wayfindinglib.models.session.telemetry import (
     ExternalAlignmentPoll,
@@ -27,35 +28,27 @@ __all__ = ["MountControl"]
 class MountControl(ControlChild):
     """Point and track the telescope mount."""
 
-    def status(self, include: list[str] | None = None) -> dict[str, Any]:
-        """Read the mount's position and tracking, and the imaging devices.
+    def status(self) -> MountControlStatus:
+        """Read the mount's position, tracking and connection.
 
-        Parameters
-        ----------
-        include : `list` [`str`], optional
-            Device reads to make: ``mount`` (position, tracking, pier
-            side, park state, tracking rate, connection, ambient
-            temperature and humidity), ``filter``
-            (current filter), ``focuser`` (position) and ``camera``
-            (sensor temperature). All of them when omitted.
+        Only the mount: the filter, the focuser and the camera are read
+        with `control.imaging.status`.
 
         Returns
         -------
-        status : `dict` [`str`, `Any`]
-            ``ra``, ``dec``, ``altitude``, ``azimuth``, ``trackingStatus``,
-            ``connectionStatus``, ``targetName``, ``pierSide`` (``EAST`` or
-            ``WEST``), ``parked``, ``trackMode`` (such as ``SIDEREAL``),
-            ``temperature``,
-            ``humidity``, ``cameraStatus``, ``filter``, ``focuserPosition``
-            and ``cameraTemperature``, for the sections read. ``ra`` and
-            ``dec`` are ICRS (J2000), like catalog stars and plate
-            solutions: the mount's own current-epoch (JNow) reading is
-            converted. They read like ``"5h 35m 17.30s"`` and
-            ``"-5° 23′ 28.0″"``.
+        status : `MountControlStatus`
+            ``ra`` and ``dec`` are ICRS (J2000), like catalog stars and
+            plate solutions: the mount's own current-epoch (JNow) reading
+            is converted. They read like ``"5h 35m 17.30s"`` and
+            ``"-5° 23′ 28.0″"``. Also ``altitude``, ``azimuth``,
+            ``tracking_status``, ``connection_status``, ``target_name``,
+            ``pier_side`` (``EAST`` or ``WEST``), ``parked``,
+            ``track_mode`` (such as ``SIDEREAL``) and the ambient
+            ``temperature`` and ``humidity``.
         """
         from wayfindinglib.tasks.control_tasks import hardware_operations
 
-        return hardware_operations.mount_status(self._context, include)
+        return hardware_operations.mount_status(self._context)
 
     def poll_external_alignment(self) -> ExternalAlignmentPoll:
         """Store the alignment that other programs did through the mount.

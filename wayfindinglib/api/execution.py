@@ -294,7 +294,7 @@ class ObservationExecution:
 
     # -- Divergence recording ----------------------------------------------
 
-    def record_divergence(
+    def build_divergence_record(
         self,
         record_id: str,
         observation_session_id: str,

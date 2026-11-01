@@ -261,7 +261,12 @@ CLASSIFICATION_RULES = (
         "high",
         "Writes settings to local storage.",
     ),
-    _rule(r"^execution_record_divergence$", "change-data", "medium", "Records a divergence in session data."),
+    _rule(
+        r"^execution_build_divergence_record$",
+        "compute",
+        "high",
+        "Builds a divergence record and writes nothing.",
+    ),
     _rule(
         r"^observatory_guiding_(drain_external_pulses|refit_spectrum)$",
         "change-data",

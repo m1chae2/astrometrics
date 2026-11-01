@@ -349,6 +349,7 @@ class RecordingDrivers:
         }
         self.indi_session = MagicMock()
         self.indi_session.set_property.return_value = True
+        self.indi_session.status = {}
         self._previous = {name: getattr(context, name) for name in self.REPLACED_ATTRIBUTES}
         self.context._mount_driver = self.drivers["mount"]
         self.context._focuser_driver = self.drivers["focuser"]

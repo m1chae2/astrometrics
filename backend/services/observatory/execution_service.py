@@ -91,7 +91,7 @@ class ExecutionService:
         logger.info("Reconciling observation session %s", session_id)
         return self.wayfinder.execution.reconcile_session(session_id)
 
-    def record_divergence(
+    def build_divergence_record(
         self,
         record_id: str,
         observation_session_id: str,
@@ -136,7 +136,7 @@ class ExecutionService:
         """
         from wayfindinglib import ObservatoryCapability
 
-        record = self.wayfinder.execution.record_divergence(
+        record = self.wayfinder.execution.build_divergence_record(
             record_id,
             observation_session_id,
             queued_observation_package_id,

@@ -16,6 +16,13 @@
       "interim_block": "",
       "note": "Needs callables that MCP cannot send. No MCP use today."
     },
+    "execution_build_divergence_record": {
+      "tool_class": "compute",
+      "category": "planning-sessions",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Builds a record and writes nothing. The only arguments MCP can send are useless."
+    },
     "execution_create_recorder": {
       "tool_class": "change-data",
       "category": "planning-sessions",
@@ -29,13 +36,6 @@
       "disposition": "withhold",
       "interim_block": "",
       "note": "Writes the calibration counts and the session after a night."
-    },
-    "execution_record_divergence": {
-      "tool_class": "compute",
-      "category": "planning-sessions",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Builds a record and writes nothing. The only arguments MCP can send are useless."
     },
     "observatory_equipment_apply_configuration": {
       "tool_class": "change-data",

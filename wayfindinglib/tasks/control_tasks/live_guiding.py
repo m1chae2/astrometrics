@@ -169,7 +169,7 @@ def poll(context: ControlContext) -> None:
     if not reading.samples:
         return
     monitor.add(reading.samples)
-    target_name = hardware_operations.mount_status(context, ["mount"]).get("targetName")
+    target_name = hardware_operations.mount_status(context).target_name
     context.records.record_guiding_samples([
         {
             **sample.model_dump(),
@@ -193,7 +193,7 @@ def _tracking_status(context: ControlContext) -> str:
     status : `str`
         Such as ``"Tracking"``, ``"Idle"`` or ``"Parked"``.
     """
-    return hardware_operations.mount_status(context, ["mount"]).get("trackingStatus", "Unknown")
+    return hardware_operations.mount_status(context).tracking_status
 
 
 def _wait_for_tracking(context: ControlContext, sleep: Callable[[float], None]) -> None:

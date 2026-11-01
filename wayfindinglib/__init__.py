@@ -141,7 +141,7 @@ _LAZY_EXPORTS = {
     # The shape of `IndiInterface.get_polar_alignment_status()` and of a
     # stored polar alignment run.
     "PolarAlignmentStatus": "wayfindinglib.models.session.telemetry",
-    # The capability `control.safety` and `execution.record_divergence` take.
+    # The capability `control.safety` and `execution` take.
     "ObservatoryCapability": "wayfindinglib.models.policy.delegation",
     "ImagingStatus": "wayfindinglib.models.control_status",
     "GuidingStatus": "wayfindinglib.models.control_status",

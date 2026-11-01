@@ -209,7 +209,7 @@ RPC_METHODS: tuple[str, ...] = (
     "execution:get_session",
     "execution:abort_session",
     "execution:reconcile_session",
-    "execution:record_divergence",
+    "execution:build_divergence_record",
     # Night plan and observation packages: read them, edit them, tick a
     # checklist item. A session write sends the `plan:changed` event; a package
     # write sends the `packages:changed` event.

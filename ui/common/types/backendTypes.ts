@@ -5660,7 +5660,7 @@ export const RPC_METHODS = [
   "execution:get_session",
   "execution:abort_session",
   "execution:reconcile_session",
-  "execution:record_divergence",
+  "execution:build_divergence_record",
   "plan:get",
   "plan:current_session",
   "plan:list_packages",

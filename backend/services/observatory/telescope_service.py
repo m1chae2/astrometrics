@@ -74,7 +74,14 @@ class TelescopeService:
 
         logger = logging.getLogger(__name__)
         try:
-            data = self.wayfinder.control.mount.status()
+            data = self.wayfinder.control.mount.status().model_dump(by_alias=True)
+            imaging = self.wayfinder.control.imaging.status(include=["current_filter", "focuser", "camera"])
+            data.update({
+                "cameraStatus": imaging.camera_status,
+                "filter": imaging.current_filter,
+                "focuserPosition": imaging.focuser_position,
+                "cameraTemperature": imaging.camera_temperature,
+            })
         except (AstrometricsError, OSError, RuntimeError) as e:
             logger.warning("Failed to query telescope status (telescope may be offline): %s", e)
             data = {

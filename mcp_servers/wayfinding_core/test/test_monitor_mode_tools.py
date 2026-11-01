@@ -150,6 +150,7 @@ class Recorder:
             mock.get_last_image = AsyncMock(return_value=None)
         self.indi_session = MagicMock()
         self.indi_session.set_property.return_value = True
+        self.indi_session.status = {}
         for name, mock in self.drivers.items():
             setattr(wayfinder.control, f"_{name}", mock)
         wayfinder.control._driver = self.indi_session

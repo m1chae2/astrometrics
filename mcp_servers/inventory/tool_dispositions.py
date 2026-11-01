@@ -181,7 +181,7 @@ DECISIONS = {
         "drop",
         "Draws the Planetarium. Returns an empty list because of a wrong file path, and is 89 KB when fixed.",
     ),
-    "execution_record_divergence": ToolDecision(
+    "execution_build_divergence_record": ToolDecision(
         "drop", "Builds a record and writes nothing. The only arguments MCP can send are useless.", "compute"
     ),
     "execution_advance_session": ToolDecision(

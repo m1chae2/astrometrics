@@ -1166,15 +1166,15 @@ def test_focuser_and_filter_wheel_commands_refused_when_not_authoritative(
         control.imaging.set_filter("Luminance")
 
 
-def test_mount_status_golden_output_matches_the_single_driver_read(control: ObservatoryControl) -> None:
-    """Verify the four-call-assembled status matches the old single-call one.
+def test_mount_and_imaging_status_together_match_the_single_driver_read(control: ObservatoryControl) -> None:
+    """Verify the separate reads together match the old single-call status.
 
-    Regression-sensitive point: `control.mount.status`
-    now reassembles its result from four separate driver calls
-    (`mount_driver`, `filter_wheel_driver`, `focuser_driver`, `camera_driver`)
-    instead of one `IndiInterface.get_status()` call. Since nothing here
-    changes the simulator's state between the two reads, both must
-    produce byte-identical output.
+    Regression-sensitive point: `control.mount.status` and
+    `control.imaging.status` read through separate drivers
+    (`mount_driver`, `filter_wheel_driver`, `focuser_driver`,
+    `camera_driver`) instead of one `IndiInterface.get_status()` call.
+    Since nothing here changes the simulator's state between the reads,
+    the two together must produce the same values.
     """
     from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
 
@@ -1183,7 +1183,15 @@ def test_mount_status_golden_output_matches_the_single_driver_read(control: Obse
     golden = control._driver.get_status().model_dump(by_alias=True)
     golden.pop("guidingHistory", None)  # The backend's TelescopeService adds this.
 
-    reassembled = control.mount.status()
+    mount = control.mount.status()
+    imaging = control.imaging.status(include=["current_filter", "focuser", "camera"])
+    reassembled = {
+        **mount.model_dump(by_alias=True),
+        "cameraStatus": imaging.camera_status,
+        "filter": imaging.current_filter,
+        "focuserPosition": imaging.focuser_position,
+        "cameraTemperature": imaging.camera_temperature,
+    }
 
     assert reassembled == golden
 

@@ -149,6 +149,20 @@ The MCP tools for all of these are gone (`observatory_guiding_pulse`, `observato
 | `TelescopeService(driver=)` and `TelescopeService.indi_interface` | Removed; nothing read them |
 | (new) MCP | `observatory_mount_poll_external_alignment`, `observatory_mount_get_polar_alignment` and `observatory_equipment_apply_configuration`, all dropped (the backend calls them) |
 
+### `mount.status` and the divergence record
+
+| Old | New |
+| --- | --- |
+| `control.mount.status(include=[...])` returned a `dict` with the mount, filter, focuser and camera readings | `control.mount.status()` returns `MountControlStatus` and reads only the mount: `ra`, `dec`, `altitude`, `azimuth`, `temperature`, `humidity`, `tracking_status`, `connection_status`, `target_name`, `pier_side`, `parked`, `track_mode`. It has no `include`, because nothing is left to choose |
+| `mount.status` keys `filter`, `focuserPosition`, `cameraTemperature`, `cameraStatus` | `control.imaging.status(include=[...])` fields `current_filter`, `focuser_position`, `camera_temperature`, `camera_status`. New sections: `current_filter` and `camera`. `ImagingStatus` has the new fields |
+| RPC `telescope:get_status` | Same reply: the backend merges the two reads |
+| MCP `observatory_mount_status` argument `include` | Removed; use `observatory_imaging_status` for the filter, focuser and camera |
+| `execution.record_divergence` | `execution.build_divergence_record` |
+| RPC `execution:record_divergence` | `execution:build_divergence_record` (backend service method renamed the same way) |
+| MCP `execution_record_divergence` | `execution_build_divergence_record` |
+
+The function `record_divergence` in `tasks.execution_tasks.divergence_recording` keeps its name; it is not public.
+
 ## Left as they were, on purpose
 
 - `visualization.get_last_captured_image` is separate from `render_fits`: it finds the newest file itself and

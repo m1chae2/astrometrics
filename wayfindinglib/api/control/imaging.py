@@ -3,7 +3,8 @@
 Description: Takes exposures with the main camera (with a filter change
 and dithering between frames), turns the filter wheel, moves the
 focuser, and fits a focus curve. `status` reads the
-filter names, the focuser position and the saved focus model. A capture
+filter names and the filter in the beam, the focuser position, the
+camera's temperature and activity, and the saved focus model. A capture
 or filter change needs `CAPTURE_ORCHESTRATION` to be `AUTHORITATIVE`; a
 focuser move needs `AUTOFOCUS`.
 """
@@ -17,7 +18,7 @@ from wayfindinglib.models.session.capture_result import CaptureResult
 
 __all__ = ["ImagingControl"]
 
-STATUS_SECTIONS = ("filters", "focuser", "focus_model")
+STATUS_SECTIONS = ("filters", "current_filter", "focuser", "camera", "focus_model")
 """Sections `ImagingControl.status` can read."""
 
 
@@ -25,14 +26,16 @@ class ImagingControl(ControlChild):
     """Operate the main camera, the filter wheel and the focuser."""
 
     def status(self, include: list[str] | None = None) -> ImagingStatus:
-        """Read the filter wheel, the focuser and the saved focus model.
+        """Read the filter wheel, the focuser, the camera and the focus model.
 
         Parameters
         ----------
         include : `list` [`str`], optional
             Sections to read: ``filters`` (slot names, from the device),
-            ``focuser`` (position, from the device) and ``focus_model``
-            (saved, no device needed). All of them when omitted.
+            ``current_filter`` (the filter in the beam), ``focuser``
+            (position, from the device), ``camera`` (sensor temperature and
+            what the camera is doing) and ``focus_model`` (saved, no device
+            needed). All of them when omitted.
 
         Returns
         -------
@@ -45,8 +48,14 @@ class ImagingControl(ControlChild):
         status = ImagingStatus(sections=sections)
         if "filters" in sections:
             status.filter_names = hardware_operations.filter_names(self._context)
+        if "current_filter" in sections:
+            status.current_filter = hardware_operations.current_filter(self._context)
         if "focuser" in sections:
             status.focuser_position = hardware_operations.focuser_position(self._context)
+        if "camera" in sections:
+            status.camera_temperature, status.camera_status = hardware_operations.camera_reading(
+                self._context
+            )
         if "focus_model" in sections:
             status.focus_model = self._context.active_focus_model()
         return status

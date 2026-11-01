@@ -100,6 +100,7 @@ EXECUTION_MEMBERS = frozenset({
 REVIEW_MEMBERS = frozenset({
     "query",
     "query_alignment_sessions",
+    "query_alignment_records",
     "get_live_session_status",
     "frame_guiding",
     "get_performance_envelope",

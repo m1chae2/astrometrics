@@ -65,6 +65,10 @@ try:
 except PackageNotFoundError:  # running from a source tree without an install
     __version__ = "0.0.0+unknown"
 
+# `ObservationReview` is imported for real (not only for type checking) so
+# that `typing.get_type_hints(Wayfinder)` can resolve the `review` annotation.
+from wayfindinglib.api.review import ObservationReview  # ruff: ignore[module-import-not-at-top-of-file]
+
 _LAZY_EXPORTS = {
     "ObservatoryControl": "wayfindinglib.api.control",
     "ObservationPlanning": "wayfindinglib.api.planning",
@@ -111,6 +115,11 @@ class Wayfinder:
     The watchdog (`wayfindinglib/watchdog/`) is not built here on
     purpose: it must not be importable by the code it watches.
     """
+
+    review: ObservationReview
+    """The `review` sub-API. Declared here, with a real import, so that
+    `typing.get_type_hints(Wayfinder)` finds its class and the API reference
+    can show the section."""
 
     def __init__(
         self,
@@ -161,7 +170,6 @@ class Wayfinder:
         from wayfindinglib.api.control import ObservatoryControl
         from wayfindinglib.api.execution import ObservationExecution
         from wayfindinglib.api.planning import ObservationPlanning
-        from wayfindinglib.api.review import ObservationReview
         from wayfindinglib.drivers.butler import DiskButler
 
         self.config = config or get_configuration()

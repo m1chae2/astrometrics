@@ -25,7 +25,7 @@ Every warning a job detects today stays detected, and a user can ask what warnin
 
 - **Where a warning lives.** The measurement table already fits: each row has `check_outcome`, `reason`, the limit and its register entry, and `job_id`. A warning is a row with a failed check outcome.
 - **Conditions with no row today.** Flag reasons that are not gates must become rows before `flag_reasons` goes: the quarantine note, the single-frame note, a group left out for a non-gate reason, the camera with no profile, and the stacking timeout. The inventory lists these. The baseline comparison found 60 flag reasons with no failed gate.
-- **Proposed read.** `jobs.query(job_id=..., detail="warnings")` lists them, with the same data available to the backend, the desktop app and the MCP tools. This has not been built, and `job_id` may be empty on some rows, which needs checking.
+- **The read.** `jobs.query(job_id=..., detail="warnings")` lists them, with the same data available to the backend (RPC method `jobs:query`) and the MCP tool `jobs_query`. Built in phase 1b (2026-11-01). A warning is a stored row whose check outcome is `failed`; a row with no job id belongs to no job (backfilled rows, and calls outside any job).
 - **Order.** The read and the new rows are built before any flag is removed. Phase 3 starts only when the comparison script shows that every warning on the copy's targets is still reported.
 
 ## 2. Decisions needed
@@ -58,7 +58,7 @@ These are computed properties on `SpectroscopyResult`, with limits in astrometri
 
 Each frame's quality is stored in `FrameMeasurements` and in the measurement table.
 
-**Decided by the user, 2026-11-01:** retire it and read the measurement table everywhere, once every field it holds is confirmed to be in that table.
+**Decided by the user, 2026-11-01:** keep it. A field check found most of it is not in the measurement table: eight registration fields have no rows, and only background level and saturated fraction are true duplicates. Retiring it would add about nine metrics and a one-time copy on the real library, for little gain.
 
 ### D6. `processing_jobs.output_metrics`
 
@@ -109,7 +109,7 @@ A read-only script runs the wayfindinglib rules next to today's flags for every 
 
 ### Phase 1b: the job warnings read
 
-Build `jobs.query(detail="warnings")` from the measurement table. Record every non-gate flag reason as a row. Fill `job_id` wherever a job made the row. Extend the comparison script to check that every flag reason appears in its job's warnings.
+Built 2026-11-01: `jobs.query(detail="warnings")` from the measurement table. Record every non-gate flag reason as a row. Fill `job_id` wherever a job made the row. Extend the comparison script to check that every flag reason appears in its job's warnings.
 
 ### Phase 2: one pipeline at a time
 

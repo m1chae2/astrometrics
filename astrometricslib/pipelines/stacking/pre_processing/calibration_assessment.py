@@ -576,7 +576,7 @@ def _zero_check(
         return check_failed(
             name,
             f"{kind} frames are cut off at zero: {len(over)} of {len(shares)} frame(s) have "
-            f"{worst:.0%} or less of their pixels at exactly zero, so their noise is lost and the master "
+            f"up to {worst:.0%} of their pixels at exactly zero, so their noise is lost and the master "
             "is wrong; use a camera offset above 0",
             worst,
             ZERO_PIXEL_FRACTION_LIMIT,

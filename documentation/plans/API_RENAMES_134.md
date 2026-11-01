@@ -100,6 +100,7 @@ Done on the same branch. No old name is kept as an alias. The MCP tool of each c
 | `planning.get_sources(ra_deg, dec_deg, radius_deg, include=["stars"], limiting_magnitude=, include_stars_without_catalog_magnitude=)` | `planning.query_sources(..., source=["targets", "stars"], magnitude_max=, include_stars_without_catalog_magnitude=, limit=None)`. The old `include=["online"]` is `source=["simbad"]`; targets are listed only when `source` has `"targets"` |
 | `planning.get_library_star_summaries(ra_deg, dec_deg, radius_deg, magnitude_range=)` | `planning.query_sources(..., source=["stars"], magnitude_min=, magnitude_max=)` |
 | `planning.get_online_catalog_sources(ra_deg, dec_deg, radius_deg, enabled_driver_names, magnitude_limit=)` | `planning.query_sources(..., source=["catalogs"], catalog_drivers=[...], magnitude_max=)` |
+| `planning.get_imaged_field_centers()` | Removed. Use `astrometrics.targets.imaged_field_centers().centers`, a list of `FieldCenter` (read `center.right_ascension_deg`, not `center["right_ascension_deg"]`). The MCP tool `planning_get_imaged_field_centers` was already withheld; `target_imaged_field_centers` stays |
 
 ### Planning parameters
 

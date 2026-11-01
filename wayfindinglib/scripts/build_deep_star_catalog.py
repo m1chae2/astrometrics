@@ -41,7 +41,13 @@ import logging
 import sys
 import time
 
-from astrometricslib import ConflictError, ExternalServiceError, InvalidArgumentError, configure_logging
+from astrometricslib import (
+    Astrometrics,
+    ConflictError,
+    ExternalServiceError,
+    InvalidArgumentError,
+    configure_logging,
+)
 from wayfindinglib import Wayfinder
 from wayfindinglib.drivers.catalog import deep_star_store
 from wayfindinglib.drivers.catalog.deep_star_catalog_builder import (
@@ -166,7 +172,7 @@ def _build_argument_parser() -> argparse.ArgumentParser:
 
 
 def _choose_search_circles(
-    arguments: argparse.Namespace, planning: object
+    arguments: argparse.Namespace, config: object
 ) -> list[tuple[float, float, float]] | None:
     """Work out which places of sky the user asked to be downloaded.
 
@@ -174,8 +180,9 @@ def _choose_search_circles(
     ----------
     arguments : `argparse.Namespace`
         The parsed command-line arguments.
-    planning : `wayfindinglib.ObservationPlanning`
-        Used to look up imaged field centers for ``--near-targets``.
+    config : `astrometricslib.AppConfiguration`
+        The configuration of the library whose imaged fields
+        ``--near-targets`` looks up.
 
     Returns
     -------
@@ -189,11 +196,11 @@ def _choose_search_circles(
 
     circles = [(ra, dec, radius) for ra, dec, radius in arguments.near or []]
     if arguments.near_targets:
-        field_centers = planning.get_imaged_field_centers()
+        field_centers = Astrometrics(config).targets.imaged_field_centers(register_job=False).centers
         for field_center in field_centers:
             circles.append((
-                field_center["right_ascension_deg"],
-                field_center["declination_deg"],
+                field_center.right_ascension_deg,
+                field_center.declination_deg,
                 arguments.near_targets_radius_degrees,
             ))
         print(f"\nFound {len(field_centers)} imaged field(s) in the library.")
@@ -309,7 +316,7 @@ def run_catalog_build(argv: list[str] | None = None) -> int:
 
     _print_status(config)
 
-    circles = _choose_search_circles(arguments, planning)
+    circles = _choose_search_circles(arguments, config)
     chosen_pixels = None
     if circles is not None:
         if not circles:

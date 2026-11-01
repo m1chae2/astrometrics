@@ -270,9 +270,6 @@ DECISIONS = {
         "2026-10-05 it is ProcessingPipelines.stack, which also takes the exact frames to stack.",
         "process",
     ),
-    "planning_get_imaged_field_centers": ToolDecision(
-        "withhold", "Replaced by target_imaged_field_centers, which runs as a background job."
-    ),
     "target_imaged_field_centers": ToolDecision(
         "keep",
         "Built 2026-10-04. The distinct sky positions imaged, read from FITS headers (about 35 s on this "

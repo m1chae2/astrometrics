@@ -555,13 +555,6 @@
       "interim_block": "",
       "note": "Built 2026-10-27 (#134). Reads a target's depth goal: the chosen level, the depth reached and the time to reach the level. Saves nothing."
     },
-    "planning_get_imaged_field_centers": {
-      "tool_class": "observe",
-      "category": "planning-sessions",
-      "disposition": "withhold",
-      "interim_block": "",
-      "note": "Replaced by target_imaged_field_centers, which runs as a background job."
-    },
     "planning_get_plan": {
       "tool_class": "observe",
       "category": "planning-sessions",

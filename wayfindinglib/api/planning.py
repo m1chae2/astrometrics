@@ -692,23 +692,6 @@ class ObservationPlanning:
         """
         return self._sky_engine.get_constellation_lines()
 
-    def get_imaged_field_centers(self) -> list[dict[str, Any]]:
-        """List the sky positions of every target the library has imaged.
-
-        Used to download the deep-star catalog only around the fields
-        actually imaged, instead of the whole sky (see
-        `build_deep_star_catalog`'s ``pixels`` argument).
-
-        Returns
-        -------
-        field_centers : `list` [`dict`]
-            One entry per unique imaged field, with keys
-            ``right_ascension_deg``, ``declination_deg``, ``target_ids``
-            and ``frames_examined``.
-        """
-        centers = self._astrometrics.targets.imaged_field_centers(register_job=False).centers
-        return [center.model_dump() for center in centers]
-
     # -- Visibility ---------------------------------------------------------
 
     def get_visibility(

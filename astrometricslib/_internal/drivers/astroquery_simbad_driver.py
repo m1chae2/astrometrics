@@ -23,8 +23,11 @@ configuration. A failed query (no network, a server error, or a reply
 that cannot be read) is raised as `ExternalServiceError`, so callers
 catch one error category.
 
-When SIMBAD cannot be reached at all (a refused connection or a request
-that times out), the driver stops asking for `SIMBAD_COOLDOWN_SECONDS`.
+SIMBAD has two servers holding the same database (`SIMBAD_SERVERS`). When
+one cannot be reached (a refused connection or a request that times out), the
+driver logs it and asks the other, then keeps using the one that answered, so
+later calls do not wait out a timeout. When neither can be reached, the
+driver stops asking for `SIMBAD_COOLDOWN_SECONDS`.
 Every call in that time raises `ExternalServiceError` at once, instead of
 each waiting out its own timeout. The pause is short and temporary: after
 it the next call tries SIMBAD again, and one good reply clears it early.
@@ -33,10 +36,12 @@ it the next call tries SIMBAD again, and one good reply clears it early.
 import logging
 import threading
 import time
+from collections.abc import Callable
 from typing import Any
 
 import requests
 from astroquery.simbad import SimbadClass
+from pyvo.dal.exceptions import DALServiceError
 
 from astrometricslib._internal.drivers.interfaces.simbad_driver import SimbadDriver
 from astrometricslib.foundation.errors import ExternalServiceError
@@ -74,6 +79,15 @@ SIMBAD_QUERY_TIMEOUT_SECONDS = 30
 # run.
 SIMBAD_COOLDOWN_SECONDS = 120.0
 
+# The SIMBAD servers, in the order to try them: the main one in Strasbourg and
+# its mirror at Harvard. These are the two astroquery accepts for
+# `SimbadClass.server`.
+SIMBAD_SERVERS = ("simbad.cds.unistra.fr", "simbad.harvard.edu")
+
+# The position in `SIMBAD_SERVERS` of the server that last answered. Only read
+# or written with `SIMBAD_LOCK` held.
+_server_index: int = 0
+
 # The time (from `time.monotonic`) before which calls fail at once, or 0.0
 # when SIMBAD is not paused. Only read or written with `SIMBAD_LOCK` held.
 _paused_until: float = 0.0
@@ -95,7 +109,9 @@ def _is_connection_failure(error: BaseException) -> bool:
     A refused connection, a lost network and a timeout all do. A reply
     that arrives but is an error page, or cannot be read, does not: the
     server is up, so asking again soon may work. The error is followed
-    through its causes, because pyvo can wrap the `requests` error.
+    through its causes, because pyvo can wrap the `requests` error. pyvo can
+    also drop that error when it looks for the service's capabilities, leaving
+    a `DALServiceError` with no HTTP status, which means no server replied.
 
     Parameters
     ----------
@@ -116,6 +132,8 @@ def _is_connection_failure(error: BaseException) -> bool:
             current,
             (requests.exceptions.ConnectionError, requests.exceptions.Timeout, ConnectionError, TimeoutError),
         ):
+            return True
+        if isinstance(current, DALServiceError) and current.code is None:
             return True
         current = current.__cause__ or current.__context__
     return False
@@ -231,6 +249,56 @@ def _configure(client: SimbadClass, votable_fields: tuple[str, ...], row_limit: 
         client.add_votable_fields(*votable_fields)
 
 
+def _query_with_fallback(client: SimbadClass, query: Callable[[SimbadClass], Any]) -> Any:
+    """Run a query, asking the other server if the current one is unreachable.
+
+    Only a connection failure moves on to the other server. A reply that
+    arrives but cannot be read is raised, because the same query would fail the
+    same way on a copy of the same database.
+
+    Only call with `SIMBAD_LOCK` held.
+
+    Parameters
+    ----------
+    client : `SimbadClass`
+        The client to query with.
+    query : `collections.abc.Callable`
+        Configures the client and runs the query. It may run once per server.
+
+    Returns
+    -------
+    result : `object`
+        What `query` returned.
+
+    Raises
+    ------
+    ONLINE_QUERY_ERRORS
+        What the query raised, when the error is not a connection failure or
+        no server could be reached.
+    RuntimeError
+        If `SIMBAD_SERVERS` is empty.
+    """
+    global _server_index
+    server_count = len(SIMBAD_SERVERS)
+    for attempt in range(server_count):
+        index = (_server_index + attempt) % server_count
+        client.server = SIMBAD_SERVERS[index]
+        try:
+            result = query(client)
+        except ONLINE_QUERY_ERRORS as query_error:
+            if attempt == server_count - 1 or not _is_connection_failure(query_error):
+                raise
+            logger.warning(
+                "SIMBAD server %s could not be reached; trying the other one: %s",
+                SIMBAD_SERVERS[index],
+                query_error,
+            )
+            continue
+        _server_index = index
+        return result
+    raise RuntimeError("SIMBAD_SERVERS is empty")
+
+
 class AstroquerySimbadDriver(SimbadDriver):
     """Queries SIMBAD through the process's one astroquery client."""
 
@@ -269,9 +337,20 @@ class AstroquerySimbadDriver(SimbadDriver):
         with SIMBAD_LOCK:
             _raise_if_paused("The SIMBAD region search was skipped.", {"radius": radius})
             client = _get_client()
+
+            def region_query(active_client: SimbadClass) -> Any:
+                """Configure the client and search the cone.
+
+                Returns
+                -------
+                result_table : `astropy.table.Table` or `None`
+                    The matching rows, or `None` if SIMBAD returned nothing.
+                """
+                _configure(active_client, votable_fields, row_limit)
+                return active_client.query_region(coordinates, radius=radius)
+
             try:
-                _configure(client, votable_fields, row_limit)
-                result = client.query_region(coordinates, radius=radius)
+                result = _query_with_fallback(client, region_query)
                 _note_outcome(None)
                 return result
             except ONLINE_QUERY_ERRORS as query_error:
@@ -303,11 +382,22 @@ class AstroquerySimbadDriver(SimbadDriver):
         with SIMBAD_LOCK:
             _raise_if_paused("The SIMBAD name lookup was skipped.", {"object_name": object_name})
             client = _get_client()
-            try:
-                # Inside the `try`: adding a column can itself ask the
+
+            def object_query(active_client: SimbadClass) -> Any:
+                """Configure the client and look the name up.
+
+                Returns
+                -------
+                result_table : `astropy.table.Table` or `None`
+                    The matching row, or `None` if the name did not resolve.
+                """
+                # Part of the query: adding a column can itself ask the
                 # server which columns exist, and that can fail offline.
-                _configure(client, votable_fields, None)
-                result = client.query_object(object_name)
+                _configure(active_client, votable_fields, None)
+                return active_client.query_object(object_name)
+
+            try:
+                result = _query_with_fallback(client, object_query)
                 _note_outcome(None)
                 return result
             except ONLINE_QUERY_ERRORS as query_error:
@@ -338,7 +428,7 @@ class AstroquerySimbadDriver(SimbadDriver):
             _raise_if_paused("The SIMBAD TAP query was skipped.", {"query_length": len(adql_query)})
             client = _get_client()
             try:
-                result = client.query_tap(adql_query)
+                result = _query_with_fallback(client, lambda active: active.query_tap(adql_query))
                 _note_outcome(None)
                 return result
             except ONLINE_QUERY_ERRORS as query_error:

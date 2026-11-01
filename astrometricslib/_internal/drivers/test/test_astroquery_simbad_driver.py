@@ -80,6 +80,7 @@ class _FakeSimbad:
 def no_pause(monkeypatch: pytest.MonkeyPatch) -> None:
     """Start every test with SIMBAD not paused."""
     monkeypatch.setattr(simbad_module, "_paused_until", 0.0)
+    monkeypatch.setattr(simbad_module, "_server_index", 0)
 
 
 @pytest.fixture
@@ -300,7 +301,7 @@ def test_a_service_error_is_reported_as_an_external_service_error(monkeypatch: p
     The original error stays attached as the cause, so the log still shows
     what the server said.
     """
-    service_error = DALServiceError("SIMBAD returned HTTP 503")
+    service_error = DALServiceError("SIMBAD returned HTTP 503", code=503)
     monkeypatch.setattr(simbad_module, "_client", _FakeSimbad(result=service_error))
 
     with pytest.raises(ExternalServiceError) as raised:
@@ -410,7 +411,7 @@ def test_a_connection_failure_pauses_the_next_calls_without_asking_simbad(
     with pytest.raises(ExternalServiceError):
         driver.query_tap("SELECT 1")
 
-    assert len(calls_after_first) == 1
+    assert len(calls_after_first) == len(simbad_module.SIMBAD_SERVERS)
     assert [event for event in client.events if event[0].startswith("query")] == calls_after_first
 
 
@@ -436,7 +437,7 @@ def test_the_pause_ends_after_the_cooldown_and_a_good_reply_clears_it(
 
 def test_a_server_error_does_not_start_a_pause(monkeypatch: pytest.MonkeyPatch) -> None:
     """An error reply means the server is up, so the next call goes through."""
-    client = _FakeSimbad(result=DALServiceError("SIMBAD returned HTTP 503"))
+    client = _FakeSimbad(result=DALServiceError("SIMBAD returned HTTP 503", code=503))
     monkeypatch.setattr(simbad_module, "_client", client)
     driver = AstroquerySimbadDriver()
 
@@ -454,4 +455,86 @@ def test_a_connection_error_wrapped_by_another_error_still_starts_the_pause() ->
     wrapped.__cause__ = requests.exceptions.ConnectionError("refused")
 
     assert simbad_module._is_connection_failure(wrapped)
-    assert not simbad_module._is_connection_failure(DALServiceError("HTTP 503"))
+    assert not simbad_module._is_connection_failure(DALServiceError("HTTP 503", code=503))
+
+
+class _TwoServerSimbad(_FakeSimbad):
+    """A stand-in whose answer depends on which server it is pointed at."""
+
+    def __init__(self, outcomes: dict[str, object]) -> None:
+        """Store the outcome of each server.
+
+        Parameters
+        ----------
+        outcomes : `dict` [`str`, `object`]
+            Each server's reply, or the exception it raises.
+        """
+        super().__init__()
+        self.outcomes = outcomes
+        self.server = ""
+        self.asked: list[str] = []
+
+    def query_tap(self, _query: str) -> object:
+        """Answer as the current server would.
+
+        Returns
+        -------
+        reply : `object`
+            The current server's reply. Its exception, when it has one, is
+            raised instead.
+        """
+        self.asked.append(self.server)
+        outcome = self.outcomes[self.server]
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+MAIN_SERVER, MIRROR_SERVER = simbad_module.SIMBAD_SERVERS
+
+
+def test_an_unreachable_server_falls_back_to_the_other(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The mirror answers when the main server is down, and stays in use."""
+    client = _TwoServerSimbad({MAIN_SERVER: ConnectionError("down"), MIRROR_SERVER: "rows"})
+    monkeypatch.setattr(simbad_module, "_client", client)
+    driver = AstroquerySimbadDriver()
+    assert driver.query_tap("SELECT 1") == "rows"
+    assert driver.query_tap("SELECT 2") == "rows"
+    assert client.asked == [MAIN_SERVER, MIRROR_SERVER, MIRROR_SERVER]
+    assert simbad_module._paused_until <= 0.0
+
+
+def test_a_pyvo_error_with_no_http_status_counts_as_unreachable() -> None:
+    """A capabilities failure from pyvo has no status and no network error."""
+    assert simbad_module._is_connection_failure(DALServiceError("Unable to access the capabilities endpoint"))
+    assert not simbad_module._is_connection_failure(DALServiceError("server error", code=500))
+
+
+def test_a_server_that_answers_is_not_left(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The main server is the only one asked while it answers."""
+    client = _TwoServerSimbad({MAIN_SERVER: "rows", MIRROR_SERVER: "other"})
+    monkeypatch.setattr(simbad_module, "_client", client)
+    assert AstroquerySimbadDriver().query_tap("SELECT 1") == "rows"
+    assert client.asked == [MAIN_SERVER]
+
+
+def test_a_bad_reply_does_not_fall_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A reply that cannot be read is an error, not a reason to switch."""
+    client = _TwoServerSimbad({MAIN_SERVER: ValueError("bad reply"), MIRROR_SERVER: "rows"})
+    monkeypatch.setattr(simbad_module, "_client", client)
+    with pytest.raises(ExternalServiceError):
+        AstroquerySimbadDriver().query_tap("SELECT 1")
+    assert client.asked == [MAIN_SERVER]
+
+
+def test_both_servers_unreachable_starts_the_pause(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The pause starts only after both servers have failed."""
+    client = _TwoServerSimbad({MAIN_SERVER: ConnectionError("down"), MIRROR_SERVER: TimeoutError("down")})
+    monkeypatch.setattr(simbad_module, "_client", client)
+    driver = AstroquerySimbadDriver()
+    with pytest.raises(ExternalServiceError):
+        driver.query_tap("SELECT 1")
+    assert client.asked == [MAIN_SERVER, MIRROR_SERVER]
+    with pytest.raises(ExternalServiceError):
+        driver.query_tap("SELECT 2")
+    assert client.asked == [MAIN_SERVER, MIRROR_SERVER]

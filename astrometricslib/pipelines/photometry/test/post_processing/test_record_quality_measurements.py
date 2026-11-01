@@ -51,7 +51,9 @@ def _declared_names() -> set[str]:
     """Give the name of every run-level metric the pipeline declares.
 
     The zero point metrics are about frames and sessions and are checked in
-    `test_record_zero_point.py`; a run with no zero points emits none. The
+    `test_record_zero_point.py`; a run with no zero points emits none.
+    A notice metric is left out: its row is stored only when the condition
+    occurs (see `test_notices.py`). The
     noise model, alias peaks and target amplitude have steps of their own
     (`test_record_science_outcomes.py`).
 
@@ -61,7 +63,7 @@ def _declared_names() -> set[str]:
         The declared names, less the zero point and science outcome metrics.
     """
     return (
-        {spec.name for spec in PHOTOMETRY_METRICS}
+        {spec.name for spec in PHOTOMETRY_METRICS if ".notice_" not in spec.name}
         - PHOTOMETRY_ZERO_POINT_METRIC_NAMES
         - PHOTOMETRY_SCIENCE_OUTCOME_METRIC_NAMES
     )

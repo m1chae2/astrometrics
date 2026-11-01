@@ -45,6 +45,7 @@ from astrometricslib.models.quality.metric_spec import (
     MetricSpec,
     UncertaintyKind,
 )
+from astrometricslib.pipelines.shared.quality.notices import camera_without_profile_spec
 
 ASTROMETRY_SOURCES_DETECTED = "astrometry.sources_detected_count"
 ASTROMETRY_SIMBAD_MATCHED_COUNT = "astrometry.simbad_matched_count"
@@ -747,4 +748,5 @@ ASTROMETRY_METRICS: tuple[MetricSpec, ...] = (
         "when no lookup was made, including when the breaker was already open.",
         "The catalog lookups made during the run.",
     ),
+    camera_without_profile_spec("astrometry"),
 )

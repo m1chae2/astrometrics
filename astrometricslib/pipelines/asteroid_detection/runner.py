@@ -217,7 +217,7 @@ class AsteroidDetectionPipelineAdapter(AnalysisPipeline):
             record_camera_profile,
         )
 
-        record_camera_profile(summary, most_common_camera_name(light_frames))
+        record_camera_profile(summary, most_common_camera_name(light_frames), measurement_context)
         return summary
 
     def to_result_dict(

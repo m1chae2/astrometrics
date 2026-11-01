@@ -64,7 +64,9 @@ UNIT_NAME_ENDING: dict[str, str] = {
 # Names that are allowed to break the unit-ending rule, each with the reason.
 # Keep this list short. A gate's metric (``<pipeline>.gate_<name>``) carries
 # the gate's own name and the units of whatever number that gate quotes, so
-# gates are exempt as a group (see `is_gate_metric`). The two slopes below are
+# gates are exempt as a group (see `is_gate_metric`), and so is a notice's
+# (``<pipeline>.notice_<what was noticed>``, see `is_notice_metric`): it names
+# the thing noticed and counts it. The two slopes below are
 # unitless in the registry because "percent per 1000 angstrom" is not a known
 # unit; their names spell the unit out in full.
 UNIT_ENDING_ALLOW_LIST: dict[str, str] = {
@@ -178,6 +180,71 @@ def _stacking_emitted_measurements() -> list[QualityMeasurement]:
     return stacking_emitted_measurements()
 
 
+def _with_notice_rows(pipeline: str, rows: list[QualityMeasurement]) -> list[QualityMeasurement]:
+    """Add the notice rows of a run that raised every notice.
+
+    A notice is stored only when it happened, so the healthy fixture runs
+    store none. This raises each notice of the pipeline once.
+
+    Parameters
+    ----------
+    pipeline : `str`
+        The pipeline's name.
+    rows : `list` of `QualityMeasurement`
+        What the pipeline's record step emitted for its healthy run.
+
+    Returns
+    -------
+    rows : `list` of `QualityMeasurement`
+        The same rows and the pipeline's notice rows.
+    """
+    from datetime import UTC, datetime
+
+    from astrometricslib.models.quality.quality_summary import (
+        ExposureGroupSummary,
+        StackingPipelineQualityMetrics,
+        StackQualitySummary,
+    )
+    from astrometricslib.models.quality.stacking_quality import StackingInputQuality
+    from astrometricslib.pipelines.shared.applied_camera_profile import record_camera_profile
+    from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
+    from astrometricslib.pipelines.stacking.post_processing.record_quality import stacking_notice_measurements
+
+    context = PipelineRunContext(
+        "M 99", pipeline, "1.0.0", "job-1", "job-1", datetime(2026, 11, 1, tzinfo=UTC)
+    )
+    summary = StackQualitySummary(
+        targetId="M 99",
+        stackingMetrics=StackingPipelineQualityMetrics(
+            isSpectral=False,
+            framesSubmitted=3,
+            framesStacked=1,
+            exposureGroups=[
+                ExposureGroupSummary(
+                    exposureSeconds=30.0,
+                    framesSubmitted=3,
+                    framesStacked=0,
+                    darkApplied=False,
+                    leftOutReason="was left out for a test",
+                )
+            ],
+        ),
+        inputQuality=StackingInputQuality(
+            framesSubmitted=3,
+            framesAccepted=1,
+            framesQuarantined=2,
+            flatCalibrationIssues=["not smoothed: a test note"],
+        ),
+    )
+    summary.quality_processing_applied = False
+    record_camera_profile(summary, "Acme Imager 9000")
+    if pipeline == "stacking":
+        return [*rows, *stacking_notice_measurements(summary, context, "M99_Stacked.fits")]
+    from astrometricslib.pipelines.shared.quality.notices import camera_without_profile_measurement
+
+    return [*rows, camera_without_profile_measurement("Acme Imager 9000", context, context.run_subject())]
+
+
 # Phase 3 (plan section 3.7): a pipeline listed here produces every metric it
 # declares. Each entry maps the pipeline to a function that runs its record
 # step on a fixed run and returns the measurements. A pipeline joins this
@@ -288,6 +355,25 @@ def is_gate_metric(name: str) -> bool:
     return name.split(".", 1)[-1].startswith("gate_")
 
 
+def is_notice_metric(name: str) -> bool:
+    """Say whether a metric stands for a notice row.
+
+    A notice is a warning that is not a gate (see
+    `astrometricslib.pipelines.shared.quality.notices`).
+
+    Parameters
+    ----------
+    name : `str`
+        A registered metric name.
+
+    Returns
+    -------
+    is_notice : `bool`
+        `True` for ``<checkpoint>.notice_<what was noticed>``.
+    """
+    return name.split(".", 1)[-1].startswith("notice_")
+
+
 def find_unit_ending_problems(specs: tuple[MetricSpec, ...]) -> list[str]:
     """Name each spec whose name does not end with its unit.
 
@@ -299,14 +385,14 @@ def find_unit_ending_problems(specs: tuple[MetricSpec, ...]) -> list[str]:
     Returns
     -------
     problems : `list` of `str`
-        One line per metric. A gate metric and the names in
+        One line per metric. A gate metric, a notice metric and the names in
         `UNIT_ENDING_ALLOW_LIST` are skipped. A unitless metric must not end
         with another unit's ending (it would claim a unit it does not have).
     """
     problems = []
     all_endings = tuple(UNIT_NAME_ENDING.values())
     for spec in specs:
-        if is_gate_metric(spec.name) or spec.name in UNIT_ENDING_ALLOW_LIST:
+        if is_gate_metric(spec.name) or is_notice_metric(spec.name) or spec.name in UNIT_ENDING_ALLOW_LIST:
             continue
         required = UNIT_NAME_ENDING.get(spec.unit)
         if required is not None and not spec.name.endswith(required):
@@ -485,7 +571,9 @@ def test_a_phase_3_pipeline_emits_every_metric_it_declares(pipeline: str) -> Non
     from astrometricslib.pipelines.shared.quality.metric_registry import load_pipeline_metrics
 
     declared = {spec.name for spec in load_pipeline_metrics(pipeline)}
-    emitted = {measurement.metric for measurement in PHASE_3_RECORD_STEPS[pipeline]()}
+    emitted = {
+        measurement.metric for measurement in _with_notice_rows(pipeline, PHASE_3_RECORD_STEPS[pipeline]())
+    }
     assert declared - emitted == set(), f"{pipeline} declares metrics its record step never emits"
     assert emitted - declared == set(), f"{pipeline} emits metrics it does not declare"
 

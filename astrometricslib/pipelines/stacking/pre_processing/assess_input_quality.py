@@ -12,6 +12,10 @@ from typing import Any
 from astrometricslib._internal.drivers.calibration_library import CALIBRATION_MATCH_BLOCKING_FLAGS_KEY
 from astrometricslib.models.quality.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
 from astrometricslib.models.quality.stacking_quality import StackingInputQuality
+from astrometricslib.pipelines.stacking.notice_reasons import (
+    flat_calibration_issue_reason,
+    frames_moved_to_excluded_reason,
+)
 from astrometricslib.pipelines.stacking.pre_processing.calibration_assessment import THIN_SET_FRAME_COUNT
 from astrometricslib.pipelines.stacking.pre_processing.flat_calibration import (
     BRIGHT_FLAT_ISSUE_PREFIX,
@@ -328,15 +332,13 @@ def assess_input_quality(
 
     reasons = []
     if quarantined:
-        reasons.append(
-            f"{len(quarantined)} frame(s) with clouds or trailed stars moved to the _excluded folder"
-        )
+        reasons.append(frames_moved_to_excluded_reason(len(quarantined)))
     if detail is not None:
         reasons.append(f"background split: {detail}")
     reasons.extend(calibration_metadata_reasons(diagnostics))
     if short_masters:
         reasons.append("calibration frame count too low: " + "; ".join(short_masters))
-    reasons.extend(f"flat calibration: {issue}" for issue in flat_issues)
+    reasons.extend(flat_calibration_issue_reason(issue) for issue in flat_issues)
 
     return StackingInputQuality(
         frames_submitted=frames_submitted,

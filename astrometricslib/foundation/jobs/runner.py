@@ -40,7 +40,12 @@ from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.foundation.jobs.models import ProcessingJob
 from astrometricslib.foundation.jobs.process_identity import current_process_identity, process_is_alive
 from astrometricslib.foundation.jobs.store import DbLogHandler, JobStore
-from astrometricslib.foundation.logging import active_job_ids, get_job_log_router, log_context
+from astrometricslib.foundation.logging import (
+    active_job_ids,
+    get_job_log_router,
+    get_log_context,
+    log_context,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +78,57 @@ def get_current_job() -> JobHandle | None:
         as a background job, such as in a plain function call or a test.
     """
     return _current_job.get()
+
+
+@contextmanager
+def report_started_jobs(callback: Callable[[JobHandle], None]) -> Generator[None]:
+    """Call a function with the handle of each job the enclosed work records.
+
+    A caller that runs work in a thread cannot see the job the work records
+    inside it. This gives the caller the handle as soon as the job exists.
+
+    Parameters
+    ----------
+    callback : `Callable`
+        Called with each new job's handle, outermost job first.
+
+    Yields
+    ------
+    None
+        The enclosed work runs while the callback is active.
+    """
+    token = _job_started_listener.set(callback)
+    try:
+        yield
+    finally:
+        _job_started_listener.reset(token)
+
+
+def current_job_id() -> str | None:
+    """Give the id of the job the calling work is running as, if any.
+
+    Rows that a run stores carry this id, so `Jobs.query` can list the
+    warnings of the job. A run that registered no job of its own, such as
+    one called with ``register_job=False`` from inside a larger job, uses the
+    enclosing job's id. The backend's analysis jobs are created by the backend
+    and tracked with `capture_job_logs`, which names the job in the log
+    context, so the log context is read too.
+
+    Returns
+    -------
+    job_id : `str` or `None`
+        The running job's id, or `None` when the code runs outside any
+        recorded job.
+    """
+    job = _current_job.get()
+    if job is not None and job.job_id:
+        return job.job_id
+    logged_id = get_log_context().get("job_id")
+    # A parallel batch tags each item "batch-item:<id>" in the log context;
+    # that is not a job in the job list.
+    if logged_id is None or str(logged_id).startswith("batch-item:"):
+        return None
+    return str(logged_id)
 
 
 class JobHandle:

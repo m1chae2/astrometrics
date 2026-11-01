@@ -735,6 +735,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             summary,
             camera_name_for_paths(target.frames, payload.get("image_paths") or [])
             or most_common_camera_name(target.frames),
+            measurement_context,
         )
         return summary
 

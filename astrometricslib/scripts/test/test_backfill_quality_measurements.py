@@ -615,12 +615,12 @@ def test_spectroscopy_tables_and_the_asteroid_gates_are_copied(tmp_path: Path) -
 
 
 def test_what_the_json_never_held_is_counted_not_written(tmp_path: Path) -> None:
-    """Noise, weights and run-data gates are skipped and counted."""
+    """Skip and count noise, weights, run-data gates and notice rows."""
     database = make_database(tmp_path, {TARGET: full_document()})
     report = backfill.run_backfill(database, log=lambda _: None)
-    assert report.skipped["stacking", backfill.SkipReason.NOT_HELD] == 81
-    assert report.skipped["astrometry", backfill.SkipReason.NOT_HELD] == 6
-    assert report.skipped["photometry", backfill.SkipReason.NOT_HELD] == 10 + 9 + 1 + 6 + 3
+    assert report.skipped["stacking", backfill.SkipReason.NOT_HELD] == 81 + 5
+    assert report.skipped["astrometry", backfill.SkipReason.NOT_HELD] == 6 + 1
+    assert report.skipped["photometry", backfill.SkipReason.NOT_HELD] == 10 + 9 + 1 + 6 + 3 + 1
     assert report.skipped["photometry", backfill.SkipReason.NEEDS_RUN_DATA] == 1
     rows = backfill_rows_planned(database)
     assert "stacking.frame_weight" not in rows

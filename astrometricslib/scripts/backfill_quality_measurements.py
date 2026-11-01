@@ -1288,8 +1288,18 @@ _STACKING_GATES: tuple[GateMapping, ...] = gate_mappings_from_sources(STACKING_G
 # The numbers of different dark and bias frames behind the masters come from
 # the stored per-frame numbers of the calibration frames, which a summary made
 # before the dark and bias checks existed never held.
+# The notice rows (warnings that are not gates) are not backfilled either: a
+# stored summary keeps only the sentence in `flagReasons`, with no job and no
+# value, and a row made from it would claim a count the summary never held.
+# The comparison script reports such a flag reason as old data until a new run
+# stores the row (validation register STK-58).
 _STACKING_NOT_HELD: tuple[str, ...] = (
     "stacking.abandoned_after_s",
+    "stacking.notice_frames_moved_to_excluded",
+    "stacking.notice_single_frame_stack",
+    "stacking.notice_exposure_group_left_out",
+    "stacking.notice_flat_calibration_note",
+    "stacking.notice_camera_without_profile",
     "stacking.dark_unique_frame_count",
     "stacking.bias_unique_frame_count",
     "stacking.aperture_set_number",
@@ -1377,6 +1387,7 @@ _STACKING_NOT_HELD: tuple[str, ...] = (
 # from the raw frames and Siril's registration records, which a summary does
 # not hold.
 _ASTROMETRY_NOT_HELD: tuple[str, ...] = (
+    "astrometry.notice_camera_without_profile",
     "astrometry.frame_target_clipped_fraction",
     "astrometry.frame_target_nonlinear_fraction",
     # The expected residual needs the star finder's peaks and noise of the run
@@ -1476,6 +1487,7 @@ _PHOTOMETRY_GATES: tuple[GateMapping, ...] = gate_mappings_from_sources(PHOTOMET
 # run's per-session comparison sets and centroid summaries, and from counts
 # the summary does not keep.
 _PHOTOMETRY_NOT_HELD: tuple[str, ...] = (
+    "photometry.notice_camera_without_profile",
     "photometry.stars_with_light_curve_scatter_count",
     "photometry.noise_model_star_count",
     "photometry.comparison_scatter_over_predicted_worst",
@@ -1697,6 +1709,7 @@ SUMMARY_KINDS: tuple[SummaryKind, ...] = (
         gates=_SPECTROSCOPY_GATES,
         extra_metrics=_SPECTROSCOPY_EXTRA_METRICS,
         extras=_spectroscopy_extras,
+        not_held=("spectroscopy.notice_camera_without_profile",),
     ),
     SummaryKind(
         key="asteroidDetection",
@@ -1710,6 +1723,7 @@ SUMMARY_KINDS: tuple[SummaryKind, ...] = (
         gates=_ASTEROID_GATES,
         extra_metrics=("asteroid_detection.residual_worst_accepted_ratio",),
         extras=_asteroid_extras,
+        not_held=("asteroid_detection.notice_camera_without_profile",),
         gate_adjuster=_asteroid_gate,
     ),
 )

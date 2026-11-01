@@ -42,7 +42,7 @@ from typing import TYPE_CHECKING, Any
 
 from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.foundation.errors import ConflictError, InvalidArgumentError, ProcessingError
-from astrometricslib.foundation.jobs.runner import registered_job
+from astrometricslib.foundation.jobs.runner import current_job_id, registered_job, report_started_jobs
 from astrometricslib.foundation.run_abandonment import RunAbandonedError, RunAbandonment, bind_abandonment
 from astrometricslib.foundation.run_tally import RunTally
 from astrometricslib.foundation.storage.process_locks import acquire_resource_slot
@@ -176,11 +176,13 @@ def _record_abandoned_stack(
     *,
     working_seconds: float,
     budget_seconds: float,
+    job_id: str | None = None,
 ) -> None:
     """Store the quality row that says a stack was abandoned.
 
     The row is a processing-decision measurement (`stacking.abandoned_after_s`)
-    on the stacking run. It is stored even when the target has no stack
+    on the stacking run. Its check outcome is ``failed``, so it is a warning
+    of the stacking job. It is stored even when the target has no stack
     summary yet. Nothing is stored when the caller gave no time or no
     recording information, as in tests. A failure to store never reaches the
     caller.
@@ -198,6 +200,9 @@ def _record_abandoned_stack(
         lock.
     budget_seconds : `float`
         The time budget the stack ran past.
+    job_id : `str`, optional
+        The stacking job that was abandoned. The row carries it, so the job
+        can list the timeout as one of its warnings.
     """
     if measured_at is None or quality_recording is None:
         return
@@ -211,7 +216,7 @@ def _record_abandoned_stack(
     )
 
     context = PipelineRunContext.from_options(
-        target.id, "stacking", STACKING_PIPELINE_VERSION, {"measured_at": measured_at}
+        target.id, "stacking", STACKING_PIPELINE_VERSION, {"job_id": job_id, "measured_at": measured_at}
     )
     if context is None:
         return
@@ -278,10 +283,16 @@ def stack_frames_with_timeout(
     # This stack's own Siril processes. Giving up on the stack stops them (and
     # only them), so the thread ends and gives its slot back.
     abandonment = RunAbandonment()
+    # Filled by the stacking thread with the id of its job (see below).
+    stacking_job_ids: list[str | None] = []
 
     def _run_stacking() -> None:
         try:
-            with siril_interface.bind_lock_wait(lock_wait), bind_abandonment(abandonment):
+            with (
+                siril_interface.bind_lock_wait(lock_wait),
+                bind_abandonment(abandonment),
+                report_started_jobs(lambda handle: stacking_job_ids.append(handle.job_id)),
+            ):
                 outcome["path"] = _stack_with_job_tracking(
                     target, frames_to_stack, measured_at, quality_recording
                 )
@@ -343,6 +354,7 @@ def stack_frames_with_timeout(
             quality_recording,
             working_seconds=max(0.0, time.monotonic() - started_at - lock_wait_seconds),
             budget_seconds=timeout_seconds,
+            job_id=next((job_id for job_id in stacking_job_ids if job_id), None),
         )
         return None
 
@@ -440,7 +452,11 @@ def analyze_target(
                     f" on target {target.id}."
                 )
 
-        kwargs["job_id"] = job.job_id
+        # The rows this run stores carry the id of the job that made them,
+        # so `Jobs.query(detail="warnings")` can list them. With no job of its
+        # own (register_job=False), the run uses the job it is running inside,
+        # such as a caller's batch job. With neither, the rows have no job.
+        kwargs["job_id"] = job.job_id or kwargs.get("job_id") or current_job_id()
         kwargs["measured_at"] = measured_at
         return _run_analysis_pipeline_match(
             target, frames, pipeline_type, filter_type, catalog_access, path, **kwargs

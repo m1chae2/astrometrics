@@ -34,7 +34,7 @@ import numpy as np
 
 from astrometricslib._internal.drivers.calibration_library import BIAS_FRAME_PATHS_KEY, FLAT_FRAME_PATHS_KEY
 from astrometricslib.models.quality.gate_result import GateResult
-from astrometricslib.models.quality.limit import LimitTier
+from astrometricslib.models.quality.limit import LimitTier, QualityLimit
 from astrometricslib.models.quality.measurement import (
     MeasurementStatus,
     QualityMeasurement,
@@ -43,6 +43,11 @@ from astrometricslib.models.quality.measurement import (
 from astrometricslib.models.quality.metric_spec import MetricSpec
 from astrometricslib.models.quality.quality_summary import ExposureGroupSummary, StackQualitySummary
 from astrometricslib.pipelines.shared.quality.frame_measurement import frame_subject
+from astrometricslib.pipelines.shared.quality.notices import (
+    NOTICE_REGISTER_ENTRY,
+    camera_without_profile_measurement,
+    notice_measurement,
+)
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
     GateLimitSource,
     PipelineRunContext,
@@ -87,6 +92,10 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_METRICS,
     STACKING_NEGATIVE_PIXEL_MAX_FRACTION,
     STACKING_NOISE_REFERENCE_FLUX_STACK_UNIT,
+    STACKING_NOTICE_EXPOSURE_GROUP_LEFT_OUT,
+    STACKING_NOTICE_FLAT_CALIBRATION_NOTE,
+    STACKING_NOTICE_FRAMES_MOVED_TO_EXCLUDED,
+    STACKING_NOTICE_SINGLE_FRAME_STACK,
     STACKING_POINT_SOURCE_DEPTH_5SIGMA_MAG,
     STACKING_REGISTRATION_REFERENCE_STAR_COUNT,
     STACKING_REJECTED_PIXEL_FRACTION,
@@ -94,6 +103,13 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_STACKED_FWHM_PX,
     STACKING_SURFACE_BRIGHTNESS_LIMIT_3SIGMA_10ARCSEC_MAG_PER_ARCSEC2,
     STACKING_ZERO_PIXEL_FRACTION,
+)
+from astrometricslib.pipelines.stacking.notice_reasons import (
+    exposure_group_left_out_reason,
+    flat_calibration_issue_reason,
+    frames_moved_to_excluded_reason,
+    single_frame_stack_reason,
+    uncovered_flat_calibration_issues,
 )
 from astrometricslib.pipelines.stacking.post_processing.aperture_size_noise import ApertureSizeNoiseOutcome
 from astrometricslib.pipelines.stacking.post_processing.aperture_storage import APERTURE_FILE_NAME
@@ -161,6 +177,7 @@ __all__ = [
     "size_exponent_measurements",
     "stack_depth_of",
     "stacking_measurements",
+    "stacking_notice_measurements",
 ]
 
 _SPEC_BY_NAME: dict[str, MetricSpec] = {spec.name: spec for spec in STACKING_METRICS}
@@ -409,18 +426,118 @@ def abandoned_stack_measurements(
     Returns
     -------
     measurements : `list` of `QualityMeasurement`
-        One row on the run's subject. Its `action_taken` says the stack was
-        abandoned and states the budget.
+        One row on the run's subject, with the check outcome ``failed`` and
+        the time budget as its limit, so the stacking job lists it as a
+        warning. Its `action_taken` says the stack was abandoned and states
+        the budget.
     """
     return [
-        build_measurement(
+        notice_measurement(
             _SPEC_BY_NAME[STACKING_ABANDONED_AFTER_S],
             float(working_seconds),
             context,
             context.run_subject(),
+            f"stacking timed out after {budget_seconds:g}s",
             action_taken=f"stack abandoned after its {budget_seconds:g} s time budget",
+            limit=QualityLimit(
+                value=float(budget_seconds),
+                unit="s",
+                tier=LimitTier.DESIGN_ESTIMATE,
+                derivation=(
+                    "The time budget of the stack: 300 s plus 30 s for each frame, and never under 600 s. "
+                    "A safety net to find a stuck run, not an expected run time (validation register "
+                    "STK-D37)."
+                ),
+                registerEntry=NOTICE_REGISTER_ENTRY,
+            ),
         )
     ]
+
+
+def stacking_notice_measurements(
+    summary: StackQualitySummary, context: PipelineRunContext, stack_file_name: str
+) -> list[QualityMeasurement]:
+    """Build the notice rows of one stack: the warnings that are not gates.
+
+    A notice is stored only when it happened. The rows carry the same
+    sentences the summary lists as flag reasons, so a job can list them (see
+    `astrometricslib.pipelines.shared.quality.notices`). The stack's
+    timeout is stored apart, by the run that gave up on the stack.
+
+    Parameters
+    ----------
+    summary : `StackQualitySummary`
+        The finished summary.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    stack_file_name : `str`
+        The stack's file name.
+
+    Returns
+    -------
+    measurements : `list` of `QualityMeasurement`
+        A row for frames moved to the excluded folder, one for a stack of
+        one frame, one for each exposure group left out for a reason other
+        than nonlinearity (a nonlinear group is reported by the
+        ``exposure_group_linearity`` gate), one for the flat issues that no
+        flat gate reports (its reason joins their sentences), and one for a
+        camera with no profile.
+    """
+    stack_subject = context.stack_subject(stack_file_name)
+    rows: list[QualityMeasurement] = []
+    moved = summary.input_quality.frames_quarantined if summary.input_quality is not None else 0
+    if moved:
+        rows.append(
+            notice_measurement(
+                _SPEC_BY_NAME[STACKING_NOTICE_FRAMES_MOVED_TO_EXCLUDED],
+                float(moved),
+                context,
+                stack_subject,
+                frames_moved_to_excluded_reason(moved),
+                action_taken="frames moved to the _excluded folder",
+            )
+        )
+    if not summary.quality_processing_applied:
+        rows.append(
+            notice_measurement(
+                _SPEC_BY_NAME[STACKING_NOTICE_SINGLE_FRAME_STACK],
+                float(summary.stacking_metrics.frames_stacked or 1),
+                context,
+                stack_subject,
+                single_frame_stack_reason(),
+            )
+        )
+    for index, group in enumerate(summary.stacking_metrics.exposure_groups):
+        if group.left_out_reason and not group.gain_nonlinear:
+            rows.append(
+                notice_measurement(
+                    _SPEC_BY_NAME[STACKING_NOTICE_EXPOSURE_GROUP_LEFT_OUT],
+                    float(group.frames_submitted),
+                    context,
+                    exposure_group_subject(context, stack_file_name, group, index),
+                    exposure_group_left_out_reason(group.exposure_seconds, group.left_out_reason),
+                    action_taken="exposure group left out of the combined stack",
+                )
+            )
+    flat_issues = (
+        uncovered_flat_calibration_issues(summary.input_quality.flat_calibration_issues)
+        if summary.input_quality is not None
+        else []
+    )
+    if flat_issues:
+        rows.append(
+            notice_measurement(
+                _SPEC_BY_NAME[STACKING_NOTICE_FLAT_CALIBRATION_NOTE],
+                float(len(flat_issues)),
+                context,
+                stack_subject,
+                "; ".join(flat_calibration_issue_reason(issue) for issue in flat_issues),
+            )
+        )
+    profile = summary.camera_profile
+    if profile is not None and profile.is_generic_fallback and profile.camera_name:
+        rows.append(camera_without_profile_measurement(profile.camera_name, context, stack_subject))
+    return rows
 
 
 def gate_for_measurement(gate: GateResult) -> GateResult:
@@ -977,6 +1094,7 @@ def stacking_measurements(
             )
         )
 
+    measurements.extend(stacking_notice_measurements(summary, context, stack_file_name))
     measurements.extend(noise_measurements(noise, context, stack_subject))
     measurements.extend(
         depth_limit_measurements(noise, metrics.stacked_fwhm_px, gaia_lookup, context, stack_subject)

@@ -636,6 +636,7 @@ def _attach_spectroscopy_quality_summary(
     record_camera_profile(
         target.quality.spectroscopy,
         camera_name_for_paths(target.frames, [path for session in sessions for path in session.frame_paths]),
+        measurement_context,
     )
 
     from astrometricslib.pipelines.shared.provenance_recording import record_pipeline_run

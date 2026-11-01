@@ -23,6 +23,7 @@ from astrometricslib.models.quality.metric_spec import (
     MetricSpec,
     UncertaintyKind,
 )
+from astrometricslib.pipelines.shared.quality.notices import camera_without_profile_spec
 
 ASTEROID_FRAMES_WITH_WCS_ESTIMATE = "asteroid_detection.frames_with_wcs_estimate_count"
 ASTEROID_FRAMES_EXCLUDED_MISSING_POINTING = (
@@ -335,4 +336,5 @@ ASTEROID_DETECTION_METRICS: tuple[MetricSpec, ...] = (
         "The chains that reached the straight-line test.",
         register_entry="MOV-03",
     ),
+    camera_without_profile_spec("asteroid_detection"),
 )

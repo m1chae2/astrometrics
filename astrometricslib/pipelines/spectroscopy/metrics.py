@@ -51,6 +51,7 @@ from astrometricslib.models.quality.metric_spec import (
     MetricSpec,
     UncertaintyKind,
 )
+from astrometricslib.pipelines.shared.quality.notices import camera_without_profile_spec
 
 # ---- Run totals from the summary -----------------------------------------
 
@@ -1163,4 +1164,5 @@ SPECTROSCOPY_METRICS: tuple[MetricSpec, ...] = (
         "The stars compared with a Gaia XP spectrum.",
         computed_by=f"{_GAIA_XP_MODULE}.gaia_xp_gate",
     ),
+    camera_without_profile_spec("spectroscopy"),
 )

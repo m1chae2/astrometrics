@@ -239,13 +239,16 @@ def test_an_abandoned_stack_is_recorded_as_a_processing_decision(
     release = threading.Event()
 
     def hung_stack(*_: object, **__: object) -> str:
-        """Stand in for a stack that never finishes until released.
+        """Stand in for a stack that records a job, then hangs until released.
 
         Returns
         -------
         stacked_path : `str`
             A path that is never used.
         """
+        from astrometricslib.foundation.jobs import runner
+
+        runner._job_started_listener.get()(SimpleNamespace(job_id="job-stack-1"))
         release.wait(30)
         return "/never/reached.fits"
 
@@ -279,3 +282,9 @@ def test_an_abandoned_stack_is_recorded_as_a_processing_decision(
     assert rows[0].value is not None
     assert rows[0].value >= 0.9
     assert rows[0].action_taken == "stack abandoned after its 1 s time budget"
+    # The row is a warning: a failed check against the time budget.
+    assert rows[0].check_outcome.value == "failed"
+    assert rows[0].check_limit.value == pytest.approx(1.0)
+    assert rows[0].reason == "stacking timed out after 1s"
+    # The timeout is a warning of the stacking job that was abandoned.
+    assert rows[0].job_id == "job-stack-1"

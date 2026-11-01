@@ -2531,6 +2531,41 @@ Every Python example assumes the library is installed and configured with your o
 - **Guarded by tests:** `astrometricslib/_internal/drivers/test/test_flat_bias_matching.py` and the golden case `imaging_flats_at_another_offset` in `astrometricslib/_internal/drivers/test/test_siril_script_golden.py`.
 - **Raw record:** Kept outside the repository, in the validation folder of issue 134 under `calibration_checks/`: see `CALIBRATION_SET_ASIDE_LIST.md`, section 5.
 
+### STK-58
+
+**Warnings of a job: notice rows and the time budget**
+
+- **Claim:** Every warning a pipeline raises is a stored quality row whose check failed, and a job can list its warnings. A warning that is not a gate (frames moved to the excluded folder, a stack of one frame, an exposure group left out, a flat issue no gate reports, a camera with no profile, a stack abandoned for taking too long) is stored as a notice row with a limit of zero, because it is raised on any occurrence. The stack time budget is the limit of the abandoned-stack row.
+- **Settings it supports:** None. The notice rule has no tuned number. The time budget is listed as a design estimate (STK-D37).
+- **Status:** Design estimate. The rows and the read were written and tested on made-up rows. No restack has stored them yet, so no stored stack on the library holds a notice row.
+- **Data you need:** A stack that raised a warning of each kind (frames moved by the quarantine, a camera with no profile, a group left out), or the run of a target with a camera that has no profile.
+- **Procedure:**
+  1. Stack or analyze the target as a job and note the job's id.
+  2. Ask the job for its warnings.
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  answer = astro.jobs.query(job_id="<job id>", detail="warnings")
+  print(answer.measurement_count, answer.checks_not_run_count)
+  for warning in answer.warnings:
+      print(
+          warning.pipeline, warning.metric, warning.reason, warning.value, warning.limit, warning.register_entry
+      )
+  ```
+
+  `Jobs.query` lists the stored rows of the job whose check failed. An empty list with a nonzero `measurement_count` means the job was checked and nothing failed; a zero count means the job stored no rows; an unknown id raises `NotFoundError`. <!-- impl: astrometricslib.api.jobs.Jobs.query -->
+- **Acceptance criterion:** Each flag reason of the stored summary appears as the reason of a warning row of the same pipeline. The comparison script `wayfindinglib/scripts/shadow_compare_verdicts.py` checks this word for word and counts the reasons that have no row.
+- **What to look at:** The count of flag reasons with no warning row in the script's report, separated into old data (stored before the notice rows existed) and rows that should exist.
+- **Our result:** Code: this change (issue 97, phase 1b). Unit tests on made-up rows show each notice is stored with the outcome `failed`, a limit of zero and the job id, and that the abandoned-stack row carries the time budget as its limit. The comparison on the data copy is reported in the pull request; stored summaries there predate the notice rows. Not measured: a restack that stores the rows.
+- **Verdict:** Not judged. No limit was compared with data.
+- **Limits:** A notice states that something happened, not how bad it is. Rows stored before this change have no notice rows and no job ids. A run called with no job, and a run with no time stamp, store no job id or no rows at all.
+- **To tune for your setup:** Nothing to tune. Change the stack time budget by editing the constants named in STK-D37.
+- **Regenerate with:** `wayfindinglib/scripts/shadow_compare_verdicts.py --report <file>` on a copy of the library, after a restack.
+- **Guarded by tests:** `astrometricslib/pipelines/shared/quality/test/test_notices.py`, `astrometricslib/api/test/test_jobs_warnings.py`, `astrometricslib/pipelines/stacking/test/test_abandoned_stack.py` and `wayfindinglib/scripts/test/test_shadow_compare_verdicts.py`.
+- **Raw record:** None kept.
+
 ## Design estimates
 
 These tuned values have not been measured. Each is a reasoned choice; the last column says how you could measure it on your data.
@@ -2573,3 +2608,4 @@ These tuned values have not been measured. Each is a reasoned choice; the last c
 | STK-D34 | Depth limits: Gaia match radius for a reference star; companion magnitude margin; fewest stars for the zero point; detection thresholds; surface-brightness box | 3 arcsec; 3 mag; 3; 5σ and 3σ; 10 arcsec | code constants `STAR_MATCH_RADIUS_ARCSEC`, `CONTAMINATION_MAGNITUDE_MARGIN`, `MINIMUM_ZERO_POINT_STARS`, `POINT_SOURCE_SIGMA`, `SURFACE_BRIGHTNESS_SIGMA`, `SURFACE_BRIGHTNESS_BOX_ARCSEC` in `pipelines/stacking/post_processing/depth_limits.py` (the thresholds and the box follow mission practice, Beckwith et al. 2006 and the Euclid preparation XVI paper) <!-- impl: astrometricslib.pipelines.stacking.post_processing.depth_limits.STAR_MATCH_RADIUS_ARCSEC --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.depth_limits.CONTAMINATION_MAGNITUDE_MARGIN --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.depth_limits.MINIMUM_ZERO_POINT_STARS --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.depth_limits.POINT_SOURCE_SIGMA --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.depth_limits.SURFACE_BRIGHTNESS_SIGMA --> | Stated biases: the 94% aperture reads the point-source depth about 0.07 mag shallow; the zero point carries up to 0.03 mag from a contaminating companion; the band is Gaia G with no color term; without a measured exponent the depth is optimistic. A wrong match radius gives a wrong star or no star. | Inject stars of known magnitude into a stack and measure the share recovered at the stated depth, and compare the zero point with a photometry run on the same field. Code uncommitted on `134-group-weights-nikon` after 817c7da4 (#134, 2026-10-26); unit tests only, not run on the real library. |
 | STK-D35 | Odd–even bias test: width of the Gaussian that smooths a real frame's sky; radius kept around flagged pixels | 3 px; 4 px | code constants `SMOOTHING_SIGMA_PX`, `KEEP_RADIUS_PX` in `pipelines/stacking/odd_even_bias.py` <!-- impl: astrometricslib.pipelines.stacking.odd_even_bias.SMOOTHING_SIGMA_PX --> <!-- impl: astrometricslib.pipelines.stacking.odd_even_bias.KEEP_RADIUS_PX --> | Too narrow a smoothing leaves real noise behind (9.4% of the white noise, under 1% of the variance, at 3 px; the added noise is lowered by that amount); too wide flattens real sky structure. A star core smoothed away breaks registration. | Run the bias test with 2, 3 and 4 px and check that the ratio does not move. Code uncommitted on `134-group-weights-nikon` after 817c7da4 (#134, 2026-10-26); unit tests only, not run on the real library. |
 | STK-D36 | Fewest different frames in a dark or bias master before it counts as thin | 10 | code constant `THIN_SET_FRAME_COUNT` in `pipelines/stacking/pre_processing/calibration_assessment.py` (STK-53) <!-- impl: astrometricslib.pipelines.stacking.pre_processing.calibration_assessment.THIN_SET_FRAME_COUNT --> | A master that adds up to a tenth of its noise variance to every light is let through, or a good master is flagged. | Build masters from 5, 10, 20 and 33 frames and compare the stack noise with `QualityRecords.measure_stack(path, compare_to="previous")`. |
+| STK-D37 | Stack time budget (the limit of the abandoned-stack warning) | 300 s plus 30 s per frame, at least 600 s | code constants `STACKING_TIMEOUT_BASE_SECONDS`, `STACKING_TIMEOUT_PER_FRAME_SECONDS`, `STACKING_TIMEOUT_SECONDS` in `pipelines/tasks.py` <!-- impl: astrometricslib.pipelines.tasks.STACKING_TIMEOUT_BASE_SECONDS --> <!-- impl: astrometricslib.pipelines.tasks.STACKING_TIMEOUT_PER_FRAME_SECONDS --> <!-- impl: astrometricslib.pipelines.tasks.STACKING_TIMEOUT_SECONDS --> | A slow but healthy stack is abandoned, or a stuck Siril run holds its slot for a long time. | Read the working seconds of your stacks from the `stacking.duration_s` rows and set the budget a few times above the longest healthy stack. |

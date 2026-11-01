@@ -79,9 +79,10 @@ def _declared_names() -> set[str]:
     Returns
     -------
     names : `set` [`str`]
-        The declared metric names.
+        The declared metric names, less the notice metric, whose row is
+        stored only when the condition occurs (see `test_notices.py`).
     """
-    return {spec.name for spec in SPECTROSCOPY_METRICS}
+    return {spec.name for spec in SPECTROSCOPY_METRICS if ".notice_" not in spec.name}
 
 
 def _numeric_checkpoint_metrics() -> set[tuple[str, str]]:

@@ -202,7 +202,7 @@ def test_no_session_gives_no_measurement() -> None:
 def test_every_declared_zero_point_metric_is_emitted_by_the_fixture_run() -> None:
     """The fixture run emits every declared metric, zero points included."""
     emitted = {measurement.metric for measurement in photometry_emitted_measurements()}
-    assert emitted == {spec.name for spec in PHOTOMETRY_METRICS}
+    assert emitted == {spec.name for spec in PHOTOMETRY_METRICS if ".notice_" not in spec.name}
 
 
 def _use_temporary_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> QualityStore:

@@ -138,7 +138,7 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 
 - **Frames and targets.** `frame_grouping.py`, `frame_scanning.py`, `target_records.py`, `target_sessions.py`.
 - **Images, stars and state.** `image_conversions.py`, `star_recording.py`, `catalog_star_identity.py`, `session_identification.py`, `analysis_context.py`.
-- **Recording.** `provenance_recording.py`, `applied_camera_profile.py`.
+- **Recording.** `provenance_recording.py`, `applied_camera_profile.py`, `quality/notices.py` ([STK-58](validation/stacking.md#stk-58)). <!-- impl: astrometricslib.pipelines.shared.quality.notices.notice_measurement -->
 - **Quality primitives.** `quality/` (`saturation.py`, `raw_frame_check.py`, `frame_measurement.py`; the shared README lists the rest).
 
 ### 4.7 Drivers and pixel-level primitives

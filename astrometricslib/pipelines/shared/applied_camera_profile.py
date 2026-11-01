@@ -13,6 +13,14 @@ from typing import Any
 from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.models.applied_camera_profile import AppliedCameraProfile
 from astrometricslib.models.quality.quality_summary import PipelineQualitySummaryBase
+from astrometricslib.pipelines.shared.quality.notices import (
+    camera_without_profile_measurement,
+    camera_without_profile_reason,
+)
+from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
+    PipelineRunContext,
+    build_and_record_measurements,
+)
 
 
 def most_common_camera_name(frames: Iterable[Any]) -> str | None:
@@ -102,7 +110,11 @@ def build_applied_camera_profile(camera_name: str | None) -> AppliedCameraProfil
     )
 
 
-def record_camera_profile(summary: PipelineQualitySummaryBase, camera_name: str | None) -> None:
+def record_camera_profile(
+    summary: PipelineQualitySummaryBase,
+    camera_name: str | None,
+    measurement_context: PipelineRunContext | None = None,
+) -> None:
     """Put the camera profile used on a quality summary, in place.
 
     A camera with no profile of its own also flags the summary, because the
@@ -115,12 +127,23 @@ def record_camera_profile(summary: PipelineQualitySummaryBase, camera_name: str 
         The summary to change.
     camera_name : `str` or `None`
         The camera that took the run's frames, when it is known.
+    measurement_context : `PipelineRunContext`, optional
+        The run's shared facts. When given, a camera with no profile is also
+        stored as a notice row on the run. Storing never fails the run.
     """
     if not camera_name:
         return
     summary.camera_profile = build_applied_camera_profile(camera_name)
     if summary.camera_profile.is_generic_fallback:
         summary.flagged = True
-        summary.flag_reasons.append(
-            f"camera {camera_name!r} has no camera profile; generic assumptions about the sensor were used"
-        )
+        summary.flag_reasons.append(camera_without_profile_reason(camera_name))
+        if measurement_context is not None:
+            build_and_record_measurements(
+                lambda: [
+                    camera_without_profile_measurement(
+                        camera_name, measurement_context, measurement_context.run_subject()
+                    )
+                ],
+                f"camera-profile notice for {measurement_context.pipeline_name} "
+                f"on {measurement_context.target_id}",
+            )

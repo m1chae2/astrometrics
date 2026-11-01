@@ -27,7 +27,7 @@ from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAcce
 from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
-from astrometricslib.foundation.jobs.runner import background_job, registered_job
+from astrometricslib.foundation.jobs.runner import background_job, current_job_id, registered_job
 from astrometricslib.models.calibration_ingest import (
     CalibrationIngestReport,
     CalibrationMeasurementReport,
@@ -888,7 +888,7 @@ class CalibrationCatalog:
                 QualityStore(quality_database_path(self._config)),
                 self._config,
                 run_id=job.job_id or f"calibration-measure-{uuid4().hex}",
-                job_id=job.job_id,
+                job_id=job.job_id or current_job_id(),
                 measured_at=datetime.now(UTC),
                 kinds=("dark", "bias") if kind is None else (kind,),
                 camera=camera_id,
@@ -1495,7 +1495,7 @@ class ProcessingPipelines:
             target.id,
             "stacking",
             STACKING_PIPELINE_VERSION,
-            {"job_id": job_id, "measured_at": datetime.now(UTC)},
+            {"job_id": job_id or current_job_id(), "measured_at": datetime.now(UTC)},
         )
 
     @background_job("preview", grace_period_seconds=20.0)

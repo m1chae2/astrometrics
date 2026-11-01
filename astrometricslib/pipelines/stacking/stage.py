@@ -20,6 +20,10 @@ from astrometricslib.models.target import Target
 from astrometricslib.pipelines.stacking.calibration_health import measure_calibration_health
 from astrometricslib.pipelines.stacking.frame_screening import screen_frames
 from astrometricslib.pipelines.stacking.fwhm_sampling import measure_fwhm_degradation
+from astrometricslib.pipelines.stacking.notice_reasons import (
+    exposure_group_left_out_reason,
+    single_frame_stack_reason,
+)
 from astrometricslib.pipelines.stacking.registration_records import (
     check_spectral_registration_quality,
     update_frame_registration_results,
@@ -1314,9 +1318,9 @@ def _finalize_stack_quality_flags(summary: StackQualitySummary) -> None:
         # `exposure_group_linearity` gate, which names both brightness
         # ratios, so it is not listed twice.
         if group.left_out_reason and not group.gain_nonlinear:
-            flag_reasons.append(f"the {group.exposure_seconds:g} s exposure group {group.left_out_reason}")
+            flag_reasons.append(exposure_group_left_out_reason(group.exposure_seconds, group.left_out_reason))
     if not summary.quality_processing_applied:
-        flag_reasons.append("single-frame stack: no rejection/registration quality processing applied")
+        flag_reasons.append(single_frame_stack_reason())
 
     summary.flagged = bool(flag_reasons)
     summary.flag_reasons = flag_reasons

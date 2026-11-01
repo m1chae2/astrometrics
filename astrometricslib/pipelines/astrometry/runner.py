@@ -478,7 +478,7 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
         camera_name = camera_name_from_header(result.context.image.header) or most_common_camera_name(
             request.frames or request.target.frames
         )
-        record_camera_profile(summary, camera_name)
+        record_camera_profile(summary, camera_name, measurement_context)
         return summary
 
     def to_result_dict(

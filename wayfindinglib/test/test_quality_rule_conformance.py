@@ -90,7 +90,21 @@ DECISION_CATALOG = {
 # rule of this table compares them with a limit of its own, and the view of
 # those outcomes belongs to issue 97, so they are listed once by pattern (see
 # `SELF_CHECK_MARKER`) and not by name.
+_NOTICE_ROW_REASON = (
+    "issue 97: a notice row, so a job can list the warning (Jobs.query with detail warnings). No rule "
+    "reads it yet; the rules that turn notices into suggestions come with the pipeline-quality view of "
+    "issue 97."
+)
 UNUSED_DECISION_METRICS = {
+    "stacking.notice_frames_moved_to_excluded": _NOTICE_ROW_REASON,
+    "stacking.notice_single_frame_stack": _NOTICE_ROW_REASON,
+    "stacking.notice_flat_calibration_note": _NOTICE_ROW_REASON,
+    "stacking.notice_exposure_group_left_out": _NOTICE_ROW_REASON,
+    "stacking.notice_camera_without_profile": _NOTICE_ROW_REASON,
+    "astrometry.notice_camera_without_profile": _NOTICE_ROW_REASON,
+    "photometry.notice_camera_without_profile": _NOTICE_ROW_REASON,
+    "spectroscopy.notice_camera_without_profile": _NOTICE_ROW_REASON,
+    "asteroid_detection.notice_camera_without_profile": _NOTICE_ROW_REASON,
     "stacking.abandoned_after_s": (
         "issue 97: records that a stack ran out of its time budget, so the job can list it as a warning. "
         "No rule reads it yet."

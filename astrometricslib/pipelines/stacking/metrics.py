@@ -26,6 +26,7 @@ from astrometricslib.models.quality.metric_spec import (
     MetricSpec,
     UncertaintyKind,
 )
+from astrometricslib.pipelines.shared.quality.notices import camera_without_profile_spec, notice_spec
 from astrometricslib.pipelines.stacking.post_processing.exposure_saturation import (
     CHECKED_ESTIMATE_ERROR_FRACTION,
     CHECKED_ESTIMATE_RANGE_ROOM_MULTIPLES_BY_CAMERA,
@@ -157,6 +158,10 @@ STACKING_MEDIAN_INPUT_FWHM_PX = "stacking.median_input_fwhm_px"
 STACKING_EXPECTED_STACK_FWHM_PX = "stacking.expected_stack_fwhm_px"
 STACKING_DURATION_S = "stacking.duration_s"
 STACKING_ABANDONED_AFTER_S = "stacking.abandoned_after_s"
+STACKING_NOTICE_FRAMES_MOVED_TO_EXCLUDED = "stacking.notice_frames_moved_to_excluded"
+STACKING_NOTICE_SINGLE_FRAME_STACK = "stacking.notice_single_frame_stack"
+STACKING_NOTICE_EXPOSURE_GROUP_LEFT_OUT = "stacking.notice_exposure_group_left_out"
+STACKING_NOTICE_FLAT_CALIBRATION_NOTE = "stacking.notice_flat_calibration_note"
 STACKING_REGISTRATION_REFERENCE_STAR_COUNT = "stacking.registration_reference_star_count"
 STACKING_GROUP_EXPOSURE_S = "stacking.group_exposure_s"
 STACKING_GROUP_FRAMES_SUBMITTED = "stacking.group_frames_submitted_count"
@@ -2990,6 +2995,52 @@ _NOISE_BREAKDOWN_METRICS: tuple[MetricSpec, ...] = (
     ),
 )
 
+_NOTICE_COMPUTED_BY = "pipelines.stacking.post_processing.record_quality.stacking_notice_measurements"
+
+_NOTICE_METRICS: tuple[MetricSpec, ...] = (
+    notice_spec(
+        STACKING_NOTICE_FRAMES_MOVED_TO_EXCLUDED,
+        Checkpoint.STACKING,
+        SubjectLevel.STACK,
+        "count",
+        "Whether the quarantine step moved frames with clouds or trailed stars out of the stack.",
+        "The number of frames moved to the excluded folder.",
+        _NOTICE_COMPUTED_BY,
+        "Moved frames are no longer in the target's frame list, so a person should know they were moved.",
+    ),
+    notice_spec(
+        STACKING_NOTICE_SINGLE_FRAME_STACK,
+        Checkpoint.STACKING,
+        SubjectLevel.STACK,
+        "count",
+        "Whether the stack was made from one frame, so no rejection or registration quality work applied.",
+        "The number of frames in the stack, which is 1.",
+        _NOTICE_COMPUTED_BY,
+        "A stack of one frame has no pixel rejection or alignment, so its quality numbers differ.",
+    ),
+    notice_spec(
+        STACKING_NOTICE_EXPOSURE_GROUP_LEFT_OUT,
+        Checkpoint.STACKING,
+        SubjectLevel.STACK,
+        "count",
+        "Whether an exposure group was left out of the combined stack for a reason other than nonlinearity.",
+        "The number of frames the left-out group held.",
+        _NOTICE_COMPUTED_BY,
+        "A group left out of the combined image does not add its frames, so the stack has less depth.",
+    ),
+    notice_spec(
+        STACKING_NOTICE_FLAT_CALIBRATION_NOTE,
+        Checkpoint.STACKING,
+        SubjectLevel.STACK,
+        "count",
+        "Whether the flat assessment raised an issue that no flat gate reports.",
+        "The number of such issues, such as a color sensor's flat that was not smoothed.",
+        _NOTICE_COMPUTED_BY,
+        "The flat gates report faint, bright and noisy flats; another flat issue would go unlisted.",
+    ),
+    camera_without_profile_spec("stacking"),
+)
+
 STACKING_METRICS: tuple[MetricSpec, ...] = (
     *_DECLARED_BEFORE_PHASE_3,
     *_VALUE_METRICS,
@@ -3003,6 +3054,7 @@ STACKING_METRICS: tuple[MetricSpec, ...] = (
     *_SHIFT_METRICS,
     *_PATTERN_METRICS,
     *_GATE_METRICS,
+    *_NOTICE_METRICS,
 )
 
 # The gate name (as in the stack summary) mapped to the metric that stores it.

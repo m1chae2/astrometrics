@@ -104,6 +104,12 @@ jobs:
         run: |
           python build/documentation/check_notebook_outputs.py
 
+      - name: Check Notebooks Import Only Public Names
+        # Static, like the check above: notebooks may import only
+        # astrometricslib or wayfindinglib public names and their own helpers.
+        run: |
+          python build/documentation/check_notebook_imports.py
+
       - name: Build Documentation
         # Delegates to the same script used for local dev builds so CI and
         # developer machines can never drift apart (see build/linux/build_docs.sh).

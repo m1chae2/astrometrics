@@ -32,8 +32,7 @@ Every warning a job detects today stays detected, and a user can ask what warnin
 
 ### D1. Which pull request
 
-- **A (recommended): a new branch and pull request, based on `134-integration`, merged after #135.** #135 already changes 780 files and is waiting on the hardware check and the restack. This work changes what the app shows, so it deserves its own review.
-- B: add it to #135. One restack and one merge, but a larger review, and a failure in this work holds up the API restructure.
+**Decided by the user, 2026-11-01:** everything stays on one branch, on #135.
 
 ### D2. When the final restack runs
 

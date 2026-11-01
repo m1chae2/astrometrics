@@ -76,32 +76,28 @@ def test_the_d5300_summary_shows_its_saturation_threshold_cannot_be_reached() ->
     assert applied.has_quantum_efficiency_curve is False
 
 
-def test_a_listed_camera_is_recorded_without_a_flag() -> None:
-    """Check that a recognised camera does not flag the summary."""
+def test_a_listed_camera_is_recorded_as_a_real_profile() -> None:
+    """Check that a recognised camera is not the generic stand-in."""
     summary = make_summary()
     record_camera_profile(summary, "ZWO ASI 533MM Pro")
     assert summary.camera_profile is not None
     assert summary.camera_profile.profile_name == "ZWO ASI533MM Pro"
-    assert summary.flagged is False
-    assert summary.flag_reasons == []
+    assert summary.camera_profile.is_generic_fallback is False
 
 
-def test_an_unlisted_camera_flags_the_summary() -> None:
-    """Check the flag promised for a camera that is not recognised."""
+def test_an_unlisted_camera_is_recorded_as_the_generic_stand_in() -> None:
+    """Check that a camera that is not recognised gets the generic stand-in."""
     summary = make_summary()
     record_camera_profile(summary, "Acme Imager 9000")
     assert summary.camera_profile is not None
     assert summary.camera_profile.is_generic_fallback is True
-    assert summary.flagged is True
-    assert any("Acme Imager 9000" in reason for reason in summary.flag_reasons)
 
 
-def test_a_run_with_no_camera_name_records_nothing_and_does_not_flag() -> None:
+def test_a_run_with_no_camera_name_records_nothing() -> None:
     """Check that not knowing the camera is not the same as an unlisted one."""
     summary = make_summary()
     record_camera_profile(summary, None)
     assert summary.camera_profile is None
-    assert summary.flagged is False
 
 
 def test_a_summary_saved_before_camera_profiles_still_loads() -> None:

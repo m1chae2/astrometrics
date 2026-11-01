@@ -22,7 +22,7 @@ def _empty_summary() -> AstrometryQualitySummary:
     Returns
     -------
     summary : `AstrometryQualitySummary`
-        A summary that has not been flagged and has no gates recorded.
+        A summary that has no gates recorded.
     """
     return AstrometryQualitySummary.model_validate({
         "targetId": "TEST",
@@ -35,24 +35,22 @@ def _empty_summary() -> AstrometryQualitySummary:
     })
 
 
-def test_failed_gate_flags_the_run_and_adds_its_reason() -> None:
-    """A failed gate sets `flagged` and appends its sentence once."""
+def test_failed_gate_is_recorded_once_with_its_reason() -> None:
+    """A second result of a gate replaces the first."""
     summary = _empty_summary()
     summary.record_gate(failed_gate("plate_solve", "plate solve failed"))
     summary.record_gate(failed_gate("plate_solve", "plate solve failed"))
 
-    assert summary.flagged is True
-    assert summary.flag_reasons == ["plate solve failed"]
+    assert summary.gate("plate_solve").status is GateStatus.FAILED
+    assert summary.gate("plate_solve").detail == "plate solve failed"
     assert len(summary.gates) == 1
 
 
-def test_passed_gate_does_not_flag_the_run() -> None:
-    """A gate that ran and passed leaves the run unflagged but is on record."""
+def test_passed_gate_is_on_record() -> None:
+    """A gate that ran and passed is recorded as passed."""
     summary = _empty_summary()
     summary.record_gate(passed_gate("plate_solve", measured_value=0.8, limit=2.0))
 
-    assert summary.flagged is False
-    assert summary.flag_reasons == []
     assert summary.gate("plate_solve").status is GateStatus.PASSED
 
 
@@ -65,7 +63,6 @@ def test_unchecked_gate_is_recorded_and_is_not_a_pass() -> None:
     assert recorded is not None
     assert recorded.status is GateStatus.NOT_CHECKED
     assert recorded.status is not GateStatus.PASSED
-    assert summary.flagged is False
     assert recorded.detail == "3 frames are too few to judge"
 
 

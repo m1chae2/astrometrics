@@ -252,8 +252,6 @@ def run_stack(
     return result.model_copy(
         update={
             "stacked_path": stacked_path,
-            "flagged": getattr(quality, "flagged", None),
-            "flag_reasons": list(getattr(quality, "flag_reasons", []) or []),
             "quality_summary": quality,
             "note": "To compare this stack with the previous one, use QualityRecords.measure_stack.",
         }

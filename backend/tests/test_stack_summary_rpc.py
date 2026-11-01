@@ -44,6 +44,23 @@ def test_the_reply_is_plain_json(monkeypatch: pytest.MonkeyPatch) -> None:
     plain = serialize_rpc_result(reply)
     assert plain["frames_stacked"] == 36
     assert plain["exposure_groups"] == []
+    assert "flagged" not in plain
+    assert "flag_reasons" not in plain
+
+
+def test_a_stored_summary_with_the_removed_flag_keys_still_loads() -> None:
+    """An older saved summary holds `flagged`; it is ignored."""
+    summary = StackSummary.model_validate({
+        "target_id": "M 81",
+        "made_at": "2026-10-30T04:00:00+00:00",
+        "frames_submitted": 40,
+        "frames_stacked": 36,
+        "frames_skipped": 4,
+        "flagged": True,
+        "flag_reasons": ["single-frame stack: no rejection/registration quality processing applied"],
+    })
+    assert summary.frames_stacked == 36
+    assert "flagged" not in summary.model_dump()
 
 
 @pytest.mark.anyio

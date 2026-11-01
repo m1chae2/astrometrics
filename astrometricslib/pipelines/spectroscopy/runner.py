@@ -539,7 +539,6 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
                 unresolved_star_count=star_id_breakdown.unresolved,
                 poor_match_classification_count=poor_match_count,
                 ambiguous_classification_count=ambiguous_count,
-                flagged_spectral_classifications=flagged_spectral_classifications,
                 stage_quality_summary=summarize_stage_quality(quality_rows) or None,
                 gaia_xp_summary=summarize_gaia_xp(gaia_rows),
                 wavelength_scale_summary=wavelength_scale,

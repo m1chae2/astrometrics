@@ -36,7 +36,6 @@ from astrometricslib.models.quality.quality_summary import (
     StackQualitySummary,
 )
 from astrometricslib.models.quality.spectroscopy_quality import StageQualityRollup
-from astrometricslib.models.quality.stacking_quality import StackingInputQuality
 from astrometricslib.models.wavelength_scale import WavelengthScaleSummary
 from astrometricslib.pipelines.asteroid_detection import record_quality as asteroid_record
 from astrometricslib.pipelines.astrometry.post_processing import record_quality as astrometry_record
@@ -109,9 +108,9 @@ def stack_summary(*, with_groups: bool = True) -> dict[str, Any]:
             stackingDurationSeconds=61.5,
             registrationReferenceStarCount=210,
             exposureGroups=groups if with_groups else [],
-        ),
-        inputQuality=StackingInputQuality(
-            framesSubmitted=25, framesAccepted=21, framesExcludedForGain=1, framesQuarantined=3
+            framesAccepted=21,
+            framesExcludedForGain=1,
+            framesQuarantined=3,
         ),
     )
     summary.record_gate(passed_gate("flat_noise", 0.002, 0.01, "the flat noise limit"))
@@ -656,6 +655,7 @@ def test_an_old_flat_summary_with_no_gates_is_read(tmp_path: Path) -> None:
     metrics["catalogMatchSeparationRmsArcsec"] = None
     old_stack = stack_summary()
     old_stack["inputQuality"] = None
+    old_stack["stackingMetrics"].pop("framesAccepted", None)
     document = {
         "id": TARGET,
         "frames": [

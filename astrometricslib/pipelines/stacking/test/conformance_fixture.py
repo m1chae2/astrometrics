@@ -23,7 +23,6 @@ from astrometricslib.models.quality.quality_summary import (
     StackingPipelineQualityMetrics,
     StackQualitySummary,
 )
-from astrometricslib.models.quality.stacking_quality import StackingInputQuality
 from astrometricslib.models.quality.subset_stacks import SubsetStackResult
 from astrometricslib.models.target import FrameRecord
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
@@ -57,6 +56,9 @@ from astrometricslib.pipelines.stacking.post_processing.normalization_scale impo
     NormalizationScale,
     NormalizationScaleOutcome,
 )
+from astrometricslib.pipelines.stacking.post_processing.preview_notices import (
+    preview_step_skipped_measurements,
+)
 from astrometricslib.pipelines.stacking.post_processing.record_quality import (
     abandoned_stack_measurements,
     frame_geometry_measurements,
@@ -71,6 +73,7 @@ from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
     StackNoiseOutcome,
     StackNoiseResult,
 )
+from astrometricslib.pipelines.stacking.post_processing.stack_preview import SkippedPreviewStep
 from astrometricslib.pipelines.stacking.subset_noise_run import (
     expected_ratio_measurement,
     night_measurements,
@@ -215,17 +218,14 @@ def fixture_summary() -> StackQualitySummary:
         expectedStackFwhmPx=3.05,
         stackingDurationSeconds=95.0,
         registrationReferenceStarCount=150,
+        framesAccepted=18,
+        framesExcludedForGain=1,
+        framesExcludedForBackground=0,
+        framesQuarantined=1,
     )
     summary = StackQualitySummary(
         targetId="M 99",
         stackingMetrics=metrics,
-        inputQuality=StackingInputQuality(
-            framesSubmitted=20,
-            framesAccepted=18,
-            framesExcludedForGain=1,
-            framesExcludedForBackground=0,
-            framesQuarantined=1,
-        ),
     )
     for gate_name in GATE_METRIC_BY_NAME:
         summary.record_gate(passed_gate(gate_name, 0.01, 0.1, "fixture limit"))
@@ -364,6 +364,11 @@ def stacking_emitted_measurements() -> list[QualityMeasurement]:
     frame = FrameRecord(path="/frames/lights/M 99/Scope/Cam/a.fits", camera="Cam", exposure="60")
     measurements.extend(fixture_frame_geometry_rows(context))
     measurements.extend(abandoned_stack_measurements(context, 3600.5, 3600))
+    measurements.extend(
+        preview_step_skipped_measurements(
+            [SkippedPreviewStep("GraXpert", "GraXpert did not finish")], context, "M99_Stacked.fits"
+        )
+    )
     measurements.extend(
         flat_match_measurements(
             FlatMatchOutcome(

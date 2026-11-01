@@ -290,17 +290,13 @@ _METRICS_FIELDS: dict[str, tuple[str, str]] = {
         STACKING_REGISTRATION_REFERENCE_STAR_COUNT,
         "no single registration reference frame could be identified",
     ),
-}
-
-# Fields on `StackingInputQuality`.
-_INPUT_FIELDS: dict[str, tuple[str, str]] = {
-    "frames_accepted": (STACKING_FRAMES_ACCEPTED, "the input quality was not assessed"),
-    "frames_excluded_for_gain": (STACKING_FRAMES_EXCLUDED_FOR_GAIN, "the input quality was not assessed"),
+    "frames_accepted": (STACKING_FRAMES_ACCEPTED, "the input checks did not run"),
+    "frames_excluded_for_gain": (STACKING_FRAMES_EXCLUDED_FOR_GAIN, "the input checks did not run"),
     "frames_excluded_for_background": (
         STACKING_FRAMES_EXCLUDED_FOR_BACKGROUND,
-        "the input quality was not assessed",
+        "the input checks did not run",
     ),
-    "frames_quarantined": (STACKING_FRAMES_QUARANTINED, "the input quality was not assessed"),
+    "frames_quarantined": (STACKING_FRAMES_QUARANTINED, "the input checks did not run"),
     "dark_unique_frame_count": (
         STACKING_DARK_UNIQUE_FRAME_COUNT,
         "the stack used no dark, or the dark frames' numbers were not measured",
@@ -460,7 +456,7 @@ def stacking_notice_measurements(
     """Build the notice rows of one stack: the warnings that are not gates.
 
     A notice is stored only when it happened. The rows carry the same
-    sentences the summary lists as flag reasons, so a job can list them (see
+    sentences a reader sees in the job's warnings (see
     `astrometricslib.pipelines.shared.quality.notices`). The stack's
     timeout is stored apart, by the run that gave up on the stack.
 
@@ -485,7 +481,7 @@ def stacking_notice_measurements(
     """
     stack_subject = context.stack_subject(stack_file_name)
     rows: list[QualityMeasurement] = []
-    moved = summary.input_quality.frames_quarantined if summary.input_quality is not None else 0
+    moved = summary.stacking_metrics.frames_quarantined
     if moved:
         rows.append(
             notice_measurement(
@@ -519,11 +515,7 @@ def stacking_notice_measurements(
                     action_taken="exposure group left out of the combined stack",
                 )
             )
-    flat_issues = (
-        uncovered_flat_calibration_issues(summary.input_quality.flat_calibration_issues)
-        if summary.input_quality is not None
-        else []
-    )
+    flat_issues = uncovered_flat_calibration_issues(summary.stacking_metrics.flat_calibration_issues)
     if flat_issues:
         rows.append(
             notice_measurement(
@@ -1068,9 +1060,6 @@ def stacking_measurements(
         value = getattr(metrics, field_name)
         if field_name == "negative_pixel_max_percent" and value is not None:
             value = value / 100.0
-        measurements.append(_value_measurement(metric_name, value, reason, context, stack_subject))
-    for field_name, (metric_name, reason) in _INPUT_FIELDS.items():
-        value = getattr(summary.input_quality, field_name) if summary.input_quality is not None else None
         measurements.append(_value_measurement(metric_name, value, reason, context, stack_subject))
 
     for index, group in enumerate(metrics.exposure_groups):

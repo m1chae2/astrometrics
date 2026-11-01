@@ -554,8 +554,6 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
         "The camera settings applied, such as the gain (e-/ADU) and the level at which pixels clip."
     ),
     "quality_processing_applied": "Whether the quality gates were run.",
-    "flagged": "True if one or more quality gates failed, so a person should look at the run.",
-    "flag_reasons": "One plain sentence for each reason the run was flagged.",
     "gates": "Every quality gate result: passed, failed or not checked.",
     "created_at": "Time the quality summary was made, in UTC.",
     "provenance_activity_id": (
@@ -634,7 +632,6 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
     "ambiguous_classification_count": (
         "Number of stars whose classification is ambiguous between spectral classes."
     ),
-    "flagged_spectral_classifications": "Details of each star whose classification is in doubt.",
     "stage_quality_summary": "Summary of the quality metrics at each extraction checkpoint.",
     "gaia_xp_summary": (
         "Comparison with Gaia DR3 synthetic XP spectra (low-resolution spectra from the Gaia space mission)."
@@ -721,8 +718,16 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
         "Whether color frames were debayered (turned from the sensor's color-filter mosaic into full-"
         "color pixels)."
     ),
-    "input_quality": "Structured assessment of the raw frames' quality.",
-    "output_quality": "Structured assessment of the final stack's quality.",
+    "frames_accepted": "Number of frames left after the gain, frame-quality and background checks.",
+    "frames_excluded_for_gain": (
+        "Number of frames set aside because their camera gain differed from the rest."
+    ),
+    "frames_excluded_for_background": (
+        "Number of frames set aside because their sky background differed from the rest."
+    ),
+    "frames_quarantined": "Number of frames with clouds or trailed stars moved to the excluded folder.",
+    "dark_unique_frame_count": "Number of different frames (copies counted once) in the master dark.",
+    "bias_unique_frame_count": "Number of different frames (copies counted once) in the master bias.",
 }
 
 
@@ -954,8 +959,8 @@ FITS_INTRO = (
 # Words that open section 4.1 of every guide, before the gate table.
 GATE_INTRO = (
     'A quality gate is an automatic test on a run. It passes, fails, or is "not checked" when the '
-    "data it needs are missing. A failed gate marks the run as flagged (the `flagged` field in "
-    "Section 7) so a person can look at it. The list below is read from the code when this guide is "
+    "data it needs are missing. A failed gate is stored as a warning row, and the job's warnings "
+    "list it so a person can look at it. The list below is read from the code when this guide is "
     "generated."
 )
 
@@ -1323,7 +1328,8 @@ def build_astrometry_doc() -> str:
             "`str` (ISO-8601, UTC)",
             "Time the shutter opened. Used to move Gaia DR3 star positions from the catalog "
             "date to the image date (Eq. 3).",
-            "Gaia positions stay at the catalog date (epoch 2016.0) and the run is flagged.",
+            "Gaia positions stay at the catalog date (epoch 2016.0) and the run records the "
+            "`gaia_epoch_unknown` flag.",
         ],
         [
             "`FOCALLEN`",
@@ -1337,7 +1343,8 @@ def build_astrometry_doc() -> str:
             "Recommended",
             "`float` (μm)",
             "Pixel size after binning (binning joins neighboring sensor pixels into one), "
-            "used as written. If the two values differ, they are averaged and the run is flagged.",
+            "used as written. If the two values differ, they are averaged and the run records the "
+            "`scale_hint_binning_mismatch` flag.",
             "`PIXSIZE1` / `PIXSIZE2` times `XBINNING` / `YBINNING`.",
         ],
         [

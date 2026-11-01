@@ -1,9 +1,8 @@
 """The sentences of the stacking notices that are not gates.
 
-The stacking stage writes these sentences as flag reasons on the stack's
-summary, and stores the same sentences as the reasons of its notice rows (see
-`astrometricslib.pipelines.shared.quality.notices`). Both places call the
-functions here, so the two copies cannot drift apart.
+The stacking stage stores these sentences as the reasons of its notice rows
+(see `astrometricslib.pipelines.shared.quality.notices`). The functions here
+are the one place that writes them.
 """
 
 __all__ = [
@@ -71,7 +70,7 @@ def flat_calibration_issue_reason(issue: str) -> str:
     Returns
     -------
     reason : `str`
-        The sentence the summary lists as a flag reason.
+        The sentence.
     """
     return f"flat calibration: {issue}"
 

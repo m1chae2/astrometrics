@@ -6,8 +6,7 @@ caller reads named fields instead of
 guessing at the keys of a dictionary.
 
 - `StackResult` says which frames were chosen and, unless only a plan was
-  asked for, where the stack went, its quality summary, and whether it was
-  flagged.
+  asked for, where the stack went and its quality summary.
 - `PreviewRemakeResult` says where the new preview picture went and which
   steps made it.
 - `ProcessTargetResult` holds one target's result from each analysis stage
@@ -48,11 +47,9 @@ class StackResult(BaseModel):
     plan_only: bool = False
     # Where the stack is. None for a plan, or when stacking made no image.
     stacked_path: str | None = None
-    # Whether the stack's quality summary flags a problem. None for a plan.
-    flagged: bool | None = None
-    flag_reasons: list[str] = Field(default_factory=list)
     # The new stack's quality summary (rejected fraction, star sharpness
-    # against the inputs, flags). None for a plan.
+    # against the inputs, gates). None for a plan. Its warnings are listed by
+    # `Jobs.query(job_id=..., detail="warnings")`.
     quality_summary: StackQualitySummary | None = None
     note: str = ""
 

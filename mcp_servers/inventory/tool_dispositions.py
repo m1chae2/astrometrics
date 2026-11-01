@@ -153,6 +153,9 @@ DECISIONS = {
         "drop",
         "A change counter for the backend's answer cache. It tells an AI client nothing about the sky.",
     ),
+    "processing_stop_stacking_programs": ToolDecision(
+        "drop", "Stops every Siril the library started. The backend calls it when it stops."
+    ),
     "processing_open_in_siril": ToolDecision(
         "drop", "Opens a window on the person's screen. An AI client cannot see it. The app's button uses it."
     ),
@@ -290,7 +293,7 @@ DECISIONS = {
     "processing_stack_summary": ToolDecision(
         "keep",
         "Built 2026-10-04. One short answer for a target's stack: frames stacked and skipped, rejected "
-        "fraction, star width against the inputs, flags and each exposure group. Reads the saved summary.",
+        "fraction, star width against the inputs and each exposure group. Reads the saved summary.",
     ),
     "star_query": ToolDecision(
         "keep", "Built 2026-10-03. Library star lookup with hard caps on rows, region size and full records."

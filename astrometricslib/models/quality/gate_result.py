@@ -4,7 +4,8 @@ A pipeline's quality summary used to say only that it was flagged and give a
 list of sentences. A reader could not tell a check that ran and passed from
 a check that never ran: both leave nothing in the list. This module adds one
 record per gate, so that "passed", "failed" and "not checked" are three
-different, visible answers.
+different, visible answers. The flag and the list are gone; a failed gate is
+also stored as a warning row.
 
 Each `GateResult` carries what was measured, the limit it was compared with,
 and where that limit came from. A gate that could not run (for example, a
@@ -108,8 +109,8 @@ def failed_gate(
     name : `str`
         The gate's name.
     detail : `str`
-        One sentence saying what is wrong. It is also added to the run's
-        flag reasons.
+        One sentence saying what is wrong. A failed gate's sentence is the
+        reason of its warning row.
     measured_value : `float` or `None`, optional
         What was measured.
     limit : `float` or `None`, optional

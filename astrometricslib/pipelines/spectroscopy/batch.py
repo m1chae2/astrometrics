@@ -591,7 +591,6 @@ def _attach_spectroscopy_quality_summary(
             median_trail_width_px=median_trail_width_px,
             poor_match_classification_count=poor_match_count,
             ambiguous_classification_count=ambiguous_count,
-            flagged_spectral_classifications=all_spectral_classification_concerns,
             stage_quality_summary=summarize_stage_quality(all_stage_quality_rows) or None,
             gaia_xp_summary=summarize_gaia_xp(all_gaia_xp_rows),
             wavelength_scale_summary=wavelength_scale,

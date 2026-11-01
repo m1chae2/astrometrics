@@ -76,7 +76,6 @@ from astrometricslib.models.quality.quality_summary import (
     NoiseModelPoint,
     PhotometryPipelineQualityMetrics,
     PhotometryQualitySummary,
-    SpectralClassificationConcern,
     SpectroscopyPipelineQualityMetrics,
     SpectroscopyQualitySummary,
     StackingPipelineQualityMetrics,
@@ -94,7 +93,6 @@ from astrometricslib.models.quality.spectroscopy_quality import (
     StageQualityMetric,
     StageQualityRollup,
 )
-from astrometricslib.models.quality.stacking_quality import StackingInputQuality, StackingOutputQuality
 from astrometricslib.models.sensor_noise_measurement import SensorNoiseMeasurement
 from astrometricslib.models.spectral_cross_checks import LineIndexClassification, ReddeningRecord
 from astrometricslib.models.stellar_source import (
@@ -597,8 +595,6 @@ def render_types() -> str:
         generate_interface(TargetSessionContribution, "TargetSessionContribution"),
         generate_interface(ExposureGroupSummary, "ExposureGroupSummary"),
         generate_interface(AppliedCameraProfile, "AppliedCameraProfile"),
-        generate_interface(StackingInputQuality, "StackingInputQuality"),
-        generate_interface(StackingOutputQuality, "StackingOutputQuality"),
         generate_interface(StackingPipelineQualityMetrics, "StackingPipelineQualityMetrics"),
         generate_interface(StackQualitySummary, "StackQualitySummary"),
         generate_interface(AstrometryPipelineQualityMetrics, "AstrometryPipelineQualityMetrics"),
@@ -607,7 +603,6 @@ def render_types() -> str:
         generate_interface(NoiseModelPoint, "NoiseModelPoint"),
         generate_interface(PhotometryPipelineQualityMetrics, "PhotometryPipelineQualityMetrics"),
         generate_interface(PhotometryQualitySummary, "PhotometryQualitySummary"),
-        generate_interface(SpectralClassificationConcern, "SpectralClassificationConcern"),
         generate_interface(SpectroscopyPipelineQualityMetrics, "SpectroscopyPipelineQualityMetrics"),
         generate_interface(SpectroscopyQualitySummary, "SpectroscopyQualitySummary"),
         generate_interface(FrameDetection, "FrameDetection"),

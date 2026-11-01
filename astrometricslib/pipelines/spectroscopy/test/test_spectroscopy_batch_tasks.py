@@ -485,7 +485,6 @@ class TestAttachSpectroscopyQualitySummary:
         assert rollups[0].metric_medians["classification_rms"] == pytest.approx(0.30)
         gate = recorded.gate(PROCESSING_QUALITY_GATE_NAME)
         assert gate.status is GateStatus.FAILED
-        assert recorded.flagged is True
 
     def test_records_the_camera_profile_of_the_frames_that_were_processed(self) -> None:
         """The summary names the camera of the session's frames."""
@@ -512,7 +511,6 @@ class TestAttachSpectroscopyQualitySummary:
         recorded = target.quality.spectroscopy
         assert recorded.camera_profile is not None
         assert recorded.camera_profile.profile_name == "ZWO ASI533MM Pro"
-        assert recorded.flagged is False
 
     def test_flags_a_batch_in_which_no_frame_produced_a_spectrum(self) -> None:
         """Frames that yielded no spectrum no longer read as clean."""
@@ -523,8 +521,7 @@ class TestAttachSpectroscopyQualitySummary:
         batch._attach_spectroscopy_quality_summary(target, summary, [(session, SimpleNamespace())])
 
         recorded = target.quality.spectroscopy
-        assert recorded.flagged is True
-        assert "no star produced a spectrum" in recorded.flag_reasons
+        assert recorded.gate("spectra_extracted").detail == "no star produced a spectrum"
 
     def test_flags_target_when_zero_order_saturation_significant(self) -> None:
         """Verify significant zero-order saturation flags with a reason."""
@@ -548,8 +545,9 @@ class TestAttachSpectroscopyQualitySummary:
 
         batch._attach_spectroscopy_quality_summary(target, summary, session_results)
 
-        assert target.quality.spectroscopy.flagged is True
-        assert "zero-order saturated" in target.quality.spectroscopy.flag_reasons[0]
+        gate = target.quality.spectroscopy.gate("zero_order_saturation")
+        assert gate.status.value == "failed"
+        assert "zero-order saturated" in gate.detail
 
     def test_flags_target_when_spectral_classification_uncertain(self) -> None:
         """Verify per-frame classification concerns aggregate and flag."""
@@ -601,15 +599,9 @@ class TestAttachSpectroscopyQualitySummary:
         metrics = target.quality.spectroscopy.spectroscopy_metrics
         assert metrics.poor_match_classification_count == 1
         assert metrics.ambiguous_classification_count == 1
-        assert {c.star_id for c in metrics.flagged_spectral_classifications} == {
-            "HD 150579",
-            "HD 150998",
-        }
-        assert target.quality.spectroscopy.flagged is True
-        assert any(
-            "spectral classification uncertain" in reason
-            for reason in target.quality.spectroscopy.flag_reasons
-        )
+        classification_gate = target.quality.spectroscopy.gate("spectral_classification")
+        assert classification_gate.status.value == "failed"
+        assert classification_gate.detail.startswith("spectral classification uncertain for 2 star(s)")
 
     def test_frames_clipped_counts_failed_paths_per_session(self) -> None:
         """Verify frames_clipped only counts that session's own failures."""
@@ -651,8 +643,7 @@ class TestAttachSpectroscopyQualitySummary:
 
         batch._attach_spectroscopy_quality_summary(target, summary, [])
 
-        assert target.quality.spectroscopy.flagged is True
-        assert target.quality.spectroscopy.flag_reasons == ["no star produced a spectrum"]
+        assert target.quality.spectroscopy.gate("spectra_extracted").detail == "no star produced a spectrum"
         assert target.quality.spectroscopy.gate("zero_order_saturation").status.value == "not_checked"
         assert target.quality.spectroscopy.spectroscopy_metrics.zero_order_saturated_pixel_fraction is None
         assert target.quality.spectroscopy.spectroscopy_metrics.median_trail_width_px is None

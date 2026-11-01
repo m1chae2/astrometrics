@@ -1,8 +1,7 @@
 """Tests for notice rows: the warnings that are not gates.
 
 A notice row has the check outcome ``failed`` and a limit of zero, carries
-the job id of its run, and holds the same sentence the summary lists as a
-flag reason.
+the job id of its run, and holds the sentence that says what was noticed.
 """
 
 from datetime import UTC, datetime
@@ -62,8 +61,8 @@ def test_every_pipeline_declares_its_camera_notice(pipeline: str) -> None:
     assert spec.checkpoint.value == pipeline
 
 
-def test_the_camera_notice_is_a_failed_check_with_the_job_and_the_flag_sentence() -> None:
-    """The row is a warning of its job, worded like the flag reason."""
+def test_the_camera_notice_is_a_failed_check_with_the_job_and_sentence() -> None:
+    """The row is a warning of its job, with the camera sentence."""
     context = _context()
     row = camera_without_profile_measurement("Acme", context, context.run_subject())
     assert row.metric == "photometry.notice_camera_without_profile"
@@ -77,7 +76,7 @@ def test_the_camera_notice_is_a_failed_check_with_the_job_and_the_flag_sentence(
 def test_recording_an_unlisted_camera_stores_the_notice_row(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The summary flag and the stored row say the same thing."""
+    """The stored row keeps the sentence the summary used to flag."""
     monkeypatch.setattr(
         "astrometricslib.pipelines.shared.quality.pipeline_measurements.QualityStore.from_configuration",
         lambda config=None: QualityStore(str(tmp_path / "astrometrics.db")),
@@ -85,7 +84,11 @@ def test_recording_an_unlisted_camera_stores_the_notice_row(
     summary = PipelineQualitySummaryBase(pipeline_name="photometry", pipeline_version="1", target_id="M 31")
     record_camera_profile(summary, "Acme Imager 9000", _context())
     rows = QualityStore(str(tmp_path / "astrometrics.db")).query(job_id="job-9", latest_only=False)
-    assert [row.reason for row in rows] == summary.flag_reasons
+    assert [row.reason for row in rows] == [
+        "camera 'Acme Imager 9000' has no camera profile; generic assumptions about the sensor were used"
+    ]
+    assert summary.camera_profile is not None
+    assert summary.camera_profile.is_generic_fallback
 
 
 def test_a_listed_camera_stores_no_notice(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -99,12 +102,15 @@ def test_a_listed_camera_stores_no_notice(tmp_path: Path, monkeypatch: pytest.Mo
     assert QualityStore(str(tmp_path / "astrometrics.db")).query(latest_only=False) == []
 
 
-def test_stacking_sentences_are_the_ones_the_summary_uses() -> None:
-    """The three stacking sentences come from one place."""
+def test_stacking_notice_sentences_are_the_ones_stored_before_the_flag_was_removed() -> None:
+    """The stored reason text of each stacking notice is unchanged."""
     assert frames_moved_to_excluded_reason(3) == (
         "3 frame(s) with clouds or trailed stars moved to the _excluded folder"
     )
-    assert single_frame_stack_reason().startswith("single-frame stack")
+    assert (
+        single_frame_stack_reason()
+        == "single-frame stack: no rejection/registration quality processing applied"
+    )
     assert exposure_group_left_out_reason(60.0, "was left out") == "the 60 s exposure group was left out"
 
 
@@ -115,7 +121,6 @@ def test_stacking_notice_rows_follow_the_summary() -> None:
         StackingPipelineQualityMetrics,
         StackQualitySummary,
     )
-    from astrometricslib.models.quality.stacking_quality import StackingInputQuality
     from astrometricslib.pipelines.stacking.post_processing.record_quality import (
         stacking_notice_measurements,
     )
@@ -124,16 +129,13 @@ def test_stacking_notice_rows_follow_the_summary() -> None:
         targetId="M 31",
         stackingMetrics=StackingPipelineQualityMetrics(isSpectral=False, framesSubmitted=1, framesStacked=1),
     )
-    summary.input_quality = StackingInputQuality(
-        framesSubmitted=8,
-        framesAccepted=6,
-        framesQuarantined=2,
-        flatCalibrationIssues=[
-            "flats are faint: 5% of full scale",
-            "flats are bright: 95% of full scale",
-            "not smoothed: blurring a colour sensor's flat would mix its colours",
-        ],
-    )
+    summary.stacking_metrics.frames_accepted = 6
+    summary.stacking_metrics.frames_quarantined = 2
+    summary.stacking_metrics.flat_calibration_issues = [
+        "flats are faint: 5% of full scale",
+        "flats are bright: 95% of full scale",
+        "not smoothed: blurring a colour sensor's flat would mix its colours",
+    ]
     summary.quality_processing_applied = False
     summary.stacking_metrics.exposure_groups = [
         ExposureGroupSummary(
@@ -168,7 +170,7 @@ def test_stacking_notice_rows_follow_the_summary() -> None:
         exposure_group_left_out_reason(30.0, "was left out because it has no dark frames"),
         "flat calibration: flats are bright: 95% of full scale; "
         "flat calibration: not smoothed: blurring a colour sensor's flat would mix its colours",
-        *summary.flag_reasons,
+        "camera 'Acme Imager 9000' has no camera profile; generic assumptions about the sensor were used",
     }
 
 

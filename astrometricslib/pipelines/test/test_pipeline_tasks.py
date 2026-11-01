@@ -615,8 +615,8 @@ def test_target_analyze_target_asteroid_detection(tmp_path: Path, mocker: Mocker
     assert summary.asteroid_detection_metrics.candidates_rate_linearity_confirmed == 1
     assert len(summary.target_session_breakdown) == 1
     assert summary.target_session_breakdown[0].frames_contributed == 4
-    assert summary.flagged is True
-    assert "not matched to a known body" in summary.flag_reasons[0]
+    failed_details = [gate.detail for gate in summary.gates if gate.status.value == "failed"]
+    assert "not matched to a known body" in failed_details[0]
 
 
 def test_target_analyze_target_asteroid_detection_drops_rejected_candidates(

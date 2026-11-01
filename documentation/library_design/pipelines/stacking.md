@@ -133,7 +133,7 @@ Stacking has no `AnalysisPipeline` adapter. The entry point is `stage.stack_fram
 
 ### 4.1 Quality gates
 
-A quality gate is an automatic test on a run. It passes, fails, or is "not checked" when the data it needs are missing. A failed gate marks the run as flagged (the `flagged` field in Section 7) so a person can look at it. The list below is read from the code when this guide is generated.
+A quality gate is an automatic test on a run. It passes, fails, or is "not checked" when the data it needs are missing. A failed gate is stored as a warning row, and the job's warnings list it so a person can look at it. The list below is read from the code when this guide is generated.
 
 | Gate | Role | Defined in | What it checks |
 | --- | --- | --- | --- |
@@ -219,15 +219,11 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `resolved_parameters` | `dict[str, Any]` | The settings the run actually used, after defaults were filled in. |
 | `camera_profile` | `astrometricslib.models.applied_camera_profile.AppliedCameraProfile \| None` | The camera settings applied, such as the gain (e-/ADU) and the level at which pixels clip. |
 | `quality_processing_applied` | `bool` | Whether the quality gates were run. |
-| `flagged` | `bool` | True if one or more quality gates failed, so a person should look at the run. |
-| `flag_reasons` | `list[str]` | One plain sentence for each reason the run was flagged. |
 | `gates` | `list[astrometricslib.models.quality.gate_result.GateResult]` | Every quality gate result: passed, failed or not checked. |
 | `created_at` | `datetime.datetime` | Time the quality summary was made, in UTC. |
 | `provenance_activity_id` | `str \| None` | Identifier of this run in the provenance record (the IVOA-standard log of which run made which data). |
 | `upstream_entity_id` | `str \| None` | Identifier of the exact database record this run read as its input. |
 | `stacking_metrics` | `astrometricslib.models.quality.quality_summary.StackingPipelineQualityMetrics` | The stacking measurements (Section 7.2). |
-| `input_quality` | `astrometricslib.models.quality.stacking_quality.StackingInputQuality \| None` | Structured assessment of the raw frames' quality. |
-| `output_quality` | `astrometricslib.models.quality.stacking_quality.StackingOutputQuality \| None` | Structured assessment of the final stack's quality. |
 
 ### 7.2 Domain scientific metrics schema (`StackingPipelineQualityMetrics`)
 
@@ -237,10 +233,16 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `frames_submitted` | `int` | Number of frames offered for calibration and stacking. |
 | `frames_stacked` | `int` | Number of light frames (exposures of the target) aligned and stacked. |
 | `excluded_frames` | `list[astrometricslib.models.quality.quality_summary.ExcludedFrame]` | Input frames set aside before stacking, each with its reason. |
+| `frames_accepted` | `int \| None` | Number of frames left after the gain, frame-quality and background checks. |
+| `frames_excluded_for_gain` | `int` | Number of frames set aside because their camera gain differed from the rest. |
+| `frames_excluded_for_background` | `int` | Number of frames set aside because their sky background differed from the rest. |
+| `frames_quarantined` | `int` | Number of frames with clouds or trailed stars moved to the excluded folder. |
 | `rejected_pixel_fraction` | `float \| None` | Share of pixel values rejected (clipped) while building the stack. |
 | `background_split_detected` | `bool` | True if the frames' sky-background levels split into two groups with a sudden jump between them (gap at least 4 times the spread within a group, checked for each exposure length), for example clouds arriving. The frames outside the larger group are set aside. |
 | `background_split_detail` | `str \| None` | Description of the sky-background jump. |
 | `calibration_mismatch_flags` | `list[str]` | Soft flags for calibration frames applied with a different gain setting, offset or temperature. |
+| `dark_unique_frame_count` | `int \| None` | Number of different frames (copies counted once) in the master dark. |
+| `bias_unique_frame_count` | `int \| None` | Number of different frames (copies counted once) in the master bias. |
 | `flat_frame_count` | `int \| None` | Number of flat exposures (images of an evenly lit surface) in the master flat. |
 | `flat_noise_fraction` | `float \| None` | Relative noise level measured in the master flat. |
 | `flat_smoothing_sigma_px` | `float \| None` | Gaussian smoothing width (sigma, in pixels) applied to the master flat because its relative noise was above 0.5% (`MAXIMUM_FLAT_NOISE_FRACTION`). None when no smoothing was applied, including on color sensors. |

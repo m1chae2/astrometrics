@@ -9,6 +9,7 @@ stack with a legitimately dark sky is not, and that a group left out of the
 combined image is named in the flags.
 """
 
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,17 +17,36 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
+from astrometricslib.models.quality.gate_result import GateStatus
 from astrometricslib.models.quality.quality_summary import (
     StackingPipelineQualityMetrics,
     StackQualitySummary,
 )
+from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
 from astrometricslib.pipelines.stacking.calibration_health import measure_calibration_health
-from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import assess_input_quality
+from astrometricslib.pipelines.stacking.post_processing.record_quality import stacking_notice_measurements
+from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import calibration_gates
 from astrometricslib.pipelines.stacking.stage import (
     _base_stack_quality_summary,
-    _finalize_stack_quality_flags,
     _record_exposure_groups,
+    _record_output_gates,
 )
+
+
+def failed_reasons(summary: StackQualitySummary) -> list[str]:
+    """List the sentences of the summary's failed gates.
+
+    Parameters
+    ----------
+    summary : `StackQualitySummary`
+        The summary.
+
+    Returns
+    -------
+    reasons : `list` [`str`]
+        The detail of each failed gate.
+    """
+    return [gate.detail for gate in summary.gates if gate.status is GateStatus.FAILED]
 
 
 def make_summary(is_spectral: bool = False) -> StackQualitySummary:
@@ -35,11 +55,10 @@ def make_summary(is_spectral: bool = False) -> StackQualitySummary:
     Returns
     -------
     summary : `StackQualitySummary`
-        A summary with default metrics and a clean input judgement.
+        A summary with default metrics and no gate yet.
     """
     return StackQualitySummary(
         target_id="NGC 7023",
-        input_quality=assess_input_quality(10, 10, [], None, {}),
         stacking_metrics=StackingPipelineQualityMetrics(
             is_spectral=is_spectral, frames_submitted=10, frames_stacked=10
         ),
@@ -119,11 +138,10 @@ def test_a_mostly_zero_imaging_stack_is_flagged_as_blank(tmp_path: Path) -> None
     summary = make_summary()
 
     measure_calibration_health(summary, write_stack(tmp_path / "blank.fits", 0.99), {})
-    _finalize_stack_quality_flags(summary)
+    _record_output_gates(summary)
 
     assert summary.stacking_metrics.zero_pixel_fraction > 0.95
-    assert summary.flagged
-    assert any("exactly zero" in reason for reason in summary.flag_reasons)
+    assert any("exactly zero" in reason for reason in failed_reasons(summary))
 
 
 def test_a_normal_imaging_stack_is_not_flagged(tmp_path: Path) -> None:
@@ -131,9 +149,9 @@ def test_a_normal_imaging_stack_is_not_flagged(tmp_path: Path) -> None:
     summary = make_summary()
 
     measure_calibration_health(summary, write_stack(tmp_path / "fine.fits", 0.01), {})
-    _finalize_stack_quality_flags(summary)
+    _record_output_gates(summary)
 
-    assert not any("exactly zero" in reason for reason in summary.flag_reasons)
+    assert not any("exactly zero" in reason for reason in failed_reasons(summary))
 
 
 def test_a_mostly_zero_spectral_stack_is_flagged_but_a_nearly_clean_one_is_not(tmp_path: Path) -> None:
@@ -143,13 +161,13 @@ def test_a_mostly_zero_spectral_stack_is_flagged_but_a_nearly_clean_one_is_not(t
     """
     flagged = make_summary(is_spectral=True)
     measure_calibration_health(flagged, write_stack(tmp_path / "spec_bad.fits", 0.35), {})
-    _finalize_stack_quality_flags(flagged)
-    assert any("exactly zero" in reason for reason in flagged.flag_reasons)
+    _record_output_gates(flagged)
+    assert any("exactly zero" in reason for reason in failed_reasons(flagged))
 
     clean = make_summary(is_spectral=True)
     measure_calibration_health(clean, write_stack(tmp_path / "spec_ok.fits", 0.004), {})
-    _finalize_stack_quality_flags(clean)
-    assert not any("exactly zero" in reason for reason in clean.flag_reasons)
+    _record_output_gates(clean)
+    assert not any("exactly zero" in reason for reason in failed_reasons(clean))
 
 
 def test_the_negative_pixel_warning_from_siril_is_recorded_and_flagged(tmp_path: Path) -> None:
@@ -158,10 +176,10 @@ def test_the_negative_pixel_warning_from_siril_is_recorded_and_flagged(tmp_path:
     diagnostics = {"negative_pixel_max_percent": 99, "negative_pixel_frames": 40}
 
     measure_calibration_health(summary, write_stack(tmp_path / "s.fits", 0.0), diagnostics)
-    _finalize_stack_quality_flags(summary)
+    _record_output_gates(summary)
 
     assert summary.stacking_metrics.negative_pixel_max_percent == 99
-    assert any("negative pixels" in reason for reason in summary.flag_reasons)
+    assert any("negative pixels" in reason for reason in failed_reasons(summary))
 
 
 def test_a_small_negative_share_is_recorded_but_not_flagged(tmp_path: Path) -> None:
@@ -171,14 +189,14 @@ def test_a_small_negative_share_is_recorded_but_not_flagged(tmp_path: Path) -> N
     measure_calibration_health(
         summary, write_stack(tmp_path / "s.fits", 0.0), {"negative_pixel_max_percent": 10}
     )
-    _finalize_stack_quality_flags(summary)
+    _record_output_gates(summary)
 
     assert summary.stacking_metrics.negative_pixel_max_percent == 10
-    assert not any("negative pixels" in reason for reason in summary.flag_reasons)
+    assert not any("negative pixels" in reason for reason in failed_reasons(summary))
 
 
-def test_a_group_left_out_of_the_combined_image_is_named_in_the_flags() -> None:
-    """Why a group is missing from the combined stack appears as a flag."""
+def test_a_group_left_out_of_the_combined_image_is_named_in_a_notice_row() -> None:
+    """Why a group is missing from the combined stack is a warning row."""
     summary = make_summary()
     _record_exposure_groups(
         summary,
@@ -194,44 +212,38 @@ def test_a_group_left_out_of_the_combined_image_is_named_in_the_flags() -> None:
             ]
         },
     )
-
-    _finalize_stack_quality_flags(summary)
-
-    assert summary.flagged
-    assert "the 0.5 s exposure group could not be stacked" in summary.flag_reasons
-
-
-def test_the_flat_measurements_come_from_the_diagnostics_and_are_flagged() -> None:
-    """Flat issues become flag reasons; the measurements are copied."""
-    summary = make_summary()
-    summary.input_quality = assess_input_quality(
-        10,
-        10,
-        [],
-        None,
-        {
-            "flat_calibration": {
-                "frame_count": 1,
-                "noise_fraction": 0.045,
-                "smoothing_sigma_pixels": 2.5,
-                "issues": ["master flat noise is 4.49% from 1 frame(s)"],
-            }
-        },
+    context = PipelineRunContext(
+        "NGC 7023", "stacking", "1.3.0", "job-1", "job-1", datetime(2026, 11, 1, tzinfo=UTC)
     )
-    _finalize_stack_quality_flags(summary)
-    assert summary.input_quality.flat_noise_fraction == pytest.approx(0.045)
-    assert summary.flagged
-    assert "flat calibration: master flat noise is 4.49% from 1 frame(s)" in summary.flag_reasons
+
+    rows = stacking_notice_measurements(summary, context, "NGC7023_Stacked.fits")
+
+    assert [row.reason for row in rows] == ["the 0.5 s exposure group could not be stacked"]
+    assert rows[0].check_outcome is GateStatus.FAILED
 
 
-def test_a_stack_with_good_flats_has_no_flat_flag() -> None:
-    """No flat issues add no flag reason."""
+def test_a_noisy_master_flat_fails_the_flat_noise_gate() -> None:
+    """A noisy master flat fails the flat-noise gate with its sentence."""
     summary = make_summary()
-    summary.input_quality = assess_input_quality(
-        10, 10, [], None, {"flat_calibration": {"frame_count": 40, "noise_fraction": 0.001}}
-    )
-    _finalize_stack_quality_flags(summary)
-    assert not any(reason.startswith("flat calibration") for reason in summary.flag_reasons)
+    diagnostics = {
+        "flat_calibration": {
+            "frame_count": 1,
+            "noise_fraction": 0.045,
+            "smoothing_sigma_pixels": 2.5,
+            "issues": ["master flat noise is 4.49% from 1 frame(s)"],
+        }
+    }
+    for gate in calibration_gates(diagnostics):
+        summary.record_gate(gate)
+    assert "flat calibration: master flat noise is 4.49% from 1 frame(s)" in failed_reasons(summary)
+
+
+def test_a_stack_with_good_flats_has_no_flat_warning() -> None:
+    """No flat issues give no failed flat gate."""
+    summary = make_summary()
+    for gate in calibration_gates({"flat_calibration": {"frame_count": 40, "noise_fraction": 0.001}}):
+        summary.record_gate(gate)
+    assert not any(reason.startswith("flat calibration") for reason in failed_reasons(summary))
 
 
 def test_a_colour_stack_with_one_dead_channel_is_flagged(tmp_path: Path) -> None:
@@ -244,10 +256,10 @@ def test_a_colour_stack_with_one_dead_channel_is_flagged(tmp_path: Path) -> None
     summary = make_summary()
 
     measure_calibration_health(summary, str(path), {})
-    _finalize_stack_quality_flags(summary)
+    _record_output_gates(summary)
 
     assert summary.stacking_metrics.zero_pixel_fraction == pytest.approx(0.9, abs=0.03)
-    assert any("exactly zero" in reason for reason in summary.flag_reasons)
+    assert any("exactly zero" in reason for reason in failed_reasons(summary))
 
 
 def test_the_summary_records_the_rejection_limits_and_whether_the_floor_applied() -> None:

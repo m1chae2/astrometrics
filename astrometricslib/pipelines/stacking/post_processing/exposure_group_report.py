@@ -391,8 +391,8 @@ def exposure_group_linearity_gate(groups: list[dict[str, Any]], tolerance: float
     bright end of a group is compressed near full well or clipped they do not.
     A group whose check ratio sits more than `tolerance` from the gain is left
     out of the combined image (see `_stack_exposure_groups`), and this gate
-    fails with a sentence that names the ratios. The sentence is the same text
-    the stage lists as the group's flag reason, so the two never disagree.
+    fails with a sentence that names the ratios. The sentence is the
+    reason of the gate's warning row.
 
     Parameters
     ----------

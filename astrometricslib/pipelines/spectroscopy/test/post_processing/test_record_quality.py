@@ -276,8 +276,9 @@ def test_the_real_validate_output_records_the_gates() -> None:
 
     summary = runner.SpectroscopyPipelineAdapter().validate_output(request, result)
 
-    assert summary.flagged is True
-    assert "zero-order saturated in at least one processed star" in summary.flag_reasons
+    assert (
+        summary.gate(rg.ZERO_ORDER_GATE_NAME).detail == "zero-order saturated in at least one processed star"
+    )
     assert summary.gate(rg.ZERO_ORDER_GATE_NAME).status is GateStatus.FAILED
     assert summary.gate(rg.CATALOG_GATE_NAME).status is GateStatus.FAILED
     assert summary.gate(rg.SPECTRA_GATE_NAME).status is GateStatus.PASSED

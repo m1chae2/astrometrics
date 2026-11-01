@@ -828,8 +828,8 @@ class AppConfiguration:
         camera is linear. When the bright end of a group is compressed (near
         full well) or clipped, they differ. If either quarter's ratio is
         farther from the scale than this setting, as a fraction of the scale,
-        the group is left out of the combined image and the stack is flagged
-        with the "exposure_group_linearity" gate.
+        the group is left out of the combined image and the
+        "exposure_group_linearity" gate fails.
 
         Returns
         -------

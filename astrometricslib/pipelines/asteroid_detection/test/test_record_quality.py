@@ -191,8 +191,9 @@ def test_the_real_validate_output_tells_an_empty_field_from_an_offline_database(
     summary = AsteroidDetectionPipelineAdapter().validate_output(request, result)
 
     assert summary.gate(rg.EPHEMERIS_GATE_NAME).status is expected_ephemeris
-    assert any(expected_flagged_text in reason for reason in summary.flag_reasons)
-    assert summary.flagged is True
+    assert any(
+        expected_flagged_text in gate.detail for gate in summary.gates if gate.status.value == "failed"
+    )
 
 
 def test_residual_gate_is_not_checked_when_no_chain_reached_the_straight_line_test() -> None:

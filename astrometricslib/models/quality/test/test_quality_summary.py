@@ -44,7 +44,6 @@ def test_asteroid_detection_quality_summary_constructs_with_minimal_fields() -> 
     assert summary.asteroid_detection_metrics.candidates_detected == 5
     assert summary.pipeline_name == "asteroid_detection"
     assert summary.upstream_quality_summary_reference == "astrometry"
-    assert summary.flagged is False
 
 
 def test_asteroid_detection_quality_summary_defaults_to_empty_session_provenance() -> None:
@@ -70,7 +69,6 @@ def test_astrometry_quality_summary_constructs_with_minimal_fields() -> None:
     assert summary.astrometry_metrics.sources_detected == 42
     assert summary.pipeline_name == "astrometry"
     assert summary.upstream_quality_summary_reference == "stacking"
-    assert summary.flagged is False
 
 
 def test_astrometry_quality_summary_defaults_to_empty_session_provenance() -> None:
@@ -104,7 +102,6 @@ def test_photometry_quality_summary_constructs_with_minimal_fields() -> None:
     )
     assert summary.photometry_metrics.frames_processed == 38
     assert summary.pipeline_name == "photometry"
-    assert summary.flagged is False
 
 
 def test_photometry_quality_summary_has_no_upstream_reference() -> None:
@@ -160,7 +157,6 @@ def test_stack_quality_summary_constructs_with_minimal_fields() -> None:
     )
     assert summary.stacking_metrics.frames_stacked == 38
     assert summary.stacking_metrics.excluded_frames[0].reason == "minority gain"
-    assert summary.flagged is False
     assert summary.pipeline_name == "stacking"
 
 
@@ -189,3 +185,82 @@ def test_a_stored_stacking_summary_with_the_removed_yes_no_fields_still_loads() 
     assert metrics.negative_pixel_max_percent == 70
     for removed in ("rejected_fraction_flagged", "saturation_flagged", "fwhm_degraded", "timed_out"):
         assert not hasattr(metrics, removed)
+
+
+def test_a_stored_summary_with_the_removed_flag_fields_loads() -> None:
+    """Old rows hold `flagged`, `flagReasons`, `inputQuality` and more.
+
+    The models ignore the flag fields. The frame counts of `inputQuality`
+    move to the stack metrics, so an old stack keeps its numbers.
+    """
+    stored = {
+        "targetId": "M 81",
+        "flagged": True,
+        "flagReasons": ["2 frame(s) with clouds or trailed stars moved to the _excluded folder"],
+        "stackingMetrics": {"isSpectral": False, "framesSubmitted": 40, "framesStacked": 38},
+        "inputQuality": {
+            "framesSubmitted": 40,
+            "framesAccepted": 38,
+            "framesExcludedForGain": 1,
+            "framesQuarantined": 2,
+            "darkUniqueFrameCount": 12,
+            "isFlagged": True,
+            "flagReasons": ["2 frame(s) with clouds or trailed stars moved to the _excluded folder"],
+        },
+        "outputQuality": {"isFlagged": False, "flagReasons": []},
+    }
+    summary = StackQualitySummary.model_validate(stored)
+    assert not hasattr(summary, "flagged")
+    assert not hasattr(summary, "flag_reasons")
+    assert summary.stacking_metrics.frames_accepted == 38
+    assert summary.stacking_metrics.frames_excluded_for_gain == 1
+    assert summary.stacking_metrics.frames_quarantined == 2
+    assert summary.stacking_metrics.dark_unique_frame_count == 12
+    assert "flagged" not in summary.model_dump(by_alias=True)
+    assert "flagReasons" not in summary.model_dump(by_alias=True)
+
+
+def test_stored_summaries_of_the_other_pipelines_with_flag_fields_still_load() -> None:
+    """The flag fields and the removed spectral list are ignored on load."""
+    spectroscopy = SpectroscopyQualitySummary.model_validate({
+        "targetId": "M 13",
+        "flagged": True,
+        "flagReasons": ["spectral classification uncertain for 2 star(s)"],
+        "spectroscopyMetrics": {
+            "poorMatchClassificationCount": 1,
+            "flaggedSpectralClassifications": [
+                {"starId": "HD 1", "reason": "poor_match", "spectralType": "A0V"}
+            ],
+        },
+    })
+    assert spectroscopy.spectroscopy_metrics.poor_match_classification_count == 1
+    assert not hasattr(spectroscopy.spectroscopy_metrics, "flagged_spectral_classifications")
+    astrometry = AstrometryQualitySummary.model_validate({
+        "targetId": "TEST",
+        "flagged": True,
+        "flagReasons": ["plate solve failed"],
+        "astrometryMetrics": {
+            "sourcesDetected": 0,
+            "solveAttempted": False,
+            "plateSolveSucceeded": False,
+            "simbadMatchedCount": 0,
+        },
+    })
+    assert astrometry.target_id == "TEST"
+
+
+def test_older_stack_results_and_target_reports_with_the_removed_keys_load() -> None:
+    """`flagged`, `flag_reasons` and `flaggedPipelines` are ignored on load."""
+    from astrometricslib.models.processing_results import StackResult
+
+    result = StackResult.model_validate({
+        "target_id": "M 81",
+        "kind": "imaging",
+        "frames_selected": 3,
+        "first_file": "a",
+        "last_file": "c",
+        "flagged": True,
+        "flag_reasons": ["x"],
+    })
+    assert result.frames_selected == 3
+    assert not hasattr(result, "flagged")

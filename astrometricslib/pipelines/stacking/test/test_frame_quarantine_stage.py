@@ -151,8 +151,8 @@ def test_stage_records_a_switched_off_quarantine_as_not_checked(monkeypatch: pyt
     assert gates["frame_quarantine"].status is GateStatus.NOT_CHECKED
 
 
-def test_a_failed_quarantine_gate_survives_the_flag_rebuild() -> None:
-    """The real builder keeps a failed gate's reason after the flag rebuild."""
+def test_a_failed_quarantine_gate_reaches_the_summary() -> None:
+    """The real builder keeps a failed gate and its reason."""
     summary = stacking_tasks._build_stack_quality_summary(
         target=make_target(),
         is_spectral=False,
@@ -165,9 +165,8 @@ def test_a_failed_quarantine_gate_survives_the_flag_rebuild() -> None:
         gate_results=[failed_gate("frame_quarantine", "too many bad frames; still in the stack")],
     )
 
-    assert summary.flagged is True
-    assert "too many bad frames; still in the stack" in summary.flag_reasons
     assert summary.gate("frame_quarantine").status is GateStatus.FAILED
+    assert summary.gate("frame_quarantine").detail == "too many bad frames; still in the stack"
 
 
 MEASURED_AT = datetime(2026, 10, 22, 6, 0, tzinfo=UTC)

@@ -2534,7 +2534,7 @@ Every Python example assumes the library is installed and configured with your o
 
 **Warnings of a job: notice rows and the time budget**
 
-- **Claim:** Every warning a pipeline raises is a stored quality row whose check failed, and a job can list its warnings. A warning that is not a gate (frames moved to the excluded folder, a stack of one frame, an exposure group left out, a flat issue no gate reports, a camera with no profile, a stack abandoned for taking too long) is stored as a notice row with a limit of zero, because it is raised on any occurrence. The stack time budget is the limit of the abandoned-stack row.
+- **Claim:** Every warning a pipeline raises is a stored quality row whose check failed, and a job can list its warnings. A warning that is not a gate (frames moved to the excluded folder, a stack of one frame, an exposure group left out, a flat issue no gate reports, a camera with no profile, a preview step that failed and was skipped, a stack abandoned for taking too long) is stored as a notice row with a limit of zero, because it is raised on any occurrence. The stack time budget is the limit of the abandoned-stack row.
 - **Settings it supports:** None. The notice rule has no tuned number. The time budget is listed as a design estimate (STK-D37).
 - **Status:** Design estimate. The rows and the read were written and tested on made-up rows. No restack has stored them yet, so no stored stack on the library holds a notice row.
 - **Data you need:** A stack that raised a warning of each kind (frames moved by the quarantine, a camera with no profile, a group left out), or the run of a target with a camera that has no profile.
@@ -2555,7 +2555,7 @@ Every Python example assumes the library is installed and configured with your o
   ```
 
   `Jobs.query` lists the stored rows of the job whose check failed. An empty list with a nonzero `measurement_count` means the job was checked and nothing failed; a zero count means the job stored no rows; an unknown id raises `NotFoundError`. <!-- impl: astrometricslib.api.jobs.Jobs.query -->
-- **Acceptance criterion:** Each flag reason of the stored summary appears as the reason of a warning row of the same pipeline. The comparison script `wayfindinglib/scripts/shadow_compare_verdicts.py` checks this word for word and counts the reasons that have no row.
+- **Acceptance criterion:** Each flag reason stored in a summary from before the field was removed appears as the reason of a warning row of the same pipeline. The comparison script `wayfindinglib/scripts/shadow_compare_verdicts.py` reads the reasons from the raw stored JSON, since the models no longer have the field, checks this word for word and counts the reasons that have no row.
 - **What to look at:** The count of flag reasons with no warning row in the script's report, separated into old data (stored before the notice rows existed) and rows that should exist.
 - **Our result:** Code: this change (issue 97, phase 1b). Unit tests on made-up rows show each notice is stored with the outcome `failed`, a limit of zero and the job id, and that the abandoned-stack row carries the time budget as its limit. The comparison on the data copy is reported in the pull request; stored summaries there predate the notice rows. Not measured: a restack that stores the rows.
 - **Verdict:** Not judged. No limit was compared with data.

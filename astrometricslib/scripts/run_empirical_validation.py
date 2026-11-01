@@ -15,6 +15,27 @@ from astrometricslib import Astrometrics
 from astrometricslib._internal.errors import DATA_ERRORS
 from astrometricslib._internal.processing_scripts import tune_spectroscopy_calibration
 from astrometricslib.exceptions import AstrometricsError
+from astrometricslib.models.quality.gate_result import GateStatus
+from astrometricslib.models.quality.quality_summary import PipelineQualitySummaryBase
+
+
+def failed_gate_names(summary: PipelineQualitySummaryBase | None) -> list[str]:
+    """List the quality gates of a pipeline summary that failed.
+
+    Parameters
+    ----------
+    summary : `PipelineQualitySummaryBase` or `None`
+        A pipeline's quality summary, if the run made one.
+
+    Returns
+    -------
+    names : `list` [`str`]
+        The name of each failed gate. Empty when none failed or there is no
+        summary.
+    """
+    if summary is None:
+        return []
+    return [gate.name for gate in summary.gates if gate.status is GateStatus.FAILED]
 
 
 def run_spectroscopy_validation(astrometrics: Astrometrics, camera_name: str) -> dict:
@@ -62,9 +83,9 @@ def run_spectroscopy_validation(astrometrics: Astrometrics, camera_name: str) ->
                 ).results["spectroscopy"]
                 if res and "context" in res:
                     summary = t.quality.spectroscopy
-                    flagged = summary.flagged if summary else False
-                    print(f"  Target {t.id} Spectroscopy Completed. Flagged: {flagged}")
-                    results[t.id] = {"status": "success", "flagged": flagged}
+                    failed_gates = failed_gate_names(summary)
+                    print(f"  Target {t.id} Spectroscopy Completed. Failed gates: {failed_gates or 'none'}")
+                    results[t.id] = {"status": "success", "failed_gates": failed_gates}
                 astrometrics.targets.save()
                 print(f"  Incremental save completed for target: {t.id}")
             except (AstrometricsError, OSError, *DATA_ERRORS) as err:
@@ -255,7 +276,7 @@ def run_stacking_validation(astrometrics: Astrometrics, camera_name: str) -> dic
             summary = target.stacking.quality_summary
             if summary:
                 print(f"  Target {target.id} Stack Quality Summary Found:")
-                print(f"    Flagged: {summary.flagged}, Reasons: {summary.flag_reasons}")
+                print(f"    Failed gates: {failed_gate_names(summary) or 'none'}")
                 if summary.stacking_metrics:
                     m = summary.stacking_metrics
                     print(

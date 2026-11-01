@@ -21,12 +21,13 @@ from astrometricslib._internal.drivers.calibration_library import (
 from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.models.quality.gate_result import GateResult, GateStatus
+from astrometricslib.models.quality.quality_summary import StackingPipelineQualityMetrics
 from astrometricslib.models.target import FrameRecord
 from astrometricslib.pipelines.stacking.calibration_measurement_run import measure_calibration_frames
 from astrometricslib.pipelines.stacking.post_processing.record_quality import GATE_LIMIT_SOURCES
 from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import (
-    assess_input_quality,
     calibration_gates,
+    record_input_counts,
 )
 from astrometricslib.pipelines.stacking.pre_processing.stack_calibration_health import (
     DARK_MISSING_GATE_NAME,
@@ -295,14 +296,15 @@ def test_a_master_under_the_minimum_keeps_its_old_flag_only(tmp_path: Path) -> N
     assert health.count_flags == []
 
 
-def test_the_input_quality_carries_the_unique_counts(tmp_path: Path) -> None:
+def test_the_stack_metrics_carry_the_unique_counts(tmp_path: Path) -> None:
     """The numbers a rule re-judges the thin limit with are stored."""
     library, store, darks, biases = _library(tmp_path, dark_count=5)
     diagnostics: dict = {}
     store_in_diagnostics(diagnostics, _assess(library, store, darks, biases, _lights()))
-    quality = assess_input_quality(3, 3, [], None, diagnostics)
-    assert quality.dark_unique_frame_count == 5
-    assert quality.bias_unique_frame_count == 12
+    metrics = StackingPipelineQualityMetrics(is_spectral=False, frames_submitted=3, frames_stacked=3)
+    record_input_counts(metrics, 3, [], diagnostics)
+    assert metrics.dark_unique_frame_count == 5
+    assert metrics.bias_unique_frame_count == 12
 
 
 def test_a_stack_without_calibration_health_has_only_the_old_gates() -> None:

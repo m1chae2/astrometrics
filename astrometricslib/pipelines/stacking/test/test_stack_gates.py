@@ -451,7 +451,7 @@ def test_raw_frame_clipping_gate_is_not_checked_without_a_measurement() -> None:
 
 
 def test_a_summary_with_clipped_raw_frames_is_flagged_by_the_gate() -> None:
-    """The stage records the failed gate and its sentence as a flag reason."""
+    """The stage records the failed gate and its sentence."""
     from astrometricslib.pipelines.stacking import stage
 
     frames = [make_frame(index, "100", 100.0) for index in range(10)]
@@ -468,8 +468,7 @@ def test_a_summary_with_clipped_raw_frames_is_flagged_by_the_gate() -> None:
     )
 
     assert summary.gate(RAW_FRAME_CLIPPING_GATE_NAME).status is GateStatus.FAILED
-    assert summary.flagged
-    assert any("clipped at zero" in reason for reason in summary.flag_reasons)
+    assert "clipped at zero" in summary.gate(RAW_FRAME_CLIPPING_GATE_NAME).detail
 
 
 def test_negative_pixel_gate_goes_red_on_siril_warning() -> None:
@@ -528,7 +527,7 @@ def test_the_real_builder_records_every_stacking_gate() -> None:
         aoq.NEGATIVE_PIXELS_GATE_NAME,
         RAW_FRAME_CLIPPING_GATE_NAME,
     }
-    assert summary.flagged is False
+    assert all(gate.status is not GateStatus.FAILED for gate in summary.gates)
 
 
 def test_every_stack_condition_still_gives_a_failed_gate_at_its_limit() -> None:

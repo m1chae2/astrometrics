@@ -96,8 +96,9 @@ def test_photometry_with_no_frames_for_the_filter_returns_completed_with_zero_co
 
     summary = target.quality.photometry
     assert summary is not None
-    assert summary.flagged
-    assert any("No frames found for filter" in reason for reason in summary.flag_reasons)
+    assert any(
+        "No frames found for filter" in gate.detail for gate in summary.gates if gate.status.value == "failed"
+    )
 
 
 def test_an_unknown_analysis_mode_is_rejected_by_name() -> None:

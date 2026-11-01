@@ -1247,17 +1247,37 @@ _STACKING_VALUES: tuple[ValueMapping, ...] = (
         "registrationReferenceStarCount",
         subject=_STACK,
     ),
-    _value("stacking.frames_accepted_count", "inputQuality", "framesAccepted", subject=_STACK),
+    # The four frame counts moved from the `inputQuality` block to
+    # `stackingMetrics` when that block was removed; a summary saved before
+    # keeps them in the old place.
     _value(
-        "stacking.frames_excluded_for_gain_count", "inputQuality", "framesExcludedForGain", subject=_STACK
+        "stacking.frames_accepted_count",
+        "stackingMetrics",
+        "framesAccepted",
+        subject=_STACK,
+        older_path=("inputQuality", "framesAccepted"),
+    ),
+    _value(
+        "stacking.frames_excluded_for_gain_count",
+        "stackingMetrics",
+        "framesExcludedForGain",
+        subject=_STACK,
+        older_path=("inputQuality", "framesExcludedForGain"),
     ),
     _value(
         "stacking.frames_excluded_for_background_count",
-        "inputQuality",
+        "stackingMetrics",
         "framesExcludedForBackground",
         subject=_STACK,
+        older_path=("inputQuality", "framesExcludedForBackground"),
     ),
-    _value("stacking.frames_quarantined_count", "inputQuality", "framesQuarantined", subject=_STACK),
+    _value(
+        "stacking.frames_quarantined_count",
+        "stackingMetrics",
+        "framesQuarantined",
+        subject=_STACK,
+        older_path=("inputQuality", "framesQuarantined"),
+    ),
 )
 
 _STACKING_GATES: tuple[GateMapping, ...] = gate_mappings_from_sources(STACKING_GATE_LIMIT_SOURCES)
@@ -1290,16 +1310,18 @@ _STACKING_GATES: tuple[GateMapping, ...] = gate_mappings_from_sources(STACKING_G
 # the stored per-frame numbers of the calibration frames, which a summary made
 # before the dark and bias checks existed never held.
 # The notice rows (warnings that are not gates) are not backfilled either: a
-# stored summary keeps only the sentence in `flagReasons`, with no job and no
-# value, and a row made from it would claim a count the summary never held.
-# The comparison script reports such a flag reason as old data until a new run
-# stores the row (validation register STK-58).
+# stored summary of the time before the flag fields were removed keeps only
+# the sentence in `flagReasons`, with no job and no value, and a row made from
+# it would claim a count the summary never held. The comparison script reports
+# such a flag reason as old data until a new run stores the row (validation
+# register STK-58).
 _STACKING_NOT_HELD: tuple[str, ...] = (
     "stacking.abandoned_after_s",
     "stacking.notice_frames_moved_to_excluded",
     "stacking.notice_single_frame_stack",
     "stacking.notice_exposure_group_left_out",
     "stacking.notice_flat_calibration_note",
+    "stacking.notice_preview_step_skipped",
     "stacking.notice_camera_without_profile",
     "stacking.dark_unique_frame_count",
     "stacking.bias_unique_frame_count",

@@ -133,7 +133,14 @@
       "category": "image-processing",
       "disposition": "keep",
       "interim_block": "",
-      "note": "Built 2026-10-04. One short answer for a target's stack: frames stacked and skipped, rejected fraction, star width against the inputs, flags and each exposure group. Reads the saved summary."
+      "note": "Built 2026-10-04. One short answer for a target's stack: frames stacked and skipped, rejected fraction, star width against the inputs and each exposure group. Reads the saved summary."
+    },
+    "processing_stop_stacking_programs": {
+      "tool_class": "unclassified",
+      "category": "image-processing",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Stops every Siril the library started. The backend calls it when it stops."
     },
     "quality_calibration_identities": {
       "tool_class": "observe",

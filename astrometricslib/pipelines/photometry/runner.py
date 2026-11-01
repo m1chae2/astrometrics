@@ -199,13 +199,13 @@ def _empty_photometry_result(no_work_reason: str) -> Result:
     Structured exactly like a real run that happened to process zero
     sessions and find zero stars, so `run` can be skipped while
     `validate_output`/`to_result_dict` still produce a normal (empty)
-    summary and result dict, with `no_work_reason` surfaced as a flag
+    summary and result dict, with `no_work_reason` surfaced as a failed gate
     rather than a one-off status/message pair.
 
     Parameters
     ----------
     no_work_reason : `str`
-        Why there was nothing to do; recorded as a flag reason on the
+        Why there was nothing to do; recorded as a failed gate on the
         quality summary `validate_output` builds from this `Result`.
 
     Returns
@@ -270,7 +270,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         `has_work=False` `Result` instead of running -- `validate_output`
         and `to_result_dict` still run on it, same as a real run's
         `Result`, so the target still gets a real (empty) quality
-        summary and the reason still surfaces, as a flag rather than a
+        summary and the reason still surfaces, as a failed gate rather than a
         one-off status/message pair.
 
         Returns
@@ -837,8 +837,8 @@ def run_photometry_analysis(
     result : `dict`
         The completed dict carrying every brightness-tracking metric,
         even when there was no usable data -- in that case every metric
-        is zero/empty and the reason surfaces as a flag in
-        `target.quality.photometry.flag_reasons` rather than as
+        is zero/empty and the reason surfaces as a failed gate in
+        `target.quality.photometry.gates` rather than as
         a differently-structured return value.
     """
     request = PipelineRequest(

@@ -2,20 +2,16 @@
 
 The builder here looks only at what was known before the stacking engine
 ran: the frames set aside by the pre-checks, whether the sky background
-changed during the session, and how good the flat frames were. It returns a
-`StackingInputQuality` (see `models/quality/stacking_quality.py`) that carries
-its own flag reasons.
+changed during the session, and how good the calibration frames were. It
+builds the calibration gates and records the frame counts on the stack's
+metrics.
 """
 
 from typing import Any
 
 from astrometricslib._internal.drivers.calibration_library import CALIBRATION_MATCH_BLOCKING_FLAGS_KEY
 from astrometricslib.models.quality.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
-from astrometricslib.models.quality.stacking_quality import StackingInputQuality
-from astrometricslib.pipelines.stacking.notice_reasons import (
-    flat_calibration_issue_reason,
-    frames_moved_to_excluded_reason,
-)
+from astrometricslib.models.quality.quality_summary import StackingPipelineQualityMetrics
 from astrometricslib.pipelines.stacking.pre_processing.calibration_assessment import THIN_SET_FRAME_COUNT
 from astrometricslib.pipelines.stacking.pre_processing.flat_calibration import (
     BRIGHT_FLAT_ISSUE_PREFIX,
@@ -92,8 +88,7 @@ def calibration_gates(diagnostics: dict[str, Any]) -> list[GateResult]:
     A stack that used no flats cannot fail the flat checks, and that is not
     the same as passing them, so those gates are ``not_checked`` with the
     reason. The same goes for the metadata check when no calibration frame
-    was applied. A failed gate's sentence is the same text the input quality
-    lists as a flag reason, so the two never disagree.
+    was applied.
 
     The ``calibration_metadata`` gate fails when a calibration frame was
     applied although its gain, offset or temperature differs from the lights,
@@ -106,7 +101,7 @@ def calibration_gates(diagnostics: dict[str, Any]) -> list[GateResult]:
     The ``calibration_frame_count`` gate fails when a master bias, dark or flat
     was built from fewer frames than the configured minimum (see
     `AppConfiguration.get_minimum_calibration_frames`). It is a blocking
-    flag: the stack is still produced, but it is flagged and its reason names
+    flag: the stack is still produced, but its gate fails and names
     each short master, so nobody reads it as a fully calibrated stack.
 
     The ``calibration_frame_count`` gate also fails for a dark or bias master
@@ -290,73 +285,41 @@ def describe_background_splits(background_split: dict | list[dict] | None) -> st
     return "; ".join(details)
 
 
-def assess_input_quality(
-    frames_submitted: int,
+def record_input_counts(
+    metrics: StackingPipelineQualityMetrics,
     frames_accepted: int,
     excluded_frames: list[Any],
-    background_split: dict | list[dict] | None,
     diagnostics: dict[str, Any],
-) -> StackingInputQuality:
-    """Judge the frames and calibration data that went into a stack.
+) -> None:
+    """Record the frames the pre-checks set aside and the set sizes.
+
+    The warnings about the inputs are the gates (`calibration_gates` and the
+    background-homogeneity gate) and the notice rows (see
+    `stacking_notice_measurements`). This only stores the numbers they rest
+    on, on the stack's metrics.
 
     Parameters
     ----------
-    frames_submitted : `int`
-        How many frames the stage was given.
+    metrics : `StackingPipelineQualityMetrics`
+        The metrics being built; set in place.
     frames_accepted : `int`
-        How many were left after the gain and background checks.
+        How many frames were left after the gain and background checks.
     excluded_frames : `list`
         The frames set aside, each with a ``reason``.
-    background_split : `dict`, `list` [`dict`] or `None`
-        What the background check found (see `describe_background_splits`).
     diagnostics : `dict`
-        What the stacking run reported. This reads the flat assessment, the
-        calibration mismatch flags and the flags for calibration frames that
-        could not be applied from it.
-
-    Returns
-    -------
-    quality : `StackingInputQuality`
-        The input judgement, with a sentence for each problem found.
+        What the stacking run reported. This reads the number of different
+        frames in each master dark and bias.
     """
-    flat = diagnostics.get("flat_calibration") or {}
     unique_counts = diagnostics.get(CALIBRATION_UNIQUE_COUNTS_KEY) or {}
-    mismatches = list(diagnostics.get("calibration_mismatch_flags", []))
-    short_masters = list(diagnostics.get("calibration_blocking_flags", []))
-    flat_issues = list(flat.get("issues", []))
-    detail = describe_background_splits(background_split)
-
-    quarantined = [
-        frame for frame in excluded_frames if frame.reason.startswith(QUARANTINE_EXCLUSION_REASON_PREFIX)
-    ]
-
-    reasons = []
-    if quarantined:
-        reasons.append(frames_moved_to_excluded_reason(len(quarantined)))
-    if detail is not None:
-        reasons.append(f"background split: {detail}")
-    reasons.extend(calibration_metadata_reasons(diagnostics))
-    if short_masters:
-        reasons.append("calibration frame count too low: " + "; ".join(short_masters))
-    reasons.extend(flat_calibration_issue_reason(issue) for issue in flat_issues)
-
-    return StackingInputQuality(
-        frames_submitted=frames_submitted,
-        frames_accepted=frames_accepted,
-        frames_excluded_for_gain=sum(1 for frame in excluded_frames if frame.reason == GAIN_EXCLUSION_REASON),
-        frames_excluded_for_background=sum(
-            1 for frame in excluded_frames if frame.reason == BACKGROUND_EXCLUSION_REASON
-        ),
-        frames_quarantined=len(quarantined),
-        background_split_detected=detail is not None,
-        background_split_detail=detail,
-        flat_frame_count=flat.get("frame_count"),
-        dark_unique_frame_count=unique_counts.get("dark"),
-        bias_unique_frame_count=unique_counts.get("bias"),
-        flat_noise_fraction=flat.get("noise_fraction"),
-        flat_smoothing_sigma_px=flat.get("smoothing_sigma_pixels"),
-        flat_calibration_issues=flat_issues,
-        calibration_mismatch_flags=mismatches,
-        is_flagged=bool(reasons),
-        flag_reasons=reasons,
+    metrics.frames_accepted = frames_accepted
+    metrics.frames_excluded_for_gain = sum(
+        1 for frame in excluded_frames if frame.reason == GAIN_EXCLUSION_REASON
     )
+    metrics.frames_excluded_for_background = sum(
+        1 for frame in excluded_frames if frame.reason == BACKGROUND_EXCLUSION_REASON
+    )
+    metrics.frames_quarantined = sum(
+        1 for frame in excluded_frames if frame.reason.startswith(QUARANTINE_EXCLUSION_REASON_PREFIX)
+    )
+    metrics.dark_unique_frame_count = unique_counts.get("dark")
+    metrics.bias_unique_frame_count = unique_counts.get("bias")

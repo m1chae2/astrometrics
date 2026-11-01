@@ -3,16 +3,14 @@
 A pipeline records most of its warnings as gates: a self-check with a number,
 a limit and an outcome. A few warnings are not gates. They are facts the
 pipeline noticed and wants a person to know, such as "this camera has no
-profile" or "40 frames were moved out of the stack". Before this module they
-lived only in the summary's `flag_reasons` list, which is to be removed. A
+profile" or "40 frames were moved out of the stack". A
 notice row keeps each of them in the measurement table, so
 `Jobs.query(detail="warnings")` lists them next to the failed gates.
 
 A notice row is a measurement with the check outcome ``failed``. Its value
 counts what was noticed (frames moved, cameras without a profile). Its limit
 is zero, because the notice is raised on any occurrence: there is no tuned
-threshold. The row's reason is the same sentence the summary used as a flag
-reason, so the two can be compared word for word.
+threshold. The row's reason is the sentence that says what was noticed.
 
 This module builds the declarations (`notice_spec`) and the rows
 (`notice_measurement`). Each pipeline's ``metrics.py`` declares its own
@@ -258,8 +256,7 @@ def camera_without_profile_measurement(
     Returns
     -------
     measurement : `QualityMeasurement`
-        A failed notice whose reason is the sentence the summary used as a
-        flag reason.
+        A failed notice whose reason is the sentence for the camera.
     """
     return notice_measurement(
         camera_without_profile_spec(context.pipeline_name),
@@ -281,6 +278,6 @@ def camera_without_profile_reason(camera_name: str) -> str:
     Returns
     -------
     reason : `str`
-        The sentence. It is also the summary's flag reason.
+        The sentence.
     """
     return f"camera {camera_name!r} has no camera profile; generic assumptions about the sensor were used"

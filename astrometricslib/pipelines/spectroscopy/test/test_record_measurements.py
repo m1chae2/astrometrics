@@ -141,7 +141,7 @@ def test_every_numeric_checkpoint_metric_has_a_declared_median() -> None:
 def test_every_numeric_summary_field_is_declared() -> None:
     """Each numeric summary field has a metric; verdicts have none."""
     verdict_fields = {"zero_order_saturation_flagged", "trail_width_profile_available"}
-    per_star_or_rollup = {"flagged_spectral_classifications", "stage_quality_summary"}
+    per_star_or_rollup = {"stage_quality_summary"}
     assert verdict_fields | per_star_or_rollup <= set(SpectroscopyPipelineQualityMetrics.model_fields)
     declared = _declared_names()
     for name in (

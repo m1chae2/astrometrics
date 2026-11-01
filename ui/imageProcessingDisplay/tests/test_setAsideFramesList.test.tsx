@@ -117,7 +117,7 @@ describe('the count in the Stack Summary block', () => {
                 return {
                     target_id: 'M 81', kind: 'imaging', stack_path: '/s.fits', made_at: '2026-10-30T04:00:00+00:00',
                     frames_submitted: 10, frames_stacked: 9, frames_skipped: 1, skipped_reasons: [],
-                    frames_set_aside_before_stacking: 3, exposure_groups: [], flagged: false, flag_reasons: [],
+                    frames_set_aside_before_stacking: 3, exposure_groups: [],
                     star_width_px: {}, calibration_mismatches: 0,
                 };
             }

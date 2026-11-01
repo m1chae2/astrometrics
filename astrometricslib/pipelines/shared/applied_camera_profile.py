@@ -2,8 +2,8 @@
 
 Every pipeline's quality summary carries an `AppliedCameraProfile`, so that
 a reader can see which camera the numbers assume. A camera that has no profile
-gets the generic stand-in, and the summary is flagged so that this is not
-missed.
+gets the generic stand-in, and a notice row is stored so that this is not
+missed (see `notices.py`).
 """
 
 import collections
@@ -15,7 +15,6 @@ from astrometricslib.models.applied_camera_profile import AppliedCameraProfile
 from astrometricslib.models.quality.quality_summary import PipelineQualitySummaryBase
 from astrometricslib.pipelines.shared.quality.notices import (
     camera_without_profile_measurement,
-    camera_without_profile_reason,
 )
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
     PipelineRunContext,
@@ -117,9 +116,10 @@ def record_camera_profile(
 ) -> None:
     """Put the camera profile used on a quality summary, in place.
 
-    A camera with no profile of its own also flags the summary, because the
-    numbers taken from the generic stand-in are assumptions about a made-up
-    camera. A run with no camera name at all records nothing and does not flag.
+    A camera with no profile of its own also gets a notice row (when a
+    measurement context is given), because the numbers taken from the generic
+    stand-in are assumptions about a made-up camera. A run with no camera name
+    at all records nothing.
 
     Parameters
     ----------
@@ -135,8 +135,6 @@ def record_camera_profile(
         return
     summary.camera_profile = build_applied_camera_profile(camera_name)
     if summary.camera_profile.is_generic_fallback:
-        summary.flagged = True
-        summary.flag_reasons.append(camera_without_profile_reason(camera_name))
         if measurement_context is not None:
             build_and_record_measurements(
                 lambda: [

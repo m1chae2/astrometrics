@@ -205,7 +205,6 @@ def _with_notice_rows(pipeline: str, rows: list[QualityMeasurement]) -> list[Qua
         StackingPipelineQualityMetrics,
         StackQualitySummary,
     )
-    from astrometricslib.models.quality.stacking_quality import StackingInputQuality
     from astrometricslib.pipelines.shared.applied_camera_profile import record_camera_profile
     from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
     from astrometricslib.pipelines.stacking.post_processing.record_quality import stacking_notice_measurements
@@ -228,9 +227,6 @@ def _with_notice_rows(pipeline: str, rows: list[QualityMeasurement]) -> list[Qua
                     leftOutReason="was left out for a test",
                 )
             ],
-        ),
-        inputQuality=StackingInputQuality(
-            framesSubmitted=3,
             framesAccepted=1,
             framesQuarantined=2,
             flatCalibrationIssues=["not smoothed: a test note"],

@@ -15,7 +15,7 @@ wavelength zero points scatter (see `wavelength_scale`). A ninth,
 
 Each check is returned as a `GateResult`. A check that could not look (no
 zero-order measurement, no catalog type to compare with) is ``not_checked``;
-it is not a pass. The failed gates' sentences are the run's flag reasons.
+it is not a pass. The failed gates' sentences are the run's warnings.
 
 The run is summarised first as a few plain counts (`spectrum_facts`), so the
 single-image runner and the parallel batch workers, which cannot pass whole

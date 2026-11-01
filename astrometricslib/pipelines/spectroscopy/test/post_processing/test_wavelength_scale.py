@@ -348,7 +348,6 @@ def test_the_batch_merge_records_the_summary_and_the_gate() -> None:
     assert scale.spectrum_count == 3
     assert scale.rms_after_correction_angstrom == pytest.approx(math.sqrt((900 + 784 + 1225) / 3))
     assert recorded.gate(WAVELENGTH_SCALE_GATE_NAME).status is GateStatus.FAILED
-    assert recorded.flagged is True
 
 
 def test_the_real_validate_output_records_the_summary_and_the_gate() -> None:
@@ -381,4 +380,3 @@ def test_the_real_validate_output_records_the_summary_and_the_gate() -> None:
     assert scale.spectrum_count == 3
     assert scale.applied_count == 0
     assert summary.gate(WAVELENGTH_SCALE_GATE_NAME).status is GateStatus.FAILED
-    assert summary.flagged is True

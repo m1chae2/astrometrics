@@ -20,10 +20,6 @@ from astrometricslib.models.target import Target
 from astrometricslib.pipelines.stacking.calibration_health import measure_calibration_health
 from astrometricslib.pipelines.stacking.frame_screening import screen_frames
 from astrometricslib.pipelines.stacking.fwhm_sampling import measure_fwhm_degradation
-from astrometricslib.pipelines.stacking.notice_reasons import (
-    exposure_group_left_out_reason,
-    single_frame_stack_reason,
-)
 from astrometricslib.pipelines.stacking.registration_records import (
     check_spectral_registration_quality,
     update_frame_registration_results,
@@ -754,13 +750,27 @@ def _make_preview(run: StackRun, stacked_path: str) -> None:
     stacked_path : `str`
         The stack that was made.
     """
+    from astrometricslib.pipelines.stacking.post_processing.preview_notices import (
+        record_preview_step_notices,
+    )
     from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
+        SkippedPreviewStep,
         record_preview_as_processed_image,
         write_stack_preview,
     )
 
     _report_stage(80, "Making the preview picture (GraXpert, Cosmic Clarity, star toning)")
-    run.preview_path = write_stack_preview(stacked_path, run.preview_settings)
+    skipped_steps: list[SkippedPreviewStep] = []
+    run.preview_path = write_stack_preview(stacked_path, run.preview_settings, skipped_steps=skipped_steps)
+    # A skipped step is a warning of this job, not only a line in the log.
+    record_preview_step_notices(
+        skipped_steps,
+        run.target.id,
+        os.path.basename(stacked_path),
+        run.job_id,
+        run.measured_at,
+        None if run.quality_recording is None else run.quality_recording.configuration,
+    )
     if run.preview_path:
         record_preview_as_processed_image(run.target, run.has_spectral, stacked_path, run.preview_path)
 
@@ -1289,34 +1299,18 @@ def _record_exposure_groups(summary: StackQualitySummary, diagnostics: dict) -> 
     ]
 
 
-def _finalize_stack_quality_flags(summary: StackQualitySummary) -> None:
-    """Derive `summary.flagged` and `flag_reasons` from the two judgements.
+def _record_output_gates(summary: StackQualitySummary) -> None:
+    """Record the gates that judge the finished stack on the summary.
 
-    The input and output judgements (`summary.input_quality` and
-    `summary.output_quality`) supply their own reasons. This adds the ones
-    that belong to neither: exposure groups left out and single-frame stacks.
+    The gates read only the stack's measurements (`summary.stacking_metrics`).
+    Exposure groups left out and single-frame stacks are reported as notice
+    rows when the measurements are stored (see `stacking_notice_measurements`).
     """
     from astrometricslib.pipelines.stacking.post_processing.assess_output_quality import (
-        assess_output_quality,
         output_quality_gates,
     )
 
-    metrics = summary.stacking_metrics
-    summary.output_quality = assess_output_quality(metrics, summary.quality_processing_applied)
-    output_gates = output_quality_gates(metrics, summary.quality_processing_applied)
-    flag_reasons = [*summary.input_quality.flag_reasons, *summary.output_quality.flag_reasons]
-    for group in metrics.exposure_groups:
-        # A nonlinear group's reason is recorded by the
-        # `exposure_group_linearity` gate, which names both brightness
-        # ratios, so it is not listed twice.
-        if group.left_out_reason and not group.gain_nonlinear:
-            flag_reasons.append(exposure_group_left_out_reason(group.exposure_seconds, group.left_out_reason))
-    if not summary.quality_processing_applied:
-        flag_reasons.append(single_frame_stack_reason())
-
-    summary.flagged = bool(flag_reasons)
-    summary.flag_reasons = flag_reasons
-    for output_gate in output_gates:
+    for output_gate in output_quality_gates(summary.stacking_metrics, summary.quality_processing_applied):
         summary.record_gate(output_gate)
 
 
@@ -1346,16 +1340,14 @@ def _build_stack_quality_summary(
         something looks wrong.
     """
     from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import (
-        assess_input_quality,
         describe_background_splits,
+        record_input_counts,
     )
 
     summary = _base_stack_quality_summary(
         target, is_spectral, frames_submitted, target_frames, excluded_frames, diagnostics
     )
-    summary.input_quality = assess_input_quality(
-        frames_submitted, len(target_frames), excluded_frames, background_split, diagnostics
-    )
+    record_input_counts(summary.stacking_metrics, len(target_frames), excluded_frames, diagnostics)
 
     split_detail = describe_background_splits(background_split)
     if split_detail is not None:
@@ -1380,9 +1372,7 @@ def _build_stack_quality_summary(
         if is_spectral and summary.quality_processing_applied:
             check_spectral_registration_quality(summary, stacked_path, diagnostics)
 
-    _finalize_stack_quality_flags(summary)
-    # Recorded after the flags are rebuilt above, so a failed gate's reason is
-    # not wiped by that rebuild.
+    _record_output_gates(summary)
     from astrometricslib.foundation.config import get_configuration
     from astrometricslib.pipelines.stacking.post_processing.exposure_group_report import (
         exposure_group_linearity_gate,
@@ -1395,8 +1385,6 @@ def _build_stack_quality_summary(
         diagnostics.get("exposure_group_summaries", []),
         get_configuration().get_exposure_group_gain_tolerance(),
     )
-    # The raw-clipping gate carries the sentence that used to be appended to
-    # the flag reasons here; `record_gate` adds it for a failed gate.
     for gate_result in [
         *(gate_results or []),
         *calibration_gates(diagnostics),

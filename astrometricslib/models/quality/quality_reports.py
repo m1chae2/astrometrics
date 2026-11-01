@@ -187,6 +187,4 @@ class StackSummary(BaseModel):
     saturated_pixel_fraction: float | None = None
     zero_pixel_fraction: float | None = None
     exposure_groups: list[dict[str, Any]] = Field(default_factory=list)
-    flagged: bool = False
-    flag_reasons: list[str] = Field(default_factory=list)
     calibration_mismatches: int = 0

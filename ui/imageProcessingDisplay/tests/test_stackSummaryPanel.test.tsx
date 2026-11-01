@@ -34,7 +34,7 @@ const summary = {
         { exposure_seconds: 5, frames_submitted: 10, frames_stacked: 6, saturated: false, clipped_at_zero: true,
           alignment_shift_pixels: [3, 4], left_out_reason: 'gain disagrees' },
     ],
-    flagged: true, flag_reasons: ['Star width is wider than expected'], calibration_mismatches: 0,
+    calibration_mismatches: 0,
     job_id: 'job-stack-1',
 };
 
@@ -142,8 +142,6 @@ describe('StackSummaryPanel', () => {
         expect(items[2].textContent).toContain('Something new.');
         expect(items[2].textContent).toContain('a reason with no number');
         expect(container.querySelectorAll('.stack-summary__flag-list details')).toHaveLength(0);
-        // The old flag text is not read.
-        expect(screen.queryByText('Star width is wider than expected')).toBeNull();
     });
 
     it('reads the stored failed checks of the stack when it has no job id', async () => {

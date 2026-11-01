@@ -162,6 +162,7 @@ STACKING_NOTICE_FRAMES_MOVED_TO_EXCLUDED = "stacking.notice_frames_moved_to_excl
 STACKING_NOTICE_SINGLE_FRAME_STACK = "stacking.notice_single_frame_stack"
 STACKING_NOTICE_EXPOSURE_GROUP_LEFT_OUT = "stacking.notice_exposure_group_left_out"
 STACKING_NOTICE_FLAT_CALIBRATION_NOTE = "stacking.notice_flat_calibration_note"
+STACKING_NOTICE_PREVIEW_STEP_SKIPPED = "stacking.notice_preview_step_skipped"
 STACKING_REGISTRATION_REFERENCE_STAR_COUNT = "stacking.registration_reference_star_count"
 STACKING_GROUP_EXPOSURE_S = "stacking.group_exposure_s"
 STACKING_GROUP_FRAMES_SUBMITTED = "stacking.group_frames_submitted_count"
@@ -524,7 +525,7 @@ _VALUE_METRICS: tuple[MetricSpec, ...] = (
         "How many frames were left after the gain, quarantine and background checks.",
         "A count of the frames given to the stacking program.",
         "The frames that passed the stage's pre-checks.",
-        "pipelines.stacking.pre_processing.assess_input_quality.assess_input_quality",
+        "pipelines.stacking.pre_processing.assess_input_quality.record_input_counts",
         better=Direction.HIGHER,
     ),
     _context_metric(
@@ -533,7 +534,7 @@ _VALUE_METRICS: tuple[MetricSpec, ...] = (
         "How many frames were set aside because their camera gain differed from the rest.",
         "A count of the frames with a minority gain setting.",
         "The frames the gain check set aside.",
-        "pipelines.stacking.pre_processing.assess_input_quality.assess_input_quality",
+        "pipelines.stacking.pre_processing.assess_input_quality.record_input_counts",
     ),
     _context_metric(
         STACKING_FRAMES_EXCLUDED_FOR_BACKGROUND,
@@ -541,7 +542,7 @@ _VALUE_METRICS: tuple[MetricSpec, ...] = (
         "How many frames were set aside because their sky background differed from the rest.",
         "A count of the frames the background-homogeneity check set aside.",
         "The frames the background check set aside.",
-        "pipelines.stacking.pre_processing.assess_input_quality.assess_input_quality",
+        "pipelines.stacking.pre_processing.assess_input_quality.record_input_counts",
     ),
     _context_metric(
         STACKING_FRAMES_QUARANTINED,
@@ -549,7 +550,7 @@ _VALUE_METRICS: tuple[MetricSpec, ...] = (
         "How many frames the quarantine step moved out of the stack.",
         "A count of the frames moved to the excluded folder for clouds or trailed stars.",
         "The frames the quarantine step moved.",
-        "pipelines.stacking.pre_processing.assess_input_quality.assess_input_quality",
+        "pipelines.stacking.pre_processing.assess_input_quality.record_input_counts",
         register_entry="STK-01",
     ),
     _context_metric(
@@ -3037,6 +3038,16 @@ _NOTICE_METRICS: tuple[MetricSpec, ...] = (
         "The number of such issues, such as a color sensor's flat that was not smoothed.",
         _NOTICE_COMPUTED_BY,
         "The flat gates report faint, bright and noisy flats; another flat issue would go unlisted.",
+    ),
+    notice_spec(
+        STACKING_NOTICE_PREVIEW_STEP_SKIPPED,
+        Checkpoint.STACKING,
+        SubjectLevel.STACK,
+        "count",
+        "Whether the preview picture skipped a cleanup step that failed, so it differs from its settings.",
+        "The number of preview steps skipped, such as GraXpert or Cosmic Clarity.",
+        "pipelines.stacking.post_processing.preview_notices.preview_step_skipped_measurements",
+        "A skipped step changes the picture people look at, so a person should know it was made without it.",
     ),
     camera_without_profile_spec("stacking"),
 )

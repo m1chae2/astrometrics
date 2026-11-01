@@ -1,4 +1,4 @@
-"""Purpose: Keep private library modules out of code that must use only public names.
+"""Purpose: Keep private library modules out of code that uses public names.
 
 Description: The linters (ruff's banned-api rule and import-linter) read
 `import` statements. A program can skip them by naming a module in a string,
@@ -119,7 +119,7 @@ def test_the_scan_finds_a_module_named_in_a_string() -> None:
 
 @pytest.mark.parametrize("folder", sorted(SCANNED_FOLDERS))
 def test_no_string_names_a_private_library_module(folder: str) -> None:
-    """No non-test code outside a library names its private modules in a string."""
+    """No scanned code names a private library module in a string."""
     forbidden = SCANNED_FOLDERS[folder]
     problems = []
     for path in sorted((REPOSITORY_ROOT / folder).rglob("*.py")):

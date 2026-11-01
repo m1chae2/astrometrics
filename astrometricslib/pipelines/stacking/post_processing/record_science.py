@@ -16,8 +16,7 @@ dark adds (`master_dark_noise_measurements`) is stored here too.
 - The brightest star's peak against the ceiling for each exposure group (see
   `exposure_group_report.summarize_group_peak`). The values sit on the
   group's own entry in the summary (`ExposureGroupSummary`), and the rows are
-  built from that entry. They replace the recommended exposure, which stays in
-  the summary until it is removed.
+  built from that entry. The planner reads them to choose an exposure.
 
 A value that cannot be worked out is stored as not measured, with the reason.
 Nothing here reads the clock, and a failure never fails the stack.

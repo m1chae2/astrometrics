@@ -29,7 +29,6 @@ from astrometricslib.pipelines.stacking.post_processing.exposure_saturation impo
     checked_estimate_range,
     group_is_saturated,
     measure_frame_saturation,
-    recommend_stack_exposure_seconds,
 )
 from astrometricslib.pipelines.stacking.processing.group_combination import FRAMES_SAMPLED_PER_GROUP
 from astrometricslib.pipelines.stacking.processing.group_gains import (
@@ -558,21 +557,6 @@ def raw_frame_clipping_gate(diagnostics: dict[str, Any]) -> GateResult:
         limit=CLIPPED_FRAME_ZERO_FRACTION,
         limit_source=limit_source,
     )
-
-
-def recommended_exposure_for_groups(
-    exposure_seconds: list[float], saturation_by_group: list[list[FrameSaturation]]
-) -> float | None:
-    """Recommend one exposure for a stack.
-
-    Returns
-    -------
-    recommended : `float` or `None`
-        The recommended exposure in seconds, rounded to two decimals, or
-        `None` when it cannot be worked out.
-    """
-    recommendation = recommend_stack_exposure_seconds(exposure_seconds, saturation_by_group)
-    return None if recommendation is None else round(float(recommendation), 2)
 
 
 def write_group_manifest(

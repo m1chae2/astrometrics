@@ -372,7 +372,7 @@ def assess_flats(flat_paths: list[str], camera: str | None = None) -> FlatAssess
         if sigma is not None:
             issues.append(
                 f"{NOISY_FLAT_ISSUE_PREFIX} {noise_fraction:.2%} from {frame_count} frame(s), above the "
-                f"{MAXIMUM_FLAT_NOISE_FRACTION:.1%} limit; take more flats"
+                f"{MAXIMUM_FLAT_NOISE_FRACTION:.1%} limit"
             )
     return FlatAssessment(
         frame_count,

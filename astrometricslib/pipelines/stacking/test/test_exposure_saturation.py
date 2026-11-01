@@ -15,12 +15,9 @@ import pytest
 from astrometricslib.pipelines.stacking.post_processing.exposure_saturation import (
     MAXIMUM_RELIABLE_PEAK_TO_ROOM_RATIO,
     SATURATED_BLOB_MINIMUM_PIXELS,
-    TARGET_PEAK_FRACTION,
     FrameSaturation,
     group_is_saturated,
     measure_frame_saturation,
-    recommend_exposure_seconds,
-    recommend_stack_exposure_seconds,
 )
 
 SKY = 500.0
@@ -105,28 +102,6 @@ def test_a_group_is_saturated_when_half_its_frames_are() -> None:
     assert not group_is_saturated([])
 
 
-def test_the_recommended_exposure_puts_the_peak_at_the_target_fraction() -> None:
-    """A star at half the room in 10 s needs 16 s to reach 80%."""
-    room = CEILING - SKY
-    frames = [make(False, 0.5 * room), make(False, 0.5 * room)]
-
-    assert recommend_exposure_seconds(10.0, frames) == pytest.approx(10.0 * TARGET_PEAK_FRACTION / 0.5)
-
-
-def test_a_clipped_group_is_told_to_shorten_the_exposure() -> None:
-    """A star at twice the room in 10 s needs 4 s to reach 80% of it."""
-    room = CEILING - SKY
-    frames = [make(True, 2.0 * room)]
-
-    assert recommend_exposure_seconds(10.0, frames) == pytest.approx(10.0 * TARGET_PEAK_FRACTION / 2.0)
-
-
-def test_no_recommendation_without_a_peak() -> None:
-    """Frames that gave no peak, or an empty list, give no recommendation."""
-    assert recommend_exposure_seconds(10.0, [make(True, None)]) is None
-    assert recommend_exposure_seconds(10.0, []) is None
-
-
 def test_a_star_clipped_far_beyond_the_estimate_limit_gives_no_peak() -> None:
     """A huge clipped core is too heavy to estimate, so it gives no peak."""
     result = measure_frame_saturation(star_frame(5.0e6, size=200, sigma=6.0), ceiling_adu=CEILING)
@@ -134,29 +109,3 @@ def test_a_star_clipped_far_beyond_the_estimate_limit_gives_no_peak() -> None:
     assert result.saturated
     assert result.peak_above_sky_adu is None
     assert MAXIMUM_RELIABLE_PEAK_TO_ROOM_RATIO == pytest.approx(100.0)
-
-
-def test_the_stack_recommendation_trusts_a_measured_group_over_an_estimated_one() -> None:
-    """A measured 5 s group is used, not the clipped 30 s group's estimate."""
-    room = CEILING - SKY
-    short = [make(False, 0.2 * room)]
-    long = [make(True, 3.0 * room)]
-
-    recommended = recommend_stack_exposure_seconds([5.0, 30.0], [short, long])
-
-    assert recommended == pytest.approx(5.0 * TARGET_PEAK_FRACTION / 0.2)
-
-
-def test_the_stack_recommendation_uses_the_estimates_when_every_group_is_clipped() -> None:
-    """With no measured group, the median of the estimates is used."""
-    room = CEILING - SKY
-    groups = [[make(True, 2.0 * room)], [make(True, 4.0 * room)], [make(True, 8.0 * room)]]
-
-    recommended = recommend_stack_exposure_seconds([10.0, 10.0, 10.0], groups)
-
-    assert recommended == pytest.approx(10.0 * TARGET_PEAK_FRACTION / 4.0)
-
-
-def test_the_stack_recommendation_is_none_when_no_group_gives_one() -> None:
-    """Groups with no peak at all give `None`."""
-    assert recommend_stack_exposure_seconds([5.0], [[make(True, None)]]) is None

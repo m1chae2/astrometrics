@@ -1884,7 +1884,6 @@ export interface StackingPipelineQualityMetrics {
   saturatedPixelFraction?: number | null;
   saturationFlagged?: boolean;
   exposureGroups?: ExposureGroupSummary[];
-  recommendedExposureSeconds?: number | null;
   zeroPixelFraction?: number | null;
   zeroFractionFlagged?: boolean;
   negativePixelMaxPercent?: number | null;

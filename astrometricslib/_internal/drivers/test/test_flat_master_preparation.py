@@ -65,7 +65,8 @@ def test_a_noisy_single_flat_is_assessed_for_smoothing(tmp_path: Path) -> None:
     )
     assert assessment.needs_smoothing
     assert assessment.smoothing_sigma_pixels == pytest.approx(2.5, abs=0.2)
-    assert any("take more flats" in issue for issue in assessment.issues)
+    assert any("master flat noise is" in issue for issue in assessment.issues)
+    assert not any("take more flats" in issue for issue in assessment.issues)
 
 
 def test_flats_are_not_assessed_without_the_pipelines_step(tmp_path: Path) -> None:

@@ -61,8 +61,8 @@ def write_stack(path: Path, zero_fraction: float) -> str:
     return str(path)
 
 
-def test_group_entries_and_the_recommendation_come_from_the_diagnostics() -> None:
-    """Each entry becomes a group summary; the recommendation is copied."""
+def test_group_entries_come_from_the_diagnostics() -> None:
+    """Each entry becomes a group summary."""
     summary = make_summary()
     diagnostics = {
         "exposure_group_summaries": [
@@ -82,7 +82,6 @@ def test_group_entries_and_the_recommendation_come_from_the_diagnostics() -> Non
                 "stack_path": "/library/lights/NGC/groups/x_exp300s.fits",
             },
         ],
-        "recommended_exposure_seconds": 42.5,
     }
 
     _record_exposure_groups(summary, diagnostics)
@@ -91,17 +90,28 @@ def test_group_entries_and_the_recommendation_come_from_the_diagnostics() -> Non
     assert [group.exposure_seconds for group in groups] == [60.0, 300.0]
     assert [group.dark_applied for group in groups] == [False, True]
     assert [group.saturated for group in groups] == [False, True]
-    assert summary.stacking_metrics.recommended_exposure_seconds == pytest.approx(42.5)
+
+
+def test_a_stored_row_with_the_removed_exposure_recommendation_still_loads() -> None:
+    """An old row holding `recommendedExposureSeconds` loads and drops it."""
+    metrics = StackingPipelineQualityMetrics.model_validate({
+        "isSpectral": False,
+        "framesSubmitted": 10,
+        "framesStacked": 10,
+        "recommendedExposureSeconds": 42.5,
+    })
+
+    assert not hasattr(metrics, "recommended_exposure_seconds")
+    assert "recommendedExposureSeconds" not in metrics.model_dump(by_alias=True)
 
 
 def test_a_stack_without_group_entries_has_none() -> None:
-    """A run that reported no groups has an empty list and no advice."""
+    """A run that reported no groups has an empty list."""
     summary = make_summary()
 
     _record_exposure_groups(summary, {})
 
     assert summary.stacking_metrics.exposure_groups == []
-    assert summary.stacking_metrics.recommended_exposure_seconds is None
 
 
 def test_a_mostly_zero_imaging_stack_is_flagged_as_blank(tmp_path: Path) -> None:

@@ -87,8 +87,7 @@ def run_stack(
     """Stack frames with Siril, one exposure length at a time if they differ.
 
     Every stack's diagnostics carry an ``"exposure_group_summaries"`` list (one
-    entry per exposure length, see `exposure_group_report`) and a
-    ``"recommended_exposure_seconds"``.
+    entry per exposure length, see `exposure_group_report`).
 
     Parameters
     ----------
@@ -438,7 +437,7 @@ def _describe_single_group(frames: list[Any], diagnostics: dict[str, Any], stack
         few strays).
     diagnostics : `dict`
         The run's diagnostics, added to in place. Gets
-        ``"exposure_group_summaries"``, ``"recommended_exposure_seconds"``,
+        ``"exposure_group_summaries"``
         and, when the zero share was measured,
         ``"exposure_group_frame_zero_fractions"`` and
         ``"clipped_exposure_groups"``.
@@ -448,7 +447,6 @@ def _describe_single_group(frames: list[Any], diagnostics: dict[str, Any], stack
     from astrometricslib.pipelines.stacking.post_processing.exposure_group_report import (
         build_group_summary,
         measure_group_saturation,
-        recommended_exposure_for_groups,
     )
     from astrometricslib.pipelines.stacking.processing.exposure_groups import (
         ExposureGroup,
@@ -503,7 +501,6 @@ def _describe_single_group(frames: list[Any], diagnostics: dict[str, Any], stack
             clipped_at_zero=clipped_at_zero,
         )
     ]
-    diagnostics["recommended_exposure_seconds"] = recommended_exposure_for_groups([exposure], [saturation])
 
 
 @dataclass
@@ -657,8 +654,7 @@ def _stack_exposure_groups(
         The groups' diagnostics joined in group order, with an
         ``"exposure_groups"`` entry per group, an
         ``"exposure_group_summaries"`` list (one entry per exposure length,
-        including any left out), a
-        ``"recommended_exposure_seconds"``, and a ``"clipped_exposure_groups"``
+        including any left out), a ``"clipped_exposure_groups"``
         list of the groups whose raw frames are clipped at zero, and an
         ``"exposure_group_frame_zero_fractions"`` list with every group's
         measured zero fraction (empty when the frames could not be read), an
@@ -677,7 +673,7 @@ def _stack_exposure_groups(
     final_path, combination, stacked_fwhm = _write_combined_stack(
         results, measurements, output_file, is_spectral
     )
-    summaries, saturation_by_group = _describe_groups(results, failed_groups, final_path, target_id)
+    summaries = _describe_groups(results, failed_groups, final_path, target_id)
     merged_diagnostics = _join_group_diagnostics(
         results,
         summaries,
@@ -685,7 +681,6 @@ def _stack_exposure_groups(
         combination,
         stacked_fwhm,
         stack_options.get("stack_weight"),
-        saturation_by_group,
     )
     return final_path, merged_diagnostics
 
@@ -1142,7 +1137,7 @@ def _describe_groups(
     failed_groups: list[tuple[Any, dict[str, Any]]],
     final_path: str,
     target_id: str,
-) -> tuple[list[dict[str, Any]], list[tuple[float, Any]]]:
+) -> list[dict[str, Any]]:
     """Describe every group, including any not stacked or not lined up.
 
     Writes the group manifest next to the combined stack.
@@ -1163,9 +1158,6 @@ def _describe_groups(
     -------
     summaries : `list` [`dict`]
         One summary per group, stacked groups first.
-    saturation_by_group : `list` [`tuple`]
-        The exposure length and the saturation measured for each stacked
-        group, in group order.
     """
     from astrometricslib.pipelines.stacking.post_processing.exposure_group_report import (
         build_group_summary,
@@ -1174,7 +1166,7 @@ def _describe_groups(
     )
     from astrometricslib.pipelines.stacking.processing.group_gains import CLIPPED_FRAME_ZERO_FRACTION
 
-    summaries, details, saturation_by_group = [], [], []
+    summaries, details = [], []
     for result in results:
         try:
             saturation = measure_group_saturation(result.group.frames)
@@ -1182,7 +1174,6 @@ def _describe_groups(
             # A measurement must not cost the stack.
             logger.warning("Could not measure saturation for '%s': %s", target_id, measurement_error)
             saturation = []
-        saturation_by_group.append((result.exposure, saturation))
         alignment = result.alignment
         summaries.append(
             build_group_summary(
@@ -1222,7 +1213,7 @@ def _describe_groups(
         )
         details.append({})
     write_group_manifest(final_path, summaries, details)
-    return summaries, saturation_by_group
+    return summaries
 
 
 def _join_group_diagnostics(
@@ -1232,7 +1223,6 @@ def _join_group_diagnostics(
     combination: Any,
     stacked_fwhm: float | None,
     stack_weight: str | None,
-    saturation_by_group: list[tuple[float, Any]],
 ) -> dict[str, Any]:
     """Join the used groups' diagnostics and add what the combine found.
 
@@ -1250,9 +1240,6 @@ def _join_group_diagnostics(
         The star width of the combined image.
     stack_weight : `str` or `None`
         The Siril ``-weight`` mode the groups were stacked with.
-    saturation_by_group : `list` [`tuple`]
-        The exposure length and saturation of each stacked group, as
-        `_describe_groups` returned them.
 
     Returns
     -------
@@ -1260,10 +1247,6 @@ def _join_group_diagnostics(
         The diagnostics described in `_stack_exposure_groups`.
     """
     import numpy as np
-
-    from astrometricslib.pipelines.stacking.post_processing.exposure_group_report import (
-        recommended_exposure_for_groups,
-    )
 
     used = used_groups(results)
     merged_diagnostics = _merge_diagnostics([
@@ -1291,10 +1274,6 @@ def _join_group_diagnostics(
     merged_diagnostics["covered_in_every_group"] = np.logical_and.reduce(combination.covered_masks)
     if stacked_fwhm is not None:
         merged_diagnostics["stacked_fwhm_px"] = stacked_fwhm
-    merged_diagnostics["recommended_exposure_seconds"] = recommended_exposure_for_groups(
-        [exposure for exposure, _ in saturation_by_group],
-        [saturation for _, saturation in saturation_by_group],
-    )
     return merged_diagnostics
 
 

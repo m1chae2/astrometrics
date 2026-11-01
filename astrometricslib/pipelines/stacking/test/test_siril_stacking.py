@@ -663,7 +663,7 @@ def test_a_group_that_cannot_be_stacked_still_appears_in_the_summaries(tmp_path:
 
 
 def test_a_stack_of_one_length_still_describes_its_single_group(tmp_path: Path) -> None:
-    """A one-length stack reports one group entry and a recommendation."""
+    """A one-length stack reports one group entry."""
     frames = [_frame("30.0", f"light_{i}") for i in range(6)]
     driver = FakeSirilDriver(tmp_path, [{"registered": 6}])
 
@@ -673,7 +673,7 @@ def test_a_stack_of_one_length_still_describes_its_single_group(tmp_path: Path) 
     assert len(entries) == 1
     assert entries[0]["exposure_seconds"] == pytest.approx(30.0)
     assert entries[0]["frames_stacked"] == 6
-    assert "recommended_exposure_seconds" in diagnostics
+    assert "recommended_exposure_seconds" not in diagnostics
     assert not (tmp_path / "groups").exists()
 
 

@@ -1291,7 +1291,6 @@ def _record_exposure_groups(summary: StackQualitySummary, diagnostics: dict) -> 
     summary.stacking_metrics.exposure_groups = [
         ExposureGroupSummary(**entry) for entry in diagnostics.get("exposure_group_summaries", [])
     ]
-    summary.stacking_metrics.recommended_exposure_seconds = diagnostics.get("recommended_exposure_seconds")
 
 
 def _finalize_stack_quality_flags(summary: StackQualitySummary) -> None:

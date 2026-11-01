@@ -249,7 +249,6 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `saturated_pixel_fraction` | `float \| None` | Share of saturated pixels (clipped at the sensor's maximum) in the final stack. |
 | `saturation_flagged` | `bool` | True if the stack holds a significant share of saturated pixels. |
 | `exposure_groups` | `list[astrometricslib.models.quality.quality_summary.ExposureGroupSummary]` | One sub-stack per exposure length, with its details. |
-| `recommended_exposure_seconds` | `float \| None` | Estimated exposure, in seconds, that keeps bright stars below clipping. |
 | `zero_pixel_fraction` | `float \| None` | Share of stack pixels that are exactly zero. |
 | `zero_fraction_flagged` | `bool` | True if over-subtraction clipped pixels at zero ADU (zero camera counts). |
 | `negative_pixel_max_percent` | `int \| None` | Largest percentage of negative pixels the stacking engine reported. |

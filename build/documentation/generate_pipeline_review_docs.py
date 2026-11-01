@@ -685,7 +685,6 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
     ),
     "saturation_flagged": "True if the stack holds a significant share of saturated pixels.",
     "exposure_groups": "One sub-stack per exposure length, with its details.",
-    "recommended_exposure_seconds": "Estimated exposure, in seconds, that keeps bright stars below clipping.",
     "zero_pixel_fraction": "Share of stack pixels that are exactly zero.",
     "zero_fraction_flagged": "True if over-subtraction clipped pixels at zero ADU (zero camera counts).",
     "negative_pixel_max_percent": "Largest percentage of negative pixels the stacking engine reported.",

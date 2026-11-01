@@ -1912,7 +1912,7 @@ _SCIENCE_METRICS: tuple[MetricSpec, ...] = (
         "pipelines.stacking.post_processing.exposure_group_report.summarize_group_peak",
         purpose=MetricPurpose.DECISION,
         purpose_reason=(
-            "It replaces the recommended exposure: the planner reads how near the ceiling the brightest "
+            "The planner reads how near the ceiling the brightest "
             "star is at the exposure that was used. The peak grows in proportion to the exposure."
         ),
         decisions=("exposure length",),

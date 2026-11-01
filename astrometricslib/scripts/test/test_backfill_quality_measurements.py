@@ -1032,7 +1032,6 @@ def test_every_stacking_summary_field_is_a_measurement_or_listed_as_not_one() ->
         "flat_calibration_issues": "a list of sentences",
         "saturation_flagged": "a verdict",
         "exposure_groups": "a list; the group metrics hold each group's numbers",
-        "recommended_exposure_seconds": "a recommendation, not a measurement",
         "zero_fraction_flagged": "a verdict",
         "negative_pixels_flagged": "a verdict",
         "fwhm_degraded": "a verdict",

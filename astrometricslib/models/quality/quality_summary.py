@@ -296,10 +296,6 @@ class StackingPipelineQualityMetrics(BaseModel):
     # One entry per exposure length in the stack (a single entry when every
     # frame has the same length).
     exposure_groups: list[ExposureGroupSummary] = Field(default_factory=list, alias="exposureGroups")
-    # The exposure length, in seconds, that would keep the brightest star
-    # below the camera's ceiling; `None` when it cannot be worked out (for
-    # example a star clipped too heavily to estimate).
-    recommended_exposure_seconds: float | None = Field(default=None, alias="recommendedExposureSeconds")
 
     # The share of the stack's pixels that are exactly zero. A stack that is
     # mostly zero has been over-subtracted (its calibration removed more than

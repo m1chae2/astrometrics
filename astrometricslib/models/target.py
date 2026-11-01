@@ -205,6 +205,20 @@ class FrameRecord(BaseModel):
         migrated["measurements"] = found
         return migrated
 
+    @property
+    def is_spectral(self) -> bool:
+        """Whether this is a spectroscopy frame.
+
+        This is worked out from the filter every time and is not saved with
+        the record.
+
+        Returns
+        -------
+        is_spectral : `bool`
+            `True` when the filter is the spectroscopy grating.
+        """
+        return self.filter == FilterType.SPEC
+
     @field_validator("filter", mode="before")
     @classmethod
     def normalize_filter(cls, v: Any) -> Any:
@@ -276,6 +290,24 @@ class TargetStackingResult(BaseModel):
         default_factory=dict, alias="stacksByConfiguration"
     )
     quality_summary: StackQualitySummary | None = Field(default=None, alias="qualitySummary")
+
+    @property
+    def preview_path(self) -> str | None:
+        """Where the stack's preview picture (JPEG) is, or would be.
+
+        The name comes from the stack's file name, so this is worked out
+        every time and is not saved. The file may not exist.
+
+        Returns
+        -------
+        preview_path : `str` or `None`
+            The preview picture's path, or `None` when there is no stack.
+        """
+        if not self.stacked_image:
+            return None
+        from astrometricslib.utilities.stack_preview_path import preview_path_for
+
+        return preview_path_for(self.stacked_image)
 
 
 class AsteroidDetectionResult(BaseModel):
@@ -471,6 +503,61 @@ class Target(BaseModel):
         from astrometricslib.utilities.target_classification import classify_target_name
 
         return classify_target_name(self.id)
+
+    @property
+    def object_category(self) -> str | None:
+        """The broad kind of sky object, from SIMBAD's type code and the id.
+
+        This is worked out every time and is not saved.
+
+        Returns
+        -------
+        category : `str` or `None`
+            ``"galaxy"``, ``"nebula"``, ``"cluster"``, ``"star"``,
+            ``"solar_system"``, or `None` when the type is not known.
+        """
+        from astrometricslib.utilities.target_object_category import target_object_category
+
+        return target_object_category(self.simbad_object_type, self.id)
+
+    @property
+    def ra_deg(self) -> float:
+        """The right ascension (the east-west sky coordinate) in degrees.
+
+        This is read from the text in `ra` every time and is not saved.
+
+        Returns
+        -------
+        ra_degrees : `float`
+            The right ascension, in decimal degrees.
+
+        Notes
+        -----
+        Raises `InvalidArgumentError` if `ra` cannot be read as an angle.
+        """
+        from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
+
+        return parse_coordinate_string(self.ra, is_ra=True)
+
+    @property
+    def dec_deg(self) -> float:
+        """The declination (the north-south sky coordinate) in degrees.
+
+        This is read from the text in `dec` every time and is not saved.
+
+        Returns
+        -------
+        dec_degrees : `float`
+            The declination, in decimal degrees.
+
+        Notes
+        -----
+        Raises `InvalidArgumentError` if `dec` cannot be read as an angle
+        or lies outside -90 to 90 degrees.
+        """
+        from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
+
+        return parse_coordinate_string(self.dec, is_ra=False)
 
     def serialize(self) -> dict[str, Any]:
         """Package the target's data into a basic dictionary format.

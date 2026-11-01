@@ -23,7 +23,7 @@ from scipy.ndimage import median_filter
 from scipy.optimize import minimize
 from scipy.signal import find_peaks
 
-from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import ProcessingError
 from astrometricslib.pipelines.shared.quality.saturation import compute_saturated_pixel_fraction

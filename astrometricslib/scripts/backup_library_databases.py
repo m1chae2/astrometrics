@@ -30,7 +30,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from astrometricslib.drivers.local_database import snapshot_sqlite_database
+from astrometricslib._internal.drivers.local_database import snapshot_sqlite_database
 from astrometricslib.foundation.paths import data_directory, remote_snapshot_path, scratch_directory
 
 logger = logging.getLogger(__name__)

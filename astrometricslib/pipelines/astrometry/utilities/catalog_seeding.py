@@ -16,7 +16,7 @@ from typing import Any
 import astropy.units as u
 from astropy.coordinates import SkyCoord
 
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, read_header
+from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read_header
 from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.utilities.exceptions import DATA_ERRORS, ONLINE_QUERY_ERRORS
 
@@ -257,7 +257,7 @@ def seed_local_gaia_catalog(
         A summary of what was done: how many spots were checked, how many
         failed, and how many new stars were added to the database.
     """
-    from astrometricslib.drivers.catalog_store import summarize_catalog_coverage
+    from astrometricslib._internal.drivers.catalog_store import summarize_catalog_coverage
 
     field_centers = derive_field_centers(targets)
     report: dict[str, Any] = {

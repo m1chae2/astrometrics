@@ -40,7 +40,7 @@ from astropy.io import fits
 from scipy import ndimage
 from skimage.registration import phase_cross_correlation
 
-from astrometricslib.drivers.fits_access import read_data
+from astrometricslib._internal.drivers.fits_access import read_data
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.paths import siril_work_directory
 from astrometricslib.pipelines.stacking.post_processing.stack_preview import run_preview_script

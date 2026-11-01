@@ -96,7 +96,7 @@ def test_pipelines_do_not_build_built_in_drivers() -> None:
 
     assert not new_sites, (
         f"Built-in driver constructed directly in pipeline module(s): {sorted(new_sites)}. "
-        f"Take a `Drivers` (astrometricslib.drivers.driver_set) and ask it for the driver, "
+        f"Take a `Drivers` (astrometricslib._internal.drivers.driver_set) and ask it for the driver, "
         f"so a caller can inject their own through Astrometrics(...)."
     )
 

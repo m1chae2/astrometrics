@@ -6,11 +6,11 @@
 
 This paper maps the design in `Wayfinding_Library_Architecture.md` to the Python source in `wayfindinglib/`. It names the layers, the model classes and the modules for planning, execution and control. It lists the settings with values and register identifiers; evidence is in the validation register. It names the structural tests and says which parts of the design have no code yet.
 
-Terms are defined in the [glossary](./../Glossary.md) and at first use.
+Terms are defined in the [glossary](../Glossary.md) and at first use.
 
 ## 1. Scope
 
-This paper indexes the code; theory stays in [Wayfinding_Library_Architecture.md](./Wayfinding_Library_Architecture.md). Module paths are relative to `wayfindinglib/` unless a path starts with another folder.
+This paper indexes the code; theory stays in [Wayfinding_Library_Architecture.md](Wayfinding_Library_Architecture.md). Module paths are relative to `wayfindinglib/` unless a path starts with another folder.
 
 The one supported entry point is the package root, which loads its names on first use, so importing it loads no hardware code. It offers `Wayfinder` with three sub-APIs, `control`, `planning` and `execution`, their models, `group_alignment_attempts` and the error class.
 

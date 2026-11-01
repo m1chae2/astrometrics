@@ -181,7 +181,7 @@ def test_the_frame_derived_limit_reaches_the_query(monkeypatch: pytest.MonkeyPat
 
 def test_cached_stars_fainter_than_the_limit_are_left_out(monkeypatch: pytest.MonkeyPatch) -> None:
     """A cached download deeper than the request is trimmed to the request."""
-    from astrometricslib.drivers import catalog_store
+    from astrometricslib._internal.drivers import catalog_store
     from astrometricslib.foundation.config import get_configuration
 
     config = get_configuration()

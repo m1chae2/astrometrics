@@ -14,7 +14,7 @@ Everything here takes plain data and returns plain data. The public
 from collections.abc import Iterable
 from typing import Any
 
-from astrometricslib.drivers.calibration_library import FlatGroup
+from astrometricslib._internal.drivers.calibration_library import FlatGroup
 from astrometricslib.models.calibration_ingest import (
     CalibrationGroupChange,
     CalibrationIngestReport,

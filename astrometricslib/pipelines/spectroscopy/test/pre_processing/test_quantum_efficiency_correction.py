@@ -9,7 +9,7 @@ cameras without one.
 
 import numpy as np
 
-from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
+from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.pipelines.spectroscopy.pre_processing.quantum_efficiency_correction import (
     QuantumEfficiencyCurve,
     apply_quantum_efficiency_correction,

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from astrometricslib.drivers import fits_access
+from astrometricslib._internal.drivers import fits_access
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 

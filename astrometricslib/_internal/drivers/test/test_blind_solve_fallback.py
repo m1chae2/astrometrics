@@ -1,0 +1,166 @@
+"""Tests for surviving a wrong pixel-scale hint during plate solving.
+
+If the focal length in the image metadata is incorrect, the constrained
+solve will fail. This tests that we successfully fall back to a blind
+solve without scale hints.
+"""
+
+from pathlib import Path
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+from astropy.io import fits
+
+from astrometricslib._internal.drivers import astrometry_net_driver
+from astrometricslib._internal.drivers.astrometry_net_driver import AstrometryNetPlateSolveDriver
+
+
+@pytest.fixture
+def solver() -> AstrometryNetPlateSolveDriver:
+    """Return a plate solve driver with no API key, so online paths stay off.
+
+    Returns
+    -------
+    solver : `AstrometryNetPlateSolveDriver`
+        Solver instance for local-path tests.
+    """
+    return AstrometryNetPlateSolveDriver()
+
+
+def test_a_failed_hinted_solve_is_retried_blind(
+    solver: AstrometryNetPlateSolveDriver, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The regression: a bad hint must not be the end of the attempt."""
+    commands = []
+
+    def _fake_run(self, command, working_directory, timeout):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
+        commands.append(command)
+        # Fail while constrained, succeed once the hints are gone.
+        if "--scale-low" in command:
+            return None
+        return fits.Header({"CRVAL1": 10.7, "CRVAL2": 41.27})
+
+    monkeypatch.setattr(AstrometryNetPlateSolveDriver, "_run_solve_field", _fake_run)
+
+    header = solver._solve_locally(
+        "/nonexistent/image.fits",
+        scale_units="arcsecperpix",
+        scale_lower=2.54,
+        scale_upper=2.81,
+    )
+
+    assert header is not None
+    assert header["CRVAL1"] == pytest.approx(10.7)
+    assert len(commands) == 2
+    assert "--scale-low" in commands[0]
+    assert "--scale-low" not in commands[1]
+
+
+def test_position_hints_alone_also_trigger_the_blind_retry(
+    solver: AstrometryNetPlateSolveDriver, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A wrong RA/Dec constrains the search just as fatally as scale."""
+    commands = []
+
+    def _fake_run(self, command, working_directory, timeout):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
+        commands.append(command)
+        return None if "--ra" in command else fits.Header({"CRVAL1": 1.0})
+
+    monkeypatch.setattr(AstrometryNetPlateSolveDriver, "_run_solve_field", _fake_run)
+
+    assert solver._solve_locally("/nonexistent/image.fits", center_ra=10.0, center_dec=41.0) is not None
+    assert len(commands) == 2
+
+
+def test_a_successful_hinted_solve_does_not_retry(
+    solver: AstrometryNetPlateSolveDriver, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Hints are usually right; a second solve would double the cost."""
+    calls = []
+
+    def _fake_run(self, command, working_directory, timeout):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
+        calls.append(command)
+        return fits.Header({"CRVAL1": 10.7})
+
+    monkeypatch.setattr(AstrometryNetPlateSolveDriver, "_run_solve_field", _fake_run)
+    solver._solve_locally(
+        "/nonexistent/image.fits", scale_units="arcsecperpix", scale_lower=2.0, scale_upper=2.1
+    )
+
+    assert len(calls) == 1
+
+
+def test_an_unhinted_solve_is_attempted_only_once(
+    solver: AstrometryNetPlateSolveDriver, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no hints to blame, a failure is the field's, not the window's."""
+    calls = []
+
+    def _fake_run(self, command, working_directory, timeout) -> None:  # ruff: ignore[missing-type-function-argument]
+        calls.append(command)
+        return None
+
+    monkeypatch.setattr(AstrometryNetPlateSolveDriver, "_run_solve_field", _fake_run)
+
+    assert solver._solve_locally("/nonexistent/image.fits") is None
+    assert len(calls) == 1
+
+
+def test_solve_field_success_requires_the_output_file(
+    solver: AstrometryNetPlateSolveDriver, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A zero exit status alone does not mean the field was solved."""
+
+    class _Result:
+        returncode = 0
+
+    monkeypatch.setattr(astrometry_net_driver.subprocess, "run", lambda *a, **k: _Result())
+
+    assert solver._run_solve_field(["solve-field"], str(tmp_path), 10) is None
+
+
+def test_a_colour_stack_is_flattened_before_upload(
+    solver: AstrometryNetPlateSolveDriver, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """astrometry.net's uploader crashes on a 3D array.
+
+    It raised "weights.ndim (2) must match len(axes) (3)" for every DSLR
+    stack, so the online fallback was unusable for exactly the targets
+    most likely to need it.
+    """
+    colour_path = tmp_path / "colour.fits"
+    fits.PrimaryHDU(np.ones((3, 8, 6), dtype=np.float32)).writeto(colour_path)
+    uploaded = {}
+
+    solver.api_key = "test-key"
+
+    def _fake_solve_from_image(path, **kwargs: object):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
+        with fits.open(path) as hdul:
+            uploaded["ndim"] = hdul[0].data.ndim
+        return fits.Header({"CRVAL1": 1.0})
+
+    monkeypatch.setattr(solver, "astrometry_net", SimpleNamespace(solve_from_image=_fake_solve_from_image))
+
+    assert solver._solve_online_image(str(colour_path)) is not None
+    assert uploaded["ndim"] == 2
+
+
+def test_a_mono_stack_is_uploaded_unchanged(
+    solver: AstrometryNetPlateSolveDriver, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Monochrome frames must not pay for a rewrite they do not need."""
+    mono_path = tmp_path / "mono.fits"
+    fits.PrimaryHDU(np.ones((8, 6), dtype=np.float32)).writeto(mono_path)
+    uploaded = {}
+
+    solver.api_key = "test-key"
+
+    def _fake_solve_from_image(path, **kwargs: object):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
+        uploaded["path"] = path
+        return fits.Header({"CRVAL1": 1.0})
+
+    monkeypatch.setattr(solver, "astrometry_net", SimpleNamespace(solve_from_image=_fake_solve_from_image))
+    solver._solve_online_image(str(mono_path))
+
+    assert uploaded["path"] == str(mono_path)

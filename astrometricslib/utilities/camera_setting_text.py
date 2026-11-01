@@ -22,7 +22,7 @@ from typing import Any
 from astrometricslib.utilities.iso_text import canonical_iso_text
 
 # The binning of a frame whose header names none: no binning at all. Same
-# default as `astrometricslib.drivers.calibration_library.UNBINNED`, which
+# default as `astrometricslib._internal.drivers.calibration_library.UNBINNED`, which
 # takes its value from here.
 UNBINNED_TEXT = "1x1"
 

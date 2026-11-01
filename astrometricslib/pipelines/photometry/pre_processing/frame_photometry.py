@@ -42,7 +42,7 @@ from astropy.time import Time
 from photutils.aperture import CircularAnnulus, CircularAperture
 from photutils.centroids import centroid_com
 
-from astrometricslib.drivers.fits_access import collapse_to_2d, read_header_and_data
+from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_header_and_data
 from astrometricslib.pipelines.photometry.pre_processing.detector_noise import DetectorNoise
 from astrometricslib.pipelines.shared.quality.saturation import (
     compute_saturated_pixel_fraction,

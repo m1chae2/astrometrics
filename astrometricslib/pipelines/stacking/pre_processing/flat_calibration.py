@@ -33,8 +33,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
-from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
+from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.foundation.errors import NotFoundError, StorageError
 
 logger = logging.getLogger(__name__)

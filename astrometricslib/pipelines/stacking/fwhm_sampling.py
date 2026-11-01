@@ -10,7 +10,7 @@ FWHM fields and the degradation flag on the stack's quality summary.
 import logging
 from typing import Any
 
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
+from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 

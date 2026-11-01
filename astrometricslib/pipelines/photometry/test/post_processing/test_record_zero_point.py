@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from astrometricslib.drivers.quality_store import QualityStore
+from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.models.quality.measurement import MeasurementStatus, QualityMeasurement, SubjectLevel
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.photometry import runner

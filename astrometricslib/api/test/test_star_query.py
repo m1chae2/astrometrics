@@ -10,8 +10,8 @@ from typing import Any
 
 import pytest
 
+from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib.api.stars import StellarCatalog
-from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.stellar_source import StellarObject
 

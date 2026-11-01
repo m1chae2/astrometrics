@@ -11,7 +11,7 @@ survives a round trip through its camelCase form.
 import numpy as np
 import pytest
 
-from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.models.stellar_source import (
     ExtinctionCorrectionRecord,
     SpectralExtractionDiagnostics,

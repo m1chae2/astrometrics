@@ -26,7 +26,7 @@ import sqlite3
 from collections.abc import Callable
 from typing import Any, NamedTuple
 
-from astrometricslib.drivers.catalog_access import POSITION_ONLY_STAR_ID_PREFIX
+from astrometricslib._internal.drivers.catalog_access import POSITION_ONLY_STAR_ID_PREFIX
 from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.pipelines.shared.catalog_star_identity import (
     CATALOG_MATCH_RADIUS_ARCSEC,

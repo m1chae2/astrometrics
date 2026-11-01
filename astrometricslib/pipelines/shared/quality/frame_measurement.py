@@ -66,7 +66,7 @@ import numpy as np
 from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
 
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, collapse_to_2d, open_primary_hdu
+from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, collapse_to_2d, open_primary_hdu
 from astrometricslib.models.camera_profile import CameraProfile, ProvenancedValue, ProvenanceKind
 from astrometricslib.models.quality.measurement import (
     MeasurementOrigin,

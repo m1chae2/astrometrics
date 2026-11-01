@@ -299,7 +299,7 @@ def reindex_frames(
     from astrometricslib.pipelines.shared import frame_scanning
 
     if catalog_access is None:
-        from astrometricslib.drivers.catalog_access import CatalogAccess
+        from astrometricslib._internal.drivers.catalog_access import CatalogAccess
 
         catalog_access = CatalogAccess()
 

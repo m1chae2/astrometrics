@@ -26,7 +26,7 @@ from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
     QuarantineReport,
 )
 
-SIRIL_DRIVER = "astrometricslib.drivers.siril_interface.ImageProcessing"
+SIRIL_DRIVER = "astrometricslib._internal.drivers.siril_interface.ImageProcessing"
 SUMMARY_BUILDER = "astrometricslib.pipelines.stacking.stage._build_stack_quality_summary"
 QUARANTINE_STEP = "astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.quarantine_bad_frames"
 

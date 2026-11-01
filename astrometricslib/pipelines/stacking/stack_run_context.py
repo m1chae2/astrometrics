@@ -11,12 +11,12 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib.drivers.driver_set import Drivers
+from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.models.quality.gate_result import GateResult
 from astrometricslib.models.target import Target
 
 if TYPE_CHECKING:
-    from astrometricslib.drivers.interfaces.stacking_driver import StackingDriver
+    from astrometricslib._internal.drivers.interfaces.stacking_driver import StackingDriver
     from astrometricslib.models.quality.quality_summary import ExcludedFrame
     from astrometricslib.pipelines.stacking.frame_measurement_run import FrameQualityRecording
 

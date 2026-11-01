@@ -50,7 +50,7 @@ from typing import Any
 
 import numpy as np
 
-from astrometricslib.drivers.driver_set import Drivers
+from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.quality.measurement import QualityMeasurement, QualitySubject
 from astrometricslib.models.quality.subset_stacks import OddEvenDifferenceNoiseResult

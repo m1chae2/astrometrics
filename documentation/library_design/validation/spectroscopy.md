@@ -11,7 +11,7 @@ Two calls recur in many procedures. They are written out once here.
 ```python
 import numpy as np
 
-from astrometricslib.drivers.image import AstrometricsImage  # internal
+from astrometricslib._internal.drivers.image import AstrometricsImage  # internal
 from astrometricslib.pipelines.astrometry.pipeline import AstrometryPipeline  # internal
 from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline  # internal
 from astrometricslib.pipelines.spectroscopy.pre_processing.standard_star_selection import (  # internal
@@ -32,7 +32,7 @@ star = SpectroscopyPipeline().process(context, limit=1)[0]
 spectrum = star.spectroscopy  # a SpectroscopyResult
 ```
 
-<!-- impl: astrometricslib.drivers.image.AstrometricsImage -->
+<!-- impl: astrometricslib._internal.drivers.image.AstrometricsImage -->
 <!-- impl: astrometricslib.pipelines.astrometry.pipeline.AstrometryPipeline -->
 <!-- impl: astrometricslib.pipelines.spectroscopy.pipeline.SpectroscopyPipeline -->
 <!-- impl: astrometricslib.pipelines.spectroscopy.pipeline.SpectroscopyPipeline.process_image -->
@@ -1078,7 +1078,7 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
   2. For one star by hand:
 
   ```python
-  from astrometricslib.drivers.driver_set import Drivers  # internal
+  from astrometricslib._internal.drivers.driver_set import Drivers  # internal
   from astrometricslib.pipelines.shared.catalog_star_identity import gaia_dr3_source_id_of  # internal
   from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp import (
       compare_to_gaia_xp,
@@ -1098,7 +1098,7 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
   )
   ```
   <!-- impl: astrometricslib._internal.drivers.GaiaXpDriver -->
-  <!-- impl: astrometricslib.drivers.driver_set.Drivers.gaia_xp_or_default -->
+  <!-- impl: astrometricslib._internal.drivers.driver_set.Drivers.gaia_xp_or_default -->
   <!-- impl: astrometricslib.pipelines.shared.catalog_star_identity.gaia_dr3_source_id_of -->
   <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp.compare_to_gaia_xp -->
   <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp.summarize_gaia_xp -->

@@ -41,8 +41,8 @@ import logging
 import sys
 
 from astrometricslib import Astrometrics, configure_logging
-from astrometricslib.drivers.catalog_access import StarPosition
-from astrometricslib.drivers.local_database import backup_catalog_database
+from astrometricslib._internal.drivers.catalog_access import StarPosition
+from astrometricslib._internal.drivers.local_database import backup_catalog_database
 from astrometricslib.pipelines.shared.catalog_star_identity import (
     CATALOG_MATCH_RADIUS_ARCSEC,
     merge_duplicate_into_survivor,

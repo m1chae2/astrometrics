@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from astrometricslib.drivers.quality_store import QualityStore
+from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines import target_batch, tasks
 from astrometricslib.pipelines.stacking import frame_screening
@@ -125,7 +125,7 @@ def test_the_rebuild_script_path_stores_frame_quality(
     )
     library = _recording(tmp_path).calibration_library
     monkeypatch.setattr(
-        "astrometricslib.drivers.calibration_library.CalibrationLibrary", lambda app_config: library
+        "astrometricslib._internal.drivers.calibration_library.CalibrationLibrary", lambda app_config: library
     )
 
     rebuild_stacks.rebuild_target(astrometrics, "M 99", str(tmp_path / "backup"))
@@ -145,9 +145,12 @@ def test_the_batch_worker_passes_the_time_to_the_full_pipeline(monkeypatch: pyte
     monkeypatch.setattr(
         "astrometricslib.pipelines.shared.frame_grouping.select_frames_for_camera", lambda target, camera: [1]
     )
-    monkeypatch.setattr("astrometricslib.drivers.catalog_access.CatalogAccess", lambda config: object())
     monkeypatch.setattr(
-        "astrometricslib.drivers.calibration_library.CalibrationLibrary", lambda app_config: "library"
+        "astrometricslib._internal.drivers.catalog_access.CatalogAccess", lambda config: object()
+    )
+    monkeypatch.setattr(
+        "astrometricslib._internal.drivers.calibration_library.CalibrationLibrary",
+        lambda app_config: "library",
     )
 
     target_batch._process_single_target_worker("M 99", 2, "Cam", measured_at=MEASURED_AT)

@@ -107,7 +107,7 @@ def _make_real_catalog(tmp_path: Path, stars: list[StellarObject]) -> StellarCat
     catalog : `StellarCatalog`
         A catalog whose stellar_catalog table holds exactly `stars`.
     """
-    from astrometricslib.drivers.catalog_access import CatalogAccess
+    from astrometricslib._internal.drivers.catalog_access import CatalogAccess
     from astrometricslib.foundation.config import AppConfiguration
 
     library_path = tmp_path / "library"

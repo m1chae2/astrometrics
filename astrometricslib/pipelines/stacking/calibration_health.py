@@ -45,7 +45,7 @@ def measure_calibration_health(
     """
     import numpy as np
 
-    from astrometricslib.drivers.fits_access import read_data
+    from astrometricslib._internal.drivers.fits_access import read_data
     from astrometricslib.pipelines.stacking.post_processing.stack_quality import (
         is_negative_pixel_percent_significant,
         is_zero_fraction_significant,

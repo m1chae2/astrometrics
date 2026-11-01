@@ -24,8 +24,8 @@ SCANNED_FOLDERS = ("astrometricslib", "wayfindinglib", "backend", "mcp_servers")
 # echo the profile's configured numbers and make no saturation decision.
 ALLOWED_MODULES = frozenset({
     "astrometricslib/models/camera_profile.py",
-    "astrometricslib/drivers/camera_profile_store.py",
-    "astrometricslib/drivers/camera_profile_migration.py",
+    "astrometricslib/_internal/drivers/camera_profile_store.py",
+    "astrometricslib/_internal/drivers/camera_profile_migration.py",
     "astrometricslib/pipelines/shared/applied_camera_profile.py",
 })
 

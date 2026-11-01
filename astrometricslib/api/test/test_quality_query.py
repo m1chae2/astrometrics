@@ -13,8 +13,8 @@ from types import SimpleNamespace
 import pytest
 
 from astrometricslib import Astrometrics
+from astrometricslib._internal.drivers.quality_store import QualityStore, quality_database_path
 from astrometricslib.api.quality import QualityRecords
-from astrometricslib.drivers.quality_store import QualityStore, quality_database_path
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.quality.calibration_identities import CalibrationIdentities
 from astrometricslib.models.quality.capture_setting import CaptureSetting

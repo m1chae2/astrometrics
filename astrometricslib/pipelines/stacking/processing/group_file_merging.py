@@ -14,7 +14,7 @@ from typing import Any
 
 import numpy as np
 
-from astrometricslib.drivers.fits_access import read_data, write_image
+from astrometricslib._internal.drivers.fits_access import read_data, write_image
 
 # A per-frame registration line in Siril's ``.seq`` file starts with R and the
 # frame's number (the same pattern `parse_seq_file` reads).

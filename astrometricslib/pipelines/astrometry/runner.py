@@ -13,8 +13,8 @@ import numpy as np
 from astropy import units as u
 from astropy.coordinates import SkyCoord
 
-from astrometricslib.drivers.driver_set import Drivers
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
+from astrometricslib._internal.drivers.driver_set import Drivers
+from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.foundation.run_tally import RunTally
 from astrometricslib.models.quality.gate_result import failed_gate, passed_gate
@@ -308,7 +308,7 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
             Carries the `AnalysisContext`, the saved stars, and the
             counters `validate_output` needs.
         """
-        from astrometricslib.drivers.astrometry_net_driver import bind_plate_solve_attempts
+        from astrometricslib._internal.drivers.astrometry_net_driver import bind_plate_solve_attempts
         from astrometricslib.pipelines.astrometry.pipeline import (
             AstrometryPipeline,
         )

@@ -109,8 +109,8 @@ from urllib.parse import quote
 from pydantic import ValidationError
 
 from astrometricslib import configure_logging
-from astrometricslib.drivers.local_database import backup_catalog_database, snapshot_sqlite_database
-from astrometricslib.drivers.quality_store import QualityStore, quality_database_path
+from astrometricslib._internal.drivers.local_database import backup_catalog_database, snapshot_sqlite_database
+from astrometricslib._internal.drivers.quality_store import QualityStore, quality_database_path
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.errors import InvalidArgumentError, StorageError
 from astrometricslib.models.quality.gate_result import GateResult

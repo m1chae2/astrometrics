@@ -14,8 +14,8 @@ from typing import Literal
 
 from astropy.io import fits
 
-from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
-from astrometricslib.drivers.driver_set import Drivers
+from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAccess
+from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.jobs.runner import background_job, registered_job
@@ -467,7 +467,7 @@ class TargetCatalog:
             dictionary, for example ``header.get("FILTER")``.
         """
         # A missing, cut-off or damaged file raises one of FITS_READ_ERRORS.
-        from astrometricslib.drivers.fits_access import read_header
+        from astrometricslib._internal.drivers.fits_access import read_header
 
         return read_header(path, first_hdu_only=True)
 
@@ -817,7 +817,7 @@ class TargetCatalog:
         if detail == "nights":
             return TargetQueryResult(detail=detail, nights=target_overview.count_targets_per_night(targets))
         if detail == "camera_index":
-            from astrometricslib.drivers.camera_profile_store import camera_identity
+            from astrometricslib._internal.drivers.camera_profile_store import camera_identity
             from astrometricslib.pipelines.shared.target_camera_index import build_target_camera_index
 
             camera_names = list(self._config.get_available_cameras())

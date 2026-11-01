@@ -46,7 +46,7 @@ import sys
 import numpy as np
 
 from astrometricslib import Astrometrics, configure_logging
-from astrometricslib.drivers.local_database import backup_catalog_database
+from astrometricslib._internal.drivers.local_database import backup_catalog_database
 from astrometricslib.models.stellar_source import (
     ExtinctionCorrectionRecord,
     SpectroscopyResult,

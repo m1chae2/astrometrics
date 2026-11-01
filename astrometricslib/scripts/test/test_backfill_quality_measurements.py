@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 
-from astrometricslib.drivers.quality_store import QualityStore
+from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.models.quality.gaia_xp_comparison import GaiaXpBandSummary, GaiaXpRunSummary
 from astrometricslib.models.quality.gate_result import failed_gate, passed_gate, unchecked_gate
 from astrometricslib.models.quality.measurement import MeasurementOrigin, MeasurementStatus, SubjectLevel

@@ -80,8 +80,8 @@ from typing import Any
 
 import numpy as np
 
-from astrometricslib.drivers.driver_set import Drivers
-from astrometricslib.drivers.quality_store import QualityStore
+from astrometricslib._internal.drivers.driver_set import Drivers
+from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.foundation.errors import AstrometricsError, InvalidArgumentError, NotFoundError
 from astrometricslib.foundation.jobs.runner import get_current_job
 from astrometricslib.models.quality.measurement import (

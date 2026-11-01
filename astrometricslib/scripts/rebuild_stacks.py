@@ -30,7 +30,7 @@ from typing import Any
 import numpy as np
 
 from astrometricslib import Astrometrics
-from astrometricslib.drivers.fits_access import read_data
+from astrometricslib._internal.drivers.fits_access import read_data
 from astrometricslib.pipelines.shared.frame_grouping import (
     frame_exposure_seconds,
     frame_is_spectral,
@@ -202,7 +202,7 @@ def rebuild_target(astrometrics: Astrometrics, name: str, backup_directory: str)
     backup_directory : `str`
         Where the existing stacks are copied first.
     """
-    from astrometricslib.drivers.calibration_library import CalibrationLibrary
+    from astrometricslib._internal.drivers.calibration_library import CalibrationLibrary
     from astrometricslib.pipelines.stacking.frame_measurement_run import FrameQualityRecording
     from astrometricslib.pipelines.tasks import stack_frames_with_timeout
 

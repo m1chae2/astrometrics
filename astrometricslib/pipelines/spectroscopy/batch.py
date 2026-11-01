@@ -13,7 +13,7 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
-from astrometricslib.drivers.driver_set import Drivers
+from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.models.quality.quality_summary import SPECTROSCOPY_PIPELINE_VERSION
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import FrameRecord, Target
@@ -54,7 +54,7 @@ _BRIGHTEST_CATALOG_MAGNITUDE = -2.0
 
 # Prefix of the id given to a star that was found in an image but never
 # matched to a catalog. Must match POSITION_ONLY_STAR_ID_PREFIX in
-# astrometricslib/drivers/catalog_access.py.
+# astrometricslib/_internal/drivers/catalog_access.py.
 _POSITION_ONLY_STAR_ID_PREFIX = "FIELD_J"
 
 
@@ -304,8 +304,8 @@ def _process_single_spectroscopy_frame_worker_v2(
         "gaia_xp": [],
     }
     try:
-        from astrometricslib.drivers.catalog_access import CatalogAccess
-        from astrometricslib.drivers.image import AstrometricsImage
+        from astrometricslib._internal.drivers.catalog_access import CatalogAccess
+        from astrometricslib._internal.drivers.image import AstrometricsImage
 
         catalog_access = CatalogAccess()
 
@@ -451,7 +451,7 @@ def process_spectroscopy_frames_by_session(
         The results for each session, pairing the session data with its
         star identification data.
     """
-    from astrometricslib.drivers.image import AstrometricsImage
+    from astrometricslib._internal.drivers.image import AstrometricsImage
     from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
     from astrometricslib.pipelines.shared.session_identification import (
         identify_session_stars,

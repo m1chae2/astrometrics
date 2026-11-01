@@ -187,7 +187,7 @@ def test_each_frames_saturation_uses_its_own_cameras_threshold(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A frame is judged against the threshold in its camera's profile."""
-    from astrometricslib.drivers import camera_profile_store
+    from astrometricslib._internal.drivers import camera_profile_store
     from astrometricslib.foundation.config import AppConfiguration
 
     config_path = tmp_path / "profiles.config.toml"

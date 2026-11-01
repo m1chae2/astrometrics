@@ -6,7 +6,7 @@ This guide has short recipes for running your telescope from the Astrometrics de
 
 The app handles basic telescope control and simple capture queues. Full automated nights are best run in a dedicated INDI client such as [KStars/Ekos](https://docs.kde.org/trunk5/en/kstars/kstars/ekos.html). INDI is the open standard that lets software talk to astronomy hardware. For a description of every control, see the [user manual](User_Manual.md).
 
-![Observatory Manager](./assets/observatory_manager.png)
+![Observatory Manager](assets/observatory_manager.png)
 
 ## Connect to your INDI devices
 

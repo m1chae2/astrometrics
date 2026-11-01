@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from astrometricslib.drivers.catalog_access import CatalogAccess
+from astrometricslib._internal.drivers.catalog_access import CatalogAccess
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.stellar_source import (
     MINIMUM_POINTS_FOR_PERIOD_SEARCH,

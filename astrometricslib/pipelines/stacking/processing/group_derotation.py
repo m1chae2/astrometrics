@@ -134,7 +134,7 @@ def measure_trail_angle_degrees(
     contrast_sigma : `float`
         How clearly the trail stood out above the background noise.
     """
-    from astrometricslib.drivers.image import AstrometricsImage
+    from astrometricslib._internal.drivers.image import AstrometricsImage
     from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline
     from astrometricslib.utilities import ConfigLoader
 

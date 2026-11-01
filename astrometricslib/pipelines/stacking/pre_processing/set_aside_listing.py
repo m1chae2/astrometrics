@@ -19,7 +19,7 @@ import logging
 import os
 from collections.abc import Iterable, Sequence
 
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, read_header
+from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read_header
 from astrometricslib.models.quality.excluded_frames import SetAsideFrameRecord
 from astrometricslib.models.quality.measurement import QualityMeasurement
 from astrometricslib.pipelines.shared.quality.frame_measurement import frame_subject_id

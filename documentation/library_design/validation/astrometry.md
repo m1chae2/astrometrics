@@ -21,7 +21,7 @@ Two quantities appear in many entries. A *residual* is the distance left between
 - **Procedure:**
   1. Solve the stack through the public API and read the solver's fit residual from the quality summary.
   2. Detect the stars and refine each center with a 2-D Gaussian fit, which is independent of the pipeline's own centroids. The detector call is public; `centroid_2dg` comes from photutils.
-  3. Download the Gaia DR3 stars of the field brighter than G = 16 and move them to the image date (internal functions, not part of the public API; may change). <!-- impl: astrometricslib.drivers.gaia_cone_driver.query_gaia_cone_vizier --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.propagate_gaia_positions --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.read_observation_time -->
+  3. Download the Gaia DR3 stars of the field brighter than G = 16 and move them to the image date (internal functions, not part of the public API; may change). <!-- impl: astrometricslib._internal.drivers.gaia_cone_driver.query_gaia_cone_vizier --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.propagate_gaia_positions --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.read_observation_time -->
   4. Match each refined center to the nearest Gaia star within 2 arcsec and compute the median offset in RA and in Dec (the constant shift) and the scatter about it.
 
 ```python
@@ -32,7 +32,7 @@ from astropy.io import fits
 from photutils.centroids import centroid_2dg
 
 from astrometricslib import Astrometrics
-from astrometricslib.drivers.gaia_cone_driver import query_gaia_cone_vizier
+from astrometricslib._internal.drivers.gaia_cone_driver import query_gaia_cone_vizier
 from astrometricslib.pipelines.astrometry.processing.star_identifier import (
     propagate_gaia_positions,
     read_observation_time,
@@ -392,13 +392,13 @@ print(measure_image_fwhm("/path/to/your_stack.fits"), "px")
 - **Status:** Partly measured. One day and one field; the limits are not validated over many nights.
 - **Data you need:** A dense field (a globular cluster or the Milky Way) and network access.
 - **Procedure:**
-  1. Time each service on the same cone (internal driver functions, not part of the public API; may change). <!-- impl: astrometricslib.drivers.gaia_cone_driver.query_gaia_cone_vizier --> <!-- impl: astrometricslib.drivers.gaia_cone_driver.query_gaia_cone_esa -->
+  1. Time each service on the same cone (internal driver functions, not part of the public API; may change). <!-- impl: astrometricslib._internal.drivers.gaia_cone_driver.query_gaia_cone_vizier --> <!-- impl: astrometricslib._internal.drivers.gaia_cone_driver.query_gaia_cone_esa -->
   2. Repeat at G < 18 and G < 17, and on several days.
 
 ```python
 import time
 
-from astrometricslib.drivers.gaia_cone_driver import query_gaia_cone_esa, query_gaia_cone_vizier
+from astrometricslib._internal.drivers.gaia_cone_driver import query_gaia_cone_esa, query_gaia_cone_vizier
 
 ra, dec, radius = 250.42, 36.46, 1.13  # M 13
 for query in (query_gaia_cone_vizier, query_gaia_cone_esa):
@@ -605,7 +605,7 @@ print(wider["id", "angDist", "Gmag"])
 
 - **Claim:** With fewer than 10 detected stars, the local solver does not solve and spends its whole time limit trying.
 - **Settings it supports:**
-  - code constant `MINIMUM_SOURCES_FOR_LOCAL_SOLVE` = 10 in `astrometricslib/drivers/astrometry_net_driver.py` (changing it means editing the code). Relation: confirmed by this entry. <!-- impl: astrometricslib.drivers.astrometry_net_driver.MINIMUM_SOURCES_FOR_LOCAL_SOLVE -->
+  - code constant `MINIMUM_SOURCES_FOR_LOCAL_SOLVE` = 10 in `astrometricslib/_internal/drivers/astrometry_net_driver.py` (changing it means editing the code). Relation: confirmed by this entry. <!-- impl: astrometricslib._internal.drivers.astrometry_net_driver.MINIMUM_SOURCES_FOR_LOCAL_SOLVE -->
 - **Status:** Partly measured. One underexposed frame.
 - **Data you need:** A few frames with few detectable stars (short or cloudy exposures), and a local solver with index files.
 - **Procedure:**
@@ -1020,7 +1020,7 @@ These values have not been measured. Each is a code constant unless the table sa
 | AST-D03 | Color-frame block averaging before detection | 2 by 2 | `_COLOR_DETECTION_BIN_FACTOR` in `pipelines/astrometry/processing/star_identifier.py` <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier._COLOR_DETECTION_BIN_FACTOR --> | Fewer catalog matches on color frames. | Checked on a synthetic demosaiced background only (`test_color_frame_detection.py`); on a real color stack, compare catalog matches with factors 1, 2 and 3. |
 | AST-D04 | Fewest detections to try a solve | 4 | inline in `StarIdentifier.process_image` <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier.process_image --> | Solves tried that cannot work, or solvable frames skipped. | Solve frames with 4 to 10 detections with `astrometrics.processing.plate_solve` and record which solve. |
 | AST-D05 | Brightest stars sent to the online solver | 100 | `MAXIMUM_PLATE_SOLVE_SOURCES` in `pipelines/astrometry/processing/star_identifier.py` <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.MAXIMUM_PLATE_SOLVE_SOURCES --> | Slow or failed online solves. | Time online solves of a few frames with 50, 100 and 200 stars sent. |
-| AST-D06 | Pixel-scale window; driver widening; blind-retry cut-off | ±5%; 0.8 and 1.2; 90% of the time limit | `StarIdentifier._calculate_scale_hints`; `AstrometryNetPlateSolveDriver` and `HINTED_SOLVE_NEAR_TIMEOUT_FRACTION` in `drivers/astrometry_net_driver.py` <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier._calculate_scale_hints --> <!-- impl: astrometricslib.drivers.astrometry_net_driver.HINTED_SOLVE_NEAR_TIMEOUT_FRACTION --> | Solver search too wide (slow) or too narrow (no solve). | Compare the solved plate scale with the hint across your library (`report_gate_limits.py` lists stored values) to see how much window you need. |
+| AST-D06 | Pixel-scale window; driver widening; blind-retry cut-off | ±5%; 0.8 and 1.2; 90% of the time limit | `StarIdentifier._calculate_scale_hints`; `AstrometryNetPlateSolveDriver` and `HINTED_SOLVE_NEAR_TIMEOUT_FRACTION` in `drivers/astrometry_net_driver.py` <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier._calculate_scale_hints --> <!-- impl: astrometricslib._internal.drivers.astrometry_net_driver.HINTED_SOLVE_NEAR_TIMEOUT_FRACTION --> | Solver search too wide (slow) or too narrow (no solve). | Compare the solved plate scale with the hint across your library (`report_gate_limits.py` lists stored values) to see how much window you need. |
 | AST-D07 | Catalog match radius | 10 arcsec | `CATALOG_MATCH_RADIUS_ARCSEC` in `pipelines/shared/catalog_star_identity.py` <!-- impl: astrometricslib.pipelines.shared.catalog_star_identity.CATALOG_MATCH_RADIUS_ARCSEC --> | True matches missed or wrong stars matched. | After a Gaia refit, histogram the detected-to-catalog distances from `StarIdentifier.catalog_match_separations_arcsec` and set the radius where true matches end. |
 | AST-D08 | Most stars identified per image | 500 | config key `[Processing.Astrometry] maximum_identified_stars` (default 500; 0 means no limit) <!-- impl: astrometricslib.AppConfiguration.get_maximum_identified_stars --> | Long run time and high memory use. | Time a run and watch memory with 500, 1000 and 0 on your densest field. |
 | AST-D09 | Failed catalog lookups allowed | under 50% | `MAXIMUM_FAILED_LOOKUP_FRACTION` in `pipelines/astrometry/post_processing/record_quality.py` <!-- impl: astrometricslib.pipelines.astrometry.post_processing.record_quality.MAXIMUM_FAILED_LOOKUP_FRACTION --> | Network outages pass the gate, or normal runs fail it. | `report_gate_limits.py` prints the failed / attempted share of every stored run; compare it with runs you know had a network outage. |

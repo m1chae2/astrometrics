@@ -652,7 +652,7 @@ on 2026-10-17:
 | Models (shapes only) | `astrometricslib/models/quality/` | Measurement and limit shapes; today's quality models, moved |
 | Shared calculations | `astrometricslib/pipelines/shared/quality/` | The assembled registry, the frame measurement step |
 | Each pipeline | `<pipeline>/metrics.py` and its `record_quality.py` | The declaration of its metrics, and what it emits |
-| Storage | `astrometricslib/drivers/quality_store.py` | The measurement and equipment tables, in plain SQL |
+| Storage | `astrometricslib/_internal/drivers/quality_store.py` | The measurement and equipment tables, in plain SQL |
 | Public API | `astrometricslib/api/quality.py` | `query`, `metrics` and the live checks |
 | Judgments and efficiency | `wayfindinglib/analytics/result_quality/` | The fitness-for-use rules and the observing-advice rules as a table, the efficiency references and functions, night and target aggregates, the focus-temperature slope fit |
 | Recommendations | `wayfindinglib/session_analysis/` | Guiding, capture and sky recommendations |

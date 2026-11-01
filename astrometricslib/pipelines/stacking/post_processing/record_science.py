@@ -39,9 +39,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-from astrometricslib.drivers.calibration_library import DARK_FRAME_PATHS_KEY
-from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
-from astrometricslib.drivers.quality_store import QualityStore
+from astrometricslib._internal.drivers.calibration_library import DARK_FRAME_PATHS_KEY
+from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
+from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.models.quality.measurement import (
     MeasurementStatus,
     QualityMeasurement,

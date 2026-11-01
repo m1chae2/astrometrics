@@ -215,7 +215,7 @@ def resolve_saturation_threshold(camera_name: str | None) -> tuple[float, str]:
     source : `str`
         A sentence saying where the level came from.
     """
-    from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
+    from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
 
     try:
         profile = resolve_camera_profile(camera_name)

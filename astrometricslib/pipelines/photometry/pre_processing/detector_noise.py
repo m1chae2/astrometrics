@@ -37,7 +37,7 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
-from astrometricslib.drivers.calibration_library import header_binning
+from astrometricslib._internal.drivers.calibration_library import header_binning
 from astrometricslib.models.camera_profile import CameraProfile, SensorSettingNoise
 from astrometricslib.utilities.iso_text import iso_or_gain_text
 

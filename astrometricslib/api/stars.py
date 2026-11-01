@@ -14,7 +14,7 @@ The methods check their arguments and hand the work to
 import logging
 from typing import Any, Literal
 
-from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
+from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.catalog_queries import StarQueryResult

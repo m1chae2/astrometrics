@@ -17,7 +17,7 @@ from typing import Any
 
 import numpy as np
 
-from astrometricslib.drivers.fits_access import read_data
+from astrometricslib._internal.drivers.fits_access import read_data
 from astrometricslib.foundation.constants import FULL_SCALE_COUNTS
 from astrometricslib.foundation.errors import InvalidArgumentError, ProcessingError
 from astrometricslib.pipelines.stacking.processing.exposure_groups import ExposureGroup

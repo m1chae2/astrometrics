@@ -28,14 +28,14 @@ from collections import Counter
 from collections.abc import Sequence
 from typing import Any
 
-from astrometricslib.drivers.calibration_library import (
+from astrometricslib._internal.drivers.calibration_library import (
     BIAS_FRAME_PATHS_KEY,
     DARK_FRAME_PATHS_KEY,
     FLAT_BIAS_FRAME_PATHS_KEY,
     FLAT_FRAME_PATHS_KEY,
 )
-from astrometricslib.drivers.quality_store import QualityStore
-from astrometricslib.drivers.siril_stacking_driver import cached_siril_version
+from astrometricslib._internal.drivers.quality_store import QualityStore
+from astrometricslib._internal.drivers.siril_stacking_driver import cached_siril_version
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.models.quality.calibration_identities import (
     CalibrationFileIdentity,

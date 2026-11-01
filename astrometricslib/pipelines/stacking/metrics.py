@@ -55,7 +55,7 @@ _DECLARED_BEFORE_PHASE_3: tuple[MetricSpec, ...] = (
             "the detection side is not."
         ),
         band="stack filter or channel",
-        computed_by="drivers.siril_output_parsing.measure_rejected_fraction",
+        computed_by="_internal.drivers.siril_output_parsing.measure_rejected_fraction",
         uncertainty_kind=UncertaintyKind.NONE,
         uncertainty_method="No uncertainty is reported.",
         register_entry="STK-24",
@@ -632,7 +632,7 @@ _VALUE_METRICS: tuple[MetricSpec, ...] = (
             "(12% is 0.12). No value when Siril printed no warning."
         ),
         "The worst frame Siril warned about.",
-        "drivers.siril_output_parsing.parse_negative_pixel_percentage",
+        "_internal.drivers.siril_output_parsing.parse_negative_pixel_percentage",
         better=Direction.LOWER,
         register_entry="STK-26",
     ),
@@ -675,7 +675,7 @@ _VALUE_METRICS: tuple[MetricSpec, ...] = (
         "How long the stacking program ran.",
         "The wall-clock seconds the stacking program took, summed over exposure groups.",
         "One run of the stacking program.",
-        "drivers.siril_interface.ImageProcessing",
+        "_internal.drivers.siril_interface.ImageProcessing",
         better=Direction.LOWER,
     ),
     _context_metric(

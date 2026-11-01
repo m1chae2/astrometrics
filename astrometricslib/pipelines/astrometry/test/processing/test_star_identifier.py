@@ -414,7 +414,7 @@ class TestGaiaCircuitBreaker:
         import sqlite3
 
         import astrometricslib.foundation.config as config_loader_module
-        from astrometricslib.drivers import catalog_store
+        from astrometricslib._internal.drivers import catalog_store
         from astrometricslib.foundation.config import AppConfiguration
 
         config = AppConfiguration()

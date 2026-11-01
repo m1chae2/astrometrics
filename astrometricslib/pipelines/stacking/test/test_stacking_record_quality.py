@@ -15,7 +15,7 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from astrometricslib.drivers.quality_store import QualityStore
+from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.models.quality.gate_result import GateStatus
 from astrometricslib.models.quality.measurement import (
     MeasurementStatus,

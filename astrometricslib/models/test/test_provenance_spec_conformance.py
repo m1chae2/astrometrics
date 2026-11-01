@@ -12,7 +12,7 @@ rule holds in the store, not just in the schema's primary key comment.
 
 from pathlib import Path
 
-from astrometricslib.drivers.provenance_store import ProvenanceStore
+from astrometricslib._internal.drivers.provenance_store import ProvenanceStore
 from astrometricslib.models.provenance import (
     Activity,
     ActivityDescription,

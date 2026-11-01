@@ -1,0 +1,275 @@
+"""Purpose: Unit tests for where process_target hangs its frame filters.
+
+Description: Siril accepts the same ``-filter-wfwhm``/``-filter-round``
+options on both ``seqapplyreg`` and ``stack``, selecting on the same
+per-frame FWHM and roundness that ``register -2pass`` measured. Placing
+them on ``seqapplyreg`` picks the same frames but skips interpolating
+and writing the ones it drops, so the standard imaging path puts them
+there. The spectral path uses single-pass ``register``, which applies
+transforms as it goes and has no separate filtering step, so its filters
+stay on ``stack``.
+
+The failure these guard against is passing the filters twice: a 90%
+setting applied at both stages compounds to 81% of the input frames,
+silently discarding frames the operator asked to keep. That is invisible
+in the output -- the stack simply has fewer contributing frames -- so it
+needs a test on the generated command script rather than on any result.
+
+Drives `process_target` with Siril's launch, pipe, and read steps
+stubbed out, capturing the command script that would have been sent.
+"""
+
+import io
+import logging
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+from unittest.mock import MagicMock
+
+import pytest
+
+from astrometricslib._internal.drivers import siril_interface
+from astrometricslib._internal.drivers.siril_interface import SirilStackRequest, imaging_stacker
+
+
+@pytest.fixture
+def captured_siril_script(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[..., Any]:
+    """Run process_target with Siril stubbed, returning the script it built.
+
+    Returns
+    -------
+    run_process_target : `callable`
+        Called with ``is_spectral``, ``filter_wfwhm``, ``filter_round``
+        and, optionally, ``spectral_star_detection`` and
+        ``reference_frame_path``; returns the list
+        of Siril commands `process_target` would have sent.
+    """
+    sent_commands: list[str] = []
+
+    def fake_send_commands(
+        self,  # ruff: ignore[missing-type-function-argument]
+        command_pipe,  # ruff: ignore[missing-type-function-argument]
+        commands,  # ruff: ignore[missing-type-function-argument]
+        job_logger=None,  # ruff: ignore[missing-type-function-argument]
+        status_queue=None,  # ruff: ignore[missing-type-function-argument]
+        process=None,  # ruff: ignore[missing-type-function-argument]
+    ) -> None:
+        sent_commands.clear()
+        sent_commands.extend(commands)
+
+    def fake_build_directories(self, id, image_files, camera_filter=None, job_logger=None):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
+        target_folder = tmp_path / "work" / id
+        for subdirectory in ("biases", "darks", "flats", "lights", "process"):
+            (target_folder / subdirectory).mkdir(parents=True, exist_ok=True)
+        # Twenty lights so process_target takes its multi-frame branch
+        # (the one that registers and stacks) and, more importantly, so
+        # a 90% filter still leaves more than
+        # stack_filter_floor.DEFAULT_MINIMUM_SURVIVING_FRAMES standing.
+        # Below that floor the filter is loosened away entirely and
+        # these tests would be asserting against an unfiltered run.
+        for frame_index in range(20):
+            (target_folder / "lights" / f"light_source_{frame_index:05d}.fits").touch()
+            # The real build records each linked frame's original path, in
+            # the order of the sequence.
+            self.last_run_diagnostics.setdefault("symlinked_light_paths", []).append(
+                f"/frames/f{frame_index:02d}.fits"
+            )
+        # One dark, so the lights are calibrated and the registered
+        # sequence is named for the calibrated frames (pp_light_source)
+        # exactly as it is in a real run.
+        (target_folder / "darks" / "dark_00000.fits").touch()
+        return str(target_folder)
+
+    monkeypatch.setattr(siril_interface.ImageProcessing, "build_directories", fake_build_directories)
+    monkeypatch.setattr(siril_interface.ImageProcessing, "send_commands", fake_send_commands)
+    monkeypatch.setattr(
+        siril_interface.ImageProcessing, "create_named_pipes", lambda self, base: ("cmd", "out")
+    )
+    monkeypatch.setattr(
+        siril_interface.ImageProcessing,
+        "run_siril_headless",
+        lambda self, *a, **k: MagicMock(stdout=io.BytesIO()),
+    )
+    monkeypatch.setattr(siril_interface.ImageProcessing, "read_output", lambda self, *a, **k: None)
+    monkeypatch.setattr(siril_interface.ImageProcessing, "_kill_process_tree", lambda self, *a, **k: None)
+    monkeypatch.setattr(siril_interface.ImageProcessing, "cleanup_subprocesses", lambda self: None)
+    monkeypatch.setattr(
+        siril_interface.ImageProcessing, "restore_cached_calibration_masters", lambda self, *a, **k: set()
+    )
+    monkeypatch.setattr(imaging_stacker, "_frames_use_color_filter_array", lambda path: False)
+    monkeypatch.setattr(imaging_stacker, "siril_process_lock", lambda **kwargs: _NullContext())
+
+    def run_process_target(
+        is_spectral: bool,
+        filter_wfwhm: str | None,
+        filter_round: str | None,
+        spectral_star_detection: str = "standard",
+        reference_frame_path: str | None = None,
+    ) -> list[str]:
+        mock_config = MagicMock()
+        mock_config.get_siril_executable.return_value = "siril"
+        mock_config.get_logs_path.return_value = str(tmp_path)
+        mock_config.get_frames_path.return_value = str(tmp_path / "frames")
+        mock_config.get_stacks_path.return_value = str(tmp_path / "frames")
+        mock_config.get_stack_rejection_sigma_mode.return_value = "fixed"
+        mock_config.get_stack_rejection_sigma.return_value = (3.0, 3.0)
+        mock_config.get_stack_weight.return_value = "wfwhm"
+        mock_config.get_stack_generate_rejmap.return_value = False
+        mock_config.get_auto_open_siril_gui.return_value = False
+        # process_target falls back to these when a filter argument is
+        # None, so they must answer None too rather than a MagicMock.
+        mock_config.get_stack_filter_wfwhm_percentile.return_value = None
+        mock_config.get_stack_filter_round_percentile.return_value = None
+        mock_config.get_minimum_calibration_frames.return_value = 3
+
+        driver = siril_interface.ImageProcessing(mock_config, MagicMock())
+        driver.workdir = str(tmp_path / "work")
+        driver.process_target(
+            SirilStackRequest(
+                id="FilterPlacement",
+                image_files=[{"path": "a.fits", "camera": "Cam"}],
+                is_spectral=is_spectral,
+                filter_wfwhm=filter_wfwhm,
+                filter_round=filter_round,
+                spectral_star_detection=spectral_star_detection,
+                reference_frame_path=reference_frame_path,
+            )
+        )
+        logging.getLogger("siril_FilterPlacement").handlers.clear()
+        return list(sent_commands)
+
+    return run_process_target
+
+
+class _NullContext:
+    """A context manager that does nothing, standing in for the Siril lock."""
+
+    def __enter__(self) -> _NullContext:
+        """Enter the no-op context.
+
+        Returns
+        -------
+        `_NullContext`
+            The context instance itself.
+        """
+        return self
+
+    def __exit__(self, *exception_details) -> bool:  # ruff: ignore[missing-type-args]
+        """Leave the no-op context without suppressing anything.
+
+        Returns
+        -------
+        `bool`
+            False so that any exceptions are propagated.
+        """
+        return False
+
+
+def _find_command(commands: list[str], verb: str) -> str:
+    """Return the single command starting with `verb`.
+
+    Returns
+    -------
+    command : `str`
+        The matching command line.
+    """
+    matches = [command for command in commands if command.startswith(verb)]
+    assert len(matches) == 1, f"expected exactly one {verb!r} command, got {matches}"
+    return matches[0]
+
+
+def test_standard_path_filters_on_seqapplyreg_not_stack(captured_siril_script: Callable[..., Any]) -> None:
+    """The imaging path drops frames before they are ever resampled."""
+    commands = captured_siril_script(is_spectral=False, filter_wfwhm="90%", filter_round="90%")
+
+    seqapplyreg_command = _find_command(commands, "seqapplyreg")
+    assert "-filter-wfwhm=90%" in seqapplyreg_command
+    assert "-filter-round=90%" in seqapplyreg_command
+
+    stack_command = _find_command(commands, "stack r_")
+    assert "-filter-wfwhm" not in stack_command
+    assert "-filter-round" not in stack_command
+
+
+def test_spectral_path_filters_on_stack(captured_siril_script: Any) -> None:
+    """Spectral registration leaves filters on stack and tunes findstar."""
+    commands = captured_siril_script(is_spectral=True, filter_wfwhm="90%", filter_round="90%")
+
+    assert not [command for command in commands if command.startswith("seqapplyreg")]
+
+    # The standard detection is the default: it is the setting that
+    # registered all 140 Vega frames (2026-08-25).
+    setfindstar_command = _find_command(commands, "setfindstar")
+    assert setfindstar_command == "setfindstar -relax=on"
+
+    register_command = _find_command(commands, "register")
+    assert "-transf=shift" in register_command
+
+    stack_command = _find_command(commands, "stack r_")
+    assert "-filter-wfwhm=90%" in stack_command
+    assert "-filter-round=90%" in stack_command
+
+
+def test_spectral_path_can_use_the_relaxed_star_detection(captured_siril_script: Any) -> None:
+    """The relaxed detection is there for fields the standard misses."""
+    commands = captured_siril_script(
+        is_spectral=True, filter_wfwhm=None, filter_round=None, spectral_star_detection="relaxed"
+    )
+
+    setfindstar_command = _find_command(commands, "setfindstar")
+    assert "-roundness=0.15" in setfindstar_command
+    assert "-radius=3" in setfindstar_command
+
+
+def test_standard_imaging_ignores_the_spectral_star_detection(captured_siril_script: Any) -> None:
+    """Only spectral frames use the spectral detection setting."""
+    commands = captured_siril_script(
+        is_spectral=False, filter_wfwhm=None, filter_round=None, spectral_star_detection="relaxed"
+    )
+
+    assert _find_command(commands, "setfindstar") == "setfindstar -relax=on"
+
+
+def test_filters_are_never_applied_twice(captured_siril_script: Callable[..., Any]) -> None:
+    """No single run passes a frame filter at both stages.
+
+    Compounding 90% at seqapplyreg with 90% at stack keeps 81% of the
+    input, quietly discarding frames the operator asked to keep.
+    """
+    for is_spectral in (False, True):
+        commands = captured_siril_script(is_spectral=is_spectral, filter_wfwhm="90%", filter_round="90%")
+        for filter_flag in ("-filter-wfwhm", "-filter-round"):
+            occurrences = sum(filter_flag in command for command in commands)
+            assert occurrences == 1, f"{filter_flag} appears {occurrences}x (is_spectral={is_spectral})"
+
+
+def test_no_filter_options_when_none_configured(captured_siril_script: Callable[..., Any]) -> None:
+    """An unfiltered run passes bare commands, not empty option strings."""
+    commands = captured_siril_script(is_spectral=False, filter_wfwhm=None, filter_round=None)
+
+    assert _find_command(commands, "seqapplyreg") == "seqapplyreg pp_light_source"
+    assert "-filter-" not in _find_command(commands, "stack r_")
+
+
+def test_a_named_reference_frame_is_set_before_the_two_pass_registration(
+    captured_siril_script: Callable[..., Any],
+) -> None:
+    """The named reference is sent as ``setref`` (counted from 1)."""
+    commands = captured_siril_script(
+        is_spectral=False, filter_wfwhm=None, filter_round=None, reference_frame_path="/frames/f06.fits"
+    )
+
+    assert _find_command(commands, "setref") == "setref pp_light_source 7"
+    assert commands.index("setref pp_light_source 7") < commands.index("register pp_light_source -2pass")
+
+
+def test_no_reference_is_set_unless_one_is_named_and_present(
+    captured_siril_script: Callable[..., Any],
+) -> None:
+    """Siril chooses its own reference when none is named or it is absent."""
+    unnamed = captured_siril_script(is_spectral=False, filter_wfwhm=None, filter_round=None)
+    assert not [command for command in unnamed if command.startswith("setref")]
+    absent = captured_siril_script(
+        is_spectral=False, filter_wfwhm=None, filter_round=None, reference_frame_path="/frames/other.fits"
+    )
+    assert not [command for command in absent if command.startswith("setref")]

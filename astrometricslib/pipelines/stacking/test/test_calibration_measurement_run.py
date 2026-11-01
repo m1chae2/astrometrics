@@ -13,8 +13,8 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib.drivers.calibration_library import CalibrationLibrary
-from astrometricslib.drivers.quality_store import QualityStore
+from astrometricslib._internal.drivers.calibration_library import CalibrationLibrary
+from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.pipelines.shared.quality.calibration_frame_measurement import (
     calibration_metric_set_fingerprint,
     calibration_subject_id,

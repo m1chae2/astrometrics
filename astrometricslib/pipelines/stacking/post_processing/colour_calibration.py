@@ -40,7 +40,7 @@ from photutils.aperture import ApertureStats, CircularAnnulus, CircularAperture
 from photutils.detection import DAOStarFinder
 from photutils.utils.exceptions import NoDetectionsWarning
 
-from astrometricslib.drivers.fits_access import read_data, read_header, write_image
+from astrometricslib._internal.drivers.fits_access import read_data, read_header, write_image
 from astrometricslib.pipelines.stacking.post_processing.stack_image import (
     MAD_TO_SIGMA,
     robust_sigma,

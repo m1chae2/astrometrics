@@ -39,8 +39,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from astrometricslib.drivers.driver_set import Drivers
-from astrometricslib.drivers.interfaces.simbad_driver import SimbadDriver
+from astrometricslib._internal.drivers.driver_set import Drivers
+from astrometricslib._internal.drivers.interfaces.simbad_driver import SimbadDriver
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.pipelines.shared.target_position import (
     POSITION_TOLERANCE_FLOOR_ARCMIN,

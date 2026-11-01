@@ -46,7 +46,7 @@ from enum import StrEnum
 from typing import Any
 
 from astrometricslib import Astrometrics, configure_logging
-from astrometricslib.drivers.local_database import backup_catalog_database
+from astrometricslib._internal.drivers.local_database import backup_catalog_database
 from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.shared.simbad_object_types import quote_adql, separation_arcsec
@@ -439,7 +439,7 @@ def main(argv: list[str] | None = None) -> int:
         ``0`` on success, ``1`` if `--apply` was requested but the safety
         backup could not be made, ``2`` if SIMBAD could not be reached.
     """
-    from astrometricslib.drivers.astroquery_simbad_driver import AstroquerySimbadDriver
+    from astrometricslib._internal.drivers.astroquery_simbad_driver import AstroquerySimbadDriver
 
     parser = argparse.ArgumentParser(
         prog="backfill_target_object_types",

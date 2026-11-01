@@ -20,9 +20,9 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
+from astrometricslib._internal.drivers.calibration_library import CalibrationSelection
+from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.api.quality import QualityRecords
-from astrometricslib.drivers.calibration_library import CalibrationSelection
-from astrometricslib.drivers.quality_store import QualityStore
 from astrometricslib.foundation.errors import InvalidArgumentError, StorageError
 from astrometricslib.models.camera_profile import (
     CameraProfile,

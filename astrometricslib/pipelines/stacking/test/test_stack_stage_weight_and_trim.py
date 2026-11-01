@@ -17,7 +17,7 @@ from astrometricslib.models.quality.quality_summary import StackingPipelineQuali
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.stacking import stage as stacking_tasks
 
-SIRIL_DRIVER = "astrometricslib.drivers.siril_interface.ImageProcessing"
+SIRIL_DRIVER = "astrometricslib._internal.drivers.siril_interface.ImageProcessing"
 SUMMARY_BUILDER = "astrometricslib.pipelines.stacking.stage._build_stack_quality_summary"
 RUN_STACK = "astrometricslib.pipelines.stacking.stack_runner.run_stack"
 PREVIEW = "astrometricslib.pipelines.stacking.post_processing.stack_preview.write_stack_preview"

@@ -11,7 +11,7 @@ instrument's resolution, then tilted and shifted by amounts the test chooses.
 
 import numpy as np
 
-from astrometricslib.drivers.interfaces.gaia_xp_driver import GaiaXpDriver
+from astrometricslib._internal.drivers.interfaces.gaia_xp_driver import GaiaXpDriver
 from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp import (
     SLOPE_REFERENCE_ANGSTROM,
     xp_resolution_fwhm_angstrom,

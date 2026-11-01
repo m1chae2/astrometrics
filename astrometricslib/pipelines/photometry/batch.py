@@ -20,8 +20,8 @@ import math
 from collections.abc import Sequence
 from typing import Any
 
-from astrometricslib.drivers.catalog_access import POSITION_ONLY_STAR_ID_PREFIX
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
+from astrometricslib._internal.drivers.catalog_access import POSITION_ONLY_STAR_ID_PREFIX
+from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import Target
@@ -119,7 +119,7 @@ def _run_variability_analysis_for_session(
     seed_stars = None
     identify_result = None
     if use_astrometry_seed and star_identifier is not None and target is not None:
-        from astrometricslib.drivers.image import AstrometricsImage
+        from astrometricslib._internal.drivers.image import AstrometricsImage
         from astrometricslib.pipelines.shared.session_identification import (
             identify_session_stars,
         )
@@ -168,7 +168,7 @@ def _solve_session_wcs(session: Any, target: Target) -> Any | None:
         The map from pixel to sky position, or None if the solve
         failed.
     """
-    from astrometricslib.drivers.image import AstrometricsImage
+    from astrometricslib._internal.drivers.image import AstrometricsImage
     from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
     from astrometricslib.pipelines.shared.session_identification import resolve_frame_wcs
 

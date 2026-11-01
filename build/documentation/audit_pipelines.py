@@ -397,8 +397,8 @@ def audit_pipeline_structures() -> list[dict[str, Any]]:
     stacking_entry = "stacking.stage.stack_frames → SirilStackingDriver"
     try:
         stage_mod = importlib.import_module("astrometricslib.pipelines.stacking.stage")
-        driver_mod = importlib.import_module("astrometricslib.drivers.siril_stacking_driver")
-        session_mod = importlib.import_module("astrometricslib.drivers.siril_interface")
+        driver_mod = importlib.import_module("astrometricslib._internal.drivers.siril_stacking_driver")
+        session_mod = importlib.import_module("astrometricslib._internal.drivers.siril_interface")
         entry_points_exist = all((
             callable(getattr(stage_mod, "stack_frames", None)),
             getattr(driver_mod, "SirilStackingDriver", None) is not None,

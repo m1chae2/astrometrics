@@ -86,9 +86,9 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, collapse_to_2d, open_primary_hdu
-from astrometricslib.drivers.quality_store import QualityStore
+from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
+from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, collapse_to_2d, open_primary_hdu
+from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.foundation.jobs.runner import JobHandle, get_current_job
 from astrometricslib.models.camera_profile import UNMIGRATED_NOISE_REASON, CameraProfile
@@ -128,7 +128,7 @@ from astrometricslib.utilities.exceptions import DATA_ERRORS
 from astrometricslib.utilities.observing_night import observing_night_id
 
 if TYPE_CHECKING:
-    from astrometricslib.drivers.calibration_library import CalibrationLibrary
+    from astrometricslib._internal.drivers.calibration_library import CalibrationLibrary
     from astrometricslib.foundation.config import AppConfiguration
 
 logger = logging.getLogger(__name__)

@@ -12,8 +12,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from astrometricslib._internal.drivers.provenance_store import ProvenanceStore
 from astrometricslib.api.jobs import MAXIMUM_JOBS, MAXIMUM_LOG_LINES, MAXIMUM_TEXT_LENGTH, Jobs
-from astrometricslib.drivers.provenance_store import ProvenanceStore
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.foundation.jobs.models import ProcessingJob
 from astrometricslib.foundation.jobs.store import JobStore

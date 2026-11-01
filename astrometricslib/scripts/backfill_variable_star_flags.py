@@ -42,7 +42,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from astrometricslib import Astrometrics, configure_logging
-from astrometricslib.drivers.local_database import backup_catalog_database
+from astrometricslib._internal.drivers.local_database import backup_catalog_database
 from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.models.known_variability import (
     KnownVariability,

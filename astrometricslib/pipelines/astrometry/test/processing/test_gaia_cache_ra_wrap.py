@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from astrometricslib.drivers import catalog_store
+from astrometricslib._internal.drivers import catalog_store
 from astrometricslib.pipelines.astrometry.processing.star_identifier import (
     StarIdentifier,
     _catalog_ra_ranges,

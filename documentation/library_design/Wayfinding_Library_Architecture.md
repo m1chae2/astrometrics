@@ -14,7 +14,7 @@ Terms are defined in the [glossary](../Glossary.md). This document also defines 
 
 **Approach.** This architecture separates the three jobs so each can be built, used and checked alone. Planning and control are peers: an operator can plan a night without commanding any hardware, and the observatory can protect itself with no plan in existence. Execution sits above both.
 
-**Scope.** This paper explains what each part does and why, and the idea behind each setting, not its value. The [Wayfinding library implementation](./Wayfinding_Library_Implementation.md) paper names the code and lists the settings. The evidence for each setting is in the validation register, not here.
+**Scope.** This paper explains what each part does and why, and the idea behind each setting, not its value. The [Wayfinding library implementation](Wayfinding_Library_Implementation.md) paper names the code and lists the settings. The evidence for each setting is in the validation register, not here.
 
 ### 1.1 Related work
 
@@ -64,7 +64,7 @@ Five rules govern the architecture.
 1. **Foundation independence.** Domain models and astronomy calculation depend on nothing above themselves.
 2. **Control and planning peerage.** Control and planning never depend on one another. Either can be used with the other absent.
 3. **Execution is optional.** Execution may depend on control, planning and the foundation. Nothing else depends on it, so a system built without it is a complete planning-and-control system.
-4. **One litmus test per boundary.** A capability belongs to the science-side image processing library (see the [Astrometrics library architecture](./Astrometrics_Library_Architecture.md)) if a scientist could use it with archived data and no telescope. Otherwise it belongs here.
+4. **One litmus test per boundary.** A capability belongs to the science-side image processing library (see the [Astrometrics library architecture](Astrometrics_Library_Architecture.md)) if a scientist could use it with archived data and no telescope. Otherwise it belongs here.
 5. **Delegation is a per-capability state, not an architecture boundary.** Which system performs a hardware-facing capability is a setting read at run time (Section 2.3).
 
 <!-- impl: wayfindinglib.Wayfinder -->
@@ -715,7 +715,7 @@ Four rules keep the analysis honest.
 
 ### 6.11 Judging quality and recommending the next observation
 
-Planning and control share one way to judge stored measurements and to recommend the next observation. The science library measures and gives no advice. This library compares measurements with limits that follow the equipment, and it states each result with its evidence, its class of action and a confidence taken from the validation register. It never advises new hardware, and it stores no judgment. The theory is in the companion paper [Wayfinding quality judgment](./Wayfinding_Quality_Judgment.md).
+Planning and control share one way to judge stored measurements and to recommend the next observation. The science library measures and gives no advice. This library compares measurements with limits that follow the equipment, and it states each result with its evidence, its class of action and a confidence taken from the validation register. It never advises new hardware, and it stores no judgment. The theory is in the companion paper [Wayfinding quality judgment](Wayfinding_Quality_Judgment.md).
 
 ## 7. Verification
 
@@ -731,7 +731,7 @@ Five checks apply across the whole library. A *static* check reads the import gr
 - **Planning is hardware-free (static and runtime).** Planning may not reach any hardware driver, directly or through the foundation. A runtime test plans a night and asserts that no driver or control module was loaded.
 - **Cross-library dependency (static).** The science library imports nothing from this one.
 
-The [Wayfinding library implementation](./Wayfinding_Library_Implementation.md) paper names the files that hold each check.
+The [Wayfinding library implementation](Wayfinding_Library_Implementation.md) paper names the files that hold each check.
 
 <!-- impl: wayfindinglib.test.import_probe.wayfindinglib_modules_loaded_by -->
 

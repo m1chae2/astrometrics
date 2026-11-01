@@ -8,7 +8,7 @@ isolated catalog database -- never the real one.
 
 from pathlib import Path
 
-from astrometricslib.drivers.catalog_access import CatalogAccess, StarPosition
+from astrometricslib._internal.drivers.catalog_access import CatalogAccess, StarPosition
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
 from astrometricslib.pipelines.shared.catalog_star_identity import (

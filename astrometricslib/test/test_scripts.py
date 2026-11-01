@@ -38,7 +38,7 @@ def run_script_as_subprocess(module_name: str, extra_env: dict[str, str] | None 
     # Suppresses SirilInterface.launch_siril_gui(), which otherwise
     # pops an interactive GUI window after a successful stack -- see
     # its "HEADLESS" check in
-    # astrometricslib/drivers/siril_interface/session.py.
+    # astrometricslib/_internal/drivers/siril_interface/session.py.
     env["HEADLESS"] = "1"
     if extra_env:
         env.update(extra_env)
@@ -104,7 +104,7 @@ def test_script_reindex_all_targets(tmp_path: Path) -> None:
 
     seed_script = textwrap.dedent(f"""
         from astrometricslib import FrameRecord, Target
-        from astrometricslib.drivers.local_database import save_target
+        from astrometricslib._internal.drivers.local_database import save_target
 
         frame = FrameRecord(
             path={str(frame_path)!r},

@@ -309,7 +309,7 @@ def measure_spectral_frame_file(
         No clear zero-order target is near the centre of the frame, and no
         position was given.
     """
-    from astrometricslib.drivers.fits_access import collapse_to_2d, read_data
+    from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_data
     from astrometricslib.pipelines.stacking.processing.group_alignment import locate_zero_order
     from astrometricslib.pipelines.stacking.processing.group_derotation import measure_trail_angle_degrees
 

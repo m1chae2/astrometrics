@@ -18,7 +18,7 @@ from astropy.io import fits
 from astropy.modeling.models import Gaussian2D
 from astropy.wcs import WCS
 
-from astrometricslib.drivers.catalog_access import CatalogAccess
+from astrometricslib._internal.drivers.catalog_access import CatalogAccess
 from astrometricslib.foundation import config as config_loader
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.quality.gate_result import GateStatus

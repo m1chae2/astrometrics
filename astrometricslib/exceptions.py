@@ -7,7 +7,7 @@ damaged or missing FITS file can raise. Each name is imported from the module
 where its code lives today, so moving the code later changes this file only.
 """
 
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
+from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.foundation.errors import (
     AstrometricsError,
     ConfigurationError,

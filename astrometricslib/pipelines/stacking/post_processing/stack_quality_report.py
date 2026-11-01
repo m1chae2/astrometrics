@@ -97,7 +97,10 @@ def stack_quality_report(
     NotFoundError
         If the stack file, or the stack to compare with, does not exist.
     """
-    from astrometricslib.drivers.siril_output_parsing import measure_rejected_fraction, parse_seq_file
+    from astrometricslib._internal.drivers.siril_output_parsing import (
+        measure_rejected_fraction,
+        parse_seq_file,
+    )
     from astrometricslib.pipelines.stacking.post_processing.previous_stack import previous_stack_path
     from astrometricslib.pipelines.stacking.post_processing.stack_comparison import (
         compare_stacks,

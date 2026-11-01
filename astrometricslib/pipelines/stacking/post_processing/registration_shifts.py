@@ -59,7 +59,7 @@ from typing import Any
 
 import numpy as np
 
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, read_header
+from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read_header
 from astrometricslib.models.quality.measurement import QualityMeasurement
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
     PipelineRunContext,

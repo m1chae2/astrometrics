@@ -28,7 +28,7 @@ from astropy.wcs import WCS
 from astropy.wcs.utils import proj_plane_pixel_scales
 from photutils.aperture import CircularAnnulus, CircularAperture
 
-from astrometricslib.drivers.fits_access import collapse_to_2d, read_data
+from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_data
 
 __all__ = [
     "APERTURE_RADIUS_PX",

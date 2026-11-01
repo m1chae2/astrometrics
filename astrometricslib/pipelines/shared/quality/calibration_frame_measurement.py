@@ -44,8 +44,8 @@ from functools import cache
 import numpy as np
 from astropy.stats import sigma_clipped_stats
 
-from astrometricslib.drivers.calibration_library import header_temperature_c
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, collapse_to_2d, open_primary_hdu
+from astrometricslib._internal.drivers.calibration_library import header_temperature_c
+from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, collapse_to_2d, open_primary_hdu
 from astrometricslib.models.camera_profile import CameraProfile
 from astrometricslib.models.quality.measurement import (
     MeasurementOrigin,

@@ -13,12 +13,12 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib.drivers.calibration_library import (
+from astrometricslib._internal.drivers.calibration_library import (
     BIAS_FRAME_PATHS_KEY,
     DARK_FRAME_PATHS_KEY,
     CalibrationLibrary,
 )
-from astrometricslib.drivers.quality_store import QualityStore
+from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.models.quality.gate_result import GateResult, GateStatus
 from astrometricslib.models.target import FrameRecord

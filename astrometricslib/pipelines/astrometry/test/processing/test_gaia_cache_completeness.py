@@ -20,7 +20,7 @@ import numpy as np
 import pytest
 from astropy.table import Table
 
-from astrometricslib.drivers import catalog_store
+from astrometricslib._internal.drivers import catalog_store
 from astrometricslib.pipelines.astrometry.processing import star_identifier as star_identifier_module
 from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 

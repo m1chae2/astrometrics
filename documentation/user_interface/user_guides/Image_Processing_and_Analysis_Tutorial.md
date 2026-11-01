@@ -4,7 +4,7 @@
 
 In this tutorial you take the frames of one target from raw files to a measured light curve. A light curve is a plot of a star's brightness over time. You will check your frames, stack them, plate solve them, and read the brightness of a star. Each step tells you what you should see before you move on.
 
-![Image Processing](./assets/image_processing.png)
+![Image Processing](assets/image_processing.png)
 
 ## What you need
 

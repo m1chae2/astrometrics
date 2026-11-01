@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib.drivers.provenance_store import ProvenanceStore
+from astrometricslib._internal.drivers.provenance_store import ProvenanceStore
 from astrometricslib.foundation import config as config_loader
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.quality.quality_summary import PipelineQualitySummaryBase

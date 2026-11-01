@@ -14,9 +14,9 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
+from astrometricslib._internal.drivers import camera_profile_store
+from astrometricslib._internal.drivers.camera_profile_store import load_camera_profiles
 from astrometricslib.api.processing import CalibrationCatalog
-from astrometricslib.drivers import camera_profile_store
-from astrometricslib.drivers.camera_profile_store import load_camera_profiles
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.camera_profile import ProvenancedValue, ValueProvenance
 from astrometricslib.models.quality.measurement import MeasurementStatus

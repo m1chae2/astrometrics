@@ -123,8 +123,8 @@ from astropy.io import fits
 from astropy.wcs import WCS
 from scipy.spatial import cKDTree
 
-from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
-from astrometricslib.drivers.fits_access import collapse_to_2d, read_data, read_header
+from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
+from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_data, read_header
 from astrometricslib.models.camera_profile import ProvenanceKind
 from astrometricslib.pipelines.shared.applied_camera_profile import camera_name_from_header
 from astrometricslib.pipelines.stacking.post_processing.aperture_placement import (

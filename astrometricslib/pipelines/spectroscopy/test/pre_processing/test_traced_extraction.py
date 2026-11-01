@@ -13,7 +13,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectroscopy_instrument import (
     SpectroscopyInstrument,
 )

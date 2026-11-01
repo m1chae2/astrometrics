@@ -8,7 +8,7 @@ spectrum, with its normal-image position untouched.
 
 from pathlib import Path
 
-from astrometricslib.drivers.catalog_access import CatalogAccess
+from astrometricslib._internal.drivers.catalog_access import CatalogAccess
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.stellar_source import PhotometryResult, SpectroscopyResult, StellarObject
 from astrometricslib.scripts.merge_spectroscopy_star_rows import (

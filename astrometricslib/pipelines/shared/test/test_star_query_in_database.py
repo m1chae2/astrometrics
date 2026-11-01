@@ -14,8 +14,8 @@ from typing import Any
 import pytest
 from pytest_mock import MockerFixture
 
+from astrometricslib._internal.drivers.catalog_access import CatalogAccess
 from astrometricslib.api.stars import StellarCatalog
-from astrometricslib.drivers.catalog_access import CatalogAccess
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObject
 

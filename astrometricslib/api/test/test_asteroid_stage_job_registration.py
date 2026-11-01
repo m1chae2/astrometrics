@@ -144,8 +144,8 @@ def test_the_api_supplies_the_time_so_the_analysis_run_stores_quality_rows(
 
     The pipelines never read the clock, so the API supplies `measured_at`.
     """
-    from astrometricslib.drivers import quality_store
-    from astrometricslib.drivers.quality_store import QualityStore
+    from astrometricslib._internal.drivers import quality_store
+    from astrometricslib._internal.drivers.quality_store import QualityStore
 
     _, config = isolated_job_logging
     library_path = Path(config.get_library_path())

@@ -9,7 +9,7 @@ is kept separately, in `stacking/pre_processing/background_homogeneity.py`.
 import numpy as np
 from astropy.stats import sigma_clipped_stats
 
-from astrometricslib.drivers.fits_access import collapse_to_2d, read_data
+from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_data
 from astrometricslib.pipelines.shared.quality.saturation import compute_saturated_pixel_fraction
 
 

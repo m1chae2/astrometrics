@@ -18,7 +18,7 @@ an activity was configured (`Parameter`, `ParameterDescription`,
 `ConfigFile`, `ConfigFileDescription`, `WasConfiguredBy`).
 
 This module only describes the shape of the data. The code that records
-and queries it lives in `astrometricslib.drivers.provenance_store`, and
+and queries it lives in `astrometricslib._internal.drivers.provenance_store`, and
 the single call site every pipeline goes through is
 `astrometricslib.pipelines.shared.provenance_recording`.
 """
@@ -201,7 +201,7 @@ class WasGeneratedBy(BaseModel):
 
     Cardinality is 0..1 per the spec -- an entity has at most one
     generating activity -- enforced in storage by
-    `astrometricslib.drivers.provenance_store` via a primary key on the
+    `astrometricslib._internal.drivers.provenance_store` via a primary key on the
     entity id, not by this model alone.
 
     Attributes

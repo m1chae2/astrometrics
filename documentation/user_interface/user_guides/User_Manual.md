@@ -117,7 +117,7 @@ When a copy finishes, the dialog closes by itself after about 1 s and the target
 
 ## Image Viewer
 
-![Image Viewer](./assets/image_viewer.png)
+![Image Viewer](assets/image_viewer.png)
 
 **Purpose.** Look at the finished image of a target and keep its catalog details up to date.
 
@@ -143,7 +143,7 @@ When a copy finishes, the dialog closes by itself after about 1 s and the target
 
 ## Image Processing
 
-![Image Processing](./assets/image_processing.png)
+![Image Processing](assets/image_processing.png)
 
 **Purpose.** Check the frames of a target, stack them, and run star analysis on them.
 
@@ -242,7 +242,7 @@ The terminal starts with these names ready: `targets` (target catalog), `stars` 
 
 ## Astronomy Manager
 
-![Astronomy Manager](./assets/astronomy_manager.png)
+![Astronomy Manager](assets/astronomy_manager.png)
 
 **Purpose.** Inspect the brightness history (light curve) and the spectrum of each star the app has identified.
 
@@ -274,7 +274,7 @@ A plot that has no data collapses to a one-line note. The notes read No spectrum
 
 ## Planetarium
 
-![Planetarium](./assets/planetarium.png)
+![Planetarium](assets/planetarium.png)
 
 **Purpose.** See the sky from your site, find objects, and send the telescope to them.
 
@@ -310,7 +310,7 @@ A plot that has no data collapses to a one-line note. The notes read No spectrum
 
 ## Observatory Manager
 
-![Observatory Manager](./assets/observatory_manager.png)
+![Observatory Manager](assets/observatory_manager.png)
 
 **Purpose.** Set up and watch the equipment: the mount, the camera profiles, the safety limits, guiding, the calibration library and the connected INDI devices. INDI is the open standard that lets software talk to astronomy hardware.
 
@@ -346,7 +346,7 @@ The view has no Focuser and no Filter Wheel panel. Ekos moves both.
 
 ## Observation Manager
 
-![Observation Manager](./assets/observation_manager.png)
+![Observation Manager](assets/observation_manager.png)
 
 **Purpose.** Plan what to image. You keep a library of observation packages, one for each target, and edit one package at a time. You place packages in tonight's session and watch how far the night got.
 

@@ -10,11 +10,11 @@ from typing import Any
 
 import numpy as np
 
-from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
-from astrometricslib.drivers.driver_set import Drivers
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, read_data
-from astrometricslib.drivers.image import AstrometricsImage
-from astrometricslib.drivers.interfaces.gaia_xp_driver import GaiaXpDriver
+from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
+from astrometricslib._internal.drivers.driver_set import Drivers
+from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read_data
+from astrometricslib._internal.drivers.image import AstrometricsImage
+from astrometricslib._internal.drivers.interfaces.gaia_xp_driver import GaiaXpDriver
 from astrometricslib.foundation.errors import ProcessingError
 from astrometricslib.foundation.observatory_site import ObservatorySite
 from astrometricslib.models.quality.gaia_xp_comparison import GaiaXpComparison

@@ -22,9 +22,9 @@ from contextlib import AbstractContextManager
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
 
-from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
-from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
-from astrometricslib.drivers.driver_set import Drivers
+from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
+from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAccess
+from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.jobs.runner import background_job, registered_job
@@ -158,7 +158,7 @@ def _calibration_set_matches(
     matches : `bool`
         `True` when every given setting matches.
     """
-    from astrometricslib.drivers.calibration_library import (
+    from astrometricslib._internal.drivers.calibration_library import (
         DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
         temperature_slot_c,
     )
@@ -240,7 +240,7 @@ def _calibration_row_matches(
     matches : `bool`
         `True` when every given setting matches.
     """
-    from astrometricslib.drivers.calibration_library import (
+    from astrometricslib._internal.drivers.calibration_library import (
         DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
         normalize_binning,
         temperature_slot_c,
@@ -304,7 +304,7 @@ class CalibrationCatalog:
             The underlying calibration library model.
         """
         if self._library is None:
-            from astrometricslib.drivers.calibration_library import CalibrationLibrary
+            from astrometricslib._internal.drivers.calibration_library import CalibrationLibrary
 
             self._library = CalibrationLibrary(app_config=self._config)
         return self._library
@@ -372,7 +372,7 @@ class CalibrationCatalog:
             If the detail or kind is unknown, an argument the detail does
             not use is given, or a needed target is missing.
         """
-        from astrometricslib.drivers.calibration_library import DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
+        from astrometricslib._internal.drivers.calibration_library import DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
         from astrometricslib.pipelines.shared.quality import frame_statistics
 
         check_choice("detail", detail, CALIBRATION_DETAILS)
@@ -663,7 +663,7 @@ class CalibrationCatalog:
         health : `list` [`CalibrationSetHealth`]
             One record per matching flat set.
         """
-        from astrometricslib.drivers.calibration_library import normalize_binning
+        from astrometricslib._internal.drivers.calibration_library import normalize_binning
 
         minimum_frames = self._config.get_minimum_calibration_frames()
         groups = self._calibration_library.list_flat_groups(
@@ -765,7 +765,7 @@ class CalibrationCatalog:
         health : `list` [`CalibrationSetHealth`]
             One record per set.
         """
-        from astrometricslib.drivers.quality_store import QualityStore, quality_database_path
+        from astrometricslib._internal.drivers.quality_store import QualityStore, quality_database_path
         from astrometricslib.pipelines.shared.quality.calibration_frame_measurement import (
             calibration_subject_id,
         )
@@ -880,7 +880,7 @@ class CalibrationCatalog:
         """
         from uuid import uuid4
 
-        from astrometricslib.drivers.quality_store import QualityStore, quality_database_path
+        from astrometricslib._internal.drivers.quality_store import QualityStore, quality_database_path
 
         if kind is not None:
             check_choice("kind", kind, ("dark", "bias"))

@@ -13,9 +13,9 @@ from unittest.mock import MagicMock
 import pytest
 from astropy.table import Table
 
+from astrometricslib._internal.drivers.driver_set import Drivers
+from astrometricslib._internal.drivers.interfaces.simbad_driver import SimbadDriver
 from astrometricslib.api.targets import TargetCatalog
-from astrometricslib.drivers.driver_set import Drivers
-from astrometricslib.drivers.interfaces.simbad_driver import SimbadDriver
 from astrometricslib.foundation.errors import NotFoundError
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.shared import target_records

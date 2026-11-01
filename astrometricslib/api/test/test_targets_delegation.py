@@ -16,8 +16,8 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
+from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.api.targets import TargetCatalog
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared import frame_grouping, image_conversions, target_records

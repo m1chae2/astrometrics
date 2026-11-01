@@ -91,7 +91,7 @@ import numpy as np
 from scipy.interpolate import PchipInterpolator
 from scipy.ndimage import gaussian_filter1d
 
-from astrometricslib.drivers.interfaces.gaia_xp_driver import GaiaXpDriver
+from astrometricslib._internal.drivers.interfaces.gaia_xp_driver import GaiaXpDriver
 from astrometricslib.models.quality.gaia_xp_comparison import (
     GaiaXpBandResidual,
     GaiaXpBandSummary,

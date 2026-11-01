@@ -37,8 +37,8 @@ from typing import Any
 import numpy as np
 
 from astrometricslib import Astrometrics, configure_logging
-from astrometricslib.drivers.driver_set import Drivers
-from astrometricslib.drivers.interfaces.gaia_xp_driver import GaiaXpDriver
+from astrometricslib._internal.drivers.driver_set import Drivers
+from astrometricslib._internal.drivers.interfaces.gaia_xp_driver import GaiaXpDriver
 from astrometricslib.models.quality.gaia_xp_comparison import GaiaXpComparison
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.shared.catalog_star_identity import gaia_dr3_source_id_of

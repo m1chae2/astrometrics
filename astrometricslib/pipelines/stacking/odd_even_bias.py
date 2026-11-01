@@ -82,8 +82,8 @@ from typing import Any
 import numpy as np
 from scipy.ndimage import gaussian_filter
 
-from astrometricslib.drivers.driver_set import Drivers
-from astrometricslib.drivers.fits_access import open_primary_hdu, write_image
+from astrometricslib._internal.drivers.driver_set import Drivers
+from astrometricslib._internal.drivers.fits_access import open_primary_hdu, write_image
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral

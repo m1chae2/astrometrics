@@ -33,7 +33,7 @@ import logging
 import numpy as np
 from scipy import ndimage
 
-from astrometricslib.drivers.fits_access import read_data, read_header, write_image
+from astrometricslib._internal.drivers.fits_access import read_data, read_header, write_image
 from astrometricslib.pipelines.stacking.post_processing.stack_image import robust_sigma
 
 logger = logging.getLogger(__name__)

@@ -6,7 +6,7 @@ may import this module. Each name is imported from the module where its code
 lives today, so moving the code later changes this file only.
 """
 
-from astrometricslib.drivers.calibration_library import DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
+from astrometricslib._internal.drivers.calibration_library import DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
 from astrometricslib.models.processing_results import StackWeightPrediction
 from astrometricslib.models.stellar_source import AMBIGUOUS_RMS_GAP, NO_GOOD_MATCH_RMS
 from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (

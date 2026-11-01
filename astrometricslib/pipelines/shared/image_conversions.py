@@ -12,7 +12,7 @@ from typing import Any
 
 from PIL import Image
 
-from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.foundation.errors import NotFoundError, ProcessingError
 from astrometricslib.models.target import FitsHeaderEntry, RenderedImage, StretchParameters, ViewableImage
 from astrometricslib.pipelines.shared.image_scaling import ImageScaler
@@ -408,7 +408,7 @@ def get_fits_header(path: str) -> list[dict[str, str]]:
     if not os.path.exists(path):
         raise NotFoundError(f"File not found: {path}")
 
-    from astrometricslib.drivers.fits_access import read_header
+    from astrometricslib._internal.drivers.fits_access import read_header
 
     primary_header = read_header(path, first_hdu_only=True)
     header_list = []

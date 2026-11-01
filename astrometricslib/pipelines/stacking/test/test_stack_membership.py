@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib.drivers.siril_output_parsing import parse_seq_inclusion
+from astrometricslib._internal.drivers.siril_output_parsing import parse_seq_inclusion
 from astrometricslib.pipelines.stacking import stage
 from astrometricslib.pipelines.stacking.post_processing.stack_membership import (
     count_frames_stacked,

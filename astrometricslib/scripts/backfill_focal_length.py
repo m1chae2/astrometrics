@@ -34,7 +34,7 @@ import sys
 from typing import Any
 
 from astrometricslib import Astrometrics, configure_logging
-from astrometricslib.drivers.fits_access import read_header
+from astrometricslib._internal.drivers.fits_access import read_header
 from astrometricslib.exceptions import FITS_READ_ERRORS
 
 logger = logging.getLogger(__name__)
@@ -158,7 +158,7 @@ def apply_focal_length(path: str, focal_length_mm: float) -> bool:
     """
     from astropy.io import fits
 
-    from astrometricslib.drivers.fits_access import update_first_header
+    from astrometricslib._internal.drivers.fits_access import update_first_header
 
     def _add_focal_length(header: fits.Header) -> bool:
         """Add the focal length and a history note.

@@ -35,7 +35,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any
 
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
+from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.foundation.errors import AstrometricsError
 
 logger = logging.getLogger(__name__)
@@ -311,7 +311,7 @@ def build_stack_inputs_record(
     """
     try:
         if library is None:
-            from astrometricslib.drivers.calibration_library import CalibrationLibrary
+            from astrometricslib._internal.drivers.calibration_library import CalibrationLibrary
 
             library = CalibrationLibrary(app_config=configuration)
         return {

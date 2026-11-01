@@ -22,9 +22,12 @@ from typing import Any, Protocol
 from astropy.io import fits
 from astropy.wcs import WCS, FITSFixedWarning
 
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, update_first_header
-from astrometricslib.drivers.image import AstrometricsImage
-from astrometricslib.drivers.interfaces.plate_solve_driver import PlateSolveDriver, read_fit_statistics
+from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, update_first_header
+from astrometricslib._internal.drivers.image import AstrometricsImage
+from astrometricslib._internal.drivers.interfaces.plate_solve_driver import (
+    PlateSolveDriver,
+    read_fit_statistics,
+)
 from astrometricslib.models.stellar_source import StellarObject
 
 logger = logging.getLogger(__name__)
@@ -487,7 +490,7 @@ def _detect_and_limit_session_sources(
     data = reference_image.data
     is_color_frame = data is not None and data.ndim == 3
     if is_color_frame:
-        from astrometricslib.drivers.fits_access import collapse_to_2d
+        from astrometricslib._internal.drivers.fits_access import collapse_to_2d
 
         data = collapse_to_2d(data)
 

@@ -26,14 +26,18 @@ import shutil
 from dataclasses import dataclass, field
 from typing import Any
 
-from astrometricslib.drivers.calibration_library import (
+from astrometricslib._internal.drivers.calibration_library import (
     BIAS_FRAME_PATHS_KEY,
     DARK_FRAME_PATHS_KEY,
     FLAT_BIAS_FRAME_PATHS_KEY,
     FLAT_FRAME_PATHS_KEY,
 )
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
-from astrometricslib.drivers.interfaces.stacking_driver import PipelineSteps, StackingDriver, StackSettings
+from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS
+from astrometricslib._internal.drivers.interfaces.stacking_driver import (
+    PipelineSteps,
+    StackingDriver,
+    StackSettings,
+)
 from astrometricslib.pipelines.stacking.pre_processing.flat_calibration import assess_flats
 from astrometricslib.pipelines.stacking.processing.spectral_frame_alignment import align_calibrated_frames
 from astrometricslib.utilities.exceptions import DATA_ERRORS
@@ -176,7 +180,7 @@ def run_siril_stack(
     diagnostics : `dict`
         What the run reported (see `run_stack`).
     """
-    from astrometricslib.drivers.siril_stacking_driver import SirilStackingDriver
+    from astrometricslib._internal.drivers.siril_stacking_driver import SirilStackingDriver
 
     return run_stack(
         SirilStackingDriver(siril_driver),
@@ -313,7 +317,7 @@ def _is_stack_blank(stack_path: str) -> bool:
     """
     import numpy as np
 
-    from astrometricslib.drivers.fits_access import read_data
+    from astrometricslib._internal.drivers.fits_access import read_data
     from astrometricslib.pipelines.stacking.processing.group_gains import (
         MINIMUM_STACK_DATA_FRACTION,
         stack_data_fraction,
@@ -799,8 +803,8 @@ def _measure_group_stacks(
     """
     import numpy as np
 
-    from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
-    from astrometricslib.drivers.fits_access import read_data
+    from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
+    from astrometricslib._internal.drivers.fits_access import read_data
     from astrometricslib.pipelines.stacking.processing.group_combination import (
         CLIPPING_FLOOR_SIGMAS,
         measure_group_frames,
@@ -1058,7 +1062,7 @@ def _write_combined_stack(
         The star width of the combined image (`None` for spectra or when it
         could not be measured).
     """
-    from astrometricslib.drivers.fits_access import read_header, write_image
+    from astrometricslib._internal.drivers.fits_access import read_header, write_image
     from astrometricslib.pipelines.stacking.post_processing.exposure_group_report import groups_directory
     from astrometricslib.pipelines.stacking.processing.group_combination import combine_exposure_group_images
     from astrometricslib.pipelines.stacking.processing.group_file_merging import (
@@ -1441,7 +1445,7 @@ def _measure_combined_fwhm(
     """
     import numpy as np
 
-    from astrometricslib.drivers.fits_access import collapse_to_2d
+    from astrometricslib._internal.drivers.fits_access import collapse_to_2d
     from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_fwhm_from_data
     from astrometricslib.pipelines.stacking.processing.group_gains import saturated_pixel_mask
 

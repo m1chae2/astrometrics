@@ -34,7 +34,7 @@ import shutil
 
 import numpy as np
 
-from astrometricslib.drivers.fits_access import read_data, read_header, write_image
+from astrometricslib._internal.drivers.fits_access import read_data, read_header, write_image
 
 logger = logging.getLogger(__name__)
 

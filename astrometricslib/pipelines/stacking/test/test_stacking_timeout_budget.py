@@ -15,8 +15,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib.drivers import siril_interface
-from astrometricslib.drivers.siril_interface import session
+from astrometricslib._internal.drivers import siril_interface
+from astrometricslib._internal.drivers.siril_interface import session
 from astrometricslib.foundation.run_tally import RunTally
 from astrometricslib.pipelines import tasks
 from astrometricslib.pipelines.tasks import (
@@ -105,7 +105,7 @@ def test_time_blocked_on_a_slot_is_recorded() -> None:
     holder_source = (
         "import time, sys;"
         f"sys.path.insert(0, {repository_root!r});"
-        "from astrometricslib.drivers.siril_interface import siril_process_lock;"
+        "from astrometricslib._internal.drivers.siril_interface import siril_process_lock;"
         "ctx = siril_process_lock(max_concurrent_runs=1);"
         "ctx.__enter__();"
         "print('holding', flush=True);"

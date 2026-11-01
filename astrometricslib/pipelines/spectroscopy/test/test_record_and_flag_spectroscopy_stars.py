@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from astrometricslib.drivers.catalog_access import CatalogAccess
+from astrometricslib._internal.drivers.catalog_access import CatalogAccess
 from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObject
 from astrometricslib.pipelines.spectroscopy.post_processing.assess_output_quality import (
     build_spectral_classification_concerns,

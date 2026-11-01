@@ -21,7 +21,7 @@ differ from the others.
 from collections.abc import Sequence
 from typing import Any
 
-from astrometricslib.drivers.camera_profile_store import camera_identity
+from astrometricslib._internal.drivers.camera_profile_store import camera_identity
 from astrometricslib.foundation.errors import ConflictError, InvalidArgumentError
 
 __all__ = ["choose_camera_frames", "ensure_single_camera", "split_frames_by_camera"]

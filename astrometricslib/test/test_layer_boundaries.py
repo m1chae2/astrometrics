@@ -57,10 +57,10 @@ _RAW_FITS_ACCESS_METHODS = frozenset({"open", "getheader", "getdata", "writeto",
 # it is only correct alongside a review of the new call site for the
 # HDU0/HDU1 rule.
 KNOWN_FITS_ACCESS_SITES = frozenset({
-    "drivers/calibration_library.py",
-    "drivers/fits_access.py",
-    "drivers/image.py",
-    "drivers/astrometry_net_driver.py",
+    "_internal/drivers/calibration_library.py",
+    "_internal/drivers/fits_access.py",
+    "_internal/drivers/image.py",
+    "_internal/drivers/astrometry_net_driver.py",
     # Reads pixels on its own on purpose: it re-measures saved numbers by
     # a path independent of the pipeline's FITS access.
     "scripts/recompute_headline_numbers.py",
@@ -126,7 +126,7 @@ def test_no_new_files_call_fits_directly() -> None:
     assert not new_sites, (
         f"New raw fits.* call site(s) found outside KNOWN_FITS_ACCESS_SITES: "
         f"{sorted(new_sites)}. Route the new code through "
-        f"drivers/fits_access.py instead, or if it genuinely needs its own "
+        f"_internal/drivers/fits_access.py instead, or if it genuinely needs its own "
         f"call site, review it for the HDU0/HDU1 rule and add it to "
         f"KNOWN_FITS_ACCESS_SITES in this file."
     )
@@ -435,7 +435,7 @@ _PIPELINE_RUNNERS = ("astrometricslib.pipelines.tasks", "astrometricslib.pipelin
 #   data and settings that every layer may import, so it imports no layer.
 _UPWARD_IMPORT_RULES: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
     (
-        ("drivers/",),
+        ("_internal/drivers/",),
         ("astrometricslib.pipelines", "astrometricslib.api", "astrometricslib.visualization"),
     ),
     (("pipelines/",), ("astrometricslib.api",)),
@@ -458,7 +458,7 @@ _UPWARD_IMPORT_RULES: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
 # The folders that may not import names from the `astrometricslib` package
 # itself (``from astrometricslib import Astrometrics``). The package's
 # `__init__.py` is the public API, the top layer.
-_NO_PACKAGE_ROOT_IMPORT_FOLDERS = ("drivers/", "pipelines/", "models/", "foundation/", "utilities/")
+_NO_PACKAGE_ROOT_IMPORT_FOLDERS = ("_internal/drivers/", "pipelines/", "models/", "foundation/", "utilities/")
 
 # Upward imports that were already there when this ratchet was written,
 # as "file -> module". This list should only ever shrink. It is empty: the
@@ -581,9 +581,12 @@ def test_the_upward_import_list_has_no_stale_entries() -> None:
 def test_the_upward_import_scan_recognizes_each_rule() -> None:
     """Verify the scan flags each upward import and allows downward ones."""
     upward = [
-        ("drivers/siril_interface/imaging_stacker.py", "astrometricslib.pipelines.stacking.stack_runner"),
-        ("drivers/siril_interface/imaging_stacker.py", "astrometricslib.api.processing"),
-        ("drivers/siril_interface/imaging_stacker.py", "astrometricslib"),
+        (
+            "_internal/drivers/siril_interface/imaging_stacker.py",
+            "astrometricslib.pipelines.stacking.stack_runner",
+        ),
+        ("_internal/drivers/siril_interface/imaging_stacker.py", "astrometricslib.api.processing"),
+        ("_internal/drivers/siril_interface/imaging_stacker.py", "astrometricslib"),
         ("pipelines/stacking/stage.py", "astrometricslib.api"),
         ("pipelines/spectroscopy/batch.py", "astrometricslib.pipelines.tasks"),
         ("pipelines/spectroscopy/batch.py", "astrometricslib"),
@@ -599,8 +602,11 @@ def test_the_upward_import_scan_recognizes_each_rule() -> None:
         ("pipelines/asteroid_detection/pipeline.py", "astrometricslib.pipelines.target_batch"),
     ]
     downward = [
-        ("drivers/siril_interface/imaging_stacker.py", "astrometricslib.drivers.fits_access"),
-        ("drivers/siril_interface/imaging_stacker.py", "astrometricslib.foundation.errors"),
+        (
+            "_internal/drivers/siril_interface/imaging_stacker.py",
+            "astrometricslib._internal.drivers.fits_access",
+        ),
+        ("_internal/drivers/siril_interface/imaging_stacker.py", "astrometricslib.foundation.errors"),
         ("pipelines/spectroscopy/batch.py", "astrometricslib.pipelines.spectroscopy.runner"),
         ("pipelines/spectroscopy/batch.py", "astrometricslib.pipelines.stacking.stage"),
         ("pipelines/stacking/stage.py", "astrometricslib.pipelines.shared.frame_scanning"),

@@ -15,7 +15,7 @@ shift and the note, and that a star with no E(B-V) is classified unchanged.
 import numpy as np
 import pytest
 
-from astrometricslib.drivers.interfaces.reddening_driver import ReddeningEstimate
+from astrometricslib._internal.drivers.interfaces.reddening_driver import ReddeningEstimate
 from astrometricslib.models.stellar_source import ladder_position, ladder_steps_between
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
     FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,

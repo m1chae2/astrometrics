@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 from astropy.io import fits
 
-from astrometricslib.drivers.calibration_library import FlatGroup
+from astrometricslib._internal.drivers.calibration_library import FlatGroup
 from astrometricslib.models.calibration_ingest import CalibrationSetHealth
 from astrometricslib.pipelines.stacking import calibration_ingest as ci
 

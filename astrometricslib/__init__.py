@@ -24,14 +24,14 @@ try:
 except PackageNotFoundError:  # running from a source tree without an install
     __version__ = "0.0.0+unknown"
 
-from astrometricslib.api import AbstractCatalogAccess, CatalogAccess
-from astrometricslib.drivers.interfaces import (
+from astrometricslib._internal.drivers.interfaces import (
     GaiaXpDriver,
     PlateSolveDriver,
     ReddeningDriver,
     SimbadDriver,
     StackingDriver,
 )
+from astrometricslib.api import AbstractCatalogAccess, CatalogAccess
 from astrometricslib.foundation.astropy_setup import configure_offline_iers, warm_earth_orientation_data
 from astrometricslib.foundation.config import AppConfiguration, get_configuration
 from astrometricslib.foundation.enums import FilterType
@@ -167,13 +167,13 @@ class Astrometrics:
         gaia_xp_driver: GaiaXpDriver | None = None,
         reddening_driver: ReddeningDriver | None = None,
     ) -> None:
+        from astrometricslib._internal.drivers.driver_set import Drivers
         from astrometricslib.api.jobs import Jobs
         from astrometricslib.api.processing import ProcessingPipelines
         from astrometricslib.api.quality import QualityRecords
         from astrometricslib.api.stars import StellarCatalog
         from astrometricslib.api.targets import TargetCatalog
         from astrometricslib.api.visualization import Visualization
-        from astrometricslib.drivers.driver_set import Drivers
 
         self.config = config or get_configuration()
         self._catalog_access = catalog_access or CatalogAccess(self.config)

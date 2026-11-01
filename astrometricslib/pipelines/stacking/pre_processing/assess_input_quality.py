@@ -9,7 +9,7 @@ its own flag reasons.
 
 from typing import Any
 
-from astrometricslib.drivers.calibration_library import CALIBRATION_MATCH_BLOCKING_FLAGS_KEY
+from astrometricslib._internal.drivers.calibration_library import CALIBRATION_MATCH_BLOCKING_FLAGS_KEY
 from astrometricslib.models.quality.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
 from astrometricslib.models.quality.stacking_quality import StackingInputQuality
 from astrometricslib.pipelines.stacking.pre_processing.calibration_assessment import THIN_SET_FRAME_COUNT

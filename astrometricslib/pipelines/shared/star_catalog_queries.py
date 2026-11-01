@@ -22,7 +22,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from astrometricslib.drivers.catalog_access import UNRESOLVED_DETECTION_ID
+from astrometricslib._internal.drivers.catalog_access import UNRESOLVED_DETECTION_ID
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.catalog_queries import StarQueryResult, TargetStarCount
 from astrometricslib.models.stellar_source import (
@@ -79,7 +79,7 @@ QUERY_ORDERS = ("id", "useful", "match")
 POSITION_ONLY_STAR_ID_PREFIX = "FIELD_J"
 """Start of the id given to a star found in an image but never matched to a
 catalog. Must match `POSITION_ONLY_STAR_ID_PREFIX` in
-`astrometricslib/drivers/catalog_access.py`."""
+`astrometricslib/_internal/drivers/catalog_access.py`."""
 
 
 def is_unresolved_detection(star_id: str) -> bool:

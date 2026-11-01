@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 
-from astrometricslib.drivers.driver_set import Drivers
+from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.foundation.errors import NotFoundError, ProcessingError
 from astrometricslib.foundation.jobs.runner import registered_job
 from astrometricslib.foundation.logging import get_log_context

@@ -276,7 +276,7 @@ def script(monkeypatch: pytest.MonkeyPatch) -> Any:
         The imported script module.
     """
     monkeypatch.setenv("HEADLESS", "0")
-    from astrometricslib.drivers import siril_interface
+    from astrometricslib._internal.drivers import siril_interface
     from astrometricslib.scripts import run_all_target_processing
 
     monkeypatch.setattr(siril_interface, "purge_stale_work_directories", lambda *args, **kwargs: (0, 0))

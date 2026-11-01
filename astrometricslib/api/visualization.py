@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Literal
 
 from matplotlib.figure import Figure
 
-from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
+from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.models.stellar_source import StellarObject

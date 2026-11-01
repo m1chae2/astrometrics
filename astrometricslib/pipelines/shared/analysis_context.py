@@ -9,7 +9,7 @@ from typing import Any
 
 from astropy.wcs import WCS
 
-from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.models.stellar_source import StellarObject
 
 

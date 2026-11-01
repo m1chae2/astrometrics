@@ -22,7 +22,7 @@ import sys
 from typing import Any
 
 from astrometricslib import Astrometrics, configure_logging
-from astrometricslib.drivers.fits_access import read_header
+from astrometricslib._internal.drivers.fits_access import read_header
 from astrometricslib.exceptions import FITS_READ_ERRORS
 from astrometricslib.foundation.observatory_setups import ObservatorySetups
 from astrometricslib.pipelines.shared.frame_optics import resolve_frame_telescope

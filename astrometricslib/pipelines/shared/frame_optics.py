@@ -12,7 +12,7 @@ setups the observer lists in the config file (see
 import logging
 from dataclasses import dataclass
 
-from astrometricslib.drivers.camera_profile_store import camera_identity
+from astrometricslib._internal.drivers.camera_profile_store import camera_identity
 from astrometricslib.foundation.observatory_setups import ObservatorySetups, OpticConfig
 from astrometricslib.foundation.warn_once import warn_once
 

@@ -20,7 +20,7 @@ import pytest
 from astropy.io import fits
 from astropy.wcs import WCS
 
-from astrometricslib.drivers.interfaces.plate_solve_driver import PlateSolveHeader
+from astrometricslib._internal.drivers.interfaces.plate_solve_driver import PlateSolveHeader
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 from astrometricslib.pipelines.shared import session_identification

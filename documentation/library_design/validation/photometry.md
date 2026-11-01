@@ -673,7 +673,7 @@ print(counts, result.results["photometry"]["crossSessionMatchCount"])
 from datetime import datetime
 
 from astrometricslib import Astrometrics
-from astrometricslib.drivers.quality_store import QualityStore
+from astrometricslib._internal.drivers.quality_store import QualityStore
 
 astrometrics = Astrometrics()
 target = astrometrics.targets.get("M 57")
@@ -693,7 +693,7 @@ rows = QualityStore.from_configuration(astrometrics.config).query(
 )
 print([(row.value, row.uncertainty, row.sample_count) for row in rows])
 ```
-<!-- impl: astrometricslib.Astrometrics --> <!-- impl: astrometricslib.drivers.quality_store.QualityStore -->
+<!-- impl: astrometricslib.Astrometrics --> <!-- impl: astrometricslib._internal.drivers.quality_store.QualityStore -->
 
   1. For repeatability, split the fixed star set into two random halves, find each half's zero point in every frame with `differential_frame_estimates` <!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.differential_frame_estimates -->, and take the robust spread of the differences. Repeat for 50 random splits. For the error, compare `standard_error_of_median` <!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.standard_error_of_median --> with `bootstrap_median_error` <!-- impl: astrometricslib.pipelines.shared.quality.frame_statistics.bootstrap_median_error --> on the same differences. For the dependence on seeing, regress the steady frames' zero points on `frame.star_width_moffat_px`. The scripts are in the session's scratch folder (`science/s2/`): `run_s2.py` and `evidence_s2b.py`.
 
@@ -727,7 +727,7 @@ print([(row.value, row.uncertainty, row.sample_count) for row in rows])
   1. Read the stored zero points of a run and pass them to the helper.
 
 ```python
-from astrometricslib.drivers.quality_store import QualityStore
+from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.pipelines.photometry.processing.catalog_zero_point import zero_point_scatter
 
 rows = QualityStore.from_configuration(astrometrics.config).query(
@@ -735,7 +735,7 @@ rows = QualityStore.from_configuration(astrometrics.config).query(
 )
 print(zero_point_scatter([row.value for row in rows if row.value is not None]))
 ```
-<!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.zero_point_scatter --> <!-- impl: astrometricslib.drivers.quality_store.QualityStore -->
+<!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.zero_point_scatter --> <!-- impl: astrometricslib._internal.drivers.quality_store.QualityStore -->
 
 - **Acceptance criterion:** Not recorded (set after the result).
 - **What to look at:** The spread in magnitudes, with its frame count and bootstrap error. Compare it with the frame-to-frame precision of [PHO-15](#pho-15) (0.0013 mag): the difference is real wander.

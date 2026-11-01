@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib.drivers.calibration_library import CalibrationLibrary
+from astrometricslib._internal.drivers.calibration_library import CalibrationLibrary
 from astrometricslib.models.calibration_ingest import FlatSetAssessment
 from astrometricslib.models.calibration_inventory import CalibrationEntry, CalibrationStats
 

@@ -34,7 +34,7 @@ def test_analysis_and_public_api_use_is_allowed(code: str) -> None:
         "import os",
         "import subprocess",
         "from astrometricslib.api.stars import StarsAPI",
-        "import astrometricslib.drivers.catalog_access",
+        "import astrometricslib._internal.drivers.catalog_access",
         "from astrometricslib import _private_thing",
         "from astrometricslib import NotAPublicName",
         "from backend.container import container",

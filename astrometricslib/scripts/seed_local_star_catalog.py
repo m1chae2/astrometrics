@@ -19,7 +19,7 @@ import logging
 import sys
 
 from astrometricslib import Astrometrics, configure_logging
-from astrometricslib.drivers.catalog_store import summarize_catalog_coverage
+from astrometricslib._internal.drivers.catalog_store import summarize_catalog_coverage
 from astrometricslib.pipelines.astrometry.utilities.catalog_seeding import (
     DEFAULT_FIELD_RADIUS_DEGREES,
     DEFAULT_MAGNITUDE_LIMIT,

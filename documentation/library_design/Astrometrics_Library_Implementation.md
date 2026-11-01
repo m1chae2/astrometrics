@@ -10,7 +10,7 @@ The [glossary](../Glossary.md) defines the terms; this document defines each at 
 
 ## 1. Scope
 
-**Statement of need.** Theory is in [Astrometrics_Library_Architecture.md](./Astrometrics_Library_Architecture.md). Evidence is in the [validation register](./validation/index.md). Module paths are relative to `astrometricslib/`; the [review guides](./pipelines/index.md) give stage detail.
+**Statement of need.** Theory is in [Astrometrics_Library_Architecture.md](Astrometrics_Library_Architecture.md). Evidence is in the [validation register](validation/index.md). Module paths are relative to `astrometricslib/`; the [review guides](pipelines/index.md) give stage detail.
 
 The supported entry point is the package root (`from astrometricslib import Astrometrics`). It re-exports the `api/` facade, driver interfaces (Section 4.7), job framework (Section 4.9) and error types. The package builds on Astropy [1]; `wayfindinglib`, the backend and the MCP servers [2] use it.
 
@@ -61,7 +61,7 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 *Located in:* `astrometricslib/pipelines/stacking/`
 
 - **Interfaces (§3.1).** `stack_request.py`, `stage.py` (`stack_frames`), `stack_runner.py`.
-- **Calibration frames (§3.2).** `calibration_ingest.py`, `astrometricslib/drivers/calibration_library.py`, `pre_processing/flat_calibration.py`.
+- **Calibration frames (§3.2).** `calibration_ingest.py`, `astrometricslib/_internal/drivers/calibration_library.py`, `pre_processing/flat_calibration.py`.
 - **Gain and read noise (§3.2).** `CalibrationCatalog.measure_sensor_noise` (`astrometricslib/api/processing.py`) calls `sensor_noise_run.py` and `pre_processing/sensor_noise.py`. `save=True` writes the profile. `CameraProfile.sensor_noise_for` matches gain, offset and binning exactly; with `clipped_at_zero=False` (from the share of exact zeros, `CLIPPED_FRAME_ZERO_FRACTION`) it falls back to the nearest other offset at that gain and binning, ties higher. <!-- impl: astrometricslib.models.camera_profile.CameraProfile.sensor_noise_for --> Evidence: [STK-35](validation/stacking.md#stk-35); the fallback is a design estimate ([table](validation/stacking.md#design-estimates)).
 - **Flat bias.** `staging._select_flat_bias_frames` ([STK-57](validation/stacking.md#stk-57)).
 - **Rejection and filtering (§3.2).** `astrometricslib/utilities/rejection_thresholds.py`, `stack_filter_floor.py`.
@@ -91,7 +91,7 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 
 - **Interfaces (§4.1).** `pipeline.py`; `runner.py` (adapter).
 - **Detection and centroids (§4.2).** `processing/star_identifier.py`, `pre_processing/source_detection.py`, `pre_processing/fwhm.py`.
-- **Plate solving, Gaia and the refit (§4.2).** `processing/wcs_refinement.py`; `astrometricslib/drivers/astrometry_net_driver.py`, `gaia_cone_driver.py`, `catalog_store.py`; `utilities/catalog_seeding.py`.
+- **Plate solving, Gaia and the refit (§4.2).** `processing/wcs_refinement.py`; `astrometricslib/_internal/drivers/astrometry_net_driver.py`, `gaia_cone_driver.py`, `catalog_store.py`; `utilities/catalog_seeding.py`.
 - **WCS header (§4.3).** `astrometricslib/pipelines/shared/session_identification.py` (`write_wcs_to_fits_header`).
 - **Checks (§4.4).** `post_processing/record_quality.py`, `assess_match_quality.py`.
 - **Target clipping (§4.4).** `post_processing/target_clipping.py` (`target_clipping_measurements`). Evidence: [AST-19](validation/astrometry.md#ast-19).
@@ -163,7 +163,7 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 
 ## 5. Tuned parameters and validation status
 
-Tables 3 to 7 list each pipeline's tuned values and the explaining section. Each status label (defined in the [register](./validation/index.md#3-status-labels)) links to its evidence; hidden links after each table name each value's code.
+Tables 3 to 7 list each pipeline's tuned values and the explaining section. Each status label (defined in the [register](validation/index.md#3-status-labels)) links to its evidence; hidden links after each table name each value's code.
 
 ### 5.1 Stacking settings
 
@@ -238,8 +238,8 @@ Tables 3 to 7 list each pipeline's tuned values and the explaining section. Each
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.flat_match.MAXIMUM_SHIFT_CELLS -->
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.flat_match.COARSE_ANGLE_RANGE_DEG -->
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.flat_match.DEFAULT_TIME_LIMIT_SECONDS -->
-<!-- impl: astrometricslib.drivers.calibration_library.FLAT_FRAME_PATHS_KEY -->
-<!-- impl: astrometricslib.drivers.calibration_library.BIAS_FRAME_PATHS_KEY -->
+<!-- impl: astrometricslib._internal.drivers.calibration_library.FLAT_FRAME_PATHS_KEY -->
+<!-- impl: astrometricslib._internal.drivers.calibration_library.BIAS_FRAME_PATHS_KEY -->
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_placement.FAINT_SOURCE_THRESHOLD_SIGMAS -->
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_placement.FAINT_SOURCE_SMOOTHING_SIGMAS_PX -->
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_placement.FAINT_SOURCE_HIGH_PASS_SIGMA_PX -->
@@ -297,7 +297,7 @@ Tables 3 to 7 list each pipeline's tuned values and the explaining section. Each
 <!-- impl: astrometricslib.pipelines.stacking.pre_processing.sensor_noise.MINIMUM_BIAS_PAIRS -->
 <!-- impl: astrometricslib.pipelines.stacking.pre_processing.sensor_noise.MAXIMUM_TEMPERATURE_SPREAD_C -->
 <!-- impl: astrometricslib.pipelines.stacking.pre_processing.sensor_noise.CENTRAL_REGION_SHAPE_PIXELS -->
-<!-- impl: astrometricslib.drivers.calibration_library.DEFAULT_DARK_TEMPERATURE_TOLERANCE_C -->
+<!-- impl: astrometricslib._internal.drivers.calibration_library.DEFAULT_DARK_TEMPERATURE_TOLERANCE_C -->
 <!-- impl: astrometricslib.utilities.stack_filter_floor.DEFAULT_MINIMUM_SURVIVING_FRAMES -->
 <!-- impl: astrometricslib.pipelines.stacking.processing.group_gains.GAIN_MID_RANGE_PERCENTILES -->
 <!-- impl: astrometricslib.pipelines.stacking.processing.group_gains.GAIN_BRIGHTEST_FRACTION -->
@@ -346,7 +346,7 @@ Tables 3 to 7 list each pipeline's tuned values and the explaining section. Each
 | Margin around the solved frame for a catalog position | 15 arcmin | Design estimate ([astrometry table](validation/astrometry.md#design-estimates)) | §4.2 |
 
 <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.source_detection.SourceDetector -->
-<!-- impl: astrometricslib.drivers.astrometry_net_driver.MINIMUM_SOURCES_FOR_LOCAL_SOLVE -->
+<!-- impl: astrometricslib._internal.drivers.astrometry_net_driver.MINIMUM_SOURCES_FOR_LOCAL_SOLVE -->
 <!-- impl: astrometricslib.pipelines.shared.catalog_star_identity.CATALOG_MATCH_RADIUS_ARCSEC -->
 <!-- impl: astrometricslib.pipelines.astrometry.post_processing.record_quality.MINIMUM_MATCHED_STARS -->
 <!-- impl: astrometricslib.pipelines.astrometry.post_processing.record_quality.MAXIMUM_RESIDUAL_FRACTION_OF_FWHM -->
@@ -508,15 +508,15 @@ Tables 3 to 7 list each pipeline's tuned values and the explaining section. Each
 
 ## 6. Validation tooling
 
-This section maps behaviors the [validation sessions](./validation/index.md#6-validation-sessions) rely on to code.
+This section maps behaviors the [validation sessions](validation/index.md#6-validation-sessions) rely on to code.
 
-- **Scripts** in `astrometricslib/scripts/`: `run_empirical_validation.py` (campaign), `run_all_target_processing.py` (batch; restack options in the scripts README), `seed_local_star_catalog.py`, `benchmark_siril_concurrency.py`, `backfill_focal_length.py`, `calibrate_class_gap_against_snr.py` (class gap table, [SPE-30](./validation/spectroscopy.md#spe-30)), `backfill_variable_star_flags.py` (with `--refresh-vsx-ranges`, [PHO-19](./validation/photometry.md#pho-19)).
-- **History fill.** `scripts/backfill_quality_measurements.py`; record: [Section 6.4](./validation/index.md#64-history-fill-of-the-quality-store).
+- **Scripts** in `astrometricslib/scripts/`: `run_empirical_validation.py` (campaign), `run_all_target_processing.py` (batch; restack options in the scripts README), `seed_local_star_catalog.py`, `benchmark_siril_concurrency.py`, `backfill_focal_length.py`, `calibrate_class_gap_against_snr.py` (class gap table, [SPE-30](validation/spectroscopy.md#spe-30)), `backfill_variable_star_flags.py` (with `--refresh-vsx-ranges`, [PHO-19](validation/photometry.md#pho-19)).
+- **History fill.** `scripts/backfill_quality_measurements.py`; record: [Section 6.4](validation/index.md#64-history-fill-of-the-quality-store).
 - **Calibration identities.** `QualityStore.write_calibration_identities` (`drivers/quality_store.py`) stores one row per library stack, keyed by `run_id` and `subject_id`, in the side table `quality_calibration_identity` (schema version 3). The columns include `flat_masters`, `bias_masters`, `flat_bias_masters` and `dark_masters` (each a list of path, size and modification time), `siril_version` and `stacking_algorithm_version` (`STACKING_ALGORITHM_VERSION`). A second write for the same key is ignored. `QualityRecords.calibration_identities(run_ids, target_id)` and the read-only MCP tool `quality_calibration_identities` read it. The migration from version 2 only creates the table. Each library stacking run writes its record through `record_calibration_identities` (`pipelines/stacking/post_processing/calibration_record.py`), called from `record_stacking_quality`: the files are the flat, bias, flat-bias and dark frames the run staged for Siril (`FLAT_FRAME_PATHS_KEY`, `BIAS_FRAME_PATHS_KEY`, `FLAT_BIAS_FRAME_PATHS_KEY`, `DARK_FRAME_PATHS_KEY`).
 - **Capture settings.** `CaptureSetting` rounds `pixel_scale_arcsec` to `PIXEL_SCALE_SIGNIFICANT_FIGURES` = 4 (`round_pixel_scale`). <!-- impl: astrometricslib.models.quality.capture_setting.PIXEL_SCALE_SIGNIFICANT_FIGURES --> Schema version 4 merges equal settings on first open; back up first. Design estimate ([STK-D29](validation/stacking.md#design-estimates)).
-- **Per-session photometry.** `analyze_target(pipeline_type="photometry")` runs `VariabilityAnalyzer` per `TargetSession` ([PHO-14](./validation/photometry.md#pho-14)).
+- **Per-session photometry.** `analyze_target(pipeline_type="photometry")` runs `VariabilityAnalyzer` per `TargetSession` ([PHO-14](validation/photometry.md#pho-14)).
 - **Cross-session star matching** (Architecture §5.2, concept 6): `_match_and_merge_across_sessions` (`pipelines/photometry/batch.py`) uses `search_around_sky` (a KD-tree [10]); `sessions_missing_wcs` isolates a session without a WCS.
-- **Track linking.** `MovingObjectDetector._chain_detections_by_persistence` in `pipelines/asteroid_detection/detection.py` pre-filters pairs with an RA/Dec box; the search is still $O(N \times M)$ ([MOV-07](./validation/asteroid_detection.md#mov-07)).
+- **Track linking.** `MovingObjectDetector._chain_detections_by_persistence` in `pipelines/asteroid_detection/detection.py` pre-filters pairs with an RA/Dec box; the search is still $O(N \times M)$ ([MOV-07](validation/asteroid_detection.md#mov-07)).
 
 ## Appendix A. Ratchets and import contracts
 

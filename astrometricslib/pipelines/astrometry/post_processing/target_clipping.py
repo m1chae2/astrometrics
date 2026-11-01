@@ -74,8 +74,8 @@ import numpy as np
 from astropy.wcs import WCS
 from astropy.wcs.utils import proj_plane_pixel_scales
 
-from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, collapse_to_2d, read_data
+from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
+from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, collapse_to_2d, read_data
 from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.models.camera_profile import CameraProfile
 from astrometricslib.models.quality.measurement import MeasurementStatus, QualityMeasurement

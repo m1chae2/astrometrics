@@ -11,10 +11,13 @@ import re
 from datetime import datetime
 from typing import Any
 
-from astrometricslib.drivers.camera_profile_store import record_name_for_camera, resolve_camera_profile
-from astrometricslib.drivers.filter_detection import get_filter_type
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, read_header
-from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib._internal.drivers.camera_profile_store import (
+    record_name_for_camera,
+    resolve_camera_profile,
+)
+from astrometricslib._internal.drivers.filter_detection import get_filter_type
+from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read_header
+from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.enums import FilterType
 from astrometricslib.foundation.errors import AstrometricsError

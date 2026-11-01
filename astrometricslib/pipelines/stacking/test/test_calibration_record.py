@@ -15,13 +15,13 @@ from unittest.mock import patch
 
 import pytest
 
-from astrometricslib.drivers.calibration_library import (
+from astrometricslib._internal.drivers.calibration_library import (
     BIAS_FRAME_PATHS_KEY,
     DARK_FRAME_PATHS_KEY,
     FLAT_BIAS_FRAME_PATHS_KEY,
     FLAT_FRAME_PATHS_KEY,
 )
-from astrometricslib.drivers.quality_store import QualityStore
+from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
 from astrometricslib.pipelines.stacking.post_processing import calibration_record
 from astrometricslib.pipelines.stacking.post_processing.calibration_record import (

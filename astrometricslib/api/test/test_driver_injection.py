@@ -28,8 +28,8 @@ from astrometricslib._internal.drivers import (
     StackRunResult,
     StackSettings,
 )
-from astrometricslib.drivers.driver_set import Drivers
-from astrometricslib.drivers.interfaces import PipelineSteps
+from astrometricslib._internal.drivers.driver_set import Drivers
+from astrometricslib._internal.drivers.interfaces import PipelineSteps
 from astrometricslib.exceptions import InvalidArgumentError
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.quality.quality_summary import StackingPipelineQualityMetrics, StackQualitySummary
@@ -222,11 +222,11 @@ def real_drivers_are_forbidden(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError("A real driver was used instead of the one that was injected.")
 
     for path in (
-        "astrometricslib.drivers.astrometry_net_driver.AstrometryNetPlateSolveDriver.solve",
-        "astrometricslib.drivers.astroquery_simbad_driver.AstroquerySimbadDriver.query_region",
-        "astrometricslib.drivers.astroquery_simbad_driver.AstroquerySimbadDriver.query_object",
-        "astrometricslib.drivers.astroquery_simbad_driver.AstroquerySimbadDriver.query_tap",
-        "astrometricslib.drivers.siril_stacking_driver.SirilStackingDriver.stack_batch",
+        "astrometricslib._internal.drivers.astrometry_net_driver.AstrometryNetPlateSolveDriver.solve",
+        "astrometricslib._internal.drivers.astroquery_simbad_driver.AstroquerySimbadDriver.query_region",
+        "astrometricslib._internal.drivers.astroquery_simbad_driver.AstroquerySimbadDriver.query_object",
+        "astrometricslib._internal.drivers.astroquery_simbad_driver.AstroquerySimbadDriver.query_tap",
+        "astrometricslib._internal.drivers.siril_stacking_driver.SirilStackingDriver.stack_batch",
     ):
         monkeypatch.setattr(path, forbidden)
 
@@ -348,9 +348,9 @@ def test_processing_stack_uses_the_injected_stacking_driver(tmp_path: Path) -> N
 
 def test_defaults_build_the_real_drivers() -> None:
     """With no drivers given, the built-in drivers are the ones built."""
-    from astrometricslib.drivers.astrometry_net_driver import AstrometryNetPlateSolveDriver
-    from astrometricslib.drivers.astroquery_simbad_driver import AstroquerySimbadDriver
-    from astrometricslib.drivers.siril_stacking_driver import SirilStackingDriver
+    from astrometricslib._internal.drivers.astrometry_net_driver import AstrometryNetPlateSolveDriver
+    from astrometricslib._internal.drivers.astroquery_simbad_driver import AstroquerySimbadDriver
+    from astrometricslib._internal.drivers.siril_stacking_driver import SirilStackingDriver
     from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 
     drivers = Drivers()
@@ -367,7 +367,7 @@ def test_defaults_build_the_real_drivers() -> None:
 
 def test_a_given_driver_is_used_and_the_others_stay_default() -> None:
     """A driver left out stays the built-in one when another is injected."""
-    from astrometricslib.drivers.astroquery_simbad_driver import AstroquerySimbadDriver
+    from astrometricslib._internal.drivers.astroquery_simbad_driver import AstroquerySimbadDriver
     from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 
     solver = FakePlateSolver()

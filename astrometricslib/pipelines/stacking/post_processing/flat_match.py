@@ -138,8 +138,8 @@ import numpy as np
 import scipy.fft
 from scipy import ndimage
 
-from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, collapse_to_2d, open_primary_hdu
+from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
+from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, collapse_to_2d, open_primary_hdu
 from astrometricslib.models.quality.measurement import QualityMeasurement, QualitySubject
 from astrometricslib.pipelines.shared.quality.frame_measurement import measure_clipped_mean_adu
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (

@@ -32,7 +32,7 @@ from typing import Any, NamedTuple
 
 import numpy as np
 
-from astrometricslib.drivers.calibration_library import BIAS_FRAME_PATHS_KEY, FLAT_FRAME_PATHS_KEY
+from astrometricslib._internal.drivers.calibration_library import BIAS_FRAME_PATHS_KEY, FLAT_FRAME_PATHS_KEY
 from astrometricslib.models.quality.gate_result import GateResult
 from astrometricslib.models.quality.limit import LimitTier
 from astrometricslib.models.quality.measurement import (

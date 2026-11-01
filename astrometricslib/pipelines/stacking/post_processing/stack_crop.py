@@ -33,7 +33,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.ndimage import median_filter
 
-from astrometricslib.drivers.fits_access import collapse_to_2d, read_data, read_header, write_image
+from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_data, read_header, write_image
 from astrometricslib.pipelines.stacking.post_processing.stack_image import MAD_TO_SIGMA
 
 logger = logging.getLogger(__name__)

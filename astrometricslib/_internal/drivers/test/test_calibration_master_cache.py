@@ -1,0 +1,205 @@
+"""Tests for reuse of master bias/dark/flat calibration frames.
+
+Master frames take a long time to build. This ensures we reuse
+them across targets when the camera settings match, saving time.
+"""
+
+import os
+from pathlib import Path
+from unittest.mock import MagicMock
+
+from astrometricslib._internal.drivers import siril_interface
+from astrometricslib._internal.drivers.siril_interface import CALIBRATION_MASTER_CACHE_DIRECTORY_NAME
+from astrometricslib._internal.drivers.siril_interface.staging import _calibration_source_fingerprint
+
+
+def _make_processor(tmp_path: Path):  # ruff: ignore[missing-return-type-private-function]
+    """Build an ImageProcessing with its work directory inside tmp_path.
+
+    Returns
+    -------
+    processor : `ImageProcessing`
+        Instance whose `workdir` (and therefore master cache) is
+        sandboxed inside the test's temporary directory.
+    """
+    processor = object.__new__(siril_interface.ImageProcessing)
+    processor.workdir = str(tmp_path / "Work")
+    os.makedirs(processor.workdir, exist_ok=True)
+    return processor
+
+
+def _stage_frames(target_folder, subdirectory, library_directory, count) -> str:  # ruff: ignore[missing-type-function-argument]
+    """Symlink `count` library frames into a staging subdirectory.
+
+    Skips writing a library frame that already has the expected content,
+    rather than rewriting it unconditionally: `_calibration_source_fingerprint`
+    hashes mtime truncated to whole seconds, so restaging the same
+    `library_directory` a second time (as the cache round-trip tests do,
+    modelling two runs against the same physical calibration frames) would
+    otherwise flakily invalidate the cache whenever the two calls happen to
+    straddle a wall-clock second boundary -- a real frame set that hasn't
+    changed doesn't get touched between runs either.
+
+    Returns
+    -------
+    staging_directory : `str`
+        The staging directory the frames were linked into.
+    """
+    staging = os.path.join(target_folder, subdirectory)
+    os.makedirs(staging, exist_ok=True)
+    os.makedirs(library_directory, exist_ok=True)
+    for index in range(count):
+        library_frame = os.path.join(library_directory, f"frame_{index}.fits")
+        content = f"library frame {index}"
+        already_current = False
+        if os.path.exists(library_frame):
+            with open(library_frame) as handle:
+                already_current = handle.read() == content
+        if already_current:
+            os.symlink(library_frame, os.path.join(staging, f"staged_{index:05d}.fits"))
+            continue
+        with open(library_frame, "w") as handle:
+            handle.write(content)
+        os.symlink(library_frame, os.path.join(staging, f"staged_{index:05d}.fits"))
+    return staging
+
+
+def test_fingerprint_is_stable_for_the_same_frames(tmp_path: Path) -> None:
+    """The same library frames must fingerprint identically across runs."""
+    library = str(tmp_path / "library")
+    first = _stage_frames(str(tmp_path / "run_a"), "biases", library, 3)
+    second = _stage_frames(str(tmp_path / "run_b"), "biases", library, 3)
+
+    assert _calibration_source_fingerprint(first) == _calibration_source_fingerprint(second)
+
+
+def test_fingerprint_changes_when_a_frame_is_added(tmp_path: Path) -> None:
+    """A different frame set must not reuse the previous master."""
+    library = str(tmp_path / "library")
+    three_frames = _stage_frames(str(tmp_path / "run_a"), "biases", library, 3)
+    fingerprint_before = _calibration_source_fingerprint(three_frames)
+
+    four_frames = _stage_frames(str(tmp_path / "run_b"), "biases", str(tmp_path / "library2"), 4)
+
+    assert _calibration_source_fingerprint(four_frames) != fingerprint_before
+
+
+def test_fingerprint_changes_when_a_source_frame_is_modified(tmp_path: Path) -> None:
+    """Editing a library frame must invalidate the cached master."""
+    library = str(tmp_path / "library")
+    staging = _stage_frames(str(tmp_path / "run"), "biases", library, 2)
+    fingerprint_before = _calibration_source_fingerprint(staging)
+
+    edited = os.path.join(library, "frame_0.fits")
+    with open(edited, "w") as handle:
+        handle.write("materially different content of a different length")
+    os.utime(edited, (1_800_000_000, 1_800_000_000))
+
+    assert _calibration_source_fingerprint(staging) != fingerprint_before
+
+
+def test_empty_directory_has_no_fingerprint(tmp_path: Path) -> None:
+    """Nothing staged means nothing to cache."""
+    empty = tmp_path / "biases"
+    empty.mkdir()
+
+    assert _calibration_source_fingerprint(str(empty)) is None
+
+
+def test_store_then_restore_round_trips_a_master(tmp_path: Path) -> None:
+    """A master built by one run is reused by the next identical run."""
+    processor = _make_processor(tmp_path)
+    library = str(tmp_path / "library")
+
+    first_run = str(tmp_path / "run_a")
+    _stage_frames(first_run, "biases", library, 3)
+    os.makedirs(os.path.join(first_run, "process"), exist_ok=True)
+    with open(os.path.join(first_run, "process", "bias_stacked.fits"), "w") as handle:
+        handle.write("MASTER BIAS PIXELS")
+    processor.store_calibration_masters_in_cache(first_run)
+
+    second_run = str(tmp_path / "run_b")
+    _stage_frames(second_run, "biases", library, 3)
+    restored = processor.restore_cached_calibration_masters(second_run)
+
+    assert "bias" in restored
+    with open(os.path.join(second_run, "process", "bias_stacked.fits")) as handle:
+        assert handle.read() == "MASTER BIAS PIXELS"
+
+
+def test_restore_misses_when_frames_differ(tmp_path: Path) -> None:
+    """A different calibration set must rebuild rather than reuse."""
+    processor = _make_processor(tmp_path)
+
+    first_run = str(tmp_path / "run_a")
+    _stage_frames(first_run, "biases", str(tmp_path / "library_a"), 3)
+    os.makedirs(os.path.join(first_run, "process"), exist_ok=True)
+    with open(os.path.join(first_run, "process", "bias_stacked.fits"), "w") as handle:
+        handle.write("MASTER A")
+    processor.store_calibration_masters_in_cache(first_run)
+
+    second_run = str(tmp_path / "run_b")
+    _stage_frames(second_run, "biases", str(tmp_path / "library_b"), 3)
+
+    assert processor.restore_cached_calibration_masters(second_run) == set()
+    assert not os.path.exists(os.path.join(second_run, "process", "bias_stacked.fits"))
+
+
+def test_each_master_kind_is_cached_independently(tmp_path: Path) -> None:
+    """A cached flat must not be served when only the bias matches."""
+    processor = _make_processor(tmp_path)
+    shared_bias_library = str(tmp_path / "bias_library")
+
+    first_run = str(tmp_path / "run_a")
+    _stage_frames(first_run, "biases", shared_bias_library, 2)
+    _stage_frames(first_run, "flats", str(tmp_path / "flat_library_a"), 2)
+    os.makedirs(os.path.join(first_run, "process"), exist_ok=True)
+    for filename in ("bias_stacked.fits", "flat_stacked.fits"):
+        with open(os.path.join(first_run, "process", filename), "w") as handle:
+            handle.write(filename)
+    processor.store_calibration_masters_in_cache(first_run)
+
+    # Same biases, different flats.
+    second_run = str(tmp_path / "run_b")
+    _stage_frames(second_run, "biases", shared_bias_library, 2)
+    _stage_frames(second_run, "flats", str(tmp_path / "flat_library_b"), 2)
+    restored = processor.restore_cached_calibration_masters(second_run)
+
+    assert restored == {"bias"}
+
+
+def test_no_partial_files_are_left_in_the_cache(tmp_path: Path) -> None:
+    """Atomic writes must not leave .partial files a later run could read."""
+    processor = _make_processor(tmp_path)
+    run = str(tmp_path / "run")
+    _stage_frames(run, "darks", str(tmp_path / "library"), 2)
+    os.makedirs(os.path.join(run, "process"), exist_ok=True)
+    with open(os.path.join(run, "process", "dark_stacked.fits"), "w") as handle:
+        handle.write("MASTER DARK")
+
+    processor.store_calibration_masters_in_cache(run)
+
+    cache_directory = os.path.join(processor.workdir, CALIBRATION_MASTER_CACHE_DIRECTORY_NAME)
+    assert not [name for name in os.listdir(cache_directory) if name.endswith(".partial")]
+
+
+def test_cache_hit_is_reported_to_the_job_log(tmp_path: Path) -> None:
+    """A reused master is visible in the job log, not silent."""
+    processor = _make_processor(tmp_path)
+    library = str(tmp_path / "library")
+
+    first_run = str(tmp_path / "run_a")
+    _stage_frames(first_run, "biases", library, 2)
+    os.makedirs(os.path.join(first_run, "process"), exist_ok=True)
+    with open(os.path.join(first_run, "process", "bias_stacked.fits"), "w") as handle:
+        handle.write("MASTER")
+    processor.store_calibration_masters_in_cache(first_run)
+
+    second_run = str(tmp_path / "run_b")
+    _stage_frames(second_run, "biases", library, 2)
+    job_logger = MagicMock()
+    processor.restore_cached_calibration_masters(second_run, job_logger=job_logger)
+
+    # The logger gets a %-style message and its values; fill them in.
+    messages = [call.args[0] % call.args[1:] for call in job_logger.info.call_args_list]
+    assert any("Reusing cached master bias" in message for message in messages)

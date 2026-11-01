@@ -37,9 +37,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from astrometricslib.drivers.calibration_library import CalibrationLibrary
-from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
-from astrometricslib.drivers.quality_store import QualityStore
+from astrometricslib._internal.drivers.calibration_library import CalibrationLibrary
+from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
+from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.models.quality.measurement import QualityMeasurement

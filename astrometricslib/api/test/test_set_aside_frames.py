@@ -18,8 +18,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.api.quality import QualityRecords
-from astrometricslib.drivers.quality_store import QualityStore
 from astrometricslib.models.quality.capture_setting import CaptureSetting
 from astrometricslib.models.quality.measurement import (
     MeasurementOrigin,

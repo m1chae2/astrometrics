@@ -23,7 +23,7 @@ from typing import Any
 from astropy import units as u
 from astropy.coordinates import SkyCoord
 
-from astrometricslib.drivers.interfaces.simbad_driver import SimbadDriver
+from astrometricslib._internal.drivers.interfaces.simbad_driver import SimbadDriver
 from astrometricslib.foundation.errors import ExternalServiceError, InvalidArgumentError
 from astrometricslib.models.target import TargetObjectType
 from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string

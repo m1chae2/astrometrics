@@ -12,7 +12,7 @@ from collections.abc import Callable
 import numpy as np
 from astropy.stats import sigma_clipped_stats
 
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, collapse_to_2d, read_data
+from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, collapse_to_2d, read_data
 from astrometricslib.pipelines.shared.quality.saturation import (
     compute_saturated_pixel_fraction,
     compute_stack_saturated_pixel_fraction,

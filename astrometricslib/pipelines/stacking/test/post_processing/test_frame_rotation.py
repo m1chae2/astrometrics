@@ -15,7 +15,7 @@ import pytest
 from astropy.io import fits
 from astropy.wcs import WCS
 
-from astrometricslib.drivers.quality_store import QualityStore
+from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.models.quality.measurement import MeasurementStatus, QualityMeasurement
 from astrometricslib.pipelines.shared.quality.frame_measurement import frame_subject, frame_subject_id
 from astrometricslib.pipelines.shared.quality.metric_registry import get_metric_registry

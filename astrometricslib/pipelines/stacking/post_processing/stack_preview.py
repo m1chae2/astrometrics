@@ -66,9 +66,9 @@ from typing import Any
 
 import numpy as np
 
-from astrometricslib.drivers.fits_access import read_data, read_header, write_image
-from astrometricslib.drivers.image import AstrometricsImage
-from astrometricslib.drivers.siril_interface import siril_process_lock
+from astrometricslib._internal.drivers.fits_access import read_data, read_header, write_image
+from astrometricslib._internal.drivers.image import AstrometricsImage
+from astrometricslib._internal.drivers.siril_interface import siril_process_lock
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.errors import NotFoundError, StorageError
 from astrometricslib.foundation.paths import siril_work_directory

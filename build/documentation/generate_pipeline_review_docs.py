@@ -1295,7 +1295,7 @@ def build_astrometry_doc() -> str:
     record_quality_module = "astrometricslib.pipelines.astrometry.post_processing.record_quality"
     identifier_module = "astrometricslib.pipelines.astrometry.processing.star_identifier"
     refine_module = "astrometricslib.pipelines.astrometry.processing.wcs_refinement"
-    driver_module = "astrometricslib.drivers.astrometry_net_driver"
+    driver_module = "astrometricslib._internal.drivers.astrometry_net_driver"
     fwhm_module = "astrometricslib.pipelines.astrometry.pre_processing.fwhm"
     detector = require_symbol(
         "astrometricslib.pipelines.astrometry.pre_processing.source_detection", "SourceDetector"
@@ -3112,7 +3112,7 @@ def build_stacking_doc() -> str:
     values = {
         "version_line": VERSION_LINE,
         "dark_tol": require_symbol(
-            "astrometricslib.drivers.calibration_library", "DEFAULT_DARK_TEMPERATURE_TOLERANCE_C"
+            "astrometricslib._internal.drivers.calibration_library", "DEFAULT_DARK_TEMPERATURE_TOLERANCE_C"
         ),
         "degrade": require_symbol(quality_module, "DEFAULT_FWHM_DEGRADATION_RATIO"),
         "rej": require_symbol(quality_module, "DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD"),

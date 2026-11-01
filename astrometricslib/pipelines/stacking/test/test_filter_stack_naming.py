@@ -50,7 +50,7 @@ def test_filter_stack_naming_and_target_properties() -> None:
         ),
     )
 
-    siril_path = "astrometricslib.drivers.siril_interface.ImageProcessing"
+    siril_path = "astrometricslib._internal.drivers.siril_interface.ImageProcessing"
     summary_path = "astrometricslib.pipelines.stacking.stage._build_stack_quality_summary"
 
     with (

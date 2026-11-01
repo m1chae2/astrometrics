@@ -18,7 +18,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
+from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.jobs.runner import background_job, registered_job
@@ -211,7 +211,7 @@ class QualityRecords:
         -----
         A stored row that fails the model's checks raises `StorageError`.
         """
-        from astrometricslib.drivers.quality_store import QualityStore, quality_database_path
+        from astrometricslib._internal.drivers.quality_store import QualityStore, quality_database_path
         from astrometricslib.pipelines.shared.quality.metric_registry import get_metric_registry
 
         if metric is not None:
@@ -367,7 +367,7 @@ class QualityRecords:
         settings : `dict` [`int`, `CaptureSetting`]
             The settings, keyed by their id.
         """
-        from astrometricslib.drivers.quality_store import QualityStore, quality_database_path
+        from astrometricslib._internal.drivers.quality_store import QualityStore, quality_database_path
 
         return QualityStore(quality_database_path(self._config)).get_capture_settings(ids)
 
@@ -424,7 +424,7 @@ class QualityRecords:
         records : `list` [`CalibrationIdentities`]
             The records, oldest first.
         """
-        from astrometricslib.drivers.quality_store import QualityStore, quality_database_path
+        from astrometricslib._internal.drivers.quality_store import QualityStore, quality_database_path
 
         return QualityStore(quality_database_path(self._config)).get_calibration_identities(
             run_ids, target_id
@@ -905,7 +905,7 @@ class QualityRecords:
         InvalidArgumentError
             If ``limit`` is below 1.
         """
-        from astrometricslib.drivers.quality_store import QualityStore
+        from astrometricslib._internal.drivers.quality_store import QualityStore
         from astrometricslib.pipelines.shared.target_records import save_quality_stamps
         from astrometricslib.pipelines.stacking.frame_measurement_run import (
             FrameMeasurementSession,

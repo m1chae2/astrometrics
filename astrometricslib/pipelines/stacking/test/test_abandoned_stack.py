@@ -15,9 +15,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib.drivers import siril_interface
-from astrometricslib.drivers.siril_interface import session as siril_session
-from astrometricslib.drivers.siril_interface.imaging_stacker import SirilImagingStacker
+from astrometricslib._internal.drivers import siril_interface
+from astrometricslib._internal.drivers.siril_interface import session as siril_session
+from astrometricslib._internal.drivers.siril_interface.imaging_stacker import SirilImagingStacker
 from astrometricslib.foundation.paths import locks_directory
 from astrometricslib.foundation.run_abandonment import (
     RunAbandonedError,

@@ -10,9 +10,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from astrometricslib._internal.drivers.calibration_library import DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
 from astrometricslib.api import processing
 from astrometricslib.api.processing import CalibrationCatalog
-from astrometricslib.drivers.calibration_library import DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.camera_profile import CameraProfile
 

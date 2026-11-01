@@ -9,8 +9,8 @@ import os
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib.drivers.camera_profile_store import camera_identity
-from astrometricslib.drivers.driver_set import Drivers
+from astrometricslib._internal.drivers.camera_profile_store import camera_identity
+from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.errors import AstrometricsError, ConflictError
 from astrometricslib.foundation.jobs.runner import get_current_job
@@ -544,7 +544,7 @@ def _judge_calibration_frames(run: StackRun) -> None:
     run : `StackRun`
         The run, with the stacking engine's diagnostics.
     """
-    from astrometricslib.drivers.quality_store import QualityStore, quality_database_path
+    from astrometricslib._internal.drivers.quality_store import QualityStore, quality_database_path
     from astrometricslib.pipelines.stacking.pre_processing.stack_calibration_health import (
         assess_stack_calibration,
         store_in_diagnostics,

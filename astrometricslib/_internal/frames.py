@@ -6,7 +6,7 @@ module. Each name is imported from the module where its code lives today, so
 moving the code later changes this file only.
 """
 
-from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
+from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.models.applied_camera_profile import AppliedCameraProfile
 from astrometricslib.models.camera_profile import CameraProfile
 from astrometricslib.models.stellar_source import has_catalog_magnitude

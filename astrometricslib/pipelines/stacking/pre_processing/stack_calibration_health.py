@@ -34,15 +34,15 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from astrometricslib.drivers.calibration_library import (
+from astrometricslib._internal.drivers.calibration_library import (
     BIAS_FRAME_PATHS_KEY,
     DARK_FRAME_PATHS_KEY,
     DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
     CalibrationLibrary,
     CalibrationSet,
 )
-from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
-from astrometricslib.drivers.quality_store import QualityStore
+from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
+from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib.models.quality.gate_result import (
     GateResult,
     GateStatus,

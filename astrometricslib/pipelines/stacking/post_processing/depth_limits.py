@@ -211,7 +211,7 @@ def cached_gaia_lookup(config: object) -> GaiaLookup:
         Gives the cached Gaia stars inside a small circle; `None` when the
         cache cannot be read. It never downloads anything.
     """
-    from astrometricslib.drivers.catalog_store import query_gaia_sources_in_bounds
+    from astrometricslib._internal.drivers.catalog_store import query_gaia_sources_in_bounds
 
     def lookup(
         right_ascension: float, declination: float, radius_deg: float

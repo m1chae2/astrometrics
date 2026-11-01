@@ -118,7 +118,7 @@ from functools import cache
 import numpy as np
 from photutils.aperture import CircularAnnulus, CircularAperture
 
-from astrometricslib.drivers.fits_access import collapse_to_2d, read_data
+from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_data
 from astrometricslib.foundation.constants import FULL_SCALE_COUNTS
 from astrometricslib.models.camera_profile import ProvenancedValue, ProvenanceKind
 from astrometricslib.models.quality.measurement import MeasurementStatus, QualityMeasurement

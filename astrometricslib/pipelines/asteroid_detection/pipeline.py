@@ -20,7 +20,12 @@ from astropy.wcs import WCS, FITSFixedWarning
 from astropy.wcs.utils import proj_plane_pixel_scales
 from scipy.spatial import cKDTree
 
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, read_data, read_header, read_header_and_data
+from astrometricslib._internal.drivers.fits_access import (
+    FITS_READ_ERRORS,
+    read_data,
+    read_header,
+    read_header_and_data,
+)
 from astrometricslib.foundation.errors import ConflictError
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate, CascadeStage, FrameDetection
 from astrometricslib.models.moving_object_config import (

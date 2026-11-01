@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from astrometricslib import Astrometrics
-from astrometricslib.drivers.catalog_access import CatalogAccess
+from astrometricslib._internal.drivers.catalog_access import CatalogAccess
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.pipelines.tasks import analyze_target
 

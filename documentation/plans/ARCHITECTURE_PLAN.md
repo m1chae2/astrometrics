@@ -449,7 +449,7 @@ same change.
 Some code handles older data that cannot be upgraded, or formats that other software defines. It
 stays:
 
-- `astrometricslib/drivers/image.py` reads the FITS `RADECSYS` keyword.
+- `astrometricslib/_internal/drivers/image.py` reads the FITS `RADECSYS` keyword.
 - `wayfindinglib/drivers/indi/filter_wheel_controller.py` falls back to the INDI text property.
 - `astrometricslib/pipelines/stacking/stage.py` handles Siril `r_` sequences.
 

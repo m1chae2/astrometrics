@@ -24,10 +24,10 @@ import numpy as np
 from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
 
+from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
+from astrometricslib._internal.drivers.fits_access import collapse_to_2d
+from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.api.quality import QualityRecords
-from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
-from astrometricslib.drivers.fits_access import collapse_to_2d
-from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_fwhm_from_data
 from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector

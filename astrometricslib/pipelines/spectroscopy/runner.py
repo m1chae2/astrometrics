@@ -152,7 +152,7 @@ def _field_center_for_registration(
     """
     if hint_ra is not None and hint_dec is not None:
         return float(hint_ra), float(hint_dec)
-    from astrometricslib.drivers.fits_access import read_header
+    from astrometricslib._internal.drivers.fits_access import read_header
 
     try:
         header = read_header(stack_path)

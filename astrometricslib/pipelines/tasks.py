@@ -40,7 +40,7 @@ import time
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib.drivers.driver_set import Drivers
+from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.foundation.errors import ConflictError, InvalidArgumentError, ProcessingError
 from astrometricslib.foundation.jobs.runner import registered_job
 from astrometricslib.foundation.run_abandonment import RunAbandonedError, RunAbandonment, bind_abandonment
@@ -214,7 +214,7 @@ def stack_frames_with_timeout(
     """  # ruff: ignore[docstring-extraneous-exception] -- `raise
     # outcome["error"]` re-raises a captured exception object,
     # which pydoclint cannot resolve to a declared type statically.
-    from astrometricslib.drivers import siril_interface
+    from astrometricslib._internal.drivers import siril_interface
 
     if timeout_seconds is None:
         timeout_seconds = compute_stacking_timeout_seconds(len(frames_to_stack))
@@ -345,7 +345,7 @@ def analyze_target(
         the right images needed to run it.
     """
     if catalog_access is None:
-        from astrometricslib.drivers.catalog_access import CatalogAccess
+        from astrometricslib._internal.drivers.catalog_access import CatalogAccess
 
         catalog_access = CatalogAccess()
 

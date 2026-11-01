@@ -30,7 +30,7 @@ import numpy as np
 from astropy.stats import gaussian_sigma_to_fwhm, sigma_clipped_stats
 from scipy import optimize
 
-from astrometricslib.drivers.fits_access import collapse_to_2d, read_data
+from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_data
 from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 

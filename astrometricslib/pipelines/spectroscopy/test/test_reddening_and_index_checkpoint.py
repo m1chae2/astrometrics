@@ -15,9 +15,9 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
-from astrometricslib.drivers.driver_set import Drivers
-from astrometricslib.drivers.interfaces.reddening_driver import ReddeningDriver, ReddeningEstimate
+from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
+from astrometricslib._internal.drivers.driver_set import Drivers
+from astrometricslib._internal.drivers.interfaces.reddening_driver import ReddeningDriver, ReddeningEstimate
 from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.models.quality.spectroscopy_quality import StageQualityCheckpoint, StageQualityMetric
 from astrometricslib.models.spectral_cross_checks import LineIndexClassification, ReddeningRecord

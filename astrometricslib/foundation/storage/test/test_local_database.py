@@ -1,6 +1,6 @@
 """Tests for the storage module's NumpyEncoder and safe_json_dumps.
 
-Both astrometricslib.drivers.local_database (the targets table) and the
+Both astrometricslib._internal.drivers.local_database (the targets table) and the
 generic `Butler` in astrometricslib.foundation.storage (used for the stellar
 catalog and friends)
 route every save through safe_json_dumps, so this is the one place that

@@ -15,7 +15,7 @@ classification runs on the observed spectrum.
 
 import logging
 
-from astrometricslib.drivers.interfaces.reddening_driver import ReddeningDriver, ReddeningEstimate
+from astrometricslib._internal.drivers.interfaces.reddening_driver import ReddeningDriver, ReddeningEstimate
 from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.shared.catalog_star_identity import gaia_dr3_source_id_of

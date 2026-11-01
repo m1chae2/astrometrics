@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 from pytest_mock import MockerFixture
 
 from astrometricslib import Target
-from astrometricslib.drivers.catalog_access import CatalogAccess
+from astrometricslib._internal.drivers.catalog_access import CatalogAccess
 from astrometricslib.models.target import FrameRecord
 from astrometricslib.pipelines.shared.target_records import reindex_frames
 

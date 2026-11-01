@@ -132,6 +132,7 @@ READ_ONLY_METHODS = frozenset({
     "planetarium:get_targets",
     "planetarium:get_visibility",
     "planetarium:list_catalog_drivers",
+    "jobs:query",
     "processing:active_jobs",
     "processing:get_job",
     "processing:job_log_tail",

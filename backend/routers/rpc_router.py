@@ -176,6 +176,9 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "quality:query": ("quality_measurement_service", "query_measurements"),
     "quality:metrics": ("astrometrics.quality", "metrics"),
     "quality:resolve_rows": ("astrometrics.quality", "resolve_rows"),
+    # The job history, read-only. `detail="warnings"` lists the warnings one
+    # job detected, from the stored quality rows that carry its id.
+    "jobs:query": ("astrometrics.jobs", "query"),
     # Photometry and spectroscopy analysis
     "analysis:analyze_image": ("analysis_orchestrator", "analyze_image"),
     "analysis:get_results": ("analysis_orchestrator", "get_analysis_results"),

@@ -373,8 +373,9 @@ DECISIONS = {
     ),
     "jobs_query": ToolDecision(
         "keep",
-        "Built 2026-10-03. Reads jobs, log tails, stored results and data lineage from the logs database, "
-        "opened read-only. A job stuck at 'started' after the app stopped still shows as active.",
+        "Built 2026-10-03. Reads jobs, log tails, stored results, data lineage and (detail=warnings) the "
+        "warnings one job detected, from the logs and quality databases, opened read-only. A job stuck at "
+        "'started' after the app stopped still shows as active.",
     ),
     "quality_query": ToolDecision(
         "keep",

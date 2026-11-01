@@ -17,15 +17,24 @@ from typing import Any
 
 from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib._internal.drivers.provenance_store import ProvenanceStore
+from astrometricslib._internal.drivers.quality_store import QualityStore, quality_database_path
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.foundation.jobs.models import ProcessingJob
 from astrometricslib.foundation.jobs.store import JobStore
-from astrometricslib.models.job_queries import JobLogLine, JobQueryResult, JobSummary, LineageRun
+from astrometricslib.models.job_queries import (
+    JobLogLine,
+    JobQueryResult,
+    JobSummary,
+    JobWarning,
+    LineageRun,
+)
+from astrometricslib.models.quality.gate_result import GateStatus
+from astrometricslib.models.quality.measurement import QualityMeasurement
 
 __all__ = ["Jobs"]
 
-DETAILS = ("summary", "log_tail", "result", "lineage")
+DETAILS = ("summary", "log_tail", "result", "lineage", "warnings")
 """The kinds of answer `Jobs.query` can give."""
 
 LINEAGE_NEEDS_A_TARGET = "detail='lineage' needs a target_id, or a job_id of a job that has one."
@@ -51,6 +60,10 @@ MAXIMUM_LOG_LINES = 200
 
 MAXIMUM_LINEAGE_RUNS = 50
 """Most pipeline runs one lineage answer lists."""
+
+MAXIMUM_WARNINGS = 500
+"""Most warnings one call returns. A stack that fails many checks stays well
+below this; the cap only guards the reply size."""
 
 MAXIMUM_TEXT_LENGTH = 500
 """Longest message or log line returned, in characters."""
@@ -109,6 +122,40 @@ def _minutes_since(timestamp: str | None) -> float | None:
         return (now - then).total_seconds() / 60.0
     except ValueError:
         return None
+
+
+def _warning_from_row(row: QualityMeasurement) -> JobWarning:
+    """Describe one failed check as a warning.
+
+    Parameters
+    ----------
+    row : `QualityMeasurement`
+        A stored measurement whose check outcome is ``failed``.
+
+    Returns
+    -------
+    warning : `JobWarning`
+        The warning, with the value, the limit and the register entry.
+    """
+    limit = row.check_limit
+    return JobWarning(
+        pipeline=row.metric.split(".", 1)[0],
+        metric=row.metric,
+        subject=row.subject.subject_id,
+        subject_level=row.subject.level.value,
+        target_id=row.subject.target_id,
+        reason=_shorten(row.reason),
+        outcome=GateStatus.FAILED.value,
+        value=row.value,
+        limit=None if limit is None else limit.value,
+        unit=None if limit is None else limit.unit,
+        limit_tier=None if limit is None else limit.tier.value,
+        limit_derivation=None if limit is None else _shorten(limit.derivation),
+        register_entry=None if limit is None else limit.register_entry,
+        action_taken=row.action_taken,
+        measured_at=row.measured_at.isoformat(),
+        row_id=row.row_id,
+    )
 
 
 class Jobs:
@@ -188,8 +235,8 @@ class Jobs:
         Parameters
         ----------
         job_id : `str`, optional
-            Read one job. With ``detail="log_tail"`` or ``"result"`` this
-            is required.
+            Read one job. With ``detail="log_tail"``, ``"result"`` or
+            ``"warnings"`` this is required.
         target_id : `str`, optional
             Only jobs for this target. With ``detail="lineage"``, the
             target whose lineage to show (or taken from ``job_id``).
@@ -208,6 +255,7 @@ class Jobs:
             ``"log_tail"``: the last log lines of ``job_id``.
             ``"result"``: the stored input and output numbers of ``job_id``.
             ``"lineage"``: the pipeline runs that produced a target's data.
+            ``"warnings"``: the warnings ``job_id`` detected (see Notes).
         lines : `int`, optional
             How many log lines to return, from 1 to 200. Defaults to 50.
         limit : `int`, optional
@@ -229,13 +277,26 @@ class Jobs:
             needs, or ``offset`` is negative.
         NotFoundError
             If the job does not exist, or there is no logs database yet for
-            a question about one job or one target.
+            a question about one job or one target. For
+            ``detail="warnings"``, if neither the job list nor the
+            measurement table knows the id.
+
+        Notes
+        -----
+        A warning is a stored quality measurement of the job whose check
+        outcome is ``failed``. A check that ``passed`` is not a warning. A
+        check that could not run (``not_checked``) is not a warning either,
+        because it detected nothing; it is only counted. The answer lists
+        the warnings and says how many measurements the job stored, so an
+        empty list for a job that stored measurements ("checked, nothing
+        failed") differs from a job that stored none ("nothing to check"),
+        and both differ from an unknown id, which raises `NotFoundError`.
         """
         if detail not in DETAILS:
             raise InvalidArgumentError(
                 f"detail must be one of: {', '.join(DETAILS)}.", details={"detail": detail}
             )
-        if detail in ("log_tail", "result") and not job_id:
+        if detail in ("log_tail", "result", "warnings") and not job_id:
             raise InvalidArgumentError(f"detail={detail!r} needs a job_id.")
         if detail == "lineage" and not (target_id or job_id):
             raise InvalidArgumentError(
@@ -245,6 +306,8 @@ class Jobs:
             raise InvalidArgumentError("offset must be 0 or more.", details={"offset": offset})
         limit = max(1, min(int(limit), MAXIMUM_JOBS))
         lines = max(1, min(int(lines), MAXIMUM_LOG_LINES))
+        if detail == "warnings":
+            return self._warnings(job_id)
         if not Path(self._database_path).is_file():
             if detail == "summary" and not job_id:
                 return JobQueryResult(detail="summary", count=0, jobs=[], note=UNTRUSTED_TEXT_NOTE)
@@ -308,6 +371,46 @@ class Jobs:
             answer.input_metrics = _shorten(job.input_metrics, MAXIMUM_RESULT_LENGTH)
             answer.output_metrics = _shorten(job.output_metrics, MAXIMUM_RESULT_LENGTH)
         return answer
+
+    def _warnings(self, job_id: str | None) -> JobQueryResult:
+        """Answer with the warnings one job detected.
+
+        Parameters
+        ----------
+        job_id : `str`
+            The job to read. `query` has already checked that it is given.
+
+        Returns
+        -------
+        answer : `JobQueryResult`
+            The job's summary when the logs database knows it, the warnings
+            (oldest first, at most `MAXIMUM_WARNINGS`), the number of
+            measurements the job stored and the number of checks that could
+            not run.
+
+        Raises
+        ------
+        NotFoundError
+            If the logs database has no such job and no measurement carries
+            the id.
+        """
+        job = None
+        if Path(self._database_path).is_file():
+            job = JobStore(self._database_path, read_only=True).get_job(job_id)
+        rows = QualityStore(quality_database_path(self._config)).query(job_id=job_id, latest_only=False)
+        if job is None and not rows:
+            raise NotFoundError(f"No job with id {job_id!r}.", details={"job_id": job_id})
+        failed = [row for row in rows if row.check_outcome == GateStatus.FAILED]
+        warnings = [_warning_from_row(row) for row in failed[:MAXIMUM_WARNINGS]]
+        return JobQueryResult(
+            detail="warnings",
+            job=None if job is None else self._summarize(job),
+            warnings=warnings,
+            measurement_count=len(rows),
+            checks_not_run_count=sum(1 for row in rows if row.check_outcome == GateStatus.NOT_CHECKED),
+            truncated=len(failed) > MAXIMUM_WARNINGS,
+            note=UNTRUSTED_TEXT_NOTE,
+        )
 
     def _lineage(
         self, job_store: JobStore, job_id: str | None, target_id: str | None, limit: int

@@ -145,6 +145,8 @@ RPC_METHODS: tuple[str, ...] = (
     "quality:query",
     "quality:metrics",
     "quality:resolve_rows",
+    # The job history. `detail="warnings"` lists the warnings one job detected.
+    "jobs:query",
     # Photometry and spectroscopy analysis
     "analysis:analyze_image",
     "analysis:get_results",

@@ -320,6 +320,8 @@ export interface ActionRegistry {
     // Parameter names are snake_case (target_id, not targetId); the router
     // drops names it does not know, so a misspelled filter is ignored.
     "quality:query": { payload: { metric?: string; level?: import('../types/backendTypes').SubjectLevel; target_id?: string; observing_night_id?: string; camera?: string; telescope?: string; since?: string; row_ids?: number[]; latest_only?: boolean; variant?: string; library_only?: boolean }; response: import('../types/backendTypes').QualityMeasurement[] };
+    // The job history, read-only. detail 'warnings' lists the warnings one job detected (job_id required).
+    "jobs:query": { payload: { job_id?: string; target_id?: string; job_type?: string; status?: string; active_only?: boolean; detail?: 'summary' | 'log_tail' | 'result' | 'lineage' | 'warnings'; lines?: number; limit?: number; offset?: number }; response: import('../types/backendTypes').JobQueryResult };
     "quality:resolve_rows": { payload: { row_ids: number[] }; response: import('../types/backendTypes').QualityRowResolution };
     "quality:metrics": { payload: { name?: string; checkpoint?: import('../types/backendTypes').Checkpoint; detail?: 'summary' | 'full' }; response: import('../types/backendTypes').MetricSummary[] | import('../types/backendTypes').MetricSpec[] };
 

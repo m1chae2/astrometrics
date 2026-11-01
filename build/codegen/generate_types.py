@@ -25,6 +25,7 @@ from astrometricslib.models.applied_camera_profile import AppliedCameraProfile
 from astrometricslib.models.calibration_ingest import CalibrationMeasurementReport, CalibrationSetHealth
 from astrometricslib.models.calibration_inventory import CalibrationEntry, CalibrationStats
 from astrometricslib.models.catalog_queries import CalibrationQueryResult, OverlayStar, TargetStarCount
+from astrometricslib.models.job_queries import JobLogLine, JobQueryResult, JobSummary, JobWarning, LineageRun
 from astrometricslib.models.measured_line_spread import MeasuredLineSpread
 from astrometricslib.models.moving_object import (
     AsteroidDetectionCandidate,
@@ -668,6 +669,11 @@ def render_types() -> str:
                 CalibrationQueryResult,
                 CalibrationSetHealth,
                 CalibrationMeasurementReport,
+                JobQueryResult,
+                JobSummary,
+                JobLogLine,
+                LineageRun,
+                JobWarning,
                 StackSummary,
                 PreviewRemakeResult,
                 SetAsideFrameRecord,

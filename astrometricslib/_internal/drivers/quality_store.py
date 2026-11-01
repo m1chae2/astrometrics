@@ -1061,6 +1061,7 @@ class QualityStore:
         variant: str | None = None,
         library_only: bool = False,
         subject_id_prefix: str | None = None,
+        job_id: str | None = None,
     ) -> list[QualityMeasurement]:
         """Read stored measurements.
 
@@ -1096,6 +1097,10 @@ class QualityStore:
         subject_id_prefix : `str`, optional
             Only subjects whose id starts with this text, such as
             ``"calibration/dark/"`` for the dark frames.
+        job_id : `str`, optional
+            Only rows that the job with this id wrote. To read everything a
+            job wrote, also pass ``latest_only=False``: a later run can
+            replace a row in the latest view.
 
         Returns
         -------
@@ -1126,6 +1131,7 @@ class QualityStore:
             ("m.subject_level", None if level is None else SubjectLevel(level).value),
             ("m.target_id", target_id),
             ("m.observing_night_id", observing_night_id),
+            ("m.job_id", job_id),
             ("cs.camera", camera),
             ("cs.telescope", telescope),
         ):

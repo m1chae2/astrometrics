@@ -63,7 +63,7 @@
       "category": "jobs-history",
       "disposition": "keep",
       "interim_block": "",
-      "note": "Built 2026-10-03. Reads jobs, log tails, stored results and data lineage from the logs database, opened read-only. A job stuck at 'started' after the app stopped still shows as active."
+      "note": "Built 2026-10-03. Reads jobs, log tails, stored results, data lineage and (detail=warnings) the warnings one job detected, from the logs and quality databases, opened read-only. A job stuck at 'started' after the app stopped still shows as active."
     },
     "processing_acquire_job_slot": {
       "tool_class": "change-data",

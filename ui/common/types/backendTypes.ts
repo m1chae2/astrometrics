@@ -717,7 +717,6 @@ export interface OutputQualityAssessment {
   isPoorMatch?: boolean | null;
   isAmbiguous: boolean;
   isClassAmbiguous?: boolean | null;
-  isSubtypeFinerThanResolution?: boolean | null;
   catalogAgrees?: boolean | null;
   isTrustworthy: boolean;
 }

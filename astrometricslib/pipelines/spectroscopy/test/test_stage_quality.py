@@ -581,7 +581,6 @@ def test_the_input_and_output_assessments_keep_their_fields() -> None:
         "is_poor_match",
         "is_ambiguous",
         "is_class_ambiguous",
-        "is_subtype_finer_than_resolution",
         "catalog_agrees",
         "is_trustworthy",
     ]
@@ -601,7 +600,7 @@ def test_the_assessment_functions_still_return_the_older_models() -> None:
     assert type(input_quality) is InputQualityAssessment
     assert type(output_quality) is OutputQualityAssessment
     assert output_quality.is_trustworthy is True
-    assert output_quality.is_subtype_finer_than_resolution is None
+    assert not hasattr(output_quality, "is_subtype_finer_than_resolution")
 
 
 # ------------------------------------------------------ the run-level roll-up

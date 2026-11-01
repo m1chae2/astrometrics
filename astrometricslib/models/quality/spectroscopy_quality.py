@@ -315,13 +315,6 @@ class OutputQualityAssessment(BaseModel):
     # is uncertain. `False` when no other class was compared. `None` in a
     # record saved before 2026-10-10 (see `is_poor_match`).
     is_class_ambiguous: bool | None = Field(default=None, alias="isClassAmbiguous")
-    # Whether the classifier's own top two candidates are closer together
-    # than the instrument's resolution can actually distinguish. `None`
-    # until the Angstrom-per-subtype-step conversion this needs has been
-    # calibrated (see `post_processing.assess_output_quality`) -- not
-    # `False`, since "not computed" and "computed and found precise
-    # enough" are different claims.
-    is_subtype_finer_than_resolution: bool | None = Field(default=None, alias="isSubtypeFinerThanResolution")
     # `CatalogComparison.spectral_type_agrees`, repeated here so a reader
     # can see the overall trust verdict without also fetching the
     # comparison object. `None` when there was nothing to compare.

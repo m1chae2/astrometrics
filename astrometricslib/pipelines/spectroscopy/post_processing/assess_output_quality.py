@@ -171,8 +171,8 @@ def assess_output_quality(
         The result of `compare_to_catalog`, when one was made.
     resolution_element_angstrom : `float`
         How much the instrument blurred this spectrum, in Angstroms. Not
-        yet used (see `is_subtype_finer_than_resolution` below), but
-        threaded through so callers don't need to change again once it is.
+        yet used, but threaded through so callers don't need to change
+        again once it is.
 
     Returns
     -------
@@ -180,7 +180,7 @@ def assess_output_quality(
         The structured trust verdict; see that class for what each field
         means.
     """
-    del resolution_element_angstrom  # not yet used -- see is_subtype_finer_than_resolution
+    del resolution_element_angstrom  # not yet used
     classification_rms = classification.get("classification_rms")
     is_poor_match = is_classification_poor_match(
         float(classification_rms) if isinstance(classification_rms, int | float) else None
@@ -195,10 +195,6 @@ def assess_output_quality(
         is_poor_match=is_poor_match,
         is_ambiguous=is_ambiguous,
         is_class_ambiguous=is_class_ambiguous,
-        # Needs an Angstrom-per-subtype-step conversion that has not been
-        # calibrated anywhere in this codebase yet; left unset (not
-        # `False`) until that calibration exists, rather than guessing.
-        is_subtype_finer_than_resolution=None,
         catalog_agrees=catalog_agrees,
         is_trustworthy=not (is_poor_match or is_ambiguous or catalog_agrees is False),
     )

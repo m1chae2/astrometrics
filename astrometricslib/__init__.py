@@ -92,6 +92,7 @@ from astrometricslib.foundation.storage import (
     safe_json_dumps,
 )
 from astrometricslib.models.applied_camera_profile import AppliedCameraProfile
+from astrometricslib.models.camera_profile import CameraProfile
 from astrometricslib.models.catalog_queries import (
     CalibrationQueryResult,
     OverlayStar,
@@ -475,6 +476,7 @@ __all__ = [
     "CalibrationCatalog",
     "CalibrationLineFit",
     "CalibrationQueryResult",
+    "CameraProfile",
     "CaptureSetting",
     "CatalogAccess",
     "Checkpoint",

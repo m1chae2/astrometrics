@@ -75,6 +75,7 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "AstrometryQualitySummary",
     "BatchRunSummary",
     "Butler",
+    "CameraProfile",
     "CalibrationCatalog",
     "CalibrationQueryResult",
     "CatalogAccess",
@@ -367,6 +368,7 @@ SUB_API_MEMBERS = {
     },
     "processing.calibration": {
         "assess",
+        "camera_profile",
         "measure_frames",
         "measure_sensor_noise",
         "query",

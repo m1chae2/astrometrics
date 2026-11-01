@@ -33,6 +33,7 @@ from astrometricslib.models.calibration_ingest import (
     CalibrationMeasurementReport,
     CalibrationSetHealth,
 )
+from astrometricslib.models.camera_profile import CameraProfile
 from astrometricslib.models.catalog_queries import CalibrationQueryResult
 from astrometricslib.models.point_sources import PointSource, PointSourceDetection
 from astrometricslib.models.processing_results import (
@@ -432,6 +433,28 @@ class CalibrationCatalog:
             return CalibrationQueryResult(detail=detail, target_id=resolved.id, lights=lights)
         groups = frame_statistics.get_frame_stats_grouped(resolved, self._calibration_library, camera_id)
         return CalibrationQueryResult(detail=detail, target_id=resolved.id, groups=groups)
+
+    def camera_profile(self, camera_name: str | None) -> CameraProfile:
+        """Give the stored facts about a camera model.
+
+        The profile holds the camera's other spellings, its saturation
+        limits with where each came from, and its gain and read noise for
+        each sensor setting. The match ignores case, spaces and punctuation.
+
+        Parameters
+        ----------
+        camera_name : `str` or `None`
+            The camera name, written in any spelling that the profile lists.
+
+        Returns
+        -------
+        profile : `CameraProfile`
+            The matching profile. When nothing matches, or no name is given,
+            this is the generic fallback profile, whose
+            ``is_generic_fallback`` is `True`. A name that matches nothing
+            also logs a warning, once per distinct name.
+        """
+        return resolve_camera_profile(camera_name, self._config)
 
     def save(self) -> None:
         """Write the calibration library to its JSON file on disk."""

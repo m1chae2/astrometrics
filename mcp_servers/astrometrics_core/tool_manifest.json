@@ -9,6 +9,13 @@
       "interim_block": "",
       "note": "Judges the dark, bias or flat sets of the library from the stored numbers. Flats are measured when asked. Writes nothing."
     },
+    "calibration_camera_profile": {
+      "tool_class": "observe",
+      "category": "calibration",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-01. Reads the stored facts about one camera model: aliases, limits and gains."
+    },
     "calibration_measure_frames": {
       "tool_class": "compute",
       "category": "calibration",
@@ -91,7 +98,7 @@
       "category": "image-processing",
       "disposition": "drop",
       "interim_block": "",
-      "note": "Takes lists of per-frame facts that only forecast code holds. An AI client has no way to supply them."
+      "note": "Takes per-frame lists that only forecast code holds. An AI client has no way to supply them."
     },
     "processing_process_target": {
       "tool_class": "change-data",

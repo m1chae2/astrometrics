@@ -515,6 +515,11 @@ DECISIONS = {
         "Returns whole frame records, which can overflow the reply. Scripts and wayfindinglib use it. "
         "observatory_history_frame_guiding already serves an AI client.",
     ),
+    "calibration_camera_profile": ToolDecision(
+        "keep",
+        "Built 2026-11-01. Reads the stored facts about one camera model: aliases, limits and gains.",
+        tool_class="observe",
+    ),
     "processing_predict_stack_weights": ToolDecision(
         "drop",
         "Takes per-frame lists that only forecast code holds. An AI client has no way to supply them.",

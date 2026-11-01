@@ -118,7 +118,7 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 - **Extraction (§6.2).** `pre_processing/spectrum_extractor.py`, `_extractor_c.c`, `neighbor_trail_deblending.py`, `neighbor_wing_correction.py`.
 - **Wavelength calibration (§6.2).** `pre_processing/spectrum_calibrator.py`, `optics_physics.py`, `differential_refraction.py`, `wavelength_zero_point.py`.
 - **Flux and resolution (§6.2).** `pre_processing/quantum_efficiency_correction.py`, `instrument_response.py`, `atmospheric_extinction.py`, `measured_line_spread.py`, `spectral_resolution.py`.
-- **Classification and features (§6.2).** `processing/spectral_classifier.py`, `spectrum_analysis.py`, `star_reddening.py`, `interstellar_extinction.py`.
+- **Classification and features (§6.2).** `processing/spectral_classifier.py`, `spectrum_analysis.py`, `star_reddening.py`, `interstellar_extinction.py`/`detection_label_limits.py`.
 - **Stack registration quality (§6.3).** `utilities/registration_quality.py`.
 - **Checks (§6.4).** `post_processing/record_quality.py`, `compare_to_gaia_xp.py`, `compare_to_catalog.py`, `wavelength_scale.py`.
 - **Signal-to-noise and class gap (§6.2).** `processing/spectral_line_indices.py` (`line_window_signal_to_noise`) fills `snr_at_classifying_lines`; `processing/class_gap_calibration.py` and `data/class_gap_against_snr_zwo_asi_533mm_pro.json` hold the table. Evidence: [SPE-30](validation/spectroscopy.md#spe-30).

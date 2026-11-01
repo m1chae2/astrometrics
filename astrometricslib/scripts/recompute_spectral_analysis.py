@@ -66,6 +66,9 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution i
     ResolutionProfile,
     load_line_spread_profile,
 )
+from astrometricslib.pipelines.spectroscopy.processing.detection_label_limits import (
+    build_detection_label_limits,
+)
 from astrometricslib.pipelines.spectroscopy.processing.spectrum_analysis import (
     EXTENDED_TARGET_SPECTRAL_TYPE,
     analyze_spectrum,
@@ -288,6 +291,7 @@ def recompute_star(
         else None
     )
     spectroscopy.emission_lines = analysis.emission_lines
+    spectroscopy.detection_label_limits = build_detection_label_limits()
     spectroscopy.is_emission_line_source = analysis.is_emission_line_source
     spectroscopy.response_corrected_intensities = analysis.response_corrected_intensity
     spectroscopy.resolution_element_angstrom = (

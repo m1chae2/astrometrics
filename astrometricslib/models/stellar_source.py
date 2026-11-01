@@ -30,6 +30,7 @@ from astrometricslib.models.quality.photometry_quality import (
 )
 from astrometricslib.models.quality.spectroscopy_quality import (
     CatalogComparison,
+    DetectionLabelLimits,
     InputQualityAssessment,
     OutputQualityAssessment,
     StageQualityCheckpoint,
@@ -854,6 +855,10 @@ class SpectroscopyResult(BaseModel):
     # Named emission lines (or blends of lines) found in this spectrum, most
     # convincing first -- see emission_line_detector.detect_emission_lines.
     emission_lines: list[dict[str, Any]] = Field(default_factory=list, alias="emissionLines")
+    # The limits and register entries that turned the statistics above into
+    # labels, stored once for the whole spectrum instead of on each feature
+    # or line. `None` on rows saved before this record existed.
+    detection_label_limits: DetectionLabelLimits | None = Field(default=None, alias="detectionLabelLimits")
     # True when at least two emission lines or blends were detected, so the
     # spectrum looks like glowing gas rather than a star.
     is_emission_line_source: bool = Field(default=False, alias="isEmissionLineSource")

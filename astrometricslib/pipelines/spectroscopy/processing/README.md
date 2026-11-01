@@ -162,12 +162,15 @@ The `processing_quality` run gate counts the spectra in which any of these metri
 
 **Class gap against signal-to-noise.** `class_gap_calibration.py` degrades stored spectra of high signal-to-noise with white noise, classifies each copy with `classify_spectral_type`, and records the gap to the next class and to the second-best reference at each signal-to-noise. `class_gap_table` makes the table, `class_gap_for_snr` reads the stored one (`data/class_gap_against_snr_zwo_asi_533mm_pro.json`, one file for each camera; it returns `None` and a reason when the camera, definition version, ambiguity threshold or estimator does not match, or the file does not read), and `scripts/calibrate_class_gap_against_snr.py` rebuilds it. A level is reached where at least half of the cases (`REACHED_SHARE`) have a gap of at least `AMBIGUOUS_RMS_GAP` at that value and every higher one, on the grid 3, 5, 8, 12, 20 and 30 (`DEFAULT_SNR_GRID`; design estimate; see [SPE-D25](../../../../documentation/library_design/validation/spectroscopy.md#design-estimates)). When no value passes, the verdict is `CONFIDENCE_LIMITED`, "confidence-limited at this resolution": the classifier's own gap stays under the limit, which says nothing about whether the classes can be told apart. Each row also carries the share of copies that keep the spectrum's own undegraded class, and 16 to 84 percent intervals. The uncertainty comes from resampling star fields, not spectra. The noise is white, so the table says what noise alone does (partly measured; see [SPE-30](../../../../documentation/library_design/validation/spectroscopy.md#spe-30)).
 
+**Where the label limits are stored.** Each feature and each emission line keeps its statistics and its label, but not the limit that made the label. The limits are the same for every entry in a spectrum. The pipeline and `scripts/recompute_spectral_analysis.py` store them once, as `detection_label_limits` on `SpectroscopyResult`, with the register id of each detector. Rows saved before this record existed load with it empty. No limit and no label changed.
+
 ## Files
 
 - `spectrum_analysis.py` holds `analyze_spectrum`, which runs steps 1 to 7.
 - `spectrum_signal.py` checks for a real signal.
 - `emission_line_detector.py` finds emission lines.
 - `spectral_feature_detector.py` tests named absorption features.
+- `detection_label_limits.py` builds `DetectionLabelLimits`, the limits behind the labels with their register entries, from the detectors' own constants: features (partly measured; see [SPE-24](../../../../documentation/library_design/validation/spectroscopy.md#spe-24)) and emission lines (partly measured; see [SPE-25](../../../../documentation/library_design/validation/spectroscopy.md#spe-25)).
 - `star_reddening.py` and `interstellar_extinction.py` look up and remove interstellar reddening.
 - `spectral_classifier.py` compares the spectrum with the reference spectra.
 - `spectral_line_indices.py` estimates the type from six line depths and gives the signal-to-noise at those lines.

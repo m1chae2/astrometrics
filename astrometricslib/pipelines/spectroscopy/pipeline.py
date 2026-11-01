@@ -105,6 +105,9 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.wavelength_zero_point
 from astrometricslib.pipelines.spectroscopy.processing.assess_processing_quality import (
     assess_processing_quality,
 )
+from astrometricslib.pipelines.spectroscopy.processing.detection_label_limits import (
+    build_detection_label_limits,
+)
 from astrometricslib.pipelines.spectroscopy.processing.second_order_risk import (
     compute_second_order_blue_to_red_ratio,
 )
@@ -1608,6 +1611,7 @@ class SpectroscopyPipeline:
             self_determined_spectral_type_candidates=classification["ranked_types"],
             probable_spectral_features=probable_spectral_features,
             emission_lines=analysis.emission_lines,
+            detection_label_limits=build_detection_label_limits(),
             is_emission_line_source=analysis.is_emission_line_source,
             star_position_px=[float(result["target_pos"][0]), float(result["target_pos"][1])],
             requested_wavelength_range_angstrom=(

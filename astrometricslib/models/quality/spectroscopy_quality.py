@@ -251,6 +251,70 @@ class CatalogComparison(BaseModel):
         )
 
 
+class AbsorptionFeatureLimits(BaseModel):
+    """The limits behind every absorption-feature label in one spectrum.
+
+    Each feature entry carries a label (detected, possible, inconclusive,
+    not detected, not covered) and its statistic (p-value, depth). The limits
+    that turned the statistic into the label are the same for every feature
+    in the spectrum, so they are stored here once instead of on each entry.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    # A feature is "detected" at or below this p-value.
+    detected_p_value: float = Field(alias="detectedPValue")
+    # A feature is "possible" at or below this p-value.
+    possible_p_value: float = Field(alias="possiblePValue")
+    # A feature that is neither is "inconclusive" at or below this p-value...
+    inconclusive_p_value: float = Field(alias="inconclusivePValue")
+    # ...and at least this deep, as a fraction of the continuum.
+    inconclusive_minimum_depth: float = Field(alias="inconclusiveMinimumDepth")
+    # A dip shallower than this fraction of the continuum is never reported.
+    minimum_reported_depth: float = Field(alias="minimumReportedDepth")
+    # A depth uncertainty above this caps the label at "inconclusive".
+    maximum_depth_uncertainty_for_label: float = Field(alias="maximumDepthUncertaintyForLabel")
+    # The validation register entry that checked these limits ("SPE-24").
+    register_entry: str = Field(alias="registerEntry")
+
+
+class EmissionLineLimits(BaseModel):
+    """The limits behind every emission-line label in one spectrum.
+
+    Each line entry carries a label (detected, unclear, not seen, not
+    covered) and its significance. The limits are the same for every line in
+    the spectrum, so they are stored here once.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    # A line is "detected" at or above this many error bars above zero.
+    detected_significance: float = Field(alias="detectedSignificance")
+    # A line is "unclear" at or above this many error bars, below the above.
+    unclear_significance: float = Field(alias="unclearSignificance")
+    # A line is "covered" only when this fraction of its box was fitted.
+    minimum_covered_fraction: float = Field(alias="minimumCoveredFraction")
+    # The spectrum is an emission-line source at this many detected lines.
+    minimum_detected_for_emission_source: int = Field(alias="minimumDetectedForEmissionSource")
+    # The validation register entry that checked these limits ("SPE-25").
+    register_entry: str = Field(alias="registerEntry")
+
+
+class DetectionLabelLimits(BaseModel):
+    """The limits and register entries behind one spectrum's labels.
+
+    Spectral feature and emission-line entries keep only their statistics and
+    labels. This record, stored once per spectrum, says which limits turned
+    those statistics into labels and which register entry checked them. Old
+    stored rows lack it and load with `None` where it is used.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    absorption_features: AbsorptionFeatureLimits = Field(alias="absorptionFeatures")
+    emission_lines: EmissionLineLimits = Field(alias="emissionLines")
+
+
 class InputQualityAssessment(BaseModel):
     """How good the raw data behind a spectrum was, before anything was found.
 

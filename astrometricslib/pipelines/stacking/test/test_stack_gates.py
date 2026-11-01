@@ -17,7 +17,6 @@ from astrometricslib.foundation.enums import FilterType
 from astrometricslib.models.quality.gate_result import GateResult, GateStatus
 from astrometricslib.models.quality.quality_summary import ExcludedFrame, StackingPipelineQualityMetrics
 from astrometricslib.models.target import FrameRecord
-from astrometricslib.pipelines.shared.quality.saturation import is_saturation_significant
 from astrometricslib.pipelines.stacking.post_processing import assess_output_quality as aoq
 from astrometricslib.pipelines.stacking.post_processing.exposure_group_report import (
     RAW_FRAME_CLIPPING_GATE_NAME,
@@ -26,10 +25,6 @@ from astrometricslib.pipelines.stacking.post_processing.exposure_group_report im
 from astrometricslib.pipelines.stacking.post_processing.stack_quality import (
     DEFAULT_ZERO_FRACTION_FLAG_THRESHOLD,
     SPECTRAL_ZERO_FRACTION_FLAG_THRESHOLD,
-    is_negative_pixel_percent_significant,
-    is_rejected_fraction_significant,
-    is_stacked_fwhm_degraded,
-    is_zero_fraction_significant,
     zero_fraction_threshold,
 )
 from astrometricslib.pipelines.stacking.pre_processing import flat_calibration
@@ -325,11 +320,9 @@ def test_rejected_fraction_gate_goes_red_and_green() -> None:
     """A 30% rejection fails; 5% passes."""
     metrics = make_metrics()
     metrics.rejected_pixel_fraction = 0.30
-    metrics.rejected_fraction_flagged = is_rejected_fraction_significant(0.30)
     assert output_gates(metrics)[aoq.REJECTED_GATE_NAME].status is GateStatus.FAILED
 
     metrics.rejected_pixel_fraction = 0.05
-    metrics.rejected_fraction_flagged = is_rejected_fraction_significant(0.05)
     assert output_gates(metrics)[aoq.REJECTED_GATE_NAME].status is GateStatus.PASSED
 
 
@@ -338,13 +331,11 @@ def test_sharpness_gate_goes_red_on_a_misregistered_stack() -> None:
     metrics = make_metrics()
     metrics.expected_stack_fwhm_px = 3.0
     metrics.stacked_fwhm_px = 4.5
-    metrics.fwhm_degraded = is_stacked_fwhm_degraded(4.5, 3.0)
     failed = output_gates(metrics)[aoq.SHARPNESS_GATE_NAME]
     assert failed.status is GateStatus.FAILED
     assert failed.measured_value == pytest.approx(1.5)
 
     metrics.stacked_fwhm_px = 3.0
-    metrics.fwhm_degraded = is_stacked_fwhm_degraded(3.0, 3.0)
     assert output_gates(metrics)[aoq.SHARPNESS_GATE_NAME].status is GateStatus.PASSED
 
 
@@ -363,11 +354,9 @@ def test_saturation_gate_goes_red_and_green() -> None:
     """One percent saturated fails; none passes."""
     metrics = make_metrics()
     metrics.saturated_pixel_fraction = 0.01
-    metrics.saturation_flagged = is_saturation_significant(0.01)
     assert output_gates(metrics)[aoq.SATURATION_GATE_NAME].status is GateStatus.FAILED
 
     metrics.saturated_pixel_fraction = 0.0
-    metrics.saturation_flagged = is_saturation_significant(0.0)
     assert output_gates(metrics)[aoq.SATURATION_GATE_NAME].status is GateStatus.PASSED
 
 
@@ -375,11 +364,9 @@ def test_zero_fraction_gate_goes_red_on_a_blank_stack_and_skips_spectra() -> Non
     """A 99% zero image fails and a 6% zero image passes."""
     image = make_metrics()
     image.zero_pixel_fraction = 0.99
-    image.zero_fraction_flagged = is_zero_fraction_significant(0.99)
     assert output_gates(image)[aoq.ZERO_FRACTION_GATE_NAME].status is GateStatus.FAILED
 
     image.zero_pixel_fraction = 0.06
-    image.zero_fraction_flagged = is_zero_fraction_significant(0.06)
     assert output_gates(image)[aoq.ZERO_FRACTION_GATE_NAME].status is GateStatus.PASSED
 
 
@@ -391,17 +378,11 @@ def test_spectral_zero_fraction_gate_uses_its_own_limit() -> None:
     for clean_fraction in (0.0, 0.0028, 0.004):
         spectrum = make_metrics(is_spectral=True)
         spectrum.zero_pixel_fraction = clean_fraction
-        spectrum.zero_fraction_flagged = is_zero_fraction_significant(
-            clean_fraction, zero_fraction_threshold(True)
-        )
         assert output_gates(spectrum)[aoq.ZERO_FRACTION_GATE_NAME].status is GateStatus.PASSED
 
     for bad_fraction in (0.3235, 0.3503):
         spectrum = make_metrics(is_spectral=True)
         spectrum.zero_pixel_fraction = bad_fraction
-        spectrum.zero_fraction_flagged = is_zero_fraction_significant(
-            bad_fraction, zero_fraction_threshold(True)
-        )
         gate = output_gates(spectrum)[aoq.ZERO_FRACTION_GATE_NAME]
         assert gate.status is GateStatus.FAILED
         assert gate.limit == SPECTRAL_ZERO_FRACTION_FLAG_THRESHOLD
@@ -409,7 +390,7 @@ def test_spectral_zero_fraction_gate_uses_its_own_limit() -> None:
     # An image stack keeps the 50% limit: 35% zero is not a blank image.
     assert zero_fraction_threshold(False) == pytest.approx(DEFAULT_ZERO_FRACTION_FLAG_THRESHOLD)
     assert DEFAULT_ZERO_FRACTION_FLAG_THRESHOLD == pytest.approx(0.5)
-    assert not is_zero_fraction_significant(0.35, zero_fraction_threshold(False))
+    assert 0.35 < zero_fraction_threshold(False)
 
 
 def test_spectral_zero_fraction_gate_is_not_checked_when_unmeasured() -> None:
@@ -495,7 +476,6 @@ def test_negative_pixel_gate_goes_red_on_siril_warning() -> None:
     """A Siril warning of 99% negative pixels fails; no warning passes."""
     metrics = make_metrics()
     metrics.negative_pixel_max_percent = 99
-    metrics.negative_pixels_flagged = is_negative_pixel_percent_significant(99)
     assert output_gates(metrics)[aoq.NEGATIVE_PIXELS_GATE_NAME].status is GateStatus.FAILED
 
     clean = make_metrics()
@@ -549,3 +529,35 @@ def test_the_real_builder_records_every_stacking_gate() -> None:
         RAW_FRAME_CLIPPING_GATE_NAME,
     }
     assert summary.flagged is False
+
+
+def test_every_stack_condition_still_gives_a_failed_gate_at_its_limit() -> None:
+    """Each condition fails its gate at the limit and passes just below it.
+
+    The stored yes/no fields are gone, so the gate compares the number with
+    its limit itself. This pins that every condition still gives a failed
+    row, with the limit and the measured number on it.
+    """
+    cases = [
+        (aoq.REJECTED_GATE_NAME, "rejected_pixel_fraction", 0.15, 0.149, False),
+        (aoq.SATURATION_GATE_NAME, "saturated_pixel_fraction", 0.001, 0.0009, False),
+        (aoq.ZERO_FRACTION_GATE_NAME, "zero_pixel_fraction", 0.5, 0.49, False),
+        (aoq.ZERO_FRACTION_GATE_NAME, "zero_pixel_fraction", 0.05, 0.04, True),
+        (aoq.NEGATIVE_PIXELS_GATE_NAME, "negative_pixel_max_percent", 50, 49, False),
+    ]
+    for gate_name, field, at_limit, below_limit, is_spectral in cases:
+        failing = make_metrics(is_spectral=is_spectral)
+        setattr(failing, field, at_limit)
+        failed = output_gates(failing)[gate_name]
+        assert failed.status is GateStatus.FAILED, gate_name
+        assert failed.measured_value == pytest.approx(at_limit)
+        passing = make_metrics(is_spectral=is_spectral)
+        setattr(passing, field, below_limit)
+        assert output_gates(passing)[gate_name].status is GateStatus.PASSED, gate_name
+
+    sharp = make_metrics()
+    sharp.expected_stack_fwhm_px = 3.0
+    sharp.stacked_fwhm_px = 3.7
+    assert output_gates(sharp)[aoq.SHARPNESS_GATE_NAME].status is GateStatus.FAILED
+    sharp.stacked_fwhm_px = 3.5
+    assert output_gates(sharp)[aoq.SHARPNESS_GATE_NAME].status is GateStatus.PASSED

@@ -73,7 +73,7 @@ def test_the_stack_is_compared_with_the_rms_of_its_inputs() -> None:
     assert metrics.expected_stack_fwhm_px == pytest.approx(10.0**0.5)
     assert metrics.stacked_fwhm_px == pytest.approx(3.2)
     assert metrics.median_input_fwhm_px == pytest.approx(3.0)
-    assert metrics.fwhm_degraded is False
+    assert metrics.stacked_fwhm_px / metrics.expected_stack_fwhm_px < 1.2
 
 
 def test_a_stack_much_wider_than_its_inputs_is_flagged() -> None:
@@ -84,7 +84,8 @@ def test_a_stack_much_wider_than_its_inputs_is_flagged() -> None:
     with patch(MEASURE, side_effect=lambda path: 3.0 if path == "stack.fits" else 2.0):
         fwhm_sampling.measure_fwhm_degradation(summary, "stack.fits", frames)
 
-    assert summary.stacking_metrics.fwhm_degraded is True
+    metrics = summary.stacking_metrics
+    assert metrics.stacked_fwhm_px / metrics.expected_stack_fwhm_px == pytest.approx(1.5)
 
 
 def test_a_width_measured_by_the_combine_is_used_instead_of_measuring_the_file() -> None:
@@ -109,7 +110,8 @@ def test_a_width_measured_by_the_combine_is_used_instead_of_measuring_the_file()
 
     assert "stack.fits" not in measured
     assert summary.stacking_metrics.stacked_fwhm_px == pytest.approx(2.3)
-    assert not summary.stacking_metrics.fwhm_degraded
+    metrics = summary.stacking_metrics
+    assert metrics.stacked_fwhm_px / metrics.expected_stack_fwhm_px < 1.2
 
 
 def test_a_width_far_above_the_inputs_still_flags_the_stack() -> None:
@@ -119,7 +121,8 @@ def test_a_width_far_above_the_inputs_still_flags_the_stack() -> None:
     with patch(MEASURE, return_value=2.0):
         fwhm_sampling.measure_fwhm_degradation(summary, "stack.fits", frames, stacked_fwhm=3.4)
 
-    assert summary.stacking_metrics.fwhm_degraded
+    metrics = summary.stacking_metrics
+    assert metrics.stacked_fwhm_px / metrics.expected_stack_fwhm_px > 1.2
 
 
 def fake_width_by_name(path: str) -> float | None:

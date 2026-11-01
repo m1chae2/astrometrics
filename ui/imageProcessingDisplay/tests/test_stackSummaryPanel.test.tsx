@@ -26,8 +26,8 @@ const summary = {
     frames_submitted: 40, frames_stacked: 36, frames_skipped: 4,
     skipped_reasons: [{ file: 'a.fits', reason: 'trailed stars' }],
     frames_set_aside_before_stacking: 3,
-    sessions: [], rejected_pixel_fraction: 0.0123, rejected_fraction_flagged: false,
-    star_width_px: { stack: 2.31, expected_from_inputs: 2.2, median_of_inputs: 2.4, degraded: true },
+    sessions: [], rejected_pixel_fraction: 0.0123,
+    star_width_px: { stack: 2.31, expected_from_inputs: 2.2, median_of_inputs: 2.4 },
     exposure_groups: [
         { exposure_seconds: 30, frames_submitted: 30, frames_stacked: 30, saturated: true, clipped_at_zero: false,
           alignment_shift_pixels: null, left_out_reason: null },
@@ -59,7 +59,6 @@ describe('StackSummaryPanel', () => {
         expect(screen.getByText('3 frames')).toBeTruthy();
         expect(screen.getByText(/1\.2% of pixels/)).toBeTruthy();
         expect(screen.getByText(/2\.31 px in the stack/)).toBeTruthy();
-        expect(screen.getByText(/wider than expected\)/)).toBeTruthy();
         expect(screen.getByText('Star width is wider than expected')).toBeTruthy();
         expect(callBackendMock).toHaveBeenCalledWith(
             'processing:stack_summary', { target: 'M 81', kind: 'imaging' }, { silent: true });

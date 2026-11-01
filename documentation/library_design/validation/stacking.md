@@ -927,7 +927,6 @@ Every Python example assumes the library is installed and configured with your o
       metrics.stacked_fwhm_px,
       metrics.median_input_fwhm_px,
       metrics.expected_stack_fwhm_px,
-      metrics.fwhm_degraded,
   )
   print(metrics.stacked_fwhm_px / metrics.expected_stack_fwhm_px)
   ```

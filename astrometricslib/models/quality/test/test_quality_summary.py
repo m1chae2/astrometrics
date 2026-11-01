@@ -162,3 +162,30 @@ def test_stack_quality_summary_constructs_with_minimal_fields() -> None:
     assert summary.stacking_metrics.excluded_frames[0].reason == "minority gain"
     assert summary.flagged is False
     assert summary.pipeline_name == "stacking"
+
+
+def test_a_stored_stacking_summary_with_the_removed_yes_no_fields_still_loads() -> None:
+    """Old rows with the dropped yes/no fields load and keep the numbers."""
+    stored = {
+        "isSpectral": False,
+        "framesSubmitted": 10,
+        "framesStacked": 9,
+        "rejectedPixelFraction": 0.2,
+        "rejectedFractionFlagged": True,
+        "saturatedPixelFraction": 0.01,
+        "saturationFlagged": True,
+        "zeroPixelFraction": 0.6,
+        "zeroFractionFlagged": True,
+        "negativePixelMaxPercent": 70,
+        "negativePixelsFlagged": True,
+        "fwhmDegraded": True,
+        "timedOut": True,
+    }
+
+    metrics = StackingPipelineQualityMetrics.model_validate(stored)
+
+    assert metrics.rejected_pixel_fraction == pytest.approx(0.2)
+    assert metrics.zero_pixel_fraction == pytest.approx(0.6)
+    assert metrics.negative_pixel_max_percent == 70
+    for removed in ("rejected_fraction_flagged", "saturation_flagged", "fwhm_degraded", "timed_out"):
+        assert not hasattr(metrics, removed)

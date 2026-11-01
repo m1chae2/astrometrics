@@ -178,7 +178,6 @@ class StackSummary(BaseModel):
     frames_set_aside_before_stacking: int | None = None
     sessions: list[dict[str, Any]] = Field(default_factory=list)
     rejected_pixel_fraction: float | None = None
-    rejected_fraction_flagged: bool | None = None
     # The stack's star width against what the input frames predict.
     star_width_px: dict[str, Any] = Field(default_factory=dict)
     saturated_pixel_fraction: float | None = None

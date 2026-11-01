@@ -1258,26 +1258,18 @@ def _measure_stacked_pixel_fractions(
 
     The rejected share comes from the engine's report (``diagnostics``);
     the saturated share is measured on the stacked file. Sets
-    `summary.stacking_metrics`' pixel-fraction fields and their threshold
-    flags in place.
+    `summary.stacking_metrics`' pixel-fraction fields in place. The limits
+    are applied later, by the output gates.
     """
     from astrometricslib.pipelines.shared.quality.quality_metrics import measure_saturated_pixel_fraction
-    from astrometricslib.pipelines.shared.quality.saturation import is_saturation_significant
-    from astrometricslib.pipelines.stacking.post_processing.stack_quality import (
-        is_rejected_fraction_significant,
-    )
 
     rejected_fraction = diagnostics.get("rejected_pixel_fraction")
     if rejected_fraction is not None:
         summary.stacking_metrics.rejected_pixel_fraction = rejected_fraction
-        summary.stacking_metrics.rejected_fraction_flagged = is_rejected_fraction_significant(
-            rejected_fraction
-        )
 
     saturated_fraction = measure_saturated_pixel_fraction(stacked_path)
     if saturated_fraction is not None:
         summary.stacking_metrics.saturated_pixel_fraction = saturated_fraction
-        summary.stacking_metrics.saturation_flagged = is_saturation_significant(saturated_fraction)
 
 
 def _record_exposure_groups(summary: StackQualitySummary, diagnostics: dict) -> None:
@@ -1374,7 +1366,7 @@ def _build_stack_quality_summary(
 
     if stacked_path:
         _measure_stacked_pixel_fractions(summary, stacked_path, diagnostics)
-        measure_calibration_health(summary, stacked_path, is_spectral, diagnostics)
+        measure_calibration_health(summary, stacked_path, diagnostics)
 
         if not is_spectral and summary.quality_processing_applied:
             update_frame_registration_results(summary, stacked_path, target_frames, diagnostics)

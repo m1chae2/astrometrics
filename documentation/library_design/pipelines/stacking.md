@@ -238,7 +238,6 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `frames_stacked` | `int` | Number of light frames (exposures of the target) aligned and stacked. |
 | `excluded_frames` | `list[astrometricslib.models.quality.quality_summary.ExcludedFrame]` | Input frames set aside before stacking, each with its reason. |
 | `rejected_pixel_fraction` | `float \| None` | Share of pixel values rejected (clipped) while building the stack. |
-| `rejected_fraction_flagged` | `bool` | True if pixel rejection was above the warning threshold. |
 | `background_split_detected` | `bool` | True if the frames' sky-background levels split into two groups with a sudden jump between them (gap at least 4 times the spread within a group, checked for each exposure length), for example clouds arriving. The frames outside the larger group are set aside. |
 | `background_split_detail` | `str \| None` | Description of the sky-background jump. |
 | `calibration_mismatch_flags` | `list[str]` | Soft flags for calibration frames applied with a different gain setting, offset or temperature. |
@@ -247,20 +246,15 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `flat_smoothing_sigma_px` | `float \| None` | Gaussian smoothing width (sigma, in pixels) applied to the master flat because its relative noise was above 0.5% (`MAXIMUM_FLAT_NOISE_FRACTION`). None when no smoothing was applied, including on color sensors. |
 | `flat_calibration_issues` | `list[str]` | Messages about problems with the flat calibration. |
 | `saturated_pixel_fraction` | `float \| None` | Share of saturated pixels (clipped at the sensor's maximum) in the final stack. |
-| `saturation_flagged` | `bool` | True if the stack holds a significant share of saturated pixels. |
 | `exposure_groups` | `list[astrometricslib.models.quality.quality_summary.ExposureGroupSummary]` | One sub-stack per exposure length, with its details. |
 | `zero_pixel_fraction` | `float \| None` | Share of stack pixels that are exactly zero. |
-| `zero_fraction_flagged` | `bool` | True if over-subtraction clipped pixels at zero ADU (zero camera counts). |
 | `negative_pixel_max_percent` | `int \| None` | Largest percentage of negative pixels the stacking engine reported. |
-| `negative_pixels_flagged` | `bool` | True if the count of negative pixels was above the tolerance. |
 | `stacked_fwhm_px` | `float \| None` | Measured FWHM of the stacked image. |
 | `median_input_fwhm_px` | `float \| None` | Median FWHM of all light frames that were kept. |
 | `expected_stack_fwhm_px` | `float \| None` | Expected stack FWHM: the RMS of a sample of input-frame FWHMs. |
-| `fwhm_degraded` | `bool` | True if the stack FWHM over the expected FWHM is above the limit (the stack is blurrier than predicted). |
 | `spectral_registration_flags` | `list[astrometricslib.models.quality.quality_summary.ExcludedFrame]` | Frames about which the spectral registration (alignment) test raised a concern. |
 | `spectral_registration_checked` | `bool` | Whether the spectral registration (alignment) test ran. |
 | `stacking_duration_seconds` | `float \| None` | How long the stacking run took, in seconds. |
-| `timed_out` | `bool` | True if the stacking run timed out. |
 | `debayer_applied` | `bool \| None` | Whether color frames were debayered (turned from the sensor's color-filter mosaic into full-color pixels). |
 | `stacking_engine` | `str \| None` | Program that did the pixel processing (for example Siril). |
 | `stacking_engine_version` | `str \| None` | Version of the stacking program. |

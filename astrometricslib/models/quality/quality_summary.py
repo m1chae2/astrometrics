@@ -271,7 +271,6 @@ class StackingPipelineQualityMetrics(BaseModel):
     excluded_frames: list[ExcludedFrame] = Field(default_factory=list, alias="excludedFrames")
 
     rejected_pixel_fraction: float | None = Field(default=None, alias="rejectedPixelFraction")
-    rejected_fraction_flagged: bool = Field(default=False, alias="rejectedFractionFlagged")
 
     background_split_detected: bool = Field(default=False, alias="backgroundSplitDetected")
     background_split_detail: str | None = Field(default=None, alias="backgroundSplitDetail")
@@ -291,7 +290,6 @@ class StackingPipelineQualityMetrics(BaseModel):
     flat_calibration_issues: list[str] = Field(default_factory=list, alias="flatCalibrationIssues")
 
     saturated_pixel_fraction: float | None = Field(default=None, alias="saturatedPixelFraction")
-    saturation_flagged: bool = Field(default=False, alias="saturationFlagged")
 
     # One entry per exposure length in the stack (a single entry when every
     # frame has the same length).
@@ -301,20 +299,17 @@ class StackingPipelineQualityMetrics(BaseModel):
     # mostly zero has been over-subtracted (its calibration removed more than
     # the sky), and is blank.
     zero_pixel_fraction: float | None = Field(default=None, alias="zeroPixelFraction")
-    zero_fraction_flagged: bool = Field(default=False, alias="zeroFractionFlagged")
     # Siril warns when calibration leaves a large share of a frame below zero;
     # this is the worst percentage it reported, or `None` if it did not warn.
     negative_pixel_max_percent: int | None = Field(default=None, alias="negativePixelMaxPercent")
-    negative_pixels_flagged: bool = Field(default=False, alias="negativePixelsFlagged")
 
     # Standard-imaging-only.
     stacked_fwhm_px: float | None = Field(default=None, alias="stackedFwhmPx")
     median_input_fwhm_px: float | None = Field(default=None, alias="medianInputFwhmPx")
     # The star width the stack should have given its input frames: the root
-    # mean square of a sample of their widths. The degradation flag compares
+    # mean square of a sample of their widths. The sharpness gate compares
     # the stack with this, not with the median.
     expected_stack_fwhm_px: float | None = Field(default=None, alias="expectedStackFwhmPx")
-    fwhm_degraded: bool = Field(default=False, alias="fwhmDegraded")
 
     # Spectral-only.
     spectral_registration_flags: list[ExcludedFrame] = Field(
@@ -325,10 +320,9 @@ class StackingPipelineQualityMetrics(BaseModel):
     # when its three per-frame lists do not line up.
     spectral_registration_checked: bool = Field(default=False, alias="spectralRegistrationChecked")
 
-    # Technical details about the stacking run itself, such as whether
-    # the process timed out or if color-conversion (debayering) was applied.
+    # Technical details about the stacking run itself, such as how long it
+    # took or if color-conversion (debayering) was applied.
     stacking_duration_seconds: float | None = Field(default=None, alias="stackingDurationSeconds")
-    timed_out: bool = Field(default=False, alias="timedOut")
     debayer_applied: bool | None = Field(default=None, alias="debayerApplied")
     # The program that did the pixel work (calibration, registration and
     # combination) and its version, so a stack can be traced to the tool that

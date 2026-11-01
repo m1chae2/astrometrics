@@ -191,12 +191,10 @@ def summarize_stack(target: Target, kind: StackKind) -> StackSummary:
             for session in quality.target_session_breakdown
         ],
         rejected_pixel_fraction=metrics.rejected_pixel_fraction,
-        rejected_fraction_flagged=metrics.rejected_fraction_flagged,
         star_width_px={
             "stack": metrics.stacked_fwhm_px,
             "expected_from_inputs": metrics.expected_stack_fwhm_px,
             "median_of_inputs": metrics.median_input_fwhm_px,
-            "degraded": metrics.fwhm_degraded,
         },
         saturated_pixel_fraction=metrics.saturated_pixel_fraction,
         zero_pixel_fraction=metrics.zero_pixel_fraction,

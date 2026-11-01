@@ -662,7 +662,6 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
     "frames_stacked": "Number of light frames (exposures of the target) aligned and stacked.",
     "excluded_frames": "Input frames set aside before stacking, each with its reason.",
     "rejected_pixel_fraction": "Share of pixel values rejected (clipped) while building the stack.",
-    "rejected_fraction_flagged": "True if pixel rejection was above the warning threshold.",
     "background_split_detected": (
         "True if the frames' sky-background levels split into two groups with a sudden jump "
         "between them (gap at least 4 times the spread within a group, checked for each exposure "
@@ -683,12 +682,9 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
     "saturated_pixel_fraction": (
         "Share of saturated pixels (clipped at the sensor's maximum) in the final stack."
     ),
-    "saturation_flagged": "True if the stack holds a significant share of saturated pixels.",
     "exposure_groups": "One sub-stack per exposure length, with its details.",
     "zero_pixel_fraction": "Share of stack pixels that are exactly zero.",
-    "zero_fraction_flagged": "True if over-subtraction clipped pixels at zero ADU (zero camera counts).",
     "negative_pixel_max_percent": "Largest percentage of negative pixels the stacking engine reported.",
-    "negative_pixels_flagged": "True if the count of negative pixels was above the tolerance.",
     "stacked_fwhm_px": "Measured FWHM of the stacked image.",
     "median_input_fwhm_px": "Median FWHM of all light frames that were kept.",
     "expected_fwhm_px": "Predicted stack FWHM: the RMS of a sample of input-frame FWHMs.",
@@ -716,16 +712,11 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
     "gaia_fit_star_count": "Stars used in the Gaia refit.",
     "wcs_refinement_shift_arcsec": "Largest move of the field made by the Gaia refit.",
     "expected_stack_fwhm_px": "Expected stack FWHM: the RMS of a sample of input-frame FWHMs.",
-    "fwhm_degraded": (
-        "True if the stack FWHM over the expected FWHM is above the limit (the stack is blurrier than "
-        "predicted)."
-    ),
     "spectral_registration_flags": (
         "Frames about which the spectral registration (alignment) test raised a concern."
     ),
     "spectral_registration_checked": "Whether the spectral registration (alignment) test ran.",
     "stacking_duration_seconds": "How long the stacking run took, in seconds.",
-    "timed_out": "True if the stacking run timed out.",
     "debayer_applied": (
         "Whether color frames were debayered (turned from the sensor's color-filter mosaic into full-"
         "color pixels)."

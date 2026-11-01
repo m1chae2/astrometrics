@@ -33,11 +33,8 @@ def test_each_failed_threshold_gives_one_reason() -> None:
     """Rejected, zero and negative-pixel flags are each worded."""
     metrics = make_metrics()
     metrics.rejected_pixel_fraction = 0.3
-    metrics.rejected_fraction_flagged = True
     metrics.zero_pixel_fraction = 0.9
-    metrics.zero_fraction_flagged = True
-    metrics.negative_pixel_max_percent = 40
-    metrics.negative_pixels_flagged = True
+    metrics.negative_pixel_max_percent = 60
     quality = assess_output_quality(metrics)
     assert quality.is_flagged
     assert len(quality.flag_reasons) == 3

@@ -52,7 +52,6 @@ export interface StarWidthView {
     stack?: number | null;
     expected_from_inputs?: number | null;
     median_of_inputs?: number | null;
-    degraded?: boolean | null;
 }
 
 /** One frame left out of the stack, as the backend sends it inside `StackSummary.skipped_reasons`. */
@@ -221,9 +220,6 @@ export const StackSummaryPanel: React.FC<StackSummaryPanelProps> = ({
                 <dt>Pixels rejected</dt>
                 <dd>
                     {formatPixelShare(summary.rejected_pixel_fraction)}
-                    {summary.rejected_fraction_flagged && (
-                        <span className="stack-summary__flag"> (flagged: more than expected)</span>
-                    )}
                 </dd>
 
                 <dt>Star width (FWHM)</dt>
@@ -233,9 +229,6 @@ export const StackSummaryPanel: React.FC<StackSummaryPanelProps> = ({
                         <>, against {formatStarWidth(starWidth.expected_from_inputs)} expected from the input frames</>
                     )}{' '}
                     (the input frames' median is {formatStarWidth(starWidth.median_of_inputs)}).
-                    {starWidth.degraded && (
-                        <span className="stack-summary__flag"> (flagged: wider than expected)</span>
-                    )}
                 </dd>
 
                 {summary.calibration_mismatches ? (

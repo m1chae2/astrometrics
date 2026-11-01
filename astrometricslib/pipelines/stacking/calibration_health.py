@@ -20,17 +20,15 @@ __all__ = ["measure_calibration_health"]
 def measure_calibration_health(
     summary: StackQualitySummary,
     stacked_path: str,
-    is_spectral: bool,
     diagnostics: dict,
 ) -> None:
-    """Record whether calibration left the stack mostly zeros.
+    """Measure whether calibration left the stack mostly zeros.
 
     Two signs are used: the share of exactly-zero pixels in the stack (for a
     colour stack, the share in its worst channel), and the
     worst "many negative pixels" percentage Siril printed after subtracting the
-    dark. Both are recorded for every stack. The zero share is flagged only for
-    images, because the sky of a spectral stack is legitimately at or below
-    zero.
+    dark. Both are recorded for every stack. The output gates compare them
+    with their limits (a lower zero limit applies to spectral stacks).
 
     Parameters
     ----------
@@ -38,19 +36,12 @@ def measure_calibration_health(
         The summary being built; its metrics are set in place.
     stacked_path : `str`
         The stacked image to measure.
-    is_spectral : `bool`
-        Whether the stack is spectral.
     diagnostics : `dict`
         What the stacking run reported.
     """
     import numpy as np
 
     from astrometricslib._internal.drivers.fits_access import read_data
-    from astrometricslib.pipelines.stacking.post_processing.stack_quality import (
-        is_negative_pixel_percent_significant,
-        is_zero_fraction_significant,
-        zero_fraction_threshold,
-    )
 
     metrics = summary.stacking_metrics
     try:
@@ -65,10 +56,6 @@ def measure_calibration_health(
         metrics.zero_pixel_fraction = max(
             float(np.count_nonzero(plane == 0) / plane.size) for plane in planes
         )
-        metrics.zero_fraction_flagged = is_zero_fraction_significant(
-            metrics.zero_pixel_fraction, zero_fraction_threshold(is_spectral)
-        )
     negative_percent = diagnostics.get("negative_pixel_max_percent")
     if negative_percent is not None:
         metrics.negative_pixel_max_percent = int(negative_percent)
-        metrics.negative_pixels_flagged = is_negative_pixel_percent_significant(negative_percent)

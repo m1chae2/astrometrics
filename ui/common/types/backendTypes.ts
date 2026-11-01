@@ -1874,7 +1874,6 @@ export interface StackingPipelineQualityMetrics {
   framesStacked: number;
   excludedFrames?: ExcludedFrame[];
   rejectedPixelFraction?: number | null;
-  rejectedFractionFlagged?: boolean;
   backgroundSplitDetected?: boolean;
   backgroundSplitDetail?: string | null;
   calibrationMismatchFlags?: string[];
@@ -1883,20 +1882,15 @@ export interface StackingPipelineQualityMetrics {
   flatSmoothingSigmaPx?: number | null;
   flatCalibrationIssues?: string[];
   saturatedPixelFraction?: number | null;
-  saturationFlagged?: boolean;
   exposureGroups?: ExposureGroupSummary[];
   zeroPixelFraction?: number | null;
-  zeroFractionFlagged?: boolean;
   negativePixelMaxPercent?: number | null;
-  negativePixelsFlagged?: boolean;
   stackedFwhmPx?: number | null;
   medianInputFwhmPx?: number | null;
   expectedStackFwhmPx?: number | null;
-  fwhmDegraded?: boolean;
   spectralRegistrationFlags?: ExcludedFrame[];
   spectralRegistrationChecked?: boolean;
   stackingDurationSeconds?: number | null;
-  timedOut?: boolean;
   debayerApplied?: boolean | null;
   stackingEngine?: string | null;
   stackingEngineVersion?: string | null;
@@ -3928,7 +3922,6 @@ export interface StackSummary {
   frames_set_aside_before_stacking?: number | null;
   sessions?: Record<string, any>[];
   rejected_pixel_fraction?: number | null;
-  rejected_fraction_flagged?: boolean | null;
   star_width_px?: Record<string, any>;
   saturated_pixel_fraction?: number | null;
   zero_pixel_fraction?: number | null;

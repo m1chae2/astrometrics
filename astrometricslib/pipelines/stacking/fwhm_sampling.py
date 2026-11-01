@@ -140,7 +140,6 @@ def measure_fwhm_degradation(
     )
     from astrometricslib.pipelines.stacking.post_processing.stack_quality import (
         expected_stack_fwhm,
-        is_stacked_fwhm_degraded,
     )
 
     # A sample of at most 15 frames (matching FWHM_MEASUREMENT_STAR_COUNT),
@@ -165,5 +164,3 @@ def measure_fwhm_degradation(
         stacked_fwhm = measure_image_fwhm(stacked_path)
     if stacked_fwhm is not None:
         summary.stacking_metrics.stacked_fwhm_px = stacked_fwhm
-        if expected is not None:
-            summary.stacking_metrics.fwhm_degraded = is_stacked_fwhm_degraded(stacked_fwhm, expected)

@@ -1282,8 +1282,9 @@ _STACKING_GATES: tuple[GateMapping, ...] = gate_mappings_from_sources(STACKING_G
 # here: the rows would need a stacking run to belong to, which a backfill does
 # not invent, and a stack made before S3 has no such file. The next stacking
 # run stores them.
-# A stack that was abandoned for taking too long: the stored summary keeps
-# only a yes or no (`timedOut`), not the working seconds the row holds.
+# A stack that was abandoned for taking too long: the stored summary of the
+# stack before it holds nothing about it, so no row is made. The timeout step
+# stores `stacking.abandoned_after_s` itself, when it happens.
 # The pattern the two half stacks share comes from the half stacks themselves.
 # The numbers of different dark and bias frames behind the masters come from
 # the stored per-frame numbers of the calibration frames, which a summary made

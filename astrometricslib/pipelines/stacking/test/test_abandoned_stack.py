@@ -254,9 +254,7 @@ def test_an_abandoned_stack_is_recorded_as_a_processing_decision(
 
     monkeypatch.setattr(tasks, "_stack_with_job_tracking", hung_stack)
     monkeypatch.setattr(tasks, "_STACKING_TIMEOUT_POLL_SECONDS", 0.05)
-    summary = SimpleNamespace(
-        flagged=False, flag_reasons=[], stacking_metrics=SimpleNamespace(timed_out=False)
-    )
+    summary = SimpleNamespace(flagged=False, flag_reasons=[], stacking_metrics=SimpleNamespace())
     target = SimpleNamespace(id="NGC 1499", stacking=SimpleNamespace(quality_summary=summary))
     configuration = SimpleNamespace(get_library_path=lambda: tmp_path)
     recording = FrameQualityRecording(configuration=configuration, calibration_library=object())
@@ -275,7 +273,6 @@ def test_an_abandoned_stack_is_recorded_as_a_processing_decision(
     assert result is None
     assert summary.flagged is False
     assert summary.flag_reasons == []
-    assert summary.stacking_metrics.timed_out is False
     rows = QualityStore(str(tmp_path / "astrometrics.db")).query(metric="stacking.abandoned_after_s")
     assert len(rows) == 1
     assert rows[0].subject.level is SubjectLevel.RUN

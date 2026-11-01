@@ -19,6 +19,15 @@ Issue #97 now covers what the public API restructure did not. Issues #95 and #96
 
 Detection labels stay in astrometricslib (issue #97, user decision of 2026-10-24): the periodogram, transit, spectral feature and emission-line `verdict`, each reported with its statistic, its limit and its register entry.
 
+### Requirement: no warning is lost (user, 2026-11-01)
+
+Every warning a job detects today stays detected, and a user can ask what warnings a given job detected. This limits the rest of the plan.
+
+- **Where a warning lives.** The measurement table already fits: each row has `check_outcome`, `reason`, the limit and its register entry, and `job_id`. A warning is a row with a failed check outcome.
+- **Conditions with no row today.** Flag reasons that are not gates must become rows before `flag_reasons` goes: the quarantine note, the single-frame note, a group left out for a non-gate reason, the camera with no profile, and the stacking timeout. The inventory lists these. The baseline comparison found 60 flag reasons with no failed gate.
+- **Proposed read.** `jobs.query(job_id=..., detail="warnings")` lists them, with the same data available to the backend, the desktop app and the MCP tools. This has not been built, and `job_id` may be empty on some rows, which needs checking.
+- **Order.** The read and the new rows are built before any flag is removed. Phase 3 starts only when the comparison script shows that every warning on the copy's targets is still reported.
+
 ## 2. Decisions needed
 
 ### D1. Which pull request
@@ -36,8 +45,8 @@ Stored summaries are rewritten by a restack, so a restack before this work store
 
 Stored gates (55 `*.gate_*` metric names; stacking 25, photometry 11, spectroscopy 9, astrometry 5, asteroid detection 5) mix two things: self-checks of the measurement, and judgments of fitness for use.
 
-- **A (recommended): sort each gate in the per-pipeline inventory.** A self-check stays as a measurement with a check outcome. A judgment moves to a wayfindinglib rule.
-- B: keep them all as measurements with a check outcome, and add wayfindinglib rules only where one is missing. Less work, but astrometricslib keeps limits that are judgments.
+- A: sort each gate in the per-pipeline inventory. A self-check stays as a measurement with a check outcome. A judgment moves to a wayfindinglib rule. A job in astrometricslib could then no longer report a moved gate as a warning, because astrometricslib cannot call wayfindinglib, so this fits the no-lost-warning requirement poorly.
+- **B (recommended since the no-lost-warning requirement): keep them all as measurements with a check outcome, and add wayfindinglib rules that turn them into suggestions.** A job can always list its warnings. astrometricslib keeps limits that are judgments, which departs from `QUALITY_METRICS_PLAN.md` decision 1 and needs your approval.
 
 Whichever is chosen, some gates have no matching rule by name today: stack sharpness, rejected fraction, `scatter_population`, `variability_discrimination`, `catalog_agreement` and `gaia_xp_agreement`. Each needs a new rule or a recorded choice to have none.
 
@@ -86,6 +95,10 @@ No app behavior changes.
 ### Phase 1: the shadow script
 
 A read-only script runs the wayfindinglib rules next to today's flags for every target, on the data copy, and lists each difference. You mark each difference as a bug fixed or an approved change. The first run is the baseline for phase 2.
+
+### Phase 1b: the job warnings read
+
+Build `jobs.query(detail="warnings")` from the measurement table. Record every non-gate flag reason as a row. Fill `job_id` wherever a job made the row. Extend the comparison script to check that every flag reason appears in its job's warnings.
 
 ### Phase 2: one pipeline at a time
 

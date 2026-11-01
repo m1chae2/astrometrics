@@ -84,7 +84,10 @@ from astrometricslib.models.quality.quality_summary import (
 )
 from astrometricslib.models.quality.row_frames import QualityRowFile, QualityRowResolution
 from astrometricslib.models.quality.spectroscopy_quality import (
+    AbsorptionFeatureLimits,
     CatalogComparison,
+    DetectionLabelLimits,
+    EmissionLineLimits,
     InputQualityAssessment,
     OutputQualityAssessment,
     StageQualityCheckpoint,
@@ -530,6 +533,9 @@ def render_types() -> str:
         generate_interface(GaiaXpBandSummary, "GaiaXpBandSummary"),
         generate_interface(GaiaXpRunSummary, "GaiaXpRunSummary"),
         generate_interface(ExtinctionCorrectionRecord, "ExtinctionCorrectionRecord"),
+        generate_interface(AbsorptionFeatureLimits, "AbsorptionFeatureLimits"),
+        generate_interface(EmissionLineLimits, "EmissionLineLimits"),
+        generate_interface(DetectionLabelLimits, "DetectionLabelLimits"),
         generate_interface(CatalogComparison, "CatalogComparison"),
         generate_interface(InputQualityAssessment, "InputQualityAssessment"),
         generate_interface(OutputQualityAssessment, "OutputQualityAssessment"),

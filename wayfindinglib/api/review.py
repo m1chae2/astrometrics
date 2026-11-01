@@ -24,15 +24,21 @@ from typing import TYPE_CHECKING, Any, Literal
 from astrometricslib import Target
 from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
 from astrometricslib.jobs import background_job, get_current_job, registered_job
+from wayfindinglib.analytics.alignment_sessions import group_alignment_attempts
 from wayfindinglib.api.control.context import ControlChild
 from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
+from wayfindinglib.models.session.alignment_records import AlignmentRecords
 from wayfindinglib.models.session.control_results import FrameGuidingReport
 from wayfindinglib.models.session.ekos_session import EkosSessionContext
 from wayfindinglib.models.session.live_session_status import LiveSessionStatus
 from wayfindinglib.models.session.night_list import NightListEntry, TargetChange
 from wayfindinglib.models.session.night_quality import NightQuality
 from wayfindinglib.models.session.review_query import ReviewQueryResult
-from wayfindinglib.models.session.telemetry import AlignmentAttempt, AlignmentSessionsResult
+from wayfindinglib.models.session.telemetry import (
+    AlignmentAttempt,
+    AlignmentSessionsResult,
+    PolarAlignmentStatus,
+)
 
 if TYPE_CHECKING:
     from wayfindinglib.api.control.control import ObservatoryControl
@@ -71,6 +77,65 @@ TYPED_KIND_FIELDS = {
 
 FRAME_GUIDING_SECTIONS = ("quality",)
 """Optional sections `ObservationReview.frame_guiding` can add."""
+
+
+ALIGNMENT_STATUSES = ("solving", "failed", "warning", "aligned", "idle")
+"""The statuses an alignment attempt can have."""
+
+
+def _attempt_from_row(row: dict[str, Any], with_session: bool) -> AlignmentAttempt:
+    """Turn one stored alignment row into an `AlignmentAttempt`.
+
+    Parameters
+    ----------
+    row : `dict` [`str`, `Any`]
+        A row of the stored alignment attempts, keyed by column name.
+    with_session : `bool`
+        Whether to keep the row's session id.
+
+    Returns
+    -------
+    attempt : `AlignmentAttempt`
+        A status the model does not know reads as ``aligned``.
+    """
+    status = row.get("status")
+    return AlignmentAttempt(
+        status=status if status in ALIGNMENT_STATUSES else "aligned",
+        delta_ra_arcsec=row.get("delta_ra_arcsec"),
+        delta_dec_arcsec=row.get("delta_dec_arcsec"),
+        ra=row.get("mount_ra"),
+        dec=row.get("mount_dec"),
+        pointing_error_arcsec=row.get("pointing_error_arcsec"),
+        timestamp=row.get("timestamp"),
+        target_name=row.get("target_name"),
+        session_id=row.get("session_id") if with_session else None,
+    )
+
+
+def _polar_status_from_row(row: dict[str, Any]) -> PolarAlignmentStatus:
+    """Turn one stored polar alignment row into a `PolarAlignmentStatus`.
+
+    Parameters
+    ----------
+    row : `dict` [`str`, `Any`]
+        A row of the stored polar alignment runs.
+
+    Returns
+    -------
+    status : `PolarAlignmentStatus`
+        The run. A status the model does not know reads as ``aligned``.
+    """
+    status = row.get("status", "aligned")
+    return PolarAlignmentStatus(
+        status=status if status in ("idle", "in_progress", "aligned", "warning") else "aligned",
+        total_error_arcsec=row.get("total_error_arcsec"),
+        alt_error_arcsec=row.get("alt_error_arcsec"),
+        az_error_arcsec=row.get("az_error_arcsec"),
+        pole_ra=row.get("pole_ra"),
+        pole_dec=row.get("pole_dec"),
+        paa_points=row.get("paa_points", []),
+        timestamp=row.get("timestamp"),
+    )
 
 
 class ObservationReview(ControlChild):
@@ -411,6 +476,67 @@ class ObservationReview(ControlChild):
         except ValidationError as error:
             raise InvalidArgumentError(f"An alignment attempt is not valid: {error}") from error
         return AlignmentSessionsResult(attempts=models, targets=group_alignment_attempts(models))
+
+    def query_alignment_records(
+        self,
+        session_id: str | None = None,
+        limit: int = 50,
+        since: float | None = None,
+        targets: list[Target] | None = None,
+    ) -> AlignmentRecords:
+        """Read the stored alignment attempts, grouped by target.
+
+        With no `session_id` this is the live view: the `limit` newest
+        attempts, oldest first. With a `session_id` it is the night view:
+        every attempt of that night, a tracking row for each target imaged
+        that night (when `targets` is given), and the latest polar
+        alignment run.
+
+        Parameters
+        ----------
+        session_id : `str`, optional
+            An observing night, such as ``"2026-09-24"``. ``"all"`` reads
+            every night. `None` reads the newest attempts instead.
+        limit : `int`, optional
+            Most attempts to read when `session_id` is `None`. Defaults
+            to 50.
+        since : `float`, optional
+            When `session_id` is `None`, drop attempts older than this Unix
+            time. For a night view it is ignored.
+        targets : `list` [`Target`], optional
+            The library targets whose frames show when each was tracked.
+            Used only with a `session_id`.
+
+        Returns
+        -------
+        records : `AlignmentRecords`
+            The attempts, their grouping by target, and the polar run.
+            A status the attempt model does not know reads as ``aligned``.
+            Nothing is returned for records that cannot be read.
+        """
+        records = self._context.records
+        if session_id is None:
+            rows = list(reversed(records.get_alignment_attempts(limit=limit)))
+            if since is not None:
+                rows = [row for row in rows if (row.get("timestamp") or 0) >= since]
+            attempts = [_attempt_from_row(row, with_session=False) for row in rows]
+            polar = None
+        else:
+            attempts = [
+                _attempt_from_row(row, with_session=True)
+                for row in records.get_session_alignment_attempts(session_id)
+            ]
+            if targets is not None:
+                attempts.extend(
+                    AlignmentAttempt.model_validate(row)
+                    for row in records.get_session_target_telemetry(session_id, targets)
+                )
+            polar_session = None if session_id in ("all", "*") else session_id
+            runs = records.get_polar_alignments(session_id=polar_session, limit=1)
+            polar = _polar_status_from_row(runs[0]) if runs else None
+        return AlignmentRecords(
+            attempts=attempts, targets=group_alignment_attempts(attempts), polar_alignment=polar
+        )
 
     def get_performance_envelope(
         self, blur_tolerance_fraction: float | None = None, before_night: str | None = None

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import inspect
 import re
-import sys
 import typing
 from typing import Any
 
@@ -55,16 +54,13 @@ def _public_attribute(library: str, name: str) -> Any:
     return None
 
 
-def _class_hints(cls: type, names: dict[str, Any] | None = None) -> dict[str, Any]:
+def _class_hints(cls: type) -> dict[str, Any]:
     """Read the annotations of a class, or nothing when one cannot be resolved.
 
     Parameters
     ----------
     cls : `type`
         The class to read.
-    names : `dict` [`str`, `Any`], optional
-        Names the annotations use that the class's module only imports for
-        type checking, such as ``{"ObservationReview": ObservationReview}``.
 
     Returns
     -------
@@ -73,10 +69,7 @@ def _class_hints(cls: type, names: dict[str, Any] | None = None) -> dict[str, An
         only imported for type checking.
     """
     try:
-        if not names:
-            return typing.get_type_hints(cls)
-        module_names = dict(vars(sys.modules[cls.__module__]))
-        return typing.get_type_hints(cls, globalns={**module_names, **names})
+        return typing.get_type_hints(cls)
     except NameError, TypeError:
         return {}
 
@@ -533,12 +526,6 @@ def generate_wayfindinglib_docs() -> str:
     """
     import wayfindinglib
 
-    # `ObservationReview` is the class of `wayfinder.review`. It is found
-    # from the annotation the `Wayfinder` class gives that attribute, if any.
-    from wayfindinglib.api.review import ObservationReview
-
-    review_cls = _class_hints(wayfindinglib.Wayfinder, {"ObservationReview": ObservationReview}).get("review")
-
     sections: list[str] = [
         "# Wayfinding Library (`wayfindinglib`)",
         "",
@@ -556,7 +543,7 @@ def generate_wayfindinglib_docs() -> str:
         "- [Observatory Control: `ObservatoryControl`](#class-observatorycontrol)",
         "- [Observation Planning: `ObservationPlanning`](#class-observationplanning)",
         "- [Observation Execution: `ObservationExecution`](#class-observationexecution)",
-        *(["- [Observation Review: `ObservationReview`](#class-observationreview)"] if review_cls else []),
+        "- [Observation Review: `ObservationReview`](#class-observationreview)",
         "- [Public Modules](#public-modules)",
         "",
         "---",
@@ -627,8 +614,9 @@ def generate_wayfindinglib_docs() -> str:
         sections.append("\n---\n")
 
     # 5. ObservationReview
-    if isinstance(review_cls, type):
-        sections.append('<a id="class-observationreview"></a>')
+    sections.append('<a id="class-observationreview"></a>')
+    review_cls = getattr(wayfindinglib, "ObservationReview", None)
+    if review_cls:
         sections.append(
             format_class_markdown(
                 review_cls,

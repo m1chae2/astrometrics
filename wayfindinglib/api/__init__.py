@@ -1,9 +1,10 @@
-"""Purpose: The three sub-APIs of the Wayfinder.
+"""Purpose: The four sub-APIs of the Wayfinder.
 
 Description: `ObservatoryControl` (operate the observatory),
-`ObservationPlanning` (decide what to observe) and
-`ObservationExecution` (run and recover an observing session) live here,
-in `control/`, `planning.py` and `execution.py`. Import them from the
+`ObservationPlanning` (decide what to observe),
+`ObservationExecution` (run and recover an observing session) and
+`ObservationReview` (how the nights went) live here, in `control/`,
+`planning.py`, `execution.py` and `review.py`. Import them from the
 package root, `wayfindinglib`, not from this subpackage; never import
 `wayfindinglib.tasks` or `wayfindinglib.drivers` directly.
 
@@ -20,10 +21,12 @@ if TYPE_CHECKING:
     from wayfindinglib.api.control import ObservatoryControl
     from wayfindinglib.api.execution import ObservationExecution
     from wayfindinglib.api.planning import ObservationPlanning
+    from wayfindinglib.api.review import ObservationReview
 
 __all__ = [
     "ObservationExecution",
     "ObservationPlanning",
+    "ObservationReview",
     "ObservatoryControl",
 ]
 
@@ -50,6 +53,7 @@ def __getattr__(name: str) -> type:
         "ObservatoryControl": "wayfindinglib.api.control",
         "ObservationPlanning": "wayfindinglib.api.planning",
         "ObservationExecution": "wayfindinglib.api.execution",
+        "ObservationReview": "wayfindinglib.api.review",
     }
     if name not in lazy_exports:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -10,7 +10,7 @@ The library has a small public surface. Everything else is private.
 
 | Import from | What it holds |
 | :--- | :--- |
-| `wayfindinglib` (the root, 6 names) | `Wayfinder`, the three sub-API classes `ObservatoryControl`, `ObservationPlanning` and `ObservationExecution`, and the two records `ObservationSession` and `ObservationPackage`. |
+| `wayfindinglib` (the root, 7 names) | `Wayfinder`, the four sub-API classes `ObservatoryControl`, `ObservationPlanning`, `ObservationExecution` and `ObservationReview`, and the two records `ObservationSession` and `ObservationPackage`. |
 | `wayfindinglib.exceptions` | `DelegationPolicyValidationError` and `PlanRevisionConflictError`. The shared categories (`NotFoundError`, `InvalidArgumentError` and the rest) come from `astrometricslib.exceptions`. |
 | `wayfindinglib.reports` | The states and levels that results report: `RunState`, `PackageStatus`, `DepthGoalState` and `DepthLevel`. |
 | `wayfindinglib._internal` | Everything else, in the groups `planning`, `execution`, `review` and `control`. |

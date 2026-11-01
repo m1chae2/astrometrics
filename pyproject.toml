@@ -436,9 +436,6 @@ ignore_imports = [
     "backend.** -> astrometricslib.drivers",
     "backend.** -> wayfindinglib.exceptions",
     "backend.** -> wayfindinglib.reports",
-    # The API reference generator needs the class of `Wayfinder.review` to
-    # resolve that attribute's annotation. The root does not export it.
-    "backend.services.infrastructure.api_doc_generator -> wayfindinglib.api.review",
 ]
 
 [[tool.importlinter.contracts]]

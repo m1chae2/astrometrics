@@ -20,7 +20,7 @@ The user decided these on 2026-10-31.
 
 | Module | Names |
 | :--- | :--- |
-| `wayfindinglib` (root, 6) | `Wayfinder`, `ObservatoryControl`, `ObservationPlanning`, `ObservationExecution`, `ObservationSession`, `ObservationPackage` |
+| `wayfindinglib` (root, 7) | `Wayfinder`, `ObservatoryControl`, `ObservationPlanning`, `ObservationExecution`, `ObservationReview`, `ObservationSession`, `ObservationPackage` |
 | `wayfindinglib.exceptions` (2) | `DelegationPolicyValidationError`, `PlanRevisionConflictError` |
 | `wayfindinglib.reports` (4) | `RunState`, `PackageStatus`, `DepthGoalState`, `DepthLevel` |
 

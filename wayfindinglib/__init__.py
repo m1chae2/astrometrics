@@ -8,10 +8,10 @@ topic: `mount`, `imaging`, `guiding`, `safety`, `equipment` and `remote`.
 
 What to import from where
 -------------------------
-The package root holds 6 names: `Wayfinder`, the three sub-API classes
-(`ObservatoryControl`, `ObservationPlanning` and `ObservationExecution`),
-and the two records a script builds or reads most (`ObservationSession` and
-`ObservationPackage`). The review sub-API is reached as `Wayfinder.review`.
+The package root holds 7 names: `Wayfinder`, the four sub-API classes
+(`ObservatoryControl`, `ObservationPlanning`, `ObservationExecution` and
+`ObservationReview`), and the two records a script builds or reads most
+(`ObservationSession` and `ObservationPackage`).
 Two public modules hold the rest:
 
 - `wayfindinglib.exceptions`: the errors that belong to this library. The
@@ -70,6 +70,7 @@ _LAZY_EXPORTS = {
     "ObservatoryControl": "wayfindinglib.api.control",
     "ObservationPlanning": "wayfindinglib.api.planning",
     "ObservationExecution": "wayfindinglib.api.execution",
+    "ObservationReview": "wayfindinglib.api.review",
     "ObservationPackage": "wayfindinglib.models.planning.observation_package",
     "ObservationSession": "wayfindinglib.models.session.observation_session",
 }
@@ -112,13 +113,6 @@ class Wayfinder:
     The watchdog (`wayfindinglib/watchdog/`) is not built here on
     purpose: it must not be importable by the code it watches.
     """
-
-    # Quoted on purpose: the class is imported for type checking only,
-    # because importing review at package import would load the control
-    # package. The reference generator passes the class in when it reads
-    # the annotation with `typing.get_type_hints`.
-    review: "ObservationReview"  # ruff: ignore[quoted-annotation]
-    """The `review` sub-API. Declared so the API reference finds its class."""
 
     def __init__(
         self,

@@ -21,8 +21,7 @@ def test_wayfinder_initialization() -> None:
 
 def test_wayfinder_composes_the_three_root_function_astrometrics() -> None:
     """Verify Wayfinder composes .control/.planning/.execution interfaces."""
-    from wayfindinglib import ObservationExecution, ObservationPlanning, ObservatoryControl
-    from wayfindinglib.api.review import ObservationReview
+    from wayfindinglib import ObservationExecution, ObservationPlanning, ObservationReview, ObservatoryControl
 
     config = AppConfiguration()
     wayfinder = Wayfinder(config)

@@ -1,4 +1,4 @@
-"""Purpose: Pin the public surface of wayfindinglib and its three sub-APIs.
+"""Purpose: Pin the public surface of wayfindinglib and its four sub-APIs.
 
 Description: `wayfindinglib/__init__.py` is the only door into this library
 that code outside it should use. `Wayfinder.control` is split into a root
@@ -21,15 +21,15 @@ from pydantic import ValidationError
 import wayfindinglib
 from astrometricslib import AppConfiguration
 from astrometricslib.exceptions import ExternalServiceError, InvalidArgumentError, NotFoundError
-from wayfindinglib import ObservationExecution, ObservationPlanning, ObservatoryControl
+from wayfindinglib import ObservationExecution, ObservationPlanning, ObservationReview, ObservatoryControl
 from wayfindinglib._internal.control import SkyPosition
-from wayfindinglib.api.review import ObservationReview
 from wayfindinglib.drivers.butler import DiskButler
 
 EXPECTED_EXPORTS = frozenset({
     "ObservationExecution",
     "ObservationPackage",
     "ObservationPlanning",
+    "ObservationReview",
     "ObservationSession",
     "ObservatoryControl",
     "Wayfinder",

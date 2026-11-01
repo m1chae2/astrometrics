@@ -506,7 +506,21 @@
       "interim_block": "",
       "note": "The AI is read-only, so a tool that writes is not offered."
     },
-    "planning_create_plan": {
+    "planning_create_package": {
+      "tool_class": "change-data",
+      "category": "planning-sessions",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "The AI is read-only, so a tool that writes is not offered."
+    },
+    "planning_create_sequence": {
+      "tool_class": "change-data",
+      "category": "planning-sessions",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "The AI is read-only, so a tool that writes is not offered."
+    },
+    "planning_create_session": {
       "tool_class": "change-data",
       "category": "planning-sessions",
       "disposition": "withhold",

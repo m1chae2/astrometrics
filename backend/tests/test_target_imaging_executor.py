@@ -225,7 +225,7 @@ def test_reading_the_queue_never_creates_a_session(tmp_path: Path) -> None:
     assert service.remove_from_queue("entry") is False
     assert service.reorder(["entry"]) is False
     assert service.modify_queue_item("entry", _sequence()) is False
-    planning.create_plan.assert_not_called()
+    planning.create_session.assert_not_called()
     assert planning.get_plan.call_args.kwargs["night_id"]
 
 
@@ -238,11 +238,13 @@ def test_the_session_is_asked_for_by_night_each_time(monkeypatch: pytest.MonkeyP
         lambda timestamp: next(nights),
     )
     service = TargetImagingExecutor(wayfinder=SimpleNamespace(planning=planning, execution=None))
-    planning.create_plan.side_effect = lambda kind, **arguments: SimpleNamespace(id=arguments["night_id"])
+    planning.create_session.side_effect = lambda **arguments: SimpleNamespace(
+        id=arguments["observing_night_id"]
+    )
 
     assert service._session().id == "2026-10-24"
     assert service._session().id == "2026-10-25"
-    assert [call.kwargs["night_id"] for call in planning.create_plan.call_args_list] == [
+    assert [call.kwargs["observing_night_id"] for call in planning.create_session.call_args_list] == [
         "2026-10-24",
         "2026-10-25",
     ]

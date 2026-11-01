@@ -399,8 +399,8 @@ def night_session(fixture: Fixture, offset_days: int = 0) -> ObservationSession:
         The session.
     """
     night = (current_night(NOW) + timedelta(days=offset_days)).isoformat()
-    return fixture.planning.create_plan(
-        "empty_session", site_profile=_site(), telescope=_telescope(), camera_id="cam1", night_id=night
+    return fixture.planning.create_session(
+        site_profile=_site(), telescope=_telescope(), camera_id="cam1", observing_night_id=night
     )
 
 
@@ -754,7 +754,7 @@ def test_dismiss_is_refused_for_a_planned_package_and_mixed_arguments(fixture: F
     """Only a suggestion can be dismissed, and not with a change."""
     from astrometricslib import ConflictError
 
-    package = fixture.planning.create_plan("package", target="M 81")
+    package = fixture.planning.create_package(target="M 81")
     with pytest.raises(ConflictError):
         fixture.planning.edit_package(package.id, dismiss=True)
     with pytest.raises(InvalidArgumentError):
@@ -840,7 +840,7 @@ def test_a_failed_ranking_leaves_ranking_suggestions_alone(fixture: Fixture) -> 
 
 def test_ranking_skips_a_target_already_queued_tonight_and_a_held_key(fixture: Fixture) -> None:
     """A queued target or a held key is not suggested."""
-    held = fixture.planning.create_plan("package", target="M 81")
+    held = fixture.planning.create_package(target="M 81")
     session = night_session(fixture)
     fixture.planning.edit_queue(session.id, add=[{"package_id": held.id}])
     fixture.ranking = ranking("M 81", "M 13")
@@ -912,8 +912,7 @@ def _planned_package_in_session(
     package, session : `ObservationPackage`, `ObservationSession`
         The package and its session.
     """
-    package = fixture.planning.create_plan(
-        "package",
+    package = fixture.planning.create_package(
         target="M 81",
         exposure_requests=[
             ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.L, exposure_sec=60.0, count=count)
@@ -966,8 +965,7 @@ def test_an_unreadable_target_does_not_revert_a_complete_package(fixture: Fixtur
 
 def test_a_package_added_to_a_later_session_asks_only_for_missing_frames(fixture: Fixture) -> None:
     """Carry-over drops met rows and keeps the missing count."""
-    package = fixture.planning.create_plan(
-        "package",
+    package = fixture.planning.create_package(
         target="M 81",
         exposure_requests=[
             ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.L, exposure_sec=60.0, count=10),
@@ -999,7 +997,7 @@ def test_a_package_with_nothing_captured_keeps_all_its_rows_in_a_session(fixture
 
 def test_edit_package_sets_the_framing(fixture: Fixture) -> None:
     """Edit_package stores the framing the Planetarium sends."""
-    package = fixture.planning.create_plan("package", target="M 81")
+    package = fixture.planning.create_package(target="M 81")
     edited = fixture.planning.edit_package(
         package.id, framing={"center_ra_deg": 148.9, "center_dec_deg": 69.1, "rotation_deg": 12.0}
     )
@@ -1013,8 +1011,7 @@ def test_a_new_row_starts_counting_now_and_an_unchanged_row_keeps_its_time(
     fixture: Fixture, clock: Clock
 ) -> None:
     """A changed row restarts its counting time; a new count does not."""
-    package = fixture.planning.create_plan(
-        "package",
+    package = fixture.planning.create_package(
         target="M 81",
         exposure_requests=[
             ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.L, exposure_sec=60.0, count=5)
@@ -1049,8 +1046,7 @@ def test_reopen_stores_a_baseline_so_old_frames_do_not_complete_it_again(fixture
 
 def test_reopen_with_no_session_counts_from_now(fixture: Fixture, clock: Clock) -> None:
     """A package in no session reopens with rows counting from now."""
-    package = fixture.planning.create_plan(
-        "package",
+    package = fixture.planning.create_package(
         target="M 81",
         exposure_requests=[
             ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.L, exposure_sec=60.0, count=3)
@@ -1086,8 +1082,7 @@ def test_get_plan_can_include_the_card_progress(fixture: Fixture) -> None:
 def test_the_session_list_can_include_the_run_state_including_not_run(fixture: Fixture) -> None:
     """A past night that never ran reads "not run" in the session list."""
     past = night_session(fixture, offset_days=-3)
-    package = fixture.planning.create_plan(
-        "package",
+    package = fixture.planning.create_package(
         target="M 81",
         exposure_requests=[
             ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.L, exposure_sec=60.0, count=4)
@@ -1130,7 +1125,7 @@ def test_pick_one_gives_the_planned_package_else_the_suggested_one(fixture: Fixt
     fixture.planning.edit_package(suggestion.id, dismiss=True)
     assert pick("M 81") is None
     fixture.planning.edit_package(suggestion.id, undismiss=True)
-    planned = fixture.planning.create_plan("package", target="M 81")
+    planned = fixture.planning.create_package(target="M 81")
     assert pick("M 81").id == planned.id
     with pytest.raises(InvalidArgumentError):
         fixture.planning.get_plan(kind="packages", pick="one")
@@ -1157,7 +1152,7 @@ def test_the_judgments_helper_is_used_by_the_reader() -> None:
 def test_a_conditional_delete_checks_the_status_and_the_revision(fixture: Fixture) -> None:
     """A conditional delete checks the status and the revision."""
     butler = fixture.planning._butler
-    package = fixture.planning.create_plan("package", target="M 81")
+    package = fixture.planning.create_package(target="M 81")
     assert not butler.delete_package(package.id, only_status="SUGGESTED")
     assert not butler.delete_package(package.id, expected_revision=4)
     assert butler.delete_package(package.id, expected_revision=0, only_status="PLANNED")

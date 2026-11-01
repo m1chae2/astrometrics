@@ -3,16 +3,17 @@
 Description: `Wayfinder.planning` is an `ObservationPlanning`. It answers
 where objects are in the sky (`get_visibility`), advises on targets and
 calibration frames (`get_advisory`), lays out mosaics
-(`calculate_panels`, `create_mosaic`), writes plans (`create_plan`,
-`edit_queue`, `edit_package`, `tick_checklist_item`) and reads them back
+(`calculate_panels`, `create_mosaic`), writes plans (`create_sequence`,
+`create_package`, `create_session`, `edit_queue`, `edit_package`,
+`tick_checklist_item`) and reads them back
 (`get_plan`). `refresh_suggestions` keeps the library's suggested
 observation packages up to date and marks finished packages complete. It
 also browses the library and online catalogs around a point in the sky and
 reports on the downloaded deep-star catalog.
 
-Planning never talks to hardware. A plan made by hand (`create_plan`
-with ``kind="empty_session"``, then `edit_queue`) and a plan placed
-automatically (``kind="scheduled_session"``) write the same queue
+Planning never talks to hardware. A plan made by hand (`create_session`
+with no `requests`, then `edit_queue`) and a plan placed
+automatically (`create_session` with `requests`) write the same queue
 structure, so `ObservationExecution` runs either one.
 
 Each method checks its arguments and hands the work to a function under
@@ -129,34 +130,6 @@ ADVISORY_ARGUMENTS = {
     "result": ("target", "object_id"),
 }
 """The arguments each advisory kind uses."""
-
-PlanKind = Literal["sequence", "package", "empty_session", "scheduled_session"]
-"""The kinds of plan `ObservationPlanning.create_plan` writes."""
-
-PLAN_ARGUMENTS = {
-    "sequence": ("target", "plan_items"),
-    "package": (
-        "target",
-        "exposure_requests",
-        "plan_items",
-        "dither_config",
-        "minimum_altitude_deg",
-        "priority",
-        "quality_weighting_enabled",
-        "notes",
-    ),
-    "empty_session": ("site_profile", "telescope", "camera_id", "night_id"),
-    "scheduled_session": ("requests", "site_profile", "telescope", "camera_id", "night_id"),
-}
-"""The arguments each plan kind uses."""
-
-PLAN_REQUIRED_ARGUMENTS = {
-    "sequence": ("target", "plan_items"),
-    "package": ("target",),
-    "empty_session": ("night_id",),
-    "scheduled_session": ("requests", "site_profile", "telescope", "camera_id", "night_id"),
-}
-"""The arguments each plan kind cannot do without."""
 
 PlanListKind = Literal["sessions", "packages", "suggestion_log"]
 """What `ObservationPlanning.get_plan` lists."""
@@ -1049,169 +1022,181 @@ class ObservationPlanning:
 
     # -- Plans and queues --------------------------------------------------
 
-    def create_plan(
+    def create_sequence(self, target: str | Target, plan_items: list[dict[str, Any]]) -> SequencePlan:
+        """Build a sequence plan for the app's sequencer queue.
+
+        Nothing is stored.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target, by id or as a `Target`.
+        plan_items : `list` [`dict`]
+            The sequence items, each with ``count``, ``exposure`` (seconds)
+            and ``filter``.
+
+        Returns
+        -------
+        plan : `SequencePlan`
+            The plan for the target.
+        """
+        from wayfindinglib.tasks.planning_tasks.planning_operations import build_sequence_plan
+
+        return build_sequence_plan(self._target(target).id, plan_items)
+
+    def create_package(
         self,
-        kind: PlanKind,
-        target: str | Target | None = None,
+        target: str | Target,
+        exposure_requests: list[ExposureRequest | dict[str, Any]] | None = None,
         plan_items: list[dict[str, Any]] | None = None,
-        exposure_requests: list[ExposureRequest] | None = None,
-        dither_config: DitherConfig | None = None,
+        dither_config: DitherConfig | dict[str, Any] | None = None,
         minimum_altitude_deg: float | None = None,
         priority: int | None = None,
         quality_weighting_enabled: bool | None = None,
         notes: str | None = None,
-        requests: list[QueueRequest] | None = None,
-        site_profile: SiteProfile | None = None,
-        telescope: Telescope | None = None,
-        camera_id: str | None = None,
-        night_id: str | None = None,
-    ) -> SequencePlan | ObservationPackage | ObservationSession:
-        """Write a plan: a sequence, a package, or an observing session.
+    ) -> ObservationPackage:
+        """Record a reusable imaging request for a target.
 
         Parameters
         ----------
-        kind : `str`
-            ``"sequence"``: a sequence plan for the app's sequencer queue,
-            from `target` and `plan_items`. Nothing is stored.
-            ``"package"``: a reusable imaging request for `target`, from
-            `exposure_requests` (or the sequence items `plan_items`) and
-            the optional `dither_config`, `minimum_altitude_deg`,
-            `priority`, `quality_weighting_enabled` and `notes`. Recorded.
-            ``"empty_session"``: an observing session with an empty queue
-            for the night `night_id`, to fill by hand with `edit_queue`.
-            Uses `site_profile`, `telescope` and `camera_id`, which
-            default to the recorded site and the active telescope and
-            camera. Recorded.
-            ``"scheduled_session"``: an observing session for the night
-            `night_id` with every package in `requests` placed
-            automatically, using `site_profile`, `telescope` and
-            `camera_id`. Packages that cannot be placed are listed with
-            the reason. No device is contacted. Recorded.
-        target : `str` or `Target`, optional
+        target : `str` or `Target`
             The target, by id or as a `Target`.
+        exposure_requests : `list` [`dict`], optional
+            The exposures the package asks for. Each is a dictionary with
+            ``frame_type``, ``exposure_sec`` and ``count``, and optionally a
+            filter, gain setting, offset and binning. The library checks
+            them. Leave out for a package with none.
         plan_items : `list` [`dict`], optional
-            Sequence items, each with ``count``, ``exposure`` (seconds)
-            and ``filter``, and for a package an optional frame ``type``
-            (``LIGHT`` by default).
-        exposure_requests : `list` [`ExposureRequest`], optional
-            The exposures a package asks for.
-        dither_config : `DitherConfig`, optional
-            How a package dithers.
+            The exposures as sequence items (``count``, ``exposure``,
+            ``filter`` and an optional frame ``type``, ``LIGHT`` by
+            default), instead of `exposure_requests`.
+        dither_config : `dict`, optional
+            How the package dithers.
         minimum_altitude_deg : `float`, optional
-            The lowest altitude a package may be imaged at.
+            The lowest altitude the package may be imaged at.
         priority : `int`, optional
-            A package's priority; higher is placed first. Defaults to 0.
+            The package's priority; higher is placed first. Defaults to 0.
         quality_weighting_enabled : `bool`, optional
-            Let the target's dataset report raise the package's
-            priority during automatic placement. Defaults to `False`.
+            Let the target's dataset report raise the package's priority
+            during automatic placement. Defaults to `False`.
         notes : `str`, optional
-            Free text kept with a package.
-        requests : `list` [`QueueRequest`], optional
-            The recorded packages to place, each with its start mode.
-        site_profile : `SiteProfile`, optional
-            The observing site.
-        telescope : `Telescope`, optional
-            The telescope, whose pointing limits the placement respects.
-        camera_id : `str`, optional
-            The camera, recorded on the session.
-        night_id : `str`, optional
-            The observing night, named for the local date on which it
-            began, such as ``"2026-09-24"``.
+            Free text kept with the package.
 
         Returns
         -------
-        plan : `SequencePlan`, `ObservationPackage` or `ObservationSession`
-            The plan for the chosen kind.
+        package : `ObservationPackage`
+            The recorded package.
 
         Raises
         ------
         InvalidArgumentError
-            If `kind` is unknown, an argument the kind does not use is
-            given, or a required argument is missing.
+            If both `exposure_requests` and `plan_items` are given, or a
+            value is malformed.
         NotFoundError
-            If a package's target is neither in the library nor known to
-            the catalog. A catalog name that is not in the library yet is
-            added to the library, with its position, before the package
-            is recorded.
+            If the target is neither in the library nor known to the
+            catalog. A catalog name that is not in the library yet is added
+            to the library, with its position, before the package is
+            recorded.
         """
-        check_choice("kind", kind, tuple(PLAN_ARGUMENTS))
-        arguments = {
-            "target": target,
-            "plan_items": plan_items,
-            "exposure_requests": exposure_requests,
-            "dither_config": dither_config,
-            "minimum_altitude_deg": minimum_altitude_deg,
-            "priority": priority,
-            "quality_weighting_enabled": quality_weighting_enabled,
-            "notes": notes,
-            "requests": requests,
-            "site_profile": site_profile,
-            "telescope": telescope,
-            "camera_id": camera_id,
-            "night_id": night_id,
-        }
-        reject_unused_arguments(
-            kind, PLAN_ARGUMENTS, {name: value is not None for name, value in arguments.items()}
-        )
-        missing = [name for name in PLAN_REQUIRED_ARGUMENTS[kind] if arguments[name] is None]
-        if missing:
-            raise InvalidArgumentError(
-                f"kind={kind!r} needs: {', '.join(missing)}.", details={"missing": missing}
-            )
+        from wayfindinglib.tasks.planning_tasks.planning_operations import exposure_requests_from_items
 
-        if kind == "sequence":
-            from wayfindinglib.tasks.planning_tasks.planning_operations import build_sequence_plan
-
-            return build_sequence_plan(self._target(target).id, plan_items)
-        if kind == "package":
-            from wayfindinglib.tasks.planning_tasks.planning_operations import exposure_requests_from_items
-
-            if exposure_requests is not None and plan_items is not None:
-                raise InvalidArgumentError("kind='package' takes exposure_requests or plan_items, not both.")
+        if exposure_requests is not None and plan_items is not None:
+            raise InvalidArgumentError("Give exposure_requests or plan_items, not both.")
+        try:
+            resolved = self._target(target)
+        except NotFoundError:
+            # Not in the library: make it from the catalog, with its
+            # position. `create` raises NotFoundError when the catalog
+            # does not know the name.
             try:
-                resolved = self._target(target)
-            except NotFoundError:
-                # Not in the library: make it from the catalog, with its
-                # position. `create` raises NotFoundError when the catalog
-                # does not know the name.
-                try:
-                    resolved = self._astrometrics.targets.create(target, from_catalog=True)
-                except NotFoundError as error:
-                    raise NotFoundError(
-                        f"No target '{target}' in the library or the catalog: {error}"
-                    ) from error
-            if plan_items is not None:
-                requests_for_package = exposure_requests_from_items(plan_items)
-            else:
-                # No exposures is allowed: "New package" and the
-                # Planetarium's "Add" start empty.
-                requests_for_package = list(exposure_requests or [])
-            # Frames count toward a row only from its last update, so a new
-            # row starts counting now.
-            moment = _utc_now()
-            requests_for_package = [
-                row if row.counted_from is not None else row.model_copy(update={"counted_from": moment})
-                for row in requests_for_package
-            ]
+                resolved = self._astrometrics.targets.create(target, from_catalog=True)
+            except NotFoundError as error:
+                raise NotFoundError(f"No target '{target}' in the library or the catalog: {error}") from error
+        if plan_items is not None:
+            requests_for_package = exposure_requests_from_items(plan_items)
+        else:
+            # No exposures is allowed: "New package" and the
+            # Planetarium's "Add" start empty.
+            requests_for_package = list(exposure_requests or [])
+        # Frames count toward a row only from its last update, so a new
+        # row starts counting now.
+        moment = _utc_now()
+        try:
+            checked_rows = [ExposureRequest.model_validate(item) for item in requests_for_package]
             package = ObservationPackage(
                 id=str(uuid.uuid4()),
                 name=resolved.id,
                 target_id=resolved.id,
-                exposure_requests=requests_for_package,
-                dither_config=dither_config,
+                exposure_requests=[
+                    row if row.counted_from is not None else row.model_copy(update={"counted_from": moment})
+                    for row in checked_rows
+                ],
+                dither_config=None if dither_config is None else DitherConfig.model_validate(dither_config),
                 minimum_altitude_deg=minimum_altitude_deg,
                 priority=priority or 0,
                 quality_weighting_enabled=bool(quality_weighting_enabled),
                 notes=notes or "",
             )
-            self._butler.put(package, "observation_package", {"id": package.id})
-            return package
-        if kind == "empty_session":
-            night = _night_date(night_id)
+        except ValidationError as error:
+            raise InvalidArgumentError(
+                "A package value is not valid.", details={"error": str(error)}
+            ) from error
+        self._butler.put(package, "observation_package", {"id": package.id})
+        return package
+
+    def create_session(
+        self,
+        observing_night_id: str,
+        requests: list[QueueRequest | dict[str, Any]] | None = None,
+        site_profile: SiteProfile | dict[str, Any] | None = None,
+        telescope: Telescope | dict[str, Any] | None = None,
+        camera_id: str | None = None,
+    ) -> ObservationSession:
+        """Record an observing session for one night.
+
+        With no `requests` the session starts with an empty queue, to fill
+        by hand with `add_to_queue`. With `requests`, every package in them
+        is placed automatically, and the packages that cannot be placed are
+        listed with the reason. No device is contacted. A night that already
+        has an empty session gets that session back. A night that already
+        has a session gets the new placement written into it. An
+        `InvalidArgumentError` says the night is not a date or a value is
+        malformed. A `ConflictError` says an entry of the night's session
+        has already started.
+
+        Parameters
+        ----------
+        observing_night_id : `str`
+            The observing night, named for the local date on which it
+            began, such as ``"2026-09-24"``.
+        requests : `list` [`dict`], optional
+            The recorded packages to place, each a dictionary with a
+            ``package_id`` and its start mode.
+        site_profile : `dict`, optional
+            The observing site. Defaults to the recorded site.
+        telescope : `dict`, optional
+            The telescope, whose pointing limits the placement respects.
+            Defaults to the active telescope.
+        camera_id : `str`, optional
+            The camera, recorded on the session. Defaults to the active
+            camera.
+
+        Returns
+        -------
+        session : `ObservationSession`
+            The recorded session.
+        """
+        night = _night_date(observing_night_id)
+        if site_profile is not None:
+            site_profile = SiteProfile.model_validate(site_profile)
+        if telescope is not None:
+            telescope = Telescope.model_validate(telescope)
+        if requests is None:
             existing = self._session_for_night(night)
             if existing is not None:
                 return existing
-            site_profile, telescope, camera_id = self._session_equipment(site_profile, telescope, camera_id)
+        site_profile, telescope, camera_id = self._session_equipment(site_profile, telescope, camera_id)
+        if requests is None:
             session = ObservationSession(
                 id=str(uuid.uuid4()),
                 night_date=night,
@@ -1223,7 +1208,6 @@ class ObservationPlanning:
             # Check and insert in one transaction: a second caller gets
             # this session back.
             return self._butler.insert_session_for_night(session)
-        night = _night_date(night_id)
         placed = self._schedule_session(requests, site_profile, telescope, camera_id, night)
         existing = self._session_for_night(night)
         if existing is None:
@@ -1693,10 +1677,10 @@ class ObservationPlanning:
     ) -> ObservationPackage:
         """Change, reopen, dismiss or delete one observation package.
 
-        Values are checked the same way `create_plan` with ``kind="package"``
-        checks them. A change counts as one write and adds one to the
-        package's revision. A value left out (`None`) is not changed, so
-        this call cannot clear the dither or the altitude limit.
+        Values are checked the same way `create_package` checks them. A
+        change counts as one write and adds one to the package's revision.
+        A value left out (`None`) is not changed, so this call cannot clear
+        the dither or the altitude limit.
 
         A new or changed exposure row starts counting frames from now. A row
         whose frame type, filter, length, gain, offset and binning are the

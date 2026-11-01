@@ -1,7 +1,7 @@
 """Purpose: Place observation packages into one observing night.
 
 Description: `schedule_session` does the work behind
-`ObservationPlanning.create_plan(kind="scheduled_session")` in seven
+`ObservationPlanning.create_session` (with `requests`) in seven
 steps: work out the night window, split the packages into fixed-time and
 "as soon as possible" ones, place the fixed-time ones, raise the priority
 of packages whose target report asks for it, place the rest greedily

@@ -154,7 +154,7 @@ def test_current_session_reads_tonights_night_and_creates_nothing(
     assert service.current_session() is None
 
     planning.get_plan.assert_called_once_with(night_id="2026-10-24", include=["progress"])
-    planning.create_plan.assert_not_called()
+    planning.create_session.assert_not_called()
     assert sockets.events == []
 
 
@@ -174,14 +174,13 @@ def test_current_session_returns_the_session(
 def test_creating_a_package_with_no_exposures_announces_it(setup: tuple[Any, _Sockets, PlanService]) -> None:
     """A package needs only a target name; its creation is announced."""
     planning, sockets, service = setup
-    planning.create_plan.return_value = _package(revision=0)
+    planning.create_package.return_value = _package(revision=0)
 
     result = service.create_package("M 81")
 
     assert result.id == "pkg-1"
-    planning.create_plan.assert_called_once()
-    arguments = planning.create_plan.call_args.kwargs
-    assert arguments["kind"] == "package"
+    planning.create_package.assert_called_once()
+    arguments = planning.create_package.call_args.kwargs
     assert arguments["target"] == "M 81"
     assert arguments["exposure_requests"] is None
     assert sockets.events == [
@@ -189,21 +188,17 @@ def test_creating_a_package_with_no_exposures_announces_it(setup: tuple[Any, _So
     ]
 
 
-def test_creating_a_package_turns_exposure_dicts_into_requests(
+def test_creating_a_package_passes_exposure_dicts_to_the_library(
     setup: tuple[Any, _Sockets, PlanService],
 ) -> None:
-    """Exposure dictionaries become the library's `ExposureRequest`."""
+    """Exposure dictionaries go to the library, which checks them."""
     planning, _, service = setup
-    planning.create_plan.return_value = _package(revision=0)
+    planning.create_package.return_value = _package(revision=0)
+    row = {"frame_type": "LIGHT", "filter": "Ha", "exposure_sec": 60, "count": 3}
 
-    service.create_package(
-        "M 81",
-        exposure_requests=[{"frame_type": "LIGHT", "filter": "Ha", "exposure_sec": 60, "count": 3}],
-    )
+    service.create_package("M 81", exposure_requests=[row])
 
-    (request,) = planning.create_plan.call_args.kwargs["exposure_requests"]
-    assert request.count == 3
-    assert request.exposure_sec == 60
+    assert planning.create_package.call_args.kwargs["exposure_requests"] == [row]
 
 
 def test_creating_a_session_still_asks_for_the_empty_session(
@@ -211,11 +206,11 @@ def test_creating_a_session_still_asks_for_the_empty_session(
 ) -> None:
     """The default kind is the night's session; no package event is sent."""
     planning, sockets, service = setup
-    planning.create_plan.return_value = _session()
+    planning.create_session.return_value = _session()
 
     service.create_plan(night_id="2026-10-24")
 
-    planning.create_plan.assert_called_once_with(kind="empty_session", night_id="2026-10-24")
+    planning.create_session.assert_called_once_with(observing_night_id="2026-10-24")
     assert sockets.events == []
 
 

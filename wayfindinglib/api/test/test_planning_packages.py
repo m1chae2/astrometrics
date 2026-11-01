@@ -75,8 +75,8 @@ def _night_session(planning: ObservationPlanning, night: str = "2026-08-10") -> 
     session : `ObservationSession`
         The night's session.
     """
-    return planning.create_plan(
-        "empty_session", site_profile=_site(), telescope=_telescope(), camera_id="c1", night_id=night
+    return planning.create_session(
+        site_profile=_site(), telescope=_telescope(), camera_id="c1", observing_night_id=night
     )
 
 
@@ -113,7 +113,7 @@ def test_a_suggestion_keeps_its_source_fields() -> None:
 def test_a_package_can_have_no_exposures(isolated_butler: DiskButler) -> None:
     """An empty package is recorded for a library target."""
     planning = _planning_with_targets(isolated_butler)
-    package = planning.create_plan("package", target="M 81")
+    package = planning.create_package(target="M 81")
     assert package.exposure_requests == []
     assert isolated_butler.get("observation_package", {"id": package.id}) is not None
 
@@ -121,7 +121,7 @@ def test_a_package_can_have_no_exposures(isolated_butler: DiskButler) -> None:
 def test_a_package_for_a_catalog_target_creates_the_target(isolated_butler: DiskButler) -> None:
     """A target missing from the library is created from the catalog first."""
     planning = _planning_with_targets(isolated_butler)
-    package = planning.create_plan("package", target="NGC 7331")
+    package = planning.create_package(target="NGC 7331")
     assert package.target_id == "NGC 7331"
     assert planning._astrometrics.targets.created == ["NGC 7331"]
     assert planning._astrometrics.targets.get("NGC 7331").ra == "01h 02m 03s"
@@ -131,7 +131,7 @@ def test_a_package_for_a_catalog_target_creates_the_target(isolated_butler: Disk
 def test_a_package_for_a_library_target_creates_nothing(isolated_butler: DiskButler) -> None:
     """A target already in the library is reused, with no catalog lookup."""
     planning = _planning_with_targets(isolated_butler)
-    planning.create_plan("package", target="M 81")
+    planning.create_package(target="M 81")
     assert planning._astrometrics.targets.created == []
 
 
@@ -139,7 +139,7 @@ def test_a_package_for_a_name_the_catalog_does_not_know_is_refused(isolated_butl
     """A name that is in neither the library nor the catalog is refused."""
     planning = _planning_with_targets(isolated_butler)
     with pytest.raises(NotFoundError, match="does not know"):
-        planning.create_plan("package", target="NGC 9999")
+        planning.create_package(target="NGC 9999")
     assert planning._astrometrics.targets.get("NGC 9999") is None
 
 
@@ -281,13 +281,12 @@ def test_a_scheduled_session_replaces_the_placement_in_the_nights_session(
     planning = _planning_with_targets(isolated_butler)
     existing = _night_session(planning)
     package = _package(planning)
-    scheduled = planning.create_plan(
-        "scheduled_session",
+    scheduled = planning.create_session(
         requests=[QueueRequest(package_id=package.id)],
         site_profile=_site(),
         telescope=_telescope(),
         camera_id="c1",
-        night_id="2026-08-10",
+        observing_night_id="2026-08-10",
     )
     assert scheduled.id == existing.id
     assert scheduled.revision == existing.revision + 1
@@ -299,8 +298,7 @@ def test_adding_a_suggested_package_to_a_queue_promotes_it(isolated_butler: Disk
     """A suggested package becomes planned when queued."""
     planning = _planning_with_targets(isolated_butler)
     session = _night_session(planning)
-    package = planning.create_plan(
-        "package",
+    package = planning.create_package(
         target="M 81",
         exposure_requests=[ExposureRequest(frame_type=FrameType.LIGHT, exposure_sec=60.0, count=2)],
     )

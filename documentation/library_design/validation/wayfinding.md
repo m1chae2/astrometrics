@@ -426,7 +426,7 @@ Every Python example assumes the library is installed and configured with your o
 - **Status:** Partly measured. Tested on made-up sessions, on a session JSON rewritten to the old shape, and on a stale write. It has not been run with two real app windows.
 - **Data you need:** A night plan with at least one queue entry.
 - **Procedure:**
-  1. Create an empty plan with `create_plan`, then change it with `edit_queue(..., expected_revision=0)`.
+  1. Create an empty plan with `create_session`, then change it with `edit_queue(..., expected_revision=0)`.
   2. Repeat the same call with `expected_revision=0`. It must raise `PlanRevisionConflictError`, whose details name revision 1.
   3. Read the plan with `get_plan` and check the revision is 1.
 

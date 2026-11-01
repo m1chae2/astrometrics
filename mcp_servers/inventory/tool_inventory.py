@@ -250,10 +250,16 @@ CLASSIFICATION_RULES = (
         "Builds or stores catalog or plan data.",
     ),
     _rule(
-        r"^planning_create_plan$",
+        r"^planning_create_(package|session)$",
         "change-data",
         "high",
-        "Records packages and sessions. Only kind=sequence writes nothing.",
+        "Records packages and sessions.",
+    ),
+    _rule(
+        r"^planning_create_sequence$",
+        "change-data",
+        "high",
+        "Builds a sequence plan and writes nothing.",
     ),
     _rule(
         r"^observatory_(safety_apply_promotion_decision|equipment_set_active_.+)$",

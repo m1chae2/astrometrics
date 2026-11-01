@@ -44,7 +44,7 @@ def test_wayfinder_planning() -> None:
 
     # 2. Test create sequence plan
     plan_items = [{"count": 10, "exposure": 60.0, "filter": "SPEC", "duration": 600.0}]
-    plan = wayfinder.planning.create_plan("sequence", target=Target(id="M 13"), plan_items=plan_items)
+    plan = wayfinder.planning.create_sequence(target=Target(id="M 13"), plan_items=plan_items)
     assert plan.target_name == "M 13"
     assert len(plan.items) == 1
 

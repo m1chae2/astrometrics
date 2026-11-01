@@ -101,6 +101,10 @@ Done on the same branch. No old name is kept as an alias. The MCP tool of each c
 | `planning.get_library_star_summaries(ra_deg, dec_deg, radius_deg, magnitude_range=)` | `planning.query_sources(..., source=["stars"], magnitude_min=, magnitude_max=)` |
 | `planning.get_online_catalog_sources(ra_deg, dec_deg, radius_deg, enabled_driver_names, magnitude_limit=)` | `planning.query_sources(..., source=["catalogs"], catalog_drivers=[...], magnitude_max=)` |
 | `planning.get_imaged_field_centers()` | Removed. Use `astrometrics.targets.imaged_field_centers().centers`, a list of `FieldCenter` (read `center.right_ascension_deg`, not `center["right_ascension_deg"]`). The MCP tool `planning_get_imaged_field_centers` was already withheld; `target_imaged_field_centers` stays |
+| `planning.create_plan("sequence", target=, plan_items=)` | `planning.create_sequence(target, plan_items)` |
+| `planning.create_plan("package", target=, exposure_requests=, plan_items=, dither_config=, minimum_altitude_deg=, priority=, quality_weighting_enabled=, notes=)` | `planning.create_package(target, exposure_requests=, plan_items=, dither_config=, minimum_altitude_deg=, priority=, quality_weighting_enabled=, notes=)`. Exposure rows and the dither setting are plain dictionaries, checked by the library. A bad row raises `InvalidArgumentError` |
+| `planning.create_plan("empty_session", night_id=)` | `planning.create_session(observing_night_id)` |
+| `planning.create_plan("scheduled_session", requests=, site_profile=, telescope=, camera_id=, night_id=)` | `planning.create_session(observing_night_id, requests=[...], site_profile=, telescope=, camera_id=)`. `requests` is now what makes the session scheduled. `site_profile`, `telescope` and `camera_id` are optional here too (the recorded site and the active telescope and camera) |
 
 ### Planning parameters
 

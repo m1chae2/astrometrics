@@ -67,7 +67,7 @@ class TargetImagingExecutor:
         session : `ObservationSession`
             The session whose queue the sequencer shows.
         """
-        return self._wayfinder.planning.create_plan("empty_session", night_id=observing_night_id(time.time()))
+        return self._wayfinder.planning.create_session(observing_night_id=observing_night_id(time.time()))
 
     def _existing_session(self) -> ObservationSession | None:
         """Return tonight's session if it exists, without creating one.
@@ -226,7 +226,7 @@ class TargetImagingExecutor:
         plan : `SequencePlan`
             The sequence plan from the wayfinding library's planning.
         """
-        return self._wayfinder.planning.create_plan("sequence", target=target_name, plan_items=items)
+        return self._wayfinder.planning.create_sequence(target=target_name, plan_items=items)
 
     def get_queue(self) -> list[dict[str, Any]]:
         """Return the queue as the sequences the app shows.

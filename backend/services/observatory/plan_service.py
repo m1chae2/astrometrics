@@ -38,7 +38,7 @@ from datetime import datetime
 from typing import Any
 
 from astrometricslib import InvalidArgumentError, observing_night_id
-from wayfindinglib import DitherConfig, ExposureRequest, ObservationPackage, PlanChange
+from wayfindinglib import ObservationPackage, PlanChange
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +169,7 @@ class PlanService:
         plan : `ObservationSession`
             The night's session.
         """
-        return self.wayfinder.planning.create_plan(kind="empty_session", night_id=night_id)
+        return self.wayfinder.planning.create_session(observing_night_id=night_id)
 
     def create_package(
         self,
@@ -205,16 +205,11 @@ class PlanService:
         package : `ObservationPackage`
             The stored package.
         """
-        package = self.wayfinder.planning.create_plan(
-            kind="package",
+        package = self.wayfinder.planning.create_package(
             target=target,
             plan_items=plan_items,
-            exposure_requests=(
-                None
-                if exposure_requests is None
-                else [ExposureRequest.model_validate(item) for item in exposure_requests]
-            ),
-            dither_config=None if dither_config is None else DitherConfig.model_validate(dither_config),
+            exposure_requests=exposure_requests,
+            dither_config=dither_config,
             minimum_altitude_deg=minimum_altitude_deg,
             priority=priority,
             notes=notes,

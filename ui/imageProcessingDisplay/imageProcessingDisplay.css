@@ -1465,6 +1465,16 @@
   display: flex;
   align-items: baseline;
   gap: var(--space-2);
+  cursor: pointer;
+}
+
+.stack-summary__title:focus-visible {
+  outline: 2px solid var(--primary-blue, #007acc);
+  outline-offset: 2px;
+}
+
+.stack-summary[open] > .stack-summary__title {
+  margin-bottom: var(--space-2);
 }
 
 .stack-summary__made-at,

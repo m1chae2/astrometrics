@@ -6,7 +6,9 @@
  * stars are against what the input frames predict, any flags, and what happened to
  * each exposure group. The numbers are the ones the stacking step saved with the
  * stack, so nothing is measured again. The panel only reports; it does not rate a
- * stack beyond the flags the stacking step raised.
+ * stack beyond the flags the stacking step raised. The whole block is a disclosure that
+ * is closed at first and shows one line (frames, flags, date), so it does not push the
+ * session frames far down the tab. It remembers nothing between visits.
  */
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -17,6 +19,7 @@ import { PreviewRemakeControl } from './PreviewRemakeControl';
 import { StackComparisonControl } from './StackComparisonControl';
 import { SetAsideFramesList } from './SetAsideFramesList';
 import { formatExposureSeconds } from '../utils/stackFormatting';
+import { describeFlagCount, describeStackFlag } from '../utils/stackFlagMeaning';
 
 /** Which stack to summarize. */
 export type StackSummaryKind = 'imaging' | 'spectral';
@@ -157,11 +160,13 @@ export const StackSummaryPanel: React.FC<StackSummaryPanelProps> = ({
     const madeAtText = Number.isNaN(madeAt.getTime()) ? summary.made_at : madeAt.toLocaleString();
 
     return (
-        <section className="stack-summary" aria-label={`${label} summary`}>
-            <div className="stack-summary__title">
-                <span className="stacked-image-panel__label">{label} summary</span>
-                <span className="stack-summary__made-at">made {madeAtText}</span>
-            </div>
+        <details className="stack-summary">
+            <summary className="stack-summary__title">
+                <span className="stacked-image-panel__label">
+                    {`${label} summary: ${summary.frames_stacked} of ${summary.frames_submitted} frames, `
+                        + `${describeFlagCount(summary.flagged, flagReasons)}, made ${madeAtText}`}
+                </span>
+            </summary>
 
             <dl className="stack-summary__list">
                 <dt>Frames used</dt>
@@ -241,12 +246,35 @@ export const StackSummaryPanel: React.FC<StackSummaryPanelProps> = ({
 
             <div className="stack-summary__flags">
                 <span className="stacked-image-panel__label">Flags:</span>{' '}
-                {summary.flagged && flagReasons.length > 0 ? (
-                    <ul className="stack-summary__flag-list">
-                        {flagReasons.map((reason) => (
-                            <li key={reason} className="stack-summary__flag">{reason}</li>
-                        ))}
-                    </ul>
+                {flagReasons.length > 0 ? (
+                    <>
+                        <span>
+                            {flagReasons.length === 1
+                                ? 'The stacking step raised 1 flag.'
+                                : `The stacking step raised ${flagReasons.length} flags.`}
+                            {' '}A flag is a warning that something may have lowered the quality of the stack.
+                        </span>
+                        <ul className="stack-summary__flag-list">
+                            {flagReasons.map((reason) => {
+                                const meaning = describeStackFlag(reason);
+                                return (
+                                    <li key={reason} className="stack-summary__flag">
+                                        {meaning.known ? (
+                                            <>
+                                                <strong>{meaning.title}.</strong> {meaning.explanation}
+                                                <details className="stack-summary__details">
+                                                    <summary>Show the raw flag</summary>
+                                                    <code>{reason}</code>
+                                                </details>
+                                            </>
+                                        ) : (
+                                            reason
+                                        )}
+                                    </li>
+                                );
+                            })}
+                        </ul>
+                    </>
                 ) : summary.flagged ? (
                     <span className="stack-summary__flag">Flagged (no reason recorded)</span>
                 ) : (
@@ -282,6 +310,6 @@ export const StackSummaryPanel: React.FC<StackSummaryPanelProps> = ({
 
             <StackComparisonControl targetId={targetId} kind={kind} />
             <PreviewRemakeControl targetId={targetId} kind={kind} onShowPicture={onShowPicture} />
-        </section>
+        </details>
     );
 };

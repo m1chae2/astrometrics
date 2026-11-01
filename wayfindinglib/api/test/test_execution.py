@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+from astrometricslib import ConfigurationError
+from wayfindinglib import ObservatoryControl
 from wayfindinglib.api.execution import ObservationExecution
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.policy.device_state import DeviceSummaryState
@@ -114,14 +116,14 @@ def test_execute_meridian_flip_delegates_to_task_function() -> None:
         reacquire_guide_star=lambda: True,
         resume_exposure=lambda: True,
     )
-    outcome = execution.execute_meridian_flip("flip-1", "entry-1", 1.0, steps, CorrectionConfig())
+    outcome = execution._execute_meridian_flip("flip-1", "entry-1", 1.0, steps, CorrectionConfig())
     assert outcome.resumed is True
 
 
 def test_recover_fault_delegates_to_task_function() -> None:
     """Verify recover_fault runs bounded recovery attempts."""
     execution = ObservationExecution()
-    record = execution.recover_fault(
+    record = execution._recover_fault(
         "fault-1",
         "mount-1",
         DeviceSummaryState.FAULT,
@@ -140,7 +142,7 @@ def test_recover_guide_star_loss_delegates_to_task_function() -> None:
     from wayfindinglib.models.session.correction_config import CorrectionConfig
 
     execution = ObservationExecution()
-    event = execution.recover_guide_star_loss(
+    event = execution._recover_guide_star_loss(
         "loss-1",
         "session-1",
         "frame-1",
@@ -172,9 +174,16 @@ def test_record_divergence_delegates_to_task_function() -> None:
 
 def test_create_recorder_binds_the_astrometrics_own_butler(butler: DiskButler) -> None:
     """Verify create_recorder binds the recorder to this interface's butler."""
-    execution = ObservationExecution(butler=butler)
-    recorder = execution.create_recorder(guiding_service=object(), indi_driver=object())
+    control = ObservatoryControl(config=butler.config, butler=butler, driver=object())
+    execution = ObservationExecution(butler=butler, control=control)
+    recorder = execution.create_recorder(guiding_service=object())
     assert recorder._butler is butler
+
+
+def test_create_recorder_needs_the_control(butler: DiskButler) -> None:
+    """Verify create_recorder refuses when no control is given."""
+    with pytest.raises(ConfigurationError):
+        ObservationExecution(butler=butler).create_recorder(guiding_service=object())
 
 
 def test_reconcile_session_delegates_and_persists(butler: DiskButler) -> None:

@@ -135,7 +135,7 @@ class GuidingControl(ControlChild):
 
         hardware_operations.stop_guide_loop(self._context, stop)
 
-    def pulse(self, direction: str, duration_ms: float) -> bool:
+    def _pulse(self, direction: str, duration_ms: float) -> bool:
         """Send one guide pulse to the mount.
 
         Parameters
@@ -173,7 +173,7 @@ class GuidingControl(ControlChild):
 
         return hardware_operations.guide_expose(self._context, exposure_seconds, gain=gain)
 
-    def get_image(self) -> Any:
+    def _get_image(self) -> Any:
         """Return the guide camera's last image.
 
         Returns
@@ -185,7 +185,7 @@ class GuidingControl(ControlChild):
 
         return hardware_operations.guide_image(self._context)
 
-    def drain_external_pulses(self) -> list[dict[str, Any]]:
+    def _drain_external_pulses(self) -> list[dict[str, Any]]:
         """Return and clear the guide pulses another program sent.
 
         Lets this app watch guiding that KStars/Ekos or PHD2 commands
@@ -200,7 +200,7 @@ class GuidingControl(ControlChild):
 
         return hardware_operations.drain_external_pulses(self._context)
 
-    def compute_correction(
+    def _compute_correction(
         self,
         comparison_input_id: str,
         drift_x_px: float,
@@ -253,7 +253,7 @@ class GuidingControl(ControlChild):
             dec_direction_reversal=dec_direction_reversal,
         )
 
-    def run_calibration(
+    def _run_calibration(
         self,
         steps: GuiderCalibrationSteps,
         calibration_id: str,
@@ -294,10 +294,10 @@ class GuidingControl(ControlChild):
             ra_pulse_duration_sec,
             dec_pulse_duration_sec,
         )
-        self.save_calibration(calibration)
+        self._save_calibration(calibration)
         return calibration
 
-    def run_backlash_calibration(
+    def _run_backlash_calibration(
         self,
         steps: BacklashCalibrationSteps,
         settle_direction: str = "north",
@@ -344,7 +344,7 @@ class GuidingControl(ControlChild):
             motion_detection_threshold_px,
         )
 
-    def run_exposure_test(
+    def _run_exposure_test(
         self,
         exposure_seconds: tuple[float, ...] = (0.5, 1.0, 2.0, 4.0),
         frames_per_exposure: int = 8,
@@ -500,7 +500,7 @@ class GuidingControl(ControlChild):
             context, context.records, session_id, limit
         )
 
-    def save_calibration(self, calibration: GuiderCalibration) -> None:
+    def _save_calibration(self, calibration: GuiderCalibration) -> None:
         """Save a measured guider calibration.
 
         Parameters
@@ -510,7 +510,7 @@ class GuidingControl(ControlChild):
         """
         self._context.butler.put(calibration, "guider_calibration", {"id": calibration.id})
 
-    def save_spectrum_analysis(self, analysis: GuidingSpectrumAnalysis) -> None:
+    def _save_spectrum_analysis(self, analysis: GuidingSpectrumAnalysis) -> None:
         """Save `analysis` as the active mount's periodic error model.
 
         The model belongs to the mount, so it is keyed by the active
@@ -523,7 +523,7 @@ class GuidingControl(ControlChild):
         """
         self._context.save_guiding_spectrum_analysis(analysis)
 
-    def save_run(self, run: GuidingRunSummary) -> None:
+    def _save_run(self, run: GuidingRunSummary) -> None:
         """Save one guiding run, replacing an earlier read of the same run.
 
         Parameters

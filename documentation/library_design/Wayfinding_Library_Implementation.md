@@ -79,10 +79,10 @@ Each command in `tasks/control_tasks/hardware_operations.py` starts with `_requi
 
 ### 2.4 Delegation phases (Architecture Section 2.4)
 
-The phase is the combination of states `DelegationPolicy` holds, not a type. `CommissioningRun` (`models/policy/commissioning.py`) records phase 0 to 5 evidence as `CommissioningObservation` records. `control.equipment.save_commissioning_run` stores it.
+The phase is the combination of states `DelegationPolicy` holds, not a type. `CommissioningRun` (`models/policy/commissioning.py`) records phase 0 to 5 evidence as `CommissioningObservation` records. `control.equipment._save_commissioning_run` stores it.
 
 <!-- impl: wayfindinglib.models.policy.commissioning.CommissioningObservation -->
-<!-- impl: wayfindinglib.api.control.equipment.EquipmentControl.save_commissioning_run -->
+<!-- impl: wayfindinglib.api.control.equipment.EquipmentControl._save_commissioning_run -->
 
 ### 2.5 Domain models and operations (Architecture Section 2.5)
 
@@ -204,12 +204,12 @@ Folder: `tasks/execution_tasks/`. Facade: `ObservationExecution` in `api/executi
 
 | Child | Main calls |
 | --- | --- |
-| `control.mount` | `slew`, `sync`, `park`, `unpark`, `set_tracking`, `compute_pointing_correction` |
-| `control.imaging` | `capture_image`, `set_filter`, `focus_move`, `compute_focus_correction` |
-| `control.guiding` | `run_loop`, `compute_correction`, `run_calibration`, `run_exposure_test` |
+| `control.mount` | `slew`, `park`, `unpark`, `set_tracking` |
+| `control.imaging` | `capture_image`, `set_filter`, `focus_move` |
+| `control.guiding` | `run_loop`, `stop_loop`, `refit_spectrum` |
 | `control.remote` | `list`, `sync_frames`, `sync_logs` |
-| `control.safety` | `assess`, `execute_safe_state`, `open_enclosure`, `close_enclosure`, `apply_promotion_decision` |
-| `control.equipment` | `connect`, `set_active_telescope`, `cooling_ramp_rate`, `summarize_device` |
+| `control.safety` | `apply_promotion_decision`, `enter_monitoring_mode` |
+| `control.equipment` | `connect`, `set_active_telescope` |
 
 `Wayfinder.review` (`api/review.py`) holds the night reads.
 
@@ -340,7 +340,7 @@ All in `tasks/control_tasks/` unless noted.
 | --- | --- | --- |
 | Guiding (exposure length in `processing/measure_exposure_feasibility.py`) | `session_analysis/guiding/` | `GuidingSessionAnalysis`, `GuidingPerformance` (`models/session/session_quality.py`); `kind="guiding"` |
 | Capture | `session_analysis/capture/`, `wayfindinglib/analytics/capture_history.py` | `CaptureSessionAnalysis`, `CapturePerformance` (`models/session/capture_quality.py`); `kind="capture"` |
-| Guide exposure test | `analytics/guide_exposure_ladder.py`, `guide_exposure_ladder_tasks.py` | `GuideExposureLadder`; `control.guiding.run_exposure_test`. Tested only against a simulated camera. |
+| Guide exposure test | `analytics/guide_exposure_ladder.py`, `guide_exposure_ladder_tasks.py` | `GuideExposureLadder`; `control.guiding._run_exposure_test`. Tested only against a simulated camera. |
 | Sky position | `session_analysis/sky/` | `SkyAnalysis`, `SkySample`; `kind="sky_coverage"` |
 | Recurring issues; live status; frame and guide error; alignment history | `recurring_issues.py`, `live_status.py`, `frame_guiding.py`, `alignment_history.py` | `RecurringIssue`; `get_live_session_status`; `frame_guiding`; `kind="alignment"` |
 
@@ -529,12 +529,12 @@ No module applies the gates of the architecture's Table 8. `DivergenceEvidenceSu
 | Ekos module | Library calls | Code |
 | --- | --- | --- |
 | Mount | `control.mount.slew`, `park`, `set_tracking` | `hardware_operations.py` |
-| Align | `control.mount.compute_pointing_correction`, `slew(center=True)` | `pointing_correction.py`, `centering.py` |
-| Focus | `control.imaging.compute_focus_correction` (no autofocus sweep call) | `focus_correction.py` |
-| Guide | `control.guiding.compute_correction`, `status(include=["live"])` | `guiding_correction.py`, `live_guiding.py` |
+| Align | `control.mount._compute_pointing_correction`, `slew(center=True)` | `pointing_correction.py`, `centering.py` |
+| Focus | `focus_correction.compute_focus_correction` (no autofocus sweep call) | `focus_correction.py` |
+| Guide | `control.guiding._compute_correction`, `status(include=["live"])` | `guiding_correction.py`, `live_guiding.py` |
 | Scheduler | `planning.create_plan(kind="scheduled_session")` | `scheduling.py` |
 | Capture | `planning.create_plan(kind="package")` | `observation_package.py` |
-| Dome and weather interlock | `control.safety.execute_safe_state`, `assess` | `safe_state.py` |
+| Dome and weather interlock | `control.safety._execute_safe_state`, `_assess` | `safe_state.py` |
 | Session recording | `execution.advance_session`, `create_recorder`, `review.query` | `session_runner.py` |
 
 ## References

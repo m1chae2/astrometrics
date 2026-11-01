@@ -14,7 +14,6 @@ from wayfindinglib.models.control_status import ImagingStatus
 from wayfindinglib.models.equipment_and_site.focus_model import FocusModel
 from wayfindinglib.models.planning.observation_package import DitherConfig
 from wayfindinglib.models.session.capture_result import CaptureResult
-from wayfindinglib.models.session.correction_result import FocusCorrection, FocusCurvePoint
 
 __all__ = ["ImagingControl"]
 
@@ -152,40 +151,7 @@ class ImagingControl(ControlChild):
 
         return hardware_operations.focus_move(self._context, steps)
 
-    def compute_focus_correction(
-        self,
-        comparison_input_id: str,
-        curve: list[FocusCurvePoint],
-        starting_position: int,
-        trigger_reason: str,
-    ) -> FocusCorrection:
-        """Fit a parabola to a sampled focus curve and pick its lowest point.
-
-        Computes only; nothing is sent to the focuser.
-
-        Parameters
-        ----------
-        comparison_input_id : `str`
-            Id of the focus run this correction is for.
-        curve : `list` [`FocusCurvePoint`]
-            Star width measured at each focuser position.
-        starting_position : `int`
-            Focuser position before the run.
-        trigger_reason : `str`
-            Why focusing was started.
-
-        Returns
-        -------
-        correction : `FocusCorrection`
-            The best position and the move to reach it.
-        """
-        from wayfindinglib.tasks.control_tasks.focus_correction import compute_focus_correction
-
-        return compute_focus_correction(
-            comparison_input_id, curve, starting_position, trigger_reason, self._context.correction_config
-        )
-
-    def save_focus_model(self, focus_model: FocusModel) -> None:
+    def _save_focus_model(self, focus_model: FocusModel) -> None:
         """Save a measured focus model.
 
         Parameters

@@ -118,7 +118,7 @@ class MountControl(ControlChild):
             target_name=target_name,
         )
 
-    def sync(self, position: SkyPosition | dict[str, float]) -> bool:
+    def _sync(self, position: SkyPosition | dict[str, float]) -> bool:
         """Tell the mount it is pointing at a plate-solved position.
 
         Parameters
@@ -251,7 +251,7 @@ class MountControl(ControlChild):
 
         return hardware_operations.set_slew_rate(self._context, rate_index)
 
-    def compute_pointing_correction(
+    def _compute_pointing_correction(
         self,
         comparison_input_id: str,
         commanded_ra_deg: float,
@@ -298,7 +298,7 @@ class MountControl(ControlChild):
             latitude_deg=self._context.observer_latitude_deg(),
         )
 
-    def run_polar_alignment_assist(
+    def _run_polar_alignment_assist(
         self, attempts: list[dict[str, Any]], latitude_deg: float | None = None
     ) -> MountPointingModel:
         """Fit tonight's polar alignment error from this session's solves.

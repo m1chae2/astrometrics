@@ -142,16 +142,6 @@ DECISIONS = {
     "observatory_equipment_set_active_telescope": ToolDecision(
         "withhold", "Writes the active telescope into the configuration file."
     ),
-    "observatory_safety_save_rule_set": ToolDecision(
-        "withhold", "Changes the rules that decide when the observatory is safe."
-    ),
-    "observatory_imaging_save_focus_model": ToolDecision("withhold", "Replaces the stored focus model."),
-    "observatory_guiding_save_calibration": ToolDecision(
-        "withhold", "Replaces the stored guider calibration."
-    ),
-    "observatory_guiding_save_spectrum_analysis": ToolDecision(
-        "withhold", "Replaces the standing guiding analysis."
-    ),
     "observatory_safety_apply_promotion_decision": ToolDecision(
         "withhold", "Applies an operator's decision. Needs the operator."
     ),
@@ -197,17 +187,8 @@ DECISIONS = {
     "execution_advance_session": ToolDecision(
         "drop", "Needs callables that MCP cannot send. No MCP use today."
     ),
-    "execution_execute_meridian_flip": ToolDecision("drop", "Needs callables that MCP cannot send."),
-    "execution_recover_fault": ToolDecision("drop", "Needs callables that MCP cannot send."),
-    "execution_recover_guide_star_loss": ToolDecision("drop", "Needs callables that MCP cannot send."),
     "execution_create_recorder": ToolDecision(
         "drop", "Builds an object. The result is only a text label over MCP."
-    ),
-    "observatory_safety_assess": ToolDecision(
-        "drop", "Works on readings MCP cannot express. Keeps state between calls."
-    ),
-    "observatory_equipment_summarize_device": ToolDecision(
-        "drop", "Classifies values the caller passes in. Reads nothing."
     ),
     # ---- Not offered yet: parts of the old sync set not built ----
     "observatory_remote_sync_frames": ToolDecision(
@@ -447,9 +428,6 @@ DECISIONS = {
         "Ends the guide loop through a stop event MCP cannot send. Dropped with the other hardware tools.",
         "safe-stop",
     ),
-    "observatory_safety_execute_safe_state": ToolDecision(
-        "drop", "Commands the mount and enclosure, so it is dropped with the other hardware tools."
-    ),
     "review_get_performance_envelope": ToolDecision(
         "keep", "Slow: reads every session and target twice.", "observe"
     ),
@@ -522,11 +500,6 @@ DECISIONS = {
     "ui_build_check": ToolDecision("keep", "Developer check."),
     "typegen_contract_validator": ToolDecision("keep", "Developer check."),
     # ---- Class corrections found by reading the code ----
-    "observatory_mount_run_polar_alignment_assist": ToolDecision(
-        "drop",
-        "Only fits a pointing model from plate-solve records passed in. The user does not want it.",
-        "compute",
-    ),
     "observatory_safety_enter_controller_mode": ToolDecision(
         "withhold",
         "Writes the delegation state (the Safe Mode toggle) to the database. Not a hardware command, but "
@@ -540,24 +513,7 @@ DECISIONS = {
         "change-data",
     ),
     # ---- Records: dropped ----
-    "observatory_equipment_save_commissioning_run": ToolDecision(
-        "drop", "Takes a whole run object that MCP cannot send. The ingest tools create the same records."
-    ),
-    "review_save_ekos_session_context": ToolDecision(
-        "drop", "Takes a whole context object that MCP cannot send. The ingest tools create the same records."
-    ),
-    "observatory_guiding_save_run": ToolDecision(
-        "drop", "Takes a whole run object that MCP cannot send. The ingest tools create the same records."
-    ),
     # ---- No use, empty, or cannot be called through MCP ----
-    "observatory_guiding_get_image": ToolDecision(
-        "drop",
-        "Returns the text form of raw bytes, and None in practice because the app never enables BLOBs.",
-        "observe",
-    ),
-    "observatory_equipment_cooling_ramp_rate": ToolDecision(
-        "drop", "Needs a cooling-policy object that MCP cannot send. Arithmetic on the caller's input."
-    ),
     # ---- Not wanted by the user ----
     "observatory_guiding_run_loop": ToolDecision(
         "drop",
@@ -565,21 +521,8 @@ DECISIONS = {
         "Sends guide pulses, which belongs to the dropped control side.",
         "actuate",
     ),
-    "observatory_guiding_drain_external_pulses": ToolDecision(
-        "drop",
-        "Clears guide pulses when read. Belongs to the dropped control side. The user does not want it.",
-    ),
     "observatory_guiding_refit_spectrum": ToolDecision(
         "drop", "Recomputes and stores a result. The user does not want an AI to trigger it."
-    ),
-    "observatory_imaging_compute_focus_correction": ToolDecision(
-        "drop", "Advice for a device command the app will not send. The user does not want it."
-    ),
-    "observatory_guiding_compute_correction": ToolDecision(
-        "drop", "Advice for a device command the app will not send. The user does not want it."
-    ),
-    "observatory_mount_compute_pointing_correction": ToolDecision(
-        "drop", "Advice for a device command the app will not send. The user does not want it."
     ),
     # ---- Writers with no read-only form ----
     **dict.fromkeys(
@@ -632,10 +575,6 @@ DECISIONS = {
     **dict.fromkeys(
         (
             "observatory_guiding_expose",
-            "observatory_guiding_pulse",
-            "observatory_guiding_run_backlash_calibration",
-            "observatory_guiding_run_calibration",
-            "observatory_guiding_run_exposure_test",
             "observatory_imaging_capture_image",
             "observatory_imaging_focus_move",
             "observatory_imaging_set_filter",
@@ -644,10 +583,7 @@ DECISIONS = {
             "observatory_mount_set_slew_rate",
             "observatory_mount_set_tracking",
             "observatory_mount_slew",
-            "observatory_mount_sync",
             "observatory_mount_unpark",
-            "observatory_safety_close_enclosure",
-            "observatory_safety_open_enclosure",
         ),
         ToolDecision("drop", DEVICE_COMMAND_NOTE),
     ),

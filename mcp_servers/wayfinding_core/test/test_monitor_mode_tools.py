@@ -47,22 +47,14 @@ ALLOWED_IN_MONITOR_MODE = frozenset({
 own INDI connect and disconnect move nothing and take no picture. Decision
 U4 of the same day: nothing else is allowed, not even stopping a run."""
 
-CALLER_SUPPLIED_STEP_TOOLS = frozenset({
-    "execution_execute_meridian_flip",
-    "execution_recover_fault",
-    "execution_recover_guide_star_loss",
-    "observatory_guiding_run_calibration",
-    "observatory_guiding_run_backlash_calibration",
-    "observatory_safety_execute_safe_state",
-})
-"""Commands that run steps the caller hands in. A JSON call cannot carry
-them and they touch no driver themselves. Reported to the systems engineer
-(issue #95, batch 5); the library test keeps the same list."""
+CALLER_SUPPLIED_STEP_TOOLS: frozenset[str] = frozenset()
+"""Commands that run steps the caller hands in. They are private methods
+now (issue #134), so no tool is left in this list. A JSON call could not
+carry the steps, and they touch no driver themselves."""
 
 JSON_CANNOT_CARRY_THE_ARGUMENT = frozenset({
     "observatory_guiding_run_loop",
     "observatory_guiding_stop_loop",
-    "observatory_mount_sync",
 })
 """Tools whose argument a JSON call cannot carry: a `threading.Event`, or a
 sky position (the tool's schema asks for text). They must fail without
@@ -73,8 +65,6 @@ QUIET_BUT_NOT_REFUSED_TOOLS = frozenset({"execution_advance_session"})
 
 SAMPLE_ARGUMENTS = {
     "observatory_guiding_expose": {"exposure_seconds": 1.0},
-    "observatory_guiding_pulse": {"direction": "north", "duration_ms": 100.0},
-    "observatory_guiding_run_exposure_test": {},
     "observatory_guiding_run_loop": {},
     "observatory_guiding_stop_loop": {},
     "observatory_imaging_capture_image": {"exposure_seconds": 1.0, "register_job": False},
@@ -87,10 +77,7 @@ SAMPLE_ARGUMENTS = {
     "observatory_mount_set_slew_rate": {"rate_index": 1},
     "observatory_mount_set_tracking": {"enabled": True},
     "observatory_mount_slew": {"destination": "M 81"},
-    "observatory_mount_sync": {"position": "10.0 20.0"},
     "observatory_mount_unpark": {},
-    "observatory_safety_close_enclosure": {},
-    "observatory_safety_open_enclosure": {},
     "execution_advance_session": {},
 }
 """Sample arguments in the form the tool schemas accept. A command with no
@@ -164,8 +151,8 @@ class Recorder:
         self.indi_session = MagicMock()
         self.indi_session.set_property.return_value = True
         for name, mock in self.drivers.items():
-            setattr(wayfinder.control, name, mock)
-        wayfinder.control.driver = self.indi_session
+            setattr(wayfinder.control, f"_{name}", mock)
+        wayfinder.control._driver = self.indi_session
 
     def commands_sent(self) -> list[str]:
         """List the movement and capture commands any driver received.

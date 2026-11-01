@@ -15,7 +15,7 @@ Two tasks feed the monitor, both through the active guiding driver
   `control.guiding.status(include=["live"])` calls it.
 - `run_loop` runs this app's own guide loop until asked to stop or until
   the mount stops tracking: one `run_cycle` of the driver after another.
-  Every pulse goes through `control.guiding.pulse`, so it needs
+  Every pulse goes through `control.guiding._pulse`, so it needs
   `AUTOGUIDING` to be `AUTHORITATIVE`. The loop's samples are shown but
   not recorded, because only the simulator can run it today.
 """

@@ -124,7 +124,7 @@ class ObservatoryControl:
         self._context.close()
 
     @property
-    def driver(self) -> Any:
+    def _driver(self) -> Any:
         """The INDI session every INDI device driver wraps.
 
         Returns
@@ -135,13 +135,13 @@ class ObservatoryControl:
         """
         return self._context.driver
 
-    @driver.setter
-    def driver(self, driver: Any) -> None:
+    @_driver.setter
+    def _driver(self, driver: Any) -> None:
         """Set the INDI session."""
         self._context.driver = driver
 
     @property
-    def mount_driver(self) -> MountDriver:
+    def _mount_driver(self) -> MountDriver:
         """The mount driver, built for the active telescope's protocol.
 
         Returns
@@ -151,13 +151,13 @@ class ObservatoryControl:
         """
         return self._context.mount_driver
 
-    @mount_driver.setter
-    def mount_driver(self, mount_driver: MountDriver) -> None:
+    @_mount_driver.setter
+    def _mount_driver(self, mount_driver: MountDriver) -> None:
         """Set the mount driver."""
         self._context.mount_driver = mount_driver
 
     @property
-    def focuser_driver(self) -> FocuserDriver:
+    def _focuser_driver(self) -> FocuserDriver:
         """The focuser driver, built for the active telescope's protocol.
 
         Returns
@@ -167,13 +167,13 @@ class ObservatoryControl:
         """
         return self._context.focuser_driver
 
-    @focuser_driver.setter
-    def focuser_driver(self, focuser_driver: FocuserDriver) -> None:
+    @_focuser_driver.setter
+    def _focuser_driver(self, focuser_driver: FocuserDriver) -> None:
         """Set the focuser driver."""
         self._context.focuser_driver = focuser_driver
 
     @property
-    def filter_wheel_driver(self) -> FilterWheelDriver:
+    def _filter_wheel_driver(self) -> FilterWheelDriver:
         """The filter wheel driver, built for the active telescope's protocol.
 
         Returns
@@ -183,13 +183,13 @@ class ObservatoryControl:
         """
         return self._context.filter_wheel_driver
 
-    @filter_wheel_driver.setter
-    def filter_wheel_driver(self, filter_wheel_driver: FilterWheelDriver) -> None:
+    @_filter_wheel_driver.setter
+    def _filter_wheel_driver(self, filter_wheel_driver: FilterWheelDriver) -> None:
         """Set the filter wheel driver."""
         self._context.filter_wheel_driver = filter_wheel_driver
 
     @property
-    def camera_driver(self) -> CameraDriver:
+    def _camera_driver(self) -> CameraDriver:
         """The main camera driver, built for the active camera's protocol.
 
         Returns
@@ -199,13 +199,13 @@ class ObservatoryControl:
         """
         return self._context.camera_driver
 
-    @camera_driver.setter
-    def camera_driver(self, camera_driver: CameraDriver) -> None:
+    @_camera_driver.setter
+    def _camera_driver(self, camera_driver: CameraDriver) -> None:
         """Set the main camera driver."""
         self._context.camera_driver = camera_driver
 
     @property
-    def guide_camera_driver(self) -> CameraDriver:
+    def _guide_camera_driver(self) -> CameraDriver:
         """The guide camera driver.
 
         Returns
@@ -215,13 +215,13 @@ class ObservatoryControl:
         """
         return self._context.guide_camera_driver
 
-    @guide_camera_driver.setter
-    def guide_camera_driver(self, guide_camera_driver: CameraDriver) -> None:
+    @_guide_camera_driver.setter
+    def _guide_camera_driver(self, guide_camera_driver: CameraDriver) -> None:
         """Set the guide camera driver."""
         self._context.guide_camera_driver = guide_camera_driver
 
     @property
-    def enclosure_driver(self) -> EnclosureDriver:
+    def _enclosure_driver(self) -> EnclosureDriver:
         """The enclosure driver, built for the configured enclosure's protocol.
 
         Returns
@@ -231,13 +231,13 @@ class ObservatoryControl:
         """
         return self._context.enclosure_driver
 
-    @enclosure_driver.setter
-    def enclosure_driver(self, enclosure_driver: EnclosureDriver) -> None:
+    @_enclosure_driver.setter
+    def _enclosure_driver(self, enclosure_driver: EnclosureDriver) -> None:
         """Set the enclosure driver."""
         self._context.enclosure_driver = enclosure_driver
 
     @property
-    def switch_driver(self) -> SwitchDriver:
+    def _switch_driver(self) -> SwitchDriver:
         """The power switch driver.
 
         Returns
@@ -247,13 +247,13 @@ class ObservatoryControl:
         """
         return self._context.switch_driver
 
-    @switch_driver.setter
-    def switch_driver(self, switch_driver: SwitchDriver) -> None:
+    @_switch_driver.setter
+    def _switch_driver(self, switch_driver: SwitchDriver) -> None:
         """Set the power switch driver."""
         self._context.switch_driver = switch_driver
 
     @property
-    def weather_driver(self) -> WeatherDriver:
+    def _weather_driver(self) -> WeatherDriver:
         """The weather sensor driver.
 
         Returns
@@ -263,13 +263,13 @@ class ObservatoryControl:
         """
         return self._context.weather_driver
 
-    @weather_driver.setter
-    def weather_driver(self, weather_driver: WeatherDriver) -> None:
+    @_weather_driver.setter
+    def _weather_driver(self, weather_driver: WeatherDriver) -> None:
         """Set the weather sensor driver."""
         self._context.weather_driver = weather_driver
 
     @property
-    def guiding_driver(self) -> GuidingDriver:
+    def _guiding_driver(self) -> GuidingDriver:
         """The guiding driver, chosen by the telescope's guiding protocol.
 
         Returns
@@ -279,13 +279,13 @@ class ObservatoryControl:
         """
         return self._context.guiding_driver
 
-    @guiding_driver.setter
-    def guiding_driver(self, guiding_driver: GuidingDriver) -> None:
+    @_guiding_driver.setter
+    def _guiding_driver(self, guiding_driver: GuidingDriver) -> None:
         """Set the guiding driver."""
         self._context.guiding_driver = guiding_driver
 
     @property
-    def remote_transfer_driver(self) -> RemoteTransferDriver:
+    def _remote_transfer_driver(self) -> RemoteTransferDriver:
         """The driver that copies files from the observatory computer.
 
         Returns
@@ -295,7 +295,7 @@ class ObservatoryControl:
         """
         return self._context.remote_transfer_driver
 
-    @remote_transfer_driver.setter
-    def remote_transfer_driver(self, remote_transfer_driver: RemoteTransferDriver) -> None:
+    @_remote_transfer_driver.setter
+    def _remote_transfer_driver(self, remote_transfer_driver: RemoteTransferDriver) -> None:
         """Set the remote transfer driver."""
         self._context.remote_transfer_driver = remote_transfer_driver

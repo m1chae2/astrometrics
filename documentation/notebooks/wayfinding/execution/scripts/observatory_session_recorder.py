@@ -110,7 +110,6 @@ def run_observation_session_recorder() -> None:
 
         recorder = wayfinder.execution.create_recorder(
             guiding_service,
-            wayfinder.control.driver,
             snapshot_interval_seconds=args.snapshot_interval_seconds,
         )
 

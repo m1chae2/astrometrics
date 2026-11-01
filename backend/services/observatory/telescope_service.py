@@ -55,7 +55,7 @@ class TelescopeService:
             self.wayfinder = wayfinder
 
         if driver is not None:
-            self.wayfinder.control.driver = driver
+            self.wayfinder.control._driver = driver
 
         self._guiding_service = guiding_service
         self._target_service = target_service
@@ -71,7 +71,7 @@ class TelescopeService:
         driver : `Any`
             The underlying INDI driver instance orchestrating hardware calls.
         """
-        return self.wayfinder.control.driver
+        return self.wayfinder.control._driver
 
     def get_status(self) -> dict[str, Any]:
         """Retrieve current telescope status.

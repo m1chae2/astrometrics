@@ -93,7 +93,7 @@ def test_a_night_on_other_equipment_gets_no_limits(control: ObservatoryControl) 
     other = "telescope=other|camera=other|guide_focal_mm=240|guide_scale=3.2"
     night = record_guiding_night(control, 0, fingerprint=other)
     runs = night_analysis.guiding_runs(control._context, night)
-    control.guiding.save_run(
+    control.guiding._save_run(
         runs[0].model_copy(update={"focal_length_mm": 240.0, "pixel_scale_arcsec_per_px": 3.2})
     )
 

@@ -160,7 +160,7 @@ class Container:
             self.indi_worker_client = IndiWorkerClient()
             self.indi_driver = IndiWorkerProxy(self.indi_worker_client)
 
-        self.wayfinder.control.driver = self.indi_driver
+        self.wayfinder.control._driver = self.indi_driver
 
         from backend.services.infrastructure.settings_service import SettingsService
 

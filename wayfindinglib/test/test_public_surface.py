@@ -134,9 +134,6 @@ EXECUTION_MEMBERS = frozenset({
     "advance_session",
     "abort_session",
     "reconcile_session",
-    "execute_meridian_flip",
-    "recover_fault",
-    "recover_guide_star_loss",
     "record_divergence",
     "create_recorder",
 })
@@ -148,24 +145,8 @@ REVIEW_MEMBERS = frozenset({
     "get_live_session_status",
     "frame_guiding",
     "get_performance_envelope",
-    "save_ekos_session_context",
 })
 """The public members of `ObservationReview`."""
-
-ROOT_DRIVERS = frozenset({
-    "driver",
-    "mount_driver",
-    "focuser_driver",
-    "filter_wheel_driver",
-    "camera_driver",
-    "guide_camera_driver",
-    "enclosure_driver",
-    "switch_driver",
-    "weather_driver",
-    "remote_transfer_driver",
-    "guiding_driver",
-})
-"""The driver properties `control` keeps for injecting drivers."""
 
 ROOT_LIFECYCLE = frozenset({"close"})
 """Lifecycle methods on `control` itself, outside the operation count.
@@ -181,7 +162,6 @@ CHILDREN = {
     "mount": {
         "status",
         "slew",
-        "sync",
         "park",
         "unpark",
         "set_tracking",
@@ -189,42 +169,23 @@ CHILDREN = {
         "abort_motion",
         "cancel_centering",
         "set_slew_rate",
-        "compute_pointing_correction",
-        "run_polar_alignment_assist",
     },
     "imaging": {
         "status",
         "capture_image",
         "set_filter",
         "focus_move",
-        "compute_focus_correction",
-        "save_focus_model",
     },
     "guiding": {
         "status",
-        "pulse",
         "expose",
-        "get_image",
-        "drain_external_pulses",
-        "compute_correction",
-        "run_calibration",
-        "run_backlash_calibration",
-        "run_exposure_test",
         "refit_spectrum",
-        "save_calibration",
-        "save_spectrum_analysis",
-        "save_run",
         "run_loop",
         "stop_loop",
     },
     "remote": {"list", "check_connection", "frame_status", "sync_frames", "sync_logs"},
     "safety": {
         "status",
-        "assess",
-        "save_rule_set",
-        "execute_safe_state",
-        "open_enclosure",
-        "close_enclosure",
         "apply_promotion_decision",
         "enter_monitoring_mode",
         "enter_controller_mode",
@@ -236,9 +197,6 @@ CHILDREN = {
         "set_active_telescope",
         "set_active_camera",
         "set_device_property",
-        "cooling_ramp_rate",
-        "summarize_device",
-        "save_commissioning_run",
     },
 }
 """Each child of `control` and its public members."""
@@ -321,8 +279,8 @@ def test_background_jobs_can_skip_registering_a_job() -> None:
 
 
 def test_control_root_holds_only_the_drivers_and_the_children(control: ObservatoryControl) -> None:
-    """The root offers only the driver properties, the children and `close`."""
-    assert _public_names(control) == ROOT_DRIVERS | ROOT_LIFECYCLE | set(CHILDREN)
+    """The root offers only the children and `close`."""
+    assert _public_names(control) == ROOT_LIFECYCLE | set(CHILDREN)
 
 
 @pytest.mark.parametrize("child", sorted(CHILDREN))
@@ -342,14 +300,14 @@ def test_children_hold_the_shared_context_not_control(control: ObservatoryContro
 def test_setting_a_driver_on_control_reaches_every_child(control: ObservatoryControl) -> None:
     """Injecting a driver on the root updates the shared context."""
     marker = object()
-    control.mount_driver = marker
+    control._mount_driver = marker
     assert control._context.mount_driver is marker
-    assert control.mount_driver is marker
+    assert control._mount_driver is marker
 
 
 def test_control_stays_under_its_size_limit(control: ObservatoryControl) -> None:
-    """The drivers plus the children's operations number 72 or fewer."""
-    total = len(ROOT_DRIVERS) + sum(len(_public_names(getattr(control, child))) for child in CHILDREN)
+    """The children's operations number 72 or fewer."""
+    total = sum(len(_public_names(getattr(control, child))) for child in CHILDREN)
     assert total <= MAXIMUM_CONTROL_MEMBERS
 
 

@@ -106,6 +106,33 @@ old name is kept as an alias.
 | `review.query` returned a `dict`, a typed list or a `NightQuality` by `kind` | `ReviewQueryResult` (`wayfindinglib/models/session/review_query.py`). The analysis kinds fill named fields (`analysis`, `sessions`, `runs`, `model`, `total`, `shown`, `truncated` and so on) and drop the empty ones when dumped, so the data has the same keys as before. The typed kinds fill `night_list`, `target_changes` and `night_quality`; the backend reads those, so the RPC replies keep their shape. An MCP reply for those three kinds is now `{"kind": ..., "night_list": [...]}` and so on, not a bare list |
 | (new) | MCP `review_query_alignment_sessions` (dropped: the backend calls it) |
 
+### Made private
+
+These members got a leading underscore. They are no longer public, no longer MCP tools, and no alias is kept.
+Tests and the library's own code reach them by the new name. A private call runs exactly as before; monitor mode
+still refuses the ones that command hardware (`wayfindinglib/test/test_monitor_mode_sends_no_commands.py` calls
+them by their private names).
+
+| Old | New |
+| --- | --- |
+| `execution.execute_meridian_flip`, `recover_fault`, `recover_guide_star_loss` | `execution._execute_meridian_flip`, `_recover_fault`, `_recover_guide_star_loss` |
+| `control.mount.sync`, `compute_pointing_correction`, `run_polar_alignment_assist` | `control.mount._sync`, `_compute_pointing_correction`, `_run_polar_alignment_assist` |
+| `control.imaging.save_focus_model` | `control.imaging._save_focus_model` |
+| `control.guiding.pulse`, `get_image`, `drain_external_pulses`, `compute_correction`, `run_calibration`, `run_backlash_calibration`, `run_exposure_test`, `save_calibration`, `save_spectrum_analysis`, `save_run` | the same names with a leading underscore on `control.guiding` |
+| `control.safety.assess`, `save_rule_set`, `execute_safe_state`, `open_enclosure`, `close_enclosure` | the same names with a leading underscore on `control.safety` |
+| `control.equipment.save_commissioning_run` | `control.equipment._save_commissioning_run` |
+| `review.save_ekos_session_context` | `review._save_ekos_session_context` |
+| `control.driver`, `mount_driver`, `focuser_driver`, `filter_wheel_driver`, `camera_driver`, `guide_camera_driver`, `enclosure_driver`, `switch_driver`, `weather_driver`, `remote_transfer_driver`, `guiding_driver` | the same names with a leading underscore on `control` |
+| `execution.create_recorder(guiding_service, indi_driver, snapshot_interval_seconds=)` | `execution.create_recorder(guiding_service, snapshot_interval_seconds=)`; the recorder takes the INDI session from `control` |
+
+Deleted, because nothing (tests included) used them: `control.imaging.compute_focus_correction`,
+`control.equipment.cooling_ramp_rate` and `control.equipment.summarize_device`. The functions they wrapped in
+`tasks.control_tasks` stay, with their own tests.
+
+The MCP tools for all of these are gone (`observatory_guiding_pulse`, `observatory_mount_sync`,
+`observatory_safety_assess` and so on, and `execution_execute_meridian_flip`, `execution_recover_fault`,
+`execution_recover_guide_star_loss`).
+
 ## Left as they were, on purpose
 
 - `visualization.get_last_captured_image` is separate from `render_fits`: it finds the newest file itself and

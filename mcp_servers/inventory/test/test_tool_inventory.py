@@ -242,7 +242,7 @@ def test_apply_decisions_corrects_the_class_and_keeps_the_note() -> None:
 
 def test_config_writers_are_withheld() -> None:
     """The tools that change configuration are withheld from AI clients."""
-    for name in ("observatory_equipment_set_active_camera", "observatory_safety_save_rule_set"):
+    for name in ("observatory_equipment_set_active_camera", "observatory_equipment_set_active_telescope"):
         assert DECISIONS[name].disposition == "withhold"
 
 
@@ -254,15 +254,8 @@ def test_every_hardware_control_tool_is_dropped() -> None:
         for record in records
         if record.category == "observatory-control"
     ]
-    assert len(control_tools) > 20
+    assert len(control_tools) > 10
     assert {record.disposition for record in control_tools} == {"drop"}
-
-
-def test_polar_alignment_assist_is_a_calculation_not_a_command() -> None:
-    """The fit uses records passed in, so it is a monitoring calculation."""
-    record = ToolRecord("srv", "observatory_mount_run_polar_alignment_assist", "", tool_class="actuate")
-    apply_decisions(record)
-    assert (record.tool_class, record.category) == ("compute", "observatory-status")
 
 
 def test_delegation_mode_switches_count_as_configuration() -> None:
@@ -275,17 +268,7 @@ def test_delegation_mode_switches_count_as_configuration() -> None:
 
 def test_tools_the_user_declined_are_dropped() -> None:
     """Tools the user declined stay dropped."""
-    dropped = (
-        "observatory_imaging_compute_focus_correction",
-        "observatory_guiding_compute_correction",
-        "observatory_mount_compute_pointing_correction",
-        "observatory_mount_run_polar_alignment_assist",
-        "observatory_guiding_drain_external_pulses",
-        "observatory_guiding_refit_spectrum",
-        "observatory_equipment_save_commissioning_run",
-        "review_save_ekos_session_context",
-        "observatory_guiding_save_run",
-    )
+    dropped = ("observatory_guiding_refit_spectrum",)
     for name in dropped:
         assert DECISIONS[name].disposition == "drop", name
 

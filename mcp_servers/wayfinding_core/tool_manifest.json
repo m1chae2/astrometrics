@@ -23,13 +23,6 @@
       "interim_block": "",
       "note": "Builds an object. The result is only a text label over MCP."
     },
-    "execution_execute_meridian_flip": {
-      "tool_class": "actuate",
-      "category": "planning-sessions",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Needs callables that MCP cannot send."
-    },
     "execution_reconcile_session": {
       "tool_class": "change-data",
       "category": "planning-sessions",
@@ -44,20 +37,6 @@
       "interim_block": "",
       "note": "Builds a record and writes nothing. The only arguments MCP can send are useless."
     },
-    "execution_recover_fault": {
-      "tool_class": "actuate",
-      "category": "planning-sessions",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Needs callables that MCP cannot send."
-    },
-    "execution_recover_guide_star_loss": {
-      "tool_class": "actuate",
-      "category": "planning-sessions",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Needs callables that MCP cannot send."
-    },
     "observatory_equipment_connect": {
       "tool_class": "actuate",
       "category": "observatory-control",
@@ -65,26 +44,12 @@
       "interim_block": "",
       "note": "Opens the INDI session. Not a device command, but the status tools already open it on demand."
     },
-    "observatory_equipment_cooling_ramp_rate": {
-      "tool_class": "observe",
-      "category": "observatory-status",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Needs a cooling-policy object that MCP cannot send. Arithmetic on the caller's input."
-    },
     "observatory_equipment_disconnect": {
       "tool_class": "actuate",
       "category": "observatory-control",
       "disposition": "drop",
       "interim_block": "",
       "note": "Closes the INDI session. Not a device command, but it would cut off monitoring and has no monitoring use."
-    },
-    "observatory_equipment_save_commissioning_run": {
-      "tool_class": "change-data",
-      "category": "observatory-config",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Takes a whole run object that MCP cannot send. The ingest tools create the same records."
     },
     "observatory_equipment_set_active_camera": {
       "tool_class": "change-data",
@@ -114,42 +79,7 @@
       "interim_block": "",
       "note": "Reads the active equipment, camera profiles, site, commissioning records and the INDI device list. The INDI sections use the connect-only path."
     },
-    "observatory_equipment_summarize_device": {
-      "tool_class": "observe",
-      "category": "observatory-status",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Classifies values the caller passes in. Reads nothing."
-    },
-    "observatory_guiding_compute_correction": {
-      "tool_class": "compute",
-      "category": "observatory-status",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Advice for a device command the app will not send. The user does not want it."
-    },
-    "observatory_guiding_drain_external_pulses": {
-      "tool_class": "change-data",
-      "category": "observatory-status",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Clears guide pulses when read. Belongs to the dropped control side. The user does not want it."
-    },
     "observatory_guiding_expose": {
-      "tool_class": "actuate",
-      "category": "observatory-control",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Commanding a device (mount, cameras, focuser, filter wheel, enclosure) is out of scope. Reading from them and from the Pi is allowed."
-    },
-    "observatory_guiding_get_image": {
-      "tool_class": "observe",
-      "category": "observatory-status",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Returns the text form of raw bytes, and None in practice because the app never enables BLOBs."
-    },
-    "observatory_guiding_pulse": {
       "tool_class": "actuate",
       "category": "observatory-control",
       "disposition": "drop",
@@ -163,54 +93,12 @@
       "interim_block": "",
       "note": "Recomputes and stores a result. The user does not want an AI to trigger it."
     },
-    "observatory_guiding_run_backlash_calibration": {
-      "tool_class": "actuate",
-      "category": "observatory-control",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Commanding a device (mount, cameras, focuser, filter wheel, enclosure) is out of scope. Reading from them and from the Pi is allowed."
-    },
-    "observatory_guiding_run_calibration": {
-      "tool_class": "actuate",
-      "category": "observatory-control",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Commanding a device (mount, cameras, focuser, filter wheel, enclosure) is out of scope. Reading from them and from the Pi is allowed."
-    },
-    "observatory_guiding_run_exposure_test": {
-      "tool_class": "actuate",
-      "category": "observatory-control",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Commanding a device (mount, cameras, focuser, filter wheel, enclosure) is out of scope. Reading from them and from the Pi is allowed."
-    },
     "observatory_guiding_run_loop": {
       "tool_class": "actuate",
       "category": "observatory-control",
       "disposition": "drop",
       "interim_block": "",
       "note": "Runs the guide loop until a stop event MCP cannot send is set; the backend runs it on a thread. Sends guide pulses, which belongs to the dropped control side."
-    },
-    "observatory_guiding_save_calibration": {
-      "tool_class": "change-data",
-      "category": "observatory-config",
-      "disposition": "withhold",
-      "interim_block": "",
-      "note": "Replaces the stored guider calibration."
-    },
-    "observatory_guiding_save_run": {
-      "tool_class": "change-data",
-      "category": "observatory-config",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Takes a whole run object that MCP cannot send. The ingest tools create the same records."
-    },
-    "observatory_guiding_save_spectrum_analysis": {
-      "tool_class": "change-data",
-      "category": "observatory-config",
-      "disposition": "withhold",
-      "interim_block": "",
-      "note": "Replaces the standing guiding analysis."
     },
     "observatory_guiding_status": {
       "tool_class": "observe",
@@ -233,26 +121,12 @@
       "interim_block": "",
       "note": "Commanding a device (mount, cameras, focuser, filter wheel, enclosure) is out of scope. Reading from them and from the Pi is allowed."
     },
-    "observatory_imaging_compute_focus_correction": {
-      "tool_class": "compute",
-      "category": "observatory-status",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Advice for a device command the app will not send. The user does not want it."
-    },
     "observatory_imaging_focus_move": {
       "tool_class": "actuate",
       "category": "observatory-control",
       "disposition": "drop",
       "interim_block": "",
       "note": "Commanding a device (mount, cameras, focuser, filter wheel, enclosure) is out of scope. Reading from them and from the Pi is allowed."
-    },
-    "observatory_imaging_save_focus_model": {
-      "tool_class": "change-data",
-      "category": "observatory-config",
-      "disposition": "withhold",
-      "interim_block": "",
-      "note": "Replaces the stored focus model."
     },
     "observatory_imaging_set_filter": {
       "tool_class": "actuate",
@@ -282,13 +156,6 @@
       "interim_block": "",
       "note": "Stops a centering run by aborting the mount, so it is dropped with the other hardware tools."
     },
-    "observatory_mount_compute_pointing_correction": {
-      "tool_class": "compute",
-      "category": "observatory-status",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Advice for a device command the app will not send. The user does not want it."
-    },
     "observatory_mount_manual_move": {
       "tool_class": "actuate",
       "category": "observatory-control",
@@ -302,13 +169,6 @@
       "disposition": "drop",
       "interim_block": "",
       "note": "Commanding a device (mount, cameras, focuser, filter wheel, enclosure) is out of scope. Reading from them and from the Pi is allowed."
-    },
-    "observatory_mount_run_polar_alignment_assist": {
-      "tool_class": "compute",
-      "category": "observatory-status",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Only fits a pointing model from plate-solve records passed in. The user does not want it."
     },
     "observatory_mount_set_slew_rate": {
       "tool_class": "actuate",
@@ -337,13 +197,6 @@
       "disposition": "keep",
       "interim_block": "Connects through connect_to_telescope, which sends CONNECTION=ON to every INDI device that is off. Blocked until it uses the connect-only path. app_status reports the mount through the backend.",
       "note": "Reads the mount, filter, focuser and camera temperature. Blocked for now; see the block."
-    },
-    "observatory_mount_sync": {
-      "tool_class": "actuate",
-      "category": "observatory-control",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Commanding a device (mount, cameras, focuser, filter wheel, enclosure) is out of scope. Reading from them and from the Pi is allowed."
     },
     "observatory_mount_unpark": {
       "tool_class": "actuate",
@@ -394,20 +247,6 @@
       "interim_block": "",
       "note": "Applies an operator's decision. Needs the operator."
     },
-    "observatory_safety_assess": {
-      "tool_class": "observe",
-      "category": "observatory-status",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Works on readings MCP cannot express. Keeps state between calls."
-    },
-    "observatory_safety_close_enclosure": {
-      "tool_class": "actuate",
-      "category": "observatory-control",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Commanding a device (mount, cameras, focuser, filter wheel, enclosure) is out of scope. Reading from them and from the Pi is allowed."
-    },
     "observatory_safety_enter_controller_mode": {
       "tool_class": "change-data",
       "category": "observatory-config",
@@ -421,27 +260,6 @@
       "disposition": "withhold",
       "interim_block": "",
       "note": "Writes the delegation state (the Safe Mode toggle) to the database. Not a hardware command, but the user decided an AI may not change configuration."
-    },
-    "observatory_safety_execute_safe_state": {
-      "tool_class": "safe-stop",
-      "category": "observatory-control",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Commands the mount and enclosure, so it is dropped with the other hardware tools."
-    },
-    "observatory_safety_open_enclosure": {
-      "tool_class": "actuate",
-      "category": "observatory-control",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Commanding a device (mount, cameras, focuser, filter wheel, enclosure) is out of scope. Reading from them and from the Pi is allowed."
-    },
-    "observatory_safety_save_rule_set": {
-      "tool_class": "change-data",
-      "category": "observatory-config",
-      "disposition": "withhold",
-      "interim_block": "",
-      "note": "Changes the rules that decide when the observatory is safe."
     },
     "observatory_safety_status": {
       "tool_class": "observe",
@@ -645,13 +463,6 @@
       "disposition": "drop",
       "interim_block": "",
       "note": "The backend calls it with plate-solve attempts it has already read. The AI reads nights through review_query(kind=\"alignment\"), which groups them already."
-    },
-    "review_save_ekos_session_context": {
-      "tool_class": "change-data",
-      "category": "observatory-config",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Takes a whole context object that MCP cannot send. The ingest tools create the same records."
     }
   }
 }

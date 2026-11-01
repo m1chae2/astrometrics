@@ -10,7 +10,7 @@ Execution is the one part of the library that uses both of the others:
 it runs what planning wrote, through the hardware `control` drives. A
 caller may hand in the bundles of steps that touch hardware
 (`SessionRunnerDependencies`, `MeridianFlipSteps`), the same way
-`control.safety.execute_safe_state` takes its steps. For an imaging
+`control.safety._execute_safe_state` takes its steps. For an imaging
 queue, `advance_session` builds its steps from `control` itself.
 """
 
@@ -18,7 +18,7 @@ import threading
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib import AppConfiguration, Astrometrics, NotFoundError
+from astrometricslib import AppConfiguration, Astrometrics, ConfigurationError, NotFoundError
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.policy.device_state import DeviceSummaryState
 from wayfindinglib.models.policy.recovery import FaultRecord, RecoveryPolicy
@@ -217,7 +217,7 @@ class ObservationExecution:
 
     # -- Meridian flip -------------------------------------------------------
 
-    def execute_meridian_flip(
+    def _execute_meridian_flip(
         self,
         outcome_id: str,
         queued_observation_package_id: str,
@@ -238,7 +238,7 @@ class ObservationExecution:
 
     # -- Fault recovery --------------------------------------------------
 
-    def recover_fault(
+    def _recover_fault(
         self,
         fault_record_id: str,
         device_id: str,
@@ -273,7 +273,7 @@ class ObservationExecution:
 
     # -- Guide-star loss recovery --------------------------------------------
 
-    def recover_guide_star_loss(
+    def _recover_guide_star_loss(
         self,
         event_id: str,
         observation_session_id: str,
@@ -332,17 +332,36 @@ class ObservationExecution:
     # -- Telemetry recording -------------------------------------------------
 
     def create_recorder(
-        self, guiding_service: Any, indi_driver: Any, snapshot_interval_seconds: int = 300
+        self, guiding_service: Any, snapshot_interval_seconds: int = 300
     ) -> ObservationSessionRecorder:
         """Build an `ObservationSessionRecorder` bound to this DB.
+
+        The recorder reads the INDI session of the `Wayfinder`'s `control`,
+        so the caller no longer passes it in.
+
+        Parameters
+        ----------
+        guiding_service : `Any`
+            The PHD2 guiding service whose telemetry is recorded.
+        snapshot_interval_seconds : `int`, optional
+            How often a snapshot is saved, in seconds.
 
         Returns
         -------
         recorder : `ObservationSessionRecorder`
             The newly constructed recorder.
+
+        Raises
+        ------
+        ConfigurationError
+            If this object was built without the `Wayfinder`'s `control`.
         """
+        if self._control is None:
+            raise ConfigurationError(
+                "create_recorder needs the Wayfinder's control, which holds the INDI session."
+            )
         return ObservationSessionRecorder(
-            guiding_service, indi_driver, self._butler, snapshot_interval_seconds
+            guiding_service, self._control._driver, self._butler, snapshot_interval_seconds
         )
 
     # -- Post-session reconciliation -----------------------------------------

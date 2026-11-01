@@ -455,7 +455,7 @@ class ObservationReview(ControlChild):
         risk = performance_envelope_tasks.tracking_risk_map(self._context)
         return envelope.model_copy(update={"tracking_risk": risk})
 
-    def save_ekos_session_context(self, context: EkosSessionContext) -> None:
+    def _save_ekos_session_context(self, context: EkosSessionContext) -> None:
         """Save one Ekos session record, replacing an earlier read of it.
 
         Parameters

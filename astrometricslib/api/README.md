@@ -138,7 +138,9 @@ Live checks:
 
 ## Injecting drivers
 
-A driver is the code that talks to one outside program or service. A caller can swap any of them, for example to run a test with no network. The library uses five:
+Tests only. `Astrometrics(config, catalog_access)` takes no driver arguments, so a program always runs the built-in drivers.
+
+A driver is the code that talks to one outside program or service. A test can swap any of them, for example to run with no network. The library uses five:
 
 - a plate solver, which works out which part of the sky an image shows (built-in: Astrometry.net);
 - a stacking program (built-in: Siril);
@@ -148,19 +150,21 @@ A driver is the code that talks to one outside program or service. A caller can 
 
 Reddening is the color excess E(B-V) that dust adds to a star's light. B and V are two standard brightness bands, blue (about 4400 Å) and visual (about 5500 Å). E(B-V) is how much bigger the star's B − V magnitude difference is than it would be without dust. The spectroscopy pipeline uses it to correct a spectrum before it classifies the star, that is, before it decides the star's spectral type.
 
-The root's signature accepts a replacement for each driver:
+A test builds the root through a helper in the library's private code, `astrometricslib._internal.testing`:
 
 ```python
-Astrometrics(config, catalog_access, *, plate_solve_driver=None, stacking_driver=None,
-             simbad_driver=None, gaia_xp_driver=None, reddening_driver=None)
+astrometrics_with_drivers(config, catalog_access, *, plate_solve_driver=None, stacking_driver=None,
+                          simbad_driver=None, gaia_xp_driver=None, reddening_driver=None)
 ```
 
-A driver left out stays the built-in one. The root puts the five into one `Drivers` object (`drivers/driver_set.py`) and gives it to `StellarCatalog` and `ProcessingPipelines`, which pass it to the pipelines as a `drivers=` keyword. The method signatures on the sub-APIs do not change.
+A driver left out stays the built-in one. The helper puts the five into one `Drivers` object (`drivers/driver_set.py`) and gives it to `StellarCatalog` and `ProcessingPipelines`, which pass it to the pipelines as a `drivers=` keyword. The method signatures on the sub-APIs do not change.
 
-A replacement subclasses `PlateSolveDriver`, `StackingDriver`, `SimbadDriver`, `GaiaXpDriver` or `ReddeningDriver`. The root exports these base classes, and also `StackSettings` and `StackRunResult`, which a stacking driver needs. A test can run a stage with a fake solver and no network:
+A replacement subclasses `PlateSolveDriver`, `StackingDriver`, `SimbadDriver`, `GaiaXpDriver` or `ReddeningDriver` (from `astrometricslib._internal.drivers`; `StackSettings` and `StackRunResult`, which a stacking driver needs, are there too). A test can run a stage with a fake solver and no network:
 
 ```python
-astrometrics = Astrometrics(config, catalog_access, plate_solve_driver=MySolver(), simbad_driver=MySimbad())
+astrometrics = astrometrics_with_drivers(
+    config, catalog_access, plate_solve_driver=MySolver(), simbad_driver=MySimbad()
+)
 astrometrics.processing.process_target("M 13", stages=["astrometry"])
 ```
 

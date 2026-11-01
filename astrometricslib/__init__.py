@@ -53,13 +53,6 @@ try:
 except PackageNotFoundError:  # running from a source tree without an install
     __version__ = "0.0.0+unknown"
 
-from astrometricslib._internal.drivers.interfaces import (
-    GaiaXpDriver,
-    PlateSolveDriver,
-    ReddeningDriver,
-    SimbadDriver,
-    StackingDriver,
-)
 from astrometricslib.api import AbstractCatalogAccess, CatalogAccess
 from astrometricslib.foundation.astropy_setup import configure_offline_iers, warm_earth_orientation_data
 from astrometricslib.foundation.config import AppConfiguration, get_configuration
@@ -71,6 +64,7 @@ from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.stacking.post_processing.interrupted_jobs import restore_interrupted_stacks
 
 if TYPE_CHECKING:
+    from astrometricslib._internal.drivers.driver_set import Drivers
     from astrometricslib.api.jobs import Jobs
     from astrometricslib.api.processing import CalibrationCatalog, ProcessingPipelines
     from astrometricslib.api.quality import QualityRecords
@@ -148,18 +142,6 @@ class Astrometrics:
     catalog_access : `AbstractCatalogAccess`, optional
         The database used to save and load data. If not given, a default
         one is built from ``config``.
-    plate_solve_driver : `PlateSolveDriver`, optional
-        The plate solver. If not given, Astrometry.net is used.
-    stacking_driver : `StackingDriver`, optional
-        The stacking program. If not given, Siril is used.
-    simbad_driver : `SimbadDriver`, optional
-        The SIMBAD database client. If not given, astroquery is used.
-    gaia_xp_driver : `GaiaXpDriver`, optional
-        The source of Gaia DR3 XP spectra. If not given, astroquery is used,
-        with the spectra cached in the library's data folder.
-    reddening_driver : `ReddeningDriver`, optional
-        The source of interstellar reddening values. If not given, Gaia DR3
-        is queried through astroquery.
 
     Attributes
     ----------
@@ -180,23 +162,40 @@ class Astrometrics:
 
     Notes
     -----
-    The drivers are for one process. Processing several targets at once
-    starts worker processes that cannot receive them, so that call is
-    refused when any driver was given.
+    The outside programs and services the library talks to (the plate
+    solver, Siril, SIMBAD and the Gaia services) cannot be swapped through
+    this signature. A test swaps them through
+    `astrometricslib._internal.testing.astrometrics_with_drivers`.
     """
 
     def __init__(
         self,
         config: AppConfiguration | None = None,
         catalog_access: AbstractCatalogAccess | None = None,
-        *,
-        plate_solve_driver: PlateSolveDriver | None = None,
-        stacking_driver: StackingDriver | None = None,
-        simbad_driver: SimbadDriver | None = None,
-        gaia_xp_driver: GaiaXpDriver | None = None,
-        reddening_driver: ReddeningDriver | None = None,
     ) -> None:
         from astrometricslib._internal.drivers.driver_set import Drivers
+
+        self._build(config, catalog_access, Drivers())
+
+    def _build(
+        self,
+        config: AppConfiguration | None,
+        catalog_access: AbstractCatalogAccess | None,
+        drivers: Drivers,
+    ) -> None:
+        """Build the sub-APIs over the given drivers.
+
+        Parameters
+        ----------
+        config : `AppConfiguration` or `None`
+            The application settings. The default settings are loaded if
+            `None`.
+        catalog_access : `AbstractCatalogAccess` or `None`
+            The database. A default one is built if `None`.
+        drivers : `Drivers`
+            The outside programs and services to use. `Drivers()` means the
+            built-in ones.
+        """
         from astrometricslib.api.jobs import Jobs
         from astrometricslib.api.processing import ProcessingPipelines
         from astrometricslib.api.quality import QualityRecords
@@ -206,13 +205,6 @@ class Astrometrics:
 
         self.config = config or get_configuration()
         self._catalog_access = catalog_access or CatalogAccess(self.config)
-        drivers = Drivers(
-            plate_solve=plate_solve_driver,
-            stacking=stacking_driver,
-            simbad=simbad_driver,
-            gaia_xp=gaia_xp_driver,
-            reddening=reddening_driver,
-        )
 
         # There is deliberately no in-memory copy of the star catalog here.
         # The database is the one copy, reached through `self.stars`, which

@@ -1,6 +1,6 @@
 """Purpose: Tests that `Astrometrics` passes its drivers to the pipelines.
 
-Description: A caller can hand `Astrometrics(...)` a plate solver, a stacking
+Description: A test can build the root with a plate solver, a stacking
 program and a SIMBAD client. These tests give it fakes and check that the
 astrometry stage, `StellarCatalog.plate_solve` and `ProcessingPipelines.stack`
 use them, and that none of the real drivers (Astrometry.net, SIMBAD, Siril)
@@ -30,6 +30,7 @@ from astrometricslib._internal.drivers import (
 )
 from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib._internal.drivers.interfaces import PipelineSteps
+from astrometricslib._internal.testing import astrometrics_with_drivers
 from astrometricslib.exceptions import InvalidArgumentError
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.quality.quality_summary import StackingPipelineQualityMetrics, StackQualitySummary
@@ -262,7 +263,7 @@ def test_the_astrometry_stage_uses_the_injected_solver_and_simbad(
     monkeypatch.setattr(
         "astrometricslib.pipelines.astrometry.runner.record_pipeline_stars", lambda stars, **_: (stars, None)
     )
-    astrometrics = Astrometrics(
+    astrometrics = astrometrics_with_drivers(
         AppConfiguration(), MagicMock(), plate_solve_driver=solver, simbad_driver=simbad
     )
     target = Target(id="Injection Field")
@@ -288,7 +289,7 @@ def test_the_astrometry_stage_uses_the_injected_solver_and_simbad(
 def test_plate_solve_on_the_star_catalog_uses_the_injected_solver(field_image: str) -> None:
     """`processing.plate_solve` uses the fake solver and the fake SIMBAD."""
     solver, simbad = FakePlateSolver(), FakeSimbad()
-    astrometrics = Astrometrics(
+    astrometrics = astrometrics_with_drivers(
         AppConfiguration(), MagicMock(), plate_solve_driver=solver, simbad_driver=simbad
     )
 
@@ -324,7 +325,7 @@ def make_stacking_target(tmp_path: Path) -> Target:
 def test_processing_stack_uses_the_injected_stacking_driver(tmp_path: Path) -> None:
     """`processing.stack` hands its frames to the fake stacking program."""
     stacker = FakeStacker(str(tmp_path / "Injection_Stack_L_Stacked.fits"))
-    astrometrics = Astrometrics(AppConfiguration(), MagicMock(), stacking_driver=stacker)
+    astrometrics = astrometrics_with_drivers(AppConfiguration(), MagicMock(), stacking_driver=stacker)
     target = make_stacking_target(tmp_path)
     summary = StackQualitySummary(
         pipeline_name="stacking",
@@ -371,7 +372,7 @@ def test_a_given_driver_is_used_and_the_others_stay_default() -> None:
     from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 
     solver = FakePlateSolver()
-    astrometrics = Astrometrics(AppConfiguration(), MagicMock(), plate_solve_driver=solver)
+    astrometrics = astrometrics_with_drivers(AppConfiguration(), MagicMock(), plate_solve_driver=solver)
     identifier = StarIdentifier(AppConfiguration(), drivers=astrometrics.processing._drivers)
 
     assert identifier.solver is solver
@@ -386,7 +387,9 @@ def test_processing_several_targets_refuses_injected_drivers(driver_name: str) -
         "stacking_driver": lambda: FakeStacker("/stack.fits"),
         "simbad_driver": FakeSimbad,
     }
-    astrometrics = Astrometrics(AppConfiguration(), MagicMock(), **{driver_name: fake[driver_name]()})
+    astrometrics = astrometrics_with_drivers(
+        AppConfiguration(), MagicMock(), **{driver_name: fake[driver_name]()}
+    )
 
     with pytest.raises(InvalidArgumentError, match="worker process"):
         astrometrics.processing.process_target(None, camera_id="ZWO ASI 533MM Pro")
@@ -409,12 +412,14 @@ def test_open_in_siril_uses_the_stacking_driver_and_refuses_one_without_a_window
             self.shown.append(file_path)
 
     windowed = WindowedStacker("/stacks/x.fits")
-    Astrometrics(AppConfiguration(), MagicMock(), stacking_driver=windowed).processing.open_in_siril(
-        "/stacks/M 42/stack.fits"
-    )
+    astrometrics_with_drivers(
+        AppConfiguration(), MagicMock(), stacking_driver=windowed
+    ).processing.open_in_siril("/stacks/M 42/stack.fits")
     assert windowed.shown == ["/stacks/M 42/stack.fits"]
 
     windowless = FakeStacker("/stacks/x.fits")
-    processing = Astrometrics(AppConfiguration(), MagicMock(), stacking_driver=windowless).processing
+    processing = astrometrics_with_drivers(
+        AppConfiguration(), MagicMock(), stacking_driver=windowless
+    ).processing
     with pytest.raises(ProcessingError):
         processing.open_in_siril("/stacks/M 42/stack.fits")

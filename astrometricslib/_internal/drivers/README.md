@@ -172,7 +172,7 @@ Its darks are still not pooled across temperatures. When a dark's key has no tem
 
 ## Injecting drivers
 
-A caller replaces a built-in driver by passing a subclass of `PlateSolveDriver`, `StackingDriver`, `SimbadDriver`, `GaiaXpDriver` or `ReddeningDriver` to `Astrometrics(...)` (`plate_solve_driver=`, `stacking_driver=`, `simbad_driver=`, `gaia_xp_driver=`, `reddening_driver=`). `Astrometrics` wraps them in a `Drivers` and hands that to the sub-APIs, which pass it to the pipelines. See `api/README.md` for which calls use which driver.
+Only a test replaces a built-in driver. `Astrometrics(...)` takes no driver arguments. A test builds the root with `astrometrics_with_drivers` (in `_internal/testing.py`) and passes a subclass of `PlateSolveDriver`, `StackingDriver`, `SimbadDriver`, `GaiaXpDriver` or `ReddeningDriver` (`plate_solve_driver=`, `stacking_driver=`, `simbad_driver=`, `gaia_xp_driver=`, `reddening_driver=`). The root wraps them in a `Drivers` and hands that to the sub-APIs, which pass it to the pipelines. See `api/README.md` for which calls use which driver.
 
 To add a pipeline step that needs a driver:
 

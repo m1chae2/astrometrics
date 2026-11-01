@@ -377,11 +377,14 @@ def start_siril_processing_task(
         # summary and provenance, makes the preview picture the viewer shows,
         # and saves the target. This job is already in the job list, so the
         # stack records its provenance against it instead of a new job.
-        from astrometricslib import frame_is_spectral
         from astrometricslib.exceptions import ProcessingError
         from astrometricslib.jobs import log_context
 
-        kind = "spectral" if frames_to_stack and all(map(frame_is_spectral, frames_to_stack)) else "imaging"
+        kind = (
+            "spectral"
+            if frames_to_stack and all(frame.is_spectral for frame in frames_to_stack)
+            else "imaging"
+        )
         try:
             with log_context(job_id=job_id):
                 stack_result = target_service.astrometrics.processing.stack(

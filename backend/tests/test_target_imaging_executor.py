@@ -18,10 +18,27 @@ import pytest
 
 from astrometricslib import AppConfiguration, Target
 from astrometricslib._internal.quality import QualityQueryResult
+from astrometricslib.exceptions import ConfigurationError
 from backend.services.observatory.plan_service import PlanService
 from backend.services.observatory.target_imaging_executor import TargetImagingExecutor
 from wayfindinglib import ObservationPackage, ObservationPlanning
 from wayfindinglib._internal.control import Telescope
+
+
+def _no_camera_profile(camera_name: str) -> None:
+    """Say that a camera has no profile, as the library does for one.
+
+    Parameters
+    ----------
+    camera_name : `str`
+        The camera asked about.
+
+    Raises
+    ------
+    ConfigurationError
+        Always.
+    """
+    raise ConfigurationError(f"No profile for camera {camera_name!r}.")
 
 
 @pytest.fixture
@@ -38,12 +55,17 @@ def executor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TargetImagingEx
     config.update_config({"Wayfinding Library": {"path": str(tmp_path / "wayfinding_library")}})
     targets = {"M 81": Target(id="M 81", ra="09:55:33", dec="+69:03:55")}
     astrometrics = SimpleNamespace(
-        targets=SimpleNamespace(get=lambda target_id, refresh=False: targets.get(target_id)),
+        targets=SimpleNamespace(
+            get=lambda target_id, refresh=False: targets.get(target_id),
+            resolve=lambda target: targets[target] if isinstance(target, str) else target,
+        ),
         # The library's frame counting also reads frame judgments; no target
         # here has judged frames.
         quality=SimpleNamespace(
             capture_settings=lambda ids=None: {}, query=lambda **kwargs: QualityQueryResult()
         ),
+        # No camera has a profile here, so no setting is checked.
+        processing=SimpleNamespace(calibration=SimpleNamespace(camera_profile=_no_camera_profile)),
     )
     telescope = Telescope(id="t1", name="Scope", focal_length_mm=450.0, focal_ratio=6.0)
     catalog = SimpleNamespace(

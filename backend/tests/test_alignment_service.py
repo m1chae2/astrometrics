@@ -40,15 +40,23 @@ class _Logs:
         ]
 
 
-def _real_review() -> ObservationReview:
+def _real_review(records: Any = None) -> ObservationReview:
     """Build a real `ObservationReview`, which groups attempts in plain code.
+
+    Parameters
+    ----------
+    records : `Any`, optional
+        A stand-in for the stored records the review reads.
 
     Returns
     -------
     review : `ObservationReview`
         Built over a control with a stand-in configuration.
     """
-    return ObservationReview(ObservatoryControl(config=MagicMock()))
+    review = ObservationReview(ObservatoryControl(config=MagicMock()))
+    if records is not None:
+        review._context._records = records
+    return review
 
 
 def _autospec_control() -> MagicMock:
@@ -67,7 +75,7 @@ def _autospec_control() -> MagicMock:
 
 def test_get_attempts_lists_recorded_attempts_oldest_first() -> None:
     """Attempts come back camelCase, oldest first; no position, no target."""
-    service = AlignmentService(observatory_api=_autospec_control(), review=_real_review(), records=_Logs())
+    service = AlignmentService(observatory_api=_autospec_control(), review=_real_review(_Logs()))
 
     live = service.get_attempts()
     attempts = live["alignmentAttempts"]
@@ -97,7 +105,7 @@ def test_start_then_cancel_alignment_runs_and_stops_the_centering() -> None:
     observatory.mount.cancel_centering.side_effect = lambda run_is_active: (
         (released.set() if run_is_active else None) or run_is_active
     )
-    service = AlignmentService(observatory_api=observatory, review=_real_review(), records=_Logs())
+    service = AlignmentService(observatory_api=observatory, review=_real_review(_Logs()))
 
     assert service.start_alignment(target_ra="0h 40m 00s", target_dec="+20d 00m 00s") is True
     assert service.is_active() is True
@@ -107,8 +115,8 @@ def test_start_then_cancel_alignment_runs_and_stops_the_centering() -> None:
     assert service.cancel_alignment() is True
     assert service.is_active() is False
     (position,), options = observatory.mount.slew.call_args
-    assert position.ra_deg == pytest.approx(10.0)
-    assert position.dec_deg == pytest.approx(20.0)
+    assert position["ra_deg"] == pytest.approx(10.0)
+    assert position["dec_deg"] == pytest.approx(20.0)
     assert options == {"center": True, "max_iterations": CENTERING_MAX_ITERATIONS}
 
 

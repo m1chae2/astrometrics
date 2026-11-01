@@ -240,6 +240,11 @@ DECISIONS = {
         "The backend calls it with plate-solve attempts it has already read. The AI reads nights through "
         'review_query(kind="alignment"), which groups them already.',
     ),
+    "review_query_alignment_records": ToolDecision(
+        "drop",
+        "The backend reads the stored attempts for its alignment views and passes in library targets. "
+        'The AI reads nights through review_query(kind="alignment").',
+    ),
     "review_frame_guiding": ToolDecision(
         "keep",
         "Built 2026-10-03. Cuts the stored guide-log samples to each light frame's exposure window. "

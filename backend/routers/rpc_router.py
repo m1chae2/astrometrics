@@ -92,7 +92,7 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "telescope:set_filter": ("wayfinder.control.imaging", "set_filter"),
     "telescope:set_slew_rate": ("wayfinder.control.mount", "set_slew_rate"),
     "telescope:set_tracking": ("wayfinder.control.mount", "set_tracking"),
-    # The UI sends RA in hours; the service makes a SkyPosition.
+    # The UI sends RA in hours; the service sends degrees.
     "telescope:slew_coordinates": ("telescope_service", "slew_coordinates"),
     "telescope:slew_target": ("telescope_service", "slew_target"),
     # The service adds the guiding history and alignment state to

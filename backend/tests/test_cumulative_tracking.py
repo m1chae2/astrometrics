@@ -52,16 +52,14 @@ def test_get_session_data_all_retrieves_cumulative_attempts() -> None:
         }
     ]
 
-    service = AlignmentService(
-        observatory_api=None,
-        review=ObservationReview(ObservatoryControl(config=MagicMock())),
-        records=mock_logger,
-    )
+    review = ObservationReview(ObservatoryControl(config=MagicMock()))
+    review._context._records = mock_logger
+    service = AlignmentService(observatory_api=None, review=review)
 
     data = service.get_session_data("all")
 
     mock_logger.get_session_alignment_attempts.assert_called_once_with("all")
-    mock_logger.get_polar_alignments.assert_called_once_with(limit=1)
+    mock_logger.get_polar_alignments.assert_called_once_with(session_id=None, limit=1)
 
     assert len(data["alignmentAttempts"]) == 2
     assert data["alignmentAttempts"][0]["targetName"] == "Deneb"
@@ -77,11 +75,9 @@ def test_get_cumulative_tracking_data_delegates_to_all_sessions() -> None:
     mock_logger.get_session_alignment_attempts.return_value = []
     mock_logger.get_polar_alignments.return_value = []
 
-    service = AlignmentService(
-        observatory_api=None,
-        review=ObservationReview(ObservatoryControl(config=MagicMock())),
-        records=mock_logger,
-    )
+    review = ObservationReview(ObservatoryControl(config=MagicMock()))
+    review._context._records = mock_logger
+    service = AlignmentService(observatory_api=None, review=review)
 
     data = service.get_cumulative_tracking_data()
 

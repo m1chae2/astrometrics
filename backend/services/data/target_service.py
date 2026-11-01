@@ -10,7 +10,7 @@ import sqlite3
 from collections.abc import Callable
 from typing import Any
 
-from astrometricslib import FilterType, ReindexReport, Target, preview_path_for
+from astrometricslib import FilterType, Target
 from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError, NotFoundError
 from backend.services.data.deletion_archive import archive_record_before_delete
 from backend.services.data.image_service import ImageService
@@ -74,7 +74,7 @@ class TargetService:
 
     def reindex_library(
         self, prune_missing: bool = False, on_progress: Callable[[int, int, str], None] | None = None
-    ) -> ReindexReport:
+    ) -> Any:
         """Bring every target's frame list up to date with the frames folder.
 
         The library scans each target folder under the frames folder's
@@ -228,7 +228,7 @@ class TargetService:
         elif target.stacking.stacked_image:
             # The viewer shows the stretched FITS. The stack's JPEG sits
             # beside the stack under a name the library decides.
-            path = preview_path_for(target.stacking.stacked_image)
+            path = target.stacking.preview_path
         else:
             raise NotFoundError(f"{target_id} has no stack to send a picture of.")
         if not os.path.isfile(path):

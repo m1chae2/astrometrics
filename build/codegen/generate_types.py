@@ -304,6 +304,17 @@ def generate_enum(enum_cls: type[Enum], name: str) -> str:
     return "\n".join(lines)
 
 
+FIELD_TYPE_OVERRIDES: dict[str, dict[str, Any]] = {
+    "TelescopePulse": {"alignment_targets": list[AlignmentTargetSession]},
+}
+"""Fields whose TypeScript type is richer than the backend model's annotation.
+
+The backend may only use the libraries' public names, so `TelescopePulse` holds
+the grouped alignment sessions as plain dictionaries. The reply carries
+`AlignmentTargetSession` records, and the UI wants that type.
+"""
+
+
 def generate_interface(model: type[BaseModel], name: str) -> str:
     """Generate a TypeScript interface definition from a Pydantic model.
 
@@ -330,6 +341,7 @@ def generate_interface(model: type[BaseModel], name: str) -> str:
     lines.append(f"export interface {name} {{")
 
     hints = get_type_hints(model, include_extras=True)
+    hints.update(FIELD_TYPE_OVERRIDES.get(name, {}))
     for field_name, field_info in model.model_fields.items():
         ts_name = field_info.alias or field_name
         optional = not field_info.is_required()

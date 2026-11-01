@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from astrometricslib import Target
 from astrometricslib.exceptions import NotFoundError
 from backend.services.data import target_service
 from backend.services.data.target_service import TargetService
@@ -31,9 +32,10 @@ def _service_with(processed: str | None, stacked: str | None) -> TargetService:
     """
     service = TargetService.__new__(TargetService)
     service.astrometrics = MagicMock()
-    stacking = service.astrometrics.targets.get.return_value.stacking
-    stacking.processed_image = processed
-    stacking.stacked_image = stacked
+    target = Target(id="M 57")
+    target.stacking.processed_image = processed
+    target.stacking.stacked_image = stacked
+    service.astrometrics.targets.get.return_value = target
     return service
 
 

@@ -541,6 +541,13 @@
       "interim_block": "",
       "note": "Built 2026-10-03. Reads the recorded nights and calculates the analyses, in replies under 40,000 characters. The recorded-data tables are read through the butler, which creates a missing table. Kind night_quality needs session_id (the night) and returns a typed review."
     },
+    "review_query_alignment_records": {
+      "tool_class": "unclassified",
+      "category": "observatory-status",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "The backend reads the stored attempts for its alignment views and passes in library targets. The AI reads nights through review_query(kind=\"alignment\")."
+    },
     "review_query_alignment_sessions": {
       "tool_class": "compute",
       "category": "observatory-status",

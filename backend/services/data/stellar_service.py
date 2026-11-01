@@ -18,7 +18,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypeVar
 
-from astrometricslib import Astrometrics, StarQueryResult, StellarObject
+from astrometricslib import Astrometrics, StellarObject
 from astrometricslib.exceptions import AstrometricsError, ConflictError, InvalidArgumentError
 from backend.services.data.deletion_archive import archive_record_before_delete
 from backend.services.infrastructure.heavy_read_limiter import DEFAULT_SHARED_WAIT_SECONDS, HeavyReadLimiter
@@ -327,7 +327,7 @@ class StellarService:
         detail: str,
         limit: int | None,
         offset: int,
-    ) -> StarQueryResult:
+    ) -> Any:
         """Run a star listing query with the app's scope arguments.
 
         Parameters
@@ -365,7 +365,7 @@ class StellarService:
         detail: str,
         limit: int | None,
         offset: int,
-    ) -> StarQueryResult:
+    ) -> Any:
         """Ask the library for a star listing, without any limiting.
 
         Parameters are those of `_query_listing`.

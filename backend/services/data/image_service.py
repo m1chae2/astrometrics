@@ -8,13 +8,12 @@ computer and shapes each picture the way the viewer reads it.
 import logging
 from typing import Any
 
-from astrometricslib import RenderedImage
 from astrometricslib.drivers import resolve_mounted_path
 
 logger = logging.getLogger(__name__)
 
 
-def _viewer_payload(picture: RenderedImage | None) -> dict[str, Any] | None:
+def _viewer_payload(picture: Any | None) -> dict[str, Any] | None:
     """Shape a rendered picture the way the app's viewer reads it.
 
     The viewer reads the picture as ``imageData``; the last-image panel

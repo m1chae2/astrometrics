@@ -19,7 +19,7 @@ import numpy as np
 import pytest
 
 from astrometricslib.exceptions import ConflictError, HardwareError, InvalidArgumentError, NotFoundError
-from astrometricslib.foundation.logging import ContextFilter  # ruff: ignore[banned-api]
+from astrometricslib.foundation.logging import ContextFilter
 from backend.routers import rpc_router
 from backend.services.rpc_protocol import RPCMethodNotFoundError, RPCRequest, serialize_rpc_result
 

@@ -258,7 +258,7 @@ def test_worker_writes_job_log_lines_to_the_given_job_repository() -> None:
     target_service = _target_service(_target_with_frames("M 42", ["/lights/M_42/lum_001.fits"]))
     repository = MagicMock()
 
-    with patch(STAGE, return_value=None), patch("astrometricslib.capture_job_logs") as capture:
+    with patch(STAGE, return_value=None), patch("astrometricslib.jobs.capture_job_logs") as capture:
         start_siril_processing_task(
             job_id="job-repo",
             target_id="M 42",

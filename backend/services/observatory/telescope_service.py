@@ -10,6 +10,7 @@ import sqlite3
 from typing import Any
 
 from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError
+from backend.services.coordinate_text import parse_coordinate_text
 
 logger = logging.getLogger(__name__)
 
@@ -151,11 +152,9 @@ class TelescopeService:
             return None
 
         try:
-            from astrometricslib import parse_coordinate_string
-
             nearest = self._target_service.astrometrics.targets.query(
-                ra_deg=parse_coordinate_string(ra_str, is_ra=True),
-                dec_deg=parse_coordinate_string(dec_str, is_ra=False),
+                ra_deg=parse_coordinate_text(ra_str, is_right_ascension=True),
+                dec_deg=parse_coordinate_text(dec_str, is_right_ascension=False),
                 radius_deg=1.0,  # 1 degree tolerance for sensor FOV match
                 include_empty=True,
                 sort="separation",
@@ -200,9 +199,7 @@ class TelescopeService:
         # REQ: BKD-1.2: The backend SHALL provide a generic interface
         # for Telescope control (Slew, Sync, Park, Track).
         try:
-            from wayfindinglib import SkyPosition
-
-            position = SkyPosition(ra_deg=(float(ra) * 15.0) % 360.0, dec_deg=float(dec))
+            position = {"ra_deg": (float(ra) * 15.0) % 360.0, "dec_deg": float(dec)}
             return self.wayfinder.control.mount.slew(position)
         except ValueError as e:
             raise InvalidArgumentError(str(e)) from e

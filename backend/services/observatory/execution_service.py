@@ -134,13 +134,11 @@ class ExecutionService:
         record : `dict`
             The divergence record, serialized for transport.
         """
-        from wayfindinglib import ObservatoryCapability
-
         record = self.wayfinder.execution.build_divergence_record(
             record_id,
             observation_session_id,
             queued_observation_package_id,
-            ObservatoryCapability(capability),
+            capability,
             comparison_input_id,
             intended_value,
             observed_value,

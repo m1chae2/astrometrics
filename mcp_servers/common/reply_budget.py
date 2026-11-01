@@ -40,7 +40,14 @@ from typing import cast
 
 from pydantic import BaseModel
 
-from wayfindinglib import NightQuality, TargetDatasetReport, TargetStatement, TonightRanking
+TARGET_REPORT_FIELDS = frozenset({"statements", "context", "context_omitted_reason"})
+"""Field names that mark a target dataset report (a `TargetDatasetReport`)."""
+
+TONIGHT_RANKING_FIELDS = frozenset({"lists", "notes"})
+"""Field names that mark tonight's ranking (a `TonightRanking`)."""
+
+NIGHT_QUALITY_FIELDS = frozenset({"targets", "night_statements", "notes"})
+"""Field names that mark a night review (a `NightQuality`)."""
 
 MAXIMUM_REPLY_CHARACTERS = 40_000
 """The reply limit of the MCP tools (`MAXIMUM_REPLY_BYTES` in the MCP tool
@@ -127,7 +134,7 @@ def fit_reply[ReplyT: BaseModel](
     return current
 
 
-def limit_statement_evidence(statements: Sequence[TargetStatement], keep: int) -> list[TargetStatement]:
+def limit_statement_evidence(statements: Sequence[BaseModel], keep: int) -> list[BaseModel]:
     """Cut each statement's evidence list to its first ``keep`` references.
 
     Parameters
@@ -156,7 +163,7 @@ def limit_statement_evidence(statements: Sequence[TargetStatement], keep: int) -
     ]
 
 
-def drop_plain_messages(statements: Sequence[TargetStatement]) -> list[TargetStatement]:
+def drop_plain_messages(statements: Sequence[BaseModel]) -> list[BaseModel]:
     """Empty each statement's plain message, the last way to shorten a reply.
 
     Parameters
@@ -176,7 +183,7 @@ def drop_plain_messages(statements: Sequence[TargetStatement]) -> list[TargetSta
     ]
 
 
-def _fit_target_report(report: TargetDatasetReport, limit: int) -> TargetDatasetReport:
+def _fit_target_report(report: BaseModel, limit: int) -> BaseModel:
     """Shrink a target report until its JSON fits the budget.
 
     Two things can go, in this order. First the context section, which is only
@@ -201,7 +208,7 @@ def _fit_target_report(report: TargetDatasetReport, limit: int) -> TargetDataset
         smallest step does not fit, that smallest copy.
     """
 
-    def shrink(current: TargetDatasetReport, round_number: int) -> TargetDatasetReport | None:
+    def shrink(current: BaseModel, round_number: int) -> BaseModel | None:
         """Make the report one step smaller.
 
         Parameters
@@ -238,7 +245,7 @@ def _fit_target_report(report: TargetDatasetReport, limit: int) -> TargetDataset
     return fit_reply(report, shrink, limit)
 
 
-def _fit_tonight_ranking(ranking: TonightRanking, limit: int) -> TonightRanking:
+def _fit_tonight_ranking(ranking: BaseModel, limit: int) -> BaseModel:
     """Leave out the lowest candidates until the ranking fits the budget.
 
     Parameters
@@ -259,7 +266,7 @@ def _fit_tonight_ranking(ranking: TonightRanking, limit: int) -> TonightRanking:
     """
     original_counts = {ranked_list.use: len(ranked_list.candidates) for ranked_list in ranking.lists}
 
-    def shrink(current: TonightRanking, _round_number: int) -> TonightRanking | None:
+    def shrink(current: BaseModel, _round_number: int) -> BaseModel | None:
         """Drop the lowest candidates of the longest list.
 
         Parameters
@@ -296,7 +303,7 @@ def _fit_tonight_ranking(ranking: TonightRanking, limit: int) -> TonightRanking:
     return fit_reply(ranking, shrink, limit)
 
 
-def _fit_night_quality(quality: NightQuality, limit: int) -> NightQuality:
+def _fit_night_quality(quality: BaseModel, limit: int) -> BaseModel:
     """Shorten the evidence lists until the night review fits the budget.
 
     Parameters
@@ -319,7 +326,7 @@ def _fit_night_quality(quality: NightQuality, limit: int) -> NightQuality:
         "Read the rows with QualityRecords.query."
     )
 
-    def shrink(current: NightQuality, round_number: int) -> NightQuality | None:
+    def shrink(current: BaseModel, round_number: int) -> BaseModel | None:
         """Cut the evidence lists one step shorter.
 
         Parameters
@@ -389,10 +396,15 @@ def fit_reply_to_budget[ReplyT](reply: ReplyT, budget: int | None = None) -> Rep
         and each cut is counted or noted in the reply.
     """
     limit = reply_budget() if budget is None else budget
-    if isinstance(reply, TargetDatasetReport):
+    if not isinstance(reply, BaseModel):
+        return reply
+    field_names = frozenset(type(reply).model_fields)
+    # Tell the three kinds apart by their field names, because the library
+    # keeps these classes private.
+    if TARGET_REPORT_FIELDS <= field_names:
         return cast(ReplyT, _fit_target_report(reply, limit))
-    if isinstance(reply, TonightRanking):
-        return cast(ReplyT, _fit_tonight_ranking(reply, limit))
-    if isinstance(reply, NightQuality):
+    if NIGHT_QUALITY_FIELDS <= field_names:
         return cast(ReplyT, _fit_night_quality(reply, limit))
+    if TONIGHT_RANKING_FIELDS <= field_names:
+        return cast(ReplyT, _fit_tonight_ranking(reply, limit))
     return reply

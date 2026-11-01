@@ -6,7 +6,7 @@ an Ekos-run night, until interrupted, per
 `Wayfinding_Library_Architecture.md` Sections 5.7 and 5.8. Attaches to an
 existing, already-planned session where one exists (created by
 Observation Planning); otherwise creates a minimal session against the
-active telescope/camera and a seeded default site profile, so this
+active telescope/camera and the recorded site, so this
 script remains usable standalone without a prior planning step.
 """
 
@@ -14,51 +14,37 @@ import argparse
 import threading
 from datetime import UTC, datetime
 
-from wayfindinglib import Wayfinder
-from wayfindinglib.data_access.site_profile_reader import get_or_seed_default_site_profile
+from wayfindinglib import ObservationSession, Wayfinder
 from wayfindinglib.drivers.phd2.phd2_client import DEFAULT_PHD2_PORT, PHD2Client
 from wayfindinglib.drivers.phd2.phd2_guiding_service import PHD2GuidingService
-from wayfindinglib.models.session.observation_session import ObservationSession, SessionStatus
 
 
 def _ensure_session(wayfinder: Wayfinder, session_id: str) -> ObservationSession:
-    """Return the session for `session_id`, creating a minimal one if absent.
+    """Return the session for `session_id`, creating an empty one if absent.
+
+    Parameters
+    ----------
+    wayfinder : `Wayfinder`
+        The library entry point.
+    session_id : `str`
+        The id of a planned session, or, to start a new one, the observing
+        night as a date such as ``"2026-09-24"``.
 
     Returns
     -------
     session : `ObservationSession`
-        The existing or newly created, already-persisted session.
+        The existing session, or a new empty one for that night (recorded
+        for the active telescope and camera at the recorded site).
 
-    Raises
-    ------
-    RuntimeError
-        If no session exists and no active telescope/camera is
-        configured to create a minimal one against.
+    Notes
+    -----
+    The library raises `InvalidArgumentError` if no session has this id and
+    `session_id` is not a date.
     """
-    butler = wayfinder.execution._butler
-    existing = butler.get("observation_session", {"session_id": session_id})
+    existing = wayfinder.planning.get_plan(session_id)
     if existing is not None:
         return existing
-
-    equipment = wayfinder.control.equipment.status(include=["telescope", "camera"])
-    telescope, camera = equipment.telescope, equipment.camera
-    if telescope is None or camera is None:
-        raise RuntimeError(
-            "No existing session found and no active telescope/camera is configured "
-            "to create one -- plan a session first, or activate a telescope and camera."
-        )
-    site_profile = get_or_seed_default_site_profile(butler, wayfinder.config)
-
-    session = ObservationSession(
-        id=session_id,
-        night_date=datetime.now(UTC).date(),
-        status=SessionStatus.PLANNED,
-        site_profile_id=site_profile.id,
-        telescope_id=telescope.id,
-        camera_id=camera.id,
-    )
-    butler.put(session, "observation_session", {"session_id": session.id})
-    return session
+    return wayfinder.planning.create_session(session_id)
 
 
 def run_observation_session_recorder() -> None:
@@ -106,7 +92,7 @@ def run_observation_session_recorder() -> None:
     print("Connecting to observatory INDI driver...")
     try:
         wayfinder.control.equipment.connect()
-        _ensure_session(wayfinder, session_id)
+        session_id = _ensure_session(wayfinder, session_id).id
 
         recorder = wayfinder.execution.create_recorder(
             guiding_service,

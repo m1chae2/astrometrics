@@ -181,16 +181,13 @@ class Container:
 
         # 5. Initialize Domain Services with proper DI
         from backend.services.observatory.alignment_service import AlignmentService
-        from wayfindinglib import ControlRecordStore
 
-        # The alignment service still reads the stored attempts directly.
-        # The INDI session and the external-alignment polling now go
-        # through `control.mount`. Reading the stored attempts through the
-        # library is left for the API review (issue #134).
+        # The service reads the stored attempts through `review`, and the
+        # INDI session and the external-alignment polling go through
+        # `control.mount`.
         self.alignment_service = AlignmentService(
             observatory_api=self.wayfinder.control,
             review=self.wayfinder.review,
-            records=ControlRecordStore.for_configuration(self.config_service),
             targets=self.astrometrics.targets,
         )
         self.telescope_service = TelescopeService(

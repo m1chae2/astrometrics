@@ -41,7 +41,7 @@ from typing import Any
 
 from astrometricslib.exceptions import InvalidArgumentError
 from astrometricslib.reports import observing_night_id
-from wayfindinglib import ObservationPackage, PlanChange
+from wayfindinglib import ObservationPackage
 
 logger = logging.getLogger(__name__)
 
@@ -361,7 +361,7 @@ class PlanService:
         add_checklist: list[dict[str, Any]] | None = None,
         framing: dict[str, Any] | None = None,
         expected_revision: int | None = None,
-    ) -> PlanChange:
+    ) -> Any:
         """Change the night plan by hand and announce the change.
 
         One call makes one kind of change: give exactly one of `add`,
@@ -372,7 +372,8 @@ class PlanService:
         session_id : `str`
             The session to change.
         add : `list` [`dict`], optional
-            Packages to append to the queue (a `QueueRequest` each).
+            Packages to append to the queue. Each is a dictionary with a
+            ``package_id`` and a start mode.
         order : `list` [`str`], optional
             Every entry id left after `remove`, in the new order.
         remove : `list` [`str`], optional
@@ -443,7 +444,7 @@ class PlanService:
         expected_revision: int | None = None,
         note: str | None = None,
         ticked_at: str | None = None,
-    ) -> PlanChange:
+    ) -> Any:
         """Record that the user did one checklist item, and announce it.
 
         Parameters
@@ -487,7 +488,7 @@ class PlanService:
         self._announce(change)
         return change
 
-    def _announce(self, change: PlanChange) -> None:
+    def _announce(self, change: Any) -> None:
         """Send the ``plan:changed`` event for one successful write.
 
         Parameters
@@ -510,7 +511,7 @@ class PlanService:
             },
         )
 
-    def _announce_promotions(self, change: PlanChange) -> None:
+    def _announce_promotions(self, change: Any) -> None:
         """Announce each suggested package a write promoted.
 
         Parameters

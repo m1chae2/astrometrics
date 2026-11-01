@@ -417,10 +417,11 @@ def test_alignment_service_session_queries_and_retrieval() -> None:
 
     observatory_mock = MagicMock()
     review = ObservationReview(ObservatoryControl(config=MagicMock()))
+    review._context._records = records_mock
     review.query = MagicMock(
         return_value=SimpleNamespace(sessions=[{"sessionId": "2026-09-24", "syncCount": 5}])
     )
-    service = AlignmentService(observatory_api=observatory_mock, review=review, records=records_mock)
+    service = AlignmentService(observatory_api=observatory_mock, review=review)
     sessions = service.list_sessions()
     assert len(sessions) == 1
     assert sessions[0]["sessionId"] == "2026-09-24"

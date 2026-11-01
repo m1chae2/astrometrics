@@ -262,7 +262,7 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "astrometricslib/pipelines/stacking/post_processing/stack_preview.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "astrometricslib/_internal/drivers/siril_stacking_driver.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "astrometricslib/_internal/drivers/astrometry_net_driver.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
-"backend/services/infrastructure/system_status_service.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path", "banned-api"]
+"backend/services/infrastructure/system_status_service.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"]
 "backend/services/infrastructure/handoff_service.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "backend/services/infrastructure/phone_share.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "wayfindinglib/drivers/stellarmate_interface.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
@@ -294,6 +294,9 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 # exempt one library's names and keep the other's.
 "wayfindinglib/**" = ["banned-api"]
 "astrometricslib/**" = ["banned-api"]
+"backend/tests/**" = ["banned-api"] # a backend test may import a library's private names to set up a case
+"mcp_servers/**/test/**" = ["banned-api"] # so may an MCP server test
+"conftest.py" = ["banned-api"] # and the root test configuration
 "build/codegen/generate_types.py" = ["banned-api"] # TS codegen introspects the full model surface, not just the public API
 "astrometricslib/conftest.py" = ["module-import-not-at-top-of-file"] # sys.modules mocking/config patching must precede import
 "backend/tests/conftest.py" = ["module-import-not-at-top-of-file"] # sys.modules mocking/config patching must precede import
@@ -317,10 +320,6 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "astrometricslib/utilities/test/test_parallel_batch.py" = ["print"]
 "backend/services/infrastructure/scripting_service.py" = ["print"]
 "backend/services/infrastructure/socket_manager.py" = ["blind-except"]
-"backend/services/observatory/execution_service.py" = ["banned-api"]
-"backend/tests/test_passive_alignment_and_guiding.py" = ["banned-api"]
-"backend/tests/test_pointing_and_guiding_analytics.py" = ["banned-api"]
-"mcp_servers/common/test/test_reply_budget.py" = ["banned-api"]
 "documentation/notebooks/astrometrics/user_guide/01_working_with_targets.ipynb" = ["print"]
 "documentation/notebooks/astrometrics/user_guide/02_inspecting_fits_metadata.ipynb" = ["print"]
 "documentation/notebooks/astrometrics/user_guide/03_stacking_and_calibration.ipynb" = ["print"]
@@ -401,8 +400,6 @@ type = "forbidden"
 source_modules = ["mcp_servers"]
 # Every subpackage of both libraries, so a new one is covered too.
 forbidden_modules = ["astrometricslib.*", "wayfindinglib.*"]
-# This test builds report models to check how a long reply is cut. The models
-# are internal to the library, so the one test module is let in.
 ignore_imports = [
     "mcp_servers.** -> astrometricslib.exceptions",
     "mcp_servers.** -> astrometricslib.reports",
@@ -410,7 +407,9 @@ ignore_imports = [
     "mcp_servers.** -> astrometricslib.drivers",
     "mcp_servers.** -> wayfindinglib.exceptions",
     "mcp_servers.** -> wayfindinglib.reports",
-    "mcp_servers.common.test.test_reply_budget -> wayfindinglib.models.**",
+    # A test may reach into the libraries to set up a case.
+    "mcp_servers.**.test.** -> astrometricslib.**",
+    "mcp_servers.**.test.** -> wayfindinglib.**",
 ]
 allow_indirect_imports = true
 # The public modules are listed above whether or not a server imports them today.
@@ -453,14 +452,25 @@ ignore_imports = [
     "wayfindinglib.**.test.** -> astrometricslib._internal.**",
     "wayfindinglib.test.** -> astrometricslib._internal",
     "wayfindinglib.**.test.** -> astrometricslib._internal",
+    "backend.tests.** -> astrometricslib._internal.**",
+    "backend.tests.** -> astrometricslib._internal",
+    "mcp_servers.**.test.** -> astrometricslib._internal.**",
+    "mcp_servers.**.test.** -> astrometricslib._internal",
 ]
 
 [[tool.importlinter.contracts]]
-name = "only wayfindinglib imports wayfindinglib._internal"
+name = "only wayfindinglib and the tests of the backend and the MCP servers import wayfindinglib._internal"
 type = "forbidden"
 source_modules = ["backend", "mcp_servers"]
 forbidden_modules = ["wayfindinglib._internal"]
 allow_indirect_imports = true
+unmatched_ignore_imports_alerting = "none"
+ignore_imports = [
+    "backend.tests.** -> wayfindinglib._internal.**",
+    "backend.tests.** -> wayfindinglib._internal",
+    "mcp_servers.**.test.** -> wayfindinglib._internal.**",
+    "mcp_servers.**.test.** -> wayfindinglib._internal",
+]
 
 [[tool.importlinter.contracts]]
 name = "the libraries never import the MCP servers"

@@ -260,6 +260,9 @@ def test_the_real_validate_output_records_the_gates() -> None:
     stars = [make_star(agrees=False)]
     spectroscopy = SimpleNamespace(
         last_run_zero_order_saturation_fractions=[0.02],
+        last_run_skipped_no_trail_count=0,
+        last_run_skipped_unidentified_count=0,
+        last_run_below_feature_limit_count=0,
         config=SimpleNamespace(camera=SimpleNamespace(name="ZWO ASI 533MM Pro")),
     )
     result = Result(
@@ -350,6 +353,9 @@ def test_the_real_validate_output_records_the_stage_quality_summary() -> None:
     stars = [make_star(processing_failed=True), make_star()]
     spectroscopy = SimpleNamespace(
         last_run_zero_order_saturation_fractions=[0.0],
+        last_run_skipped_no_trail_count=0,
+        last_run_skipped_unidentified_count=0,
+        last_run_below_feature_limit_count=0,
         config=SimpleNamespace(camera=SimpleNamespace(name="ZWO ASI 533MM Pro")),
     )
     result = Result(

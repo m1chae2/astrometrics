@@ -22,6 +22,7 @@ from astrometricslib.pipelines.spectroscopy.processing.spectral_feature_detector
 )
 from astrometricslib.pipelines.spectroscopy.processing.spectrum_analysis import analyze_spectrum
 from astrometricslib.pipelines.spectroscopy.processing.spectrum_signal import (
+    MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE,
     MINIMUM_SPECTRUM_SIGNAL_TO_NOISE,
     estimate_spectrum_signal_to_noise,
 )
@@ -203,3 +204,72 @@ def test_a_precisely_measured_feature_is_not_capped() -> None:
     assert float(entry["depth_uncertainty"]) < MAXIMUM_UNCERTAINTY_FOR_A_VERDICT
     assert entry["limited_by_noise"] is False
     assert entry["verdict"] == "detected"
+
+
+def _faint_but_real_spectrum() -> tuple[np.ndarray, float]:
+    """Build a continuum between the two limits, with a deep Mg b dip.
+
+    Returns
+    -------
+    intensity : `numpy.ndarray`
+        The spectrum.
+    signal_to_noise : `float`
+        Its measured signal-to-noise, between the continuum limit and the
+        feature-analysis limit.
+    """
+    intensity = _star_spectrum(1.5)
+    intensity = intensity * (1.0 - 0.7 * np.exp(-0.5 * ((WAVELENGTHS - 5175.0) / 25.0) ** 2))
+    measured = estimate_spectrum_signal_to_noise(WAVELENGTHS, intensity, 45.0)
+    assert measured is not None
+    assert MINIMUM_SPECTRUM_SIGNAL_TO_NOISE < measured < MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE
+    return intensity, measured
+
+
+def test_a_spectrum_below_the_feature_limit_gets_no_feature_analysis() -> None:
+    """The spectrum is kept; no features, emission lines or type."""
+    intensity, measured = _faint_but_real_spectrum()
+
+    analysis = analyze_spectrum(
+        WAVELENGTHS, intensity, apply_instrument_response(WAVELENGTHS, intensity, RESPONSE)
+    )
+
+    assert analysis.classification["spectral_type"] == "Unknown"
+    assert "without feature analysis" in str(analysis.classification["reason"])
+    assert analysis.features == []
+    assert analysis.emission_lines == []
+    assert analysis.signal_to_noise == pytest.approx(measured)
+
+
+def test_the_continuum_limit_keeps_its_meaning() -> None:
+    """Below 1.5 the reason is still "no measurable spectrum"."""
+    analysis = analyze_spectrum(WAVELENGTHS, _noise_only_spectrum(), None)
+
+    assert "no measurable spectrum" in str(analysis.classification["reason"])
+    assert MINIMUM_SPECTRUM_SIGNAL_TO_NOISE < MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE
+
+
+def test_an_extended_target_below_the_feature_limit_still_gets_the_emission_test() -> None:
+    """The emission-line detector was not measured, so its use is unchanged."""
+    intensity, _measured = _faint_but_real_spectrum()
+
+    analysis = analyze_spectrum(WAVELENGTHS, intensity, None, is_extended_target=True)
+
+    assert "without feature analysis" not in str(analysis.classification["reason"])
+    assert "extended object" in str(analysis.classification["reason"]) or "glowing gas" in str(
+        analysis.classification["reason"]
+    )
+
+
+def test_a_spectrum_above_the_feature_limit_is_analyzed_as_before() -> None:
+    """A star above the limit gets its feature tests."""
+    intensity = _star_spectrum(40.0)
+    measured = estimate_spectrum_signal_to_noise(WAVELENGTHS, intensity, 45.0)
+    assert measured is not None
+    assert measured > MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE
+
+    analysis = analyze_spectrum(
+        WAVELENGTHS, intensity, apply_instrument_response(WAVELENGTHS, intensity, RESPONSE)
+    )
+
+    assert "without feature analysis" not in str(analysis.classification.get("reason"))
+    assert analysis.features

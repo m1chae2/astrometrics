@@ -1732,7 +1732,12 @@ SUMMARY_KINDS: tuple[SummaryKind, ...] = (
         gates=_SPECTROSCOPY_GATES,
         extra_metrics=_SPECTROSCOPY_EXTRA_METRICS,
         extras=_spectroscopy_extras,
-        not_held=("spectroscopy.notice_camera_without_profile",),
+        not_held=(
+            "spectroscopy.notice_camera_without_profile",
+            "spectroscopy.skipped_no_trail_star_count",
+            "spectroscopy.skipped_unidentified_star_count",
+            "spectroscopy.notice_stars_below_feature_limit",
+        ),
     ),
     SummaryKind(
         key="asteroidDetection",

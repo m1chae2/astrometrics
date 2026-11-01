@@ -636,7 +636,7 @@ class PhotometryQualitySummary(PipelineQualitySummaryBase):
 
 # Bumped whenever SpectroscopyPipelineQualityMetrics's shape changes
 # meaningfully.
-SPECTROSCOPY_PIPELINE_VERSION = "1.6.0"
+SPECTROSCOPY_PIPELINE_VERSION = "1.7.0"
 
 
 class SpectroscopyPipelineQualityMetrics(StarIdentificationMetrics):
@@ -666,6 +666,18 @@ class SpectroscopyPipelineQualityMetrics(StarIdentificationMetrics):
     # star (`self_determined_spectral_type_rms`, `rms_gap_to_next_class`).
     poor_match_classification_count: int = Field(default=0, alias="poorMatchClassificationCount")
     ambiguous_classification_count: int = Field(default=0, alias="ambiguousClassificationCount")
+    # How many detected stars the run left out before extraction: stars with
+    # no part of their trail on the image, and stars with no catalog identity
+    # (which are dropped at save anyway). A summary saved before these were
+    # recorded reads 0.
+    skipped_no_trail_star_count: int = Field(default=0, alias="skippedNoTrailStarCount")
+    skipped_unidentified_star_count: int = Field(default=0, alias="skippedUnidentifiedStarCount")
+    # How many extracted spectra were below the signal-to-noise limit for
+    # feature detection and classification (see
+    # `MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE`). Those stars keep their
+    # spectrum and get no feature detection or classification. The single-
+    # image run counts them; a summary saved before this was recorded reads 0.
+    below_feature_limit_star_count: int = Field(default=0, alias="belowFeatureLimitStarCount")
     # How each quality checkpoint went across the run's spectra, in stage
     # order: for each of the four stages, how many spectra were checked, how
     # many had a failed metric, and the median of each numeric metric (see

@@ -51,7 +51,7 @@ from astrometricslib.models.quality.metric_spec import (
     MetricSpec,
     UncertaintyKind,
 )
-from astrometricslib.pipelines.shared.quality.notices import camera_without_profile_spec
+from astrometricslib.pipelines.shared.quality.notices import camera_without_profile_spec, notice_spec
 
 # ---- Run totals from the summary -----------------------------------------
 
@@ -61,6 +61,9 @@ SPECTROSCOPY_TRAIL_WIDTH_MEDIAN = "spectroscopy.trail_width_median_px"
 SPECTROSCOPY_CATALOG_MATCHED_STAR_COUNT = "spectroscopy.catalog_matched_star_count"
 SPECTROSCOPY_POSITION_ONLY_STAR_COUNT = "spectroscopy.position_only_star_count"
 SPECTROSCOPY_UNRESOLVED_STAR_COUNT = "spectroscopy.unresolved_star_count"
+SPECTROSCOPY_SKIPPED_NO_TRAIL_STAR_COUNT = "spectroscopy.skipped_no_trail_star_count"
+SPECTROSCOPY_SKIPPED_UNIDENTIFIED_STAR_COUNT = "spectroscopy.skipped_unidentified_star_count"
+SPECTROSCOPY_NOTICE_BELOW_FEATURE_LIMIT = "spectroscopy.notice_stars_below_feature_limit"
 SPECTROSCOPY_POOR_MATCH_CLASSIFICATION_COUNT = "spectroscopy.poor_match_classification_count"
 SPECTROSCOPY_AMBIGUOUS_CLASSIFICATION_COUNT = "spectroscopy.ambiguous_classification_count"
 
@@ -943,6 +946,33 @@ def _gaia_xp_metrics() -> tuple[MetricSpec, ...]:
     return tuple(specs)
 
 
+def below_feature_limit_notice_spec() -> MetricSpec:
+    """Declare the notice for spectra below the feature-analysis limit.
+
+    Returns
+    -------
+    spec : `MetricSpec`
+        A run-level notice. Its value is the number of extracted spectra whose
+        signal-to-noise is below the limit; the row is stored only when there
+        was at least one.
+    """
+    return notice_spec(
+        SPECTROSCOPY_NOTICE_BELOW_FEATURE_LIMIT,
+        Checkpoint.SPECTROSCOPY,
+        SubjectLevel.RUN,
+        "count",
+        "Whether some spectra were too faint for feature detection and classification.",
+        "The number of extracted spectra whose signal-to-noise per resolution element is below the limit for "
+        "finding a line (validation register SPE-31). Those stars keep their spectrum and get no feature "
+        "detection or classification. An extended target is not counted.",
+        "pipelines.spectroscopy.post_processing.record_quality.below_feature_limit_notice_measurement",
+        (
+            "A line cannot be found in a spectrum this faint, so the spectrum is kept but its features and "
+            "type are not reported; a person should know that stars were left unanalyzed."
+        ),
+    )
+
+
 SPECTROSCOPY_METRICS: tuple[MetricSpec, ...] = (
     _context_metric(
         SPECTROSCOPY_ZERO_ORDER_SATURATED_FRACTION_MAX,
@@ -1005,6 +1035,32 @@ SPECTROSCOPY_METRICS: tuple[MetricSpec, ...] = (
         "It shows how much of the run could not be identified.",
         better=Direction.LOWER,
         uncertainty_method=_EXACT_COUNT,
+    ),
+    _context_metric(
+        SPECTROSCOPY_SKIPPED_NO_TRAIL_STAR_COUNT,
+        "count",
+        "How many detected stars were left out because no part of their trail is on the image.",
+        "Count of the detected stars whose trail, laid out from the star along the dispersion direction, "
+        "has no sample on the image. Such a star cannot give a spectrum, so it is left out before "
+        "extraction.",
+        "Every detected star of the single-image run. The session batch does not leave stars out this way "
+        "and gives no value.",
+        "It shows how many detections were set aside for a trail that is off the frame.",
+        uncertainty_method=_EXACT_COUNT,
+        register_entry="SPE-31",
+    ),
+    _context_metric(
+        SPECTROSCOPY_SKIPPED_UNIDENTIFIED_STAR_COUNT,
+        "count",
+        "How many detected stars were left out because they have no catalog identity.",
+        "Count of the detected stars that still carry a placeholder name. They would be dropped when the "
+        "run is saved, so they are left out before analysis. Those brighter than the last analyzed star are "
+        "still read, as neighbors only.",
+        "Every detected star of the single-image run whose trail is on the image. The session batch does not "
+        "leave stars out this way and gives no value.",
+        "It shows how much of the field could not be named, and that no spectrum was made for it.",
+        uncertainty_method=_EXACT_COUNT,
+        register_entry="SPE-31",
     ),
     _context_metric(
         SPECTROSCOPY_POOR_MATCH_CLASSIFICATION_COUNT,
@@ -1186,4 +1242,5 @@ SPECTROSCOPY_METRICS: tuple[MetricSpec, ...] = (
         computed_by=f"{_GAIA_XP_MODULE}.gaia_xp_gate",
     ),
     camera_without_profile_spec("spectroscopy"),
+    below_feature_limit_notice_spec(),
 )

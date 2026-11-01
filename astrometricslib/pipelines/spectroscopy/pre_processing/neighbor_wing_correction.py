@@ -29,6 +29,7 @@ What it does NOT do:
 """
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -378,6 +379,7 @@ def correct_neighbor_wings(
     traces: list[StarTrace | None],
     stored: StoredCrossTrailBlur | None,
     dispersion_vector: tuple[float, float],
+    neighbor_only: Sequence[bool] | None = None,
 ) -> list[NeighborWingOutcome]:
     """Take each star's neighbours' blurred light out of its box flux.
 
@@ -393,6 +395,10 @@ def correct_neighbor_wings(
     dispersion_vector : `tuple` [`float`, `float`]
         The direction the spectra run on the image, as (x, y). Used to lay
         the image out with wavelength rising down the rows.
+    neighbor_only : `Sequence` [`bool`], optional
+        One flag per trace. A star flagged `True` is used as a neighbor of
+        the other stars but is not corrected itself, and gets the outcome
+        `STATUS_NOT_NEEDED`. Left out, every star is corrected.
 
     Returns
     -------
@@ -404,6 +410,9 @@ def correct_neighbor_wings(
     placed = [_place_trace(frame, trace) for trace in traces]
     outcomes = []
     for target_index, target in enumerate(placed):
+        if neighbor_only is not None and neighbor_only[target_index]:
+            outcomes.append(NeighborWingOutcome(STATUS_NOT_NEEDED))
+            continue
         if target is None:
             outcomes.append(NeighborWingOutcome("skipped: the extraction did not record its geometry"))
             continue

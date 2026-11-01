@@ -51,6 +51,7 @@ from astrometricslib.pipelines.spectroscopy.processing.spectral_line_indices imp
     classify_by_line_indices,
 )
 from astrometricslib.pipelines.spectroscopy.processing.spectrum_signal import (
+    MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE,
     MINIMUM_SPECTRUM_SIGNAL_TO_NOISE,
     estimate_spectrum_signal_to_noise,
 )
@@ -396,6 +397,11 @@ def analyze_spectrum(
     -------
     analysis : `SpectrumAnalysis`
         The classification, the feature results and the emission lines.
+        A star whose signal-to-noise is below
+        `MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE` gets an "Unknown"
+        classification that says so, and no features or emission lines; the
+        signal-to-noise is still in the result. An extended target is not held
+        to that limit.
         When `is_extended_target` is set, the stellar classification is
         replaced by an "Unknown" result saying so and the absorption
         features are left empty, since neither describes a nebula or a
@@ -423,6 +429,29 @@ def analyze_spectrum(
                 "no measurable spectrum: the star is too faint here, its signal-to-noise is "
                 f"{signal_to_noise:.1f} per resolution element and at least "
                 f"{MINIMUM_SPECTRUM_SIGNAL_TO_NOISE:g} is needed"
+            ),
+            [],
+            False,
+            resolution_element_angstrom,
+            is_resolution_measured,
+            signal_to_noise,
+        )
+
+    # A star above the cut above but below the feature limit has a continuum,
+    # yet too little signal for a line to be found (see
+    # `MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE`). Its spectrum is kept and the
+    # analysis is not run. The emission-line detector was never measured, so an
+    # extended target goes on to the emission-line test below as before.
+    if (
+        signal_to_noise is not None
+        and signal_to_noise < MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE
+        and not is_extended_target
+    ):
+        return SpectrumAnalysis(
+            unclassified_result(
+                "spectrum kept without feature analysis: its signal-to-noise is "
+                f"{signal_to_noise:.1f} per resolution element and at least "
+                f"{MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE:g} is needed to find a line"
             ),
             [],
             False,

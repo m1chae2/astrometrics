@@ -105,6 +105,11 @@ UNUSED_DECISION_METRICS = {
     "astrometry.notice_camera_without_profile": _NOTICE_ROW_REASON,
     "photometry.notice_camera_without_profile": _NOTICE_ROW_REASON,
     "spectroscopy.notice_camera_without_profile": _NOTICE_ROW_REASON,
+    "spectroscopy.notice_stars_below_feature_limit": (
+        "issue 97: counts the extracted spectra too faint for feature detection and classification "
+        "(SPE-31), so a job can list them as a warning. No rule reads it yet; the pipeline-quality view "
+        "of issue 97 decides how it is shown."
+    ),
     "asteroid_detection.notice_camera_without_profile": _NOTICE_ROW_REASON,
     "asteroid_detection.notice_ephemeris_query_cap_reached": _NOTICE_ROW_REASON,
     "stacking.abandoned_after_s": (

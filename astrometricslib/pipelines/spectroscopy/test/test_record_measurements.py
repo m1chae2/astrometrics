@@ -123,7 +123,7 @@ def test_a_healthy_run_emits_one_measurement_per_declared_metric() -> None:
     assert set(names) == _declared_names()
     assert all(m.subject.level is SubjectLevel.RUN for m in measurements)
     assert all(m.origin is MeasurementOrigin.MEASURED and m.run_id == "job-1" for m in measurements)
-    assert all(m.pipeline_version == "1.6.0" and m.measured_at == MEASURED_AT for m in measurements)
+    assert all(m.pipeline_version == "1.7.0" and m.measured_at == MEASURED_AT for m in measurements)
     assert all(m.status is MeasurementStatus.MEASURED for m in measurements)
 
 
@@ -273,6 +273,9 @@ def test_the_single_image_runner_writes_one_row_per_metric_and_a_repeat_writes_n
     store = _use_temporary_store(tmp_path, monkeypatch)
     spectroscopy = SimpleNamespace(
         last_run_zero_order_saturation_fractions=[0.0],
+        last_run_skipped_no_trail_count=0,
+        last_run_skipped_unidentified_count=0,
+        last_run_below_feature_limit_count=0,
         config=SimpleNamespace(camera=SimpleNamespace(name="ZWO ASI 533MM Pro")),
     )
     result = Result(
@@ -298,7 +301,7 @@ def test_the_single_image_runner_writes_one_row_per_metric_and_a_repeat_writes_n
     by_metric = {row.metric: row for row in rows}
     assert by_metric[SPECTROSCOPY_CATALOG_MATCHED_STAR_COUNT].value == pytest.approx(2.0)
     assert by_metric[stage_metric_name("processing", "classification_rms")].value == pytest.approx(0.05)
-    context = PipelineRunContext(target.id, "spectroscopy", "1.6.0", "job-7", "job-7", MEASURED_AT)
+    context = PipelineRunContext(target.id, "spectroscopy", "1.7.0", "job-7", "job-7", MEASURED_AT)
     again = rg.record_spectroscopy_quality(summary.spectroscopy_metrics, list(summary.gates), context)
     assert again == 0
 
@@ -312,6 +315,9 @@ def test_a_run_without_a_time_stores_nothing(tmp_path: Path, monkeypatch: pytest
     store = _use_temporary_store(tmp_path, monkeypatch)
     spectroscopy = SimpleNamespace(
         last_run_zero_order_saturation_fractions=[],
+        last_run_skipped_no_trail_count=0,
+        last_run_skipped_unidentified_count=0,
+        last_run_below_feature_limit_count=0,
         config=SimpleNamespace(camera=SimpleNamespace(name="ZWO ASI 533MM Pro")),
     )
     result = Result(
@@ -349,6 +355,9 @@ def test_a_storage_failure_does_not_fail_the_run(
     )
     spectroscopy = SimpleNamespace(
         last_run_zero_order_saturation_fractions=[],
+        last_run_skipped_no_trail_count=0,
+        last_run_skipped_unidentified_count=0,
+        last_run_below_feature_limit_count=0,
         config=SimpleNamespace(camera=SimpleNamespace(name="ZWO ASI 533MM Pro")),
     )
     result = Result(
@@ -403,3 +412,38 @@ def test_the_session_batch_writes_one_row_per_metric(tmp_path: Path, monkeypatch
     assert by_metric[SPECTROSCOPY_CATALOG_MATCHED_STAR_COUNT].value is None
     assert by_metric["spectroscopy.trail_width_median_px"].value == pytest.approx(3.5)
     assert by_metric["spectroscopy.dispersion_angle_first_star_deg"].value == pytest.approx(12.5)
+
+
+def test_spectra_below_the_feature_limit_are_stored_as_a_notice() -> None:
+    """Too-faint spectra give a failed notice, only when there are some."""
+    metrics = healthy_summary_metrics().model_copy(update={"below_feature_limit_star_count": 3})
+
+    stored = rg.spectroscopy_run_measurements(metrics, healthy_gates(), run_context())
+    quiet = rg.spectroscopy_run_measurements(healthy_summary_metrics(), healthy_gates(), run_context())
+
+    notices = [m for m in stored if m.metric == "spectroscopy.notice_stars_below_feature_limit"]
+    assert len(notices) == 1
+    assert notices[0].value == pytest.approx(3.0)
+    assert notices[0].check_outcome is GateStatus.FAILED
+    assert not [m for m in quiet if ".notice_" in m.metric]
+
+
+def test_the_skipped_star_counts_are_stored_and_a_batch_gives_none() -> None:
+    """The single-image run stores both counts; the session batch does not."""
+    metrics = healthy_summary_metrics().model_copy(
+        update={"skipped_no_trail_star_count": 4, "skipped_unidentified_star_count": 7}
+    )
+
+    counted = {
+        m.metric: m.value for m in rg.spectroscopy_run_measurements(metrics, healthy_gates(), run_context())
+    }
+    batch_rows = {
+        m.metric: m
+        for m in rg.spectroscopy_run_measurements(
+            metrics, healthy_gates(), run_context(), star_identification_counted=False
+        )
+    }
+
+    assert counted["spectroscopy.skipped_no_trail_star_count"] == pytest.approx(4.0)
+    assert counted["spectroscopy.skipped_unidentified_star_count"] == pytest.approx(7.0)
+    assert batch_rows["spectroscopy.skipped_no_trail_star_count"].status is MeasurementStatus.NOT_MEASURED

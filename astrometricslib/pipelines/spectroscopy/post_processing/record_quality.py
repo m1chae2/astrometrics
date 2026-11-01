@@ -39,7 +39,7 @@ from typing import Any
 
 from astrometricslib.models.quality.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
 from astrometricslib.models.quality.limit import LimitTier
-from astrometricslib.models.quality.measurement import QualityMeasurement
+from astrometricslib.models.quality.measurement import QualityMeasurement, QualitySubject
 from astrometricslib.models.quality.metric_spec import MetricSpec
 from astrometricslib.models.quality.quality_summary import SpectroscopyPipelineQualityMetrics
 from astrometricslib.models.quality.spectroscopy_quality import (
@@ -55,6 +55,7 @@ from astrometricslib.models.stellar_source import (
     types_differ_on_ladder,
 )
 from astrometricslib.models.wavelength_scale import WavelengthScaleSummary
+from astrometricslib.pipelines.shared.quality.notices import notice_measurement
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
     GateLimitSource,
     PipelineRunContext,
@@ -86,6 +87,8 @@ from astrometricslib.pipelines.spectroscopy.metrics import (
     SPECTROSCOPY_METRICS,
     SPECTROSCOPY_POOR_MATCH_CLASSIFICATION_COUNT,
     SPECTROSCOPY_POSITION_ONLY_STAR_COUNT,
+    SPECTROSCOPY_SKIPPED_NO_TRAIL_STAR_COUNT,
+    SPECTROSCOPY_SKIPPED_UNIDENTIFIED_STAR_COUNT,
     SPECTROSCOPY_TRAIL_WIDTH_MEDIAN,
     SPECTROSCOPY_UNRESOLVED_STAR_COUNT,
     SPECTROSCOPY_WAVELENGTH_SCALE_APPLIED_COUNT,
@@ -97,6 +100,7 @@ from astrometricslib.pipelines.spectroscopy.metrics import (
     SPECTROSCOPY_ZERO_ORDER_SATURATED_FRACTION_MAX,
     STAGE_METRIC_KEYS,
     STAGE_NAMES,
+    below_feature_limit_notice_spec,
     gaia_xp_band_metric_name,
     stage_metric_name,
     stage_spectrum_count_name,
@@ -105,6 +109,9 @@ from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp i
 from astrometricslib.pipelines.spectroscopy.post_processing.wavelength_scale import (
     WAVELENGTH_SCALE_GATE_NAME,
     wavelength_scale_gate,
+)
+from astrometricslib.pipelines.spectroscopy.processing.spectrum_signal import (
+    MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE,
 )
 
 SPECTRA_GATE_NAME = "spectra_extracted"
@@ -549,6 +556,7 @@ _NO_STAGE_VALUE_REASON = "No spectrum of the run had a value for this metric at 
 _NO_WAVELENGTH_SCALE_REASON = "No spectrum of the run had a measured wavelength zero-point offset."
 _NO_GAIA_XP_REASON = "No star of the run was compared with a Gaia XP spectrum."
 _NOT_COUNTED_REASON = "This run path does not count star identification."
+_NO_SKIPPING_REASON = "This run path does not leave stars out before extraction."
 
 
 def _optional_float(value: float | int | None) -> float | None:
@@ -622,6 +630,18 @@ def _summary_values(
             SPECTROSCOPY_UNRESOLVED_STAR_COUNT,
             float(metrics.unresolved_star_count) if star_identification_counted else None,
             identification_reason,
+            None,
+        ),
+        (
+            SPECTROSCOPY_SKIPPED_NO_TRAIL_STAR_COUNT,
+            float(metrics.skipped_no_trail_star_count) if star_identification_counted else None,
+            _NO_SKIPPING_REASON,
+            None,
+        ),
+        (
+            SPECTROSCOPY_SKIPPED_UNIDENTIFIED_STAR_COUNT,
+            float(metrics.skipped_unidentified_star_count) if star_identification_counted else None,
+            _NO_SKIPPING_REASON,
             None,
         ),
         (
@@ -758,6 +778,38 @@ def _stage_values(
     return values
 
 
+def below_feature_limit_notice_measurement(
+    star_count: int, context: PipelineRunContext, subject: QualitySubject
+) -> QualityMeasurement:
+    """Build the row that says some spectra were below the feature limit.
+
+    Parameters
+    ----------
+    star_count : `int`
+        How many extracted spectra were below the limit.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    subject : `QualitySubject`
+        The run.
+
+    Returns
+    -------
+    measurement : `QualityMeasurement`
+        A failed notice whose value is the number of spectra. Those stars keep
+        their spectrum and have no feature detection or classification.
+    """
+    return notice_measurement(
+        below_feature_limit_notice_spec(),
+        float(star_count),
+        context,
+        subject,
+        f"{star_count} spectrum(s) have a signal-to-noise below {MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE:g} "
+        "per resolution element, too low to find a line; each keeps its spectrum and has no feature "
+        "detection or classification",
+        action_taken="kept the spectra and skipped the feature detection and classification",
+    )
+
+
 def spectroscopy_run_measurements(
     metrics: SpectroscopyPipelineQualityMetrics,
     gates: Sequence[GateResult],
@@ -800,6 +852,11 @@ def spectroscopy_run_measurements(
         )
     for name, value, reason in _stage_values(metrics):
         measurements.append(build_measurement(_SPEC_BY_NAME[name], value, context, subject, reason=reason))
+
+    if metrics.below_feature_limit_star_count > 0:
+        measurements.append(
+            below_feature_limit_notice_measurement(metrics.below_feature_limit_star_count, context, subject)
+        )
 
     gates_by_name = {gate.name: gate for gate in gates}
     for gate_name, limit_source in GATE_LIMIT_SOURCES.items():

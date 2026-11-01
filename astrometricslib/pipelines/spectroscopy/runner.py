@@ -51,9 +51,11 @@ from astrometricslib.pipelines.spectroscopy.record_and_flag_spectroscopy_stars i
 # How many of the brightest stars get a spectrum in one analysis, unless the
 # caller asks otherwise. This is a stopgap the user chose on 2026-11-01, not a
 # measured limit: a run over every detected star (about 500) took over 50
-# minutes. It stays until a measured brightness limit decides which stars are
-# worth analyzing (documentation/plans/VERDICT_REMOVAL_PLAN.md). Fainter stars
-# get no spectrum in the meantime.
+# minutes. It counts only the stars left after the stars with no trail on the
+# image and the stars with no catalog identity are set aside (see
+# `SpectroscopyPipeline.select_stars_for_spectra`). It stays until wing
+# subtraction is fast in crowded fields (documentation/plans/
+# VERDICT_REMOVAL_PLAN.md). Fainter stars get no spectrum in the meantime.
 DEFAULT_SPECTRUM_STAR_LIMIT = 10
 
 # How far from the frame centre, in degrees, a reference star may be and still
@@ -536,7 +538,13 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
                 median_trail_width_px=median_trail_width_px,
                 catalog_matched_star_count=star_id_breakdown.catalog_matched,
                 position_only_star_count=star_id_breakdown.position_only,
-                unresolved_star_count=star_id_breakdown.unresolved,
+                # Unidentified stars left out before extraction would have been
+                # dropped at save, so they are counted here as before.
+                unresolved_star_count=star_id_breakdown.unresolved
+                + spectroscopy.last_run_skipped_unidentified_count,
+                skipped_no_trail_star_count=spectroscopy.last_run_skipped_no_trail_count,
+                skipped_unidentified_star_count=spectroscopy.last_run_skipped_unidentified_count,
+                below_feature_limit_star_count=spectroscopy.last_run_below_feature_limit_count,
                 poor_match_classification_count=poor_match_count,
                 ambiguous_classification_count=ambiguous_count,
                 stage_quality_summary=summarize_stage_quality(quality_rows) or None,

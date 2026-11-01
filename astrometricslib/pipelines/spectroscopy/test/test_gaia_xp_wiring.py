@@ -263,6 +263,9 @@ def test_the_runner_records_the_gaia_summary_and_fails_the_gate_for_tilted_stars
             ),
             "spectroscopy": SimpleNamespace(
                 last_run_zero_order_saturation_fractions=[0.0],
+                last_run_skipped_no_trail_count=0,
+                last_run_skipped_unidentified_count=0,
+                last_run_below_feature_limit_count=0,
                 config=SimpleNamespace(camera=SimpleNamespace(name="ZWO ASI 533MM Pro")),
             ),
             "flagged_spectral_classifications": [],
@@ -293,6 +296,9 @@ def test_the_runner_leaves_the_gate_unchecked_when_no_star_was_compared() -> Non
             ),
             "spectroscopy": SimpleNamespace(
                 last_run_zero_order_saturation_fractions=[0.0],
+                last_run_skipped_no_trail_count=0,
+                last_run_skipped_unidentified_count=0,
+                last_run_below_feature_limit_count=0,
                 config=SimpleNamespace(camera=SimpleNamespace(name="ZWO ASI 533MM Pro")),
             ),
             "flagged_spectral_classifications": [],

@@ -633,6 +633,7 @@ for path in ["/path/to/frame1.fits", "/path/to/frame2.fits"]:
         solved = False
     print(path, count, "stars,", "solved" if solved else "not solved", round(time.monotonic() - start), "s")
 ```
+
 - **Acceptance criterion:** Not recorded (set after the result).
 - **What to look at:** The detection count against whether the local solve succeeded and how long it took, in seconds.
 - **Our result:** A real underexposed M 13 reference frame (date not recorded): a hinted and a blind local solve each ran for their full 300 s time limit with too few detected sources, and neither solved.

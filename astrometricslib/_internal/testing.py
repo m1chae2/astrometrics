@@ -14,7 +14,7 @@ from astrometricslib import Astrometrics
 from astrometricslib._internal.drivers.driver_set import Drivers
 
 if TYPE_CHECKING:
-    from astrometricslib import AbstractCatalogAccess, AppConfiguration
+    from astrometricslib import AppConfiguration
     from astrometricslib._internal.drivers.interfaces import (
         GaiaXpDriver,
         PlateSolveDriver,
@@ -22,6 +22,7 @@ if TYPE_CHECKING:
         SimbadDriver,
         StackingDriver,
     )
+    from astrometricslib.api import AbstractCatalogAccess
 
 __all__ = ["astrometrics_with_drivers"]
 

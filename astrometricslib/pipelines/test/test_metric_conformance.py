@@ -245,6 +245,12 @@ def _with_notice_rows(pipeline: str, rows: list[QualityMeasurement]) -> list[Qua
         )
 
         notice_rows.append(ephemeris_query_cap_notice_measurement(2, context, context.run_subject()))
+    if pipeline == "spectroscopy":
+        from astrometricslib.pipelines.spectroscopy.post_processing.record_quality import (
+            below_feature_limit_notice_measurement,
+        )
+
+        notice_rows.append(below_feature_limit_notice_measurement(2, context, context.run_subject()))
     return [*rows, *notice_rows]
 
 

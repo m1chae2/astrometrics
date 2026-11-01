@@ -4,6 +4,7 @@ No library, database or real data is used: the comparison functions take plain
 objects, and `main` is checked to write only the report file.
 """
 
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -142,3 +143,81 @@ def test_gates_without_rule_and_report(tmp_path: Path) -> None:
     target = tmp_path / "report.md"
     target.write_text(text, encoding="utf-8")
     assert target.read_text(encoding="utf-8").startswith("# Shadow comparison")
+
+
+def _row(
+    metric: str, reason: str, outcome: str, when: datetime, job_id: str | None = "job-1"
+) -> SimpleNamespace:
+    """Make a stored-row stand-in.
+
+    Returns
+    -------
+    row : `SimpleNamespace`
+        An object with the fields the warnings check reads.
+    """
+    return SimpleNamespace(
+        metric=metric, reason=reason, check_outcome=outcome, measured_at=when, job_id=job_id
+    )
+
+
+def test_flag_reasons_are_matched_to_failed_rows_and_old_data_is_told_apart() -> None:
+    """Match a reason to a failed row; tell old data from a gap by row date."""
+    cutoff = datetime(2026, 11, 2, tzinfo=UTC)
+    old = datetime(2026, 10, 31, tzinfo=UTC)
+    new = datetime(2026, 11, 3, tzinfo=UTC)
+    states = {
+        "stacking": script.OldPipelineState(
+            flagged=True, flag_reasons=["flat noise high", "single-frame stack"], gates={}
+        ),
+        "photometry": script.OldPipelineState(flagged=True, flag_reasons=["camera has no profile"], gates={}),
+    }
+    rows = [
+        _row("stacking.gate_flat_noise", "flat noise high", "failed", new),
+        _row("stacking.gate_flat_level", "", "passed", new),
+        _row("photometry.gate_x", "", "passed", old),
+    ]
+    differences, counts = script.compare_flag_reasons_to_warnings(
+        "M 31", states, script.warning_rows_from_measurements(rows), cutoff
+    )
+    assert counts.matched == 1
+    assert counts.gaps == 1
+    assert counts.old_data == 1
+    kinds = {(difference.pipeline, difference.kind) for difference in differences}
+    assert kinds == {
+        ("stacking", script.FLAG_REASON_NO_WARNING_ROW),
+        ("photometry", script.FLAG_REASON_OLD_DATA),
+    }
+
+
+def test_a_matched_reason_counts_failed_rows_without_a_job() -> None:
+    """Count failed rows of the pipeline that have no job id."""
+    when = datetime(2026, 11, 3, tzinfo=UTC)
+    states = {"stacking": script.OldPipelineState(flagged=True, flag_reasons=["a"], gates={})}
+    rows = [_row("stacking.gate_a", "a", "failed", when, job_id=None)]
+    _, counts = script.compare_flag_reasons_to_warnings(
+        "M 31", states, script.warning_rows_from_measurements(rows), script.NEW_ROWS_SINCE
+    )
+    assert counts.matched == 1
+    assert counts.matched_without_job == 1
+
+
+def test_the_report_has_a_warnings_section() -> None:
+    """The report states old data apart from gaps."""
+    counts = script.WarningCheckCounts(matched=3, old_data=2, gaps=1)
+    text = script.build_report([], 1, 0, [], {}, counts)
+    assert "Flag reasons against job warnings" in text
+    assert "old data" in text
+
+
+def test_a_backfilled_row_matches_by_the_start_of_its_reason() -> None:
+    """A backfilled row adds a note after the sentence and still matches."""
+    when = datetime(2026, 10, 12, tzinfo=UTC)
+    states = {
+        "photometry": script.OldPipelineState(flagged=True, flag_reasons=["the score is low"], gates={})
+    }
+    rows = [_row("photometry.gate_x", "the score is low Backfilled from the stored summary.", "failed", when)]
+    differences, counts = script.compare_flag_reasons_to_warnings(
+        "M 31", states, script.warning_rows_from_measurements(rows), script.NEW_ROWS_SINCE
+    )
+    assert counts.matched == 1
+    assert differences == []

@@ -16,6 +16,19 @@ star. A rule is tied to a gate when the rule reads the gate's metric
 rule. Detection labels (period, transit, spectral feature verdicts) stay in
 `astrometricslib` and are not compared.
 
+Phase 1b of `VERDICT_REMOVAL_PLAN.md` adds a second check, the warnings
+check: no warning may be lost. Every stored flag reason must appear as a
+warning row in the measurement table (a stored quality row whose check
+failed), the rows `Jobs.query(detail="warnings")` lists for a job. The check
+matches each flag reason, word for word, with the reason of a failed row of
+the same pipeline (a stored reason that contains the sentence counts: a
+backfilled row adds a note after it, and two gates join sentences). A flag
+reason with no such row is either old data or a gap. Rows written before the
+notice rows existed cannot match a reason that is not a gate, so a reason is
+old data when the newest row of its pipeline on that target is older than
+`NEW_ROWS_SINCE` (the `--new-rows-since` option). The report states the
+old-data count apart from the gaps.
+
 The script is read-only. It writes one file, the report given with
 ``--report``, and nothing to any database. Run it on the data copy only (see
 `build/agent_tools/README.md`).
@@ -29,6 +42,7 @@ import sys
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +74,15 @@ STAR_FLAG_RULES = {
     "is_class_ambiguous": "spectral_class_ambiguous",
 }
 
+NEW_ROWS_SINCE = datetime(2026, 11, 2, tzinfo=UTC)
+"""When the warning rows (gates and notices) started to be stored.
+
+A stored summary whose pipeline rows are all older than this was made before
+the notice rows existed, so a flag reason that is not a gate has no row to
+match. The date is the day after the notice rows were written (issue 97,
+phase 1b); change it with ``--new-rows-since``.
+"""
+
 # Difference kinds, in the order the report lists them.
 GATE_FAILED_RULE_QUIET = "gate failed, rule did not fire"
 GATE_FAILED_NO_RULE = "gate failed, no rule reads it"
@@ -72,6 +95,8 @@ RULE_NO_FLAG_COUNTERPART = "rule fired, no pipeline flag to compare"
 STAR_FLAG_RULE_QUIET = "star flag set, rule did not fire"
 STAR_RULE_FIRED_FLAG_CLEAR = "star rule fired, flag not set"
 STAR_FLAG_NO_RULE = "star flag with no rule"
+FLAG_REASON_NO_WARNING_ROW = "flag reason with no warning row"
+FLAG_REASON_OLD_DATA = "flag reason, rows predate the warning rows"
 COULD_NOT_JUDGE = "could not be judged"
 
 DIFFERENCE_KIND_ORDER = (
@@ -86,6 +111,8 @@ DIFFERENCE_KIND_ORDER = (
     STAR_RULE_FIRED_FLAG_CLEAR,
     STAR_FLAG_NO_RULE,
     RULE_NO_FLAG_COUNTERPART,
+    FLAG_REASON_NO_WARNING_ROW,
+    FLAG_REASON_OLD_DATA,
     COULD_NOT_JUDGE,
 )
 
@@ -428,6 +455,148 @@ def compare_star(
     return differences
 
 
+@dataclass
+class WarningRows:
+    """The stored warning rows of one target, by pipeline prefix.
+
+    Parameters
+    ----------
+    reasons : `dict` [`str`, `set` [`str`]]
+        Metric prefix (``stacking``, ``photometry`` ...) to the reasons of
+        the failed rows of that pipeline.
+    without_job : `dict` [`str`, `int`]
+        Metric prefix to how many failed rows have no job id.
+    newest : `dict` [`str`, `datetime`]
+        Metric prefix to the time of the newest row of any outcome.
+    """
+
+    reasons: dict[str, set[str]] = field(default_factory=lambda: defaultdict(set))
+    without_job: dict[str, int] = field(default_factory=lambda: defaultdict(int))
+    newest: dict[str, datetime] = field(default_factory=dict)
+
+
+@dataclass
+class WarningCheckCounts:
+    """How the flag reasons fared against the warning rows.
+
+    Parameters
+    ----------
+    matched : `int`
+        Flag reasons with a failed row of the same pipeline and sentence.
+    old_data : `int`
+        Unmatched reasons whose pipeline rows predate the warning rows.
+    gaps : `int`
+        Unmatched reasons whose rows are recent: a warning that would be lost.
+    matched_without_job : `int`
+        Matched reasons whose row has no job id (a row from a path with no
+        job, or from before job ids were filled).
+    """
+
+    matched: int = 0
+    old_data: int = 0
+    gaps: int = 0
+    matched_without_job: int = 0
+
+
+def warning_rows_from_measurements(measurements: Iterable[Any]) -> WarningRows:
+    """Collect the failed rows of one target, by pipeline prefix.
+
+    Parameters
+    ----------
+    measurements : iterable of `QualityMeasurement`
+        The target's stored rows.
+
+    Returns
+    -------
+    rows : `WarningRows`
+        The reasons of the failed rows, how many have no job id, and the
+        newest row time, each by the first part of the metric name.
+    """
+    rows = WarningRows()
+    for measurement in measurements:
+        prefix = measurement.metric.split(".", 1)[0]
+        newest = rows.newest.get(prefix)
+        if newest is None or measurement.measured_at > newest:
+            rows.newest[prefix] = measurement.measured_at
+        if _status_text(measurement.check_outcome) == "failed":
+            rows.reasons[prefix].add(measurement.reason)
+            if measurement.job_id is None:
+                rows.without_job[prefix] += 1
+    return rows
+
+
+def _reason_has_row(flag_reason: str, stored_reasons: Iterable[str]) -> bool:
+    """Say whether a failed row carries a flag reason.
+
+    A row written by the backfill script keeps the summary's sentence and adds
+    a note after it ("Backfilled from the stored summary ..."). A gate that
+    joins several sentences with "; " (the calibration metadata gate) or a
+    notice that does (the flat calibration note) holds each of them. So a
+    stored reason that contains the flag reason counts as the same sentence.
+
+    Parameters
+    ----------
+    flag_reason : `str`
+        The sentence from a summary's `flag_reasons`.
+    stored_reasons : iterable of `str`
+        The reasons of the failed rows of the pipeline.
+
+    Returns
+    -------
+    found : `bool`
+        `True` when a stored reason contains the flag reason.
+    """
+    return any(flag_reason in stored for stored in stored_reasons)
+
+
+def compare_flag_reasons_to_warnings(
+    target_id: str,
+    old_states: Mapping[str, OldPipelineState],
+    warning_rows: WarningRows,
+    new_rows_since: datetime,
+) -> tuple[list[Difference], WarningCheckCounts]:
+    """Check that every stored flag reason is also a warning row.
+
+    Parameters
+    ----------
+    target_id : `str`
+        The target id.
+    old_states : `dict` [`str`, `OldPipelineState`]
+        The stored summaries, by pipeline.
+    warning_rows : `WarningRows`
+        The target's failed rows.
+    new_rows_since : `datetime`
+        Rows older than this were stored before the notice rows existed.
+
+    Returns
+    -------
+    differences, counts : `list` [`Difference`], `WarningCheckCounts`
+        One difference for each flag reason with no matching row, labelled
+        old data or no warning row, and the counts for the report.
+    """
+    differences: list[Difference] = []
+    counts = WarningCheckCounts()
+    for pipeline, state in old_states.items():
+        prefix = PIPELINE_METRIC_PREFIX[pipeline]
+        for reason in state.flag_reasons:
+            if _reason_has_row(reason, warning_rows.reasons.get(prefix, set())):
+                counts.matched += 1
+                if warning_rows.without_job.get(prefix, 0):
+                    counts.matched_without_job += 1
+                continue
+            newest = warning_rows.newest.get(prefix)
+            if newest is None or newest < new_rows_since:
+                counts.old_data += 1
+                kind = FLAG_REASON_OLD_DATA
+                detail = f"{reason} (newest {prefix} row: {newest.isoformat() if newest else 'none'})"
+            else:
+                counts.gaps += 1
+                kind = FLAG_REASON_NO_WARNING_ROW
+                detail = reason
+            differences.append(Difference(target_id, pipeline, kind, "flag_reasons", detail))
+    return differences, counts
+
+
 def gates_without_rule(gate_metric_names: Iterable[str], index: RuleIndex) -> list[str]:
     """List the declared gate metrics that no rule reads.
 
@@ -452,6 +621,8 @@ def build_report(
     stars_checked: int,
     unruled_gates: list[str],
     gate_counts: Mapping[str, Mapping[str, int]],
+    warning_counts: WarningCheckCounts | None = None,
+    new_rows_since: datetime = NEW_ROWS_SINCE,
 ) -> str:
     """Write the Markdown report.
 
@@ -466,6 +637,10 @@ def build_report(
     gate_counts : `dict` [`str`, `dict` [`str`, `int`]]
         For each gate metric seen in stored summaries, how many times it was
         ``passed``, ``failed`` and ``not_checked``.
+    warning_counts : `WarningCheckCounts`, optional
+        The result of the warnings check. Left out, the section is skipped.
+    new_rows_since : `datetime`, optional
+        The date that separates old data from new rows.
 
     Returns
     -------
@@ -504,6 +679,28 @@ def build_report(
         by_item[difference.pipeline, difference.kind, difference.item] += 1
     for (pipeline, kind, item), count in sorted(by_item.items(), key=lambda pair: (-pair[1], pair[0])):
         lines.append(f"| {pipeline} | {kind} | {item} | {count} |")
+    if warning_counts is not None:
+        total = warning_counts.matched + warning_counts.old_data + warning_counts.gaps
+        lines += [
+            "",
+            "## Flag reasons against job warnings",
+            "",
+            "Each stored flag reason must also be a warning row (a failed check in the measurement "
+            'table), so `Jobs.query(detail="warnings")` can list it.',
+            "",
+            "| Result | Flag reasons |",
+            "| :--- | ---: |",
+            f"| Total | {total} |",
+            f"| Has a matching warning row | {warning_counts.matched} |",
+            f"| No row, and the pipeline's rows are older than {new_rows_since.date().isoformat()} "
+            f"(old data, written before the notice rows existed) | {warning_counts.old_data} |",
+            f"| No row, and the rows are recent (a warning that would be lost) | {warning_counts.gaps} |",
+            f"| Matched, but some failed rows of the pipeline have no job id | "
+            f"{warning_counts.matched_without_job} |",
+            "",
+            "Old data is not a defect of the code: it is stored data that a restack replaces. "
+            "Only the recent-rows line counts against phase 3.",
+        ]
     lines += ["", "## Gates with no matching rule", ""]
     if unruled_gates:
         lines += [
@@ -533,7 +730,9 @@ def build_report(
     return "\n".join(lines) + "\n"
 
 
-def run_comparison(wayfinder: Any, only_targets: list[str] | None = None) -> tuple[str, list[Difference]]:
+def run_comparison(
+    wayfinder: Any, only_targets: list[str] | None = None, new_rows_since: datetime = NEW_ROWS_SINCE
+) -> tuple[str, list[Difference]]:
     """Compare every target and return the report text.
 
     Reads the library through the public calls and stores nothing.
@@ -544,6 +743,8 @@ def run_comparison(wayfinder: Any, only_targets: list[str] | None = None) -> tup
         The library handle.
     only_targets : `list` [`str`], optional
         Limit the run to these target ids.
+    new_rows_since : `datetime`, optional
+        Rows older than this predate the notice rows (see `NEW_ROWS_SINCE`).
 
     Returns
     -------
@@ -560,6 +761,7 @@ def run_comparison(wayfinder: Any, only_targets: list[str] | None = None) -> tup
     gate_counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     targets_checked = 0
     stars_checked = 0
+    warning_counts = WarningCheckCounts()
     for target in astrometrics.targets.list():
         if only_targets and target.id not in only_targets:
             continue
@@ -569,6 +771,20 @@ def run_comparison(wayfinder: Any, only_targets: list[str] | None = None) -> tup
             for gate_name, (status, _detail) in state.gates.items():
                 gate_counts[f"{PIPELINE_METRIC_PREFIX[pipeline]}.gate_{gate_name}"][status] += 1
         try:
+            rows = astrometrics.quality.query(target_id=target.id, latest_only=True).rows
+            reason_differences, counts = compare_flag_reasons_to_warnings(
+                target.id, old_states, warning_rows_from_measurements(rows), new_rows_since
+            )
+            differences += reason_differences
+            warning_counts.matched += counts.matched
+            warning_counts.old_data += counts.old_data
+            warning_counts.gaps += counts.gaps
+            warning_counts.matched_without_job += counts.matched_without_job
+        except Exception as error:  # ruff: ignore[blind-except] - one bad target must not stop the run
+            differences.append(
+                Difference(target.id, UNATTRIBUTED, COULD_NOT_JUDGE, repr(error)[:120], "warning rows")
+            )
+        try:
             report = wayfinder.review.get_advisory(kind="quality", target=target)
             differences += compare_target_pipelines(target.id, old_states, report.statements, index)
         except Exception as error:  # ruff: ignore[blind-except] - one bad target must not stop the run
@@ -576,7 +792,10 @@ def run_comparison(wayfinder: Any, only_targets: list[str] | None = None) -> tup
                 Difference(target.id, UNATTRIBUTED, COULD_NOT_JUDGE, repr(error)[:120], "quality report")
             )
         stars_checked += _compare_target_stars(wayfinder, target, differences)
-    return build_report(differences, targets_checked, stars_checked, unruled, gate_counts), differences
+    text = build_report(
+        differences, targets_checked, stars_checked, unruled, gate_counts, warning_counts, new_rows_since
+    )
+    return text, differences
 
 
 def _compare_target_stars(wayfinder: Any, target: Any, differences: list[Difference]) -> int:
@@ -627,6 +846,12 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--report", required=True, type=Path, help="Markdown report file to write.")
     parser.add_argument("--target", action="append", help="Limit to this target id (repeatable).")
+    parser.add_argument(
+        "--new-rows-since",
+        type=datetime.fromisoformat,
+        default=NEW_ROWS_SINCE,
+        help="ISO date with time zone. Pipeline rows older than this are old data (default: %(default)s).",
+    )
     return parser
 
 
@@ -647,7 +872,7 @@ def main(argv: list[str] | None = None) -> int:
     from wayfindinglib import Wayfinder
 
     logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
-    text, differences = run_comparison(Wayfinder(), arguments.target)
+    text, differences = run_comparison(Wayfinder(), arguments.target, arguments.new_rows_since)
     arguments.report.write_text(text, encoding="utf-8")
     print(f"Wrote {arguments.report}: {len(differences)} differences.")
     return 0

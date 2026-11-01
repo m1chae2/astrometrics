@@ -37,6 +37,13 @@
       "interim_block": "",
       "note": "Builds a record and writes nothing. The only arguments MCP can send are useless."
     },
+    "observatory_equipment_apply_configuration": {
+      "tool_class": "change-data",
+      "category": "observatory-status",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "The backend calls it after the settings page saves. It points the INDI session at a host, so it is not offered to the AI."
+    },
     "observatory_equipment_connect": {
       "tool_class": "actuate",
       "category": "observatory-control",
@@ -156,6 +163,13 @@
       "interim_block": "",
       "note": "Stops a centering run by aborting the mount, so it is dropped with the other hardware tools."
     },
+    "observatory_mount_get_polar_alignment": {
+      "tool_class": "unclassified",
+      "category": "observatory-status",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "The backend shows it. An AI reads the stored runs through review_query(kind=\"alignment\")."
+    },
     "observatory_mount_manual_move": {
       "tool_class": "actuate",
       "category": "observatory-control",
@@ -169,6 +183,13 @@
       "disposition": "drop",
       "interim_block": "",
       "note": "Commanding a device (mount, cameras, focuser, filter wheel, enclosure) is out of scope. Reading from them and from the Pi is allowed."
+    },
+    "observatory_mount_poll_external_alignment": {
+      "tool_class": "ingest",
+      "category": "observatory-status",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "The backend calls it to store the syncs other programs queued. It writes records, and the AI is read-only."
     },
     "observatory_mount_set_slew_rate": {
       "tool_class": "actuate",

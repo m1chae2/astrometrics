@@ -159,7 +159,7 @@ class AlignmentTargetSession(BaseModel):
     as tracking error. Drift is the slope of a straight-line fit of the
     offsets against time.
 
-    `wayfindinglib.group_alignment_attempts` builds these from a list of
+    `ObservationReview.query_alignment_sessions` builds these from a list of
     `AlignmentAttempt` records.
     """
 
@@ -188,6 +188,21 @@ class AlignmentTargetSession(BaseModel):
     )
     time_series: list[AlignmentTrackPoint] = Field(default_factory=list, alias="timeSeries")
     attempts: list[AlignmentAttempt] = Field(default_factory=list, alias="attempts")
+
+
+class ExternalAlignmentPoll(BaseModel):
+    """What `control.mount.poll_external_alignment` stored.
+
+    Attributes
+    ----------
+    sync_count : `int`
+        How many plate-solve syncs by other programs were stored.
+    polar_alignment_recorded : `bool`
+        Whether a new polar alignment measurement was stored.
+    """
+
+    sync_count: int = 0
+    polar_alignment_recorded: bool = False
 
 
 class AlignmentSessionsResult(BaseModel):

@@ -14,7 +14,11 @@ from typing import Any
 from astrometricslib import Target
 from wayfindinglib.api.control.context import ControlChild
 from wayfindinglib.models.session.correction_result import PointingCorrection
-from wayfindinglib.models.session.telemetry import MountPointingModel
+from wayfindinglib.models.session.telemetry import (
+    ExternalAlignmentPoll,
+    MountPointingModel,
+    PolarAlignmentStatus,
+)
 from wayfindinglib.models.sky_position import SkyPosition
 
 __all__ = ["MountControl"]
@@ -52,6 +56,39 @@ class MountControl(ControlChild):
         from wayfindinglib.tasks.control_tasks import hardware_operations
 
         return hardware_operations.mount_status(self._context, include)
+
+    def poll_external_alignment(self) -> ExternalAlignmentPoll:
+        """Store the alignment that other programs did through the mount.
+
+        KStars, Ekos and similar programs plate solve and sync the mount,
+        and run the Polar Alignment Assistant, on their own. The INDI
+        session queues what it sees. This stores the queued plate-solve
+        syncs as alignment attempts and the polar alignment measurement as
+        a polar alignment record, so `review` can show them. Call it from
+        time to time while another program is aligning. It moves nothing.
+
+        Returns
+        -------
+        poll : `ExternalAlignmentPoll`
+            How many syncs and whether a polar alignment run were stored.
+        """
+        from wayfindinglib.tasks.control_tasks import external_alignment
+
+        return external_alignment.poll_external_alignment(self._context)
+
+    def get_polar_alignment(self) -> PolarAlignmentStatus:
+        """Read the polar alignment, live if a run is going.
+
+        Returns
+        -------
+        status : `PolarAlignmentStatus`
+            The run in progress or just finished on the INDI session;
+            otherwise the most recent stored run; otherwise an idle status
+            with no numbers.
+        """
+        from wayfindinglib.tasks.control_tasks import external_alignment
+
+        return external_alignment.read_polar_alignment(self._context)
 
     def slew(
         self,

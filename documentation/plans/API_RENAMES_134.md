@@ -133,6 +133,22 @@ The MCP tools for all of these are gone (`observatory_guiding_pulse`, `observato
 `observatory_safety_assess` and so on, and `execution_execute_meridian_flip`, `execution_recover_fault`,
 `execution_recover_guide_star_loss`).
 
+### The driver and the INDI worker
+
+`Wayfinder` now builds its own INDI session. The backend no longer builds `SimulatorIndiInterface`,
+`IndiWorkerClient` or `IndiWorkerProxy`.
+
+| Old | New |
+| --- | --- |
+| `Wayfinder(config, astrometrics)`; the backend then set `wayfinder.control.driver` | `Wayfinder(config, astrometrics, *, simulated=None, separate_process=False)`. `simulated=None` uses the simulator when `ASTROMETRICS_TESTING` is set. `separate_process=True` runs the session in a process of its own (the worker), started on the first call that needs INDI |
+| `ObservatoryControl(..., driver=)` | adds `simulated=` and `separate_process=` |
+| `backend/services/infrastructure/indi_worker.py` (`IndiWorkerClient`, `IndiWorkerProxy`, `serve_requests`) | `wayfindinglib/drivers/indi_worker.py`, private; code unchanged apart from the imports. `control.close()` stops the worker |
+| the backend's `SettingsService(config, driver=)` calling `driver.sync_configuration()` | `SettingsService(config, equipment=)` calling the new `control.equipment.apply_configuration()` |
+| `AlignmentService.poll_external_syncs(indi_interface=)` reading `control.driver` | `AlignmentService.poll_external_syncs()` calling the new `control.mount.poll_external_alignment()` (returns `ExternalAlignmentPoll`) |
+| `AlignmentService.get_polar_alignment` reading `control.driver` and the records | the new `control.mount.get_polar_alignment()` (returns `PolarAlignmentStatus`); the reply keeps its keys |
+| `TelescopeService(driver=)` and `TelescopeService.indi_interface` | Removed; nothing read them |
+| (new) MCP | `observatory_mount_poll_external_alignment`, `observatory_mount_get_polar_alignment` and `observatory_equipment_apply_configuration`, all dropped (the backend calls them) |
+
 ## Left as they were, on purpose
 
 - `visualization.get_last_captured_image` is separate from `render_fits`: it finds the newest file itself and

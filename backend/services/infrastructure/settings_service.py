@@ -2,32 +2,32 @@
 
 Description: The settings page sends the whole configuration back when the
 user saves it. This service writes it through the shared configuration
-object, then tells the INDI driver to read the telescope hostname again,
-so a changed hostname is used on the next connection.
+object, then tells the observatory control to read the telescope hostname
+again, so a changed hostname is used on the next connection.
 """
 
 from typing import Any
 
 
 class SettingsService:
-    """Save the configuration and keep the hardware driver in step."""
+    """Save the configuration and keep the hardware in step."""
 
-    def __init__(self, config: Any, driver: Any = None) -> None:
-        """Keep the configuration and the driver.
+    def __init__(self, config: Any, equipment: Any = None) -> None:
+        """Keep the configuration and the equipment control.
 
         Parameters
         ----------
         config : `AstrometricsConfiguration`
             The shared configuration object.
-        driver : `IndiInterface`, optional
-            The INDI driver (or the proxy to the INDI worker process).
-            `None` when no driver is set up.
+        equipment : `EquipmentControl`, optional
+            The Wayfinder's ``control.equipment``. `None` when there is no
+            hardware control.
         """
         self._config = config
-        self._driver = driver
+        self._equipment = equipment
 
     def save_config(self, config: dict[str, Any]) -> bool:
-        """Save new settings and pass the hostname on to the driver.
+        """Save new settings and pass the hostname on to the hardware.
 
         Parameters
         ----------
@@ -40,6 +40,6 @@ class SettingsService:
             Always `True`. A failed save raises instead.
         """
         self._config.update_config(config)
-        if self._driver is not None:
-            self._driver.sync_configuration()
+        if self._equipment is not None:
+            self._equipment.apply_configuration()
         return True

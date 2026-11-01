@@ -13,8 +13,8 @@ work, each on one topic:
 
 The children share one `ControlContext` (configuration, storage and
 drivers) and hold no reference back to `control`. The driver properties
-stay here, as the place where tests and the backend put in their own
-drivers. Setting one updates the shared context, so every child sees it.
+stay here, private, as the place where tests put in their own drivers.
+Setting one updates the shared context, so every child sees it.
 Callers never import `wayfindinglib.tasks` directly.
 """
 
@@ -63,6 +63,12 @@ class ObservatoryControl:
     astrometrics : `Astrometrics`, optional
         The science library handle shared with the rest of the
         `Wayfinder`. Built over `config` on first use when omitted.
+    simulated : `bool`, optional
+        Use the simulated INDI session instead of the real one. When
+        omitted, the simulator is used if ``ASTROMETRICS_TESTING`` is set.
+    separate_process : `bool`, optional
+        Run the INDI session in a process of its own, so a slow INDI
+        call cannot freeze the caller. `close` stops that process.
 
     Attributes
     ----------
@@ -94,6 +100,8 @@ class ObservatoryControl:
         butler: DiskButler | None = None,
         correction_config: CorrectionConfig | None = None,
         astrometrics: Astrometrics | None = None,
+        simulated: bool | None = None,
+        separate_process: bool = False,
     ) -> None:
         """Build the shared context and the six children."""
         if config is None:
@@ -106,6 +114,8 @@ class ObservatoryControl:
             butler=butler,
             correction_config=correction_config,
             astrometrics=astrometrics,
+            simulated=simulated,
+            separate_process=separate_process,
         )
         self.mount = MountControl(self._context)
         self.imaging = ImagingControl(self._context)
@@ -118,7 +128,8 @@ class ObservatoryControl:
         """Stop the background work control started, for good.
 
         Call it once when the program shuts down. Today that stops the PHD2
-        event reader, if guiding was used. It starts nothing that was not
+        event reader, if guiding was used, and the INDI worker process, if
+        `separate_process` started one. It starts nothing that was not
         already running, and it is safe to call more than once.
         """
         self._context.close()

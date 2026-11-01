@@ -250,8 +250,11 @@ class Wayfinder:
         self,
         config: AppConfiguration | None = None,
         astrometrics: Astrometrics | None = None,
+        *,
+        simulated: bool | None = None,
+        separate_process: bool = False,
     ) -> None:
-        """Build the three sub-APIs over a shared configuration and storage.
+        """Build the four sub-APIs over a shared configuration and storage.
 
         Parameters
         ----------
@@ -261,6 +264,17 @@ class Wayfinder:
             The science library handle every part of the Wayfinder uses, so
             all of them see the same target catalog. A new one is built over
             the configuration when omitted.
+        simulated : `bool`, optional
+            Use the simulated INDI session instead of the real hardware.
+            When omitted, the simulator is used if ``ASTROMETRICS_TESTING``
+            is set in the environment.
+        separate_process : `bool`, optional
+            Run the INDI session in a process of its own. The library
+            starts it on the first call that needs INDI, and
+            ``control.close()`` stops it. A program with a busy event loop,
+            such as the backend, should ask for it: the INDI client
+            library holds Python's global lock during its blocking calls
+            and would freeze everything else. `False` by default.
 
         Attributes
         ----------
@@ -289,7 +303,13 @@ class Wayfinder:
         self.astrometrics = astrometrics or Astrometrics(self.config)
 
         butler = DiskButler(app_config=self.config)
-        self.control = ObservatoryControl(config=self.config, butler=butler, astrometrics=self.astrometrics)
+        self.control = ObservatoryControl(
+            config=self.config,
+            butler=butler,
+            astrometrics=self.astrometrics,
+            simulated=simulated,
+            separate_process=separate_process,
+        )
         self.planning = ObservationPlanning(self.config, butler, astrometrics=self.astrometrics)
         self.review = ObservationReview(self.control)
         self.execution = ObservationExecution(

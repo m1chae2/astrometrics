@@ -12,17 +12,21 @@ import pytest
 from backend.container import Container
 
 
-def test_shutdown_stops_the_maintenance_thread_and_the_indi_client() -> None:
-    """Shutdown stops both background pieces and marks the container down."""
+def test_shutdown_stops_the_maintenance_thread_and_the_indi_worker() -> None:
+    """Shutdown stops both background pieces and marks the container down.
+
+    The INDI worker process belongs to the Wayfinder, so `control.close()`
+    stops it.
+    """
     container = Container()
     container.maintenance_service = MagicMock()
-    container.indi_worker_client = MagicMock()
+    container.wayfinder = MagicMock()
     container.initialized = True
 
     container.shutdown_resources()
 
     container.maintenance_service.stop.assert_called_once()
-    container.indi_worker_client.stop.assert_called_once()
+    container.wayfinder.control.close.assert_called_once_with()
     assert container.initialized is False
 
 

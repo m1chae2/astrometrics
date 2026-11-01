@@ -1390,3 +1390,95 @@ def test_review_refuses_an_alignment_attempt_with_an_unknown_status(control: Obs
     """A status the model does not know is an invalid argument."""
     with pytest.raises(InvalidArgumentError, match="not valid"):
         ObservationReview(control).query_alignment_sessions([{"status": "synced"}])
+
+
+def test_poll_external_alignment_stores_syncs_and_polar_runs(
+    control: ObservatoryControl, mocker: MockerFixture
+) -> None:
+    """Syncs by other programs and a polar run become stored records."""
+    driver = mocker.MagicMock()
+    driver.drain_external_syncs.return_value = [
+        {"time": 1000.0, "status": "aligned", "delta_ra_arcsec": 12.5, "delta_dec_arcsec": -8.3}
+    ]
+    driver.status = {"TARGET_NAME": "M31"}
+    driver.drain_polar_alignment.return_value = {
+        "status": "aligned",
+        "total_error_arcsec": 42.0,
+        "alt_error_arcsec": 30.0,
+        "az_error_arcsec": -29.0,
+        "pole_ra": 1.0,
+        "pole_dec": 89.0,
+        "paa_points": [],
+        "timestamp": 1001.0,
+    }
+    control._driver = driver
+
+    poll = control.mount.poll_external_alignment()
+
+    assert poll.sync_count == 1
+    assert poll.polar_alignment_recorded is True
+    (attempt,) = control._context.records.get_alignment_attempts(limit=5)
+    assert attempt["status"] == "aligned"
+    assert attempt["delta_ra_arcsec"] == pytest.approx(12.5)
+    assert attempt["target_name"] == "M31"
+    assert control._context.records.get_polar_alignments(limit=1)[0]["total_error_arcsec"] == pytest.approx(
+        42.0
+    )
+
+
+def test_poll_external_alignment_with_nothing_queued_stores_nothing(
+    control: ObservatoryControl, mocker: MockerFixture
+) -> None:
+    """An empty queue gives an empty poll."""
+    driver = mocker.MagicMock()
+    driver.drain_external_syncs.return_value = []
+    driver.drain_polar_alignment.return_value = None
+    control._driver = driver
+
+    poll = control.mount.poll_external_alignment()
+
+    assert (poll.sync_count, poll.polar_alignment_recorded) == (0, False)
+    assert control._context.records.get_alignment_attempts(limit=5) == []
+
+
+def test_get_polar_alignment_prefers_the_live_run_then_the_last_stored_one(
+    control: ObservatoryControl, mocker: MockerFixture
+) -> None:
+    """A live run wins; then the last stored run; then idle."""
+    driver = mocker.MagicMock()
+    driver.get_polar_alignment_status.return_value = {"status": "idle", "paaPoints": []}
+    control._driver = driver
+    assert control.mount.get_polar_alignment().status == "idle"
+
+    control._context.records.record_polar_alignment({
+        "status": "aligned",
+        "total_error_arcsec": 42.0,
+        "alt_error_arcsec": 30.0,
+        "az_error_arcsec": -29.0,
+        "pole_ra": 1.0,
+        "pole_dec": 89.0,
+        "paa_points": [],
+        "timestamp": 1001.0,
+    })
+    stored = control.mount.get_polar_alignment()
+    assert stored.status == "aligned"
+    assert stored.total_error_arcsec == pytest.approx(42.0)
+
+    driver.get_polar_alignment_status.return_value = {
+        "status": "in_progress",
+        "totalErrorArcsec": 99.0,
+        "paaPoints": [],
+    }
+    assert control.mount.get_polar_alignment().total_error_arcsec == pytest.approx(99.0)
+
+
+def test_apply_configuration_tells_the_session_to_read_the_hostname_again(
+    control: ObservatoryControl, mocker: MockerFixture
+) -> None:
+    """`equipment.apply_configuration` calls `sync_configuration`."""
+    driver = mocker.MagicMock()
+    control._driver = driver
+
+    control.equipment.apply_configuration()
+
+    driver.sync_configuration.assert_called_once_with()

@@ -14,7 +14,8 @@ PyIndi a GIL of its own: a separate process.
 `IndiWorkerClient` spawns that process and exposes a `call_sync()` that looks
 like an ordinary (blocking) method call from the caller's side;
 `IndiWorkerProxy` wraps a client so it can stand in for a real `IndiInterface`
-session wherever one is expected (see `backend/container.py`), without any of
+session wherever one is expected (`ControlContext` hands it out when the
+`Wayfinder` is built with `separate_process=True`), without any of
 the `Indi*Driver` adapter files needing to change -- they already call
 `asyncio.to_thread(self._session.<method>, ...)`, which now just blocks on a
 response from the worker process instead of running PyIndi directly.
@@ -91,11 +92,11 @@ def _worker_main(testing: bool, command_queue: Queue, result_queue: Queue, paren
 
         config = get_configuration()
         if testing:
-            from wayfindinglib import SimulatorIndiInterface
+            from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
 
             session = SimulatorIndiInterface(config=config)
         else:
-            from wayfindinglib import IndiInterface
+            from wayfindinglib.drivers.indi_interface import IndiInterface
 
             session = IndiInterface(config=config)
     except Exception:

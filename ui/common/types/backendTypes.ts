@@ -1066,7 +1066,7 @@ export interface AlignmentTrackPoint {
  * as tracking error. Drift is the slope of a straight-line fit of the
  * offsets against time.
  *
- * `wayfindinglib.group_alignment_attempts` builds these from a list of
+ * `ObservationReview.query_alignment_sessions` builds these from a list of
  * `AlignmentAttempt` records.
  */
 export interface AlignmentTargetSession {

@@ -129,6 +129,15 @@ class EquipmentControl(ControlChild):
 
         return hardware_operations.disconnect(self._context)
 
+    def apply_configuration(self) -> None:
+        """Make the INDI session read the telescope hostname again.
+
+        Call it after the configuration changed, so a new hostname is used
+        on the next connection. It points the session at the host and does
+        not reconnect or move anything.
+        """
+        self._context.driver.sync_configuration()
+
     def set_active_telescope(self, telescope_id: str, limits: dict[str, float | bool] | None = None) -> bool:
         """Choose the active telescope, and optionally save its safety limits.
 

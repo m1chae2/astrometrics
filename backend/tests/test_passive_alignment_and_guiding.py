@@ -1,6 +1,5 @@
 """Tests for passive INDI alignment sync logging and PHD2 guiding ingestion."""
 
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -117,37 +116,32 @@ def test_indi_interface_ignores_zero_delta_echo_during_sync() -> None:
     assert syncs[0]["delta_ra_arcsec"] == pytest.approx(21.2, abs=0.5)
 
 
-def test_alignment_service_polls_external_syncs(tmp_path: Path) -> None:
-    """Verify AlignmentService drains sync events into recorded attempts."""
+def test_alignment_service_polls_external_syncs_through_the_library() -> None:
+    """Verify AlignmentService asks `control.mount` to store the syncs."""
     from backend.services.observatory.alignment_service import AlignmentService
-    from wayfindinglib import ControlRecordStore, ObservatoryControl
-    from wayfindinglib.api.review import ObservationReview
 
-    driver_mock = MagicMock()
-    driver_mock.drain_external_syncs.return_value = [
-        {
-            "time": 1000.0,
-            "status": "aligned",
-            "delta_ra_arcsec": 12.5,
-            "delta_dec_arcsec": -8.3,
-        }
-    ]
-    driver_mock.drain_polar_alignment.return_value = None
     observatory_mock = MagicMock()
-    observatory_mock.driver = driver_mock
 
-    service = AlignmentService(
-        observatory_api=observatory_mock,
-        review=ObservationReview(ObservatoryControl(config=MagicMock())),
-        records=ControlRecordStore(str(tmp_path / "wayfinding.db")),
+    AlignmentService(observatory_api=observatory_mock).poll_external_syncs()
+
+    observatory_mock.mount.poll_external_alignment.assert_called_once_with()
+
+
+def test_alignment_service_reads_the_polar_alignment_from_the_library() -> None:
+    """Verify the polar alignment is the library's, with camelCase keys."""
+    from backend.services.observatory.alignment_service import AlignmentService
+    from wayfindinglib import ObservatoryControl
+
+    observatory = ObservatoryControl(config=MagicMock())
+    observatory._context.driver = MagicMock(
+        get_polar_alignment_status=MagicMock(return_value={"status": "in_progress", "totalErrorArcsec": 12.0})
     )
-    service.poll_external_syncs()
 
-    attempts = service.get_attempts()["alignmentAttempts"]
-    assert len(attempts) == 1
-    assert attempts[0]["status"] == "aligned"
-    assert attempts[0]["deltaRaArcsec"] == pytest.approx(12.5)
-    assert attempts[0]["deltaDecArcsec"] == pytest.approx(-8.3)
+    status = AlignmentService(observatory_api=observatory).get_polar_alignment()
+
+    assert status["status"] == "in_progress"
+    assert status["totalErrorArcsec"] == pytest.approx(12.0)
+    assert status["paaPoints"] == []
 
 
 def test_indi_interface_extracts_target_from_fits_header() -> None:
@@ -262,38 +256,6 @@ def test_telescope_service_prioritizes_driver_target_name() -> None:
     assert status.get("targetName") == "IC 1396"
     # TargetService coordinate matching should not even be called
     target_service_mock.get_targets.assert_not_called()
-
-
-def test_alignment_service_persists_to_records() -> None:
-    """Verify that AlignmentService records drained sync attempts to SQLite."""
-    from backend.services.observatory.alignment_service import AlignmentService
-
-    driver_mock = MagicMock()
-    driver_mock.drain_external_syncs.return_value = [
-        {
-            "time": 1700000000.0,
-            "status": "aligned",
-            "delta_ra_arcsec": 10.5,
-            "delta_dec_arcsec": -15.2,
-            "pointing_error_arcsec": 18.5,
-        }
-    ]
-
-    observatory_mock = MagicMock()
-    observatory_mock.driver = driver_mock
-
-    records_mock = MagicMock()
-    service = AlignmentService(
-        observatory_api=observatory_mock,
-        records=records_mock,
-    )
-    service.poll_external_syncs()
-
-    assert records_mock.record_alignment_attempt.called
-    attempt = records_mock.record_alignment_attempt.call_args[0][0]
-    assert attempt["delta_ra_arcsec"] == pytest.approx(10.5)
-    assert attempt["delta_dec_arcsec"] == pytest.approx(-15.2)
-    assert attempt["pointing_error_arcsec"] == pytest.approx(18.5)
 
 
 def test_indi_interface_pulse_coalescing_and_echo_filtering() -> None:

@@ -37,8 +37,6 @@ class Container:
         """Start with every service unset; `init_resources` builds them."""
         # Core Infrastructure
         self.config_service = None
-        self.indi_driver = None
-        self.indi_worker_client = None
         self.calibration = None
 
         # Domain Services
@@ -97,8 +95,8 @@ class Container:
     def shutdown_resources(self) -> None:
         """Stop the background threads and processes the container started.
 
-        Stops the maintenance thread, the observatory control's background
-        readers (such as the PHD2 event reader) and the INDI worker client.
+        Stops the maintenance thread, and the observatory control's background
+        readers (such as the PHD2 event reader) and INDI worker process.
         Safe to call more than once, and safe on a container that was never
         initialized or only partly built.
         """
@@ -106,8 +104,6 @@ class Container:
             self.maintenance_service.stop()
         if self.wayfinder is not None:
             self.wayfinder.control.close()
-        if self.indi_worker_client is not None:
-            self.indi_worker_client.stop()
         self.initialized = False
 
     def _build_resources(self) -> None:
@@ -122,7 +118,21 @@ class Container:
         from wayfindinglib import Wayfinder
 
         self.astrometrics = Astrometrics(self.config_service)
-        self.wayfinder = Wayfinder(self.config_service, astrometrics=self.astrometrics)
+        # The real INDI client runs in its own OS process, not here:
+        # pyindi-client does not release the GIL during its blocking calls,
+        # so running it in this process would freeze the whole backend
+        # (every concurrent request, the event loop, everything) for
+        # however long that call takes. The Wayfinder starts that process
+        # on the first call that needs INDI, and `control.close()` (see
+        # `shutdown_resources`) stops it. Tests (ASTROMETRICS_TESTING) use
+        # the simulator in this process.
+        testing = bool(os.getenv("ASTROMETRICS_TESTING"))
+        self.wayfinder = Wayfinder(
+            self.config_service,
+            astrometrics=self.astrometrics,
+            simulated=testing,
+            separate_process=not testing,
+        )
 
         self.target_service = TargetService(self.config_service, astrometrics=self.astrometrics)
         self.stellar_object_service = StellarService(
@@ -140,31 +150,13 @@ class Container:
         self.calibration = self.astrometrics.processing.calibration
         self.calibration.query()
 
-        # 3. Initialize Hardware Drivers
-        if os.getenv("ASTROMETRICS_TESTING"):
-            from wayfindinglib import SimulatorIndiInterface
-
-            self.indi_driver = SimulatorIndiInterface(config=self.config_service)
-        else:
-            # The real IndiInterface runs in its own OS process, not here:
-            # pyindi-client does not release the GIL during its blocking
-            # calls, so running it in this process would freeze the whole
-            # backend (every concurrent request, the event loop, everything)
-            # for however long that call takes -- see
-            # backend/services/infrastructure/indi_worker.py for the full
-            # story and measurements. IndiWorkerProxy forwards every call to
-            # that process and stands in for a real IndiInterface wherever
-            # one is expected.
-            from backend.services.infrastructure.indi_worker import IndiWorkerClient, IndiWorkerProxy
-
-            self.indi_worker_client = IndiWorkerClient()
-            self.indi_driver = IndiWorkerProxy(self.indi_worker_client)
-
-        self.wayfinder.control._driver = self.indi_driver
+        # 3. Initialize Hardware Drivers: the Wayfinder builds its own (above).
 
         from backend.services.infrastructure.settings_service import SettingsService
 
-        self.settings_service = SettingsService(self.config_service, driver=self.indi_driver)
+        self.settings_service = SettingsService(
+            self.config_service, equipment=self.wayfinder.control.equipment
+        )
 
         # 4. Initialize Infrastructure Services
         from backend.services.infrastructure.socket_manager import SocketManager
@@ -191,6 +183,10 @@ class Container:
         from backend.services.observatory.alignment_service import AlignmentService
         from wayfindinglib import ControlRecordStore
 
+        # The alignment service still reads the stored attempts directly.
+        # The INDI session and the external-alignment polling now go
+        # through `control.mount`. Reading the stored attempts through the
+        # library is left for the API review (issue #134).
         self.alignment_service = AlignmentService(
             observatory_api=self.wayfinder.control,
             review=self.wayfinder.review,

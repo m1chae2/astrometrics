@@ -161,6 +161,8 @@ argument.
 CHILDREN = {
     "mount": {
         "status",
+        "poll_external_alignment",
+        "get_polar_alignment",
         "slew",
         "park",
         "unpark",
@@ -194,6 +196,7 @@ CHILDREN = {
         "status",
         "connect",
         "disconnect",
+        "apply_configuration",
         "set_active_telescope",
         "set_active_camera",
         "set_device_property",

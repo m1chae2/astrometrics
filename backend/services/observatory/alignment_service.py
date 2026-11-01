@@ -150,43 +150,11 @@ class AlignmentService:
         Returns
         -------
         status : `dict` [`str`, `Any`]
-            Polar alignment metrics and coordinates.
+            Polar alignment metrics and coordinates, camelCase keys. The
+            library reads a run in progress first, then the last stored
+            run.
         """
-        driver = self._observatory.driver
-        if driver and hasattr(driver, "get_polar_alignment_status"):
-            st = driver.get_polar_alignment_status()
-            if st.get("status") != "idle":
-                return st
-
-        # Fallback to latest persisted polar alignment in SQLite
-        if self._records:
-            try:
-                logs = self._records.get_polar_alignments(limit=1)
-                if logs:
-                    row = logs[0]
-                    return {
-                        "status": row.get("status", "aligned"),
-                        "totalErrorArcsec": row.get("total_error_arcsec"),
-                        "altErrorArcsec": row.get("alt_error_arcsec"),
-                        "azErrorArcsec": row.get("az_error_arcsec"),
-                        "poleRa": row.get("pole_ra"),
-                        "poleDec": row.get("pole_dec"),
-                        "paaPoints": row.get("paa_points", []),
-                        "timestamp": row.get("timestamp"),
-                    }
-            except StorageError as exc:
-                logger.debug("Error fetching polar alignment fallback: %s", exc)
-
-        return {
-            "status": "idle",
-            "totalErrorArcsec": None,
-            "altErrorArcsec": None,
-            "azErrorArcsec": None,
-            "poleRa": None,
-            "poleDec": None,
-            "paaPoints": [],
-            "timestamp": None,
-        }
+        return self._observatory.mount.get_polar_alignment().model_dump(by_alias=True)
 
     def list_sessions(self) -> list[dict[str, Any]]:
         """List the nights that recorded alignment data, newest first.
@@ -306,51 +274,13 @@ class AlignmentService:
         reply = self._require_review().query(kind="pointing_model", session_id=session_id, register_job=False)
         return MountPointingModel.model_validate(reply.model).model_dump(by_alias=True)
 
-    def poll_external_syncs(self, indi_interface: Any = None) -> None:
-        """Poll and drain external plate-solve syncs and polar alignment.
+    def poll_external_syncs(self) -> None:
+        """Store the plate-solve syncs and polar alignment of other programs.
 
-        Parameters
-        ----------
-        indi_interface : `Any`, optional
-            INDI driver instance to drain sync records from. If `None`,
-            falls back to `self._observatory.driver`.
+        The library drains what the INDI session queued and stores it as
+        alignment records (``control.mount.poll_external_alignment``).
         """
-        driver = indi_interface or self._observatory.driver
-        if not driver:
-            return
-
-        # Poll external syncs
-        if hasattr(driver, "drain_external_syncs"):
-            try:
-                sync_records = driver.drain_external_syncs()
-                driver_status = getattr(driver, "status", None)
-                target_name = driver_status.get("TARGET_NAME") if isinstance(driver_status, dict) else None
-                if not isinstance(target_name, str):
-                    target_name = None
-                for record in sync_records:
-                    if not self._records:
-                        continue
-                    self._records.record_alignment_attempt({
-                        "status": record.get("status", "aligned"),
-                        "delta_ra_arcsec": record.get("delta_ra_arcsec"),
-                        "delta_dec_arcsec": record.get("delta_dec_arcsec"),
-                        "pointing_error_arcsec": record.get("pointing_error_arcsec"),
-                        "timestamp": record.get("time", time.time()),
-                        "ra": record.get("ra"),
-                        "dec": record.get("dec"),
-                        "target_name": target_name,
-                    })
-            except (StorageError, ValueError) as exc:
-                logger.debug("Error polling external syncs: %s", exc)
-
-        # Poll polar alignment updates
-        if hasattr(driver, "drain_polar_alignment"):
-            try:
-                polar_record = driver.drain_polar_alignment()
-                if polar_record and self._records:
-                    self._records.record_polar_alignment(polar_record)
-            except StorageError as p_err:
-                logger.debug("Error polling polar alignment: %s", p_err)
+        self._observatory.mount.poll_external_alignment()
 
     def start_alignment(self, target_ra: str, target_dec: str) -> bool:
         """Start centering the mount on a sky position, in the background.

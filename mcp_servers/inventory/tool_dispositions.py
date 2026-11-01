@@ -231,6 +231,22 @@ DECISIONS = {
     "target_get_frame": ToolDecision(
         "keep", "Returns the path of one frame, found by ISO, exposure and index."
     ),
+    "observatory_mount_poll_external_alignment": ToolDecision(
+        "drop",
+        "The backend calls it to store the syncs other programs queued. It writes records, and the AI "
+        "is read-only.",
+        "ingest",
+    ),
+    "observatory_mount_get_polar_alignment": ToolDecision(
+        "drop",
+        'The backend shows it. An AI reads the stored runs through review_query(kind="alignment").',
+    ),
+    "observatory_equipment_apply_configuration": ToolDecision(
+        "drop",
+        "The backend calls it after the settings page saves. It points the INDI session at a host, so "
+        "it is not offered to the AI.",
+        "change-data",
+    ),
     "review_query_alignment_sessions": ToolDecision(
         "drop",
         "The backend calls it with plate-solve attempts it has already read. The AI reads nights through "

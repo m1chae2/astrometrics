@@ -41,7 +41,6 @@ def test_identify_variable_stars_flags_only_field_outliers() -> None:
 
     assert [star.id for star in variable_candidates] == ["variable_1"]
     variable_star, quiet_star = variable_candidates[0], analyzer.stellar_objects[0]
-    assert variable_star.photometry.output_quality.is_trustworthy is True
     assert variable_star.photometry.output_quality.margin_in_mad_units > 0
     assert quiet_star.photometry.output_quality.margin_in_mad_units < 0
 

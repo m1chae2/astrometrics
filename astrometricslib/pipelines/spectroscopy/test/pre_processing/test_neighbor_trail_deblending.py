@@ -268,3 +268,24 @@ def test_subtraction_never_goes_below_zero() -> None:
     """An overshooting correction is held at zero, not made negative."""
     corrected, _ = subtract_neighbor_wings(np.array([10.0, 10.0]), [np.array([3.0, 30.0])])
     assert corrected.tolist() == [7.0, 0.0]
+
+
+def test_fit_matches_values_stored_before_splines_were_built_once() -> None:
+    """The fit of a three-streak crowd equals the stored old-code numbers.
+
+    The values were taken before the curves through the measured shape were
+    built once per band (they used to be rebuilt on every trial of the
+    fitter). Building them once must not change a digit of the answer.
+    """
+    blur = measure_reference_blur()
+    image, *_ = make_pair(1.1)
+    fit = fit_the_pair(image, blur, [BRIGHT_CENTRE_PX, FAINT_CENTRE_PX, FAINT_CENTRE_PX - 9.0])
+
+    np.testing.assert_allclose(fit.dilation, 1.0006158054246836, rtol=1e-12, atol=0.0)
+    np.testing.assert_allclose(
+        fit.centre_shifts_px, [0.0, 0.056354811780429774, 1.1030882520326524], rtol=1e-12, atol=0.0
+    )
+    np.testing.assert_allclose(fit.amplitudes[0], [6656.412548592807, 0.0, 0.0], rtol=1e-12, atol=0.0)
+    np.testing.assert_allclose(fit.amplitudes[6], [14661.055461206923, 0.0, 0.0], rtol=1e-12, atol=0.0)
+    np.testing.assert_allclose(fit.sky_levels[0], 7.235609091698279, rtol=1e-12, atol=0.0)
+    np.testing.assert_allclose(fit.relative_residual, 0.12980089763934455, rtol=1e-12, atol=0.0)

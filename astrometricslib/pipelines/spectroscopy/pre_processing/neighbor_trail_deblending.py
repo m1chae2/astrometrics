@@ -262,7 +262,35 @@ def _profile_at(blur: EmpiricalBlur, position_px: float) -> np.ndarray:
     return (1.0 - weight) * blur.profiles[lower] + weight * blur.profiles[upper]
 
 
-def _evaluate_profile(blur: EmpiricalBlur, position_px: float, offsets_px: np.ndarray) -> np.ndarray:
+def _profile_spline(blur: EmpiricalBlur, position_px: float) -> CubicSpline:
+    """Build the cubic curve through the measured shape at one place.
+
+    The curve depends only on the measured blur and the place along the
+    streak, not on the stretch or the star's position. The fit therefore
+    builds it once per band and reuses it for every trial.
+
+    Parameters
+    ----------
+    blur : `EmpiricalBlur`
+        The measured blur.
+    position_px : `float`
+        Distance along the streak from the zero-order star, in pixels.
+
+    Returns
+    -------
+    spline : `scipy.interpolate.CubicSpline`
+        The curve, `None` outside the measured window (it does not
+        extrapolate).
+    """
+    return CubicSpline(blur.offsets_px, _profile_at(blur, position_px), extrapolate=False)
+
+
+def _evaluate_profile(
+    blur: EmpiricalBlur,
+    position_px: float,
+    offsets_px: np.ndarray,
+    spline: CubicSpline | None = None,
+) -> np.ndarray:
     """Read the measured shape at any offsets, between the measured pixels.
 
     A straight line between neighbouring pixels flattens a narrow core (a core
@@ -278,13 +306,17 @@ def _evaluate_profile(blur: EmpiricalBlur, position_px: float, offsets_px: np.nd
         Distance along the streak from the zero-order star, in pixels.
     offsets_px : `numpy.ndarray`
         The offsets, in pixels, to read the shape at.
+    spline : `scipy.interpolate.CubicSpline`, optional
+        The curve from `_profile_spline` for this blur and position, when
+        the caller has already built it. Built here when omitted.
 
     Returns
     -------
     values : `numpy.ndarray`
         The measured shape at those offsets; 0 outside the measured window.
     """
-    spline = CubicSpline(blur.offsets_px, _profile_at(blur, position_px), extrapolate=False)
+    if spline is None:
+        spline = _profile_spline(blur, position_px)
     return np.nan_to_num(spline(offsets_px), nan=0.0)
 
 
@@ -358,6 +390,7 @@ def pixel_profile(
     dilation: float,
     source_offset_px: float,
     pixel_centres_px: np.ndarray,
+    spline: CubicSpline | None = None,
 ) -> np.ndarray:
     """Give the light one star puts into each pixel across the streak.
 
@@ -373,6 +406,9 @@ def pixel_profile(
         Where the star's streak is, in pixels.
     pixel_centres_px : `numpy.ndarray`
         The centre of each pixel, in the same coordinates.
+    spline : `scipy.interpolate.CubicSpline`, optional
+        The curve from `_profile_spline` for this blur and position, when
+        the caller has already built it.
 
     Returns
     -------
@@ -386,7 +422,10 @@ def pixel_profile(
     # fitted as 1.03 in the tests).
     return (
         _evaluate_profile(
-            blur, position_px, (np.asarray(pixel_centres_px, dtype=float) - source_offset_px) / dilation
+            blur,
+            position_px,
+            (np.asarray(pixel_centres_px, dtype=float) - source_offset_px) / dilation,
+            spline,
         )
         / dilation
     )
@@ -455,6 +494,7 @@ def _solve_amplitudes(
     band_positions_px: np.ndarray,
     star_offsets_px: np.ndarray,
     weights: np.ndarray,
+    band_splines: list[CubicSpline] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Find, for a given stretch and positions, the best amplitudes and sky.
 
@@ -478,6 +518,9 @@ def _solve_amplitudes(
         Where each star's streak is, in pixels.
     weights : `numpy.ndarray`
         How much each point counts, same shape as `profiles`.
+    band_splines : `list` [`scipy.interpolate.CubicSpline`], optional
+        One curve per band from `_profile_spline`, so a fit that calls this
+        many times builds them once. Built here when omitted.
 
     Returns
     -------
@@ -494,7 +537,14 @@ def _solve_amplitudes(
     residuals = np.zeros_like(profiles)
     for band_index in range(n_bands):
         columns = [
-            pixel_profile(blur, float(band_positions_px[band_index]), dilation, float(offset), offsets_px)
+            pixel_profile(
+                blur,
+                float(band_positions_px[band_index]),
+                dilation,
+                float(offset),
+                offsets_px,
+                None if band_splines is None else band_splines[band_index],
+            )
             for offset in star_offsets_px
         ]
         design = np.column_stack([*columns, np.ones(len(offsets_px))])
@@ -546,6 +596,9 @@ def fit_neighbor_amplitudes(
     star_offsets_px = np.asarray(star_offsets_px, dtype=float)
     n_stars = len(star_offsets_px)
     weights = 1.0 / np.sqrt(noise_floor**2 + np.clip(profiles, 0.0, None))
+    # The curve through the measured shape depends only on the band, so it is
+    # built once here, not on every trial of the fitter.
+    band_splines = [_profile_spline(blur, float(position)) for position in band_positions_px]
 
     def shifts_from(parameters: np.ndarray) -> np.ndarray:
         """Give the star position corrections that go with the free numbers.
@@ -573,6 +626,7 @@ def fit_neighbor_amplitudes(
             band_positions_px,
             star_offsets_px + shifts_from(parameters),
             weights,
+            band_splines,
         )
         return residuals.ravel()
 
@@ -582,7 +636,14 @@ def fit_neighbor_amplitudes(
     dilation = float(result.x[0])
     shifts = shifts_from(result.x)
     amplitudes, sky_levels, _ = _solve_amplitudes(
-        blur, dilation, offsets_px, profiles, band_positions_px, star_offsets_px + shifts, weights
+        blur,
+        dilation,
+        offsets_px,
+        profiles,
+        band_positions_px,
+        star_offsets_px + shifts,
+        weights,
+        band_splines,
     )
 
     # Judge the fit on the plain (unweighted) misfit, as a fraction of the
@@ -597,6 +658,7 @@ def fit_neighbor_amplitudes(
                 dilation,
                 float(star_offsets_px[star_index] + shifts[star_index]),
                 offsets_px,
+                band_splines[band_index],
             )
             for star_index in range(n_stars)
         )

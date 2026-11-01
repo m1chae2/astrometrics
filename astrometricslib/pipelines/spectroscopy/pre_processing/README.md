@@ -281,7 +281,7 @@ No measurement says what value of the three error-based metrics is too low, and 
 - `spectrum_extractor.py` extracts each spectrum and measures the sky (see [Extraction box and sky](#extraction-box-and-sky)).
 - `spectral_star_registration.py` names the stars in a spectral image.
 - `optics_physics.py` and `spectroscopy_instrument.py` hold the grating equation and the instrument model.
-- `neighbor_trail_deblending.py` and `neighbor_wing_correction.py` correct for crowding.
+- `neighbor_trail_deblending.py` and `neighbor_wing_correction.py` correct for crowding. The fit builds the curve through the measured blur once for each band along the trail and reuses it on every trial, which gives the same numbers in a fraction of the time.
 - `spectrum_calibrator.py` converts pixels to wavelengths.
 - `atmospheric_extinction.py` applies the airmass extinction correction.
 - `atmospheric_refraction.py` and `differential_refraction.py` correct for atmospheric differential refraction.

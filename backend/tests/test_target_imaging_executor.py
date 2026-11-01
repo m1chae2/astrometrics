@@ -159,7 +159,7 @@ def test_every_queue_edit_announces_plan_changed(executor: TargetImagingExecutor
     events.clear()
 
     executor.modify_queue_item(second, _sequence(5))
-    assert [name for name, _ in events] == ["plan:changed", "plan:changed"]
+    assert [name for name, _ in events] == ["plan:changed", "plan:changed", "plan:changed"]
     events.clear()
 
     executor.remove_from_queue(first)

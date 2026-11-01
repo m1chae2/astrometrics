@@ -12,7 +12,7 @@ Two details are decided here:
 
 - `ObservationPackage` carries no start-time mode; only the placed
   `QueuedObservationPackage` does. The mode is therefore given with each
-  package at placement time, the same way `ObservationPlanning.edit_queue`
+  package at placement time, the same way `ObservationPlanning.add_to_queue`
   takes it. `PlacementRequest` below pairs them. It is a plain parameter
   object, not a stored model, because nothing about it outlives one
   `place()` call.

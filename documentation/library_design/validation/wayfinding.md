@@ -426,12 +426,12 @@ Every Python example assumes the library is installed and configured with your o
 - **Status:** Partly measured. Tested on made-up sessions, on a session JSON rewritten to the old shape, and on a stale write. It has not been run with two real app windows.
 - **Data you need:** A night plan with at least one queue entry.
 - **Procedure:**
-  1. Create an empty plan with `create_session`, then change it with `edit_queue(..., expected_revision=0)`.
+  1. Create an empty plan with `create_session`, then change it with `add_checklist_items(..., expected_revision=0)`.
   2. Repeat the same call with `expected_revision=0`. It must raise `PlanRevisionConflictError`, whose details name revision 1.
   3. Read the plan with `get_plan` and check the revision is 1.
 
   ```python
-  change = planning.edit_queue(session.id, add_checklist=[{"rule": "example"}], expected_revision=0)
+  change = planning.add_checklist_items(session.id, [{"rule": "example"}], expected_revision=0)
   print(change.revision, [item.kind for item in change.changes])
   ```
 
@@ -544,7 +544,7 @@ Every Python example assumes the library is installed and configured with your o
 - **Status:** Partly measured. Adding, de-duplicating and ticking are tested on made-up plans. The return rule itself is built by a later batch.
 - **Data you need:** A night plan with a checklist item.
 - **Procedure:**
-  1. Add an item with `edit_queue(add_checklist=[...])`.
+  1. Add an item with `add_checklist_items(session_id, [...])`.
   2. Tick it with `tick_checklist_item` and read the plan back.
 
   ```python

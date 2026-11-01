@@ -232,7 +232,9 @@ CLASSIFICATION_RULES = (
         r"^processing_tune_spectroscopy_calibration$", "change-data", "low", "May store a new calibration."
     ),
     _rule(
-        r"^planning_(edit_queue|edit_package|tick_checklist_item)$",
+        r"^planning_(add_to_queue|reorder_queue|remove_from_queue|set_entry_exposures|add_checklist_items"
+        r"|set_framing|update_package|reopen_package|dismiss_package|undismiss_package|delete_package"
+        r"|tick_checklist_item)$",
         "change-data",
         "high",
         "Changes the saved queue or checklist.",

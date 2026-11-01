@@ -2,7 +2,7 @@
 
 Description: The app's sequencer queue is the queue of one observing
 session in the wayfinding library. Adding a sequence records an
-observation package and queues it (`ObservationPlanning.edit_queue`);
+observation package and queues it (`ObservationPlanning.add_to_queue`);
 removing, reordering and changing entries edit the same queue; and
 starting the sequencer runs `ObservationExecution.advance_session` on a
 background thread until the queue is done. Each cycle checks safety,
@@ -189,7 +189,8 @@ class TargetImagingExecutor:
         )
         new_id = self._queue_sequence(sequence, timing)
         order = [new_id if entry_id == sequence_id else entry_id for entry_id in ids]
-        self._plan_service.edit_plan(session.id, remove=[sequence_id], order=order)
+        self._plan_service.edit_plan(session.id, remove=[sequence_id])
+        self._plan_service.edit_plan(session.id, order=order)
         return True
 
     def reorder(self, sequence_ids: list[str]) -> bool:

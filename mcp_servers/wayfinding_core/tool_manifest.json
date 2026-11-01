@@ -485,6 +485,20 @@
       "interim_block": "The assessment section connects through connect_to_telescope, which sends CONNECTION=ON to every INDI device that is off, and enclosure_state returns unknown in the MCP process. Blocked until those sections use the connect-only path.",
       "note": "Reads the safety rules, a weather verdict, the enclosure, the delegation policy and the agreement evidence for one capability. The delegation policy's live row was once written by a UI test; clean it before relying on it."
     },
+    "planning_add_checklist_items": {
+      "tool_class": "change-data",
+      "category": "planning-sessions",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "The AI is read-only, so a tool that writes is not offered."
+    },
+    "planning_add_to_queue": {
+      "tool_class": "change-data",
+      "category": "planning-sessions",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "The AI is read-only, so a tool that writes is not offered."
+    },
     "planning_build_deep_star_catalog": {
       "tool_class": "change-data",
       "category": "planning-sessions",
@@ -534,14 +548,7 @@
       "interim_block": "",
       "note": "Built 2026-10-06. Reads the catalog file; the optional estimate queries the Gaia archive and saves nothing."
     },
-    "planning_edit_package": {
-      "tool_class": "change-data",
-      "category": "planning-sessions",
-      "disposition": "withhold",
-      "interim_block": "",
-      "note": "The AI is read-only, so a tool that writes is not offered."
-    },
-    "planning_edit_queue": {
+    "planning_dismiss_package": {
       "tool_class": "change-data",
       "category": "planning-sessions",
       "disposition": "withhold",
@@ -611,6 +618,27 @@
       "interim_block": "",
       "note": "The AI is read-only, so a tool that writes is not offered."
     },
+    "planning_remove_from_queue": {
+      "tool_class": "change-data",
+      "category": "planning-sessions",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "The AI is read-only, so a tool that writes is not offered."
+    },
+    "planning_reopen_package": {
+      "tool_class": "change-data",
+      "category": "planning-sessions",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "The AI is read-only, so a tool that writes is not offered."
+    },
+    "planning_reorder_queue": {
+      "tool_class": "change-data",
+      "category": "planning-sessions",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "The AI is read-only, so a tool that writes is not offered."
+    },
     "planning_set_depth_goal": {
       "tool_class": "change-data",
       "category": "planning-sessions",
@@ -618,7 +646,35 @@
       "interim_block": "",
       "note": "Writes the user's chosen depth level for a target to the database. Not a hardware command, but the user decided an AI may not change configuration."
     },
+    "planning_set_entry_exposures": {
+      "tool_class": "change-data",
+      "category": "planning-sessions",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "The AI is read-only, so a tool that writes is not offered."
+    },
+    "planning_set_framing": {
+      "tool_class": "change-data",
+      "category": "planning-sessions",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "The AI is read-only, so a tool that writes is not offered."
+    },
     "planning_tick_checklist_item": {
+      "tool_class": "change-data",
+      "category": "planning-sessions",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "The AI is read-only, so a tool that writes is not offered."
+    },
+    "planning_undismiss_package": {
+      "tool_class": "change-data",
+      "category": "planning-sessions",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "The AI is read-only, so a tool that writes is not offered."
+    },
+    "planning_update_package": {
       "tool_class": "change-data",
       "category": "planning-sessions",
       "disposition": "withhold",

@@ -105,6 +105,19 @@ Done on the same branch. No old name is kept as an alias. The MCP tool of each c
 | `planning.create_plan("package", target=, exposure_requests=, plan_items=, dither_config=, minimum_altitude_deg=, priority=, quality_weighting_enabled=, notes=)` | `planning.create_package(target, exposure_requests=, plan_items=, dither_config=, minimum_altitude_deg=, priority=, quality_weighting_enabled=, notes=)`. Exposure rows and the dither setting are plain dictionaries, checked by the library. A bad row raises `InvalidArgumentError` |
 | `planning.create_plan("empty_session", night_id=)` | `planning.create_session(observing_night_id)` |
 | `planning.create_plan("scheduled_session", requests=, site_profile=, telescope=, camera_id=, night_id=)` | `planning.create_session(observing_night_id, requests=[...], site_profile=, telescope=, camera_id=)`. `requests` is now what makes the session scheduled. `site_profile`, `telescope` and `camera_id` are optional here too (the recorded site and the active telescope and camera) |
+| `planning.edit_queue(session_id, add=[...])` | `planning.add_to_queue(session_id, requests)` |
+| `planning.edit_queue(session_id, order=[...])` | `planning.reorder_queue(session_id, entry_ids)` |
+| `planning.edit_queue(session_id, remove=[...])` | `planning.remove_from_queue(session_id, entry_ids)` |
+| `planning.edit_queue(session_id, set_exposures={...})` | `planning.set_entry_exposures(session_id, exposures)` |
+| `planning.edit_queue(session_id, add_checklist=[...])` | `planning.add_checklist_items(session_id, items)` |
+| `planning.edit_queue(session_id, framing={...})` | `planning.set_framing(session_id, framing)` |
+| `planning.edit_package(package_id, exposure_requests=, dither_config=, minimum_altitude_deg=, priority=, notes=, name=, framing=)` | `planning.update_package(package_id, exposure_requests=, dither_config=, minimum_altitude_deg=, priority=, notes=, name=, framing=)` |
+| `planning.edit_package(package_id, reopen=True)` | `planning.reopen_package(package_id)`. It can no longer come with value changes in one call |
+| `planning.edit_package(package_id, dismiss=True, source_key=)` | `planning.dismiss_package(package_id, source_key=)` |
+| `planning.edit_package(package_id, undismiss=True, source_key=)` | `planning.undismiss_package(package_id, source_key=)` |
+| `planning.edit_package(package_id, delete=True)` | `planning.delete_package(package_id)` |
+| `planning.edit_queue(session_id)` and `planning.edit_package(package_id)` with nothing to change | No longer possible for the queue, because each verb has one argument that must be given. `planning.update_package(package_id)` with no value still raises `InvalidArgumentError` |
+| `planning.edit_queue(...)` with several changes in one call | One call per change. Each is its own write with its own revision. `expected_revision` stays on every call |
 
 ### Planning parameters
 
@@ -122,6 +135,8 @@ Done on the same branch. No old name is kept as an alias. The MCP tool of each c
 
 | Old | New |
 | --- | --- |
+| `plan:edit` payload with more than one of `add`, `order`, `remove`, `set_exposures`, `add_checklist`, `framing` | Refused with `invalid_argument`. Give exactly one. The UI never sent more than one; the payload fields and the reply are the same |
+| `plan:edit_package` with `delete`, `dismiss` or `undismiss` together with a change, or with each other | Refused with `invalid_argument`, as before (the backend now checks it). `reopen` with value changes still works: the backend reopens first, then updates with the new revision. The payload and the reply are the same |
 
 ## Left as they were, on purpose
 

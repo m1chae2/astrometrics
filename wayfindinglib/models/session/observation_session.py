@@ -276,7 +276,7 @@ class PlanChange(BaseModel):
 class QueueRequest(BaseModel):
     """A request to put one recorded package into a session's queue.
 
-    Used by `ObservationPlanning.edit_queue` to add entries by hand and by
+    Used by `ObservationPlanning.add_to_queue` to add entries by hand and by
     `ObservationPlanning.create_session` to place
     packages automatically. The package is named by its id, so the request
     is plain data.

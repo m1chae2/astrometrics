@@ -1,11 +1,11 @@
 """Purpose: Unit tests for the observation package library calls.
 
 Description: Verifies the package status and its old-data default, the
-package list filters, `edit_package` (revision conflicts, reopen, delete),
-the one-session-per-night rule (including the pick among old duplicates),
-packages with no exposures, and the promotion of a suggested package when
-it is added to a queue. Uses a temporary database and stand-in targets,
-never real data.
+package list filters, `update_package` (revision conflicts),
+`reopen_package`, `delete_package`, the one-session-per-night rule
+(including the pick among old duplicates), packages with no exposures, and
+the promotion of a suggested package when it is added to a queue. Uses a
+temporary database and stand-in targets, never real data.
 """
 
 import pytest
@@ -174,7 +174,7 @@ def test_edit_package_changes_values_and_bumps_the_revision(isolated_butler: Dis
     """An edit stores new values and adds one to the revision."""
     planning = _planning_with_targets(isolated_butler)
     package = _package(planning)
-    edited = planning.edit_package(
+    edited = planning.update_package(
         package.id,
         exposure_requests=[{"frame_type": "LIGHT", "exposure_sec": 30.0, "count": 5}],
         priority=2,
@@ -187,18 +187,18 @@ def test_edit_package_changes_values_and_bumps_the_revision(isolated_butler: Dis
     assert stored.name == "Wide M 81"
     assert stored.exposure_requests[0].count == 5
     with pytest.raises(InvalidArgumentError):
-        planning.edit_package(package.id, minimum_altitude_deg=200.0)
+        planning.update_package(package.id, minimum_altitude_deg=200.0)
     with pytest.raises(InvalidArgumentError):
-        planning.edit_package(package.id)
+        planning.update_package(package.id)
 
 
 def test_edit_package_refuses_a_stale_revision(isolated_butler: DiskButler) -> None:
     """A stale revision is refused and names the current one."""
     planning = _planning_with_targets(isolated_butler)
     package = _package(planning)
-    planning.edit_package(package.id, notes="first", expected_revision=0)
+    planning.update_package(package.id, notes="first", expected_revision=0)
     with pytest.raises(PlanRevisionConflictError) as caught:
-        planning.edit_package(package.id, notes="second", expected_revision=0)
+        planning.update_package(package.id, notes="second", expected_revision=0)
     assert caught.value.details["current_revision"] == 1
     assert planning.get_plan(kind="packages")[0].notes == "first"
 
@@ -208,26 +208,24 @@ def test_reopen_sets_a_complete_package_back_to_planned(isolated_butler: DiskBut
     planning = _planning_with_targets(isolated_butler)
     package = _package(planning)
     with pytest.raises(ConflictError):
-        planning.edit_package(package.id, reopen=True)
+        planning.reopen_package(package.id)
     package.status = PackageStatus.COMPLETE
     isolated_butler.put(package, "observation_package", {"id": package.id})
-    reopened = planning.edit_package(package.id, reopen=True)
+    reopened = planning.reopen_package(package.id)
     assert reopened.status == PackageStatus.PLANNED
     assert reopened.revision == 1
 
 
 def test_delete_removes_the_package_and_refuses_mixed_arguments(isolated_butler: DiskButler) -> None:
-    """Delete removes a package; mixed or missing is refused."""
+    """Delete removes a package; a stale or missing one is refused."""
     planning = _planning_with_targets(isolated_butler)
     package = _package(planning)
-    with pytest.raises(InvalidArgumentError):
-        planning.edit_package(package.id, delete=True, priority=1)
     with pytest.raises(PlanRevisionConflictError):
-        planning.edit_package(package.id, delete=True, expected_revision=5)
-    planning.edit_package(package.id, delete=True)
+        planning.delete_package(package.id, expected_revision=5)
+    planning.delete_package(package.id)
     assert planning.get_plan(kind="packages") == []
     with pytest.raises(NotFoundError):
-        planning.edit_package(package.id, delete=True)
+        planning.delete_package(package.id)
 
 
 def test_one_session_per_night(isolated_butler: DiskButler) -> None:
@@ -262,11 +260,11 @@ def test_old_duplicates_pick_the_most_entries_then_the_newest(isolated_butler: D
     older = base.model_copy(update={"id": "older"})
     newer = base.model_copy(update={"id": "newer", "created_at": base.created_at.replace(year=2099)})
     fuller = base.model_copy(update={"id": "fuller", "created_at": base.created_at.replace(year=2001)})
-    planning.edit_queue(base.id, add=[{"package_id": package.id}])
-    planning.edit_queue(base.id, remove=[planning.get_plan(base.id).queue[0].id])
+    planning.add_to_queue(base.id, requests=[{"package_id": package.id}])
+    planning.remove_from_queue(base.id, entry_ids=[planning.get_plan(base.id).queue[0].id])
     for extra in (older, newer, fuller):
         isolated_butler.put(extra, "observation_session", {"session_id": extra.id})
-    fuller_stored = planning.edit_queue("fuller", add=[{"package_id": package.id}]).session
+    fuller_stored = planning.add_to_queue("fuller", requests=[{"package_id": package.id}]).session
     assert fuller_stored.id == "fuller"
     assert planning.get_plan(night_id="2026-08-10").id == "fuller"
     assert _night_session(planning).id == "fuller"
@@ -305,7 +303,7 @@ def test_adding_a_suggested_package_to_a_queue_promotes_it(isolated_butler: Disk
     package.status = PackageStatus.SUGGESTED
     isolated_butler.put(package, "observation_package", {"id": package.id})
 
-    change = planning.edit_queue(session.id, add=[{"package_id": package.id}])
+    change = planning.add_to_queue(session.id, requests=[{"package_id": package.id}])
 
     assert any(item.kind == "package_promoted" for item in change.changes)
     stored = planning.get_plan(kind="packages")[0]

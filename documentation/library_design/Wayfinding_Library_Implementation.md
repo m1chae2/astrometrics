@@ -138,7 +138,7 @@ Folder: `tasks/planning_tasks/`. Facade: `ObservationPlanning` in `api/planning.
 - **Night window and visibility.** `night_window.py` (`resolve_night_window`), `astronomy/solar_position.py`, `visibility_tasks.py` (`visibility_state_at`, `find_earliest_visible_window`, `ever_visible`), `visibility_report.py`, `visibility_operations.py`.
 - **Placement.** `scheduling.py` (`PlacementRequest`, `place`, `schedule_session`, `_apply_advisory_boost`). Reasons: `InfeasibilityReasonCode`. The boost needs `quality_weighting_enabled`.
 - **Mosaics and advice.** `mosaic_tasks.py` (`calculate_panels` takes `rotation_deg`), `calibration_advisory_tasks.py`. The quality judgments are in Section 6.10.
-- **Plans.** `planning_operations.py` (`create_sequence`, `create_package`, `create_session`; `get_advisory` kinds: `quality`, `calibration`, `tonight`, `result`; `get_plan`, `edit_queue`, `tick_checklist_item`).
+- **Plans.** `planning_operations.py` (`create_sequence`, `create_package`, `create_session`; `get_advisory` kinds: `quality`, `calibration`, `tonight`, `result`; `get_plan`, `add_to_queue`, `tick_checklist_item`).
 - **Sky.** `sky_engine.py` (`SkyEngine`), `sky_sources.py`, `drivers/catalog/`, and the `*_operations.py` calculation modules.
 
 <!-- impl: wayfindinglib.tasks.planning_tasks.scheduling.PlacementRequest -->

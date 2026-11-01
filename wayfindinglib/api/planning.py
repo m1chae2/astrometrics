@@ -4,15 +4,16 @@ Description: `Wayfinder.planning` is an `ObservationPlanning`. It answers
 where objects are in the sky (`get_visibility`), advises on targets and
 calibration frames (`get_advisory`), lays out mosaics
 (`calculate_panels`, `create_mosaic`), writes plans (`create_sequence`,
-`create_package`, `create_session`, `edit_queue`, `edit_package`,
-`tick_checklist_item`) and reads them back
-(`get_plan`). `refresh_suggestions` keeps the library's suggested
-observation packages up to date and marks finished packages complete. It
-also browses the library and online catalogs around a point in the sky and
-reports on the downloaded deep-star catalog.
+`create_package`, `create_session`, the queue verbs such as
+`add_to_queue`, the package verbs such as `update_package`, and
+`tick_checklist_item`) and reads them back (`get_plan`).
+`refresh_suggestions` keeps the library's suggested observation packages up
+to date and marks finished packages complete. It also browses the library
+and online catalogs around a point in the sky and reports on the downloaded
+deep-star catalog.
 
 Planning never talks to hardware. A plan made by hand (`create_session`
-with no `requests`, then `edit_queue`) and a plan placed
+with no `requests`, then `add_to_queue`) and a plan placed
 automatically (`create_session` with `requests`) write the same queue
 structure, so `ObservationExecution` runs either one.
 
@@ -1368,7 +1369,204 @@ class ObservationPlanning:
             session.camera_id, self._config, self._astrometrics.quality.capture_settings().values()
         )
 
-    def edit_queue(
+    def add_to_queue(
+        self,
+        session_id: str,
+        requests: list[QueueRequest | dict[str, Any]],
+        *,
+        expected_revision: int | None = None,
+    ) -> PlanChange:
+        """Add recorded packages to the end of an observing session's queue.
+
+        Each added entry freezes a copy of its package (exposures,
+        dithering, altitude limit and priority), the same way automatic
+        placement does, so a session built by hand and one placed
+        automatically run the same way. A suggested package that is added
+        becomes planned.
+
+        Every exposure request is checked against the camera: a gain
+        setting, offset or binning the camera profile did not measure is
+        refused with the reason, and a camera with no measured setting
+        accepts the request and notes "setting not measured". Exact
+        duplicate requests in one entry merge (their counts add);
+        requests that differ only in delay are refused.
+
+        The write is one database step. When `expected_revision` is given,
+        it must be the revision last read, or nothing is written.
+
+        Parameters
+        ----------
+        session_id : `str`
+            The session to change.
+        requests : `list` [`dict`]
+            The packages to append. Each is a dictionary with a
+            ``package_id`` and a start mode, any start and end worked out
+            by hand, and optionally its own exposure requests instead of
+            the package's.
+        expected_revision : `int`, optional
+            The plan revision the caller last read. Leave out to write
+            over whatever is stored.
+
+        Returns
+        -------
+        change : `PlanChange`
+            The new revision, what changed, notes on accepted settings and
+            the stored session. An `InvalidArgumentError` says a request is
+            malformed or an exposure request is refused. A
+            `PlanRevisionConflictError` says the stored revision is not
+            `expected_revision`; its details hold the current revision.
+        """
+        return self._edit_queue(session_id, add=requests, expected_revision=expected_revision)
+
+    def reorder_queue(
+        self, session_id: str, entry_ids: list[str], *, expected_revision: int | None = None
+    ) -> PlanChange:
+        """Put the entries of an observing session's queue in a new order.
+
+        Parameters
+        ----------
+        session_id : `str`
+            The session to change.
+        entry_ids : `list` [`str`]
+            Every entry id in the queue, in the new order. It must name
+            exactly the entries in the queue, or `InvalidArgumentError` is
+            raised.
+        expected_revision : `int`, optional
+            The plan revision the caller last read. Leave out to write
+            over whatever is stored.
+
+        Returns
+        -------
+        change : `PlanChange`
+            The new revision, what changed and the stored session. A
+            `PlanRevisionConflictError` says the stored revision is not
+            `expected_revision`.
+        """
+        return self._edit_queue(session_id, order=entry_ids, expected_revision=expected_revision)
+
+    def remove_from_queue(
+        self, session_id: str, entry_ids: list[str], *, expected_revision: int | None = None
+    ) -> PlanChange:
+        """Take entries out of an observing session's queue.
+
+        Parameters
+        ----------
+        session_id : `str`
+            The session to change.
+        entry_ids : `list` [`str`]
+            The ids of the entries to remove. `NotFoundError` is raised for
+            an id that is not in the queue, and `ConflictError` for an
+            entry that is running.
+        expected_revision : `int`, optional
+            The plan revision the caller last read. Leave out to write
+            over whatever is stored.
+
+        Returns
+        -------
+        change : `PlanChange`
+            The new revision, what changed and the stored session. A
+            `PlanRevisionConflictError` says the stored revision is not
+            `expected_revision`.
+        """
+        return self._edit_queue(session_id, remove=entry_ids, expected_revision=expected_revision)
+
+    def set_entry_exposures(
+        self,
+        session_id: str,
+        exposures: dict[str, list[ExposureRequest | dict[str, Any]]],
+        *,
+        expected_revision: int | None = None,
+    ) -> PlanChange:
+        """Replace the exposure requests of entries in a session's queue.
+
+        The requests are checked against the camera and merged the same
+        way `add_to_queue` does.
+
+        Parameters
+        ----------
+        session_id : `str`
+            The session to change.
+        exposures : `dict` [`str`, `list` [`dict`]]
+            The new exposure requests for each entry, by entry id. Each
+            request is a dictionary with ``frame_type``, ``exposure_sec``
+            and ``count``. An entry that is running or done cannot change
+            (`ConflictError`), and an id that is not in the queue raises
+            `NotFoundError`.
+        expected_revision : `int`, optional
+            The plan revision the caller last read. Leave out to write
+            over whatever is stored.
+
+        Returns
+        -------
+        change : `PlanChange`
+            The new revision, what changed, notes on accepted settings and
+            the stored session. A `PlanRevisionConflictError` says the
+            stored revision is not `expected_revision`.
+        """
+        return self._edit_queue(session_id, set_exposures=exposures, expected_revision=expected_revision)
+
+    def add_checklist_items(
+        self,
+        session_id: str,
+        items: list[ChecklistItem | dict[str, Any]],
+        *,
+        expected_revision: int | None = None,
+    ) -> PlanChange:
+        """Add checklist items to an observing session.
+
+        An item with the same rule and capture setting as one already on the
+        list is not added again, and a write that adds nothing keeps the
+        revision.
+
+        Parameters
+        ----------
+        session_id : `str`
+            The session to change.
+        items : `list` [`dict`]
+            The items to add. Each is a dictionary with a ``rule``.
+        expected_revision : `int`, optional
+            The plan revision the caller last read. Leave out to write
+            over whatever is stored.
+
+        Returns
+        -------
+        change : `PlanChange`
+            The new revision, what changed and the stored session. A
+            `PlanRevisionConflictError` says the stored revision is not
+            `expected_revision`.
+        """
+        return self._edit_queue(session_id, add_checklist=items, expected_revision=expected_revision)
+
+    def set_framing(
+        self,
+        session_id: str,
+        framing: Framing | dict[str, Any],
+        *,
+        expected_revision: int | None = None,
+    ) -> PlanChange:
+        """Store where the camera points for an observing session.
+
+        Parameters
+        ----------
+        session_id : `str`
+            The session to change.
+        framing : `dict`
+            The field center (``center_ra_deg``, ``center_dec_deg``), the
+            camera rotation and any mosaic panels.
+        expected_revision : `int`, optional
+            The plan revision the caller last read. Leave out to write
+            over whatever is stored.
+
+        Returns
+        -------
+        change : `PlanChange`
+            The new revision, what changed and the stored session. A
+            `PlanRevisionConflictError` says the stored revision is not
+            `expected_revision`.
+        """
+        return self._edit_queue(session_id, framing=framing, expected_revision=expected_revision)
+
+    def _edit_queue(
         self,
         session_id: str,
         add: list[QueueRequest | dict[str, Any]] | None = None,
@@ -1380,7 +1578,11 @@ class ObservationPlanning:
         framing: Framing | dict[str, Any] | None = None,
         expected_revision: int | None = None,
     ) -> PlanChange:
-        """Change an observing session's night plan by hand.
+        """Apply one change to an observing session's night plan.
+
+        The public calls `add_to_queue`, `reorder_queue`,
+        `remove_from_queue`, `set_entry_exposures`, `add_checklist_items`
+        and `set_framing` each pass one change here.
 
         Added entries freeze a copy of their package (exposures,
         dithering, altitude limit and priority), the same way automatic
@@ -1657,7 +1859,189 @@ class ObservationPlanning:
                 self._log_suggestion_event(SuggestionEvent.PROMOTED, package, "added to a session")
                 return
 
-    def edit_package(
+    def update_package(
+        self,
+        package_id: str,
+        *,
+        exposure_requests: list[ExposureRequest | dict[str, Any]] | None = None,
+        dither_config: DitherConfig | dict[str, Any] | None = None,
+        minimum_altitude_deg: float | None = None,
+        priority: int | None = None,
+        notes: str | None = None,
+        name: str | None = None,
+        framing: Framing | dict[str, Any] | None = None,
+        expected_revision: int | None = None,
+    ) -> ObservationPackage:
+        """Change the values of one observation package.
+
+        Values are checked the same way `create_package` checks them. A
+        change counts as one write and adds one to the package's revision. A
+        value left out (`None`) is not changed, so this call cannot clear
+        the dither or the altitude limit.
+
+        A new or changed exposure row starts counting frames from now. A row
+        whose frame type, filter, length, gain, offset and binning are the
+        same as a row already in the package keeps its counting time (a
+        change of its count alone does not restart the count).
+
+        Parameters
+        ----------
+        package_id : `str`
+            The package to change.
+        exposure_requests : `list` [`dict`], optional
+            The new full list of exposures, replacing the old list. An empty
+            list clears them.
+        dither_config : `dict`, optional
+            The new dithering.
+        minimum_altitude_deg : `float`, optional
+            The new lowest altitude the package may be imaged at.
+        priority : `int`, optional
+            The new priority.
+        notes : `str`, optional
+            The new free text.
+        name : `str`, optional
+            The new package name.
+        framing : `dict`, optional
+            Where the camera points: the field center, the camera rotation
+            and any mosaic panels. The Planetarium's "Send framing to
+            package" sets it.
+        expected_revision : `int`, optional
+            The package revision the caller last read. Leave out to write
+            over whatever is stored.
+
+        Returns
+        -------
+        package : `ObservationPackage`
+            The stored package. An `InvalidArgumentError` says nothing to
+            change was given or a value is malformed. `NotFoundError` says
+            no package has that id. A `PlanRevisionConflictError` says the
+            stored revision is not `expected_revision`; its details hold
+            the current revision.
+        """
+        return self._edit_package(
+            package_id,
+            expected_revision=expected_revision,
+            exposure_requests=exposure_requests,
+            dither_config=dither_config,
+            minimum_altitude_deg=minimum_altitude_deg,
+            priority=priority,
+            notes=notes,
+            name=name,
+            framing=framing,
+        )
+
+    def reopen_package(self, package_id: str, *, expected_revision: int | None = None) -> ObservationPackage:
+        """Set a complete observation package back to planned.
+
+        For each light row, this stores how many matching frames are
+        already captured, so those frames do not complete the package
+        again. When the frames cannot be counted (the package is in no
+        session, or the library cannot be read), each row starts counting
+        from now instead.
+
+        Parameters
+        ----------
+        package_id : `str`
+            The package to reopen.
+        expected_revision : `int`, optional
+            The package revision the caller last read. Leave out to write
+            over whatever is stored.
+
+        Returns
+        -------
+        package : `ObservationPackage`
+            The stored package. A `ConflictError` says the package is not
+            complete. A `PlanRevisionConflictError` says the stored revision
+            is not `expected_revision`.
+        """
+        return self._edit_package(package_id, expected_revision=expected_revision, reopen=True)
+
+    def dismiss_package(
+        self,
+        package_id: str,
+        *,
+        source_key: str | None = None,
+        expected_revision: int | None = None,
+    ) -> ObservationPackage:
+        """Hide a suggested package until the evidence for it changes.
+
+        The next refresh shows the suggestion again if its evidence has
+        changed. `undismiss_package` takes a dismissal back.
+
+        Parameters
+        ----------
+        package_id : `str`
+            The suggested package to dismiss.
+        source_key : `str`, optional
+            Dismiss only this row of the suggestion, and take that row out
+            of the package. `NotFoundError` is raised for a key that names
+            no row.
+        expected_revision : `int`, optional
+            The package revision the caller last read. Leave out to write
+            over whatever is stored.
+
+        Returns
+        -------
+        package : `ObservationPackage`
+            The stored package. A `ConflictError` says the package is not a
+            library suggestion. A `PlanRevisionConflictError` says the
+            stored revision is not `expected_revision`.
+        """
+        return self._edit_package(
+            package_id, expected_revision=expected_revision, dismiss=True, source_key=source_key
+        )
+
+    def undismiss_package(
+        self,
+        package_id: str,
+        *,
+        source_key: str | None = None,
+        expected_revision: int | None = None,
+    ) -> ObservationPackage:
+        """Bring back a suggested package that was dismissed.
+
+        Parameters
+        ----------
+        package_id : `str`
+            The suggested package to bring back.
+        source_key : `str`, optional
+            Bring back only this row of the suggestion.
+        expected_revision : `int`, optional
+            The package revision the caller last read. Leave out to write
+            over whatever is stored.
+
+        Returns
+        -------
+        package : `ObservationPackage`
+            The stored package. A `ConflictError` says the package is not a
+            library suggestion. A `PlanRevisionConflictError` says the
+            stored revision is not `expected_revision`.
+        """
+        return self._edit_package(
+            package_id, expected_revision=expected_revision, undismiss=True, source_key=source_key
+        )
+
+    def delete_package(self, package_id: str, *, expected_revision: int | None = None) -> ObservationPackage:
+        """Remove one observation package.
+
+        Parameters
+        ----------
+        package_id : `str`
+            The package to remove.
+        expected_revision : `int`, optional
+            The package revision the caller last read. Leave out to remove
+            whatever is stored.
+
+        Returns
+        -------
+        package : `ObservationPackage`
+            The package as it was when removed. `NotFoundError` says no
+            package has that id. A `PlanRevisionConflictError` says the
+            stored revision is not `expected_revision`.
+        """
+        return self._edit_package(package_id, expected_revision=expected_revision, delete=True)
+
+    def _edit_package(
         self,
         package_id: str,
         *,
@@ -1675,7 +2059,11 @@ class ObservationPlanning:
         source_key: str | None = None,
         expected_revision: int | None = None,
     ) -> ObservationPackage:
-        """Change, reopen, dismiss or delete one observation package.
+        """Apply one change to an observation package.
+
+        The public calls `update_package`, `reopen_package`,
+        `dismiss_package`, `undismiss_package` and `delete_package` each
+        pass one change here.
 
         Values are checked the same way `create_package` checks them. A
         change counts as one write and adds one to the package's revision.
@@ -1835,7 +2223,7 @@ class ObservationPlanning:
     def _changed_package(
         self, package: ObservationPackage, changes: dict[str, Any], reopen: bool
     ) -> ObservationPackage:
-        """Apply the plain changes of `edit_package` to a copy of a package.
+        """Apply the plain changes of `update_package` to a copy of a package.
 
         Parameters
         ----------
@@ -2722,7 +3110,7 @@ class ObservationPlanning:
             return
         for _attempt in range(3):
             try:
-                result = self.edit_queue(session.id, add_checklist=items)
+                result = self.add_checklist_items(session.id, items)
             except PlanRevisionConflictError:
                 continue
             change.checklist_item_ids.extend(

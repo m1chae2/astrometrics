@@ -2054,6 +2054,9 @@ export interface SpectroscopyPipelineQualityMetrics {
   medianTrailWidthPx?: number | null;
   poorMatchClassificationCount?: number;
   ambiguousClassificationCount?: number;
+  skippedNoTrailStarCount?: number;
+  skippedUnidentifiedStarCount?: number;
+  belowFeatureLimitStarCount?: number;
   stageQualitySummary?: StageQualityRollup[] | null;
   gaiaXpSummary?: GaiaXpRunSummary | null;
   wavelengthScaleSummary?: WavelengthScaleSummary | null;

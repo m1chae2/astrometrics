@@ -22,12 +22,20 @@ between, so a second caller can never observe a half-applied
 configuration. A failed query (no network, a server error, or a reply
 that cannot be read) is raised as `ExternalServiceError`, so callers
 catch one error category.
+
+When SIMBAD cannot be reached at all (a refused connection or a request
+that times out), the driver stops asking for `SIMBAD_COOLDOWN_SECONDS`.
+Every call in that time raises `ExternalServiceError` at once, instead of
+each waiting out its own timeout. The pause is short and temporary: after
+it the next call tries SIMBAD again, and one good reply clears it early.
 """
 
 import logging
 import threading
+import time
 from typing import Any
 
+import requests
 from astroquery.simbad import SimbadClass
 
 from astrometricslib._internal.drivers.interfaces.simbad_driver import SimbadDriver
@@ -54,6 +62,22 @@ logger = logging.getLogger(__name__)
 # limits over the network, so merely assigning it can itself hang.
 SIMBAD_QUERY_TIMEOUT_SECONDS = 30
 
+# How long to stop asking SIMBAD after it could not be reached.
+#
+# A run that looks up many stars while SIMBAD is down would otherwise wait
+# out the 30 s timeout above on every call (2 to 4 times in one M 13
+# spectroscopy stage, about two minutes). After one failed connection the
+# driver fails the next calls at once for this long. It is a pause, never a
+# permanent mark: when it ends the next call goes to SIMBAD again. 120 s is
+# a design estimate: long enough to cover the burst of lookups in one stage,
+# short enough that a server that comes back is used within the same night's
+# run.
+SIMBAD_COOLDOWN_SECONDS = 120.0
+
+# The time (from `time.monotonic`) before which calls fail at once, or 0.0
+# when SIMBAD is not paused. Only read or written with `SIMBAD_LOCK` held.
+_paused_until: float = 0.0
+
 # Guards both the client's creation and every use of it. Held across
 # configuration and the query together, because the columns one caller
 # requests are read back by whoever queries next.
@@ -63,6 +87,82 @@ SIMBAD_LOCK = threading.Lock()
 # this module -- which every test and the app itself does -- stays free of
 # side effects.
 _client: SimbadClass | None = None
+
+
+def _is_connection_failure(error: BaseException) -> bool:
+    """Say whether an error means SIMBAD could not be reached at all.
+
+    A refused connection, a lost network and a timeout all do. A reply
+    that arrives but is an error page, or cannot be read, does not: the
+    server is up, so asking again soon may work. The error is followed
+    through its causes, because pyvo can wrap the `requests` error.
+
+    Parameters
+    ----------
+    error : `BaseException`
+        The error a query raised.
+
+    Returns
+    -------
+    is_connection_failure : `bool`
+        `True` when the error or one of its causes is a connection error or
+        a timeout.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(
+            current,
+            (requests.exceptions.ConnectionError, requests.exceptions.Timeout, ConnectionError, TimeoutError),
+        ):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def _raise_if_paused(message: str, details: dict[str, Any]) -> None:
+    """Fail at once while SIMBAD is paused after a connection failure.
+
+    Only call with `SIMBAD_LOCK` held.
+
+    Parameters
+    ----------
+    message : `str`
+        The error text of the call that is being refused.
+    details : `dict`
+        The details of that call's error.
+
+    Raises
+    ------
+    ExternalServiceError
+        If SIMBAD is paused.
+    """
+    remaining = _paused_until - time.monotonic()
+    if remaining > 0:
+        raise ExternalServiceError(
+            message, details={**details, "skipped_for_seconds_more": round(remaining, 1)}
+        )
+
+
+def _note_outcome(error: BaseException | None) -> None:
+    """Start or end the pause, from how the last call went.
+
+    Only call with `SIMBAD_LOCK` held.
+
+    Parameters
+    ----------
+    error : `BaseException` or `None`
+        The error the call raised, or `None` when it got an answer.
+    """
+    global _paused_until
+    if error is None:
+        _paused_until = 0.0
+    elif _is_connection_failure(error):
+        _paused_until = time.monotonic() + SIMBAD_COOLDOWN_SECONDS
+        logger.warning(
+            "SIMBAD could not be reached; skipping its calls for %.0f s: %s", SIMBAD_COOLDOWN_SECONDS, error
+        )
 
 
 def _install_request_timeout(client: SimbadClass) -> None:
@@ -167,11 +267,15 @@ class AstroquerySimbadDriver(SimbadDriver):
             If SIMBAD could not be reached or its reply could not be read.
         """
         with SIMBAD_LOCK:
+            _raise_if_paused("The SIMBAD region search was skipped.", {"radius": radius})
             client = _get_client()
             try:
                 _configure(client, votable_fields, row_limit)
-                return client.query_region(coordinates, radius=radius)
+                result = client.query_region(coordinates, radius=radius)
+                _note_outcome(None)
+                return result
             except ONLINE_QUERY_ERRORS as query_error:
+                _note_outcome(query_error)
                 raise ExternalServiceError(
                     "The SIMBAD region search failed.", details={"radius": radius}
                 ) from query_error
@@ -197,13 +301,17 @@ class AstroquerySimbadDriver(SimbadDriver):
             If SIMBAD could not be reached or its reply could not be read.
         """
         with SIMBAD_LOCK:
+            _raise_if_paused("The SIMBAD name lookup was skipped.", {"object_name": object_name})
             client = _get_client()
             try:
                 # Inside the `try`: adding a column can itself ask the
                 # server which columns exist, and that can fail offline.
                 _configure(client, votable_fields, None)
-                return client.query_object(object_name)
+                result = client.query_object(object_name)
+                _note_outcome(None)
+                return result
             except ONLINE_QUERY_ERRORS as query_error:
+                _note_outcome(query_error)
                 raise ExternalServiceError(
                     "The SIMBAD name lookup failed.", details={"object_name": object_name}
                 ) from query_error
@@ -227,10 +335,14 @@ class AstroquerySimbadDriver(SimbadDriver):
             If SIMBAD could not be reached or its reply could not be read.
         """
         with SIMBAD_LOCK:
+            _raise_if_paused("The SIMBAD TAP query was skipped.", {"query_length": len(adql_query)})
             client = _get_client()
             try:
-                return client.query_tap(adql_query)
+                result = client.query_tap(adql_query)
+                _note_outcome(None)
+                return result
             except ONLINE_QUERY_ERRORS as query_error:
+                _note_outcome(query_error)
                 raise ExternalServiceError(
                     "The SIMBAD TAP query failed.", details={"query_length": len(adql_query)}
                 ) from query_error

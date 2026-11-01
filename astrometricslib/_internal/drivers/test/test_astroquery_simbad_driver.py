@@ -22,6 +22,7 @@ import threading
 from typing import Any
 
 import pytest
+import requests
 from pyvo.dal.exceptions import DALServiceError
 
 from astrometricslib._internal.drivers import astroquery_simbad_driver as simbad_module
@@ -73,6 +74,12 @@ class _FakeSimbad:
         if isinstance(self._result, Exception):
             raise self._result
         return self._result
+
+
+@pytest.fixture(autouse=True)
+def no_pause(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Start every test with SIMBAD not paused."""
+    monkeypatch.setattr(simbad_module, "_paused_until", 0.0)
 
 
 @pytest.fixture
@@ -366,3 +373,85 @@ def test_a_tap_failure_is_reported_as_an_external_service_error_and_frees_the_lo
         AstroquerySimbadDriver().query_tap("SELECT main_id FROM basic")
 
     assert not simbad_module.SIMBAD_LOCK.locked()
+
+
+# --- Pause after a connection failure ---------------------------------------
+
+
+class _ClockStub:
+    """A hand-set clock standing in for `time.monotonic`."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def test_a_connection_failure_pauses_the_next_calls_without_asking_simbad(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """After one unreachable-server error, later calls fail at once.
+
+    The stand-in client records every call, so the test can see that the
+    second and third calls never reached it.
+    """
+    clock = _ClockStub()
+    monkeypatch.setattr(simbad_module.time, "monotonic", clock)
+    client = _FakeSimbad(result=requests.exceptions.ConnectTimeout("timed out"))
+    monkeypatch.setattr(simbad_module, "_client", client)
+    driver = AstroquerySimbadDriver()
+
+    with pytest.raises(ExternalServiceError):
+        driver.query_object("M 13")
+    calls_after_first = [event for event in client.events if event[0].startswith("query")]
+    with pytest.raises(ExternalServiceError):
+        driver.query_region("coord", radius="0.5d")
+    with pytest.raises(ExternalServiceError):
+        driver.query_tap("SELECT 1")
+
+    assert len(calls_after_first) == 1
+    assert [event for event in client.events if event[0].startswith("query")] == calls_after_first
+
+
+def test_the_pause_ends_after_the_cooldown_and_a_good_reply_clears_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The pause is temporary: the next call after it asks SIMBAD again."""
+    clock = _ClockStub()
+    monkeypatch.setattr(simbad_module.time, "monotonic", clock)
+    client = _FakeSimbad(result=ConnectionError("SIMBAD unreachable"))
+    monkeypatch.setattr(simbad_module, "_client", client)
+    driver = AstroquerySimbadDriver()
+    with pytest.raises(ExternalServiceError):
+        driver.query_object("M 13")
+
+    clock.now += simbad_module.SIMBAD_COOLDOWN_SECONDS + 1.0
+    client._result = "table"
+
+    assert driver.query_object("M 13") == "table"
+    assert not simbad_module._paused_until
+    assert driver.query_object("M 81") == "table"
+
+
+def test_a_server_error_does_not_start_a_pause(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An error reply means the server is up, so the next call goes through."""
+    client = _FakeSimbad(result=DALServiceError("SIMBAD returned HTTP 503"))
+    monkeypatch.setattr(simbad_module, "_client", client)
+    driver = AstroquerySimbadDriver()
+
+    with pytest.raises(ExternalServiceError):
+        driver.query_object("M 13")
+    with pytest.raises(ExternalServiceError):
+        driver.query_object("M 81")
+
+    assert len([event for event in client.events if event[0] == "query_object"]) == 2
+
+
+def test_a_connection_error_wrapped_by_another_error_still_starts_the_pause() -> None:
+    """The cause chain is followed, because pyvo wraps `requests` errors."""
+    wrapped = DALServiceError("could not connect")
+    wrapped.__cause__ = requests.exceptions.ConnectionError("refused")
+
+    assert simbad_module._is_connection_failure(wrapped)
+    assert not simbad_module._is_connection_failure(DALServiceError("HTTP 503"))

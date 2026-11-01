@@ -445,7 +445,8 @@ def test_sky_browsing_methods_delegate_to_the_sky_engine(mocker: object, isolate
         type(planning), "_sky_engine", new_callable=mocker.PropertyMock, return_value=fake_sky
     )
 
-    planning.resolve_target_coordinates("M 81")
+    fake_sky.resolve_target_coordinates.return_value = Target(id="M 81", ra="9 55 33", dec="69 3 55")
+    assert planning.lookup_coordinates("M 81").id == "M 81"
     fake_sky.resolve_target_coordinates.assert_called_once_with("M 81")
 
     collect = mocker.patch("wayfindinglib.tasks.planning_tasks.sky_sources.collect_sky_sources")

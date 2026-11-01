@@ -87,6 +87,32 @@ The reply of `quality:query`, `images:delete` and `calibration:get_stats` keeps 
 | `quality_flag_value_outliers` | Removed |
 | `quality_query` | Same name; new `limit` and `offset` arguments |
 
+## `wayfindinglib` planning (`wayfinder.planning`)
+
+Done on the same branch. No old name is kept as an alias. The MCP tool of each call is `planning_<name>`.
+
+### Planning calls
+
+| Old | New |
+| --- | --- |
+| `planning.resolve_target_coordinates(name)` and `planning.lookup_coordinates(name)` | `planning.lookup_coordinates(name)`, one call. The MCP tool `planning_resolve_target_coordinates` is removed |
+
+### Planning parameters
+
+| Call | Old | New |
+| --- | --- | --- |
+
+### Planning return types
+
+| Call | Old | New |
+| --- | --- | --- |
+| `planning.lookup_coordinates` | `dict` | `CoordinateLookup` (`id`, `name`, `kind`, `ra_deg`, `dec_deg`, `ra`, `dec`, `magnitude`, `spectral_type`). `result["ra_deg"]` becomes `result.ra_deg` |
+
+### Planning RPC methods
+
+| Old | New |
+| --- | --- |
+
 ## Left as they were, on purpose
 
 - `visualization.get_last_captured_image` is separate from `render_fits`: it finds the newest file itself and

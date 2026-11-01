@@ -58,6 +58,7 @@ from wayfindinglib.drivers.butler import DiskButler, pick_session_for_night
 from wayfindinglib.models.equipment_and_site.calibration import CalibrationAdvisory
 from wayfindinglib.models.equipment_and_site.equipment import EquipmentConfiguration, Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
+from wayfindinglib.models.planning.coordinate_lookup import CoordinateLookup
 from wayfindinglib.models.planning.deep_catalog import DeepCatalogEstimate, DeepCatalogStatus
 from wayfindinglib.models.planning.depth_goal import DepthGoalStatus, DepthLevel
 from wayfindinglib.models.planning.mosaic import MosaicPanel, MosaicPlan
@@ -507,27 +508,12 @@ class ObservationPlanning:
 
     # -- Sky browsing (name lookup and catalogs) ----------------------------
 
-    def resolve_target_coordinates(self, name: str) -> Target | StellarObject:
-        """Resolve a target or star by name, through the library or SIMBAD.
-
-        Parameters
-        ----------
-        name : `str`
-            A target id or common name, or a star name.
-
-        Returns
-        -------
-        resolved : `Target` or `StellarObject`
-            The whole record of the object found.
-        """
-        return self._sky_engine.resolve_target_coordinates(name)
-
-    def lookup_coordinates(self, name: str) -> dict[str, Any]:
+    def lookup_coordinates(self, name: str) -> CoordinateLookup:
         """Find where a named object is, from the library or SIMBAD.
 
-        Gives a short answer. `resolve_target_coordinates` returns the
-        whole target record, frames and all, which is far more than a
-        position needs.
+        Looks in the library first. A name the library does not know goes
+        to SIMBAD, so the call can use the network. A name neither knows
+        raises the lookup's own error.
 
         Parameters
         ----------
@@ -536,32 +522,34 @@ class ObservationPlanning:
 
         Returns
         -------
-        position : `dict` [`str`, `Any`]
-            ``id``, ``name``, ``kind`` (``"target"`` or ``"star"``), and
-            the position in degrees (``ra_deg``, ``dec_deg``) and as text.
+        position : `CoordinateLookup`
+            The ``id``, ``name`` and ``kind`` (``"target"`` or ``"star"``),
+            and the position in degrees (``ra_deg``, ``dec_deg``). A target
+            also has its position as saved text; a star has its magnitude
+            and spectral type.
         """
         from astrometricslib import parse_coordinate_string
 
         found = self._sky_engine.resolve_target_coordinates(name)
         if isinstance(found, StellarObject):
-            return {
-                "id": found.id,
-                "name": found.name,
-                "kind": "star",
-                "ra_deg": round(float(found.right_ascension), 6),
-                "dec_deg": round(float(found.declination), 6),
-                "magnitude": found.magnitude,
-                "spectral_type": found.spectral_type,
-            }
-        return {
-            "id": found.id,
-            "name": found.common_name or None,
-            "kind": "target",
-            "ra_deg": round(parse_coordinate_string(found.ra, True), 6),
-            "dec_deg": round(parse_coordinate_string(found.dec, False), 6),
-            "ra": found.ra,
-            "dec": found.dec,
-        }
+            return CoordinateLookup(
+                id=found.id,
+                name=found.name,
+                kind="star",
+                ra_deg=round(float(found.right_ascension), 6),
+                dec_deg=round(float(found.declination), 6),
+                magnitude=found.magnitude,
+                spectral_type=found.spectral_type,
+            )
+        return CoordinateLookup(
+            id=found.id,
+            name=found.common_name or None,
+            kind="target",
+            ra_deg=round(parse_coordinate_string(found.ra, True), 6),
+            dec_deg=round(parse_coordinate_string(found.dec, False), 6),
+            ra=found.ra,
+            dec=found.dec,
+        )
 
     def find_sources(
         self,

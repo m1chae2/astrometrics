@@ -125,7 +125,6 @@ PLANNING_MEMBERS = frozenset({
     "get_constellation_lines",
     "get_imaged_field_centers",
     "lookup_coordinates",
-    "resolve_target_coordinates",
 })
 """The public members of `ObservationPlanning`."""
 

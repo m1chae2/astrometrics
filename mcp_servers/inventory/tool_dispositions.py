@@ -74,10 +74,6 @@ INTERIM_BLOCKS = {
         "Returns every star in the circle, which can overflow the 40,000 character reply. Use "
         "planning_find_sources, which caps the list, brightest first."
     ),
-    "planning_resolve_target_coordinates": (
-        "Returns the whole target record, frames and all, which overflows the reply. Use "
-        "planning_lookup_coordinates, which returns the position."
-    ),
     "observatory_imaging_status": (
         "The filters and focuser sections return [] and 0 because the MCP process has no hardware "
         "connection. Use app_status with the telescope section (focuser position, filter, pier side, "
@@ -335,9 +331,6 @@ DECISIONS = {
         "keep", "Queries online catalogs over the network. Reads only."
     ),
     "planning_list_catalog_driver_metadata": ToolDecision("keep", "Lists the catalog drivers. Reads only."),
-    "planning_resolve_target_coordinates": ToolDecision(
-        "keep", "Looks up an object's position by name. Unknown names go to SIMBAD over the network."
-    ),
     "planning_get_visibility": ToolDecision(
         "keep",
         "Built 2026-10-03. Where objects are now or over a night: altitude, horizon clearance with "

@@ -67,17 +67,17 @@ def test_a_target_is_looked_up_as_a_short_position() -> None:
     """The reply is a position, not the target record."""
     target = Target(id="M 57", ra="18 55 54.17", dec="32 37 45.85")
     answer = make_planning([], [], resolved=target).lookup_coordinates("M 57")
-    assert answer["kind"] == "target"
-    assert abs(answer["ra_deg"] - 283.9757) < 0.001
-    assert "frames" not in answer
+    assert answer.kind == "target"
+    assert abs(answer.ra_deg - 283.9757) < 0.001
+    assert not hasattr(answer, "frames")
 
 
 def test_a_star_is_looked_up_with_its_magnitude() -> None:
     """A star answers with its position in degrees and its type."""
     star = StellarObject(id="* alf Lyr", name="Vega", right_ascension=279.2, declination=38.8, magnitude=0.03)
     answer = make_planning([], [], resolved=star).lookup_coordinates("Vega")
-    assert answer["kind"] == "star"
-    assert answer["dec_deg"] == pytest.approx(38.8)
+    assert answer.kind == "star"
+    assert answer.dec_deg == pytest.approx(38.8)
 
 
 def test_an_unknown_name_raises_the_lookup_error() -> None:

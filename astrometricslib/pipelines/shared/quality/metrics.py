@@ -16,6 +16,7 @@ light frames because the meaning is the same: `FRAME_BACKGROUND_LEVEL` and
 
 import datetime
 
+from astrometricslib.models.quality.limit import LimitTier, QualityLimit
 from astrometricslib.models.quality.measurement import SubjectLevel
 from astrometricslib.models.quality.metric_spec import (
     Checkpoint,
@@ -23,6 +24,10 @@ from astrometricslib.models.quality.metric_spec import (
     MetricPurpose,
     MetricSpec,
     UncertaintyKind,
+)
+from astrometricslib.pipelines.shared.quality.saturation import (
+    SATURATED_BLOB_MINIMUM_PIXELS,
+    SATURATED_FRAME_FRACTION,
 )
 
 FRAME_BACKGROUND_LEVEL = "frame.background_level_adu"
@@ -230,6 +235,30 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         purpose_reason=(
             "A frame with many saturated pixels has lost the brightness of those pixels, "
             "and the checks warn about it. No register entry yet backs the limit it is compared with."
+        ),
+        limits=(
+            QualityLimit(
+                value=float(SATURATED_BLOB_MINIMUM_PIXELS),
+                unit="pixels",
+                tier=LimitTier.DESIGN_ESTIMATE,
+                derivation=(
+                    "A star counts as saturated when at least this many connected pixels sit at the frame's "
+                    "ceiling. A single pixel at the ceiling is usually a hot pixel; four (2 x 2) is the "
+                    "smallest blob that is not one. Saturated stars in ASI533 and D5300 frames had cores of "
+                    "9 to over 1700 pixels. A saturated-pixel count is this metric's fraction times the "
+                    "sensor's pixel count (divided by the binning squared)."
+                ),
+            ),
+            QualityLimit(
+                value=SATURATED_FRAME_FRACTION,
+                unit="fraction",
+                tier=LimitTier.DESIGN_ESTIMATE,
+                derivation=(
+                    "An exposure length is called clipped when a star saturates in at least this share of "
+                    "its frames. One clipped frame in three can be a cosmic ray or a satellite trail, not a "
+                    "property of the exposure."
+                ),
+            ),
         ),
     ),
     MetricSpec(

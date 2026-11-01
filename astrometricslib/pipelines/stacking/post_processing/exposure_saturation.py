@@ -23,25 +23,17 @@ import numpy as np
 from scipy.ndimage import binary_dilation, label, minimum_filter
 
 from astrometricslib.foundation.camera_names import normalize_camera_name
-from astrometricslib.pipelines.shared.quality.saturation import CLIP_CEILING_TOLERANCE_FRACTION
-
-# A star counts as saturated when at least this many connected pixels sit at
-# the frame's ceiling. Single pixels at the ceiling are common and are not
-# stars: a Nikon D5300 frame had 188 to 481 isolated ones, hot pixels. The
-# saturated stars in the same frames had cores of 9 to over 1700 pixels
-# (ASI533 frames of Vega, NGC 2403 and Arcturus; D5300 frames of NGC 2244 and
-# M 42). Four pixels (2 x 2) is the smallest blob that is not one hot pixel.
-SATURATED_BLOB_MINIMUM_PIXELS = 4
+from astrometricslib.pipelines.shared.quality.saturation import (
+    CLIP_CEILING_TOLERANCE_FRACTION,
+    SATURATED_BLOB_MINIMUM_PIXELS,
+    SATURATED_FRAME_FRACTION,
+)
 
 # A pixel is at the ceiling when it is within this fraction of it. Saturated
 # frames pile up at exactly one value, so a small tolerance only allows for the
 # last count or two.
 CEILING_TOLERANCE_FRACTION = CLIP_CEILING_TOLERANCE_FRACTION
 
-# A frame is described as saturated when a star clips in at least this share of
-# the frames sampled from an exposure group. One clipped frame in three can be
-# a cosmic ray or a satellite trail; it is not a property of the exposure.
-SATURATED_FRAME_FRACTION = 0.5
 
 # The exposure recommended is the one that puts the brightest star's peak at
 # this fraction of the room between the sky and the ceiling. It is the same

@@ -372,6 +372,7 @@ class CalibrationCatalog:
             If the detail or kind is unknown, an argument the detail does
             not use is given, or a needed target is missing.
         """
+        from astrometricslib.drivers.calibration_library import DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
         from astrometricslib.pipelines.shared.quality import frame_statistics
 
         check_choice("detail", detail, CALIBRATION_DETAILS)
@@ -419,20 +420,70 @@ class CalibrationCatalog:
                     if _calibration_row_matches(label, row, camera_id, gain, offset, binning, temperature_c)
                 ]
                 return CalibrationQueryResult(
-                    detail=detail, kind=kind, camera_totals=camera_totals, matched_row_keys=matched
+                    detail=detail,
+                    kind=kind,
+                    camera_totals=camera_totals,
+                    matched_row_keys=matched,
+                    dark_temperature_tolerance_c=DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
                 )
             rows = keyed
             if kind is not None:
                 rows = {wanted[kind]: rows[wanted[kind]]}
-            return CalibrationQueryResult(detail=detail, kind=kind, camera_totals=camera_totals, **rows)
+            return CalibrationQueryResult(
+                detail=detail,
+                kind=kind,
+                camera_totals=camera_totals,
+                dark_temperature_tolerance_c=DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+                **rows,
+            )
         if target is None:
             raise InvalidArgumentError(f"detail={detail!r} needs a target.")
         resolved = resolve_target(self._targets, target)
         if detail == "target_frames":
             lights = frame_statistics.get_frame_stats(resolved)["lights"]
-            return CalibrationQueryResult(detail=detail, target_id=resolved.id, lights=lights)
+            return CalibrationQueryResult(
+                detail=detail,
+                target_id=resolved.id,
+                lights=lights,
+                dark_temperature_tolerance_c=DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+            )
         groups = frame_statistics.get_frame_stats_grouped(resolved, self._calibration_library, camera_id)
-        return CalibrationQueryResult(detail=detail, target_id=resolved.id, groups=groups)
+        return CalibrationQueryResult(
+            detail=detail,
+            target_id=resolved.id,
+            groups=groups,
+            dark_temperature_tolerance_c=DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+        )
+
+    def add_frames(self, paths: Sequence[str], *, telescope: str) -> list[str]:
+        """Move new dark, bias and flat files into the calibration library.
+
+        Each path is a folder to search or a single FITS file. A file is
+        sorted by its header into the calibration folders. A light frame is
+        left where it is: `TargetCatalog.add_frames` moves those. Files are
+        moved, not copied, and a file that cannot be read stays where it is.
+        The call does not update the index: call `reindex_frames` and `save`
+        for that.
+
+        Parameters
+        ----------
+        paths : `Sequence` [`str`]
+            Folders to search, or FITS files.
+        telescope : `str`
+            The name of the telescope the frames were taken with. It is part
+            of the library folder of a flat frame.
+
+        Returns
+        -------
+        added_paths : `list` [`str`]
+            The new path of each file that was moved to a place where no file
+            of that name yet existed.
+        """
+        from astrometricslib.pipelines.shared.frame_scanning import classify_and_sort_fits_files
+
+        added_paths: list[str] = []
+        classify_and_sort_fits_files(list(paths), "", self._config, telescope, added_paths)
+        return added_paths
 
     def camera_profile(self, camera_name: str | None) -> CameraProfile:
         """Give the stored facts about a camera model.

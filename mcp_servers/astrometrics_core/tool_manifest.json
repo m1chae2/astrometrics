@@ -2,6 +2,13 @@
   "server": "astrometricslib-core",
   "generated_by": "python -m mcp_servers.inventory --write-runtime-manifests",
   "tools": {
+    "calibration_add_frames": {
+      "tool_class": "unclassified",
+      "category": "calibration",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "Moves files into the calibration library from any path. The AI is read-only."
+    },
     "calibration_assess": {
       "tool_class": "compute",
       "category": "calibration",
@@ -170,6 +177,13 @@
       "interim_block": "",
       "note": "Built 2026-10-24. Reads the camera, telescope, filter, exposure, gain setting, offset and binning that stored quality measurements point at, by capture setting id. Writes nothing and creates no table."
     },
+    "quality_get_aperture_record": {
+      "tool_class": "observe",
+      "category": "image-processing",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Reads a file from any path and returns every aperture, which can overflow the reply. Scripts and wayfindinglib use it."
+    },
     "quality_measure_frames": {
       "tool_class": "compute",
       "category": "image-processing",
@@ -275,6 +289,13 @@
       "interim_block": "",
       "note": "The AI is read-only, so a tool that writes is not offered."
     },
+    "target_add_frames": {
+      "tool_class": "unclassified",
+      "category": "targets",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "Moves files into the library from any path. The AI is read-only; wayfindinglib calls it."
+    },
     "target_create": {
       "tool_class": "change-data",
       "category": "targets",
@@ -365,6 +386,13 @@
       "disposition": "drop",
       "interim_block": "",
       "note": "Returns whole frame records, which can overflow the reply. Scripts and wayfindinglib use it. observatory_history_frame_guiding already serves an AI client."
+    },
+    "target_sessions": {
+      "tool_class": "observe",
+      "category": "targets",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-01. Groups one target's frames into nights. Reads only."
     },
     "typegen_contract_validator": {
       "tool_class": "develop",

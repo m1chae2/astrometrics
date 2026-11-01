@@ -242,6 +242,19 @@ def resolve_saturation_threshold(camera_name: str | None) -> tuple[float, str]:
 # for the last count or two.
 CLIP_CEILING_TOLERANCE_FRACTION = 0.02
 
+# A star counts as saturated when at least this many connected pixels sit at
+# the frame's ceiling. Single pixels at the ceiling are common and are not
+# stars: a Nikon D5300 frame had 188 to 481 isolated ones, hot pixels. The
+# saturated stars in the same frames had cores of 9 to over 1700 pixels
+# (ASI533 frames of Vega, NGC 2403 and Arcturus; D5300 frames of NGC 2244 and
+# M 42). Four pixels (2 x 2) is the smallest blob that is not one hot pixel.
+SATURATED_BLOB_MINIMUM_PIXELS = 4
+
+# A frame is described as saturated when a star clips in at least this share of
+# the frames sampled from an exposure group. One clipped frame in three can be
+# a cosmic ray or a satellite trail; it is not a property of the exposure.
+SATURATED_FRAME_FRACTION = 0.5
+
 
 @dataclass(frozen=True)
 class ClipAndLinearityLevels:

@@ -211,7 +211,7 @@ from astrometricslib.models.target import (
 )
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 from astrometricslib.pipelines.shared.frame_scanning import classify_and_sort_fits_files
-from astrometricslib.pipelines.shared.target_sessions import derive_target_sessions
+from astrometricslib.pipelines.shared.target_sessions import TargetSession, derive_target_sessions
 from astrometricslib.pipelines.stacking.post_processing.exposure_saturation import (
     SATURATED_BLOB_MINIMUM_PIXELS,
     SATURATED_FRAME_FRACTION,
@@ -589,6 +589,7 @@ __all__ = [
     "TargetFilesResponse",
     "TargetQueryResult",
     "TargetReindexChange",
+    "TargetSession",
     "TargetSessionContribution",
     "TargetStarCount",
     "UncertaintyKind",

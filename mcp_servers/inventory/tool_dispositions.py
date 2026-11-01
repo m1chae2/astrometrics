@@ -520,6 +520,20 @@ DECISIONS = {
         "Built 2026-11-01. Reads the stored facts about one camera model: aliases, limits and gains.",
         tool_class="observe",
     ),
+    "target_add_frames": ToolDecision(
+        "withhold", "Moves files into the library from any path. The AI is read-only; wayfindinglib calls it."
+    ),
+    "calibration_add_frames": ToolDecision(
+        "withhold", "Moves files into the calibration library from any path. The AI is read-only."
+    ),
+    "target_sessions": ToolDecision(
+        "keep", "Built 2026-11-01. Groups one target's frames into nights. Reads only.", tool_class="observe"
+    ),
+    "quality_get_aperture_record": ToolDecision(
+        "drop",
+        "Reads a file from any path and returns every aperture, which can overflow the reply. "
+        "Scripts and wayfindinglib use it.",
+    ),
     "processing_predict_stack_weights": ToolDecision(
         "drop",
         "Takes per-frame lists that only forecast code holds. An AI client has no way to supply them.",

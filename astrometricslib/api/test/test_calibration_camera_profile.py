@@ -12,6 +12,7 @@ import pytest
 
 from astrometricslib.api import processing
 from astrometricslib.api.processing import CalibrationCatalog
+from astrometricslib.drivers.calibration_library import DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.camera_profile import CameraProfile
 
@@ -38,3 +39,14 @@ def test_camera_profile_gives_a_profile_and_the_generic_fallback() -> None:
     assert isinstance(unnamed, CameraProfile)
     assert unnamed.is_generic_fallback is True
     assert catalog.camera_profile("No Such Camera 9000").is_generic_fallback is True
+
+
+def test_calibration_query_states_the_dark_temperature_tolerance() -> None:
+    """Every answer holds the tolerance the library matches darks with."""
+    catalog = CalibrationCatalog(AppConfiguration(), MagicMock())
+    catalog._library = MagicMock()
+    catalog._library.get_stats.return_value = {}
+
+    answer = catalog.query()
+
+    assert answer.dark_temperature_tolerance_c == DEFAULT_DARK_TEMPERATURE_TOLERANCE_C

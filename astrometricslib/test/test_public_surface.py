@@ -197,6 +197,7 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "TargetCatalog",
     "TargetFilesResponse",
     "TargetQueryResult",
+    "TargetSession",
     "TargetReindexChange",
     "TargetStarCount",
     "TargetSessionContribution",
@@ -323,6 +324,8 @@ def test_every_public_name_actually_resolves() -> None:
 SUB_API_MEMBERS = {
     "targets": {
         "add",
+        "add_frames",
+        "sessions",
         "create",
         "delete",
         "delete_images",
@@ -367,6 +370,7 @@ SUB_API_MEMBERS = {
         "tune_spectroscopy_calibration",
     },
     "processing.calibration": {
+        "add_frames",
         "assess",
         "camera_profile",
         "measure_frames",
@@ -377,6 +381,7 @@ SUB_API_MEMBERS = {
     },
     "quality": {
         "calibration_identities",
+        "get_aperture_record",
         "capture_settings",
         "measure_frames",
         "measure_stack",

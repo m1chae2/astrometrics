@@ -129,6 +129,10 @@ class CalibrationQueryResult(BaseModel):
     """The answer of `CalibrationCatalog.query`."""
 
     detail: str
+    # How far, in degrees Celsius, a dark's sensor temperature may differ from
+    # a light frame's and still count as a match. Every answer states the
+    # tolerance the library matched with, so a caller need not keep a copy.
+    dark_temperature_tolerance_c: float | None = None
     # The calibration kind asked for (dark, bias or flat), or None for all.
     kind: str | None = None
     target_id: str | None = None

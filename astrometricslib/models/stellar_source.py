@@ -1021,6 +1021,34 @@ class SpectroscopyResult(BaseModel):
         rms = self.self_determined_spectral_type_rms
         return rms is not None and rms > NO_GOOD_MATCH_RMS
 
+    @property
+    def poor_match_rms_limit(self) -> float:
+        """The relative RMS above which this spectrum counts as a poor match.
+
+        This is the limit `is_poor_match` applies. It is read from the
+        library when asked and is not saved with the spectrum.
+
+        Returns
+        -------
+        limit : `float`
+            `NO_GOOD_MATCH_RMS`, in relative RMS units.
+        """
+        return NO_GOOD_MATCH_RMS
+
+    @property
+    def ambiguous_rms_gap_limit(self) -> float:
+        """The RMS gap below which the best match counts as ambiguous.
+
+        This is the limit `is_ambiguous` applies. It is read from the
+        library when asked and is not saved with the spectrum.
+
+        Returns
+        -------
+        limit : `float`
+            `AMBIGUOUS_RMS_GAP`, in relative RMS units.
+        """
+        return AMBIGUOUS_RMS_GAP
+
     @computed_field(alias="rmsGapToSecondBest")
     @property
     def rms_gap_to_second_best(self) -> float | None:

@@ -2641,6 +2641,11 @@ export interface QualityRowResolution {
  * review_date : `datetime.date` or `None`
  * When an exploratory metric must be promoted or removed. Required for
  * exploratory.
+ * limits : `tuple` of `QualityLimit`
+ * The limits that decisions made from this metric apply to its values
+ * (or to counts worked out from them), with the source of each. Empty
+ * when the metric has none. The limits are not part of the metric's
+ * definition, so changing one does not change `definition_version`.
  */
 export interface MetricSpec {
   name: string;
@@ -2662,6 +2667,7 @@ export interface MetricSpec {
   purposeReason?: string;
   exploratoryQuestion?: string;
   reviewDate?: string | null;
+  limits?: QualityLimit[];
 }
 
 /**
@@ -3570,6 +3576,7 @@ export interface CameraNoiseSetting {
  */
 export interface CalibrationQueryResult {
   detail: string;
+  dark_temperature_tolerance_c?: number | null;
   kind?: string | null;
   target_id?: string | null;
   darks?: Record<string, any>[] | null;

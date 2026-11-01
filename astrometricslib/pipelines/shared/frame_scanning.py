@@ -562,7 +562,8 @@ def classify_and_sort_fits_files(
     Parameters
     ----------
     scan_list : `list` of `str`
-        A list of folders to check for new images.
+        A list of folders to check for new images. A path that names a
+        single FITS file sorts that file.
     target_id : `str`
         The name of the target for regular light frames.
     config : `AppConfiguration`
@@ -585,6 +586,11 @@ def classify_and_sort_fits_files(
     fits_files = []
 
     for src in scan_list:
+        if os.path.isfile(src):
+            # A file named on its own is sorted like a file found in a folder.
+            if src.lower().endswith((".fits", ".fit")):
+                fits_files.append((src, os.path.basename(src)))
+            continue
         for root, directories, files in os.walk(src):
             # Frames set aside by the stacking pipeline stay where they are.
             directories[:] = [d for d in directories if d not in _SKIPPED_FOLDER_NAMES]

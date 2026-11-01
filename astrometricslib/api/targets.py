@@ -8,7 +8,8 @@ arguments and hand off.
 """
 
 import builtins
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from datetime import date
 from typing import Literal
 
 from astropy.io import fits
@@ -29,7 +30,7 @@ from astrometricslib.pipelines.shared.api_arguments import (
 )
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 from astrometricslib.pipelines.shared.frame_scanning import classify_and_sort_fits_files
-from astrometricslib.pipelines.shared.target_sessions import derive_target_sessions
+from astrometricslib.pipelines.shared.target_sessions import TargetSession, derive_target_sessions
 
 __all__ = [
     "TargetCatalog",
@@ -551,6 +552,72 @@ class TargetCatalog:
         `InvalidArgumentError` if ``target`` is neither text nor a `Target`.
         """
         return resolve_target(self, target)
+
+    def add_frames(self, paths: Sequence[str], target: str | Target, *, telescope: str) -> builtins.list[str]:
+        """Move new image files into the library, under a target.
+
+        Each path is a folder to search or a single FITS file. A file is
+        sorted by its header: a light frame goes under the target, and a dark,
+        bias or flat frame goes to the calibration folders. Frames set aside
+        by the stacking pipeline are skipped. Files are moved, not copied, and
+        a file that cannot be read is left where it is. The call does not
+        update the frame records: call `reindex_frames` with the returned
+        paths for that.
+
+        Parameters
+        ----------
+        paths : `Sequence` [`str`]
+            Folders to search, or FITS files.
+        target : `str` or `Target`
+            The target the light frames belong to.
+        telescope : `str`
+            The name of the telescope the frames were taken with. It is part
+            of the library folder of a light or flat frame.
+
+        Returns
+        -------
+        added_paths : `list` [`str`]
+            The new path of each file that was moved to a place where no file
+            of that name yet existed.
+
+        Notes
+        -----
+        Raises `NotFoundError` if the target does not exist.
+        """
+        from astrometricslib.pipelines.shared.frame_scanning import classify_and_sort_fits_files
+
+        resolved = resolve_target(self, target)
+        added_paths: builtins.list[str] = []
+        classify_and_sort_fits_files(list(paths), resolved.id, self._config, telescope, added_paths)
+        return added_paths
+
+    def sessions(self, target: str | Target, night_date: date | None = None) -> builtins.list[TargetSession]:
+        """Group a target's frames into observing sessions.
+
+        Frames go in the same session when they were taken on the same night
+        (noon to noon, local time) with the same gain and offset. A change of
+        filter or exposure length does not start a new session. Frames with
+        no start time are ignored.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target.
+        night_date : `datetime.date`, optional
+            Only the sessions of this night.
+
+        Returns
+        -------
+        sessions : `list` [`TargetSession`]
+            The sessions, ordered by night.
+
+        Notes
+        -----
+        Raises `NotFoundError` if the target does not exist.
+        """
+        resolved = resolve_target(self, target)
+        found = derive_target_sessions(resolved.id, resolved.frames)
+        return [session for session in found if night_date is None or session.night_date == night_date]
 
     def get_frame(self, target: str | Target, iso: str, exposure: str, index: int = 0) -> str:
         """Find the path of a target's frame by gain, exposure and order.

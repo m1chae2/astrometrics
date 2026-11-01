@@ -371,6 +371,33 @@ class QualityRecords:
 
         return QualityStore(quality_database_path(self._config)).get_capture_settings(ids)
 
+    def get_aperture_record(self, path: str) -> dict[str, Any] | None:
+        """Read the per-aperture noise record that a stack's job wrote.
+
+        The odd–even difference job saves, beside a stack, the sum and the
+        difference of each empty sky aperture it measured. A stacking run's
+        quality row names the file. Nothing is measured or written.
+
+        Parameters
+        ----------
+        path : `str`
+            The record file.
+
+        Returns
+        -------
+        record : `dict` [`str`, `Any`] or `None`
+            The file's content: ``version``, ``stack``, ``aperture_identity``,
+            ``note`` and ``apertures`` (a list of dicts with ``index``, ``x``,
+            ``y``, ``distance_from_center_px``, ``distance_from_target_px``,
+            ``sum`` and ``difference``). `None` when the file is missing,
+            cannot be read or is of another version.
+        """
+        from astrometricslib.pipelines.stacking.post_processing.odd_even_apertures import (
+            load_odd_even_aperture_record,
+        )
+
+        return load_odd_even_aperture_record(path)
+
     def calibration_identities(
         self, run_ids: list[str] | None = None, target_id: str | None = None
     ) -> list[CalibrationIdentities]:

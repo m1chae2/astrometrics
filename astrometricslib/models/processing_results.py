@@ -56,6 +56,23 @@ class StackResult(BaseModel):
     quality_summary: StackQualitySummary | None = None
     note: str = ""
 
+    @property
+    def provenance_activity_id(self) -> str | None:
+        """The id of the provenance record of the run that made this stack.
+
+        It is read from the quality summary, where the run stamped it, so
+        nothing extra is stored. Pass it to `Jobs.query` with
+        ``detail="lineage"`` and the target to see the chain of runs.
+
+        Returns
+        -------
+        activity_id : `str` or `None`
+            The run's id, or `None` for a plan or a run with no provenance.
+        """
+        if self.quality_summary is None:
+            return None
+        return self.quality_summary.provenance_activity_id
+
 
 class PreviewSettingsUsed(BaseModel):
     """The choices a preview run really used, as recorded beside the stack."""
@@ -121,6 +138,33 @@ class ProcessTargetResult(BaseModel):
     # The target's astrometry, photometry and spectroscopy quality
     # summaries after the stages ran.
     quality: TargetQualitySummaries | None = None
+
+    @property
+    def provenance_activity_ids(self) -> dict[str, str]:
+        """The provenance record ids of the analysis runs, by stage.
+
+        They are read from the quality summaries, where each run stamped its
+        id, so nothing extra is stored. Pass an id to `Jobs.query` with
+        ``detail="lineage"`` and the target to see the chain of runs.
+
+        Returns
+        -------
+        activity_ids : `dict` [`str`, `str`]
+            The id of each stage that has one, keyed by stage name
+            (``"astrometry"``, ``"photometry"`` or ``"spectroscopy"``).
+        """
+        if self.quality is None:
+            return {}
+        summaries = {
+            "astrometry": self.quality.astrometry,
+            "photometry": self.quality.photometry,
+            "spectroscopy": self.quality.spectroscopy,
+        }
+        return {
+            stage: summary.provenance_activity_id
+            for stage, summary in summaries.items()
+            if summary is not None and summary.provenance_activity_id
+        }
 
 
 class StackWeightPrediction(BaseModel):

@@ -523,6 +523,7 @@ def _correct_one_star(
         )
 
     wing_fluxes = []
+    cumulative_light_cache: dict = {}
     for other, offset in neighbors:
         neighbor_trace = other.trace
         neighbor_flux = np.interp(
@@ -545,6 +546,7 @@ def _correct_one_star(
                 np.where(np.isfinite(offset), offset, 0.0),
                 target.trace.box_half_width_px,
                 np.zeros(target.trace.distance_px.size),
+                cumulative_light_cache,
             )
         )
     corrected, fraction = subtract_neighbor_wings(target.trace.box_flux, wing_fluxes)

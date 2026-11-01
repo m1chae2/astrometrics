@@ -379,6 +379,32 @@ def enclosed_fraction(
         The fraction of the star's light between the two ends, from 0 to 1.
     """
     grid_px, cumulative = _cumulative_light(blur, position_px, dilation)
+    return _fraction_between(grid_px, cumulative, source_offset_px, interval_low_px, interval_high_px)
+
+
+def _fraction_between(
+    grid_px: np.ndarray,
+    cumulative: np.ndarray,
+    source_offset_px: float,
+    interval_low_px: float,
+    interval_high_px: float,
+) -> float:
+    """Read the light between two ends off a star's cumulative curve.
+
+    Parameters
+    ----------
+    grid_px, cumulative : `numpy.ndarray`
+        The curve from `_cumulative_light`.
+    source_offset_px : `float`
+        Where the star's streak is, across the streak, in pixels.
+    interval_low_px, interval_high_px : `float`
+        The two ends of the stretch, in the same coordinates.
+
+    Returns
+    -------
+    fraction : `float`
+        The fraction of the star's light between the two ends.
+    """
     at_low = np.interp(interval_low_px - source_offset_px, grid_px, cumulative, left=0.0, right=1.0)
     at_high = np.interp(interval_high_px - source_offset_px, grid_px, cumulative, left=0.0, right=1.0)
     return float(at_high - at_low)
@@ -685,6 +711,7 @@ def neighbor_wing_flux(
     neighbor_offset_px: np.ndarray,
     target_box_half_width_px: np.ndarray,
     target_offset_px: np.ndarray,
+    cumulative_light_cache: dict[tuple[float, float], tuple[np.ndarray, np.ndarray]] | None = None,
 ) -> np.ndarray:
     """Work out how much of a neighbour's light lands in the target's box.
 
@@ -711,6 +738,11 @@ def neighbor_wing_flux(
     target_offset_px : `numpy.ndarray`
         Where the target's streak is across the streak at each sample, in
         the same coordinates as `neighbor_offset_px`.
+    cumulative_light_cache : `dict`, optional
+        A dictionary the caller keeps between calls for the same blur, so
+        neighbours of one target, which share their positions along the
+        streak and the stretch, build each cumulative curve once. Filled in
+        place. Without it each call builds its own.
 
     Returns
     -------
@@ -720,21 +752,27 @@ def neighbor_wing_flux(
     """
     count = len(neighbor_box_flux)
     wing_flux = np.zeros(count)
+    if cumulative_light_cache is None:
+        cumulative_light_cache = {}
     for sample in range(count):
-        own = enclosed_fraction(
-            blur,
-            float(positions_px[sample]),
-            dilation,
+        # Both fractions read the same curve (same blur, place and stretch),
+        # so it is built once per sample, not once per fraction.
+        key = (float(positions_px[sample]), float(dilation))
+        if key not in cumulative_light_cache:
+            cumulative_light_cache[key] = _cumulative_light(blur, key[0], key[1])
+        grid_px, cumulative = cumulative_light_cache[key]
+        own = _fraction_between(
+            grid_px,
+            cumulative,
             float(neighbor_offset_px[sample]),
             float(neighbor_offset_px[sample] - neighbor_box_half_width_px[sample]),
             float(neighbor_offset_px[sample] + neighbor_box_half_width_px[sample]),
         )
         if own <= 0:
             continue
-        inside_target = enclosed_fraction(
-            blur,
-            float(positions_px[sample]),
-            dilation,
+        inside_target = _fraction_between(
+            grid_px,
+            cumulative,
             float(neighbor_offset_px[sample]),
             float(target_offset_px[sample] - target_box_half_width_px[sample]),
             float(target_offset_px[sample] + target_box_half_width_px[sample]),

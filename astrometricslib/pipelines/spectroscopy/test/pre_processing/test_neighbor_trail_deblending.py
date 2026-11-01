@@ -289,3 +289,36 @@ def test_fit_matches_values_stored_before_splines_were_built_once() -> None:
     np.testing.assert_allclose(fit.amplitudes[6], [14661.055461206923, 0.0, 0.0], rtol=1e-12, atol=0.0)
     np.testing.assert_allclose(fit.sky_levels[0], 7.235609091698279, rtol=1e-12, atol=0.0)
     np.testing.assert_allclose(fit.relative_residual, 0.12980089763934455, rtol=1e-12, atol=0.0)
+
+
+def test_wing_flux_matches_values_stored_before_the_curve_was_shared() -> None:
+    """The neighbour's light in the faint box equals the stored old-code sums.
+
+    The values were taken before the cumulative curve was built once per
+    sample (it used to be built for each of the two fractions). Sharing it,
+    also across calls through a cache, must change no digit.
+    """
+    blur = measure_reference_blur()
+    image, *_ = make_pair(1.1)
+    fit = fit_the_pair(image, blur, [0.0, GAP_PX])
+    bright_box = box_sum(image, BRIGHT_CENTRE_PX)
+    count = len(bright_box)
+    arguments = (
+        np.arange(count, dtype=float),
+        bright_box,
+        np.full(count, BOX_HALF_WIDTH_PX),
+        np.full(count, -GAP_PX),
+        np.full(count, BOX_HALF_WIDTH_PX),
+        np.zeros(count),
+    )
+    shared: dict = {}
+
+    plain = neighbor_wing_flux(blur, fit.dilation, *arguments)
+    first = neighbor_wing_flux(blur, fit.dilation, *arguments, shared)
+    second = neighbor_wing_flux(blur, fit.dilation, *arguments, shared)
+
+    for wing in (plain, first, second):
+        np.testing.assert_allclose(wing.sum(), 16129.272884681193, rtol=1e-12, atol=0.0)
+        np.testing.assert_allclose(wing[-1], 38.96119568336099, rtol=1e-12, atol=0.0)
+        np.testing.assert_allclose(wing[count // 2], 40.212882707773524, rtol=1e-12, atol=0.0)
+    assert len(shared) == count

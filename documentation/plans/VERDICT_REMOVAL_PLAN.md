@@ -1,0 +1,142 @@
+# Plan for the rest of issue 97: verdicts, flags and script-user cleanup
+
+Date: 2026-11-01. Status: draft, waiting for the decisions in section 2. No code has changed.
+
+The inventory behind this plan came from a code search of `134-integration`, not from running anything. Section 7 lists what it could not determine.
+
+## 1. Scope
+
+Issue #97 now covers what the public API restructure did not. Issues #95 and #96 are closed, so the wayfindinglib rules and the displays this work waits on exist.
+
+| Work | Size | Risk |
+| --- | --- | --- |
+| A. Small removals: dead fields, observing advice, stacking timeout | Small | Low |
+| B. Verdict fields no outside code reads | Small | Low |
+| C. Verdict fields with readers, and `flagged` and `flag_reasons` | Large | Changes what the app shows |
+| D. Night analysis flags in wayfindinglib | Medium | Low; no reader outside wayfindinglib was found |
+| E. Duplicate stored values and `output_metrics` | Medium | Stored data |
+| F. Notebook import check, simpler interactions, generated API pages | Medium | Low, except typed stage results |
+
+Detection labels stay in astrometricslib (issue #97, user decision of 2026-10-24): the periodogram, transit, spectral feature and emission-line `verdict`, each reported with its statistic, its limit and its register entry.
+
+## 2. Decisions needed
+
+### D1. Which pull request
+
+- **A (recommended): a new branch and pull request, based on `134-integration`, merged after #135.** #135 already changes 780 files and is waiting on the hardware check and the restack. This work changes what the app shows, so it deserves its own review.
+- B: add it to #135. One restack and one merge, but a larger review, and a failure in this work holds up the API restructure.
+
+### D2. When the final restack runs
+
+Stored summaries are rewritten by a restack, so a restack before this work stores fields that are then dropped. Old rows still load: the models do not forbid extra fields, so Pydantic ignores removed ones. This was read from the model configuration, not tested on stored rows.
+
+- **A (recommended): restack once, after phase 3.** The stored data then has the final shape and the gate outcomes the new rules read. #135 merges first, without a restack.
+- B: restack at #135's merge as planned, and again later. You said you do not want repeated restacks.
+
+### D3. What happens to the gates
+
+Stored gates (55 `*.gate_*` metric names; stacking 25, photometry 11, spectroscopy 9, astrometry 5, asteroid detection 5) mix two things: self-checks of the measurement, and judgments of fitness for use.
+
+- **A (recommended): sort each gate in the per-pipeline inventory.** A self-check stays as a measurement with a check outcome. A judgment moves to a wayfindinglib rule.
+- B: keep them all as measurements with a check outcome, and add wayfindinglib rules only where one is missing. Less work, but astrometricslib keeps limits that are judgments.
+
+Whichever is chosen, some gates have no matching rule by name today: stack sharpness, rejected fraction, `scatter_population`, `variability_discrimination`, `catalog_agreement` and `gaia_xp_agreement`. Each needs a new rule or a recorded choice to have none.
+
+### D4. Spectral `is_poor_match` and `is_ambiguous`
+
+These are computed properties on `SpectroscopyResult`, with limits in astrometricslib (`NO_GOOD_MATCH_RMS`, `AMBIGUOUS_RMS_GAP`). wayfindinglib's star rules and the star display read them.
+
+- **A (recommended): treat them as detection labels.** They describe the classification, which is a science product. They stay, reported with the rms, the limit and a register entry.
+- B: treat them as verdicts. Move the limits to wayfindinglib, as issue #97 lists them, and have the desktop app read the judgment.
+
+### D5. `FrameRecord.measurements`
+
+Each frame's quality is stored in `FrameMeasurements` and in the measurement table.
+
+- **A (recommended): keep it as a cache for now,** minus the two dead fields. Retiring it touches stacking's frame selection, which has no need to change here.
+- B: retire it, and read the measurement table everywhere.
+
+### D6. `processing_jobs.output_metrics`
+
+The stack review screens read `outputMetrics.result` (`ui/common/services/imaging/stackReviewService.ts`).
+
+- **A (recommended): keep the column, and drop only the repeated quality values from what a job stores.**
+- B: retire it, and give the review screens a new read.
+
+### D7. Typed stage results
+
+`ProcessTargetResult.results` is `dict[str, Any]`, which breaks the rule that a call returns a model. Typing it is the largest gain for script users, and it touches every stage's result.
+
+- **A (recommended): build it, as the last phase, after the verdict fields are gone.**
+- B: record it as declined with the reason.
+
+## 3. Phases
+
+Each phase is one or more commits. Sonnet agents make the edits and scripts handle mechanical ones. CI runs the full suites. A pipeline's inventory goes in `documentation/plans/` and you approve it before that pipeline's code changes.
+
+### Phase 0: small removals (A and B)
+
+No app behavior changes.
+
+1. Remove `registration_fwhm_y_px` and `registration_rmse` from `FrameMeasurements`, and their mentions in `scripts/backfill_quality_measurements.py`, `scripts/README.md`, the comment in `registration_records.py` and the tests. Issue #97 lists `stage.py` as a reader; it no longer is.
+2. Remove `recommend_exposure_seconds`, `recommend_stack_exposure_seconds`, `recommended_exposure_for_groups`, `recommended_exposure_seconds` on the stacking metrics, and "take more flats" in `flat_calibration.py` and `stacking/metrics.py`. `recommended_exposure_for_groups` has four call sites in `stack_runner.py`. The guide exposure ladder in wayfindinglib stays.
+3. Record the stacking timeout as a processing-decision measurement (`pipelines/tasks.py`). `timed_out` has no reader outside its setter.
+4. Remove the verdict fields with no reader outside tests: photometry `is_low_coverage`, `is_tracking_unstable`, `is_low_confidence`, `is_trustworthy`; spectroscopy `is_trustworthy` and `is_subtype_finer_than_resolution` (always empty). Keep the numbers they rest on. Check first that each number is stored with its uncertainty.
+5. Correct `QUALITY_METRICS_PLAN.md` sections 7 and 8: add the detection label row; remove `quality_advisory_tasks.py`, `TargetQualityAdvisory` and `science_recommended_exposure_seconds`, which no longer exist.
+
+### Phase 1: the shadow script
+
+A read-only script runs the wayfindinglib rules next to today's flags for every target, on the data copy, and lists each difference. You mark each difference as a bug fixed or an approved change. The first run is the baseline for phase 2.
+
+### Phase 2: one pipeline at a time
+
+In the order set by issue #97: photometry, spectroscopy, astrometry, stacking, asteroid detection. For each:
+
+1. Write the inventory, sorted by D3 and D4, and get your approval.
+2. Add any missing wayfindinglib rule, with its register entry.
+3. Move readers to the judgments, then run the shadow script.
+4. Turn remaining data-quality booleans into measurements with uncertainties: `saturation_flagged`, `rejected_fraction_flagged`, `zero_fraction_flagged`, `negative_pixels_flagged`, `fwhm_degraded`, `catalog_agrees`, `spectral_type_agrees`, `colour_agrees`.
+5. Split `test_gate_conformance.py` between self-checks and rules.
+6. Run the M 13 golden suite and the one-target check on the copy. Science numbers must not change.
+
+Issue #97's note that `starDisplayFormat.ts` is the only desktop-app reader is out of date. `StackSummaryPanel.tsx`, `stackFlagMeaning.ts` and `FileBrowser.tsx` read the flags, and stacking is where the user will see the most change.
+
+### Phase 3: drop `flagged` and `flag_reasons`
+
+1. In astrometricslib: `PipelineQualitySummaryBase`, `StackingInputQuality`, `StackingOutputQuality`, `StackSummary` and `processing_results.py`. Readers to move first: `target_overview.py`, `stack_request.py`, `target_report_tasks.py`, `run_empirical_validation.py`, notebooks 06 and 09.
+2. In wayfindinglib night analysis: `sky_quality`, `session_quality`, `capture_quality`, `night_quality`, and `night_analysis.py` and `night_quality_task.py`, moved to `TargetStatement`. `RequestCount.flagged` is a different field and stays.
+3. Trim `output_metrics` by D6, and retire the repeated values in the JSON summaries.
+4. Search everything, including notebooks, for each removed name. Regenerate `backendTypes.ts` with `build/codegen/generate-types.sh`.
+5. Run the final restack (D2), starting with the frame-move preview that was skipped on 2026-11-01.
+
+### Phase 4: script users and API pages
+
+1. Add the static notebook import check beside `check_notebook_outputs.py`.
+2. Notebook edits: `targets.create`, drop the manual path filter, one filter spelling, the corrected text in notebooks 01, 03 and 09.
+3. A linked read for a star's spectrum in place of the `::spectroscopy` id, and a short read for a target's stars.
+4. Typed stage results (D7).
+5. Finish generated-only API pages. Issue #97's items need rewriting first: they name the dropped `astrometricslib.api` tier, and the pages now have a "Result fields" section and hand-written text this work should check.
+6. Re-run every changed notebook with `build/linux/execute_notebooks.sh`, on a separate empty library.
+
+## 4. Order and what can run at once
+
+Phase 0, then 1, then 2 are in order. Within phase 2, pipelines run one after another, because each changes shared models and the generated types. Phase 3 needs all of phase 2. Phase 4 items 1 to 3 can run at any time, and items 4 to 6 come after phase 3.
+
+## 5. Safeguards
+
+- Nothing is removed before its replacement exists and its readers have moved (`QUALITY_METRICS_PLAN.md` section 8).
+- Real-data checks run on the copy, one target by default.
+- The real library changes only at the restack in phase 3, with your go-ahead.
+- A change to a tuned value or a method updates its validation register entry.
+
+## 6. Change control board
+
+The plan changes what the app shows and moves limits between the libraries, so a board review of this document is worthwhile once D1 to D7 are settled.
+
+## 7. Not determined by the inventory
+
+- How many stored rows hold these fields, and whether old rows load without them on real data.
+- Whether night analysis flags are stored anywhere; only request-time construction was found.
+- Which MCP tools pass these models through in their results; the search was by name.
+- The mapping of each gate to a rule, beyond matching names.
+- How much work each pipeline is. Phase sizes in section 1 are estimates.

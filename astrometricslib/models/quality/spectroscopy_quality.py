@@ -220,6 +220,14 @@ class CatalogComparison(BaseModel):
     # close enough to the catalog's B-V to call it agreement. `None` when
     # there was nothing to compare.
     colour_agrees: bool | None = Field(default=None, alias="colourAgrees")
+    # The spectrum's own B-V minus the catalog's B-V, in magnitudes. The
+    # sign is spectrum minus catalog: positive means the spectrum is redder
+    # than the catalog says, negative means bluer. `None` when either
+    # colour is missing or not finite, or when the catalog colour is
+    # redder than the range the colour map is calibrated for (the same
+    # cases where `colour_agrees` is `None`). Old stored rows lack this
+    # field and load with `None`.
+    b_minus_v_difference_mag: float | None = Field(default=None, alias="bMinusVDifferenceMag")
     # Why `colour_agrees` is `False`, or an empty string otherwise.
     colour_note: str = Field(default="", alias="colourNote")
 

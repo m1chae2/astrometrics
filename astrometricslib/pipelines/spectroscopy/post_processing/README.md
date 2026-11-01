@@ -76,6 +76,8 @@ The modules in this stage import these values and define none of their own. A te
 
 The color limits in `compare_to_catalog.py` are used only there and stay in that file. `COLOUR_DISAGREEMENT_MAGNITUDES` is 0.4 mag (partly measured; see [SPE-27](../../../../documentation/library_design/validation/spectroscopy.md#spe-27)). `MAXIMUM_CALIBRATED_B_MINUS_V` is 1.7 (design estimate; see [spectroscopy design estimates](../../../../documentation/library_design/validation/spectroscopy.md#design-estimates)).
 
+`CatalogComparison` also stores `b_minus_v_difference_mag`, the spectrum's B-V minus the catalog's B-V in magnitudes (positive means the spectrum is redder). It is empty where `colour_agrees` is empty. Rows saved before this field existed load with it empty.
+
 The Gaia XP limits are in `compare_to_gaia_xp.py`. The residual RMS limit is 0.05 (design estimate; see [spectroscopy design estimates](../../../../documentation/library_design/validation/spectroscopy.md#design-estimates)). The tilt limit is 3% per 1000 Å (design estimate; see [spectroscopy design estimates](../../../../documentation/library_design/validation/spectroscopy.md#design-estimates)). The wavelength shift limit is 11 Å (design estimate; see [spectroscopy design estimates](../../../../documentation/library_design/validation/spectroscopy.md#design-estimates)). The run gate needs at least 3 compared stars (design estimate; see [spectroscopy design estimates](../../../../documentation/library_design/validation/spectroscopy.md#design-estimates)). See [Check against Gaia XP](#check-against-gaia-xp) for the reasons.
 
 ## Quality metrics

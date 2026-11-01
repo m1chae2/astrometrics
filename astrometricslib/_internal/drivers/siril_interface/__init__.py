@@ -16,8 +16,9 @@ The code is split by job, one module each:
 - `image_processing`: `ImageProcessing`, which joins them.
 
 The names other code imports are re-exported here, so
-``from astrometricslib._internal.drivers.siril_interface import ...`` works. Code that
-replaces a name for a test must replace it in the module that uses it.
+``from astrometricslib._internal.drivers.siril_interface import ...``
+works. Code that replaces a name for a test must replace it in the module
+that uses it.
 """
 
 from astrometricslib._internal.drivers.siril_interface.image_processing import ImageProcessing

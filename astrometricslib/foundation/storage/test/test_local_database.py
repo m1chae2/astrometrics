@@ -1,11 +1,11 @@
 """Tests for the storage module's NumpyEncoder and safe_json_dumps.
 
-Both astrometricslib._internal.drivers.local_database (the targets table) and the
-generic `Butler` in astrometricslib.foundation.storage (used for the stellar
-catalog and friends)
-route every save through safe_json_dumps, so this is the one place that
-decides whether a scientific value (numpy, astropy, pandas) saved into a
-model's field crashes the save or degrades safely.
+Both astrometricslib._internal.drivers.local_database (the targets table)
+and the generic `Butler` in astrometricslib.foundation.storage (used for the
+stellar catalog and friends) route every save through safe_json_dumps, so
+this is the one place that decides whether a scientific value (numpy,
+astropy, pandas) saved into a model's field crashes the save or degrades
+safely.
 """
 
 import json

@@ -10,7 +10,8 @@ Every number carries a note saying where it came from (see
 measured on our own frames, and from a plain assumption.
 
 This file only describes the shape of the data. The code that finds and
-loads the profiles is in `astrometricslib._internal.drivers.camera_profile_store`.
+loads the profiles is in
+`astrometricslib._internal.drivers.camera_profile_store`.
 """
 
 import enum

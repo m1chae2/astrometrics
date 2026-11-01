@@ -4,12 +4,26 @@ Description: `Wayfinder` composes the library's four sub-APIs:
 `control` (operate the observatory), `planning` (decide what to
 observe), `execution` (run and recover an observing session) and
 `review` (how the nights went). `control` has six children named by
-topic, such as `control.mount` and `control.guiding`. The package root
-also offers the models those sub-APIs take and return, the pure
-function callers need (`group_alignment_attempts`), and the library's own
-error class.
-The error categories themselves (`NotFoundError`,
-`InvalidArgumentError` and the rest) come from `astrometricslib`.
+topic: `mount`, `imaging`, `guiding`, `safety`, `equipment` and `remote`.
+
+What to import from where
+-------------------------
+The package root holds 6 names: `Wayfinder`, the three sub-API classes
+(`ObservatoryControl`, `ObservationPlanning` and `ObservationExecution`),
+and the two records a script builds or reads most (`ObservationSession` and
+`ObservationPackage`). The review sub-API is reached as `Wayfinder.review`.
+Two public modules hold the rest:
+
+- `wayfindinglib.exceptions`: the errors that belong to this library. The
+  shared categories (`NotFoundError`, `InvalidArgumentError` and the rest)
+  come from `astrometricslib.exceptions`.
+- `wayfindinglib.reports`: the states and levels that results report
+  (`RunState`, `PackageStatus`, `DepthGoalState` and `DepthLevel`).
+
+Everything else is private. The result models that the calls return are
+private too: use their fields, as listed on the API reference page, and do
+not import the classes. This library uses only the public names of
+`astrometricslib`.
 
 Every name below except `Wayfinder` is loaded on first use (module
 `__getattr__`, PEP 562) from one lookup table. Importing a submodule

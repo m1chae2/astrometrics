@@ -5,9 +5,38 @@ It handles everything from aligning and stacking images (calibration),
 to figuring out exactly what stars are in the picture (plate-solving),
 to measuring star brightness and colors (photometry and spectroscopy).
 
-To use the library, just import `Astrometrics` from here. It acts as the
-main control panel, giving you access to all the sub-tools like targets,
-stars, and image processing.
+To use the library, import `Astrometrics` from here. It acts as the main
+control panel, giving you access to all the sub-tools: `targets`, `stars`,
+`processing`, `visualization`, `jobs` and `quality`.
+
+What to import from where
+-------------------------
+The package root holds 16 names:
+
+- the entry point and setup: `Astrometrics`, `AppConfiguration`,
+  `get_configuration`, `configure_logging`, `configure_offline_iers` and
+  `warm_earth_orientation_data`;
+- the sub-API classes, which you normally reach as attributes of
+  `Astrometrics` (`TargetCatalog`, `StellarCatalog`, `ProcessingPipelines`,
+  `CalibrationCatalog`, `QualityRecords` and `Visualization`);
+- the core records: `Target`, `FrameRecord`, `StellarObject` and
+  `FilterType`.
+
+Four public modules hold the rest:
+
+- `astrometricslib.exceptions`: the errors a script catches, and the helpers
+  that turn an error into a plain record and back;
+- `astrometricslib.reports`: the quality reports and row shapes that checks
+  return, plus `CaptureSetting` and `observing_night_id`;
+- `astrometricslib.jobs`: the job history, and the tools that run a function
+  as a tracked background job;
+- `astrometricslib.drivers`: the data store and file tools that other apps
+  share.
+
+Everything else is private, including `astrometricslib._internal`. Only
+`astrometricslib` itself may import it. The result models that the calls
+return are private too: use their fields, as listed on the API reference
+page, and do not import the classes.
 """
 
 import logging

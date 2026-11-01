@@ -163,7 +163,7 @@ The scripts are:
 ## Demos and one-off tools
 
 - `seed_local_star_catalog.py` — fills the local Gaia DR3 cache so later batch runs need no network access.
-- `reset_stellar_object_library.py`, `stellar_catalog_audit.py` — demo scripts showing how to clear the stellar object library and audit stellar catalog quality.
+- `stellar_catalog_audit.py` — a demo script showing how to audit stellar catalog quality.
 - `skip_targets.txt` — a plain-text list of target IDs the batch scripts above skip, not a Python module.
 
 For exact behavior, read the code.

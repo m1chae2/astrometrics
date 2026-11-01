@@ -59,16 +59,6 @@ def run_script_as_subprocess(module_name: str, extra_env: dict[str, str] | None 
     )
 
 
-# NOTE: astrometricslib/scripts/reset_stellar_object_library.py is
-# deliberately NOT exercised here. `run_script_as_subprocess` runs against
-# the real config and database by default, and that script deletes every
-# row in the stellar catalog -- so covering it meant a plain
-# `pytest astrometricslib` silently destroyed the user's real stellar
-# catalog. The script itself is fine and still shipped; it just cannot be
-# smoke-tested against production data without the same throwaway-catalog
-# treatment `test_script_reindex_all_targets` below now gets.
-
-
 @pytest.mark.slow
 def test_script_reindex_all_targets(tmp_path: Path) -> None:
     """Run reindex_all_targets against a throwaway catalog, not the real one.
@@ -78,8 +68,6 @@ def test_script_reindex_all_targets(tmp_path: Path) -> None:
     judged missing -- so running it via plain `run_script_as_subprocess`
     (real config, real database) would prune real frame rows from the
     user's actual catalog on every `pytest astrometricslib` invocation.
-    That is the same class of bug already fixed for
-    reset_stellar_object_library.py above, just discovered later.
 
     Seeds one target with one frame whose file genuinely exists on disk,
     via a throwaway config/database passed through ASTROMETRICS_CONFIG_PATH

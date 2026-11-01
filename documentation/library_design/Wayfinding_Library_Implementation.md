@@ -417,7 +417,7 @@ The theory is in [Wayfinding quality judgment](Wayfinding_Quality_Judgment.md) (
 | Night plan | `ObservationSession` fields `checklist`, `framing`, `revision`; `PlanChange`, `PlanRevisionConflictError`; `night_plan_tasks.py`; `AllowedCaptureValues`; `SequenceSummary` | [WAY-50](validation/wayfinding.md#way-50), [WAY-51](validation/wayfinding.md#way-51), [WAY-52](validation/wayfinding.md#way-52), [WAY-53](validation/wayfinding.md#way-53), [WAY-54](validation/wayfinding.md#way-54); WAY-D50, WAY-D51, WAY-D52, WAY-D53, WAY-D54 |
 | Night list and target changes | `build_night_list`, `build_night_history` (`night_history.py`); `find_target_changes` (`target_changes.py`) | [WAY-55](validation/wayfinding.md#way-55), [WAY-57](validation/wayfinding.md#way-57); WAY-D55, WAY-D56, WAY-D57 |
 | Monitor mode | `ALLOWED_IN_MONITOR_MODE` and the three `test_monitor_mode_*` tests; guards in `hardware_operations.py` | [WAY-56](validation/wayfinding.md#way-56) |
-| Reply size | `reply_budget.py`; the MCP tool registry trims replies; `fit_status_to_budget` for the live status | WAY-D58, WAY-D77 |
+| Reply size | `mcp_servers/common/reply_budget.py`; the MCP tool registry trims replies; `fit_status_to_budget` for the live status | WAY-D58, WAY-D77 |
 
 <!-- impl: wayfindinglib.models.quality.statements.TargetStatement -->
 <!-- impl: wayfindinglib.models.quality.rule.QualityRule -->
@@ -455,7 +455,7 @@ The theory is in [Wayfinding quality judgment](Wayfinding_Quality_Judgment.md) (
 <!-- impl: wayfindinglib.models.session.night_list.NightListEntry -->
 <!-- impl: wayfindinglib.analytics.result_quality.allowed_capture_values.AllowedCaptureValues -->
 <!-- impl: wayfindinglib.models.planning.sequence_summary.SequenceSummary -->
-<!-- impl: wayfindinglib.analytics.result_quality.reply_budget.reply_budget -->
+<!-- impl: mcp_servers.common.reply_budget.reply_budget -->
 <!-- impl: wayfindinglib.models.equipment_and_site.site_profile.SiteProfile -->
 
 Without `SiteProfile.typical_seeing_fwhm_arcsec`, the physical reference uses the diffraction limit (design estimate; WAY-D01). `DiskButler.put_session_from_execution` <!-- impl: wayfindinglib.drivers.butler.DiskButler.put_session_from_execution --> is the one write Execution uses. It merges Planning's fields in one transaction, so a plan edit survives a checkpoint. A plan edit that changes nothing stores nothing, keeps the revision and sends no `plan:changed`. The `sequencer` methods `add`, `remove`, `reorder` and `modify` edit the queue through the plan service.

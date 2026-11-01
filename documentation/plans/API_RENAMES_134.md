@@ -176,6 +176,8 @@ dictionary. A name the model does not list is kept as an extra field.
 | `control.guiding.expose` | `Any` (a `bool` in practice) | `GuideExposureResult` (`started`, `exposure_seconds`, `gain`) |
 | `review.frame_guiding` | `dict` | `FrameGuidingReport` |
 | `review.query` | (see above) | `ReviewQueryResult`; its `model` field is now a `MountPointingModel` |
+| `fit_reply_to_budget` | `wayfindinglib.fit_reply_to_budget` (`wayfindinglib/analytics/result_quality/reply_budget.py`) | `mcp_servers/common/reply_budget.py`. It is no longer exported from `wayfindinglib` |
+| backend `TelescopePulse.polar_alignment` | annotated `PolarAlignmentStatus` | `dict[str, Any]`; the backend imports neither `PolarAlignmentStatus` nor `MountPointingModel` any more |
 
 ## Left as they were, on purpose
 

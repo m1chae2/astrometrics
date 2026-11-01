@@ -94,9 +94,8 @@ EXPECTED_EXPORTS = frozenset({
     "Telescope",
     "VisibilityReport",
     "VisibilitySpan",
-    # The pure functions.
+    # The pure function.
     "group_alignment_attempts",
-    "fit_reply_to_budget",
     # The library's own error class.
     "DelegationPolicyValidationError",
 })

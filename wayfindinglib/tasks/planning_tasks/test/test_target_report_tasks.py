@@ -35,7 +35,6 @@ from astrometricslib import (
 )
 from astrometricslib.models.catalog_queries import CalibrationQueryResult
 from astrometricslib.models.target import FrameRecord
-from wayfindinglib.analytics.result_quality.reply_budget import MAXIMUM_REPLY_CHARACTERS, fit_reply_to_budget
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.planning.target_report import (
     ForecastBasis,
@@ -1166,42 +1165,22 @@ def _busy_library() -> _Library:
     return library
 
 
-def test_a_busy_target_gives_a_full_report_and_the_mcp_reply_fits_the_budget(
+MCP_REPLY_LIMIT = 40_000
+"""The reply limit of the MCP tools, which cut a longer reply."""
+
+
+def test_a_busy_target_gives_a_full_report_longer_than_the_mcp_reply_limit(
     isolated_butler: DiskButler,
 ) -> None:
-    """The library keeps everything; the MCP shortening fits the limit."""
+    """The library keeps everything, even when the MCP reply would be cut."""
     full = _report(_busy_library(), isolated_butler)
     assert full.context_omitted_reason is None
     assert all(statement.evidence_omitted_count == 0 for statement in full.statements)
-    report = fit_reply_to_budget(full)
-    text = json.dumps(report.model_dump(), separators=(",", ":"), default=str)
-    assert len(text) <= MAXIMUM_REPLY_CHARACTERS
-    assert len(report.statements) == len(full.statements)
-    assert len(report.capture_settings) == 3
-    for reading in report.context:
+    text = json.dumps(full.model_dump(), separators=(",", ":"), default=str)
+    assert len(text) > MCP_REPLY_LIMIT
+    assert len(full.capture_settings) == 3
+    for reading in full.context:
         assert reading.capture_setting_id is None or reading.capture_setting_id in {1, 2, 3}
-
-
-def test_the_context_section_goes_first_and_then_the_long_evidence_lists(
-    isolated_butler: DiskButler,
-) -> None:
-    """A tight budget drops readings, then evidence, never statements."""
-    library = _busy_library()
-    full = _report(library, isolated_butler)
-    assert full.context
-    assert len(json.dumps(full.model_dump(mode="json"), separators=(",", ":"))) > MAXIMUM_REPLY_CHARACTERS
-    without_context = full.model_copy(update={"context": []})
-    size_without_context = len(json.dumps(without_context.model_dump(mode="json"), separators=(",", ":")))
-    only_context = fit_reply_to_budget(full, budget=size_without_context + 500)
-    assert only_context.context == []
-    assert only_context.context_omitted_reason is not None
-    assert only_context.statements == full.statements
-    tight = fit_reply_to_budget(full, budget=2_000)
-    assert [statement.rule for statement in tight.statements] == [s.rule for s in full.statements]
-    assert tight.needs_attention == full.needs_attention
-    for kept, original in zip(tight.statements, full.statements, strict=True):
-        assert len(kept.evidence) + kept.evidence_omitted_count == len(original.evidence)
-        assert len(kept.evidence) <= 1
 
 
 def test_take_more_prices_dithers_and_refocusing_like_the_ranking(

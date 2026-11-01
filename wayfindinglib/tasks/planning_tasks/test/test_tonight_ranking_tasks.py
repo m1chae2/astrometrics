@@ -505,42 +505,6 @@ def test_a_missing_site_without_a_butler_is_refused() -> None:
         tr.rank_tonight(TONIGHT, astrometrics=_library())
 
 
-def test_a_long_ranking_is_full_in_the_library_and_shortened_for_the_mcp_reply() -> None:
-    """With 120 made-up targets, the MCP cut fits the limit, keeps the best."""
-    from wayfindinglib.analytics.result_quality.reply_budget import (
-        MAXIMUM_REPLY_CHARACTERS,
-        fit_reply_to_budget,
-        reply_characters,
-    )
-    from wayfindinglib.models.planning.tonight_ranking import RankedCandidate, RankedList, TonightRanking
-
-    now = datetime(2026, 10, 10, 6, 0, tzinfo=UTC)
-    candidates = [
-        RankedCandidate(
-            target_id=f"NGC {1000 + index}",
-            use=RankedUse.IMAGING,
-            status=CandidateStatus.RANKED,
-            rank=index + 1,
-            gain_per_hour_fraction=0.5 / (index + 1),
-            reason="The hour copies the target's past frames at tonight's modeled sky. " * 3,
-        )
-        for index in range(120)
-    ]
-    ranking = TonightRanking(
-        at=now,
-        lists=[RankedList(use=RankedUse.IMAGING, gain_description="noise", candidates=candidates)],
-        sky=tr.summarize_sky(now.timestamp(), SITE, {}, []),
-    )
-    assert reply_characters(ranking) > MAXIMUM_REPLY_CHARACTERS
-    fitted = fit_reply_to_budget(ranking)
-    assert reply_characters(fitted) <= MAXIMUM_REPLY_CHARACTERS
-    kept = fitted.lists[0].candidates
-    assert [candidate.target_id for candidate in kept] == [c.target_id for c in candidates[: len(kept)]]
-    assert any("left out" in note for note in fitted.notes)
-    assert fit_reply_to_budget(fitted) is fitted
-    assert len(ranking.lists[0].candidates) == 120
-
-
 def test_ranking_never_stores_a_site_and_says_where_its_site_came_from(
     tmp_path: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:

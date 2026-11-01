@@ -318,6 +318,7 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "backend/services/observatory/execution_service.py" = ["banned-api"]
 "backend/tests/test_passive_alignment_and_guiding.py" = ["banned-api"]
 "backend/tests/test_pointing_and_guiding_analytics.py" = ["banned-api"]
+"mcp_servers/common/test/test_reply_budget.py" = ["banned-api"]
 "documentation/notebooks/astrometrics/user_guide/01_working_with_targets.ipynb" = ["print"]
 "documentation/notebooks/astrometrics/user_guide/02_inspecting_fits_metadata.ipynb" = ["print"]
 "documentation/notebooks/astrometrics/user_guide/03_stacking_and_calibration.ipynb" = ["print"]
@@ -387,6 +388,11 @@ type = "forbidden"
 source_modules = ["mcp_servers"]
 # Every subpackage of both libraries, so a new one is covered too.
 forbidden_modules = ["astrometricslib.*", "wayfindinglib.*"]
+# This test builds report models to check how a long reply is cut. The models
+# are internal to the library, so the one test module is let in.
+ignore_imports = [
+    "mcp_servers.common.test.test_reply_budget -> wayfindinglib.models.**",
+]
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]

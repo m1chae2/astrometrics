@@ -23,7 +23,6 @@ from astrometricslib import (
 )
 from wayfindinglib import (
     ControlRecordStore,
-    MountPointingModel,
     ObservatoryControl,
     SkyPosition,
 )
@@ -272,7 +271,7 @@ class AlignmentService:
             given, or no observer location is known.
         """
         reply = self._require_review().query(kind="pointing_model", session_id=session_id, register_job=False)
-        return MountPointingModel.model_validate(reply.model).model_dump(by_alias=True)
+        return reply.model.model_dump(by_alias=True)
 
     def poll_external_syncs(self) -> None:
         """Store the plate-solve syncs and polar alignment of other programs.

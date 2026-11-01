@@ -306,7 +306,7 @@ The evidence for each judgment is in the validation register. The register label
 - The target dataset report (Section 14): partly measured, [WAY-60](validation/wayfinding.md#way-60).
 
 <!-- impl: wayfindinglib.tasks.planning_tasks.target_report_tasks.build_target_dataset_report -->
-<!-- impl: wayfindinglib.analytics.result_quality.reply_budget -->
+<!-- impl: mcp_servers.common.reply_budget -->
 
 ## 16. Limitations and assumptions
 

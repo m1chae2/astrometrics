@@ -2,7 +2,8 @@
 
 Description: A statement cites the measurements it rests on. When a reply is
 shortened for an AI tool, the references are cut from the end of the list
-(`reply_budget.py`), so the order of the list decides what survives. This
+(`mcp_servers/common/reply_budget.py`), so the order of the list decides
+what survives. This
 module sorts a statement's references so the ones that matter most come first:
 
 * The sort works on the rows the references point at. A row's distance beyond

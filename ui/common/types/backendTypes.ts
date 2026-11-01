@@ -954,7 +954,7 @@ export interface TelescopePulse {
   alignmentAttempts?: any[];
   alignmentTargets?: AlignmentTargetSession[];
   alignmentActive?: boolean;
-  polarAlignment?: PolarAlignmentStatus | null;
+  polarAlignment?: Record<string, any> | null;
   cameraTemperature?: string | null;
   cameraStatus?: string | null;
   targetName?: string | null;

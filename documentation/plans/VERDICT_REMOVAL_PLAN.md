@@ -52,15 +52,13 @@ Whichever is chosen, some gates have no matching rule by name today: stack sharp
 
 These are computed properties on `SpectroscopyResult`, with limits in astrometricslib (`NO_GOOD_MATCH_RMS`, `AMBIGUOUS_RMS_GAP`). wayfindinglib's star rules and the star display read them.
 
-- **A (recommended): treat them as detection labels.** They describe the classification, which is a science product. They stay, reported with the rms, the limit and a register entry.
-- B: treat them as verdicts. Move the limits to wayfindinglib, as issue #97 lists them, and have the desktop app read the judgment.
+**Decided by the user, 2026-11-01:** these are verdicts, and astrometricslib makes no verdicts. They move to wayfindinglib. The rms and rms gap stay as measurements.
 
 ### D5. `FrameRecord.measurements`
 
 Each frame's quality is stored in `FrameMeasurements` and in the measurement table.
 
-- **A (recommended): keep it as a cache for now,** minus the two dead fields. Retiring it touches stacking's frame selection, which has no need to change here.
-- B: retire it, and read the measurement table everywhere.
+**Decided by the user, 2026-11-01:** retire it and read the measurement table everywhere, once every field it holds is confirmed to be in that table.
 
 ### D6. `processing_jobs.output_metrics`
 

@@ -1,6 +1,6 @@
 # Backend services
 
-This folder holds the backend's services. A service is a Python class that keeps some state or does some work for the app. The RPC route (`/api/rpc`) calls a service method for each request. A service never imports the container (`backend/container.py`) or the routers. The container builds the services and passes each one what it needs.
+This folder holds the backend's services. A service is a Python class that keeps some state or does some work for the app. The RPC route (`/api/rpc`) calls a service method for each request. A service never imports the container (`backend/container.py`) or the routers. The container builds the services and passes each one what it needs. `Container.shutdown_resources()` stops them when the backend stops: the maintenance thread, the observatory control, and every Siril process (through the library's `processing.stop_stacking_programs()`; the backend's exit runs no `atexit` handlers).
 
 Terms are defined in the [glossary](../../documentation/Glossary.md). This file also explains each term when it first appears.
 

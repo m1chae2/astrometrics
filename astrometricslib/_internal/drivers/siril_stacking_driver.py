@@ -74,6 +74,17 @@ class SirilStackingDriver(StackingDriver):
 
         launch_siril_gui(self.session.siril_executable, file_path)
 
+    def stop_running_programs(self) -> None:
+        """Stop every Siril process this program started, in any session.
+
+        Each Siril runs as the leader of its own process group, and the whole
+        group is stopped. Nothing is matched by name, so a Siril window a
+        person opened by hand is not touched.
+        """
+        from astrometricslib._internal.drivers.siril_interface.session import stop_all_siril_processes
+
+        stop_all_siril_processes()
+
     def read_stack_artifacts(self, stacked_path: str) -> dict[str, Any]:
         """Read Siril's registration sequence and rejection map for a stack.
 

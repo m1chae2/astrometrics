@@ -10,6 +10,7 @@ the app's lifespan in `backend/main_backend.py`, so importing that module
 starts nothing.
 """
 
+import logging
 import os
 
 from backend.services.analysis.analysis_orchestrator import AnalysisOrchestrator
@@ -24,6 +25,8 @@ from backend.services.observatory.target_imaging_executor import TargetImagingEx
 from backend.services.observatory.telescope_service import TelescopeService
 from backend.services.processing.image_processing_service import ImageProcessingService
 from backend.services.processing.job_service import JobService
+
+logger = logging.getLogger(__name__)
 
 
 class Container:
@@ -95,13 +98,21 @@ class Container:
     def shutdown_resources(self) -> None:
         """Stop the background threads and processes the container started.
 
-        Stops the maintenance thread, and the observatory control's background
-        readers (such as the PHD2 event reader) and INDI worker process.
+        Stops the maintenance thread, the observatory control's background
+        readers (such as the PHD2 event reader) and INDI worker process, and
+        every Siril process the library started. Siril runs in a session of
+        its own and the backend's exit runs no `atexit` handlers, so without
+        this call a Siril would outlive the backend.
         Safe to call more than once, and safe on a container that was never
         initialized or only partly built.
         """
         if self.maintenance_service is not None:
             self.maintenance_service.stop()
+        if self.astrometrics is not None:
+            try:
+                self.astrometrics.processing.stop_stacking_programs()
+            except Exception:  # shutdown must go on to stop the rest
+                logger.exception("Could not stop the stacking programs at shutdown")
         if self.wayfinder is not None:
             self.wayfinder.control.close()
         self.initialized = False

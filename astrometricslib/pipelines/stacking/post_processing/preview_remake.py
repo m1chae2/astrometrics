@@ -17,6 +17,7 @@ failed run puts them back. The stack file is never opened for writing.
 import logging
 import os
 import shutil
+from datetime import datetime
 from typing import Any
 
 from pydantic import ValidationError
@@ -28,8 +29,10 @@ from astrometricslib.pipelines.shared.stack_preview_path import (
     preview_settings_path_for,
     processed_fits_path_for,
 )
+from astrometricslib.pipelines.stacking.post_processing.preview_notices import record_preview_step_notices
 from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
     PreviewSettings,
+    SkippedPreviewStep,
     read_preview_settings,
     record_preview_as_processed_image,
     write_stack_preview,
@@ -114,6 +117,9 @@ def remake_stack_preview(
     spectral: bool,
     settings: PreviewSettings,
     keep_previous: bool = True,
+    job_id: str | None = None,
+    measured_at: datetime | None = None,
+    configuration: Any | None = None,
 ) -> PreviewRemakeResult:
     """Make the preview of a target's current stack again.
 
@@ -128,6 +134,14 @@ def remake_stack_preview(
         Choices for this run that replace the saved settings.
     keep_previous : `bool`, optional
         Copy the current pictures aside first. On by default.
+    job_id : `str`, optional
+        The job the remake runs in. A step the preview skips is stored as a
+        notice row with this id, so the job lists it as a warning.
+    measured_at : `datetime`, optional
+        When the remake started, with a time zone. Without it no notice row
+        is stored (pipeline code does not read the clock).
+    configuration : `AppConfiguration`, optional
+        Where the quality store lives. The process-wide one if omitted.
 
     Returns
     -------
@@ -156,7 +170,11 @@ def remake_stack_preview(
     modified_before = os.path.getmtime(stacked_path)
     kept = _keep_old_pictures(stacked_path) if keep_previous else []
     steps: list[str] = []
-    preview_path = write_stack_preview(stacked_path, settings, steps)
+    skipped_steps: list[SkippedPreviewStep] = []
+    preview_path = write_stack_preview(stacked_path, settings, steps, skipped_steps)
+    record_preview_step_notices(
+        skipped_steps, target.id, os.path.basename(stacked_path), job_id, measured_at, configuration
+    )
     if preview_path is None:
         if kept:
             _put_old_pictures_back(stacked_path, kept)

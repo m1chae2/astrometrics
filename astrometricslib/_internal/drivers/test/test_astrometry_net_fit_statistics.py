@@ -10,7 +10,6 @@ they build fake ``.corr`` and ``.new`` files and a fake ``solve-field`` run.
 
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
 
 import numpy as np
 import pytest
@@ -154,20 +153,20 @@ def fake_solve_field(monkeypatch: pytest.MonkeyPatch, write_corr_file: bool) -> 
     Parameters
     ----------
     monkeypatch : `pytest.MonkeyPatch`
-        Used to replace `subprocess.run` in the driver module.
+        Used to replace `run_registered` in the driver module.
     write_corr_file : `bool`
         Whether the fake program also writes the match table.
     """
 
-    def run(command: list[str], **_keywords: Any) -> SimpleNamespace:
+    def run(command: list[str], _timeout_seconds: float) -> SimpleNamespace:
         """Write the output files into the directory named by ``--dir``.
 
         Parameters
         ----------
         command : `list` [`str`]
             The command line the driver built.
-        **_keywords
-            Ignored subprocess options.
+        _timeout_seconds : `float`
+            Ignored time limit.
 
         Returns
         -------
@@ -190,7 +189,7 @@ def fake_solve_field(monkeypatch: pytest.MonkeyPatch, write_corr_file: bool) -> 
             )
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr(astrometry_net_driver.subprocess, "run", run)
+    monkeypatch.setattr(astrometry_net_driver, "run_registered", run)
 
 
 def test_the_local_solve_returns_the_fit_statistics_with_the_wcs(

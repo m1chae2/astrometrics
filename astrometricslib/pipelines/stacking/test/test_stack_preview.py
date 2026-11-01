@@ -1,7 +1,7 @@
 """Tests for the flattened, stretched picture written beside a finished stack.
 
 Neither Siril nor GraXpert is started. Stand-ins replace the functions that
-run them, or the `subprocess.run` call inside them, so the tests check what
+run them, or the `run_registered` call inside them, so the tests check what
 the module asks each program to do and how it reacts when one succeeds or
 fails.
 """
@@ -282,6 +282,32 @@ def test_a_failed_graxpert_still_gives_a_picture(
 
     assert write_stack_preview(str(stack)) is not None
     assert 'load "stack.fits"' in programs.siril_calls[0][1]
+
+
+def test_a_failed_graxpert_is_reported_as_a_skipped_step(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a skipped step reaches the caller, so it can store a notice."""
+    _configure(monkeypatch, "siril-cli", "graxpert-gpu")
+    _Programs(flatten_result=False).install(monkeypatch)
+    skipped: list[stack_preview.SkippedPreviewStep] = []
+
+    assert write_stack_preview(str(stack), skipped_steps=skipped) is not None
+
+    assert skipped == [stack_preview.SkippedPreviewStep("GraXpert", "GraXpert did not finish")]
+
+
+def test_a_working_graxpert_reports_no_skipped_step(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify nothing is reported when every step worked."""
+    _configure(monkeypatch, "siril-cli", "graxpert-gpu")
+    _Programs().install(monkeypatch)
+    skipped: list[stack_preview.SkippedPreviewStep] = []
+
+    assert write_stack_preview(str(stack), skipped_steps=skipped) is not None
+
+    assert skipped == []
 
 
 def test_a_graxpert_that_cannot_start_still_gives_a_picture(
@@ -604,7 +630,7 @@ def test_no_configured_siril_gives_no_picture(
 
 
 def _record_subprocess(monkeypatch: pytest.MonkeyPatch) -> dict:
-    """Replace `subprocess.run` inside the module with a recorder.
+    """Replace `run_registered` inside the module with a recorder.
 
     Returns
     -------
@@ -614,7 +640,9 @@ def _record_subprocess(monkeypatch: pytest.MonkeyPatch) -> dict:
     """
     captured: dict = {}
 
-    def fake_subprocess_run(arguments: list[str], **_: object) -> stack_preview.subprocess.CompletedProcess:
+    def fake_subprocess_run(
+        arguments: list[str], _timeout_seconds: float
+    ) -> stack_preview.subprocess.CompletedProcess:
         """Record the command line, and the script file if there is one.
 
         Returns
@@ -627,7 +655,7 @@ def _record_subprocess(monkeypatch: pytest.MonkeyPatch) -> dict:
             captured["script"] = Path(arguments[-1]).read_text(encoding="utf-8")
         return stack_preview.subprocess.CompletedProcess(arguments, 0, "", "")
 
-    monkeypatch.setattr(stack_preview.subprocess, "run", fake_subprocess_run)
+    monkeypatch.setattr(stack_preview, "run_registered", fake_subprocess_run)
     monkeypatch.setattr(stack_preview, "siril_process_lock", nullcontext)
     return captured
 
@@ -680,7 +708,7 @@ def cosmic_clarity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def _fake_denoise_program(
     monkeypatch: pytest.MonkeyPatch, returncode: int = 0, writes_output: bool = True
 ) -> list[list[str]]:
-    """Replace `subprocess.run` with a program that denoises its `input`.
+    """Replace `run_registered` with a program that denoises its `input`.
 
     Returns
     -------
@@ -689,7 +717,7 @@ def _fake_denoise_program(
     """
     calls: list[list[str]] = []
 
-    def fake_run(arguments: list[str], **_: object) -> stack_preview.subprocess.CompletedProcess:
+    def fake_run(arguments: list[str], _timeout_seconds: float) -> stack_preview.subprocess.CompletedProcess:
         """Write a ``_denoised`` copy of each input file, as the program does.
 
         Returns
@@ -704,7 +732,7 @@ def _fake_denoise_program(
                 (folder / "output" / f"{staged.stem}_denoised.fits").write_bytes(b"denoised")
         return stack_preview.subprocess.CompletedProcess(arguments, returncode, "", "")
 
-    monkeypatch.setattr(stack_preview.subprocess, "run", fake_run)
+    monkeypatch.setattr(stack_preview, "run_registered", fake_run)
     return calls
 
 

@@ -287,21 +287,22 @@ def _open_pipe_or_die(
     return outcome["pipe"]
 
 
-def _cleanup_all_active_image_processing_instances() -> None:
-    """Clean up any ImageProcessing instances still alive at exit.
+def stop_all_siril_processes() -> None:
+    """Stop every Siril process that any session in this program started.
 
-    Safety net registered with `atexit` so subprocesses started by
-    an ImageProcessing instance are not leaked if the interpreter
-    exits without an explicit `cleanup_subprocesses()` call.
+    The backend calls this when it stops (through the stacking driver), so
+    no Siril outlives it: Siril runs in a session of its own, and the
+    backend's exit does not run `atexit` handlers. It is also the `atexit`
+    safety net for a script. Safe to call more than once.
     """
     for instance in list(_active_image_processing_instances):
         try:
             instance.cleanup_subprocesses()
         except Exception:
-            logger.debug("Failed to clean up ImageProcessing subprocesses at exit", exc_info=True)
+            logger.debug("Failed to clean up ImageProcessing subprocesses", exc_info=True)
 
 
-atexit.register(_cleanup_all_active_image_processing_instances)
+atexit.register(stop_all_siril_processes)
 
 
 def launch_siril_gui(siril_executable: str, file_path: str) -> None:

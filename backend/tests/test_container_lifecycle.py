@@ -30,6 +30,30 @@ def test_shutdown_stops_the_maintenance_thread_and_the_indi_worker() -> None:
     assert container.initialized is False
 
 
+def test_shutdown_stops_the_stacking_programs_through_the_public_name() -> None:
+    """Shutdown stops Siril directly, not through an `atexit` hook."""
+    container = Container()
+    container.astrometrics = MagicMock()
+    container.wayfinder = MagicMock()
+
+    container.shutdown_resources()
+
+    container.astrometrics.processing.stop_stacking_programs.assert_called_once_with()
+    container.wayfinder.control.close.assert_called_once_with()
+
+
+def test_a_failure_stopping_siril_does_not_stop_the_rest_of_shutdown() -> None:
+    """The observatory control is still closed when Siril cannot be stopped."""
+    container = Container()
+    container.astrometrics = MagicMock()
+    container.astrometrics.processing.stop_stacking_programs.side_effect = RuntimeError("boom")
+    container.wayfinder = MagicMock()
+
+    container.shutdown_resources()
+
+    container.wayfinder.control.close.assert_called_once_with()
+
+
 def test_shutdown_closes_observatory_control() -> None:
     """Shutdown stops observatory control's background readers too."""
     container = Container()

@@ -1035,7 +1035,7 @@ class ProcessingPipelines:
     drivers : `Drivers`, optional
         The plate solver, stacking program and SIMBAD driver to use. Any
         left out is the built-in one (Astrometry.net, Siril, astroquery).
-        They reach `stack`, the astrometry and spectroscopy stages of
+        They reach `stack`, the astrometry, photometry and spectroscopy stages of
         `process_target` for one target, and `run_spectroscopy_by_session`.
         `process_target` for several targets runs in worker processes, which
         cannot receive them, so it refuses to start when any were given.
@@ -1189,8 +1189,8 @@ class ProcessingPipelines:
         Returns
         -------
         result : `StackResult`
-            The frames chosen and, unless ``plan_only``, the stack's path,
-            flags and quality summary (``quality_summary``). To compare
+            The frames chosen and, unless ``plan_only``, the stack's path
+            and quality summary (``quality_summary``). To compare
             it with the previous stack, use
             `Astrometrics.quality.measure_stack`.
 
@@ -1589,7 +1589,15 @@ class ProcessingPipelines:
             self.acquire_job_slot(),
             registered_job(enabled=register_job, job_type="preview", target_id=resolved.id),
         ):
-            result = remake_stack_preview(resolved, kind == "spectral", settings, keep_previous)
+            result = remake_stack_preview(
+                resolved,
+                kind == "spectral",
+                settings,
+                keep_previous,
+                job_id=current_job_id(),
+                measured_at=datetime.now(UTC),
+                configuration=self._config,
+            )
         if result.shown_in_viewer:
             self._targets.save()
         return result
@@ -1830,7 +1838,7 @@ class ProcessingPipelines:
         Reads the numbers the stacking stage saved with the stack, so nothing
         is measured again. The answer covers how many frames went in and how
         many were set aside, the share of pixels rejected, the star width
-        against what the input frames predict, the flags, and what happened
+        against what the input frames predict, and what happened
         to each exposure group (its frames, whether it clipped, how far it
         was moved to line up, and why it was left out if it was).
 
@@ -1927,6 +1935,15 @@ class ProcessingPipelines:
             The FITS file to open. An empty string opens Siril alone.
         """
         self._drivers.stacking_or_default().open_in_viewer(file_path)
+
+    def stop_stacking_programs(self) -> None:
+        """Stop every stacking program this library started and still runs.
+
+        The backend calls this when it stops, so no Siril process outlives
+        it. A person's own Siril window, opened by hand, is not touched.
+        Safe to call more than once, and when nothing is running.
+        """
+        self._drivers.stacking_or_default().stop_running_programs()
 
     def plate_solve(self, image_path: str) -> Any | None:
         """Work out where on the sky an image points, from its stars.

@@ -10,6 +10,7 @@ import subprocess  # ruff: ignore[suspicious-subprocess-import] -- real child pr
 import sys
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -179,3 +180,23 @@ def test_run_registered_without_a_bound_run_returns_the_output() -> None:
     completed = run_registered([sys.executable, "-c", "print('hello')"], 30.0)
     assert completed.returncode == 0
     assert completed.stdout.strip() == "hello"
+
+
+def test_a_timeout_without_a_bound_run_ends_the_program_and_its_helper(tmp_path: Path) -> None:
+    """A timed-out stand-in program leaves no helper process running.
+
+    The stand-in starts a sleeping helper and writes its id to the file named
+    by the first argument, as GraXpert or ``solve-field`` start helpers of
+    their own. No run is bound, so this is the plain call that GraXpert,
+    Cosmic Clarity, the preview's Siril and ``solve-field`` use in scripts.
+    """
+    helper_file = tmp_path / "helper_pid.txt"
+    script = CHILD_WITH_GRANDCHILD.replace(
+        "print(g.pid, flush=True)", f"open({str(helper_file)!r}, 'w').write(str(g.pid))"
+    )
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        run_registered([sys.executable, "-c", script], 1.5)
+
+    helper_process_id = int(helper_file.read_text())
+    assert wait_until_gone(helper_process_id)

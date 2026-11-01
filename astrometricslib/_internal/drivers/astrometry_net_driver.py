@@ -41,6 +41,7 @@ from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read
 from astrometricslib._internal.drivers.interfaces.plate_solve_driver import PlateSolveDriver, PlateSolveHeader
 from astrometricslib.foundation.config import AppConfiguration, get_configuration
 from astrometricslib.foundation.paths import scratch_directory
+from astrometricslib.foundation.run_abandonment import run_registered
 from astrometricslib.foundation.run_tally import RunTally, add_to_bound_tally, bind_tally
 
 logger = logging.getLogger(__name__)
@@ -509,7 +510,8 @@ class AstrometryNetPlateSolveDriver(PlateSolveDriver):
         working_directory : `str`
             The temporary folder where it can dump its math files.
         timeout : `int`
-            How long to let it think before it is killed.
+            How long to let it think before it and its helper programs are
+            killed.
 
         Returns
         -------
@@ -520,7 +522,9 @@ class AstrometryNetPlateSolveDriver(PlateSolveDriver):
             is absent or unreadable).
         """
         logger.info("Executing: %s", " ".join(command))
-        result = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+        # Its own process group: a timeout ends solve-field and the
+        # astrometry-engine helpers it started, not only solve-field.
+        result = run_registered(command, timeout)
         if result.returncode != 0:
             logger.warning("solve-field returned error code %s", result.returncode)
 

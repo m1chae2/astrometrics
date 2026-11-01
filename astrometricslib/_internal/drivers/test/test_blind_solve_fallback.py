@@ -115,7 +115,7 @@ def test_solve_field_success_requires_the_output_file(
     class _Result:
         returncode = 0
 
-    monkeypatch.setattr(astrometry_net_driver.subprocess, "run", lambda *a, **k: _Result())
+    monkeypatch.setattr(astrometry_net_driver, "run_registered", lambda *a, **k: _Result())
 
     assert solver._run_solve_field(["solve-field"], str(tmp_path), 10) is None
 

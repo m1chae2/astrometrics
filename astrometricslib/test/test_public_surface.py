@@ -125,6 +125,7 @@ EXPECTED_MODULE_NAMES = {
         "require_mounted_storage",
         "resolve_mounted_path",
         "scratch_directory",
+        "stop_process_group",
     }),
 }
 """Names each public module of astrometricslib offers (its `__all__`)."""
@@ -220,6 +221,7 @@ SUB_API_MEMBERS = {
         "predict_stack_weights",
         "stack",
         "stack_summary",
+        "stop_stacking_programs",
     },
     "processing.calibration": {
         "add_frames",

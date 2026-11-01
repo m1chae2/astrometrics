@@ -47,6 +47,7 @@ __all__ = [
     "launch_registered",
     "raise_if_abandoned",
     "run_registered",
+    "stop_process_group",
 ]
 
 # How long a stopped process group gets to exit after SIGTERM before SIGKILL.
@@ -234,20 +235,23 @@ def launch_registered(start_process: Callable[[], subprocess.Popen]) -> subproce
 
 
 def run_registered(arguments: Sequence[str], timeout_seconds: float) -> subprocess.CompletedProcess[str]:
-    """Run a program to the end, like `subprocess.run`, but stoppable.
+    """Run a program to the end, like `subprocess.run`, but in its own group.
 
     Output is captured as text and a non-zero exit code is not an error, as
     for ``subprocess.run(..., capture_output=True, text=True, check=False)``.
-    When a run is bound, the program runs in its own process group and is
-    registered with that run, so giving up on the run stops it. With no run
-    bound this is the plain call.
+    The program always leads a process group of its own, so a timeout ends
+    the program and every helper it started (`stop_process_group`), not just
+    the program. This is the one way the library runs GraXpert, Cosmic
+    Clarity, the headless Siril preview and ``solve-field``. When a run is
+    bound, the program is also registered with that run, so giving up on the
+    run stops it too.
 
     Parameters
     ----------
     arguments : `collections.abc.Sequence` [`str`]
         The program and its arguments.
     timeout_seconds : `float`
-        How long the program may run before it is stopped.
+        How long the program may run before its whole group is stopped.
 
     Returns
     -------
@@ -257,18 +261,14 @@ def run_registered(arguments: Sequence[str], timeout_seconds: float) -> subproce
     Raises
     ------
     subprocess.TimeoutExpired
-        If the program ran longer than ``timeout_seconds``.
+        If the program ran longer than ``timeout_seconds``. By then the
+        program and its helpers are stopped.
 
     Notes
     -----
     `RunAbandonedError` is raised if the run was given up on before or
     while the program ran.
     """
-    if _bound_abandonment.get() is None:
-        # No run to give up on: behave exactly like the plain call.
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] -- caller's fixed argv
-            list(arguments), capture_output=True, text=True, timeout=timeout_seconds, check=False
-        )
     process = launch_registered(
         lambda: subprocess.Popen(  # ruff: ignore[subprocess-without-shell-equals-true] -- caller's fixed argv
             list(arguments),
@@ -282,7 +282,10 @@ def run_registered(arguments: Sequence[str], timeout_seconds: float) -> subproce
         standard_output, standard_error = process.communicate(timeout=timeout_seconds)
     except subprocess.TimeoutExpired:
         stop_process_group(process)
-        process.communicate()
+        # A helper that left the group could still hold the output pipes, so
+        # this last read is bounded too.
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            process.communicate(timeout=REAP_TIMEOUT_SECONDS)
         raise
     raise_if_abandoned()
     return subprocess.CompletedProcess(arguments, process.returncode, standard_output, standard_error)

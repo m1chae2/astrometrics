@@ -161,6 +161,15 @@ class StackingDriver(ABC):
         """
         raise ProcessingError(f"{self.name} has no window to open {file_path!r} in.")
 
+    def stop_running_programs(self) -> None:
+        """Stop every program of this kind that is still running.
+
+        The backend calls this when it stops, so no stacking program is left
+        running. A driver that starts no long-lived program keeps this
+        default, which does nothing.
+        """
+        return None
+
     @abstractmethod
     def read_stack_artifacts(self, stacked_path: str) -> dict[str, Any]:
         """Read the engine's own files that sit next to a finished stack.

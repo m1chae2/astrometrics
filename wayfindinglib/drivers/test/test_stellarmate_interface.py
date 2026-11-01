@@ -5,6 +5,7 @@ fail-fast behavior, without requiring a real SSH-reachable host.
 """
 
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -428,3 +429,56 @@ def test_the_first_call_probes_once_and_concurrent_calls_share_the_answer() -> N
 
     assert len(calls) == 1
     assert len(errors) == 4
+
+
+def test_every_rsync_transfer_has_the_tools_own_stall_timeout(tmp_path: Path) -> None:
+    """Verify an image download carries rsync's ``--timeout`` too."""
+    driver = StellarMateInterface(host_alias="test-host", remote_pictures_path="/home/stellarmate/Pictures")
+    with (
+        patch.object(driver, "_resolve_remote_folder_name", return_value="M_27"),
+        patch("subprocess.Popen", return_value=_finished_process()) as mock_popen,
+    ):
+        driver.download_target_folder(remote_target_name="M_27", local_dest_path=str(tmp_path / "images"))
+
+    (command,) = [call.args[0] for call in mock_popen.call_args_list]
+    assert "--timeout=60" in command
+
+
+def test_a_transfer_past_the_overall_limit_ends_rsync_and_its_helper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stand-in ``rsync`` that keeps printing is stopped with its ssh helper.
+
+    The stand-in is first on the path, so the real rsync never runs. It starts
+    a sleeping helper (as rsync starts ssh) and prints a line every 0.2 s, so
+    it is healthy and only the overall limit can end it.
+    """
+    helper_file = tmp_path / "helper_pid.txt"
+    program = tmp_path / "bin" / "rsync"
+    program.parent.mkdir()
+    program.write_text(
+        f"#!{sys.executable}\n"
+        "import subprocess, sys, time\n"
+        "helper = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+        f"open({str(helper_file)!r}, 'w').write(str(helper.pid))\n"
+        "while True:\n"
+        "    print('still moving', flush=True)\n"
+        "    time.sleep(0.2)\n"
+    )
+    program.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{program.parent}:/usr/bin:/bin")
+    monkeypatch.setattr("wayfindinglib.drivers.stellarmate_interface._RSYNC_OVERALL_LIMIT_SECONDS", 1.5)
+    driver = StellarMateInterface(host_alias="test-host")
+
+    succeeded = driver._run_rsync("/remote/", str(tmp_path / "out"), [], "stand-in transfer")
+
+    assert succeeded is False
+    helper_process_id = int(helper_file.read_text())
+    deadline = time.monotonic() + 5.0
+    while Path(f"/proc/{helper_process_id}").exists() and time.monotonic() < deadline:
+        state = Path(f"/proc/{helper_process_id}/stat").read_text().rsplit(")", 1)[1].split()[0]
+        if state == "Z":
+            break
+        time.sleep(0.05)
+    stat_path = Path(f"/proc/{helper_process_id}/stat")
+    assert not stat_path.exists() or stat_path.read_text().rsplit(")", 1)[1].split()[0] == "Z"

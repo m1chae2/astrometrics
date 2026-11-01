@@ -328,6 +328,8 @@ export interface Spectrum {
   hasSpectra?: boolean;
   /** Check if the star's magnitude is a real catalog magnitude. */
   hasCatalogMagnitude?: boolean;
+  /** Check if the spectrum's matched type disagrees with the catalog. */
+  differsFromCatalog?: boolean | null;
   /** Check if the light curve has enough points for the cycle search. */
   canRunPeriodSearch?: boolean;
   /** Check if the light curve has enough points for the dip search. */
@@ -435,6 +437,7 @@ export interface SpectroscopyResult {
   countsPerSecondFactor?: number | null;
   catalogComparison?: CatalogComparison | null;
   inputQuality?: InputQualityAssessment | null;
+  outputQuality?: OutputQualityAssessment | null;
   stageQuality?: StageQualityCheckpoint[];
   wavelengthZeroPoint?: WavelengthZeroPointRecord | null;
   reddening?: ReddeningRecord | null;
@@ -444,10 +447,16 @@ export interface SpectroscopyResult {
   differentialRefraction?: DifferentialRefractionRecord | null;
   gaiaXpComparison?: GaiaXpComparison | null;
   generatedByJobId?: string | null;
+  /** Check if even the closest reference spectrum fits badly. */
+  isPoorMatch?: boolean;
   /** Measure how much closer the best reference is than the runner-up. */
   rmsGapToSecondBest?: number | null;
+  /** Check if the best reference barely beats the runner-up. */
+  isAmbiguous?: boolean | null;
   /** Measure how much closer the best reference is than the next class. */
   rmsGapToNextClass?: number | null;
+  /** Check if another spectral class fits almost as well as the best. */
+  isClassAmbiguous?: boolean | null;
 }
 
 /**
@@ -658,52 +667,6 @@ export interface ExtinctionCorrectionRecord {
 }
 
 /**
- * The limits behind every absorption-feature label in one spectrum.
- *
- * Each feature entry carries a label (detected, possible, inconclusive,
- * not detected, not covered) and its statistic (p-value, depth). The limits
- * that turned the statistic into the label are the same for every feature
- * in the spectrum, so they are stored here once instead of on each entry.
- */
-export interface AbsorptionFeatureLimits {
-  detectedPValue: number;
-  possiblePValue: number;
-  inconclusivePValue: number;
-  inconclusiveMinimumDepth: number;
-  minimumReportedDepth: number;
-  maximumDepthUncertaintyForLabel: number;
-  registerEntry: string;
-}
-
-/**
- * The limits behind every emission-line label in one spectrum.
- *
- * Each line entry carries a label (detected, unclear, not seen, not
- * covered) and its significance. The limits are the same for every line in
- * the spectrum, so they are stored here once.
- */
-export interface EmissionLineLimits {
-  detectedSignificance: number;
-  unclearSignificance: number;
-  minimumCoveredFraction: number;
-  minimumDetectedForEmissionSource: number;
-  registerEntry: string;
-}
-
-/**
- * The limits and register entries behind one spectrum's labels.
- *
- * Spectral feature and emission-line entries keep only their statistics and
- * labels. This record, stored once per spectrum, says which limits turned
- * those statistics into labels and which register entry checked them. Old
- * stored rows lack it and load with `None` where it is used.
- */
-export interface DetectionLabelLimits {
-  absorptionFeatures: AbsorptionFeatureLimits;
-  emissionLines: EmissionLineLimits;
-}
-
-/**
  * How a star's self-determined spectrum compares with its catalog entry.
  *
  * The catalog (SIMBAD/Gaia) already has a spectral type and a B-V colour
@@ -714,11 +677,13 @@ export interface DetectionLabelLimits {
  * object).
  */
 export interface CatalogComparison {
+  spectralTypeAgrees?: boolean | null;
   spectralTypeNote?: string;
   isLuminosityClassUncertain?: boolean;
   luminosityClassNote?: string;
   closestGiantType?: string | null;
   closestGiantRms?: number | null;
+  colourAgrees?: boolean | null;
   bMinusVDifferenceMag?: number | null;
   colourNote?: string;
 }
@@ -742,18 +707,20 @@ export interface InputQualityAssessment {
 }
 
 /**
- * How much to trust a star's variability verdict, given its own CV.
+ * How much to trust a spectrum's classification, given everything found.
  *
- * A star is flagged as variable when its coefficient of variation (CV)
- * exceeds the observing run's adaptive cutoff -- a single boolean that,
- * on its own, does not say whether a star sits far past that line or
- * right on top of it. This turns the same comparison into a continuous
- * margin, so a confident call is distinguishable from a borderline one.
+ * Combines the classifier's own match statistics (is the winning type a
+ * weak match, or nearly tied with the runner-up) with the catalog
+ * comparison above, into one overall verdict. Unlike
+ * `InputQualityAssessment`, this depends on what classifying the
+ * spectrum actually produced.
  */
 export interface OutputQualityAssessment {
-  coefficientOfVariation: number;
-  adaptiveCutoff: number;
-  marginInMadUnits: number;
+  isPoorMatch?: boolean | null;
+  isAmbiguous: boolean;
+  isClassAmbiguous?: boolean | null;
+  catalogAgrees?: boolean | null;
+  isTrustworthy: boolean;
 }
 
 /**

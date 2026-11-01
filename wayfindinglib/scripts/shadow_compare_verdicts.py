@@ -9,8 +9,9 @@ bug fixed or a change approved.
 The old side is what the stored pipeline summaries say: `flagged`,
 `flag_reasons` and each gate's outcome, for stacking, spectral stacking,
 astrometry, photometry, spectroscopy and asteroid detection, plus a star's
-match distance and gaps, read against their limits. The new side is the statements of
-`planning.get_advisory`, kind ``"quality"`` for a target and ``"result"`` for a
+match distance and gaps, read against their limits. The new side is the
+statements of
+`review.get_advisory`, kind ``"quality"`` for a target and ``"result"`` for a
 star. A rule is tied to a gate when the rule reads the gate's metric
 (``<pipeline>.gate_<name>``). A gate that no rule reads is listed as having no
 rule. Detection labels (period, transit, spectral feature verdicts) stay in
@@ -46,6 +47,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from wayfindinglib.analytics.result_quality.star_result_rules import (
+    AMBIGUOUS_RMS_GAP_LIMIT,
+    POOR_MATCH_RMS_LIMIT,
+)
+
 logger = logging.getLogger(__name__)
 
 # Where each pipeline's summary lives on a `Target`, and the metric prefix its
@@ -64,11 +70,6 @@ STAR_PIPELINE = "star_spectrum"
 
 UNATTRIBUTED = "(no pipeline)"
 """The label for rules that read no pipeline metric, or only frame metrics."""
-
-from wayfindinglib.analytics.result_quality.star_result_rules import (
-    AMBIGUOUS_RMS_GAP_LIMIT,
-    POOR_MATCH_RMS_LIMIT,
-)
 
 FIRING_KINDS = frozenset({"warning", "recommendation"})
 """Statement kinds that count as the rule saying "something is wrong"."""

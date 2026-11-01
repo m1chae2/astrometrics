@@ -122,7 +122,7 @@ def test_agreement_gives_no_difference_and_insufficient_data_is_noted() -> None:
 
 
 def test_star_flags() -> None:
-    """Flags worked out from the stored numbers are matched with rules by name."""
+    """Flags worked out from stored numbers match rules by name."""
     spectrum = SimpleNamespace(
         self_determined_spectral_type_rms=0.2, rms_gap_to_next_class=0.5, rms_gap_to_second_best=0.01
     )

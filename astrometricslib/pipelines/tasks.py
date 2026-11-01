@@ -474,7 +474,7 @@ def _run_analysis_pipeline_match(
 ANALYSIS_STAGES = ("astrometry", "photometry", "spectroscopy", "asteroids")
 """The analysis stages `run_target_stages` can run, in the order run."""
 
-DEFAULT_ANALYSIS_STAGES = ("astrometry", "spectroscopy")
+DEFAULT_ANALYSIS_STAGES = ("astrometry", "photometry", "spectroscopy")
 """The stages that run for one target when the caller names none."""
 
 STAGE_OPTIONS = {

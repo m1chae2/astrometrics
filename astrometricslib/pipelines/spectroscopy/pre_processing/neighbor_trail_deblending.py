@@ -512,6 +512,70 @@ def build_band_profiles(
     return offsets_px, profiles, band_positions
 
 
+# Each trial of the fitter needs one shape per star, and a finite-difference
+# step revisits the base point, so a few trials' worth is enough. Dropping
+# entries never changes a number, only how often a shape is rebuilt.
+_MAXIMUM_CACHED_STAR_SHAPES = 64
+
+
+def _star_shape_in_bands(
+    blur: EmpiricalBlur,
+    dilation: float,
+    star_offset_px: float,
+    offsets_px: np.ndarray,
+    band_positions_px: np.ndarray,
+    band_splines: list[CubicSpline] | None,
+    column_cache: dict[tuple[float, float], np.ndarray] | None,
+) -> np.ndarray:
+    """Give one star's shape in every band, building it only once per trial.
+
+    The fitter's finite-difference step moves one number at a time, so most
+    stars keep the same stretch and position from one trial to the next.
+    Their shapes are read from `column_cache` instead of being rebuilt.
+
+    Parameters
+    ----------
+    blur : `EmpiricalBlur`
+        The measured blur.
+    dilation : `float`
+        How much to stretch the measured shape.
+    star_offset_px : `float`
+        Where the star's streak is, in pixels.
+    offsets_px : `numpy.ndarray`
+        Offsets across the streak, in pixels.
+    band_positions_px : `numpy.ndarray`
+        How far along the streak each band is.
+    band_splines : `list` [`scipy.interpolate.CubicSpline`] or `None`
+        One curve per band, or `None` to build them in `pixel_profile`.
+    column_cache : `dict` or `None`
+        The shapes built so far, or `None` to build every time.
+
+    Returns
+    -------
+    shape : `numpy.ndarray`
+        The star's light in each pixel, shape (bands, offsets).
+    """
+    key = (float(dilation), float(star_offset_px))
+    if column_cache is not None and key in column_cache:
+        return column_cache[key]
+    shape = np.stack([
+        pixel_profile(
+            blur,
+            float(band_positions_px[band_index]),
+            dilation,
+            star_offset_px,
+            offsets_px,
+            None if band_splines is None else band_splines[band_index],
+        )
+        for band_index in range(len(band_positions_px))
+    ])
+    if column_cache is not None:
+        if len(column_cache) > _MAXIMUM_CACHED_STAR_SHAPES:
+            column_cache.clear()
+        column_cache[key] = shape
+    return shape
+
+
 def _solve_amplitudes(
     blur: EmpiricalBlur,
     dilation: float,
@@ -521,6 +585,7 @@ def _solve_amplitudes(
     star_offsets_px: np.ndarray,
     weights: np.ndarray,
     band_splines: list[CubicSpline] | None = None,
+    column_cache: dict[tuple[float, float], np.ndarray] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Find, for a given stretch and positions, the best amplitudes and sky.
 
@@ -547,6 +612,11 @@ def _solve_amplitudes(
     band_splines : `list` [`scipy.interpolate.CubicSpline`], optional
         One curve per band from `_profile_spline`, so a fit that calls this
         many times builds them once. Built here when omitted.
+    column_cache : `dict`, optional
+        Shapes already built, keyed by (stretch, star position), each an
+        array of shape (bands, offsets). A fit that tries a star at the
+        same stretch and position again reads it from here. Shapes this
+        call builds are added. The numbers are the same with or without it.
 
     Returns
     -------
@@ -561,18 +631,14 @@ def _solve_amplitudes(
     amplitudes = np.zeros((n_bands, len(star_offsets_px)))
     sky_levels = np.zeros(n_bands)
     residuals = np.zeros_like(profiles)
+    star_shapes = [
+        _star_shape_in_bands(
+            blur, dilation, float(offset), offsets_px, band_positions_px, band_splines, column_cache
+        )
+        for offset in star_offsets_px
+    ]
     for band_index in range(n_bands):
-        columns = [
-            pixel_profile(
-                blur,
-                float(band_positions_px[band_index]),
-                dilation,
-                float(offset),
-                offsets_px,
-                None if band_splines is None else band_splines[band_index],
-            )
-            for offset in star_offsets_px
-        ]
+        columns = [shape[band_index] for shape in star_shapes]
         design = np.column_stack([*columns, np.ones(len(offsets_px))])
         weighted_design = design * weights[band_index][:, None]
         solution, *_ = np.linalg.lstsq(
@@ -592,6 +658,7 @@ def fit_neighbor_amplitudes(
     band_positions_px: np.ndarray,
     star_offsets_px: np.ndarray,
     noise_floor: float,
+    reuse_star_shapes: bool = True,
 ) -> NeighborFit:
     """Fit the measured blur to the band profiles of a crowded image.
 
@@ -613,6 +680,10 @@ def fit_neighbor_amplitudes(
         profile's units. Points are weighted as one over the larger of this
         and the square root of the profile, so the faint wings count as much
         as the bright core.
+    reuse_star_shapes : `bool`, optional
+        Build each star's shape once per stretch and position and reuse it
+        across the fitter's trials. The fit is the same with `False`, only
+        slower; the switch exists so a test can show that.
 
     Returns
     -------
@@ -625,6 +696,7 @@ def fit_neighbor_amplitudes(
     # The curve through the measured shape depends only on the band, so it is
     # built once here, not on every trial of the fitter.
     band_splines = [_profile_spline(blur, float(position)) for position in band_positions_px]
+    column_cache: dict[tuple[float, float], np.ndarray] | None = {} if reuse_star_shapes else None
 
     def shifts_from(parameters: np.ndarray) -> np.ndarray:
         """Give the star position corrections that go with the free numbers.
@@ -653,6 +725,7 @@ def fit_neighbor_amplitudes(
             star_offsets_px + shifts_from(parameters),
             weights,
             band_splines,
+            column_cache,
         )
         return residuals.ravel()
 
@@ -670,22 +743,27 @@ def fit_neighbor_amplitudes(
         star_offsets_px + shifts,
         weights,
         band_splines,
+        column_cache,
     )
 
     # Judge the fit on the plain (unweighted) misfit, as a fraction of the
     # brightest star's peak, so the number means the same for every image.
     misfit = np.zeros_like(profiles)
+    final_shapes = [
+        _star_shape_in_bands(
+            blur,
+            dilation,
+            float(star_offsets_px[star_index] + shifts[star_index]),
+            offsets_px,
+            band_positions_px,
+            band_splines,
+            column_cache,
+        )
+        for star_index in range(n_stars)
+    ]
     for band_index in range(profiles.shape[0]):
         model = sky_levels[band_index] + sum(
-            amplitudes[band_index, star_index]
-            * pixel_profile(
-                blur,
-                float(band_positions_px[band_index]),
-                dilation,
-                float(star_offsets_px[star_index] + shifts[star_index]),
-                offsets_px,
-                band_splines[band_index],
-            )
+            amplitudes[band_index, star_index] * final_shapes[star_index][band_index]
             for star_index in range(n_stars)
         )
         misfit[band_index] = profiles[band_index] - model

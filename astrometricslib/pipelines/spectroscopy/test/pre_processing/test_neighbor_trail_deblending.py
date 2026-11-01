@@ -298,6 +298,34 @@ def test_prebuilt_splines_give_the_same_amplitudes_as_splines_built_per_call() -
             np.testing.assert_array_equal(shared_part, rebuilt_part)
 
 
+def test_reused_star_shapes_give_the_same_fit_as_shapes_rebuilt_every_trial() -> None:
+    """Reusing each star's shape gives the same fit as rebuilding it.
+
+    Both fits run in this test on the same input, so nothing depends on the
+    platform or library versions. Three stars make the fitter's
+    finite-difference steps revisit shapes, so the cache is really used.
+    Every number of the two fits must match exactly.
+    """
+    blur = measure_reference_blur()
+    image, *_ = make_pair(1.1)
+    offsets, profiles, positions = build_band_profiles(
+        image, True, np.full(ROWS, BRIGHT_CENTRE_PX), BAND_EDGES, 0.0, half_width_px=75
+    )
+    star_offsets = np.array([0.0, GAP_PX, GAP_PX - 9.0])
+
+    reused = fit_neighbor_amplitudes(blur, offsets, profiles, positions, star_offsets, 0.5)
+    rebuilt = fit_neighbor_amplitudes(
+        blur, offsets, profiles, positions, star_offsets, 0.5, reuse_star_shapes=False
+    )
+
+    assert reused.dilation == rebuilt.dilation
+    assert reused.relative_residual == rebuilt.relative_residual
+    assert reused.is_reliable == rebuilt.is_reliable
+    np.testing.assert_array_equal(reused.centre_shifts_px, rebuilt.centre_shifts_px)
+    np.testing.assert_array_equal(reused.amplitudes, rebuilt.amplitudes)
+    np.testing.assert_array_equal(reused.sky_levels, rebuilt.sky_levels)
+
+
 def test_wing_flux_equals_the_per_sample_enclosed_fractions_with_and_without_a_cache() -> None:
     """Shared-curve wing flux equals the per-sample `enclosed_fraction` result.
 

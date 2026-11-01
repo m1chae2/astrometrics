@@ -29,7 +29,8 @@ An *observation package* is the plan for one target: exposure rows (a count, a f
 ## Session and equipment analysis
 
 - `alignment_sessions.py`, `capture_history.py`, `guide_exposure_ladder.py`, `guide_pulses.py`, `guiding_spectrum.py` and `tracking_risk.py` analyze guiding, alignment and tracking records.
-- `performance_envelope.py` and `envelope_assembly.py` build the performance envelope: the range of results the equipment has reached on earlier nights.
+- The alignment attempts those modules read are kept by the control record store (`drivers/control_record_store.py`). An attempt that came from a frame names that frame in `source_frame`. Bringing in or solving the same frame again then updates its one row instead of adding a second.
+- `performance_envelope.py` and `envelope_assembly.py` build the performance envelope: the range of results the equipment has reached on earlier nights. `envelope_assembly.py` reads only guide samples whose source is in `MEASURED_GUIDING_SAMPLE_SOURCES` (`models/session/telemetry.py`): the PHD2 guide log, PHD2 live, the Ekos guide log and the Ekos analyze log. A sample that is a pulse estimate or unverified never counts, because the envelope is built from measured drift only.
 - `pointing_model.py` fits the mount's pointing error.
 
 ## Measures that these modules produce

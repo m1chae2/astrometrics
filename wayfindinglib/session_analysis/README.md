@@ -41,6 +41,6 @@ It reports:
 
 Every limit comes from the session's own data and is checked against the 2026-10-02 session, as the comments beside each constant record.
 
-Gathering one night's data from storage is not done here. `wayfindinglib/tasks/control_tasks/session_analysis_tasks.py` (guiding) and `wayfindinglib/analytics/capture_history.py` (capture) do it. `wayfindinglib/tasks/control_tasks/night_analysis.py` runs the analyses, and `review.query(kind="guiding")` and `query(kind="capture")` are the entry points. This keeps every stage a pure function of its input.
+Gathering one night's data from storage is not done here. `wayfindinglib/tasks/control_tasks/session_analysis_tasks.py` (guiding) and `wayfindinglib/analytics/capture_history.py` (capture) do it. `wayfindinglib/tasks/control_tasks/night_analysis.py` runs the analyses, `wayfindinglib/tasks/control_tasks/night_history.py` is the front door behind `review.query`: it picks the analysis and keeps the reply under a size limit. The entry points are `review.query(kind="guiding")` and `query(kind="capture")`. This keeps every stage a pure function of its input.
 
 For exact behavior, read the code. The code is the source of truth.

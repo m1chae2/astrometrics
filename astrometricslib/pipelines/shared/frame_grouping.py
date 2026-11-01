@@ -13,8 +13,8 @@ import math
 import os
 from typing import Any
 
-from astrometricslib.foundation.enums import FilterType
 from astrometricslib.models.target import FrameRecord
+from astrometricslib.utilities.frame_identity import frame_is_spectral
 
 logger = logging.getLogger(__name__)
 
@@ -121,38 +121,6 @@ def frames_missing_focal_length(target: Any, camera_name: str | None = None) -> 
         if (not camera_name or camera_name.lower() in (frame.camera or "").lower())
         and frame_configuration_key(frame) is None
     ]
-
-
-def frame_is_spectral(frame: Any) -> bool:
-    """Decide whether a frame is a spectroscopy frame.
-
-    A frame's filter can show up as an already-normalized `FilterType`
-    member, a bare string that skipped normalization, or the catalog
-    value itself ("Star Analyzer 200") rather than the "SPEC" alias --
-    checking all three keeps spectral frames recognized the same way
-    everywhere they're classified, instead of each caller growing its
-    own slightly different test.
-
-    Parameters
-    ----------
-    frame : `Any`
-        The frame record (or anything with a `.filter` attribute or
-        `"filter"` key) to check.
-
-    Returns
-    -------
-    is_spectral : `bool`
-        True if the frame is a spectroscopy frame.
-    """
-    if isinstance(frame, dict):
-        frame_filter = frame.get("filter")
-    else:
-        frame_filter = getattr(frame, "filter", None)
-    return (
-        frame_filter == FilterType.SPEC
-        or getattr(frame_filter, "name", None) == "SPEC"
-        or str(frame_filter).upper() in ("SPEC", "STAR ANALYZER 200", "SPECTROSCOPY")
-    )
 
 
 def select_frames_for_processing(

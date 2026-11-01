@@ -123,7 +123,7 @@ class CaptureSetting(BaseModel):
         `FrameRecord.is_spectral`). A setting with no filter name is not
         spectral. This is worked out every time and is not saved.
         """
-        from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
+        from astrometricslib.utilities.frame_identity import frame_is_spectral
 
         return frame_is_spectral({"filter": self.filter_name})
 

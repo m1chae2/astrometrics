@@ -577,7 +577,7 @@ class Target(BaseModel):
         subject_id : `str`
             ``"<target id>/<path below the target's lights folder>"``.
         """
-        from astrometricslib.pipelines.shared.quality.frame_measurement import frame_subject_id
+        from astrometricslib.utilities.frame_identity import frame_subject_id
 
         return frame_subject_id(frame if isinstance(frame, str) else frame.path, self.id)
 

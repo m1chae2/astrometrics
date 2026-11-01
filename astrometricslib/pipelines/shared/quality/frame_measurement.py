@@ -56,7 +56,6 @@ The work is spread over four modules in this folder:
 import hashlib
 import logging
 import math
-import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -121,6 +120,7 @@ from astrometricslib.pipelines.shared.quality.time_budget import (
     Stopwatch,
 )
 from astrometricslib.utilities.exceptions import DATA_ERRORS
+from astrometricslib.utilities.frame_identity import frame_subject_id
 from astrometricslib.utilities.observing_night import observing_night_id
 
 logger = logging.getLogger(__name__)
@@ -248,35 +248,6 @@ class _Context:
         """
         for metric in metrics:
             self.add(metric, reason=reason, channel=channel)
-
-
-def frame_subject_id(path: str, target_id: str) -> str:
-    """Name a frame by its target and its place in the target's lights folder.
-
-    The library keeps frames at ``<frames root>/lights/<target>/<telescope>/
-    <camera>/<file>``. The id keeps what follows the target folder, so it does
-    not change when the frames root moves to another mount.
-
-    Parameters
-    ----------
-    path : `str`
-        The frame's path.
-    target_id : `str`
-        The target's id.
-
-    Returns
-    -------
-    subject_id : `str`
-        ``"<target_id>/<path below the target's lights folder>"``. A path with
-        no ``lights`` folder above a target folder gives the target id and the
-        file name only, never the full path.
-    """
-    parts = os.path.normpath(path).split(os.sep)
-    lights_positions = [
-        index for index, part in enumerate(parts) if part.lower() == "lights" and index + 2 < len(parts)
-    ]
-    relative_parts = parts[lights_positions[-1] + 2 :] if lights_positions else parts[-1:]
-    return "/".join([target_id, *relative_parts])
 
 
 def frame_subject(

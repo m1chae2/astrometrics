@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import inspect
 import re
+import sys
 import typing
 from typing import Any
 
@@ -54,13 +55,16 @@ def _public_attribute(library: str, name: str) -> Any:
     return None
 
 
-def _class_hints(cls: type) -> dict[str, Any]:
+def _class_hints(cls: type, names: dict[str, Any] | None = None) -> dict[str, Any]:
     """Read the annotations of a class, or nothing when one cannot be resolved.
 
     Parameters
     ----------
     cls : `type`
         The class to read.
+    names : `dict` [`str`, `Any`], optional
+        Names the annotations use that the class's module only imports for
+        type checking, such as ``{"ObservationReview": ObservationReview}``.
 
     Returns
     -------
@@ -69,7 +73,10 @@ def _class_hints(cls: type) -> dict[str, Any]:
         only imported for type checking.
     """
     try:
-        return typing.get_type_hints(cls)
+        if not names:
+            return typing.get_type_hints(cls)
+        module_names = dict(vars(sys.modules[cls.__module__]))
+        return typing.get_type_hints(cls, globalns={**module_names, **names})
     except NameError, TypeError:
         return {}
 
@@ -528,7 +535,9 @@ def generate_wayfindinglib_docs() -> str:
 
     # `ObservationReview` is the class of `wayfinder.review`. It is found
     # from the annotation the `Wayfinder` class gives that attribute, if any.
-    review_cls = _class_hints(wayfindinglib.Wayfinder).get("review")
+    from wayfindinglib.api.review import ObservationReview
+
+    review_cls = _class_hints(wayfindinglib.Wayfinder, {"ObservationReview": ObservationReview}).get("review")
 
     sections: list[str] = [
         "# Wayfinding Library (`wayfindinglib`)",

@@ -188,6 +188,7 @@ def test_a_stack_that_finishes_after_the_give_up_is_not_recorded(monkeypatch: py
     abandonment = RunAbandonment()
     archive_results: list[bool] = []
     stage_run = SimpleNamespace(
+        drivers=None,
         engine=object(),
         target=SimpleNamespace(id="NGC 1499"),
         stack_file="stack.fits",

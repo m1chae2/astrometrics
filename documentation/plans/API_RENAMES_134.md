@@ -87,6 +87,24 @@ The reply of `quality:query`, `images:delete` and `calibration:get_stats` keeps 
 | `quality_flag_value_outliers` | Removed |
 | `quality_query` | Same name; new `limit` and `offset` arguments |
 
+## wayfindinglib: `review`, `control` and `execution`
+
+`Wayfinder` has a new sub-API, `wayfinder.review` (`wayfindinglib/api/review.py`, class `ObservationReview`). No
+old name is kept as an alias.
+
+| Old | New |
+| --- | --- |
+| `wayfinder.control.history` (class `HistoryControl`) | `wayfinder.review` (class `ObservationReview`, built from `control`) |
+| `control.history.query` | `review.query` |
+| `control.history.get_live_session_status` | `review.get_live_session_status` |
+| `control.history.frame_guiding` | `review.frame_guiding` (stays its own call: it takes a target and a frame range, and `query` takes a night) |
+| `control.history.get_performance_envelope` | `review.get_performance_envelope` |
+| `control.history.save_ekos_session_context` | `review.save_ekos_session_context` (made private further down) |
+| `group_alignment_attempts(attempts)` from `wayfindinglib` | `review.query_alignment_sessions(attempts)`; takes a list of plain dictionaries and returns `AlignmentSessionsResult` (`attempts`, `targets`) |
+| RPC `telescope:get_performance_envelope` target `wayfinder.control.history` | `wayfinder.review`; the reply keeps its shape |
+| MCP `observatory_history_query`, `_get_live_session_status`, `_frame_guiding`, `_get_performance_envelope`, `_save_ekos_session_context` | `review_query`, `review_get_live_session_status`, `review_frame_guiding`, `review_get_performance_envelope`, `review_save_ekos_session_context` |
+| (new) | MCP `review_query_alignment_sessions` (dropped: the backend calls it) |
+
 ## Left as they were, on purpose
 
 - `visualization.get_last_captured_image` is separate from `render_fits`: it finds the newest file itself and

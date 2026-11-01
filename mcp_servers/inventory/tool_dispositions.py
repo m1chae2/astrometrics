@@ -229,7 +229,7 @@ DECISIONS = {
         "the spectrum, a predicted peak at another exposure, a summary by exposure and pier side); it "
         "replaces quality_check_spectral_frames.",
     ),
-    "observatory_history_get_live_session_status": ToolDecision(
+    "review_get_live_session_status": ToolDecision(
         "keep",
         "Served 2026-10-03. refresh=true copies the newest Ekos and KStars logs into a local folder, "
         "which is reading from the telescope computer and adds files only. A folder argument is now "
@@ -250,7 +250,12 @@ DECISIONS = {
     "target_get_frame": ToolDecision(
         "keep", "Returns the path of one frame, found by ISO, exposure and index."
     ),
-    "observatory_history_frame_guiding": ToolDecision(
+    "review_query_alignment_sessions": ToolDecision(
+        "drop",
+        "The backend calls it with plate-solve attempts it has already read. The AI reads nights through "
+        'review_query(kind="alignment"), which groups them already.',
+    ),
+    "review_frame_guiding": ToolDecision(
         "keep",
         "Built 2026-10-03. Cuts the stored guide-log samples to each light frame's exposure window. "
         "Reads only.",
@@ -379,7 +384,7 @@ DECISIONS = {
         "withhold", "Writes the calibration counts and the session after a night."
     ),
     # ---- Keep ----
-    "observatory_history_query": ToolDecision(
+    "review_query": ToolDecision(
         "keep",
         "Built 2026-10-03. Reads the recorded nights and calculates the analyses, in replies under 40,000 "
         "characters. The recorded-data tables are read through the butler, which creates a missing table. "
@@ -445,7 +450,7 @@ DECISIONS = {
     "observatory_safety_execute_safe_state": ToolDecision(
         "drop", "Commands the mount and enclosure, so it is dropped with the other hardware tools."
     ),
-    "observatory_history_get_performance_envelope": ToolDecision(
+    "review_get_performance_envelope": ToolDecision(
         "keep", "Slow: reads every session and target twice.", "observe"
     ),
     "observatory_remote_check_connection": ToolDecision("keep", "A small network probe.", "observe"),
@@ -538,7 +543,7 @@ DECISIONS = {
     "observatory_equipment_save_commissioning_run": ToolDecision(
         "drop", "Takes a whole run object that MCP cannot send. The ingest tools create the same records."
     ),
-    "observatory_history_save_ekos_session_context": ToolDecision(
+    "review_save_ekos_session_context": ToolDecision(
         "drop", "Takes a whole context object that MCP cannot send. The ingest tools create the same records."
     ),
     "observatory_guiding_save_run": ToolDecision(
@@ -676,6 +681,8 @@ CATEGORY_RULES = (
     (re.compile(r"^(processing_|diagnostics_|quality_|visualization_)"), "image-processing"),
     (re.compile(r"^jobs_"), "jobs-history"),
     (re.compile(r"^(planning_|execution_)"), "planning-sessions"),
+    (re.compile(r"^review_save_"), "observatory-config"),
+    (re.compile(r"^review_"), "observatory-status"),
     (
         re.compile(
             r"^observatory_[a-z]+_(save_|set_active_|apply_promotion_decision"

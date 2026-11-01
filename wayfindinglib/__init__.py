@@ -1,13 +1,14 @@
 """Purpose: The Wayfinder, the entry point to the wayfinding library.
 
-Description: `Wayfinder` composes the library's three sub-APIs:
+Description: `Wayfinder` composes the library's four sub-APIs:
 `control` (operate the observatory), `planning` (decide what to
-observe) and `execution` (run and recover an observing session).
-`control` has seven children named by topic, such as `control.mount`
-and `control.history`. The package root also offers the models those
-sub-APIs take and return, the pure functions callers need
-(`group_alignment_attempts`, and `fit_reply_to_budget`, which the MCP tools
-use to shorten a long quality reply), and the library's own error class.
+observe), `execution` (run and recover an observing session) and
+`review` (how the nights went). `control` has six children named by
+topic, such as `control.mount` and `control.guiding`. The package root
+also offers the models those sub-APIs take and return, the pure
+functions callers need (`group_alignment_attempts`, and
+`fit_reply_to_budget`, which the MCP tools use to shorten a long quality
+reply), and the library's own error class.
 The error categories themselves (`NotFoundError`,
 `InvalidArgumentError` and the rest) come from `astrometricslib`.
 
@@ -187,7 +188,7 @@ _LAZY_EXPORTS = {
     "PlanChangeItem": "wayfindinglib.models.session.observation_session",
     "PlanRevisionConflictError": "wayfindinglib.models.session.observation_session",
     "SequenceSummary": "wayfindinglib.models.planning.sequence_summary",
-    # Models that `control.history` returns.
+    # Models that `review` returns.
     "NightListEntry": "wayfindinglib.models.session.night_list",
     "TargetChange": "wayfindinglib.models.session.night_list",
     "NightQuality": "wayfindinglib.models.session.night_quality",
@@ -236,9 +237,9 @@ def __getattr__(name: str) -> object:
 class Wayfinder:
     """The entry point to the wayfinding library.
 
-    Builds and holds the three sub-APIs, `control`, `planning` and
-    `execution`, over one configuration, one `DiskButler` and one
-    `Astrometrics` handle, so all three see the same records. It has no
+    Builds and holds the four sub-APIs, `control`, `planning`,
+    `execution` and `review`, over one configuration, one `DiskButler` and
+    one `Astrometrics` handle, so all four see the same records. It has no
     methods of its own.
 
     The watchdog (`wayfindinglib/watchdog/`) is not built here on
@@ -265,18 +266,22 @@ class Wayfinder:
         ----------
         control : `ObservatoryControl`
             Direct hardware commanding across mount, imaging, guiding,
-            remote, history, safety, and equipment.
+            remote, safety, and equipment.
         planning : `ObservationPlanning`
             Target visibility, sky catalogs, mosaic calculation, and queue
             sequence planning.
         execution : `ObservationExecution`
             Session queue advancement, meridian flip automation, and fault
             recovery.
+        review : `ObservationReview`
+            Past and current observing nights, alignment sessions and the
+            equipment's performance limits.
         """
         from astrometricslib import Astrometrics, get_configuration
         from wayfindinglib.api.control import ObservatoryControl
         from wayfindinglib.api.execution import ObservationExecution
         from wayfindinglib.api.planning import ObservationPlanning
+        from wayfindinglib.api.review import ObservationReview
         from wayfindinglib.drivers.butler import DiskButler
 
         self.config = config or get_configuration()
@@ -286,6 +291,7 @@ class Wayfinder:
         butler = DiskButler(app_config=self.config)
         self.control = ObservatoryControl(config=self.config, butler=butler, astrometrics=self.astrometrics)
         self.planning = ObservationPlanning(self.config, butler, astrometrics=self.astrometrics)
+        self.review = ObservationReview(self.control)
         self.execution = ObservationExecution(
             self.config, butler, astrometrics=self.astrometrics, control=self.control
         )

@@ -11,7 +11,7 @@ RPC reply has one fixed type.
 * The depth goal of a target, from `Wayfinder.planning.get_depth_goal` and
   `set_depth_goal`: the plain level a person chose (Quick look, Good or
   Deep), how deep the image is, and the time to reach the level.
-* Night history, from `Wayfinder.control.history`: the list of nights, one
+* Night history, from `Wayfinder.review`: the list of nights, one
   night's quality review, and the slews that changed target. These reads
   never register a background job.
 * Two live facts: the status of the running session (read from the logs
@@ -133,7 +133,7 @@ class AdvisoryService:
         nights : `list` [`NightListEntry`]
             One entry per night, in the order the library gives them.
         """
-        return self.wayfinder.control.history.query(kind="nights", limit=limit, register_job=False)
+        return self.wayfinder.review.query(kind="nights", limit=limit, register_job=False)
 
     def get_night_quality(self, session_id: str) -> Any:
         """Read the quality review of one night.
@@ -148,9 +148,7 @@ class AdvisoryService:
         review : `NightQuality`
             The night's targets, warnings and guiding summary.
         """
-        return self.wayfinder.control.history.query(
-            kind="night_quality", session_id=session_id, register_job=False
-        )
+        return self.wayfinder.review.query(kind="night_quality", session_id=session_id, register_job=False)
 
     def list_target_changes(self, session_id: str | None = None, limit: int = 10) -> Any:
         """List the slews that moved the mount to a new target.
@@ -167,7 +165,7 @@ class AdvisoryService:
         changes : `list` [`TargetChange`]
             The target changes, in the order the library gives them.
         """
-        return self.wayfinder.control.history.query(
+        return self.wayfinder.review.query(
             kind="target_changes", session_id=session_id, limit=limit, register_job=False
         )
 
@@ -192,7 +190,7 @@ class AdvisoryService:
         status : `LiveSessionStatus`
             The session status.
         """
-        return self.wayfinder.control.history.get_live_session_status(
+        return self.wayfinder.review.get_live_session_status(
             window_minutes=window_minutes, refresh=False, include=include, limit=limit
         )
 

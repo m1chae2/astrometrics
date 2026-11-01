@@ -16,11 +16,13 @@ def test_wayfinder_initialization() -> None:
     assert wayfinder.control is not None
     assert wayfinder.planning is not None
     assert wayfinder.execution is not None
+    assert wayfinder.review is not None
 
 
 def test_wayfinder_composes_the_three_root_function_astrometrics() -> None:
     """Verify Wayfinder composes .control/.planning/.execution interfaces."""
     from wayfindinglib import ObservationExecution, ObservationPlanning, ObservatoryControl
+    from wayfindinglib.api.review import ObservationReview
 
     config = AppConfiguration()
     wayfinder = Wayfinder(config)
@@ -28,6 +30,7 @@ def test_wayfinder_composes_the_three_root_function_astrometrics() -> None:
     assert isinstance(wayfinder.control, ObservatoryControl)
     assert isinstance(wayfinder.planning, ObservationPlanning)
     assert isinstance(wayfinder.execution, ObservationExecution)
+    assert isinstance(wayfinder.review, ObservationReview)
     assert wayfinder.planning._butler is wayfinder.execution._butler
 
 

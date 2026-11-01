@@ -462,7 +462,7 @@ def generate_wayfindinglib_docs() -> str:
             )
         )
         sections.append("\n---\n")
-        # The operations live on the seven topic children, such as
+        # The operations live on the six topic children, such as
         # `control.mount`; the class annotations name each child's class.
         for child_name, child_class in typing.get_type_hints(control_cls).items():
             sections.append(

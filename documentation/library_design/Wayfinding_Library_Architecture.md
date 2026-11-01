@@ -443,7 +443,7 @@ Control groups its operations by topic: mount, imaging, guiding, remote file tra
 <!-- impl: wayfindinglib.api.control.imaging.ImagingControl -->
 <!-- impl: wayfindinglib.api.control.guiding.GuidingControl -->
 <!-- impl: wayfindinglib.api.control.remote.RemoteControl -->
-<!-- impl: wayfindinglib.api.control.history.HistoryControl -->
+<!-- impl: wayfindinglib.api.review.ObservationReview -->
 <!-- impl: wayfindinglib.api.control.safety.SafetyControl -->
 <!-- impl: wayfindinglib.api.control.equipment.EquipmentControl -->
 

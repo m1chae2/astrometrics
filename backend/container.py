@@ -193,6 +193,7 @@ class Container:
 
         self.alignment_service = AlignmentService(
             observatory_api=self.wayfinder.control,
+            review=self.wayfinder.review,
             records=ControlRecordStore.for_configuration(self.config_service),
             targets=self.astrometrics.targets,
         )

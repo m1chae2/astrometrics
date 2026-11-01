@@ -2,7 +2,7 @@
 
 Description: `wayfindinglib/__init__.py` is the only door into this library
 that code outside it should use. `Wayfinder.control` is split into a root
-and seven children named by topic, and `planning` and `execution` are
+and six children named by topic, and `planning` and `execution` are
 single classes. Renaming, adding or removing a public name is a change to
 the library's contract with the backend, the MCP servers and the UI, so it
 must be a deliberate edit to the lists below rather than a side effect of
@@ -20,6 +20,7 @@ from pydantic import ValidationError
 import wayfindinglib
 from astrometricslib import AppConfiguration, ExternalServiceError, InvalidArgumentError, NotFoundError
 from wayfindinglib import ObservationExecution, ObservationPlanning, ObservatoryControl, SkyPosition
+from wayfindinglib.api.review import ObservationReview
 from wayfindinglib.drivers.butler import DiskButler
 
 EXPECTED_EXPORTS = frozenset({
@@ -141,6 +142,16 @@ EXECUTION_MEMBERS = frozenset({
 })
 """The public members of `ObservationExecution`."""
 
+REVIEW_MEMBERS = frozenset({
+    "query",
+    "query_alignment_sessions",
+    "get_live_session_status",
+    "frame_guiding",
+    "get_performance_envelope",
+    "save_ekos_session_context",
+})
+"""The public members of `ObservationReview`."""
+
 ROOT_DRIVERS = frozenset({
     "driver",
     "mount_driver",
@@ -207,13 +218,6 @@ CHILDREN = {
         "stop_loop",
     },
     "remote": {"list", "check_connection", "frame_status", "sync_frames", "sync_logs"},
-    "history": {
-        "query",
-        "get_live_session_status",
-        "frame_guiding",
-        "get_performance_envelope",
-        "save_ekos_session_context",
-    },
     "safety": {
         "status",
         "assess",
@@ -292,6 +296,18 @@ def test_planning_offers_exactly_its_pinned_members() -> None:
 def test_execution_offers_exactly_its_pinned_members() -> None:
     """`ObservationExecution` offers exactly the pinned methods."""
     assert _public_names(ObservationExecution) == EXECUTION_MEMBERS
+
+
+def test_review_offers_exactly_its_pinned_members(control: ObservatoryControl) -> None:
+    """`ObservationReview` offers exactly the pinned methods."""
+    assert _public_names(ObservationReview(control)) == REVIEW_MEMBERS
+
+
+def test_review_shares_the_context_of_control(control: ObservatoryControl) -> None:
+    """Review reads through control's context and holds no reference to it."""
+    review = ObservationReview(control)
+    assert review._context is control._context
+    assert control not in vars(review).values()
 
 
 def test_background_jobs_can_skip_registering_a_job() -> None:

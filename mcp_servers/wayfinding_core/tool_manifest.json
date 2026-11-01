@@ -226,41 +226,6 @@
       "interim_block": "",
       "note": "Ends the guide loop through a stop event MCP cannot send. Dropped with the other hardware tools."
     },
-    "observatory_history_frame_guiding": {
-      "tool_class": "compute",
-      "category": "observatory-status",
-      "disposition": "keep",
-      "interim_block": "",
-      "note": "Built 2026-10-03. Cuts the stored guide-log samples to each light frame's exposure window. Reads only."
-    },
-    "observatory_history_get_live_session_status": {
-      "tool_class": "ingest",
-      "category": "observatory-status",
-      "disposition": "keep",
-      "interim_block": "",
-      "note": "Served 2026-10-03. refresh=true copies the newest Ekos and KStars logs into a local folder, which is reading from the telescope computer and adds files only. A folder argument is now checked against the allowed roots. Reports pier side, camera temperature, exposure counts and dither settings; the guide algorithm is not in the logs and the reply says so."
-    },
-    "observatory_history_get_performance_envelope": {
-      "tool_class": "observe",
-      "category": "observatory-status",
-      "disposition": "keep",
-      "interim_block": "",
-      "note": "Slow: reads every session and target twice."
-    },
-    "observatory_history_query": {
-      "tool_class": "compute",
-      "category": "observatory-status",
-      "disposition": "keep",
-      "interim_block": "",
-      "note": "Built 2026-10-03. Reads the recorded nights and calculates the analyses, in replies under 40,000 characters. The recorded-data tables are read through the butler, which creates a missing table. Kind night_quality needs session_id (the night) and returns a typed review."
-    },
-    "observatory_history_save_ekos_session_context": {
-      "tool_class": "change-data",
-      "category": "observatory-config",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "Takes a whole context object that MCP cannot send. The ingest tools create the same records."
-    },
     "observatory_imaging_capture_image": {
       "tool_class": "actuate",
       "category": "observatory-control",
@@ -645,6 +610,48 @@
       "disposition": "withhold",
       "interim_block": "",
       "note": "The AI is read-only, so a tool that writes is not offered."
+    },
+    "review_frame_guiding": {
+      "tool_class": "compute",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-10-03. Cuts the stored guide-log samples to each light frame's exposure window. Reads only."
+    },
+    "review_get_live_session_status": {
+      "tool_class": "ingest",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Served 2026-10-03. refresh=true copies the newest Ekos and KStars logs into a local folder, which is reading from the telescope computer and adds files only. A folder argument is now checked against the allowed roots. Reports pier side, camera temperature, exposure counts and dither settings; the guide algorithm is not in the logs and the reply says so."
+    },
+    "review_get_performance_envelope": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Slow: reads every session and target twice."
+    },
+    "review_query": {
+      "tool_class": "compute",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-10-03. Reads the recorded nights and calculates the analyses, in replies under 40,000 characters. The recorded-data tables are read through the butler, which creates a missing table. Kind night_quality needs session_id (the night) and returns a typed review."
+    },
+    "review_query_alignment_sessions": {
+      "tool_class": "compute",
+      "category": "observatory-status",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "The backend calls it with plate-solve attempts it has already read. The AI reads nights through review_query(kind=\"alignment\"), which groups them already."
+    },
+    "review_save_ekos_session_context": {
+      "tool_class": "change-data",
+      "category": "observatory-config",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Takes a whole context object that MCP cannot send. The ingest tools create the same records."
     }
   }
 }

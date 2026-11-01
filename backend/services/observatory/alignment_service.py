@@ -4,7 +4,8 @@ Description: Centering the mount on a target by plate solving is
 ``control.mount.slew(destination, center=True)`` in the wayfinding
 library, which records each round as an alignment attempt. This service
 only runs that call on a background thread and stops it, lists the
-recorded nights through ``control.history.query(kind="alignment")``, and
+recorded nights through ``review.query(kind="alignment")``, groups
+attempts by target with ``review.query_alignment_sessions``, and
 records the plate-solve syncs and polar alignment runs that another
 program (such as Ekos) sends to the mount.
 """
@@ -21,12 +22,10 @@ from astrometricslib import (
     parse_coordinate_string,
 )
 from wayfindinglib import (
-    AlignmentAttempt,
     ControlRecordStore,
     MountPointingModel,
     ObservatoryControl,
     SkyPosition,
-    group_alignment_attempts,
 )
 
 logger = logging.getLogger(__name__)
@@ -38,7 +37,20 @@ RECENT_ATTEMPTS_SHOWN = 50
 """How many recorded attempts the live status lists when no run is active."""
 
 ATTEMPT_STATUSES = ("solving", "failed", "warning", "aligned", "idle")
-"""The statuses an `AlignmentAttempt` can have."""
+"""The statuses an alignment attempt can have."""
+
+SOLVING_ATTEMPT = {
+    "status": "solving",
+    "deltaRaArcsec": None,
+    "deltaDecArcsec": None,
+    "ra": None,
+    "dec": None,
+    "pointingErrorArcsec": None,
+    "timestamp": None,
+    "targetName": None,
+    "sessionId": None,
+}
+"""The placeholder row shown while a centering run waits for a solve."""
 
 
 class AlignmentService:
@@ -49,13 +61,17 @@ class AlignmentService:
         observatory_api: ObservatoryControl,
         records: ControlRecordStore | None = None,
         targets: TargetCatalog | None = None,
+        review: Any = None,
     ) -> None:
-        """Keep the observatory control, the alignment records and the targets.
+        """Keep the control, the review, the records and the targets.
 
         Parameters
         ----------
         observatory_api : `ObservatoryControl`
             The Wayfinder's `control`, which runs the centering.
+        review : `ObservationReview`, optional
+            The Wayfinder's `review`, which lists the recorded nights and
+            groups attempts by target.
         records : `ControlRecordStore`, optional
             The store that holds the alignment records.
         targets : `astrometricslib.TargetCatalog`, optional
@@ -63,6 +79,7 @@ class AlignmentService:
             tracked in a night's view.
         """
         self._observatory = observatory_api
+        self._review = review
         self._records = records
         self._targets = targets
         self._alignment_thread: threading.Thread | None = None
@@ -80,8 +97,8 @@ class AlignmentService:
         live : `dict` [`str`, `list` [`dict`]]
             ``alignmentAttempts``: one dict per attempt, oldest first.
             ``alignmentTargets``: the same attempts grouped into one
-            `AlignmentTargetSession` per target, with jitter and drift
-            rates, worked out by the library.
+            session per target, with jitter and drift rates, worked out by
+            the library.
         """
         if not self._records:
             return {"alignmentAttempts": [], "alignmentTargets": []}
@@ -89,25 +106,43 @@ class AlignmentService:
         if self._run_started_at is not None:
             rows = [row for row in rows if (row.get("timestamp") or 0) >= self._run_started_at]
         attempts = [
-            AlignmentAttempt(
-                status=row.get("status") if row.get("status") in ATTEMPT_STATUSES else "aligned",
-                delta_ra_arcsec=row.get("delta_ra_arcsec"),
-                delta_dec_arcsec=row.get("delta_dec_arcsec"),
-                ra=row.get("mount_ra"),
-                dec=row.get("mount_dec"),
-                pointing_error_arcsec=row.get("pointing_error_arcsec"),
-                timestamp=row.get("timestamp"),
-                target_name=row.get("target_name"),
-            )
+            {
+                "status": row.get("status") if row.get("status") in ATTEMPT_STATUSES else "aligned",
+                "deltaRaArcsec": row.get("delta_ra_arcsec"),
+                "deltaDecArcsec": row.get("delta_dec_arcsec"),
+                "ra": row.get("mount_ra"),
+                "dec": row.get("mount_dec"),
+                "pointingErrorArcsec": row.get("pointing_error_arcsec"),
+                "timestamp": row.get("timestamp"),
+                "targetName": row.get("target_name"),
+                "sessionId": None,
+            }
             for row in rows
         ]
-        targets = group_alignment_attempts(attempts)
+        targets = self._require_review().query_alignment_sessions(attempts).targets
         if self.is_active():
-            attempts.append(AlignmentAttempt(status="solving"))
+            attempts.append(dict(SOLVING_ATTEMPT))
         return {
-            "alignmentAttempts": [attempt.model_dump(by_alias=True) for attempt in attempts],
+            "alignmentAttempts": attempts,
             "alignmentTargets": [target.model_dump(mode="json", by_alias=True) for target in targets],
         }
+
+    def _require_review(self) -> Any:
+        """Return the review, or fail clearly if none was given.
+
+        Returns
+        -------
+        review : `ObservationReview`
+            The Wayfinder's review.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If the service was built without a review.
+        """
+        if self._review is None:
+            raise InvalidArgumentError("The alignment service was built without a review.")
+        return self._review
 
     def get_polar_alignment(self) -> dict[str, Any]:
         """Get current or latest polar alignment assistant status.
@@ -160,9 +195,9 @@ class AlignmentService:
         -------
         sessions : `list` [`dict` [`str`, `Any`]]
             One summary per night, from
-            ``control.history.query(kind="alignment")``.
+            ``review.query(kind="alignment")``.
         """
-        reply = self._observatory.history.query(kind="alignment", limit=50, register_job=False)
+        reply = self._require_review().query(kind="alignment", limit=50, register_job=False)
         return reply["sessions"]
 
     def get_session_data(self, session_id: str = "") -> dict[str, Any]:
@@ -179,7 +214,7 @@ class AlignmentService:
             ``alignmentAttempts`` (a status the model does not know reads
             as ``aligned``), ``alignmentTargets`` (the attempts grouped by
             target, with jitter and drift rates, from
-            `group_alignment_attempts`) and ``polarAlignment``.
+            ``review.query_alignment_sessions``) and ``polarAlignment``.
         """
         if not self._records:
             return {"alignmentAttempts": [], "alignmentTargets": [], "polarAlignment": None}
@@ -223,9 +258,7 @@ class AlignmentService:
                     "timestamp": p.get("timestamp"),
                 }
 
-            targets = group_alignment_attempts([
-                AlignmentAttempt.model_validate(attempt) for attempt in attempts
-            ])
+            targets = self._require_review().query_alignment_sessions(attempts).targets
             return {
                 "alignmentAttempts": attempts,
                 "alignmentTargets": [target.model_dump(mode="json", by_alias=True) for target in targets],
@@ -253,7 +286,7 @@ class AlignmentService:
     def compute_pointing_model(self, session_id: str | None = None) -> dict[str, Any]:
         """Compute decomposed geometric mount pointing terms.
 
-        Delegates to `control.history.query(kind="pointing_model")`
+        Delegates to `review.query(kind="pointing_model")`
         rather than fitting directly.
 
         Parameters
@@ -274,9 +307,7 @@ class AlignmentService:
             If the library cannot fit a model: no night was given, or no
             observer location is known.
         """
-        reply = self._observatory.history.query(
-            kind="pointing_model", session_id=session_id, register_job=False
-        )
+        reply = self._require_review().query(kind="pointing_model", session_id=session_id, register_job=False)
         if "error" in reply:
             raise InvalidArgumentError(reply["error"])
         return MountPointingModel.model_validate(reply["model"]).model_dump(by_alias=True)

@@ -122,7 +122,7 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "telescope:get_pointing_model": ("alignment_service", "compute_pointing_model"),
     # The equipment's limits, with the sky's tracking-risk grid that the
     # planetarium colors.
-    "telescope:get_performance_envelope": ("wayfinder.control.history", "get_performance_envelope"),
+    "telescope:get_performance_envelope": ("wayfinder.review", "get_performance_envelope"),
     "telescope:get_guiding_spectrum": ("guiding_service", "analyze_guiding_spectrum"),
     # Equipment set-up and control mode
     "observatory:list_cameras": ("equipment_service", "list_camera_profiles"),

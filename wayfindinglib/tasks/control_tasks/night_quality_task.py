@@ -1,7 +1,7 @@
 """Purpose: Review the quality of one observing night.
 
 Description: `build_night_quality` is the work behind
-`control.history.query(kind="night_quality", session_id=...)`
+`review.query(kind="night_quality", session_id=...)`
 (`QUALITY_METRICS_PLAN.md` Section 6.1, use case UC1). For each target imaged
 that night it states where the time went: frames set aside, and the efficiency
 lost in the frames kept, against the user's own best nights with the same

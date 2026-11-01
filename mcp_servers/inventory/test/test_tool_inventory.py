@@ -43,7 +43,7 @@ from mcp_servers.inventory.tool_inventory import (
         ("observatory_imaging_capture_image", "actuate"),
         ("observatory_mount_sync", "actuate"),
         ("observatory_mount_status", "observe"),
-        ("observatory_history_query", "compute"),
+        ("review_query", "compute"),
         ("observatory_mount_compute_pointing_correction", "compute"),
         ("observatory_safety_save_rule_set", "change-data"),
         ("processing_process_target", "change-data"),
@@ -283,7 +283,7 @@ def test_tools_the_user_declined_are_dropped() -> None:
         "observatory_guiding_drain_external_pulses",
         "observatory_guiding_refit_spectrum",
         "observatory_equipment_save_commissioning_run",
-        "observatory_history_save_ekos_session_context",
+        "review_save_ekos_session_context",
         "observatory_guiding_save_run",
     )
     for name in dropped:

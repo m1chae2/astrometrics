@@ -1,14 +1,13 @@
 """Purpose: `ObservatoryControl`, the entry point for the observatory.
 
 Description: `Wayfinder.control` is an `ObservatoryControl`. It holds no
-operations of its own. Its seven children, built once with it, do the
+operations of its own. Its six children, built once with it, do the
 work, each on one topic:
 
 - `mount`: pointing and tracking;
 - `imaging`: the main camera, filter wheel and focuser;
 - `guiding`: the guide camera, guide pulses and guider models;
 - `remote`: the observatory computer's files and logs;
-- `history`: past and current observing sessions;
 - `safety`: weather, the enclosure, and who is allowed to act;
 - `equipment`: the equipment profile and device connections.
 
@@ -26,7 +25,6 @@ from typing import TYPE_CHECKING, Any
 from wayfindinglib.api.control.context import ControlContext
 from wayfindinglib.api.control.equipment import EquipmentControl
 from wayfindinglib.api.control.guiding import GuidingControl
-from wayfindinglib.api.control.history import HistoryControl
 from wayfindinglib.api.control.imaging import ImagingControl
 from wayfindinglib.api.control.mount import MountControl
 from wayfindinglib.api.control.remote import RemoteControl
@@ -50,7 +48,7 @@ __all__ = ["ObservatoryControl"]
 
 
 class ObservatoryControl:
-    """Operate the observatory through seven topic children.
+    """Operate the observatory through six topic children.
 
     Parameters
     ----------
@@ -76,8 +74,6 @@ class ObservatoryControl:
         The guide camera, guide pulses and guider models.
     remote : `RemoteControl`
         The observatory computer's files and logs.
-    history : `HistoryControl`
-        Past and current observing sessions.
     safety : `SafetyControl`
         Weather, the enclosure, and who is allowed to act.
     equipment : `EquipmentControl`
@@ -88,7 +84,6 @@ class ObservatoryControl:
     imaging: ImagingControl
     guiding: GuidingControl
     remote: RemoteControl
-    history: HistoryControl
     safety: SafetyControl
     equipment: EquipmentControl
 
@@ -100,7 +95,7 @@ class ObservatoryControl:
         correction_config: CorrectionConfig | None = None,
         astrometrics: Astrometrics | None = None,
     ) -> None:
-        """Build the shared context and the seven children."""
+        """Build the shared context and the six children."""
         if config is None:
             from astrometricslib import get_configuration
 
@@ -116,7 +111,6 @@ class ObservatoryControl:
         self.imaging = ImagingControl(self._context)
         self.guiding = GuidingControl(self._context)
         self.remote = RemoteControl(self._context)
-        self.history = HistoryControl(self._context)
         self.safety = SafetyControl(self._context)
         self.equipment = EquipmentControl(self._context)
 

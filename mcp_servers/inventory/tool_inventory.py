@@ -315,7 +315,7 @@ CLASSIFICATION_RULES = (
         "Returns a stored, derived or measured value.",
     ),
     _rule(
-        r"^observatory_history_query$",
+        r"^review_query(_alignment_sessions)?$",
         "compute",
         "high",
         "Reads recorded nights and calculates the analyses.",
@@ -333,7 +333,7 @@ CLASSIFICATION_RULES = (
         "Measures frames and returns statistics. Saves nothing.",
     ),
     _rule(
-        r"^(observatory_history_frame_guiding|planning_get_visibility)$",
+        r"^(review_frame_guiding|planning_get_visibility)$",
         "compute",
         "high",
         "Calculates from stored records and the sky. Saves nothing.",

@@ -119,7 +119,8 @@ def test_indi_interface_ignores_zero_delta_echo_during_sync() -> None:
 def test_alignment_service_polls_external_syncs(tmp_path: Path) -> None:
     """Verify AlignmentService drains sync events into recorded attempts."""
     from backend.services.observatory.alignment_service import AlignmentService
-    from wayfindinglib import ControlRecordStore
+    from wayfindinglib import ControlRecordStore, ObservatoryControl
+    from wayfindinglib.api.review import ObservationReview
 
     driver_mock = MagicMock()
     driver_mock.drain_external_syncs.return_value = [
@@ -135,7 +136,9 @@ def test_alignment_service_polls_external_syncs(tmp_path: Path) -> None:
     observatory_mock.driver = driver_mock
 
     service = AlignmentService(
-        observatory_api=observatory_mock, records=ControlRecordStore(str(tmp_path / "wayfinding.db"))
+        observatory_api=observatory_mock,
+        review=ObservationReview(ObservatoryControl(config=MagicMock())),
+        records=ControlRecordStore(str(tmp_path / "wayfinding.db")),
     )
     service.poll_external_syncs()
 
@@ -405,6 +408,8 @@ def test_indi_interface_polar_alignment_and_paa_points() -> None:
 def test_alignment_service_session_queries_and_retrieval() -> None:
     """Verify AlignmentService lists sessions and retrieves historical data."""
     from backend.services.observatory.alignment_service import AlignmentService
+    from wayfindinglib import ObservatoryControl
+    from wayfindinglib.api.review import ObservationReview
 
     records_mock = MagicMock()
     records_mock.get_alignment_sessions.return_value = [
@@ -447,8 +452,9 @@ def test_alignment_service_session_queries_and_retrieval() -> None:
     ]
 
     observatory_mock = MagicMock()
-    observatory_mock.history.query.return_value = {"sessions": [{"sessionId": "2026-09-24", "syncCount": 5}]}
-    service = AlignmentService(observatory_api=observatory_mock, records=records_mock)
+    review = ObservationReview(ObservatoryControl(config=MagicMock()))
+    review.query = MagicMock(return_value={"sessions": [{"sessionId": "2026-09-24", "syncCount": 5}]})
+    service = AlignmentService(observatory_api=observatory_mock, review=review, records=records_mock)
     sessions = service.list_sessions()
     assert len(sessions) == 1
     assert sessions[0]["sessionId"] == "2026-09-24"

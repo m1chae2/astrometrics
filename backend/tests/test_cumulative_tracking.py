@@ -10,6 +10,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from backend.services.observatory.alignment_service import AlignmentService
+from wayfindinglib import ObservatoryControl
+from wayfindinglib.api.review import ObservationReview
 
 
 def test_get_session_data_all_retrieves_cumulative_attempts() -> None:
@@ -52,6 +54,7 @@ def test_get_session_data_all_retrieves_cumulative_attempts() -> None:
 
     service = AlignmentService(
         observatory_api=None,
+        review=ObservationReview(ObservatoryControl(config=MagicMock())),
         records=mock_logger,
     )
 
@@ -76,6 +79,7 @@ def test_get_cumulative_tracking_data_delegates_to_all_sessions() -> None:
 
     service = AlignmentService(
         observatory_api=None,
+        review=ObservationReview(ObservatoryControl(config=MagicMock())),
         records=mock_logger,
     )
 

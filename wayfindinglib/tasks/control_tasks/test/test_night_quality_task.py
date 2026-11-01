@@ -1,4 +1,4 @@
-"""Purpose: Tests for the night review, `control.history` kind night_quality.
+"""Purpose: Tests for the night review, `review` kind night_quality.
 
 Description: Builds a made-up science library of several nights, then reviews
 one night. Checks the loss account against the user's own baseline, the

@@ -26,9 +26,9 @@ from backend.services.infrastructure.handoff_service import HandoffService
 from backend.services.observatory.advisory_service import AdvisoryService
 from backend.services.observatory.mosaic_service import MosaicService
 from backend.services.observatory.plan_service import PlanService
-from wayfindinglib.api.control.history import HistoryControl
 from wayfindinglib.api.control.safety import SafetyControl
 from wayfindinglib.api.planning import ObservationPlanning
+from wayfindinglib.api.review import ObservationReview
 
 
 def _wayfinder() -> SimpleNamespace:
@@ -37,13 +37,14 @@ def _wayfinder() -> SimpleNamespace:
     Returns
     -------
     wayfinder : `types.SimpleNamespace`
-        With ``planning``, and ``control`` holding ``history`` and ``safety``.
+        With ``planning``, ``review``, and ``control`` holding ``safety``.
     """
-    control = SimpleNamespace(
-        history=create_autospec(HistoryControl, instance=True),
-        safety=create_autospec(SafetyControl, instance=True),
+    control = SimpleNamespace(safety=create_autospec(SafetyControl, instance=True))
+    return SimpleNamespace(
+        planning=create_autospec(ObservationPlanning, instance=True),
+        review=create_autospec(ObservationReview, instance=True),
+        control=control,
     )
-    return SimpleNamespace(planning=create_autospec(ObservationPlanning, instance=True), control=control)
 
 
 NEW_READS = {
@@ -107,7 +108,7 @@ def test_history_reads_register_no_job() -> None:
     """Each history read passes ``register_job=False`` and its arguments."""
     wayfinder = _wayfinder()
     service = AdvisoryService(wayfinder)
-    history = wayfinder.control.history
+    history = wayfinder.review
     service.list_nights()
     history.query.assert_called_with(kind="nights", limit=10, register_job=False)
     service.get_night_quality("2026-10-23")
@@ -122,7 +123,7 @@ def test_live_status_does_not_refresh_the_logs() -> None:
     """The live status reads the logs on disk and copies no new ones."""
     wayfinder = _wayfinder()
     AdvisoryService(wayfinder).get_live_session_status(window_minutes=5.0, include=["captures"])
-    wayfinder.control.history.get_live_session_status.assert_called_once_with(
+    wayfinder.review.get_live_session_status.assert_called_once_with(
         window_minutes=5.0, refresh=False, include=["captures"], limit=10
     )
 

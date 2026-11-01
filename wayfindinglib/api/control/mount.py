@@ -66,7 +66,7 @@ class MountControl(ControlChild):
         take a short frame, solve it, and if the pointing error is above
         `tolerance_arcsec`, sync the mount to the solved position and slew
         again. Each round is recorded as an alignment attempt (see
-        `control.history.query(kind="alignment")`). `abort_motion` stops
+        `review.query(kind="alignment")`). `abort_motion` stops
         the rounds.
 
         Parameters

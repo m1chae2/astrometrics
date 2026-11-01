@@ -198,9 +198,9 @@ Folder: `tasks/execution_tasks/`. Facade: `ObservationExecution` in `api/executi
 
 ### 6.1 Facade and children
 
-`ObservatoryControl` (`api/control/control.py`) holds the drivers and seven children, each a `ControlChild` sharing one `ControlContext` (`api/control/context.py`). Each child lives in `api/control/<child>.py` and has `status(include=...)`. `close()` stops control's threads at shutdown.
+`ObservatoryControl` (`api/control/control.py`) holds the drivers and six children, each a `ControlChild` sharing one `ControlContext` (`api/control/context.py`). Each child lives in `api/control/<child>.py` and has `status(include=...)`. `close()` stops control's threads at shutdown.
 
-**Table 6.** The seven children of `ObservatoryControl`.
+**Table 6.** The six children of `ObservatoryControl`.
 
 | Child | Main calls |
 | --- | --- |
@@ -208,11 +208,12 @@ Folder: `tasks/execution_tasks/`. Facade: `ObservationExecution` in `api/executi
 | `control.imaging` | `capture_image`, `set_filter`, `focus_move`, `compute_focus_correction` |
 | `control.guiding` | `run_loop`, `compute_correction`, `run_calibration`, `run_exposure_test` |
 | `control.remote` | `list`, `sync_frames`, `sync_logs` |
-| `control.history` | `query`, `get_live_session_status`, `frame_guiding`, `get_performance_envelope` |
 | `control.safety` | `assess`, `execute_safe_state`, `open_enclosure`, `close_enclosure`, `apply_promotion_decision` |
 | `control.equipment` | `connect`, `set_active_telescope`, `cooling_ramp_rate`, `summarize_device` |
 
-The `kind` values of `control.history.query` are `capture`, `guiding`, `sky_coverage`, `recurring_issues`, `ekos_sessions`, `guiding_runs`, `pointing_model`, `alignment`. `night_history.py` shrinks long replies. `hardware_operations.mount_position_to_icrs` converts the mount's JNow positions to ICRS.
+`Wayfinder.review` (`api/review.py`) holds the night reads.
+
+The `kind` values of `review.query` are `capture`, `guiding`, `sky_coverage`, `recurring_issues`, `ekos_sessions`, `guiding_runs`, `pointing_model`, `alignment`. `night_history.py` shrinks long replies. `hardware_operations.mount_position_to_icrs` converts the mount's JNow positions to ICRS.
 
 <!-- impl: wayfindinglib.api.control.context.ControlContext -->
 <!-- impl: wayfindinglib.api.control.context.ControlChild -->
@@ -323,7 +324,7 @@ All in `tasks/control_tasks/` unless noted.
 
 `ekos_log_ingestion.py` downloads guide and analyze logs (`control.remote.sync_logs`) and ties each session to its equipment (`attribute_session_equipment`). Parsers: `drivers/phd2/guide_log_parser.py`, `drivers/ekos/analyze_log_parser.py`. `MEASURED_GUIDING_SAMPLE_SOURCES` lists the samples a refit may read. `frame_pointing.py` records each solved frame's pointing error, one record per frame file name.
 
-`derive_performance_envelope` (`analytics/performance_envelope.py`) is the pure derivation (Architecture Equations (10) to (12)); `performance_envelope_tasks.py` gathers its inputs; the entry is `control.history.get_performance_envelope`. Constants: `SIGMA_TO_FWHM` (2.3548), `SIDEREAL_RATE_ARCSEC_PER_SECOND` (15.041), `MAD_TO_SIGMA` (1.4826). `analytics/tracking_risk.py` (`build_tracking_risk_map`) builds `tracking_risk`.
+`derive_performance_envelope` (`analytics/performance_envelope.py`) is the pure derivation (Architecture Equations (10) to (12)); `performance_envelope_tasks.py` gathers its inputs; the entry is `review.get_performance_envelope`. Constants: `SIGMA_TO_FWHM` (2.3548), `SIDEREAL_RATE_ARCSEC_PER_SECOND` (15.041), `MAD_TO_SIGMA` (1.4826). `analytics/tracking_risk.py` (`build_tracking_risk_map`) builds `tracking_risk`.
 
 <!-- impl: wayfindinglib.tasks.control_tasks.ekos_log_ingestion.attribute_session_equipment -->
 <!-- impl: wayfindinglib.models.session.telemetry.MEASURED_GUIDING_SAMPLE_SOURCES -->
@@ -393,7 +394,7 @@ All in `tasks/control_tasks/` unless noted.
 
 ### 6.10 Quality judgment and advice (Quality Judgment paper)
 
-The theory is in [Wayfinding quality judgment](Wayfinding_Quality_Judgment.md) (Architecture Section 6.11). Planning and Control share the vocabulary in `models/quality/`. The judging code is in `analytics/result_quality/` (see its README). Entry points: `get_advisory` (kinds `quality`, `tonight`, `result`, `calibration`) and `control.history.query` (kinds `night_quality`, `nights`, `target_changes`). A rule's confidence is its register entry's status label (partly measured; see [WAY-01](validation/wayfinding.md#way-01)).
+The theory is in [Wayfinding quality judgment](Wayfinding_Quality_Judgment.md) (Architecture Section 6.11). Planning and Control share the vocabulary in `models/quality/`. The judging code is in `analytics/result_quality/` (see its README). Entry points: `get_advisory` (kinds `quality`, `tonight`, `result`, `calibration`) and `review.query` (kinds `night_quality`, `nights`, `target_changes`). A rule's confidence is its register entry's status label (partly measured; see [WAY-01](validation/wayfinding.md#way-01)).
 
 **Table 12.** Where each part of the judgment lives. Paths are relative to `wayfindinglib/`. Register entries hold the evidence; WAY-D rows hold Table 13's settings.
 
@@ -534,7 +535,7 @@ No module applies the gates of the architecture's Table 8. `DivergenceEvidenceSu
 | Scheduler | `planning.create_plan(kind="scheduled_session")` | `scheduling.py` |
 | Capture | `planning.create_plan(kind="package")` | `observation_package.py` |
 | Dome and weather interlock | `control.safety.execute_safe_state`, `assess` | `safe_state.py` |
-| Session recording | `execution.advance_session`, `create_recorder`, `control.history.query` | `session_runner.py` |
+| Session recording | `execution.advance_session`, `create_recorder`, `review.query` | `session_runner.py` |
 
 ## References
 

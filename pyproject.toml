@@ -486,6 +486,7 @@ forbidden_modules = [
 #   Foundation  models, astronomy, data_access, analytics, drivers.butler,
 #               drivers.control_record_store, drivers.catalog
 #   Control     tasks.control_tasks, session_analysis, watchdog, api.control,
+#               api.review (it reads the same records as control),
 #               and the hardware drivers (drivers.indi, drivers.indi_interface,
 #               drivers.interfaces, drivers.phd2, drivers.simulators,
 #               drivers.ekos, drivers.stellarmate_interface)
@@ -513,6 +514,7 @@ forbidden_modules = [
     "wayfindinglib.session_analysis",
     "wayfindinglib.watchdog",
     "wayfindinglib.api.control",
+    "wayfindinglib.api.review",
     # The hardware drivers (Control)
     "wayfindinglib.drivers.indi",
     "wayfindinglib.drivers.indi_interface",
@@ -540,6 +542,7 @@ source_modules = [
     "wayfindinglib.session_analysis",
     "wayfindinglib.watchdog",
     "wayfindinglib.api.control",
+    "wayfindinglib.api.review",
     "wayfindinglib.drivers.indi",
     "wayfindinglib.drivers.indi_interface",
     "wayfindinglib.drivers.interfaces",
@@ -565,6 +568,7 @@ forbidden_modules = [
     "wayfindinglib.session_analysis",
     "wayfindinglib.watchdog",
     "wayfindinglib.api.control",
+    "wayfindinglib.api.review",
 ]
 
 [[tool.importlinter.contracts]]

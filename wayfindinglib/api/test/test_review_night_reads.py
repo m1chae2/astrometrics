@@ -1,4 +1,4 @@
-"""Purpose: Tests for the typed night reads of `control.history`.
+"""Purpose: Tests for the typed night reads of `review`.
 
 Description: Covers `query(kind="nights")`, `query(kind="target_changes")`
 and the size bound of the typed `get_live_session_status`. The nights come
@@ -12,6 +12,7 @@ from astropy.time import Time
 
 from astrometricslib import InvalidArgumentError
 from wayfindinglib import ObservatoryControl
+from wayfindinglib.api.review import ObservationReview
 from wayfindinglib.api.test.capture_night_helpers import Library, add_frames, record_ekos_captures
 from wayfindinglib.api.test.guiding_night_helpers import FIRST_NIGHT, record_guiding_night
 from wayfindinglib.astronomy.coordinate_transforms import compute_altaz, earth_location
@@ -88,7 +89,7 @@ def test_nights_lists_each_night_with_the_data_it_has(control: ObservatoryContro
     record_ekos_captures(control, 0, 30)
     second = record_guiding_night(control, 1)
 
-    nights = control.history.query(kind="nights", register_job=False)
+    nights = ObservationReview(control).query(kind="nights", register_job=False)
 
     assert [night.night_id for night in nights] == [first, second]
     assert all(isinstance(night, NightListEntry) for night in nights)
@@ -104,7 +105,7 @@ def test_nights_without_a_sky_measurement_say_so(control: ObservatoryControl, li
     """A night whose frames have no background value has no sky data."""
     add_frames(library, 0, background_adu=None)
 
-    (night,) = control.history.query(kind="nights", register_job=False)
+    (night,) = ObservationReview(control).query(kind="nights", register_job=False)
 
     assert night.has_frame_data
     assert not night.has_sky_data
@@ -115,7 +116,7 @@ def test_nights_keeps_only_the_newest_when_limited(control: ObservatoryControl, 
     for day in range(3):
         add_frames(library, day, count=2)
 
-    nights = control.history.query(kind="nights", limit=2, register_job=False)
+    nights = ObservationReview(control).query(kind="nights", limit=2, register_job=False)
 
     assert len(nights) == 2
     assert nights[-1].night_id.endswith("25")
@@ -124,7 +125,7 @@ def test_nights_keeps_only_the_newest_when_limited(control: ObservatoryControl, 
 def test_nights_refuses_an_argument_it_does_not_use(control: ObservatoryControl) -> None:
     """A night id means nothing to the list of nights."""
     with pytest.raises(InvalidArgumentError, match="session_id"):
-        control.history.query(kind="nights", session_id="2026-09-23", register_job=False)
+        ObservationReview(control).query(kind="nights", session_id="2026-09-23", register_job=False)
 
 
 def test_target_changes_finds_new_targets_and_skips_a_reslew(
@@ -134,7 +135,7 @@ def test_target_changes_finds_new_targets_and_skips_a_reslew(
     monkeypatch.setattr(control._context, "observer_location", lambda: SITE)
     _record_slews(control)
 
-    changes = control.history.query(kind="target_changes", register_job=False)
+    changes = ObservationReview(control).query(kind="target_changes", register_job=False)
 
     assert [change.target_id for change in changes] == ["M 81", "M 13"]
     assert all(isinstance(change, TargetChange) for change in changes)
@@ -155,7 +156,7 @@ def test_target_changes_leaves_the_target_empty_outside_the_match_radius(
     )
     _record_slews(control)
 
-    changes = control.history.query(kind="target_changes", register_job=False)
+    changes = ObservationReview(control).query(kind="target_changes", register_job=False)
 
     assert [change.target_id for change in changes] == [None, None]
     assert all(change.separation_deg is None for change in changes)
@@ -168,7 +169,7 @@ def test_target_changes_says_why_a_position_is_missing(
     monkeypatch.setattr(control._context, "observer_location", lambda: None)
     _record_slews(control)
 
-    changes = control.history.query(kind="target_changes", register_job=False)
+    changes = ObservationReview(control).query(kind="target_changes", register_job=False)
 
     assert len(changes) == 3
     assert all(change.ra_deg is None and "location" in change.note for change in changes)
@@ -181,12 +182,15 @@ def test_target_changes_filters_by_night_and_limit(
     monkeypatch.setattr(control._context, "observer_location", lambda: SITE)
     _record_slews(control)
 
-    assert control.history.query(kind="target_changes", session_id="2030-01-01", register_job=False) == []
-    newest = control.history.query(kind="target_changes", limit=1, register_job=False)
+    assert (
+        ObservationReview(control).query(kind="target_changes", session_id="2030-01-01", register_job=False)
+        == []
+    )
+    newest = ObservationReview(control).query(kind="target_changes", limit=1, register_job=False)
     assert [change.target_id for change in newest] == ["M 13"]
 
 
 def test_target_changes_refuses_an_argument_it_does_not_use(control: ObservatoryControl) -> None:
     """`ekos_file_id` is not an argument of this kind."""
     with pytest.raises(InvalidArgumentError, match="ekos_file_id"):
-        control.history.query(kind="target_changes", ekos_file_id="x", register_job=False)
+        ObservationReview(control).query(kind="target_changes", ekos_file_id="x", register_job=False)

@@ -373,10 +373,10 @@ AGENT_PROMPT = (
     "`jobs_query`. To judge raw spectrum frames (zero order, tilt, clipping "
     "along the spectrum, a predicted peak at another exposure), use `quality_measure_frames` "
     'with `kind="spectral"`. '
-    "To tell whether guiding spoiled a frame, use `observatory_history_frame_guiding`. "
+    "To tell whether guiding spoiled a frame, use `review_frame_guiding`. "
     "To plan a night over several hours, use `planning_get_visibility`. "
     "For the live session (pier side, camera temperature, "
-    "exposure and dither counts), use `observatory_history_get_live_session_status`; it cannot report the "
+    "exposure and dither counts), use `review_get_live_session_status`; it cannot report the "
     "guide algorithm, because the logs do not record it. Do not try to get around "
     "these limits.\n\n"
     "2. Use only your MCP tools. If they cannot do what the person asks, stop. Do not chain tools to "

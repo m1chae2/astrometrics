@@ -190,6 +190,17 @@ class AlignmentTargetSession(BaseModel):
     attempts: list[AlignmentAttempt] = Field(default_factory=list, alias="attempts")
 
 
+class AlignmentSessionsResult(BaseModel):
+    """The alignment attempts, and the same attempts grouped by target.
+
+    Returned by `ObservationReview.query_alignment_sessions`.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+    attempts: list[AlignmentAttempt] = Field(default_factory=list)
+    targets: list[AlignmentTargetSession] = Field(default_factory=list)
+
+
 class GuidingStats(BaseModel):
     """Statistical RMS errors and tracking SNR for active guiding."""
 

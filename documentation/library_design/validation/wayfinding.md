@@ -357,7 +357,7 @@ Every Python example assumes the library is installed and configured with your o
 - **Status:** Partly measured. Run on this observatory's real guide logs when built; the confidence labels are new and the exposure-length rule rests on the guide log as a proxy for star shape.
 - **Data you need:** Guide logs and Ekos session records of the night, and the envelope.
 - **Procedure:**
-  1. Run `control.history.query(kind="guiding", ...)` for a night.
+  1. Run `review.query(kind="guiding", ...)` for a night.
   2. Read each statement's `limits` and `confidence`.
 
   `recommend_for_guiding` <!-- impl: wayfindinglib.session_analysis.guiding.post_processing.recommend_for_guiding.recommend_for_guiding -->.
@@ -380,7 +380,7 @@ Every Python example assumes the library is installed and configured with your o
 - **Status:** Partly measured. The old clipping rule agreed with the stacking summary on 67 of 69 exposure groups (the two differences were Moon frames). The stored-measurement version has not been re-run on the real library.
 - **Data you need:** Light frames with stored measurements and Ekos records.
 - **Procedure:**
-  1. Run `control.history.query(kind="capture", ...)` for a night.
+  1. Run `review.query(kind="capture", ...)` for a night.
   2. Check that each statement's `evidence` rows exist in the measurement store.
 
   `recommend_for_capture` <!-- impl: wayfindinglib.session_analysis.capture.post_processing.recommend_for_capture.recommend_for_capture -->.
@@ -403,7 +403,7 @@ Every Python example assumes the library is installed and configured with your o
 - **Status:** Design estimate. The comparison is observational, and altitude is tied to time of night, so a poor altitude band can be a poor hour.
 - **Data you need:** Five or more nights with a known pointing.
 - **Procedure:**
-  1. Run `control.history.query(kind="sky")`.
+  1. Run `review.query(kind="sky")`.
   2. Read each poor region's message and `limits`.
 
   `recommend_for_sky` <!-- impl: wayfindinglib.session_analysis.sky.post_processing.recommend_for_sky.recommend_for_sky -->.
@@ -576,7 +576,7 @@ Every Python example assumes the library is installed and configured with your o
   2. Compare each reported change with the targets you know you imaged and when.
 
   ```python
-  changes = control.history.query(kind="target_changes")
+  changes = review.query(kind="target_changes")
   for change in changes:
       print(change)
   ```
@@ -628,7 +628,7 @@ Every Python example assumes the library is installed and configured with your o
   2. Compare each flag with what you know is stored for that night.
 
   ```python
-  nights = control.history.query(kind="nights")
+  nights = review.query(kind="nights")
   for night in nights:
       print(night)
   ```
@@ -838,7 +838,7 @@ Every Python example assumes the library is installed and configured with your o
   3. Repeat on a night with a known cause.
 
      ```python
-     quality = control.history.query(kind="night_quality", session_id="2026-10-02", register_job=False)
+     quality = review.query(kind="night_quality", session_id="2026-10-02", register_job=False)
      for entry in quality.targets:
          print(entry.target_id, entry.frames_taken, entry.needs_attention, entry.loss_account)
      ```
@@ -848,7 +848,7 @@ Every Python example assumes the library is installed and configured with your o
 - **What to look at:** Whether the largest share of the lost time on a night with a known cause is that cause, and whether frames the stacker moved to `_excluded` appear as set-aside time.
 - **Our result:** Measured value not recorded.
 - **Verdict:** Not judged.
-- **Limits:** The stacker now records an action on the quarantine rows of each frame it sets aside; frames set aside before that change are found from the folder's manifest or the folder alone (WAY-D75), and frames with no stored measurement are counted as unassigned. Stack-level rules read the newest stack of the target, which may be newer than the night. The MCP reply to a review over the reply budget cuts the evidence lists of its statements and says so (WAY-D77); the library returns the whole review. Transparency is not included. The polar-alignment estimate is exploratory and drives no rule. Warnings that repeat across nights are read with `control.history.query(kind="recurring_issues")`, not in this reply.
+- **Limits:** The stacker now records an action on the quarantine rows of each frame it sets aside; frames set aside before that change are found from the folder's manifest or the folder alone (WAY-D75), and frames with no stored measurement are counted as unassigned. Stack-level rules read the newest stack of the target, which may be newer than the night. The MCP reply to a review over the reply budget cuts the evidence lists of its statements and says so (WAY-D77); the library returns the whole review. Transparency is not included. The polar-alignment estimate is exploratory and drives no rule. Warnings that repeat across nights are read with `review.query(kind="recurring_issues")`, not in this reply.
 - **To tune for your setup:** Nothing to tune in the review. The baseline needs three nights of the same equipment setting.
 - **Regenerate with:** No script; run the example above.
 - **Guarded by tests:** `wayfindinglib/tasks/control_tasks/test/test_night_quality_task.py` and `wayfindinglib/api/test/test_night_quality_control.py`.
@@ -996,7 +996,7 @@ These values have not been measured. Each is a reasoned choice; the last column 
 | WAY-D75 | Which frames count as set aside | Three sources, in order: the library's listing of the target's `_excluded` folders (`Astrometrics.quality.set_aside_frames`, which itself prefers the stored row, then the folder's manifest, then the folder alone), then a stored row whose action contains `_excluded`. One definition, `set_aside_reasons` <!-- impl: wayfindinglib.analytics.result_quality.library_inputs.set_aside_reasons -->, serves the report and the review (`LibraryInputs.set_aside_reasons` reads the listing). The reason shown is the kind (clouded or trailed) when known, else the recorded words, else `NO_REASON_RECORDED` <!-- impl: wayfindinglib.analytics.result_quality.library_inputs.NO_REASON_RECORDED -->. A listed frame with no stored measurement cannot be placed in a capture setting and is counted as unassigned. The 2026-10 real-data run showed frames in `_excluded` folders with a manifest and no rows were never counted | `SET_ASIDE_MARKER` <!-- impl: wayfindinglib.analytics.result_quality.library_inputs.SET_ASIDE_MARKER --> | A folder the library cannot read leaves a note and falls back to the rows, so the lost time can be shown lower. | List the `_excluded` folders of a night and compare the frames with the rows that carry the marker. |
 | WAY-D76 | Efficiency reference for the night review | The user's own baseline when there are at least three nights of the setting; otherwise the telescope's diffraction limit with the site's seeing. Both references are reported when both exist, with the efficiency against the one not in use. The physical reference uses the telescope named by the capture setting. The reviewed night is left out of its own baseline. The site is read, never stored (a note says when none is stored) | `LibraryInputs.reference_for` <!-- impl: wayfindinglib.analytics.result_quality.library_inputs.LibraryInputs.reference_for --> | A lasting fault hides in the baseline; a physical limit makes every frame look worse than it can be. | Compare the loss of one night against both references. |
 | WAY-D77 | Largest MCP reply of the target report, tonight's ranking and the night review, and what is cut when it is too long | 40,000 characters of compact JSON (the reply limit of the MCP tools). The library returns the full report, ranking and review to every caller; the MCP tools shorten the reply (`fit_reply_to_budget` <!-- impl: wayfindinglib.analytics.result_quality.reply_budget.fit_reply_to_budget -->, applied in `mcp_servers/common/tool_registry.py` before the character cut). The report drops its context section first. Then each statement keeps 20, then 5, then 1 references. The ranking leaves out its lowest candidates. Each statement lists its evidence most extreme first (distance beyond the limit in limit units, ties newest; rows of several metrics or a limit of another unit: newest first), so the cut keeps the most extreme references (user decision U5). The budget is the limit less 10% headroom (`REPLY_HEADROOM_FRACTION` <!-- impl: wayfindinglib.analytics.result_quality.reply_budget.REPLY_HEADROOM_FRACTION -->, design estimate), and a reply is measured the way the MCP tool registry measures it (`model_dump()` and compact `json.dumps(default=str)`); the notes a cut adds are inside the measured reply | `MAXIMUM_REPLY_CHARACTERS` <!-- impl: wayfindinglib.analytics.result_quality.reply_budget.MAXIMUM_REPLY_CHARACTERS -->, `EVIDENCE_STEPS` <!-- impl: wayfindinglib.analytics.result_quality.reply_budget.EVIDENCE_STEPS --> | A long reply is cut by the transport without warning, or a statement loses references the reader needed, or a target is left out of the ranking. Each cut is stated in the reply. | Build the reply for your busiest target, library or night, count its characters, and compare what was cut with what you would have opened. |
-| WAY-D78 | How much guiding may widen a star | Guiding may widen a star by at most 10% (`STAR_WIDTH_BUDGET_FRACTION`). Squared widths add, so a star of width w takes a guide blur of w*sqrt(1.1^2-1) = 0.46 w; a Gaussian full width is 2.3548 times its standard deviation (`GAUSSIAN_FWHM_PER_SIGMA`), which gives the largest sharp guide error on one axis. The star width used is the lower quartile of the setting's frame widths (`STAR_WIDTH_QUANTILE` = 0.25), because the median already includes the guiding blur | `allowed_guide_rms_arcsec` <!-- impl: wayfindinglib.analytics.result_quality.guiding_exposure.allowed_guide_rms_arcsec -->, `STAR_WIDTH_BUDGET_FRACTION` <!-- impl: wayfindinglib.analytics.result_quality.guiding_exposure.STAR_WIDTH_BUDGET_FRACTION -->, `STAR_WIDTH_QUANTILE` <!-- impl: wayfindinglib.analytics.result_quality.guiding_exposure.STAR_WIDTH_QUANTILE --> | A budget too large calls loose guiding sharp; too small calls normal guiding loose. A lower-quartile width that is itself guiding-limited makes the allowed error too large. | Pick frames with the sharpest and the softest stars of one night, find their guide error with `control.history.query(kind="frame_guiding")`, and see where the stars start to widen. |
+| WAY-D78 | How much guiding may widen a star | Guiding may widen a star by at most 10% (`STAR_WIDTH_BUDGET_FRACTION`). Squared widths add, so a star of width w takes a guide blur of w*sqrt(1.1^2-1) = 0.46 w; a Gaussian full width is 2.3548 times its standard deviation (`GAUSSIAN_FWHM_PER_SIGMA`), which gives the largest sharp guide error on one axis. The star width used is the lower quartile of the setting's frame widths (`STAR_WIDTH_QUANTILE` = 0.25), because the median already includes the guiding blur | `allowed_guide_rms_arcsec` <!-- impl: wayfindinglib.analytics.result_quality.guiding_exposure.allowed_guide_rms_arcsec -->, `STAR_WIDTH_BUDGET_FRACTION` <!-- impl: wayfindinglib.analytics.result_quality.guiding_exposure.STAR_WIDTH_BUDGET_FRACTION -->, `STAR_WIDTH_QUANTILE` <!-- impl: wayfindinglib.analytics.result_quality.guiding_exposure.STAR_WIDTH_QUANTILE --> | A budget too large calls loose guiding sharp; too small calls normal guiding loose. A lower-quartile width that is itself guiding-limited makes the allowed error too large. | Pick frames with the sharpest and the softest stars of one night, find their guide error with `review.query(kind="frame_guiding")`, and see where the stars start to widen. |
 | WAY-D79 | Share of frames that must stay sharp | 80% (`TARGET_SHARP_FRACTION`). The rule fires when fewer than 80% of the windows of the exposure the setting used stay sharp, and proposes the longest exposure of a ladder that reaches 80% | `TARGET_SHARP_FRACTION` <!-- impl: wayfindinglib.analytics.result_quality.guiding_exposure.TARGET_SHARP_FRACTION -->, `guiding_limits_statements` <!-- impl: wayfindinglib.analytics.result_quality.report_rules.guiding_limits_statements --> | A target set too high asks for exposures that are too short; too low leaves one frame in three soft. | Count the frames you set aside as trailed at each exposure on your own nights and see what share the guiding rule would have kept. |
 | WAY-D80 | How the windows are cut and counted | A window needs at least 3 guide samples and half its length covered (`MINIMUM_WINDOW_SAMPLES`, `MINIMUM_WINDOW_COVERAGE`); an exposure needs at least 10 judged windows (`MINIMUM_WINDOWS_PER_EXPOSURE`); frames of one setting less than 10 minutes apart are one stretch of imaging (`MAXIMUM_GAP_WITHIN_IMAGING_SECONDS`); the exposures tried are 10, 15, 20, 30, 45, 60, 90, 120, 180, 240, 300 and 600 s plus the one used (`EXPOSURE_LADDER_SECONDS`) | `sharpness_at_exposure` <!-- impl: wayfindinglib.analytics.result_quality.guiding_exposure.sharpness_at_exposure -->, `imaging_spans` <!-- impl: wayfindinglib.analytics.result_quality.guiding_exposure.imaging_spans --> | Too few windows give a share that is only noise (10 windows: about 15 percentage points); windows cut across time the setting was not imaging judge the wrong guiding. | Compare the share the rule gives at the exposure you used with the share of your own frames whose guide error was in range (the statement's `frames_sharp_fraction`). |
 | WAY-D81 | A setting with no efficiency reference | Rule `efficiency_reference_missing` (insufficient_data, no action class): a setting with no physical or baseline reference gets this statement with the reason, instead of an efficiency number. No tuned value | `EFFICIENCY_RULE_NAME` <!-- impl: wayfindinglib.tasks.planning_tasks.target_report_tasks.EFFICIENCY_RULE_NAME --> | A setting is shown without an efficiency and without a reason. | Remove the physical reference of a made-up setting and read the report's statements. |

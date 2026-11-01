@@ -122,5 +122,5 @@ def test_apply_profile_removes_tools_and_calls_to_them_fail(tmp_path: Path) -> N
 
 def test_a_dropped_tool_is_withheld_and_its_note_is_the_reason() -> None:
     """A dropped tool is withheld, and the reason quotes its note."""
-    entry = {"tool_class": "compute", "disposition": "drop", "note": "Replaced by observatory_history_query."}
-    assert withheld_reason(entry, "investigator") == "Replaced by observatory_history_query"
+    entry = {"tool_class": "compute", "disposition": "drop", "note": "Replaced by review_query."}
+    assert withheld_reason(entry, "investigator") == "Replaced by review_query"

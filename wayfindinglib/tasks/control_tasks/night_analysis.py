@@ -1,4 +1,4 @@
-"""Purpose: Analyse recorded observing nights for `control.history`.
+"""Purpose: Analyse recorded observing nights for `review`.
 
 Description: The capture, guiding and sky-coverage analyses, the list of
 findings that recur across nights, and the performance envelope they are

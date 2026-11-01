@@ -693,7 +693,7 @@ def test_a_new_database_is_at_the_current_version_and_has_no_settings(tmp_path: 
             (SCHEMA_VERSION,)
         ]
         assert connection.execute("SELECT COUNT(*) FROM quality_capture_setting").fetchone()[0] == 0
-    assert SCHEMA_VERSION == 6
+    assert SCHEMA_VERSION == 7
 
 
 #: The start of the metric names the odd-even difference had before version 5.
@@ -770,3 +770,61 @@ def test_version_5_is_idempotent(tmp_path: Path) -> None:
     QualityStore(str(path)).write_measurements([make_measurement(run_id="again")])
     second = snapshot()
     assert second[: len(first)] == first
+
+
+def _index_names(path: Path) -> set[str]:
+    """List the names of the indexes on the measurement table.
+
+    Parameters
+    ----------
+    path : `pathlib.Path`
+        The database file.
+
+    Returns
+    -------
+    names : `set` [`str`]
+        The index names.
+    """
+    with sqlite3.connect(path) as connection:
+        return {row[1] for row in connection.execute("PRAGMA index_list(quality_measurements)")}
+
+
+def test_a_new_database_has_the_job_id_index(tmp_path: Path) -> None:
+    """A new file gets the index that makes a read by job id fast."""
+    path = tmp_path / "astrometrics.db"
+    QualityStore(str(path)).write_measurements([make_measurement()])
+    assert "quality_measurements_job_id" in _index_names(path)
+
+
+def test_version_7_adds_the_job_id_index_to_an_old_database_and_keeps_the_rows(tmp_path: Path) -> None:
+    """An old file gets the index on its first write; rows and ids stay."""
+    path = tmp_path / "astrometrics.db"
+    QualityStore(str(path)).write_measurements([make_measurement(run_id="before")])
+    with sqlite3.connect(path) as connection:
+        connection.execute("DROP INDEX quality_measurements_job_id")
+        connection.execute("UPDATE quality_schema_version SET version = 6")
+    assert "quality_measurements_job_id" not in _index_names(path)
+    # A read never migrates.
+    QualityStore(str(path)).query()
+    assert "quality_measurements_job_id" not in _index_names(path)
+    with sqlite3.connect(path) as connection:
+        before = connection.execute("SELECT row_id, run_id, job_id FROM quality_measurements").fetchall()
+
+    QualityStore(str(path)).write_measurements([make_measurement(run_id="after")])
+
+    assert "quality_measurements_job_id" in _index_names(path)
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("SELECT version FROM quality_schema_version").fetchall() == [
+            (SCHEMA_VERSION,)
+        ]
+        kept = connection.execute(
+            "SELECT row_id, run_id, job_id FROM quality_measurements WHERE run_id = 'before'"
+        ).fetchall()
+        plan = connection.execute(
+            "EXPLAIN QUERY PLAN SELECT * FROM quality_measurements WHERE job_id = 'job-1'"
+        ).fetchall()
+    assert kept == before
+    assert any("quality_measurements_job_id" in str(step) for step in plan)
+    # Running the move again changes nothing.
+    QualityStore(str(path)).write_measurements([make_measurement(run_id="again")])
+    assert "quality_measurements_job_id" in _index_names(path)

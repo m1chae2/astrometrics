@@ -35,7 +35,11 @@ their measurements at it and deletes the others; see
 names that began ``stacking.half`` plus ``_difference_`` to
 ``stacking.odd_even_difference_*`` (the measurement is now called the
 odd-even difference); see
-`QualityStore._migrate_from_version_4`. Take a backup first
+`QualityStore._migrate_from_version_4`. Version 6 adds the flat-bias column of
+``quality_calibration_identity``. Version 7 adds the index
+``quality_measurements_job_id`` on ``quality_measurements (job_id)``, so
+reading the warnings of one job does not scan the whole table; the move only
+creates the index, so it is additive and safe to repeat. Take a backup first
 with ``scripts/backup_library_databases.py``. A migration only touches the
 quality tables, view and version table and never any other table.
 
@@ -81,7 +85,7 @@ from astrometricslib.models.quality.measurement import (
 logger = logging.getLogger(__name__)
 
 #: The schema version this code writes and expects.
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 _MEASUREMENT_COLUMNS = (
     "metric",
@@ -209,6 +213,16 @@ _CREATE_SCHEMA_STATEMENTS = (
     """,
     _CREATE_LATEST_VIEW_STATEMENT,
 )
+
+# Version 7 adds this index. A read by job (`Jobs.query` with
+# ``detail="warnings"``) filters on ``job_id`` alone, which none of the other
+# indexes starts with, so without it the read scans every row. Rows with no
+# job id are in the index too; that is harmless. ``IF NOT EXISTS`` makes the
+# statement safe to run on a file that already has the index.
+_CREATE_JOB_ID_INDEX_STATEMENT = """
+    CREATE INDEX IF NOT EXISTS quality_measurements_job_id
+    ON quality_measurements (job_id)
+"""
 
 # Version 3 adds this table. One row per (run, stack subject). Each master
 # column holds a JSON list of ``[path, size_bytes, modified_ns]`` file
@@ -672,6 +686,10 @@ class QualityStore:
             # statements above did not include it, so it is created here too.
             for statement in _CREATE_CALIBRATION_IDENTITY_STATEMENTS:
                 connection.execute(statement)
+        if version < 7:
+            # Version 7 only adds an index. A new file (version 0) has the
+            # table by now, because the statements above created it.
+            connection.execute(_CREATE_JOB_ID_INDEX_STATEMENT)
         if version < 6:
             # Version 6 adds the flat-bias column. Old rows keep NULL, which
             # means "not recorded", so they are never read as "no flat bias".

@@ -731,7 +731,7 @@ DEFERRED_RULES: tuple[DeferredRule, ...] = (
         reason=(
             "The best nights need a model that combines each night's visibility of the target, the Moon "
             "and the sky history. That nights-by-visibility model is not built. Tonight's ranking "
-            "(get_advisory, kind tonight) covers tonight only."
+            "(get_tonight_advice) covers tonight only."
         ),
         unblocked_by=(
             "A nights, visibility and Moon model that scores the coming nights, with a register entry."

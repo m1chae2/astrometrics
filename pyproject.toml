@@ -438,6 +438,9 @@ ignore_imports = [
     "backend.** -> astrometricslib.drivers",
     "backend.** -> wayfindinglib.exceptions",
     "backend.** -> wayfindinglib.reports",
+    # The API reference generator needs the class of `Wayfinder.review` to
+    # resolve that attribute's annotation. The root does not export it.
+    "backend.services.infrastructure.api_doc_generator -> wayfindinglib.api.review",
 ]
 
 [[tool.importlinter.contracts]]
@@ -620,6 +623,12 @@ source_modules = [
 forbidden_modules = [
     "wayfindinglib.tasks.planning_tasks",
     "wayfindinglib.api.planning",
+]
+# `ObservationReview.get_advisory` judges the data and results that exist and
+# shares its report code with the suggestion refresh in planning. This one
+# edge is the only way review reaches planning.
+ignore_imports = [
+    "wayfindinglib.api.review -> wayfindinglib.tasks.planning_tasks.advisory_tasks",
 ]
 
 [[tool.importlinter.contracts]]

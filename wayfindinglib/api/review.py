@@ -12,9 +12,9 @@ out the performance limits of the active equipment. Only
 
 Review reads the same records and context as `control`, so it is built
 from the `Wayfinder`'s `ObservatoryControl` and shares its context. The
-advisory (`get_advisory`) will join it here: its results and data kinds
-are answered by review, while its tonight and calibration kinds stay in
-`planning`.
+advisory (`get_advisory`) judges data and results that already exist, so it
+is answered here. The advice that looks ahead is in `planning`
+(`get_tonight_advice` and `get_calibration_advice`).
 """
 
 from __future__ import annotations
@@ -27,6 +27,8 @@ from astrometricslib.jobs import background_job, get_current_job, registered_job
 from wayfindinglib.analytics.alignment_sessions import group_alignment_attempts
 from wayfindinglib.api.control.context import ControlChild
 from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
+from wayfindinglib.models.planning.target_report import TargetDatasetReport
+from wayfindinglib.models.quality.statements import TargetStatement
 from wayfindinglib.models.session.alignment_records import AlignmentRecords
 from wayfindinglib.models.session.control_results import FrameGuidingReport
 from wayfindinglib.models.session.ekos_session import EkosSessionContext
@@ -42,6 +44,7 @@ from wayfindinglib.models.session.telemetry import (
 
 if TYPE_CHECKING:
     from wayfindinglib.api.control.control import ObservatoryControl
+    from wayfindinglib.tasks.planning_tasks.advisory_tasks import AdvisoryKind
 
 __all__ = ["ObservationReview"]
 
@@ -566,6 +569,51 @@ class ObservationReview(ControlChild):
             return None
         risk = performance_envelope_tasks.tracking_risk_map(self._context)
         return envelope.model_copy(update={"tracking_risk": risk})
+
+    def get_advisory(
+        self,
+        kind: AdvisoryKind,
+        target: str | Target,
+        *,
+        object_id: str | None = None,
+    ) -> TargetDatasetReport | list[TargetStatement]:
+        """Judge a target's data or one result.
+
+        This judges data and results that already exist. Tonight's ranking
+        and calibration advice are `planning.get_tonight_advice` and
+        `planning.get_calibration_advice`. The advice is worked out on
+        demand and never stored.
+
+        Parameters
+        ----------
+        kind : `str`
+            ``"quality"``: the target dataset report. It summarizes each
+            capture setting, lists warnings and recommendations in priority
+            order, and gives a starting point when the target has no frames.
+            ``"result"``: how far one per-star science result can be
+            trusted, as statements. Needs `object_id`.
+        target : `str` or `Target`
+            The target, by id or as a `Target`.
+        object_id : `str`, optional
+            ``kind="result"`` only. The star whose result is judged.
+
+        Returns
+        -------
+        advice : `TargetDatasetReport` or `list` [`TargetStatement`]
+            The advice for the chosen kind. `InvalidArgumentError` is raised
+            if `kind` is unknown, an argument the kind does not use is
+            given, or a required argument is missing.
+        """
+        from wayfindinglib.tasks.planning_tasks.advisory_tasks import build_advisory
+
+        return build_advisory(
+            kind,
+            target,
+            object_id,
+            astrometrics=self._context.astrometrics,
+            butler=self._context.butler,
+            config=self._context.config,
+        )
 
     def _save_ekos_session_context(self, context: EkosSessionContext) -> None:
         """Save one Ekos session record, replacing an earlier read of it.

@@ -20,6 +20,7 @@ from astrometricslib._internal.results import RestoreReport
 from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
 from astrometricslib.models.catalog_queries import CalibrationQueryResult
 from wayfindinglib.api.planning import ObservationPlanning
+from wayfindinglib.api.review import ObservationReview
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.equipment_and_site.calibration import CalibrationAdvisory
 from wayfindinglib.models.equipment_and_site.equipment import Telescope
@@ -237,6 +238,29 @@ def _planning(butler: DiskButler, *targets: Target) -> ObservationPlanning:
     return ObservationPlanning(butler.config, butler, astrometrics=_FakeAstrometrics(list(targets)))
 
 
+def _review(butler: DiskButler, *targets: Target) -> ObservationReview:
+    """Build a review API over the butler and a fake target catalog.
+
+    Parameters
+    ----------
+    butler : `DiskButler`
+        The isolated storage.
+    *targets : `Target`
+        The library's targets.
+
+    Returns
+    -------
+    review : `ObservationReview`
+        The API under test.
+    """
+    from wayfindinglib.api.control import ObservatoryControl
+
+    control = ObservatoryControl(
+        butler.config, butler=butler, astrometrics=_FakeAstrometrics(list(targets)), simulated=True
+    )
+    return ObservationReview(control)
+
+
 def _site() -> SiteProfile:
     """Build a test site.
 
@@ -399,7 +423,8 @@ def test_a_bad_night_id_is_refused(isolated_butler: DiskButler) -> None:
 def test_the_advice_calls_answer_and_refuse_the_wrong_arguments(isolated_butler: DiskButler) -> None:
     """Quality takes a target; calibration advice, a camera and frame type."""
     planning = _planning(isolated_butler, _target("M 81"))
-    report = planning.get_advisory("quality", target="M 81")
+    review = _review(isolated_butler, _target("M 81"))
+    report = review.get_advisory("quality", target="M 81")
     assert isinstance(report, TargetDatasetReport)
     assert report.target_id == "M 81"
     assert report.needs_attention.warning_count == 0
@@ -408,13 +433,13 @@ def test_the_advice_calls_answer_and_refuse_the_wrong_arguments(isolated_butler:
     assert isinstance(calibration, CalibrationAdvisory)
     assert calibration.existing_count == 0
     with pytest.raises(InvalidArgumentError, match="object_id"):
-        planning.get_advisory("quality", target="M 81", object_id="star-1")
+        review.get_advisory("quality", target="M 81", object_id="star-1")
     with pytest.raises(NotFoundError):
-        planning.get_advisory("quality", target="NOT-A-TARGET")
+        review.get_advisory("quality", target="NOT-A-TARGET")
     with pytest.raises(InvalidArgumentError, match="kind"):
-        planning.get_advisory("tonight", target="M 81")
+        review.get_advisory("tonight", target="M 81")
     with pytest.raises(InvalidArgumentError, match="object_id"):
-        planning.get_advisory("result", target="M 81")
+        review.get_advisory("result", target="M 81")
     with pytest.raises(InvalidArgumentError, match="ISO 8601"):
         planning.get_tonight_advice(at="not a time")
 
@@ -941,7 +966,8 @@ def test_tonight_advice_and_a_result_advisory_reach_the_task_functions(isolated_
     from wayfindinglib.models.planning.tonight_ranking import TonightRanking
 
     planning = _planning(isolated_butler, _target("M 81"))
+    review = _review(isolated_butler, _target("M 81"))
     ranking = planning.get_tonight_advice(at="2026-10-24T04:00:00Z")
     assert isinstance(ranking, TonightRanking)
     with pytest.raises(NotFoundError):
-        planning.get_advisory("result", target="M 81", object_id="no-such-star")
+        review.get_advisory("result", target="M 81", object_id="no-such-star")

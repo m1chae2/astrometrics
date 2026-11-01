@@ -2,7 +2,7 @@
 
 Description: `Wayfinder.planning` is an `ObservationPlanning`. It answers
 where objects are in the sky (`get_visibility`), advises on targets and
-calibration frames (`get_advisory`, `get_tonight_advice`,
+calibration frames (`get_tonight_advice`,
 `get_calibration_advice`), lays out mosaics
 (`calculate_panels`, `create_mosaic`), writes plans (`create_sequence`,
 `create_package`, `create_session`, the queue verbs such as
@@ -79,7 +79,6 @@ from wayfindinglib.models.planning.suggestion_log import (
     SuggestionEvent,
     SuggestionLogEntry,
 )
-from wayfindinglib.models.planning.target_report import TargetDatasetReport
 from wayfindinglib.models.planning.tonight_ranking import TonightRanking
 from wayfindinglib.models.planning.visibility import HorizonZone, VisibilityReport
 from wayfindinglib.models.quality.statements import TargetStatement
@@ -110,15 +109,6 @@ logger = logging.getLogger(__name__)
 
 MAXIMUM_SOURCES = 300
 """Most stars one `ObservationPlanning.query_sources` answer lists."""
-
-AdvisoryKind = Literal["quality", "result"]
-"""The kinds of review advice `ObservationPlanning.get_advisory` gives."""
-
-ADVISORY_ARGUMENTS = {
-    "quality": ("target",),
-    "result": ("target", "object_id"),
-}
-"""The arguments each advisory kind uses."""
 
 PlanListKind = Literal["sessions", "packages", "suggestion_log"]
 """What `ObservationPlanning.query_plans` lists."""
@@ -763,63 +753,6 @@ class ObservationPlanning:
         return report
 
     # -- Advice -------------------------------------------------------------
-
-    def get_advisory(
-        self,
-        kind: AdvisoryKind,
-        target: str | Target,
-        *,
-        object_id: str | None = None,
-    ) -> TargetDatasetReport | list[TargetStatement]:
-        """Judge a target's data or one result. This part moves to `review`.
-
-        This is the review half of the old advice call: it judges data and
-        results that already exist. Tonight's ranking and calibration advice
-        are `get_tonight_advice` and `get_calibration_advice`. The advice is
-        worked out on demand and never stored.
-
-        Parameters
-        ----------
-        kind : `str`
-            ``"quality"``: the target dataset report. It summarizes each
-            capture setting, lists warnings and recommendations in priority
-            order, and gives a starting point when the target has no frames.
-            ``"result"``: how far one per-star science result can be
-            trusted, as statements. Needs `object_id`.
-        target : `str` or `Target`
-            The target, by id or as a `Target`.
-        object_id : `str`, optional
-            ``kind="result"`` only. The star whose result is judged.
-
-        Returns
-        -------
-        advice : `TargetDatasetReport` or `list` [`TargetStatement`]
-            The advice for the chosen kind.
-
-        Raises
-        ------
-        InvalidArgumentError
-            If `kind` is unknown, an argument the kind does not use is
-            given, or a required argument is missing.
-        """
-        check_choice("kind", kind, tuple(ADVISORY_ARGUMENTS))
-        reject_unused_arguments(
-            kind, ADVISORY_ARGUMENTS, {"target": True, "object_id": object_id is not None}
-        )
-        if kind == "quality":
-            from wayfindinglib.tasks.planning_tasks.target_report_tasks import build_target_dataset_report
-
-            return build_target_dataset_report(
-                self._target(target),
-                astrometrics=self._astrometrics,
-                butler=self._butler,
-                config=self._config,
-            )
-        if object_id is None:
-            raise InvalidArgumentError('kind="result" needs an object_id.')
-        from wayfindinglib.tasks.planning_tasks.result_judgment_tasks import judge_star_result
-
-        return judge_star_result(self._target(target).id, object_id, astrometrics=self._astrometrics)
 
     def get_tonight_advice(self, at: datetime | str | None = None) -> TonightRanking:
         """Rank the targets by what the next hour of each would add.
@@ -2967,6 +2900,7 @@ class ObservationPlanning:
             read_target_noise,
         )
         from wayfindinglib.analytics.result_quality.all_rules import ALL_RULES
+        from wayfindinglib.tasks.planning_tasks import advisory_tasks
         from wayfindinglib.tasks.planning_tasks import suggestion_tasks as tasks
         from wayfindinglib.tasks.planning_tasks.depth_goal_tasks import depth_goal_met
 
@@ -3048,7 +2982,13 @@ class ObservationPlanning:
             if exposure_request_from_statement is None:
                 break
             try:
-                report = self.get_advisory(kind="quality", target=target_id)
+                report = advisory_tasks.build_advisory(
+                    "quality",
+                    target_id,
+                    astrometrics=self._astrometrics,
+                    butler=self._butler,
+                    config=self._config,
+                )
             except (AstrometricsError, OSError, sqlite3.Error, ValueError) as error:
                 logger.warning("Suggestions: no report for %s: %s", target_id, error)
                 change.notes.append(

@@ -18,7 +18,7 @@ def test_server_only_parameters_are_hidden_from_registered_tool_schemas(registry
     schema = registry.tools["planning_get_deep_catalog_status"]["tool_def"].input_schema
     assert "register_job" not in schema["properties"]
     assert "include" in schema["properties"]
-    advisory = registry.tools["planning_get_advisory"]["tool_def"].input_schema
+    advisory = registry.tools["review_get_advisory"]["tool_def"].input_schema
     assert advisory["required"] == ["kind", "target"]
 
 

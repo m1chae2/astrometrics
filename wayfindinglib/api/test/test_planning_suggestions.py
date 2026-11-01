@@ -59,6 +59,7 @@ from wayfindinglib.models.quality.statements import (
 )
 from wayfindinglib.models.session.observation_session import ObservationSession, RunState
 from wayfindinglib.models.session.session_progress import ObservationSessionWithProgress
+from wayfindinglib.tasks.planning_tasks import advisory_tasks
 
 NOW = datetime(2026, 10, 24, 20, 0, tzinfo=UTC)
 """The fixed clock: two hours before the first test frame (22:00)."""
@@ -322,7 +323,9 @@ def fixture(isolated_butler: DiskButler, clock: Clock, monkeypatch: pytest.Monke
     planning = ObservationPlanning(isolated_butler.config, isolated_butler, astrometrics=library)
     made = Fixture(planning, library)
 
-    def fake_advisory(kind: str, target: str | None = None, **_arguments: object) -> object:
+    def fake_advisory(
+        kind: str, target: str | None = None, *_arguments: object, **_keywords: object
+    ) -> object:
         """Answer the quality report the refresh reads.
 
         Parameters
@@ -331,7 +334,9 @@ def fixture(isolated_butler: DiskButler, clock: Clock, monkeypatch: pytest.Monke
             ``"quality"``.
         target : `str`, optional
             The target of the report.
-        **_arguments : `object`
+        *_args : `object`
+            Ignored.
+        **_kwargs : `object`
             Ignored.
 
         Returns
@@ -370,7 +375,7 @@ def fixture(isolated_butler: DiskButler, clock: Clock, monkeypatch: pytest.Monke
             raise NotFoundError("no ranking")
         return made.ranking
 
-    monkeypatch.setattr(planning, "get_advisory", fake_advisory)
+    monkeypatch.setattr(advisory_tasks, "build_advisory", fake_advisory)
     monkeypatch.setattr(planning, "get_tonight_advice", fake_tonight_advice)
     return made
 

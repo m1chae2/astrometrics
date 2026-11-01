@@ -352,13 +352,6 @@
       "interim_block": "",
       "note": "The AI is read-only, so a tool that writes is not offered."
     },
-    "planning_get_advisory": {
-      "tool_class": "observe",
-      "category": "planning-sessions",
-      "disposition": "keep",
-      "interim_block": "",
-      "note": "Built 2026-10-06; split 2026-10-31. The target dataset report (quality) or the trust in one star result, worked out on demand. Saves nothing. Moves to the review group."
-    },
     "planning_get_calibration_advice": {
       "tool_class": "observe",
       "category": "planning-sessions",
@@ -519,6 +512,13 @@
       "disposition": "keep",
       "interim_block": "",
       "note": "Built 2026-10-03. Cuts the stored guide-log samples to each light frame's exposure window. Reads only."
+    },
+    "review_get_advisory": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-10-06; split 2026-10-31. The target dataset report (quality) or the trust in one star result, worked out on demand. Saves nothing."
     },
     "review_get_live_session_status": {
       "tool_class": "ingest",

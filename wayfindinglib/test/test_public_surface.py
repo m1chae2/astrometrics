@@ -52,7 +52,6 @@ EXPECTED_MODULE_NAMES = {
 
 PLANNING_MEMBERS = frozenset({
     "get_visibility",
-    "get_advisory",
     "get_tonight_advice",
     "get_calibration_advice",
     "get_depth_goal",
@@ -101,6 +100,7 @@ REVIEW_MEMBERS = frozenset({
     "query",
     "query_alignment_sessions",
     "query_alignment_records",
+    "get_advisory",
     "get_live_session_status",
     "frame_guiding",
     "get_performance_envelope",

@@ -77,7 +77,7 @@ def test_target_report_asks_for_the_quality_kind() -> None:
     """The target report passes only the target."""
     wayfinder = _wayfinder()
     AdvisoryService(wayfinder).get_target_report("M 81")
-    wayfinder.planning.get_advisory.assert_called_once_with(kind="quality", target="M 81")
+    wayfinder.review.get_advisory.assert_called_once_with(kind="quality", target="M 81")
 
 
 def test_tonight_ranking_passes_the_planning_time() -> None:
@@ -91,7 +91,7 @@ def test_result_statements_pass_target_and_object() -> None:
     """The result read passes the target and the star."""
     wayfinder = _wayfinder()
     AdvisoryService(wayfinder).get_result_statements("M 81", "star-1")
-    wayfinder.planning.get_advisory.assert_called_once_with(kind="result", target="M 81", object_id="star-1")
+    wayfinder.review.get_advisory.assert_called_once_with(kind="result", target="M 81", object_id="star-1")
 
 
 def test_depth_goal_methods_pass_the_target_and_the_level() -> None:

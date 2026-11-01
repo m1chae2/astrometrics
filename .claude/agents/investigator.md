@@ -34,7 +34,6 @@ tools:
   - mcp__wayfindinglib-core__observatory_remote_sync_frames
   - mcp__wayfindinglib-core__observatory_remote_sync_logs
   - mcp__wayfindinglib-core__planning_calculate_panels
-  - mcp__wayfindinglib-core__planning_get_advisory
   - mcp__wayfindinglib-core__planning_get_calibration_advice
   - mcp__wayfindinglib-core__planning_get_deep_catalog_status
   - mcp__wayfindinglib-core__planning_get_depth_goal
@@ -47,6 +46,7 @@ tools:
   - mcp__wayfindinglib-core__planning_query_plans
   - mcp__wayfindinglib-core__planning_query_sources
   - mcp__wayfindinglib-core__review_frame_guiding
+  - mcp__wayfindinglib-core__review_get_advisory
   - mcp__wayfindinglib-core__review_get_live_session_status
   - mcp__wayfindinglib-core__review_get_performance_envelope
   - mcp__wayfindinglib-core__review_query

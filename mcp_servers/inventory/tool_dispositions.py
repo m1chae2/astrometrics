@@ -326,10 +326,10 @@ DECISIONS = {
         "Built 2026-10-03. Where objects are now or over a night: altitude, horizon clearance with "
         "caller-given blocked ranges, meridian crossing, Sun and Moon. Reads nothing stored.",
     ),
-    "planning_get_advisory": ToolDecision(
+    "review_get_advisory": ToolDecision(
         "keep",
         "Built 2026-10-06; split 2026-10-31. The target dataset report (quality) or the trust in one star "
-        "result, worked out on demand. Saves nothing. Moves to the review group.",
+        "result, worked out on demand. Saves nothing.",
     ),
     "planning_get_tonight_advice": ToolDecision(
         "keep", "Tonight's ranking of targets, worked out on demand. Saves nothing."

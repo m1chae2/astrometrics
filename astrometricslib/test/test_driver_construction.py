@@ -1,7 +1,8 @@
 """Purpose: Guard that the pipelines never build a built-in driver themselves.
 
-Description: `Astrometrics(...)` can be given a plate solver, a stacking
-program and a SIMBAD client (see `drivers/driver_set.py`). That only works if
+Description: A test can give the library a plate solver, a stacking program
+and a SIMBAD client through `astrometricslib._internal.testing` (see
+`drivers/driver_set.py`). That only works if
 no pipeline builds `AstrometryNetPlateSolveDriver`, `SirilStackingDriver` or
 `AstroquerySimbadDriver` on its own, because such a pipeline would ignore the
 driver the caller chose. Every pipeline asks `Drivers` for its driver
@@ -97,7 +98,7 @@ def test_pipelines_do_not_build_built_in_drivers() -> None:
     assert not new_sites, (
         f"Built-in driver constructed directly in pipeline module(s): {sorted(new_sites)}. "
         f"Take a `Drivers` (astrometricslib._internal.drivers.driver_set) and ask it for the driver, "
-        f"so a caller can inject their own through Astrometrics(...)."
+        f"so a caller can inject their own through astrometrics_with_drivers(...)."
     )
 
 

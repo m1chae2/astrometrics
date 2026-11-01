@@ -139,7 +139,7 @@ Live checks:
 
 ## Injecting drivers
 
-Tests only. `Astrometrics(config, catalog_access)` takes no driver arguments, so a program always runs the built-in drivers.
+`Astrometrics(config, catalog_access)` takes only those two arguments. It has no driver arguments, so a program always runs the built-in drivers. Only a test swaps a driver, and it does so through private code (`astrometricslib._internal.testing.astrometrics_with_drivers`). Nothing outside the library's tests and scripts may import that module.
 
 A driver is the code that talks to one outside program or service. A test can swap any of them, for example to run with no network. The library uses five:
 
@@ -151,9 +151,11 @@ A driver is the code that talks to one outside program or service. A test can sw
 
 Reddening is the color excess E(B-V) that dust adds to a star's light. B and V are two standard brightness bands, blue (about 4400 Å) and visual (about 5500 Å). E(B-V) is how much bigger the star's B − V magnitude difference is than it would be without dust. The spectroscopy pipeline uses it to correct a spectrum before it classifies the star, that is, before it decides the star's spectral type.
 
-A test builds the root through a helper in the library's private code, `astrometricslib._internal.testing`:
+A test builds the root with the helper:
 
 ```python
+from astrometricslib._internal.testing import astrometrics_with_drivers
+
 astrometrics_with_drivers(config, catalog_access, *, plate_solve_driver=None, stacking_driver=None,
                           simbad_driver=None, gaia_xp_driver=None, reddening_driver=None)
 ```

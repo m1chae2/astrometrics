@@ -8,7 +8,9 @@ for each one. A field left as `None` means "use the built-in driver"
 (Astrometry.net, Siril, astroquery, and Gaia through astroquery), and the
 `*_or_default` methods build that built-in driver on demand.
 
-`Astrometrics(...)` builds one `Drivers` and passes it to the sub-APIs, which
+`Astrometrics(...)` builds one `Drivers` (empty, so every driver is the
+built-in one; a test builds its own through
+`astrometricslib._internal.testing`) and passes it to the sub-APIs, which
 pass it on to the pipelines. This file is the only place in `pipelines/` or
 `api/` that names a built-in driver class, so a test can swap in a fake
 solver, stacking engine, SIMBAD or Gaia XP source without any network, Siril or

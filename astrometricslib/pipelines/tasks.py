@@ -336,18 +336,9 @@ def stack_frames_with_timeout(
         abandonment.abandon()
         # Let the thread unwind, so the slot is free when this returns.
         stacking_thread.join(_ABANDONED_THREAD_JOIN_SECONDS)
-        # A timeout is a quality event, not just a log line: recorded on
-        # the target's existing stack summary when there is one, so the
-        # abandoned stack is queryable rather than only discoverable by
-        # reading the run's output. The summary may be absent entirely --
-        # stack_frames builds it, and this stack never got that far -- in
-        # which case the timeout stays a log-only fact.
-        summary = target.stacking.quality_summary
-        metrics = getattr(summary, "stacking_metrics", None) if summary else None
-        if metrics is not None:
-            metrics.timed_out = True
-            summary.flagged = True
-            summary.flag_reasons.append(f"stacking timed out after {timeout_seconds}s")
+        # A timeout is a quality event, not just a log line. It is recorded
+        # as a row on this run (`stacking.abandoned_after_s`), never on the
+        # target's earlier stack summary, which describes a different run.
         _record_abandoned_stack(
             target,
             measured_at,

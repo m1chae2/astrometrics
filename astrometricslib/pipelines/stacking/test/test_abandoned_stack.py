@@ -231,10 +231,10 @@ def test_a_stack_that_finishes_after_the_give_up_is_not_recorded(monkeypatch: py
 def test_an_abandoned_stack_is_recorded_as_a_processing_decision(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The timeout stores a decision row and still sets `flagged` for readers.
+    """The timeout stores a decision row and leaves the old summary alone.
 
-    `flagged` is dropped in a later phase, so the summary keeps its flag and
-    its reason while the quality store gains the row.
+    The summary describes the previous good stack, so the timeout must not
+    flag it. The failed row on the abandoned run is the record.
     """
     release = threading.Event()
 
@@ -273,8 +273,9 @@ def test_an_abandoned_stack_is_recorded_as_a_processing_decision(
         release.set()
 
     assert result is None
-    assert summary.flagged is True
-    assert summary.flag_reasons == ["stacking timed out after 1s"]
+    assert summary.flagged is False
+    assert summary.flag_reasons == []
+    assert summary.stacking_metrics.timed_out is False
     rows = QualityStore(str(tmp_path / "astrometrics.db")).query(metric="stacking.abandoned_after_s")
     assert len(rows) == 1
     assert rows[0].subject.level is SubjectLevel.RUN

@@ -417,6 +417,7 @@ export interface SpectroscopyResult {
   selfDeterminedSpectralTypeCandidates?: Record<string, any>[];
   probableSpectralFeatures?: Record<string, any>[];
   emissionLines?: Record<string, any>[];
+  detectionLabelLimits?: DetectionLabelLimits | null;
   isEmissionLineSource?: boolean;
   starPositionPx?: number[] | null;
   requestedWavelengthRangeAngstrom?: number[] | null;
@@ -683,6 +684,7 @@ export interface CatalogComparison {
   closestGiantType?: string | null;
   closestGiantRms?: number | null;
   colourAgrees?: boolean | null;
+  bMinusVDifferenceMag?: number | null;
   colourNote?: string;
 }
 

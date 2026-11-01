@@ -89,6 +89,10 @@ These replace the proposals in the three `inventory_97_*.md` files wherever the 
 - **Cautions:** `possible_neighbor_contamination` and `neighbor_wing_status` stay as measurements and appear in job warnings.
 - **Checkpoints:** the spectral checkpoints count as one self-check group.
 
+### Spectrum star limit (user, 2026-11-01)
+
+Spectroscopy analyzes the 10 brightest stars by default (`DEFAULT_SPECTRUM_STAR_LIMIT`), until a measured feature-detection limit decides which stars are worth analyzing. This reverses the all-stars default of 2026-10-13 for now. The measurement is injection-recovery into real faint spectra, reported as a curve per feature strength.
+
 ## 3. Phases
 
 Each phase is one or more commits. Sonnet agents make the edits and scripts handle mechanical ones. CI runs the full suites. A pipeline's inventory goes in `documentation/plans/` and you approve it before that pipeline's code changes.

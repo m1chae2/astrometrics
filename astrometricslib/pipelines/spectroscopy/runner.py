@@ -48,6 +48,14 @@ from astrometricslib.pipelines.spectroscopy.record_and_flag_spectroscopy_stars i
     record_and_flag_spectroscopy_stars,
 )
 
+# How many of the brightest stars get a spectrum in one analysis, unless the
+# caller asks otherwise. This is a stopgap the user chose on 2026-11-01, not a
+# measured limit: a run over every detected star (about 500) took over 50
+# minutes. It stays until a measured brightness limit decides which stars are
+# worth analyzing (documentation/plans/VERDICT_REMOVAL_PLAN.md). Fainter stars
+# get no spectrum in the meantime.
+DEFAULT_SPECTRUM_STAR_LIMIT = 10
+
 # How far from the frame centre, in degrees, a reference star may be and still
 # be used to name the stars in a spectral frame. The frame is 3008 pixels of
 # about 1.9 arcseconds (1.6 degrees) on a side, so its corners are 1.13
@@ -62,6 +70,24 @@ REGISTRATION_REFERENCE_FIELD_RADIUS_DEG = 1.5
 # catalog-identified star must be examined. Small enough that the stars that
 # are not kept can be freed before the next slice is read.
 _CATALOG_SLICE_SIZE = 2000
+
+
+def spectrum_star_limit(options: dict[str, Any]) -> int | None:
+    """Return how many of the brightest stars a run analyzes.
+
+    Parameters
+    ----------
+    options : `dict` [`str`, `Any`]
+        The stage's options. ``limit`` sets the count, and an explicit
+        `None` asks for every candidate star.
+
+    Returns
+    -------
+    limit : `int` or `None`
+        The count, which is `DEFAULT_SPECTRUM_STAR_LIMIT` when ``limit`` is
+        left out.
+    """
+    return options.get("limit", DEFAULT_SPECTRUM_STAR_LIMIT)
 
 
 def _recover_extended_source_hint(
@@ -433,14 +459,7 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
             )
 
         spectroscopy = SpectroscopyPipeline(drivers=request.options.get("drivers"))
-        # No fixed count here: every candidate that clears the point-source
-        # detector's own 5-sigma threshold (`source_detection.py`) and the
-        # spurious-trail filter gets an extraction attempt. A caller can
-        # still pass `options["limit"]` to deliberately cap a run (for
-        # example a quick interactive check), but production runs should
-        # not silently drop real, fainter, already-identified stars past
-        # an arbitrary top-N count the way a fixed default of 10 used to.
-        limit = request.options.get("limit")
+        limit = spectrum_star_limit(request.options)
         stellar_objects, star_id_breakdown, flagged_spectral_classifications = (
             record_and_flag_spectroscopy_stars(
                 spectroscopy.process(context, limit=limit),

@@ -57,6 +57,17 @@ _DATA_DIR = Path(__file__).parent.parent / "data"
 # be fitted, and its wing at the star is already tiny.
 MAXIMUM_NEIGHBOR_DISTANCE_PX = 60.0
 
+# At most this many neighbors per star get their own position shift and are
+# modeled in the stretch fit; the others are left out of the fit. Every
+# neighbor's wing is still subtracted afterward, so the correction itself
+# covers all of them. The fit's cost grows steeply with the number of fitted
+# positions, and a faint neighbor adds almost nothing to the fit. Derivation:
+# the neighbors are ranked by median box flux and the 8 brightest kept (the
+# `cap8` run in validation entry SPE-D27). On M 13 and Albireo (two images
+# only), the set of stars with a reliable fit did not change, and no feature
+# verdict flipped. Design estimate until more targets are measured.
+MAXIMUM_FITTED_NEIGHBORS = 8
+
 # Two streaks closer than this across the streak are treated as the same star
 # (for example a star listed twice), not as a neighbour.
 MINIMUM_NEIGHBOR_DISTANCE_PX = 3.0
@@ -481,6 +492,33 @@ def _place_trace(frame: WorkingFrame, trace: StarTrace | None) -> _PlacedTrace |
     return _PlacedTrace(trace, along, cross, float(zero_along[0]))
 
 
+def brightest_neighbor_indices(
+    neighbor_box_fluxes: Sequence[np.ndarray], maximum: int = MAXIMUM_FITTED_NEIGHBORS
+) -> list[int]:
+    """Pick which neighbors get their own position shift in the fit.
+
+    Parameters
+    ----------
+    neighbor_box_fluxes : `Sequence` [`numpy.ndarray`]
+        The box flux of each neighbor along its streak.
+    maximum : `int`, optional
+        How many neighbors to keep.
+
+    Returns
+    -------
+    indices : `list` [`int`]
+        The positions of the brightest neighbors (by median absolute box
+        flux), in their original order. All of them when there are no more
+        than `maximum`.
+    """
+    count = len(neighbor_box_fluxes)
+    if count <= maximum:
+        return list(range(count))
+    brightness = np.array([float(np.nanmedian(np.abs(flux))) for flux in neighbor_box_fluxes])
+    brightness = np.nan_to_num(brightness, nan=-np.inf)
+    return sorted(np.argsort(-brightness, kind="stable")[:maximum].tolist())
+
+
 def _correct_one_star(
     working_image: np.ndarray,
     target: _PlacedTrace,
@@ -522,7 +560,8 @@ def _correct_one_star(
     )
     outer = np.concatenate([profiles[:, :10], profiles[:, -10:]], axis=1)
     noise_floor = max(1.4826 * float(np.median(np.abs(outer - np.median(outer)))), 1e-9)
-    star_offsets = np.array([0.0, *[float(np.nanmedian(offset)) for _, offset in neighbors]])
+    fitted = brightest_neighbor_indices([other.trace.box_flux for other, _ in neighbors])
+    star_offsets = np.array([0.0, *[float(np.nanmedian(neighbors[index][1])) for index in fitted]])
     fit = fit_neighbor_amplitudes(stored.blur, offsets, profiles, band_positions, star_offsets, noise_floor)
     if not fit.is_reliable:
         return NeighborWingOutcome(

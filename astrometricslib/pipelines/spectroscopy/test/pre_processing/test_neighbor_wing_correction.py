@@ -16,15 +16,19 @@ import json
 import numpy as np
 import pytest
 
+from astrometricslib.pipelines.spectroscopy.pre_processing import neighbor_wing_correction as wing_module
 from astrometricslib.pipelines.spectroscopy.pre_processing.neighbor_trail_deblending import (
+    NeighborFit,
     measure_empirical_blur,
 )
 from astrometricslib.pipelines.spectroscopy.pre_processing.neighbor_wing_correction import (
+    MAXIMUM_FITTED_NEIGHBORS,
     STATUS_APPLIED,
     STATUS_NOT_NEEDED,
     StarTrace,
     StoredCrossTrailBlur,
     box_half_widths_px,
+    brightest_neighbor_indices,
     correct_neighbor_wings,
     cross_trail_blur_record,
     load_cross_trail_blur,
@@ -369,3 +373,62 @@ def test_a_lone_star_gets_no_record_even_with_the_switch_on() -> None:
     """A star with no neighbour in the image has nothing recorded."""
     results, _ = _run_pipeline(True, stored_blur(), count=1)
     assert "neighbor_wing_status" not in results[0]
+
+
+def test_up_to_the_cap_every_neighbor_is_fitted() -> None:
+    """With few neighbors, all of them keep their own shift."""
+    fluxes = [np.full(5, float(level)) for level in range(MAXIMUM_FITTED_NEIGHBORS)]
+    assert brightest_neighbor_indices(fluxes) == list(range(MAXIMUM_FITTED_NEIGHBORS))
+
+
+def test_beyond_the_cap_the_brightest_neighbors_are_kept_in_order() -> None:
+    """The faintest neighbors by median absolute flux drop out; order stays."""
+    levels = [5.0, 1.0, 9.0, 3.0, -7.0, 2.0, 8.0, 4.0, 6.0, 0.5, 10.0]
+    fluxes = [np.full(5, level) for level in levels]
+    fluxes[1] = np.array([1.0, 1.0, 1.0, np.nan, np.nan])
+    assert brightest_neighbor_indices(fluxes, maximum=8) == [0, 2, 3, 4, 6, 7, 8, 10]
+
+
+def test_the_fit_sees_eight_neighbors_but_every_wing_is_subtracted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A crowded star's fit gets 9 positions; all 11 wings are subtracted."""
+    stored = stored_blur(1.1)
+    columns = [140.0] + [85.0 + 4.5 * index for index in range(11)]
+    levels = [8000.0] + [500.0 + 100.0 * index for index in range(11)]
+    stars = [(c, np.full(ROWS, level)) for c, level in zip(columns, levels, strict=True)]
+    image = make_image(stars, 1.1, seed=4)
+    traces = [make_trace(image, column) for column in columns]
+    seen: dict[str, int] = {"fitted_positions": 0, "wing_calls": 0}
+
+    def fake_fit(*args: object) -> NeighborFit:
+        """Record how many positions were fitted and claim a reliable fit.
+
+        Returns
+        -------
+        fit : `NeighborFit`
+            A reliable fit of no shifts.
+        """
+        count = len(args[4])
+        seen["fitted_positions"] = count
+        return NeighborFit(1.0, np.zeros(count), np.ones((1, count)), np.zeros(1), 0.0, True)
+
+    real_wing_flux = wing_module.neighbor_wing_flux
+
+    def counting_wing_flux(*args: object) -> np.ndarray:
+        """Count the wings that are worked out, then do the real work.
+
+        Returns
+        -------
+        wing : `numpy.ndarray`
+            The real wing flux.
+        """
+        seen["wing_calls"] += 1
+        return real_wing_flux(*args)
+
+    monkeypatch.setattr(wing_module, "fit_neighbor_amplitudes", fake_fit)
+    monkeypatch.setattr(wing_module, "neighbor_wing_flux", counting_wing_flux)
+    outcomes = correct_neighbor_wings(image, traces, stored, VERTICAL, [False] + [True] * 11)
+    assert outcomes[0].status == STATUS_APPLIED
+    assert seen["fitted_positions"] == 1 + MAXIMUM_FITTED_NEIGHBORS
+    assert seen["wing_calls"] == 11

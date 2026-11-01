@@ -4,25 +4,25 @@
 
 ## Abstract
 
-This paper maps the design in `Astrometrics_Library_Architecture.md` to the Python source in `astrometricslib/`. It names the layers, model classes, the modules of the five pipelines, and the scripts and tests that check them. It lists each pipeline's tuned values with a status label.
+This paper maps the design in `Astrometrics_Library_Architecture.md` to the Python source in `astrometricslib/`. It names the layers, model classes, pipeline modules, and the scripts and tests that check them. It lists each pipeline's tuned values with status labels.
 
 The [glossary](../Glossary.md) defines the terms; this document defines each at first use.
 
 ## 1. Scope
 
-**Statement of need.** Theory is in [Astrometrics_Library_Architecture.md](Astrometrics_Library_Architecture.md). Evidence is in the [validation register](validation/index.md). Module paths are relative to `astrometricslib/`; the [review guides](pipelines/index.md) give stage detail.
+**Statement of need.** Theory is in [Astrometrics_Library_Architecture.md](Astrometrics_Library_Architecture.md). Evidence is in the [validation register](validation/index.md). Module paths are relative to `astrometricslib/`; the [review guides](pipelines/index.md) detail each stage.
 
 The supported entry point is the package root (`from astrometricslib import Astrometrics`). Besides 16 root names, `exceptions.py`, `reports.py`, `jobs.py` and `drivers/` are public. The package builds on Astropy [1]; `wayfindinglib`, the backend and the MCP servers [2] use it.
 
 ## 2. Package layering
 
-Each layer may import only from the layers below it; the Appendix A ratchet test enforces this.
+Each layer imports only from the layers below it; the Appendix A ratchet test enforces this.
 
 **Table 1.** The six layers.
 
 | Layer | Holds | Calls into | Key modules |
 | --- | --- | --- | --- |
-| 1. Public API | The `Astrometrics` facade and the public modules | Layers 2 to 5 | `api/`, `__init__.py`, `exceptions.py`, `reports.py`, `jobs.py`, `drivers/` |
+| 1. Public API | The `Astrometrics` facade, public modules | Layers 2 to 5 | `api/`, `__init__.py`, `exceptions.py`, `reports.py`, `jobs.py`, `drivers/` |
 | 2. Pipeline runners | Stage dispatcher; batch runner | Layer 3 | `pipelines/tasks.py`, `pipelines/target_batch.py` |
 | 3. Pipelines | Stacking, astrometry, photometry, spectroscopy, asteroid detection | Layers 4 to 6; sideways between pipelines | `pipelines/<name>/` |
 | 4. Shared pipeline code | Frame scanning, target records, image conversion, quality primitives, run recording | Layers 5 and 6 | `pipelines/shared/`, `pipelines/pipeline_base.py` |
@@ -31,9 +31,9 @@ Each layer may import only from the layers below it; the Appendix A ratchet test
 
 `visualization/` sits outside the layers.
 
-The pipelines delegate computation and catalog lookups to outside services: Siril for headless stacking, Astrometry.net [3] and Gaia through VizieR [4] or the ESA archive via astroquery [5] and SIMBAD [6] for plate solving and star identification, Gaia XP and DR3 for spectroscopy, and IMCCE SkyBoT for asteroid detection.
+The pipelines delegate to outside services: Siril for headless stacking, Astrometry.net [3] and Gaia through VizieR [4] or the ESA archive via astroquery [5] and SIMBAD [6] for plate solving and star identification, Gaia XP and DR3 for spectroscopy, and IMCCE SkyBoT for asteroid detection.
 
-`process_target` (`api/processing.py`) runs the chosen stages in a fixed order through `pipelines.tasks.run_target_stages`; a list of targets runs each in its own process (`pipelines.target_batch.process_targets_in_parallel`).
+`process_target` (`api/processing.py`) runs the chosen stages in a fixed order through `pipelines.tasks.run_target_stages`; a target list runs each in its own process (`pipelines.target_batch.process_targets_in_parallel`).
 
 ## 3. Data models
 
@@ -457,6 +457,7 @@ Tables 3 to 7 list each pipeline's tuned values and the explaining section. Each
 | Reading box half-width; width smoothing | 2.5 times the trail width; 61 steps | Design estimate ([table](validation/spectroscopy.md#design-estimates)); [SPE-04](validation/spectroscopy.md#spe-04) | §6.2 (concept 2) |
 | Minimum signal-to-noise: spectrum; lines | 1.5; 7 | Partly measured ([SPE-10](validation/spectroscopy.md#spe-10), [SPE-31](validation/spectroscopy.md#spe-31)) | §6.2 (concept 5) |
 | Stars per run | 10 | Design estimate ([SPE-D26](validation/spectroscopy.md#design-estimates)) | §6.2 |
+| Fitted neighbors per star | 8 | Design estimate ([SPE-D27](validation/spectroscopy.md#design-estimates)) | §6.2 |
 | Line significance for the wavelength zero point | 6 | Partly measured ([SPE-11](validation/spectroscopy.md#spe-11)) | §6.2 (concept 4) |
 | Sky strip gap and width | 6 px; 10 px | Partly measured ([SPE-01](validation/spectroscopy.md#spe-01)) | §6.2 (concept 2) |
 | Sky contamination limit | 3σ | Partly measured ([SPE-03](validation/spectroscopy.md#spe-03)); simulation only | §6.2 (concept 2) |
@@ -477,6 +478,7 @@ Tables 3 to 7 list each pipeline's tuned values and the explaining section. Each
 <!-- impl: astrometricslib.pipelines.spectroscopy.processing.spectrum_signal.MINIMUM_SPECTRUM_SIGNAL_TO_NOISE -->
 <!-- impl: astrometricslib.pipelines.spectroscopy.processing.spectrum_signal.MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE -->
 <!-- impl: astrometricslib.pipelines.spectroscopy.runner.DEFAULT_SPECTRUM_STAR_LIMIT -->
+<!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.neighbor_wing_correction.MAXIMUM_FITTED_NEIGHBORS -->
 <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.wavelength_zero_point.MINIMUM_LINE_SIGNIFICANCE -->
 <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.SKY_BAND_GAP_PX -->
 <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.SKY_BAND_WIDTH_PX -->

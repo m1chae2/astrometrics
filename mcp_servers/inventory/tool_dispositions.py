@@ -66,14 +66,6 @@ INTERIM_BLOCKS = {
         "INDI device that is off, and enclosure_state returns unknown in the MCP process. Blocked until "
         "those sections use the connect-only path."
     ),
-    "planning_get_sources": (
-        "Returns whole target records and every star, which overflows the 40,000 character reply. Use "
-        "planning_find_sources, which caps the list, brightest first."
-    ),
-    "planning_get_library_star_summaries": (
-        "Returns every star in the circle, which can overflow the 40,000 character reply. Use "
-        "planning_find_sources, which caps the list, brightest first."
-    ),
     "observatory_imaging_status": (
         "The filters and focuser sections return [] and 0 because the MCP process has no hardware "
         "connection. Use app_status with the telescope section (focuser position, filter, pier side, "
@@ -291,10 +283,11 @@ DECISIONS = {
         "Built 2026-10-04. Targets as short rows or one grouped record, the cameras used, or each "
         "target's frames per camera; replaces target_get and target_list.",
     ),
-    "planning_find_sources": ToolDecision(
+    "planning_query_sources": ToolDecision(
         "keep",
-        "Built 2026-10-04. Library targets and stars near a point, brightest stars first, cut at a limit "
-        "with the total reported.",
+        "Targets and stars near a point from the library, SIMBAD or the online catalogs, brightest stars "
+        "first, cut at a limit with the total reported. Replaces planning_find_sources, "
+        "planning_get_sources, planning_get_library_star_summaries and planning_get_online_catalog_sources.",
     ),
     "planning_lookup_coordinates": ToolDecision(
         "keep", "Built 2026-10-04. The position of a named object, from the library or SIMBAD. Reads only."
@@ -322,13 +315,6 @@ DECISIONS = {
         "keep",
         "Built 2026-10-05. Draws one chart of a target or a star; the registry sends it as a PNG image. "
         "Saves nothing.",
-    ),
-    "planning_get_library_star_summaries": ToolDecision("keep", "Reads star summaries for planning."),
-    "planning_get_sources": ToolDecision(
-        "keep", "Lists sources near a position. It also returns targets; target_query will cover those."
-    ),
-    "planning_get_online_catalog_sources": ToolDecision(
-        "keep", "Queries online catalogs over the network. Reads only."
     ),
     "planning_list_catalog_driver_metadata": ToolDecision("keep", "Lists the catalog drivers. Reads only."),
     "planning_get_visibility": ToolDecision(

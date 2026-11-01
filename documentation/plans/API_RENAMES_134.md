@@ -96,6 +96,10 @@ Done on the same branch. No old name is kept as an alias. The MCP tool of each c
 | Old | New |
 | --- | --- |
 | `planning.resolve_target_coordinates(name)` and `planning.lookup_coordinates(name)` | `planning.lookup_coordinates(name)`, one call. The MCP tool `planning_resolve_target_coordinates` is removed |
+| `planning.find_sources(ra_deg, dec_deg, radius_deg, magnitude_min=, magnitude_max=, include=["targets"], limit=100)` | `planning.query_sources(ra_deg, dec_deg, radius_deg, source=["targets", "stars"], magnitude_min=, magnitude_max=, limit=100)`. `include=[]` (stars only) becomes `source=["stars"]` |
+| `planning.get_sources(ra_deg, dec_deg, radius_deg, include=["stars"], limiting_magnitude=, include_stars_without_catalog_magnitude=)` | `planning.query_sources(..., source=["targets", "stars"], magnitude_max=, include_stars_without_catalog_magnitude=, limit=None)`. The old `include=["online"]` is `source=["simbad"]`; targets are listed only when `source` has `"targets"` |
+| `planning.get_library_star_summaries(ra_deg, dec_deg, radius_deg, magnitude_range=)` | `planning.query_sources(..., source=["stars"], magnitude_min=, magnitude_max=)` |
+| `planning.get_online_catalog_sources(ra_deg, dec_deg, radius_deg, enabled_driver_names, magnitude_limit=)` | `planning.query_sources(..., source=["catalogs"], catalog_drivers=[...], magnitude_max=)` |
 
 ### Planning parameters
 
@@ -107,6 +111,7 @@ Done on the same branch. No old name is kept as an alias. The MCP tool of each c
 | Call | Old | New |
 | --- | --- | --- |
 | `planning.lookup_coordinates` | `dict` | `CoordinateLookup` (`id`, `name`, `kind`, `ra_deg`, `dec_deg`, `ra`, `dec`, `magnitude`, `spectral_type`). `result["ra_deg"]` becomes `result.ra_deg` |
+| `planning.find_sources`, `get_sources`, `get_library_star_summaries`, `get_online_catalog_sources` | `dict`, `list[SkySource]`, `list[dict]`, `list[SkySource]` | `SourceQueryResult` (`sources`, a list of `SkySource`, then `total_stars` and `stars_truncated`). A library star is a `SkySource`, so the `targetIds` of the old summary rows is gone. The RPCs `planetarium:get_sources`, `planetarium:get_targets` and `planetarium:get_catalog_sources` still reply with a list of `SkySource` records |
 
 ### Planning RPC methods
 

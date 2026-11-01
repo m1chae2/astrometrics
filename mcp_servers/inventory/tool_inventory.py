@@ -365,7 +365,7 @@ CLASSIFICATION_RULES = (
     ),
     _rule(r"^star_query$", "observe", "high", "Reads library stars. Row counts are capped."),
     _rule(
-        r"^(target_query|target_imaged_field_centers|planning_find_sources|planning_lookup_coordinates)$",
+        r"^(target_query|target_imaged_field_centers|planning_query_sources|planning_lookup_coordinates)$",
         "observe",
         "high",
         "Reads targets or stars in short, capped records.",

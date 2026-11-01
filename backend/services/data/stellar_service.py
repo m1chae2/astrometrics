@@ -755,15 +755,16 @@ class StellarService:
             One `SkySource` per object, with the Planetarium's camelCase
             keys.
         """
-        sources = self.wayfinder.planning.get_sources(
+        result = self.wayfinder.planning.query_sources(
             ra,
             dec,
             radius,
-            include=["stars", "online"] if include_catalog else ["stars"],
-            limiting_magnitude=limiting_magnitude,
+            source=["targets", "stars", "simbad"] if include_catalog else ["targets", "stars"],
+            magnitude_max=limiting_magnitude,
             include_stars_without_catalog_magnitude=include_stars_without_catalog_magnitude,
+            limit=None,
         )
-        return [source.model_dump(by_alias=True) for source in sources]
+        return [source.model_dump(by_alias=True) for source in result.sources]
 
     def get_planetarium_targets(self) -> list[dict]:
         """List every library target that has coordinates, for the sky map.
@@ -779,8 +780,10 @@ class StellarService:
         REQ: PLN-2.2
         """
         whole_sky_radius_deg = 180.0
-        sources = self.wayfinder.planning.get_sources(0.0, 0.0, whole_sky_radius_deg, include=[])
-        return [source.model_dump(by_alias=True) for source in sources]
+        result = self.wayfinder.planning.query_sources(
+            0.0, 0.0, whole_sky_radius_deg, source=["targets"], limit=None
+        )
+        return [source.model_dump(by_alias=True) for source in result.sources]
 
     def get_online_catalog_sources(
         self,
@@ -817,14 +820,16 @@ class StellarService:
 
         REQ: PLN-3.1, PLN-3.2
         """
-        sources = self.wayfinder.planning.get_online_catalog_sources(
+        result = self.wayfinder.planning.query_sources(
             ra_deg=ra,
             dec_deg=dec,
             radius_deg=radius,
-            enabled_driver_names=enabled_drivers,
-            magnitude_limit=limiting_magnitude,
+            source=["catalogs"],
+            catalog_drivers=enabled_drivers,
+            magnitude_max=limiting_magnitude,
+            limit=None,
         )
-        return [source.model_dump(by_alias=True) for source in sources]
+        return [source.model_dump(by_alias=True) for source in result.sources]
 
     def deep_catalog_status(self) -> dict:
         """Say how much of the downloaded deep-star catalog is installed.
@@ -863,7 +868,7 @@ class StellarService:
     def get_constellation_lines(self) -> list[dict]:
         """Return all bundled constellation stick-figure line segments.
 
-        Unlike get_sources()/get_online_catalog_sources(), this takes no
+        Unlike get_sources() and get_online_catalog_sources(), this takes no
         ra/dec/radius — the full bundled dataset (a few hundred segments) is
         small enough to return in one shot and let the frontend project/cull
         it client-side, decoupled from whatever stars the user currently has

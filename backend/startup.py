@@ -70,7 +70,7 @@ def warm_start_up_caches() -> None:
         """Build the sky engine and load its catalog with a tiny query."""
         started_at = time.monotonic()
         try:
-            container.wayfinder.planning.get_sources(0.0, 0.0, 0.01)
+            container.wayfinder.planning.query_sources(0.0, 0.0, 0.01, limit=None)
             logger.info("Sky catalog warmed in %.1fs", time.monotonic() - started_at)
         except Exception:
             # Warm-up runs in the background; a failure only makes the first

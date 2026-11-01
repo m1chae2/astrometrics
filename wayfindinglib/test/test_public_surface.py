@@ -117,10 +117,7 @@ PLANNING_MEMBERS = frozenset({
     "deep_catalog_status",
     "build_deep_star_catalog",
     # Sky browsing around a point, and name lookups.
-    "find_sources",
-    "get_sources",
-    "get_library_star_summaries",
-    "get_online_catalog_sources",
+    "query_sources",
     "list_catalog_driver_metadata",
     "get_constellation_lines",
     "get_imaged_field_centers",

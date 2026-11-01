@@ -534,13 +534,6 @@
       "interim_block": "",
       "note": "The AI is read-only, so a tool that writes is not offered."
     },
-    "planning_find_sources": {
-      "tool_class": "observe",
-      "category": "planning-sessions",
-      "disposition": "keep",
-      "interim_block": "",
-      "note": "Built 2026-10-04. Library targets and stars near a point, brightest stars first, cut at a limit with the total reported."
-    },
     "planning_get_advisory": {
       "tool_class": "observe",
       "category": "planning-sessions",
@@ -569,33 +562,12 @@
       "interim_block": "",
       "note": "Replaced by target_imaged_field_centers, which runs as a background job."
     },
-    "planning_get_library_star_summaries": {
-      "tool_class": "observe",
-      "category": "planning-sessions",
-      "disposition": "keep",
-      "interim_block": "Returns every star in the circle, which can overflow the 40,000 character reply. Use planning_find_sources, which caps the list, brightest first.",
-      "note": "Reads star summaries for planning."
-    },
-    "planning_get_online_catalog_sources": {
-      "tool_class": "observe",
-      "category": "planning-sessions",
-      "disposition": "keep",
-      "interim_block": "",
-      "note": "Queries online catalogs over the network. Reads only."
-    },
     "planning_get_plan": {
       "tool_class": "observe",
       "category": "planning-sessions",
       "disposition": "keep",
       "interim_block": "",
       "note": "Built 2026-10-06. Reads a recorded session or the session list."
-    },
-    "planning_get_sources": {
-      "tool_class": "observe",
-      "category": "planning-sessions",
-      "disposition": "keep",
-      "interim_block": "Returns whole target records and every star, which overflows the 40,000 character reply. Use planning_find_sources, which caps the list, brightest first.",
-      "note": "Lists sources near a position. It also returns targets; target_query will cover those."
     },
     "planning_get_visibility": {
       "tool_class": "observe",
@@ -617,6 +589,13 @@
       "disposition": "keep",
       "interim_block": "",
       "note": "Built 2026-10-04. The position of a named object, from the library or SIMBAD. Reads only."
+    },
+    "planning_query_sources": {
+      "tool_class": "observe",
+      "category": "planning-sessions",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Targets and stars near a point from the library, SIMBAD or the online catalogs, brightest stars first, cut at a limit with the total reported. Replaces planning_find_sources, planning_get_sources, planning_get_library_star_summaries and planning_get_online_catalog_sources."
     },
     "planning_refresh_suggestions": {
       "tool_class": "change-data",

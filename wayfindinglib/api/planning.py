@@ -72,7 +72,7 @@ from wayfindinglib.models.planning.observation_package import (
 )
 from wayfindinglib.models.planning.planning_config import PlanningConfig
 from wayfindinglib.models.planning.sequence_plan import SequencePlan
-from wayfindinglib.models.planning.sky_source import SkySource
+from wayfindinglib.models.planning.sky_source import SkySource, SourceQueryResult
 from wayfindinglib.models.planning.suggestion_log import (
     PackageChange,
     SuggestionEvent,
@@ -108,7 +108,7 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 MAXIMUM_SOURCES = 300
-"""Most stars one `ObservationPlanning.find_sources` answer lists."""
+"""Most stars one `ObservationPlanning.query_sources` answer lists."""
 
 AdvisoryKind = Literal["quality", "calibration", "tonight", "result"]
 """The kinds of advice `ObservationPlanning.get_advisory` gives."""
@@ -551,96 +551,24 @@ class ObservationPlanning:
             dec=found.dec,
         )
 
-    def find_sources(
+    def query_sources(
         self,
         ra_deg: float,
         dec_deg: float,
         radius_deg: float,
+        source: Sequence[str] = ("targets", "stars"),
         magnitude_min: float | None = None,
         magnitude_max: float | None = None,
-        include: Sequence[str] = ("targets",),
-        limit: int = 100,
-    ) -> dict[str, Any]:
-        """List the library's stars, and optionally targets, near a point.
-
-        Stars come brightest first and the list is cut at ``limit``, with
-        the total reported so the cut is never silent.
-
-        Parameters
-        ----------
-        ra_deg : `float`
-            Right ascension of the center, in degrees.
-        dec_deg : `float`
-            Declination of the center, in degrees.
-        radius_deg : `float`
-            Search radius, in degrees.
-        magnitude_min : `float`, optional
-            Keep stars at least this magnitude (numerically).
-        magnitude_max : `float`, optional
-            Keep stars no fainter than this magnitude.
-        include : `list` [`str`], optional
-            ``"targets"`` also lists the library targets in the circle.
-            Defaults to ``["targets"]``; pass ``[]`` for stars only.
-        limit : `int`, optional
-            Most stars to list, from 1 to 300. Defaults to 100.
-
-        Returns
-        -------
-        answer : `dict` [`str`, `Any`]
-            ``stars`` (the summary rows), ``stars_total``, whether the star
-            list was cut, and ``targets`` (id, name, position) when asked.
-        """
-        from astrometricslib import parse_coordinate_string
-
-        sections = check_include(include, ("targets",))
-        limit = max(1, min(int(limit), MAXIMUM_SOURCES))
-        magnitude_range = None
-        if magnitude_min is not None or magnitude_max is not None:
-            magnitude_range = (
-                magnitude_min if magnitude_min is not None else -30.0,
-                magnitude_max if magnitude_max is not None else 60.0,
-            )
-        stars = list(
-            self._sky_engine.get_library_star_summaries(ra_deg, dec_deg, radius_deg, magnitude_range)
-        )
-        stars.sort(key=lambda row: (row.get("magnitude") is None, row.get("magnitude") or 0.0))
-        answer: dict[str, Any] = {
-            "stars_total": len(stars),
-            "stars_truncated": len(stars) > limit,
-            "stars": stars[:limit],
-        }
-        if "targets" in sections:
-            targets = []
-            for target in self._sky_engine.get_sources(ra_deg, dec_deg, radius_deg, False, False):
-                try:
-                    ra = parse_coordinate_string(target.ra, True)
-                    dec = parse_coordinate_string(target.dec, False)
-                except InvalidArgumentError:
-                    ra = dec = None
-                targets.append({
-                    "id": target.id,
-                    "name": getattr(target, "common_name", None) or None,
-                    "ra_deg": ra,
-                    "dec_deg": dec,
-                })
-            answer["targets"] = targets
-        return answer
-
-    def get_sources(
-        self,
-        ra_deg: float,
-        dec_deg: float,
-        radius_deg: float,
-        include: Sequence[str] = ("stars",),
-        limiting_magnitude: float | None = None,
         include_stars_without_catalog_magnitude: bool = True,
-    ) -> list[SkySource]:
-        """List the targets, and optionally stars, to draw in a sky region.
+        catalog_drivers: Sequence[str] | None = None,
+        limit: int | None = 100,
+    ) -> SourceQueryResult:
+        """List the targets and stars near a point, from the places you name.
 
         Targets show their stacked image, or their longest LIGHT frame when
-        they have no stack. Stars are read from the library's indexed
-        summaries, so a wide region stays fast. Single-frame photometry
-        detections are never listed.
+        they have no stack. Library stars are read from the library's
+        indexed summaries, so a wide region stays fast. Single-frame
+        photometry detections are never listed.
 
         Parameters
         ----------
@@ -650,110 +578,98 @@ class ObservationPlanning:
             Declination of the center, in degrees.
         radius_deg : `float`
             Search radius, in degrees.
-        include : `list` [`str`], optional
-            ``"stars"`` adds the library's own stars; ``"online"`` adds
-            SIMBAD's objects that the library does not hold. Defaults to
-            ``["stars"]``; pass ``[]`` for library targets only.
-        limiting_magnitude : `float`, optional
-            Leave out stars whose catalog magnitude is fainter than this.
-            Targets are never left out. Needs ``"stars"`` or ``"online"``.
+        source : `list` [`str`], optional
+            Where to look. ``"targets"`` lists the library's targets.
+            ``"stars"`` lists the library's own stars. ``"simbad"`` adds
+            SIMBAD's objects that the library does not hold. ``"catalogs"``
+            asks the online catalog drivers named in ``catalog_drivers``;
+            it never reads the library. Defaults to targets and stars.
+        magnitude_min : `float`, optional
+            Brightest star magnitude to keep. Stars with no catalog
+            magnitude are then left out.
+        magnitude_max : `float`, optional
+            Faintest star magnitude to keep. Targets are never left out.
+            Online catalog drivers that can use it fetch fewer stars.
         include_stars_without_catalog_magnitude : `bool`, optional
-            Keep stars that have no real catalog magnitude (missing, zero,
-            or an instrumental value from photometry). Defaults to `True`.
-            A wide map view passes `False`, because most library stars are
-            field detections that the magnitude limit cannot thin out.
-            Needs ``"stars"`` or ``"online"``.
+            Keep library and SIMBAD stars that have no real catalog
+            magnitude (missing, zero, or an instrumental value from
+            photometry). Defaults to `True`. A wide map view passes
+            `False`, because most library stars are field detections that
+            the magnitude limit cannot thin out.
+        catalog_drivers : `list` [`str`], optional
+            The online catalog drivers to ask, such as ``["deep_stars"]``.
+            Needed with ``"catalogs"``, and allowed only with it.
+        limit : `int`, optional
+            Most stars to list, from 1 to 300, brightest first. Targets are
+            never cut. Defaults to 100. `None` lists every star in the order
+            found, which can be very long.
 
         Returns
         -------
-        sources : `list` [`SkySource`]
-            Library targets, then library stars, then online objects.
+        result : `SourceQueryResult`
+            The sources, the number of stars found before the cut, and
+            whether the cut dropped any.
 
         Raises
         ------
         InvalidArgumentError
-            If ``include`` names an unknown section, or a star limit is
-            given with no stars asked for.
+            If ``source`` names an unknown place, ``"catalogs"`` has no
+            ``catalog_drivers`` (or the reverse), or a star limit is given
+            with no stars asked for.
         """
         from wayfindinglib.tasks.planning_tasks import sky_sources
 
-        sections = check_include(include, ("stars", "online"))
-        if not sections and (limiting_magnitude is not None or not include_stars_without_catalog_magnitude):
+        sections = check_include(source, ("targets", "stars", "simbad", "catalogs"))
+        if ("catalogs" in sections) != bool(catalog_drivers):
             raise InvalidArgumentError(
-                "limiting_magnitude and include_stars_without_catalog_magnitude only apply when "
-                "include has 'stars' or 'online'."
+                "catalog_drivers goes with source 'catalogs', and 'catalogs' needs it."
             )
-        return sky_sources.collect_sky_sources(
-            self._sky_engine,
-            ra_deg,
-            dec_deg,
-            radius_deg,
-            include_stars="stars" in sections,
-            include_online="online" in sections,
-            limiting_magnitude=limiting_magnitude,
-            include_stars_without_catalog_magnitude=include_stars_without_catalog_magnitude,
-        )
-
-    def get_library_star_summaries(
-        self,
-        ra_deg: float,
-        dec_deg: float,
-        radius_deg: float,
-        magnitude_range: tuple[float, float] | None = None,
-    ) -> list[dict[str, Any]]:
-        """Return quick summaries of the user's own stars near a point.
-
-        ``magnitude_range`` keeps only stars whose magnitude is between
-        the two values, ends included; stars with no saved magnitude are
-        left out. Every star is kept when it is omitted.
-
-        Returns
-        -------
-        summaries : `list` [`dict`]
-            One dict per library star inside the search radius, with keys
-            ``id``, ``name``, ``ra``, ``dec``, ``targetIds``,
-            ``hasSpectra``, ``hasPhotometry``, ``magnitude`` and
-            ``spectralType``.
-        """
-        return self._sky_engine.get_library_star_summaries(ra_deg, dec_deg, radius_deg, magnitude_range)
-
-    def get_online_catalog_sources(
-        self,
-        ra_deg: float,
-        dec_deg: float,
-        radius_deg: float,
-        enabled_driver_names: list[str],
-        magnitude_limit: float | None = None,
-    ) -> list[SkySource]:
-        """Ask the enabled online catalog drivers for the stars in a region.
-
-        Only the online catalogs are asked; the library is neither read nor
-        changed.
-
-        Parameters
-        ----------
-        ra_deg : `float`
-            Right ascension of the center, in degrees.
-        dec_deg : `float`
-            Declination of the center, in degrees.
-        radius_deg : `float`
-            Search radius, in degrees.
-        enabled_driver_names : `list` [`str`]
-            The drivers to ask, such as ``["deep_stars"]``.
-        magnitude_limit : `float`, optional
-            Faintest magnitude wanted. Drivers that can use it fetch fewer
-            stars.
-
-        Returns
-        -------
-        sources : `list` [`SkySource`]
-            One source per star found, marked global, with
-            ``catalog_source`` naming the driver.
-        """
-        from wayfindinglib.tasks.planning_tasks import sky_sources
-
-        return sky_sources.online_catalog_sources(
-            self._sky_engine, ra_deg, dec_deg, radius_deg, enabled_driver_names, magnitude_limit
+        asks_for_stars = bool(sections & {"stars", "simbad", "catalogs"})
+        if not asks_for_stars and (
+            magnitude_min is not None
+            or magnitude_max is not None
+            or not include_stars_without_catalog_magnitude
+        ):
+            raise InvalidArgumentError(
+                "The magnitude limits only apply when source has 'stars', 'simbad' or 'catalogs'."
+            )
+        found: list[SkySource] = []
+        if sections & {"targets", "stars", "simbad"}:
+            found.extend(
+                sky_sources.collect_sky_sources(
+                    self._sky_engine,
+                    ra_deg,
+                    dec_deg,
+                    radius_deg,
+                    include_stars="stars" in sections,
+                    include_online="simbad" in sections,
+                    limiting_magnitude=magnitude_max,
+                    include_stars_without_catalog_magnitude=include_stars_without_catalog_magnitude,
+                    include_targets="targets" in sections,
+                    magnitude_min=magnitude_min,
+                )
+            )
+        if "catalogs" in sections:
+            from_catalogs = sky_sources.online_catalog_sources(
+                self._sky_engine, ra_deg, dec_deg, radius_deg, list(catalog_drivers), magnitude_max
+            )
+            found.extend(
+                catalog_source
+                for catalog_source in from_catalogs
+                if magnitude_min is None
+                or (catalog_source.has_catalog_magnitude and catalog_source.magnitude >= magnitude_min)
+            )
+        targets = [item for item in found if item.type == "target"]
+        stars = [item for item in found if item.type == "star"]
+        total_stars = len(stars)
+        if limit is not None:
+            limit = max(1, min(int(limit), MAXIMUM_SOURCES))
+            stars.sort(key=lambda item: (item.magnitude is None, item.magnitude or 0.0))
+        truncated = limit is not None and total_stars > limit
+        return SourceQueryResult(
+            sources=[*targets, *(stars[:limit] if limit is not None else stars)],
+            total_stars=total_stars,
+            stars_truncated=truncated,
         )
 
     def list_catalog_driver_metadata(self) -> list[dict[str, Any]]:

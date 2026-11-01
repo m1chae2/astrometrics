@@ -45,8 +45,7 @@ Stored summaries are rewritten by a restack, so a restack before this work store
 
 Stored gates (55 `*.gate_*` metric names; stacking 25, photometry 11, spectroscopy 9, astrometry 5, asteroid detection 5) mix two things: self-checks of the measurement, and judgments of fitness for use.
 
-- A: sort each gate in the per-pipeline inventory. A self-check stays as a measurement with a check outcome. A judgment moves to a wayfindinglib rule. A job in astrometricslib could then no longer report a moved gate as a warning, because astrometricslib cannot call wayfindinglib, so this fits the no-lost-warning requirement poorly.
-- **B (recommended since the no-lost-warning requirement): keep them all as measurements with a check outcome, and add wayfindinglib rules that turn them into suggestions.** A job can always list its warnings. astrometricslib keeps limits that are judgments, which departs from `QUALITY_METRICS_PLAN.md` decision 1 and needs your approval.
+**Decided by the user, 2026-11-01:** all gates and measurements belong in astrometricslib. Each gate stays a measurement with a check outcome, and a job can always list its warnings. wayfindinglib rules only turn outcomes into suggestions of what to do next. `QUALITY_METRICS_PLAN.md` decision 1 needs updating to match, and the inventories' proposals to move gates to wayfindinglib no longer apply.
 
 Whichever is chosen, some gates have no matching rule by name today: stack sharpness, rejected fraction, `scatter_population`, `variability_discrimination`, `catalog_agreement` and `gaia_xp_agreement`. Each needs a new rule or a recorded choice to have none.
 

@@ -333,7 +333,6 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "documentation/notebooks/wayfinding/control/adding_remote_images.ipynb" = ["print"]
 "documentation/notebooks/wayfinding/control/telescope_slewing_and_tracking.ipynb" = ["print"]
 "documentation/notebooks/wayfinding/execution/observation_execution.ipynb" = ["print"]
-"documentation/notebooks/wayfinding/execution/scripts/observatory_session_recorder.py" = ["banned-api"]
 "documentation/notebooks/wayfinding/planning/mosaic_sequence_authoring.ipynb" = ["print"]
 "documentation/notebooks/wayfinding/planning/observation_planning.ipynb" = ["print"]
 "mcp_servers/gaps/__main__.py" = ["banned-api"]

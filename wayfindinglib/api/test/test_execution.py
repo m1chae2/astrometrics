@@ -180,6 +180,15 @@ def test_create_recorder_binds_the_astrometrics_own_butler(butler: DiskButler) -
     assert recorder._butler is butler
 
 
+def test_create_recorder_builds_its_own_phd2_connection(butler: DiskButler) -> None:
+    """Without a guiding service, a PHD2 connection is built."""
+    control = ObservatoryControl(config=butler.config, butler=butler, driver=object())
+    execution = ObservationExecution(butler=butler, control=control)
+    recorder = execution.create_recorder(phd2_host="guider.local", phd2_port=4401)
+    client = recorder._guiding_service._client
+    assert (client.host, client.port) == ("guider.local", 4401)
+
+
 def test_create_recorder_needs_the_control(butler: DiskButler) -> None:
     """Verify create_recorder refuses when no control is given."""
     with pytest.raises(ConfigurationError):

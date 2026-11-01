@@ -198,7 +198,7 @@ them by their private names).
 | `control.equipment.save_commissioning_run` | `control.equipment._save_commissioning_run` |
 | `review.save_ekos_session_context` | `review._save_ekos_session_context` |
 | `control.driver`, `mount_driver`, `focuser_driver`, `filter_wheel_driver`, `camera_driver`, `guide_camera_driver`, `enclosure_driver`, `switch_driver`, `weather_driver`, `remote_transfer_driver`, `guiding_driver` | the same names with a leading underscore on `control` |
-| `execution.create_recorder(guiding_service, indi_driver, snapshot_interval_seconds=)` | `execution.create_recorder(guiding_service, snapshot_interval_seconds=)`; the recorder takes the INDI session from `control` |
+| `execution.create_recorder(guiding_service, indi_driver, snapshot_interval_seconds=)` | `execution.create_recorder(*, phd2_host="localhost", phd2_port=None, snapshot_interval_seconds=300, guiding_service=None)`; the recorder takes the INDI session from `control` and builds its own PHD2 connection unless `guiding_service` is given. `phd2_port=None` means PHD2's standard port, 4400. All arguments are keyword-only |
 
 Deleted, because nothing (tests included) used them: `control.imaging.compute_focus_correction`,
 `control.equipment.cooling_ramp_rate` and `control.equipment.summarize_device`. The functions they wrapped in

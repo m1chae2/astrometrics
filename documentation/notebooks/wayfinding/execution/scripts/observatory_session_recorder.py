@@ -15,8 +15,6 @@ import threading
 from datetime import UTC, datetime
 
 from wayfindinglib import ObservationSession, Wayfinder
-from wayfindinglib.drivers.phd2.phd2_client import DEFAULT_PHD2_PORT, PHD2Client
-from wayfindinglib.drivers.phd2.phd2_guiding_service import PHD2GuidingService
 
 
 def _ensure_session(wayfinder: Wayfinder, session_id: str) -> ObservationSession:
@@ -57,7 +55,12 @@ def run_observation_session_recorder() -> None:
     """
     parser = argparse.ArgumentParser(description="Astrometrics Passive Observation Session Recorder")
     parser.add_argument("--phd2-host", type=str, default="localhost", help="PHD2 event-server hostname.")
-    parser.add_argument("--phd2-port", type=int, default=DEFAULT_PHD2_PORT, help="PHD2 event-server port.")
+    parser.add_argument(
+        "--phd2-port",
+        type=int,
+        default=None,
+        help="PHD2 event-server port (default: PHD2's standard port, 4400).",
+    )
     parser.add_argument(
         "--session-id",
         type=str,
@@ -86,16 +89,15 @@ def run_observation_session_recorder() -> None:
     print("Initializing Wayfinder...")
     wayfinder = Wayfinder()
 
-    print(f"Connecting to PHD2 at {args.phd2_host}:{args.phd2_port}...")
-    guiding_service = PHD2GuidingService(PHD2Client(host=args.phd2_host, port=args.phd2_port))
-
     print("Connecting to observatory INDI driver...")
     try:
         wayfinder.control.equipment.connect()
         session_id = _ensure_session(wayfinder, session_id).id
 
+        print("Connecting to PHD2...")
         recorder = wayfinder.execution.create_recorder(
-            guiding_service,
+            phd2_host=args.phd2_host,
+            phd2_port=args.phd2_port,
             snapshot_interval_seconds=args.snapshot_interval_seconds,
         )
 

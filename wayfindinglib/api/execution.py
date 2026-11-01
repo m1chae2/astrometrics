@@ -21,6 +21,8 @@ from typing import TYPE_CHECKING, Any
 from astrometricslib import AppConfiguration, Astrometrics
 from astrometricslib.exceptions import ConfigurationError, NotFoundError
 from wayfindinglib.drivers.butler import DiskButler
+from wayfindinglib.drivers.phd2.phd2_client import DEFAULT_PHD2_PORT, PHD2Client
+from wayfindinglib.drivers.phd2.phd2_guiding_service import PHD2GuidingService
 from wayfindinglib.models.policy.device_state import DeviceSummaryState
 from wayfindinglib.models.policy.recovery import FaultRecord, RecoveryPolicy
 from wayfindinglib.models.session.divergence import DivergenceRecord
@@ -333,19 +335,34 @@ class ObservationExecution:
     # -- Telemetry recording -------------------------------------------------
 
     def create_recorder(
-        self, guiding_service: Any, snapshot_interval_seconds: int = 300
+        self,
+        *,
+        phd2_host: str = "localhost",
+        phd2_port: int | None = None,
+        snapshot_interval_seconds: int = 300,
+        guiding_service: Any | None = None,
     ) -> ObservationSessionRecorder:
         """Build an `ObservationSessionRecorder` bound to this DB.
 
-        The recorder reads the INDI session of the `Wayfinder`'s `control`,
-        so the caller no longer passes it in.
+        The recorder reads the INDI session of the `Wayfinder`'s `control`.
+        Unless the caller passes a guiding service, it opens its own
+        connection to the PHD2 event server (the guiding program's data
+        feed) at `phd2_host` and `phd2_port`.
 
         Parameters
         ----------
-        guiding_service : `Any`
-            The PHD2 guiding service whose telemetry is recorded.
+        phd2_host : `str`, optional
+            The computer PHD2 runs on. Ignored when `guiding_service` is
+            given.
+        phd2_port : `int`, optional
+            The PHD2 event-server port. PHD2's standard port, 4400, if not
+            given. Ignored when `guiding_service` is given.
         snapshot_interval_seconds : `int`, optional
             How often a snapshot is saved, in seconds.
+        guiding_service : `Any`, optional
+            An existing PHD2 guiding service whose telemetry is recorded,
+            such as the one the backend already runs. A new connection is
+            built from `phd2_host` and `phd2_port` if not given.
 
         Returns
         -------
@@ -360,6 +377,10 @@ class ObservationExecution:
         if self._control is None:
             raise ConfigurationError(
                 "create_recorder needs the Wayfinder's control, which holds the INDI session."
+            )
+        if guiding_service is None:
+            guiding_service = PHD2GuidingService(
+                PHD2Client(host=phd2_host, port=DEFAULT_PHD2_PORT if phd2_port is None else phd2_port)
             )
         return ObservationSessionRecorder(
             guiding_service, self._control._driver, self._butler, snapshot_interval_seconds

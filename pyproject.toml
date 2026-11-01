@@ -413,6 +413,8 @@ ignore_imports = [
     "mcp_servers.common.test.test_reply_budget -> wayfindinglib.models.**",
 ]
 allow_indirect_imports = true
+# The public modules are listed above whether or not a server imports them today.
+unmatched_ignore_imports_alerting = "none"
 
 [[tool.importlinter.contracts]]
 name = "the backend uses only the public API of astrometricslib and wayfindinglib"

@@ -181,14 +181,27 @@ describe('selectLightCurveSeries', () => {
     });
 });
 
+/** One stored check on a spectrum number, as the final checkpoint keeps it. */
+type StoredCheck = { name: string; passed: boolean | null };
+
+/** A spectrum result whose final checkpoint holds the given checks. */
+function spectrumWithChecks(fields: Record<string, unknown>, checks: StoredCheck[]) {
+    return {
+        ...fields,
+        stageQuality: [
+            { stage: 'post_processing', metrics: checks.map((check) => ({ ...check, value: 1, unit: '' })), flags: [] },
+        ],
+    };
+}
+
 describe('spectral type and verdict helpers', () => {
     it('describes a good template match without cautions', async () => {
         const { describeTemplateMatch } = await import('../utils/starDisplayFormat');
         const description = describeTemplateMatch(
-            {
-                spectroscopy: { selfDeterminedSpectralType: 'A5V', selfDeterminedSpectralTypeRms: 0.07, isPoorMatch: false },
-                differsFromCatalog: false,
-            },
+            spectrumWithChecks({ selfDeterminedSpectralType: 'A5V', selfDeterminedSpectralTypeRms: 0.07 }, [
+                { name: 'classification_rms', passed: true },
+                { name: 'catalog_type_steps_apart', passed: true },
+            ]),
             'A2'
         );
         expect(description?.badgeText).toBe('Spectrum: A5V (7% off)');
@@ -196,13 +209,13 @@ describe('spectral type and verdict helpers', () => {
         expect(description?.differsFromCatalog).toBe(false);
     });
 
-    it('words the library verdicts for a poor match far from the catalog type', async () => {
+    it('words the stored checks for a poor match far from the catalog type', async () => {
         const { describeTemplateMatch } = await import('../utils/starDisplayFormat');
         const poor = describeTemplateMatch(
-            {
-                spectroscopy: { selfDeterminedSpectralType: 'G0V', selfDeterminedSpectralTypeRms: 0.19, isPoorMatch: true },
-                differsFromCatalog: true,
-            },
+            spectrumWithChecks({ selfDeterminedSpectralType: 'G0V', selfDeterminedSpectralTypeRms: 0.19 }, [
+                { name: 'classification_rms', passed: false },
+                { name: 'catalog_type_steps_apart', passed: false },
+            ]),
             'A2'
         );
         expect(poor?.isPoor).toBe(true);
@@ -211,13 +224,47 @@ describe('spectral type and verdict helpers', () => {
         expect(poor?.hoverText).toContain('It differs from the catalog type (A2).');
     });
 
+    it('does not call a match poor when the check passed, was not run, or is missing', async () => {
+        const { describeTemplateMatch } = await import('../utils/starDisplayFormat');
+        const fields = { selfDeterminedSpectralType: 'G0V', selfDeterminedSpectralTypeRms: 0.19 };
+        expect(describeTemplateMatch(spectrumWithChecks(fields, [{ name: 'classification_rms', passed: true }]), 'A2')?.isPoor).toBe(false);
+        expect(describeTemplateMatch(spectrumWithChecks(fields, [{ name: 'classification_rms', passed: null }]), 'A2')?.isPoor).toBe(false);
+        expect(describeTemplateMatch(fields, 'A2')?.isPoor).toBe(false);
+    });
+
+    it('reads the earlier checkpoint when the last one lacks the check', async () => {
+        const { describeTemplateMatch } = await import('../utils/starDisplayFormat');
+        const poor = describeTemplateMatch(
+            {
+                selfDeterminedSpectralType: 'G0V',
+                selfDeterminedSpectralTypeRms: 0.19,
+                stageQuality: [
+                    { stage: 'processing', metrics: [{ name: 'classification_rms', value: 0.19, unit: '', passed: false }] },
+                    { stage: 'post_processing', metrics: [{ name: 'poor_match', value: 1, unit: 'flag', passed: false }] },
+                ],
+            },
+            'A2'
+        );
+        expect(poor?.isPoor).toBe(true);
+    });
+
+    it('reads the catalog distance from the stored check and not from a limit of its own', async () => {
+        const { differsFromCatalogType } = await import('../utils/starDisplayFormat');
+        const check = (passed: boolean | null) => spectrumWithChecks({}, [{ name: 'catalog_type_steps_apart', passed }]);
+        expect(differsFromCatalogType(check(false))).toBe(true);
+        expect(differsFromCatalogType(check(true))).toBe(false);
+        expect(differsFromCatalogType(check(null))).toBe(false);
+        expect(differsFromCatalogType({ stageQuality: [] })).toBe(false);
+        expect(differsFromCatalogType(null)).toBe(false);
+    });
+
     it('describes nothing when no type was determined', async () => {
         const { describeTemplateMatch } = await import('../utils/starDisplayFormat');
-        expect(describeTemplateMatch({ spectroscopy: { selfDeterminedSpectralType: 'Unknown' } }, 'A2')).toBeNull();
+        expect(describeTemplateMatch({ selfDeterminedSpectralType: 'Unknown' }, 'A2')).toBeNull();
         expect(describeTemplateMatch(null, 'A2')).toBeNull();
     });
 
-    it('words the library match gap', async () => {
+    it('words the library match gap from the stored checks', async () => {
         const { describeMatchGap } = await import('../utils/starDisplayFormat');
         const candidates = [
             { spectral_type: 'G2V', rms: 0.05 },
@@ -226,49 +273,71 @@ describe('spectral type and verdict helpers', () => {
         ];
         expect(describeMatchGap(null)).toBeNull();
         expect(describeMatchGap({})).toBeNull();
+        const gaps = { selfDeterminedSpectralTypeCandidates: candidates, rmsGapToNextClass: 0.04 };
         expect(
-            describeMatchGap({
-                selfDeterminedSpectralTypeCandidates: candidates,
-                rmsGapToSecondBest: 0.027,
-                isAmbiguous: false,
-                rmsGapToNextClass: 0.04,
-                isClassAmbiguous: false,
-            })
+            describeMatchGap(
+                spectrumWithChecks({ ...gaps, rmsGapToSecondBest: 0.027 }, [
+                    { name: 'rms_gap_to_second_best', passed: true },
+                    { name: 'rms_gap_to_next_class', passed: true },
+                ])
+            )
         ).toEqual({ status: 'clear', label: 'clear', detail: 'gap 0.027 RMS to F8V' });
         expect(
-            describeMatchGap({
-                selfDeterminedSpectralTypeCandidates: candidates,
-                rmsGapToSecondBest: 0.01,
-                isAmbiguous: true,
-                rmsGapToNextClass: 0.04,
-                isClassAmbiguous: false,
-            })
+            describeMatchGap(
+                spectrumWithChecks({ ...gaps, rmsGapToSecondBest: 0.01 }, [
+                    { name: 'rms_gap_to_second_best', passed: false },
+                    { name: 'rms_gap_to_next_class', passed: true },
+                ])
+            )
         ).toEqual({ status: 'subtype-uncertain', label: 'same class, subtype uncertain', detail: 'gap 0.010 RMS to F8V' });
     });
 
-    it('words a class-level ambiguity with the nearest other-class type', async () => {
+    it('shows the gap without a verdict for a result saved before the gaps were checked', async () => {
         const { describeMatchGap } = await import('../utils/starDisplayFormat');
         const result = describeMatchGap({
             selfDeterminedSpectralTypeCandidates: [
                 { spectral_type: 'G2V', rms: 0.05 },
-                { spectral_type: 'G0V', rms: 0.055 },
-                { spectral_type: 'K0V', rms: 0.06 },
+                { spectral_type: 'F8V', rms: 0.077 },
             ],
-            rmsGapToSecondBest: 0.005,
-            isAmbiguous: true,
-            rmsGapToNextClass: 0.01,
-            isClassAmbiguous: true,
+            rmsGapToSecondBest: 0.027,
         });
+        expect(result).toEqual({ status: 'not-judged', label: 'not judged', detail: 'gap 0.027 RMS to F8V' });
+    });
+
+    it('words a class-level ambiguity with the nearest other-class type', async () => {
+        const { describeMatchGap } = await import('../utils/starDisplayFormat');
+        const result = describeMatchGap(
+            spectrumWithChecks(
+                {
+                    selfDeterminedSpectralTypeCandidates: [
+                        { spectral_type: 'G2V', rms: 0.05 },
+                        { spectral_type: 'G0V', rms: 0.055 },
+                        { spectral_type: 'K0V', rms: 0.06 },
+                    ],
+                    rmsGapToSecondBest: 0.005,
+                    rmsGapToNextClass: 0.01,
+                },
+                [
+                    { name: 'rms_gap_to_second_best', passed: false },
+                    { name: 'rms_gap_to_next_class', passed: false },
+                ]
+            )
+        );
         expect(result).toEqual({ status: 'class-uncertain', label: 'class uncertain', detail: 'gap 0.010 RMS to K0V' });
     });
 
     it('never uses the words confidence or probability in the match gap wording', async () => {
         const { describeMatchGap } = await import('../utils/starDisplayFormat');
-        const flags = [true, false];
-        for (const isAmbiguous of flags) {
-            for (const isClassAmbiguous of flags) {
+        const outcomes = [true, false];
+        for (const subtypeFailed of outcomes) {
+            for (const classFailed of outcomes) {
                 const text = JSON.stringify(
-                    describeMatchGap({ rmsGapToSecondBest: 0.02, rmsGapToNextClass: 0.02, isAmbiguous, isClassAmbiguous })
+                    describeMatchGap(
+                        spectrumWithChecks({ rmsGapToSecondBest: 0.02, rmsGapToNextClass: 0.02 }, [
+                            { name: 'rms_gap_to_second_best', passed: !subtypeFailed },
+                            { name: 'rms_gap_to_next_class', passed: !classFailed },
+                        ])
+                    )
                 );
                 expect(text).not.toMatch(/confidence|probability/i);
             }
@@ -277,7 +346,7 @@ describe('spectral type and verdict helpers', () => {
 
     it('omits the detail when no gap was measured', async () => {
         const { describeMatchGap } = await import('../utils/starDisplayFormat');
-        expect(describeMatchGap({ isAmbiguous: false, isClassAmbiguous: false })?.detail).toBeNull();
+        expect(describeMatchGap({})).toBeNull();
     });
 
     it('treats only detected and possible verdicts as significant', async () => {
@@ -364,28 +433,28 @@ describe('spectral type and verdict helpers', () => {
 
     it('shows one chip when no type is known, and two only when each says something', async () => {
         const { describeStarTypeBadges } = await import('../utils/starDisplayFormat');
-        const goodSpectrum = { selfDeterminedSpectralType: 'B1V', selfDeterminedSpectralTypeRms: 0.07, isPoorMatch: false };
-        const goodMatch = { spectroscopy: goodSpectrum, differsFromCatalog: null };
-        const poorMatch = {
-            spectroscopy: { selfDeterminedSpectralType: 'B1V', selfDeterminedSpectralTypeRms: 0.23, isPoorMatch: true },
-        };
-        // The library's verdicts against a K2 and a B2 catalog type.
-        const disagreeingMatch = { spectroscopy: goodSpectrum, differsFromCatalog: true };
-        const agreeingMatch = { spectroscopy: goodSpectrum, differsFromCatalog: false };
+        const fields = { selfDeterminedSpectralType: 'B1V', selfDeterminedSpectralTypeRms: 0.07 };
+        const goodSpectrum = spectrumWithChecks(fields, [{ name: 'classification_rms', passed: true }]);
+        const poorSpectrum = spectrumWithChecks({ ...fields, selfDeterminedSpectralTypeRms: 0.23 }, [
+            { name: 'classification_rms', passed: false },
+        ]);
+        // The stored catalog distance check against a K2 and a B2 catalog type.
+        const disagreeingSpectrum = spectrumWithChecks(fields, [{ name: 'catalog_type_steps_apart', passed: false }]);
+        const agreeingSpectrum = spectrumWithChecks(fields, [{ name: 'catalog_type_steps_apart', passed: true }]);
 
         // Neither the catalog nor the spectrum names a type: one grey chip.
-        const unknown = describeStarTypeBadges('Unknown', poorMatch);
+        const unknown = describeStarTypeBadges('Unknown', poorSpectrum);
         expect(unknown.map((badge) => badge.text)).toEqual(['Type: unknown']);
         expect(unknown[0].tone).toBe('neutral');
         expect(describeStarTypeBadges('', null).map((badge) => badge.text)).toEqual(['Type: unknown']);
 
         // Only the spectrum names a type.
-        expect(describeStarTypeBadges('Unknown', goodMatch).map((badge) => badge.text)).toEqual([
+        expect(describeStarTypeBadges('Unknown', goodSpectrum).map((badge) => badge.text)).toEqual([
             'Spectrum: B1V (7% off)',
         ]);
 
         // Only the catalog names a type, and the spectrum could not confirm it: both, the second as a caution.
-        const unconfirmed = describeStarTypeBadges('K2', poorMatch);
+        const unconfirmed = describeStarTypeBadges('K2', poorSpectrum);
         expect(unconfirmed.map((badge) => badge.text)).toEqual(['Catalog: K2', 'Spectrum: no good match']);
         expect(unconfirmed[1].tone).toBe('caution');
 
@@ -393,7 +462,7 @@ describe('spectral type and verdict helpers', () => {
         expect(describeStarTypeBadges('K2', null).map((badge) => badge.text)).toEqual(['Catalog: K2']);
 
         // Both name a type, and they disagree: the measured one is a caution.
-        const disagreeing = describeStarTypeBadges('K2', disagreeingMatch);
+        const disagreeing = describeStarTypeBadges('K2', disagreeingSpectrum);
         expect(disagreeing.map((badge) => badge.text)).toEqual([
             'Catalog: K2',
             'Spectrum: B1V (7% off) · differs from catalog',
@@ -401,7 +470,7 @@ describe('spectral type and verdict helpers', () => {
         expect(disagreeing[1].tone).toBe('caution');
 
         // Both agree.
-        const agreeing = describeStarTypeBadges('B2', agreeingMatch);
+        const agreeing = describeStarTypeBadges('B2', agreeingSpectrum);
         expect(agreeing[1].tone).toBe('measured');
     });
 

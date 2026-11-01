@@ -52,7 +52,6 @@ from astrometricslib.models.stellar_source import (
     SpectroscopyResult,
     StellarObject,
 )
-from astrometricslib.pipelines.spectroscopy.post_processing.assess_output_quality import assess_output_quality
 from astrometricslib.pipelines.spectroscopy.pre_processing.assess_input_quality import assess_input_quality
 from astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_extinction import (
     apply_extinction_correction,
@@ -310,9 +309,6 @@ def recompute_star(
         zero_order_saturated_pixel_fraction=None,
         valid_fraction=spectroscopy.valid_fraction,
         signal_to_noise=analysis.signal_to_noise,
-    )
-    spectroscopy.output_quality = assess_output_quality(
-        classification, analysis.catalog_comparison, analysis.resolution_element_angstrom
     )
     return True
 

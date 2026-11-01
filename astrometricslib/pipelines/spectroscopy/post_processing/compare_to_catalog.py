@@ -176,29 +176,23 @@ def compare_to_catalog(
     comparison : `CatalogComparison`
         The structured comparison; see that class for what each field means.
     """
-    differs = types_differ_on_ladder(classified_type, catalog_spectral_type)
-    spectral_type_agrees = None if differs is None else not differs
     is_luminosity_uncertain = bool(
         is_catalog_giant(catalog_spectral_type) and classified_type and classified_type != "Unknown"
     )
-    colour_agrees = None
     # Spectrum colour minus catalog colour, in magnitudes (positive means
-    # the spectrum is redder). Stored beside `colour_agrees`.
+    # the spectrum is redder).
     b_minus_v_difference_mag = None
     if catalog_b_minus_v is not None and synthetic_colour is not None:
         if np.isfinite(catalog_b_minus_v) and np.isfinite(synthetic_colour):
             if catalog_b_minus_v <= MAXIMUM_CALIBRATED_B_MINUS_V:
                 b_minus_v_difference_mag = float(synthetic_colour - catalog_b_minus_v)
-                colour_agrees = abs(b_minus_v_difference_mag) <= COLOUR_DISAGREEMENT_MAGNITUDES
 
     return CatalogComparison(
-        spectral_type_agrees=spectral_type_agrees,
         spectral_type_note=catalog_disagreement_note(catalog_spectral_type, classified_type),
         is_luminosity_class_uncertain=is_luminosity_uncertain,
         luminosity_class_note=luminosity_class_note(catalog_spectral_type, classified_type, closest_giant),
         closest_giant_type=closest_giant[0] if closest_giant is not None else None,
         closest_giant_rms=closest_giant[1] if closest_giant is not None else None,
-        colour_agrees=colour_agrees,
         b_minus_v_difference_mag=b_minus_v_difference_mag,
         colour_note=colour_disagreement_note(catalog_b_minus_v, synthetic_colour),
     )

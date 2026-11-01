@@ -51,6 +51,8 @@ from astrometricslib.models.stellar_source import (
     AMBIGUOUS_RMS_GAP,
     DIFFERS_FROM_CATALOG_SUBTYPES,
     NO_GOOD_MATCH_RMS,
+    is_rms_gap_ambiguous,
+    types_differ_on_ladder,
 )
 from astrometricslib.models.wavelength_scale import WavelengthScaleSummary
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
@@ -164,12 +166,14 @@ def spectrum_facts(stellar_objects: Iterable[Any]) -> dict[str, int]:
         spectral_type = spectroscopy.self_determined_spectral_type
         if spectral_type and spectral_type not in _UNCLASSIFIED_TYPES:
             facts["classified"] += 1
-            if getattr(spectroscopy, "is_ambiguous", None):
+            if is_rms_gap_ambiguous(spectroscopy.rms_gap_to_second_best):
                 facts["subtype_ambiguous"] += 1
-        comparison = spectroscopy.catalog_comparison
-        if comparison is not None and comparison.spectral_type_agrees is not None:
+        # The two types are compared on the O-to-M ladder; `None` means one
+        # of them is missing, so there was nothing to compare.
+        differs_from_catalog = types_differ_on_ladder(spectral_type, getattr(star, "spectral_type", None))
+        if differs_from_catalog is not None:
             facts["catalog_compared"] += 1
-            if comparison.spectral_type_agrees is False:
+            if differs_from_catalog:
                 facts["catalog_disagree"] += 1
         methods = [
             feature.get("p_value_method")

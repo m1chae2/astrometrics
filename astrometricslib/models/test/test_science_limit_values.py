@@ -7,7 +7,7 @@ library constant it replaces, and that the stored form of a spectroscopy
 result does not change.
 """
 
-from astrometricslib.models.stellar_source import AMBIGUOUS_RMS_GAP, NO_GOOD_MATCH_RMS, SpectroscopyResult
+from astrometricslib.models.stellar_source import SpectroscopyResult
 from astrometricslib.pipelines.shared.quality.metrics import FRAME_METRICS, FRAME_SATURATED_PIXEL_FRACTION
 from astrometricslib.pipelines.stacking.post_processing.exposure_saturation import (
     SATURATED_BLOB_MINIMUM_PIXELS,
@@ -15,15 +15,12 @@ from astrometricslib.pipelines.stacking.post_processing.exposure_saturation impo
 )
 
 
-def test_spectroscopy_result_carries_its_match_limits_without_saving_them() -> None:
-    """The two limits equal the constants and are not in the saved form."""
-    result = SpectroscopyResult()
-    assert result.poor_match_rms_limit == NO_GOOD_MATCH_RMS
-    assert result.ambiguous_rms_gap_limit == AMBIGUOUS_RMS_GAP
-    saved = result.model_dump(by_alias=True)
-    assert "poorMatchRmsLimit" not in saved
-    assert "ambiguousRmsGapLimit" not in saved
-    assert "poor_match_rms_limit" not in result.model_dump()
+def test_spectroscopy_result_saves_no_match_limits_or_verdicts() -> None:
+    """The saved form holds the match numbers, not their limits or verdicts."""
+    saved = SpectroscopyResult().model_dump(by_alias=True)
+    removed_names = ("poorMatchRmsLimit", "ambiguousRmsGapLimit", "isPoorMatch")
+    for removed in (*removed_names, "isAmbiguous", "isClassAmbiguous"):
+        assert removed not in saved
 
 
 def test_the_saturated_pixel_metric_lists_the_saturation_limits() -> None:

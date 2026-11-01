@@ -61,9 +61,9 @@ This pattern gives two kinds of results a fixed home: a judgment of quality, and
 
 The pattern has four parts:
 
-1. The class lives in `models/`, not in the pipeline. This gives a reader, the user interface or another pipeline one place to look for what a field means. `SpectroscopyResult` and `SpectroscopyQualitySummary` live there too. `models/quality/spectroscopy_quality.py` holds `CatalogComparison`, `InputQualityAssessment` and `OutputQualityAssessment`.
-2. A builder function lives in the pipeline's own stage folder. It holds the logic that computes the value: `pre_processing/assess_input_quality.py`, `post_processing/compare_to_catalog.py` and `post_processing/assess_output_quality.py`.
-3. The result is stored as an additive, optional field on the pipeline's per-object result model (`SpectroscopyResult.catalog_comparison`, `.input_quality` and `.output_quality`). It is never a required field, so existing stored data and existing readers are unaffected.
+1. The class lives in `models/`, not in the pipeline. This gives a reader, the user interface or another pipeline one place to look for what a field means. `SpectroscopyResult` and `SpectroscopyQualitySummary` live there too. `models/quality/spectroscopy_quality.py` holds `CatalogComparison` and `InputQualityAssessment`.
+2. A builder function lives in the pipeline's own stage folder. It holds the logic that computes the value: `pre_processing/assess_input_quality.py`, `post_processing/compare_to_catalog.py` and `post_processing/assess_output_quality.py` (the final checkpoint).
+3. The result is stored as an additive, optional field on the pipeline's per-object result model (`SpectroscopyResult.catalog_comparison` and `.input_quality`). It is never a required field, so existing stored data and existing readers are unaffected.
 4. Codegen registration is part of the same change. Codegen is the build step that writes matching TypeScript types for the user interface from the Python models. A new model in `models/` must be added to the `interfaces = [...]` list in `build/codegen/generate_types.py`, or `npm run type-check` fails against the regenerated `ui/common/types/backendTypes.ts`.
 
 These structured objects describe one star or one spectrum. They sit one level below the batch-wide quality summary described in [the external contract](#the-external-contract-analysispipeline), and add to it.

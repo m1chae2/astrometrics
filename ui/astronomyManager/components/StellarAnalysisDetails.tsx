@@ -136,9 +136,7 @@ export const StellarAnalysisDetails: React.FC<StellarAnalysisDetailsProps> = ({
 
     const measuredSpectralType: string = spectroscopy?.selfDeterminedSpectralType || '';
     const spectralRms = spectroscopy?.selfDeterminedSpectralTypeRms;
-    const templateMatch = describeTemplateMatch(astronomyData, astronomyData?.spectralType);
     const spectralCandidates: any[] = spectroscopy?.selfDeterminedSpectralTypeCandidates ?? [];
-    const matchGap = describeMatchGap(spectroscopy);
     const testedFeatures = (spectroscopy?.probableSpectralFeatures ?? []) as SpectralFeatureResult[];
     // A glowing-gas source (such as a nebula) is described by its emission lines, not by a star type.
     const emissionLines = (spectroscopy?.emissionLines ?? []) as EmissionLineResult[];
@@ -166,6 +164,8 @@ export const StellarAnalysisDetails: React.FC<StellarAnalysisDetailsProps> = ({
     const qualityObjectId = astronomyData?.id ? String(astronomyData.id) : null;
     const qualitySection =
         qualityTargetId && qualityObjectId ? <QualitySection targetId={qualityTargetId} objectId={qualityObjectId} /> : null;
+    const templateMatch = describeTemplateMatch(spectroscopy, astronomyData?.spectralType);
+    const matchGap = describeMatchGap(spectroscopy);
 
     if (pointCount === 0 && !measuredSpectralType && testedFeatures.length === 0 && emissionLines.length === 0 && !periodogram && !transitCandidate) {
         return (
@@ -247,13 +247,17 @@ export const StellarAnalysisDetails: React.FC<StellarAnalysisDetailsProps> = ({
                                 title={
                                     matchGap.status === 'clear'
                                         ? 'No other reference star fits nearly as well as the closest one.'
-                                        : matchGap.status === 'subtype-uncertain'
+                                        : matchGap.status === 'not-judged'
+                                          ? 'This result was saved before the gaps were checked, so the gap is shown without a verdict.'
+                                          : matchGap.status === 'subtype-uncertain'
                                           ? 'Another reference star of the same class fits almost as well, so the number after the class letter is uncertain.'
                                           : 'A reference star of a different class fits almost as well, so the class letter itself is uncertain.'
                                 }
                             >
                                 <span className="analysis-label">Separation:</span>
-                                <span className={`analysis-value${matchGap.status === 'clear' ? '' : ' analysis-value--caution'}`}>
+                                <span
+                                    className={`analysis-value${matchGap.status === 'clear' || matchGap.status === 'not-judged' ? '' : ' analysis-value--caution'}`}
+                                >
                                     {matchGap.label.charAt(0).toUpperCase() + matchGap.label.slice(1)}
                                     {matchGap.detail ? ` (${matchGap.detail})` : ''}
                                 </span>

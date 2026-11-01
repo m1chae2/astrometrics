@@ -188,5 +188,5 @@ def test_analysis_detail_returns_short_records_not_raw_arrays() -> None:
     summary = summarize_star(star)
     assert summary["spectrum"]["points"] == 3
     assert summary["spectrum"]["own_type_percent_off"] == pytest.approx(6.0)
-    assert summary["spectrum"]["no_good_match"] is False
+    assert "no_good_match" not in summary["spectrum"]
     assert "wavelengths_angstrom" not in str(summary)

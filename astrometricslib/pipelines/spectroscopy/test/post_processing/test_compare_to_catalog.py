@@ -125,13 +125,13 @@ def test_the_colour_difference_is_spectrum_minus_catalog() -> None:
     assert bluer.b_minus_v_difference_mag == pytest.approx(-0.40)
 
 
-def test_the_colour_difference_sits_beside_the_agreement_flag() -> None:
-    """The stored difference and `colour_agrees` come from the same numbers."""
+def test_the_colour_difference_and_the_colour_note_come_from_the_same_numbers() -> None:
+    """A far colour has a note and a close one has none."""
     close = compare_to_catalog(None, None, None, 0.50, 0.60)
     far = compare_to_catalog(None, None, None, 0.50, 1.10)
-    assert close.colour_agrees is True
+    assert close.colour_note == ""
     assert close.b_minus_v_difference_mag == pytest.approx(0.10)
-    assert far.colour_agrees is False
+    assert far.colour_note != ""
     assert far.b_minus_v_difference_mag == pytest.approx(0.60)
 
 
@@ -150,7 +150,7 @@ def test_the_colour_difference_is_empty_when_the_colour_is_not_compared(
 ) -> None:
     """A colour that is not compared leaves the difference empty."""
     comparison = compare_to_catalog(None, None, None, catalog, synthetic)
-    assert comparison.colour_agrees is None
+    assert comparison.colour_note == ""
     assert comparison.b_minus_v_difference_mag is None
 
 
@@ -158,6 +158,7 @@ def test_an_old_stored_comparison_without_the_difference_still_loads() -> None:
     """A row saved before the difference existed loads with the field empty."""
     old_row = {"colourAgrees": True, "colourNote": "", "spectralTypeAgrees": None}
     comparison = CatalogComparison.model_validate(old_row)
-    assert comparison.colour_agrees is True
+    assert comparison.colour_note == ""
     assert comparison.b_minus_v_difference_mag is None
+    assert not hasattr(comparison, "colour_agrees")
     assert CatalogComparison.model_validate(comparison.model_dump(by_alias=True)) == comparison

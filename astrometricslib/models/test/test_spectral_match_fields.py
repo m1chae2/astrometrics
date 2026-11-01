@@ -1,13 +1,12 @@
-"""Purpose: Tests for the spectral-match verdicts on the star models.
+"""Purpose: Tests for the spectral-match numbers on the star models.
 
-Description: Whether a spectrum's best reference type fits badly, whether
-it beats the runner-up by enough RMS (root-mean-square difference), and
-whether it disagrees with the catalog used to be decided in the Astronomy
-Manager. They are now fields of `SpectroscopyResult` (`is_poor_match`,
-`rms_gap_to_second_best`, `is_ambiguous`) and `StellarObject`
-(`differs_from_catalog`), sent to the app with the star. The limits behind
-them (`NO_GOOD_MATCH_RMS`, `AMBIGUOUS_RMS_GAP`,
-`DIFFERS_FROM_CATALOG_SUBTYPES`) are defined once in `stellar_source`.
+Description: How far a spectrum's best reference type is from it, and how
+much closer that reference is than the runner-up (in RMS, the root-mean-square
+difference), are numbers on `SpectroscopyResult` (`rms_gap_to_second_best`,
+`rms_gap_to_next_class`). The model makes no verdict from them. The limits
+the checks compare them with (`NO_GOOD_MATCH_RMS`, `AMBIGUOUS_RMS_GAP`,
+`DIFFERS_FROM_CATALOG_SUBTYPES`) are defined once in `stellar_source`. A
+record stored with the old verdict fields still loads.
 """
 
 import pytest
@@ -15,7 +14,6 @@ import pytest
 from astrometricslib.models.stellar_source import (
     AMBIGUOUS_RMS_GAP,
     DIFFERS_FROM_CATALOG_SUBTYPES,
-    NO_GOOD_MATCH_RMS,
     SpectroscopyResult,
     StellarObject,
     is_rms_gap_ambiguous,
@@ -24,7 +22,6 @@ from astrometricslib.models.stellar_source import (
     rms_gap_to_second_best,
     types_differ_on_ladder,
 )
-from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_catalog import compare_to_catalog
 
 
 def test_the_ladder_places_a_type_by_class_and_subtype() -> None:
@@ -38,14 +35,6 @@ def test_the_ladder_places_a_type_by_class_and_subtype() -> None:
     assert ladder_position(None) is None
 
 
-@pytest.mark.parametrize(
-    ("rms", "poor"), [(0.05, False), (NO_GOOD_MATCH_RMS, False), (0.2, True), (None, False)]
-)
-def test_a_match_above_the_no_good_match_limit_is_poor(rms: float | None, poor: bool) -> None:
-    """The poor-match limit is `NO_GOOD_MATCH_RMS` relative RMS."""
-    assert SpectroscopyResult(self_determined_spectral_type_rms=rms).is_poor_match is poor
-
-
 def test_the_gap_to_the_second_best_is_a_difference_in_rms_whatever_the_order() -> None:
     """The gap is the second-smallest RMS minus the smallest, in RMS units."""
     spectrum = SpectroscopyResult(
@@ -56,7 +45,7 @@ def test_the_gap_to_the_second_best_is_a_difference_in_rms_whatever_the_order() 
         ]
     )
     assert spectrum.rms_gap_to_second_best == pytest.approx(0.003)
-    assert spectrum.is_ambiguous is True
+    assert is_rms_gap_ambiguous(spectrum.rms_gap_to_second_best) is True
     clear = SpectroscopyResult(
         self_determined_spectral_type_candidates=[
             {"spectral_type": "A0V", "rms": 0.05},
@@ -64,13 +53,12 @@ def test_the_gap_to_the_second_best_is_a_difference_in_rms_whatever_the_order() 
         ]
     )
     assert clear.rms_gap_to_second_best == pytest.approx(0.04)
-    assert clear.is_ambiguous is False
+    assert is_rms_gap_ambiguous(clear.rms_gap_to_second_best) is False
 
 
 def test_with_fewer_than_two_candidates_there_is_no_gap_and_no_verdict() -> None:
     """No gap is `None`, which is not the same as "clearly separated"."""
     assert SpectroscopyResult().rms_gap_to_second_best is None
-    assert SpectroscopyResult().is_ambiguous is None
     assert rms_gap_to_second_best([0.1]) is None
     assert is_rms_gap_ambiguous(None) is None
 
@@ -86,16 +74,16 @@ def test_the_gap_to_the_next_class_skips_same_class_neighbours() -> None:
         ]
     )
     assert spectrum.rms_gap_to_second_best == pytest.approx(0.001)
-    assert spectrum.is_ambiguous is True
+    assert is_rms_gap_ambiguous(spectrum.rms_gap_to_second_best) is True
     assert spectrum.rms_gap_to_next_class == pytest.approx(0.10)
-    assert spectrum.is_class_ambiguous is False
+    assert is_rms_gap_ambiguous(spectrum.rms_gap_to_next_class) is False
     close_classes = SpectroscopyResult(
         self_determined_spectral_type_candidates=[
             {"spectral_type": "G0V", "rms": 0.05},
             {"spectral_type": "F8V", "rms": 0.06},
         ]
     )
-    assert close_classes.is_class_ambiguous is True
+    assert is_rms_gap_ambiguous(close_classes.rms_gap_to_next_class) is True
 
 
 def test_with_one_class_compared_there_is_no_class_gap() -> None:
@@ -107,8 +95,6 @@ def test_with_one_class_compared_there_is_no_class_gap() -> None:
         ]
     )
     assert only_k.rms_gap_to_next_class is None
-    assert only_k.is_class_ambiguous is None
-    assert SpectroscopyResult().is_class_ambiguous is None
     assert rms_gap_to_next_class([]) is None
 
 
@@ -119,28 +105,15 @@ def test_a_gap_is_ambiguous_only_below_the_single_ambiguity_limit() -> None:
     assert is_rms_gap_ambiguous(0.0) is True
 
 
-def test_differs_from_catalog_needs_both_types_on_the_ladder() -> None:
+def test_types_differ_on_ladder_needs_both_types_on_the_ladder() -> None:
     """M2 vs A0V differs; A3V vs A0V agrees; a missing type gives None."""
-
-    def star(own: str, catalog: str) -> StellarObject:
-        """Build a star with a matched and a catalog type.
-
-        Returns
-        -------
-        star : `StellarObject`
-            The star.
-        """
-        return StellarObject(
-            id="S", spectral_type=catalog, spectroscopy=SpectroscopyResult(self_determined_spectral_type=own)
-        )
-
-    assert star("M2", "A0V").differs_from_catalog is True
-    assert star("A3V", "A0V").differs_from_catalog is False
-    assert star("Unknown", "A0V").differs_from_catalog is None
-    assert star("A3V", "").differs_from_catalog is None
+    assert types_differ_on_ladder("M2", "A0V") is True
+    assert types_differ_on_ladder("A3V", "A0V") is False
+    assert types_differ_on_ladder("Unknown", "A0V") is None
+    assert types_differ_on_ladder("A3V", "") is None
 
 
-def test_differs_from_catalog_uses_the_measured_twenty_step_limit() -> None:
+def test_the_catalog_limit_is_the_measured_twenty_steps() -> None:
     """F8 matched as K0 (12 steps) agrees; 21 steps apart differs."""
     assert DIFFERS_FROM_CATALOG_SUBTYPES == pytest.approx(20.0)
     assert types_differ_on_ladder("K0V", "F8V") is False
@@ -148,21 +121,8 @@ def test_differs_from_catalog_uses_the_measured_twenty_step_limit() -> None:
     assert types_differ_on_ladder("F1V", "B0V") is True
 
 
-@pytest.mark.parametrize(
-    ("own", "catalog"),
-    [("K0V", "F8V"), ("M2V", "B7III"), ("K4V", "B9.5V"), ("A3V", "A0V"), ("G2V", "K"), ("F0V", "B0V")],
-)
-def test_the_model_field_and_the_catalog_comparison_never_contradict(own: str, catalog: str) -> None:
-    """`differs_from_catalog` and `spectral_type_agrees` use one rule."""
-    star = StellarObject(
-        id="S", spectral_type=catalog, spectroscopy=SpectroscopyResult(self_determined_spectral_type=own)
-    )
-    comparison = compare_to_catalog(catalog, own, None, None, None)
-    assert comparison.spectral_type_agrees is (not star.differs_from_catalog)
-
-
-def test_the_verdicts_are_sent_with_the_star() -> None:
-    """The app reads the camelCase fields from the star's JSON."""
+def test_the_star_is_sent_without_match_verdicts() -> None:
+    """The JSON holds the numbers and none of the removed verdicts."""
     data = StellarObject(
         id="S",
         spectral_type="A0V",
@@ -170,36 +130,62 @@ def test_the_verdicts_are_sent_with_the_star() -> None:
             self_determined_spectral_type="M2", self_determined_spectral_type_rms=0.2
         ),
     ).model_dump(by_alias=True)
-    assert data["differsFromCatalog"] is True
-    assert data["spectroscopy"]["isPoorMatch"] is True
+    assert data["spectroscopy"]["selfDeterminedSpectralTypeRms"] == pytest.approx(0.2)
     assert data["spectroscopy"]["rmsGapToSecondBest"] is None
-    assert data["spectroscopy"]["isAmbiguous"] is None
     assert data["spectroscopy"]["rmsGapToNextClass"] is None
-    assert data["spectroscopy"]["isClassAmbiguous"] is None
+    for removed in ("differsFromCatalog",):
+        assert removed not in data
+    for removed in ("isPoorMatch", "isAmbiguous", "isClassAmbiguous", "outputQuality"):
+        assert removed not in data["spectroscopy"]
     assert "selfDeterminedSpectralTypeConfidence" not in data["spectroscopy"]
     assert "candidateSeparation" not in data["spectroscopy"]
 
 
-def test_a_star_saved_before_the_new_verdicts_still_loads() -> None:
-    """A record with the older output-quality shape is read, not refused.
+def test_a_star_saved_with_the_removed_verdicts_still_loads() -> None:
+    """A stored record with the removed fields loads and drops them.
 
-    The 68 stars with spectra in the library on 2026-10-10 carried
-    ``isLowConfidence`` and no ``isPoorMatch`` or ``isClassAmbiguous``.
-    Requiring those two fields made every pipeline that records stars for
-    their targets stop with a validation error.
+    Rows saved before the verdict fields were removed hold ``isPoorMatch``,
+    ``isAmbiguous``, ``isClassAmbiguous``, ``outputQuality`` (with
+    ``catalogAgrees`` and ``isTrustworthy``) on the spectrum,
+    ``differsFromCatalog`` on the star, and ``spectralTypeAgrees`` and
+    ``colourAgrees`` on the catalog comparison. The models ignore fields
+    they no longer define, so the record still loads and keeps its science
+    numbers.
     """
-    from astrometricslib.models.quality.spectroscopy_quality import OutputQualityAssessment
-
-    older = {
-        "catalogAgrees": None,
-        "isAmbiguous": False,
-        "isLowConfidence": False,
-        "isSubtypeFinerThanResolution": None,
-        "isTrustworthy": True,
+    stored = {
+        "id": "S",
+        "spectralType": "A0V",
+        "differsFromCatalog": True,
+        "spectroscopy": {
+            "selfDeterminedSpectralType": "A3V",
+            "selfDeterminedSpectralTypeRms": 0.07,
+            "isPoorMatch": False,
+            "isAmbiguous": True,
+            "isClassAmbiguous": None,
+            "outputQuality": {
+                "catalogAgrees": None,
+                "isAmbiguous": False,
+                "isLowConfidence": False,
+                "isSubtypeFinerThanResolution": None,
+                "isTrustworthy": True,
+            },
+            "catalogComparison": {
+                "spectralTypeAgrees": True,
+                "colourAgrees": False,
+                "colourNote": "the spectrum is redder",
+                "bMinusVDifferenceMag": 0.5,
+            },
+        },
     }
 
-    assessment = OutputQualityAssessment.model_validate(older)
+    star = StellarObject.model_validate(stored)
 
-    assert assessment.is_poor_match is None
-    assert assessment.is_class_ambiguous is None
-    assert assessment.is_trustworthy is True
+    assert star.spectroscopy is not None
+    assert star.spectroscopy.self_determined_spectral_type == "A3V"
+    assert star.spectroscopy.self_determined_spectral_type_rms == pytest.approx(0.07)
+    assert star.spectroscopy.catalog_comparison.b_minus_v_difference_mag == pytest.approx(0.5)
+    dumped = star.model_dump(by_alias=True)
+    assert "differsFromCatalog" not in dumped
+    assert "isPoorMatch" not in dumped["spectroscopy"]
+    assert "outputQuality" not in dumped["spectroscopy"]
+    assert "colourAgrees" not in dumped["spectroscopy"]["catalogComparison"]

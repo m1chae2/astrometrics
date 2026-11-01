@@ -81,7 +81,7 @@ Each `StageQualityMetric` has these fields:
 | `passed` | `True` when the value is on the good side of the limit, `False` when it is on the bad side, `None` when there is no limit or no value. A value exactly at the limit passes, except where a metric sets `limit_is_a_pass=False`. |
 | `note` | One sentence of context, such as where the limit comes from. |
 
-The pipeline stores the four checkpoints on each star as `SpectroscopyResult.stage_quality` (`stageQuality` in the saved JSON), in stage order. The `input_quality` and `output_quality` records exist beside them. The user interface reads those records, and checkpoints 1 and 3 repeat their numbers.
+The pipeline stores the four checkpoints on each star as `SpectroscopyResult.stage_quality` (`stageQuality` in the saved JSON), in stage order. The `input_quality` record exists beside them, and checkpoint 1 repeats its numbers. The user interface reads the checkpoint outcomes for its match wording.
 
 ### The four checkpoints
 
@@ -90,7 +90,7 @@ The pipeline stores the four checkpoints on each star as `SpectroscopyResult.sta
 | 0 | `raw_frame` | `assess_raw_frame_quality` in `pre_processing/assess_raw_frame_quality.py` | The numbers the extraction already measured for the star | [Pre-processing](pre_processing/README.md#quality-metrics) |
 | 1 | `pre_processing` | `input_quality_checkpoint` in `pre_processing/assess_input_quality.py` | The `InputQualityAssessment` | [Pre-processing](pre_processing/README.md#quality-metrics) |
 | 2 | `processing` | `assess_processing_quality` in `processing/assess_processing_quality.py` | The classification, features, color, emission lines and second-order ratio | [Processing](processing/README.md#quality-metrics) |
-| 3 | `post_processing` | `output_quality_checkpoint` in `post_processing/assess_output_quality.py` | The `OutputQualityAssessment` and the catalog comparison | [Post-processing](post_processing/README.md#quality-metrics) |
+| 3 | `post_processing` | `output_quality_checkpoint` in `post_processing/assess_output_quality.py` | The classifier's match numbers and the catalog comparison | [Post-processing](post_processing/README.md#quality-metrics) |
 
 `_apply_result_to_stellar_object` in `pipeline.py` calls the four builders and stores the list. Each builder only gathers numbers that earlier code already produced. None of them changes a spectrum or a classification.
 
@@ -208,7 +208,7 @@ Next to the summary and its gates, a run stores its numbers as quality measureme
 - A gate is stored as a self-check: its value, its outcome (`passed`, `failed` or `not_checked`) and its limit. A limit that follows from what the check is for (a count that must be zero, the one spectrum a run needs) is geometry. The saturation share, the failed-spectrum share, the wavelength-scale RMS and the Gaia XP limits are design estimates, stored with their register entry (`GATE_LIMIT_SOURCES` in `post_processing/record_quality.py`). None claims a validated data set.
 - A failure while building or storing the rows is logged and never fails the run. A NaN or infinite number is stored as not measured with the reason "the value was not finite".
 - The values are run-level, not stack-level: the session batch rolls up every frame of every session, and the single-image runner does not say which stack it read. Each name ends with its unit; a stage metric adds the unit to the checkpoint's own name (for example `stage_raw_frame_streak_tilt_deg`).
-- The summary keeps only the median of each checkpoint metric over the spectra, so the stage metrics are those medians. The per-star values stay in the star records. Yes/no verdicts (for example `poor_match`, `trustworthy`, `wavelength_zero_point_applied`) and the failed-spectrum counts are not measurements.
+- The summary keeps only the median of each checkpoint metric over the spectra, so the stage metrics are those medians. The per-star values stay in the star records. Yes/no verdicts (for example `wavelength_zero_point_applied`) and the failed-spectrum counts are not measurements.
 
 ### Run-level metrics
 

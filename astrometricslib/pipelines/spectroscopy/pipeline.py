@@ -34,7 +34,6 @@ from astrometricslib.pipelines.shared.quality.saturation import (
     is_normalised_stack_scale,
 )
 from astrometricslib.pipelines.spectroscopy.post_processing.assess_output_quality import (
-    assess_output_quality,
     output_quality_checkpoint,
 )
 from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp import (
@@ -1505,9 +1504,6 @@ class SpectroscopyPipeline:
             valid_fraction=result.get("valid_fraction"),
             signal_to_noise=analysis.signal_to_noise,
         )
-        output_quality = assess_output_quality(
-            classification, analysis.catalog_comparison, analysis.resolution_element_angstrom
-        )
         gaia_xp_comparison = self._gaia_xp_comparison(
             star, wavelengths_angstrom, analysis, response_corrected_errors
         )
@@ -1583,7 +1579,7 @@ class SpectroscopyPipeline:
                 line_index_classification=analysis.line_index_classification,
             ),
             output_quality_checkpoint(
-                output_quality,
+                classification,
                 own_spectral_type=str(classification["spectral_type"]),
                 catalog_spectral_type=star.spectral_type,
                 catalog_comparison=analysis.catalog_comparison,
@@ -1637,7 +1633,6 @@ class SpectroscopyPipeline:
             catalog_comparison=analysis.catalog_comparison,
             gaia_xp_comparison=gaia_xp_comparison,
             input_quality=input_quality,
-            output_quality=output_quality,
             stage_quality=stage_quality,
             wavelength_zero_point=zero_point,
             reddening=analysis.reddening,

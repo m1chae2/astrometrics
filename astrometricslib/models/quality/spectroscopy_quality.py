@@ -197,11 +197,9 @@ class CatalogComparison(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    # Whether the self-determined type is close enough to the catalog type
-    # to call it agreement. `None` when there was nothing to compare (no
-    # catalog type, or no self-determined type).
-    spectral_type_agrees: bool | None = Field(default=None, alias="spectralTypeAgrees")
-    # Why `spectral_type_agrees` is `False`, or an empty string otherwise.
+    # Why the self-determined type is more than `DIFFERS_FROM_CATALOG_SUBTYPES`
+    # steps from the catalog type, or an empty string when it is not. The
+    # number of steps is the checkpoint 3 metric `catalog_type_steps_apart`.
     spectral_type_note: str = Field(default="", alias="spectralTypeNote")
     # True when the catalog calls this star a giant or supergiant. The
     # classifier only ever compares against main-sequence (dwarf)
@@ -216,19 +214,15 @@ class CatalogComparison(BaseModel):
     # when the catalog calls the star a giant. `None` when not looked up.
     closest_giant_type: str | None = Field(default=None, alias="closestGiantType")
     closest_giant_rms: float | None = Field(default=None, alias="closestGiantRms")
-    # Whether the spectrum's own colour (see `synthetic_b_minus_v`) is
-    # close enough to the catalog's B-V to call it agreement. `None` when
-    # there was nothing to compare.
-    colour_agrees: bool | None = Field(default=None, alias="colourAgrees")
     # The spectrum's own B-V minus the catalog's B-V, in magnitudes. The
     # sign is spectrum minus catalog: positive means the spectrum is redder
     # than the catalog says, negative means bluer. `None` when either
     # colour is missing or not finite, or when the catalog colour is
-    # redder than the range the colour map is calibrated for (the same
-    # cases where `colour_agrees` is `None`). Old stored rows lack this
-    # field and load with `None`.
+    # redder than the range the colour map is calibrated for. Old stored
+    # rows lack this field and load with `None`.
     b_minus_v_difference_mag: float | None = Field(default=None, alias="bMinusVDifferenceMag")
-    # Why `colour_agrees` is `False`, or an empty string otherwise.
+    # Why the colour is more than `COLOUR_DISAGREEMENT_MAGNITUDES` from the
+    # catalog colour, or an empty string otherwise.
     colour_note: str = Field(default="", alias="colourNote")
 
     def joined_note(self) -> str:
@@ -353,44 +347,3 @@ class InputQualityAssessment(BaseModel):
     # `estimate_spectrum_signal_to_noise`). `None` when it could not be
     # judged (for example too few usable samples).
     signal_to_noise: float | None = Field(default=None, alias="signalToNoise")
-
-
-class OutputQualityAssessment(BaseModel):
-    """How much to trust a spectrum's classification, given everything found.
-
-    Combines the classifier's own match statistics (is the winning type a
-    weak match, or nearly tied with the runner-up) with the catalog
-    comparison above, into one overall verdict. Unlike
-    `InputQualityAssessment`, this depends on what classifying the
-    spectrum actually produced.
-    """
-
-    model_config = ConfigDict(populate_by_name=True)
-
-    # The winning type's relative RMS is above `NO_GOOD_MATCH_RMS`, so the
-    # closest reference still fits badly (see `is_classification_poor_match`).
-    # `False` for an unclassified star -- that is a separate "nothing to
-    # compare" case, not a shaky match. `None` in a record saved before
-    # 2026-10-10, which carries the older `isLowConfidence` judgement instead;
-    # `scripts/recompute_spectral_analysis.py` re-judges such records. Without
-    # the default, loading one of the 68 stars stored that way stopped every
-    # pipeline that records stars for its target.
-    is_poor_match: bool | None = Field(default=None, alias="isPoorMatch")
-    # (Subtype level.) The best and second-best reference types are less than
-    # `AMBIGUOUS_RMS_GAP` apart in relative RMS (see
-    # `is_classification_ambiguous`). `False` when fewer than two references
-    # were compared.
-    is_ambiguous: bool = Field(alias="isAmbiguous")
-    # The best reference and the best reference of a different spectral
-    # class letter are less than `AMBIGUOUS_RMS_GAP` apart in relative RMS
-    # (see `is_classification_class_ambiguous`), so the class letter itself
-    # is uncertain. `False` when no other class was compared. `None` in a
-    # record saved before 2026-10-10 (see `is_poor_match`).
-    is_class_ambiguous: bool | None = Field(default=None, alias="isClassAmbiguous")
-    # `CatalogComparison.spectral_type_agrees`, repeated here so a reader
-    # can see the overall trust verdict without also fetching the
-    # comparison object. `None` when there was nothing to compare.
-    catalog_agrees: bool | None = Field(default=None, alias="catalogAgrees")
-    # The overall verdict: `False` when any of the above says this result
-    # should be treated with caution, `True` when none of them do.
-    is_trustworthy: bool = Field(alias="isTrustworthy")

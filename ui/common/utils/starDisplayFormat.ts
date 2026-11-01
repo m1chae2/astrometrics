@@ -207,47 +207,70 @@ export function selectLightCurveSeries(photometry: PhotometryResult | null | und
 }
 
 
+/**
+ * Says whether the library's stored check on one spectrum number failed.
+ *
+ * Each spectrum keeps quality checkpoints. A checkpoint lists measured numbers, each with the limit
+ * the library compared it with and the outcome (`passed`). The screen applies no limit of its own:
+ * it only reads the outcome. The last checkpoint is read first, then the earlier ones.
+ *
+ * @param spectroscopy The star's spectroscopy result, or null when there is none.
+ * @param metricName The name of the number, for example "classification_rms".
+ * @returns True only when the number was checked and failed. False when it passed, was not checked,
+ *     or is missing (for example in a result saved before the check existed).
+ */
+function storedCheckFailed(spectroscopy: SpectroscopyResult | null | undefined, metricName: string): boolean {
+    const checkpoints = [...(spectroscopy?.stageQuality ?? [])].reverse();
+    for (const checkpoint of checkpoints) {
+        const metric = (checkpoint.metrics ?? []).find((candidate) => candidate.name === metricName);
+        if (metric && typeof metric.passed === 'boolean') return !metric.passed;
+    }
+    return false;
+}
+
+/**
+ * Says whether the library found the measured type too far from the catalog type.
+ *
+ * @param spectroscopy The star's spectroscopy result, or null when there is none.
+ * @returns True only when the stored check on the steps between the two types failed.
+ */
+export function differsFromCatalogType(spectroscopy: SpectroscopyResult | null | undefined): boolean {
+    return storedCheckFailed(spectroscopy, 'catalog_type_steps_apart');
+}
+
 /** How a spectrum's template match should be shown. */
 export interface TemplateMatchDescription {
     /** Badge text, for example "Spectrum: A5V (7% off)". */
     badgeText: string;
     /** Longer hover text. */
     hoverText: string;
-    /** True when the match is poor (the library's `isPoorMatch`). */
+    /** True when the stored check on the best match's RMS failed. */
     isPoor: boolean;
-    /** True when the matched type is far from the catalog's type (the library's `differsFromCatalog`). */
+    /** True when the matched type is far from the catalog's type (the failed catalog distance check). */
     differsFromCatalog: boolean;
-}
-
-/** The parts of a star record that say how its spectrum matched. */
-export interface StarSpectralMatch {
-    /** The star's spectroscopy result, with the library's `isPoorMatch` verdict. */
-    spectroscopy?: SpectroscopyResult | null;
-    /** The library's verdict on whether the matched type disagrees with the catalog. */
-    differsFromCatalog?: boolean | null;
 }
 
 /**
  * Describes a spectrum's best-matching reference type and whether to trust it.
  *
  * The match is a comparison of the spectrum's shape with reference spectra,
- * not a probability. The library decides whether the match is poor and
- * whether it is far from the catalog type; this only words those verdicts.
+ * not a probability. The library decides whether the match is poor and whether
+ * the type is far from the catalog type, through the checks it stored with the
+ * spectrum. This only words those outcomes.
  *
- * @param star The star record (its spectroscopy and verdicts).
+ * @param spectroscopy The star's spectroscopy result.
  * @param catalogSpectralType The star's catalog spectral type, if known, for the hover text.
  * @returns The description, or null when no type was determined.
  */
 export function describeTemplateMatch(
-    star: StarSpectralMatch | null | undefined,
+    spectroscopy: SpectroscopyResult | null | undefined,
     catalogSpectralType: string | null | undefined
 ): TemplateMatchDescription | null {
-    const spectroscopy = star?.spectroscopy;
     const matchedType = spectroscopy?.selfDeterminedSpectralType;
     if (!matchedType || matchedType === 'Unknown') return null;
     const rms = spectroscopy?.selfDeterminedSpectralTypeRms;
-    const isPoor = spectroscopy?.isPoorMatch === true;
-    const differsFromCatalog = star?.differsFromCatalog === true;
+    const isPoor = storedCheckFailed(spectroscopy, 'classification_rms');
+    const differsFromCatalog = differsFromCatalogType(spectroscopy);
     const candidates = spectroscopy?.selfDeterminedSpectralTypeCandidates ?? [];
     const closest = candidates
         .slice(0, 3)
@@ -308,30 +331,32 @@ export function spectralClassLetter(spectralType: string | null | undefined): st
 
 /** How cleanly a spectrum's best-matching type stands out from the next-closest candidate. */
 export interface MatchGapDescription {
-    /** "clear" when nothing else fits nearly as well; otherwise which part of the type is uncertain. */
-    status: 'clear' | 'subtype-uncertain' | 'class-uncertain';
-    /** Plain-words label: "clear", "same class, subtype uncertain", or "class uncertain". */
+    /**
+     * "clear" when nothing else fits nearly as well; otherwise which part of the type is uncertain.
+     * "not-judged" when the result was saved before the gaps were checked.
+     */
+    status: 'clear' | 'subtype-uncertain' | 'class-uncertain' | 'not-judged';
+    /** Plain-words label: "clear", "same class, subtype uncertain", "class uncertain", or "not judged". */
     label: string;
     /** The size of the gap and the type it is measured against, e.g. "gap 0.027 RMS to F8V"; null when no gap was measured. */
     detail: string | null;
 }
 
 /**
- * Words the library's verdict on whether the best-matching spectral type is a
+ * Words the library's stored checks on whether the best-matching spectral type is a
  * clear best or a close call. The gap is the difference in root-mean-square
  * (RMS) fit error between the best reference spectrum and a runner-up. It is
  * a plain number with no unit, measured relative to the spectrum's size.
  *
  * @param spectroscopy The star's spectroscopy result, or null when there is none.
- * @returns The description, or null when the library gave no gap or ambiguity flag.
+ * @returns The description, or null when the library gave no gap.
  */
 export function describeMatchGap(spectroscopy: SpectroscopyResult | null | undefined): MatchGapDescription | null {
     if (!spectroscopy) return null;
     const subtypeGap = spectroscopy.rmsGapToSecondBest;
     const classGap = spectroscopy.rmsGapToNextClass;
     const hasGap = typeof subtypeGap === 'number' || typeof classGap === 'number';
-    const hasFlag = typeof spectroscopy.isAmbiguous === 'boolean' || typeof spectroscopy.isClassAmbiguous === 'boolean';
-    if (!hasGap && !hasFlag) return null;
+    if (!hasGap) return null;
 
     const candidates = (spectroscopy.selfDeterminedSpectralTypeCandidates ?? []) as { spectral_type?: string }[];
     const bestType = candidates[0]?.spectral_type ?? spectroscopy.selfDeterminedSpectralType ?? '';
@@ -345,14 +370,21 @@ export function describeMatchGap(spectroscopy: SpectroscopyResult | null | undef
     const describeGap = (gap: number | null | undefined, type: string | undefined): string | null =>
         typeof gap === 'number' ? `gap ${gap.toFixed(3)} RMS to ${type || 'the next type'}` : null;
 
-    if (spectroscopy.isClassAmbiguous) {
+    const hasCheck = (metricName: string) =>
+        (spectroscopy.stageQuality ?? []).some((checkpoint) =>
+            (checkpoint.metrics ?? []).some((metric) => metric.name === metricName && typeof metric.passed === 'boolean')
+        );
+    if (!hasCheck('rms_gap_to_next_class') && !hasCheck('rms_gap_to_second_best')) {
+        return { status: 'not-judged', label: 'not judged', detail: describeGap(subtypeGap, secondType) };
+    }
+    if (storedCheckFailed(spectroscopy, 'rms_gap_to_next_class')) {
         return {
             status: 'class-uncertain',
             label: 'class uncertain',
             detail: describeGap(classGap, nextClassType ?? secondType),
         };
     }
-    if (spectroscopy.isAmbiguous) {
+    if (storedCheckFailed(spectroscopy, 'rms_gap_to_second_best')) {
         return {
             status: 'subtype-uncertain',
             label: 'same class, subtype uncertain',
@@ -380,16 +412,16 @@ export interface StarBadge {
  * single "Type: unknown" chip.
  *
  * @param catalogSpectralType The catalog's spectral type, if any.
- * @param star The star record (its spectroscopy and the library's match verdicts).
+ * @param spectroscopy The star's spectroscopy result (its stored match checks).
  * @returns One or two chips.
  */
 export function describeStarTypeBadges(
     catalogSpectralType: string | null | undefined,
-    star: StarSpectralMatch | null | undefined
+    spectroscopy: SpectroscopyResult | null | undefined
 ): StarBadge[] {
     const catalogType = (catalogSpectralType ?? '').trim();
     const catalogKnown = catalogType !== '' && catalogType !== 'Unknown';
-    const match = describeTemplateMatch(star, catalogSpectralType);
+    const match = describeTemplateMatch(spectroscopy, catalogSpectralType);
     const matchIsUsable = match !== null && !match.isPoor;
 
     const badges: StarBadge[] = [];

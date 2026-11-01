@@ -122,7 +122,7 @@ def _spectroscopy() -> SpectroscopyResult:
     -------
     spectroscopy : `SpectroscopyResult`
         A short spectrum with three reference candidates, which gives a
-        close call (`is_ambiguous`), extraction diagnostics and an
+        close call (`rms_gap_to_second_best`), extraction diagnostics and an
         extinction record.
     """
     return SpectroscopyResult(
@@ -245,8 +245,6 @@ def _assert_spectroscopy_round_trips(sent: SpectroscopyResult, loaded: Spectrosc
     assert loaded is not None
     assert loaded.rms_gap_to_second_best == pytest.approx(0.01)
     assert loaded.rms_gap_to_second_best == sent.rms_gap_to_second_best
-    assert loaded.is_ambiguous is True
-    assert loaded.is_ambiguous == sent.is_ambiguous
     assert loaded.extraction_diagnostics == sent.extraction_diagnostics
     assert loaded.extinction_correction == sent.extinction_correction
     assert _dump(loaded) == _dump(sent)

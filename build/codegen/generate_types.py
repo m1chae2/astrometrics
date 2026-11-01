@@ -63,6 +63,7 @@ from astrometricslib.models.quality.metric_spec import (
     MetricSummary,
     UncertaintyKind,
 )
+from astrometricslib.models.quality.photometry_quality import OutputQualityAssessment
 from astrometricslib.models.quality.quality_reports import StackQualityReport, StackSummary
 from astrometricslib.models.quality.quality_summary import (
     AsteroidDetectionPipelineQualityMetrics,
@@ -89,7 +90,6 @@ from astrometricslib.models.quality.spectroscopy_quality import (
     DetectionLabelLimits,
     EmissionLineLimits,
     InputQualityAssessment,
-    OutputQualityAssessment,
     StageQualityCheckpoint,
     StageQualityMetric,
     StageQualityRollup,
@@ -538,6 +538,7 @@ def render_types() -> str:
         generate_interface(DetectionLabelLimits, "DetectionLabelLimits"),
         generate_interface(CatalogComparison, "CatalogComparison"),
         generate_interface(InputQualityAssessment, "InputQualityAssessment"),
+        # The photometry class of this name.
         generate_interface(OutputQualityAssessment, "OutputQualityAssessment"),
         generate_interface(StageQualityMetric, "StageQualityMetric"),
         generate_interface(StageQualityCheckpoint, "StageQualityCheckpoint"),

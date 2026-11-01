@@ -17,7 +17,7 @@ import numpy as np
 from astrometricslib._internal.drivers.interfaces.reddening_driver import ReddeningEstimate
 from astrometricslib.models.quality.spectroscopy_quality import CatalogComparison
 from astrometricslib.models.spectral_cross_checks import LineIndexClassification, ReddeningRecord
-from astrometricslib.models.stellar_source import ladder_steps_between
+from astrometricslib.models.stellar_source import NO_GOOD_MATCH_RMS, ladder_steps_between
 from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_catalog import compare_to_catalog
 from astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_extinction import ExtinctionCorrection
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
@@ -628,7 +628,7 @@ def analyze_spectrum(
     if (
         expected_reference_type is None
         and classification["spectral_type"] != "Unknown"
-        and classification["match_quality"] == "good"
+        and float(classification["classification_rms"]) <= NO_GOOD_MATCH_RMS
     ):
         features = detect_named_features(
             wavelength_angstrom,

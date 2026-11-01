@@ -34,7 +34,7 @@ read, the numbers that describe that stack alone (for example the trail
 width) could move to the stack level.
 
 Yes/no verdicts are not measurements and are not declared here (for example
-``poor_match``, ``trustworthy`` and ``zero_order_saturation_flagged``). The
+``zero_order_saturation_flagged``). The
 per-star results stay in the star records.
 
 Names follow ``<checkpoint>.<snake_case>`` with exactly one dot, so the stage
@@ -659,6 +659,27 @@ _STAGE_ROWS: tuple[_StageRow, ...] = (
         "How far the measured spectral type is from the catalog type, in subtype steps.",
         "Absolute steps between the two types; ten steps make one letter class.",
         "SPE-19",
+    ),
+    (
+        "post_processing",
+        "rms_gap_to_second_best",
+        "",
+        Direction.HIGHER,
+        "How much closer the best reference is than the second best, in relative RMS, checked against the "
+        "ambiguity gap.",
+        "The second-best reference's relative RMS minus the best one's; below the limit the subtype is "
+        "uncertain.",
+        "SPE-18",
+    ),
+    (
+        "post_processing",
+        "colour_difference_mag",
+        "mag",
+        Direction.LOWER,
+        "How far the spectrum's own B-V color is from the catalog B-V color.",
+        "The absolute size of the spectrum's B-V minus the catalog B-V; empty when the catalog color is "
+        "missing or redder than the color map covers.",
+        "SPE-27",
     ),
     (
         "post_processing",

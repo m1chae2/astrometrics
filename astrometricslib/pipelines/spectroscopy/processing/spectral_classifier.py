@@ -101,9 +101,7 @@ import numpy as np
 from scipy.ndimage import gaussian_filter1d
 
 from astrometricslib.models.stellar_source import (
-    NO_GOOD_MATCH_RMS,
     UNRELIABLE_MATCH_RMS,
-    is_rms_gap_ambiguous,
     rms_gap_to_next_class,
     rms_gap_to_second_best,
 )
@@ -259,11 +257,11 @@ CLASSIFICATION_WAVELENGTH_RANGE_ANGSTROM = (3000.0, 10000.0)
 # required.
 MINIMUM_CLASSIFICATION_COVERAGE_ANGSTROM = 2500.0
 
-# The limits that turn a match score into a verdict live in
+# The limits that the match scores are checked against live in
 # `astrometricslib.models.stellar_source` (`NO_GOOD_MATCH_RMS`,
-# `UNRELIABLE_MATCH_RMS` and `AMBIGUOUS_RMS_GAP`), so the model, the gates and
-# the star summary all read one value. This module imports them and defines
-# none of its own.
+# `UNRELIABLE_MATCH_RMS` and `AMBIGUOUS_RMS_GAP`), so the checkpoints and the
+# gates all read one value. This module imports `UNRELIABLE_MATCH_RMS` and
+# defines none of its own.
 
 _reference_cache: dict[str, tuple[np.ndarray, np.ndarray]] = {}
 # Blurred references, kept for each resolution seen so far. The key is the
@@ -558,10 +556,7 @@ def unclassified_result(reason: str) -> dict[str, object]:
         "spectral_type": "Unknown",
         "classification_rms": None,
         "rms_gap_to_second_best": None,
-        "is_ambiguous": None,
         "rms_gap_to_next_class": None,
-        "is_class_ambiguous": None,
-        "match_quality": None,
         "reason": reason,
         "correlation_by_type": {},
         "ranked_types": [],
@@ -714,17 +709,9 @@ def classify_spectral_type(
         the best one's, in the same RMS units, or `None` when fewer than two
         references were compared. It is a difference in RMS, not a
         probability.
-        ``"is_ambiguous"``: `True` when that gap is below
-        `AMBIGUOUS_RMS_GAP` (see `stellar_source`), `None` when there is no
-        gap. This is the subtype-level statement.
         ``"rms_gap_to_next_class"``: the RMS of the best reference whose
         spectral class letter differs from the best one's, minus the best
         RMS, in the same units, or `None` when no other class was compared.
-        ``"is_class_ambiguous"``: `True` when that gap is below
-        `AMBIGUOUS_RMS_GAP`, `None` when there is no gap. This is the
-        class-level statement.
-        ``"match_quality"``: ``"good"`` or ``"poor"`` (see
-        `NO_GOOD_MATCH_RMS`).
         ``"correlation_by_type"``: every reference's Pearson correlation.
         ``"ranked_types"``: every compared type, closest first, scored by
         RMS (see `_rank_by_rms`). Each entry also has ``"reduced_chi_square"``,
@@ -843,10 +830,7 @@ def classify_spectral_type(
         "spectral_type": best_type,
         "classification_rms": best_rms,
         "rms_gap_to_second_best": rms_gap,
-        "is_ambiguous": is_rms_gap_ambiguous(rms_gap),
         "rms_gap_to_next_class": class_gap,
-        "is_class_ambiguous": is_rms_gap_ambiguous(class_gap),
-        "match_quality": "poor" if best_rms > NO_GOOD_MATCH_RMS else "good",
         "reason": None,
         "correlation_by_type": correlation_by_type,
         "ranked_types": ranked_types,

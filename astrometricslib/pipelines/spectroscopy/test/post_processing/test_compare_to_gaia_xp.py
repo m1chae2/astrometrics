@@ -15,7 +15,7 @@ import pytest
 
 from astrometricslib.models.quality.gaia_xp_comparison import GaiaXpComparison
 from astrometricslib.models.quality.gate_result import GateStatus
-from astrometricslib.models.quality.spectroscopy_quality import CatalogComparison, OutputQualityAssessment
+from astrometricslib.models.quality.spectroscopy_quality import CatalogComparison
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.shared.catalog_star_identity import gaia_dr3_source_id_of
 from astrometricslib.pipelines.spectroscopy.post_processing.assess_output_quality import (
@@ -276,31 +276,29 @@ def test_metrics_of_a_spectrum_that_was_not_compared_have_no_value_and_say_why()
 
 def test_checkpoint_three_carries_the_gaia_metrics_and_a_flag() -> None:
     """Checkpoint 3 gets the Gaia metrics, classified or not."""
-    assessment = OutputQualityAssessment(
-        is_poor_match=False,
-        is_ambiguous=False,
-        is_class_ambiguous=False,
-        catalog_agrees=True,
-        is_trustworthy=True,
-    )
+    classification = {
+        "classification_rms": 0.05,
+        "rms_gap_to_second_best": 0.1,
+        "rms_gap_to_next_class": 0.1,
+    }
     bad = compare(tilt_percent_per_1000_angstrom=6.0)
 
     classified = output_quality_checkpoint(
-        assessment,
+        classification,
         own_spectral_type="G2V",
         catalog_spectral_type="G2V",
         catalog_comparison=CatalogComparison(),
         gaia_xp_comparison=bad,
     )
     unclassified = output_quality_checkpoint(
-        assessment,
+        classification,
         own_spectral_type="Unknown",
         catalog_spectral_type=None,
         catalog_comparison=None,
         gaia_xp_comparison=bad,
     )
     without = output_quality_checkpoint(
-        assessment, own_spectral_type="G2V", catalog_spectral_type="G2V", catalog_comparison=None
+        classification, own_spectral_type="G2V", catalog_spectral_type="G2V", catalog_comparison=None
     )
 
     for checkpoint in (classified, unclassified):

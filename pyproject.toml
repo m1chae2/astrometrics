@@ -218,25 +218,27 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 
 # Enforces the astrometricslib public-API boundary documented in
 # astrometricslib/api/__init__.py: everything outside astrometricslib
-# itself must import from the top-level `astrometricslib` namespace,
+# itself must import from the top-level `astrometricslib` namespace or its public modules
+# (`exceptions`, `reports`, `jobs`, `drivers`),
 # never from its internal subpackages. Exempted for astrometricslib's
 # own modules via per-file-ignores below, since Layer 1 (`api/`) is
 # meant to reach into its own lower layers directly.
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
-"astrometricslib.api".msg = "Internal. Import from the top-level `astrometricslib` namespace instead."
-"astrometricslib.models".msg = "Internal. Import from the top-level `astrometricslib` namespace instead."
-"astrometricslib.utilities".msg = "Internal. Import from the top-level `astrometricslib` namespace instead."
+"astrometricslib.api".msg = "Internal. Import from `astrometricslib` or its public modules (`exceptions`, `reports`, `jobs`, `drivers`) instead."
+"astrometricslib.models".msg = "Internal. Import from `astrometricslib` or its public modules (`exceptions`, `reports`, `jobs`, `drivers`) instead."
+"astrometricslib.utilities".msg = "Internal. Import from `astrometricslib` or its public modules (`exceptions`, `reports`, `jobs`, `drivers`) instead."
 "astrometricslib.pipelines".msg = "Internal. Use the facade on `Astrometrics` instead."
-"astrometricslib.drivers".msg = "Internal. Use the facade on `Astrometrics` instead."
-"astrometricslib.foundation".msg = "Internal. Import from the top-level `astrometricslib` namespace instead."
+"astrometricslib.foundation".msg = "Internal. Import from `astrometricslib` or its public modules (`exceptions`, `reports`, `jobs`, `drivers`) instead."
 "astrometricslib.visualization".msg = "Internal. Use `Astrometrics.visualization` instead."
+"astrometricslib._internal".msg = "Private to astrometricslib. Use its public modules instead."
 "wayfindinglib.drivers".msg = "Internal. Use the `Wayfinder` API instead."
 "wayfindinglib.tasks".msg = "Internal. Use the `Wayfinder` API instead."
-"wayfindinglib.models".msg = "Internal. Import the model from the top-level `wayfindinglib` namespace instead."
+"wayfindinglib.models".msg = "Internal. Import from `wayfindinglib` or its public modules (`exceptions`, `reports`) instead."
 "wayfindinglib.analytics".msg = "Internal. Use the `Wayfinder` API instead."
 "wayfindinglib.session_analysis".msg = "Internal. Use the `Wayfinder` API instead."
 "wayfindinglib.data_access".msg = "Internal. Use the `Wayfinder` API instead."
 "wayfindinglib.watchdog".msg = "Internal. The watchdog must not be imported by what it watches."
+"wayfindinglib._internal".msg = "Private to wayfindinglib. Use its public modules instead."
 "logging.basicConfig".msg = "Only a program's entry point configures logging. Call the shared logging setup instead."
 
 [tool.ruff.lint.per-file-ignores]
@@ -373,6 +375,17 @@ source_modules = ["wayfindinglib"]
 # package root.
 forbidden_modules = ["astrometricslib.*"]
 allow_indirect_imports = true
+unmatched_ignore_imports_alerting = "none"
+ignore_imports = [
+    "wayfindinglib.** -> astrometricslib.exceptions",
+    "wayfindinglib.** -> astrometricslib.reports",
+    "wayfindinglib.** -> astrometricslib.jobs",
+    "wayfindinglib.** -> astrometricslib.drivers",
+    "wayfindinglib.test.** -> astrometricslib._internal.**",
+    "wayfindinglib.**.test.** -> astrometricslib._internal.**",
+    "wayfindinglib.test.** -> astrometricslib._internal",
+    "wayfindinglib.**.test.** -> astrometricslib._internal",
+]
 
 [[tool.importlinter.contracts]]
 name = "a library script never imports another script"
@@ -391,6 +404,12 @@ forbidden_modules = ["astrometricslib.*", "wayfindinglib.*"]
 # This test builds report models to check how a long reply is cut. The models
 # are internal to the library, so the one test module is let in.
 ignore_imports = [
+    "mcp_servers.** -> astrometricslib.exceptions",
+    "mcp_servers.** -> astrometricslib.reports",
+    "mcp_servers.** -> astrometricslib.jobs",
+    "mcp_servers.** -> astrometricslib.drivers",
+    "mcp_servers.** -> wayfindinglib.exceptions",
+    "mcp_servers.** -> wayfindinglib.reports",
     "mcp_servers.common.test.test_reply_budget -> wayfindinglib.models.**",
 ]
 allow_indirect_imports = true
@@ -410,6 +429,36 @@ source_modules = [
 ]
 forbidden_modules = ["astrometricslib.*", "wayfindinglib.*"]
 allow_indirect_imports = true
+unmatched_ignore_imports_alerting = "none"
+ignore_imports = [
+    "backend.** -> astrometricslib.exceptions",
+    "backend.** -> astrometricslib.reports",
+    "backend.** -> astrometricslib.jobs",
+    "backend.** -> astrometricslib.drivers",
+    "backend.** -> wayfindinglib.exceptions",
+    "backend.** -> wayfindinglib.reports",
+]
+
+[[tool.importlinter.contracts]]
+name = "only astrometricslib and the tests of either library import astrometricslib._internal"
+type = "forbidden"
+source_modules = ["wayfindinglib", "backend", "mcp_servers"]
+forbidden_modules = ["astrometricslib._internal"]
+allow_indirect_imports = true
+unmatched_ignore_imports_alerting = "none"
+ignore_imports = [
+    "wayfindinglib.test.** -> astrometricslib._internal.**",
+    "wayfindinglib.**.test.** -> astrometricslib._internal.**",
+    "wayfindinglib.test.** -> astrometricslib._internal",
+    "wayfindinglib.**.test.** -> astrometricslib._internal",
+]
+
+[[tool.importlinter.contracts]]
+name = "only wayfindinglib imports wayfindinglib._internal"
+type = "forbidden"
+source_modules = ["backend", "mcp_servers"]
+forbidden_modules = ["wayfindinglib._internal"]
+allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
 name = "the libraries never import the MCP servers"
@@ -422,7 +471,7 @@ name = "astrometricslib drivers never import pipelines"
 type = "forbidden"
 # Drivers sit below the pipelines: a pipeline calls a driver, never the
 # other way round.
-source_modules = ["astrometricslib.drivers"]
+source_modules = ["astrometricslib._internal.drivers", "astrometricslib.drivers"]
 forbidden_modules = ["astrometricslib.pipelines"]
 
 [[tool.importlinter.contracts]]

@@ -12,6 +12,7 @@ moving code. The tests also check that every export resolves, that
 arguments its `kind` does not use.
 """
 
+import importlib
 from pathlib import Path
 
 import pytest
@@ -26,82 +27,28 @@ from wayfindinglib.api.review import ObservationReview
 from wayfindinglib.drivers.butler import DiskButler
 
 EXPECTED_EXPORTS = frozenset({
-    # The root object, the sub-APIs and the drivers callers put in.
-    "Wayfinder",
-    "ObservatoryControl",
-    "ObservationPlanning",
     "ObservationExecution",
-    "IndiInterface",
-    "SimulatorIndiInterface",
-    "ControlRecordStore",
-    # Models.
-    "AlignmentAttempt",
-    "AlignmentTargetSession",
-    "CalibrationAdvisory",
-    "CaptureResult",
-    "DeepCatalogEstimate",
-    "DeepCatalogStatus",
-    "ChecklistItem",
-    "DitherConfig",
-    "EquipmentConfiguration",
-    "EquipmentStatus",
-    "ExposureRequest",
-    "FrameType",
-    "Framing",
-    "GuidingStatus",
-    "HorizonZone",
-    "ImagingStatus",
-    "LiveGuidingStatus",
-    "LiveSessionStatus",
-    "MeridianStatus",
-    "NightListEntry",
-    "NightQuality",
-    "PlanChange",
-    "PlanChangeItem",
-    "PlanRevisionConflictError",
-    "SequenceSummary",
-    "TargetChange",
-    "MosaicPanel",
-    "MosaicPlan",
-    "MountPointingModel",
-    "NightConditions",
-    "ObjectVisibility",
     "ObservationPackage",
-    "PackageStatus",
-    "PackageSuggestion",
-    "PackageChange",
-    "SuggestionLogEntry",
-    "RunState",
-    "SessionProgress",
-    "EntryProgress",
-    "ObservationSessionWithProgress",
-    "ObservatoryCapability",
+    "ObservationPlanning",
     "ObservationSession",
-    "ObservationSessionSummary",
-    "PolarAlignmentStatus",
-    "QueueRequest",
-    "SafetyStatus",
-    "SequenceItem",
-    "SequencePlan",
-    "SkySource",
-    "SiteProfile",
-    "SkyPosition",
-    "StartTimeMode",
-    "TargetDatasetReport",
-    "DepthGoalStatus",
-    "DepthGoalState",
-    "DepthLevel",
-    "TargetStatement",
-    "TonightRanking",
-    "Telescope",
-    "VisibilityReport",
-    "VisibilitySpan",
-    # The pure function.
-    "group_alignment_attempts",
-    # The library's own error class.
-    "DelegationPolicyValidationError",
+    "ObservatoryControl",
+    "Wayfinder",
 })
 """What `from wayfindinglib import ...` offers."""
+
+EXPECTED_MODULE_NAMES = {
+    "wayfindinglib.exceptions": frozenset({
+        "DelegationPolicyValidationError",
+        "PlanRevisionConflictError",
+    }),
+    "wayfindinglib.reports": frozenset({
+        "DepthGoalState",
+        "DepthLevel",
+        "PackageStatus",
+        "RunState",
+    }),
+}
+"""Names each public module of wayfindinglib offers (its `__all__`)."""
 
 PLANNING_MEMBERS = frozenset({
     "get_visibility",
@@ -377,3 +324,13 @@ def test_remote_list_files_tells_unreachable_from_missing_folder(
     monkeypatch.setattr(tasks, "check_remote_connection", lambda context: is_reachable)
     with pytest.raises(error_type, match=message):
         control.remote.list("files", folder_name="NGC 7331")
+
+
+def test_each_public_module_offers_exactly_its_pinned_names() -> None:
+    """Verify each public module's `__all__` is exactly its pinned set."""
+    for module_name, expected in EXPECTED_MODULE_NAMES.items():
+        module = importlib.import_module(module_name)
+        actual = frozenset(module.__all__)
+        assert not actual - expected, f"{module_name} offers new name(s): {sorted(actual - expected)}"
+        assert not expected - actual, f"{module_name} lost name(s): {sorted(expected - actual)}"
+        assert all(hasattr(module, name) for name in actual), module_name

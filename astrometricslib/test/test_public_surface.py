@@ -28,6 +28,10 @@ internal layers can be checked against without re-deriving, each time,
 whether the outside world would notice.
 """
 
+import ast
+import importlib
+from pathlib import Path
+
 import astrometricslib
 
 # The public surface. Changing this set on purpose -- adding, removing, or
@@ -35,243 +39,95 @@ import astrometricslib
 # with the rest of the repo, so it should be a deliberate edit to this list,
 # not a side effect of moving code around internally.
 EXPECTED_PUBLIC_NAMES = frozenset({
-    "AMBIGUOUS_RMS_GAP",
-    "EARLIER_NIGHTS_VARIANT",
-    "MINIMUM_PENALTY_TO_WEIGHT",
-    "NOISE_WEIGHT_MODE",
-    "NO_GOOD_MATCH_RMS",
-    "PIXEL_BLUR_FWHM_SQUARED_FACTOR",
-    "UNKNOWN_CAPTURE_SETTING_CAMERA",
-    "SetAsideFrameRecord",
-    "choose_stack_weight",
-    "equal_weight_noise_penalty",
-    "wfwhm_weights",
-    "group_frame_weights",
-    "fold_exposure_lengths",
-    "aperture_identity_from_number",
-    "load_odd_even_aperture_record",
-    "aperture_identity_to_number",
-    "check_choice",
-    "check_include",
-    "registered_job",
-    "run_as_background_job",
-    "reject_unused_arguments",
-    "resolve_target",
-    "to_epoch_seconds",
-    "preview_path_for",
-    "AbstractButler",
-    "AbstractCatalogAccess",
-    "Activity",
-    "ActivityDescription",
-    "Agent",
-    "AgentType",
-    "AnalysisResult",
     "AppConfiguration",
-    "AppliedCameraProfile",
-    "AsteroidDetectionCandidate",
     "Astrometrics",
-    "AstrometricsError",
-    "AstrometryPipelineQualityMetrics",
-    "AstrometryQualitySummary",
-    "BatchRunSummary",
-    "Butler",
-    "CameraProfile",
     "CalibrationCatalog",
-    "CalibrationQueryResult",
-    "CatalogAccess",
-    "Collection",
-    "ConfigFile",
-    "ConfigFileDescription",
-    "ConfigurationError",
-    "ConflictError",
-    "DATA_ERRORS",
-    "DEFAULT_DARK_TEMPERATURE_TOLERANCE_C",
-    "FITS_READ_ERRORS",
-    "ONLINE_QUERY_ERRORS",
-    "DatasetDescription",
-    "DatasetEntity",
-    "DatasetSpec",
-    "DbLogHandler",
-    "DeviceInUseError",
-    "Entity",
-    "EntityDescription",
-    "ErrorInfo",
-    "ExposureGroupSummary",
-    "ExternalServiceError",
-    "FileItem",
     "FilterType",
-    "FitsHeaderEntry",
-    "FrameMeasurementSummary",
     "FrameRecord",
-    "FrameSelection",
-    "GaiaXpDriver",
-    "GenerationDescription",
-    "GroupedFrameStat",
-    "OddEvenDifferenceNoiseResult",
-    "HardwareError",
-    "InputQualityReport",
-    "InvalidArgumentError",
-    "Jobs",
-    "JobStore",
-    "MovingObjectConfig",
-    "NotFoundError",
-    "NumpyEncoder",
-    "Parameter",
-    "ParameterDescription",
-    "PermissionDeniedError",
-    "PhotometryResult",
-    "PlateSolveDriver",
-    "PlateSolveHeader",
-    "PlateSolveFailedError",
-    "PlotData",
-    "PreviewRemakeResult",
-    "ProcessTargetResult",
-    "ProcessingError",
-    "ProcessingJob",
     "ProcessingPipelines",
-    "ProvenanceStore",
     "QualityRecords",
-    "QualityRowFile",
-    "QualityRowResolution",
-    "JobLogLine",
-    "JobQueryResult",
-    "JobSummary",
-    "LineageRun",
-    "FailedDeletion",
-    "ImageDeletionResult",
-    "FieldCenter",
-    "ImagedFieldCenters",
-    "PointSource",
-    "PointSourceDetection",
-    "CalibrationLineFit",
-    "SpectroscopyCalibrationResult",
-    "QualityQueryResult",
-    "CaptureSetting",
-    "Checkpoint",
-    "Direction",
-    "LimitTier",
-    "MeasurementOrigin",
-    "MeasurementReference",
-    "MeasurementStatus",
-    "MetricPurpose",
-    "MetricSpec",
-    "MetricSummary",
-    "QualityLimit",
-    "QualityMeasurement",
-    "QualitySubject",
-    "StarResultReference",
-    "SubjectLevel",
-    "UncertaintyKind",
-    "NightContribution",
-    "NightContributionResult",
-    "NoiseGrowthResult",
-    "QuarantinePreview",
-    "RPC_CODES",
-    "RawFrameCheckReport",
-    "ReddeningDriver",
-    "ReddeningEstimate",
-    "OverlayStar",
-    "ReindexReport",
-    "RenderedImage",
-    "RestoreReport",
-    "SATURATED_BLOB_MINIMUM_PIXELS",
-    "SATURATED_FRAME_FRACTION",
-    "SetAsideFrame",
-    "SimbadDriver",
-    "SpectralFrameCheckReport",
-    "SpectroscopyResult",
-    "StackQualityReport",
-    "StackResult",
-    "StackWeightPrediction",
-    "StackRunResult",
-    "StackSettings",
-    "StackSummary",
-    "StackingDriver",
-    "SubsetStackResult",
-    "StarQueryResult",
     "StellarCatalog",
     "StellarObject",
-    "StorageError",
-    "StorageNotMountedError",
     "Target",
     "TargetCatalog",
-    "TargetFilesResponse",
-    "TargetQueryResult",
-    "TargetSession",
-    "TargetReindexChange",
-    "TargetStarCount",
-    "TargetSessionContribution",
-    "UsageDescription",
-    "Used",
-    "ValueDescription",
-    "ValueEntity",
-    "VariableCandidate",
-    "ViewableImage",
     "Visualization",
-    "WasAssociatedWith",
-    "WasAttributedTo",
-    "WasConfiguredBy",
-    "WasGeneratedBy",
-    "acquire_resource_slot",
-    "background_job",
-    "capture_job_logs",
-    "classify_and_sort_fits_files",
-    "close_interrupted_jobs",
     "configure_logging",
     "configure_offline_iers",
-    "connect_db",
-    "derive_target_sessions",
-    "error_from_info",
-    "export_target_lineage_as_prov_xml",
-    "file_lock",
-    "frame_is_spectral",
-    "frame_subject_id",
     "get_configuration",
-    "get_current_job",
-    "get_log_context",
-    "has_catalog_magnitude",
-    "is_path_inside",
-    "locks_directory",
-    "log_context",
-    "new_request_id",
-    "observing_night_id",
-    "parse_coordinate_string",
-    "parse_iso_time",
-    "require_mounted_storage",
-    "resolve_camera_profile",
-    "resolve_mounted_path",
-    "safe_json_dumps",
-    "scratch_directory",
-    "select_library_frames",
-    "target_object_category",
-    "to_error_info",
     "warm_earth_orientation_data",
 })
 
-# Internal names the root still exports because code outside the library
-# imports them from here. wayfindinglib may import only the package root
-# (the import-linter contract). Each one should leave the root once its
-# last outside caller has a public alternative.
-#
-# Everything else in `EXPECTED_PUBLIC_NAMES` is public on purpose. That
-# includes the job and storage tools of `astrometricslib.foundation`
-# (`capture_job_logs`, `background_job`, `connect_db`, `file_lock`, ...),
-# which wayfindinglib, the backend and the MCP servers share, and the
-# frame helpers wayfindinglib calls (`FrameSelection`,
-# `select_library_frames`, `derive_target_sessions`,
-# `classify_and_sort_fits_files`, `frame_is_spectral`, the `SATURATED_*`
-# limits). wayfindinglib's plate solving goes through `processing.plate_solve`
-# and its field-center list through `targets.imaged_field_centers`.
-KEPT_FOR_OUTSIDE_CALLERS = {
-    # Both write temporary files on disk instead of in RAM, in the folder this
-    # function names (`foundation/paths.py`). The Siril work folder,
-    # `siril_work_directory`, is used only inside the library and stays off the
-    # root.
-    "scratch_directory": "wayfindinglib (the StellarMate driver) and the backend (the scripting service)",
-    # The lock-file folder under the cache, which wayfindinglib's INDI
-    # hardware lock shares with the library's own locks.
-    "locks_directory": "wayfindinglib (the INDI hardware lock)",
+EXPECTED_MODULE_NAMES = {
+    "astrometricslib.exceptions": frozenset({
+        "FITS_READ_ERRORS",
+        "AstrometricsError",
+        "ConfigurationError",
+        "ConflictError",
+        "DeviceInUseError",
+        "ErrorInfo",
+        "ExternalServiceError",
+        "HardwareError",
+        "InvalidArgumentError",
+        "NotFoundError",
+        "PermissionDeniedError",
+        "PlateSolveFailedError",
+        "ProcessingError",
+        "StorageError",
+        "StorageNotMountedError",
+        "error_from_info",
+        "to_error_info",
+    }),
+    "astrometricslib.reports": frozenset({
+        "EARLIER_NIGHTS_VARIANT",
+        "AstrometryPipelineQualityMetrics",
+        "AstrometryQualitySummary",
+        "CaptureSetting",
+        "ExposureGroupSummary",
+        "InputQualityReport",
+        "LimitTier",
+        "MeasurementReference",
+        "MeasurementStatus",
+        "QualityLimit",
+        "QualityMeasurement",
+        "QuarantinePreview",
+        "RawFrameCheckReport",
+        "SetAsideFrame",
+        "SetAsideFrameRecord",
+        "SpectralFrameCheckReport",
+        "StackQualityReport",
+        "StackSummary",
+        "StarResultReference",
+        "SubjectLevel",
+        "observing_night_id",
+    }),
+    "astrometricslib.jobs": frozenset({
+        "DbLogHandler",
+        "JobStore",
+        "Jobs",
+        "ProcessingJob",
+        "background_job",
+        "capture_job_logs",
+        "close_interrupted_jobs",
+        "get_current_job",
+        "log_context",
+        "new_request_id",
+        "registered_job",
+        "run_as_background_job",
+    }),
+    "astrometricslib.drivers": frozenset({
+        "AbstractButler",
+        "Butler",
+        "DatasetSpec",
+        "connect_db",
+        "file_lock",
+        "is_path_inside",
+        "locks_directory",
+        "require_mounted_storage",
+        "resolve_mounted_path",
+        "scratch_directory",
+    }),
 }
+"""Names each public module of astrometricslib offers (its `__all__`)."""
 
 
 def test_public_all_matches_the_pinned_name_set() -> None:
@@ -450,3 +306,54 @@ def test_target_catalog_and_processing_share_one_calibration_catalog() -> None:
     assert astrometrics.quality._targets is astrometrics.targets
     assert astrometrics.processing.calibration._targets is astrometrics.targets
     assert astrometrics.visualization._stars is astrometrics.stars
+
+
+def test_each_public_module_offers_exactly_its_pinned_names() -> None:
+    """Verify each public module's `__all__` is exactly its pinned set.
+
+    The public modules are the places a script imports the errors, reports,
+    job tools and storage tools from. A name added or removed there is a
+    change to the library's contract, like one at the root.
+    """
+    for module_name, expected in EXPECTED_MODULE_NAMES.items():
+        module = importlib.import_module(module_name)
+        actual = frozenset(module.__all__)
+        assert not actual - expected, f"{module_name} offers new name(s): {sorted(actual - expected)}"
+        assert not expected - actual, f"{module_name} lost name(s): {sorted(expected - actual)}"
+
+
+def test_every_name_of_every_public_module_resolves() -> None:
+    """Verify each name in each public module's `__all__` can be fetched."""
+    unresolvable = [
+        f"{module_name}.{name}"
+        for module_name in EXPECTED_MODULE_NAMES
+        for name in importlib.import_module(module_name).__all__
+        if not hasattr(importlib.import_module(module_name), name)
+    ]
+    assert not unresolvable, f"names that do not resolve: {unresolvable}"
+
+
+def test_no_code_outside_the_libraries_imports_the_private_package() -> None:
+    """Verify the private package is imported only where it may be.
+
+    Only astrometricslib, its scripts and the tests of either library may
+    import `astrometricslib._internal`. The backend, the MCP servers and
+    wayfindinglib use the root and the public modules only.
+    """
+    repository = Path(__file__).resolve().parents[2]
+    offenders = []
+    for folder in ("wayfindinglib", "backend", "mcp_servers"):
+        for path in sorted((repository / folder).rglob("*.py")):
+            parts = path.relative_to(repository).parts
+            if {"test", "tests", "scripts", "__pycache__"} & set(parts[:-1]) or parts[-1].startswith((
+                "test_",
+                "conftest",
+            )):
+                continue
+            for node in ast.walk(ast.parse(path.read_text())):
+                names = [alias.name for alias in node.names] if isinstance(node, ast.Import) else []
+                if isinstance(node, ast.ImportFrom) and node.module:
+                    names = [node.module]
+                if any(name.startswith("astrometricslib._internal") for name in names):
+                    offenders.append(f"{path.relative_to(repository)}:{node.lineno}")
+    assert not offenders, f"imports of astrometricslib._internal outside the library: {offenders}"

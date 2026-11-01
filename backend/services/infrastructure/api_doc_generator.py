@@ -17,6 +17,43 @@ from typing import Any
 _DOCS_CACHE: dict[str, dict[str, str]] = {}
 
 
+PUBLIC_LIBRARY_MODULES = {
+    "astrometricslib": (
+        "astrometricslib",
+        "astrometricslib.exceptions",
+        "astrometricslib.reports",
+        "astrometricslib.jobs",
+        "astrometricslib.drivers",
+    ),
+    "wayfindinglib": ("wayfindinglib", "wayfindinglib.exceptions", "wayfindinglib.reports"),
+}
+"""For each library, the root and its public modules."""
+
+
+def _public_attribute(library: str, name: str) -> Any:
+    """Find a public name in a library root or in one of its public modules.
+
+    Parameters
+    ----------
+    library : `str`
+        ``astrometricslib`` or ``wayfindinglib``.
+    name : `str`
+        The name to look up.
+
+    Returns
+    -------
+    value : `Any`
+        The named object, or `None` when no public module has it.
+    """
+    import importlib
+
+    for module_name in PUBLIC_LIBRARY_MODULES[library]:
+        value = getattr(importlib.import_module(module_name), name, None)
+        if value is not None:
+            return value
+    return None
+
+
 def format_docstring(doc: str | None) -> str:
     r"""Format a Python docstring into structured Markdown.
 
@@ -365,13 +402,10 @@ def generate_astrometricslib_docs() -> str:
     sections.append("## Utility Functions\n")
     utility_names = [
         "capture_job_logs",
-        "classify_and_sort_fits_files",
-        "derive_target_sessions",
         "get_configuration",
-        "parse_coordinate_string",
     ]
     for u_name in utility_names:
-        func = getattr(astrometricslib, u_name, None)
+        func = _public_attribute("astrometricslib", u_name)
         if func and callable(func):
             sections.append(format_method_markdown(u_name, func))
             sections.append("\n---\n")
@@ -387,16 +421,10 @@ def generate_astrometricslib_docs() -> str:
         "Target",
         "FrameRecord",
         "StellarObject",
-        "FitsHeaderEntry",
-        "PhotometryResult",
-        "SpectroscopyResult",
-        "AsteroidDetectionCandidate",
-        "AnalysisResult",
-        "BatchRunSummary",
         "ProcessingJob",
     ]
     for m_name in model_names:
-        m_cls = getattr(astrometricslib, m_name, None)
+        m_cls = _public_attribute("astrometricslib", m_name)
         if m_cls and isinstance(m_cls, type):
             doc = format_docstring(inspect.getdoc(m_cls))
             sections.append(f"### `{m_name}`\n\n{doc}\n")
@@ -503,8 +531,8 @@ def generate_wayfindinglib_docs() -> str:
     # 5. Hardware Drivers & Exceptions
     sections.append('<a id="hardware-drivers"></a>')
     sections.append("## Hardware Drivers & Exceptions\n")
-    for name in ["IndiInterface", "SimulatorIndiInterface"]:
-        cls_obj = getattr(wayfindinglib, name, None)
+    for name in []:
+        cls_obj = _public_attribute("wayfindinglib", name)
         if cls_obj and isinstance(cls_obj, type):
             doc = format_docstring(inspect.getdoc(cls_obj))
             sections.append(f"### `{name}`\n\n{doc}\n")
@@ -526,19 +554,16 @@ def generate_entity_doc(entity_name: str) -> str:
     content : `str`
         Detailed Markdown document for the entity.
     """
-    import astrometricslib
-    import wayfindinglib
-
     # Strip prefixes like 'api/generated/' or '.rst'
     clean_name = entity_name.split("/")[-1].replace(".rst", "").replace(".md", "")
     short_name = clean_name.split(".")[-1]
 
     # Search in astrometricslib then wayfindinglib
     obj = (
-        getattr(astrometricslib, short_name, None)
-        or getattr(wayfindinglib, short_name, None)
-        or getattr(astrometricslib, clean_name, None)
-        or getattr(wayfindinglib, clean_name, None)
+        _public_attribute("astrometricslib", short_name)
+        or _public_attribute("wayfindinglib", short_name)
+        or _public_attribute("astrometricslib", clean_name)
+        or _public_attribute("wayfindinglib", clean_name)
     )
 
     if obj is None:

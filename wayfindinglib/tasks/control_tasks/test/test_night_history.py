@@ -1,6 +1,6 @@
 """Tests for the past-night history front door.
 
-`build_night_history` answers `control.history.query`. These tests replace
+`build_night_history` answers `review.query`. These tests replace
 the night analyses with a fake, so they check the choice of analysis, the
 argument checks, and above all that every reply fits under the size limit.
 """
@@ -14,7 +14,7 @@ import pytest
 from pydantic import BaseModel
 
 from astrometricslib import ConfigurationError, ConflictError, InvalidArgumentError, NotFoundError
-from wayfindinglib.api.control.history import HistoryControl
+from wayfindinglib.api.review import ObservationReview
 from wayfindinglib.tasks.control_tasks import night_analysis, night_history, pointing_log_ingestion
 from wayfindinglib.tasks.control_tasks.night_history import (
     MAXIMUM_REPLY_CHARACTERS,
@@ -396,8 +396,8 @@ def test_every_reply_is_json_and_within_the_limit(observatory: _Observatory) -> 
 
 
 def test_control_history_has_the_front_door_and_limits() -> None:
-    """`control.history` has `query`; the summaries take a limit."""
-    assert "query" in dir(HistoryControl)
+    """`review` has `query`; the summaries take a limit."""
+    assert "query" in dir(ObservationReview)
     for name in ("capture_night_summaries", "guiding_night_summaries", "recurring_issues"):
         assert "latest_nights" in inspect.signature(getattr(night_analysis, name)).parameters
 

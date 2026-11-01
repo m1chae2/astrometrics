@@ -45,7 +45,6 @@ Inputs and plans:
 - `library_inputs.py` reads what the analyses need from the library in one place, so the report, the ranking and the night review do not each read it their own way.
 - `guiding_join.py` cuts the guide samples to each frame's exposure window.
 - `allowed_capture_values.py` says which gain, offset, binning and filter a night plan may ask for.
-- `reply_budget.py` measures a reply the way the MCP tool registry does, and shortens a statement's evidence when a reply is too long. Its last step empties the plain messages.
 
 ## Quality metrics that each module produces
 

@@ -4,9 +4,10 @@ Description: The server reflects the public methods of `Wayfinder`. The
 tools pass the client's arguments to the methods as they are: the methods
 accept target ids, ISO times and position dictionaries themselves.
 ``control`` itself holds only the driver properties, which are not tools. Its
-operations live on seven children, so each child gets its own prefix, such
-as ``observatory_mount_park``. The server's manifest, ``tool_manifest.json``
-in this folder, decides which tools a profile may use.
+operations live on six children, so each child gets its own prefix, such
+as ``observatory_mount_park``. ``review`` is a sub-API of its own, with the
+prefix ``review``, such as ``review_query``. The server's manifest,
+``tool_manifest.json`` in this folder, decides which tools a profile may use.
 """
 
 from pathlib import Path
@@ -21,13 +22,14 @@ SERVER_NAME = "wayfindinglib-core"
 MANIFEST_PATH = Path(__file__).resolve().parent / "tool_manifest.json"
 """The reviewed list of this server's tools."""
 
-CONTROL_CHILDREN = ("mount", "imaging", "guiding", "remote", "history", "safety", "equipment")
+CONTROL_CHILDREN = ("mount", "imaging", "guiding", "remote", "safety", "equipment")
 """The children of `Wayfinder.control` that hold its operations."""
 
 BRANCH_PREFIXES = {
     **{f"control.{child}": f"observatory_{child}" for child in CONTROL_CHILDREN},
     "planning": "planning",
     "execution": "execution",
+    "review": "review",
 }
 """Sub-API of `Wayfinder` -> the prefix of its tools' names."""
 

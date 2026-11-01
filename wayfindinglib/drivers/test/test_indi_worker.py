@@ -6,7 +6,7 @@ in a real spawned child process, so these cover the actual process boundary
 -- concurrent request/response correlation, a wedged call being detected and
 the worker force-restarted, and a worker that died on its own being
 transparently respawned on the next call. See
-`backend/services/infrastructure/indi_worker.py`'s module docstring for why
+`wayfindinglib/drivers/indi_worker.py`'s module docstring for why
 this process boundary exists: `pyindi-client` does not release the GIL
 during its blocking calls, so any blocking call on it freezes the whole
 backend unless PyIndi runs in a process of its own.
@@ -15,12 +15,13 @@ backend unless PyIndi runs in a process of its own.
 import multiprocessing
 import time
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from astrometricslib import HardwareError
-from backend.services.infrastructure.indi_worker import (
+from wayfindinglib.drivers.indi_worker import (
     IndiWorkerClient,
     IndiWorkerProxy,
     serve_requests,
@@ -276,3 +277,44 @@ def test_a_call_after_stop_fails_without_restarting_the_worker() -> None:
     with pytest.raises(HardwareError, match="stopped"):
         client.call_sync("echo_after_delay", "again", 0.0, timeout=10.0)
     assert client._process is None
+
+
+def test_a_wayfinder_runs_the_simulated_session_in_a_separate_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`Wayfinder(separate_process=True)` starts the worker; `close` stops it.
+
+    The worker is a real spawned process holding `SimulatorIndiInterface`.
+    The child reads its configuration from the path in the environment, so
+    the test never touches the user's settings.
+    """
+    from astrometricslib import AppConfiguration
+    from wayfindinglib import Wayfinder
+    from wayfindinglib.drivers.indi_worker import IndiWorkerProxy
+
+    monkeypatch.setenv("ASTROMETRICS_CONFIG_PATH", str(tmp_path / "astrometrics.config.toml"))
+    wayfinder = Wayfinder(AppConfiguration(), simulated=True, separate_process=True)
+    context = wayfinder.control._context
+    assert context._worker_client is None  # nothing starts until INDI is needed
+    try:
+        assert wayfinder.control.equipment.connect() is True
+        assert isinstance(context.driver, IndiWorkerProxy)
+        assert context._worker_client._process.is_alive()
+        assert "RA" in wayfinder.control._driver.status
+    finally:
+        wayfinder.control.close()
+    assert context._worker_client is None
+
+
+def test_close_without_a_worker_does_nothing_and_can_repeat(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`close` is safe when no worker was ever started."""
+    from astrometricslib import AppConfiguration
+    from wayfindinglib import Wayfinder
+
+    monkeypatch.setenv("ASTROMETRICS_CONFIG_PATH", str(tmp_path / "astrometrics.config.toml"))
+    wayfinder = Wayfinder(AppConfiguration(), simulated=True, separate_process=True)
+
+    wayfinder.control.close()
+    wayfinder.control.close()

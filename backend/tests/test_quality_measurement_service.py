@@ -249,12 +249,12 @@ class _Remote:
         self.fail = fail
         self.measurements = measurements if measurements is not None else []
 
-    def sync_frames(self, target: str) -> dict[str, Any]:
+    def sync_frames(self, target: str) -> SimpleNamespace:
         """Finish, or fail.
 
         Returns
         -------
-        result : `dict` [`str`, `Any`]
+        result : `types.SimpleNamespace`
             A successful sync with the measurement summaries.
 
         Raises
@@ -264,7 +264,7 @@ class _Remote:
         """
         if self.fail:
             raise OSError("link down")
-        return {"success": True, "measurements": self.measurements}
+        return SimpleNamespace(success=True, measurements=self.measurements)
 
 
 class _Announcer:

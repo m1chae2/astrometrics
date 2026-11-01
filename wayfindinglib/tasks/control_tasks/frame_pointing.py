@@ -11,7 +11,7 @@ moment.
 `record_frame_pointing_errors` runs after `control.remote.sync_frames`
 brings new frames into the library. It records one alignment attempt per
 new frame that has both positions, so
-`control.history.query(kind="alignment")` shows them. Each attempt names
+`review.query(kind="alignment")` shows them. Each attempt names
 its frame (``source_frame``, the file name), so a frame that comes into
 the library again, for example after a re-download, or that has been
 solved again, updates its one record instead of adding another.

@@ -23,7 +23,6 @@ class TelescopeService:
 
     def __init__(
         self,
-        driver: Any = None,
         guiding_service: Any = None,
         target_service: Any = None,
         wayfinder: Any = None,
@@ -34,8 +33,6 @@ class TelescopeService:
 
         Parameters
         ----------
-        driver : `Any`, optional
-            Hardware driver injection for tests.
         guiding_service : `Any`, optional
             Service for managing guide camera loops.
         target_service : `Any`, optional
@@ -54,24 +51,10 @@ class TelescopeService:
         else:
             self.wayfinder = wayfinder
 
-        if driver is not None:
-            self.wayfinder.control.driver = driver
-
         self._guiding_service = guiding_service
         self._target_service = target_service
         self._astrometrics_service = astrometrics_service
         self._alignment_service = alignment_service
-
-    @property
-    def indi_interface(self) -> Any:
-        """The INDI hardware interface from the observatory.
-
-        Returns
-        -------
-        driver : `Any`
-            The underlying INDI driver instance orchestrating hardware calls.
-        """
-        return self.wayfinder.control.driver
 
     def get_status(self) -> dict[str, Any]:
         """Retrieve current telescope status.
@@ -91,7 +74,14 @@ class TelescopeService:
 
         logger = logging.getLogger(__name__)
         try:
-            data = self.wayfinder.control.mount.status()
+            data = self.wayfinder.control.mount.status().model_dump(by_alias=True)
+            imaging = self.wayfinder.control.imaging.status(include=["current_filter", "focuser", "camera"])
+            data.update({
+                "cameraStatus": imaging.camera_status,
+                "filter": imaging.current_filter,
+                "focuserPosition": imaging.focuser_position,
+                "cameraTemperature": imaging.camera_temperature,
+            })
         except (AstrometricsError, OSError, RuntimeError) as e:
             logger.warning("Failed to query telescope status (telescope may be offline): %s", e)
             data = {
@@ -119,10 +109,7 @@ class TelescopeService:
         # Inject real alignment attempt history if service is available
         if self._alignment_service:
             try:
-                driver = getattr(self.wayfinder.control, "driver", None) or getattr(
-                    self.wayfinder.control, "_driver", None
-                )
-                self._alignment_service.poll_external_syncs(driver)
+                self._alignment_service.poll_external_syncs()
             except AstrometricsError as e:
                 logger.debug("Failed to poll external syncs: %s", e)
             data.update(self._alignment_service.get_attempts())

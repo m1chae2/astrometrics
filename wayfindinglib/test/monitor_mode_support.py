@@ -74,24 +74,27 @@ tools; `test_monitor_mode_sends_no_commands` tests them by name.
 ALLOWED_RPC_IN_MONITOR_MODE = frozenset({"telescope:connect", "telescope:set_indi_property"})
 """The backend RPC methods that correspond to `ALLOWED_IN_MONITOR_MODE`."""
 
-CALLER_SUPPLIED_STEP_TOOLS = frozenset({
-    "execution_execute_meridian_flip",
-    "execution_recover_fault",
-    "execution_recover_guide_star_loss",
-    "observatory_guiding_run_calibration",
-    "observatory_guiding_run_backlash_calibration",
-    "observatory_safety_execute_safe_state",
-})
+CALLER_SUPPLIED_STEP_TOOLS: frozenset[str] = frozenset()
 """Commands whose hardware steps are handed in by the caller.
 
-These methods run the callables (``steps``, ``reacquire_guide_star`` and
-so on) they are given. They never touch a driver themselves, and a
-JSON tool call cannot carry a callable. The library does not check the
-delegation policy for them. They are reported to the systems engineer
-(issue #95, batch 5) and left out of the guarantee on purpose. The test
-`test_caller_supplied_steps_list_matches_the_manifest` keeps this list
-honest.
+These methods (the meridian flip, fault recovery, the guider calibrations
+and the safe state) run the callables they are given and never touch a
+driver themselves. The library does not check the delegation policy for
+them. They are private methods now (issue #134), so they are no tools and
+this list is empty. The test
+`test_caller_supplied_steps_list_matches_the_manifest` keeps it honest.
 """
+
+PRIVATE_REFUSED_COMMANDS = (
+    "observatory_guiding_pulse",
+    "observatory_guiding_run_exposure_test",
+    "observatory_mount_sync",
+    "observatory_safety_close_enclosure",
+    "observatory_safety_open_enclosure",
+)
+"""Commands that are private methods now (issue #134), so no tool offers
+them, but that must still be refused in monitor mode. The name is the
+old tool name; `resolve_tool` finds the private method."""
 
 QUIET_BUT_NOT_REFUSED_TOOLS = frozenset({"execution_advance_session"})
 """Commands that do not raise in monitor mode but still send nothing.
@@ -147,7 +150,7 @@ SAMPLE_ARGUMENTS: dict[str, dict[str, Any]] = {
 `observatory_guiding_run_loop` and `observatory_guiding_stop_loop` are
 added by `sample_arguments`, because they need a fresh `threading.Event`."""
 
-CHILD_PREFIXES = ("mount", "imaging", "guiding", "remote", "history", "safety", "equipment")
+CHILD_PREFIXES = ("mount", "imaging", "guiding", "remote", "safety", "equipment")
 """The children of `Wayfinder.control` that hold operations."""
 
 
@@ -173,9 +176,12 @@ def refused_tool_names() -> list[str]:
         `CALLER_SUPPLIED_STEP_TOOLS`.
     """
     return [
-        name
-        for name in command_tool_names()
-        if name not in ALLOWED_IN_MONITOR_MODE and name not in CALLER_SUPPLIED_STEP_TOOLS
+        *(
+            name
+            for name in command_tool_names()
+            if name not in ALLOWED_IN_MONITOR_MODE and name not in CALLER_SUPPLIED_STEP_TOOLS
+        ),
+        *PRIVATE_REFUSED_COMMANDS,
     ]
 
 
@@ -224,7 +230,9 @@ def resolve_tool(wayfinder: Any, tool_name: str) -> Any:
     for child in CHILD_PREFIXES:
         prefix = f"observatory_{child}_"
         if tool_name.startswith(prefix):
-            return getattr(getattr(wayfinder.control, child), tool_name.removeprefix(prefix))
+            name = tool_name.removeprefix(prefix)
+            child_object = getattr(wayfinder.control, child)
+            return getattr(child_object, name if hasattr(child_object, name) else f"_{name}")
     raise KeyError(tool_name)
 
 
@@ -341,6 +349,7 @@ class RecordingDrivers:
         }
         self.indi_session = MagicMock()
         self.indi_session.set_property.return_value = True
+        self.indi_session.status = {}
         self._previous = {name: getattr(context, name) for name in self.REPLACED_ATTRIBUTES}
         self.context._mount_driver = self.drivers["mount"]
         self.context._focuser_driver = self.drivers["focuser"]

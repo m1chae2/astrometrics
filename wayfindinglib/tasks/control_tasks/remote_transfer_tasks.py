@@ -334,7 +334,7 @@ def download_remote_targets(
         astrometrics.targets.reindex_frames(target, prune_missing=prune_missing)
         astrometrics.targets.save()
         # After the copy: the new frames that hold a plate solve give the
-        # mount's pointing error, for control.history.query(kind="alignment").
+        # mount's pointing error, for review.query(kind="alignment").
         record_frame_pointing_errors(context, added_paths)
         if added_paths:
             summary = record_new_frame_measurements(context, target, added_paths)

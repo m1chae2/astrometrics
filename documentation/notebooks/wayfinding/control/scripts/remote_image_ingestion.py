@@ -142,7 +142,7 @@ def run_sync() -> None:
             print("[Testing Mode] Replacing the observatory computer with a stand-in...")
             # A stand-in transfer driver goes in through the public
             # driver property, so no real connection is made.
-            wayfinder.control.remote_transfer_driver = _DryRunRemote()
+            wayfinder.control._remote_transfer_driver = _DryRunRemote()
             # Check the connection and list the folders that match no
             # target, through the public `wayfinder.control.remote` API.
             connected = wayfinder.control.remote.check_connection()

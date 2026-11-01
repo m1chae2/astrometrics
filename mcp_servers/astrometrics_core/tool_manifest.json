@@ -385,7 +385,7 @@
       "category": "targets",
       "disposition": "drop",
       "interim_block": "",
-      "note": "Returns whole frame records, which can overflow the reply. Scripts and wayfindinglib use it. observatory_history_frame_guiding already serves an AI client."
+      "note": "Returns whole frame records, which can overflow the reply. Scripts and wayfindinglib use it. review_frame_guiding already serves an AI client."
     },
     "target_sessions": {
       "tool_class": "observe",

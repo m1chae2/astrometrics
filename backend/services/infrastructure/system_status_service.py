@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from wayfindinglib import AlignmentTargetSession, PolarAlignmentStatus
+from wayfindinglib import AlignmentTargetSession
 
 if TYPE_CHECKING:
     from backend.services.infrastructure.astrometrics_service import AstrometricsService
@@ -32,7 +32,7 @@ class TelescopePulse(BaseModel):
     alignment_attempts: list[Any] = Field(default_factory=list, alias="alignmentAttempts")
     alignment_targets: list[AlignmentTargetSession] = Field(default_factory=list, alias="alignmentTargets")
     alignment_active: bool = Field(default=False, alias="alignmentActive")
-    polar_alignment: PolarAlignmentStatus | None = Field(default=None, alias="polarAlignment")
+    polar_alignment: dict[str, Any] | None = Field(default=None, alias="polarAlignment")
     camera_temperature: str | None = Field(default=None, alias="cameraTemperature")
     camera_status: str | None = Field(default=None, alias="cameraStatus")
     target_name: str | None = Field(default=None, alias="targetName")

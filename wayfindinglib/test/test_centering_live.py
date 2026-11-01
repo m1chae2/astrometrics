@@ -109,7 +109,7 @@ def observatory(
 
     MOUNT_CONTROL/PLATE_SOLVE_ALIGNMENT are promoted to AUTHORITATIVE
     (via SHADOWED first, per the correction-capability shadow-precedence
-    rule) so `control.mount.sync`/`control.mount.slew` actually dispatch
+    rule) so `control.mount._sync`/`control.mount.slew` actually dispatch
     to the driver rather than raising -- an isolated, temp-directory
     `DiskButler` backs the delegation policy so this never touches a
     real config/database file.
@@ -126,7 +126,7 @@ def observatory(
     config.update_config({"Wayfinding Library": {"path": str(isolated_dir / "wayfinding_library")}})
 
     observatory_control = ObservatoryControl(config=config, butler=DiskButler(app_config=config))
-    observatory_control.driver = live_interface
+    observatory_control._driver = live_interface
     observatory_control._context.records = ControlRecordStore(str(isolated_dir / "logs.db"))
     observatory_control.safety.apply_promotion_decision(
         ObservatoryCapability.MOUNT_CONTROL, DelegationState.AUTHORITATIVE

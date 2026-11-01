@@ -1,6 +1,6 @@
 """Purpose: End-to-end tests for the capture analysis on the facade.
 
-Description: Runs the capture analysis behind `control.history.query`
+Description: Runs the capture analysis behind `review.query`
 (`night_analysis.capture_night_analysis` and `capture_night_summaries`) against
 a real isolated configuration, a real Butler and a real log database. The
 science library's frame records are replaced by synthetic light frames, so the
@@ -13,6 +13,7 @@ recommendations.
 import pytest
 
 from wayfindinglib import ObservatoryControl
+from wayfindinglib.api.review import ObservationReview
 from wayfindinglib.api.test.capture_night_helpers import (
     Library,
     add_frames,
@@ -74,8 +75,8 @@ def test_a_soft_night_is_not_judged_against_itself(control: ObservatoryControl, 
     add_frames(library, 8, star_width_arcsec=12.0)
 
     analysis = night_analysis.capture_night_analysis(control._context, night)
-    with_everything = control.history.get_performance_envelope()
-    before = control.history.get_performance_envelope(before_night=night)
+    with_everything = ObservationReview(control).get_performance_envelope()
+    before = ObservationReview(control).get_performance_envelope(before_night=night)
 
     assert analysis.flagged
     assert before.thresholds["night_star_width_high_limit"].sample_count == 6

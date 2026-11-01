@@ -190,7 +190,7 @@ LOCAL_WRITE_METHODS = frozenset({
     "calibration:measure_sensor_noise",
     "execution:abort_session",
     "execution:reconcile_session",
-    "execution:record_divergence",
+    "execution:build_divergence_record",
     "handoff:beam",
     "handoff:send_alert",
     "handoff:share_file",

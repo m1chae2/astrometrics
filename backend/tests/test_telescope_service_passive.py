@@ -1,8 +1,22 @@
 """Tests for TelescopeService tracking state detection and target inference."""
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+
+
+def _imaging_status() -> SimpleNamespace:
+    """Build a stand-in `ImagingStatus` with the readings the panel shows.
+
+    Returns
+    -------
+    status : `types.SimpleNamespace`
+        Camera status, filter, focuser position and sensor temperature.
+    """
+    return SimpleNamespace(
+        camera_status="Idle", current_filter="L", focuser_position=0, camera_temperature="-"
+    )
 
 
 def test_infer_target_at_coordinates() -> None:
@@ -56,12 +70,15 @@ def test_get_status_polls_external_guiding() -> None:
     guiding_service_mock.get_status.return_value = {"history": [{"time": 100, "dra": 0.1, "ddec": -0.1}]}
 
     wayfinder_mock = MagicMock()
-    wayfinder_mock.control.mount.status.return_value = {
-        "ra": "20h 00m 00s",
-        "dec": "+22° 00m 00s",
-        "trackingStatus": "Tracking",
-        "connectionStatus": "Connected",
-    }
+    wayfinder_mock.control.mount.status.return_value = SimpleNamespace(
+        model_dump=lambda by_alias=False: {
+            "ra": "20h 00m 00s",
+            "dec": "+22° 00m 00s",
+            "trackingStatus": "Tracking",
+            "connectionStatus": "Connected",
+        }
+    )
+    wayfinder_mock.control.imaging.status.return_value = _imaging_status()
 
     service = TelescopeService(guiding_service=guiding_service_mock, wayfinder=wayfinder_mock)
     status = service.get_status()

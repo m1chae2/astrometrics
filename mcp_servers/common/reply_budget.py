@@ -5,7 +5,8 @@ cut reply is no longer valid JSON. The target report, tonight's ranking and
 the night review can all grow with the library. The library itself returns
 them in full, to every caller (the desktop app shows full reports). The MCP
 layer calls `fit_reply_to_budget` on a tool's reply before it sends it. This
-module holds what that needs, in one place:
+module, which belongs to the MCP servers and not to the library, holds what
+that needs, in one place:
 
 * the limit, and the budget a reply must meet (the limit less 10 percent
   headroom);
@@ -39,10 +40,7 @@ from typing import cast
 
 from pydantic import BaseModel
 
-from wayfindinglib.models.planning.target_report import TargetDatasetReport
-from wayfindinglib.models.planning.tonight_ranking import TonightRanking
-from wayfindinglib.models.quality.statements import TargetStatement
-from wayfindinglib.models.session.night_quality import NightQuality
+from wayfindinglib import NightQuality, TargetDatasetReport, TargetStatement, TonightRanking
 
 MAXIMUM_REPLY_CHARACTERS = 40_000
 """The reply limit of the MCP tools (`MAXIMUM_REPLY_BYTES` in the MCP tool

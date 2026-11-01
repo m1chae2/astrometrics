@@ -122,7 +122,7 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "telescope:get_pointing_model": ("alignment_service", "compute_pointing_model"),
     # The equipment's limits, with the sky's tracking-risk grid that the
     # planetarium colors.
-    "telescope:get_performance_envelope": ("wayfinder.control.history", "get_performance_envelope"),
+    "telescope:get_performance_envelope": ("wayfinder.review", "get_performance_envelope"),
     "telescope:get_guiding_spectrum": ("guiding_service", "analyze_guiding_spectrum"),
     # Equipment set-up and control mode
     "observatory:list_cameras": ("equipment_service", "list_camera_profiles"),
@@ -253,7 +253,7 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "execution:get_session": ("execution_service", "get_session"),
     "execution:abort_session": ("execution_service", "abort_session"),
     "execution:reconcile_session": ("execution_service", "reconcile_session"),
-    "execution:record_divergence": ("execution_service", "record_divergence"),
+    "execution:build_divergence_record": ("execution_service", "build_divergence_record"),
     # Night plan and observation packages. `plan:get` reads (no `session_id`
     # lists all), `plan:list_packages` lists the package library and
     # `plan:current_session` reads tonight's session. `plan:edit` and

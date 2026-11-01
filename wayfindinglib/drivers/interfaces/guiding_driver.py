@@ -16,7 +16,7 @@ guider measured since the last call. `run_cycle` runs one cycle of this
 app's own guiding loop: expose, measure the error, and send the
 correction. It receives the device commands it may use as
 `GuideCommands`, so every pulse still passes the delegation check of
-`control.guiding.pulse`.
+`control.guiding._pulse`.
 """
 
 import abc

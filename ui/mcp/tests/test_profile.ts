@@ -55,10 +55,10 @@ describe("withheldReason", () => {
 
   it("withholds a dropped tool and gives its note as the reason", () => {
     const reason = withheldReason(
-      { tool_class: "compute", disposition: "drop", note: "Replaced by observatory_history_query." },
+      { tool_class: "compute", disposition: "drop", note: "Replaced by review_query." },
       "investigator"
     );
-    expect(reason).toBe("Replaced by observatory_history_query");
+    expect(reason).toBe("Replaced by review_query");
   });
 
   it("withholds a tool that is not in the manifest", () => {

@@ -269,7 +269,12 @@ CLASSIFICATION_RULES = (
         "high",
         "Writes settings to local storage.",
     ),
-    _rule(r"^execution_record_divergence$", "change-data", "medium", "Records a divergence in session data."),
+    _rule(
+        r"^execution_build_divergence_record$",
+        "compute",
+        "high",
+        "Builds a divergence record and writes nothing.",
+    ),
     _rule(
         r"^observatory_guiding_(drain_external_pulses|refit_spectrum)$",
         "change-data",
@@ -323,7 +328,7 @@ CLASSIFICATION_RULES = (
         "Returns a stored, derived or measured value.",
     ),
     _rule(
-        r"^observatory_history_query$",
+        r"^review_query(_alignment_sessions)?$",
         "compute",
         "high",
         "Reads recorded nights and calculates the analyses.",
@@ -341,7 +346,7 @@ CLASSIFICATION_RULES = (
         "Measures frames and returns statistics. Saves nothing.",
     ),
     _rule(
-        r"^(observatory_history_frame_guiding|planning_get_visibility)$",
+        r"^(review_frame_guiding|planning_get_visibility)$",
         "compute",
         "high",
         "Calculates from stored records and the sky. Saves nothing.",

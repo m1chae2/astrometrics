@@ -954,7 +954,7 @@ export interface TelescopePulse {
   alignmentAttempts?: any[];
   alignmentTargets?: AlignmentTargetSession[];
   alignmentActive?: boolean;
-  polarAlignment?: PolarAlignmentStatus | null;
+  polarAlignment?: Record<string, any> | null;
   cameraTemperature?: string | null;
   cameraStatus?: string | null;
   targetName?: string | null;
@@ -1066,7 +1066,7 @@ export interface AlignmentTrackPoint {
  * as tracking error. Drift is the slope of a straight-line fit of the
  * offsets against time.
  *
- * `wayfindinglib.group_alignment_attempts` builds these from a list of
+ * `ObservationReview.query_alignment_sessions` builds these from a list of
  * `AlignmentAttempt` records.
  */
 export interface AlignmentTargetSession {
@@ -1180,7 +1180,7 @@ export interface TrackingRiskMap {
  * anyone can redo it. `QualityLimit` has no place for them.
  * tracking_risk : `TrackingRiskMap` or `None`
  * How risky each part of the sky is for tracking with this
- * equipment. Filled in by `control.history.get_performance_envelope`;
+ * equipment. Filled in by `review.get_performance_envelope`;
  * `None` in the envelopes the night analyses use internally.
  */
 export interface PerformanceEnvelope {
@@ -5667,7 +5667,7 @@ export const RPC_METHODS = [
   "execution:get_session",
   "execution:abort_session",
   "execution:reconcile_session",
-  "execution:record_divergence",
+  "execution:build_divergence_record",
   "plan:get",
   "plan:current_session",
   "plan:list_packages",

@@ -1,8 +1,8 @@
 """Purpose: Data structures for the night list and the target changes.
 
-Description: `control.history.query(kind="nights")` returns one
+Description: `review.query(kind="nights")` returns one
 `NightListEntry` per recorded observing night, so a caller can pick a night
-without guessing which nights have data. `control.history.query(
+without guessing which nights have data. `review.query(
 kind="target_changes")` returns one `TargetChange` for each time the mount
 finished a slew and began tracking at a new place in the sky, matched to the
 nearest target in the library. Both are computed when read and never

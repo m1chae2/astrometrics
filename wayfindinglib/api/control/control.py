@@ -1,21 +1,20 @@
 """Purpose: `ObservatoryControl`, the entry point for the observatory.
 
 Description: `Wayfinder.control` is an `ObservatoryControl`. It holds no
-operations of its own. Its seven children, built once with it, do the
+operations of its own. Its six children, built once with it, do the
 work, each on one topic:
 
 - `mount`: pointing and tracking;
 - `imaging`: the main camera, filter wheel and focuser;
 - `guiding`: the guide camera, guide pulses and guider models;
 - `remote`: the observatory computer's files and logs;
-- `history`: past and current observing sessions;
 - `safety`: weather, the enclosure, and who is allowed to act;
 - `equipment`: the equipment profile and device connections.
 
 The children share one `ControlContext` (configuration, storage and
 drivers) and hold no reference back to `control`. The driver properties
-stay here, as the place where tests and the backend put in their own
-drivers. Setting one updates the shared context, so every child sees it.
+stay here, private, as the place where tests put in their own drivers.
+Setting one updates the shared context, so every child sees it.
 Callers never import `wayfindinglib.tasks` directly.
 """
 
@@ -26,7 +25,6 @@ from typing import TYPE_CHECKING, Any
 from wayfindinglib.api.control.context import ControlContext
 from wayfindinglib.api.control.equipment import EquipmentControl
 from wayfindinglib.api.control.guiding import GuidingControl
-from wayfindinglib.api.control.history import HistoryControl
 from wayfindinglib.api.control.imaging import ImagingControl
 from wayfindinglib.api.control.mount import MountControl
 from wayfindinglib.api.control.remote import RemoteControl
@@ -50,7 +48,7 @@ __all__ = ["ObservatoryControl"]
 
 
 class ObservatoryControl:
-    """Operate the observatory through seven topic children.
+    """Operate the observatory through six topic children.
 
     Parameters
     ----------
@@ -65,6 +63,12 @@ class ObservatoryControl:
     astrometrics : `Astrometrics`, optional
         The science library handle shared with the rest of the
         `Wayfinder`. Built over `config` on first use when omitted.
+    simulated : `bool`, optional
+        Use the simulated INDI session instead of the real one. When
+        omitted, the simulator is used if ``ASTROMETRICS_TESTING`` is set.
+    separate_process : `bool`, optional
+        Run the INDI session in a process of its own, so a slow INDI
+        call cannot freeze the caller. `close` stops that process.
 
     Attributes
     ----------
@@ -76,8 +80,6 @@ class ObservatoryControl:
         The guide camera, guide pulses and guider models.
     remote : `RemoteControl`
         The observatory computer's files and logs.
-    history : `HistoryControl`
-        Past and current observing sessions.
     safety : `SafetyControl`
         Weather, the enclosure, and who is allowed to act.
     equipment : `EquipmentControl`
@@ -88,7 +90,6 @@ class ObservatoryControl:
     imaging: ImagingControl
     guiding: GuidingControl
     remote: RemoteControl
-    history: HistoryControl
     safety: SafetyControl
     equipment: EquipmentControl
 
@@ -99,8 +100,10 @@ class ObservatoryControl:
         butler: DiskButler | None = None,
         correction_config: CorrectionConfig | None = None,
         astrometrics: Astrometrics | None = None,
+        simulated: bool | None = None,
+        separate_process: bool = False,
     ) -> None:
-        """Build the shared context and the seven children."""
+        """Build the shared context and the six children."""
         if config is None:
             from astrometricslib import get_configuration
 
@@ -111,12 +114,13 @@ class ObservatoryControl:
             butler=butler,
             correction_config=correction_config,
             astrometrics=astrometrics,
+            simulated=simulated,
+            separate_process=separate_process,
         )
         self.mount = MountControl(self._context)
         self.imaging = ImagingControl(self._context)
         self.guiding = GuidingControl(self._context)
         self.remote = RemoteControl(self._context)
-        self.history = HistoryControl(self._context)
         self.safety = SafetyControl(self._context)
         self.equipment = EquipmentControl(self._context)
 
@@ -124,13 +128,14 @@ class ObservatoryControl:
         """Stop the background work control started, for good.
 
         Call it once when the program shuts down. Today that stops the PHD2
-        event reader, if guiding was used. It starts nothing that was not
+        event reader, if guiding was used, and the INDI worker process, if
+        `separate_process` started one. It starts nothing that was not
         already running, and it is safe to call more than once.
         """
         self._context.close()
 
     @property
-    def driver(self) -> Any:
+    def _driver(self) -> Any:
         """The INDI session every INDI device driver wraps.
 
         Returns
@@ -141,13 +146,13 @@ class ObservatoryControl:
         """
         return self._context.driver
 
-    @driver.setter
-    def driver(self, driver: Any) -> None:
+    @_driver.setter
+    def _driver(self, driver: Any) -> None:
         """Set the INDI session."""
         self._context.driver = driver
 
     @property
-    def mount_driver(self) -> MountDriver:
+    def _mount_driver(self) -> MountDriver:
         """The mount driver, built for the active telescope's protocol.
 
         Returns
@@ -157,13 +162,13 @@ class ObservatoryControl:
         """
         return self._context.mount_driver
 
-    @mount_driver.setter
-    def mount_driver(self, mount_driver: MountDriver) -> None:
+    @_mount_driver.setter
+    def _mount_driver(self, mount_driver: MountDriver) -> None:
         """Set the mount driver."""
         self._context.mount_driver = mount_driver
 
     @property
-    def focuser_driver(self) -> FocuserDriver:
+    def _focuser_driver(self) -> FocuserDriver:
         """The focuser driver, built for the active telescope's protocol.
 
         Returns
@@ -173,13 +178,13 @@ class ObservatoryControl:
         """
         return self._context.focuser_driver
 
-    @focuser_driver.setter
-    def focuser_driver(self, focuser_driver: FocuserDriver) -> None:
+    @_focuser_driver.setter
+    def _focuser_driver(self, focuser_driver: FocuserDriver) -> None:
         """Set the focuser driver."""
         self._context.focuser_driver = focuser_driver
 
     @property
-    def filter_wheel_driver(self) -> FilterWheelDriver:
+    def _filter_wheel_driver(self) -> FilterWheelDriver:
         """The filter wheel driver, built for the active telescope's protocol.
 
         Returns
@@ -189,13 +194,13 @@ class ObservatoryControl:
         """
         return self._context.filter_wheel_driver
 
-    @filter_wheel_driver.setter
-    def filter_wheel_driver(self, filter_wheel_driver: FilterWheelDriver) -> None:
+    @_filter_wheel_driver.setter
+    def _filter_wheel_driver(self, filter_wheel_driver: FilterWheelDriver) -> None:
         """Set the filter wheel driver."""
         self._context.filter_wheel_driver = filter_wheel_driver
 
     @property
-    def camera_driver(self) -> CameraDriver:
+    def _camera_driver(self) -> CameraDriver:
         """The main camera driver, built for the active camera's protocol.
 
         Returns
@@ -205,13 +210,13 @@ class ObservatoryControl:
         """
         return self._context.camera_driver
 
-    @camera_driver.setter
-    def camera_driver(self, camera_driver: CameraDriver) -> None:
+    @_camera_driver.setter
+    def _camera_driver(self, camera_driver: CameraDriver) -> None:
         """Set the main camera driver."""
         self._context.camera_driver = camera_driver
 
     @property
-    def guide_camera_driver(self) -> CameraDriver:
+    def _guide_camera_driver(self) -> CameraDriver:
         """The guide camera driver.
 
         Returns
@@ -221,13 +226,13 @@ class ObservatoryControl:
         """
         return self._context.guide_camera_driver
 
-    @guide_camera_driver.setter
-    def guide_camera_driver(self, guide_camera_driver: CameraDriver) -> None:
+    @_guide_camera_driver.setter
+    def _guide_camera_driver(self, guide_camera_driver: CameraDriver) -> None:
         """Set the guide camera driver."""
         self._context.guide_camera_driver = guide_camera_driver
 
     @property
-    def enclosure_driver(self) -> EnclosureDriver:
+    def _enclosure_driver(self) -> EnclosureDriver:
         """The enclosure driver, built for the configured enclosure's protocol.
 
         Returns
@@ -237,13 +242,13 @@ class ObservatoryControl:
         """
         return self._context.enclosure_driver
 
-    @enclosure_driver.setter
-    def enclosure_driver(self, enclosure_driver: EnclosureDriver) -> None:
+    @_enclosure_driver.setter
+    def _enclosure_driver(self, enclosure_driver: EnclosureDriver) -> None:
         """Set the enclosure driver."""
         self._context.enclosure_driver = enclosure_driver
 
     @property
-    def switch_driver(self) -> SwitchDriver:
+    def _switch_driver(self) -> SwitchDriver:
         """The power switch driver.
 
         Returns
@@ -253,13 +258,13 @@ class ObservatoryControl:
         """
         return self._context.switch_driver
 
-    @switch_driver.setter
-    def switch_driver(self, switch_driver: SwitchDriver) -> None:
+    @_switch_driver.setter
+    def _switch_driver(self, switch_driver: SwitchDriver) -> None:
         """Set the power switch driver."""
         self._context.switch_driver = switch_driver
 
     @property
-    def weather_driver(self) -> WeatherDriver:
+    def _weather_driver(self) -> WeatherDriver:
         """The weather sensor driver.
 
         Returns
@@ -269,13 +274,13 @@ class ObservatoryControl:
         """
         return self._context.weather_driver
 
-    @weather_driver.setter
-    def weather_driver(self, weather_driver: WeatherDriver) -> None:
+    @_weather_driver.setter
+    def _weather_driver(self, weather_driver: WeatherDriver) -> None:
         """Set the weather sensor driver."""
         self._context.weather_driver = weather_driver
 
     @property
-    def guiding_driver(self) -> GuidingDriver:
+    def _guiding_driver(self) -> GuidingDriver:
         """The guiding driver, chosen by the telescope's guiding protocol.
 
         Returns
@@ -285,13 +290,13 @@ class ObservatoryControl:
         """
         return self._context.guiding_driver
 
-    @guiding_driver.setter
-    def guiding_driver(self, guiding_driver: GuidingDriver) -> None:
+    @_guiding_driver.setter
+    def _guiding_driver(self, guiding_driver: GuidingDriver) -> None:
         """Set the guiding driver."""
         self._context.guiding_driver = guiding_driver
 
     @property
-    def remote_transfer_driver(self) -> RemoteTransferDriver:
+    def _remote_transfer_driver(self) -> RemoteTransferDriver:
         """The driver that copies files from the observatory computer.
 
         Returns
@@ -301,7 +306,7 @@ class ObservatoryControl:
         """
         return self._context.remote_transfer_driver
 
-    @remote_transfer_driver.setter
-    def remote_transfer_driver(self, remote_transfer_driver: RemoteTransferDriver) -> None:
+    @_remote_transfer_driver.setter
+    def _remote_transfer_driver(self, remote_transfer_driver: RemoteTransferDriver) -> None:
         """Set the remote transfer driver."""
         self._context.remote_transfer_driver = remote_transfer_driver

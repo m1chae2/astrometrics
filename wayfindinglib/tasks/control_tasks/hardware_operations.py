@@ -41,6 +41,7 @@ from wayfindinglib.astronomy.coordinate_transforms import current_epoch_to_icrs,
 from wayfindinglib.data_access.safety_policy_reader import get_safety_rule_set
 from wayfindinglib.data_access.site_profile_reader import configured_observer_location
 from wayfindinglib.drivers.indi.pyindi_compatibility import INDI_ERRORS
+from wayfindinglib.models.control_status import MountControlStatus
 from wayfindinglib.models.policy.delegation import ObservatoryCapability
 from wayfindinglib.models.sky_position import SkyPosition
 
@@ -63,10 +64,6 @@ PULSE_DIRECTIONS = {
     "w": "W",
 }
 """Guide pulse directions as callers name them, to the driver's initial."""
-
-MOUNT_STATUS_SECTIONS = ("mount", "filter", "focuser", "camera")
-"""Device reads `mount_status` can make. ``mount`` also brings the
-ambient temperature and humidity, which the same session read refreshes."""
 
 
 def _run_sync(coroutine: Coroutine[Any, Any, Any]) -> Any:
@@ -108,29 +105,21 @@ def _require_authoritative(context: ControlContext, capability: ObservatoryCapab
         )
 
 
-def mount_status(context: ControlContext, include: list[str] | None = None) -> dict[str, Any]:
-    """Read the mount's position and tracking, and the imaging devices.
+def mount_status(context: ControlContext) -> MountControlStatus:
+    """Read the mount's position and tracking. A read.
 
-    A read, so there is no authority check.
+    There is no authority check for a read. The ambient temperature and
+    humidity come with it, because the same session read refreshes them.
 
     Parameters
     ----------
     context : `ControlContext`
         Supplies the drivers.
-    include : `list` [`str`], optional
-        Device reads to make, from ``MOUNT_STATUS_SECTIONS``. All of them
-        when `None`.
 
     Returns
     -------
-    status : `dict` [`str`, `Any`]
-        ``mount``: ``ra``, ``dec``, ``altitude``, ``azimuth``,
-        ``trackingStatus``, ``connectionStatus``, ``targetName``,
-        ``pierSide``, ``parked``, ``trackMode``, ``temperature``,
-        ``humidity`` and ``cameraStatus``. ``filter``:
-        ``filter``. ``focuser``: ``focuserPosition``. ``camera``:
-        ``cameraTemperature``. An unknown section name is refused with
-        `InvalidArgumentError`.
+    status : `MountControlStatus`
+        The mount's reading.
 
     Notes
     -----
@@ -142,36 +131,60 @@ def mount_status(context: ControlContext, include: list[str] | None = None) -> d
     the mount does not know yet (such as ``"Unknown"``) is passed on as
     it is.
     """
-    sections = check_sections(include, MOUNT_STATUS_SECTIONS)
-    data: dict[str, Any] = {}
-    if "mount" in sections:
-        mount = _run_sync(context.mount_driver.get_status())
-        raw_status = getattr(context.driver, "status", {})
-        ra_text, dec_text = mount_position_to_icrs(mount.ra, mount.dec, Time.now())
-        data.update({
-            "ra": ra_text,
-            "dec": dec_text,
-            "altitude": mount.altitude,
-            "azimuth": mount.azimuth,
-            "temperature": raw_status.get("TEMPERATURE", "-"),
-            "humidity": raw_status.get("HUMIDITY", "-"),
-            "trackingStatus": mount.tracking_status,
-            "connectionStatus": mount.connection_status,
-            "cameraStatus": raw_status.get("CAMERA_STATUS", "Idle"),
-            "targetName": mount.target_name,
-            "pierSide": mount.pier_side,
-            "parked": mount.parked,
-            "trackMode": mount.track_mode,
-        })
-    if "filter" in sections:
-        filter_name = _run_sync(context.filter_wheel_driver.get_current_filter())
-        data["filter"] = filter_name if filter_name is not None else "L"
-    if "focuser" in sections:
-        data["focuserPosition"] = _run_sync(context.focuser_driver.get_position())
-    if "camera" in sections:
-        temperature_c = _run_sync(context.camera_driver.get_sensor_temperature_c())
-        data["cameraTemperature"] = f"{temperature_c:.1f}°C" if temperature_c is not None else "-"
-    return data
+    mount = _run_sync(context.mount_driver.get_status())
+    raw_status = getattr(context.driver, "status", {})
+    ra_text, dec_text = mount_position_to_icrs(mount.ra, mount.dec, Time.now())
+    return MountControlStatus(
+        ra=ra_text,
+        dec=dec_text,
+        altitude=mount.altitude,
+        azimuth=mount.azimuth,
+        temperature=raw_status.get("TEMPERATURE", "-"),
+        humidity=raw_status.get("HUMIDITY", "-"),
+        tracking_status=mount.tracking_status,
+        connection_status=mount.connection_status,
+        target_name=mount.target_name,
+        pier_side=mount.pier_side,
+        parked=mount.parked,
+        track_mode=mount.track_mode,
+    )
+
+
+def current_filter(context: ControlContext) -> str:
+    """Read the filter in the beam now. A read.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the filter wheel driver.
+
+    Returns
+    -------
+    filter_name : `str`
+        The filter's name; ``"L"`` if the wheel does not say.
+    """
+    filter_name = _run_sync(context.filter_wheel_driver.get_current_filter())
+    return filter_name if filter_name is not None else "L"
+
+
+def camera_reading(context: ControlContext) -> tuple[str, str]:
+    """Read the main camera's sensor temperature and activity. A read.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the camera driver and the session.
+
+    Returns
+    -------
+    temperature, camera_status : `tuple` [`str`, `str`]
+        The sensor temperature as text such as ``"-10.0°C"`` (``"-"`` if
+        unknown), and what the camera is doing, such as ``"Idle"``.
+    """
+    temperature_c = _run_sync(context.camera_driver.get_sensor_temperature_c())
+    raw_status = getattr(context.driver, "status", {})
+    temperature = f"{temperature_c:.1f}°C" if temperature_c is not None else "-"
+    return temperature, raw_status.get("CAMERA_STATUS", "Idle")
 
 
 def mount_position_to_icrs(ra_text: str, dec_text: str, obstime: Time) -> tuple[str, str]:

@@ -112,10 +112,10 @@ class SyncService:
         ----------
         object_id : `str`
             The target (or calibration folder) that was synced.
-        sync_result : `Any`
+        sync_result : `FrameSyncResult`
             What the frame sync returned.
         """
-        summaries = sync_result.get("measurements") if isinstance(sync_result, dict) else None
+        summaries = getattr(sync_result, "measurements", None)
         if self._measurement_announcer is None or not summaries:
             return
         try:
@@ -156,9 +156,10 @@ class SyncService:
             ``fitsSolvesRecorded`` (always 0 here) and ``message``.
         """
         result = self._observatory.remote.sync_logs(register_job=False)
-        guide_logs = result.get("guide_logs") or {}
-        downloaded = guide_logs.get("to_download", 0) if guide_logs.get("supported") else 0
-        samples = (result.get("ingested") or {}).get("guide_samples_stored", 0)
+        guide_logs = result.guide_logs
+        downloaded = (guide_logs.to_download or 0) if guide_logs and guide_logs.supported else 0
+        ingested = result.ingested if isinstance(result.ingested, dict) else {}
+        samples = ingested.get("guide_samples_stored", 0)
         return {
             "status": "success",
             "guideLogsDownloaded": downloaded,

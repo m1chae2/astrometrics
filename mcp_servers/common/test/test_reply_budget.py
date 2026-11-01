@@ -14,14 +14,14 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from astrometricslib import MeasurementReference
-from wayfindinglib.analytics.result_quality.reply_budget import (
+from mcp_servers.common.reply_budget import (
     MAXIMUM_REPLY_CHARACTERS,
     fit_reply,
     fit_reply_to_budget,
     reply_budget,
     reply_characters,
 )
-from wayfindinglib.models.planning.target_report import TargetDatasetReport
+from wayfindinglib.models.planning.target_report import ContextReading, TargetDatasetReport
 from wayfindinglib.models.quality.statements import (
     ActionClass,
     Confidence,
@@ -41,7 +41,7 @@ class _Reply(BaseModel):
 
 def test_the_limit_equals_the_mcp_tool_registry_limit() -> None:
     """The registry's constant is read from its source, not imported."""
-    source = Path(__file__).resolve().parents[4] / "mcp_servers" / "common" / "tool_registry.py"
+    source = Path(__file__).resolve().parents[1] / "tool_registry.py"
     match = re.search(r"^MAXIMUM_REPLY_BYTES = (\d+)", source.read_text(), re.MULTILINE)
     assert match is not None
     assert int(match.group(1)) == MAXIMUM_REPLY_CHARACTERS
@@ -135,3 +135,104 @@ def test_a_reply_that_fits_or_is_of_another_kind_is_returned_as_it_is() -> None:
     assert fit_reply_to_budget(report) is report
     other = {"anything": 1}
     assert fit_reply_to_budget(other) is other
+
+
+def test_the_context_section_goes_first_and_then_the_long_evidence_lists() -> None:
+    """A tight budget drops the readings, then evidence, never statements."""
+    full = TargetDatasetReport(
+        targetId="T",
+        statements=[_busy_statement(900) for _ in range(30)],
+        needsAttention=NeedsAttention(warning_count=30, worst_severity=Severity.ADVICE),
+        generatedAt=datetime(2026, 10, 24, tzinfo=UTC),
+        context=[ContextReading(metric=f"metric_{index}", level="stack", value=1.0) for index in range(40)],
+    )
+    without_context = full.model_copy(update={"context": []})
+    size_without_context = reply_characters(without_context)
+    assert reply_characters(full) > size_without_context
+
+    only_context = fit_reply_to_budget(full, budget=size_without_context + 500)
+    assert only_context.context == []
+    assert only_context.context_omitted_reason is not None
+    assert only_context.statements == full.statements
+
+    tight = fit_reply_to_budget(full, budget=2_000)
+    assert [statement.rule for statement in tight.statements] == [s.rule for s in full.statements]
+    assert tight.needs_attention == full.needs_attention
+    for kept, original in zip(tight.statements, full.statements, strict=True):
+        assert len(kept.evidence) + kept.evidence_omitted_count == len(original.evidence)
+        assert len(kept.evidence) <= 1
+
+
+def test_a_long_ranking_is_shortened_for_the_mcp_reply_and_keeps_the_best() -> None:
+    """With 120 made-up targets, the cut fits the limit and keeps the best."""
+    from wayfindinglib.models.planning.tonight_ranking import (
+        CandidateStatus,
+        RankedCandidate,
+        RankedList,
+        RankedUse,
+        TonightRanking,
+        TonightSkyModel,
+    )
+
+    now = datetime(2026, 10, 10, 6, 0, tzinfo=UTC)
+    candidates = [
+        RankedCandidate(
+            target_id=f"NGC {1000 + index}",
+            use=RankedUse.IMAGING,
+            status=CandidateStatus.RANKED,
+            rank=index + 1,
+            gain_per_hour_fraction=0.5 / (index + 1),
+            reason="The hour copies the target's past frames at tonight's modeled sky. " * 3,
+        )
+        for index in range(120)
+    ]
+    ranking = TonightRanking(
+        at=now,
+        lists=[RankedList(use=RankedUse.IMAGING, gain_description="noise", candidates=candidates)],
+        sky=TonightSkyModel(at=now),
+    )
+    assert reply_characters(ranking) > MAXIMUM_REPLY_CHARACTERS
+    fitted = fit_reply_to_budget(ranking)
+    assert reply_characters(fitted) <= MAXIMUM_REPLY_CHARACTERS
+    kept = fitted.lists[0].candidates
+    assert [candidate.target_id for candidate in kept] == [c.target_id for c in candidates[: len(kept)]]
+    assert any("left out" in note for note in fitted.notes)
+    assert fit_reply_to_budget(fitted) is fitted
+    assert len(ranking.lists[0].candidates) == 120
+
+
+def test_a_review_with_long_evidence_lists_is_cut_for_the_mcp_reply_budget() -> None:
+    """Statements keep fewer references, count the lost ones, and all stay."""
+    from wayfindinglib.models.session.night_quality import (
+        GuidingNightSummary,
+        NightQuality,
+        NightTargetQuality,
+    )
+
+    statement = _busy_statement(700)
+    entries = [
+        NightTargetQuality(
+            target_id=f"T{index}",
+            goal="faint_point_source",
+            frames_taken=700,
+            frames_set_aside=0,
+            captured_seconds=1.0,
+            statements=[statement, statement],
+            needs_attention=NeedsAttention(warning_count=2, worst_severity=Severity.ADVICE),
+        )
+        for index in range(6)
+    ]
+    review = NightQuality(
+        night_id="2026-10-02",
+        targets=entries,
+        needs_attention=NeedsAttention(warning_count=12, worst_severity=Severity.ADVICE),
+        guiding=GuidingNightSummary(available=False, reason="No guiding."),
+    )
+    assert reply_characters(review) > MAXIMUM_REPLY_CHARACTERS
+    fitted = fit_reply_to_budget(review)
+    assert reply_characters(fitted) <= MAXIMUM_REPLY_CHARACTERS
+    for entry in fitted.targets:
+        assert len(entry.statements) == 2
+        assert len(entry.statements[0].evidence) + entry.statements[0].evidence_omitted_count == 700
+    assert fitted.needs_attention == review.needs_attention
+    assert any("cut to fit" in note for note in fitted.notes)

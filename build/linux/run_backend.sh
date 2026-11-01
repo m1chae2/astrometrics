@@ -244,7 +244,7 @@ stop_backend() {
       # Grace period before escalating to SIGKILL. A single fixed 1s sleep
       # used to be here, but that's shorter than shutdown_event() can
       # legitimately take on its own: IndiWorkerClient.stop() (see
-      # backend/services/infrastructure/indi_worker.py) joins the INDI
+      # wayfindinglib/drivers/indi_worker.py) joins the INDI
       # worker process for up to 3s, and if that worker is wedged, kills it
       # and joins again for up to 2s more -- on top of uvicorn's own
       # shutdown handshake. Polling for up to 10s instead gives that room

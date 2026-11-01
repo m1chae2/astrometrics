@@ -617,7 +617,7 @@ class IngestionService(BaseBackgroundService):
                     sync_result = self._wayfinder.control.remote.sync_frames(
                         target_name, files=selected_files, log_callback=ingest_log_callback
                     )
-                    measurement_results = list((sync_result or {}).get("measurements") or [])
+                    measurement_results = list(sync_result.measurements or [])
                     self._log(job_id, "Download complete.")
                 except AstrometricsError as e:
                     self._log(job_id, f"Download failed: {e}")
@@ -636,7 +636,7 @@ class IngestionService(BaseBackgroundService):
             # Local ingestion goes through the same library entry point
             # as remote downloads.
             sync_result = self._wayfinder.control.remote.sync_frames(target_name, local_path=source_dir)
-            measurement_results = list((sync_result or {}).get("measurements") or [])
+            measurement_results = list(sync_result.measurements or [])
             self._log(job_id, "Local frames ingested successfully.")
 
         # The sync already measured the frames it added. Announce that run's

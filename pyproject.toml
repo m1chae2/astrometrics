@@ -313,13 +313,12 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 # sections 7 and 9. Each phase of the plan empties part of this list. Do not add to it.
 ".claude/hooks/guard_destructive.py" = ["print"]
 "astrometricslib/utilities/test/test_parallel_batch.py" = ["print"]
-"backend/services/infrastructure/indi_worker.py" = ["banned-api"]
 "backend/services/infrastructure/scripting_service.py" = ["print"]
 "backend/services/infrastructure/socket_manager.py" = ["blind-except"]
 "backend/services/observatory/execution_service.py" = ["banned-api"]
-"backend/tests/test_indi_worker.py" = ["banned-api"]
 "backend/tests/test_passive_alignment_and_guiding.py" = ["banned-api"]
 "backend/tests/test_pointing_and_guiding_analytics.py" = ["banned-api"]
+"mcp_servers/common/test/test_reply_budget.py" = ["banned-api"]
 "documentation/notebooks/astrometrics/user_guide/01_working_with_targets.ipynb" = ["print"]
 "documentation/notebooks/astrometrics/user_guide/02_inspecting_fits_metadata.ipynb" = ["print"]
 "documentation/notebooks/astrometrics/user_guide/03_stacking_and_calibration.ipynb" = ["print"]
@@ -389,6 +388,11 @@ type = "forbidden"
 source_modules = ["mcp_servers"]
 # Every subpackage of both libraries, so a new one is covered too.
 forbidden_modules = ["astrometricslib.*", "wayfindinglib.*"]
+# This test builds report models to check how a long reply is cut. The models
+# are internal to the library, so the one test module is let in.
+ignore_imports = [
+    "mcp_servers.common.test.test_reply_budget -> wayfindinglib.models.**",
+]
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
@@ -467,7 +471,6 @@ forbidden_modules = [
     "backend.services.infrastructure.base_service",
     "backend.services.infrastructure.fallback_static_files",
     "backend.services.infrastructure.handoff_service",
-    "backend.services.infrastructure.indi_worker",
     "backend.services.infrastructure.maintenance_service",
     "backend.services.infrastructure.notification_service",
     "backend.services.infrastructure.scripting_service",
@@ -486,8 +489,9 @@ forbidden_modules = [
 #   Foundation  models, astronomy, data_access, analytics, drivers.butler,
 #               drivers.control_record_store, drivers.catalog
 #   Control     tasks.control_tasks, session_analysis, watchdog, api.control,
+#               api.review (it reads the same records as control),
 #               and the hardware drivers (drivers.indi, drivers.indi_interface,
-#               drivers.interfaces, drivers.phd2, drivers.simulators,
+#               drivers.indi_worker, drivers.interfaces, drivers.phd2, drivers.simulators,
 #               drivers.ekos, drivers.stellarmate_interface)
 #   Planning    tasks.planning_tasks, api.planning
 #   Execution   tasks.execution_tasks, api.execution
@@ -513,9 +517,11 @@ forbidden_modules = [
     "wayfindinglib.session_analysis",
     "wayfindinglib.watchdog",
     "wayfindinglib.api.control",
+    "wayfindinglib.api.review",
     # The hardware drivers (Control)
     "wayfindinglib.drivers.indi",
     "wayfindinglib.drivers.indi_interface",
+    "wayfindinglib.drivers.indi_worker",
     "wayfindinglib.drivers.interfaces",
     "wayfindinglib.drivers.phd2",
     "wayfindinglib.drivers.simulators",
@@ -540,8 +546,10 @@ source_modules = [
     "wayfindinglib.session_analysis",
     "wayfindinglib.watchdog",
     "wayfindinglib.api.control",
+    "wayfindinglib.api.review",
     "wayfindinglib.drivers.indi",
     "wayfindinglib.drivers.indi_interface",
+    "wayfindinglib.drivers.indi_worker",
     "wayfindinglib.drivers.interfaces",
     "wayfindinglib.drivers.phd2",
     "wayfindinglib.drivers.simulators",
@@ -565,6 +573,7 @@ forbidden_modules = [
     "wayfindinglib.session_analysis",
     "wayfindinglib.watchdog",
     "wayfindinglib.api.control",
+    "wayfindinglib.api.review",
 ]
 
 [[tool.importlinter.contracts]]
@@ -577,6 +586,7 @@ source_modules = [
 forbidden_modules = [
     "wayfindinglib.drivers.indi",
     "wayfindinglib.drivers.indi_interface",
+    "wayfindinglib.drivers.indi_worker",
     "wayfindinglib.drivers.interfaces",
     "wayfindinglib.drivers.phd2",
     "wayfindinglib.drivers.simulators",

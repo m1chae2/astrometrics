@@ -79,10 +79,10 @@ Each command in `tasks/control_tasks/hardware_operations.py` starts with `_requi
 
 ### 2.4 Delegation phases (Architecture Section 2.4)
 
-The phase is the combination of states `DelegationPolicy` holds, not a type. `CommissioningRun` (`models/policy/commissioning.py`) records phase 0 to 5 evidence as `CommissioningObservation` records. `control.equipment.save_commissioning_run` stores it.
+The phase is the combination of states `DelegationPolicy` holds, not a type. `CommissioningRun` (`models/policy/commissioning.py`) records phase 0 to 5 evidence as `CommissioningObservation` records. `control.equipment._save_commissioning_run` stores it.
 
 <!-- impl: wayfindinglib.models.policy.commissioning.CommissioningObservation -->
-<!-- impl: wayfindinglib.api.control.equipment.EquipmentControl.save_commissioning_run -->
+<!-- impl: wayfindinglib.api.control.equipment.EquipmentControl._save_commissioning_run -->
 
 ### 2.5 Domain models and operations (Architecture Section 2.5)
 
@@ -198,21 +198,22 @@ Folder: `tasks/execution_tasks/`. Facade: `ObservationExecution` in `api/executi
 
 ### 6.1 Facade and children
 
-`ObservatoryControl` (`api/control/control.py`) holds the drivers and seven children, each a `ControlChild` sharing one `ControlContext` (`api/control/context.py`). Each child lives in `api/control/<child>.py` and has `status(include=...)`. `close()` stops control's threads at shutdown.
+`ObservatoryControl` (`api/control/control.py`) holds the drivers and six children, each a `ControlChild` sharing one `ControlContext` (`api/control/context.py`). Each child lives in `api/control/<child>.py` and has `status(include=...)`. `close()` stops control's threads at shutdown.
 
-**Table 6.** The seven children of `ObservatoryControl`.
+**Table 6.** The six children of `ObservatoryControl`.
 
 | Child | Main calls |
 | --- | --- |
-| `control.mount` | `slew`, `sync`, `park`, `unpark`, `set_tracking`, `compute_pointing_correction` |
-| `control.imaging` | `capture_image`, `set_filter`, `focus_move`, `compute_focus_correction` |
-| `control.guiding` | `run_loop`, `compute_correction`, `run_calibration`, `run_exposure_test` |
+| `control.mount` | `slew`, `park`, `unpark`, `set_tracking` |
+| `control.imaging` | `capture_image`, `set_filter`, `focus_move` |
+| `control.guiding` | `run_loop`, `stop_loop`, `refit_spectrum` |
 | `control.remote` | `list`, `sync_frames`, `sync_logs` |
-| `control.history` | `query`, `get_live_session_status`, `frame_guiding`, `get_performance_envelope` |
-| `control.safety` | `assess`, `execute_safe_state`, `open_enclosure`, `close_enclosure`, `apply_promotion_decision` |
-| `control.equipment` | `connect`, `set_active_telescope`, `cooling_ramp_rate`, `summarize_device` |
+| `control.safety` | `apply_promotion_decision`, `enter_monitoring_mode` |
+| `control.equipment` | `connect`, `set_active_telescope` |
 
-The `kind` values of `control.history.query` are `capture`, `guiding`, `sky_coverage`, `recurring_issues`, `ekos_sessions`, `guiding_runs`, `pointing_model`, `alignment`. `night_history.py` shrinks long replies. `hardware_operations.mount_position_to_icrs` converts the mount's JNow positions to ICRS.
+`Wayfinder.review` (`api/review.py`) holds the night reads.
+
+The `kind` values of `review.query` are `capture`, `guiding`, `sky_coverage`, `recurring_issues`, `ekos_sessions`, `guiding_runs`, `pointing_model`, `alignment`. `night_history.py` shrinks long replies. `hardware_operations.mount_position_to_icrs` converts the mount's JNow positions to ICRS.
 
 <!-- impl: wayfindinglib.api.control.context.ControlContext -->
 <!-- impl: wayfindinglib.api.control.context.ControlChild -->
@@ -323,7 +324,7 @@ All in `tasks/control_tasks/` unless noted.
 
 `ekos_log_ingestion.py` downloads guide and analyze logs (`control.remote.sync_logs`) and ties each session to its equipment (`attribute_session_equipment`). Parsers: `drivers/phd2/guide_log_parser.py`, `drivers/ekos/analyze_log_parser.py`. `MEASURED_GUIDING_SAMPLE_SOURCES` lists the samples a refit may read. `frame_pointing.py` records each solved frame's pointing error, one record per frame file name.
 
-`derive_performance_envelope` (`analytics/performance_envelope.py`) is the pure derivation (Architecture Equations (10) to (12)); `performance_envelope_tasks.py` gathers its inputs; the entry is `control.history.get_performance_envelope`. Constants: `SIGMA_TO_FWHM` (2.3548), `SIDEREAL_RATE_ARCSEC_PER_SECOND` (15.041), `MAD_TO_SIGMA` (1.4826). `analytics/tracking_risk.py` (`build_tracking_risk_map`) builds `tracking_risk`.
+`derive_performance_envelope` (`analytics/performance_envelope.py`) is the pure derivation (Architecture Equations (10) to (12)); `performance_envelope_tasks.py` gathers its inputs; the entry is `review.get_performance_envelope`. Constants: `SIGMA_TO_FWHM` (2.3548), `SIDEREAL_RATE_ARCSEC_PER_SECOND` (15.041), `MAD_TO_SIGMA` (1.4826). `analytics/tracking_risk.py` (`build_tracking_risk_map`) builds `tracking_risk`.
 
 <!-- impl: wayfindinglib.tasks.control_tasks.ekos_log_ingestion.attribute_session_equipment -->
 <!-- impl: wayfindinglib.models.session.telemetry.MEASURED_GUIDING_SAMPLE_SOURCES -->
@@ -339,7 +340,7 @@ All in `tasks/control_tasks/` unless noted.
 | --- | --- | --- |
 | Guiding (exposure length in `processing/measure_exposure_feasibility.py`) | `session_analysis/guiding/` | `GuidingSessionAnalysis`, `GuidingPerformance` (`models/session/session_quality.py`); `kind="guiding"` |
 | Capture | `session_analysis/capture/`, `wayfindinglib/analytics/capture_history.py` | `CaptureSessionAnalysis`, `CapturePerformance` (`models/session/capture_quality.py`); `kind="capture"` |
-| Guide exposure test | `analytics/guide_exposure_ladder.py`, `guide_exposure_ladder_tasks.py` | `GuideExposureLadder`; `control.guiding.run_exposure_test`. Tested only against a simulated camera. |
+| Guide exposure test | `analytics/guide_exposure_ladder.py`, `guide_exposure_ladder_tasks.py` | `GuideExposureLadder`; `control.guiding._run_exposure_test`. Tested only against a simulated camera. |
 | Sky position | `session_analysis/sky/` | `SkyAnalysis`, `SkySample`; `kind="sky_coverage"` |
 | Recurring issues; live status; frame and guide error; alignment history | `recurring_issues.py`, `live_status.py`, `frame_guiding.py`, `alignment_history.py` | `RecurringIssue`; `get_live_session_status`; `frame_guiding`; `kind="alignment"` |
 
@@ -393,7 +394,7 @@ All in `tasks/control_tasks/` unless noted.
 
 ### 6.10 Quality judgment and advice (Quality Judgment paper)
 
-The theory is in [Wayfinding quality judgment](Wayfinding_Quality_Judgment.md) (Architecture Section 6.11). Planning and Control share the vocabulary in `models/quality/`. The judging code is in `analytics/result_quality/` (see its README). Entry points: `get_advisory` (kinds `quality`, `tonight`, `result`, `calibration`) and `control.history.query` (kinds `night_quality`, `nights`, `target_changes`). A rule's confidence is its register entry's status label (partly measured; see [WAY-01](validation/wayfinding.md#way-01)).
+The theory is in [Wayfinding quality judgment](Wayfinding_Quality_Judgment.md) (Architecture Section 6.11). Planning and Control share the vocabulary in `models/quality/`. The judging code is in `analytics/result_quality/` (see its README). Entry points: `get_advisory` (kinds `quality`, `tonight`, `result`, `calibration`) and `review.query` (kinds `night_quality`, `nights`, `target_changes`). A rule's confidence is its register entry's status label (partly measured; see [WAY-01](validation/wayfinding.md#way-01)).
 
 **Table 12.** Where each part of the judgment lives. Paths are relative to `wayfindinglib/`. Register entries hold the evidence; WAY-D rows hold Table 13's settings.
 
@@ -416,7 +417,7 @@ The theory is in [Wayfinding quality judgment](Wayfinding_Quality_Judgment.md) (
 | Night plan | `ObservationSession` fields `checklist`, `framing`, `revision`; `PlanChange`, `PlanRevisionConflictError`; `night_plan_tasks.py`; `AllowedCaptureValues`; `SequenceSummary` | [WAY-50](validation/wayfinding.md#way-50), [WAY-51](validation/wayfinding.md#way-51), [WAY-52](validation/wayfinding.md#way-52), [WAY-53](validation/wayfinding.md#way-53), [WAY-54](validation/wayfinding.md#way-54); WAY-D50, WAY-D51, WAY-D52, WAY-D53, WAY-D54 |
 | Night list and target changes | `build_night_list`, `build_night_history` (`night_history.py`); `find_target_changes` (`target_changes.py`) | [WAY-55](validation/wayfinding.md#way-55), [WAY-57](validation/wayfinding.md#way-57); WAY-D55, WAY-D56, WAY-D57 |
 | Monitor mode | `ALLOWED_IN_MONITOR_MODE` and the three `test_monitor_mode_*` tests; guards in `hardware_operations.py` | [WAY-56](validation/wayfinding.md#way-56) |
-| Reply size | `reply_budget.py`; the MCP tool registry trims replies; `fit_status_to_budget` for the live status | WAY-D58, WAY-D77 |
+| Reply size | `mcp_servers/common/reply_budget.py`; the MCP tool registry trims replies; `fit_status_to_budget` for the live status | WAY-D58, WAY-D77 |
 
 <!-- impl: wayfindinglib.models.quality.statements.TargetStatement -->
 <!-- impl: wayfindinglib.models.quality.rule.QualityRule -->
@@ -454,7 +455,7 @@ The theory is in [Wayfinding quality judgment](Wayfinding_Quality_Judgment.md) (
 <!-- impl: wayfindinglib.models.session.night_list.NightListEntry -->
 <!-- impl: wayfindinglib.analytics.result_quality.allowed_capture_values.AllowedCaptureValues -->
 <!-- impl: wayfindinglib.models.planning.sequence_summary.SequenceSummary -->
-<!-- impl: wayfindinglib.analytics.result_quality.reply_budget.reply_budget -->
+<!-- impl: mcp_servers.common.reply_budget.reply_budget -->
 <!-- impl: wayfindinglib.models.equipment_and_site.site_profile.SiteProfile -->
 
 Without `SiteProfile.typical_seeing_fwhm_arcsec`, the physical reference uses the diffraction limit (design estimate; WAY-D01). `DiskButler.put_session_from_execution` <!-- impl: wayfindinglib.drivers.butler.DiskButler.put_session_from_execution --> is the one write Execution uses. It merges Planning's fields in one transaction, so a plan edit survives a checkpoint. A plan edit that changes nothing stores nothing, keeps the revision and sends no `plan:changed`. The `sequencer` methods `add`, `remove`, `reorder` and `modify` edit the queue through the plan service.
@@ -528,13 +529,13 @@ No module applies the gates of the architecture's Table 8. `DivergenceEvidenceSu
 | Ekos module | Library calls | Code |
 | --- | --- | --- |
 | Mount | `control.mount.slew`, `park`, `set_tracking` | `hardware_operations.py` |
-| Align | `control.mount.compute_pointing_correction`, `slew(center=True)` | `pointing_correction.py`, `centering.py` |
-| Focus | `control.imaging.compute_focus_correction` (no autofocus sweep call) | `focus_correction.py` |
-| Guide | `control.guiding.compute_correction`, `status(include=["live"])` | `guiding_correction.py`, `live_guiding.py` |
+| Align | `control.mount._compute_pointing_correction`, `slew(center=True)` | `pointing_correction.py`, `centering.py` |
+| Focus | `focus_correction.compute_focus_correction` (no autofocus sweep call) | `focus_correction.py` |
+| Guide | `control.guiding._compute_correction`, `status(include=["live"])` | `guiding_correction.py`, `live_guiding.py` |
 | Scheduler | `planning.create_session(..., requests=)` | `scheduling.py` |
 | Capture | `planning.create_package` | `observation_package.py` |
-| Dome and weather interlock | `control.safety.execute_safe_state`, `assess` | `safe_state.py` |
-| Session recording | `execution.advance_session`, `create_recorder`, `control.history.query` | `session_runner.py` |
+| Dome and weather interlock | `control.safety._execute_safe_state`, `_assess` | `safe_state.py` |
+| Session recording | `execution.advance_session`, `create_recorder`, `review.query` | `session_runner.py` |
 
 ## References
 

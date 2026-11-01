@@ -1,6 +1,6 @@
 """Purpose: The quality of one observing night, for the night review.
 
-Description: `control.history.query(kind="night_quality", session_id=...)`
+Description: `review.query(kind="night_quality", session_id=...)`
 returns a `NightQuality` (`QUALITY_METRICS_PLAN.md` Section 6.1, use case UC1).
 It lists each target imaged that night with where its time went (the loss
 account against a stated goal and reference), the warnings the night's

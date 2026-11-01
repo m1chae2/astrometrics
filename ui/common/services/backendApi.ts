@@ -264,7 +264,7 @@ export interface ActionRegistry {
     "execution:get_session": { payload: { session_id: string }; response: Record<string, any> };
     "execution:abort_session": { payload: { session_id: string; reason: string }; response: Record<string, any> };
     "execution:reconcile_session": { payload: { session_id: string }; response: Record<string, any> };
-    "execution:record_divergence": { payload: { record_id: string; observation_session_id: string; capability: string; comparison_input_id: string; intended_value: number; observed_value: number; tolerance: number; divergence_unit: string; queued_observation_package_id?: string | null; converged?: boolean | null; detail?: string }; response: Record<string, any> };
+    "execution:build_divergence_record": { payload: { record_id: string; observation_session_id: string; capability: string; comparison_input_id: string; intended_value: number; observed_value: number; tolerance: number; divergence_unit: string; queued_observation_package_id?: string | null; converged?: boolean | null; detail?: string }; response: Record<string, any> };
 
     // Night plan (#95). `plan:get` without a session id lists every session.
     // `plan:list_packages` lists the package library;

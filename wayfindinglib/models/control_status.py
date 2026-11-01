@@ -21,14 +21,53 @@ from wayfindinglib.models.policy.safety import SafetyAssessment, SafetyRuleSet
 from wayfindinglib.models.session.telemetry import GuidingSpectrumAnalysis, LiveGuidingStatus
 
 
+class MountControlStatus(BaseModel):
+    """The mount's position, tracking and connection, read now.
+
+    Returned by `control.mount.status`. Right ascension and declination are
+    ICRS (J2000), like catalog stars and plate solutions: the mount's own
+    current-epoch (JNow) reading is converted. A position the mount does
+    not know yet (such as ``"Unknown"``) is passed on as it is. The
+    names in quotes are the keys of the reply on the wire.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    ra: str = Field(description='Right ascension, such as "5h 35m 17.30s".')
+    dec: str = Field(description='Declination, such as "-5° 23′ 28.0″".')
+    altitude: str = Field(description="Altitude above the horizon, as the mount reports it.")
+    azimuth: str = Field(description="Azimuth, as the mount reports it.")
+    temperature: str = Field(default="-", description="Ambient temperature the session reports, or a dash.")
+    humidity: str = Field(default="-", description="Ambient humidity the session reports, or a dash.")
+    tracking_status: str = Field(
+        alias="trackingStatus", description='Such as "Tracking", "Idle" or "Parked".'
+    )
+    connection_status: str = Field(default="Disconnected", alias="connectionStatus")
+    target_name: str | None = Field(
+        default=None, alias="targetName", description="The target the mount reports."
+    )
+    pier_side: str | None = Field(
+        default=None, alias="pierSide", description="``EAST`` or ``WEST``, or `None` if not reported."
+    )
+    parked: bool | None = Field(default=None, description="Whether the mount is parked.")
+    track_mode: str | None = Field(
+        default=None, alias="trackMode", description="The tracking rate, such as ``SIDEREAL``."
+    )
+
+
 class ImagingStatus(BaseModel):
-    """The main camera's filter wheel, focuser and saved focus model."""
+    """The main camera, filter wheel and focuser, and the saved focus model."""
 
     model_config = ConfigDict(populate_by_name=True)
 
     sections: list[str] = Field(default_factory=list, description="The sections that were read.")
     filter_names: list[str] | None = Field(default=None, description="Filter wheel slot names, in order.")
+    current_filter: str | None = Field(default=None, description="The filter in the beam now.")
     focuser_position: int | None = Field(default=None, description="Focuser position in steps.")
+    camera_temperature: str | None = Field(
+        default=None, description='The sensor temperature, such as "-10.0°C", or a dash if unknown.'
+    )
+    camera_status: str | None = Field(default=None, description='What the camera is doing, such as "Idle".')
     focus_model: FocusModel | None = Field(
         default=None, description="Saved focus model for the active telescope and camera."
     )

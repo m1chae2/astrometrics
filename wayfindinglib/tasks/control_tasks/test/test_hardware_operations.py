@@ -198,46 +198,48 @@ def _manager_for_status_reassembly(
     )
 
 
-def test_mount_status_reassembles_the_four_driver_reads(mocker: MockerFixture) -> None:
-    """Verify status is reassembled from the four driver calls."""
+def test_mount_status_reads_the_mount_and_the_ambient_values(mocker: MockerFixture) -> None:
+    """Verify the mount status holds the mount's values and nothing else."""
     manager = _manager_for_status_reassembly(
         mocker, driver_status={"TEMPERATURE": "15.0°C", "HUMIDITY": "40.0%", "CAMERA_STATUS": "Idle"}
     )
 
     status = ops.mount_status(manager)
 
-    ra_text = status.pop("ra")
-    dec_text = status.pop("dec")
-    assert ra_text.endswith("s") and "h " in ra_text
-    assert dec_text.startswith("+") and dec_text.endswith("″")
-    assert status == {
+    assert status.ra.endswith("s") and "h " in status.ra
+    assert status.dec.startswith("+") and status.dec.endswith("″")
+    assert status.model_dump(by_alias=True, exclude={"ra", "dec"}) == {
         "altitude": "45:00:00",
         "azimuth": "180:00:00",
         "temperature": "15.0°C",
         "humidity": "40.0%",
         "trackingStatus": "Tracking",
         "connectionStatus": "Connected",
-        "focuserPosition": 12345,
-        "filter": "Luminance",
-        "cameraTemperature": "-10.0°C",
-        "cameraStatus": "Idle",
         "targetName": None,
         "pierSide": "WEST",
         "parked": False,
         "trackMode": "SIDEREAL",
     }
+    manager.focuser_driver.get_position.assert_not_called()
+    manager.filter_wheel_driver.get_current_filter.assert_not_called()
+    manager.camera_driver.get_sensor_temperature_c.assert_not_called()
 
 
-def test_mount_status_reads_only_the_sections_asked_for(mocker: MockerFixture) -> None:
-    """Verify `include` limits the device reads and rejects unknown names."""
-    manager = _manager_for_status_reassembly(mocker)
+def test_the_filter_and_the_camera_are_read_on_their_own(mocker: MockerFixture) -> None:
+    """Verify the imaging readings come from their own calls."""
+    manager = _manager_for_status_reassembly(mocker, driver_status={"CAMERA_STATUS": "Exposing"})
 
-    status = ops.mount_status(manager, include=["focuser"])
-
-    assert status == {"focuserPosition": 12345}
+    assert ops.current_filter(manager) == "Luminance"
+    assert ops.camera_reading(manager) == ("-10.0°C", "Exposing")
     manager.mount_driver.get_status.assert_not_called()
-    with pytest.raises(InvalidArgumentError, match="Unknown section"):
-        ops.mount_status(manager, include=["weather"])
+
+
+def test_the_current_filter_is_l_when_the_wheel_does_not_say(mocker: MockerFixture) -> None:
+    """Verify a wheel with no answer reads as the luminance filter."""
+    manager = _manager_for_status_reassembly(mocker)
+    manager.filter_wheel_driver.get_current_filter = mocker.AsyncMock(return_value=None)
+
+    assert ops.current_filter(manager) == "L"
 
 
 def test_mount_status_reports_the_mount_position_in_icrs(mocker: MockerFixture) -> None:
@@ -254,12 +256,12 @@ def test_mount_status_reports_the_mount_position_in_icrs(mocker: MockerFixture) 
         return_value=_FakeMountStatus(ra=f"{current_ra_deg / 15.0:.8f}", dec=f"{current_dec_deg:.8f}")
     )
 
-    status = ops.mount_status(manager, include=["mount"])
+    status = ops.mount_status(manager)
 
     from astrometricslib import parse_coordinate_string
 
-    assert parse_coordinate_string(status["ra"], is_ra=True) == pytest.approx(catalog_ra_deg, abs=2e-4)
-    assert parse_coordinate_string(status["dec"], is_ra=False) == pytest.approx(catalog_dec_deg, abs=2e-4)
+    assert parse_coordinate_string(status.ra, is_ra=True) == pytest.approx(catalog_ra_deg, abs=2e-4)
+    assert parse_coordinate_string(status.dec, is_ra=False) == pytest.approx(catalog_dec_deg, abs=2e-4)
 
 
 def test_mount_position_to_icrs_reads_indi_text_and_passes_unknown_through() -> None:

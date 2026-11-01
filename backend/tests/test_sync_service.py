@@ -8,7 +8,6 @@ reply into the shape the app shows.
 
 import threading
 from types import SimpleNamespace
-from typing import Any
 
 from backend.services.infrastructure import thread_management
 from backend.services.infrastructure.sync_service import SyncService
@@ -22,30 +21,30 @@ class _Remote:
         self.synced: list[str] = []
         self.release = threading.Event()
 
-    def sync_frames(self, target: str) -> dict[str, Any]:
+    def sync_frames(self, target: str) -> SimpleNamespace:
         """Record the target and wait to be released.
 
         Returns
         -------
-        result : `dict` [`str`, `Any`]
-            A successful sync.
+        result : `types.SimpleNamespace`
+            A successful sync with no measurements.
         """
         self.synced.append(target)
         self.release.wait(timeout=5.0)
-        return {"success": True}
+        return SimpleNamespace(success=True, measurements=None)
 
-    def sync_logs(self, register_job: bool = True) -> dict[str, Any]:
+    def sync_logs(self, register_job: bool = True) -> SimpleNamespace:
         """Return a log sync reply.
 
         Returns
         -------
-        result : `dict` [`str`, `Any`]
+        result : `types.SimpleNamespace`
             Three new guide logs and 42 stored samples.
         """
-        return {
-            "guide_logs": {"supported": True, "remote_files": 5, "to_download": 3},
-            "ingested": {"guide_samples_stored": 42},
-        }
+        return SimpleNamespace(
+            guide_logs=SimpleNamespace(supported=True, remote_files=5, to_download=3),
+            ingested={"guide_samples_stored": 42},
+        )
 
 
 def test_start_sync_runs_the_library_sync_on_a_thread() -> None:

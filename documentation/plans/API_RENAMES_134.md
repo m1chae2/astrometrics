@@ -160,6 +160,98 @@ Done on the same branch. No old name is kept as an alias. The MCP tool of each c
 | `plan:edit_package` with `delete`, `dismiss` or `undismiss` together with a change, or with each other | Refused with `invalid_argument`, as before (the backend now checks it). `reopen` with value changes still works: the backend reopens first, then updates with the new revision. The payload and the reply are the same |
 | `mosaic:preview` payload `center_ra`, `center_dec` (sent in degrees) | Same payload. The backend used to turn the numbers into text, and the library read a bare right ascension as hours, so the panels were centered in the wrong place. They are now centered on the degrees sent |
 
+## wayfindinglib: `review`, `control` and `execution`
+
+`Wayfinder` has a new sub-API, `wayfinder.review` (`wayfindinglib/api/review.py`, class `ObservationReview`). No
+old name is kept as an alias.
+
+| Old | New |
+| --- | --- |
+| `wayfinder.control.history` (class `HistoryControl`) | `wayfinder.review` (class `ObservationReview`, built from `control`) |
+| `control.history.query` | `review.query` |
+| `control.history.get_live_session_status` | `review.get_live_session_status` |
+| `control.history.frame_guiding` | `review.frame_guiding` (stays its own call: it takes a target and a frame range, and `query` takes a night) |
+| `control.history.get_performance_envelope` | `review.get_performance_envelope` |
+| `control.history.save_ekos_session_context` | `review.save_ekos_session_context` (made private further down) |
+| `group_alignment_attempts(attempts)` from `wayfindinglib` | `review.query_alignment_sessions(attempts)`; takes a list of plain dictionaries and returns `AlignmentSessionsResult` (`attempts`, `targets`) |
+| RPC `telescope:get_performance_envelope` target `wayfinder.control.history` | `wayfinder.review`; the reply keeps its shape |
+| MCP `observatory_history_query`, `_get_live_session_status`, `_frame_guiding`, `_get_performance_envelope`, `_save_ekos_session_context` | `review_query`, `review_get_live_session_status`, `review_frame_guiding`, `review_get_performance_envelope`, `review_save_ekos_session_context` |
+| `review.query` returned a `dict`, a typed list or a `NightQuality` by `kind` | `ReviewQueryResult` (`wayfindinglib/models/session/review_query.py`). The analysis kinds fill named fields (`analysis`, `sessions`, `runs`, `model`, `total`, `shown`, `truncated` and so on) and drop the empty ones when dumped, so the data has the same keys as before. The typed kinds fill `night_list`, `target_changes` and `night_quality`; the backend reads those, so the RPC replies keep their shape. An MCP reply for those three kinds is now `{"kind": ..., "night_list": [...]}` and so on, not a bare list |
+| (new) | MCP `review_query_alignment_sessions` (dropped: the backend calls it) |
+
+### Made private
+
+These members got a leading underscore. They are no longer public, no longer MCP tools, and no alias is kept.
+Tests and the library's own code reach them by the new name. A private call runs exactly as before; monitor mode
+still refuses the ones that command hardware (`wayfindinglib/test/test_monitor_mode_sends_no_commands.py` calls
+them by their private names).
+
+| Old | New |
+| --- | --- |
+| `execution.execute_meridian_flip`, `recover_fault`, `recover_guide_star_loss` | `execution._execute_meridian_flip`, `_recover_fault`, `_recover_guide_star_loss` |
+| `control.mount.sync`, `compute_pointing_correction`, `run_polar_alignment_assist` | `control.mount._sync`, `_compute_pointing_correction`, `_run_polar_alignment_assist` |
+| `control.imaging.save_focus_model` | `control.imaging._save_focus_model` |
+| `control.guiding.pulse`, `get_image`, `drain_external_pulses`, `compute_correction`, `run_calibration`, `run_backlash_calibration`, `run_exposure_test`, `save_calibration`, `save_spectrum_analysis`, `save_run` | the same names with a leading underscore on `control.guiding` |
+| `control.safety.assess`, `save_rule_set`, `execute_safe_state`, `open_enclosure`, `close_enclosure` | the same names with a leading underscore on `control.safety` |
+| `control.equipment.save_commissioning_run` | `control.equipment._save_commissioning_run` |
+| `review.save_ekos_session_context` | `review._save_ekos_session_context` |
+| `control.driver`, `mount_driver`, `focuser_driver`, `filter_wheel_driver`, `camera_driver`, `guide_camera_driver`, `enclosure_driver`, `switch_driver`, `weather_driver`, `remote_transfer_driver`, `guiding_driver` | the same names with a leading underscore on `control` |
+| `execution.create_recorder(guiding_service, indi_driver, snapshot_interval_seconds=)` | `execution.create_recorder(guiding_service, snapshot_interval_seconds=)`; the recorder takes the INDI session from `control` |
+
+Deleted, because nothing (tests included) used them: `control.imaging.compute_focus_correction`,
+`control.equipment.cooling_ramp_rate` and `control.equipment.summarize_device`. The functions they wrapped in
+`tasks.control_tasks` stay, with their own tests.
+
+The MCP tools for all of these are gone (`observatory_guiding_pulse`, `observatory_mount_sync`,
+`observatory_safety_assess` and so on, and `execution_execute_meridian_flip`, `execution_recover_fault`,
+`execution_recover_guide_star_loss`).
+
+### The driver and the INDI worker
+
+`Wayfinder` now builds its own INDI session. The backend no longer builds `SimulatorIndiInterface`,
+`IndiWorkerClient` or `IndiWorkerProxy`.
+
+| Old | New |
+| --- | --- |
+| `Wayfinder(config, astrometrics)`; the backend then set `wayfinder.control.driver` | `Wayfinder(config, astrometrics, *, simulated=None, separate_process=False)`. `simulated=None` uses the simulator when `ASTROMETRICS_TESTING` is set. `separate_process=True` runs the session in a process of its own (the worker), started on the first call that needs INDI |
+| `ObservatoryControl(..., driver=)` | adds `simulated=` and `separate_process=` |
+| `backend/services/infrastructure/indi_worker.py` (`IndiWorkerClient`, `IndiWorkerProxy`, `serve_requests`) | `wayfindinglib/drivers/indi_worker.py`, private; code unchanged apart from the imports. `control.close()` stops the worker |
+| the backend's `SettingsService(config, driver=)` calling `driver.sync_configuration()` | `SettingsService(config, equipment=)` calling the new `control.equipment.apply_configuration()` |
+| `AlignmentService.poll_external_syncs(indi_interface=)` reading `control.driver` | `AlignmentService.poll_external_syncs()` calling the new `control.mount.poll_external_alignment()` (returns `ExternalAlignmentPoll`) |
+| `AlignmentService.get_polar_alignment` reading `control.driver` and the records | the new `control.mount.get_polar_alignment()` (returns `PolarAlignmentStatus`); the reply keeps its keys |
+| `TelescopeService(driver=)` and `TelescopeService.indi_interface` | Removed; nothing read them |
+| (new) MCP | `observatory_mount_poll_external_alignment`, `observatory_mount_get_polar_alignment` and `observatory_equipment_apply_configuration`, all dropped (the backend calls them) |
+
+### `mount.status` and the divergence record
+
+| Old | New |
+| --- | --- |
+| `control.mount.status(include=[...])` returned a `dict` with the mount, filter, focuser and camera readings | `control.mount.status()` returns `MountControlStatus` and reads only the mount: `ra`, `dec`, `altitude`, `azimuth`, `temperature`, `humidity`, `tracking_status`, `connection_status`, `target_name`, `pier_side`, `parked`, `track_mode`. It has no `include`, because nothing is left to choose |
+| `mount.status` keys `filter`, `focuserPosition`, `cameraTemperature`, `cameraStatus` | `control.imaging.status(include=[...])` fields `current_filter`, `focuser_position`, `camera_temperature`, `camera_status`. New sections: `current_filter` and `camera`. `ImagingStatus` has the new fields |
+| RPC `telescope:get_status` | Same reply: the backend merges the two reads |
+| MCP `observatory_mount_status` argument `include` | Removed; use `observatory_imaging_status` for the filter, focuser and camera |
+| `execution.record_divergence` | `execution.build_divergence_record` |
+| RPC `execution:record_divergence` | `execution:build_divergence_record` (backend service method renamed the same way) |
+| MCP `execution_record_divergence` | `execution_build_divergence_record` |
+
+The function `record_divergence` in `tasks.execution_tasks.divergence_recording` keeps its name; it is not public.
+
+### Result models for the remaining dictionary returns
+
+Each model leaves out the fields a case did not fill (`SparseResult`), so the data keeps the keys of the old
+dictionary. A name the model does not list is kept as an extra field.
+
+| Call | Old | New |
+| --- | --- | --- |
+| `control.remote.frame_status` | `dict` | `FrameStatusReport` (`counts`, four `FrameDifference` fields, `telescope_error`, `library_error`, `note`) |
+| `control.remote.sync_frames` | `dict` | `FrameSyncResult` (`success`, `target`, `to_transfer`, `transferred`, `measurements`, `succeeded`, `failed`, `job_id` and so on) |
+| `control.remote.sync_logs` | `dict` | `LogSyncResult` (`dry_run`, `destination_dir`, `guide_logs` and `ekos_analyze_logs` as `LogPlan`, `ingested`) |
+| `control.guiding.expose` | `Any` (a `bool` in practice) | `GuideExposureResult` (`started`, `exposure_seconds`, `gain`) |
+| `review.frame_guiding` | `dict` | `FrameGuidingReport` |
+| `review.query` | (see above) | `ReviewQueryResult`; its `model` field is now a `MountPointingModel` |
+| `fit_reply_to_budget` | `wayfindinglib.fit_reply_to_budget` (`wayfindinglib/analytics/result_quality/reply_budget.py`) | `mcp_servers/common/reply_budget.py`. It is no longer exported from `wayfindinglib` |
+| backend `TelescopePulse.polar_alignment` | annotated `PolarAlignmentStatus` | `dict[str, Any]`; the backend imports neither `PolarAlignmentStatus` nor `MountPointingModel` any more |
+
 ## Left as they were, on purpose
 
 - `visualization.get_last_captured_image` is separate from `render_fits`: it finds the newest file itself and

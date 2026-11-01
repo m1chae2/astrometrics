@@ -45,7 +45,7 @@ def test_control_and_planning_work_without_loading_execution() -> None:
 
         butler = DiskButler(app_config=config)
         control = ObservatoryControl(config=config, butler=butler)
-        assessment = control.safety.assess({}, datetime.now(UTC))
+        assessment = control.safety._assess({}, datetime.now(UTC))
         assert not assessment.permits_observing()
 
         planning = ObservationPlanning(config, butler)

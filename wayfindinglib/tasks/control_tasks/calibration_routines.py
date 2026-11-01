@@ -108,7 +108,7 @@ def run_guider_calibration(
     -------
     calibration : `GuiderCalibration`
         The derived camera angle and per-axis rates -- not persisted;
-        the caller (`control.guiding.run_calibration`)
+        the caller (`control.guiding._run_calibration`)
         decides whether and how to record it. May raise
         `compute_guider_calibration`'s `ValueError` if either pulse
         produced no measurable star displacement.

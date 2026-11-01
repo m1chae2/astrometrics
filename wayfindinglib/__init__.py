@@ -1,13 +1,13 @@
 """Purpose: The Wayfinder, the entry point to the wayfinding library.
 
-Description: `Wayfinder` composes the library's three sub-APIs:
+Description: `Wayfinder` composes the library's four sub-APIs:
 `control` (operate the observatory), `planning` (decide what to
-observe) and `execution` (run and recover an observing session).
-`control` has seven children named by topic, such as `control.mount`
-and `control.history`. The package root also offers the models those
-sub-APIs take and return, the pure functions callers need
-(`group_alignment_attempts`, and `fit_reply_to_budget`, which the MCP tools
-use to shorten a long quality reply), and the library's own error class.
+observe), `execution` (run and recover an observing session) and
+`review` (how the nights went). `control` has six children named by
+topic, such as `control.mount` and `control.guiding`. The package root
+also offers the models those sub-APIs take and return, the pure
+function callers need (`group_alignment_attempts`), and the library's own
+error class.
 The error categories themselves (`NotFoundError`,
 `InvalidArgumentError` and the rest) come from `astrometricslib`.
 
@@ -41,7 +41,6 @@ configure_offline_iers()
 if TYPE_CHECKING:
     from astrometricslib import AppConfiguration, Astrometrics
     from wayfindinglib.analytics.alignment_sessions import group_alignment_attempts
-    from wayfindinglib.analytics.result_quality.reply_budget import fit_reply_to_budget
     from wayfindinglib.api.control import ObservatoryControl
     from wayfindinglib.api.execution import ObservationExecution
     from wayfindinglib.api.planning import ObservationPlanning
@@ -140,7 +139,7 @@ _LAZY_EXPORTS = {
     # The shape of `IndiInterface.get_polar_alignment_status()` and of a
     # stored polar alignment run.
     "PolarAlignmentStatus": "wayfindinglib.models.session.telemetry",
-    # The capability `control.safety` and `execution.record_divergence` take.
+    # The capability `control.safety` and `execution` take.
     "ObservatoryCapability": "wayfindinglib.models.policy.delegation",
     "ImagingStatus": "wayfindinglib.models.control_status",
     "GuidingStatus": "wayfindinglib.models.control_status",
@@ -187,7 +186,7 @@ _LAZY_EXPORTS = {
     "PlanChangeItem": "wayfindinglib.models.session.observation_session",
     "PlanRevisionConflictError": "wayfindinglib.models.session.observation_session",
     "SequenceSummary": "wayfindinglib.models.planning.sequence_summary",
-    # Models that `control.history` returns.
+    # Models that `review` returns.
     "NightListEntry": "wayfindinglib.models.session.night_list",
     "TargetChange": "wayfindinglib.models.session.night_list",
     "NightQuality": "wayfindinglib.models.session.night_quality",
@@ -200,8 +199,6 @@ _LAZY_EXPORTS = {
     "EquipmentConfiguration": "wayfindinglib.models.equipment_and_site.equipment",
     # Groups plate solves into one `AlignmentTargetSession` per target.
     "group_alignment_attempts": "wayfindinglib.analytics.alignment_sessions",
-    # Shortens a quality reply for the MCP tools; the library replies in full.
-    "fit_reply_to_budget": "wayfindinglib.analytics.result_quality.reply_budget",
     # The library's own error class. The categories come from astrometricslib.
     "DelegationPolicyValidationError": "wayfindinglib.data_access.delegation_policy_reader",
 }
@@ -236,9 +233,9 @@ def __getattr__(name: str) -> object:
 class Wayfinder:
     """The entry point to the wayfinding library.
 
-    Builds and holds the three sub-APIs, `control`, `planning` and
-    `execution`, over one configuration, one `DiskButler` and one
-    `Astrometrics` handle, so all three see the same records. It has no
+    Builds and holds the four sub-APIs, `control`, `planning`,
+    `execution` and `review`, over one configuration, one `DiskButler` and
+    one `Astrometrics` handle, so all four see the same records. It has no
     methods of its own.
 
     The watchdog (`wayfindinglib/watchdog/`) is not built here on
@@ -249,8 +246,11 @@ class Wayfinder:
         self,
         config: AppConfiguration | None = None,
         astrometrics: Astrometrics | None = None,
+        *,
+        simulated: bool | None = None,
+        separate_process: bool = False,
     ) -> None:
-        """Build the three sub-APIs over a shared configuration and storage.
+        """Build the four sub-APIs over a shared configuration and storage.
 
         Parameters
         ----------
@@ -260,23 +260,38 @@ class Wayfinder:
             The science library handle every part of the Wayfinder uses, so
             all of them see the same target catalog. A new one is built over
             the configuration when omitted.
+        simulated : `bool`, optional
+            Use the simulated INDI session instead of the real hardware.
+            When omitted, the simulator is used if ``ASTROMETRICS_TESTING``
+            is set in the environment.
+        separate_process : `bool`, optional
+            Run the INDI session in a process of its own. The library
+            starts it on the first call that needs INDI, and
+            ``control.close()`` stops it. A program with a busy event loop,
+            such as the backend, should ask for it: the INDI client
+            library holds Python's global lock during its blocking calls
+            and would freeze everything else. `False` by default.
 
         Attributes
         ----------
         control : `ObservatoryControl`
             Direct hardware commanding across mount, imaging, guiding,
-            remote, history, safety, and equipment.
+            remote, safety, and equipment.
         planning : `ObservationPlanning`
             Target visibility, sky catalogs, mosaic calculation, and queue
             sequence planning.
         execution : `ObservationExecution`
             Session queue advancement, meridian flip automation, and fault
             recovery.
+        review : `ObservationReview`
+            Past and current observing nights, alignment sessions and the
+            equipment's performance limits.
         """
         from astrometricslib import Astrometrics, get_configuration
         from wayfindinglib.api.control import ObservatoryControl
         from wayfindinglib.api.execution import ObservationExecution
         from wayfindinglib.api.planning import ObservationPlanning
+        from wayfindinglib.api.review import ObservationReview
         from wayfindinglib.drivers.butler import DiskButler
 
         self.config = config or get_configuration()
@@ -284,8 +299,15 @@ class Wayfinder:
         self.astrometrics = astrometrics or Astrometrics(self.config)
 
         butler = DiskButler(app_config=self.config)
-        self.control = ObservatoryControl(config=self.config, butler=butler, astrometrics=self.astrometrics)
+        self.control = ObservatoryControl(
+            config=self.config,
+            butler=butler,
+            astrometrics=self.astrometrics,
+            simulated=simulated,
+            separate_process=separate_process,
+        )
         self.planning = ObservationPlanning(self.config, butler, astrometrics=self.astrometrics)
+        self.review = ObservationReview(self.control)
         self.execution = ObservationExecution(
             self.config, butler, astrometrics=self.astrometrics, control=self.control
         )

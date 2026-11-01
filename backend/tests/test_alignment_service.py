@@ -5,11 +5,12 @@ in the wayfinding library, tested in
 `wayfindinglib/tasks/control_tasks/test/test_centering.py`. Here the
 backend only starts and stops that call on a thread, lists the recorded
 attempts in their camelCase form, lists the nights through
-`control.history.query(kind="alignment")`, and parses the coordinate
+`review.query(kind="alignment")`, and parses the coordinate
 strings of the ``telescope:alignment_start`` call.
 """
 
 import threading
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, create_autospec
 
@@ -18,8 +19,8 @@ import pytest
 from astrometricslib import InvalidArgumentError, PermissionDeniedError
 from backend.services.observatory.alignment_service import CENTERING_MAX_ITERATIONS, AlignmentService
 from wayfindinglib import ObservatoryControl
-from wayfindinglib.api.control.history import HistoryControl
 from wayfindinglib.api.control.mount import MountControl
+from wayfindinglib.api.review import ObservationReview
 
 
 class _Logs:
@@ -39,6 +40,17 @@ class _Logs:
         ]
 
 
+def _real_review() -> ObservationReview:
+    """Build a real `ObservationReview`, which groups attempts in plain code.
+
+    Returns
+    -------
+    review : `ObservationReview`
+        Built over a control with a stand-in configuration.
+    """
+    return ObservationReview(ObservatoryControl(config=MagicMock()))
+
+
 def _autospec_control() -> MagicMock:
     """Build an autospec'd `ObservatoryControl` with autospec'd children.
 
@@ -50,13 +62,12 @@ def _autospec_control() -> MagicMock:
     """
     observatory = create_autospec(ObservatoryControl, instance=True)
     observatory.mount = create_autospec(MountControl, instance=True)
-    observatory.history = create_autospec(HistoryControl, instance=True)
     return observatory
 
 
 def test_get_attempts_lists_recorded_attempts_oldest_first() -> None:
     """Attempts come back camelCase, oldest first; no position, no target."""
-    service = AlignmentService(observatory_api=_autospec_control(), records=_Logs())
+    service = AlignmentService(observatory_api=_autospec_control(), review=_real_review(), records=_Logs())
 
     live = service.get_attempts()
     attempts = live["alignmentAttempts"]
@@ -69,13 +80,13 @@ def test_get_attempts_lists_recorded_attempts_oldest_first() -> None:
 
 
 def test_list_sessions_reads_the_alignment_history() -> None:
-    """The nights come from `control.history.query(kind="alignment")`."""
-    observatory = _autospec_control()
-    observatory.history.query.return_value = {"sessions": [{"sessionId": "2026-09-25"}]}
-    service = AlignmentService(observatory_api=observatory)
+    """The nights come from `review.query(kind="alignment")`."""
+    review = create_autospec(ObservationReview, instance=True)
+    review.query.return_value = SimpleNamespace(sessions=[{"sessionId": "2026-09-25"}])
+    service = AlignmentService(observatory_api=_autospec_control(), review=review)
 
     assert service.list_sessions() == [{"sessionId": "2026-09-25"}]
-    observatory.history.query.assert_called_once_with(kind="alignment", limit=50, register_job=False)
+    review.query.assert_called_once_with(kind="alignment", limit=50, register_job=False)
 
 
 def test_start_then_cancel_alignment_runs_and_stops_the_centering() -> None:
@@ -86,7 +97,7 @@ def test_start_then_cancel_alignment_runs_and_stops_the_centering() -> None:
     observatory.mount.cancel_centering.side_effect = lambda run_is_active: (
         (released.set() if run_is_active else None) or run_is_active
     )
-    service = AlignmentService(observatory_api=observatory, records=_Logs())
+    service = AlignmentService(observatory_api=observatory, review=_real_review(), records=_Logs())
 
     assert service.start_alignment(target_ra="0h 40m 00s", target_dec="+20d 00m 00s") is True
     assert service.is_active() is True

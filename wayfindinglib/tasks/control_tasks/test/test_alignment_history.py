@@ -1,4 +1,4 @@
-"""Purpose: Tests for `control.history.query(kind="alignment")`.
+"""Purpose: Tests for `review.query(kind="alignment")`.
 
 Description: The alignment history lists one summary per night, built on
 the log database's `get_alignment_sessions`, with the night's mean

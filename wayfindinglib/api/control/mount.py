@@ -13,8 +13,13 @@ from typing import Any
 
 from astrometricslib import Target
 from wayfindinglib.api.control.context import ControlChild
+from wayfindinglib.models.control_status import MountControlStatus
 from wayfindinglib.models.session.correction_result import PointingCorrection
-from wayfindinglib.models.session.telemetry import MountPointingModel
+from wayfindinglib.models.session.telemetry import (
+    ExternalAlignmentPoll,
+    MountPointingModel,
+    PolarAlignmentStatus,
+)
 from wayfindinglib.models.sky_position import SkyPosition
 
 __all__ = ["MountControl"]
@@ -23,35 +28,60 @@ __all__ = ["MountControl"]
 class MountControl(ControlChild):
     """Point and track the telescope mount."""
 
-    def status(self, include: list[str] | None = None) -> dict[str, Any]:
-        """Read the mount's position and tracking, and the imaging devices.
+    def status(self) -> MountControlStatus:
+        """Read the mount's position, tracking and connection.
 
-        Parameters
-        ----------
-        include : `list` [`str`], optional
-            Device reads to make: ``mount`` (position, tracking, pier
-            side, park state, tracking rate, connection, ambient
-            temperature and humidity), ``filter``
-            (current filter), ``focuser`` (position) and ``camera``
-            (sensor temperature). All of them when omitted.
+        Only the mount: the filter, the focuser and the camera are read
+        with `control.imaging.status`.
 
         Returns
         -------
-        status : `dict` [`str`, `Any`]
-            ``ra``, ``dec``, ``altitude``, ``azimuth``, ``trackingStatus``,
-            ``connectionStatus``, ``targetName``, ``pierSide`` (``EAST`` or
-            ``WEST``), ``parked``, ``trackMode`` (such as ``SIDEREAL``),
-            ``temperature``,
-            ``humidity``, ``cameraStatus``, ``filter``, ``focuserPosition``
-            and ``cameraTemperature``, for the sections read. ``ra`` and
-            ``dec`` are ICRS (J2000), like catalog stars and plate
-            solutions: the mount's own current-epoch (JNow) reading is
-            converted. They read like ``"5h 35m 17.30s"`` and
-            ``"-5° 23′ 28.0″"``.
+        status : `MountControlStatus`
+            ``ra`` and ``dec`` are ICRS (J2000), like catalog stars and
+            plate solutions: the mount's own current-epoch (JNow) reading
+            is converted. They read like ``"5h 35m 17.30s"`` and
+            ``"-5° 23′ 28.0″"``. Also ``altitude``, ``azimuth``,
+            ``tracking_status``, ``connection_status``, ``target_name``,
+            ``pier_side`` (``EAST`` or ``WEST``), ``parked``,
+            ``track_mode`` (such as ``SIDEREAL``) and the ambient
+            ``temperature`` and ``humidity``.
         """
         from wayfindinglib.tasks.control_tasks import hardware_operations
 
-        return hardware_operations.mount_status(self._context, include)
+        return hardware_operations.mount_status(self._context)
+
+    def poll_external_alignment(self) -> ExternalAlignmentPoll:
+        """Store the alignment that other programs did through the mount.
+
+        KStars, Ekos and similar programs plate solve and sync the mount,
+        and run the Polar Alignment Assistant, on their own. The INDI
+        session queues what it sees. This stores the queued plate-solve
+        syncs as alignment attempts and the polar alignment measurement as
+        a polar alignment record, so `review` can show them. Call it from
+        time to time while another program is aligning. It moves nothing.
+
+        Returns
+        -------
+        poll : `ExternalAlignmentPoll`
+            How many syncs and whether a polar alignment run were stored.
+        """
+        from wayfindinglib.tasks.control_tasks import external_alignment
+
+        return external_alignment.poll_external_alignment(self._context)
+
+    def get_polar_alignment(self) -> PolarAlignmentStatus:
+        """Read the polar alignment, live if a run is going.
+
+        Returns
+        -------
+        status : `PolarAlignmentStatus`
+            The run in progress or just finished on the INDI session;
+            otherwise the most recent stored run; otherwise an idle status
+            with no numbers.
+        """
+        from wayfindinglib.tasks.control_tasks import external_alignment
+
+        return external_alignment.read_polar_alignment(self._context)
 
     def slew(
         self,
@@ -66,7 +96,7 @@ class MountControl(ControlChild):
         take a short frame, solve it, and if the pointing error is above
         `tolerance_arcsec`, sync the mount to the solved position and slew
         again. Each round is recorded as an alignment attempt (see
-        `control.history.query(kind="alignment")`). `abort_motion` stops
+        `review.query(kind="alignment")`). `abort_motion` stops
         the rounds.
 
         Parameters
@@ -118,7 +148,7 @@ class MountControl(ControlChild):
             target_name=target_name,
         )
 
-    def sync(self, position: SkyPosition | dict[str, float]) -> bool:
+    def _sync(self, position: SkyPosition | dict[str, float]) -> bool:
         """Tell the mount it is pointing at a plate-solved position.
 
         Parameters
@@ -251,7 +281,7 @@ class MountControl(ControlChild):
 
         return hardware_operations.set_slew_rate(self._context, rate_index)
 
-    def compute_pointing_correction(
+    def _compute_pointing_correction(
         self,
         comparison_input_id: str,
         commanded_ra_deg: float,
@@ -298,7 +328,7 @@ class MountControl(ControlChild):
             latitude_deg=self._context.observer_latitude_deg(),
         )
 
-    def run_polar_alignment_assist(
+    def _run_polar_alignment_assist(
         self, attempts: list[dict[str, Any]], latitude_deg: float | None = None
     ) -> MountPointingModel:
         """Fit tonight's polar alignment error from this session's solves.

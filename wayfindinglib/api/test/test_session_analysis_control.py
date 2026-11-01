@@ -1,6 +1,6 @@
 """Purpose: End-to-end tests for the session-quality analysis on the facade.
 
-Description: Runs the guiding analysis behind `control.history.query`
+Description: Runs the guiding analysis behind `review.query`
 (`night_analysis.guiding_night_analysis` and `guiding_night_summaries`) against
 a real isolated configuration, a real Butler and a real log database filled
 with synthetic nights. The main thing verified is that a night is judged only
@@ -10,6 +10,7 @@ against the equipment's earlier nights, never against itself.
 import pytest
 
 from wayfindinglib import ObservatoryControl
+from wayfindinglib.api.review import ObservationReview
 from wayfindinglib.api.test.guiding_night_helpers import (
     FIRST_NIGHT,
     record_good_history,
@@ -62,8 +63,8 @@ def test_a_bad_night_is_not_judged_against_itself(control: ObservatoryControl) -
     record_guiding_night(control, 8, snr=28.0, lost=220)
 
     analysis = night_analysis.guiding_night_analysis(control._context, night)
-    envelope_before = control.history.get_performance_envelope(before_night=night)
-    envelope_with_everything = control.history.get_performance_envelope()
+    envelope_before = ObservationReview(control).get_performance_envelope(before_night=night)
+    envelope_with_everything = ObservationReview(control).get_performance_envelope()
 
     assert analysis.flagged is True
     assert envelope_before.thresholds["guide_snr_low_limit"].sample_count == 6
@@ -92,7 +93,7 @@ def test_a_night_on_other_equipment_gets_no_limits(control: ObservatoryControl) 
     other = "telescope=other|camera=other|guide_focal_mm=240|guide_scale=3.2"
     night = record_guiding_night(control, 0, fingerprint=other)
     runs = night_analysis.guiding_runs(control._context, night)
-    control.guiding.save_run(
+    control.guiding._save_run(
         runs[0].model_copy(update={"focal_length_mm": 240.0, "pixel_scale_arcsec_per_px": 3.2})
     )
 

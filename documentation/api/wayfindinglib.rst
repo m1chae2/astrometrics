@@ -66,7 +66,7 @@ Observatory control API
 .. automodapi:: wayfindinglib.api.control.remote
    :no-inheritance-diagram:
 
-.. automodapi:: wayfindinglib.api.control.history
+.. automodapi:: wayfindinglib.api.review
    :no-inheritance-diagram:
 
 .. automodapi:: wayfindinglib.api.control.safety

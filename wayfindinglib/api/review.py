@@ -1,16 +1,25 @@
-"""Purpose: `control.history`, past and current observing sessions.
+"""Purpose: `ObservationReview`, how the nights went and what the results say.
 
-Description: Answers questions about recorded observing nights (the
-capture, guiding and sky-coverage analyses, findings that recur, Ekos
-session records, guiding runs and the pointing model), reports how the
-session in progress is going, lists the plate-solve alignment attempts
-of each night, matches each light frame to the guide error
-during its exposure, and works out the performance limits of the active
-equipment. Only `save_ekos_session_context` writes. The analyses live in
+Description: `Wayfinder.review` is an `ObservationReview`. It answers
+questions about recorded observing nights (the capture, guiding and
+sky-coverage analyses, findings that recur, Ekos session records, guiding
+runs and the pointing model), reports how the session in progress is
+going, groups plate-solve alignment attempts into one session per target,
+matches each light frame to the guide error during its exposure, and works
+out the performance limits of the active equipment. Only
+`save_ekos_session_context` writes. The analyses live in
 `tasks.control_tasks.night_analysis` and `night_history`.
+
+Review reads the same records and context as `control`, so it is built
+from the `Wayfinder`'s `ObservatoryControl` and shares its context. The
+advisory (`get_advisory`) will join it here: its results and data kinds
+are answered by review, while its tonight and calibration kinds stay in
+`planning`.
 """
 
-from typing import Any, Literal
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Literal
 
 from astrometricslib import (
     InvalidArgumentError,
@@ -22,12 +31,18 @@ from astrometricslib import (
 )
 from wayfindinglib.api.control.context import ControlChild
 from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
+from wayfindinglib.models.session.control_results import FrameGuidingReport
 from wayfindinglib.models.session.ekos_session import EkosSessionContext
 from wayfindinglib.models.session.live_session_status import LiveSessionStatus
 from wayfindinglib.models.session.night_list import NightListEntry, TargetChange
 from wayfindinglib.models.session.night_quality import NightQuality
+from wayfindinglib.models.session.review_query import ReviewQueryResult
+from wayfindinglib.models.session.telemetry import AlignmentAttempt, AlignmentSessionsResult
 
-__all__ = ["HistoryControl"]
+if TYPE_CHECKING:
+    from wayfindinglib.api.control.control import ObservatoryControl
+
+__all__ = ["ObservationReview"]
 
 HistoryKind = Literal[
     "capture",
@@ -42,22 +57,40 @@ HistoryKind = Literal[
     "target_changes",
     "night_quality",
 ]
-"""The kinds of question `HistoryControl.query` answers."""
+"""The kinds of question `ObservationReview.query` answers."""
 
 TYPED_KINDS = ("nights", "target_changes", "night_quality")
 """The kinds that answer with a typed list of models, not a dictionary.
 
-`HistoryControl._answer_typed` serves them. A new typed night read (for
+`ObservationReview._answer_typed` serves them. A new typed night read (for
 example ``"night_quality"``) is added in two places: here, and as a new
 ``case`` in `_answer_typed`, with its arguments in
 `night_history.TYPED_KIND_ARGUMENTS`."""
 
+TYPED_KIND_FIELDS = {
+    "nights": "night_list",
+    "target_changes": "target_changes",
+    "night_quality": "night_quality",
+}
+"""The `ReviewQueryResult` field each typed kind fills."""
+
 FRAME_GUIDING_SECTIONS = ("quality",)
-"""Optional sections `HistoryControl.frame_guiding` can add."""
+"""Optional sections `ObservationReview.frame_guiding` can add."""
 
 
-class HistoryControl(ControlChild):
-    """Read and analyse past and current observing sessions."""
+class ObservationReview(ControlChild):
+    """Read and analyse past and current observing sessions.
+
+    Parameters
+    ----------
+    control : `ObservatoryControl`
+        The `Wayfinder`'s hardware sub-API. Review shares its context
+        (configuration, storage and records) and holds no other state.
+    """
+
+    def __init__(self, control: ObservatoryControl) -> None:
+        """Share the context of `control`."""
+        super().__init__(control._context)
 
     @background_job("diagnostics", grace_period_seconds=20.0)
     def query(
@@ -68,13 +101,14 @@ class HistoryControl(ControlChild):
         include: list[str] | None = None,
         limit: int = 10,
         register_job: bool = True,
-    ) -> dict[str, Any] | list[NightListEntry] | list[TargetChange] | NightQuality:
+    ) -> ReviewQueryResult:
         """Analyse or list past observing nights, in replies of bounded size.
 
-        One front door for the observatory's history. It only reads. A
-        dictionary reply is measured and shrunk if needed, so it never
+        One front door for the observatory's history. It only reads. The
+        plain data in a reply is measured and shrunk if needed, so it never
         exceeds 40,000 characters of JSON. The kinds in `TYPED_KINDS`
-        answer with a list of typed models, each bounded by `limit`.
+        fill a typed field instead (`night_list`, `target_changes` or
+        `night_quality`), each bounded by `limit`.
 
         Parameters
         ----------
@@ -121,11 +155,12 @@ class HistoryControl(ControlChild):
 
         Returns
         -------
-        reply : `dict` [`str`, `Any`] or `list`
-            The answer: a dictionary, or for ``nights`` a list of
-            `NightListEntry`, for ``target_changes`` a list of
-            `TargetChange` and for ``night_quality`` a `NightQuality`. If a
-            dictionary had to be cut to fit, ``truncated`` is true. An
+        result : `ReviewQueryResult`
+            The answer. Each kind fills its own fields: ``nights`` fills
+            ``night_list`` with `NightListEntry` rows, ``target_changes``
+            fills ``target_changes`` with `TargetChange` rows and
+            ``night_quality`` fills ``night_quality`` with a `NightQuality`.
+            If plain data had to be cut to fit, ``truncated`` is true. An
             unknown `kind`, or an argument that `kind` does not use, is
             refused with `InvalidArgumentError`. A night or Ekos session
             with nothing recorded raises `NotFoundError`.
@@ -138,9 +173,12 @@ class HistoryControl(ControlChild):
             target_id=kind,
         ):
             if kind in TYPED_KINDS:
-                return self._answer_typed(kind, session_id, ekos_file_id, include, limit)
-            return night_history.build_night_history(
-                self._context, kind, session_id, ekos_file_id, include, limit
+                typed = self._answer_typed(kind, session_id, ekos_file_id, include, limit)
+                return ReviewQueryResult(kind=kind, **{TYPED_KIND_FIELDS[kind]: typed})
+            return ReviewQueryResult.model_validate(
+                night_history.build_night_history(
+                    self._context, kind, session_id, ekos_file_id, include, limit
+                )
             )
 
     def _answer_typed(
@@ -267,7 +305,7 @@ class HistoryControl(ControlChild):
         until: str | None = None,
         limit: int = 60,
         include: list[str] | None = None,
-    ) -> dict[str, Any]:
+    ) -> FrameGuidingReport:
         """Report the guide error during each light frame's exposure.
 
         Cuts the stored guide-log samples to the window of each frame and
@@ -303,7 +341,7 @@ class HistoryControl(ControlChild):
 
         Returns
         -------
-        report : `dict`
+        report : `FrameGuidingReport`
             ``frames`` (one row per frame) and ``group`` (the median error
             and the frames well above it). An unknown target raises
             `NotFoundError`.
@@ -329,9 +367,55 @@ class HistoryControl(ControlChild):
         except ValueError as error:
             raise InvalidArgumentError(f"since and until must be ISO 8601 times: {error}") from error
         target_id = target if isinstance(target, str) else target.id
-        return frame_guiding.link_frames_to_guiding(
-            self._context, target_id, selection, limit, "quality" in sections
+        return FrameGuidingReport.model_validate(
+            frame_guiding.link_frames_to_guiding(
+                self._context, target_id, selection, limit, "quality" in sections
+            )
         )
+
+    def query_alignment_sessions(self, attempts: list[dict[str, Any]]) -> AlignmentSessionsResult:
+        """Group plate-solve alignment attempts into one session per target.
+
+        A pure calculation on the attempts you pass in. Nothing is read
+        from or stored in the library. Solves with the same target name
+        form one session. A solve without a name joins the session whose
+        first solve lies within 0.5 degrees, or starts its own. See
+        `AlignmentTargetSession` for the statistics each session carries.
+
+        Parameters
+        ----------
+        attempts : `list` [`dict`]
+            Plate solves in any order. Each dictionary may hold
+            ``status`` (``"solving"``, ``"failed"``, ``"warning"``,
+            ``"aligned"`` or ``"idle"``; required), ``delta_ra_arcsec``,
+            ``delta_dec_arcsec``, ``ra`` and ``dec`` in degrees,
+            ``pointing_error_arcsec``, ``timestamp`` (Unix seconds),
+            ``target_name`` and ``session_id``. The camelCase spellings
+            (``deltaRaArcsec`` and so on) are accepted too.
+
+        Returns
+        -------
+        result : `AlignmentSessionsResult`
+            ``attempts`` (the attempts as the library read them) and
+            ``targets`` (one `AlignmentTargetSession` per target, in the
+            order the targets were first solved; empty when no solve has a
+            position).
+
+        Raises
+        ------
+        InvalidArgumentError
+            If an attempt has an unknown status, or a field of the wrong
+            type.
+        """
+        from pydantic import ValidationError
+
+        from wayfindinglib.analytics.alignment_sessions import group_alignment_attempts
+
+        try:
+            models = [AlignmentAttempt.model_validate(attempt) for attempt in attempts]
+        except ValidationError as error:
+            raise InvalidArgumentError(f"An alignment attempt is not valid: {error}") from error
+        return AlignmentSessionsResult(attempts=models, targets=group_alignment_attempts(models))
 
     def get_performance_envelope(
         self, blur_tolerance_fraction: float | None = None, before_night: str | None = None
@@ -374,7 +458,7 @@ class HistoryControl(ControlChild):
         risk = performance_envelope_tasks.tracking_risk_map(self._context)
         return envelope.model_copy(update={"tracking_risk": risk})
 
-    def save_ekos_session_context(self, context: EkosSessionContext) -> None:
+    def _save_ekos_session_context(self, context: EkosSessionContext) -> None:
         """Save one Ekos session record, replacing an earlier read of it.
 
         Parameters

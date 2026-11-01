@@ -59,6 +59,45 @@ def test_a_frame_stored_with_old_flat_measurement_fields_still_loads() -> None:
     assert frame.measurements.registration_dx_px == pytest.approx(1.2)
 
 
+def test_a_frame_stored_with_the_removed_registration_fields_still_loads() -> None:
+    """Check old rows holding the two removed registration fields load.
+
+    The fields `registrationFwhmYPx` and `registrationRmse` no longer exist.
+    A stored row that still has them, nested or in the old flat layout, must
+    load with the kept values intact and the removed ones ignored.
+    """
+    nested = FrameRecord.model_validate(
+        {
+            "path": "frame.fits",
+            "measurements": {
+                "backgroundLevel": 480.0,
+                "registrationFwhmXPx": 2.6,
+                "registrationFwhmYPx": 3.0,
+                "registrationRmse": 0.02,
+            },
+        }
+    )
+    assert nested.measurements.registration_fwhm_x_px == pytest.approx(2.6)
+    assert not hasattr(nested.measurements, "registration_rmse")
+    assert "registrationRmse" not in nested.measurements.model_dump(by_alias=True)
+
+    flat = FrameRecord.model_validate(
+        {
+            "path": "frame.fits",
+            "backgroundLevel": 480.0,
+            "registrationFwhmXPx": 2.6,
+            "registrationFwhmYPx": 3.0,
+            "registrationRmse": 0.02,
+        }
+    )
+    assert flat.measurements.background_level == pytest.approx(480.0)
+    assert flat.measurements.registration_fwhm_x_px == pytest.approx(2.6)
+    assert not hasattr(flat.measurements, "registration_fwhm_y_px")
+    dumped = flat.model_dump(by_alias=True)
+    assert "registrationRmse" not in dumped
+    assert "registrationFwhmYPx" not in dumped
+
+
 def test_a_frame_with_no_old_measurement_fields_gets_an_empty_measurements() -> None:
     """Check a plain frame with no flat or nested measurements still works."""
     frame = FrameRecord.model_validate({"path": "frame.fits"})

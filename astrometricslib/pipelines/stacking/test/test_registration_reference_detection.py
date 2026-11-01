@@ -196,5 +196,3 @@ def test_registration_facts_fill_the_honestly_named_fields_only() -> None:
     assert measurements.registration_quality == pytest.approx(0.0)
     assert measurements.registration_rotation_deg == pytest.approx(0.001)
     assert measurements.registration_star_count == 1163
-    assert measurements.registration_fwhm_y_px is None
-    assert measurements.registration_rmse is None

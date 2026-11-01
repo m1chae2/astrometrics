@@ -83,9 +83,6 @@ class FrameMeasurements(BaseModel):
     # Siril's plain FWHM in pixels. The name says "x" for history; Siril
     # reports one FWHM, not one per axis.
     registration_fwhm_x_px: float | None = Field(default=None, alias="registrationFwhmXPx")
-    # No longer filled. Stored values written before the fix were Siril's
-    # weighted FWHM, not a width along y. Removal belongs to issue #97.
-    registration_fwhm_y_px: float | None = Field(default=None, alias="registrationFwhmYPx")
     # Siril's weighted FWHM in pixels (stars counted by fit quality).
     registration_weighted_fwhm_px: float | None = Field(default=None, alias="registrationWeightedFwhmPx")
     # How round the stars look after alignment (1.0 is a perfect circle).
@@ -98,10 +95,6 @@ class FrameMeasurements(BaseModel):
     # Rotation of this picture relative to the reference, in degrees,
     # from the registration transform.
     registration_rotation_deg: float | None = Field(default=None, alias="registrationRotationDeg")
-    # No longer filled. Stored values written before the fix were the sky
-    # background level (0.02 or so), not an alignment error in pixels.
-    # Removal belongs to issue #97.
-    registration_rmse: float | None = Field(default=None, alias="registrationRmse")
     registration_star_count: int | None = Field(default=None, alias="registrationStarCount")
     registration_dx_px: float | None = Field(default=None, alias="registrationDxPx")
     registration_dy_px: float | None = Field(default=None, alias="registrationDyPx")

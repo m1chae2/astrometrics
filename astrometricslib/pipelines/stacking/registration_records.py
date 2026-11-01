@@ -87,10 +87,7 @@ def update_frame_registration_results(
                 # records them.
                 _fill_empty_registration_fields(frame.measurements, registration_facts)
                 continue
-            # `registration_fwhm_y_px` and `registration_rmse` are no longer
-            # filled: their old values were the weighted FWHM and the sky
-            # background level (see `FrameMeasurements`). The field named
-            # `..._fwhm_x_px` holds Siril's plain FWHM.
+            # The field named `..._fwhm_x_px` holds Siril's plain FWHM.
             frame.measurements.registration_fwhm_x_px = registration_facts["fwhm_px"]
             frame.measurements.registration_weighted_fwhm_px = registration_facts["weighted_fwhm_px"]
             frame.measurements.registration_roundness = registration_facts["roundness"]

@@ -68,9 +68,7 @@ What it does not do
 -------------------
 
 * It does not copy frame-level measurements. The summaries are run and stack
-  level. The stored per-frame fields ``registrationRmse`` and
-  ``registrationFwhmYPx`` hold Siril's normalized background level and the
-  weighted star width, not what their names say, so they are never copied.
+  level.
 * It does not write measurements that need data the JSON never held:
   empty-aperture noise, frame weights, effective counts, night shares,
   photometry's comparison-star and centroid scatter, and a few gates whose

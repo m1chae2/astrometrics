@@ -21,7 +21,7 @@ from astrometricslib.foundation.jobs.runner import background_job, registered_jo
 from astrometricslib.models.catalog_queries import ReindexReport, TargetQueryResult, TargetReindexChange
 from astrometricslib.models.field_centers import FieldCenter, ImagedFieldCenters
 from astrometricslib.models.image_deletion import FailedDeletion, ImageDeletionResult
-from astrometricslib.models.target import Target, TargetObjectType
+from astrometricslib.models.target import FrameRecord, Target, TargetObjectType
 from astrometricslib.pipelines.shared.api_arguments import (
     check_choice,
     reject_unused_arguments,
@@ -469,6 +469,88 @@ class TargetCatalog:
         from astrometricslib.drivers.fits_access import read_header
 
         return read_header(path, first_hdu_only=True)
+
+    def select_frames(
+        self,
+        target: str | Target,
+        filter_name: str | None = None,
+        first_file: str | None = None,
+        last_file: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        limit: int | None = None,
+    ) -> builtins.list[FrameRecord]:
+        """Pick a target's light frames by filter, file name range and time.
+
+        Only light frames that have a start time are considered. Spectroscopy
+        frames are left out unless ``filter_name`` asks for one.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target to search.
+        filter_name : `str`, optional
+            Keep frames whose filter matches this text, ignoring case.
+        first_file, last_file : `str`, optional
+            Keep frames whose file name sorts from ``first_file`` to
+            ``last_file``. A short bound such as ``"013"`` is matched
+            against the frame number at the end of the name.
+        since, until : `str`, optional
+            Keep frames that began from ``since`` to ``until``. Each is an
+            ISO 8601 time such as ``"2026-10-03T21:30:00-06:00"``; no offset
+            means UTC.
+        limit : `int`, optional
+            How many frames to keep. With a file or time bound these are the
+            first frames in the range; without one they are the newest.
+            Omit it to keep every match.
+
+        Returns
+        -------
+        frames : `list` [`FrameRecord`]
+            The kept frames, oldest first.
+
+        Notes
+        -----
+        Raises `NotFoundError` if the target does not exist, and
+        `InvalidArgumentError` if ``since`` or ``until`` is not an ISO 8601
+        time or ``limit`` is less than 1.
+        """
+        from astrometricslib.pipelines.shared.quality import frame_selection
+
+        resolved = resolve_target(self, target)
+        return frame_selection.select_target_light_frames(
+            resolved.frames,
+            filter_name=filter_name,
+            first_file=first_file,
+            last_file=last_file,
+            since=since,
+            until=until,
+            limit=limit,
+        )
+
+    def resolve(self, target: str | Target) -> Target:
+        """Turn a target id into the `Target` it names.
+
+        A `Target` is returned as it is. An id is matched loosely, as `get`
+        does, after reading the stored targets again so that a target
+        another program added is seen.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            A target id or a `Target`.
+
+        Returns
+        -------
+        resolved : `Target`
+            The target.
+
+        Notes
+        -----
+        Raises `NotFoundError` if no target has that id, and
+        `InvalidArgumentError` if ``target`` is neither text nor a `Target`.
+        """
+        return resolve_target(self, target)
 
     def get_frame(self, target: str | Target, iso: str, exposure: str, index: int = 0) -> str:
         """Find the path of a target's frame by gain, exposure and order.

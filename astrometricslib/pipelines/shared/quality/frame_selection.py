@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from astrometricslib.drivers import fits_access
+from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 
 
@@ -247,6 +248,59 @@ def select_library_frames(frames: list[Any], selection: FrameSelection) -> list[
     ]
     kept.sort(key=lambda frame: frame.timestamp or 0.0)
     return kept
+
+
+def select_target_light_frames(
+    frames: list[Any],
+    filter_name: str | None = None,
+    first_file: str | None = None,
+    last_file: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    limit: int | None = None,
+) -> list[Any]:
+    """Pick a target's timed light frames by filter, range, time and count.
+
+    Parameters
+    ----------
+    frames : `list` [`Any`]
+        A target's frame records.
+    filter_name, first_file, last_file : `str` or `None`
+        As in `FrameSelection`.
+    since, until : `str` or `None`
+        ISO 8601 times (no offset means UTC) that bound when the frames began.
+    limit : `int` or `None`
+        How many frames to keep. With a file or time bound these are the
+        first frames in the range, otherwise the newest. `None` keeps all.
+
+    Returns
+    -------
+    chosen : `list` [`Any`]
+        The kept light frames, oldest first.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If ``since`` or ``until`` is not an ISO 8601 time, or ``limit`` is
+        less than 1.
+    """
+    try:
+        selection = FrameSelection(
+            filter_name=filter_name,
+            first_file=first_file,
+            last_file=last_file,
+            since=parse_iso_time(since),
+            until=parse_iso_time(until),
+        )
+    except ValueError as error:
+        raise InvalidArgumentError(f"since and until must be ISO 8601 times: {error}") from error
+    if limit is not None and limit < 1:
+        raise InvalidArgumentError("limit must be at least 1.")
+    lights = [frame for frame in frames if str(frame.role).upper() == "LIGHT"]
+    chosen = [frame for frame in select_library_frames(lights, selection) if frame.timestamp is not None]
+    if limit is None:
+        return chosen
+    return chosen[:limit] if selection.has_bounds else chosen[-limit:]
 
 
 def select_folder_paths(folder: str, selection: FrameSelection) -> list[str]:

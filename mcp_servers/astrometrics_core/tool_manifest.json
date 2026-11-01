@@ -331,12 +331,26 @@
       "interim_block": "",
       "note": "Writes the frame records. A dry_run mode that only reports what would change would let an AI use it."
     },
+    "target_resolve": {
+      "tool_class": "compute",
+      "category": "targets",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Returns the whole target record, frames and all, which overflows the reply. Use target_query."
+    },
     "target_save": {
       "tool_class": "change-data",
       "category": "targets",
       "disposition": "withhold",
       "interim_block": "",
       "note": "Writes the database. The AI is read-only."
+    },
+    "target_select_frames": {
+      "tool_class": "unclassified",
+      "category": "targets",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Returns whole frame records, which can overflow the reply. Scripts and wayfindinglib use it. observatory_history_frame_guiding already serves an AI client."
     },
     "typegen_contract_validator": {
       "tool_class": "develop",

@@ -333,7 +333,9 @@ SUB_API_MEMBERS = {
         "read_frame_header",
         "read_saved",
         "reindex_frames",
+        "resolve",
         "save",
+        "select_frames",
     },
     "stars": {
         "analyze_periodicity",

@@ -510,6 +510,15 @@ DECISIONS = {
         "drop",
         "Returns the whole target record, frames and all, which overflows the reply. Use target_query.",
     ),
+    "target_select_frames": ToolDecision(
+        "drop",
+        "Returns whole frame records, which can overflow the reply. Scripts and wayfindinglib use it. "
+        "observatory_history_frame_guiding already serves an AI client.",
+    ),
+    "target_resolve": ToolDecision(
+        "drop",
+        "Returns the whole target record, frames and all, which overflows the reply. Use target_query.",
+    ),
     "docs_get": ToolDecision("keep", "Reads documentation."),
     "ui_run_tests": ToolDecision("keep", "Developer check."),
     "ui_diagnose_code": ToolDecision("keep", "Developer check."),

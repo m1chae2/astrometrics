@@ -54,3 +54,20 @@ def test_a_missing_or_zero_scale_is_kept() -> None:
     """None and zero pass through unchanged."""
     assert _setting(None).pixel_scale_arcsec is None
     assert _setting(0.0).pixel_scale_arcsec == pytest.approx(0.0, abs=0.0)
+
+
+def test_unknown_setting_is_marked_and_other_settings_are_not() -> None:
+    """The stand-in setting says it is unknown; a real camera does not."""
+    from astrometricslib.models.quality.capture_setting import UNKNOWN_CAPTURE_SETTING_CAMERA
+
+    unknown = CaptureSetting.unknown()
+    assert unknown.camera == UNKNOWN_CAPTURE_SETTING_CAMERA
+    assert unknown.is_unknown
+    assert not CaptureSetting(camera="ZWO ASI533MM Pro").is_unknown
+
+
+def test_setting_is_spectral_follows_the_filter_name() -> None:
+    """A grating filter is spectral; a missing or ordinary filter is not."""
+    assert CaptureSetting(camera="Cam", filter_name="SPEC").is_spectral
+    assert not CaptureSetting(camera="Cam", filter_name="L").is_spectral
+    assert not CaptureSetting(camera="Cam").is_spectral

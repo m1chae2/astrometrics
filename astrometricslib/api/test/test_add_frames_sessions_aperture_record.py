@@ -129,7 +129,7 @@ def test_sessions_groups_by_night_and_can_pick_one() -> None:
 
 
 def test_get_aperture_record_reads_the_file_or_gives_none(tmp_path: Path) -> None:
-    """A good file gives a dictionary; a bad or missing one gives None."""
+    """A good file gives a record model; a bad or missing one gives None."""
     from astrometricslib.pipelines.stacking.post_processing.odd_even_apertures import APERTURE_RECORD_VERSION
 
     good = tmp_path / "record.json"
@@ -138,6 +138,9 @@ def test_get_aperture_record_reads_the_file_or_gives_none(tmp_path: Path) -> Non
     other.write_text(json.dumps({"version": -1}), encoding="utf-8")
     records = QualityRecords(AppConfiguration(), MagicMock())
 
-    assert records.get_aperture_record(str(good)) == {"version": APERTURE_RECORD_VERSION, "apertures": []}
+    record = records.get_aperture_record(str(good))
+    assert record is not None
+    assert record.version == APERTURE_RECORD_VERSION
+    assert record.apertures == []
     assert records.get_aperture_record(str(other)) is None
     assert records.get_aperture_record(str(tmp_path / "missing.json")) is None

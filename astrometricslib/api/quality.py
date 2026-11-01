@@ -18,10 +18,13 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any, Literal
 
+from pydantic import ValidationError
+
 from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.jobs.runner import background_job, registered_job
+from astrometricslib.models.quality.aperture_record import OddEvenApertureRecord
 from astrometricslib.models.quality.calibration_identities import CalibrationIdentities
 from astrometricslib.models.quality.capture_setting import CaptureSetting
 from astrometricslib.models.quality.excluded_frames import QuarantinePreview, SetAsideFrameRecord
@@ -371,7 +374,7 @@ class QualityRecords:
 
         return QualityStore(quality_database_path(self._config)).get_capture_settings(ids)
 
-    def get_aperture_record(self, path: str) -> dict[str, Any] | None:
+    def get_aperture_record(self, path: str) -> OddEvenApertureRecord | None:
         """Read the per-aperture noise record that a stack's job wrote.
 
         The odd–even difference job saves, beside a stack, the sum and the
@@ -385,18 +388,24 @@ class QualityRecords:
 
         Returns
         -------
-        record : `dict` [`str`, `Any`] or `None`
+        record : `OddEvenApertureRecord` or `None`
             The file's content: ``version``, ``stack``, ``aperture_identity``,
-            ``note`` and ``apertures`` (a list of dicts with ``index``, ``x``,
-            ``y``, ``distance_from_center_px``, ``distance_from_target_px``,
-            ``sum`` and ``difference``). `None` when the file is missing,
-            cannot be read or is of another version.
+            ``note`` and ``apertures`` (rows with ``index``, ``x``, ``y``,
+            ``distance_from_center_px``, ``distance_from_target_px``, ``sum``
+            and ``difference``). `None` when the file is missing, cannot be
+            read, is of another version or does not have the expected fields.
         """
         from astrometricslib.pipelines.stacking.post_processing.odd_even_apertures import (
             load_odd_even_aperture_record,
         )
 
-        return load_odd_even_aperture_record(path)
+        data = load_odd_even_aperture_record(path)
+        if data is None:
+            return None
+        try:
+            return OddEvenApertureRecord.model_validate(data)
+        except ValidationError:
+            return None
 
     def calibration_identities(
         self, run_ids: list[str] | None = None, target_id: str | None = None

@@ -95,6 +95,38 @@ class CaptureSetting(BaseModel):
     offset: int | None = None
     binning: int | None = None
 
+    @classmethod
+    def unknown(cls) -> CaptureSetting:
+        """Build the stand-in for a frame whose rows point at no setting.
+
+        Returns
+        -------
+        setting : `CaptureSetting`
+            A setting whose camera is `UNKNOWN_CAPTURE_SETTING_CAMERA` and
+            whose other fields are empty. `is_unknown` is `True` for it.
+        """
+        return cls(camera=UNKNOWN_CAPTURE_SETTING_CAMERA)
+
+    @property
+    def is_unknown(self) -> bool:
+        """Whether this is the stand-in made by `unknown`, not real equipment.
+
+        This is worked out every time and is not saved.
+        """
+        return self.camera == UNKNOWN_CAPTURE_SETTING_CAMERA
+
+    @property
+    def is_spectral(self) -> bool:
+        """Whether the filter is the spectroscopy grating.
+
+        The filter name is judged the way a frame's filter is (see
+        `FrameRecord.is_spectral`). A setting with no filter name is not
+        spectral. This is worked out every time and is not saved.
+        """
+        from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
+
+        return frame_is_spectral({"filter": self.filter_name})
+
     @field_validator("pixel_scale_arcsec")
     @classmethod
     def _round_pixel_scale(cls, value: float | None) -> float | None:

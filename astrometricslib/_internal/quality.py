@@ -6,6 +6,7 @@ either library, may import this module. Each name is imported from the module
 where its code lives today, so moving the code later changes this file only.
 """
 
+from astrometricslib.models.quality.aperture_record import ApertureNoiseRow, OddEvenApertureRecord
 from astrometricslib.models.quality.capture_setting import UNKNOWN_CAPTURE_SETTING_CAMERA
 from astrometricslib.models.quality.frame_measurement_summary import FrameMeasurementSummary
 from astrometricslib.models.quality.measurement import MeasurementOrigin, QualitySubject
@@ -24,6 +25,7 @@ from astrometricslib.pipelines.shared.quality.star_profile_fitting import PIXEL_
 __all__ = [
     "PIXEL_BLUR_FWHM_SQUARED_FACTOR",
     "UNKNOWN_CAPTURE_SETTING_CAMERA",
+    "ApertureNoiseRow",
     "Checkpoint",
     "Direction",
     "FrameMeasurementSummary",
@@ -31,6 +33,7 @@ __all__ = [
     "MetricPurpose",
     "MetricSpec",
     "MetricSummary",
+    "OddEvenApertureRecord",
     "QualityQueryResult",
     "QualityRowFile",
     "QualityRowResolution",

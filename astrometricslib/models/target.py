@@ -559,6 +559,28 @@ class Target(BaseModel):
 
         return parse_coordinate_string(self.dec, is_ra=False)
 
+    def frame_subject_id(self, frame: FrameRecord | str) -> str:
+        """Name one of this target's frames the way quality rows name it.
+
+        The id is the target's id followed by the part of the frame's path
+        below the target's lights folder, so it does not change when the
+        frames root moves to another mount. It is the ``subject_id`` of the
+        frame's quality rows.
+
+        Parameters
+        ----------
+        frame : `FrameRecord` or `str`
+            The frame, or its path.
+
+        Returns
+        -------
+        subject_id : `str`
+            ``"<target id>/<path below the target's lights folder>"``.
+        """
+        from astrometricslib.pipelines.shared.quality.frame_measurement import frame_subject_id
+
+        return frame_subject_id(frame if isinstance(frame, str) else frame.path, self.id)
+
     def serialize(self) -> dict[str, Any]:
         """Package the target's data into a basic dictionary format.
 

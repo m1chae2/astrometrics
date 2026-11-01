@@ -72,3 +72,14 @@ def test_the_values_are_not_saved() -> None:
     assert "previewPath" not in saved["stacking"]
     assert "preview_path" not in saved["stacking"]
     assert "isSpectral" not in FrameRecord.model_json_schema(by_alias=True)["properties"]
+
+
+def test_frame_subject_id_names_a_frame_by_target_and_lights_path() -> None:
+    """The method takes a path or a frame and matches the library's naming."""
+    from astrometricslib._internal.frames import frame_subject_id
+
+    path = "/data/lights/M13/Scope/Cam/frame_001.fits"
+    target = Target(id="M13")
+    assert target.frame_subject_id(path) == frame_subject_id(path, "M13")
+    assert target.frame_subject_id(path) == "M13/Scope/Cam/frame_001.fits"
+    assert target.frame_subject_id(FrameRecord(path=path)) == target.frame_subject_id(path)

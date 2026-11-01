@@ -1989,8 +1989,8 @@ class ProcessingPipelines:
         check_choice("kind", kind, STACK_KINDS)
         return summarize_stack(self._resolve(target), kind)
 
+    @staticmethod
     def predict_stack_weights(
-        self,
         exposure_seconds: Sequence[float | None],
         configured_weight: str | None = None,
         *,
@@ -2031,6 +2031,12 @@ class ProcessingPipelines:
         prediction : `StackWeightPrediction`
             The weighting mode, the exposure group of each frame, and the
             weight of each frame (or the reasons they are unknown).
+
+        Notes
+        -----
+        The call reads no stored data, so it is a static method. Code that
+        holds no `Astrometrics` handle can call it on the class,
+        ``ProcessingPipelines.predict_stack_weights(...)``.
         """
         from astrometricslib.pipelines.stacking.stack_weight_prediction import predict_stack_weights
 

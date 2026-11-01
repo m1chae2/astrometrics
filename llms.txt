@@ -24,7 +24,7 @@ Paths are relative to the repository root. Theory is in the architecture papers,
 - [Spectroscopy](documentation/library_design/Astrometrics_Library_Architecture.md#6-stellar-spectroscopy-pipeline): slitless extraction, wavelength and flux calibration, classification. Guide: documentation/library_design/pipelines/spectroscopy.md. README: astrometricslib/pipelines/spectroscopy/README.md. Evidence: documentation/library_design/validation/spectroscopy.md.
 - [Asteroid detection](documentation/library_design/Astrometrics_Library_Architecture.md#7-asteroid-detection-pipeline): chaining detections and straight-line motion tests. Guide: documentation/library_design/pipelines/asteroid_detection.md. README: astrometricslib/pipelines/asteroid_detection/README.md. Evidence: documentation/library_design/validation/asteroid_detection.md.
 - [Shared pipeline code](astrometricslib/pipelines/shared/README.md): helpers used by several pipelines.
-- [Public API](astrometricslib/api/README.md): the Astrometrics entry point and its catalogs. Reference: documentation/api/astrometricslib.rst.
+- [Public API](astrometricslib/api/README.md): the Astrometrics entry point, its catalogs, and the public modules (`exceptions`, `reports`, `jobs`, `drivers`). Everything else is private (`_internal`). Reference, with the fields of each result: documentation/api/astrometricslib.rst.
 - [Validation register](documentation/library_design/validation/index.md): how each tuned value was checked, with the library calls to repeat the check.
 
 ## Observatory control (wayfindinglib)
@@ -43,7 +43,7 @@ Paths are relative to the repository root. Theory is in the architecture papers,
 - [Wayfinding analytics](wayfindinglib/analytics/README.md): frame counting, session progress and package suggestions for the observation packages.
 - [Wayfinding models](wayfindinglib/models/README.md): packages, framing, the suggestion log, session progress and camera noise.
 - [Wayfinding data access](wayfindinglib/data_access/README.md): the readers of equipment, policy and site, and the writer of safety limits.
-- Reference: documentation/api/wayfindinglib.rst.
+- [Wayfinding public API](wayfindinglib/api/README.md): `Wayfinder`, its four sub-APIs and the public modules (`exceptions`, `reports`). Reference, with the fields of each result: documentation/api/wayfindinglib.rst.
 
 ## Desktop app
 

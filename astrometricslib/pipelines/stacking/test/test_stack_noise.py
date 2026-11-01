@@ -874,13 +874,15 @@ def test_a_much_deeper_library_stack_replaces_the_set_and_a_close_one_does_not(
 ) -> None:
     """Twice the effective frame count makes a new set with a new identity."""
 
-    def solve_from_header(stack_path: str) -> tuple[WCS, str]:
+    def solve_from_header(stack_path: str, drivers: object = None) -> tuple[WCS, str]:
         """Give the stack's own header as the plate solution.
 
         Parameters
         ----------
         stack_path : `str`
             The stack to solve.
+        drivers : `Drivers`, optional
+            The caller's drivers (unused).
 
         Returns
         -------
@@ -1334,13 +1336,15 @@ def _fake_stack_solver(monkeypatch: pytest.MonkeyPatch, solution: WCS | None, re
     """
     calls: list[str] = []
 
-    def fake(stack_path: str) -> tuple[WCS | None, str]:
+    def fake(stack_path: str, drivers: object = None) -> tuple[WCS | None, str]:
         """Record the call and give the prepared answer.
 
         Parameters
         ----------
         stack_path : `str`
             The stack to solve.
+        drivers : `Drivers`, optional
+            The caller's drivers (unused).
 
         Returns
         -------
@@ -1424,6 +1428,9 @@ def test_the_real_stack_solve_turns_an_exception_into_a_reason(
 
     class RaisingPipeline:
         """A stand-in astrometry pipeline whose solve fails."""
+
+        def __init__(self, drivers: object = None) -> None:
+            """Accept the drivers the caller passes."""
 
         def process(self, image: str, attempt_plate_solving: bool = True) -> None:
             """Fail as the star identifier does for an unsolvable field.

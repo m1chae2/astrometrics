@@ -9,11 +9,14 @@ stars it found.
 
 from typing import Any
 
+from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.shared.frame_grouping import add_frame
 
 
-def analyze_frame_spectroscopy(target: Target, path: str, limit: int | None = None) -> tuple[Any, list[Any]]:
+def analyze_frame_spectroscopy(
+    target: Target, path: str, limit: int | None = None, drivers: Drivers | None = None
+) -> tuple[Any, list[Any]]:
     """Run spectroscopy analysis on a single frame in this target's context.
 
     Parameters
@@ -43,7 +46,7 @@ def analyze_frame_spectroscopy(target: Target, path: str, limit: int | None = No
     )
 
     config = get_configuration()
-    astrometry = AstrometryPipeline(config)
+    astrometry = AstrometryPipeline(config, drivers=drivers)
     context = astrometry.prepare_image(path, attempt_plate_solving=False)
 
     from astrometricslib.utilities import ConfigLoader
@@ -54,6 +57,7 @@ def analyze_frame_spectroscopy(target: Target, path: str, limit: int | None = No
     site = config.get_observatory_site()
     spectroscopy = SpectroscopyPipeline(
         spec_config,
+        drivers=drivers,
         observatory_site=site,
         atmospheric_conditions=(
             load_atmospheric_conditions(config, site.elevation_m) if site is not None else None

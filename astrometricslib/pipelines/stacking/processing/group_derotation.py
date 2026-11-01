@@ -29,6 +29,7 @@ import numpy as np
 from scipy.ndimage import rotate as rotate_image
 from scipy.ndimage import shift as shift_image
 
+from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.pipelines.stacking.processing.group_alignment import find_zero_order_position
 
@@ -105,7 +106,10 @@ def rotate_about_point(
 
 
 def measure_trail_angle_degrees(
-    image_path: str, star_position_xy: tuple[float, float], camera_name: str
+    image_path: str,
+    star_position_xy: tuple[float, float],
+    camera_name: str,
+    drivers: Drivers | None = None,
 ) -> tuple[float, float]:
     """Measure one image's trail tilt, in degrees, and how clearly it shows.
 
@@ -126,6 +130,9 @@ def measure_trail_angle_degrees(
     camera_name : `str`
         The camera the image was taken with, so the right instrument
         geometry (dispersion direction, grating spacing) is used.
+    drivers : `Drivers`, optional
+        The outside services the caller chose. Passed to the spectroscopy
+        pipeline; measuring a trail does not call any of them.
 
     Returns
     -------
@@ -138,7 +145,9 @@ def measure_trail_angle_degrees(
     from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline
     from astrometricslib.utilities import ConfigLoader
 
-    pipeline = SpectroscopyPipeline(ConfigLoader.load_spectroscopy_config(camera_name=camera_name))
+    pipeline = SpectroscopyPipeline(
+        ConfigLoader.load_spectroscopy_config(camera_name=camera_name), drivers=drivers
+    )
     return pipeline.measure_dispersion_trail(AstrometricsImage(image_path), star_position_xy)
 
 
@@ -147,6 +156,7 @@ def derotate_groups_to_common_tilt(
     image_paths: list[str],
     camera_name: str,
     minimum_contrast_sigma: float = MINIMUM_TRAIL_CONTRAST_SIGMA,
+    drivers: Drivers | None = None,
 ) -> tuple[list[np.ndarray], list[float | None]]:
     """Rotate every spectral exposure-group stack onto one common trail tilt.
 
@@ -172,6 +182,9 @@ def derotate_groups_to_common_tilt(
     minimum_contrast_sigma : `float`, optional
         A group's own trail must stand out at least this clearly to be
         rotated, or to be used as the reference tilt.
+    drivers : `Drivers`, optional
+        The outside services the caller chose, passed on to each trail
+        measurement.
 
     Returns
     -------
@@ -197,7 +210,7 @@ def derotate_groups_to_common_tilt(
             measurements.append(None)
             continue
         row, column = position
-        angle, contrast = measure_trail_angle_degrees(image_path, (column, row), camera_name)
+        angle, contrast = measure_trail_angle_degrees(image_path, (column, row), camera_name, drivers)
         measurements.append((angle, contrast) if contrast >= minimum_contrast_sigma else None)
 
     trusted_indexes = [index for index, measurement in enumerate(measurements) if measurement is not None]

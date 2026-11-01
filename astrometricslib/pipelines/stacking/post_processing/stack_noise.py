@@ -124,6 +124,7 @@ from astropy.wcs import WCS
 from scipy.spatial import cKDTree
 
 from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
+from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_data, read_header
 from astrometricslib.models.camera_profile import ProvenanceKind
 from astrometricslib.pipelines.shared.applied_camera_profile import camera_name_from_header
@@ -640,7 +641,7 @@ def _frame_lines_up(frame_path: str, stack_plane: np.ndarray, crop_offset: tuple
     return enough_stars and matches >= WCS_CHECK_MINIMUM_MATCHES
 
 
-def _plate_solve_stack_wcs(stack_path: str) -> tuple[WCS | None, str]:
+def _plate_solve_stack_wcs(stack_path: str, drivers: Drivers | None = None) -> tuple[WCS | None, str]:
     """Plate-solve the stack itself, in memory, as the last source.
 
     This runs the astrometry step's own solver path (`AstrometryPipeline`): the
@@ -656,6 +657,10 @@ def _plate_solve_stack_wcs(stack_path: str) -> tuple[WCS | None, str]:
     ----------
     stack_path : `str`
         The finished stack.
+    drivers : `Drivers`, optional
+        The outside services the caller chose. A plate solve of the stack
+        uses its plate solver and SIMBAD driver. Any left out is the
+        built-in one.
 
     Returns
     -------
@@ -669,7 +674,7 @@ def _plate_solve_stack_wcs(stack_path: str) -> tuple[WCS | None, str]:
     from astrometricslib.pipelines.astrometry.pipeline import AstrometryPipeline
 
     try:
-        context = AstrometryPipeline().process(stack_path, attempt_plate_solving=True)
+        context = AstrometryPipeline(drivers=drivers).process(stack_path, attempt_plate_solving=True)
     except (
         PlateSolveFailedError,
         RuntimeError,
@@ -1172,6 +1177,7 @@ def measure_stack_noise(
     depth: StackDepth | None = None,
     covered_mask: np.ndarray | None = None,
     member_frame_paths: Sequence[str] = (),
+    drivers: Drivers | None = None,
 ) -> StackNoiseOutcome:
     """Measure a stack's noise in the target's fixed empty apertures.
 
@@ -1210,6 +1216,10 @@ def measure_stack_noise(
         when the stack has no solution and no reference frame is named: the
         first one that lines up with the stack gives the solution (see
         `_member_frame_wcs`), and the result's ``wcs_source`` says so.
+    drivers : `Drivers`, optional
+        The outside services the caller chose. A plate solve of the stack
+        uses its plate solver and SIMBAD driver. Any left out is the
+        built-in one.
 
     Returns
     -------
@@ -1234,6 +1244,7 @@ def measure_stack_noise(
         depth,
         covered_mask=covered_mask,
         member_frame_paths=member_frame_paths,
+        drivers=drivers,
     )
     return replace(outcome, stack_sky_level=sky_level_of_plane(plane))
 
@@ -1336,15 +1347,18 @@ class _StackPlateSolve:
     needs it, and never twice for one stack.
     """
 
-    def __init__(self, stack_path: str) -> None:
+    def __init__(self, stack_path: str, drivers: Drivers | None = None) -> None:
         """Remember which stack to solve.
 
         Parameters
         ----------
         stack_path : `str`
             The finished stack.
+        drivers : `Drivers`, optional
+            The outside services the caller chose, for the solve.
         """
         self._stack_path = stack_path
+        self._drivers = drivers
         self._answer: tuple[WCS | None, str] | None = None
 
     def solve(self) -> tuple[WCS | None, str]:
@@ -1358,7 +1372,7 @@ class _StackPlateSolve:
             Why there is none. Empty when there is one.
         """
         if self._answer is None:
-            self._answer = _plate_solve_stack_wcs(self._stack_path)
+            self._answer = _plate_solve_stack_wcs(self._stack_path, self._drivers)
         return self._answer
 
 
@@ -1949,6 +1963,7 @@ def measure_noise_in_plane(
     covered_mask: np.ndarray | None = None,
     member_frame_paths: Sequence[str] = (),
     target_sky_deg: tuple[float, float] | None = None,
+    drivers: Drivers | None = None,
 ) -> StackNoiseOutcome:
     """Measure a stack's noise in the target's fixed apertures on its plane.
 
@@ -1991,6 +2006,10 @@ def measure_noise_in_plane(
     target_sky_deg : `tuple` [`float`, `float`], optional
         The target's (RA, Dec) in degrees. Used only for a difference image,
         to give the target's pixel position on the stack.
+    drivers : `Drivers`, optional
+        The outside services the caller chose. A plate solve of the stack
+        uses its plate solver and SIMBAD driver. Any left out is the
+        built-in one.
 
     Returns
     -------
@@ -2001,7 +2020,7 @@ def measure_noise_in_plane(
     if covered_mask is not None:
         window = _covered_window(covered_mask, plane.shape, crop_offset)
     stack_header = read_header(stack_path)
-    plate_solve = _StackPlateSolve(stack_path)
+    plate_solve = _StackPlateSolve(stack_path, drivers)
     choice = _choose_wcs(
         plane, stack_header, reference_frame_path, member_frame_paths, crop_offset, plate_solve
     )

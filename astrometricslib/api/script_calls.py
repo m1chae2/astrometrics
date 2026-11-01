@@ -281,7 +281,7 @@ def tune_spectroscopy_calibration(
         SpectroscopyCalibrationTuner,
     )
 
-    tuner = SpectroscopyCalibrationTuner(config=pipelines._config)
+    tuner = SpectroscopyCalibrationTuner(config=pipelines._config, drivers=pipelines._drivers)
     star_position = (star_x, star_y) if (star_x is not None and star_y is not None) else None
     summary = tuner.tune_calibration(image_path, camera_name=camera_id, star_pos=star_position)
     maximum_length = summary["max_extraction_length_px"]

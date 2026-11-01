@@ -956,6 +956,7 @@ def _stack_and_measure(
                 outcome.crop_offset,
                 apertures_path,
                 may_choose_apertures=False,
+                drivers=drivers,
             )
         else:
             noise = StackNoiseOutcome(None, apertures_reason)

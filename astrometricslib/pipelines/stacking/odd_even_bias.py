@@ -678,10 +678,20 @@ def _one_repeat(
     measurement.stack_weight = stacked["odd"].stack_weight
     say(f"Repeat {repeat + 1}: measuring")
     difference = measure_difference_noise(
-        stacked["odd"].stack_path, stacked["even"].stack_path, shared, apertures_path, bias=1.0
+        stacked["odd"].stack_path,
+        stacked["even"].stack_path,
+        shared,
+        apertures_path,
+        bias=1.0,
+        drivers=half_stacks.drivers,
     )
     whole = measure_stack_noise(
-        stacked["full"].stack_path, shared, apertures_path, (0, 0), may_choose_apertures=False
+        stacked["full"].stack_path,
+        shared,
+        apertures_path,
+        (0, 0),
+        may_choose_apertures=False,
+        drivers=half_stacks.drivers,
     )
     if difference.result is None or whole.result is None:
         raise NotFoundError(

@@ -404,6 +404,96 @@ def test_processing_stack_uses_the_injected_stacking_driver(tmp_path: Path) -> N
     assert result.stacked_path == stacker.output_path
 
 
+def record_pipeline_drivers(monkeypatch: pytest.MonkeyPatch, pipeline_class: type) -> list[Drivers | None]:
+    """Record the `drivers` each new pipeline of a class is built with.
+
+    Parameters
+    ----------
+    monkeypatch : `pytest.MonkeyPatch`
+        The test's patcher, which puts the constructor back afterwards.
+    pipeline_class : `type`
+        `AstrometryPipeline` or `SpectroscopyPipeline`.
+
+    Returns
+    -------
+    seen : `list` [`Drivers` or `None`]
+        Filled in as pipelines are built; one entry per pipeline.
+    """
+    seen: list[Drivers | None] = []
+    original_init = pipeline_class.__init__
+
+    def recording_init(self: Any, *arguments: Any, **keywords: Any) -> None:
+        """Note the drivers, then build the pipeline as usual."""
+        seen.append(keywords.get("drivers"))
+        original_init(self, *arguments, **keywords)
+
+    monkeypatch.setattr(pipeline_class, "__init__", recording_init)
+    return seen
+
+
+def test_the_spectroscopy_helpers_pass_the_drivers_on(
+    monkeypatch: pytest.MonkeyPatch, field_image: str
+) -> None:
+    """The tuner and the spectral frame check pass their drivers on.
+
+    The tuner builds an astrometry pipeline to find the star, and the
+    dispersion geometry reader builds a spectroscopy pipeline. Each must be
+    built with the caller's `Drivers`, not a fresh built-in set.
+    """
+    from astrometricslib.pipelines.astrometry.pipeline import AstrometryPipeline
+    from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline
+    from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_frame_check import (
+        load_dispersion_geometry,
+    )
+    from astrometricslib.pipelines.spectroscopy.utilities.calibration_tuner import (
+        SpectroscopyCalibrationTuner,
+    )
+
+    drivers = Drivers(plate_solve=FakePlateSolver(), simbad=FakeSimbad())
+    astrometry_seen = record_pipeline_drivers(monkeypatch, AstrometryPipeline)
+    spectroscopy_seen = record_pipeline_drivers(monkeypatch, SpectroscopyPipeline)
+
+    tuner = SpectroscopyCalibrationTuner(AppConfiguration(), drivers=drivers)
+    star_x, star_y = tuner._resolve_calibration_star_position(field_image, None)
+    load_dispersion_geometry("ZWO ASI 533MM Pro", drivers)
+
+    assert astrometry_seen == [drivers]
+    assert spectroscopy_seen == [drivers]
+    assert any(abs(star_x - x) < 3 and abs(star_y - y) < 3 for x, y in STAR_PIXELS)
+
+
+def test_the_stack_noise_plate_solve_uses_the_injected_solver(field_image: str) -> None:
+    """Solving a stack for its noise uses the fake solver and SIMBAD."""
+    from astrometricslib.pipelines.stacking.post_processing import stack_noise
+
+    # The fixture `no_stack_plate_solve` replaces the function; the real
+    # one is kept on it.
+    real_solve = stack_noise._plate_solve_stack_wcs.real_function  # type: ignore[attr-defined]
+    solver, simbad = FakePlateSolver(), FakeSimbad()
+
+    wcs, reason = real_solve(field_image, Drivers(plate_solve=solver, simbad=simbad))
+
+    assert reason == ""
+    assert len(solver.calls) == 1
+    assert wcs is not None
+    assert wcs.wcs.crval[1] == pytest.approx(FIELD_DEC_DEG)
+
+
+def test_group_derotation_passes_the_drivers_to_the_trail_measurement(
+    monkeypatch: pytest.MonkeyPatch, field_image: str
+) -> None:
+    """Measuring a group's trail tilt builds its pipeline with the drivers."""
+    from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline
+    from astrometricslib.pipelines.stacking.processing.group_derotation import measure_trail_angle_degrees
+
+    drivers = Drivers(plate_solve=FakePlateSolver())
+    seen = record_pipeline_drivers(monkeypatch, SpectroscopyPipeline)
+
+    measure_trail_angle_degrees(field_image, (40.0, 50.0), "ZWO ASI 533MM Pro", drivers)
+
+    assert seen == [drivers]
+
+
 def test_defaults_build_the_real_drivers() -> None:
     """With no drivers given, the built-in drivers are the ones built."""
     from astrometricslib._internal.drivers.astrometry_net_driver import AstrometryNetPlateSolveDriver

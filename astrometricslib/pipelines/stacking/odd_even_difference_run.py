@@ -1431,6 +1431,7 @@ def _measure_difference(
             first_plane=odd_plane,
             second_plane=even_plane,
             target_sky_deg=_target_sky_degrees(target),
+            drivers=half_stacks.drivers,
         )
     except Exception as error:  # a measurement failure is stored as a reason, never raised
         logger.exception("The noise of the odd–even difference of %s could not be measured", target.id)

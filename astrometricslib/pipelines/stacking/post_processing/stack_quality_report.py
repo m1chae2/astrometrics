@@ -19,6 +19,7 @@ import os
 from collections.abc import Collection
 from typing import Literal
 
+from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.foundation.errors import NotFoundError
 from astrometricslib.models.quality.quality_reports import RegistrationRow, StackQualityReport, StackSummary
 from astrometricslib.models.target import Target
@@ -67,6 +68,7 @@ def stack_quality_report(
     include: Collection[str],
     compare_to: str | None,
     is_spectral: bool = False,
+    drivers: Drivers | None = None,
 ) -> StackQualityReport:
     """Measure a stack and, if asked, compare it with another stack.
 
@@ -85,6 +87,9 @@ def stack_quality_report(
     is_spectral : `bool`, optional
         Whether the stack is a spectral stack. Its noise in empty sky is then
         reported as not measured.
+    drivers : `Drivers`, optional
+        The outside services the caller chose, for any plate solve of the
+        stack. Any left out is the built-in one.
 
     Returns
     -------
@@ -130,11 +135,11 @@ def stack_quality_report(
         if previous is None:
             notes.append("No previous stack is kept, so there is nothing to compare with.")
         else:
-            report.comparison = compare_stacks(previous, stack_path, is_spectral=is_spectral)
+            report.comparison = compare_stacks(previous, stack_path, is_spectral=is_spectral, drivers=drivers)
     elif compare_to:
         if not os.path.isfile(compare_to):
             raise NotFoundError(f"There is no stack file at {compare_to}.", details={"path": compare_to})
-        report.comparison = compare_stacks(compare_to, stack_path, is_spectral=is_spectral)
+        report.comparison = compare_stacks(compare_to, stack_path, is_spectral=is_spectral, drivers=drivers)
     report.notes = notes
     return report
 

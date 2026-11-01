@@ -32,6 +32,7 @@ from astrometricslib._internal.drivers.calibration_library import (
     FLAT_BIAS_FRAME_PATHS_KEY,
     FLAT_FRAME_PATHS_KEY,
 )
+from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib._internal.drivers.interfaces.stacking_driver import (
     PipelineSteps,
@@ -82,6 +83,7 @@ def run_stack(
     log_file: str | None,
     is_spectral: bool,
     job_id: str | None = None,
+    drivers: Drivers | None = None,
     **stack_options: Any,
 ) -> tuple[str | None, dict[str, Any]]:
     """Stack frames with Siril, one exposure length at a time if they differ.
@@ -108,6 +110,10 @@ def run_stack(
     job_id : `str`, optional
         The tracked job the stack belongs to, passed to the engine so it can
         report progress.
+    drivers : `Drivers`, optional
+        The outside services the caller chose. Used where stacking measures
+        spectra, such as lining up exposure groups. The stacking program is
+        `engine`, not ``drivers.stacking``.
     **stack_options
         The fields of `StackSettings` (``rejection_sigma``,
         ``filter_wfwhm``, ``filter_round``, ``stack_weight`` and
@@ -141,7 +147,15 @@ def run_stack(
         groups = split_groups_by_night(groups)
     if len(groups) > 1:
         stacked_path, diagnostics = _stack_exposure_groups(
-            engine, groups, target_id, output_file, log_file, is_spectral, job_id=job_id, **stack_options
+            engine,
+            groups,
+            target_id,
+            output_file,
+            log_file,
+            is_spectral,
+            job_id=job_id,
+            drivers=drivers,
+            **stack_options,
         )
     else:
         stacked_path, diagnostics = _stack_one_batch(
@@ -622,6 +636,7 @@ def _stack_exposure_groups(
     log_file: str | None,
     is_spectral: bool,
     job_id: str | None = None,
+    drivers: Drivers | None = None,
     **stack_options: Any,
 ) -> tuple[str | None, dict[str, Any]]:
     """Stack each exposure group on its own and combine the results.
@@ -638,6 +653,9 @@ def _stack_exposure_groups(
     sky is more than `SKY_RATIO_LIMIT` times brighter than the reference's.
     Its entry in ``"exposure_group_summaries"`` records the ratios and the
     reason.
+
+    ``drivers`` is the outside services the caller chose, passed to the
+    trail measurements that line spectral groups up.
 
     The work runs in phases, each in its own function, and each group's data
     travels in one `GroupResult`: stack each group (`_stack_each_group`),
@@ -668,7 +686,7 @@ def _stack_exposure_groups(
     )
     if not results:
         return None, {}
-    measurements = _measure_group_stacks(engine, results, target_id, is_spectral)
+    measurements = _measure_group_stacks(engine, results, target_id, is_spectral, drivers)
     _align_and_screen_groups(results, measurements, target_id, is_spectral)
     final_path, combination, stacked_fwhm = _write_combined_stack(
         results, measurements, output_file, is_spectral
@@ -771,7 +789,11 @@ def _stack_each_group(
 
 
 def _measure_group_stacks(
-    engine: StackingDriver, results: list[GroupResult], target_id: str, is_spectral: bool
+    engine: StackingDriver,
+    results: list[GroupResult],
+    target_id: str,
+    is_spectral: bool,
+    drivers: Drivers | None = None,
 ) -> _GroupStackMeasurements:
     """Read the group stacks and measure the raw frames behind them.
 
@@ -790,6 +812,8 @@ def _measure_group_stacks(
         The target's name, for the log.
     is_spectral : `bool`
         Whether the frames are spectral.
+    drivers : `Drivers`, optional
+        The outside services the caller chose, for the trail measurements.
 
     Returns
     -------
@@ -834,7 +858,10 @@ def _measure_group_stacks(
     )
     if is_spectral and len(results) > 1 and camera_name:
         derotated, trail_angles = derotate_groups_to_common_tilt(
-            [result.image for result in results], [result.path for result in results], camera_name
+            [result.image for result in results],
+            [result.path for result in results],
+            camera_name,
+            drivers=drivers,
         )
         for result, image in zip(results, derotated, strict=True):
             result.image = image

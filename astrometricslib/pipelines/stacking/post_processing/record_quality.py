@@ -33,6 +33,7 @@ from typing import Any, NamedTuple
 import numpy as np
 
 from astrometricslib._internal.drivers.calibration_library import BIAS_FRAME_PATHS_KEY, FLAT_FRAME_PATHS_KEY
+from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.models.quality.gate_result import GateResult
 from astrometricslib.models.quality.limit import LimitTier, QualityLimit
 from astrometricslib.models.quality.measurement import (
@@ -1191,6 +1192,7 @@ def measure_noise_safely(
     depth: StackDepth | None = None,
     covered_mask: np.ndarray | None = None,
     member_frame_paths: Sequence[str] = (),
+    drivers: Drivers | None = None,
 ) -> StackNoiseOutcome:
     """Measure the stack's empty-aperture noise, never raising.
 
@@ -1223,6 +1225,9 @@ def measure_noise_safely(
         For a group stack with no named reference frame, frames of the group it
         was lined up with, which give the coordinate solution instead (see
         `stack_noise.measure_stack_noise`).
+    drivers : `Drivers`, optional
+        The outside services the caller chose, for any plate solve of the
+        stack. Any left out is the built-in one.
 
     Returns
     -------
@@ -1245,6 +1250,7 @@ def measure_noise_safely(
             depth=depth,
             covered_mask=covered_mask,
             member_frame_paths=member_frame_paths,
+            drivers=drivers,
         )
     except Exception as error:  # the noise is a by-product: no failure here may fail the stack
         logger.exception("The noise of the stack %s could not be measured", stack_path)
@@ -1319,6 +1325,7 @@ def record_stacking_quality(
     crop_offset: tuple[int, int] = (0, 0),
     *,
     config: object = None,
+    drivers: Drivers | None = None,
 ) -> int:
     """Measure the stack's noise and members, then store every measurement.
 
@@ -1342,6 +1349,9 @@ def record_stacking_quality(
         The (columns, rows) trimmed from the stack's left and top edges.
     config : `AppConfiguration`, optional
         Where the quality store lives. The process-wide one if omitted.
+    drivers : `Drivers`, optional
+        The outside services the caller chose, for any plate solve of the
+        stack. Any left out is the built-in one.
 
     Returns
     -------
@@ -1368,6 +1378,7 @@ def record_stacking_quality(
             depth=stack_depth_of(membership),
             covered_mask=diagnostics.get("covered_in_every_group"),
             member_frame_paths=reference_group_frame_paths(diagnostics),
+            drivers=drivers,
         )
         if noise.result is not None:
             # The library stack's sums, kept for the leave-one-night-out

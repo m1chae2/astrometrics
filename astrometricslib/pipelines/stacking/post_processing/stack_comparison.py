@@ -32,6 +32,7 @@ import warnings
 import numpy as np
 from skimage.registration import phase_cross_correlation
 
+from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_data
 from astrometricslib.foundation.errors import ProcessingError
 from astrometricslib.models.quality.stack_comparison import StackComparison, StackMeasurements
@@ -314,7 +315,7 @@ def measure_stack_array(data: np.ndarray, path: str = "") -> StackMeasurements:
 
 
 def measure_empty_aperture_noise(
-    stack_path: str, apertures_path: str, is_spectral: bool = False
+    stack_path: str, apertures_path: str, is_spectral: bool = False, drivers: Drivers | None = None
 ) -> tuple[StackNoiseOutcome, list[str]]:
     """Measure a stack's noise in the target's stored empty apertures.
 
@@ -334,6 +335,9 @@ def measure_empty_aperture_noise(
         The target's stored apertures.
     is_spectral : `bool`, optional
         Whether the stack is spectral (its noise is not measured).
+    drivers : `Drivers`, optional
+        The outside services the caller chose, for any plate solve of the
+        stack. Any left out is the built-in one.
 
     Returns
     -------
@@ -385,7 +389,10 @@ def measure_empty_aperture_noise(
 
 
 def measure_stack(
-    path: str, apertures_path: str | None = None, is_spectral: bool = False
+    path: str,
+    apertures_path: str | None = None,
+    is_spectral: bool = False,
+    drivers: Drivers | None = None,
 ) -> StackMeasurements:
     """Measure one stacked image on disk, including its noise in empty sky.
 
@@ -397,6 +404,9 @@ def measure_stack(
         The target's stored apertures. Left out, the file beside the stack.
     is_spectral : `bool`, optional
         Whether the stack is spectral.
+    drivers : `Drivers`, optional
+        The outside services the caller chose, for any plate solve of the
+        stack. Any left out is the built-in one.
 
     Returns
     -------
@@ -410,7 +420,7 @@ def measure_stack(
         return StackMeasurements(path=path, not_measured={"all": f"the stack could not be measured: {error}"})
     if apertures_path is None:
         apertures_path = os.path.join(os.path.dirname(path), APERTURE_FILE_NAME)
-    outcome, notes = measure_empty_aperture_noise(path, apertures_path, is_spectral)
+    outcome, notes = measure_empty_aperture_noise(path, apertures_path, is_spectral, drivers)
     measurements.notes = notes
     if outcome.result is not None:
         measurements.normalized_noise = outcome.result.normalized_noise
@@ -518,7 +528,11 @@ def compare_measurements(before: StackMeasurements, after: StackMeasurements) ->
 
 
 def compare_stacks(
-    before_path: str, after_path: str, apertures_path: str | None = None, is_spectral: bool = False
+    before_path: str,
+    after_path: str,
+    apertures_path: str | None = None,
+    is_spectral: bool = False,
+    drivers: Drivers | None = None,
 ) -> StackComparison:
     """Measure two stacks on disk and compare them.
 
@@ -536,6 +550,9 @@ def compare_stacks(
         newer stack.
     is_spectral : `bool`, optional
         Whether the stacks are spectral.
+    drivers : `Drivers`, optional
+        The outside services the caller chose, for any plate solve of the
+        stack. Any left out is the built-in one.
 
     Returns
     -------
@@ -545,6 +562,6 @@ def compare_stacks(
     if apertures_path is None:
         apertures_path = os.path.join(os.path.dirname(after_path), APERTURE_FILE_NAME)
     return compare_measurements(
-        measure_stack(before_path, apertures_path, is_spectral),
-        measure_stack(after_path, apertures_path, is_spectral),
+        measure_stack(before_path, apertures_path, is_spectral, drivers),
+        measure_stack(after_path, apertures_path, is_spectral, drivers),
     )

@@ -286,6 +286,7 @@ def stack_frame_subset(
         log_file,
         is_spectral,
         job_id=job_id,
+        drivers=drivers,
         stack_weight=stack_weight,
         **({} if reference_frame_path is None else {"reference_frame_path": reference_frame_path}),
     )

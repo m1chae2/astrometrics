@@ -192,13 +192,15 @@ def no_stack_plate_solve(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     from astrometricslib.pipelines.stacking.post_processing import stack_noise
 
-    def failed_solve(stack_path: str) -> tuple[None, str]:
+    def failed_solve(stack_path: str, drivers: object = None) -> tuple[None, str]:
         """Give the answer of a solve that was not run.
 
         Parameters
         ----------
         stack_path : `str`
             The stack that would have been solved (unused).
+        drivers : `Drivers`, optional
+            The caller's drivers (unused).
 
         Returns
         -------

@@ -27,6 +27,7 @@ from typing import NamedTuple
 
 import numpy as np
 
+from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.pipelines.stacking.post_processing.aperture_placement import MINIMUM_USABLE_APERTURES
 from astrometricslib.pipelines.stacking.post_processing.empty_apertures import ApertureSetMismatchError
 from astrometricslib.pipelines.stacking.post_processing.stack_image import (
@@ -95,6 +96,7 @@ def measure_difference_noise(
     second_plane: np.ndarray | None = None,
     target_sky_deg: tuple[float, float] | None = None,
     bias: float = ODD_EVEN_DIFFERENCE_NOISE_BIAS,
+    drivers: Drivers | None = None,
 ) -> StackNoiseOutcome:
     """Measure the noise of the difference of two stacks in empty sky.
 
@@ -133,6 +135,10 @@ def measure_difference_noise(
         and their uncertainties are divided by it. The bias measurement itself
         passes 1 to see the uncorrected noise. The per-aperture sums are never
         corrected.
+    drivers : `Drivers`, optional
+        The outside services the caller chose. A plate solve of the stack
+        uses its plate solver and SIMBAD driver. Any left out is the
+        built-in one.
 
     Returns
     -------
@@ -168,6 +174,7 @@ def measure_difference_noise(
         None,
         subtracted_plane=second_plane,
         target_sky_deg=target_sky_deg,
+        drivers=drivers,
     )
     if outcome.result is not None and not math.isclose(bias, 1.0):
         result = outcome.result

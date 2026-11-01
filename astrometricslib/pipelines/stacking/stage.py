@@ -488,6 +488,7 @@ def _run_stacking_engine(run: StackRun) -> None:
             run.log_file,
             run.has_spectral,
             job_id=run.job_id,
+            drivers=run.drivers,
             rejection_sigma=run.rejection_sigma,
             filter_wfwhm=run.filter_wfwhm,
             filter_round=run.filter_round,
@@ -733,6 +734,7 @@ def _store_stack_quality(run: StackRun, stacked_path: str, summary: StackQuality
         run.job_id,
         run.measured_at,
         run.quality_recording,
+        run.drivers,
     )
 
 
@@ -826,6 +828,7 @@ def _record_stack_quality(
     job_id: str | None,
     measured_at: datetime | None,
     quality_recording: FrameQualityRecording | None,
+    drivers: Drivers | None = None,
 ) -> None:
     """Store the finished stack's quality measurements.
 
@@ -855,6 +858,9 @@ def _record_stack_quality(
         When the stack started, with a time zone, from the caller.
     quality_recording : `FrameQualityRecording` or `None`
         The caller's configuration, which says where the quality store lives.
+    drivers : `Drivers`, optional
+        The outside services the caller chose, for any plate solve of the
+        stack.
     """
     from astrometricslib.models.quality.quality_summary import STACKING_PIPELINE_VERSION
     from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
@@ -880,6 +886,7 @@ def _record_stack_quality(
         stack_weight,
         crop_offset,
         config=None if quality_recording is None else quality_recording.configuration,
+        drivers=drivers,
     )
 
 

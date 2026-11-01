@@ -46,19 +46,14 @@ KNOWN_DRIVER_CONSTRUCTION_SITES = frozenset({
 # Pipeline modules that still build `SpectroscopyPipeline` or
 # `AstrometryPipeline` without `drivers=`, as "path ClassName". Each falls
 # back to the built-in drivers, so a caller's replacements do not reach it.
-# Issue #83 fixed
-# photometry only; these are spectroscopy and stacking helpers that need a
-# `drivers` argument threaded through their callers. Remove an entry when
-# its call passes `drivers`; the list may only shrink.
+# The list may only shrink.
 KNOWN_BARE_CONSTRUCTION_SITES = frozenset({
+    # The per-frame worker runs in a spawned worker process
+    # (`utilities/parallel_batch.py`). Its arguments are pickled, and a
+    # caller's driver (a fake, or a client holding a connection) need not
+    # survive that, so the worker cannot be handed `Drivers`. The session's
+    # star identification, which runs in the calling process, does get them.
     "spectroscopy/batch.py SpectroscopyPipeline",
-    "spectroscopy/frame_analysis.py AstrometryPipeline",
-    "spectroscopy/frame_analysis.py SpectroscopyPipeline",
-    "spectroscopy/pre_processing/spectral_frame_check.py SpectroscopyPipeline",
-    "spectroscopy/utilities/calibration_tuner.py AstrometryPipeline",
-    "spectroscopy/utilities/calibration_tuner.py SpectroscopyPipeline",
-    "stacking/post_processing/stack_noise.py AstrometryPipeline",
-    "stacking/processing/group_derotation.py SpectroscopyPipeline",
 })
 
 

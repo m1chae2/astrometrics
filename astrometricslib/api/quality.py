@@ -21,6 +21,7 @@ from typing import Any, Literal
 from pydantic import ValidationError
 
 from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAccess
+from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.jobs.runner import background_job, registered_job
@@ -123,6 +124,9 @@ class QualityRecords:
         Gives the calibration library, when `record_frame_measurements`
         needs the bias frames. The library is built only when it is asked
         for.
+    drivers : `Drivers`, optional
+        The outside services the caller chose, for the checks that plate-solve
+        or measure spectra. Any left out is the built-in one.
     """
 
     def __init__(
@@ -132,7 +136,9 @@ class QualityRecords:
         *,
         targets: TargetLookup | None = None,
         calibration_library: Callable[[], Any] | None = None,
+        drivers: Drivers | None = None,
     ) -> None:
+        self._drivers = drivers
         self._config = config
         self._storage = storage
         self._targets = targets
@@ -686,7 +692,12 @@ class QualityRecords:
                 )
 
                 return check_spectral_frames(
-                    resolved, selection, exposure_seconds, predict_exposure_seconds, limit
+                    resolved,
+                    selection,
+                    exposure_seconds,
+                    predict_exposure_seconds,
+                    limit,
+                    drivers=self._drivers,
                 )
             if kind == "raw_check":
                 report = frame_quality_report.raw_check_report(
@@ -844,7 +855,9 @@ class QualityRecords:
             resolved = resolve_target(self._targets, path_or_target)
             stack_path, target_id = stack_path_of(resolved, kind), resolved.id
         with registered_job(enabled=register_job, job_type="diagnostics", target_id=target_id or stack_path):
-            return stack_quality_report(stack_path, target_id, sections, compare_to, kind == "spectral")
+            return stack_quality_report(
+                stack_path, target_id, sections, compare_to, kind == "spectral", self._drivers
+            )
 
     @background_job("quality", grace_period_seconds=20.0)
     def record_frame_measurements(

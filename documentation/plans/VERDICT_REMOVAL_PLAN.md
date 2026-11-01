@@ -64,15 +64,15 @@ Each frame's quality is stored in `FrameMeasurements` and in the measurement tab
 
 The stack review screens read `outputMetrics.result` (`ui/common/services/imaging/stackReviewService.ts`).
 
-- **A (recommended): keep the column, and drop only the repeated quality values from what a job stores.**
-- B: retire it, and give the review screens a new read.
+**Decided by the user, 2026-11-01:** keep the column and drop only the repeated quality values, because preview remake and stack comparison results exist nowhere else.
 
 ### D7. Typed stage results
 
 `ProcessTargetResult.results` is `dict[str, Any]`, which breaks the rule that a call returns a model. Typing it is the largest gain for script users, and it touches every stage's result.
 
-- **A (recommended): build it, as the last phase, after the verdict fields are gone.**
-- B: record it as declined with the reason.
+**Decided by the user, 2026-11-01:** declined. It would change every stage's return value and every caller, and the user is driving complexity down. `process_target` stays a known exception to the rule that a call returns a model.
+
+**Guiding principle (user, 2026-11-01):** drive complexity down, and keep every interpretation of good or bad in wayfindinglib.
 
 ## 3. Phases
 
@@ -121,7 +121,7 @@ Issue #97's note that `starDisplayFormat.ts` is the only desktop-app reader is o
 1. Add the static notebook import check beside `check_notebook_outputs.py`.
 2. Notebook edits: `targets.create`, drop the manual path filter, one filter spelling, the corrected text in notebooks 01, 03 and 09.
 3. A linked read for a star's spectrum in place of the `::spectroscopy` id, and a short read for a target's stars.
-4. Typed stage results (D7).
+4. Typed stage results: declined (D7).
 5. Finish generated-only API pages. Issue #97's items need rewriting first: they name the dropped `astrometricslib.api` tier, and the pages now have a "Result fields" section and hand-written text this work should check.
 6. Re-run every changed notebook with `build/linux/execute_notebooks.sh`, on a separate empty library.
 

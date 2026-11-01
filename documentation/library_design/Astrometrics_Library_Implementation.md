@@ -12,7 +12,7 @@ The [glossary](../Glossary.md) defines the terms; this document defines each at 
 
 **Statement of need.** Theory is in [Astrometrics_Library_Architecture.md](Astrometrics_Library_Architecture.md). Evidence is in the [validation register](validation/index.md). Module paths are relative to `astrometricslib/`; the [review guides](pipelines/index.md) give stage detail.
 
-The supported entry point is the package root (`from astrometricslib import Astrometrics`). It re-exports the `api/` facade, driver interfaces (Section 4.7), job framework (Section 4.9) and error types. The package builds on Astropy [1]; `wayfindinglib`, the backend and the MCP servers [2] use it.
+The supported entry point is the package root (`from astrometricslib import Astrometrics`). Besides 16 root names, `exceptions.py`, `reports.py`, `jobs.py` and `drivers/` are public. The package builds on Astropy [1]; `wayfindinglib`, the backend and the MCP servers [2] use it.
 
 ## 2. Package layering
 
@@ -22,11 +22,11 @@ Each layer may import only from the layers below it; the Appendix A ratchet test
 
 | Layer | Holds | Calls into | Key modules |
 | --- | --- | --- | --- |
-| 1. Public API | The `Astrometrics` facade and the root exports | Layers 2 to 5 | `api/`, `astrometricslib/__init__.py` |
+| 1. Public API | The `Astrometrics` facade and the public modules | Layers 2 to 5 | `api/`, `__init__.py`, `exceptions.py`, `reports.py`, `jobs.py`, `drivers/` |
 | 2. Pipeline runners | Stage dispatcher; batch runner | Layer 3 | `pipelines/tasks.py`, `pipelines/target_batch.py` |
 | 3. Pipelines | Stacking, astrometry, photometry, spectroscopy, asteroid detection | Layers 4 to 6; sideways between pipelines | `pipelines/<name>/` |
 | 4. Shared pipeline code | Frame scanning, target records, image conversion, quality primitives, run recording | Layers 5 and 6 | `pipelines/shared/`, `pipelines/pipeline_base.py` |
-| 5. Drivers | External tool wrappers, FITS access, SQLite stores | Layer 6 | `drivers/` |
+| 5. Drivers | External tool wrappers, FITS access, SQLite stores | Layer 6 | `_internal/drivers/` |
 | 6. Shared vocabulary | Models, configuration, logging, jobs, storage | No layer | `models/`, `foundation/`, `utilities/` |
 
 `visualization/` sits outside the layers.
@@ -50,7 +50,7 @@ Pydantic classes in `models/` hold fields and validation only. Table 2 maps Arch
 | Camera profile (§2.3) | `CameraProfile` (schema 2), `SensorSettingNoise`, `ProvenancedValue`, `AppliedCameraProfile` | `models/camera_profile.py`, `models/applied_camera_profile.py` |
 | Provenance (§2.3) | IVOA Provenance Data Model [7] classes such as `Agent` and `Entity` | `models/provenance.py` |
 
-Camera profiles: `drivers/camera_profile_store.py`, `camera_profile_migration.py`, `pipelines/shared/applied_camera_profile.py`. Provenance: `pipelines/shared/provenance_recording.py`, `drivers/provenance_store.py`. Two `CameraProfile` properties give saturation levels: `pixel_saturation_level_adu` (threshold capped at the clip ceiling) counts saturated pixels, and `usable_peak_level_adu` (also capped at the linearity limit) decides whether a star is photometric ([STK-36](validation/stacking.md#stk-36)).
+Camera profiles: `_internal/drivers/camera_profile_store.py`, `camera_profile_migration.py`, `pipelines/shared/applied_camera_profile.py`. Provenance: `pipelines/shared/provenance_recording.py`, `_internal/drivers/provenance_store.py`. Two `CameraProfile` properties give saturation levels: `pixel_saturation_level_adu` (threshold capped at the clip ceiling) counts saturated pixels, and `usable_peak_level_adu` (also capped at the linearity limit) decides whether a star is photometric ([STK-36](validation/stacking.md#stk-36)).
 
 ## 4. Pipelines
 
@@ -82,7 +82,7 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 - **Aperture size and depth (§3.4.3).** `aperture_size_noise.measure_aperture_size_noise` stores `stacking.empty_aperture_noise_size_exponent`. <!-- impl: astrometricslib.pipelines.stacking.post_processing.aperture_size_noise.measure_aperture_size_noise --> `depth_limits.measure_depth_limits` stores `stacking.point_source_depth_5sigma_mag` and `stacking.surface_brightness_limit_3sigma_10arcsec_mag_per_arcsec2`, zero point from `gaia_zero_point`. <!-- impl: astrometricslib.pipelines.stacking.post_processing.depth_limits.measure_depth_limits --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.depth_limits.gaia_zero_point --> Evidence: [STK-36](validation/stacking.md#stk-36).
 - **Frame re-measurement (§3.4).** The sky-rate, sky-noise and read-noise frame metrics are at versions 3, 3 and 2. `frames_whose_camera_profile_gap_closed` queues frames whose camera profile entry was missing and now exists. <!-- impl: astrometricslib.pipelines.stacking.frame_measurement_run.frames_whose_camera_profile_gap_closed --> Evidence: [AST-17](validation/astrometry.md#ast-17).
 - **Half-stack pattern (§3.4).** `post_processing/half_pattern.py`, called by `odd_even_difference_run._half_pattern_safely`. It adds eight rows to the difference's nine; Evidence: [STK-45](validation/stacking.md#stk-45).
-- **Flat-to-light match (§3.4).** `post_processing/flat_match.py` (`flat_match_rows`) stores ten rows. `drivers/calibration_library.py` selects flats and biases (`select_flat_frames`, `select_bias_frames`), and staging records them under `flat_frame_paths` and `bias_frame_paths`. Config key `flat_match_time_limit_seconds`. Evidence: [STK-46](validation/stacking.md#stk-46).
+- **Flat-to-light match (§3.4).** `post_processing/flat_match.py` (`flat_match_rows`) stores ten rows. `_internal/drivers/calibration_library.py` selects flats and biases (`select_flat_frames`, `select_bias_frames`), and staging records them under `flat_frame_paths` and `bias_frame_paths`. Config key `flat_match_time_limit_seconds`. Evidence: [STK-46](validation/stacking.md#stk-46).
 - **Registration step and drift (§3.4).** `post_processing/registration_shifts.py`, called by `frame_geometry_measurements`. Evidence: [STK-44](validation/stacking.md#stk-44).
 
 ### 4.2 Astrometry (Architecture §4)
@@ -143,7 +143,7 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 
 ### 4.7 Drivers and pixel-level primitives
 
-*Located in:* `astrometricslib/drivers/`
+*Located in:* `astrometricslib/_internal/drivers/`.
 
 - **Interfaces.** `interfaces/` holds `StackingDriver`, `PlateSolveDriver`, `SimbadDriver`, `GaiaXpDriver`, `ReddeningDriver` and the types that cross them. `driver_set.py` (`Drivers`) fills empty slots with the built-in drivers.
 - **Siril.** `siril_stacking_driver.py`, `siril_interface/`.
@@ -512,7 +512,7 @@ This section maps behaviors the [validation sessions](validation/index.md#6-vali
 
 - **Scripts** in `astrometricslib/scripts/`: `run_empirical_validation.py` (campaign), `run_all_target_processing.py` (batch; restack options in the scripts README), `seed_local_star_catalog.py`, `benchmark_siril_concurrency.py`, `backfill_focal_length.py`, `calibrate_class_gap_against_snr.py` (class gap table, [SPE-30](validation/spectroscopy.md#spe-30)), `backfill_variable_star_flags.py` (with `--refresh-vsx-ranges`, [PHO-19](validation/photometry.md#pho-19)).
 - **History fill.** `scripts/backfill_quality_measurements.py`; record: [Section 6.4](validation/index.md#64-history-fill-of-the-quality-store).
-- **Calibration identities.** `QualityStore.write_calibration_identities` (`drivers/quality_store.py`) stores one row per library stack, keyed by `run_id` and `subject_id`, in the side table `quality_calibration_identity` (schema version 3). The columns include `flat_masters`, `bias_masters`, `flat_bias_masters` and `dark_masters` (each a list of path, size and modification time), `siril_version` and `stacking_algorithm_version` (`STACKING_ALGORITHM_VERSION`). A second write for the same key is ignored. `QualityRecords.calibration_identities(run_ids, target_id)` and the read-only MCP tool `quality_calibration_identities` read it. The migration from version 2 only creates the table. Each library stacking run writes its record through `record_calibration_identities` (`pipelines/stacking/post_processing/calibration_record.py`), called from `record_stacking_quality`: the files are the flat, bias, flat-bias and dark frames the run staged for Siril (`FLAT_FRAME_PATHS_KEY`, `BIAS_FRAME_PATHS_KEY`, `FLAT_BIAS_FRAME_PATHS_KEY`, `DARK_FRAME_PATHS_KEY`).
+- **Calibration identities.** `QualityStore.write_calibration_identities` (`_internal/drivers/quality_store.py`) stores one row per library stack, keyed by `run_id` and `subject_id`, in the side table `quality_calibration_identity` (schema version 3). The columns include `flat_masters`, `bias_masters`, `flat_bias_masters` and `dark_masters` (each a list of path, size and modification time), `siril_version` and `stacking_algorithm_version` (`STACKING_ALGORITHM_VERSION`). A second write for the same key is ignored. `QualityRecords.calibration_identities(run_ids, target_id)` and the read-only MCP tool `quality_calibration_identities` read it. The migration from version 2 only creates the table. Each library stacking run writes its record through `record_calibration_identities` (`pipelines/stacking/post_processing/calibration_record.py`), called from `record_stacking_quality`: the files are the flat, bias, flat-bias and dark frames the run staged for Siril (`FLAT_FRAME_PATHS_KEY`, `BIAS_FRAME_PATHS_KEY`, `FLAT_BIAS_FRAME_PATHS_KEY`, `DARK_FRAME_PATHS_KEY`).
 - **Capture settings.** `CaptureSetting` rounds `pixel_scale_arcsec` to `PIXEL_SCALE_SIGNIFICANT_FIGURES` = 4 (`round_pixel_scale`). <!-- impl: astrometricslib.models.quality.capture_setting.PIXEL_SCALE_SIGNIFICANT_FIGURES --> Schema version 4 merges equal settings on first open; back up first. Design estimate ([STK-D29](validation/stacking.md#design-estimates)).
 - **Per-session photometry.** `analyze_target(pipeline_type="photometry")` runs `VariabilityAnalyzer` per `TargetSession` ([PHO-14](validation/photometry.md#pho-14)).
 - **Cross-session star matching** (Architecture §5.2, concept 6): `_match_and_merge_across_sessions` (`pipelines/photometry/batch.py`) uses `search_around_sky` (a KD-tree [10]); `sessions_missing_wcs` isolates a session without a WCS.
@@ -526,8 +526,8 @@ A ratchet is a test whose exception list may only shrink. `test_no_new_upward_im
 
 | Files | May not import |
 | --- | --- |
-| `models/`, `foundation/`, `utilities/` | `drivers`, `pipelines`, `api`, `visualization`, the package root |
-| `drivers/` | `pipelines`, `api`, `visualization`, the package root |
+| `models/`, `foundation/`, `utilities/` | `_internal/drivers`, `pipelines`, `api`, `visualization`, the package root |
+| `_internal/drivers/` | `pipelines`, `api`, `visualization`, the package root |
 | `pipelines/shared/`, `pipelines/pipeline_base.py` | any specific pipeline, `pipelines.tasks`, `pipelines.target_batch`, `api`, the package root |
 | `pipelines/<name>/` | `pipelines.tasks`, `pipelines.target_batch`, `api`, the package root |
 | `pipelines/tasks.py`, `pipelines/target_batch.py` | `api`, the package root |
@@ -536,7 +536,7 @@ Not checked: `visualization/`, `api/`, the package root, tests, and imports with
 
 Three more ratchets (a stale entry fails):
 
-- **Raw FITS access** (`KNOWN_FITS_ACCESS_SITES`). New code reads FITS through `drivers/fits_access.py` or `drivers/image.py`.
+- **Raw FITS access** (`KNOWN_FITS_ACCESS_SITES`). New code reads FITS through `_internal/drivers/fits_access.py` or `_internal/drivers/image.py`.
 - **Wall clock** (`KNOWN_WALL_CLOCK_SITES`). Nothing under `pipelines/` calls `datetime.now()` or `datetime.utcnow()`.
 - **Unseeded randomness** (`KNOWN_UNSEEDED_RANDOM_SITES`, empty). Nothing under `pipelines/` draws random numbers without a fixed seed.
 

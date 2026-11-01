@@ -12,13 +12,14 @@ Terms are defined in the [glossary](../Glossary.md) and at first use.
 
 This paper indexes the code; theory stays in [Wayfinding_Library_Architecture.md](Wayfinding_Library_Architecture.md). Module paths are relative to `wayfindinglib/` unless a path starts with another folder.
 
-The one supported entry point is the package root, which loads its names on first use, so importing it loads no hardware code. It offers `Wayfinder` with three sub-APIs, `control`, `planning` and `execution`, their models, `group_alignment_attempts` and the error class.
+The one supported entry point is the package root, which loads its names on first use, so importing it loads no hardware code. The root has 7 names: `Wayfinder` with four sub-APIs (`control`, `planning`, `execution`, `review`), their classes, and `ObservationSession` and `ObservationPackage`. `exceptions.py` and `reports.py` are public. The rest is private.
 
 <!-- impl: wayfindinglib.Wayfinder -->
 <!-- impl: wayfindinglib.api.control.control.ObservatoryControl -->
 <!-- impl: wayfindinglib.api.planning.ObservationPlanning -->
 <!-- impl: wayfindinglib.api.execution.ObservationExecution -->
-<!-- impl: wayfindinglib.analytics.alignment_sessions.group_alignment_attempts -->
+<!-- impl: wayfindinglib.api.review.ObservationReview -->
+<!-- impl: wayfindinglib.api.review.ObservationReview.query_alignment_sessions -->
 
 ## 2. System architecture
 

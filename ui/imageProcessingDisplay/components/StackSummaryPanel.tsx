@@ -228,8 +228,10 @@ export const StackSummaryPanel: React.FC<StackSummaryPanelProps> = ({
 
                 <dt>Star width (FWHM)</dt>
                 <dd>
-                    {formatStarWidth(starWidth.stack)} in the stack, against{' '}
-                    {formatStarWidth(starWidth.expected_from_inputs)} expected from the input frames
+                    {formatStarWidth(starWidth.stack)} in the stack
+                    {starWidth.expected_from_inputs != null && (
+                        <>, against {formatStarWidth(starWidth.expected_from_inputs)} expected from the input frames</>
+                    )}{' '}
                     (the input frames' median is {formatStarWidth(starWidth.median_of_inputs)}).
                     {starWidth.degraded && (
                         <span className="stack-summary__flag"> (flagged: wider than expected)</span>

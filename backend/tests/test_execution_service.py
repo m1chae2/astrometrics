@@ -1,7 +1,8 @@
 """Tests for the observing-session RPC service.
 
 These cover the path from the session RPC methods to wayfindinglib: the
-session list and session view read through `planning.get_plan`, and abort
+session list and session view read through `planning.query_plans` and
+`planning.get_plan`, and abort
 reaches `execution.abort_session`, which records the aborted session.
 """
 

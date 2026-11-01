@@ -6,7 +6,7 @@ calibration frames (`get_advisory`), lays out mosaics
 (`calculate_panels`, `create_mosaic`), writes plans (`create_sequence`,
 `create_package`, `create_session`, the queue verbs such as
 `add_to_queue`, the package verbs such as `update_package`, and
-`tick_checklist_item`) and reads them back (`get_plan`).
+`tick_checklist_item`) and reads them back (`get_plan`, `query_plans`).
 `refresh_suggestions` keeps the library's suggested observation packages up
 to date and marks finished packages complete. It also browses the library
 and online catalogs around a point in the sky and reports on the downloaded
@@ -133,17 +133,17 @@ ADVISORY_ARGUMENTS = {
 """The arguments each advisory kind uses."""
 
 PlanListKind = Literal["sessions", "packages", "suggestion_log"]
-"""What `ObservationPlanning.get_plan` lists."""
+"""What `ObservationPlanning.query_plans` lists."""
 
-GET_PLAN_ARGUMENTS = {
-    "sessions": ("session_id", "night_id", "include"),
-    "packages": ("status", "target", "include_dismissed", "pick"),
+QUERY_PLANS_ARGUMENTS = {
+    "sessions": ("include",),
+    "packages": ("status", "target", "include_dismissed"),
     "suggestion_log": ("target",),
 }
-"""The arguments each `get_plan` kind uses."""
+"""The arguments each `query_plans` kind uses."""
 
 GET_PLAN_SECTIONS = ("progress",)
-"""Optional sections `ObservationPlanning.get_plan` can add to a session."""
+"""Optional sections `get_plan` and `query_plans` can add."""
 
 DEEP_CATALOG_SECTIONS = ("estimate",)
 """Optional sections `ObservationPlanning.deep_catalog_status` can add."""
@@ -2481,115 +2481,132 @@ class ObservationPlanning:
         self,
         session_id: str | None = None,
         *,
-        kind: PlanListKind = "sessions",
-        night_id: str | None = None,
-        status: PackageStatus | str | None = None,
-        target: str | Target | None = None,
+        observing_night_id: str | None = None,
         include: list[str] | None = None,
-        include_dismissed: bool = False,
-        pick: Literal["all", "one"] = "all",
-    ) -> (
-        ObservationSession
-        | list[ObservationSessionSummary]
-        | list[ObservationPackage]
-        | list[SuggestionLogEntry]
-        | ObservationPackage
-        | None
-    ):
-        """Read recorded sessions, observation packages or the suggestion log.
+    ) -> ObservationSession | ObservationSessionWithProgress | None:
+        """Read one recorded observing session, by id or by night.
+
+        Give `session_id` or `observing_night_id`, not both. `query_plans`
+        lists sessions, packages and the suggestion log.
 
         Parameters
         ----------
         session_id : `str`, optional
-            ``kind="sessions"`` only. The session to read.
+            The session to read. `NotFoundError` is raised when no session
+            has that id.
+        observing_night_id : `str`, optional
+            The observing night, such as ``"2026-09-24"``. Gives that
+            night's session, or `None` when the night has none. A night with
+            several old sessions gives the one with the most queue entries,
+            then the newest.
+        include : `list` [`str`], optional
+            ``"progress"`` counts the frames that arrived. The session then
+            comes back as an `ObservationSessionWithProgress` (its
+            `progress` holds, for each entry, the frames requested and
+            captured, flagged and not judged, the entry being imaged now and
+            a typed run state, including "not run" for a night that passed
+            with nothing captured).
+
+        Returns
+        -------
+        session : `ObservationSession` or `ObservationSessionWithProgress`
+            The whole session, or `None` for a night with none.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If neither or both of `session_id` and `observing_night_id`
+            are given, or `include` names an unknown section.
+        """
+        sections = check_include(include, GET_PLAN_SECTIONS)
+        if (session_id is None) == (observing_night_id is None):
+            raise InvalidArgumentError("Give session_id or observing_night_id, not both and not neither.")
+        if session_id is not None:
+            session = self._session(session_id)
+        else:
+            session = self._session_for_night(_night_date(observing_night_id))
+        if session is None:
+            return None
+        session = self._with_checklist_labels(session)
+        if "progress" not in sections:
+            return session
+        return self._with_progress(session)
+
+    def get_package_for_target(self, target: str | Target) -> ObservationPackage | None:
+        """Read the package that stands for a target.
+
+        That is the target's newest planned package, else its newest
+        suggested one that is not dismissed. A complete package is never
+        picked. The target is matched ignoring case, with ``_`` read as a
+        space.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            The target, by id or as a `Target`.
+
+        Returns
+        -------
+        package : `ObservationPackage` or `None`
+            The package, or `None` when the target has none to pick.
+        """
+        return self._package_for_target(target)
+
+    def query_plans(
+        self,
+        kind: PlanListKind = "sessions",
+        *,
+        include: list[str] | None = None,
+        status: PackageStatus | str | None = None,
+        target: str | Target | None = None,
+        include_dismissed: bool = False,
+    ) -> list[ObservationSessionSummary] | list[ObservationPackage] | list[SuggestionLogEntry]:
+        """List recorded sessions, observation packages or the suggestion log.
+
+        Parameters
+        ----------
         kind : `str`, optional
-            ``"sessions"`` (default): one session when `session_id` or
-            `night_id` is given, otherwise one line per session.
-            ``"packages"``: the package library, newest first, narrowed by
-            `status` and `target`. ``"suggestion_log"``: the suggestion
-            lifecycle log (created, updated, deleted with the cause,
-            dismissed, completed), newest first, narrowed by `target`.
-        night_id : `str`, optional
-            ``kind="sessions"`` only. The observing night, such as
-            ``"2026-09-24"``. Gives that night's session, or `None` when the
-            night has none. A night with several old sessions gives the one
-            with the most queue entries, then the newest.
+            ``"sessions"`` (default): one line per session, newest night
+            first. ``"packages"``: the package library, newest first,
+            narrowed by `status` and `target`. ``"suggestion_log"``: the
+            suggestion lifecycle log (created, updated, deleted with the
+            cause, dismissed, completed), newest first, narrowed by
+            `target`.
+        include : `list` [`str`], optional
+            ``kind="sessions"`` only. ``"progress"`` gives each line's
+            `run_state`.
         status : `PackageStatus` or `str`, optional
             ``kind="packages"`` only. Keep packages with this status.
         target : `str` or `Target`, optional
             ``kind="packages"`` or ``"suggestion_log"``. Keep only this
             target.
-        include : `list` [`str`], optional
-            ``kind="sessions"`` only. ``"progress"`` counts the frames that
-            arrived. One session then comes back as an
-            `ObservationSessionWithProgress` (its `progress` holds, for each
-            entry, the frames requested and captured, flagged and not
-            judged, the entry being imaged now and a typed run state,
-            including "not run" for a night that passed with nothing
-            captured). A list of sessions then has each line's `run_state`.
         include_dismissed : `bool`, optional
             ``kind="packages"`` only. Also list suggestions the user
             dismissed. They are left out by default.
-        pick : `str`, optional
-            ``kind="packages"`` only. ``"all"`` (default) lists the packages.
-            ``"one"`` needs `target` and gives that target's package: the
-            newest planned one, else the newest suggested one that is not
-            dismissed, else `None`. Complete packages are never picked. The
-            target is matched like the list does (ignoring case, with ``_``
-            read as a space).
 
         Returns
         -------
-        plan : `ObservationSession`, `list` or `None`
-            A whole session (or `None` for a night with none), one line per
-            session newest night first, the packages newest first, or the
-            log lines newest first.
-
-        Raises
-        ------
-        InvalidArgumentError
-            If `kind`, `status` or `include` is unknown, an argument the kind
-            does not use is given, or both `session_id` and `night_id` are
-            given.
+        plans : `list`
+            The session lines, the packages or the log lines. An
+            `InvalidArgumentError` says `kind`, `status` or `include` is
+            unknown or an argument the kind does not use is given.
         """
-        check_choice("kind", kind, tuple(GET_PLAN_ARGUMENTS))
+        check_choice("kind", kind, tuple(QUERY_PLANS_ARGUMENTS))
         reject_unused_arguments(
             kind,
-            GET_PLAN_ARGUMENTS,
+            QUERY_PLANS_ARGUMENTS,
             {
-                "session_id": session_id is not None,
-                "night_id": night_id is not None,
+                "include": include is not None,
                 "status": status is not None,
                 "target": target is not None,
-                "include": include is not None,
                 "include_dismissed": include_dismissed,
-                "pick": pick != "all",
             },
         )
         sections = check_include(include, GET_PLAN_SECTIONS)
-        check_choice("pick", pick, ("all", "one"))
-        if kind == "packages" and pick == "one":
-            if target is None:
-                raise InvalidArgumentError("pick='one' needs a target.")
-            return self._package_for_target(target)
         if kind == "packages":
             return self._list_packages(status, target, include_dismissed)
         if kind == "suggestion_log":
             return self._suggestion_log(target)
-        if session_id is not None and night_id is not None:
-            raise InvalidArgumentError("Give session_id or night_id, not both.")
-        session = None
-        if session_id is not None:
-            session = self._session(session_id)
-        elif night_id is not None:
-            session = self._session_for_night(_night_date(night_id))
-        if session_id is not None or night_id is not None:
-            if session is None:
-                return None
-            session = self._with_checklist_labels(session)
-            if "progress" not in sections:
-                return session
-            return self._with_progress(session)
         reader = TargetFrameReader(self._astrometrics) if "progress" in sections else None
         summaries = []
         for recorded in self._butler.get_all("observation_session"):
@@ -2852,7 +2869,7 @@ class ObservationPlanning:
         suggestion stays hidden until its evidence changes. Every write
         checks the revision it read, so an edit made at the same time is
         never overwritten (a lost race is read again, up to three times).
-        Every change is written to the suggestion log (see `get_plan` with
+        Every change is written to the suggestion log (see `query_plans` with
         ``kind="suggestion_log"``).
 
         Parameters

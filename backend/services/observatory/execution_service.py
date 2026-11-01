@@ -2,7 +2,7 @@
 
 Description: The UI lists observing sessions, opens one, aborts one, or
 reconciles one after the night. Reading goes through
-`Wayfinder.planning.get_plan`; abort and reconcile go through
+`Wayfinder.planning.query_plans` and `get_plan`; abort and reconcile go through
 `Wayfinder.execution`, which take the session id and record the result.
 
 Several `ObservationExecution` operations take bundles of steps that
@@ -40,7 +40,7 @@ class ExecutionService:
         sessions : `list` [`ObservationSessionSummary`]
             One line per session.
         """
-        return self.wayfinder.planning.get_plan()
+        return self.wayfinder.planning.query_plans()
 
     def get_session(self, session_id: str) -> Any:
         """Return one observation session in full.

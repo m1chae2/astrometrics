@@ -3,7 +3,7 @@
 Description: The night plan is an observing session stored by the planning
 library. The app reads it with `Wayfinder.planning.get_plan`, edits it with
 the queue calls (`add_to_queue`, `reorder_queue` and the others) and ticks
-checklist items with `tick_checklist_item`. The same `get_plan` lists the
+checklist items with `tick_checklist_item`. `query_plans` lists the
 observation package library, `create_package` and `create_session` record a
 package or the night's session, and `update_package`, `reopen_package`,
 `dismiss_package` and `delete_package` change a package. This service wraps
@@ -78,6 +78,8 @@ class PlanService:
         plan : `ObservationSession` or `list` [`ObservationSessionSummary`]
             The whole session, or the list of summaries.
         """
+        if session_id is None:
+            return self.wayfinder.planning.query_plans()
         return self.wayfinder.planning.get_plan(session_id)
 
     def list_packages(
@@ -100,7 +102,7 @@ class PlanService:
         packages : `list` [`ObservationPackage`]
             The matching packages.
         """
-        return self.wayfinder.planning.get_plan(
+        return self.wayfinder.planning.query_plans(
             kind="packages", status=status, target=target, include_dismissed=include_dismissed
         )
 
@@ -119,7 +121,7 @@ class PlanService:
             The target's planned package, else its suggested package that is
             not dismissed, else `None`. The library does the choosing.
         """
-        return self.wayfinder.planning.get_plan(kind="packages", target=target, pick="one")
+        return self.wayfinder.planning.get_package_for_target(target)
 
     def current_session(self) -> Any:
         """Read tonight's session, the one session the app works with.
@@ -132,7 +134,7 @@ class PlanService:
             Reading never creates one.
         """
         return self.wayfinder.planning.get_plan(
-            night_id=observing_night_id(time.time()), include=["progress"]
+            observing_night_id=observing_night_id(time.time()), include=["progress"]
         )
 
     def refresh_suggestions(self, target_ids: list[str] | None = None) -> dict[str, Any]:

@@ -111,25 +111,25 @@ def test_the_new_methods_and_the_event_are_declared_and_served() -> None:
 def test_list_packages_passes_the_filters_through(setup: tuple[Any, _Sockets, PlanService]) -> None:
     """The package filters reach the library; a read announces nothing."""
     planning, sockets, service = setup
-    planning.get_plan.return_value = [_package()]
+    planning.query_plans.return_value = [_package()]
 
     result = service.list_packages(status="planned", target="M 81")
 
     assert result[0].id == "pkg-1"
-    planning.get_plan.assert_called_once_with(
+    planning.query_plans.assert_called_once_with(
         kind="packages", status="planned", target="M 81", include_dismissed=False
     )
     assert sockets.events == []
 
 
 def test_package_for_target_asks_the_library_to_pick_one(setup: tuple[Any, _Sockets, PlanService]) -> None:
-    """The service passes `pick="one"` and the target, and chooses nothing."""
+    """The service passes the target on and chooses nothing."""
     planning, sockets, service = setup
-    planning.get_plan.return_value = _package()
+    planning.get_package_for_target.return_value = _package()
 
     assert service.package_for_target("m_81").id == "pkg-1"
-    planning.get_plan.assert_called_once_with(kind="packages", target="m_81", pick="one")
-    planning.get_plan.return_value = None
+    planning.get_package_for_target.assert_called_once_with("m_81")
+    planning.get_package_for_target.return_value = None
     assert service.package_for_target("M 1") is None
     assert sockets.events == []
 
@@ -144,6 +144,16 @@ def test_plan_get_keeps_the_old_call_working(setup: tuple[Any, _Sockets, PlanSer
     planning.get_plan.assert_called_once_with("night-1")
 
 
+def test_plan_get_without_a_session_lists_every_session(setup: tuple[Any, _Sockets, PlanService]) -> None:
+    """A call with no session id lists the sessions."""
+    planning, _, service = setup
+    planning.query_plans.return_value = []
+
+    assert service.get_plan() == []
+
+    planning.query_plans.assert_called_once_with()
+
+
 def test_current_session_reads_tonights_night_and_creates_nothing(
     setup: tuple[Any, _Sockets, PlanService], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -156,7 +166,7 @@ def test_current_session_reads_tonights_night_and_creates_nothing(
 
     assert service.current_session() is None
 
-    planning.get_plan.assert_called_once_with(night_id="2026-10-24", include=["progress"])
+    planning.get_plan.assert_called_once_with(observing_night_id="2026-10-24", include=["progress"])
     planning.create_session.assert_not_called()
     assert sockets.events == []
 
@@ -299,11 +309,11 @@ def test_adding_a_suggested_package_to_the_queue_announces_the_promotion(
 def test_list_packages_can_include_dismissed_suggestions(setup: tuple[Any, _Sockets, PlanService]) -> None:
     """`include_dismissed` reaches the library."""
     planning, _, service = setup
-    planning.get_plan.return_value = []
+    planning.query_plans.return_value = []
 
     service.list_packages(include_dismissed=True)
 
-    planning.get_plan.assert_called_once_with(
+    planning.query_plans.assert_called_once_with(
         kind="packages", status=None, target=None, include_dismissed=True
     )
 

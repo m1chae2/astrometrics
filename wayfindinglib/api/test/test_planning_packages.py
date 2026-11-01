@@ -152,22 +152,22 @@ def test_packages_list_newest_first_and_filters(isolated_butler: DiskButler) -> 
     third.status = PackageStatus.COMPLETE
     isolated_butler.put(third, "observation_package", {"id": third.id})
 
-    everything = planning.get_plan(kind="packages")
+    everything = planning.query_plans(kind="packages")
     assert {package.id for package in everything} == {first.id, second.id, third.id}
     assert [package.created_at for package in everything] == sorted(
         (package.created_at for package in everything), reverse=True
     )
-    assert [package.id for package in planning.get_plan(kind="packages", status="COMPLETE")] == [third.id]
-    assert {package.id for package in planning.get_plan(kind="packages", target="m_81")} == {
+    assert [package.id for package in planning.query_plans(kind="packages", status="COMPLETE")] == [third.id]
+    assert {package.id for package in planning.query_plans(kind="packages", target="m_81")} == {
         first.id,
         third.id,
     }
     with pytest.raises(InvalidArgumentError):
-        planning.get_plan(kind="packages", status="bogus")
+        planning.query_plans(kind="packages", status="bogus")
     with pytest.raises(InvalidArgumentError):
-        planning.get_plan(kind="packages", night_id="2026-08-10")
+        planning.query_plans(kind="packages", include=["progress"])
     with pytest.raises(InvalidArgumentError):
-        planning.get_plan(status="PLANNED")
+        planning.query_plans(status="PLANNED")
 
 
 def test_edit_package_changes_values_and_bumps_the_revision(isolated_butler: DiskButler) -> None:
@@ -183,7 +183,7 @@ def test_edit_package_changes_values_and_bumps_the_revision(isolated_butler: Dis
     )
     assert edited.revision == 1
     assert edited.priority == 2
-    stored = planning.get_plan(kind="packages")[0]
+    stored = planning.query_plans(kind="packages")[0]
     assert stored.name == "Wide M 81"
     assert stored.exposure_requests[0].count == 5
     with pytest.raises(InvalidArgumentError):
@@ -200,7 +200,7 @@ def test_edit_package_refuses_a_stale_revision(isolated_butler: DiskButler) -> N
     with pytest.raises(PlanRevisionConflictError) as caught:
         planning.update_package(package.id, notes="second", expected_revision=0)
     assert caught.value.details["current_revision"] == 1
-    assert planning.get_plan(kind="packages")[0].notes == "first"
+    assert planning.query_plans(kind="packages")[0].notes == "first"
 
 
 def test_reopen_sets_a_complete_package_back_to_planned(isolated_butler: DiskButler) -> None:
@@ -223,7 +223,7 @@ def test_delete_removes_the_package_and_refuses_mixed_arguments(isolated_butler:
     with pytest.raises(PlanRevisionConflictError):
         planning.delete_package(package.id, expected_revision=5)
     planning.delete_package(package.id)
-    assert planning.get_plan(kind="packages") == []
+    assert planning.query_plans(kind="packages") == []
     with pytest.raises(NotFoundError):
         planning.delete_package(package.id)
 
@@ -236,11 +236,13 @@ def test_one_session_per_night(isolated_butler: DiskButler) -> None:
     other_night = _night_session(planning, "2026-08-11")
     assert again.id == first.id
     assert other_night.id != first.id
-    assert len(planning.get_plan()) == 2
-    assert planning.get_plan(night_id="2026-08-10").id == first.id
-    assert planning.get_plan(night_id="2026-01-01") is None
+    assert len(planning.query_plans()) == 2
+    assert planning.get_plan(observing_night_id="2026-08-10").id == first.id
+    assert planning.get_plan(observing_night_id="2026-01-01") is None
     with pytest.raises(InvalidArgumentError):
-        planning.get_plan(session_id=first.id, night_id="2026-08-10")
+        planning.get_plan(session_id=first.id, observing_night_id="2026-08-10")
+    with pytest.raises(InvalidArgumentError):
+        planning.get_plan()
 
 
 def test_the_insert_check_and_write_are_one_step(isolated_butler: DiskButler) -> None:
@@ -266,7 +268,7 @@ def test_old_duplicates_pick_the_most_entries_then_the_newest(isolated_butler: D
         isolated_butler.put(extra, "observation_session", {"session_id": extra.id})
     fuller_stored = planning.add_to_queue("fuller", requests=[{"package_id": package.id}]).session
     assert fuller_stored.id == "fuller"
-    assert planning.get_plan(night_id="2026-08-10").id == "fuller"
+    assert planning.get_plan(observing_night_id="2026-08-10").id == "fuller"
     assert _night_session(planning).id == "fuller"
     assert pick_session_for_night([older, newer]).id == "newer"
     assert pick_session_for_night([]) is None
@@ -288,7 +290,7 @@ def test_a_scheduled_session_replaces_the_placement_in_the_nights_session(
     )
     assert scheduled.id == existing.id
     assert scheduled.revision == existing.revision + 1
-    assert len(planning.get_plan()) == 1
+    assert len(planning.query_plans()) == 1
     assert len(planning.get_plan(existing.id).queue) == 1
 
 
@@ -306,6 +308,6 @@ def test_adding_a_suggested_package_to_a_queue_promotes_it(isolated_butler: Disk
     change = planning.add_to_queue(session.id, requests=[{"package_id": package.id}])
 
     assert any(item.kind == "package_promoted" for item in change.changes)
-    stored = planning.get_plan(kind="packages")[0]
+    stored = planning.query_plans(kind="packages")[0]
     assert stored.status == PackageStatus.PLANNED
     assert stored.revision == 1

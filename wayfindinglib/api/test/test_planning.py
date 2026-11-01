@@ -359,7 +359,7 @@ def test_a_scheduled_session_is_placed_and_listed(isolated_butler: DiskButler) -
 
     assert isinstance(session, ObservationSession)
     assert session.status.value == "PLANNED"
-    summaries = planning.get_plan()
+    summaries = planning.query_plans()
     assert [summary.id for summary in summaries] == [session.id]
     assert str(summaries[0].night_date) == "2026-08-10"
 

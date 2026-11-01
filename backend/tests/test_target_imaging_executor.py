@@ -182,7 +182,7 @@ def test_adding_a_sequence_announces_the_package(executor: TargetImagingExecutor
     assert len(package_events) == 1
     assert package_events[0]["kind"] == "created"
     assert package_events[0]["targetId"] == "M 81"
-    stored = executor._wayfinder.planning.get_plan(kind="packages")
+    stored = executor._wayfinder.planning.query_plans(kind="packages")
     assert [package.id for package in stored] == [package_events[0]["packageId"]]
     assert isinstance(stored[0], ObservationPackage)
 
@@ -200,18 +200,18 @@ def test_the_sequencer_uses_tonights_one_session_and_follows_the_night(
 
     executor.enqueue_sequence(_sequence(1), {"mode": "soonest"})
     executor.enqueue_sequence(_sequence(2), {"mode": "soonest"})
-    assert len(planning.get_plan()) == 1
+    assert len(planning.query_plans()) == 1
     assert len(executor.get_queue()) == 2
 
     # A restart (a fresh executor over the same library) adds no session.
     restarted = TargetImagingExecutor(wayfinder=executor._wayfinder)
     assert len(restarted.get_queue()) == 2
-    assert len(planning.get_plan()) == 1
+    assert len(planning.query_plans()) == 1
 
     night["id"] = "2026-10-25"
     assert executor.get_queue() == []
     executor.enqueue_sequence(_sequence(3), {"mode": "soonest"})
-    assert len(planning.get_plan()) == 2
+    assert len(planning.query_plans()) == 2
     assert [item["items"][0]["count"] for item in executor.get_queue()] == [3]
 
 
@@ -226,7 +226,7 @@ def test_reading_the_queue_never_creates_a_session(tmp_path: Path) -> None:
     assert service.reorder(["entry"]) is False
     assert service.modify_queue_item("entry", _sequence()) is False
     planning.create_session.assert_not_called()
-    assert planning.get_plan.call_args.kwargs["night_id"]
+    assert planning.get_plan.call_args.kwargs["observing_night_id"]
 
 
 def test_the_session_is_asked_for_by_night_each_time(monkeypatch: pytest.MonkeyPatch) -> None:

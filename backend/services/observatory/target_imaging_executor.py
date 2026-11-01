@@ -77,7 +77,7 @@ class TargetImagingExecutor:
         session : `ObservationSession` or `None`
             Tonight's session, or `None` when none was made yet.
         """
-        return self._wayfinder.planning.get_plan(night_id=observing_night_id(time.time()))
+        return self._wayfinder.planning.get_plan(observing_night_id=observing_night_id(time.time()))
 
     @staticmethod
     def _request(package_id: str, timing: dict[str, Any] | None) -> QueueRequest:

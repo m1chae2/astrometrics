@@ -576,12 +576,19 @@
       "interim_block": "",
       "note": "Built 2026-10-27 (#134). Reads a target's depth goal: the chosen level, the depth reached and the time to reach the level. Saves nothing."
     },
+    "planning_get_package_for_target": {
+      "tool_class": "observe",
+      "category": "planning-sessions",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Reads the one package that stands for a target. Reads only."
+    },
     "planning_get_plan": {
       "tool_class": "observe",
       "category": "planning-sessions",
       "disposition": "keep",
       "interim_block": "",
-      "note": "Built 2026-10-06. Reads a recorded session or the session list."
+      "note": "Built 2026-10-06. Reads one recorded session, by id or by night."
     },
     "planning_get_visibility": {
       "tool_class": "observe",
@@ -603,6 +610,13 @@
       "disposition": "keep",
       "interim_block": "",
       "note": "Built 2026-10-04. The position of a named object, from the library or SIMBAD. Reads only."
+    },
+    "planning_query_plans": {
+      "tool_class": "observe",
+      "category": "planning-sessions",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Lists the recorded sessions, the observation packages or the suggestion log. Reads only."
     },
     "planning_query_sources": {
       "tool_class": "observe",

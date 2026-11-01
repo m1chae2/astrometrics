@@ -125,6 +125,8 @@ PLANNING_MEMBERS = frozenset({
     "delete_package",
     "refresh_suggestions",
     "get_plan",
+    "query_plans",
+    "get_package_for_target",
     "deep_catalog_status",
     "build_deep_star_catalog",
     # Sky browsing around a point, and name lookups.

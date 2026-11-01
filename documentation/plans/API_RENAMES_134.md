@@ -118,6 +118,11 @@ Done on the same branch. No old name is kept as an alias. The MCP tool of each c
 | `planning.edit_package(package_id, delete=True)` | `planning.delete_package(package_id)` |
 | `planning.edit_queue(session_id)` and `planning.edit_package(package_id)` with nothing to change | No longer possible for the queue, because each verb has one argument that must be given. `planning.update_package(package_id)` with no value still raises `InvalidArgumentError` |
 | `planning.edit_queue(...)` with several changes in one call | One call per change. Each is its own write with its own revision. `expected_revision` stays on every call |
+| `planning.get_plan(session_id)`, `planning.get_plan(night_id=)` | `planning.get_plan(session_id)`, `planning.get_plan(observing_night_id=)`. It reads one session. Neither argument raises `InvalidArgumentError` |
+| `planning.get_plan()` (no argument), `planning.get_plan(include=["progress"])` | `planning.query_plans()`, `planning.query_plans(include=["progress"])` |
+| `planning.get_plan(kind="packages", status=, target=, include_dismissed=)` | `planning.query_plans(kind="packages", status=, target=, include_dismissed=)` |
+| `planning.get_plan(kind="suggestion_log", target=)` | `planning.query_plans(kind="suggestion_log", target=)` |
+| `planning.get_plan(kind="packages", target=, pick="one")` | `planning.get_package_for_target(target)`. A new call, because it reads one package, not a list |
 
 ### Planning parameters
 

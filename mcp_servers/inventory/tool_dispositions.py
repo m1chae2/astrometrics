@@ -326,7 +326,13 @@ DECISIONS = {
         "in one star result, or the calibration inventory, worked out on demand. Saves nothing.",
     ),
     "planning_get_plan": ToolDecision(
-        "keep", "Built 2026-10-06. Reads a recorded session or the session list."
+        "keep", "Built 2026-10-06. Reads one recorded session, by id or by night."
+    ),
+    "planning_query_plans": ToolDecision(
+        "keep", "Lists the recorded sessions, the observation packages or the suggestion log. Reads only."
+    ),
+    "planning_get_package_for_target": ToolDecision(
+        "keep", "Reads the one package that stands for a target. Reads only."
     ),
     "planning_get_depth_goal": ToolDecision(
         "keep",

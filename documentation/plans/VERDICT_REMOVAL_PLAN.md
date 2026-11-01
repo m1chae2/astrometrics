@@ -97,6 +97,10 @@ The user approved adopting the measured curves in place of this stopgap once the
 
 Before that profile, review whether the asteroid search is efficient, for example whether it needs every frame when looking for slow-moving objects (user, 2026-11-01).
 
+### Other issues folded into this branch (user, 2026-11-01)
+
+#83, #85, #92 and #133 are fixed here, so #135 closes them along with #93, #97 and #134. #85: wire safety limits and guiding, add session stop if the backend has a call, pass alignment exposure if accepted, remove custom stacking parameters and the timing point dropdown, and label dither settings as mosaic-only. #92: items 1 to 3 are fixed here, and items 4 and 5 go to a small follow-up issue. #133 runs last. The hardware-facing controls join the user's hardware check.
+
 ## 3. Phases
 
 Each phase is one or more commits. Sonnet agents make the edits and scripts handle mechanical ones. CI runs the full suites. A pipeline's inventory goes in `documentation/plans/` and you approve it before that pipeline's code changes.

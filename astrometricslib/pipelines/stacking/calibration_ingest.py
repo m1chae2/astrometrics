@@ -14,10 +14,11 @@ Everything here takes plain data and returns plain data. The public
 from collections.abc import Iterable
 from typing import Any
 
-from astrometricslib.drivers.calibration_library import FlatGroup, calibration_setting_key
+from astrometricslib.drivers.calibration_library import FlatGroup
 from astrometricslib.models.calibration_ingest import (
     CalibrationGroupChange,
     CalibrationIngestReport,
+    CalibrationSetHealth,
     FlatSetAssessment,
 )
 from astrometricslib.pipelines.stacking.pre_processing.flat_calibration import assess_flats
@@ -93,24 +94,6 @@ def summarize_changes(
     return changes, added_count, removed_count
 
 
-def flat_group_name(group: FlatGroup) -> str:
-    """Give a flat group the same name `flatten_frame_index` gives it.
-
-    Parameters
-    ----------
-    group : `FlatGroup`
-        A flat set from the library.
-
-    Returns
-    -------
-    name : `str`
-        Telescope, camera, filter and the gain/offset key, joined with
-        `GROUP_NAME_SEPARATOR`.
-    """
-    setting_key = calibration_setting_key(group.gain, group.offset)
-    return GROUP_NAME_SEPARATOR.join([group.telescope, group.camera, group.filter, setting_key])
-
-
 def assess_flat_group(group: FlatGroup) -> FlatSetAssessment:
     """Measure one set of flats with the check the stacker uses.
 
@@ -146,9 +129,9 @@ def build_ingest_report(
     kind: str,
     before: dict[str, set[str]],
     after: dict[str, set[str]],
-    flat_groups: Iterable[FlatGroup] = (),
+    assessments: Iterable[CalibrationSetHealth] = (),
 ) -> CalibrationIngestReport:
-    """Describe what a rescan changed, and for flats how good the new sets are.
+    """Describe what a rescan changed and how good the changed sets are.
 
     Parameters
     ----------
@@ -158,23 +141,22 @@ def build_ingest_report(
         The group table before the rescan.
     after : `dict` [`str`, `set` [`str`]]
         The group table after the rescan.
-    flat_groups : `Iterable` [`FlatGroup`], optional
-        Every flat set in the library after the rescan. Only the sets that
-        gained frames are measured. Leave empty for darks and biases.
+    assessments : `Iterable` [`CalibrationSetHealth`], optional
+        The health of each set that gained frames, worked out by the caller
+        (`CalibrationCatalog.reindex_frames`), because it needs the library
+        and the quality store.
 
     Returns
     -------
     report : `CalibrationIngestReport`
-        The totals, the groups that changed, and the flat assessments.
+        The totals, the groups that changed, and the assessments.
     """
     changes, added_count, removed_count = summarize_changes(before, after)
-    gained = {change.group for change in changes if change.added}
-    assessments = [assess_flat_group(group) for group in flat_groups if flat_group_name(group) in gained]
     return CalibrationIngestReport(
         kind=kind,
         added_count=added_count,
         removed_count=removed_count,
         total_count=sum(len(paths) for paths in after.values()),
         changes=changes,
-        flat_assessments=assessments,
+        assessments=list(assessments),
     )

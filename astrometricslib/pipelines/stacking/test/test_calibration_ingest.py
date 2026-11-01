@@ -1,7 +1,8 @@
 """Tests for the calibration ingest report's pure helpers.
 
 These check how the library's nested frame lists are flattened, how two
-snapshots are compared, and how the report names and measures flat sets.
+snapshots are compared, how a flat set is measured, and how the report carries
+the health records it is given.
 """
 
 from pathlib import Path
@@ -10,6 +11,7 @@ import numpy as np
 from astropy.io import fits
 
 from astrometricslib.drivers.calibration_library import FlatGroup
+from astrometricslib.models.calibration_ingest import CalibrationSetHealth
 from astrometricslib.pipelines.stacking import calibration_ingest as ci
 
 
@@ -63,14 +65,6 @@ def test_summarize_changes_lists_only_groups_that_changed() -> None:
     assert (added, removed) == (3, 1)
 
 
-def test_flat_group_name_matches_the_flattened_name() -> None:
-    """A `FlatGroup` is named the way `flatten_frame_index` names its slot."""
-    group = FlatGroup("Scope", "Camera", "Luminance", "0.0", 10.0, ["a"])
-    index = {"Scope": {"Camera": {"Luminance": {"0.0@offset=10": ["a"]}}}}
-
-    assert ci.flat_group_name(group) in ci.flatten_frame_index(index)
-
-
 def test_a_quiet_flat_set_passes(tmp_path: Path) -> None:
     """Thirty quiet, well-lit flats pass with no issues and no smoothing."""
     paths = [write_flat(tmp_path / f"flat_{index}.fits", seed=index) for index in range(30)]
@@ -94,25 +88,29 @@ def test_a_faint_flat_set_fails_with_an_issue(tmp_path: Path) -> None:
     assert any("faint" in issue for issue in assessment.issues)
 
 
-def test_report_measures_only_flat_sets_that_gained_frames(tmp_path: Path) -> None:
-    """A set that gained nothing is left unmeasured; a new set is measured."""
-    new_paths = [write_flat(tmp_path / f"new_{index}.fits", seed=index) for index in range(4)]
-    old_paths = [write_flat(tmp_path / f"old_{index}.fits", seed=10 + index) for index in range(4)]
-    new_group = FlatGroup("Scope", "Camera", "Luminance", "0.0", 10.0, new_paths)
-    old_group = FlatGroup("Scope", "Camera", "Star Analyzer 200", "0.0", 10.0, old_paths)
-    before = {ci.flat_group_name(old_group): set(old_paths)}
-    after = {ci.flat_group_name(old_group): set(old_paths), ci.flat_group_name(new_group): set(new_paths)}
+def test_report_carries_the_assessments_it_is_given() -> None:
+    """The report counts the frames and passes the health records through."""
+    health = CalibrationSetHealth(
+        kind="dark",
+        rowKey="dark|cam",
+        camera="cam",
+        gain="0.0",
+        offset=10.0,
+        frameCount=2,
+        uniqueFrameCount=2,
+        status="not_checked",
+        summary="2 of 2 frame(s) are not measured yet.",
+    )
 
-    report = ci.build_ingest_report("flat", before, after, [new_group, old_group])
+    report = ci.build_ingest_report("dark", {}, {"cam / 0.0 / 30.0": {"a", "b"}}, [health])
 
-    assert report.kind == "flat"
-    assert (report.added_count, report.removed_count, report.total_count) == (4, 0, 8)
-    assert [assessment.filter for assessment in report.flat_assessments] == ["Luminance"]
+    assert (report.kind, report.added_count, report.total_count) == ("dark", 2, 2)
+    assert report.assessments == [health]
 
 
-def test_report_for_darks_has_no_flat_assessments() -> None:
-    """Without flat groups, only the counts are reported."""
+def test_report_without_assessments_has_an_empty_list() -> None:
+    """With no assessments given, only the counts are reported."""
     report = ci.build_ingest_report("dark", {}, {"cam / 0.0 / 30.0": {"a", "b"}})
 
     assert report.added_count == 2
-    assert report.flat_assessments == []
+    assert report.assessments == []

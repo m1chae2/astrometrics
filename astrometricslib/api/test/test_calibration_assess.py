@@ -207,3 +207,35 @@ def test_assess_narrows_by_setting_and_refuses_an_argument_of_another_kind(
         catalog.assess("bias", exposure_seconds=30.0, register_job=False)
     with pytest.raises(InvalidArgumentError, match="kind"):
         catalog.assess("lamp", register_job=False)  # ty: ignore[invalid-argument-type]
+
+
+def test_a_rescan_reports_the_health_of_new_dark_and_bias_sets(
+    catalog: CalibrationCatalog, tmp_path: Path
+) -> None:
+    """New frames give a health record that says they are not measured yet."""
+    catalog.measure_frames(register_job=False)
+    _write(tmp_path / "frames" / "biases" / "Bias_new.fits", 500, BIAS_LEVEL_ADU, EXPTIME=0.0)
+    _write(
+        tmp_path / "frames" / "darks" / "Dark_new.fits",
+        501,
+        BIAS_LEVEL_ADU + 0.06,
+        EXPTIME=30.0,
+        CCD_TEMP=-10.0,
+    )
+
+    bias_report = catalog.reindex_frames("bias")
+    dark_report = catalog.reindex_frames("dark")
+
+    for report, kind in ((bias_report, "bias"), (dark_report, "dark")):
+        assert report.added_count == 1
+        (health,) = report.assessments
+        assert health.kind == kind
+        assert health.frame_count == FRAMES_PER_SET + 1
+        # The rescan measured nothing: only the earlier frames have numbers.
+        assert health.measured_frame_count == FRAMES_PER_SET
+        assert "not measured yet" in health.summary
+
+
+def test_a_rescan_with_nothing_new_reports_no_assessments(catalog: CalibrationCatalog) -> None:
+    """A second rescan of an unchanged folder judges nothing."""
+    assert catalog.reindex_frames("bias").assessments == []

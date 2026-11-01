@@ -33,6 +33,7 @@ Rules the cleanup follows:
 | `processing.calibration.library` | Removed. Use `calibration.query(detail="counts")`, `calibration.reindex_frames(kind)` and `calibration.save()` |
 | `processing.run_spectroscopy_by_session(astrometrics, target, frame_records, ...)` | `processing.run_spectroscopy_by_session(target, frame_records, ...)` |
 | `processing.calibration.assess_flats(telescope=, camera_id=, filter_name=, gain=, offset=)` | `processing.calibration.assess(kind="flat", camera_id=, gain=, offset=, binning=, telescope=, filter_name=)`. One call for darks, biases and flats. It returns `list[CalibrationSetHealth]` (checks as `GateResult` records) in place of `list[FlatSetAssessment]`. No alias. MCP tool `calibration_assess_flats` is now `calibration_assess` |
+| `CalibrationIngestReport.flat_assessments` (`flatAssessments`, a `list[FlatSetAssessment]`, flats only) | `CalibrationIngestReport.assessments` (`list[CalibrationSetHealth]`), the same model `processing.calibration.assess` returns. It covers darks and biases too, judged from stored numbers without measuring during the rescan; a new frame with no numbers gives `not_checked` with the reason. No alias |
 | (new) | `processing.calibration.measure_frames(kind=None, camera_id=None, force=False)` measures dark and bias frames for `assess`. MCP tool `calibration_measure_frames` (withheld from the AI) |
 
 ## Parameters

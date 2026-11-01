@@ -437,7 +437,11 @@ class CalibrationCatalog:
 
         Use this after new calibration frames have been downloaded. The
         report says how many frames were found, which groups they were
-        filed under and, for flats, whether each new set is good enough.
+        filed under and whether each set that gained frames is good enough.
+        Darks and biases are judged from the numbers `measure_frames`
+        stored, and nothing is measured during the rescan, so a new frame
+        with no numbers yet gives checks that are ``not_checked`` with the
+        reason. New flats are measured, as before.
 
         Parameters
         ----------
@@ -450,16 +454,34 @@ class CalibrationCatalog:
         Returns
         -------
         report : `CalibrationIngestReport`
-            The frames added and removed, per group, and the assessment of
-            each flat set that gained frames.
+            The frames added and removed, per group, and the health of each
+            set that gained frames.
         """
         check_choice("kind", kind, _CALIBRATION_KINDS)
         before = flatten_frame_index(getattr(self._calibration_library, f"{kind}_frames"))
         method = getattr(self._calibration_library, f"refresh_{kind}_frames")
         method(prune_missing=prune_missing)
         after = flatten_frame_index(getattr(self._calibration_library, f"{kind}_frames"))
-        flat_groups = self._calibration_library.list_flat_groups() if kind == "flat" else ()
-        return build_ingest_report(kind, before, after, flat_groups)
+        added_paths = set().union(*after.values()) - set().union(*before.values())
+        assessments: list[CalibrationSetHealth] = []
+        if added_paths:
+            if kind == "flat":
+                minimum_frames = self._config.get_minimum_calibration_frames()
+                assessments = [
+                    self._flat_set_health(group, minimum_frames)
+                    for group in self._calibration_library.list_flat_groups()
+                    if added_paths.intersection(group.paths)
+                ]
+            else:
+                gained = [
+                    calibration_set
+                    for calibration_set in self._calibration_library.list_calibration_sets(
+                        kind, validate_paths=False
+                    )
+                    if added_paths.intersection(calibration_set.paths)
+                ]
+                assessments = self._judge_dark_or_bias_sets(kind, gained, None)
+        return build_ingest_report(kind, before, after, assessments)
 
     @background_job("diagnostics", grace_period_seconds=20.0)
     def assess(
@@ -568,38 +590,53 @@ class CalibrationCatalog:
         groups = self._calibration_library.list_flat_groups(
             telescope=telescope, camera=camera_id, filter_type=filter_name, gain=gain, offset=offset
         )
-        health = []
-        for group in groups:
-            if binning is not None and normalize_binning(group.binning) != normalize_binning(binning):
-                continue
-            assessment = assess_flat_group(group)
-            checks = flat_set_checks(assessment, minimum_frames)
-            row = {
-                "camera": group.camera,
-                "filter": group.filter,
-                "iso": group.gain,
-                "offset": group.offset,
-                "binning": group.binning,
-            }
-            health.append(
-                CalibrationSetHealth(
-                    kind="flat",
-                    rowKey=_calibration_row_key("flat", row),
-                    camera=group.camera,
-                    gain=group.gain,
-                    offset=group.offset,
-                    binning=group.binning,
-                    telescope=group.telescope,
-                    filter=group.filter,
-                    frameCount=len(group.paths),
-                    uniqueFrameCount=assessment.frame_count,
-                    status=combine_status(checks),
-                    summary=summarize_checks(checks),
-                    checks=checks,
-                    smoothingSigmaPixels=assessment.smoothing_sigma_pixels,
-                )
-            )
-        return health
+        return [
+            self._flat_set_health(group, minimum_frames)
+            for group in groups
+            if binning is None or normalize_binning(group.binning) == normalize_binning(binning)
+        ]
+
+    @staticmethod
+    def _flat_set_health(group: Any, minimum_frames: int) -> CalibrationSetHealth:
+        """Measure one flat set with the stacker's flat check and judge it.
+
+        Parameters
+        ----------
+        group : `FlatGroup`
+            The set.
+        minimum_frames : `int`
+            The configured fewest frames a master may be built from.
+
+        Returns
+        -------
+        health : `CalibrationSetHealth`
+            The set's health.
+        """
+        assessment = assess_flat_group(group)
+        checks = flat_set_checks(assessment, minimum_frames)
+        row = {
+            "camera": group.camera,
+            "filter": group.filter,
+            "iso": group.gain,
+            "offset": group.offset,
+            "binning": group.binning,
+        }
+        return CalibrationSetHealth(
+            kind="flat",
+            rowKey=_calibration_row_key("flat", row),
+            camera=group.camera,
+            gain=group.gain,
+            offset=group.offset,
+            binning=group.binning,
+            telescope=group.telescope,
+            filter=group.filter,
+            frameCount=len(group.paths),
+            uniqueFrameCount=assessment.frame_count,
+            status=combine_status(checks),
+            summary=summarize_checks(checks),
+            checks=checks,
+            smoothingSigmaPixels=assessment.smoothing_sigma_pixels,
+        )
 
     def _assess_dark_or_bias_sets(
         self,
@@ -618,6 +655,37 @@ class CalibrationCatalog:
         health : `list` [`CalibrationSetHealth`]
             One record per matching set.
         """
+        wanted = [
+            calibration_set
+            for calibration_set in self._calibration_library.list_calibration_sets(kind, camera=camera_id)
+            if _calibration_set_matches(
+                calibration_set, gain, offset, binning, temperature_c, exposure_seconds
+            )
+        ]
+        return self._judge_dark_or_bias_sets(kind, wanted, camera_id)
+
+    def _judge_dark_or_bias_sets(
+        self, kind: str, wanted: list[Any], camera_id: str | None
+    ) -> list[CalibrationSetHealth]:
+        """Judge the given dark or bias sets from the stored numbers.
+
+        Nothing is measured here: a frame with no stored numbers makes its
+        checks ``not_checked`` with the reason.
+
+        Parameters
+        ----------
+        kind : {"dark", "bias"}
+            The kind of the sets.
+        wanted : `list` [`CalibrationSet`]
+            The sets to judge.
+        camera_id : `str` or `None`
+            Limits the bias sets used as references to this camera.
+
+        Returns
+        -------
+        health : `list` [`CalibrationSetHealth`]
+            One record per set.
+        """
         from astrometricslib.drivers.quality_store import QualityStore, quality_database_path
         from astrometricslib.pipelines.shared.quality.calibration_frame_measurement import (
             calibration_subject_id,
@@ -630,13 +698,6 @@ class CalibrationCatalog:
         )
 
         library = self._calibration_library
-        wanted = [
-            calibration_set
-            for calibration_set in library.list_calibration_sets(kind, camera=camera_id)
-            if _calibration_set_matches(
-                calibration_set, gain, offset, binning, temperature_c, exposure_seconds
-            )
-        ]
         if not wanted:
             return []
         store = QualityStore(quality_database_path(self._config))

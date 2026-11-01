@@ -85,11 +85,12 @@ def test_refresh_reports_new_flats_and_assesses_them(catalog: CalibrationCatalog
     assert report.removed_count == 0
     assert len(report.changes) == 1
     assert report.changes[0].added == 6
-    assert len(report.flat_assessments) == 1
-    assessment = report.flat_assessments[0]
+    assert len(report.assessments) == 1
+    assessment = report.assessments[0]
+    assert assessment.kind == "flat"
     assert assessment.frame_count == 6
     assert assessment.offset == pytest.approx(10.0)
-    assert assessment.passes
+    assert assessment.status == "good"
 
 
 def test_second_refresh_with_no_new_frames_reports_nothing_added(
@@ -104,7 +105,7 @@ def test_second_refresh_with_no_new_frames_reports_nothing_added(
 
     assert report.added_count == 0
     assert report.changes == []
-    assert report.flat_assessments == []
+    assert report.assessments == []
     assert report.total_count == 3
 
 
@@ -119,7 +120,7 @@ def test_refresh_assesses_each_filter_and_offset_separately(
 
     report = catalog.reindex_frames("flat")
 
-    keys = sorted((a.filter, a.offset) for a in report.flat_assessments)
+    keys = sorted((a.filter, a.offset) for a in report.assessments)
     assert keys == [("Luminance", 0.0), ("Luminance", 10.0), ("Star Analyzer 200", 10.0)]
     assert report.added_count == 9
 

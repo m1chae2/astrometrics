@@ -7,7 +7,7 @@ find them and they are good. These structures answer two questions:
 - `CalibrationSetHealth` says the same for one set of darks, biases or flats,
   with one record per check.
 - `CalibrationIngestReport` says what a rescan of the library added, and
-  for flats, how good each newly added set is.
+  how good each set that gained frames is (a `CalibrationSetHealth` each).
 
 Both are plain data, so any caller can show
 them without re-deriving anything.
@@ -75,29 +75,6 @@ class CalibrationGroupChange(BaseModel):
     removed: int = 0
     # Frames in the group after the rescan.
     total: int
-
-
-class CalibrationIngestReport(BaseModel):
-    """What a rescan of the calibration library changed.
-
-    Returned by `CalibrationCatalog.refresh`, so a caller that has just
-    downloaded new frames learns at once whether they were found, where
-    they were filed, and (for flats) whether they are good enough.
-    """
-
-    model_config = ConfigDict(populate_by_name=True)
-
-    # Which kind of frame was rescanned: "dark", "bias" or "flat".
-    kind: str
-    # Totals over every group.
-    added_count: int = Field(alias="addedCount")
-    removed_count: int = Field(alias="removedCount")
-    total_count: int = Field(alias="totalCount")
-    # Only the groups that gained or lost frames.
-    changes: list[CalibrationGroupChange] = Field(default_factory=list)
-    # For flats: one assessment for each group that gained frames. Empty for
-    # darks and biases.
-    flat_assessments: list[FlatSetAssessment] = Field(default_factory=list, alias="flatAssessments")
 
 
 class FrameConcern(BaseModel):
@@ -221,3 +198,30 @@ class CalibrationMeasurementReport(BaseModel):
     failed_count: int = Field(alias="failedCount")
     rows_stored: int = Field(alias="rowsStored")
     notes: list[str] = Field(default_factory=list)
+
+
+class CalibrationIngestReport(BaseModel):
+    """What a rescan of the calibration library changed.
+
+    Returned by `CalibrationCatalog.refresh`, so a caller that has just
+    downloaded new frames learns at once whether they were found, where
+    they were filed and whether the new sets are good enough. The rescan
+    measures no frame of a dark or bias set: those sets are judged from the
+    numbers `CalibrationCatalog.measure_frames` stored, so a new frame
+    without numbers gives a set whose checks are ``not_checked`` with the
+    reason. A new set of flats is measured, as it always was.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    # Which kind of frame was rescanned: "dark", "bias" or "flat".
+    kind: str
+    # Totals over every group.
+    added_count: int = Field(alias="addedCount")
+    removed_count: int = Field(alias="removedCount")
+    total_count: int = Field(alias="totalCount")
+    # Only the groups that gained or lost frames.
+    changes: list[CalibrationGroupChange] = Field(default_factory=list)
+    # One health record for each set that gained frames, in the same model
+    # `CalibrationCatalog.assess` returns.
+    assessments: list[CalibrationSetHealth] = Field(default_factory=list)

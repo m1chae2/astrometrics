@@ -18,7 +18,7 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-import astrometricslib
+from astrometricslib._internal import stacking as stacking_group
 from astrometricslib.pipelines.stacking import stack_runner
 from astrometricslib.pipelines.stacking.post_processing.aperture_placement import (
     EDGE_MARGIN_PX,
@@ -576,10 +576,10 @@ def test_the_fold_rule_leaves_one_group_when_nothing_is_large_enough_or_a_length
     assert fold_exposure_lengths([2.0] * 7) == [2.0] * 7
 
 
-def test_the_two_rules_are_public() -> None:
-    """The group weight rule and the fold rule are public."""
-    assert astrometricslib.group_frame_weights is group_frame_weights
-    assert astrometricslib.fold_exposure_lengths is fold_exposure_lengths
+def test_the_two_rules_are_in_the_private_stacking_group() -> None:
+    """The group weight rule and the fold rule are in `_internal.stacking`."""
+    assert stacking_group.group_frame_weights is group_frame_weights
+    assert stacking_group.fold_exposure_lengths is fold_exposure_lengths
 
 
 def test_the_combine_result_carries_gains_skies_weights_and_masks() -> None:

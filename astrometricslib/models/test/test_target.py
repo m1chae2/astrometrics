@@ -66,30 +66,26 @@ def test_a_frame_stored_with_the_removed_registration_fields_still_loads() -> No
     A stored row that still has them, nested or in the old flat layout, must
     load with the kept values intact and the removed ones ignored.
     """
-    nested = FrameRecord.model_validate(
-        {
-            "path": "frame.fits",
-            "measurements": {
-                "backgroundLevel": 480.0,
-                "registrationFwhmXPx": 2.6,
-                "registrationFwhmYPx": 3.0,
-                "registrationRmse": 0.02,
-            },
-        }
-    )
-    assert nested.measurements.registration_fwhm_x_px == pytest.approx(2.6)
-    assert not hasattr(nested.measurements, "registration_rmse")
-    assert "registrationRmse" not in nested.measurements.model_dump(by_alias=True)
-
-    flat = FrameRecord.model_validate(
-        {
-            "path": "frame.fits",
+    nested = FrameRecord.model_validate({
+        "path": "frame.fits",
+        "measurements": {
             "backgroundLevel": 480.0,
             "registrationFwhmXPx": 2.6,
             "registrationFwhmYPx": 3.0,
             "registrationRmse": 0.02,
-        }
-    )
+        },
+    })
+    assert nested.measurements.registration_fwhm_x_px == pytest.approx(2.6)
+    assert not hasattr(nested.measurements, "registration_rmse")
+    assert "registrationRmse" not in nested.measurements.model_dump(by_alias=True)
+
+    flat = FrameRecord.model_validate({
+        "path": "frame.fits",
+        "backgroundLevel": 480.0,
+        "registrationFwhmXPx": 2.6,
+        "registrationFwhmYPx": 3.0,
+        "registrationRmse": 0.02,
+    })
     assert flat.measurements.background_level == pytest.approx(480.0)
     assert flat.measurements.registration_fwhm_x_px == pytest.approx(2.6)
     assert not hasattr(flat.measurements, "registration_fwhm_y_px")

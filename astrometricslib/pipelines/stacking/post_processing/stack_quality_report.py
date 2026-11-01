@@ -174,6 +174,7 @@ def summarize_stack(target: Target, kind: StackKind) -> StackSummary:
         target_id=target.id,
         kind=kind,
         stack_path=getattr(stacking, "stacked_image", None),
+        job_id=quality.provenance_activity_id,
         made_at=quality.created_at.isoformat(),
         frames_submitted=metrics.frames_submitted,
         frames_stacked=metrics.frames_stacked,

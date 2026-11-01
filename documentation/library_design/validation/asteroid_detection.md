@@ -277,10 +277,10 @@ print(min(per_frame.values()), max(per_frame.values()))
 
 ### MOV-07
 
-**Bounding-box pre-filter speeds up chaining**
+**Nearby-pair search speeds up chaining**
 
-- **Claim:** Before the detector computes exact angular separations, it drops every pair outside an RA/Dec box around the match radius. On a dense field this removes almost all pairs and makes chaining take seconds, with the same tracks as an exhaustive search.
-- **Settings it supports:** No tuned value. The box is the match radius times 1.2, widened in RA by 1/cos(Dec), inside the chaining step (internal function, not part of the public API; may change). <!-- impl: astrometricslib.pipelines.asteroid_detection.detection.MovingObjectDetector._chain_detections_by_persistence -->
+- **Claim:** Before the detector computes exact separations, it finds the nearby (chain, dot) pairs with a tree search on the dots of the new frame, then applies the same RA/Dec box and distance tests as an all-pairs search. On a dense field this removes almost all pairs and makes chaining take seconds, with the same tracks, in the same order, as an all-pairs search.
+- **Settings it supports:** No tuned value. The box is the match radius times 1.2, widened in RA by 1/cos(Dec). The tree search keeps a 10% margin on the radius and is skipped for chains within about 12 degrees of a pole, which try every dot. Both sit inside the chaining step (internal function, not part of the public API; may change). <!-- impl: astrometricslib.pipelines.asteroid_detection.detection.MovingObjectDetector._chain_detections_by_persistence -->
 - **Status:** Partly measured. One field, timed once.
 - **Data you need:** A dense field with tens of thousands of detections across tens of frames.
 - **Procedure:**
@@ -301,12 +301,12 @@ print(f"{len(detections)} detections chained in {time.perf_counter() - start:.1f
 
 - **Acceptance criterion:** Not recorded (set after the result).
 - **What to look at:** Wall-clock time of the chaining step, in seconds, and whether the tracks match an exhaustive search.
-- **Our result:** M 81 (DS-M81), about 150,000 detected sources across 46 frames: the box removed 99.9% of pairs, and the step went from over 20 minutes to seconds, with the same tracks. Date not recorded.
+- **Our result:** M 81 (DS-M81), about 150,000 detected sources across 46 frames: the box removed 99.9% of pairs, and the step went from over 20 minutes to seconds, with the same tracks. Date not recorded. Synthetic check, 2026-11-01: 12 frames, each with N fixed stars and 5% noise dots, seed 0-3; the chaining step alone took 0.65, 1.5, 3.8 and 9.6 s with the per-chain loop and 0.05, 0.12, 0.34 and 0.55 s with the tree search for N = 500, 1000, 2000 and 4000. The chains were identical (same dots, same order) in these cases and in five more, near RA = 0 and near both poles.
 - **Verdict:** Not judged.
-- **Limits:** One field, one machine. The search still looks at every pair; it only does so in one vectorized NumPy comparison.
+- **Limits:** One real field timed once, plus synthetic timings (below). A chain is never closed early: its radius only grows with the gap, up to the cap, so no chain becomes unreachable within a night. The cost still grows with chains times the dots near each one.
 - **To tune for your setup:** Nothing to tune. If chaining is slow, lower `chain_match_radius_max_arcsec` to shrink the box.
 - **Regenerate with:** No script; measured by hand, date not recorded.
-- **Guarded by tests:** None.
+- **Guarded by tests:** `astrometricslib/pipelines/asteroid_detection/test/test_chaining_equivalence.py` (`test_fixed_small_input_gives_expected_chains`, `test_random_input_matches_plain_all_pairs_search`).
 - **Raw record:** None kept.
 
 ### MOV-08

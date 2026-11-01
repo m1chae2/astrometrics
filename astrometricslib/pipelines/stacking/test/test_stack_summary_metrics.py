@@ -277,3 +277,22 @@ def test_the_summary_records_the_rejection_limits_and_whether_the_floor_applied(
     assert parameters["rejection_sigma_floor"] == pytest.approx(2.5)
     assert parameters["rejection_sigma_low_extra"] == pytest.approx(0.5)
     assert parameters["rejection_sigma_floor_applied"] is True
+
+
+def test_the_stack_summary_names_the_job_that_made_the_stack() -> None:
+    """`summarize_stack` copies the job id, to list the job's warnings."""
+    from astrometricslib.pipelines.stacking.post_processing.stack_quality_report import summarize_stack
+
+    summary = make_summary()
+    summary.provenance_activity_id = "job-stack-7"
+    target = SimpleNamespace(
+        id="M 81",
+        stacking=SimpleNamespace(quality_summary=summary, stacked_image="/stacks/M81.fits"),
+        spectral_stacking=None,
+    )
+
+    report = summarize_stack(target, "imaging")
+
+    assert report.job_id == "job-stack-7"
+    summary.provenance_activity_id = None
+    assert summarize_stack(target, "imaging").job_id is None

@@ -29,6 +29,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 import numpy as np
+from scipy.spatial import cKDTree
 
 from astrometricslib.models.moving_object import (
     AsteroidDetectionCandidate,
@@ -266,6 +267,62 @@ def _reverses_direction(
     return bool(np.any(later_than & (step_back > tolerance)))
 
 
+# Chains whose last dot has a cosine of declination below this are within
+# about 78 degrees of a pole. There the flat distance test is not close to
+# the true angle, so the tree search is not trusted and every dot is tried.
+_POLAR_COS_DEC_LIMIT = 0.2
+
+
+def _unit_vectors(ra_deg: np.ndarray, dec_deg: np.ndarray) -> np.ndarray:
+    """Turn sky positions into points on the unit sphere.
+
+    Parameters
+    ----------
+    ra_deg, dec_deg : `numpy.ndarray`
+        Right Ascension and Declination in degrees.
+
+    Returns
+    -------
+    points : `numpy.ndarray`
+        Array of shape (N, 3) with the x, y, z of each position.
+    """
+    ra_rad = np.radians(ra_deg)
+    dec_rad = np.radians(dec_deg)
+    cos_dec = np.cos(dec_rad)
+    return np.column_stack((cos_dec * np.cos(ra_rad), cos_dec * np.sin(ra_rad), np.sin(dec_rad)))
+
+
+class _ChainEnds:
+    """Position and time of the last dot of every open chain, as arrays.
+
+    Chaining compares every open chain with every dot of a new picture.
+    Keeping the last positions in arrays lets that comparison run in
+    NumPy instead of in a Python loop over the chains.
+    """
+
+    def __init__(self) -> None:
+        self._count = 0
+        self.ra_deg = np.zeros(64)
+        self.dec_deg = np.zeros(64)
+        self.cos_dec = np.zeros(64)
+        self.timestamp = np.zeros(64)
+
+    def add(self, detection: FrameDetection) -> None:
+        """Start tracking a new chain whose last dot is `detection`."""
+        if self._count == self.ra_deg.size:
+            for name in ("ra_deg", "dec_deg", "cos_dec", "timestamp"):
+                setattr(self, name, np.concatenate((getattr(self, name), np.zeros(self._count))))
+        self._count += 1
+        self.replace(self._count - 1, detection)
+
+    def replace(self, chain_index: int, detection: FrameDetection) -> None:
+        """Record `detection` as the new last dot of chain `chain_index`."""
+        self.ra_deg[chain_index] = detection.right_ascension_deg
+        self.dec_deg[chain_index] = detection.declination_deg
+        self.cos_dec[chain_index] = math.cos(math.radians(detection.declination_deg))
+        self.timestamp[chain_index] = detection.timestamp
+
+
 class MovingObjectDetector:
     """Connects the dots between photos to find real moving objects.
 
@@ -396,16 +453,19 @@ class MovingObjectDetector:
         )
 
         open_chains: list[list[FrameDetection]] = []
+        chain_ends = _ChainEnds()
         for frame_path in frame_paths_in_time_order:
             unmatched_detections = list(detections_by_frame[frame_path])
 
             if not open_chains:
                 for detection in unmatched_detections:
                     open_chains.append([detection])
+                    chain_ends.add(detection)
                 continue
 
             ra_arr = np.array([d.right_ascension_deg for d in unmatched_detections], dtype=float)
             dec_arr = np.array([d.declination_deg for d in unmatched_detections], dtype=float)
+            chain_count = len(open_chains)
 
             # Gather every (chain, detection) pair that falls within that
             # chain's own match radius, without claiming anything yet. Each
@@ -415,71 +475,142 @@ class MovingObjectDetector:
             # truly nearest, not just to whichever chain happens to be
             # listed first (which can silently swap track identity in a
             # crowded field).
-            candidate_matches: list[tuple[float, int, int]] = []  # (distance, chain_index, detection_index)
+            elapsed_seconds = np.abs(unmatched_detections[0].timestamp - chain_ends.timestamp[:chain_count])
+            elapsed_hours = elapsed_seconds / _SECONDS_PER_HOUR
+            # Capped at a few arcminutes so that a gap of hours inside
+            # one night cannot grow the radius to a whole field of view,
+            # where two unrelated stars would look like a mover.
+            match_radius_arcsec = np.minimum(
+                self.config.rate_max_arcsec_per_hour * elapsed_hours,
+                self.config.chain_match_radius_max_arcsec,
+            )
+            pair_chains, pair_detections = self._find_nearby_pairs(
+                ra_arr,
+                dec_arr,
+                chain_ends.ra_deg[:chain_count],
+                chain_ends.dec_deg[:chain_count],
+                chain_ends.cos_dec[:chain_count],
+                match_radius_arcsec,
+            )
 
-            for chain_index, chain in enumerate(open_chains):
-                last_detection = chain[-1]
-                elapsed_seconds = abs(unmatched_detections[0].timestamp - last_detection.timestamp)
-                elapsed_hours = elapsed_seconds / _SECONDS_PER_HOUR
-                # Capped at a few arcminutes so that a gap of hours inside
-                # one night cannot grow the radius to a whole field of view,
-                # where two unrelated stars would look like a mover.
-                match_radius_arcsec = min(
-                    self.config.rate_max_arcsec_per_hour * elapsed_hours,
-                    self.config.chain_match_radius_max_arcsec,
-                )
-
-                cos_dec = math.cos(math.radians(last_detection.declination_deg))
-                max_deg = (match_radius_arcsec / 3600.0) * 1.2
-                # When looking near the North or South Pole, the lines of
-                # longitude (Right Ascension) get very close together. We use
-                # a small math trick (max with 1e-6) to make sure we don't
-                # accidentally divide by zero when calculating how far away
-                # to look for the next dot.
-                ra_bbox_half_width_deg = max_deg / max(abs(cos_dec), 1e-6)
-                dec_min = last_detection.declination_deg - max_deg
-                dec_max = last_detection.declination_deg + max_deg
-
-                # The RA difference wraps at 0/360 deg, so a chain near
-                # RA = 0 still finds detections on the other side of it.
-                ra_diff_all = wrapped_ra_difference_deg(ra_arr, last_detection.right_ascension_deg)
-                bbox_mask = (
-                    (np.abs(ra_diff_all) <= ra_bbox_half_width_deg)
-                    & (dec_arr >= dec_min)
-                    & (dec_arr <= dec_max)
-                )
-                candidate_indices = np.where(bbox_mask)[0]
-                if candidate_indices.size == 0:
-                    continue
-
-                ra_diff = ra_diff_all[candidate_indices]
-                ra_offsets = ra_diff * cos_dec * 3600.0
-                dec_offsets = (dec_arr[candidate_indices] - last_detection.declination_deg) * 3600.0
-                distances = np.hypot(ra_offsets, dec_offsets)
-
-                within_radius = distances <= match_radius_arcsec
-                for detection_index, distance in zip(
-                    candidate_indices[within_radius], distances[within_radius], strict=True
-                ):
-                    candidate_matches.append((float(distance), chain_index, int(detection_index)))
+            # Same distance formula as always, now on the nearby pairs only.
+            # The box test is kept so the answer is exactly the old one.
+            pair_last_dec = chain_ends.dec_deg[pair_chains]
+            pair_cos_dec = chain_ends.cos_dec[pair_chains]
+            pair_radius = match_radius_arcsec[pair_chains]
+            max_deg = (pair_radius / 3600.0) * 1.2
+            # When looking near the North or South Pole, the lines of
+            # longitude (Right Ascension) get very close together. We use
+            # a small math trick (max with 1e-6) to make sure we don't
+            # accidentally divide by zero when calculating how far away
+            # to look for the next dot.
+            ra_bbox_half_width_deg = max_deg / np.maximum(np.abs(pair_cos_dec), 1e-6)
+            # The RA difference wraps at 0/360 deg, so a chain near
+            # RA = 0 still finds detections on the other side of it.
+            ra_diff = wrapped_ra_difference_deg(ra_arr[pair_detections], chain_ends.ra_deg[pair_chains])
+            pair_dec = dec_arr[pair_detections]
+            in_box = (
+                (np.abs(ra_diff) <= ra_bbox_half_width_deg)
+                & (pair_dec >= pair_last_dec - max_deg)
+                & (pair_dec <= pair_last_dec + max_deg)
+            )
+            ra_offsets = ra_diff * pair_cos_dec * 3600.0
+            dec_offsets = (pair_dec - pair_last_dec) * 3600.0
+            distances = np.hypot(ra_offsets, dec_offsets)
+            keep = in_box & (distances <= pair_radius)
+            pair_chains = pair_chains[keep]
+            pair_detections = pair_detections[keep]
+            distances = distances[keep]
 
             # Claim nearest-first so each detection goes to its globally
             # closest open chain, and each chain claims at most one
-            # detection per frame.
-            candidate_matches.sort(key=lambda item: item[0])
+            # detection per frame. Ties keep chain order, then dot order.
+            order = np.lexsort((pair_detections, pair_chains))
+            order = order[np.argsort(distances[order], kind="stable")]
             matched_mask = np.zeros(len(unmatched_detections), dtype=bool)
-            claimed_chain_indices: set[int] = set()
-            for _distance, chain_index, detection_index in candidate_matches:
-                if matched_mask[detection_index] or chain_index in claimed_chain_indices:
+            claimed_chains = np.zeros(chain_count, dtype=bool)
+            for chain_index, detection_index in zip(
+                pair_chains[order].tolist(), pair_detections[order].tolist(), strict=True
+            ):
+                if matched_mask[detection_index] or claimed_chains[chain_index]:
                     continue
                 open_chains[chain_index].append(unmatched_detections[detection_index])
+                chain_ends.replace(chain_index, unmatched_detections[detection_index])
                 matched_mask[detection_index] = True
-                claimed_chain_indices.add(chain_index)
+                claimed_chains[chain_index] = True
 
             for idx in np.where(~matched_mask)[0]:
                 open_chains.append([unmatched_detections[idx]])
+                chain_ends.add(unmatched_detections[idx])
 
         return open_chains
+
+    def _find_nearby_pairs(
+        self,
+        ra_deg: np.ndarray,
+        dec_deg: np.ndarray,
+        chain_ra_deg: np.ndarray,
+        chain_dec_deg: np.ndarray,
+        chain_cos_dec: np.ndarray,
+        chain_radius_arcsec: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """List the (chain, dot) pairs that might be within a chain's radius.
+
+        This only narrows the field. The caller still applies the exact
+        distance test, so a few extra pairs here cost nothing. A tree
+        search over the dots of the new picture finds the pairs without
+        comparing every chain with every dot.
+
+        The tree measures true angles on the sphere. The distance test
+        uses a flat approximation, which can read a little shorter than
+        the true angle. Away from the poles the gap is under 1 percent of
+        the radius, so a 10 percent margin keeps every pair the exact test
+        would accept. Chains within `_POLAR_COS_DEC_LIMIT` of a pole (where the
+        approximation breaks down) are paired with every dot instead.
+
+        Parameters
+        ----------
+        ra_deg, dec_deg : `numpy.ndarray`
+            Positions of the dots in the new picture.
+        chain_ra_deg, chain_dec_deg, chain_cos_dec : `numpy.ndarray`
+            Position of the last dot of each open chain, and the cosine of
+            its declination.
+        chain_radius_arcsec : `numpy.ndarray`
+            Match radius of each open chain.
+
+        Returns
+        -------
+        chain_indices, dot_indices : `numpy.ndarray`
+            Equal-length integer arrays, one entry per candidate pair.
+        """
+        dot_count = ra_deg.size
+        polar = np.abs(chain_cos_dec) < _POLAR_COS_DEC_LIMIT
+        chain_indices_parts: list[np.ndarray] = []
+        dot_indices_parts: list[np.ndarray] = []
+
+        polar_chains = np.where(polar)[0]
+        if polar_chains.size:
+            chain_indices_parts.append(np.repeat(polar_chains, dot_count))
+            dot_indices_parts.append(np.tile(np.arange(dot_count), polar_chains.size))
+
+        regular_chains = np.where(~polar)[0]
+        if regular_chains.size and dot_count:
+            tree = cKDTree(_unit_vectors(ra_deg, dec_deg))
+            chord_radius = np.radians(chain_radius_arcsec[regular_chains] / 3600.0) * 1.1 + 1e-12
+            hits = tree.query_ball_point(
+                _unit_vectors(chain_ra_deg[regular_chains], chain_dec_deg[regular_chains]), chord_radius
+            )
+            hit_counts = np.fromiter((len(h) for h in hits), dtype=np.intp, count=len(hits))
+            if hit_counts.sum():
+                chain_indices_parts.append(np.repeat(regular_chains, hit_counts))
+                dot_indices_parts.append(
+                    np.fromiter((i for h in hits for i in h), dtype=np.intp, count=int(hit_counts.sum()))
+                )
+
+        if not chain_indices_parts:
+            empty = np.zeros(0, dtype=np.intp)
+            return empty, empty
+        return np.concatenate(chain_indices_parts), np.concatenate(dot_indices_parts)
 
     def _evaluate_reference_frame_test(self, chain: list[FrameDetection]) -> CascadeStage:
         """Check if the dot is a real object or a camera artifact.

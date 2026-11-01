@@ -375,6 +375,29 @@ def _read_exposure_seconds(frame_header: fits.Header) -> float | None:
     return exposure_seconds
 
 
+def _pixels_to_sky_positions(
+    wcs: WCS, pixel_positions: list[tuple[float, float]]
+) -> list[tuple[float, float]]:
+    """Convert pixel positions to sky positions with one WCS call.
+
+    Parameters
+    ----------
+    wcs : `astropy.wcs.WCS`
+        The solution that maps pixels to the sky.
+    pixel_positions : `list` [`tuple` [`float`, `float`]]
+        (x, y) pixel positions, counted from 1 as FITS does.
+
+    Returns
+    -------
+    sky_positions : `list` [`tuple` [`float`, `float`]]
+        (Right Ascension, Declination) in degrees, in the same order.
+    """
+    if not pixel_positions:
+        return []
+    sky = wcs.wcs_pix2world(np.asarray(pixel_positions, dtype=float), 1)
+    return [(float(ra_deg), float(dec_deg)) for ra_deg, dec_deg in sky]
+
+
 def _detect_sources_in_one_frame(
     frame_path: str,
     frame_timestamp: float,
@@ -439,18 +462,19 @@ def _detect_sources_in_one_frame(
     brightness_values = [float(source["flux"]) for source in sources if source.get("flux") is not None]
     picture_brightness_level = float(np.median(brightness_values)) if brightness_values else None
 
-    raw_positions = []
-    pixel_positions = []
-    fluxes = []
+    # Sources without a centroid are skipped. The rest are converted to the
+    # sky in one WCS call for the whole picture, which gives the same
+    # numbers as converting them one at a time.
+    centroid_sources = []
     for source in sources:
         pixel_x = source.get("xcentroid", source.get("x_centroid"))
         pixel_y = source.get("ycentroid", source.get("y_centroid"))
         if pixel_x is None or pixel_y is None:
             continue
-        sky_position = frame_wcs.wcs_pix2world([[float(pixel_x), float(pixel_y)]], 1)[0]
-        raw_positions.append((float(sky_position[0]), float(sky_position[1])))
-        pixel_positions.append((float(pixel_x), float(pixel_y)))
-        fluxes.append(source.get("flux"))
+        centroid_sources.append((float(pixel_x), float(pixel_y), source.get("flux")))
+    pixel_positions = [(pixel_x, pixel_y) for pixel_x, pixel_y, _flux in centroid_sources]
+    fluxes = [flux for _pixel_x, _pixel_y, flux in centroid_sources]
+    raw_positions = _pixels_to_sky_positions(frame_wcs, pixel_positions)
 
     ra_offset_deg, dec_offset_deg = 0.0, 0.0
     position_error = None
@@ -646,14 +670,14 @@ class AsteroidDetectionPipeline:
             fwhm=self.config.detection_fwhm_px, threshold_sigma=self.config.detection_threshold_sigma
         )
         sources = source_detector.detect(stack_data)
-        reference_positions_deg = []
+        reference_pixels = []
         for source in sources:
             pixel_x = source.get("xcentroid", source.get("x_centroid"))
             pixel_y = source.get("ycentroid", source.get("y_centroid"))
             if pixel_x is None or pixel_y is None:
                 continue
-            sky_position = stack_wcs.wcs_pix2world([[float(pixel_x), float(pixel_y)]], 1)[0]
-            reference_positions_deg.append((float(sky_position[0]), float(sky_position[1])))
+            reference_pixels.append((float(pixel_x), float(pixel_y)))
+        reference_positions_deg = _pixels_to_sky_positions(stack_wcs, reference_pixels)
         return _build_reference_star_tree(reference_positions_deg)
 
     def _detect_frame_sources(

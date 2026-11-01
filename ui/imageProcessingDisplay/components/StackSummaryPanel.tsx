@@ -3,12 +3,14 @@
  * @description The "Stack Summary" block of the Image Processing Display's Data tab.
  * It answers in plain words how a target's current stack was made: how many frames
  * went in and how many were set aside, how many pixels were rejected, how wide the
- * stars are against what the input frames predict, any flags, and what happened to
+ * stars are against what the input frames predict, the warnings, and what happened to
  * each exposure group. The numbers are the ones the stacking step saved with the
- * stack, so nothing is measured again. The panel only reports; it does not rate a
- * stack beyond the flags the stacking step raised. The whole block is a disclosure that
- * is closed at first and shows one line (frames, flags, date), so it does not push the
- * session frames far down the tab. It remembers nothing between visits.
+ * stack, so nothing is measured again. The warnings are the failed checks of the stacking
+ * job that made the stack, each with its number and its limit. A stack that has no job id
+ * (older data) shows the failed checks stored for its target and file instead. The panel
+ * only reports; it does not rate a stack. The whole block is a disclosure that is closed
+ * at first and shows one line (frames, date), so it does not push the session frames far
+ * down the tab. It remembers nothing between visits.
  */
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -19,7 +21,12 @@ import { PreviewRemakeControl } from './PreviewRemakeControl';
 import { StackComparisonControl } from './StackComparisonControl';
 import { SetAsideFramesList } from './SetAsideFramesList';
 import { formatExposureSeconds } from '../utils/stackFormatting';
-import { describeFlagCount, describeStackFlag } from '../utils/stackFlagMeaning';
+import {
+    fetchStackJobWarnings,
+    fetchStoredStackWarnings,
+    type StackWarning,
+} from '../../common/services/imaging/stackReviewService';
+import { describeStackWarningTitle, describeWarningNumbers } from '../utils/stackWarnings';
 
 /** Which stack to summarize. */
 export type StackSummaryKind = 'imaging' | 'spectral';
@@ -132,6 +139,19 @@ export const StackSummaryPanel: React.FC<StackSummaryPanelProps> = ({
         enabled: Boolean(targetId),
     });
 
+    // The warnings come from the stacking job that made the stack. Without a job id, or when the
+    // job has none on record, the stored failed checks of this stack are read instead.
+    const { data: warnings, isError: warningsFailed } = useQuery<StackWarning[]>({
+        queryKey: ['stackWarnings', { target_id: targetId, kind }, summary?.job_id ?? '', summary?.made_at ?? '',
+            refreshKey ?? ''],
+        queryFn: async () => {
+            const fromJob = summary?.job_id ? await fetchStackJobWarnings(summary.job_id) : [];
+            if (fromJob.length > 0) return fromJob;
+            return fetchStoredStackWarnings(targetId as string, summary?.stack_path);
+        },
+        enabled: Boolean(targetId) && Boolean(summary),
+    });
+
     if (!targetId) return null;
     if (isLoading) {
         return <div className="stack-summary stack-summary--muted">Loading {label.toLowerCase()} summary...</div>;
@@ -154,7 +174,6 @@ export const StackSummaryPanel: React.FC<StackSummaryPanelProps> = ({
     const starWidth = (summary.star_width_px ?? {}) as StarWidthView;
     const groups = (summary.exposure_groups ?? []) as unknown as ExposureGroupView[];
     const skipped = (summary.skipped_reasons ?? []) as SkippedFrameView[];
-    const flagReasons = summary.flag_reasons ?? [];
     const madeAt = new Date(summary.made_at);
     const madeAtText = Number.isNaN(madeAt.getTime()) ? summary.made_at : madeAt.toLocaleString();
 
@@ -163,7 +182,7 @@ export const StackSummaryPanel: React.FC<StackSummaryPanelProps> = ({
             <summary className="stack-summary__title">
                 <span className="stacked-image-panel__label">
                     {`${label} summary: ${summary.frames_stacked} of ${summary.frames_submitted} frames, `
-                        + `${describeFlagCount(summary.flagged, flagReasons)}, made ${madeAtText}`}
+                        + `made ${madeAtText}`}
                 </span>
             </summary>
 
@@ -240,38 +259,31 @@ export const StackSummaryPanel: React.FC<StackSummaryPanelProps> = ({
             </dl>
 
             <div className="stack-summary__flags">
-                <span className="stacked-image-panel__label">Flags:</span>{' '}
-                {flagReasons.length > 0 ? (
+                <span className="stacked-image-panel__label">Warnings:</span>{' '}
+                {warningsFailed ? (
+                    <span className="stack-summary__flag" role="alert">Could not read the warnings.</span>
+                ) : warnings == null ? (
+                    <span className="stack-summary--muted">Reading the warnings...</span>
+                ) : warnings.length > 0 ? (
                     <>
                         <span>
-                            {flagReasons.length === 1
-                                ? 'The stacking step raised 1 flag.'
-                                : `The stacking step raised ${flagReasons.length} flags.`}
-                            {' '}A flag is a warning that something may have lowered the quality of the stack.
+                            Each is a check of this stack that failed, with the number measured and its limit.
                         </span>
                         <ul className="stack-summary__flag-list">
-                            {flagReasons.map((reason) => {
-                                const meaning = describeStackFlag(reason);
+                            {warnings.map((warning, index) => {
+                                const numbers = describeWarningNumbers(warning);
                                 return (
-                                    <li key={reason} className="stack-summary__flag">
-                                        {meaning.known ? (
-                                            <>
-                                                <strong>{meaning.title}.</strong> {meaning.explanation}
-                                                <details className="stack-summary__details">
-                                                    <summary>Show the raw flag</summary>
-                                                    <code>{reason}</code>
-                                                </details>
-                                            </>
-                                        ) : (
-                                            reason
-                                        )}
+                                    <li key={`${warning.metric}-${index}`} className="stack-summary__flag">
+                                        <strong>{describeStackWarningTitle(warning.metric)}.</strong>{' '}
+                                        {numbers || warning.reason}
+                                        {' '}Outcome: failed.
+                                        {warning.actionTaken ? ` What was done: ${warning.actionTaken}.` : ''}
+                                        {warning.registerEntry ? ` Limit source: ${warning.registerEntry}.` : ''}
                                     </li>
                                 );
                             })}
                         </ul>
                     </>
-                ) : summary.flagged ? (
-                    <span className="stack-summary__flag">Flagged (no reason recorded)</span>
                 ) : (
                     <span className="stack-summary--muted">None raised.</span>
                 )}

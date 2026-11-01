@@ -3914,6 +3914,7 @@ export interface StackSummary {
   target_id: string;
   kind?: any;
   stack_path?: string | null;
+  job_id?: string | null;
   made_at: string;
   frames_submitted: number;
   frames_stacked: number;

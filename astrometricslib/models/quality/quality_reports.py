@@ -169,6 +169,10 @@ class StackSummary(BaseModel):
     target_id: str
     kind: Literal["imaging", "spectral"] = "imaging"
     stack_path: str | None = None
+    # The id of the stacking job that made this stack. A reader lists that
+    # job's warnings with `Jobs.query(job_id=..., detail="warnings")`. `None`
+    # for a stack saved before jobs were recorded, or made with no job.
+    job_id: str | None = None
     made_at: str
     frames_submitted: int
     frames_stacked: int

@@ -1,14 +1,18 @@
 /**
  * @file stackReviewService.ts
  * @description Calls the backend for the checks a person can run on a finished stack: making the
- * preview picture again, and reading why frames were set aside. The two slow checks start a
- * background job; the answer is the result, or the job to follow.
+ * preview picture again, reading why frames were set aside, and reading the warnings a stack
+ * raised. The two slow checks start a background job; the answer is the result, or the job to
+ * follow.
  */
 
 import { callBackend } from '../backendApi';
+import { GateStatus, SubjectLevel } from '../../types/backendTypes';
 import type {
+    JobWarning,
     PreviewRemakeResult,
     ProcessingJob,
+    QualityMeasurement,
     SetAsideFrameRecord,
     StackReviewStart,
 } from '../../types/backendTypes';
@@ -71,6 +75,87 @@ export async function fetchJob(jobId: string): Promise<ProcessingJob | null> {
  */
 export async function fetchSetAsideFrames(targetId: string): Promise<SetAsideFrameRecord[]> {
     return callBackend('quality:set_aside_frames', { target: targetId }, { silent: true });
+}
+
+/** One warning of a stack, in the fields the Stack Summary shows. */
+export interface StackWarning {
+    /** The registered metric name, such as `stacking.gate_flat_noise`. */
+    metric: string;
+    /** The number that was checked, or `null` when the check has no number. */
+    value: number | null;
+    /** The limit the number was checked against, or `null` when it has none. */
+    limit: number | null;
+    /** The unit of the value and the limit; empty when it has none. */
+    unit: string;
+    /** One sentence from the check. */
+    reason: string;
+    /** What the stacking step did about it, when it acted. */
+    actionTaken: string | null;
+    /** The validation register entry behind the limit. */
+    registerEntry: string | null;
+}
+
+/**
+ * Turns a warning of a job into the fields the panel shows.
+ * @param warning The warning, as `jobs:query` sends it.
+ * @return The same warning in panel form.
+ */
+const stackWarningFromJob = (warning: JobWarning): StackWarning => ({
+    metric: warning.metric,
+    value: warning.value ?? null,
+    limit: warning.limit ?? null,
+    unit: warning.unit ?? '',
+    reason: warning.reason ?? '',
+    actionTaken: warning.action_taken ?? null,
+    registerEntry: warning.register_entry ?? null,
+});
+
+/**
+ * Turns a stored measurement row with a failed check into the fields the panel shows.
+ * @param row The row, as `quality:query` sends it.
+ * @return The row in panel form.
+ */
+const stackWarningFromRow = (row: QualityMeasurement): StackWarning => ({
+    metric: row.metric,
+    value: row.value ?? null,
+    limit: row.checkLimit?.value ?? null,
+    unit: row.checkLimit?.unit ?? row.unit ?? '',
+    reason: row.reason ?? '',
+    actionTaken: row.actionTaken ?? null,
+    registerEntry: row.checkLimit?.registerEntry ?? null,
+});
+
+/**
+ * Lists the warnings a stacking job detected.
+ * @param jobId The id of the stacking job that made the stack.
+ * @return One warning for each failed check of the job; empty when there are none.
+ */
+export async function fetchStackJobWarnings(jobId: string): Promise<StackWarning[]> {
+    const answer = await callBackend(
+        'jobs:query', { job_id: jobId, detail: 'warnings' }, { silent: true });
+    return (answer.warnings ?? []).map(stackWarningFromJob);
+}
+
+/**
+ * Lists the failed checks stored for one stack, found by its target and file name. This is for a
+ * stack that has no job id (older data), so its warnings are still shown.
+ * @param targetId The target.
+ * @param stackPath The stack file's path; only its file name is used.
+ * @return One warning for each check of that stack whose newest stored result failed.
+ */
+export async function fetchStoredStackWarnings(
+    targetId: string, stackPath: string | null | undefined
+): Promise<StackWarning[]> {
+    if (!stackPath) return [];
+    const fileName = stackPath.split(/[\\/]/).pop() ?? stackPath;
+    const rows = await callBackend(
+        'quality:query',
+        { target_id: targetId, level: SubjectLevel.STACK, library_only: true, latest_only: true },
+        { silent: true }
+    );
+    return (rows ?? [])
+        .filter((row) => row.subject.subjectId === `${targetId}/${fileName}` && row.checkOutcome === GateStatus.FAILED)
+        .map(stackWarningFromRow);
 }
 
 /**

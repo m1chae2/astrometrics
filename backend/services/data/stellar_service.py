@@ -863,7 +863,7 @@ class StellarService:
 
         REQ: PLN-3.1
         """
-        return self.wayfinder.planning.query_catalogs()
+        return [driver.model_dump() for driver in self.wayfinder.planning.query_catalogs()]
 
     def get_constellation_lines(self) -> list[dict]:
         """Return all bundled constellation stick-figure line segments.
@@ -881,7 +881,7 @@ class StellarService:
 
         REQ: PLN-3.3
         """
-        return self.wayfinder.planning.get_constellation_lines()
+        return [segment.model_dump() for segment in self.wayfinder.planning.get_constellation_lines()]
 
     def get_visibility(
         self,

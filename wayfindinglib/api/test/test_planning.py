@@ -464,8 +464,20 @@ def test_sky_browsing_methods_delegate_to_the_sky_engine(mocker: object, isolate
     assert planning.lookup_coordinates("M 81").id == "M 81"
     fake_sky.resolve_target_coordinates.assert_called_once_with("M 81")
 
-    planning.get_constellation_lines()
-    fake_sky.get_constellation_lines.assert_called_once()
+    fake_sky.get_constellation_lines.return_value = [
+        {"constellation": "Ori", "ra1": 1.0, "dec1": 2.0, "ra2": 3.0, "dec2": 4.0}
+    ]
+    (segment,) = planning.get_constellation_lines()
+    assert (segment.constellation, segment.ra2) == ("Ori", 3.0)
+    fake_sky.list_catalog_driver_metadata.return_value = [
+        {"driver_name": "deep_stars", "display_name": "Gaia deep stars", "maximum_query_radius_degrees": 2.0}
+    ]
+    (driver,) = planning.query_catalogs()
+    assert driver.model_dump() == {
+        "driver_name": "deep_stars",
+        "display_name": "Gaia deep stars",
+        "maximum_query_radius_degrees": 2.0,
+    }
 
 
 def test_the_sky_engine_is_lazily_constructed_once(isolated_butler: DiskButler) -> None:

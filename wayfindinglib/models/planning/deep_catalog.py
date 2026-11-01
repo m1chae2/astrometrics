@@ -4,7 +4,8 @@ Description: The Planetarium draws faint stars from a local copy of the
 Gaia DR3 catalog, downloaded in chunks of sky. `DeepCatalogStatus` says
 how much of that copy is on disk. When asked, it also carries a
 `DeepCatalogEstimate`: a guess at the finished size, made by counting the
-stars in a sample of chunks.
+stars in a sample of chunks. `DeepCatalogBuildReport` is what a download
+run returns.
 """
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -42,4 +43,20 @@ class DeepCatalogStatus(BaseModel):
     size_megabytes: float = Field(..., description="Size of the catalog file, in megabytes.")
     estimate: DeepCatalogEstimate | None = Field(
         default=None, description='The size estimate. Filled with include=["estimate"].'
+    )
+
+
+class DeepCatalogBuildReport(BaseModel):
+    """What one run of the deep-star catalog download did."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    pixels_total: int = Field(..., description="The chunks asked for: the whole sky, or the chosen ones.")
+    pixels_previously_done: int = Field(..., description="Chunks that earlier runs had already saved.")
+    pixels_downloaded: int = Field(..., description="Chunks downloaded in this run.")
+    pixels_failed: list[int] = Field(default_factory=list, description="The numbers of chunks that failed.")
+    stars_added: int = Field(..., description="Stars saved by this run.")
+    elapsed_seconds: float = Field(..., description="How long the run took, in seconds.")
+    stopped_early: bool = Field(
+        ..., description="True when the archive seemed to be down or the chunk limit was reached."
     )

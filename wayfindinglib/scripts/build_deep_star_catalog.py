@@ -399,13 +399,13 @@ def run_catalog_build(argv: list[str] | None = None) -> int:
 
     print("\n==========================================")
     print("DEEP-STAR CATALOG DOWNLOAD FINISHED")
-    print(f"Chunks downloaded this run: {report['pixels_downloaded']:,}")
-    print(f"Chunks failed: {len(report['pixels_failed']):,}")
-    print(f"Time: {_format_duration(report['elapsed_seconds'])}")
+    print(f"Chunks downloaded this run: {report.pixels_downloaded:,}")
+    print(f"Chunks failed: {len(report.pixels_failed):,}")
+    print(f"Time: {_format_duration(report.elapsed_seconds)}")
     _print_status(config)
     status = deep_star_store.read_catalog_status(config)
     if chosen_pixels is not None:
-        chosen_are_finished = not report["pixels_failed"] and not report["stopped_early"]
+        chosen_are_finished = not report.pixels_failed and not report.stopped_early
         if chosen_are_finished:
             print("The chosen chunks are finished. Restart Astrometrics to use them.")
         else:
@@ -421,7 +421,7 @@ def run_catalog_build(argv: list[str] | None = None) -> int:
             f"{deep_star_store.BRIGHT_TIER_MAX_MAGNITUDE}), {counts['faint']:,} in the faint grid"
         )
         print("The catalog is complete. Restart Astrometrics to use it.")
-    elif report["pixels_failed"] or report["stopped_early"]:
+    elif report.pixels_failed or report.stopped_early:
         print("The catalog is not complete yet. Run the same command again to fetch what is missing.")
     print("==========================================")
 

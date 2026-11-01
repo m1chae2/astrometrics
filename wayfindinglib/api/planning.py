@@ -62,7 +62,11 @@ from wayfindinglib.models.equipment_and_site.calibration import CalibrationAdvis
 from wayfindinglib.models.equipment_and_site.equipment import EquipmentConfiguration, Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
 from wayfindinglib.models.planning.coordinate_lookup import CoordinateLookup
-from wayfindinglib.models.planning.deep_catalog import DeepCatalogEstimate, DeepCatalogStatus
+from wayfindinglib.models.planning.deep_catalog import (
+    DeepCatalogBuildReport,
+    DeepCatalogEstimate,
+    DeepCatalogStatus,
+)
 from wayfindinglib.models.planning.depth_goal import DepthGoalStatus, DepthLevel
 from wayfindinglib.models.planning.mosaic import MosaicPanel, MosaicPlan
 from wayfindinglib.models.planning.observation_package import (
@@ -75,6 +79,7 @@ from wayfindinglib.models.planning.observation_package import (
 )
 from wayfindinglib.models.planning.planning_config import PlanningConfig
 from wayfindinglib.models.planning.sequence_plan import SequencePlan
+from wayfindinglib.models.planning.sky_catalogs import CatalogDriverInfo, ConstellationLineSegment
 from wayfindinglib.models.planning.sky_source import SkySource, SourceQueryResult
 from wayfindinglib.models.planning.suggestion_log import (
     PackageChange,
@@ -636,25 +641,29 @@ class ObservationPlanning:
             stars_truncated=truncated,
         )
 
-    def query_catalogs(self) -> list[dict[str, Any]]:
-        """List the registered online catalog drivers, with metadata for each.
+    def query_catalogs(self) -> list[CatalogDriverInfo]:
+        """List the registered online catalog drivers, with details for each.
 
         Returns
         -------
-        metadata : `list` [`dict`]
-            Metadata for every registered online catalog driver.
+        drivers : `list` [`CatalogDriverInfo`]
+            One entry for every registered online catalog driver.
         """
-        return self._sky_engine.list_catalog_driver_metadata()
+        return [
+            CatalogDriverInfo.model_validate(row) for row in self._sky_engine.list_catalog_driver_metadata()
+        ]
 
-    def get_constellation_lines(self) -> list[dict[str, Any]]:
-        """Return constellation stick-figure line segment definitions.
+    def get_constellation_lines(self) -> list[ConstellationLineSegment]:
+        """Return the constellation stick-figure line segments.
 
         Returns
         -------
-        lines : `list` [`dict`]
-            Every constellation's stick-figure line segment definition.
+        lines : `list` [`ConstellationLineSegment`]
+            Every straight piece of every constellation's stick figure.
         """
-        return self._sky_engine.get_constellation_lines()
+        return [
+            ConstellationLineSegment.model_validate(row) for row in self._sky_engine.get_constellation_lines()
+        ]
 
     # -- Visibility ---------------------------------------------------------
 
@@ -3220,7 +3229,7 @@ class ObservationPlanning:
             status.estimate = DeepCatalogEstimate.model_validate(estimate)
         return status
 
-    def build_deep_star_catalog(self, **kwargs: Any) -> dict[str, Any]:
+    def build_deep_star_catalog(self, **kwargs: Any) -> DeepCatalogBuildReport:
         """Download the deep-star catalog the Planetarium draws from.
 
         A thin pass-through to
@@ -3230,12 +3239,13 @@ class ObservationPlanning:
 
         Returns
         -------
-        report : `dict`
-            The download report. See
-            `deep_star_catalog_builder.build_deep_star_catalog`.
+        report : `DeepCatalogBuildReport`
+            What the download did: the chunks asked for, downloaded and
+            failed, the stars added, the time taken and whether it stopped
+            early.
         """
         from wayfindinglib.drivers.catalog.deep_star_catalog_builder import (
             build_deep_star_catalog as _build_deep_star_catalog,
         )
 
-        return _build_deep_star_catalog(self._config, **kwargs)
+        return DeepCatalogBuildReport.model_validate(_build_deep_star_catalog(self._config, **kwargs))

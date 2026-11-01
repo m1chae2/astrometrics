@@ -148,6 +148,9 @@ Done on the same branch. No old name is kept as an alias. The MCP tool of each c
 | --- | --- | --- |
 | `planning.lookup_coordinates` | `dict` | `CoordinateLookup` (`id`, `name`, `kind`, `ra_deg`, `dec_deg`, `ra`, `dec`, `magnitude`, `spectral_type`). `result["ra_deg"]` becomes `result.ra_deg` |
 | `planning.find_sources`, `get_sources`, `get_library_star_summaries`, `get_online_catalog_sources` | `dict`, `list[SkySource]`, `list[dict]`, `list[SkySource]` | `SourceQueryResult` (`sources`, a list of `SkySource`, then `total_stars` and `stars_truncated`). A library star is a `SkySource`, so the `targetIds` of the old summary rows is gone. The RPCs `planetarium:get_sources`, `planetarium:get_targets` and `planetarium:get_catalog_sources` still reply with a list of `SkySource` records |
+| `planning.query_catalogs` (was `list_catalog_driver_metadata`) | `list[dict]` | `list[CatalogDriverInfo]` (`driver_name`, `display_name`, `maximum_query_radius_degrees`). The RPC `planetarium:list_catalog_drivers` still replies with the same dictionaries |
+| `planning.get_constellation_lines` | `list[dict]` | `list[ConstellationLineSegment]` (`constellation`, `ra1`, `dec1`, `ra2`, `dec2`). The RPC `planetarium:get_constellation_lines` still replies with the same dictionaries |
+| `planning.build_deep_star_catalog` | `dict` | `DeepCatalogBuildReport` (`pixels_total`, `pixels_previously_done`, `pixels_downloaded`, `pixels_failed`, `stars_added`, `elapsed_seconds`, `stopped_early`). `report["stars_added"]` becomes `report.stars_added` |
 
 ### Planning RPC methods
 

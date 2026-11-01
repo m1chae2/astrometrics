@@ -20,6 +20,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from astrometricslib._internal.processing_scripts import stack_subset
 from astrometricslib.api.processing import ProcessingPipelines
 from astrometricslib.foundation import config as config_loader
 from astrometricslib.foundation.config import AppConfiguration
@@ -301,14 +302,14 @@ def test_stack_subset_passes_the_frames_and_the_library_stack(
 
     monkeypatch.setattr(subset_noise_run, "stack_chosen_subset", chosen)
     target = _target()
-    result = _pipelines().stack_subset(target, target.frames, label="mine", output_folder=str(tmp_path))
+    result = stack_subset(_pipelines(), target, target.frames, label="mine", output_folder=str(tmp_path))
     assert result.label == "mine"
     assert seen["stack_path"] == LIBRARY_STACK
     assert seen["output_folder"] == str(tmp_path)
     assert seen["frames"] == target.frames
 
     bare = Target(id="Bare Target", frames=[])
-    _pipelines().stack_subset(bare, [], label="x")
+    stack_subset(_pipelines(), bare, [], label="x")
     assert seen["stack_path"].endswith("Bare Target/Bare_Target_Stacked.fits")
 
 

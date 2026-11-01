@@ -15,6 +15,8 @@ Rules the cleanup follows:
 
 `stars.save_all`, `calibration.add`, `processing.discard_previous_stack` and `processing.swap_with_previous_stack` were removed. `calibration.get` and `calibration.library` became private.
 
+Four `processing` methods became plain functions in `astrometricslib._internal.processing_scripts`, which only the library's own scripts and tests may import: `restore_excluded_frames`, `stack_subset`, `detect_point_sources` and `tune_spectroscopy_calibration`. Each takes the `ProcessingPipelines` as its first argument, and the same call is now `stack_subset(astrometrics.processing, target, frames, label=...)`. Their MCP tools (`processing_restore_excluded_frames`, `processing_stack_subset`, `processing_detect_point_sources`, `processing_tune_spectroscopy_calibration`) are gone.
+
 ## Calls
 
 | Old | New |
@@ -24,8 +26,8 @@ Rules the cleanup follows:
 | `processing.measure_night_contributions(target)` | `processing.measure_noise(target, kind="night_contributions")` |
 | `processing.measure_odd_even_difference_noise(target, keep_halves=)` | `processing.measure_noise(target, kind="odd_even_difference", keep_halves=)` |
 | `stars.plate_solve(path)` | `processing.plate_solve(path)` |
-| `stars.detect_point_sources(data)` | `processing.detect_point_sources(data)` |
-| `stars.tune_spectroscopy_calibration(...)` | `processing.tune_spectroscopy_calibration(...)` |
+| `stars.detect_point_sources(data)` | Private: `detect_point_sources(processing, data)` from `astrometricslib._internal.processing_scripts` (library scripts and tests only) |
+| `stars.tune_spectroscopy_calibration(...)` | Private: `tune_spectroscopy_calibration(processing, ...)` from `astrometricslib._internal.processing_scripts` (library scripts and tests only) |
 | `processing.record_frame_measurements(target, ...)` | `quality.record_frame_measurements(target, ...)` |
 | `processing.calibration.refresh(kind, prune_missing=)` | `processing.calibration.reindex_frames(kind, prune_missing=)` |
 | `quality.flag_value_outliers(...)` | Removed. Use `astrometricslib.pipelines.spectroscopy.utilities.registration_quality.flag_outliers` |
@@ -58,8 +60,8 @@ Rules the cleanup follows:
 | `jobs.query` | `dict` | `JobQueryResult` (fields: `jobs`, `job`, `log_lines`, `runs` and so on; `job.id` replaces `job["id"]`) |
 | `targets.delete_images` | `dict` | `ImageDeletionResult` (`deleted`, `failed`) |
 | `targets.imaged_field_centers` | `list[dict]` | `ImagedFieldCenters` (`centers`, a list of `FieldCenter`) |
-| `processing.detect_point_sources` | `list[dict]` | `PointSourceDetection` (`sources`, a list of `PointSource` with `x_centroid`, `y_centroid`, `flux` and so on) |
-| `processing.tune_spectroscopy_calibration` | `dict` | `SpectroscopyCalibrationResult` (`rms_error_nm` and so on) |
+| `detect_point_sources` (private function) | `list[dict]` | `PointSourceDetection` (`sources`, a list of `PointSource` with `x_centroid`, `y_centroid`, `flux` and so on) |
+| `tune_spectroscopy_calibration` (private function) | `dict` | `SpectroscopyCalibrationResult` (`rms_error_nm` and so on) |
 | `quality.query` | `list[QualityMeasurement]` | `QualityQueryResult` (`rows`, `total_matching`, `offset`, `truncated`) |
 
 ## RPC methods (the app's backend)
@@ -80,8 +82,8 @@ The reply of `quality:query`, `images:delete` and `calibration:get_stats` keeps 
 | --- | --- |
 | `quality_check_spectral_frames` | `quality_measure_frames` with `kind="spectral"` |
 | `processing_measure_noise_growth`, `processing_measure_night_contributions`, `processing_measure_odd_even_difference_noise` | `processing_measure_noise` with `kind` |
-| `star_detect_point_sources` | `processing_detect_point_sources` |
-| `star_tune_spectroscopy_calibration` | `processing_tune_spectroscopy_calibration` |
+| `star_detect_point_sources` | Removed (the call is private) |
+| `star_tune_spectroscopy_calibration` | Removed (the call is private) |
 | `star_plate_solve` | `processing_plate_solve` |
 | `processing_record_frame_measurements` | `quality_record_frame_measurements` |
 | `calibration_refresh` | `calibration_reindex_frames` |

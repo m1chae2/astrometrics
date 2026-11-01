@@ -133,19 +133,10 @@ DECISIONS = {
     "observatory_safety_apply_promotion_decision": ToolDecision(
         "withhold", "Applies an operator's decision. Needs the operator."
     ),
-    "processing_tune_spectroscopy_calibration": ToolDecision(
-        "withhold",
-        "Rewrites the live configuration file through update_config. Needs an apply=false mode that only "
-        "returns the fitted values.",
-        "change-data",
-    ),
     # ---- Fix first ----
     "target_save": ToolDecision("withhold", "Writes the database. The AI is read-only."),
     "star_analyze_periodicity": ToolDecision(
         "fix", "Writes the result into the live star catalog. Needs a save=false option.", "change-data"
-    ),
-    "processing_detect_point_sources": ToolDecision(
-        "fix", "Needs a NumPy array, which MCP cannot send. Take a frame path."
     ),
     "processing_plate_solve": ToolDecision(
         "fix",
@@ -570,7 +561,6 @@ DECISIONS = {
         (
             "calibration_reindex_frames",
             "processing_process_target",
-            "processing_restore_excluded_frames",
             "star_create",
             "star_find_or_create_by_position",
             "star_update",
@@ -603,10 +593,7 @@ DECISIONS = {
         "change-data",
     ),
     **dict.fromkeys(
-        (
-            "processing_stack_subset",
-            "processing_measure_noise",
-        ),
+        ("processing_measure_noise",),
         ToolDecision(
             "withhold",
             "Stacks some of a target's frames into the target's _subsets folder (never over the library "

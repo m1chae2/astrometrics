@@ -567,17 +567,18 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
 - **Data you need:** A spectral stack of a bright A-type star with strong Balmer lines (Vega is ideal), its trail unsaturated, and the zero-order position if the star is not the one nearest the frame center.
 - **Procedure:**
   1. Back up the config file: the tuner writes the fitted distance into it.
-  2. Run the tuner through the public API and read the RMS error and the per-line deviations.
+  2. Run the tuner with the internal function that `scripts/run_empirical_validation.py` calls, and read the RMS error and the per-line deviations.
 
   ```python
   from astrometricslib import Astrometrics
+  from astrometricslib._internal.processing_scripts import tune_spectroscopy_calibration  # internal
 
-  summary = Astrometrics().processing.tune_spectroscopy_calibration(
-      "vega_stack.fits", camera_id="ZWO ASI 533MM Pro"
+  summary = tune_spectroscopy_calibration(
+      Astrometrics().processing, "vega_stack.fits", camera_id="ZWO ASI 533MM Pro"
   )
   print(summary.rms_error_nm)
   ```
-  <!-- impl: astrometricslib.ProcessingPipelines.tune_spectroscopy_calibration -->
+  <!-- impl: astrometricslib.api.script_calls.tune_spectroscopy_calibration -->
 - **Acceptance criterion:** An RMS well below one pixel of dispersion (about 1.1 nm). A fit above 10 nm is refused.
 - **What to look at:** `rms_error_nm`, the RMS difference between the fitted and the true wavelengths of the three lines, in nm. One pixel of dispersion is about 1.1 nm; an RMS well below that is good. Above 10 nm the fit is refused.
 - **Our result:** Synthetic frames: measured value not recorded (the tests assert the bounds listed under Guarded by tests). On a noisy frame (3000 ADU continuum with Poisson noise), the unfiltered search had found about 60 dips and run for minutes. Real data: Vega session (DS-VEGA), RMS 0.42 nm (4.2 Å) over H-beta, H-gamma and H-delta.

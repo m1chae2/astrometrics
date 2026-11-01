@@ -284,6 +284,13 @@ def script(monkeypatch: pytest.MonkeyPatch) -> Any:
     # about the smallest stack let one frame through; the skip tests below
     # put the real limit back.
     monkeypatch.setattr(run_all_target_processing, "MINIMUM_IMAGING_FRAMES_TO_STACK", 1)
+    # The script calls `stack_subset(pipelines, ...)`; the stand-in pipelines
+    # keep the old method form so the tests can record the calls.
+    monkeypatch.setattr(
+        run_all_target_processing,
+        "stack_subset",
+        lambda pipelines, target, frames, **keywords: pipelines.stack_subset(target, frames, **keywords),
+    )
     return run_all_target_processing
 
 

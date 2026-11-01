@@ -72,13 +72,6 @@
       "interim_block": "",
       "note": "Internal concurrency lock exposed by reflection."
     },
-    "processing_detect_point_sources": {
-      "tool_class": "compute",
-      "category": "image-processing",
-      "disposition": "fix",
-      "interim_block": "",
-      "note": "Needs a NumPy array, which MCP cannot send. Take a frame path."
-    },
     "processing_measure_noise": {
       "tool_class": "change-data",
       "category": "image-processing",
@@ -121,13 +114,6 @@
       "interim_block": "",
       "note": "Built 2026-10-04 from gap report #1. Makes a target's preview picture again from its existing stack, without restacking. denoise, denoise_strength and star_toning apply to that run only and never reach the configuration. The old pictures are copied into _previous_preview first and put back if the run fails. The stack file is never written. Writes only the preview JPEG, the processed FITS and the target's processed-image pointer."
     },
-    "processing_restore_excluded_frames": {
-      "tool_class": "change-data",
-      "category": "image-processing",
-      "disposition": "withhold",
-      "interim_block": "",
-      "note": "The AI is read-only, so a tool that writes is not offered."
-    },
     "processing_run_spectroscopy_by_session": {
       "tool_class": "change-data",
       "category": "image-processing",
@@ -142,26 +128,12 @@
       "interim_block": "",
       "note": "Built 2026-10-04 at the user's request: the AI may stack a target the way the app's Stack button does, choosing imaging or spectral frames, a filter and a file or time range. plan_only lists the frames without stacking. It runs the app's own stage: sets aside bad frames into _excluded (never deletes), keeps one previous stack, and saves the target. Since 2026-10-05 it is ProcessingPipelines.stack, which also takes the exact frames to stack."
     },
-    "processing_stack_subset": {
-      "tool_class": "change-data",
-      "category": "image-processing",
-      "disposition": "withhold",
-      "interim_block": "",
-      "note": "Stacks some of a target's frames into the target's _subsets folder (never over the library stack, its previews or its records) and writes the noise of each result into the quality database. It costs one stack for each subset, so it takes minutes (kind=odd_even_difference stacks two halves, about one library stack's time in all). The AI is read-only, so it reads the stored numbers with quality_query instead."
-    },
     "processing_stack_summary": {
       "tool_class": "observe",
       "category": "image-processing",
       "disposition": "keep",
       "interim_block": "",
       "note": "Built 2026-10-04. One short answer for a target's stack: frames stacked and skipped, rejected fraction, star width against the inputs, flags and each exposure group. Reads the saved summary."
-    },
-    "processing_tune_spectroscopy_calibration": {
-      "tool_class": "change-data",
-      "category": "image-processing",
-      "disposition": "withhold",
-      "interim_block": "",
-      "note": "Rewrites the live configuration file through update_config. Needs an apply=false mode that only returns the fitted values."
     },
     "quality_calibration_identities": {
       "tool_class": "observe",

@@ -56,7 +56,7 @@ with fits.open(path, memmap=False) as hdul:
     data = np.asarray(hdul[0].data, dtype=float)
     header = hdul[0].header
 
-sources = astrometrics.processing.detect_point_sources(data).sources
+sources = detect_point_sources(astrometrics.processing, data).sources
 centres = []
 for source in sources[:3000]:
     x = int(round(source.x_centroid))
@@ -619,13 +619,14 @@ import numpy as np
 from astropy.io import fits
 
 from astrometricslib import Astrometrics
+from astrometricslib._internal.processing_scripts import detect_point_sources  # internal
 from astrometricslib.exceptions import PlateSolveFailedError
 
 astrometrics = Astrometrics()
 for path in ["/path/to/frame1.fits", "/path/to/frame2.fits"]:
     with fits.open(path, memmap=False) as hdul:
         data = np.asarray(hdul[0].data, dtype=float)
-    count = len(astrometrics.processing.detect_point_sources(data).sources)
+    count = len(detect_point_sources(astrometrics.processing, data).sources)
     start = time.monotonic()
     try:
         solved = astrometrics.processing.plate_solve(path) is not None

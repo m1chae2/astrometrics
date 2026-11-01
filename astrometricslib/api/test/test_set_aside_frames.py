@@ -158,6 +158,7 @@ def test_a_frame_without_a_manifest_entry_is_listed_but_not_restored(
     quality: QualityRecords, tmp_path: Path
 ) -> None:
     """Restore moves manifest frames only; the listing flags the rest."""
+    from astrometricslib._internal.processing_scripts import restore_excluded_frames
     from astrometricslib.api.processing import ProcessingPipelines
     from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import restore_quarantined_frames
 
@@ -176,7 +177,7 @@ def test_a_frame_without_a_manifest_entry_is_listed_but_not_restored(
     pipelines = ProcessingPipelines(
         SimpleNamespace(get_frames_path=lambda: tmp_path / "frames"), None, targets=MagicMock()
     )
-    report = pipelines.restore_excluded_frames(Target(id="M 1"), apply=True)
+    report = restore_excluded_frames(pipelines, Target(id="M 1"), apply=True)
 
     assert report.restored_count == 1
     assert (folder / "a.fits").exists()

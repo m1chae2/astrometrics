@@ -3,11 +3,11 @@
 Four jobs stack some of a target's frames, apart from the library stack, and
 measure the noise of each result:
 
-- `ProcessingPipelines.stack_subset` stacks exactly the frames it is given and
-  returns a `SubsetStackResult`. With ``record_forecast_rows=True`` it also
-  stores a library stack's forecast rows (frame weights, group rows and a
-  calibration record), so the subset can be the earlier member of a forecast
-  check's pair.
+- the internal `stack_subset` function stacks exactly the frames it is
+  given and returns a `SubsetStackResult`. With ``record_forecast_rows=True``
+  it also stores a library stack's forecast rows (frame weights, group
+  rows and a calibration record), so the subset can be the earlier member
+  of a forecast check's pair.
 - `ProcessingPipelines.measure_noise` returns the result of its kind. With
   ``kind="growth"`` it stacks the first nights (or the first part of one
   night) and returns a `NoiseGrowthResult`. With

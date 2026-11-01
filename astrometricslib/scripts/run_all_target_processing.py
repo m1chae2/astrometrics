@@ -50,6 +50,7 @@ os.environ["HEADLESS"] = "1"
 from astrometricslib import Astrometrics, configure_logging
 from astrometricslib._internal.drivers.camera_profile_store import camera_identity, resolve_camera_profile
 from astrometricslib._internal.frames import frame_subject_id
+from astrometricslib._internal.processing_scripts import stack_subset
 from astrometricslib.foundation.paths import siril_work_directory as siril_work_directory_path
 from astrometricslib.models.quality.measurement import MeasurementStatus
 from astrometricslib.pipelines.shared.camera_passes import assign_targets_to_cameras, camera_pass_order
@@ -583,7 +584,7 @@ def _earlier_nights_frames(astrometrics: Astrometrics, target: Any, since: datet
 def _stack_earlier_nights_note(astrometrics: Astrometrics, target: Any, since: datetime) -> str:
     """Stack the earlier nights of a target whose new stack has several nights.
 
-    The subset is stacked with `ProcessingPipelines.stack_subset`, labeled
+    The subset is stacked with the library's `stack_subset` function, labeled
     `EARLIER_NIGHTS_VARIANT`, with the forecast rows recorded. A failure is a
     by-product: it is reported in the returned text and never raised, so the
     library stack still counts as done.
@@ -613,8 +614,8 @@ def _stack_earlier_nights_note(astrometrics: Astrometrics, target: Any, since: d
                 f"fewer than {MINIMUM_EARLIER_NIGHTS_FRAMES})"
             )
             return ""
-        astrometrics.processing.stack_subset(
-            target, frames, label=EARLIER_NIGHTS_VARIANT, record_forecast_rows=True
+        stack_subset(
+            astrometrics.processing, target, frames, label=EARLIER_NIGHTS_VARIANT, record_forecast_rows=True
         )
     except Exception as earlier_nights_error:
         # The library stack is already made and recorded; the subset is an

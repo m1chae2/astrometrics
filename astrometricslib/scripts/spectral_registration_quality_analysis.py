@@ -43,6 +43,7 @@ from astrometricslib import Astrometrics, configure_logging
 from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_data
 from astrometricslib._internal.drivers.siril_output_parsing import parse_seq_file, parse_zero_order_star
 from astrometricslib._internal.errors import DATA_ERRORS
+from astrometricslib._internal.processing_scripts import detect_point_sources
 from astrometricslib.exceptions import AstrometricsError
 from astrometricslib.foundation.paths import siril_work_directory
 from astrometricslib.pipelines.spectroscopy.utilities.registration_quality import (
@@ -163,7 +164,7 @@ def measure_zero_order_stacked_fwhm(astrometrics: Astrometrics, path: str) -> fl
         return None
     data = collapse_to_2d(np.asarray(data, dtype=float))
 
-    sources = astrometrics.processing.detect_point_sources(data).sources
+    sources = detect_point_sources(astrometrics.processing, data).sources
     if not sources:
         return None
     brightest = sources[0]

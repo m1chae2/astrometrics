@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from astrometricslib._internal.processing_scripts import restore_excluded_frames
 from astrometricslib.api.processing import ProcessingPipelines
 from astrometricslib.api.quality import QualityRecords
 from astrometricslib.foundation.enums import FilterType
@@ -213,7 +214,7 @@ def test_list_reads_the_manifests(pipelines: ProcessingPipelines, tmp_path: Path
     folder = camera_folder(tmp_path)
     quarantine = write_manifest(folder, [manifest_entry(folder, "frame_003.fits")])
 
-    frames = pipelines.restore_excluded_frames(Target(id="M 1")).frames
+    frames = restore_excluded_frames(pipelines, Target(id="M 1")).frames
 
     assert [frame.file for frame in frames] == ["frame_003.fits"]
     assert frames[0].star_count == 203
@@ -227,7 +228,7 @@ def test_list_is_empty_for_a_target_with_nothing_set_aside(
     """A target with no `_excluded` folder lists nothing."""
     camera_folder(tmp_path)
 
-    assert pipelines.restore_excluded_frames(Target(id="M 1")).frames == []
+    assert restore_excluded_frames(pipelines, Target(id="M 1")).frames == []
 
 
 def test_a_stray_excluded_folder_without_a_manifest_is_not_listed(
@@ -236,7 +237,7 @@ def test_a_stray_excluded_folder_without_a_manifest_is_not_listed(
     """Only `_excluded` folders that hold a manifest count."""
     (camera_folder(tmp_path) / QUARANTINE_FOLDER_NAME).mkdir()
 
-    assert pipelines.restore_excluded_frames(Target(id="M 1")).frames == []
+    assert restore_excluded_frames(pipelines, Target(id="M 1")).frames == []
 
 
 def test_restore_without_apply_only_lists(pipelines: ProcessingPipelines, tmp_path: Path) -> None:
@@ -244,7 +245,7 @@ def test_restore_without_apply_only_lists(pipelines: ProcessingPipelines, tmp_pa
     folder = camera_folder(tmp_path)
     quarantine = write_manifest(folder, [manifest_entry(folder, "frame_003.fits")])
 
-    report = pipelines.restore_excluded_frames(Target(id="M 1"))
+    report = restore_excluded_frames(pipelines, Target(id="M 1"))
 
     assert report.applied is False
     assert report.restored_count == 0
@@ -260,7 +261,7 @@ def test_restore_with_apply_moves_frames_back_and_rescans(
     quarantine = write_manifest(folder, [manifest_entry(folder, "frame_003.fits")])
     target = Target(id="M 1")
 
-    report = pipelines.restore_excluded_frames(target, apply=True)
+    report = restore_excluded_frames(pipelines, target, apply=True)
 
     assert report.applied is True
     assert report.restored_count == 1
@@ -275,7 +276,7 @@ def test_restore_with_apply_does_not_rescan_when_nothing_moved(
     """A target with nothing set aside is left alone."""
     camera_folder(tmp_path)
 
-    report = pipelines.restore_excluded_frames(Target(id="M 1"), apply=True)
+    report = restore_excluded_frames(pipelines, Target(id="M 1"), apply=True)
 
     assert report.restored_count == 0
     pipelines._targets.reindex_frames.assert_not_called()

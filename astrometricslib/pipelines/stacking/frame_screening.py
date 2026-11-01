@@ -205,7 +205,7 @@ def _quarantine_bad_frames(
     The background check that follows only catches one sudden jump in sky
     brightness, and the stacker's weighting only lowers the influence of a
     bad frame. Moving the frame aside keeps it out of this stack and every
-    later one, and `ProcessingPipelines.restore_excluded_frames` puts it
+    later one, and the internal `restore_excluded_frames` function puts it
     back. Spectral frames are skipped: their streaks are the spectra
     themselves. The step also stores the frame quality rows.
 

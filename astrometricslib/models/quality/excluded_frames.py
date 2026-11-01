@@ -130,9 +130,10 @@ class SetAsideFrameRecord(BaseModel):
     # When the frame was moved (UTC, ISO 8601), from the manifest; else the
     # time of the stored row.
     moved_at: str | None = Field(default=None, alias="movedAt")
-    # Whether `ProcessingPipelines.restore_excluded_frames` can move the frame
-    # back. Only a frame with an `excluded_frames.json` entry can: that entry
-    # holds where it came from, and restore never guesses a place.
+    # Whether the internal `restore_excluded_frames` function can move the
+    # frame back. Only a frame with an `excluded_frames.json` entry can:
+    # that entry holds where it came from, and restore never guesses a
+    # place.
     restorable: bool = True
     # Why the frame cannot be restored automatically. Empty when it can.
     restore_note: str = Field(default="", alias="restoreNote")

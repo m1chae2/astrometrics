@@ -216,7 +216,7 @@ CLASSIFICATION_RULES = (
     ),
     _rule(r"^calibration_reindex_frames$", "change-data", "medium", "Probably rebuilds stored calibration."),
     _rule(
-        r"^processing_(restore_excluded_frames|process_target)$",
+        r"^processing_process_target$",
         "change-data",
         "high",
         "Changes frames or stacks on disk or in the database.",
@@ -228,9 +228,6 @@ CLASSIFICATION_RULES = (
         "Pipeline run that writes results to the live catalog or stacks.",
     ),
     _rule(r"^processing_acquire_.+_slot$", "change-data", "low", "Takes a work slot (a lock). Check."),
-    _rule(
-        r"^processing_tune_spectroscopy_calibration$", "change-data", "low", "May store a new calibration."
-    ),
     _rule(
         r"^planning_(add_to_queue|reorder_queue|remove_from_queue|set_entry_exposures|add_checklist_items"
         r"|set_framing|update_package|reopen_package|dismiss_package|undismiss_package|delete_package"

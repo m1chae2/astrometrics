@@ -403,7 +403,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         if use_astrometry_seed:
             from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 
-            star_identifier = StarIdentifier()
+            star_identifier = StarIdentifier(drivers=options.get("drivers"))
 
         session_wcs_map: dict[str, Any] = {}
         astrometry_identified_star_count = 0
@@ -495,7 +495,11 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         if id_prefix_enabled:
             all_stellar_objects, sessions_missing_wcs, cross_session_match_count = (
                 _match_and_merge_across_sessions(
-                    photometry_sessions, per_session_results, target, session_wcs_map=session_wcs_map
+                    photometry_sessions,
+                    per_session_results,
+                    target,
+                    session_wcs_map=session_wcs_map,
+                    drivers=options.get("drivers"),
                 )
             )
             if cross_session_match_count > 0:

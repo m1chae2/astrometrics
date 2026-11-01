@@ -11,6 +11,7 @@ are what gets built. No network, solver or Siril is needed.
 from collections.abc import Callable
 from contextlib import nullcontext
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -284,6 +285,62 @@ def test_the_astrometry_stage_uses_the_injected_solver_and_simbad(
     assert astrometry_result["wcs"].wcs.crval[0] == pytest.approx(FIELD_RA_DEG)
     names = {star.name for star in astrometry_result["stellar_objects"]}
     assert names == {f"Fake Star {index}" for index in range(len(STAR_PIXELS))}
+
+
+def test_the_photometry_stage_uses_the_injected_solver_and_simbad(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Photometry identifies its stars with the fake solver and SIMBAD.
+
+    The fixture `real_drivers_are_forbidden` makes any built-in plate solver
+    or SIMBAD call fail, so the run passes only if photometry used the fakes.
+    """
+    frame_paths = []
+    for index in range(3):
+        frame_path = tmp_path / f"photometry_{index}.fits"
+        make_photometry_fits(
+            frame_path,
+            [SyntheticStar(x, y, flux_adu=40000.0, fwhm_px=3.0) for x, y in STAR_PIXELS],
+            date_obs=f"2026-05-01T00:0{index}:00",
+            exptime_s=30.0,
+            shape=(IMAGE_SIZE, IMAGE_SIZE),
+            seed=index + 1,
+            extra_header={"OBJECT": "Injection Field"},
+        )
+        frame_paths.append(str(frame_path))
+    frames = [
+        FrameRecord(
+            path=frame_path,
+            filter=FilterType.L,
+            camera="ZWO ASI 533MM Pro",
+            role="LIGHT",
+            exposure="30.0",
+            timestamp=1_777_593_600.0 + 60.0 * index,
+        )
+        for index, frame_path in enumerate(frame_paths)
+    ]
+    solver, simbad = FakePlateSolver(), FakeSimbad()
+    # Saving stars to the shared test database is not under test here.
+    monkeypatch.setattr(
+        "astrometricslib.pipelines.photometry.runner.record_pipeline_stars",
+        lambda stars, **_: (stars, SimpleNamespace(catalog_matched=0, position_only=0, unresolved=0)),
+    )
+    astrometrics = astrometrics_with_drivers(
+        AppConfiguration(), MagicMock(), plate_solve_driver=solver, simbad_driver=simbad
+    )
+    target = Target(id="Injection Field", frames=frames)
+
+    result = astrometrics.processing.process_target(
+        target,
+        stages=["photometry"],
+        photometry={"frames": frames, "max_workers": 1},
+        register_job=False,
+    )
+
+    assert "photometry" in result.results
+    assert len(solver.calls) == 1
+    assert solver.calls[0]["image_path"] == frame_paths[0]
+    assert simbad.region_calls
 
 
 def test_plate_solve_on_the_star_catalog_uses_the_injected_solver(field_image: str) -> None:

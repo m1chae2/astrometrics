@@ -474,7 +474,7 @@ def _run_analysis_pipeline_match(
 ANALYSIS_STAGES = ("astrometry", "photometry", "spectroscopy", "asteroids")
 """The analysis stages `run_target_stages` can run, in the order run."""
 
-DEFAULT_ANALYSIS_STAGES = ("astrometry", "photometry", "spectroscopy")
+DEFAULT_ANALYSIS_STAGES = ("astrometry", "spectroscopy")
 """The stages that run for one target when the caller names none."""
 
 STAGE_OPTIONS = {
@@ -551,7 +551,7 @@ def run_target_stages(
         if "filter_name" in options:
             # The stage runner still names this argument ``filter_type``.
             options["filter_type"] = options.pop("filter_name")
-        if drivers is not None and stage in ("astrometry", "spectroscopy"):
+        if drivers is not None and stage in ("astrometry", "photometry", "spectroscopy"):
             options["drivers"] = drivers
         if stage == "photometry" and frame_selection is not None:
             options.setdefault("frames", frame_selection.frames)

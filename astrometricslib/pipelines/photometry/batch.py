@@ -21,6 +21,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from astrometricslib._internal.drivers.catalog_access import POSITION_ONLY_STAR_ID_PREFIX
+from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.models.stellar_source import StellarObject
@@ -155,12 +156,22 @@ def _run_variability_analysis_for_session(
     return analyzer, candidates, identify_result
 
 
-def _solve_session_wcs(session: Any, target: Target) -> Any | None:
+def _solve_session_wcs(session: Any, target: Target, drivers: Drivers | None = None) -> Any | None:
     """Plate-solve a session's reference frame to get its sky coordinates.
 
     We need this when we want to match stars across different sessions,
     but we haven't already looked up their identities in a database.
     (For example, if we skipped the SIMBAD lookup step earlier).
+
+    Parameters
+    ----------
+    session : `Any`
+        The observing session; its first frame is solved.
+    target : `Target`
+        The target, whose position helps the solver.
+    drivers : `Drivers`, optional
+        The plate solver and SIMBAD driver to use. Any left out is the
+        built-in one.
 
     Returns
     -------
@@ -178,7 +189,7 @@ def _solve_session_wcs(session: Any, target: Target) -> Any | None:
 
         wcs, _reused_existing_wcs, _solve_attempted = resolve_frame_wcs(
             AstrometricsImage(reference_path),
-            StarIdentifier(),
+            StarIdentifier(drivers=drivers),
             center_ra=center_ra,
             center_dec=center_dec,
             write_back=False,
@@ -453,6 +464,7 @@ def _match_and_merge_across_sessions(
     target: Target,
     tolerance_arcsec: float = 5.0,
     session_wcs_map: dict[str, Any] | None = None,
+    drivers: Drivers | None = None,
 ) -> tuple[list[Any], list[str], int]:
     """Find the same real star in different sessions and combine its data.
 
@@ -478,6 +490,8 @@ def _match_and_merge_across_sessions(
         A map of session IDs to their known coordinate systems (WCS).
         This stops us from having to run the plate solver twice for the
         same image.
+    drivers : `Drivers`, optional
+        The plate solver and SIMBAD driver for any solve this needs.
 
     Returns
     -------
@@ -510,7 +524,7 @@ def _match_and_merge_across_sessions(
         if session_wcs_map is not None and session.id in session_wcs_map:
             wcs = session_wcs_map[session.id]
         else:
-            wcs = _solve_session_wcs(session, target)
+            wcs = _solve_session_wcs(session, target, drivers)
         if wcs is None:
             sessions_missing_wcs.append(session.id)
             merged_stellar_objects.extend(analyzer.stellar_objects)

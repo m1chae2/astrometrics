@@ -1135,7 +1135,7 @@ def test_match_and_merge_across_sessions_falls_back_to_solving_when_session_abse
 
     _match_and_merge_across_sessions([session_a], per_session_results, target, session_wcs_map={})
 
-    solve_spy.assert_called_once_with(session_a, target)
+    solve_spy.assert_called_once_with(session_a, target, None)
 
 
 def test_match_and_merge_across_sessions_avoids_double_assignment_when_ambiguous(

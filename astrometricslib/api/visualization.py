@@ -56,6 +56,8 @@ _DEFAULT_FIGURE_SIZES = {
 class Visualization:
     """Draw FITS frames as pictures, and plot the results of the pipelines.
 
+    To draw the stars of a target on its stacked image, read their pixel
+    positions with `StellarCatalog.query` and ``detail="overlay"``.
     A target or star id that names nothing in the library raises
     `NotFoundError`. A file that cannot be drawn raises `ProcessingError`.
 

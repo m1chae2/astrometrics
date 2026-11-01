@@ -375,6 +375,15 @@ def render_model(model: type[BaseModel]) -> list[str]:
     return lines
 
 
+_INTRODUCTION = (
+    "A call returns a result model. The model classes are private, so this section",
+    "shows no import path: read the fields by name from what the call returns. A",
+    "result that the package root or one of the public modules above documents is",
+    "not repeated here.",
+    "",
+)
+
+
 class LibraryResultFields(SphinxDirective):
     """List the fields of every private result model of one library."""
 
@@ -392,7 +401,7 @@ class LibraryResultFields(SphinxDirective):
         library = self.arguments[0]
         if library not in _PUBLIC_MODULES:
             return [self.state_machine.reporter.error(f"Unknown library {library!r}", line=self.lineno)]
-        lines: list[str] = []
+        lines: list[str] = list(_INTRODUCTION)
         for model in collect_result_models(library):
             lines += render_model(model)
         container = nodes.container()

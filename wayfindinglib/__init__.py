@@ -1,10 +1,29 @@
-"""Purpose: The Wayfinder, the entry point to the wayfinding library.
+"""Plan and run observing sessions and control the observatory.
 
-Description: `Wayfinder` composes the library's four sub-APIs:
-`control` (operate the observatory), `planning` (decide what to
-observe), `execution` (run and recover an observing session) and
-`review` (how the nights went). `control` has six children named by
-topic: `mount`, `imaging`, `guiding`, `safety`, `equipment` and `remote`.
+`wayfindinglib` helps you set up each night's session and suggests what to
+image, based on the quality metrics in `astrometricslib`'s databases. It
+records alignment and guiding metrics to help you judge how well the
+observatory itself is performing. Its judgments are suggestions of what to
+image or do next, not verdicts on data.
+
+To use the library, build the entry point with no arguments. It loads the
+settings by itself::
+
+    from wayfindinglib import Wayfinder
+
+    wayfinder = Wayfinder()
+
+`Wayfinder` has one attribute for each sub-API:
+
+- `control` (`ObservatoryControl`): operate the observatory through six
+  children named by topic: `mount`, `imaging`, `guiding`, `safety`,
+  `equipment` and `remote`.
+- `planning` (`ObservationPlanning`): decide what to observe, from target
+  visibility to observation packages, sequences and mosaic grids.
+- `execution` (`ObservationExecution`): run and recover an observing
+  session, and record its telemetry.
+- `review` (`ObservationReview`): how past and current nights went, and
+  the limits the equipment has shown.
 
 What to import from where
 -------------------------

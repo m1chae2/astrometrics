@@ -1012,7 +1012,9 @@ class _TargetsOnDemand:
 
 
 class ProcessingPipelines:
-    """Stack targets, remake their previews, and run the analysis stages.
+    """Stack targets, run the analysis stages and measure noise.
+
+    It also remakes the preview pictures of stacks.
 
     Every method that takes a target accepts its id or the `Target`. An id
     that names no target, or a stack that does not exist, raises

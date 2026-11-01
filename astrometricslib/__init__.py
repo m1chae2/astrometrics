@@ -1,13 +1,40 @@
-"""The main Astrometrics software library.
+"""Process, measure and catalog astronomical images.
 
-This library is a collection of tools for processing astronomical images.
-It handles everything from aligning and stacking images (calibration),
-to figuring out exactly what stars are in the picture (plate-solving),
-to measuring star brightness and colors (photometry and spectroscopy).
+`astrometricslib` provides utilities for a target's stack and performs
+astrometry (finding where the image points), photometry (measuring star
+brightness) and spectroscopy (splitting star light by color). It also
+identifies moving objects. It keeps the database of the targets that have
+been imaged and of the stellar objects that have been identified. It manages
+the calibration images (darks, flats and bias) that improve the analysis. For
+every major processing stage it gives quality metrics that help you judge how
+useful the images are. It measures and reports; it gives no advice about what
+to image next. That is the job of `wayfindinglib`.
 
-To use the library, import `Astrometrics` from here. It acts as the main
-control panel, giving you access to all the sub-tools: `targets`, `stars`,
-`processing`, `visualization`, `jobs` and `quality`.
+To use the library, build the entry point with no arguments. It loads the
+settings by itself::
+
+    from astrometricslib import Astrometrics
+
+    astrometrics = Astrometrics()
+
+`Astrometrics` has one attribute for each sub-API:
+
+- `targets` (`TargetCatalog`): create, read and save targets, and keep their
+  frame lists current.
+- `stars` (`StellarCatalog`): the library's star records, catalog queries
+  and light-curve (brightness over time) analysis.
+- `processing` (`ProcessingPipelines`): stack a target, remake its preview
+  and run the analysis stages and noise measurements. Its `calibration`
+  child (`CalibrationCatalog`) manages darks, biases and flats.
+- `quality` (`QualityRecords`): stored quality measurements, the metric list
+  and live checks of raw frames and stacks.
+- `visualization` (`Visualization`): draw frames and stacks as pictures and
+  plot results.
+- `jobs` (`Jobs`): read the history of running and finished jobs.
+
+The sub-APIs work on three core records: a `Target` (a place on the sky,
+with its frames and stacks), the `FrameRecord`s that are part of it, and a
+`StellarObject` for each identified star.
 
 What to import from where
 -------------------------
@@ -148,7 +175,7 @@ class Astrometrics:
     targets : `TargetCatalog`
         Observation targets, folder rescanning, and frame records.
     stars : `StellarCatalog`
-        Identified stars, catalog queries, and plate solving.
+        Identified stars, catalog queries, and light-curve analysis.
     processing : `ProcessingPipelines`
         Frame calibration, stacking, and scientific analysis stages.
     visualization : `Visualization`

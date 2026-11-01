@@ -8,61 +8,6 @@
 Wayfinding Library (``wayfindinglib``)
 ======================================
 
-Overview
---------
-
-``wayfindinglib`` provides observatory automation, hardware control via the
-INDI protocol, observation planning, and unattended night session execution.
-
-The primary entry point is the :class:`~wayfindinglib.Wayfinder` façade class.
-Instantiate it with an :class:`~astrometricslib.AppConfiguration` to access all
-four sub-APIs:
-
-.. code-block:: python
-
-   from astrometricslib import get_configuration
-   from wayfindinglib import Wayfinder
-
-   config = get_configuration()
-   wayfinder = Wayfinder(config)
-
-Compositional sub-APIs
-----------------------
-
-The :class:`~wayfindinglib.Wayfinder` instance exposes four peer sub-APIs:
-
-* :attr:`~wayfindinglib.Wayfinder.control` (:class:`~wayfindinglib.ObservatoryControl`):
-  Direct hardware operation through six children: ``mount``, ``imaging``,
-  ``guiding``, ``safety``, ``equipment`` and ``remote``.
-* :attr:`~wayfindinglib.Wayfinder.planning` (:class:`~wayfindinglib.ObservationPlanning`):
-  Astronomical target visibility, observation packages, sequence
-  construction, and mosaic grid generation.
-* :attr:`~wayfindinglib.Wayfinder.execution` (:class:`~wayfindinglib.ObservationExecution`):
-  Automated night queue execution, divergence tracking, and session telemetry
-  recording.
-* :attr:`~wayfindinglib.Wayfinder.review` (:class:`~wayfindinglib.ObservationReview`):
-  Past and current observing nights, alignment sessions, and the limits the
-  equipment has shown.
-
-What to import from where
--------------------------
-
-The package root and two modules are public. Everything else is private, and
-only ``wayfindinglib`` itself may import it.
-
-.. list-table::
-   :header-rows: 1
-   :widths: 30 70
-
-   * - Import from
-     - What it holds
-   * - ``wayfindinglib``
-     - ``Wayfinder``, the four sub-API classes, ``ObservationSession`` and ``ObservationPackage``.
-   * - ``wayfindinglib.exceptions``
-     - The errors that belong to this library. The shared categories come from ``astrometricslib.exceptions``.
-   * - ``wayfindinglib.reports``
-     - The states and levels that results report.
-
 The package root
 ----------------
 
@@ -116,11 +61,5 @@ Observation execution API
 
 Result fields
 -------------
-
-A call returns a result model. The model classes are private, so this section
-shows no import path: read the fields by name from what the call returns. For
-example, ``wayfinder.planning.lookup_coordinates("M 31")`` returns an object
-with ``ra_deg`` and ``dec_deg`` fields. A result that the package root or one
-of the modules above documents is not repeated here.
 
 .. library-result-fields:: wayfindinglib

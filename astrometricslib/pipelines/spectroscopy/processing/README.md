@@ -169,7 +169,7 @@ The `processing_quality` run gate counts the spectra in which any of these metri
 - `spectrum_analysis.py` holds `analyze_spectrum`, which runs steps 1 to 7.
 - `spectrum_signal.py` checks for a real signal.
 - `emission_line_detector.py` finds emission lines.
-- `spectral_feature_detector.py` tests named absorption features.
+- `spectral_feature_detector.py` tests named absorption features. Features that share a window share one set of control measurements, and the continuum fit calls the same least-squares routine as `numpy.polyfit` without its overhead, so the detector gives the same numbers in about 40% of the time.
 - `detection_label_limits.py` builds `DetectionLabelLimits`, the limits behind the labels with their register entries, from the detectors' own constants: features (partly measured; see [SPE-24](../../../../documentation/library_design/validation/spectroscopy.md#spe-24)) and emission lines (partly measured; see [SPE-25](../../../../documentation/library_design/validation/spectroscopy.md#spe-25)).
 - `star_reddening.py` and `interstellar_extinction.py` look up and remove interstellar reddening.
 - `spectral_classifier.py` compares the spectrum with the reference spectra.

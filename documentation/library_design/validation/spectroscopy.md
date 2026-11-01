@@ -987,7 +987,7 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
 - **What to look at:** The share of pure-noise features called "detected" (should stay near 1%; the script fails above 3%), and the share called "inconclusive" (expected to approach the 25% p-value cutoff in loud noise).
 - **Our result:** Inconclusive in pure noise: 0.4% (2% noise), 15% (5%), 19% (10%), 20% (20%). 131 stored spectra: 17% of 1,025 features inconclusive; 95 stars with at least one.
 - **Verdict:** Not judged.
-- **Limits:** Synthetic noise is Gaussian smoothed over 1.2 samples. The real figures are from 30 Å resolution.
+- **Limits:** Synthetic noise is Gaussian smoothed over 1.2 samples. The real figures are from 30 Å resolution. A 2026-11-01 speed-up (one shared set of control measurements for features with the same window, and a cheaper fit of the same continuum polynomial) changed no result: on 19 real M 13 detector inputs the new output equals the old one exactly.
 - **To tune for your setup:** Run the script with `--trials 1000` for tighter rates.
 - **Regenerate with:** `python -m astrometricslib.scripts.validate_spectral_and_period_analysis [--trials 100] [--skip-standards]`. <!-- impl: astrometricslib.pipelines.spectroscopy.processing.spectral_feature_detector.detect_named_features -->
 - **Guarded by tests:** `astrometricslib/pipelines/spectroscopy/test/processing/test_spectral_feature_detector.py`.

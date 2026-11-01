@@ -292,6 +292,57 @@ def _shoulder_edges(half_window: float, resolution_element_angstrom: float) -> t
     return inner, inner + SHOULDER_BAND_HALF_WINDOWS * half_window
 
 
+def _fit_continuum(offsets: np.ndarray, values: np.ndarray) -> np.ndarray:
+    """Fit the continuum polynomial by least squares.
+
+    This is the same arithmetic as `numpy.polyfit` (scale each column of
+    the Vandermonde matrix to unit length, solve with `numpy.linalg.lstsq`
+    at polyfit's cutoff, then undo the scaling), so the coefficients agree
+    to the last bit. It skips polyfit's input checks and warning machinery,
+    which cost more than the solve itself on the few dozen samples of one
+    continuum band, and the detector calls it hundreds of thousands of
+    times per spectrum set.
+
+    Parameters
+    ----------
+    offsets : `np.ndarray`
+        Sample wavelengths relative to the feature, in Angstroms.
+    values : `np.ndarray`
+        The brightness at each sample.
+
+    Returns
+    -------
+    coefficients : `np.ndarray`
+        The polynomial coefficients, highest power first, as `numpy.polyfit`
+        returns them.
+    """
+    matrix = np.vander(offsets, CONTINUUM_POLYNOMIAL_DEGREE + 1)
+    scale = np.sqrt((matrix * matrix).sum(axis=0))
+    solution = np.linalg.lstsq(matrix / scale, values, rcond=len(offsets) * np.finfo(offsets.dtype).eps)[0]
+    return (solution.T / scale).T
+
+
+def _evaluate_continuum(coefficients: np.ndarray, offsets: np.ndarray) -> np.ndarray:
+    """Evaluate the continuum polynomial (Horner's rule, as `numpy.polyval`).
+
+    Parameters
+    ----------
+    coefficients : `np.ndarray`
+        Coefficients from `_fit_continuum`, highest power first.
+    offsets : `np.ndarray`
+        Wavelengths relative to the feature, in Angstroms.
+
+    Returns
+    -------
+    values : `np.ndarray`
+        The polynomial at each offset.
+    """
+    result = np.zeros_like(offsets) + coefficients[0]
+    for coefficient in coefficients[1:]:
+        result = result * offsets + coefficient
+    return result
+
+
 def _measure_dip(
     wavelength_angstrom: np.ndarray,
     intensity: np.ndarray,
@@ -341,10 +392,11 @@ def _measure_dip(
 
     # Centering the wavelengths on the feature keeps the fit well behaved.
     shoulder_offsets = shoulder_wavelength - center
-    coefficients = np.polyfit(shoulder_offsets, intensity[in_shoulder], CONTINUUM_POLYNOMIAL_DEGREE)
-    residuals = intensity[in_shoulder] - np.polyval(coefficients, shoulder_offsets)
-    continuum_at_core = np.polyval(coefficients, wavelength_angstrom[in_core] - center)
-    mean_continuum = float(np.mean(continuum_at_core))
+    shoulder_intensity = intensity[in_shoulder]
+    coefficients = _fit_continuum(shoulder_offsets, shoulder_intensity)
+    residuals = shoulder_intensity - _evaluate_continuum(coefficients, shoulder_offsets)
+    continuum_at_core = _evaluate_continuum(coefficients, wavelength_angstrom[in_core] - center)
+    mean_continuum = float(continuum_at_core.mean())
     if mean_continuum <= 0:
         return None
 
@@ -800,6 +852,50 @@ def _verdict_for(magnitude: float, p_value: float) -> str:
     return VERDICT_NOT_DETECTED
 
 
+def _control_significances(
+    wavelength_angstrom: np.ndarray,
+    intensity: np.ndarray,
+    half_window: float,
+    resolution_element_angstrom: float,
+) -> tuple[list[float], list[float]]:
+    """Measure the control positions' best dip and best bump for one window.
+
+    Parameters
+    ----------
+    wavelength_angstrom : `np.ndarray`
+        Wavelengths, sorted, in Angstroms.
+    intensity : `np.ndarray`
+        The brightness at each wavelength.
+    half_window : `float`
+        The core's half-width, in Angstroms.
+    resolution_element_angstrom : `float`
+        The width of one independent measurement, in Angstroms.
+
+    Returns
+    -------
+    dip_significances, bump_significances : `tuple` [`list`, `list`]
+        For each control position that could be measured, the significance
+        of its best dip and of its best bump (as a positive number).
+    """
+    dip_significances: list[float] = []
+    bump_significances: list[float] = []
+    for control_center in _control_centers(
+        wavelength_angstrom, half_window, CENTER_SEARCH_TOLERANCE_ANGSTROM, resolution_element_angstrom
+    ):
+        control_candidates = _candidate_dips(
+            wavelength_angstrom,
+            intensity,
+            float(control_center),
+            half_window,
+            resolution_element_angstrom,
+            CENTER_SEARCH_TOLERANCE_ANGSTROM,
+        )
+        if control_candidates:
+            dip_significances.append(max(candidate.significance for candidate in control_candidates))
+            bump_significances.append(-min(candidate.significance for candidate in control_candidates))
+    return dip_significances, bump_significances
+
+
 def detect_named_features(
     wavelength_angstrom: np.ndarray,
     intensity: np.ndarray,
@@ -894,6 +990,7 @@ def detect_named_features(
         sample_errors = sample_errors[order]
 
     entries: list[dict[str, object]] = []
+    control_significances_by_window: dict[float, tuple[list[float], list[float]]] = {}
     for feature in NAMED_FEATURES:
         name = str(feature["name"])
         rest_wavelength = float(feature["wavelength_angstrom"])
@@ -925,26 +1022,14 @@ def detect_named_features(
         # Control measurements: the same search, repeated where no named
         # feature lives, in both directions. Each control's best dip and best
         # bump pool separately, to measure how wide the noise is on each side.
-        control_dip_significances: list[float] = []
-        control_bump_significances: list[float] = []
-        for control_center in _control_centers(
-            wavelength_angstrom, half_window, CENTER_SEARCH_TOLERANCE_ANGSTROM, resolution_element_angstrom
-        ):
-            control_candidates = _candidate_dips(
-                wavelength_angstrom,
-                intensity,
-                float(control_center),
-                half_window,
-                resolution_element_angstrom,
-                CENTER_SEARCH_TOLERANCE_ANGSTROM,
+        # The controls depend on the spectrum and the window only, not on
+        # which feature is being tested, so features that share a window
+        # share one set of control measurements.
+        if half_window not in control_significances_by_window:
+            control_significances_by_window[half_window] = _control_significances(
+                wavelength_angstrom, intensity, half_window, resolution_element_angstrom
             )
-            if control_candidates:
-                control_dip_significances.append(
-                    max(candidate.significance for candidate in control_candidates)
-                )
-                control_bump_significances.append(
-                    -min(candidate.significance for candidate in control_candidates)
-                )
+        control_dip_significances, control_bump_significances = control_significances_by_window[half_window]
 
         p_dip, p_value_method, likelihood_absent = _one_sided_p_value(
             best_dip.significance, control_dip_significances, resolution_element_angstrom

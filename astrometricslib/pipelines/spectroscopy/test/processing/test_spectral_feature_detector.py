@@ -10,7 +10,9 @@ injected dips over many random spectra) is checked in
 validate_spectral_and_period_analysis.py; these tests only pin the behavior.
 """
 
+import json
 import math
+import pathlib
 
 import numpy as np
 import pytest
@@ -489,3 +491,73 @@ def test_only_h_alpha_and_h_beta_are_tested_for_emission() -> None:
     assert h_gamma["verdict"] == VERDICT_NOT_DETECTED
     h_beta_wavelength, h_beta_intensity = _spectrum_with_hump(4861.0, 0.25, 25.0)
     assert _entry(detect_named_features(h_beta_wavelength, h_beta_intensity), "H-beta")["kind"] == "emission"
+
+
+def _assert_same_entries(actual: object, expected: object, path: str = "") -> None:
+    """Compare two detector results, floats to a relative 1e-12.
+
+    Parameters
+    ----------
+    actual, expected : `object`
+        Nested lists, dicts and values from `detect_named_features`.
+    path : `str`
+        Where in the result the comparison is, for the failure message.
+    """
+    if isinstance(expected, dict):
+        assert isinstance(actual, dict) and actual.keys() == expected.keys(), path
+        for key, value in expected.items():
+            _assert_same_entries(actual[key], value, f"{path}.{key}")
+    elif isinstance(expected, list):
+        assert isinstance(actual, list) and len(actual) == len(expected), path
+        for index, value in enumerate(expected):
+            _assert_same_entries(actual[index], value, f"{path}[{index}]")
+    elif isinstance(expected, float):
+        assert isinstance(actual, float), path
+        assert actual == pytest.approx(expected, rel=1e-12, abs=0.0), path
+    else:
+        assert actual == expected, path
+
+
+@pytest.mark.parametrize("tag", ["a", "b"])
+def test_detector_matches_outputs_stored_from_real_m13_spectra(tag: str) -> None:
+    """Two real M 13 spectra give the same entries as before the speed-up.
+
+    The spectra were extracted from the M 13 stack, and the expected entries
+    were produced by the detector before the continuum fit was made cheaper
+    and the control measurements were shared between features with the same
+    window. The speed-up changes no number: the comparison is to a relative
+    1e-12 and the two runs agree to the last bit on this machine.
+    """
+    data_directory = pathlib.Path(__file__).parent / "data"
+    spectra = np.load(data_directory / "feature_detector_m13_spectra.npz")
+    expected = json.loads((data_directory / "feature_detector_m13_expected.json").read_text())[tag]
+
+    actual = detect_named_features(
+        spectra[f"{tag}_wavelength"],
+        spectra[f"{tag}_intensity"],
+        reference_spectral_type=expected["reference_spectral_type"],
+        resolution_element_angstrom=float(spectra[f"{tag}_resolution"]),
+        errors=spectra[f"{tag}_errors"],
+    )
+
+    _assert_same_entries(actual, expected["features"])
+
+
+def test_fast_continuum_fit_matches_numpy_polyfit_and_polyval() -> None:
+    """The cheaper continuum fit gives numpy's coefficients and values."""
+    from astrometricslib.pipelines.spectroscopy.processing.spectral_feature_detector import (
+        CONTINUUM_POLYNOMIAL_DEGREE,
+        _evaluate_continuum,
+        _fit_continuum,
+    )
+
+    generator = np.random.default_rng(3)
+    offsets = np.sort(generator.uniform(-200.0, 200.0, 40))
+    values = 100.0 + 0.05 * offsets + generator.normal(0.0, 1.0, 40)
+
+    coefficients = _fit_continuum(offsets, values)
+
+    np.testing.assert_array_equal(coefficients, np.polyfit(offsets, values, CONTINUUM_POLYNOMIAL_DEGREE))
+    np.testing.assert_array_equal(
+        _evaluate_continuum(coefficients, offsets), np.polyval(coefficients, offsets)
+    )

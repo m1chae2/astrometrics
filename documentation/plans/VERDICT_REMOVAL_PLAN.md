@@ -122,7 +122,7 @@ In the order set by issue #97: photometry, spectroscopy, astrometry, stacking, a
 5. Split `test_gate_conformance.py` between self-checks and rules.
 6. Run the M 13 golden suite and the one-target check on the copy. Science numbers must not change.
 
-Issue #97's note that `starDisplayFormat.ts` is the only desktop-app reader is out of date. `StackSummaryPanel.tsx`, `stackFlagMeaning.ts` and `FileBrowser.tsx` read the flags, and stacking is where the user will see the most change.
+Issue #97's note that `starDisplayFormat.ts` is the only desktop-app reader is out of date. `StackSummaryPanel.tsx` and `stackFlagMeaning.ts` read the flags (`FileBrowser.tsx` does not; it is not a stacking flag reader), and stacking is where the user will see the most change.
 
 ### Phase 3: drop `flagged` and `flag_reasons`
 

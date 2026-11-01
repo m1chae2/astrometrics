@@ -97,6 +97,10 @@ The user approved adopting the measured curves in place of this stopgap once the
 
 Before that profile, review whether the asteroid search is efficient, for example whether it needs every frame when looking for slow-moving objects (user, 2026-11-01).
 
+### Which stars get a spectrum (user, 2026-11-01)
+
+Measured: below an SNR of about 7 per resolution element no realistic feature is identified. Zero-order brightness does not predict that SNR tightly enough to skip stars (scatter about 0.4 dex). So: skip stars whose trail is off the frame and stars with no catalog identity before extraction, keeping the latter as neighbors for wing subtraction; stop analysis below SNR 7; keep the top-10 limit, applied after the filters, until wing subtraction is fast in crowded fields.
+
 ### Other issues folded into this branch (user, 2026-11-01)
 
 #83, #85, #92 and #133 are fixed here, so #135 closes them along with #93, #97 and #134. #85: wire safety limits and guiding, add session stop if the backend has a call, pass alignment exposure if accepted, remove custom stacking parameters and the timing point dropdown, and label dither settings as mosaic-only. #92: items 1 to 3 are fixed here, and items 4 and 5 go to a small follow-up issue. #133 runs last. The hardware-facing controls join the user's hardware check.

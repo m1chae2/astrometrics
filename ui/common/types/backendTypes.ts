@@ -1847,55 +1847,6 @@ export interface AppliedCameraProfile {
 }
 
 /**
- * Whether the frames and calibration data going into a stack were sound.
- *
- * Answers "was this stack worth running?" using only facts known before
- * the stacking engine started: how many frames survived the pre-checks,
- * whether the sky background changed during the session, and whether the
- * flat frames could be trusted.
- */
-export interface StackingInputQuality {
-  framesSubmitted: number;
-  framesAccepted: number;
-  framesExcludedForGain?: number;
-  framesExcludedForBackground?: number;
-  framesQuarantined?: number;
-  backgroundSplitDetected?: boolean;
-  backgroundSplitDetail?: string | null;
-  flatFrameCount?: number | null;
-  flatNoiseFraction?: number | null;
-  flatSmoothingSigmaPx?: number | null;
-  flatCalibrationIssues?: string[];
-  darkUniqueFrameCount?: number | null;
-  biasUniqueFrameCount?: number | null;
-  calibrationMismatchFlags?: string[];
-  isFlagged?: boolean;
-  flagReasons?: string[];
-}
-
-/**
- * Whether a finished stack came out well.
- *
- * Answers "can this stacked image be trusted?" using only measurements of
- * the stacked file and of the per-frame results the engine reported.
- * Each measurement is `None` when it does not apply or could not be made
- * (for example the sharpness comparison is only made for images, not for
- * spectra).
- */
-export interface StackingOutputQuality {
-  rejectedPixelFraction?: number | null;
-  saturatedPixelFraction?: number | null;
-  zeroPixelFraction?: number | null;
-  negativePixelMaxPercent?: number | null;
-  stackedFwhmPx?: number | null;
-  medianInputFwhmPx?: number | null;
-  expectedStackFwhmPx?: number | null;
-  spectralRegistrationConcernCount?: number;
-  isFlagged?: boolean;
-  flagReasons?: string[];
-}
-
-/**
  * Measurements recorded when combining (stacking) multiple images.
  *
  * This tracks how many images were successfully combined and records details
@@ -1906,10 +1857,16 @@ export interface StackingPipelineQualityMetrics {
   framesSubmitted: number;
   framesStacked: number;
   excludedFrames?: ExcludedFrame[];
+  framesAccepted?: number | null;
+  framesExcludedForGain?: number;
+  framesExcludedForBackground?: number;
+  framesQuarantined?: number;
   rejectedPixelFraction?: number | null;
   backgroundSplitDetected?: boolean;
   backgroundSplitDetail?: string | null;
   calibrationMismatchFlags?: string[];
+  darkUniqueFrameCount?: number | null;
+  biasUniqueFrameCount?: number | null;
   flatFrameCount?: number | null;
   flatNoiseFraction?: number | null;
   flatSmoothingSigmaPx?: number | null;
@@ -1947,15 +1904,11 @@ export interface StackQualitySummary {
   resolvedParameters?: Record<string, any>;
   cameraProfile?: AppliedCameraProfile | null;
   qualityProcessingApplied?: boolean;
-  flagged?: boolean;
-  flagReasons?: string[];
   gates?: GateResult[];
   createdAt?: string;
   provenanceActivityId?: string | null;
   upstreamEntityId?: string | null;
   stackingMetrics: StackingPipelineQualityMetrics;
-  inputQuality?: StackingInputQuality | null;
-  outputQuality?: StackingOutputQuality | null;
 }
 
 /**
@@ -2003,8 +1956,6 @@ export interface AstrometryQualitySummary {
   resolvedParameters?: Record<string, any>;
   cameraProfile?: AppliedCameraProfile | null;
   qualityProcessingApplied?: boolean;
-  flagged?: boolean;
-  flagReasons?: string[];
   gates?: GateResult[];
   createdAt?: string;
   provenanceActivityId?: string | null;
@@ -2077,29 +2028,11 @@ export interface PhotometryQualitySummary {
   resolvedParameters?: Record<string, any>;
   cameraProfile?: AppliedCameraProfile | null;
   qualityProcessingApplied?: boolean;
-  flagged?: boolean;
-  flagReasons?: string[];
   gates?: GateResult[];
   createdAt?: string;
   provenanceActivityId?: string | null;
   upstreamEntityId?: string | null;
   photometryMetrics: PhotometryPipelineQualityMetrics;
-}
-
-/**
- * One star whose self-determined spectral type shouldn't be trusted as-is.
- *
- * Names exactly which stars a spectroscopy run's own classification is
- * shaky for, and why, rather than only reporting how many -- so a user
- * building a personal catalog from self-determined types knows which
- * entries to double-check instead of taking every one at face value.
- */
-export interface SpectralClassificationConcern {
-  starId: string;
-  reason: string;
-  spectralType: string;
-  classificationRms?: number | null;
-  rmsGapToNextClass?: number | null;
 }
 
 /**
@@ -2121,7 +2054,6 @@ export interface SpectroscopyPipelineQualityMetrics {
   medianTrailWidthPx?: number | null;
   poorMatchClassificationCount?: number;
   ambiguousClassificationCount?: number;
-  flaggedSpectralClassifications?: SpectralClassificationConcern[];
   stageQualitySummary?: StageQualityRollup[] | null;
   gaiaXpSummary?: GaiaXpRunSummary | null;
   wavelengthScaleSummary?: WavelengthScaleSummary | null;
@@ -2140,8 +2072,6 @@ export interface SpectroscopyQualitySummary {
   resolvedParameters?: Record<string, any>;
   cameraProfile?: AppliedCameraProfile | null;
   qualityProcessingApplied?: boolean;
-  flagged?: boolean;
-  flagReasons?: string[];
   gates?: GateResult[];
   createdAt?: string;
   provenanceActivityId?: string | null;
@@ -2269,8 +2199,6 @@ export interface AsteroidDetectionQualitySummary {
   resolvedParameters?: Record<string, any>;
   cameraProfile?: AppliedCameraProfile | null;
   qualityProcessingApplied?: boolean;
-  flagged?: boolean;
-  flagReasons?: string[];
   gates?: GateResult[];
   createdAt?: string;
   provenanceActivityId?: string | null;
@@ -3960,8 +3888,6 @@ export interface StackSummary {
   saturated_pixel_fraction?: number | null;
   zero_pixel_fraction?: number | null;
   exposure_groups?: Record<string, any>[];
-  flagged?: boolean;
-  flag_reasons?: string[];
   calibration_mismatches?: number;
 }
 
@@ -4535,14 +4461,11 @@ export interface ForecastCheck {
  * Asteroid candidates the detection run found.
  * confirmed_asteroid_candidate_count : `int`
  * Asteroid candidates that match a known orbit.
- * flagged_pipelines : `list` [`str`]
- * Names of the pipelines whose own quality summary is flagged.
  */
 export interface ScienceOutcomeSummary {
   variableStarCandidateCount?: number;
   asteroidCandidateCount?: number;
   confirmedAsteroidCandidateCount?: number;
-  flaggedPipelines?: string[];
 }
 
 /**

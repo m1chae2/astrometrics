@@ -1035,8 +1035,9 @@ class ProcessingPipelines:
     drivers : `Drivers`, optional
         The plate solver, stacking program and SIMBAD driver to use. Any
         left out is the built-in one (Astrometry.net, Siril, astroquery).
-        They reach `stack`, the astrometry, photometry and spectroscopy stages of
-        `process_target` for one target, and `run_spectroscopy_by_session`.
+        They reach `stack`, the astrometry, photometry and spectroscopy
+        stages of `process_target` for one target, and
+        `run_spectroscopy_by_session`.
         `process_target` for several targets runs in worker processes, which
         cannot receive them, so it refuses to start when any were given.
 

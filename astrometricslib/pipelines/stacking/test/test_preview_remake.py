@@ -90,7 +90,10 @@ def fake_preview(
     seen: list[PreviewSettings | None] = []
 
     def write(
-        stacked_path: str, settings: PreviewSettings | None = None, steps_log: list | None = None
+        stacked_path: str,
+        settings: PreviewSettings | None = None,
+        steps_log: list | None = None,
+        skipped_steps: list | None = None,
     ) -> str | None:
         """Remove the old pictures and write new ones, as the real step does.
 

@@ -157,6 +157,9 @@ KNOWN_WALL_CLOCK_SITES = frozenset({
     # Writes the time a rejected frame was moved into quarantine, in the
     # move log. It dates the move itself, not any frame's observation.
     "pipelines/stacking/pre_processing/frame_quarantine.py",
+    # Writes when a preview picture was made, in its settings record. It dates
+    # the picture, not any frame's observation.
+    "pipelines/stacking/post_processing/stack_preview.py",
 })
 
 

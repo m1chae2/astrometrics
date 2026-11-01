@@ -1666,8 +1666,9 @@ class ProcessingPipelines:
             ``use_astrometry_seed`` and ``max_workers``.
         spectroscopy : `dict`, optional
             Options for the spectroscopy stage: ``path`` and ``limit`` (a
-            cap on how many stars to process, the brightest first; 10 when
-            left out, and `None` processes every star).
+            cap on how many stars to process, the brightest first; left out or
+            `None`, every usable identified star is processed. The user
+            removed the top-10 default on 2026-11-01).
         asteroids : `dict`, optional
             Options for the asteroid search: ``moving_object_config`` (a
             dictionary of settings, such as

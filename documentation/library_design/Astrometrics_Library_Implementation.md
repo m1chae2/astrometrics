@@ -456,7 +456,6 @@ Tables 3 to 7 list each pipeline's tuned values and the explaining section. Each
 | --- | --- | --- | --- |
 | Reading box half-width; width smoothing | 2.5 times the trail width; 61 steps | Design estimate ([table](validation/spectroscopy.md#design-estimates)); [SPE-04](validation/spectroscopy.md#spe-04) | §6.2 (concept 2) |
 | Minimum signal-to-noise: spectrum; lines | 1.5; 7 | Partly measured ([SPE-10](validation/spectroscopy.md#spe-10), [SPE-31](validation/spectroscopy.md#spe-31)) | §6.2 (concept 5) |
-| Stars per run | 10 | Design estimate ([SPE-D26](validation/spectroscopy.md#design-estimates)) | §6.2 |
 | Fitted neighbors per star | 8 | Design estimate ([SPE-D27](validation/spectroscopy.md#design-estimates)) | §6.2 |
 | Line significance for the wavelength zero point | 6 | Partly measured ([SPE-11](validation/spectroscopy.md#spe-11)) | §6.2 (concept 4) |
 | Sky strip gap and width | 6 px; 10 px | Partly measured ([SPE-01](validation/spectroscopy.md#spe-01)) | §6.2 (concept 2) |
@@ -477,7 +476,6 @@ Tables 3 to 7 list each pipeline's tuned values and the explaining section. Each
 <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.APERTURE_SIGMA_SMOOTHING_STEPS -->
 <!-- impl: astrometricslib.pipelines.spectroscopy.processing.spectrum_signal.MINIMUM_SPECTRUM_SIGNAL_TO_NOISE -->
 <!-- impl: astrometricslib.pipelines.spectroscopy.processing.spectrum_signal.MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE -->
-<!-- impl: astrometricslib.pipelines.spectroscopy.runner.DEFAULT_SPECTRUM_STAR_LIMIT -->
 <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.neighbor_wing_correction.MAXIMUM_FITTED_NEIGHBORS -->
 <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.wavelength_zero_point.MINIMUM_LINE_SIGNIFICANCE -->
 <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.SKY_BAND_GAP_PX -->

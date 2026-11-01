@@ -48,16 +48,6 @@ from astrometricslib.pipelines.spectroscopy.record_and_flag_spectroscopy_stars i
     record_and_flag_spectroscopy_stars,
 )
 
-# How many of the brightest stars get a spectrum in one analysis, unless the
-# caller asks otherwise. This is a stopgap the user chose on 2026-11-01, not a
-# measured limit: a run over every detected star (about 500) took over 50
-# minutes. It counts only the stars left after the stars with no trail on the
-# image and the stars with no catalog identity are set aside (see
-# `SpectroscopyPipeline.select_stars_for_spectra`). It stays until wing
-# subtraction is fast in crowded fields (documentation/plans/
-# VERDICT_REMOVAL_PLAN.md). Fainter stars get no spectrum in the meantime.
-DEFAULT_SPECTRUM_STAR_LIMIT = 10
-
 # How far from the frame centre, in degrees, a reference star may be and still
 # be used to name the stars in a spectral frame. The frame is 3008 pixels of
 # about 1.9 arcseconds (1.6 degrees) on a side, so its corners are 1.13
@@ -77,19 +67,23 @@ _CATALOG_SLICE_SIZE = 2000
 def spectrum_star_limit(options: dict[str, Any]) -> int | None:
     """Return how many of the brightest stars a run analyzes.
 
+    There is no default cap. The user removed the top-10 default on
+    2026-11-01, together with the cap on how many neighbors the wing fit
+    gives their own position shift (`MAXIMUM_FITTED_NEIGHBORS`), so every
+    usable identified star is processed unless the caller sets a limit.
+
     Parameters
     ----------
     options : `dict` [`str`, `Any`]
-        The stage's options. ``limit`` sets the count, and an explicit
-        `None` asks for every candidate star.
+        The stage's options. ``limit`` caps the count; left out or `None`,
+        every candidate star is processed.
 
     Returns
     -------
     limit : `int` or `None`
-        The count, which is `DEFAULT_SPECTRUM_STAR_LIMIT` when ``limit`` is
-        left out.
+        The caller's cap, or `None` for no cap.
     """
-    return options.get("limit", DEFAULT_SPECTRUM_STAR_LIMIT)
+    return options.get("limit")
 
 
 def _recover_extended_source_hint(

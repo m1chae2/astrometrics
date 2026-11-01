@@ -91,7 +91,9 @@ These replace the proposals in the three `inventory_97_*.md` files wherever the 
 
 ### Spectrum star limit (user, 2026-11-01)
 
-Spectroscopy analyzes the 10 brightest stars by default (`DEFAULT_SPECTRUM_STAR_LIMIT`), until a measured feature-detection limit decides which stars are worth analyzing. This reverses the all-stars default of 2026-10-13 for now. The measurement is injection-recovery into real faint spectra, reported as a curve per feature strength.
+**Removed 2026-11-01 (user):** the top-10 default (`DEFAULT_SPECTRUM_STAR_LIMIT`) is gone, along with the cap that fits the position shifts of only each star's 8 brightest neighbors (`MAXIMUM_FITTED_NEIGHBORS`, [SPE-D27](../library_design/validation/spectroscopy.md#design-estimates)). Every usable identified star is processed by default, and a caller's `options["limit"]` still caps a run. `MASTER_STACK_STAR_LIMIT` (10, `backend/services/analysis/analysis_orchestrator.py`) and the per-frame batch limit (`MAXIMUM_TRACKED_STARS_PER_FRAME`, `batch.py`) are separate and unchanged. The rest of this section is the earlier stopgap, kept as the record.
+
+Spectroscopy analyzed the 10 brightest stars by default, until a measured feature-detection limit decides which stars are worth analyzing. This reversed the all-stars default of 2026-10-13 for a time. The measurement is injection-recovery into real faint spectra, reported as a curve per feature strength.
 
 The user approved adopting the measured curves in place of this stopgap once they are ready. The full-pipeline profile runs after all updates are done, and the real hardware check runs when the user chooses.
 
@@ -99,7 +101,7 @@ Before that profile, review whether the asteroid search is efficient, for exampl
 
 ### Which stars get a spectrum (user, 2026-11-01)
 
-Measured: below an SNR of about 7 per resolution element no realistic feature is identified. Zero-order brightness does not predict that SNR tightly enough to skip stars (scatter about 0.4 dex). So: skip stars whose trail is off the frame and stars with no catalog identity before extraction, keeping the latter as neighbors for wing subtraction; stop analysis below SNR 7; keep the top-10 limit, applied after the filters, until wing subtraction is fast in crowded fields.
+Measured: below an SNR of about 7 per resolution element no realistic feature is identified. Zero-order brightness does not predict that SNR tightly enough to skip stars (scatter about 0.4 dex). So: skip stars whose trail is off the frame and stars with no catalog identity before extraction, keeping the latter as neighbors for wing subtraction; stop analysis below SNR 7; the top-10 limit, applied after the filters, was kept until wing subtraction was fast in crowded fields; the user removed it on 2026-11-01 (see above).
 
 ### Other issues folded into this branch (user, 2026-11-01)
 

@@ -4,6 +4,8 @@ No library, database or real data is used: the comparison functions take plain
 objects, and `main` is checked to write only the report file.
 """
 
+import json
+import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -47,15 +49,11 @@ def _statement(rule: str, kind: str = "warning") -> SimpleNamespace:
     return SimpleNamespace(rule=rule, kind=kind)
 
 
-def _summary(flagged: bool, reasons: list[str], gates: dict[str, str]) -> SimpleNamespace:
-    """Make a stored-summary stand-in.
+def _summary(gates: dict[str, str]) -> SimpleNamespace:
+    """Make a stored-summary stand-in. The models no longer hold the flag.
 
     Parameters
     ----------
-    flagged : `bool`
-        The summary's flag.
-    reasons : `list` [`str`]
-        The flag reasons.
     gates : `dict` [`str`, `str`]
         Gate name to status.
 
@@ -65,13 +63,29 @@ def _summary(flagged: bool, reasons: list[str], gates: dict[str, str]) -> Simple
         An object shaped like a stored summary.
     """
     return SimpleNamespace(
-        flagged=flagged,
-        flag_reasons=reasons,
         gates=[
             SimpleNamespace(name=name, status=status, detail=f"{name} detail")
             for name, status in gates.items()
         ],
     )
+
+
+def _stored(flagged: bool, reasons: list[str]) -> dict[str, object]:
+    """Make the raw stored JSON of an older summary's flag fields.
+
+    Parameters
+    ----------
+    flagged : `bool`
+        The stored flag.
+    reasons : `list` [`str`]
+        The stored flag reasons.
+
+    Returns
+    -------
+    stored : `dict`
+        The raw keys an older summary holds.
+    """
+    return {"flagged": flagged, "flagReasons": reasons}
 
 
 INDEX = script.build_rule_index([
@@ -86,7 +100,8 @@ def test_failed_gate_with_quiet_rule_and_gate_without_rule() -> None:
     """A failed gate is reported whether its rule is quiet or missing."""
     states = {
         "stacking": script.old_state_from_summary(
-            _summary(True, ["leak", "sharp"], {"dark_light_leak": "failed", "stack_sharpness": "failed"})
+            _summary({"dark_light_leak": "failed", "stack_sharpness": "failed"}),
+            _stored(True, ["leak", "sharp"]),
         )
     }
     found = script.compare_target_pipelines("T", states, [], INDEX)
@@ -98,7 +113,9 @@ def test_failed_gate_with_quiet_rule_and_gate_without_rule() -> None:
 
 def test_rule_fired_while_gate_passed_and_unattributed_rule() -> None:
     """A firing rule on a passed gate and a rule with no pipeline show."""
-    states = {"stacking": script.old_state_from_summary(_summary(False, [], {"dark_light_leak": "passed"}))}
+    states = {
+        "stacking": script.old_state_from_summary(_summary({"dark_light_leak": "passed"}), _stored(False, []))
+    }
     found = script.compare_target_pipelines(
         "T", states, [_statement("dark_light_leak"), _statement("free_rule")], INDEX
     )
@@ -111,7 +128,8 @@ def test_agreement_gives_no_difference_and_insufficient_data_is_noted() -> None:
     """Agreement is silent; missing data against a decided gate shows."""
     states = {
         "stacking": script.old_state_from_summary(
-            _summary(True, ["dark_light_leak detail"], {"dark_light_leak": "failed"})
+            _summary({"dark_light_leak": "failed"}),
+            _stored(True, ["dark_light_leak detail"]),
         )
     }
     assert script.compare_target_pipelines("T", states, [_statement("dark_light_leak")], INDEX) == []
@@ -223,3 +241,32 @@ def test_a_backfilled_row_matches_by_the_start_of_its_reason() -> None:
     )
     assert counts.matched == 1
     assert differences == []
+
+
+def test_a_summary_with_no_stored_flag_takes_its_flag_from_its_gates() -> None:
+    """A summary with no stored flag is flagged when a gate failed."""
+    failed = script.old_state_from_summary(_summary({"a": "failed", "b": "passed"}), {"gates": []})
+    clean = script.old_state_from_summary(_summary({"a": "passed"}))
+    assert failed.flagged is True
+    assert failed.flag_reasons == []
+    assert clean.flagged is False
+
+
+def test_stored_summaries_are_read_from_the_raw_document_json(tmp_path: Path) -> None:
+    """The removed flag fields are read from the raw stored JSON."""
+    document = {
+        "stacking": {"qualitySummary": {"flagged": True, "flagReasons": ["x"], "gates": []}},
+        "quality": {"photometry": {"flagged": False, "flagReasons": []}},
+    }
+    database = tmp_path / "astrometrics.db"
+    connection = sqlite3.connect(database)
+    connection.execute("CREATE TABLE targets (id TEXT, data_json TEXT)")
+    connection.execute("INSERT INTO targets VALUES (?, ?)", ("M 81", json.dumps(document)))
+    connection.execute("INSERT INTO targets VALUES (?, ?)", ("bad", "not json"))
+    connection.commit()
+    connection.close()
+    summaries = script.read_stored_summaries(str(database))
+    assert set(summaries) == {"M 81"}
+    assert summaries["M 81"]["stacking"]["flagReasons"] == ["x"]
+    assert summaries["M 81"]["photometry"]["flagged"] is False
+    assert "spectroscopy" not in summaries["M 81"]

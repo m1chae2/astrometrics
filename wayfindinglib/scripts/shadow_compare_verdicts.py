@@ -6,11 +6,16 @@ each place where they disagree (`QUALITY_METRICS_PLAN.md`, safeguard 4, and
 `VERDICT_REMOVAL_PLAN.md`, phase 1). A person then marks each difference as a
 bug fixed or a change approved.
 
-The old side is what the stored pipeline summaries say: `flagged`,
-`flag_reasons` and each gate's outcome, for stacking, spectral stacking,
-astrometry, photometry, spectroscopy and asteroid detection, plus a star's
-match distance and gaps, read against their limits. The new side is the
-statements of
+The old side is what the stored pipeline summaries say: each gate's outcome
+and, for a summary saved before `flagged` and `flag_reasons` were removed,
+those two fields. The models no longer have them, so the script reads
+them from the raw stored JSON of the catalog database (read-only). A
+summary saved after the
+removal has no flag: its flag is true when a gate failed, and it has no flag
+reasons, because its warnings are the rows. The old side covers stacking,
+spectral stacking, astrometry, photometry, spectroscopy and asteroid detection,
+plus a star's match distance and gaps, read against their limits. The new side
+is the statements of
 `review.get_advisory`, kind ``"quality"`` for a target and ``"result"`` for a
 star. A rule is tied to a gate when the rule reads the gate's metric
 (``<pipeline>.gate_<name>``). A gate that no rule reads is listed as having no
@@ -38,7 +43,10 @@ The script is read-only. It writes one file, the report given with
 from __future__ import annotations
 
 import argparse
+import json
 import logging
+import os
+import sqlite3
 import sys
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
@@ -46,6 +54,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from wayfindinglib.analytics.result_quality.star_result_rules import (
     AMBIGUOUS_RMS_GAP_LIMIT,
@@ -157,9 +166,11 @@ class OldPipelineState:
     Parameters
     ----------
     flagged : `bool`
-        The summary's `flagged`.
+        The stored `flagged` of a summary saved before the field was removed,
+        otherwise true when a gate failed.
     flag_reasons : `list` [`str`]
-        The summary's `flag_reasons`.
+        The stored `flag_reasons` of a summary saved before the field was
+        removed, otherwise empty.
     gates : `dict` [`str`, `tuple` [`str`, `str`]]
         Gate name to (status, detail). Status is ``passed``, ``failed`` or
         ``not_checked``.
@@ -225,13 +236,94 @@ def _status_text(status: Any) -> str:
     return str(getattr(status, "value", status))
 
 
-def old_state_from_summary(summary: Any) -> OldPipelineState | None:
+# Where each pipeline's summary sits in a stored target document.
+STORED_SUMMARY_LOCATIONS = {
+    "stacking": ("stacking", "qualitySummary"),
+    "spectral_stacking": ("spectralStacking", "qualitySummary"),
+    "asteroid_detection": ("asteroidDetection", "qualitySummary"),
+    "astrometry": ("quality", "astrometry"),
+    "photometry": ("quality", "photometry"),
+    "spectroscopy": ("quality", "spectroscopy"),
+}
+
+StoredFlags = dict[str, dict[str, Any]]
+"""One stored target's raw summaries, by pipeline name."""
+
+
+def stored_summaries_from_document(document: Mapping[str, Any]) -> StoredFlags:
+    """Pick the raw pipeline summaries out of a stored target document.
+
+    Parameters
+    ----------
+    document : `dict`
+        The target document as stored (``targets.data_json``).
+
+    Returns
+    -------
+    summaries : `dict` [`str`, `dict`]
+        The raw summary of each pipeline that has one, by pipeline name.
+    """
+    found: StoredFlags = {}
+    for pipeline, location in STORED_SUMMARY_LOCATIONS.items():
+        node: Any = document
+        for key in location:
+            node = node.get(key) if isinstance(node, dict) else None
+        if isinstance(node, dict):
+            found[pipeline] = node
+    return found
+
+
+def read_stored_summaries(
+    database_path: str,
+) -> dict[str, StoredFlags]:
+    """Read every target's raw pipeline summaries, read-only.
+
+    Parameters
+    ----------
+    database_path : `str`
+        The catalog database (``astrometrics.db``).
+
+    Returns
+    -------
+    summaries : `dict` [`str`, `StoredFlags`]
+        The raw summaries of each target, by target id. A target whose JSON
+        does not parse as an object has none.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the database file does not exist.
+    """
+    if not os.path.isfile(database_path):
+        raise FileNotFoundError(f"No catalog database at {database_path}.")
+    connection = sqlite3.connect(f"file:{quote(database_path)}?mode=ro", uri=True)
+    try:
+        rows = connection.execute("SELECT id, data_json FROM targets").fetchall()
+    finally:
+        connection.close()
+    summaries: dict[str, StoredFlags] = {}
+    for target_id, data_json in rows:
+        try:
+            document = json.loads(data_json)
+        except TypeError, ValueError:
+            continue
+        if isinstance(document, dict):
+            summaries[str(target_id)] = stored_summaries_from_document(document)
+    return summaries
+
+
+def old_state_from_summary(summary: Any, stored: Mapping[str, Any] | None = None) -> OldPipelineState | None:
     """Read the flag and gates of a stored pipeline summary.
 
     Parameters
     ----------
     summary : `PipelineQualitySummaryBase` or `None`
-        A stored summary with ``flagged``, ``flag_reasons`` and ``gates``.
+        A stored summary with ``gates``.
+    stored : `dict`, optional
+        The same summary as raw stored JSON. A summary saved before the
+        flag fields were removed keeps ``flagged`` and ``flagReasons`` there
+        (the models ignore them). Without them, the state is worked out from
+        the gates.
 
     Returns
     -------
@@ -241,18 +333,28 @@ def old_state_from_summary(summary: Any) -> OldPipelineState | None:
     if summary is None:
         return None
     gates = {gate.name: (_status_text(gate.status), gate.detail or "") for gate in summary.gates}
-    return OldPipelineState(
-        flagged=bool(summary.flagged), flag_reasons=list(summary.flag_reasons), gates=gates
-    )
+    stored = stored or {}
+    if "flagged" in stored or "flagReasons" in stored or "flag_reasons" in stored:
+        reasons = stored.get("flagReasons", stored.get("flag_reasons")) or []
+        return OldPipelineState(
+            flagged=bool(stored.get("flagged")), flag_reasons=[str(reason) for reason in reasons], gates=gates
+        )
+    flagged = any(status == "failed" for status, _detail in gates.values())
+    return OldPipelineState(flagged=flagged, flag_reasons=[], gates=gates)
 
 
-def old_states_from_target(target: Any) -> dict[str, OldPipelineState]:
+def old_states_from_target(
+    target: Any, stored: Mapping[str, Mapping[str, Any]] | None = None
+) -> dict[str, OldPipelineState]:
     """Collect the stored summaries of one target, by pipeline.
 
     Parameters
     ----------
     target : `Target`
         The target record.
+    stored : `dict`, optional
+        The target's raw stored summaries by pipeline (see
+        `read_stored_summaries`).
 
     Returns
     -------
@@ -269,7 +371,7 @@ def old_states_from_target(target: Any) -> dict[str, OldPipelineState]:
     }
     states = {}
     for pipeline, summary in summaries.items():
-        state = old_state_from_summary(summary)
+        state = old_state_from_summary(summary, (stored or {}).get(pipeline))
         if state is not None:
             states[pipeline] = state
     return states
@@ -753,7 +855,10 @@ def build_report(
 
 
 def run_comparison(
-    wayfinder: Any, only_targets: list[str] | None = None, new_rows_since: datetime = NEW_ROWS_SINCE
+    wayfinder: Any,
+    only_targets: list[str] | None = None,
+    new_rows_since: datetime = NEW_ROWS_SINCE,
+    stored_summaries: Mapping[str, StoredFlags] | None = None,
 ) -> tuple[str, list[Difference]]:
     """Compare every target and return the report text.
 
@@ -767,6 +872,10 @@ def run_comparison(
         Limit the run to these target ids.
     new_rows_since : `datetime`, optional
         Rows older than this predate the notice rows (see `NEW_ROWS_SINCE`).
+    stored_summaries : `dict`, optional
+        Every target's raw stored summaries (see `read_stored_summaries`),
+        which hold the removed ``flagged`` and ``flagReasons``. Without them,
+        each flag is worked out from the gates.
 
     Returns
     -------
@@ -788,7 +897,7 @@ def run_comparison(
         if only_targets and target.id not in only_targets:
             continue
         targets_checked += 1
-        old_states = old_states_from_target(target)
+        old_states = old_states_from_target(target, (stored_summaries or {}).get(target.id))
         for pipeline, state in old_states.items():
             for gate_name, (status, _detail) in state.gates.items():
                 gate_counts[f"{PIPELINE_METRIC_PREFIX[pipeline]}.gate_{gate_name}"][status] += 1
@@ -894,7 +1003,11 @@ def main(argv: list[str] | None = None) -> int:
     from wayfindinglib import Wayfinder
 
     logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
-    text, differences = run_comparison(Wayfinder(), arguments.target, arguments.new_rows_since)
+    wayfinder = Wayfinder()
+    database = os.path.join(str(wayfinder.astrometrics.config.get_library_path()), "astrometrics.db")
+    text, differences = run_comparison(
+        wayfinder, arguments.target, arguments.new_rows_since, read_stored_summaries(database)
+    )
     arguments.report.write_text(text, encoding="utf-8")
     print(f"Wrote {arguments.report}: {len(differences)} differences.")
     return 0

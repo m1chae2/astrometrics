@@ -315,22 +315,10 @@ def _science_outcomes(target: Target, rows: Sequence[QualityMeasurement]) -> Sci
     Returns
     -------
     outcomes : `ScienceOutcomeSummary`
-        Flagged pipelines, asteroid candidate counts, and the number of
+        Asteroid candidate counts, and the number of
         variable star candidates from the stored photometry count (0 when the
         photometry run stored none).
     """
-    flagged = [
-        name
-        for name, summary in (
-            ("stacking", target.stacking.quality_summary),
-            ("spectral_stacking", target.spectral_stacking.quality_summary),
-            ("astrometry", target.quality.astrometry),
-            ("photometry", target.quality.photometry),
-            ("spectroscopy", target.quality.spectroscopy),
-            ("asteroid_detection", target.asteroid_detection.quality_summary),
-        )
-        if summary is not None and summary.flagged
-    ]
     candidates = target.asteroid_detection.candidates
     variable_row = _newest(rows, VARIABLE_CANDIDATE_METRIC)
     return ScienceOutcomeSummary(
@@ -341,7 +329,6 @@ def _science_outcomes(target: Target, rows: Sequence[QualityMeasurement]) -> Sci
         confirmed_asteroid_candidate_count=sum(
             1 for candidate in candidates if candidate.cascade_stage.value == "ephemeris_matched"
         ),
-        flagged_pipelines=flagged,
     )
 
 

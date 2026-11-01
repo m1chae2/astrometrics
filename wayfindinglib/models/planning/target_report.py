@@ -155,8 +155,6 @@ class ScienceOutcomeSummary(BaseModel):
         Asteroid candidates the detection run found.
     confirmed_asteroid_candidate_count : `int`
         Asteroid candidates that match a known orbit.
-    flagged_pipelines : `list` [`str`]
-        Names of the pipelines whose own quality summary is flagged.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -164,7 +162,6 @@ class ScienceOutcomeSummary(BaseModel):
     variable_star_candidate_count: int = Field(default=0, ge=0, alias="variableStarCandidateCount")
     asteroid_candidate_count: int = Field(default=0, ge=0, alias="asteroidCandidateCount")
     confirmed_asteroid_candidate_count: int = Field(default=0, ge=0, alias="confirmedAsteroidCandidateCount")
-    flagged_pipelines: list[str] = Field(default_factory=list, alias="flaggedPipelines")
 
 
 class ContextReading(BaseModel):

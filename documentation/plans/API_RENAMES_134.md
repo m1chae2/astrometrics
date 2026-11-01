@@ -123,6 +123,9 @@ Done on the same branch. No old name is kept as an alias. The MCP tool of each c
 | `planning.get_plan(kind="packages", status=, target=, include_dismissed=)` | `planning.query_plans(kind="packages", status=, target=, include_dismissed=)` |
 | `planning.get_plan(kind="suggestion_log", target=)` | `planning.query_plans(kind="suggestion_log", target=)` |
 | `planning.get_plan(kind="packages", target=, pick="one")` | `planning.get_package_for_target(target)`. A new call, because it reads one package, not a list |
+| `planning.get_advisory("tonight", at=)` | `planning.get_tonight_advice(at=)` |
+| `planning.get_advisory("calibration", camera_id=, frame_type=, exposure_seconds=, filter=, gain_setting=, offset=, binning=, sensor_temperature_c=)` | `planning.get_calibration_advice(camera_id, frame_type, exposure_seconds=, filter_name=, gain=, offset=, binning=, temperature_c=)` |
+| `planning.get_advisory(kind, target, object_id=)` with `kind="quality"` or `"result"` | Stays on `planning` for now, with the two kinds only and `target` required. It becomes `review.get_advisory` when the `review` group is added. The `calibration` and `tonight` kinds, and the arguments they used (`camera_id`, `frame_type`, `at` and the rest), are gone from it |
 
 ### Planning parameters
 

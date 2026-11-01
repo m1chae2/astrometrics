@@ -325,41 +325,56 @@ def fixture(isolated_butler: DiskButler, clock: Clock, monkeypatch: pytest.Monke
     planning = ObservationPlanning(isolated_butler.config, isolated_butler, astrometrics=library)
     made = Fixture(planning, library)
 
-    def fake_advisory(
-        kind: str, target: str | None = None, at: object = None, **_arguments: object
-    ) -> object:
-        """Answer the two advisory kinds the refresh reads.
+    def fake_advisory(kind: str, target: str | None = None, **_arguments: object) -> object:
+        """Answer the quality report the refresh reads.
 
         Parameters
         ----------
         kind : `str`
-            ``"quality"`` or ``"tonight"``.
+            ``"quality"``.
         target : `str`, optional
-            The target of a quality report.
-        at : `object`, optional
-            Ignored.
+            The target of the report.
         **_arguments : `object`
             Ignored.
 
         Returns
         -------
         advice : `object`
-            A `Report` or the ranking.
+            A `Report`.
 
         Raises
         ------
         NotFoundError
-            For a target in `report_errors`, or when no ranking is set.
+            For a target in `report_errors`.
         """
-        if kind == "tonight":
-            if made.ranking is None:
-                raise NotFoundError("no ranking")
-            return made.ranking
         if target in made.report_errors:
             raise NotFoundError(f"no report for {target}")
         return Report(made.statements.get(target, []))
 
+    def fake_tonight_advice(at: object = None) -> object:
+        """Answer the ranking the refresh reads.
+
+        Parameters
+        ----------
+        at : `object`, optional
+            Ignored.
+
+        Returns
+        -------
+        ranking : `object`
+            The ranking the test set.
+
+        Raises
+        ------
+        NotFoundError
+            When no ranking is set.
+        """
+        if made.ranking is None:
+            raise NotFoundError("no ranking")
+        return made.ranking
+
     monkeypatch.setattr(planning, "get_advisory", fake_advisory)
+    monkeypatch.setattr(planning, "get_tonight_advice", fake_tonight_advice)
     return made
 
 

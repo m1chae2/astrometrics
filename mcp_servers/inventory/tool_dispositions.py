@@ -321,9 +321,15 @@ DECISIONS = {
     ),
     "planning_get_advisory": ToolDecision(
         "keep",
-        "Built 2026-10-06; widened 2026-10-24. The target dataset report (quality), tonight's ranking, "
-        "the trust "
-        "in one star result, or the calibration inventory, worked out on demand. Saves nothing.",
+        "Built 2026-10-06; split 2026-10-31. The target dataset report (quality) or the trust in one star "
+        "result, worked out on demand. Saves nothing. Moves to the review group.",
+    ),
+    "planning_get_tonight_advice": ToolDecision(
+        "keep", "Tonight's ranking of targets, worked out on demand. Saves nothing."
+    ),
+    "planning_get_calibration_advice": ToolDecision(
+        "keep",
+        "How many calibration frames of one kind the library holds, worked out on demand. Saves nothing.",
     ),
     "planning_get_plan": ToolDecision(
         "keep", "Built 2026-10-06. Reads one recorded session, by id or by night."

@@ -112,22 +112,11 @@ logger = logging.getLogger(__name__)
 MAXIMUM_SOURCES = 300
 """Most stars one `ObservationPlanning.query_sources` answer lists."""
 
-AdvisoryKind = Literal["quality", "calibration", "tonight", "result"]
-"""The kinds of advice `ObservationPlanning.get_advisory` gives."""
+AdvisoryKind = Literal["quality", "result"]
+"""The kinds of review advice `ObservationPlanning.get_advisory` gives."""
 
 ADVISORY_ARGUMENTS = {
     "quality": ("target",),
-    "calibration": (
-        "camera_id",
-        "frame_type",
-        "exposure_seconds",
-        "filter",
-        "gain_setting",
-        "offset",
-        "binning",
-        "sensor_temperature_c",
-    ),
-    "tonight": ("at",),
     "result": ("target", "object_id"),
 }
 """The arguments each advisory kind uses."""
@@ -777,22 +766,16 @@ class ObservationPlanning:
     def get_advisory(
         self,
         kind: AdvisoryKind,
-        target: str | Target | None = None,
-        camera_id: str | None = None,
-        frame_type: FrameType | None = None,
-        exposure_seconds: float | None = None,
-        filter: FilterType | None = None,
+        target: str | Target,
         *,
-        at: datetime | str | None = None,
         object_id: str | None = None,
-        gain_setting: int | None = None,
-        offset: int | None = None,
-        binning: int | None = None,
-        sensor_temperature_c: float | None = None,
-    ) -> TargetDatasetReport | CalibrationAdvisory | TonightRanking | list[TargetStatement]:
-        """Give planning advice about data, a result, tonight or calibration.
+    ) -> TargetDatasetReport | list[TargetStatement]:
+        """Judge a target's data or one result. This part moves to `review`.
 
-        The advice is worked out on demand and never stored.
+        This is the review half of the old advice call: it judges data and
+        results that already exist. Tonight's ranking and calibration advice
+        are `get_tonight_advice` and `get_calibration_advice`. The advice is
+        worked out on demand and never stored.
 
         Parameters
         ----------
@@ -800,45 +783,17 @@ class ObservationPlanning:
             ``"quality"``: the target dataset report. It summarizes each
             capture setting, lists warnings and recommendations in priority
             order, and gives a starting point when the target has no frames.
-            Uses `target`.
-            ``"calibration"``: how many calibration frames of one kind the
-            library already holds for a camera. Uses `camera_id`,
-            `frame_type`, `exposure_seconds`, `filter` and, to narrow the
-            match, `gain_setting`, `offset`, `binning` and
-            `sensor_temperature_c`.
-            ``"tonight"``: the targets ranked by what the next hour of
-            each would add. Uses `at`.
             ``"result"``: how far one per-star science result can be
-            trusted, as statements. Uses `target` and `object_id`.
-        target : `str` or `Target`, optional
+            trusted, as statements. Needs `object_id`.
+        target : `str` or `Target`
             The target, by id or as a `Target`.
-        camera_id : `str`, optional
-            The camera whose calibration frames are counted.
-        frame_type : `FrameType`, optional
-            ``DARK``, ``FLAT`` or ``BIAS``.
-        exposure_seconds : `float`, optional
-            Count only frames of this exposure, when the frame type has one.
-        filter : `FilterType`, optional
-            Count only frames taken through this filter.
-        at : `datetime` or `str`, optional
-            The time to rank for (ISO 8601; no offset means UTC). Defaults
-            to now.
         object_id : `str`, optional
-            The star whose result is judged.
-        gain_setting : `int`, optional
-            Count only calibration frames taken at this gain setting.
-        offset : `int`, optional
-            Count only calibration frames taken at this offset.
-        binning : `int`, optional
-            Count only calibration frames taken at this binning.
-        sensor_temperature_c : `float`, optional
-            Count only darks within the dark temperature tolerance of this
-            sensor temperature, in degrees Celsius.
+            ``kind="result"`` only. The star whose result is judged.
 
         Returns
         -------
-        advice : `TargetDatasetReport`, `CalibrationAdvisory`, `TonightRanking`
-            or `list` [`TargetStatement`]. The advice for the chosen kind.
+        advice : `TargetDatasetReport` or `list` [`TargetStatement`]
+            The advice for the chosen kind.
 
         Raises
         ------
@@ -847,23 +802,10 @@ class ObservationPlanning:
             given, or a required argument is missing.
         """
         check_choice("kind", kind, tuple(ADVISORY_ARGUMENTS))
-        given = {
-            "target": target is not None,
-            "camera_id": camera_id is not None,
-            "frame_type": frame_type is not None,
-            "exposure_seconds": exposure_seconds is not None,
-            "filter": filter is not None,
-            "at": at is not None,
-            "object_id": object_id is not None,
-            "gain_setting": gain_setting is not None,
-            "offset": offset is not None,
-            "binning": binning is not None,
-            "sensor_temperature_c": sensor_temperature_c is not None,
-        }
-        reject_unused_arguments(kind, ADVISORY_ARGUMENTS, given)
+        reject_unused_arguments(
+            kind, ADVISORY_ARGUMENTS, {"target": True, "object_id": object_id is not None}
+        )
         if kind == "quality":
-            if target is None:
-                raise InvalidArgumentError('kind="quality" needs a target.')
             from wayfindinglib.tasks.planning_tasks.target_report_tasks import build_target_dataset_report
 
             return build_target_dataset_report(
@@ -872,23 +814,79 @@ class ObservationPlanning:
                 butler=self._butler,
                 config=self._config,
             )
-        if kind == "tonight":
-            from wayfindinglib.tasks.planning_tasks.tonight_ranking_tasks import rank_tonight
+        if object_id is None:
+            raise InvalidArgumentError('kind="result" needs an object_id.')
+        from wayfindinglib.tasks.planning_tasks.result_judgment_tasks import judge_star_result
 
-            return rank_tonight(
-                _advisory_time(at),
-                astrometrics=self._astrometrics,
-                butler=self._butler,
-                config=self._config,
-            )
-        if kind == "result":
-            if target is None or object_id is None:
-                raise InvalidArgumentError('kind="result" needs a target and an object_id.')
-            from wayfindinglib.tasks.planning_tasks.result_judgment_tasks import judge_star_result
+        return judge_star_result(self._target(target).id, object_id, astrometrics=self._astrometrics)
 
-            return judge_star_result(self._target(target).id, object_id, astrometrics=self._astrometrics)
-        if camera_id is None or frame_type is None:
-            raise InvalidArgumentError('kind="calibration" needs camera_id and frame_type.')
+    def get_tonight_advice(self, at: datetime | str | None = None) -> TonightRanking:
+        """Rank the targets by what the next hour of each would add.
+
+        The ranking is worked out on demand and never stored.
+
+        Parameters
+        ----------
+        at : `datetime` or `str`, optional
+            The time to rank for (ISO 8601; no offset means UTC). Defaults
+            to now. `InvalidArgumentError` is raised for text that is not an
+            ISO 8601 time.
+
+        Returns
+        -------
+        ranking : `TonightRanking`
+            The ranked candidate targets.
+        """
+        from wayfindinglib.tasks.planning_tasks.tonight_ranking_tasks import rank_tonight
+
+        return rank_tonight(
+            _advisory_time(at),
+            astrometrics=self._astrometrics,
+            butler=self._butler,
+            config=self._config,
+        )
+
+    def get_calibration_advice(
+        self,
+        camera_id: str,
+        frame_type: FrameType,
+        exposure_seconds: float | None = None,
+        filter_name: FilterType | None = None,
+        *,
+        gain: int | None = None,
+        offset: int | None = None,
+        binning: int | None = None,
+        temperature_c: float | None = None,
+    ) -> CalibrationAdvisory:
+        """Say how many calibration frames of one kind the library holds.
+
+        The count is worked out on demand and never stored.
+
+        Parameters
+        ----------
+        camera_id : `str`
+            The camera whose calibration frames are counted.
+        frame_type : `FrameType`
+            ``DARK``, ``FLAT`` or ``BIAS``.
+        exposure_seconds : `float`, optional
+            Count only frames of this exposure, when the frame type has one.
+        filter_name : `FilterType`, optional
+            Count only frames taken through this filter.
+        gain : `int`, optional
+            Count only frames taken at this gain setting.
+        offset : `int`, optional
+            Count only frames taken at this offset.
+        binning : `int`, optional
+            Count only frames taken at this binning.
+        temperature_c : `float`, optional
+            Count only darks within the dark temperature tolerance of this
+            sensor temperature, in degrees Celsius.
+
+        Returns
+        -------
+        advice : `CalibrationAdvisory`
+            How many matching frames the library holds, and what is missing.
+        """
         from wayfindinglib.tasks.planning_tasks.calibration_advisory_tasks import build_calibration_advisory
 
         return build_calibration_advisory(
@@ -896,11 +894,11 @@ class ObservationPlanning:
             camera_id,
             FrameType(frame_type),
             exposure_seconds,
-            filter,
-            gain_setting=gain_setting,
+            filter_name,
+            gain_setting=gain,
             offset=offset,
             binning=binning,
-            sensor_temperature_c=sensor_temperature_c,
+            sensor_temperature_c=temperature_c,
         )
 
     # -- Mosaics -------------------------------------------------------------
@@ -3072,7 +3070,7 @@ class ObservationPlanning:
         ranking = None
         if target_ids is None:
             try:
-                ranking = self.get_advisory(kind="tonight", at=now)
+                ranking = self.get_tonight_advice(at=now)
             except (AstrometricsError, OSError, sqlite3.Error, ValueError) as error:
                 logger.warning("Suggestions: no ranking: %s", error)
                 change.notes.append(

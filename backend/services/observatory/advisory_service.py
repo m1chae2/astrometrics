@@ -4,10 +4,11 @@ Description: The app's quality screens read three groups of facts from the
 wayfinding library, and this service gives each read its own method so each
 RPC reply has one fixed type.
 
-* Planning advice, from `Wayfinder.planning.get_advisory`: the target
-  dataset report, the ranking of targets for tonight, and the statements
-  about one star's result. The library has one advice call with a ``kind``;
-  the RPC route cannot fix an argument, so each kind has a method here.
+* Planning advice, from `Wayfinder.planning.get_advisory` (the target
+  dataset report and the statements about one star's result, chosen by a
+  ``kind``) and `get_tonight_advice` (the ranking of targets for tonight).
+  The RPC route cannot fix an argument, so each read has its own method
+  here.
 * The depth goal of a target, from `Wayfinder.planning.get_depth_goal` and
   `set_depth_goal`: the plain level a person chose (Quick look, Good or
   Deep), how deep the image is, and the time to reach the level.
@@ -68,7 +69,7 @@ class AdvisoryService:
         ranking : `TonightRanking`
             The targets ranked for each use.
         """
-        return self.wayfinder.planning.get_advisory(kind="tonight", at=at)
+        return self.wayfinder.planning.get_tonight_advice(at=at)
 
     def get_result_statements(self, target: str, object_id: str) -> Any:
         """Read the statements about one star's science result.

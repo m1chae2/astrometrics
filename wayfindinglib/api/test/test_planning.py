@@ -373,27 +373,27 @@ def test_a_bad_night_id_is_refused(isolated_butler: DiskButler) -> None:
         )
 
 
-def test_get_advisory_answers_each_kind_and_refuses_the_wrong_arguments(isolated_butler: DiskButler) -> None:
-    """Quality takes a target; calibration takes a camera and frame type."""
+def test_the_advice_calls_answer_and_refuse_the_wrong_arguments(isolated_butler: DiskButler) -> None:
+    """Quality takes a target; calibration advice, a camera and frame type."""
     planning = _planning(isolated_butler, _target("M 81"))
     report = planning.get_advisory("quality", target="M 81")
     assert isinstance(report, TargetDatasetReport)
     assert report.target_id == "M 81"
     assert report.needs_attention.warning_count == 0
     assert report.starting_point is not None
-    calibration = planning.get_advisory("calibration", camera_id="c1", frame_type=FrameType.DARK)
+    calibration = planning.get_calibration_advice("c1", FrameType.DARK)
     assert isinstance(calibration, CalibrationAdvisory)
     assert calibration.existing_count == 0
-    with pytest.raises(InvalidArgumentError, match="camera_id"):
-        planning.get_advisory("quality", target="M 81", camera_id="c1")
+    with pytest.raises(InvalidArgumentError, match="object_id"):
+        planning.get_advisory("quality", target="M 81", object_id="star-1")
     with pytest.raises(NotFoundError):
         planning.get_advisory("quality", target="NOT-A-TARGET")
-    with pytest.raises(InvalidArgumentError, match="target"):
+    with pytest.raises(InvalidArgumentError, match="kind"):
         planning.get_advisory("tonight", target="M 81")
     with pytest.raises(InvalidArgumentError, match="object_id"):
         planning.get_advisory("result", target="M 81")
     with pytest.raises(InvalidArgumentError, match="ISO 8601"):
-        planning.get_advisory("tonight", at="not a time")
+        planning.get_tonight_advice(at="not a time")
 
 
 def test_create_mosaic_records_one_package_per_panel(isolated_butler: DiskButler) -> None:
@@ -889,12 +889,12 @@ def test_framing_is_stored_and_the_sequence_summary_follows_ekos_order(isolated_
     assert "Capture" in summary.dither_rows[0].frequency_ekos_screen
 
 
-def test_get_advisory_tonight_and_result_reach_the_task_functions(isolated_butler: DiskButler) -> None:
+def test_tonight_advice_and_a_result_advisory_reach_the_task_functions(isolated_butler: DiskButler) -> None:
     """Tonight gives a ranking; a result for an unknown star is not found."""
     from wayfindinglib.models.planning.tonight_ranking import TonightRanking
 
     planning = _planning(isolated_butler, _target("M 81"))
-    ranking = planning.get_advisory("tonight", at="2026-10-24T04:00:00Z")
+    ranking = planning.get_tonight_advice(at="2026-10-24T04:00:00Z")
     assert isinstance(ranking, TonightRanking)
     with pytest.raises(NotFoundError):
         planning.get_advisory("result", target="M 81", object_id="no-such-star")

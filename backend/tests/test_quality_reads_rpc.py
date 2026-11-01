@@ -83,7 +83,7 @@ def test_tonight_ranking_passes_the_planning_time() -> None:
     """The ranking passes only the moment."""
     wayfinder = _wayfinder()
     AdvisoryService(wayfinder).get_tonight_ranking("2026-10-24T22:00:00-06:00")
-    wayfinder.planning.get_advisory.assert_called_once_with(kind="tonight", at="2026-10-24T22:00:00-06:00")
+    wayfinder.planning.get_tonight_advice.assert_called_once_with(at="2026-10-24T22:00:00-06:00")
 
 
 def test_result_statements_pass_target_and_object() -> None:

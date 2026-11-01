@@ -104,6 +104,8 @@ EXPECTED_EXPORTS = frozenset({
 PLANNING_MEMBERS = frozenset({
     "get_visibility",
     "get_advisory",
+    "get_tonight_advice",
+    "get_calibration_advice",
     "get_depth_goal",
     "set_depth_goal",
     "calculate_panels",

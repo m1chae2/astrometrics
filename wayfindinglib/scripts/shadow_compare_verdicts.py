@@ -9,7 +9,7 @@ bug fixed or a change approved.
 The old side is what the stored pipeline summaries say: `flagged`,
 `flag_reasons` and each gate's outcome, for stacking, spectral stacking,
 astrometry, photometry, spectroscopy and asteroid detection, plus a star's
-`is_poor_match` and `is_class_ambiguous`. The new side is the statements of
+match distance and gaps, read against their limits. The new side is the statements of
 `planning.get_advisory`, kind ``"quality"`` for a target and ``"result"`` for a
 star. A rule is tied to a gate when the rule reads the gate's metric
 (``<pipeline>.gate_<name>``). A gate that no rule reads is listed as having no
@@ -65,13 +65,20 @@ STAR_PIPELINE = "star_spectrum"
 UNATTRIBUTED = "(no pipeline)"
 """The label for rules that read no pipeline metric, or only frame metrics."""
 
+from wayfindinglib.analytics.result_quality.star_result_rules import (
+    AMBIGUOUS_RMS_GAP_LIMIT,
+    POOR_MATCH_RMS_LIMIT,
+)
+
 FIRING_KINDS = frozenset({"warning", "recommendation"})
 """Statement kinds that count as the rule saying "something is wrong"."""
 
-# Star rules the old star flags map to.
+# Star rules the old star flags map to. The flags are gone from stored results,
+# so each is worked out from the stored number it rested on.
 STAR_FLAG_RULES = {
     "is_poor_match": "spectral_type_poor_match",
     "is_class_ambiguous": "spectral_class_ambiguous",
+    "is_ambiguous": "spectral_subtype_ambiguous",
 }
 
 NEW_ROWS_SINCE = datetime(2026, 11, 2, tzinfo=UTC)
@@ -407,6 +414,30 @@ def compare_target_pipelines(
     return differences
 
 
+def star_flags_from_numbers(spectroscopy: Any) -> dict[str, bool]:
+    """Work out a star's old spectral flags from its stored numbers.
+
+    Parameters
+    ----------
+    spectroscopy : `SpectroscopyResult`
+        The star's spectrum result.
+
+    Returns
+    -------
+    flags : `dict` [`str`, `bool`]
+        Each old flag's name to whether its number crosses the limit. A number
+        that is missing leaves its flag clear.
+    """
+    rms = getattr(spectroscopy, "self_determined_spectral_type_rms", None)
+    class_gap = getattr(spectroscopy, "rms_gap_to_next_class", None)
+    subtype_gap = getattr(spectroscopy, "rms_gap_to_second_best", None)
+    return {
+        "is_poor_match": rms is not None and rms > POOR_MATCH_RMS_LIMIT,
+        "is_class_ambiguous": class_gap is not None and class_gap < AMBIGUOUS_RMS_GAP_LIMIT,
+        "is_ambiguous": subtype_gap is not None and subtype_gap < AMBIGUOUS_RMS_GAP_LIMIT,
+    }
+
+
 def compare_star(
     target_id: str, star_id: str, spectroscopy: Any, statements: Iterable[Any]
 ) -> list[Difference]:
@@ -419,8 +450,8 @@ def compare_star(
     star_id : `str`
         The star's id.
     spectroscopy : `SpectroscopyResult`
-        The star's spectrum result, with ``is_poor_match``,
-        ``is_class_ambiguous`` and ``is_ambiguous``.
+        The star's spectrum result, with its match distance and the gaps
+        to the next match and the next class.
     statements : iterable of `TargetStatement`
         The star's statements from the ``"result"`` advisory.
 
@@ -430,28 +461,18 @@ def compare_star(
         Every disagreement for this star.
     """
     fired, _ = fired_and_unsure_rules(statements)
+    flags = star_flags_from_numbers(spectroscopy)
     differences = []
     for flag_name, rule_name in STAR_FLAG_RULES.items():
-        flag = bool(getattr(spectroscopy, flag_name, False))
         rule_fired = rule_name in fired
-        if flag and not rule_fired:
+        if flags[flag_name] and not rule_fired:
             differences.append(
                 Difference(target_id, STAR_PIPELINE, STAR_FLAG_RULE_QUIET, flag_name, f"star {star_id}")
             )
-        elif rule_fired and not flag:
+        elif rule_fired and not flags[flag_name]:
             differences.append(
                 Difference(target_id, STAR_PIPELINE, STAR_RULE_FIRED_FLAG_CLEAR, rule_name, f"star {star_id}")
             )
-    if getattr(spectroscopy, "is_ambiguous", None):
-        differences.append(
-            Difference(
-                target_id,
-                STAR_PIPELINE,
-                STAR_FLAG_NO_RULE,
-                "is_ambiguous",
-                f"star {star_id}: subtype ambiguity; the rules judge only class ambiguity",
-            )
-        )
     return differences
 
 

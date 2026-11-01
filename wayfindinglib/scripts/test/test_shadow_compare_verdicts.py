@@ -122,13 +122,15 @@ def test_agreement_gives_no_difference_and_insufficient_data_is_noted() -> None:
 
 
 def test_star_flags() -> None:
-    """Star flags match rules by name; subtype ambiguity has no rule."""
-    spectrum = SimpleNamespace(is_poor_match=True, is_class_ambiguous=False, is_ambiguous=True)
+    """Flags worked out from the stored numbers are matched with rules by name."""
+    spectrum = SimpleNamespace(
+        self_determined_spectral_type_rms=0.2, rms_gap_to_next_class=0.5, rms_gap_to_second_best=0.01
+    )
     found = script.compare_star("T", "S", spectrum, [_statement("spectral_class_ambiguous")])
     kinds = {(item.kind, item.item) for item in found}
     assert (script.STAR_FLAG_RULE_QUIET, "is_poor_match") in kinds
     assert (script.STAR_RULE_FIRED_FLAG_CLEAR, "spectral_class_ambiguous") in kinds
-    assert (script.STAR_FLAG_NO_RULE, "is_ambiguous") in kinds
+    assert (script.STAR_FLAG_RULE_QUIET, "is_ambiguous") in kinds
 
 
 def test_gates_without_rule_and_report(tmp_path: Path) -> None:

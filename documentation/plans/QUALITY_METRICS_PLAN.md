@@ -91,7 +91,10 @@ and listed it in pull request #128 for review.
      measurement it rested on plus the action taken.
    - **Verdicts about results** become measurements. Instead of `is_poor_match = True`, the
      pipeline reports the fit's relative RMS, the gap to the next class, and an uncertainty or a
-     calibrated probability where one can be estimated.
+     calibrated probability where one can be estimated. Detection labels, such as the periodogram,
+     transit and spectral feature `verdict`, are science products, not verdicts about results.
+     They stay in `astrometricslib`, reported with their statistic, the limit that set them and
+     its register entry.
    - **Fitness-for-use judgments** move to `wayfindinglib`, or become rules the user can
      configure. They use the shared limit shape, and the validation register still backs each
      limit.
@@ -1179,14 +1182,15 @@ facts (`CalibrationCatalog.query`) with the advice happens in `wayfindinglib`, n
 
 ## 7. What happens to today's verdicts and gates
 
-Each existing verdict field, gate and piece of advice is sorted into one of five groups during
+Each existing verdict field, gate and piece of advice is sorted into one of six groups during
 phase 6, one pipeline at a time (section 9).
 
 | Group | Rule | Examples |
 | :--- | :--- | :--- |
 | Processing decision | Stays; recorded as a measurement plus `action_taken` | `frame_quarantine`, `gain_homogeneity`, stacking timeout |
 | Self-check | Stays in `astrometricslib` as a measurement with a check outcome | `plate_solve`, `source_detection`, `spectra_extracted`, `search_frames`, `capture_timestamps` |
-| Verdict field | Becomes a measurement with an uncertainty | `is_poor_match`, `is_ambiguous`, `is_class_ambiguous`, `is_trustworthy`, `is_low_confidence`, `catalog_agrees`, `saturation_flagged`, `fwhm_degraded`, the periodogram and transit `verdict`, the spectral feature `verdict` (detected, possible, inconclusive) |
+| Verdict field | Becomes a measurement with an uncertainty | The data-quality verdicts only: `is_poor_match`, `is_ambiguous`, `is_class_ambiguous`, `is_trustworthy`, `is_low_confidence`, `catalog_agrees`, `saturation_flagged`, `fwhm_degraded` |
+| Detection label | Stays in `astrometricslib`, reported with its statistic, the limit that set it and its register entry | The periodogram and transit `verdict`, the spectral feature `verdict` (detected, possible, inconclusive) |
 | Fitness-for-use gate | Moves to a `wayfindinglib/analytics/result_quality/` rule with a `QualityLimit` | `stack_sharpness`, `scatter_population`, `variability_discrimination`, `catalog_agreement`, `gaia_xp_agreement` |
 | Observing advice | `astrometricslib` keeps only the measurement; the advice moves to a `wayfindinglib/analytics/result_quality/` rule (decision 18) | The exposure recommendation and the "take more flats" message, below |
 
@@ -1194,16 +1198,14 @@ The examples are a first sort, not a final one. Before any code changes for a pi
 inventory lists each of its verdict fields and gates with its group, every reader of it and its
 replacement. The user approves the inventory, so each move is a deliberate choice.
 
-The observing advice `astrometricslib` holds today:
+The observing advice `astrometricslib` held when this plan was written (issue #97 removed it):
 
 - **The exposure recommendation.** `recommend_exposure_seconds` and
   `recommend_stack_exposure_seconds` in
   `astrometricslib/pipelines/stacking/post_processing/exposure_saturation.py`, and
   `recommended_exposure_for_groups` in `exposure_group_report.py`, fill
   `StackingPipelineQualityMetrics.recommended_exposure_seconds` (`models/quality/quality_summary.py`).
-  `wayfindinglib` reads it as `science_recommended_exposure_seconds`
-  (`wayfindinglib/models/session/capture_quality.py`, read in
-  `session_analysis/capture/post_processing/recommend_for_capture.py`). `astrometricslib` keeps
+  `wayfindinglib`'s capture analysis no longer reads it (issue #95). `astrometricslib` keeps
   the measurement: the brightest star's peak as a fraction of saturation at each exposure length.
   The recommendation becomes a `wayfindinglib` rule.
 - **The flat message.** `stacking/pre_processing/flat_calibration.py` adds "take more flats" to
@@ -1214,8 +1216,9 @@ Two existing structures need care:
 
 - `flagged` and `flag_reasons` on every summary are interpretation. They stay readable while the
   UI, the backend and the planning advisory move to judgments, then go. The stacking timeout in
-  `pipelines/tasks.py`, which sets `flagged` without a gate, becomes a processing-decision
-  measurement.
+  `pipelines/tasks.py`, which sets `flagged` without a gate, is now also recorded as a
+  processing-decision measurement (`stacking.abandoned_after_s`). It keeps setting `flagged` until
+  that field is dropped.
 - The falsification audit work and `test_gate_conformance.py` assume every gate is a pipeline
   output. The conformance test splits in two: one for `astrometricslib` self-checks, one for
   `wayfindinglib` rules. The `failed` and `not_checked` test requirement keeps applying to both.
@@ -1252,14 +1255,16 @@ Readers of today's verdicts outside `astrometricslib`:
   `StellarAnalysisDetails.tsx`, `SpectrumViewer.tsx` (spectral feature verdicts) and
   `PhotometryViewer.tsx` also read them. The generated `ui/common/types/backendTypes.ts` follows
   the models, so removing a field changes the UI's types.
-- **The planning advisory.** `wayfindinglib/tasks/planning_tasks/quality_advisory_tasks.py` builds
-  the planner's quality advisory from `flagged` and `flag_reasons` on all six summaries. Its
-  return shape becomes `TargetDatasetReport` in phase 4, together with
-  `_apply_advisory_boost` in `scheduling.py`. Its verdict inputs are verdicts only, so they switch
-  to judgments in phase 6, not phase 4.
-- **Capture recommendations.** `wayfindinglib` reads the stacking exposure recommendation as
-  `science_recommended_exposure_seconds`. It switches to the `wayfindinglib` rule when stacking's
-  observing advice moves (section 7).
+- **The planning advisory.** `TargetDatasetReport` (`wayfindinglib/models/planning/target_report.py`)
+  is built by `wayfindinglib/tasks/planning_tasks/target_report_tasks.py`, and
+  `_apply_advisory_boost` in `wayfindinglib/tasks/planning_tasks/scheduling.py` reads it.
+  `quality_advisory_tasks.py` and `TargetQualityAdvisory` no longer exist. The report still reads
+  `flagged` and `flag_reasons` from the summaries (`target_report_tasks.py`); those inputs switch to
+  judgments in phase 6.
+- **Capture recommendations.** `wayfindinglib`'s capture analysis no longer reads the stacking
+  exposure recommendation (`science_recommended_exposure_seconds` is gone); the `wayfindinglib`
+  rule already holds it. The recommendation itself left `astrometricslib` in issue #97
+  (section 7).
 - **Validation scripts.** `measure_variability_cutoff.py`, `validate_photometry_injection.py`,
   `run_empirical_validation.py` and `spectral_registration_quality_analysis.py` read the flags,
   and validation register entries cite the limits that would move.

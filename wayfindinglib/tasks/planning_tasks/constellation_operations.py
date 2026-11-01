@@ -36,7 +36,7 @@ def default_constellation_lines_path() -> Path:
     path : `pathlib.Path`
         The default constellation line data file path.
     """
-    return Path(__file__).parent.parent / "drivers" / "catalog" / CONSTELLATION_LINES_FILENAME
+    return Path(__file__).parents[2] / "drivers" / "catalog" / CONSTELLATION_LINES_FILENAME
 
 
 class ConstellationLineLibrary:

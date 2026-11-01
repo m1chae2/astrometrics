@@ -95,6 +95,8 @@ Spectroscopy analyzes the 10 brightest stars by default (`DEFAULT_SPECTRUM_STAR_
 
 The user approved adopting the measured curves in place of this stopgap once they are ready. The full-pipeline profile runs after all updates are done, and the real hardware check runs when the user chooses.
 
+Before that profile, review whether the asteroid search is efficient, for example whether it needs every frame when looking for slow-moving objects (user, 2026-11-01).
+
 ## 3. Phases
 
 Each phase is one or more commits. Sonnet agents make the edits and scripts handle mechanical ones. CI runs the full suites. A pipeline's inventory goes in `documentation/plans/` and you approve it before that pipeline's code changes.

@@ -226,7 +226,7 @@ def test_ingest_ekos_session_logs_stores_samples_and_a_retrievable_session(
     assert summary["guide_samples_stored"] == 1
     assert summary["session_contexts_stored"] == 1
     assert summary["nights"] == ["2026-09-23"]
-    (listed,) = ObservationReview(control).query(kind="ekos_sessions")["sessions"]
+    (listed,) = ObservationReview(control).query(kind="ekos_sessions").sessions
     assert listed["id"] == "2026-09-23T20-31-48"
     assert listed["captures"] == 1
     assert "guide_focal_mm=121" in listed["equipmentFingerprint"]
@@ -254,7 +254,7 @@ def test_ingest_ekos_session_logs_twice_does_not_duplicate_anything(
     control.remote.sync_logs(destination_dir=str(logs_directory), download=False)
     control.remote.sync_logs(destination_dir=str(logs_directory), download=False)
 
-    assert len(ObservationReview(control).query(kind="ekos_sessions")["sessions"]) == 1
+    assert len(ObservationReview(control).query(kind="ekos_sessions").sessions) == 1
     assert len(control._context.records.get_guiding_samples()) == 1
 
 
@@ -538,7 +538,7 @@ def test_pointing_model_query_delegates_to_the_task_module(
 
     result = ObservationReview(control).query(kind="pointing_model", session_id="s1")
 
-    assert result["model"] == {"me": 1.0}
+    assert result.model == {"me": 1.0}
     pointing_log_ingestion.compute_pointing_model.assert_called_once_with(
         control._context, fake_records, "s1"
     )

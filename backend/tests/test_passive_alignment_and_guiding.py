@@ -1,6 +1,7 @@
 """Tests for passive INDI alignment sync logging and PHD2 guiding ingestion."""
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -453,7 +454,9 @@ def test_alignment_service_session_queries_and_retrieval() -> None:
 
     observatory_mock = MagicMock()
     review = ObservationReview(ObservatoryControl(config=MagicMock()))
-    review.query = MagicMock(return_value={"sessions": [{"sessionId": "2026-09-24", "syncCount": 5}]})
+    review.query = MagicMock(
+        return_value=SimpleNamespace(sessions=[{"sessionId": "2026-09-24", "syncCount": 5}])
+    )
     service = AlignmentService(observatory_api=observatory_mock, review=review, records=records_mock)
     sessions = service.list_sessions()
     assert len(sessions) == 1

@@ -198,7 +198,7 @@ class AlignmentService:
             ``review.query(kind="alignment")``.
         """
         reply = self._require_review().query(kind="alignment", limit=50, register_job=False)
-        return reply["sessions"]
+        return reply.sessions
 
     def get_session_data(self, session_id: str = "") -> dict[str, Any]:
         """Fetch alignment attempts and polar alignment data for a session.
@@ -299,18 +299,12 @@ class AlignmentService:
         -------
         model : `dict` [`str`, `Any`]
             Decomposed model terms (ME, MA, CH, TF) and RMS improvements,
-            with camelCase keys.
-
-        Raises
-        ------
-        InvalidArgumentError
-            If the library cannot fit a model: no night was given, or no
-            observer location is known.
+            with camelCase keys. The library refuses with an
+            `InvalidArgumentError` when it cannot fit a model: no night was
+            given, or no observer location is known.
         """
         reply = self._require_review().query(kind="pointing_model", session_id=session_id, register_job=False)
-        if "error" in reply:
-            raise InvalidArgumentError(reply["error"])
-        return MountPointingModel.model_validate(reply["model"]).model_dump(by_alias=True)
+        return MountPointingModel.model_validate(reply.model).model_dump(by_alias=True)
 
     def poll_external_syncs(self, indi_interface: Any = None) -> None:
         """Poll and drain external plate-solve syncs and polar alignment.

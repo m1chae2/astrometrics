@@ -103,6 +103,7 @@ old name is kept as an alias.
 | `group_alignment_attempts(attempts)` from `wayfindinglib` | `review.query_alignment_sessions(attempts)`; takes a list of plain dictionaries and returns `AlignmentSessionsResult` (`attempts`, `targets`) |
 | RPC `telescope:get_performance_envelope` target `wayfinder.control.history` | `wayfinder.review`; the reply keeps its shape |
 | MCP `observatory_history_query`, `_get_live_session_status`, `_frame_guiding`, `_get_performance_envelope`, `_save_ekos_session_context` | `review_query`, `review_get_live_session_status`, `review_frame_guiding`, `review_get_performance_envelope`, `review_save_ekos_session_context` |
+| `review.query` returned a `dict`, a typed list or a `NightQuality` by `kind` | `ReviewQueryResult` (`wayfindinglib/models/session/review_query.py`). The analysis kinds fill named fields (`analysis`, `sessions`, `runs`, `model`, `total`, `shown`, `truncated` and so on) and drop the empty ones when dumped, so the data has the same keys as before. The typed kinds fill `night_list`, `target_changes` and `night_quality`; the backend reads those, so the RPC replies keep their shape. An MCP reply for those three kinds is now `{"kind": ..., "night_list": [...]}` and so on, not a bare list |
 | (new) | MCP `review_query_alignment_sessions` (dropped: the backend calls it) |
 
 ## Left as they were, on purpose

@@ -10,6 +10,7 @@ strings of the ``telescope:alignment_start`` call.
 """
 
 import threading
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, create_autospec
 
@@ -81,7 +82,7 @@ def test_get_attempts_lists_recorded_attempts_oldest_first() -> None:
 def test_list_sessions_reads_the_alignment_history() -> None:
     """The nights come from `review.query(kind="alignment")`."""
     review = create_autospec(ObservationReview, instance=True)
-    review.query.return_value = {"sessions": [{"sessionId": "2026-09-25"}]}
+    review.query.return_value = SimpleNamespace(sessions=[{"sessionId": "2026-09-25"}])
     service = AlignmentService(observatory_api=_autospec_control(), review=review)
 
     assert service.list_sessions() == [{"sessionId": "2026-09-25"}]

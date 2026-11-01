@@ -32,7 +32,11 @@ def test_the_history_query_serves_the_night_review(control: ObservatoryControl) 
     target = make_target(STAR, 5)
     control._context._astrometrics = FakeLibrary([target], make_rows(target, REVIEWED))
 
-    quality = ObservationReview(control).query(kind="night_quality", session_id=REVIEWED, register_job=False)
+    quality = (
+        ObservationReview(control)
+        .query(kind="night_quality", session_id=REVIEWED, register_job=False)
+        .night_quality
+    )
 
     assert isinstance(quality, NightQuality)
     assert quality.night_id == REVIEWED

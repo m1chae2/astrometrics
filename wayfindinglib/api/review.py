@@ -35,6 +35,7 @@ from wayfindinglib.models.session.ekos_session import EkosSessionContext
 from wayfindinglib.models.session.live_session_status import LiveSessionStatus
 from wayfindinglib.models.session.night_list import NightListEntry, TargetChange
 from wayfindinglib.models.session.night_quality import NightQuality
+from wayfindinglib.models.session.review_query import ReviewQueryResult
 from wayfindinglib.models.session.telemetry import AlignmentAttempt, AlignmentSessionsResult
 
 if TYPE_CHECKING:
@@ -65,6 +66,13 @@ example ``"night_quality"``) is added in two places: here, and as a new
 ``case`` in `_answer_typed`, with its arguments in
 `night_history.TYPED_KIND_ARGUMENTS`."""
 
+TYPED_KIND_FIELDS = {
+    "nights": "night_list",
+    "target_changes": "target_changes",
+    "night_quality": "night_quality",
+}
+"""The `ReviewQueryResult` field each typed kind fills."""
+
 FRAME_GUIDING_SECTIONS = ("quality",)
 """Optional sections `ObservationReview.frame_guiding` can add."""
 
@@ -92,13 +100,14 @@ class ObservationReview(ControlChild):
         include: list[str] | None = None,
         limit: int = 10,
         register_job: bool = True,
-    ) -> dict[str, Any] | list[NightListEntry] | list[TargetChange] | NightQuality:
+    ) -> ReviewQueryResult:
         """Analyse or list past observing nights, in replies of bounded size.
 
-        One front door for the observatory's history. It only reads. A
-        dictionary reply is measured and shrunk if needed, so it never
+        One front door for the observatory's history. It only reads. The
+        plain data in a reply is measured and shrunk if needed, so it never
         exceeds 40,000 characters of JSON. The kinds in `TYPED_KINDS`
-        answer with a list of typed models, each bounded by `limit`.
+        fill a typed field instead (`night_list`, `target_changes` or
+        `night_quality`), each bounded by `limit`.
 
         Parameters
         ----------
@@ -145,11 +154,12 @@ class ObservationReview(ControlChild):
 
         Returns
         -------
-        reply : `dict` [`str`, `Any`] or `list`
-            The answer: a dictionary, or for ``nights`` a list of
-            `NightListEntry`, for ``target_changes`` a list of
-            `TargetChange` and for ``night_quality`` a `NightQuality`. If a
-            dictionary had to be cut to fit, ``truncated`` is true. An
+        result : `ReviewQueryResult`
+            The answer. Each kind fills its own fields: ``nights`` fills
+            ``night_list`` with `NightListEntry` rows, ``target_changes``
+            fills ``target_changes`` with `TargetChange` rows and
+            ``night_quality`` fills ``night_quality`` with a `NightQuality`.
+            If plain data had to be cut to fit, ``truncated`` is true. An
             unknown `kind`, or an argument that `kind` does not use, is
             refused with `InvalidArgumentError`. A night or Ekos session
             with nothing recorded raises `NotFoundError`.
@@ -162,9 +172,12 @@ class ObservationReview(ControlChild):
             target_id=kind,
         ):
             if kind in TYPED_KINDS:
-                return self._answer_typed(kind, session_id, ekos_file_id, include, limit)
-            return night_history.build_night_history(
-                self._context, kind, session_id, ekos_file_id, include, limit
+                typed = self._answer_typed(kind, session_id, ekos_file_id, include, limit)
+                return ReviewQueryResult(kind=kind, **{TYPED_KIND_FIELDS[kind]: typed})
+            return ReviewQueryResult.model_validate(
+                night_history.build_night_history(
+                    self._context, kind, session_id, ekos_file_id, include, limit
+                )
             )
 
     def _answer_typed(

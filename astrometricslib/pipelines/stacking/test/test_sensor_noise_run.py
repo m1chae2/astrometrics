@@ -110,7 +110,7 @@ def frames_folder(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def catalog(frames_folder: Path) -> CalibrationCatalog:
+def catalog(frames_folder: Path, monkeypatch: pytest.MonkeyPatch) -> CalibrationCatalog:
     """Make a catalog over the synthetic frames, with its library scanned.
 
     Returns
@@ -121,6 +121,13 @@ def catalog(frames_folder: Path) -> CalibrationCatalog:
     configuration = SimpleNamespace(
         get_frames_path=lambda: frames_folder / "frames",
         get_library_file_path=lambda name: str(frames_folder / "library" / name),
+        get_minimum_calibration_frames=lambda: 3,
+        get_library_path=lambda: str(frames_folder / "library"),
+    )
+    # A rescan judges new dark and bias sets, which needs a camera profile.
+    generic = next(p for p in load_camera_profiles() if p.is_generic_fallback)
+    monkeypatch.setattr(
+        "astrometricslib.api.processing.resolve_camera_profile", lambda name, config=None: generic
     )
     calibration_catalog = CalibrationCatalog(configuration, None)
     calibration_catalog.reindex_frames("flat")

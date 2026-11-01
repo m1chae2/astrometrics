@@ -20,7 +20,11 @@ from wayfindinglib.analytics.result_quality.judge_results import (
     needs_attention,
     order_statements,
 )
-from wayfindinglib.analytics.result_quality.rules import RESULT_QUALITY_RULES
+from wayfindinglib.analytics.result_quality.rules import (
+    REJECTED_PIXEL_FRACTION_LIMIT,
+    RESULT_QUALITY_RULES,
+    STACK_SHARPNESS_RATIO_LIMIT,
+)
 from wayfindinglib.models.quality.statements import (
     ActionClass,
     Severity,
@@ -229,6 +233,60 @@ def test_master_flat_noisy_uses_the_register_limit() -> None:
     ]
     statement = _of_rule(_judge(rows), "master_flat_noisy")[0]
     assert statement.proposed_action.frame_count == 30
+
+
+def test_rejected_fraction_warns_at_the_limit_and_not_below_it() -> None:
+    """A rejected share of 15% or more warns; 14.9% does not."""
+    at_limit = _row("stacking.rejected_pixel_fraction", 0.15, level="stack")
+    statement = _of_rule(_judge([at_limit]), "stack_rejected_fraction_high")[0]
+    assert statement.kind == StatementKind.WARNING
+    assert statement.action_class == ActionClass.DATA_SELECTION
+    assert statement.limits[0].register_entry == "STK-24"
+    assert "15.0%" in statement.message
+    assert [reference.row_id for reference in statement.evidence] == [at_limit.row_id]
+    below = _row("stacking.rejected_pixel_fraction", 0.149, level="stack")
+    assert _of_rule(_judge([below]), "stack_rejected_fraction_high") == []
+
+
+def test_sharpness_warns_above_the_ratio_limit_and_not_at_it() -> None:
+    """Stars 1.3 times the predicted width warn; exactly 1.2 times does not."""
+    wide = [
+        _row("stacking.stacked_fwhm_px", 3.9, level="stack"),
+        _row("stacking.expected_stack_fwhm_px", 3.0, level="stack"),
+    ]
+    statement = _of_rule(_judge(wide), "stack_sharpness_poor")[0]
+    assert statement.kind == StatementKind.WARNING
+    assert statement.limits[0].register_entry == "STK-25"
+    assert "1.30" in statement.message
+    assert len(statement.evidence) == 2
+    at_limit = [
+        _row("stacking.stacked_fwhm_px", 3.6, level="stack"),
+        _row("stacking.expected_stack_fwhm_px", 3.0, level="stack"),
+    ]
+    assert _of_rule(_judge(at_limit), "stack_sharpness_poor") == []
+
+
+def test_sharpness_makes_no_ratio_from_a_zero_predicted_width() -> None:
+    """A predicted width of zero gives no ratio, so no warning and no error."""
+    rows = [
+        _row("stacking.stacked_fwhm_px", 3.0, level="stack"),
+        _row("stacking.expected_stack_fwhm_px", 0.0, level="stack"),
+    ]
+    assert _of_rule(_judge(rows), "stack_sharpness_poor") == []
+
+
+def test_the_copied_stack_limits_agree_with_the_stacking_pipeline() -> None:
+    """The rule table's copies equal the limits the stacker applies."""
+    from astrometricslib.pipelines.stacking.post_processing.stack_quality import (
+        DEFAULT_FWHM_DEGRADATION_RATIO,
+        DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD,
+    )
+
+    assert REJECTED_PIXEL_FRACTION_LIMIT == DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD
+    assert STACK_SHARPNESS_RATIO_LIMIT == DEFAULT_FWHM_DEGRADATION_RATIO
+    limits = {rule.name: rule.limits[0].value for rule in RESULT_QUALITY_RULES if rule.limits}
+    assert limits["stack_rejected_fraction_high"] == DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD
+    assert limits["stack_sharpness_poor"] == DEFAULT_FWHM_DEGRADATION_RATIO
 
 
 def test_missing_metric_gives_insufficient_data_that_names_it() -> None:

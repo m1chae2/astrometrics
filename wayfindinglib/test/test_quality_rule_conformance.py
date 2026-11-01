@@ -108,10 +108,6 @@ UNUSED_DECISION_METRICS = {
         "issue 97: input of the stack sharpness check (STK-25), judged by the stacker. The report's "
         "sharpness trade-off reads the Moffat width in arcseconds, not this width."
     ),
-    "stacking.rejected_pixel_fraction": (
-        "issue 97: input of the stacker's rejection check (STK-24), judged by the stacker; its gate "
-        "outcome belongs to the pipeline-quality view of issue 97."
-    ),
     "frame.clipped_mean_level_adu": (
         "issue 134: input of the dark and bias level checks (STK-48, STK-51), judged by the stacker's "
         "gates, which the rule retake_bad_calibration_set reads."

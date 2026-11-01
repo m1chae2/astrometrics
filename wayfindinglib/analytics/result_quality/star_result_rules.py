@@ -12,13 +12,14 @@ The rules here use only what the star record already holds. They add no
 measurement and no new limit of their own beyond one design estimate:
 
 * A spectrum. The record holds the relative RMS of the best match and the
-  gaps to the second-best match and to the next class. Whether the match is
-  poor, or the class ambiguous, uses the limits of the spectroscopy pipeline
-  (register entries SPE-16 and SPE-18). A statement quotes the limits that the
-  spectrum result itself carries (`poor_match_rms_limit` and
-  `ambiguous_rms_gap_limit`). A copy of each value is kept here for the
-  static rule table, and a test compares the copy with the pipeline. The
-  answer "more time will not
+  gaps to the second-best match and to the next class. These rules compare the
+  stored numbers with the limits themselves; they do not read the spectrum
+  result's yes-or-no properties. The match is poor when the best RMS is above
+  the poor-match limit (SPE-16). The subtype is ambiguous when the gap to the
+  second-best match is below the ambiguity limit, and the class is ambiguous
+  when the gap to the next class is below it (SPE-18). A copy of each limit is
+  kept here for the static rule table, and a test compares the copy with the
+  spectroscopy pipeline. The answer "more time will not
   separate these classes at this resolution" needs a calibration of the class
   gap against the signal-to-noise ratio that does not exist yet, so it is an
   explicit `insufficient_data` statement and never a guess.
@@ -68,6 +69,7 @@ NO_RUN_ID = "not recorded"
 
 SPECTRAL_TYPE_POOR_MATCH = "spectral_type_poor_match"
 SPECTRAL_CLASS_AMBIGUOUS = "spectral_class_ambiguous"
+SPECTRAL_SUBTYPE_AMBIGUOUS = "spectral_subtype_ambiguous"
 SPECTRAL_TYPE_NOT_FOUND = "spectral_type_not_found"
 SPECTRUM_USE_RESULT = "spectrum_use_result"
 SPECTRAL_REACHABILITY = "spectral_reachability"
@@ -83,13 +85,13 @@ NO_STAR_RESULT = "no_star_result"
 POOR_MATCH_RMS_LIMIT = 0.15
 """Copy of the pipeline's poor-match limit (relative RMS), for the rule table.
 
-A test checks it against `SpectroscopyResult.poor_match_rms_limit`.
+A test checks it against `NO_GOOD_MATCH_RMS` in the spectroscopy pipeline.
 """
 
 AMBIGUOUS_RMS_GAP_LIMIT = 0.02
 """Copy of the pipeline's ambiguity limit (relative RMS), for the rule table.
 
-A test checks it against `SpectroscopyResult.ambiguous_rms_gap_limit`.
+A test checks it against `AMBIGUOUS_RMS_GAP` in the spectroscopy pipeline.
 """
 
 _POOR_MATCH_LIMIT = build_limit(
@@ -157,6 +159,25 @@ STAR_RESULT_RULES: tuple[QualityRule, ...] = (
             "Report the class as uncertain."
         ),
         purpose="When the next class fits almost as well, the class letter itself is uncertain.",
+    ),
+    QualityRule(
+        name=SPECTRAL_SUBTYPE_AMBIGUOUS,
+        statement_kind=StatementKind.WARNING,
+        action_class=ActionClass.DATA_SELECTION,
+        severity=Severity.ADVICE,
+        limits=[_AMBIGUOUS_GAP_LIMIT],
+        register_entry="SPE-18",
+        confidence=Confidence.MEASURED,
+        wording="The second-best reference fits within {gap:.3f} (relative RMS) of the best one.",
+        plain_wording=(
+            "The spectrum looks like {type_phrase}, but the next reference on the ladder fits almost as "
+            "well (the gap is only {gap:.3f}). "
+            "Report the subtype as uncertain."
+        ),
+        purpose=(
+            "When the second-best reference fits almost as well, the subtype (the digit after the class "
+            "letter) is uncertain, even when the class letter is not."
+        ),
     ),
     QualityRule(
         name=SPECTRAL_TYPE_NOT_FOUND,
@@ -409,13 +430,13 @@ def judge_spectrum(star_id: str, spectroscopy: Any) -> list[TargetStatement]:
         return statements
     spectral_type = spectroscopy.self_determined_spectral_type
     rms_reference = _reference(star_id, run, "spectroscopy.self_determined_spectral_type_rms")
-    if spectroscopy.is_poor_match:
+    if rms > POOR_MATCH_RMS_LIMIT:
         statements.append(
             _statement(
                 SPECTRAL_TYPE_POOR_MATCH,
                 (
                     f"The best reference ({spectral_type}) differs from this spectrum by {rms:.2f} "
-                    f"(relative RMS), above the {spectroscopy.poor_match_rms_limit:.2f} limit "
+                    f"(relative RMS), above the {POOR_MATCH_RMS_LIMIT:.2f} limit "
                     "for a good match."
                 ),
                 "Do not claim the type: even the closest reference fits badly.",
@@ -423,25 +444,41 @@ def judge_spectrum(star_id: str, spectroscopy: Any) -> list[TargetStatement]:
                 plain_values={
                     "type_phrase": spectral_type_phrase(spectral_type),
                     "rms": rms,
-                    "limit": spectroscopy.poor_match_rms_limit,
+                    "limit": POOR_MATCH_RMS_LIMIT,
                 },
                 proposed_note=f"Do not report {spectral_type} as the star's type.",
             )
         )
     gap = spectroscopy.rms_gap_to_next_class
-    if spectroscopy.is_class_ambiguous and gap is not None:
+    if gap is not None and gap < AMBIGUOUS_RMS_GAP_LIMIT:
         statements.append(
             _statement(
                 SPECTRAL_CLASS_AMBIGUOUS,
                 (
                     f"Another spectral class fits within {gap:.3f} (relative RMS) of the best one "
-                    f"({spectral_type}), below the {spectroscopy.ambiguous_rms_gap_limit:.2f} gap "
+                    f"({spectral_type}), below the {AMBIGUOUS_RMS_GAP_LIMIT:.2f} gap "
                     "needed to tell them apart."
                 ),
                 "The class letter is uncertain, not only the subtype.",
                 [rms_reference, _reference(star_id, run, "spectroscopy.rms_gap_to_next_class")],
                 plain_values={"type_phrase": spectral_type_phrase(spectral_type), "gap": gap},
                 proposed_note="Report the class as uncertain, with the neighbouring class.",
+            )
+        )
+    subtype_gap = spectroscopy.rms_gap_to_second_best
+    if subtype_gap is not None and subtype_gap < AMBIGUOUS_RMS_GAP_LIMIT:
+        statements.append(
+            _statement(
+                SPECTRAL_SUBTYPE_AMBIGUOUS,
+                (
+                    f"The second-best reference fits within {subtype_gap:.3f} (relative RMS) of the best "
+                    f"one ({spectral_type}), below the {AMBIGUOUS_RMS_GAP_LIMIT:.2f} gap needed to "
+                    "tell them apart."
+                ),
+                "The subtype is uncertain; the class letter may still be clear.",
+                [rms_reference, _reference(star_id, run, "spectroscopy.rms_gap_to_second_best")],
+                plain_values={"type_phrase": spectral_type_phrase(spectral_type), "gap": subtype_gap},
+                proposed_note="Report the subtype as uncertain, with the neighbouring subtype.",
             )
         )
     if not statements:

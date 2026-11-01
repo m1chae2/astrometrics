@@ -56,6 +56,9 @@ ODD_EVEN_SUM_ROW_SCATTER_METRIC = "stacking.odd_even_sum_row_average_scatter_sta
 ODD_EVEN_SUM_COLUMN_SCATTER_METRIC = "stacking.odd_even_sum_column_average_scatter_stack_unit"
 FLAT_NOISE_FRACTION_METRIC = "stacking.flat_noise_fraction"
 FLAT_FRAME_COUNT_METRIC = "stacking.flat_frame_count"
+REJECTED_PIXEL_FRACTION_METRIC = "stacking.rejected_pixel_fraction"
+STACKED_STAR_WIDTH_METRIC = "stacking.stacked_fwhm_px"
+EXPECTED_STACK_STAR_WIDTH_METRIC = "stacking.expected_stack_fwhm_px"
 EFFECTIVE_TIME_METRIC = "stacking.effective_time_s"
 STAR_WIDTH_PIXELS_METRIC = "frame.star_width_moffat_px"
 STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC = "frame.star_width_effective_arcsec"
@@ -118,6 +121,20 @@ FLAT_VARIANCE_SHARE_TARGET = 0.01
 # It equals astrometricslib's `MAXIMUM_FLAT_NOISE_FRACTION` (0.5%), derived
 # in STK-05: a flat at 0.5% adds under 3% to the variance of a typical stack.
 MASTER_FLAT_NOISE_FRACTION_LIMIT = 0.005
+
+# The share of pixel values the stacker may throw out before the rule warns.
+# It equals astrometricslib's `DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD`
+# (15%), set in STK-24: three real sessions never passed about 10%, so 15% has
+# headroom. Partly measured: no session with a truly high share was available.
+# A test compares this copy with the library's value.
+REJECTED_PIXEL_FRACTION_LIMIT = 0.15
+
+# The most a stack's star width may exceed the width its input frames predict
+# (stack width divided by predicted width) before the rule warns. It equals
+# astrometricslib's `DEFAULT_FWHM_DEGRADATION_RATIO` (1.2), set in STK-25:
+# six normal stacks measured 0.77 to 1.16. Partly measured: no real failed
+# alignment was available. A test compares this copy with the library's value.
+STACK_SHARPNESS_RATIO_LIMIT = 1.2
 
 
 def build_limit(
@@ -410,6 +427,77 @@ RESULT_QUALITY_RULES: tuple[QualityRule, ...] = (
         purpose=(
             "The stacker blurs a flat that is noisier than the limit, which loses dust and vignetting detail."
         ),
+    ),
+    QualityRule(
+        name="stack_rejected_fraction_high",
+        statement_kind=StatementKind.WARNING,
+        action_class=ActionClass.DATA_SELECTION,
+        severity=Severity.ADVICE,
+        requires=[MetricRequirement(name=REJECTED_PIXEL_FRACTION_METRIC, definition_version=1)],
+        limits=[
+            QualityLimit(
+                value=REJECTED_PIXEL_FRACTION_LIMIT,
+                unit="fraction",
+                tier=LimitTier.VALIDATED_DATASET,
+                derivation=(
+                    "STK-24: three real sessions never passed about 10% of pixel values rejected, so 15% "
+                    "does not fire on a normal stack. No session with a truly high share was available."
+                ),
+                sample_count=3,
+                register_entry="STK-24",
+            )
+        ],
+        register_entry="STK-24",
+        confidence=Confidence.PARTLY_MEASURED,
+        wording=(
+            "The stacker rejected {rejected_percent:.1f}% of the pixel values, at or above the "
+            "{limit_percent:.0f}% limit."
+        ),
+        plain_wording=(
+            "About {rejected_percent:.1f}% of the pixel values were thrown out while stacking, which is at "
+            "or above the {limit_percent:.0f}% we expect to see. "
+            "The frames disagree, often from clouds or poor alignment, so look through them."
+        ),
+        purpose=(
+            "A high rejected share means the frames disagree, often from cloud or poor alignment. It is a "
+            "weaker signal of trouble than star width."
+        ),
+    ),
+    QualityRule(
+        name="stack_sharpness_poor",
+        statement_kind=StatementKind.WARNING,
+        action_class=ActionClass.DATA_SELECTION,
+        severity=Severity.WARNING,
+        requires=[
+            MetricRequirement(name=STACKED_STAR_WIDTH_METRIC, definition_version=1),
+            MetricRequirement(name=EXPECTED_STACK_STAR_WIDTH_METRIC, definition_version=1),
+        ],
+        limits=[
+            QualityLimit(
+                value=STACK_SHARPNESS_RATIO_LIMIT,
+                unit="ratio",
+                tier=LimitTier.VALIDATED_DATASET,
+                derivation=(
+                    "STK-25: six normal stacks measured 0.77 to 1.16 times the width their input frames "
+                    "predict, so 1.2 does not fire on them. Whether 1.2 catches a real failed alignment "
+                    "is untested."
+                ),
+                sample_count=6,
+                register_entry="STK-25",
+            )
+        ],
+        register_entry="STK-25",
+        confidence=Confidence.PARTLY_MEASURED,
+        wording=(
+            "The stack's stars are {ratio:.2f} times as wide as its input frames predict "
+            "({stacked_width:.2f} px against {expected_width:.2f} px), above the {limit:.1f} limit."
+        ),
+        plain_wording=(
+            "The stars in the stack are {ratio:.2f} times as wide as the single frames predict, above the "
+            "{limit:.1f} we expect to see. "
+            "The frames may not line up, so look through them."
+        ),
+        purpose=("A stack wider than its input frames predict has been blurred, usually by poor alignment."),
     ),
     QualityRule(
         name="frames_lost",

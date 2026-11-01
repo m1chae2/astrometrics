@@ -53,14 +53,17 @@ from wayfindinglib.analytics.result_quality.rules import (
     DARK_ZERO_PIXEL_GATE_METRIC,
     ELONGATION_METRIC,
     EMPTY_APERTURE_NOISE_METRIC,
+    EXPECTED_STACK_STAR_WIDTH_METRIC,
     FLAT_FRAME_COUNT_METRIC,
     FLAT_NOISE_FRACTION_METRIC,
     FLAT_NOISE_IN_APERTURE_METRIC,
     PEAK_FRACTION_METRIC,
     RAW_FRAME_CLIPPING_METRIC,
     READ_NOISE_METRIC,
+    REJECTED_PIXEL_FRACTION_METRIC,
     RESULT_QUALITY_RULES,
     SKY_NOISE_METRIC,
+    STACKED_STAR_WIDTH_METRIC,
 )
 from wayfindinglib.models.quality.rule import QualityRule
 from wayfindinglib.models.quality.statements import (
@@ -806,6 +809,87 @@ def _judge_master_flat_noisy(case: _Case) -> list[TargetStatement]:
     ]
 
 
+def _judge_stack_rejected_fraction_high(case: _Case) -> list[TargetStatement]:
+    """Warn when the rejected share of pixel values reaches the limit.
+
+    Parameters
+    ----------
+    case : `_Case`
+        The rule, limits, setting and readings.
+
+    Returns
+    -------
+    statements : `list` [`TargetStatement`]
+        One warning, or an empty list.
+    """
+    fraction = case.readings[REJECTED_PIXEL_FRACTION_METRIC].value
+    limit = _limit_value(case.limits, 0, case.rule.name)
+    if not fraction >= limit:
+        return []
+    fields = {"rejected_percent": fraction * 100.0, "limit_percent": limit * 100.0}
+    reason = (
+        f"The rejected share is {fraction:.1%}; the limit is {limit:.0%}. Normal sessions stay under about "
+        "10% (STK-24). A high share is a weaker sign of trouble than star width."
+    )
+    action = ProposedAction(note="Look through the frames; set aside any that are clouded or do not line up.")
+    return [
+        _statement(
+            case,
+            case.rule.wording.format_map(fields),
+            reason,
+            plain_message=format_plain(case.rule, fields),
+            proposed_action=action,
+        )
+    ]
+
+
+def _judge_stack_sharpness_poor(case: _Case) -> list[TargetStatement]:
+    """Warn when the stack's stars are wider than its input frames predict.
+
+    Parameters
+    ----------
+    case : `_Case`
+        The rule, limits, setting and readings.
+
+    Returns
+    -------
+    statements : `list` [`TargetStatement`]
+        One warning, or an empty list. A predicted width of zero or less
+        gives no ratio, so no statement.
+    """
+    stacked_width = case.readings[STACKED_STAR_WIDTH_METRIC].value
+    expected_width = case.readings[EXPECTED_STACK_STAR_WIDTH_METRIC].value
+    limit = _limit_value(case.limits, 0, case.rule.name)
+    if not expected_width > 0.0:
+        return []
+    ratio = stacked_width / expected_width
+    if not ratio > limit:
+        return []
+    fields = {
+        "ratio": ratio,
+        "stacked_width": stacked_width,
+        "expected_width": expected_width,
+        "limit": limit,
+    }
+    reason = (
+        f"The stack's star width is {stacked_width:.2f} px; the root mean square of its sampled input "
+        f"frames' widths is {expected_width:.2f} px, a ratio of {ratio:.2f} against the limit {limit:g} "
+        "(STK-25)."
+    )
+    action = ProposedAction(
+        note="Look through the frames; set aside any that are sharply worse than the rest."
+    )
+    return [
+        _statement(
+            case,
+            case.rule.wording.format_map(fields),
+            reason,
+            plain_message=format_plain(case.rule, fields),
+            proposed_action=action,
+        )
+    ]
+
+
 # What each stored calibration gate says when it failed: the kind of frame, the
 # short condition, the plain condition and the advice. The advice names the
 # action the observer takes. `{value}` is the number the gate stored.
@@ -957,6 +1041,8 @@ _PLAIN_RULE_JUDGES: dict[str, Callable[[_Case], list[TargetStatement]]] = {
     "trailed_stars": _judge_trailed_stars,
     "flat_noise_limits_stack": _judge_flat_noise_limits_stack,
     "master_flat_noisy": _judge_master_flat_noisy,
+    "stack_rejected_fraction_high": _judge_stack_rejected_fraction_high,
+    "stack_sharpness_poor": _judge_stack_sharpness_poor,
     "retake_bad_calibration_set": _judge_retake_bad_calibration_set,
 }
 

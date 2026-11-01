@@ -8,7 +8,10 @@ all. Every statement must cite the star result it used, and the copies of the
 spectroscopy limits must equal the pipeline's.
 """
 
+from types import SimpleNamespace
+
 from astrometricslib._internal.results import PhotometryResult, SpectroscopyResult
+from astrometricslib._internal.stacking import AMBIGUOUS_RMS_GAP, NO_GOOD_MATCH_RMS
 from wayfindinglib.analytics.result_quality import star_result_rules as sr
 from wayfindinglib.models.quality.statements import ActionClass, StatementKind
 from wayfindinglib.test.plain_wording_support import assert_plain_message_is_sound
@@ -132,6 +135,60 @@ def test_an_ambiguous_class_warns_with_the_gap() -> None:
     assert warning.limits[0].register_entry == "SPE-18"
 
 
+def test_an_ambiguous_subtype_warns_even_when_the_class_is_clear() -> None:
+    """A close second-best warns about the subtype, not the class."""
+    statements = sr.judge_star_record(STAR, _spectrum(rms=0.05, second=0.06, next_class=0.30), None)
+
+    assert sr.SPECTRAL_SUBTYPE_AMBIGUOUS in _rules(statements)
+    assert sr.SPECTRAL_CLASS_AMBIGUOUS not in _rules(statements)
+    assert sr.SPECTRUM_USE_RESULT not in _rules(statements)
+    warning = statements[_rules(statements).index(sr.SPECTRAL_SUBTYPE_AMBIGUOUS)]
+    assert warning.kind == StatementKind.WARNING
+    assert warning.action_class == ActionClass.DATA_SELECTION
+    assert "0.010" in warning.message
+    assert warning.limits[0].register_entry == "SPE-18"
+    assert warning.evidence[-1].star_result is not None
+    assert warning.evidence[-1].star_result.metric == "spectroscopy.rms_gap_to_second_best"
+
+
+def test_a_subtype_gap_at_the_limit_does_not_warn() -> None:
+    """A gap equal to the limit, or a lone candidate, makes no warning."""
+    at_limit = sr.judge_star_record(
+        STAR, _spectrum(rms=0.05, second=0.05 + sr.AMBIGUOUS_RMS_GAP_LIMIT, next_class=0.30), None
+    )
+    assert sr.SPECTRAL_SUBTYPE_AMBIGUOUS not in _rules(at_limit)
+
+    lone = SpectroscopyResult(
+        wavelengths_angstrom=[4000.0, 5000.0],
+        intensities=[1.0, 2.0],
+        self_determined_spectral_type="G2V",
+        self_determined_spectral_type_rms=0.05,
+        self_determined_spectral_type_candidates=[{"spectral_type": "G2V", "rms": 0.05}],
+    )
+    assert sr.SPECTRAL_SUBTYPE_AMBIGUOUS not in _rules(sr.judge_star_record(STAR, lone, None))
+
+
+def test_the_spectral_rules_read_the_numbers_not_the_yes_or_no_properties() -> None:
+    """The verdicts follow the stored RMS and gaps, not the properties.
+
+    A stand-in record holds only the numbers. It has no yes-or-no property,
+    so a rule that read one would fail with an attribute error.
+    """
+    numbers_only = SimpleNamespace(
+        generated_by_job_id="job-9",
+        self_determined_spectral_type="G2V",
+        self_determined_spectral_type_rms=0.2,
+        self_determined_spectral_type_note=None,
+        rms_gap_to_second_best=0.01,
+        rms_gap_to_next_class=0.015,
+    )
+    rules = _rules(sr.judge_spectrum(STAR, numbers_only))
+
+    assert sr.SPECTRAL_TYPE_POOR_MATCH in rules
+    assert sr.SPECTRAL_SUBTYPE_AMBIGUOUS in rules
+    assert sr.SPECTRAL_CLASS_AMBIGUOUS in rules
+
+
 def test_reachability_is_always_an_explicit_gap_in_knowledge() -> None:
     """'Not reachable at this resolution' is never guessed."""
     statements = sr.judge_star_record(STAR, _spectrum(), None)
@@ -224,6 +281,7 @@ def test_every_star_statement_has_a_sound_plain_message() -> None:
     statements += sr.judge_star_record(STAR, _spectrum(), None)
     statements += sr.judge_star_record(STAR, _spectrum(rms=0.4, second=0.5, next_class=0.6), None)
     statements += sr.judge_star_record(STAR, _spectrum(rms=0.05, second=0.06, next_class=0.07), None)
+    statements += sr.judge_star_record(STAR, _spectrum(rms=0.05, second=0.06, next_class=0.30), None)
     statements += sr.judge_star_record(STAR, _spectrum(rms=None), None)
     statements += sr.judge_star_record(STAR, None, _search())
     statements += sr.judge_star_record(STAR, None, _search(cycles_observed=1.2, unconfirmed=True))
@@ -232,6 +290,7 @@ def test_every_star_statement_has_a_sound_plain_message() -> None:
     statements += sr.judge_star_record(STAR, None, None)
     assert {statement.rule for statement in statements} >= {
         sr.SPECTRAL_TYPE_POOR_MATCH,
+        sr.SPECTRAL_SUBTYPE_AMBIGUOUS,
         sr.SPECTRUM_USE_RESULT,
         sr.PERIOD_USE_RESULT,
         sr.PERIOD_FEW_CYCLES,
@@ -262,8 +321,7 @@ def test_period_results_use_the_result_kind() -> None:
     assert use.action_class is None and use.proposed_action is None
 
 
-def test_the_copied_match_limits_agree_with_the_spectroscopy_result() -> None:
-    """The rule table's copies equal the limits a spectrum result carries."""
-    result = SpectroscopyResult()
-    assert sr.POOR_MATCH_RMS_LIMIT == result.poor_match_rms_limit
-    assert sr.AMBIGUOUS_RMS_GAP_LIMIT == result.ambiguous_rms_gap_limit
+def test_the_copied_match_limits_agree_with_the_spectroscopy_pipeline() -> None:
+    """The rule table's copies equal the spectroscopy pipeline's limits."""
+    assert sr.POOR_MATCH_RMS_LIMIT == NO_GOOD_MATCH_RMS
+    assert sr.AMBIGUOUS_RMS_GAP_LIMIT == AMBIGUOUS_RMS_GAP

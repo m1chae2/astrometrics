@@ -11,11 +11,14 @@ stack is given up on, and that nothing the thread does afterward is recorded.
 import os
 import sys
 import threading
+from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from astrometricslib._internal.drivers import siril_interface
+from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib._internal.drivers.siril_interface import session as siril_session
 from astrometricslib._internal.drivers.siril_interface.imaging_stacker import SirilImagingStacker
 from astrometricslib.foundation.paths import locks_directory
@@ -26,8 +29,10 @@ from astrometricslib.foundation.run_abandonment import (
     raise_if_abandoned,
 )
 from astrometricslib.foundation.storage.process_locks import acquire_resource_slot
+from astrometricslib.models.quality.measurement import SubjectLevel
 from astrometricslib.pipelines import tasks
 from astrometricslib.pipelines.stacking import stage
+from astrometricslib.pipelines.stacking.frame_measurement_run import FrameQualityRecording
 
 # A Siril stand-in: Python ignores the extra Siril options that follow its
 # `-c` code, and sleeps far longer than any test waits.
@@ -221,3 +226,56 @@ def test_a_stack_that_finishes_after_the_give_up_is_not_recorded(monkeypatch: py
         stage._run_stacking_engine(stage_run)
 
     assert archive_results == [False]
+
+
+def test_an_abandoned_stack_is_recorded_as_a_processing_decision(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The timeout stores a decision row and still sets `flagged` for readers.
+
+    `flagged` is dropped in a later phase, so the summary keeps its flag and
+    its reason while the quality store gains the row.
+    """
+    release = threading.Event()
+
+    def hung_stack(*_: object, **__: object) -> str:
+        """Stand in for a stack that never finishes until released.
+
+        Returns
+        -------
+        stacked_path : `str`
+            A path that is never used.
+        """
+        release.wait(30)
+        return "/never/reached.fits"
+
+    monkeypatch.setattr(tasks, "_stack_with_job_tracking", hung_stack)
+    monkeypatch.setattr(tasks, "_STACKING_TIMEOUT_POLL_SECONDS", 0.05)
+    summary = SimpleNamespace(
+        flagged=False, flag_reasons=[], stacking_metrics=SimpleNamespace(timed_out=False)
+    )
+    target = SimpleNamespace(id="NGC 1499", stacking=SimpleNamespace(quality_summary=summary))
+    configuration = SimpleNamespace(get_library_path=lambda: tmp_path)
+    recording = FrameQualityRecording(configuration=configuration, calibration_library=object())
+
+    try:
+        result = tasks.stack_frames_with_timeout(
+            target,
+            [],
+            timeout_seconds=1,
+            measured_at=datetime(2026, 11, 1, 3, 0, tzinfo=UTC),
+            quality_recording=recording,
+        )
+    finally:
+        release.set()
+
+    assert result is None
+    assert summary.flagged is True
+    assert summary.flag_reasons == ["stacking timed out after 1s"]
+    rows = QualityStore(str(tmp_path / "astrometrics.db")).query(metric="stacking.abandoned_after_s")
+    assert len(rows) == 1
+    assert rows[0].subject.level is SubjectLevel.RUN
+    assert rows[0].subject.target_id == "NGC 1499"
+    assert rows[0].value is not None
+    assert rows[0].value >= 0.9
+    assert rows[0].action_taken == "stack abandoned after its 1 s time budget"

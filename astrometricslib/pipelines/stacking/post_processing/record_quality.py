@@ -53,6 +53,7 @@ from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
 from astrometricslib.pipelines.shared.registration_record import build_registration_record
 from astrometricslib.pipelines.stacking.metrics import (
     GATE_METRIC_BY_NAME,
+    STACKING_ABANDONED_AFTER_S,
     STACKING_APERTURE_SET_NUMBER,
     STACKING_BIAS_UNIQUE_FRAME_COUNT,
     STACKING_DARK_UNIQUE_FRAME_COUNT,
@@ -388,6 +389,38 @@ def _value_measurement(
         subject,
         reason=reason,
     )
+
+
+def abandoned_stack_measurements(
+    context: PipelineRunContext, working_seconds: float, budget_seconds: float
+) -> list[QualityMeasurement]:
+    """Build the processing-decision row for a stack that was abandoned.
+
+    Parameters
+    ----------
+    context : `PipelineRunContext`
+        The run's shared facts.
+    working_seconds : `float`
+        How long the stack worked before it was abandoned, not counting time
+        spent waiting for the Siril lock.
+    budget_seconds : `float`
+        The time budget the stack ran past.
+
+    Returns
+    -------
+    measurements : `list` of `QualityMeasurement`
+        One row on the run's subject. Its `action_taken` says the stack was
+        abandoned and states the budget.
+    """
+    return [
+        build_measurement(
+            _SPEC_BY_NAME[STACKING_ABANDONED_AFTER_S],
+            float(working_seconds),
+            context,
+            context.run_subject(),
+            action_taken=f"stack abandoned after its {budget_seconds:g} s time budget",
+        )
+    ]
 
 
 def gate_for_measurement(gate: GateResult) -> GateResult:

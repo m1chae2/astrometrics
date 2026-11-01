@@ -58,6 +58,7 @@ from astrometricslib.pipelines.stacking.post_processing.normalization_scale impo
     NormalizationScaleOutcome,
 )
 from astrometricslib.pipelines.stacking.post_processing.record_quality import (
+    abandoned_stack_measurements,
     frame_geometry_measurements,
     stacking_measurements,
 )
@@ -348,7 +349,8 @@ def stacking_emitted_measurements() -> list[QualityMeasurement]:
     Returns
     -------
     measurements : `list` of `QualityMeasurement`
-        What the record step emits, plus the two quarantine rows of one frame.
+        What the record step emits, plus the two quarantine rows of one frame
+        and the row of an abandoned stack.
     """
     context = PipelineRunContext("M 99", "stacking", "1.3.0", "job-1", "job-1", FIXTURE_TIME)
     measurements = stacking_measurements(
@@ -361,6 +363,7 @@ def stacking_emitted_measurements() -> list[QualityMeasurement]:
     )
     frame = FrameRecord(path="/frames/lights/M 99/Scope/Cam/a.fits", camera="Cam", exposure="60")
     measurements.extend(fixture_frame_geometry_rows(context))
+    measurements.extend(abandoned_stack_measurements(context, 3600.5, 3600))
     measurements.extend(
         flat_match_measurements(
             FlatMatchOutcome(

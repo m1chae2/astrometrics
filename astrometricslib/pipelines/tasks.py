@@ -169,6 +169,58 @@ def _stack_with_job_tracking(
         return stacked_path
 
 
+def _record_abandoned_stack(
+    target: Target,
+    measured_at: datetime | None,
+    quality_recording: FrameQualityRecording | None,
+    *,
+    working_seconds: float,
+    budget_seconds: float,
+) -> None:
+    """Store the quality row that says a stack was abandoned.
+
+    The row is a processing-decision measurement (`stacking.abandoned_after_s`)
+    on the stacking run. It is stored even when the target has no stack
+    summary yet. Nothing is stored when the caller gave no time or no
+    recording information, as in tests. A failure to store never reaches the
+    caller.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target whose stack was abandoned.
+    measured_at : `datetime` or `None`
+        When the run started, with a time zone.
+    quality_recording : `FrameQualityRecording` or `None`
+        The configuration that locates the quality database.
+    working_seconds : `float`
+        How long the stack worked, not counting time waiting for the Siril
+        lock.
+    budget_seconds : `float`
+        The time budget the stack ran past.
+    """
+    if measured_at is None or quality_recording is None:
+        return
+    from astrometricslib.models.quality.quality_summary import STACKING_PIPELINE_VERSION
+    from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
+        PipelineRunContext,
+        record_run_measurements,
+    )
+    from astrometricslib.pipelines.stacking.post_processing.record_quality import (
+        abandoned_stack_measurements,
+    )
+
+    context = PipelineRunContext.from_options(
+        target.id, "stacking", STACKING_PIPELINE_VERSION, {"measured_at": measured_at}
+    )
+    if context is None:
+        return
+    record_run_measurements(
+        abandoned_stack_measurements(context, working_seconds, budget_seconds),
+        config=quality_recording.configuration,
+    )
+
+
 def stack_frames_with_timeout(
     target: Target,
     frames_to_stack: list[FrameRecord],
@@ -285,6 +337,13 @@ def stack_frames_with_timeout(
             metrics.timed_out = True
             summary.flagged = True
             summary.flag_reasons.append(f"stacking timed out after {timeout_seconds}s")
+        _record_abandoned_stack(
+            target,
+            measured_at,
+            quality_recording,
+            working_seconds=max(0.0, time.monotonic() - started_at - lock_wait_seconds),
+            budget_seconds=timeout_seconds,
+        )
         return None
 
     if "error" in outcome:

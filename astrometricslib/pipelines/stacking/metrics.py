@@ -156,6 +156,7 @@ STACKING_STACKED_FWHM_PX = "stacking.stacked_fwhm_px"
 STACKING_MEDIAN_INPUT_FWHM_PX = "stacking.median_input_fwhm_px"
 STACKING_EXPECTED_STACK_FWHM_PX = "stacking.expected_stack_fwhm_px"
 STACKING_DURATION_S = "stacking.duration_s"
+STACKING_ABANDONED_AFTER_S = "stacking.abandoned_after_s"
 STACKING_REGISTRATION_REFERENCE_STAR_COUNT = "stacking.registration_reference_star_count"
 STACKING_GROUP_EXPOSURE_S = "stacking.group_exposure_s"
 STACKING_GROUP_FRAMES_SUBMITTED = "stacking.group_frames_submitted_count"
@@ -677,6 +678,27 @@ _VALUE_METRICS: tuple[MetricSpec, ...] = (
         "One run of the stacking program.",
         "_internal.drivers.siril_interface.ImageProcessing",
         better=Direction.LOWER,
+    ),
+    _context_metric(
+        STACKING_ABANDONED_AFTER_S,
+        "s",
+        "How long a stack worked before the run gave up on it for taking too long.",
+        (
+            "The seconds from the start of the stack until the time budget ran out, not counting time "
+            "spent waiting for the Siril lock. The row's `action_taken` says the stack was abandoned "
+            "and states the budget, which grows with the number of frames. Stored only for a stack that "
+            "was abandoned."
+        ),
+        "One stack that was abandoned. The subject is the stacking run, because no stack file exists.",
+        "pipelines.tasks.stack_frames_with_timeout",
+        better=Direction.LOWER,
+        levels=(SubjectLevel.RUN,),
+        purpose=MetricPurpose.DECISION,
+        purpose_reason=(
+            "Abandoning a stack is a processing decision: the run stops the stack's Siril and returns no "
+            "image. The row records that the decision was made, how long the stack had worked and the budget."
+        ),
+        decisions=("abandon a stack that takes too long",),
     ),
     _context_metric(
         STACKING_REGISTRATION_REFERENCE_STAR_COUNT,

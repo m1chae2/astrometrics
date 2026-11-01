@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from wayfindinglib.models.quality.statements import Confidence, Severity
+from wayfindinglib.models.quality.statements import Confidence, Severity, StatementKind
 from wayfindinglib.session_analysis.sky.pipeline import SkyAnalysisRequest
 from wayfindinglib.session_analysis.sky.pipeline import analyze_sky_request as _analyze_sky_request
 from wayfindinglib.session_analysis.sky.pre_processing.assess_sky_input_quality import (
@@ -133,7 +133,7 @@ def test_nothing_poor_says_so(make_nights: Any) -> None:
 
     assert "sky_region_poor" not in kinds
     assert "sky_coverage_gap" in kinds
-    assert not analysis.flagged
+    assert [r.rule for r in analysis.recommendations if r.kind == StatementKind.WARNING] == []
     assert analysis.pipeline_name == "sky"
     assert analysis.resolved_parameters["minimum_nights_per_bin"] == MINIMUM_NIGHTS_PER_BIN
 

@@ -281,10 +281,6 @@ class GuidingSessionAnalysis(BaseModel):
         The observing night.
     equipment_fingerprint : `str`
         The equipment the limits were worked out for.
-    flagged : `bool`
-        `True` if any statement is a warning.
-    flag_reasons : `list` [`str`]
-        The rule names of the warnings.
     resolved_parameters : `dict` [`str`, `float` or `str` or `None`]
         The limits this analysis used, so a result can be traced to the
         numbers behind it.
@@ -304,8 +300,6 @@ class GuidingSessionAnalysis(BaseModel):
     pipeline_version: str = Field(default=GUIDING_ANALYSIS_VERSION, alias="pipelineVersion")
     session_id: str = Field(alias="sessionId")
     equipment_fingerprint: str = Field(alias="equipmentFingerprint")
-    flagged: bool = False
-    flag_reasons: list[str] = Field(default_factory=list, alias="flagReasons")
     resolved_parameters: dict[str, Any] = Field(default_factory=dict, alias="resolvedParameters")
     input_quality: GuidingInputQuality = Field(alias="inputQuality")
     performance: GuidingPerformance

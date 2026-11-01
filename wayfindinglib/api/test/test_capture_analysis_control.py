@@ -21,6 +21,7 @@ from wayfindinglib.api.test.capture_night_helpers import (
     record_good_history,
 )
 from wayfindinglib.api.test.guiding_night_helpers import record_guiding_night
+from wayfindinglib.models.quality.statements import StatementKind
 from wayfindinglib.tasks.control_tasks import night_analysis
 
 
@@ -44,7 +45,7 @@ def test_an_ordinary_night_after_arecord_good_history_is_not_flagged(
     assert analysis.input_quality.captures_without_frame == 0
     assert analysis.performance.star_quality.median_star_width_arcsec == pytest.approx(5.5)
     assert analysis.performance.star_quality.star_width_limit_arcsec is not None
-    assert not analysis.flagged
+    assert [r.rule for r in analysis.recommendations if r.kind == StatementKind.WARNING] == []
 
 
 def test_soft_stars_are_flagged_against_the_earlier_nights(
@@ -57,8 +58,9 @@ def test_soft_stars_are_flagged_against_the_earlier_nights(
 
     analysis = night_analysis.capture_night_analysis(control._context, night)
 
-    assert analysis.flagged
-    assert analysis.flag_reasons == ["star_width_above_baseline"]
+    assert [r.rule for r in analysis.recommendations if r.kind == StatementKind.WARNING] == [
+        "star_width_above_baseline"
+    ]
 
 
 def test_a_soft_night_is_not_judged_against_itself(control: ObservatoryControl, library: Library) -> None:
@@ -78,7 +80,7 @@ def test_a_soft_night_is_not_judged_against_itself(control: ObservatoryControl, 
     with_everything = ObservationReview(control).get_performance_envelope()
     before = ObservationReview(control).get_performance_envelope(before_night=night)
 
-    assert analysis.flagged
+    assert [r.rule for r in analysis.recommendations if r.kind == StatementKind.WARNING] != []
     assert before.thresholds["night_star_width_high_limit"].sample_count == 6
     assert with_everything.thresholds["night_star_width_high_limit"].sample_count == 9
     assert with_everything.value("night_star_width_high_limit") > before.value("night_star_width_high_limit")
@@ -95,7 +97,7 @@ def test_a_night_with_too_little_history_gets_numbers_but_no_verdict(
 
     assert analysis.performance.star_quality.median_star_width_arcsec == pytest.approx(12.0)
     assert analysis.performance.star_quality.star_width_limit_arcsec is None
-    assert not analysis.flagged
+    assert [r.rule for r in analysis.recommendations if r.kind == StatementKind.WARNING] == []
     assert "capture_insufficient_data" in [r.rule for r in analysis.recommendations]
 
 
@@ -145,4 +147,4 @@ def test_the_summary_has_one_row_per_night_oldest_first(
 
     assert [row["sessionId"] for row in rows] == sorted(row["sessionId"] for row in rows)
     assert len(rows) == 3
-    assert {"flagged", "lightFrames", "capturesWithoutFrame", "recommendations"} <= set(rows[0])
+    assert {"lightFrames", "capturesWithoutFrame", "recommendations"} <= set(rows[0])

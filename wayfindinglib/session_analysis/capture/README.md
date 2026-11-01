@@ -2,7 +2,7 @@
 
 This folder judges one observing night of captured frames. The camera takes the frames, and the science library measures each one. The analysis asks whether the night's frames are all there and usable, what they show about saturation and star quality, and whether anything should change.
 
-`pipeline.py` runs the three stages in order and builds the night's summary (`CaptureSessionAnalysis` in `wayfindinglib/models/session/capture_quality.py`). The summary lists which limits and definitions it used (`resolvedParameters`) so any result can be traced to the numbers behind it. A night is flagged when any recommendation is a warning.
+`pipeline.py` runs the three stages in order and builds the night's summary (`CaptureSessionAnalysis` in `wayfindinglib/models/session/capture_quality.py`). The summary lists which limits and definitions it used (`resolvedParameters`) so any result can be traced to the numbers behind it. A warning is a recommendation whose kind is `warning`; the summary has no separate flag.
 
 ## Stages
 

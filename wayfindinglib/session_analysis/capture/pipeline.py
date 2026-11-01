@@ -13,7 +13,6 @@ from typing import Any, cast
 
 from pydantic import BaseModel
 
-from wayfindinglib.models.quality.statements import StatementKind
 from wayfindinglib.models.session.capture_frame import CaptureFrame
 from wayfindinglib.models.session.capture_quality import (
     CaptureInputQuality,
@@ -133,13 +132,12 @@ class CaptureSessionPipeline(SessionAnalysisPipeline):
         Returns
         -------
         summary : `CaptureSessionAnalysis`
-            The three stages' results, the recommendations, and a flag if any
-            recommendation is a warning.
+            The three stages' results and the recommendations. A warning is a
+            recommendation whose kind is ``warning``.
         """
         input_quality: CaptureInputQuality = result.input_quality
         performance: CapturePerformance = result.performance or CapturePerformance()
         recommendations = recommend_for_capture(input_quality, performance, request.envelope)
-        warnings = [r for r in recommendations if r.kind == StatementKind.WARNING]
         resolved: dict[str, Any] = {
             "limits_equipment_match": request.limits_equipment_match,
             "saturated_star_minimum_pixels": request.limits.saturated_star_minimum_pixels,
@@ -152,8 +150,6 @@ class CaptureSessionPipeline(SessionAnalysisPipeline):
         return CaptureSessionAnalysis(
             session_id=request.session_id,
             equipment_fingerprint=request.equipment_fingerprint,
-            flagged=bool(warnings),
-            flag_reasons=[warning.rule for warning in warnings],
             resolved_parameters=resolved,
             input_quality=input_quality,
             performance=performance,

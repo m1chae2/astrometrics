@@ -288,10 +288,6 @@ class CaptureSessionAnalysis(BaseModel):
         The observing night.
     equipment_fingerprint : `str`
         The equipment the limits were worked out for.
-    flagged : `bool`
-        `True` if any statement is a warning.
-    flag_reasons : `list` [`str`]
-        The rule names of the warnings.
     resolved_parameters : `dict` [`str`, `Any`]
         The limits and definitions this analysis used, so a result can be
         traced to the numbers behind it.
@@ -311,8 +307,6 @@ class CaptureSessionAnalysis(BaseModel):
     pipeline_version: str = Field(default=CAPTURE_ANALYSIS_VERSION, alias="pipelineVersion")
     session_id: str = Field(alias="sessionId")
     equipment_fingerprint: str = Field(alias="equipmentFingerprint")
-    flagged: bool = False
-    flag_reasons: list[str] = Field(default_factory=list, alias="flagReasons")
     resolved_parameters: dict[str, Any] = Field(default_factory=dict, alias="resolvedParameters")
     input_quality: CaptureInputQuality = Field(alias="inputQuality")
     performance: CapturePerformance

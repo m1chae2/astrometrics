@@ -136,8 +136,7 @@ def _guiding_summary(context: ControlContext, night_id: str) -> GuidingNightSumm
     performance = analysis.performance
     return GuidingNightSummary(
         available=True,
-        flagged=analysis.flagged,
-        flag_reasons=list(analysis.flag_reasons),
+        statements=list(analysis.recommendations),
         rms_per_axis_arcsec=performance.rms_per_axis_arcsec,
         expected_star_widening_fraction=performance.expected_star_widening_fraction,
         lost_fraction=quality.lost_fraction,

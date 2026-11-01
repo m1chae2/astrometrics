@@ -1,8 +1,8 @@
 """Purpose: Unit tests for the capture-analysis pipeline.
 
 Description: Runs whole nights through pre-processing, processing and
-post-processing and checks the summary: that a good night is not flagged,
-that a night with a real problem is flagged with the limits behind it, that a
+post-processing and checks the summary: that a good night has no warnings,
+that a night with a real problem warns with the limits behind it, that a
 night with too little data skips the measurements, and that the result can be
 traced to the limits and definitions it used.
 """
@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 
+from wayfindinglib.models.quality.statements import StatementKind
 from wayfindinglib.session_analysis.capture.pipeline import (
     CaptureAnalysisRequest,
     CaptureSessionPipeline,
@@ -43,21 +44,20 @@ def _request(make_envelope: Any, frames: list, captures: list, **overrides: Any)
     return CaptureAnalysisRequest(**fields)
 
 
-def test_a_good_night_is_not_flagged(make_frame: Any, make_capture: Any, make_envelope: Any) -> None:
+def test_a_good_night_has_no_warnings(make_frame: Any, make_capture: Any, make_envelope: Any) -> None:
     """Verify a complete, sharp night passes with no warnings."""
     frames = [make_frame(index) for index in range(40)]
     captures = [make_capture(index) for index in range(40)]
 
     analysis = analyze_capture_session_request(_request(make_envelope, frames, captures))
 
-    assert not analysis.flagged
-    assert analysis.flag_reasons == []
+    assert [r.rule for r in analysis.recommendations if r.kind == StatementKind.WARNING] == []
     assert analysis.pipeline_name == "capture"
     assert analysis.performance.star_quality.median_star_width_arcsec == pytest.approx(5.5)
     assert analysis.recommendations == []
 
 
-def test_soft_stars_flag_the_night_with_the_limit_behind_it(
+def test_soft_stars_warn_with_the_limit_behind_it(
     make_frame: Any, make_capture: Any, make_envelope: Any
 ) -> None:
     """Verify wide stars raise a warning that cites the earlier-night limit."""
@@ -66,8 +66,9 @@ def test_soft_stars_flag_the_night_with_the_limit_behind_it(
 
     analysis = analyze_capture_session_request(_request(make_envelope, frames, captures))
 
-    assert analysis.flagged
-    assert analysis.flag_reasons == ["star_width_above_baseline"]
+    assert [r.rule for r in analysis.recommendations if r.kind == StatementKind.WARNING] == [
+        "star_width_above_baseline"
+    ]
     assert analysis.resolved_parameters["night_star_width_high_limit"] is not None
 
 

@@ -16,6 +16,7 @@ from wayfindinglib.api.test.guiding_night_helpers import (
     record_good_history,
     record_guiding_night,
 )
+from wayfindinglib.models.quality.statements import StatementKind
 from wayfindinglib.tasks.control_tasks import night_analysis
 
 
@@ -32,7 +33,7 @@ def test_a_good_night_after_arecord_good_history_is_not_flagged(control: Observa
     analysis = night_analysis.guiding_night_analysis(control._context, night)
 
     assert analysis.input_quality.limits_equipment_match == "exact"
-    assert analysis.flagged is False
+    assert [r.rule for r in analysis.recommendations if r.kind == StatementKind.WARNING] == []
     assert analysis.input_quality.has_low_signal is False
 
 
@@ -43,8 +44,9 @@ def test_a_weak_lossy_night_is_flagged_against_the_earlier_nights(control: Obser
 
     analysis = night_analysis.guiding_night_analysis(control._context, night)
 
-    assert analysis.flagged is True
-    assert "check_guide_signal" in analysis.flag_reasons
+    assert "check_guide_signal" in [
+        r.rule for r in analysis.recommendations if r.kind == StatementKind.WARNING
+    ]
     assert analysis.input_quality.has_low_signal is True
     assert analysis.input_quality.has_high_loss is True
 
@@ -66,7 +68,7 @@ def test_a_bad_night_is_not_judged_against_itself(control: ObservatoryControl) -
     envelope_before = ObservationReview(control).get_performance_envelope(before_night=night)
     envelope_with_everything = ObservationReview(control).get_performance_envelope()
 
-    assert analysis.flagged is True
+    assert [r.rule for r in analysis.recommendations if r.kind == StatementKind.WARNING] != []
     assert envelope_before.thresholds["guide_snr_low_limit"].sample_count == 6
     assert envelope_with_everything.thresholds["guide_snr_low_limit"].sample_count == 9
     assert envelope_with_everything.value("guide_snr_low_limit") < envelope_before.value(
@@ -132,9 +134,9 @@ def test_the_summary_has_one_row_per_night_oldest_first(control: ObservatoryCont
     rows = night_analysis.guiding_night_summaries(control._context)
 
     assert [row["sessionId"] for row in rows] == [*nights, bad]
-    assert rows[-1]["flagged"] is True
     assert "check_guide_signal" in rows[-1]["recommendations"]
-    assert all(row["flagged"] is False for row in rows[:-1])
+    assert all("check_guide_signal" not in row["recommendations"] for row in rows[:-1])
+    assert all("flagged" not in row and "flagReasons" not in row for row in rows)
 
 
 def test_the_analysis_is_not_stored(control: ObservatoryControl) -> None:

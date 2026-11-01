@@ -15,6 +15,6 @@ Applied in this order:
 7. Star width above, or roundness below, the equipment's earlier nights: warn. The message lists the usual causes (seeing, focus drift, tracking error, trailing) and points to the autofocus record and the guiding analysis, because the frames cannot tell which applies. With too few earlier nights, it states the width and says so.
 8. If none of the above applied, the night makes no statement. No warning means the night was within limits.
 
-The summary's `flagged` field is true when any recommendation is a warning, and `flagReasons` lists their rule names.
+The summary has no separate flag. A warning is a recommendation whose kind is `warning`, and its `rule` name says which condition it reports.
 
 For exact behavior, read the code. The code is the source of truth.

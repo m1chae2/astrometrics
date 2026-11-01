@@ -2,7 +2,7 @@
 
 Description: Verifies that the three stages run in order and hand their
 results on, that a night with too little data skips processing but still gets
-a summary, that flags follow the warnings, and that the analysis is a pure
+a summary, that warnings are statements, and that the analysis is a pure
 function of its request.
 """
 
@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+from wayfindinglib.models.quality.statements import StatementKind
 from wayfindinglib.session_analysis.guiding.pipeline import (
     GuidingAnalysisRequest,
     GuidingSessionPipeline,
@@ -38,32 +39,29 @@ def _request(envelope: Any, samples: Any, runs: Any, **overrides: Any) -> Guidin
     return GuidingAnalysisRequest(**values)
 
 
-def test_a_good_night_is_not_flagged(make_samples: Any, make_run: Any, make_envelope: Any) -> None:
+def test_a_good_night_has_no_warnings(make_samples: Any, make_run: Any, make_envelope: Any) -> None:
     """Verify a healthy night has no warnings and a guiding verdict."""
     analysis = analyze_guiding_session_request(
         _request(make_envelope(), make_samples(count=1500, sigma=0.8), [make_run(duration=4900.0)])
     )
 
-    assert analysis.flagged is False
-    assert analysis.flag_reasons == []
+    assert [r.rule for r in analysis.recommendations if r.kind == StatementKind.WARNING] == []
     assert analysis.input_quality.has_enough_samples is True
     assert analysis.performance.rms_per_axis_arcsec == pytest.approx(0.8, rel=0.1)
     assert analysis.recommendations == []
 
 
-def test_a_bad_night_is_flagged_with_the_reasons(
-    make_samples: Any, make_run: Any, make_envelope: Any
-) -> None:
-    """Verify warnings set the flag and are listed by kind."""
+def test_a_bad_night_warns_with_the_reasons(make_samples: Any, make_run: Any, make_envelope: Any) -> None:
+    """Verify warnings are statements of kind warning, named by rule."""
     run = make_run(duration=4900.0, frames_total=1500, frames_lost=400, ra_rate=446.0)
 
     analysis = analyze_guiding_session_request(
         _request(make_envelope(), make_samples(count=1500, sigma=2.0, snr=40.0), [run])
     )
 
-    assert analysis.flagged is True
-    assert "recalibrate_guider" in analysis.flag_reasons
-    assert "check_guide_signal" in analysis.flag_reasons
+    warnings = [r.rule for r in analysis.recommendations if r.kind == StatementKind.WARNING]
+    assert "recalibrate_guider" in warnings
+    assert "check_guide_signal" in warnings
 
 
 def test_too_little_data_skips_processing_but_still_gives_a_summary(
@@ -77,7 +75,7 @@ def test_too_little_data_skips_processing_but_still_gives_a_summary(
     assert analysis.input_quality.has_enough_samples is False
     assert analysis.performance.rms_per_axis_arcsec is None
     assert [r.rule for r in analysis.recommendations] == ["guiding_insufficient_data"]
-    assert analysis.flagged is False
+    assert [r.rule for r in analysis.recommendations if r.kind == StatementKind.WARNING] == []
 
 
 def test_the_summary_records_the_limits_it_used(make_samples: Any, make_run: Any, make_envelope: Any) -> None:

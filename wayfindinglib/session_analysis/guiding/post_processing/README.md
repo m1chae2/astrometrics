@@ -20,6 +20,6 @@ Applied in this order:
 5. Guiding error against the acceptable guiding error: advice if it is above (with the star widening it causes). A night within the limit makes no statement.
 6. The longest exposure length in use against the exposure-length view: advice if fewer than half of the exposures of that length would have had clean guiding. The message names the main cause, the share of windows it spoiled, and the longest length that would have worked. Confidence is `medium`, or `low` when the guide signal was poor.
 
-The summary's `flagged` field is true when any recommendation is a warning, and `flagReasons` lists their rule names.
+The summary has no separate flag. A warning is a recommendation whose kind is `warning`, and its `rule` name says which condition it reports.
 
 For exact behavior, read the code. The code is the source of truth.

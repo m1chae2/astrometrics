@@ -92,10 +92,9 @@ class GuidingNightSummary(BaseModel):
         Whether the night has guiding data to summarize.
     reason : `str`
         Why it is not available. Empty when it is.
-    flagged : `bool` or `None`
-        True when the guiding analysis raised a warning.
-    flag_reasons : `list` [`str`]
-        The kinds of those warnings.
+    statements : `list` [`TargetStatement`]
+        What the guiding analysis says about the night: its warnings,
+        advice and missing-data notes. Each names its rule.
     rms_per_axis_arcsec : `float` or `None`
         The robust guiding error per axis, in arcseconds.
     expected_star_widening_fraction : `float` or `None`
@@ -113,8 +112,7 @@ class GuidingNightSummary(BaseModel):
 
     available: bool
     reason: str = ""
-    flagged: bool | None = None
-    flag_reasons: list[str] = Field(default_factory=list, alias="flagReasons")
+    statements: list[TargetStatement] = Field(default_factory=list)
     rms_per_axis_arcsec: float | None = Field(default=None, alias="rmsPerAxisArcsec")
     expected_star_widening_fraction: float | None = Field(default=None, alias="expectedStarWideningFraction")
     lost_fraction: float | None = Field(default=None, alias="lostFraction")

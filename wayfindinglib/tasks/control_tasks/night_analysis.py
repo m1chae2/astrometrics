@@ -238,9 +238,9 @@ def guiding_night_summaries(
     Returns
     -------
     summaries : `list` [`dict`]
-        One row per night, oldest first: whether it was flagged and why,
-        its samples, the share of lost frames, the guide signal, the
-        guiding error, and the rule names of its statements.
+        One row per night, oldest first: its samples, the share of lost
+        frames, the guide signal, the guiding error, and the rule names of
+        its statements (a warning is one of them).
     """
     contexts, runs = recorded_sessions(context)
     library_cache: LibraryCache = {}
@@ -251,8 +251,6 @@ def guiding_night_summaries(
             continue
         rows.append({
             "sessionId": night,
-            "flagged": analysis.flagged,
-            "flagReasons": analysis.flag_reasons,
             "limitsEquipmentMatch": analysis.input_quality.limits_equipment_match,
             "samples": analysis.input_quality.samples_analyzed,
             "lostFraction": analysis.input_quality.lost_fraction,
@@ -345,9 +343,9 @@ def capture_night_summaries(
     Returns
     -------
     summaries : `list` [`dict`]
-        One row per night, oldest first: whether it was flagged and why,
-        its light frames, Ekos exposures with no frame, the median star
-        width, and the rule names of its statements.
+        One row per night, oldest first: its light frames, Ekos exposures
+        with no frame, the median star width, and the rule names of its
+        statements (a warning is one of them).
     """
     contexts, runs = recorded_sessions(context)
     library_cache: LibraryCache = {}
@@ -366,8 +364,6 @@ def capture_night_summaries(
             continue
         rows.append({
             "sessionId": night,
-            "flagged": analysis.flagged,
-            "flagReasons": analysis.flag_reasons,
             "lightFrames": analysis.input_quality.light_frames,
             "capturesWithoutFrame": analysis.input_quality.captures_without_frame,
             "medianStarWidthArcsec": analysis.performance.star_quality.median_star_width_arcsec,

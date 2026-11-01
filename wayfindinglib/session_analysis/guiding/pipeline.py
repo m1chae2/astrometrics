@@ -13,7 +13,6 @@ from typing import Any, cast
 
 from pydantic import BaseModel
 
-from wayfindinglib.models.quality.statements import StatementKind
 from wayfindinglib.models.session.guiding_run import GuidingRunSummary
 from wayfindinglib.models.session.session_quality import (
     GuidingInputQuality,
@@ -133,8 +132,8 @@ class GuidingSessionPipeline(SessionAnalysisPipeline):
         Returns
         -------
         summary : `GuidingSessionAnalysis`
-            The three stages' results, the recommendations, and a flag if
-            any recommendation is a warning.
+            The three stages' results and the recommendations. A warning is a
+            recommendation whose kind is ``warning``.
         """
         input_quality: GuidingInputQuality = result.input_quality
         performance: GuidingPerformance = result.performance or GuidingPerformance()
@@ -145,7 +144,6 @@ class GuidingSessionPipeline(SessionAnalysisPipeline):
             request.logged_guide_scale,
             request.configured_guide_scale,
         )
-        warnings = [r for r in recommendations if r.kind == StatementKind.WARNING]
         resolved: dict[str, Any] = {"limits_equipment_match": request.limits_equipment_match}
         if request.envelope is not None:
             resolved["blur_tolerance_fraction"] = request.envelope.blur_tolerance_fraction
@@ -154,8 +152,6 @@ class GuidingSessionPipeline(SessionAnalysisPipeline):
         return GuidingSessionAnalysis(
             session_id=request.session_id,
             equipment_fingerprint=request.equipment_fingerprint,
-            flagged=bool(warnings),
-            flag_reasons=[warning.rule for warning in warnings],
             resolved_parameters=resolved,
             input_quality=input_quality,
             performance=performance,

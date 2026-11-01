@@ -210,8 +210,6 @@ def test_a_night_with_only_guiding_still_answers(monkeypatch: pytest.MonkeyPatch
     analysis = GuidingSessionAnalysis(
         session_id="2020-01-01",
         equipment_fingerprint="x",
-        flagged=True,
-        flag_reasons=["guiding_above_limit"],
         input_quality=GuidingInputQuality(
             runs=1,
             guided_seconds=3600.0,
@@ -236,7 +234,8 @@ def test_a_night_with_only_guiding_still_answers(monkeypatch: pytest.MonkeyPatch
     assert quality.targets == []
     guiding = quality.guiding
     assert isinstance(guiding, GuidingNightSummary)
-    assert guiding.available and guiding.flagged
+    assert guiding.available
+    assert guiding.statements == analysis.recommendations
     assert guiding.rms_per_axis_arcsec == pytest.approx(1.4)
     assert guiding.lost_fraction == pytest.approx(0.2)
     assert guiding.excursion_count == 3

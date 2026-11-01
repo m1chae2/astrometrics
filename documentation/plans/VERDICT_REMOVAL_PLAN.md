@@ -30,8 +30,7 @@ Detection labels stay in astrometricslib (issue #97, user decision of 2026-10-24
 
 Stored summaries are rewritten by a restack, so a restack before this work stores fields that are then dropped. Old rows still load: the models do not forbid extra fields, so Pydantic ignores removed ones. This was read from the model configuration, not tested on stored rows.
 
-- **A (recommended): restack once, after phase 3.** The stored data then has the final shape and the gate outcomes the new rules read. #135 merges first, without a restack.
-- B: restack at #135's merge as planned, and again later. You said you do not want repeated restacks.
+**Decided by the user, 2026-11-01:** every update in this plan is made before the next restack. The one restack runs after phase 4, so the stored data has the final shape.
 
 ### D3. What happens to the gates
 
@@ -107,7 +106,6 @@ Issue #97's note that `starDisplayFormat.ts` is the only desktop-app reader is o
 2. In wayfindinglib night analysis: `sky_quality`, `session_quality`, `capture_quality`, `night_quality`, and `night_analysis.py` and `night_quality_task.py`, moved to `TargetStatement`. `RequestCount.flagged` is a different field and stays.
 3. Trim `output_metrics` by D6, and retire the repeated values in the JSON summaries.
 4. Search everything, including notebooks, for each removed name. Regenerate `backendTypes.ts` with `build/codegen/generate-types.sh`.
-5. Run the final restack (D2), starting with the frame-move preview that was skipped on 2026-11-01.
 
 ### Phase 4: script users and API pages
 
@@ -118,6 +116,10 @@ Issue #97's note that `starDisplayFormat.ts` is the only desktop-app reader is o
 5. Finish generated-only API pages. Issue #97's items need rewriting first: they name the dropped `astrometricslib.api` tier, and the pages now have a "Result fields" section and hand-written text this work should check.
 6. Re-run every changed notebook with `build/linux/execute_notebooks.sh`, on a separate empty library.
 
+### Phase 5: the final restack
+
+Run only with the user's go-ahead (D2). Start with the frame-move preview and the folded group count that were skipped on 2026-11-01, and use code that matches the final branch.
+
 ## 4. Order and what can run at once
 
 Phase 0, then 1, then 2 are in order. Within phase 2, pipelines run one after another, because each changes shared models and the generated types. Phase 3 needs all of phase 2. Phase 4 items 1 to 3 can run at any time, and items 4 to 6 come after phase 3.
@@ -126,7 +128,7 @@ Phase 0, then 1, then 2 are in order. Within phase 2, pipelines run one after an
 
 - Nothing is removed before its replacement exists and its readers have moved (`QUALITY_METRICS_PLAN.md` section 8).
 - Real-data checks run on the copy, one target by default.
-- The real library changes only at the restack in phase 3, with your go-ahead.
+- The real library changes only at the restack in phase 5, with your go-ahead.
 - A change to a tuned value or a method updates its validation register entry.
 
 ## 6. Change control board

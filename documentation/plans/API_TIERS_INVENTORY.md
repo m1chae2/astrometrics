@@ -271,6 +271,8 @@ One row for each of the 208 names, in the 15 logical groups of the review.
 | `has_catalog_magnitude` | function | - | - | 1 | - | - | 1a | `_internal.frames` | `wayfindinglib` copy (S6). |
 | `frame_subject_id` | function | - | - | 4 | - | 1 | 6a 6w | `_internal.frames` | Value on a row: `FrameRecord.subject_id` (S7). |
 | `AppliedCameraProfile` | class | - | - | - | - | 1b | - | `_internal.frames` | No outside code reader. Generated types only (Section 6). |
+| `CameraProfile` | class | - | - | - | - | - | - | `_internal.frames` | Returned by `resolve_camera_profile`; added by the merge. |
+| `TargetSession` | class | - | - | - | - | - | - | `_internal.frames` | Returned by `targets.sessions`; added by the merge. |
 | `resolve_camera_profile` | function | - | - | 6 | - | 1 | 7a 1w | `_internal.frames` | New public call N6 (decided; name open). See O4. |
 
 ### Group 10 Stacking numbers (18)
@@ -293,6 +295,7 @@ One row for each of the 208 names, in the 15 logical groups of the review.
 | `group_frame_weights` | function | - | - | 1 | - | - | 1a | `_internal.stacking` | New call N3 (decided). |
 | `wfwhm_weights` | function | - | - | 1 | - | - | 2a | `_internal.stacking` | New call N3 (decided). |
 | `choose_stack_weight` | function | - | - | 1 | - | - | - | `_internal.stacking` | New call N3 (decided). |
+| `StackWeightPrediction` | class | - | - | - | - | - | - | `_internal.stacking` | Returned by `processing.predict_stack_weights`; added by the merge. |
 | `equal_weight_noise_penalty` | function | - | - | - | - | - | - | `_internal.stacking` | None. No outside reader. |
 | `fold_exposure_lengths` | function | - | - | 3 | - | - | 1a 1w | open; suggest `_internal.stacking`; new call | Part of new call N3 (S15). See O3. |
 

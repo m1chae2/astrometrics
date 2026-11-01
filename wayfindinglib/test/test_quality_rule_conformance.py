@@ -105,6 +105,7 @@ UNUSED_DECISION_METRICS = {
     "photometry.notice_camera_without_profile": _NOTICE_ROW_REASON,
     "spectroscopy.notice_camera_without_profile": _NOTICE_ROW_REASON,
     "asteroid_detection.notice_camera_without_profile": _NOTICE_ROW_REASON,
+    "asteroid_detection.notice_ephemeris_query_cap_reached": _NOTICE_ROW_REASON,
     "stacking.abandoned_after_s": (
         "issue 97: records that a stack ran out of its time budget, so the job can list it as a warning. "
         "No rule reads it yet."

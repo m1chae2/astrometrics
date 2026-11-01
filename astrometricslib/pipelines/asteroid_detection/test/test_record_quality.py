@@ -450,3 +450,41 @@ def test_a_storage_failure_does_not_fail_the_run(
     summary = AsteroidDetectionPipelineAdapter().validate_output(request, result)
 
     assert summary.gates
+
+
+def test_a_reached_question_limit_is_a_failed_gate_a_notice_row_and_not_an_unmatched_mover() -> None:
+    """Unchecked movers are not counted as new; a notice row says so."""
+    metrics = {
+        **HEALTHY_METRICS,
+        "candidates_rate_linearity_confirmed": 3,
+        "candidates_ephemeris_matched": 1,
+        "ephemeris_queries_attempted": 4,
+        "ephemeris_candidates_unchecked": 2,
+        "candidates_detected": 3,
+        "candidates_persistence_confirmed": 3,
+    }
+    gates = {gate.name: gate for gate in rg.asteroid_run_gates(metrics, 3, 2)}
+
+    assert gates[rg.EPHEMERIS_GATE_NAME].status is GateStatus.FAILED
+    assert "not checked against known asteroids" in gates[rg.EPHEMERIS_GATE_NAME].detail
+    assert gates[rg.UNMATCHED_MOVERS_GATE_NAME].status is GateStatus.NOT_CHECKED
+    assert "none is known to be new" in gates[rg.UNMATCHED_MOVERS_GATE_NAME].detail
+
+    with_unmatched = {gate.name: gate for gate in rg.asteroid_run_gates(metrics, 3, 3)}
+    assert with_unmatched[rg.UNMATCHED_MOVERS_GATE_NAME].status is GateStatus.FAILED
+    assert with_unmatched[rg.UNMATCHED_MOVERS_GATE_NAME].measured_value == pytest.approx(1.0)
+
+    measurements = rg.asteroid_run_measurements(metrics, list(gates.values()), _context())
+    by_metric = {m.metric: m for m in measurements}
+    notice = by_metric["asteroid_detection.notice_ephemeris_query_cap_reached"]
+    assert notice.value == pytest.approx(2.0)
+    assert notice.check_outcome is GateStatus.FAILED
+    assert by_metric[ASTEROID_GATE_EPHEMERIS_CROSS_MATCH].value == pytest.approx(2.0)
+
+
+def test_a_run_under_the_question_limit_stores_no_notice_row() -> None:
+    """The notice row exists only when the limit was reached."""
+    gates = rg.asteroid_run_gates(HEALTHY_METRICS, 3, 0)
+    measurements = rg.asteroid_run_measurements(HEALTHY_METRICS, gates, _context())
+
+    assert all("notice_ephemeris_query_cap_reached" not in m.metric for m in measurements)

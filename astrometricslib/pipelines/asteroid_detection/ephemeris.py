@@ -39,6 +39,15 @@ _SKYBOT_POSITION_ERROR = 120 * u.arcsec
 # questions that really go out over the network.
 _DEFAULT_SECONDS_BETWEEN_QUERIES = 0.5
 
+# The most questions one run may send to SkyBoT. Each confirmed mover needs
+# two (first and last detection), so 200 covers 100 movers. At the polite
+# spacing above, 200 questions take about 100 s plus the network time. A
+# run that confirms more movers than that is almost certainly mistaking
+# stars or artifacts for movers (validation register MOV-04), and asking
+# about each would hit the public service for minutes. Design estimate;
+# see MOV-D11 in the validation register.
+_DEFAULT_MAX_QUERIES_PER_RUN = 200
+
 
 class EphemerisCrossMatcher:
     """Checks the SkyBoT database to see if we found a known asteroid.
@@ -54,6 +63,11 @@ class EphemerisCrossMatcher:
     min_seconds_between_queries : `float`, optional
         The shortest wait between two questions sent to the service. Use
         ``0.0`` to turn the wait off.
+    max_queries : `int`, optional
+        The most questions this matcher may send in one run. A mover that
+        would need more than the questions left is not checked at all, and
+        is listed in `unchecked_candidate_ids`. Answers already in memory
+        do not count.
     """
 
     def __init__(
@@ -61,10 +75,12 @@ class EphemerisCrossMatcher:
         config: MovingObjectConfig,
         skybot_client: Any | None = None,
         min_seconds_between_queries: float = _DEFAULT_SECONDS_BETWEEN_QUERIES,
+        max_queries: int = _DEFAULT_MAX_QUERIES_PER_RUN,
     ) -> None:
         self.config = config
         self._skybot_client = skybot_client
         self._min_seconds_between_queries = min_seconds_between_queries
+        self.max_queries = max_queries
         self._last_query_time: float | None = None
         # Answers already received, so asking again for the same spot and
         # moment (for example two movers that share a first detection) does
@@ -74,6 +90,9 @@ class EphemerisCrossMatcher:
         # asteroids, so the two are counted here to tell them apart.
         self.queries_attempted = 0
         self.queries_failed = 0
+        # Confirmed movers left without an answer because the question
+        # limit was reached. They are neither matched nor known to be new.
+        self.unchecked_candidate_ids: list[str] = []
 
     def query_field(
         self,
@@ -101,12 +120,7 @@ class EphemerisCrossMatcher:
             A list of all the asteroids in that area at that time, or None
             if the search failed or the area was empty.
         """
-        cache_key = (
-            round(center_right_ascension_deg, 6),
-            round(center_declination_deg, 6),
-            round(epoch_unix, 3),
-            round(radius_deg, 8),
-        )
+        cache_key = _question_key(center_right_ascension_deg, center_declination_deg, epoch_unix, radius_deg)
         if cache_key in self._answers:
             return self._answers[cache_key]
 
@@ -243,7 +257,10 @@ class EphemerisCrossMatcher:
         For each object that passed the straight-line test, the database is
         asked about the sky around its first detection at that detection's
         time, and again for its last detection. Identical questions are
-        answered from memory.
+        answered from memory. Once the run's question limit (`max_queries`)
+        is reached, a mover that would need more questions is skipped and
+        its id goes into `unchecked_candidate_ids`; it keeps its stage and
+        gets no match, and a warning says how many were skipped.
 
         Parameters
         ----------
@@ -257,13 +274,19 @@ class EphemerisCrossMatcher:
             The original list. If a match was found, we add the asteroid's
             name and update its status to 'EPHEMERIS_MATCHED'. If no match
             was found, we leave it alone (meaning we might have discovered
-            something new!).
+            something new!). A skipped mover is also left alone, but it was
+            not checked, so it does not mean the same thing.
         """
         query_radius_deg = self.config.ephemeris_cross_match_radius_arcsec / 3600.0
         for candidate in candidates:
             if candidate.cascade_stage != CascadeStage.RATE_LINEARITY_CONFIRMED:
                 continue
             first_detection, last_detection = _first_and_last_detection(candidate)
+            if self._questions_still_needed(first_detection, last_detection, query_radius_deg) > (
+                self.max_queries - self.queries_attempted
+            ):
+                self.unchecked_candidate_ids.append(candidate.id)
+                continue
             failures_before = self.queries_failed
             first_table = self.query_field(
                 first_detection.right_ascension_deg,
@@ -289,7 +312,67 @@ class EphemerisCrossMatcher:
                 candidate.ephemeris_match = ephemeris_match
                 candidate.cascade_stage = CascadeStage.EPHEMERIS_MATCHED
 
+        if self.unchecked_candidate_ids:
+            logger.warning(
+                "SkyBoT question limit of %s reached after %s questions: %s confirmed mover(s) were "
+                "not checked against known asteroids and are neither matched nor known to be new "
+                "(ids: %s)",
+                self.max_queries,
+                self.queries_attempted,
+                len(self.unchecked_candidate_ids),
+                ", ".join(self.unchecked_candidate_ids),
+            )
         return candidates
+
+    def _questions_still_needed(
+        self, first_detection: FrameDetection, last_detection: FrameDetection, radius_deg: float
+    ) -> int:
+        """Count the network questions a mover needs that are not yet answered.
+
+        Parameters
+        ----------
+        first_detection, last_detection : `FrameDetection`
+            The earliest and latest dot of the mover.
+        radius_deg : `float`
+            The search circle, in degrees.
+
+        Returns
+        -------
+        needed : `int`
+            0, 1 or 2. A question whose answer is in memory costs nothing.
+        """
+        keys = {
+            _question_key(d.right_ascension_deg, d.declination_deg, d.timestamp, radius_deg)
+            for d in (first_detection, last_detection)
+        }
+        return sum(1 for key in keys if key not in self._answers)
+
+
+def _question_key(
+    center_right_ascension_deg: float, center_declination_deg: float, epoch_unix: float, radius_deg: float
+) -> tuple[float, float, float, float]:
+    """Round one question so that equal questions share one stored answer.
+
+    Parameters
+    ----------
+    center_right_ascension_deg, center_declination_deg : `float`
+        Center of the circle, in degrees.
+    epoch_unix : `float`
+        The moment asked about, as a Unix timestamp.
+    radius_deg : `float`
+        Radius of the circle, in degrees.
+
+    Returns
+    -------
+    key : `tuple` [`float`, `float`, `float`, `float`]
+        The rounded values.
+    """
+    return (
+        round(center_right_ascension_deg, 6),
+        round(center_declination_deg, 6),
+        round(epoch_unix, 3),
+        round(radius_deg, 8),
+    )
 
 
 def _first_and_last_detection(candidate: AsteroidDetectionCandidate) -> tuple[FrameDetection, FrameDetection]:

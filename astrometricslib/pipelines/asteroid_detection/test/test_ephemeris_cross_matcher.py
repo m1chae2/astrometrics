@@ -344,3 +344,65 @@ def test_a_failed_question_is_asked_again_not_remembered() -> None:
     matcher.query_field(150.0, 30.0, _START_UNIX, 0.5)
 
     assert len(client.calls) == 2
+
+
+def _separate_candidates(count: int) -> list[AsteroidDetectionCandidate]:
+    """Create confirmed movers that share no question, so each needs two.
+
+    Parameters
+    ----------
+    count : `int`
+        How many movers to make.
+
+    Returns
+    -------
+    candidates : `list` [`AsteroidDetectionCandidate`]
+        Movers a degree apart, each with ids ``mover-<n>``.
+    """
+    candidates = []
+    for index in range(count):
+        candidate = _make_candidate(
+            CascadeStage.RATE_LINEARITY_CONFIRMED,
+            right_ascension_deg=150.0 + index,
+            rate_arcsec_per_hour=60.0,
+            frame_count=3,
+        )
+        candidate.id = f"mover-{index}"
+        candidates.append(candidate)
+    return candidates
+
+
+def test_question_limit_leaves_later_movers_unchecked_and_warns(caplog: pytest.LogCaptureFixture) -> None:
+    """Past the limit a mover is skipped whole, keeps its stage, is listed."""
+    client = FakeSkybot(lambda epoch_unix: _asteroid_table(150.0, 30.0))
+    matcher = EphemerisCrossMatcher(
+        MovingObjectConfig(), skybot_client=client, min_seconds_between_queries=0.0, max_queries=5
+    )
+    candidates = _separate_candidates(4)
+
+    with caplog.at_level("WARNING"):
+        matcher.cross_match_candidates(candidates)
+
+    assert matcher.queries_attempted == 4
+    assert len(client.calls) == 4
+    assert matcher.unchecked_candidate_ids == ["mover-2", "mover-3"]
+    assert [c.cascade_stage for c in candidates[2:]] == [CascadeStage.RATE_LINEARITY_CONFIRMED] * 2
+    assert all(c.ephemeris_match is None for c in candidates[2:])
+    warnings = [record.getMessage() for record in caplog.records if "question limit" in record.getMessage()]
+    assert len(warnings) == 1
+    assert "mover-2" in warnings[0]
+    assert "mover-3" in warnings[0]
+
+
+def test_question_limit_is_not_reached_when_answers_come_from_memory() -> None:
+    """Movers that share their questions all fit within a small limit."""
+    client = FakeSkybot()
+    matcher = EphemerisCrossMatcher(
+        MovingObjectConfig(), skybot_client=client, min_seconds_between_queries=0.0, max_queries=2
+    )
+    candidates = [_make_candidate(CascadeStage.RATE_LINEARITY_CONFIRMED, frame_count=3) for _ in range(5)]
+
+    matcher.cross_match_candidates(candidates)
+
+    assert matcher.queries_attempted == 2
+    assert matcher.unchecked_candidate_ids == []

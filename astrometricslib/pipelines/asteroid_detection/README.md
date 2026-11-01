@@ -94,6 +94,8 @@ A passing track also stores `residual_rms_right_ascension_arcsec`, `residual_rms
 
 **Network use.** The matcher remembers each answer within a run, waits at least half a second between questions that go out over the network, and skips the second question when the first one fails.
 
+**Question limit.** One run sends at most 200 questions to SkyBoT (`_DEFAULT_MAX_QUERIES_PER_RUN` in `ephemeris.py`, the `max_queries` argument of `EphemerisCrossMatcher`; design estimate, see [MOV-D11](../../../documentation/library_design/validation/asteroid_detection.md#design-estimates)). Answers already in memory do not count. A mover whose questions would pass the limit is skipped whole. It keeps its stage and gets no match, but it was not checked, so it is neither matched nor known to be new. The run logs one warning that lists the ids of the skipped movers, stores a notice row `asteroid_detection.notice_ephemeris_query_cap_reached` (its value is the number of movers skipped), reports the count as `ephemeris_candidates_unchecked` in the run metrics, and fails the `ephemeris_cross_match` gate. The `unmatched_movers` gate does not count the skipped movers; when they are the only movers without a match, it is not checked. The summary model has no field for the count, so only the metrics dict, the notice row and the gates carry it. Movers are checked in the order the detector lists them, so the skipped ones are the later ones.
+
 **Limits.** Positions are the measured detection positions, not the fitted line. The 10 arcsec radius therefore sits close to the position error of a single frame (several arcsec after the pointing correction, partly measured; see step 3 and [MOV-06](../../../documentation/library_design/validation/asteroid_detection.md#mov-06)). A real match can miss at one end.
 
 ## Rotation period (not yet called)
@@ -166,8 +168,8 @@ A gate is a run-level pass/fail entry in a quality record. The summary keeps one
 | --- | --- | --- |
 | `search_frames` | Never | Fewer frames could be searched than a track needs (`min_frames_for_persistence`), so no mover could have been found |
 | `pointing_metadata` | A frame lacks RA, Dec or image size in its header | No frame was considered |
-| `ephemeris_cross_match` | The known-asteroid database (SkyBoT) could not be reached | No mover was confirmed, or the database was never asked |
-| `unmatched_movers` | A mover moved in a straight line but matched no known asteroid (worth a manual look) | No mover was confirmed |
+| `ephemeris_cross_match` | The known-asteroid database (SkyBoT) could not be reached, or the question limit left confirmed movers unchecked | No mover was confirmed, or the database was never asked |
+| `unmatched_movers` | A mover moved in a straight line but matched no known asteroid (worth a manual look). Movers left unchecked by the question limit are not counted | No mover was confirmed, or every unmatched mover was left unchecked by the question limit |
 | `track_residuals` | A chain that reached the straight-line test had a detection with no measured position error, so the assumed `astrometric_error_default_arcsec` stood in for it | No chain reached the straight-line test |
 
 **Query counts.** Without a count, a failed SkyBoT query would look the same as a field with no known asteroids. The pipeline counts the queries it makes and the ones that fail (`ephemerisQueriesAttempted`, `ephemerisQueriesFailed` in the metrics). Each confirmed mover costs up to two queries.
@@ -188,6 +190,7 @@ A gate is a run-level pass/fail entry in a quality record. The summary keeps one
 | `residual_chains_tested`, `residual_chains_rejected`, `residual_chains_non_monotonic` | Chains | None | How many chains reached the residual test, failed it, and failed the direction check | The `track_residuals` gate; people reading the run |
 | `first_detection_separation_arcsec`, `last_detection_separation_arcsec`, `angular_separation_arcsec` | arcsec | 10 arcsec (design estimate; see [asteroid detection design estimates](../../../documentation/library_design/validation/asteroid_detection.md#design-estimates)) | The distance between a candidate and its matched known asteroid at the first and last detection, and the larger of the two | People reading a match |
 | `ephemerisQueriesAttempted`, `ephemerisQueriesFailed` | Queries | None | How many SkyBoT queries ran and how many failed. A high failed count means the match result is unreliable | People reading the run |
+| `ephemeris_candidates_unchecked` (run metrics and notice row only) | Movers | 200 questions per run (design estimate; see [asteroid detection design estimates](../../../documentation/library_design/validation/asteroid_detection.md#design-estimates)) | Confirmed movers the question limit left unchecked. Above 0 means they are not known to be new | People reading the run; the `ephemeris_cross_match` gate |
 
 ## Where each piece lives
 

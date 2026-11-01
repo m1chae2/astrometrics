@@ -1724,7 +1724,10 @@ SUMMARY_KINDS: tuple[SummaryKind, ...] = (
         gates=_ASTEROID_GATES,
         extra_metrics=("asteroid_detection.residual_worst_accepted_ratio",),
         extras=_asteroid_extras,
-        not_held=("asteroid_detection.notice_camera_without_profile",),
+        not_held=(
+            "asteroid_detection.notice_camera_without_profile",
+            "asteroid_detection.notice_ephemeris_query_cap_reached",
+        ),
         gate_adjuster=_asteroid_gate,
     ),
 )

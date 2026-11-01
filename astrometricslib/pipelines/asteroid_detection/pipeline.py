@@ -545,6 +545,8 @@ class AsteroidDetectionPipeline:
         # How many SkyBoT questions the last run asked and how many failed.
         self._ephemeris_queries_attempted = 0
         self._ephemeris_queries_failed = 0
+        # Confirmed movers the SkyBoT question limit left unchecked.
+        self._ephemeris_unchecked_candidate_ids: list[str] = []
 
     def process(
         self, target_id: str, stacked_image_path: str, frames: list[tuple[str, float]]
@@ -609,6 +611,7 @@ class AsteroidDetectionPipeline:
 
         self._ephemeris_queries_attempted = 0
         self._ephemeris_queries_failed = 0
+        self._ephemeris_unchecked_candidate_ids = []
         candidates = self._cross_match_ephemeris(candidates)
         residual_summary = detector.last_residual_summary
 
@@ -630,6 +633,7 @@ class AsteroidDetectionPipeline:
             ),
             "ephemeris_queries_attempted": self._ephemeris_queries_attempted,
             "ephemeris_queries_failed": self._ephemeris_queries_failed,
+            "ephemeris_candidates_unchecked": len(self._ephemeris_unchecked_candidate_ids),
             # How the straight-line (residual) test went. The ratio is the
             # largest RMS-to-error ratio among accepted tracks; it is 0.0
             # when none was accepted.
@@ -779,4 +783,5 @@ class AsteroidDetectionPipeline:
         matched_candidates = cross_matcher.cross_match_candidates(candidates)
         self._ephemeris_queries_attempted = cross_matcher.queries_attempted
         self._ephemeris_queries_failed = cross_matcher.queries_failed
+        self._ephemeris_unchecked_candidate_ids = list(cross_matcher.unchecked_candidate_ids)
         return matched_candidates

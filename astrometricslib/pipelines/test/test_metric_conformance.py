@@ -242,7 +242,14 @@ def _with_notice_rows(pipeline: str, rows: list[QualityMeasurement]) -> list[Qua
         return [*rows, *stacking_notice_measurements(summary, context, "M99_Stacked.fits")]
     from astrometricslib.pipelines.shared.quality.notices import camera_without_profile_measurement
 
-    return [*rows, camera_without_profile_measurement("Acme Imager 9000", context, context.run_subject())]
+    notice_rows = [camera_without_profile_measurement("Acme Imager 9000", context, context.run_subject())]
+    if pipeline == "asteroid_detection":
+        from astrometricslib.pipelines.asteroid_detection.record_quality import (
+            ephemeris_query_cap_notice_measurement,
+        )
+
+        notice_rows.append(ephemeris_query_cap_notice_measurement(2, context, context.run_subject()))
+    return [*rows, *notice_rows]
 
 
 # Phase 3 (plan section 3.7): a pipeline listed here produces every metric it

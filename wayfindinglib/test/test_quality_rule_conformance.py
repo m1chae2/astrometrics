@@ -92,7 +92,8 @@ DECISION_CATALOG = {
 # `SELF_CHECK_MARKER`) and not by name.
 UNUSED_DECISION_METRICS = {
     "stacking.abandoned_after_s": (
-        "issue 97: records that a stack ran out of its time budget, so the job can list it as a warning. No rule reads it yet."
+        "issue 97: records that a stack ran out of its time budget, so the job can list it as a warning. "
+        "No rule reads it yet."
     ),
     "frame.background_level_adu": (
         "issue 97: input of the stacker's cloud check (STK-04). The stacker judges it and moves the frame; "

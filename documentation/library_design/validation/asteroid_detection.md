@@ -33,7 +33,7 @@ from unittest import mock
 
 import numpy as np
 
-from astrometricslib import MovingObjectConfig
+from astrometricslib.models.moving_object_config import MovingObjectConfig  # internal
 from astrometricslib.pipelines.asteroid_detection import pipeline as pipeline_module  # internal
 from astrometricslib.scripts import validate_asteroid_detection as harness  # internal
 
@@ -250,7 +250,7 @@ for gate in summary.gates:
   2. Collect `astrometric_error_arcsec` from every detection of every returned candidate, one value per frame.
 
 ```python
-from astrometricslib import MovingObjectConfig
+from astrometricslib.models.moving_object_config import MovingObjectConfig  # internal
 from astrometricslib.pipelines.asteroid_detection.pipeline import AsteroidDetectionPipeline  # internal
 
 frames = [("/data/frame_001.fits", 1700000000.0), ("/data/frame_002.fits", 1700000300.0)]
@@ -288,7 +288,7 @@ print(min(per_frame.values()), max(per_frame.values()))
 ```python
 import time
 
-from astrometricslib import MovingObjectConfig
+from astrometricslib.models.moving_object_config import MovingObjectConfig  # internal
 from astrometricslib.pipelines.asteroid_detection.detection import MovingObjectDetector  # internal
 
 detections = [d for candidate in candidates for d in candidate.frame_detections]

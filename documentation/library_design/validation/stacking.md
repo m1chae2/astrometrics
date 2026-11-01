@@ -257,8 +257,8 @@ Every Python example assumes the library is installed and configured with your o
 
   ```python
   from astrometricslib import Astrometrics
-  from astrometricslib.pipelines.stacking.pre_processing import exposure_weighting
-  from astrometricslib.pipelines.shared.frame_grouping import frame_exposure_seconds
+  from astrometricslib.pipelines.stacking.pre_processing import exposure_weighting  # internal
+  from astrometricslib.pipelines.shared.frame_grouping import frame_exposure_seconds  # internal
 
   astro = Astrometrics()
   target = astro.targets.get("M 27")

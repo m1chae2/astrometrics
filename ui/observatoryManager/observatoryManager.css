@@ -15,13 +15,14 @@
     height: 100%;
 }
 
-/* Alignment table: time and target on the left, status symbol, then the deltas lined up on the right. */
+/* Alignment table: time and target on the left, status symbol, then the deltas lined up on the right.
+   The delta columns are wide enough for a five-digit value such as -19152.94. */
 .alignment__header--time { width: 96px; }
 .alignment__header--status { width: 48px; text-align: center; }
-.alignment__header--number { width: 66px; text-align: right; }
+.alignment__header--number { width: 92px; text-align: right; }
 .alignment__cell--time { color: var(--text-muted); white-space: nowrap; padding-left: 4px; padding-right: 4px; }
 .alignment__cell--target { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.alignment__cell--number { text-align: right; font-variant-numeric: tabular-nums; }
+.alignment__cell--number { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; padding-left: 4px; padding-right: 4px; }
 .alignment__symbol { width: auto; font-size: var(--control-font-size); }
 /* On a narrow panel the Time column gives way, so the target name keeps its room. */
 @container (max-width: 400px) {
@@ -181,6 +182,7 @@
 .calibration-controls .btn--square { width: 32px; min-width: 32px; height: 32px; padding: 0; display: flex; align-items: center; justify-content: center; font-size: var(--control-font-size); }
 
 /* Tracking Settings: shorter labels; the two tabs share the panel body. */
+.tracking-settings__hint { margin: 0; color: var(--text-muted); font-size: var(--control-font-size); }
 .tracking-settings { --parameter-label-width: 88px; display: flex; flex-direction: column; gap: var(--space-2); }
 
 /* Manual Guide: the pad fills the panel height; the slew-speed slider sits beside it (below it on a narrow panel). */

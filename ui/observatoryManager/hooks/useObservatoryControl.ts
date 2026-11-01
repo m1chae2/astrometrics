@@ -67,14 +67,26 @@ export const useObservatoryControl = (forceReload: () => void) => {
         setIsAddModalOpen(true);
     };
 
-    const handleGuideStart = async () => {
-        emitToast(`Starting Guiding (Exp: ${guidingExposure}s, Gain: ${guidingGain})`, 'info');
-        await startGuiding(guidingExposure, guidingGain);
+    /**
+     * Starts guiding with the exposure and gain the user entered. A failure is shown as a toast.
+     * @param exposure Guide exposure in seconds.
+     * @param gain Guide camera gain.
+     */
+    const handleGuideStart = async (exposure: number, gain: number) => {
+        emitToast(`Starting Guiding (Exp: ${exposure}s, Gain: ${gain})`, 'info');
+        const started = await startGuiding(exposure, gain);
+        if (!started) {
+            emitToast('Guiding did not start. Check that the guide camera and mount are connected.', 'error');
+        }
     };
 
+    /** Stops guiding. A failure is shown as a toast. */
     const handleGuideStop = async () => {
         emitToast('Stopping Guiding', 'info');
-        await stopGuiding();
+        const stopped = await stopGuiding();
+        if (!stopped) {
+            emitToast('Guiding did not stop. Check the guiding status and try again.', 'error');
+        }
     };
 
     const handleGuideCapture = async () => {

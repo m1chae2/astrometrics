@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import '../imageProcessingDisplay.css';
 import { LoadingSpinner } from '../../common/components/LoadingSpinner';
-import { StackingConfigContextMenu, StackingConfig } from '../components/StackingConfigContextMenu';
 
 /**
  * Props for the ImageDetailsManager component.
@@ -89,7 +88,6 @@ export const ImageDetailsManager: React.FC<ImageDetailsManagerProps> = ({
   onReindex,
   onSetStackedProperty,
 }) => {
-  const [contextMenuPos, setContextMenuPos] = useState<{ x: number; y: number } | null>(null);
 
   /** Helper to trigger Open Siril event. */
   const handleOpenSiril = (): void => {
@@ -164,29 +162,12 @@ export const ImageDetailsManager: React.FC<ImageDetailsManagerProps> = ({
               <button
                 className="btn"
                 onClick={onProcess}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  if (!hasMultipleCameras && !hasNoFiles && !isProcessing) {
-                    setContextMenuPos({ x: e.clientX, y: e.clientY });
-                  }
-                }}
                 type="button"
                 disabled={hasMultipleCameras || hasNoFiles || isAnalyzing}
-                title={hasMultipleCameras ? `Mixed Sensors: ${selectedCameras?.join(', ')}` : "Left click: Standard Stack • Right click: Configure Settings"}
+                title={hasMultipleCameras ? `Mixed Sensors: ${selectedCameras?.join(', ')}` : "Stack the frames"}
               >
                 {hasMultipleCameras ? "⚠️ Stacking requires matching cameras" : "Stack Frames"}
               </button>
-            )}
-            {contextMenuPos && (
-              <StackingConfigContextMenu
-                position={contextMenuPos}
-                onClose={() => setContextMenuPos(null)}
-                onStackWithConfig={(config: StackingConfig) => {
-                  if (onProcess) {
-                    onProcess();
-                  }
-                }}
-              />
             )}
             {isProcessing && onCancel && (
               <button

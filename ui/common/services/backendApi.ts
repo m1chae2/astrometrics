@@ -362,6 +362,8 @@ export interface ActionRegistry {
     "sequencer:remove": { payload: { sequence_id: string }; response: boolean };
     "sequencer:reorder": { payload: { sequence_ids: string[] }; response: boolean };
     "sequencer:begin": { payload: Record<string, never>; response: void };
+    "sequencer:pause": { payload: Record<string, never>; response: void };
+    "sequencer:abort": { payload: Record<string, never>; response: void };
     "sequencer:modify": { payload: { sequence_id: string; sequence: SequenceItem }; response: boolean };
 
     // Terminal, Console & Documentation

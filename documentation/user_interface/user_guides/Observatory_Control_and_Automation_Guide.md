@@ -101,7 +101,7 @@ You can also slew from the Planetarium. Right-click an object on the sky map and
 4. Wait for ✓. A run makes at most 10 rounds.
 5. To stop early, click Stop Alignment.
 
-**Result.** The last row shows ✓ and small dRA and dDEC values. The Alignment and Guiding fields in the Tracking Settings panel do not change this run.
+**Result.** The last row shows ✓ and small dRA and dDEC values. The Alignment tab of Tracking Settings holds Accuracy and Settle. Alignment start takes only the target, so there is no exposure field.
 
 ## Move the mount by hand
 
@@ -145,7 +145,7 @@ The Observatory Manager has no Filter Wheel or Focuser panel. Ekos moves both. C
 
 **Before you start.**
 
-- Guiding is already running. The Observatory Manager has no button that starts guiding. Start it in the program that guides, such as PHD2 or KStars/Ekos.
+- Guiding is running. To start it from the app, open the Guiding tab in Tracking Settings, type an Exposure (s) and a Gain, and click Start Guiding. Click Stop Guiding to end it. A toast tells you if guiding did not start. These buttons are greyed while Ekos is in control, and then you start guiding in the program that guides, such as PHD2 or KStars/Ekos.
 - Samples are arriving from the guiding program.
 
 **Steps.**
@@ -206,7 +206,7 @@ The Observatory Manager has no Filter Wheel or Focuser panel. Ekos moves both. C
 2. Click Start Imaging Session.
 3. Watch the Last Image panel. It updates after each frame.
 
-**Result.** The queue runs card by card. The Observation Manager has no pause or stop button. For a night that needs one, use KStars/Ekos.
+**Result.** The queue runs card by card. Pause Session stops the queue after the package now being imaged and keeps the rest; Start Imaging Session continues it. Stop Session asks you to confirm, then skips the packages not yet imaged and closes the session. Neither button stops the mount or the guider. To halt the mount at once, click STOP in Manual Guide. An error message appears in the Execution Queue if a pause or stop is refused.
 
 ## Download captured frames
 

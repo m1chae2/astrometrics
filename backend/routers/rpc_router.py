@@ -291,6 +291,8 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "sequencer:remove": ("target_imaging_executor", "remove_from_queue"),
     "sequencer:reorder": ("target_imaging_executor", "reorder"),
     "sequencer:begin": ("target_imaging_executor", "begin_imaging"),
+    "sequencer:pause": ("target_imaging_executor", "pause_imaging"),
+    "sequencer:abort": ("target_imaging_executor", "abort_imaging"),
     "sequencer:modify": ("target_imaging_executor", "modify_queue_item"),
 }
 

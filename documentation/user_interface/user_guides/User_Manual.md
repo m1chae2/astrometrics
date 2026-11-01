@@ -205,7 +205,7 @@ The Image Controls panel has these buttons.
 | Analyze Temporal Variation | Appears only for spectral frames that already have a spectral stack. It follows how each star's spectrum changes across the raw frames |
 | Cancel | Replaces Analyze Target while an analysis runs |
 | Download Frames | Opens the [Ingest From Telescope dialog](#ingest-from-telescope-dialog) |
-| Stack Frames | Calibrates, aligns and combines the ticked frames. With none ticked, it uses every listed frame. Stack Frames is off when the frames come from more than one camera. The label then reads Stacking requires matching cameras. Right-click opens a Custom Stacking Parameters dialog, but in this version the dialog starts the same standard stack whatever you choose |
+| Stack Frames | Calibrates, aligns and combines the ticked frames. With none ticked, it uses every listed frame. Stack Frames is off when the frames come from more than one camera. The label then reads Stacking requires matching cameras. |
 | Open Siril | Opens Siril for the target. Siril is the outside program that does the stacking |
 | Summary lines | Show the selected Target, its Name and its Catalog ID |
 
@@ -327,7 +327,7 @@ A plot that has no data collapses to a one-line note. The notes read No spectrum
 | Start Alignment and Stop Alignment | Start and stop centering on the selected target by plate solving. Plate solving matches the stars in an image to a star catalog. Greyed while Ekos is in control |
 | Tracking ON and Tracking OFF | Turn the mount's star tracking on or off. Greyed while Ekos is in control |
 | PARK and UNPARK | Send the mount to its parked position, or free it for use. Greyed while Ekos is in control |
-| Alignment and Guiding tabs in Tracking Settings | The Alignment tab holds Accuracy, Settle and Exposure (s). The Guiding tab holds Exposure (s) and Gain. Switch tabs with a click or the arrow keys. Greyed while Ekos is in control. This view has no button that starts guiding |
+| Alignment and Guiding tabs in Tracking Settings | The Alignment tab holds Accuracy and Settle. The Guiding tab holds Exposure (s) and Gain, with the buttons Start Guiding and Stop Guiding. Start Guiding sends the exposure and gain you typed, and stays greyed while the exposure is empty or zero. A toast tells you if guiding did not start or stop. Switch tabs with a click or the arrow keys. Greyed while Ekos is in control |
 | Camera Profiles | Under Recorded noise, a table gives the gain (electrons per analog-to-digital unit, one step of the stored pixel value) and the read noise (electrons) for each camera setting. The first column shows the camera name with its setting (gain, offset, binning and temperature) on a second line. Each value has an Evidence word under it: Measured, Partly measured or Tentative (a datasheet or assumed value). A camera with no recorded noise reads Not measured |
 | Measure noise | A button in the Camera Profiles title bar. It opens a small form. Pick a camera, type a Gain and an Offset, and click Measure. The library reads flat and bias frames and shows the result. Nothing is saved until you click Save measurement and confirm. Close, or the Escape key, shuts the form and puts the focus back on the button |
 | Manual Guide | Eight arrow buttons move the mount while you hold them, and stop when you let go. STOP halts all mount motion. The Slew Speed slider sits beside the pad and has four steps, from Min to Max: Guide, Centering, Find and Max. Greyed while Ekos is in control |
@@ -371,6 +371,8 @@ You work on one thing at a time. Picking a package in the library, or a card in 
 | Imaging now | A package counts as imaging now when a frame for it arrived in the last few minutes. This is read from the frames, because Ekos runs the queue (see the [validation register](../../library_design/validation/wayfinding.md), WAY-D84, Design estimate) |
 | Checklist (N) | Opens a list of things to do before or during the night, such as taking flat frames. The library adds the items. Tick an item when it is done. Ticks are saved |
 | Start Imaging Session | Runs the queue with the app's own sequencer. It is a device command, so it is greyed while Ekos controls the equipment, and a Why unavailable? button beside it gives the reason. It is also off when the queue is empty. Run the night in Ekos for now |
+| Pause Session | Stops the queue after the package now being imaged and keeps the rest. Start Imaging Session continues it. It stays available while Ekos controls the equipment, because it only ends the app's own queue loop |
+| Stop Session | Asks you to confirm, then skips the packages not yet imaged and closes the session. It does not stop the mount or the guider; use STOP in Manual Guide or Ekos for that. A refusal appears as an error message in the strip |
 
 **Observation Packages library.**
 

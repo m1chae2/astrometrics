@@ -7,7 +7,8 @@ import { ObservationSessionWithProgress } from '../common/types/backendTypes';
 import { SectionPanel } from '../common/components/SectionPanel';
 import { InfoButton } from '../common/components/InfoButton';
 import { useCommandAvailability } from '../common/hooks/useCommandAvailability';
-import { beginImagingSession } from '../common/services/sequencerService';
+import { ConfirmDialog } from '../common/components/ConfirmDialog';
+import { beginImagingSession, pauseImagingSession, stopImagingSession } from '../common/services/sequencerService';
 import '../common/styles/panels.css';
 import './executionQueue.css';
 import './observationManagerLayout.css';
@@ -33,8 +34,9 @@ interface Props {
 }
 
 /**
- * The Execution Queue strip: the session's packages as cards in a row, with Start Imaging Session.
- * Start Imaging Session is a device command, so it is greyed while Ekos controls the equipment.
+ * The Execution Queue strip: the session's packages as cards in a row, with Start Imaging Session,
+ * Pause Session and Stop Session. Start Imaging Session is a device command, so it is greyed while
+ * Ekos controls the equipment. Pause and Stop only end the app's own queue loop, so they stay available.
  */
 export const ExecutionQueue: React.FC<Props> = ({
     queue, removeFromQueue, onEdit, reorderQueue, selectedId = null,
@@ -59,6 +61,10 @@ export const ExecutionQueue: React.FC<Props> = ({
     const [isStarting, setIsStarting] = useState(false);
     /** Text of a refused start, shown as an alert until dismissed, or null. */
     const [startError, setStartError] = useState<string | null>(null);
+    /** True while the Stop Session confirmation is open. */
+    const [isStopConfirmOpen, setIsStopConfirmOpen] = useState(false);
+    /** Text of a refused pause or stop, shown as an alert until dismissed, or null. */
+    const [stopError, setStopError] = useState<string | null>(null);
     const availability = useCommandAvailability();
     const canStart = availability.canCommand && !isStarting && queue.length > 0;
 
@@ -146,6 +152,27 @@ export const ExecutionQueue: React.FC<Props> = ({
         }
     };
 
+    /** Pauses the session after the package now being imaged. A refusal is shown to the user. */
+    const handlePauseSession = async () => {
+        setStopError(null);
+        try {
+            await pauseImagingSession();
+        } catch (error) {
+            setStopError(`Could not pause the imaging session: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    };
+
+    /** Stops the session after the user confirms. A refusal is shown to the user. */
+    const handleStopSession = async () => {
+        setIsStopConfirmOpen(false);
+        setStopError(null);
+        try {
+            await stopImagingSession();
+        } catch (error) {
+            setStopError(`Could not stop the imaging session: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    };
+
     return (
         <SectionPanel
             title="Execution Queue"
@@ -180,6 +207,21 @@ export const ExecutionQueue: React.FC<Props> = ({
                     >
                         {isStarting ? 'Starting...' : 'Start Imaging Session'}
                     </button>
+                    <button
+                        type="button"
+                        className="btn btn--tiny"
+                        onClick={handlePauseSession}
+                        title="Stop after the package now being imaged. The queue is kept; Start Imaging Session continues it."
+                    >
+                        Pause Session
+                    </button>
+                    <button
+                        type="button"
+                        className="btn btn--tiny btn--danger"
+                        onClick={() => setIsStopConfirmOpen(true)}
+                    >
+                        Stop Session
+                    </button>
                     {!availability.canCommand && <InfoButton label="Why unavailable?" text={availability.reason} />}
                 </span>
             }
@@ -190,6 +232,21 @@ export const ExecutionQueue: React.FC<Props> = ({
                     <button type="button" className="btn btn--tiny" onClick={() => setStartError(null)}>Dismiss</button>
                 </div>
             )}
+            {stopError && (
+                <div className="queue-header__error" role="alert">
+                    <span>{stopError}</span>
+                    <button type="button" className="btn btn--tiny" onClick={() => setStopError(null)}>Dismiss</button>
+                </div>
+            )}
+            <ConfirmDialog
+                open={isStopConfirmOpen}
+                title="Stop Session"
+                message="Stop the imaging session? The packages not yet imaged are skipped and the session is closed. The package being imaged now stops after its current cycle. This does not stop the mount or the guider; use Stop in Manual Guide or Ekos for that."
+                confirmLabel="Yes, Stop"
+                cancelLabel="Keep Imaging"
+                onConfirm={handleStopSession}
+                onCancel={() => setIsStopConfirmOpen(false)}
+            />
             <div className="queue-list">
                 {localQueue.length === 0 && (
                     <div className="queue-empty">

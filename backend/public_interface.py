@@ -245,6 +245,8 @@ RPC_METHODS: tuple[str, ...] = (
     "sequencer:remove",
     "sequencer:reorder",
     "sequencer:begin",
+    "sequencer:pause",
+    "sequencer:abort",
     "sequencer:modify",
 )
 

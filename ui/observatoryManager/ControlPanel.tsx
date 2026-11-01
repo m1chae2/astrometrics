@@ -32,16 +32,16 @@ export interface ControlPanelProps {
     // Alignment settings
     accuracy?: number;
     settleTime?: number;
-    alignmentExposure?: number;
     onAccuracyChange?: (value: number) => void;
     onSettleTimeChange?: (value: number) => void;
-    onAlignmentExposureChange?: (value: number) => void;
 
     // Guide settings
     guidingExposure?: number;
     guidingGain?: number;
     onGuidingExposureChange?: (value: number) => void;
     onGuidingGainChange?: (value: number) => void;
+    onGuideStart?: (exposure: number, gain: number) => void;
+    onGuideStop?: () => void;
 
     // Alignment control
     onStartAlignment?: () => void;
@@ -84,14 +84,14 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
     alignmentAttempts = [],
     accuracy,
     settleTime,
-    alignmentExposure,
     onAccuracyChange,
     onSettleTimeChange,
-    onAlignmentExposureChange,
     guidingExposure,
     guidingGain,
     onGuidingExposureChange,
     onGuidingGainChange,
+    onGuideStart,
+    onGuideStop,
     onStartAlignment,
     onStopAlignment,
     isAligningActive = false,
@@ -132,14 +132,14 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                                 disabledReasonId={reasonId}
                                 accuracy={accuracy}
                                 settleTime={settleTime}
-                                alignmentExposure={alignmentExposure}
                                 onAccuracyChange={onAccuracyChange}
                                 onSettleTimeChange={onSettleTimeChange}
-                                onAlignmentExposureChange={onAlignmentExposureChange}
                                 guidingExposure={guidingExposure}
                                 guidingGain={guidingGain}
                                 onGuidingExposureChange={onGuidingExposureChange}
                                 onGuidingGainChange={onGuidingGainChange}
+                                onGuideStart={onGuideStart}
+                                onGuideStop={onGuideStop}
                             />
                         )}
                     />

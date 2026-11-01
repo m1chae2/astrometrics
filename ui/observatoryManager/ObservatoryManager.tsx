@@ -124,6 +124,8 @@ export const ObservatoryManager: React.FC = () => {
             guidingGain={guidingGain}
             onGuidingExposureChange={setGuidingExposure}
             onGuidingGainChange={setGuidingGain}
+            onGuideStart={handlers.onGuideStart}
+            onGuideStop={handlers.onGuideStop}
             alignmentAttempts={telemetry.alignmentAttempts || []}
             onStartAlignment={() => handlers.onStartAlignment(raShared, decShared)}
             onStopAlignment={handlers.onStopAlignment}

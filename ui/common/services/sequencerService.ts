@@ -98,6 +98,32 @@ export async function beginImagingSession(): Promise<void> {
 }
 
 /**
+ * Pauses the running imaging session after the package now being imaged. The queue is kept.
+ * Rejects when the backend refuses, so the caller can show the reason.
+ */
+export async function pauseImagingSession(): Promise<void> {
+    try {
+        await callBackend("sequencer:pause", {});
+    } catch (err: unknown) {
+        console.error('Failed to pause imaging session', err);
+        throw err;
+    }
+}
+
+/**
+ * Stops the running imaging session and skips every package not yet imaged.
+ * Rejects when the backend refuses, so the caller can show the reason.
+ */
+export async function stopImagingSession(): Promise<void> {
+    try {
+        await callBackend("sequencer:abort", {});
+    } catch (err: unknown) {
+        console.error('Failed to stop imaging session', err);
+        throw err;
+    }
+}
+
+/**
  * Modifies an existing queue item's parameters.
  * @param sequenceId The sequence ID.
  * @param sequence Updated sequence properties.

@@ -1,9 +1,11 @@
 /**
  * @file TrackingSettings.tsx
  * @description The Tracking Settings panel body: the alignment settings
- * (accuracy, settle time, exposure) and the guiding camera settings (exposure,
- * gain) on two tabs, "Alignment" and "Guiding". The tabs follow the WAI-ARIA
- * tab pattern. The values live in the parent, so they survive a tab switch.
+ * (accuracy, settle time) and the guiding camera settings (exposure, gain)
+ * with the Start Guiding and Stop Guiding buttons, on two tabs, "Alignment"
+ * and "Guiding". The tabs follow the WAI-ARIA tab pattern. The values live in
+ * the parent, so they survive a tab switch. There is no alignment exposure
+ * field, because the alignment start call takes only the target.
  */
 
 import React, { useState } from 'react';
@@ -26,16 +28,18 @@ export interface TrackingSettingsProps {
     // Alignment settings
     accuracy?: number;
     settleTime?: number;
-    alignmentExposure?: number;
     onAccuracyChange?: (value: number) => void;
     onSettleTimeChange?: (value: number) => void;
-    onAlignmentExposureChange?: (value: number) => void;
 
     // Guide settings
     guidingExposure?: number;
     guidingGain?: number;
     onGuidingExposureChange?: (value: number) => void;
     onGuidingGainChange?: (value: number) => void;
+    /** Starts guiding with the exposure (seconds) and gain entered in the Guiding tab. */
+    onGuideStart?: (exposure: number, gain: number) => void;
+    /** Stops guiding. */
+    onGuideStop?: () => void;
 
     /** When true every input is unavailable (the app is not allowed to command the device). */
     disabled?: boolean;
@@ -52,14 +56,14 @@ export interface TrackingSettingsProps {
 export const TrackingSettings: React.FC<TrackingSettingsProps> = ({
     accuracy = 30,
     settleTime = 1500,
-    alignmentExposure = 1,
     onAccuracyChange,
     onSettleTimeChange,
-    onAlignmentExposureChange,
     guidingExposure = 1.0,
     guidingGain = 100,
     onGuidingExposureChange,
     onGuidingGainChange,
+    onGuideStart,
+    onGuideStop,
     disabled = false,
     disabledReasonId,
 }) => {
@@ -69,6 +73,9 @@ export const TrackingSettings: React.FC<TrackingSettingsProps> = ({
         'aria-describedby': disabled ? disabledReasonId : undefined,
     };
     const [selectedTab, setSelectedTab] = useState('alignment');
+    // A cleared field reads as NaN. Guiding does not start on a missing or non-positive value.
+    const guidingValuesValid = Number.isFinite(guidingExposure) && guidingExposure > 0
+        && Number.isFinite(guidingGain) && guidingGain >= 0;
     return (
         <div className="tracking-settings">
             <Tabs
@@ -104,19 +111,6 @@ export const TrackingSettings: React.FC<TrackingSettingsProps> = ({
                         aria-label="Settle Time"
                     />
                 </ParameterRow>
-                <ParameterRow label="Exposure (s):">
-                    <input
-                        {...unavailable}
-                        id="input-tracking-expose"
-                        name="alignmentExposure"
-                        type="number"
-                        value={alignmentExposure}
-                        onChange={(e) => !disabled && onAlignmentExposureChange?.(parseFloat(e.target.value))}
-                        className="input input--short"
-                        step="0.1"
-                        aria-label="Alignment Exposure Seconds"
-                    />
-                </ParameterRow>
             </ControlColumn>
             </TabPanel>
             <TabPanel idPrefix={TRACKING_TABS_ID_PREFIX} tabId="guiding" selected={selectedTab === 'guiding'}>
@@ -150,6 +144,31 @@ export const TrackingSettings: React.FC<TrackingSettingsProps> = ({
                         aria-label="Guiding Gain"
                     />
                 </ParameterRow>
+                <div className="telescope-control__row">
+                    <button
+                        id="btn-start-guiding"
+                        type="button"
+                        className="btn btn--control btn--success"
+                        onClick={() => !disabled && guidingValuesValid && onGuideStart?.(guidingExposure, guidingGain)}
+                        disabled={disabled || !guidingValuesValid}
+                        aria-disabled={disabled || !guidingValuesValid}
+                    >
+                        Start Guiding
+                    </button>
+                    <button
+                        id="btn-stop-guiding"
+                        type="button"
+                        className="btn btn--control btn--danger"
+                        onClick={() => !disabled && onGuideStop?.()}
+                        disabled={disabled}
+                        aria-disabled={disabled}
+                    >
+                        Stop Guiding
+                    </button>
+                </div>
+                {!guidingValuesValid && (
+                    <p className="tracking-settings__hint">Enter an exposure above 0 and a gain of 0 or more.</p>
+                )}
             </ControlColumn>
             </TabPanel>
         </div>

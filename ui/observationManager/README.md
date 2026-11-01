@@ -35,7 +35,7 @@ The display only shows what the library returns. The library chooses which packa
 - `plan:list_packages`, `plan:create_package` and `plan:edit_package` read and change packages. Each edit names the revision that the window last read. The library refuses an edit made from an old revision, and the display shows the refusal as text.
 - `plan:refresh_suggestions` asks the library to look again at which targets need more frames.
 - The `packages:changed` and `plan:changed` events mark these reads as stale. `ui/App.tsx` listens for them.
-- The `sequencer:` methods hold the queue that Start Imaging Session runs. Start Imaging Session and Test Image are device commands. They are greyed, with a Why unavailable? button, while Ekos controls the equipment (`ui/common/hooks/useCommandAvailability.ts`).
+- The `sequencer:` methods hold the queue that Start Imaging Session runs. Start Imaging Session and Test Image are device commands. They are greyed, with a Why unavailable? button, while Ekos controls the equipment (`ui/common/hooks/useCommandAvailability.ts`). Pause Session (`sequencer:pause`) and Stop Session (`sequencer:abort`, after a confirmation) only end the app's own queue loop, so they stay available; a refusal shows as an alert. Stop Session does not stop the mount or the guider.
 
 ## Measures this display shows
 

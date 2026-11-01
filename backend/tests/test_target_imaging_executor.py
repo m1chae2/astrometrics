@@ -157,6 +157,23 @@ def test_begin_runs_the_session_queue_on_a_thread(executor: TargetImagingExecuto
     assert executor.runs == [executor._session().id]
 
 
+def test_pause_stops_the_loop_and_abort_also_closes_it(executor: TargetImagingExecutor) -> None:
+    """Pause raises the stop signal; abort also aborts the running session."""
+    aborted: list[tuple[str, str]] = []
+    execution = executor._wayfinder.execution
+    execution.abort_session = lambda session_id, reason: aborted.append((session_id, reason))
+    executor._running_session_id = "night-1"
+
+    executor.pause_imaging()
+    assert executor._stop.is_set()
+    assert aborted == []
+
+    executor._stop.clear()
+    executor.abort_imaging()
+    assert executor._stop.is_set()
+    assert aborted == [("night-1", "Aborted from the sequencer.")]
+
+
 def test_every_queue_edit_announces_plan_changed(executor: TargetImagingExecutor) -> None:
     """Add, reorder, modify and remove each send the plan:changed event."""
     from types import SimpleNamespace as _Namespace

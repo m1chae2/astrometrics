@@ -74,6 +74,21 @@ The stack review screens read `outputMetrics.result` (`ui/common/services/imagin
 
 **Guiding principle (user, 2026-11-01):** drive complexity down, and keep every interpretation of good or bad in wayfindinglib.
 
+### Answers to the inventory questions (user, 2026-11-01)
+
+These replace the proposals in the three `inventory_97_*.md` files wherever the two differ.
+
+- **Stack panel:** one list of job warnings (number, limit, outcome), plus suggestions from the existing wayfindinglib display. No count in the title.
+- **Timeout:** recorded on the run that timed out, not the earlier stack.
+- **New rules:** rejected pixels and stack sharpness. A rule for `is_ambiguous`, which covers the 83 stars the comparison found. A missing-darks rule only if `calibration_gap` does not already cover it.
+- **Warning only, no rule:** saturated pixels (with a Design estimate register entry), temperature spread, `variability_discrimination`, `detectable_amplitude`, `ensemble_frame_rejection`, `unmatched_movers`.
+- **Removed with no uncertainty required:** all yes/no quality fields, including photometry `is_low_coverage`, `is_tracking_unstable`, `is_low_confidence` and `is_trustworthy`, and spectroscopy `is_trustworthy` with its checkpoint metric.
+- **Spectroscopy:** store the B-V difference and remove `colour_agrees`. Replace `differs_from_catalog` and `spectral_type_agrees` with the steps-apart number. Remove the classifier's `match_quality` text. Gates compare the rms with its limit as a measurement check.
+- **Kept as is:** the name `photometry.gate_detectable_amplitude`, and `CatalogMatchQuality.is_ambiguous`.
+- **Detection labels:** stay, with the limit and register entry stored once per spectrum. Issue #97 is amended to match. Period checks keep their form.
+- **Cautions:** `possible_neighbor_contamination` and `neighbor_wing_status` stay as measurements and appear in job warnings.
+- **Checkpoints:** the spectral checkpoints count as one self-check group.
+
 ## 3. Phases
 
 Each phase is one or more commits. Sonnet agents make the edits and scripts handle mechanical ones. CI runs the full suites. A pipeline's inventory goes in `documentation/plans/` and you approve it before that pipeline's code changes.

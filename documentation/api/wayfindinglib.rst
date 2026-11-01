@@ -40,7 +40,7 @@ The :class:`~wayfindinglib.Wayfinder` instance exposes four peer sub-APIs:
 * :attr:`~wayfindinglib.Wayfinder.execution` (:class:`~wayfindinglib.ObservationExecution`):
   Automated night queue execution, divergence tracking, and session telemetry
   recording.
-* :attr:`~wayfindinglib.Wayfinder.review` (``ObservationReview``):
+* :attr:`~wayfindinglib.Wayfinder.review` (:class:`~wayfindinglib.ObservationReview`):
   Past and current observing nights, alignment sessions, and the limits the
   equipment has shown.
 
@@ -57,7 +57,7 @@ only ``wayfindinglib`` itself may import it.
    * - Import from
      - What it holds
    * - ``wayfindinglib``
-     - ``Wayfinder``, the three sub-API classes, ``ObservationSession`` and ``ObservationPackage``.
+     - ``Wayfinder``, the four sub-API classes, ``ObservationSession`` and ``ObservationPackage``.
    * - ``wayfindinglib.exceptions``
      - The errors that belong to this library. The shared categories come from ``astrometricslib.exceptions``.
    * - ``wayfindinglib.reports``
@@ -94,9 +94,6 @@ Observatory control API
    :no-inheritance-diagram:
 
 .. automodapi:: wayfindinglib.api.control.remote
-   :no-inheritance-diagram:
-
-.. automodapi:: wayfindinglib.api.review
    :no-inheritance-diagram:
 
 .. automodapi:: wayfindinglib.api.control.safety

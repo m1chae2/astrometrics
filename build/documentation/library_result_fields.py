@@ -54,7 +54,7 @@ _SUB_API_CLASSES = {
         ("wayfindinglib", "ObservatoryControl"),
         ("wayfindinglib", "ObservationPlanning"),
         ("wayfindinglib", "ObservationExecution"),
-        ("wayfindinglib.api.review", "ObservationReview"),
+        ("wayfindinglib", "ObservationReview"),
         ("wayfindinglib.api.control.mount", "MountControl"),
         ("wayfindinglib.api.control.imaging", "ImagingControl"),
         ("wayfindinglib.api.control.guiding", "GuidingControl"),

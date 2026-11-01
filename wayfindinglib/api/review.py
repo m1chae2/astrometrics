@@ -31,6 +31,7 @@ from astrometricslib import (
 )
 from wayfindinglib.api.control.context import ControlChild
 from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
+from wayfindinglib.models.session.control_results import FrameGuidingReport
 from wayfindinglib.models.session.ekos_session import EkosSessionContext
 from wayfindinglib.models.session.live_session_status import LiveSessionStatus
 from wayfindinglib.models.session.night_list import NightListEntry, TargetChange
@@ -304,7 +305,7 @@ class ObservationReview(ControlChild):
         until: str | None = None,
         limit: int = 60,
         include: list[str] | None = None,
-    ) -> dict[str, Any]:
+    ) -> FrameGuidingReport:
         """Report the guide error during each light frame's exposure.
 
         Cuts the stored guide-log samples to the window of each frame and
@@ -340,7 +341,7 @@ class ObservationReview(ControlChild):
 
         Returns
         -------
-        report : `dict`
+        report : `FrameGuidingReport`
             ``frames`` (one row per frame) and ``group`` (the median error
             and the frames well above it). An unknown target raises
             `NotFoundError`.
@@ -366,8 +367,10 @@ class ObservationReview(ControlChild):
         except ValueError as error:
             raise InvalidArgumentError(f"since and until must be ISO 8601 times: {error}") from error
         target_id = target if isinstance(target, str) else target.id
-        return frame_guiding.link_frames_to_guiding(
-            self._context, target_id, selection, limit, "quality" in sections
+        return FrameGuidingReport.model_validate(
+            frame_guiding.link_frames_to_guiding(
+                self._context, target_id, selection, limit, "quality" in sections
+            )
         )
 
     def query_alignment_sessions(self, attempts: list[dict[str, Any]]) -> AlignmentSessionsResult:

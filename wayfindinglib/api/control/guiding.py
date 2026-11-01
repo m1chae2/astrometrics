@@ -19,6 +19,7 @@ from astrometricslib import ConfigurationError, ExternalServiceError
 from wayfindinglib.api.control.context import ControlChild
 from wayfindinglib.models.control_status import GuidingStatus
 from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCalibration
+from wayfindinglib.models.session.control_results import GuideExposureResult
 from wayfindinglib.models.session.correction_result import GuidingCorrection
 from wayfindinglib.models.session.guide_exposure_ladder import GuideExposureLadder
 from wayfindinglib.models.session.guiding_run import GuidingRunSummary
@@ -154,7 +155,7 @@ class GuidingControl(ControlChild):
 
         return hardware_operations.pulse(self._context, direction, duration_ms)
 
-    def expose(self, exposure_seconds: float, gain: float | None = None) -> Any:
+    def expose(self, exposure_seconds: float, gain: float | None = None) -> GuideExposureResult:
         """Take one exposure with the guide camera.
 
         Parameters
@@ -166,12 +167,13 @@ class GuidingControl(ControlChild):
 
         Returns
         -------
-        result : `Any`
-            The guide camera driver's exposure result.
+        result : `GuideExposureResult`
+            ``started`` is whether the guide camera accepted the command.
         """
         from wayfindinglib.tasks.control_tasks import hardware_operations
 
-        return hardware_operations.guide_expose(self._context, exposure_seconds, gain=gain)
+        started = hardware_operations.guide_expose(self._context, exposure_seconds, gain=gain)
+        return GuideExposureResult(started=bool(started), exposure_seconds=exposure_seconds, gain=gain)
 
     def _get_image(self) -> Any:
         """Return the guide camera's last image.

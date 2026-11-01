@@ -4,8 +4,8 @@ Description: `review.query(kind=...)` answers many kinds of question about
 recorded observing nights. Each kind fills in some of the fields below and
 leaves the rest empty. A caller reads a named field instead of looking
 into a dictionary. When the model is turned into plain data (`model_dump`),
-fields that were left empty are dropped, so the reply keeps the same shape
-the dictionary replies had before.
+fields that were never filled are dropped (see `SparseResult`), so the
+reply keeps the same shape the dictionary replies had before.
 
 Three kinds answer with typed models, so they have their own fields:
 ``nights`` fills `night_list`, ``target_changes`` fills `target_changes`,
@@ -14,17 +14,17 @@ data fields. That data is JSON-safe, and a reply that was too large to send
 whole has had its lists and text cut (see `truncated`).
 """
 
-from typing import Any
-
-from pydantic import BaseModel, ConfigDict, JsonValue, model_serializer
+from pydantic import JsonValue
 
 from wayfindinglib.models.session.night_list import NightListEntry, TargetChange
 from wayfindinglib.models.session.night_quality import NightQuality
+from wayfindinglib.models.session.sparse_result import SparseResult
+from wayfindinglib.models.session.telemetry import MountPointingModel
 
 __all__ = ["ReviewQueryResult"]
 
 
-class ReviewQueryResult(BaseModel):
+class ReviewQueryResult(SparseResult):
     """The answer to one `review.query` question.
 
     Attributes
@@ -56,7 +56,7 @@ class ReviewQueryResult(BaseModel):
         ``ekos_sessions`` and ``alignment``).
     session : `JsonValue`, optional
         One Ekos session (kind ``ekos_sessions`` with ``ekos_file_id``).
-    model : `JsonValue`, optional
+    model : `MountPointingModel`, optional
         The fitted pointing model (kind ``pointing_model``).
     attempts, targets, polar_alignment : `JsonValue`, optional
         One night's alignment attempts, the same grouped by target, and
@@ -68,8 +68,6 @@ class ReviewQueryResult(BaseModel):
     night_quality : `NightQuality`, optional
         The review of one night (kind ``night_quality``).
     """
-
-    model_config = ConfigDict(extra="allow")
 
     kind: str
     session_id: str | None = None
@@ -85,32 +83,10 @@ class ReviewQueryResult(BaseModel):
     runs: JsonValue = None
     sessions: JsonValue = None
     session: JsonValue = None
-    model: JsonValue = None
+    model: MountPointingModel | None = None
     attempts: JsonValue = None
     targets: JsonValue = None
     polar_alignment: JsonValue = None
     night_list: list[NightListEntry] | None = None
     target_changes: list[TargetChange] | None = None
     night_quality: NightQuality | None = None
-
-    @model_serializer(mode="wrap")
-    def _drop_empty_fields(self, handler: Any) -> dict[str, Any]:
-        """Leave out the fields a kind did not fill in.
-
-        Parameters
-        ----------
-        handler : `Any`
-            Pydantic's own serializer for the model.
-
-        Returns
-        -------
-        data : `dict` [`str`, `Any`]
-            The fields that hold a value. A false `truncated` is dropped
-            too, as the dictionary replies never carried it.
-        """
-        data = handler(self)
-        return {
-            key: value
-            for key, value in data.items()
-            if value is not None and not (key == "truncated" and value is False)
-        }

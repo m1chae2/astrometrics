@@ -163,6 +163,20 @@ The MCP tools for all of these are gone (`observatory_guiding_pulse`, `observato
 
 The function `record_divergence` in `tasks.execution_tasks.divergence_recording` keeps its name; it is not public.
 
+### Result models for the remaining dictionary returns
+
+Each model leaves out the fields a case did not fill (`SparseResult`), so the data keeps the keys of the old
+dictionary. A name the model does not list is kept as an extra field.
+
+| Call | Old | New |
+| --- | --- | --- |
+| `control.remote.frame_status` | `dict` | `FrameStatusReport` (`counts`, four `FrameDifference` fields, `telescope_error`, `library_error`, `note`) |
+| `control.remote.sync_frames` | `dict` | `FrameSyncResult` (`success`, `target`, `to_transfer`, `transferred`, `measurements`, `succeeded`, `failed`, `job_id` and so on) |
+| `control.remote.sync_logs` | `dict` | `LogSyncResult` (`dry_run`, `destination_dir`, `guide_logs` and `ekos_analyze_logs` as `LogPlan`, `ingested`) |
+| `control.guiding.expose` | `Any` (a `bool` in practice) | `GuideExposureResult` (`started`, `exposure_seconds`, `gain`) |
+| `review.frame_guiding` | `dict` | `FrameGuidingReport` |
+| `review.query` | (see above) | `ReviewQueryResult`; its `model` field is now a `MountPointingModel` |
+
 ## Left as they were, on purpose
 
 - `visualization.get_last_captured_image` is separate from `render_fits`: it finds the newest file itself and

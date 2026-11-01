@@ -120,7 +120,7 @@ class GuidingService:
         captured : `bool`
             `True` if the camera accepted the exposure command.
         """
-        return bool(self._observatory.guiding.expose(exposure, gain=gain))
+        return self._observatory.guiding.expose(exposure, gain=gain).started
 
     def get_status(self) -> dict[str, Any]:
         """Report the guiding going on now.

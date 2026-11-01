@@ -22,6 +22,7 @@ from astrometricslib import (
     registered_job,
 )
 from wayfindinglib.api.control.context import ControlChild
+from wayfindinglib.models.session.control_results import FrameStatusReport, FrameSyncResult, LogSyncResult
 
 __all__ = ["RemoteControl"]
 
@@ -152,7 +153,7 @@ class RemoteControl(ControlChild):
 
         return remote_transfer_tasks.check_remote_connection(self._context)
 
-    def frame_status(self, target: str | Target) -> dict[str, Any]:
+    def frame_status(self, target: str | Target) -> FrameStatusReport:
         """Show where a target's frames are: telescope, drive, library.
 
         Gives the count in each place and the frames that are in one place
@@ -167,12 +168,14 @@ class RemoteControl(ControlChild):
 
         Returns
         -------
-        status : `dict` [`str`, `Any`]
+        status : `FrameStatusReport`
             The counts and the differences, with a few file names each.
         """
         from wayfindinglib.tasks.control_tasks import frame_status
 
-        return frame_status.build_frame_status(self._context, _target_id(target))
+        return FrameStatusReport.model_validate(
+            frame_status.build_frame_status(self._context, _target_id(target))
+        )
 
     @background_job("remote_sync", grace_period_seconds=8.0)
     def sync_frames(
@@ -184,7 +187,7 @@ class RemoteControl(ControlChild):
         incremental: bool | None = None,
         log_callback: Callable[[str], None] | None = None,
         register_job: bool | None = None,
-    ) -> dict[str, Any]:
+    ) -> FrameSyncResult:
         """Bring new frames from the observatory computer into the library.
 
         The arguments choose what is copied:
@@ -226,7 +229,7 @@ class RemoteControl(ControlChild):
 
         Returns
         -------
-        result : `dict` [`str`, `Any`]
+        result : `FrameSyncResult`
             Every folder: ``succeeded``, ``failed``, ``job_id`` and
             ``measurements``. A local folder or chosen files: ``success``,
             ``target`` and ``measurements``. Calibration: ``success`` and the
@@ -249,8 +252,10 @@ class RemoteControl(ControlChild):
         if target is None:
             _refuse("Copying every folder", files=files, local_path=local_path, incremental=incremental)
             _refuse("Copying every folder", dry_run=dry_run or None)
-            return tasks.sync_all_remote_folders(
-                context, log_callback, True if register_job is None else register_job
+            return FrameSyncResult.model_validate(
+                tasks.sync_all_remote_folders(
+                    context, log_callback, True if register_job is None else register_job
+                )
             )
         target_id = _target_id(target)
         with registered_job(
@@ -258,7 +263,9 @@ class RemoteControl(ControlChild):
             job_type="remote_sync",
             target_id=target_id,
         ):
-            return self._sync_one(target_id, dry_run, files, local_path, incremental, log_callback)
+            return FrameSyncResult.model_validate(
+                self._sync_one(target_id, dry_run, files, local_path, incremental, log_callback)
+            )
 
     def _sync_one(
         self,
@@ -317,7 +324,7 @@ class RemoteControl(ControlChild):
         download: bool = True,
         destination_dir: str | None = None,
         register_job: bool = True,
-    ) -> dict[str, Any]:
+    ) -> LogSyncResult:
         """Bring the guide and Ekos logs into the library's database.
 
         Downloads the new guide logs and Ekos analyze logs, then stores the
@@ -342,7 +349,7 @@ class RemoteControl(ControlChild):
 
         Returns
         -------
-        result : `dict` [`str`, `Any`]
+        result : `LogSyncResult`
             The plan (how many logs exist and are new) and, for a real run,
             ``ingested`` (what was stored). Without downloading, only what
             was stored. An unreachable observatory computer raises
@@ -367,5 +374,9 @@ class RemoteControl(ControlChild):
             target_id="logs",
         ):
             if not download:
-                return ekos_log_ingestion.ingest_ekos_logs(context, directory, download=False)
-            return remote_transfer_tasks.sync_remote_logs(context, dry_run, directory)
+                return LogSyncResult.model_validate(
+                    ekos_log_ingestion.ingest_ekos_logs(context, directory, download=False)
+                )
+            return LogSyncResult.model_validate(
+                remote_transfer_tasks.sync_remote_logs(context, dry_run, directory)
+            )

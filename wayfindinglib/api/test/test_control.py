@@ -223,9 +223,9 @@ def test_ingest_ekos_session_logs_stores_samples_and_a_retrievable_session(
 
     summary = control.remote.sync_logs(destination_dir=str(logs_directory), download=False)
 
-    assert summary["guide_samples_stored"] == 1
-    assert summary["session_contexts_stored"] == 1
-    assert summary["nights"] == ["2026-09-23"]
+    assert summary.guide_samples_stored == 1
+    assert summary.session_contexts_stored == 1
+    assert summary.nights == ["2026-09-23"]
     (listed,) = ObservationReview(control).query(kind="ekos_sessions").sessions
     assert listed["id"] == "2026-09-23T20-31-48"
     assert listed["captures"] == 1
@@ -536,11 +536,16 @@ def test_pointing_model_query_delegates_to_the_task_module(
     fake_records = mocker.Mock()
     control._context.records = fake_records
     mocker.patch.object(control._context, "observer_location", return_value={"latitude": 40.0})
-    mocker.patch.object(pointing_log_ingestion, "compute_pointing_model", return_value={"me": 1.0})
+    mocker.patch.object(
+        pointing_log_ingestion,
+        "compute_pointing_model",
+        return_value={"sample_count": 3, "raw_rms_arcsec": 2.0, "residual_rms_arcsec": 1.0},
+    )
 
     result = ObservationReview(control).query(kind="pointing_model", session_id="s1")
 
-    assert result.model == {"me": 1.0}
+    assert result.model.sample_count == 3
+    assert result.model.raw_rms_arcsec == pytest.approx(2.0)
     pointing_log_ingestion.compute_pointing_model.assert_called_once_with(
         control._context, fake_records, "s1"
     )
@@ -859,7 +864,7 @@ def test_remote_methods_delegate_to_the_task_module(
     assert control.remote.check_connection() is True
     remote_transfer_tasks.check_remote_connection.assert_called_once_with(context)
 
-    assert control.remote.sync_frames("M 81", local_path="/local/M81") == {
+    assert control.remote.sync_frames("M 81", local_path="/local/M81").model_dump() == {
         "success": True,
         "target": "M 81",
         "measurements": [],
@@ -867,11 +872,11 @@ def test_remote_methods_delegate_to_the_task_module(
     remote_transfer_tasks.download_remote_targets.assert_called_once_with(
         context, "M 81", local_path="/local/M81", measurement_summaries=[]
     )
-    assert control.remote.sync_frames("Dark") == {"success": True}
+    assert control.remote.sync_frames("Dark").model_dump() == {"success": True}
     remote_transfer_tasks.sync_calibration_folder.assert_called_once_with(context, "Dark")
-    assert control.remote.sync_frames("M 81", dry_run=True) == {"dry_run": True}
+    assert control.remote.sync_frames("M 81", dry_run=True).model_dump() == {"dry_run": True}
     remote_transfer_tasks.sync_target_frames.assert_called_once_with(context, "M 81", True)
-    assert control.remote.sync_frames(register_job=False) == {"succeeded": []}
+    assert control.remote.sync_frames(register_job=False).model_dump() == {"succeeded": []}
     remote_transfer_tasks.sync_all_remote_folders.assert_called_once_with(context, None, False)
 
 
@@ -911,7 +916,7 @@ def test_sync_frames_of_one_target_records_a_job_only_when_asked(
     mocker.patch.object(remote_transfer_tasks, "download_remote_targets", return_value=True)
     recorded = mocker.spy(remote, "registered_job")
 
-    assert control.remote.sync_frames("M 81", local_path="/tmp/frames") == {
+    assert control.remote.sync_frames("M 81", local_path="/tmp/frames").model_dump() == {
         "success": True,
         "target": "M 81",
         "measurements": [],
@@ -1229,7 +1234,7 @@ def test_capture_image_and_guide_camera_end_to_end_against_simulator(control: Ob
     )
 
     assert control.imaging.capture_image(0.01, register_job=False).frames_captured == 1
-    assert control.guiding.expose(1.0) is True
+    assert control.guiding.expose(1.0).started is True
     assert control.guiding._get_image() is None
     assert control.mount._sync(SkyPosition(ra_deg=150.0, dec_deg=20.0)) is True
 

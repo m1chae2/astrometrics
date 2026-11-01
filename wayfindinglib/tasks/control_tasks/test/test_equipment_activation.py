@@ -12,7 +12,8 @@ from unittest.mock import patch
 
 import pytest
 
-from astrometricslib import AppConfiguration, resolve_camera_profile
+from astrometricslib import AppConfiguration
+from astrometricslib._internal.frames import resolve_camera_profile
 from wayfindinglib.data_access import equipment_catalog_writer
 from wayfindinglib.data_access.equipment_catalog_reader import (
     get_active_camera_id,

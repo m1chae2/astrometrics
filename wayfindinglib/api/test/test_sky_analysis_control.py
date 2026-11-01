@@ -12,7 +12,7 @@ is reported as recurring.
 import numpy as np
 import pytest
 
-from astrometricslib import observing_night_id
+from astrometricslib.reports import observing_night_id
 from wayfindinglib import ObservatoryControl
 from wayfindinglib.api.test.capture_night_helpers import Library
 from wayfindinglib.api.test.guiding_night_helpers import FIRST_NIGHT, record_guiding_night

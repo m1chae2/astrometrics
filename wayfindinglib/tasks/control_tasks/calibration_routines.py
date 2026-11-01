@@ -38,7 +38,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from astrometricslib import HardwareError
+from astrometricslib.exceptions import HardwareError
 from wayfindinglib.analytics.pointing_model import fit_pointing_model
 from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCalibration
 from wayfindinglib.models.session.telemetry import MountPointingModel

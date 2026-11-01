@@ -18,7 +18,8 @@ from pydantic import BaseModel
 # Ensure we can import from backend
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from astrometricslib import ErrorInfo, FilterType
+from astrometricslib import FilterType
+from astrometricslib.exceptions import ErrorInfo
 from astrometricslib.foundation.jobs.models import ProcessingJob, ProcessStatus
 from astrometricslib.models.applied_camera_profile import AppliedCameraProfile
 from astrometricslib.models.calibration_ingest import CalibrationMeasurementReport, CalibrationSetHealth

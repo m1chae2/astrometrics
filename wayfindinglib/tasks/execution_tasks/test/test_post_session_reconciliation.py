@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from astrometricslib import ConflictError
+from astrometricslib.exceptions import ConflictError
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.planning.observation_package import ExposureRequest, FrameType
 from wayfindinglib.models.session.observation_session import (

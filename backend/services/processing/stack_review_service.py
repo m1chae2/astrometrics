@@ -21,7 +21,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
-from astrometricslib import run_as_background_job
+from astrometricslib.jobs import run_as_background_job
 
 logger = logging.getLogger(__name__)
 

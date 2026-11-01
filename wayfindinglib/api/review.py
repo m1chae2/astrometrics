@@ -21,14 +21,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Literal
 
-from astrometricslib import (
-    InvalidArgumentError,
-    NotFoundError,
-    Target,
-    background_job,
-    get_current_job,
-    registered_job,
-)
+from astrometricslib import Target
+from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
+from astrometricslib.jobs import background_job, get_current_job, registered_job
 from wayfindinglib.api.control.context import ControlChild
 from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
 from wayfindinglib.models.session.control_results import FrameGuidingReport

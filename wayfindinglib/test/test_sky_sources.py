@@ -13,15 +13,9 @@ from typing import Any
 
 import pytest
 
-from astrometricslib import (
-    AppConfiguration,
-    CatalogAccess,
-    FrameRecord,
-    StellarCatalog,
-    StellarObject,
-    Target,
-)
-from wayfindinglib import SkySource
+from astrometricslib import AppConfiguration, FrameRecord, StellarCatalog, StellarObject, Target
+from astrometricslib._internal.drivers import CatalogAccess
+from wayfindinglib._internal.planning import SkySource
 from wayfindinglib.tasks.planning_tasks import resolution_operations, sky_sources
 
 

@@ -11,7 +11,9 @@ import argparse
 import sys
 import traceback
 
-from astrometricslib import DATA_ERRORS, Astrometrics, AstrometricsError
+from astrometricslib import Astrometrics
+from astrometricslib._internal.errors import DATA_ERRORS
+from astrometricslib.exceptions import AstrometricsError
 
 
 def run_spectroscopy_validation(astrometrics: Astrometrics, camera_name: str) -> dict:

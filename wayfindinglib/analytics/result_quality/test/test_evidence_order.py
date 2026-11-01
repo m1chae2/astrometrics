@@ -10,13 +10,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from astrometricslib import (
-    LimitTier,
-    MeasurementReference,
-    QualityLimit,
-    QualityMeasurement,
-    QualitySubject,
-)
+from astrometricslib._internal.quality import QualitySubject
+from astrometricslib.reports import LimitTier, MeasurementReference, QualityLimit, QualityMeasurement
 from wayfindinglib.analytics.result_quality.evidence_order import (
     distance_beyond_limit,
     order_evidence_most_extreme_first,

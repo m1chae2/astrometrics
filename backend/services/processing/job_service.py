@@ -10,7 +10,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from astrometricslib import ConflictError, JobStore, NotFoundError, ProcessingJob
+from astrometricslib.exceptions import ConflictError, NotFoundError
+from astrometricslib.jobs import JobStore, ProcessingJob
 
 logger = logging.getLogger(__name__)
 

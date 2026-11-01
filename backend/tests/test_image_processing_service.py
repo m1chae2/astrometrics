@@ -12,14 +12,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from astrometricslib import (
-    AppConfiguration,
-    FrameRecord,
-    NotFoundError,
-    ProcessingError,
-    ProcessingPipelines,
-    Target,
-)
+from astrometricslib import AppConfiguration, FrameRecord, ProcessingPipelines, Target
+from astrometricslib.exceptions import NotFoundError, ProcessingError
 from backend.services.processing.image_processing_service import (
     ImageProcessingService,
     start_siril_processing_task,

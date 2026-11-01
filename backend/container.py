@@ -140,7 +140,7 @@ class Container:
         )
         self.stellar_service = self.stellar_object_service
         self.image_service = ImageService(target_service=self.target_service)
-        from astrometricslib import JobStore
+        from astrometricslib.jobs import JobStore
 
         self.job_repository = JobStore(str(self.config_service.get_logs_db_path()))
         self.job_service = JobService(self.job_repository)

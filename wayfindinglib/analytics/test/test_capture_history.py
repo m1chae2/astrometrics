@@ -13,7 +13,8 @@ from typing import Any
 
 import pytest
 
-from astrometricslib import AppConfiguration, observing_night_id
+from astrometricslib import AppConfiguration
+from astrometricslib.reports import observing_night_id
 from wayfindinglib.analytics.capture_history import (
     BACKGROUND_METRIC,
     PINNED_FRAME_METRICS,

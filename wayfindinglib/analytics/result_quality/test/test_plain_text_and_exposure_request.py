@@ -8,7 +8,8 @@ free-text filter is normalized, and where each field of the row comes from.
 
 import pytest
 
-from astrometricslib import CaptureSetting, FilterType
+from astrometricslib import FilterType
+from astrometricslib.reports import CaptureSetting
 from wayfindinglib.analytics.result_quality.all_rules import ALL_RULES
 from wayfindinglib.analytics.result_quality.exposure_request import (
     exposure_request_from_statement,
@@ -212,7 +213,7 @@ def test_no_exposure_anywhere_makes_no_row() -> None:
 
 def test_a_diminishing_returns_statement_asks_for_the_doubling_frames() -> None:
     """The package row of a fixed-pattern-limited setting asks 44 frames."""
-    from astrometricslib import MeasurementReference
+    from astrometricslib.reports import MeasurementReference
     from wayfindinglib.analytics.result_quality import report_rules
     from wayfindinglib.analytics.result_quality.capture_overheads import CaptureOverheads
     from wayfindinglib.analytics.result_quality.noise_growth import TakeMoreResult

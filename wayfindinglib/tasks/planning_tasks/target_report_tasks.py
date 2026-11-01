@@ -45,15 +45,17 @@ from typing import Any
 
 from astrometricslib import (
     UNKNOWN_CAPTURE_SETTING_CAMERA,
-    AstrometricsError,
-    CaptureSetting,
-    MeasurementReference,
-    QualityMeasurement,
     Target,
     fold_exposure_lengths,
     frame_is_spectral,
-    observing_night_id,
     resolve_camera_profile,
+)
+from astrometricslib.exceptions import AstrometricsError
+from astrometricslib.reports import (
+    CaptureSetting,
+    MeasurementReference,
+    QualityMeasurement,
+    observing_night_id,
 )
 from wayfindinglib.analytics.result_quality.aggregates import (
     MeasuredNoiseCheck,
@@ -1810,7 +1812,8 @@ def _camera_spellings(camera_name: str, config: Any) -> list[str]:
     spellings : `list` [`str`]
         The catalog name first, then the profile's names, without repeats.
     """
-    from astrometricslib import ConfigurationError, resolve_camera_profile
+    from astrometricslib import resolve_camera_profile
+    from astrometricslib.exceptions import ConfigurationError
 
     names = [camera_name]
     try:

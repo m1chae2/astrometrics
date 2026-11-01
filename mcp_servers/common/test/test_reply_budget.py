@@ -13,7 +13,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from astrometricslib import MeasurementReference
+from astrometricslib.reports import MeasurementReference
 from mcp_servers.common.reply_budget import (
     MAXIMUM_REPLY_CHARACTERS,
     fit_reply,

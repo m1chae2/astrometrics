@@ -12,9 +12,9 @@ from typing import Any
 
 import pytest
 
-from astrometricslib import ConflictError, PermissionDeniedError
+from astrometricslib.exceptions import ConflictError, PermissionDeniedError
 from backend.services.observatory.guiding_service import GuidingService
-from wayfindinglib import LiveGuidingStatus
+from wayfindinglib._internal.control import LiveGuidingStatus
 
 
 class _Guiding:

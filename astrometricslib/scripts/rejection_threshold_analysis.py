@@ -16,7 +16,9 @@ import sys
 import time
 from typing import Any
 
-from astrometricslib import DATA_ERRORS, Astrometrics, AstrometricsError, configure_logging
+from astrometricslib import Astrometrics, configure_logging
+from astrometricslib._internal.errors import DATA_ERRORS
+from astrometricslib.exceptions import AstrometricsError
 
 SIGMA_GRID: list[tuple[float, float]] = [(2.0, 2.0), (2.5, 2.5), (3.0, 3.0), (3.5, 3.5), (4.0, 4.0)]
 FILTER_WFWHM_GRID: list[str | None] = [None, "90%", "80%"]

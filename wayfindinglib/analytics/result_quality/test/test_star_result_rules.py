@@ -8,7 +8,7 @@ all. Every statement must cite the star result it used, and the copies of the
 spectroscopy limits must equal the pipeline's.
 """
 
-from astrometricslib import PhotometryResult, SpectroscopyResult
+from astrometricslib._internal.results import PhotometryResult, SpectroscopyResult
 from wayfindinglib.analytics.result_quality import star_result_rules as sr
 from wayfindinglib.models.quality.statements import ActionClass, StatementKind
 from wayfindinglib.test.plain_wording_support import assert_plain_message_is_sound

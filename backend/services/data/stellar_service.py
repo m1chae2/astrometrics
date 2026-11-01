@@ -18,14 +18,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypeVar
 
-from astrometricslib import (
-    Astrometrics,
-    AstrometricsError,
-    ConflictError,
-    InvalidArgumentError,
-    StarQueryResult,
-    StellarObject,
-)
+from astrometricslib import Astrometrics, StarQueryResult, StellarObject
+from astrometricslib.exceptions import AstrometricsError, ConflictError, InvalidArgumentError
 from backend.services.data.deletion_archive import archive_record_before_delete
 from backend.services.infrastructure.heavy_read_limiter import DEFAULT_SHARED_WAIT_SECONDS, HeavyReadLimiter
 

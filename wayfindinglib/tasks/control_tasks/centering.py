@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib import AstrometricsError, PlateSolveFailedError
+from astrometricslib.exceptions import AstrometricsError, PlateSolveFailedError
 from wayfindinglib.models.session.correction_result import PointingCorrection
 from wayfindinglib.models.sky_position import SkyPosition
 from wayfindinglib.tasks.control_tasks import hardware_operations

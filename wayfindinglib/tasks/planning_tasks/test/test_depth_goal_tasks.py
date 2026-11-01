@@ -13,16 +13,10 @@ from typing import Any
 
 import pytest
 
-from astrometricslib import (
-    AppConfiguration,
-    CaptureSetting,
-    InvalidArgumentError,
-    MeasurementOrigin,
-    MeasurementStatus,
-    QualityMeasurement,
-    QualitySubject,
-    SubjectLevel,
-)
+from astrometricslib import AppConfiguration
+from astrometricslib._internal.quality import MeasurementOrigin, QualitySubject
+from astrometricslib.exceptions import InvalidArgumentError
+from astrometricslib.reports import CaptureSetting, MeasurementStatus, QualityMeasurement, SubjectLevel
 from wayfindinglib.analytics.result_quality.fixed_pattern_location import FixedPatternCause
 from wayfindinglib.analytics.test.frame_counting_helpers import FakeLibrary
 from wayfindinglib.drivers.butler import DiskButler

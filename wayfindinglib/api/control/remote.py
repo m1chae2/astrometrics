@@ -12,15 +12,9 @@ import builtins
 from collections.abc import Callable
 from typing import Any, Literal
 
-from astrometricslib import (
-    ExternalServiceError,
-    InvalidArgumentError,
-    NotFoundError,
-    Target,
-    background_job,
-    get_current_job,
-    registered_job,
-)
+from astrometricslib import Target
+from astrometricslib.exceptions import ExternalServiceError, InvalidArgumentError, NotFoundError
+from astrometricslib.jobs import background_job, get_current_job, registered_job
 from wayfindinglib.api.control.context import ControlChild
 from wayfindinglib.models.session.control_results import FrameStatusReport, FrameSyncResult, LogSyncResult
 

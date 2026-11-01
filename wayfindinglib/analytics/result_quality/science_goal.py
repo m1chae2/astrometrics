@@ -34,7 +34,8 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any
 
-from astrometricslib import CaptureSetting, Target, frame_is_spectral
+from astrometricslib import Target, frame_is_spectral
+from astrometricslib.reports import CaptureSetting
 from wayfindinglib.models.quality.efficiency import ScienceGoal
 
 EXTENDED_OBJECT_TYPES = frozenset({"messier", "ngc", "ic"})

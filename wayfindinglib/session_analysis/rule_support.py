@@ -24,7 +24,7 @@ things are the same in all three, so they live here:
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from astrometricslib import LimitTier, MeasurementReference, QualityLimit
+from astrometricslib.reports import LimitTier, MeasurementReference, QualityLimit
 from wayfindinglib.analytics.result_quality.plain_text import format_plain
 from wayfindinglib.analytics.result_quality.session_rules import SESSION_RULES_BY_NAME
 from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope

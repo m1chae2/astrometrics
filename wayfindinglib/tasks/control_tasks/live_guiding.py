@@ -30,7 +30,7 @@ from collections import deque
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from astrometricslib import ConflictError, ExternalServiceError, HardwareError
+from astrometricslib.exceptions import ConflictError, ExternalServiceError, HardwareError
 from wayfindinglib.analytics.guide_pulses import rms_arcsec
 from wayfindinglib.drivers.interfaces.guiding_driver import GuideCommands
 from wayfindinglib.models.session.telemetry import GuidingSample, GuidingStats, LiveGuidingStatus

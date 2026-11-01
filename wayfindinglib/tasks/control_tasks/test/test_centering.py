@@ -20,7 +20,7 @@ from typing import Any
 import pytest
 from astropy.wcs import WCS
 
-from astrometricslib import PlateSolveFailedError
+from astrometricslib.exceptions import PlateSolveFailedError
 from wayfindinglib.models.session.correction_config import CorrectionConfig
 from wayfindinglib.models.sky_position import SkyPosition
 from wayfindinglib.tasks.control_tasks import centering, hardware_operations

@@ -33,8 +33,9 @@ import logging
 import sys
 from typing import Any
 
-from astrometricslib import FITS_READ_ERRORS, Astrometrics, configure_logging
+from astrometricslib import Astrometrics, configure_logging
 from astrometricslib.drivers.fits_access import read_header
+from astrometricslib.exceptions import FITS_READ_ERRORS
 
 logger = logging.getLogger(__name__)
 

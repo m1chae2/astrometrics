@@ -36,13 +36,8 @@ of the quality code: this module imports the science library from its root.
 from collections.abc import Mapping
 from typing import Any
 
-from astrometricslib import (
-    AMBIGUOUS_RMS_GAP,
-    NO_GOOD_MATCH_RMS,
-    LimitTier,
-    MeasurementReference,
-    StarResultReference,
-)
+from astrometricslib import AMBIGUOUS_RMS_GAP, NO_GOOD_MATCH_RMS
+from astrometricslib.reports import LimitTier, MeasurementReference, StarResultReference
 from wayfindinglib.analytics.result_quality.plain_text import format_plain, spectral_type_phrase
 from wayfindinglib.analytics.result_quality.rules import build_limit
 from wayfindinglib.models.quality.rule import QualityRule

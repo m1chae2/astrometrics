@@ -18,8 +18,10 @@ import pytest
 from pydantic import ValidationError
 
 import wayfindinglib
-from astrometricslib import AppConfiguration, ExternalServiceError, InvalidArgumentError, NotFoundError
-from wayfindinglib import ObservationExecution, ObservationPlanning, ObservatoryControl, SkyPosition
+from astrometricslib import AppConfiguration
+from astrometricslib.exceptions import ExternalServiceError, InvalidArgumentError, NotFoundError
+from wayfindinglib import ObservationExecution, ObservationPlanning, ObservatoryControl
+from wayfindinglib._internal.control import SkyPosition
 from wayfindinglib.api.review import ObservationReview
 from wayfindinglib.drivers.butler import DiskButler
 

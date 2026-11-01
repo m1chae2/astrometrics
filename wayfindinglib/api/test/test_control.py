@@ -18,14 +18,15 @@ from pathlib import Path
 import pytest
 from pytest_mock import MockerFixture
 
-from astrometricslib import (
-    AppConfiguration,
+from astrometricslib import AppConfiguration
+from astrometricslib.exceptions import (
     ConfigurationError,
     ConflictError,
     InvalidArgumentError,
     PermissionDeniedError,
 )
-from wayfindinglib import ObservatoryControl, SkyPosition
+from wayfindinglib import ObservatoryControl
+from wayfindinglib._internal.control import SkyPosition
 from wayfindinglib.api.control import equipment, guiding, imaging, mount, safety
 from wayfindinglib.api.review import ObservationReview
 from wayfindinglib.drivers.butler import DiskButler
@@ -517,7 +518,7 @@ def test_refit_spectrum_downloads_guide_logs_through_the_task_module(
 
 def test_refit_spectrum_and_sync_logs_refuse_arguments_they_do_not_use(control: ObservatoryControl) -> None:
     """Verify an argument that the chosen source does not use is an error."""
-    from astrometricslib import InvalidArgumentError
+    from astrometricslib.exceptions import InvalidArgumentError
 
     with pytest.raises(InvalidArgumentError, match="session_id"):
         control.guiding.refit_spectrum(session_id="2026-09-24", file_path="/tmp/log.txt")
@@ -884,7 +885,7 @@ def test_remote_list_refuses_a_folder_that_is_not_listed(
     mocker: MockerFixture, control: ObservatoryControl
 ) -> None:
     """Verify a made-up folder name never reaches the remote shell."""
-    from astrometricslib import NotFoundError
+    from astrometricslib.exceptions import NotFoundError
     from wayfindinglib.tasks.control_tasks import remote_transfer_tasks
 
     control._context.remote_transfer_driver = mocker.Mock(resolve_remote_folder_name=lambda name: name)
@@ -898,7 +899,7 @@ def test_remote_list_refuses_a_folder_that_is_not_listed(
 
 def test_sync_frames_refuses_arguments_its_case_does_not_use(control: ObservatoryControl) -> None:
     """Verify sync_frames rejects arguments that the chosen case ignores."""
-    from astrometricslib import InvalidArgumentError
+    from astrometricslib.exceptions import InvalidArgumentError
 
     with pytest.raises(InvalidArgumentError, match="dry_run"):
         control.remote.sync_frames(dry_run=True)

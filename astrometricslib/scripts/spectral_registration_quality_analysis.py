@@ -39,9 +39,11 @@ from typing import Any
 import numpy as np
 from astropy.stats import sigma_clipped_stats
 
-from astrometricslib import DATA_ERRORS, Astrometrics, AstrometricsError, configure_logging
+from astrometricslib import Astrometrics, configure_logging
+from astrometricslib._internal.errors import DATA_ERRORS
 from astrometricslib.drivers.fits_access import collapse_to_2d, read_data
 from astrometricslib.drivers.siril_output_parsing import parse_seq_file, parse_zero_order_star
+from astrometricslib.exceptions import AstrometricsError
 from astrometricslib.foundation.paths import siril_work_directory
 from astrometricslib.pipelines.spectroscopy.utilities.registration_quality import (
     MIN_MATCHED_STAR_PAIRS,

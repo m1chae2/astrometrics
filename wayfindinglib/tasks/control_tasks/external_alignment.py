@@ -17,7 +17,7 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
-from astrometricslib import StorageError
+from astrometricslib.exceptions import StorageError
 from wayfindinglib.models.session.telemetry import ExternalAlignmentPoll, PolarAlignmentStatus
 
 if TYPE_CHECKING:

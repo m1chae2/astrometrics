@@ -22,7 +22,8 @@ import threading
 
 import pytest
 
-from astrometricslib import AppConfiguration, PermissionDeniedError
+from astrometricslib import AppConfiguration
+from astrometricslib.exceptions import PermissionDeniedError
 from wayfindinglib import Wayfinder
 from wayfindinglib.test import monitor_mode_support as support
 

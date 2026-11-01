@@ -10,7 +10,8 @@ temporary database and stand-in targets, never real data.
 
 import pytest
 
-from astrometricslib import AppConfiguration, ConflictError, InvalidArgumentError, NotFoundError
+from astrometricslib import AppConfiguration
+from astrometricslib.exceptions import ConflictError, InvalidArgumentError, NotFoundError
 from wayfindinglib.api.planning import ObservationPlanning
 from wayfindinglib.api.test.test_planning import _package, _planning, _site, _target, _telescope
 from wayfindinglib.drivers.butler import DiskButler, pick_session_for_night

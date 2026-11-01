@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, create_autospec
 
 import pytest
 
-from astrometricslib import InvalidArgumentError, PermissionDeniedError
+from astrometricslib.exceptions import InvalidArgumentError, PermissionDeniedError
 from backend.services.observatory.alignment_service import CENTERING_MAX_ITERATIONS, AlignmentService
 from wayfindinglib import ObservatoryControl
 from wayfindinglib.api.control.mount import MountControl

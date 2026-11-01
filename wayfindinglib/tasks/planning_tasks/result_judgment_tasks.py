@@ -20,7 +20,7 @@ Control.
 
 from typing import Any
 
-from astrometricslib import NotFoundError
+from astrometricslib.exceptions import NotFoundError
 from wayfindinglib.analytics.result_quality.judge_results import order_statements
 from wayfindinglib.analytics.result_quality.star_result_rules import judge_star_record
 from wayfindinglib.models.quality.statements import TargetStatement

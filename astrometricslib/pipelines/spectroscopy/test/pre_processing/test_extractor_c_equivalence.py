@@ -23,7 +23,7 @@ import os
 import numpy as np
 import pytest
 
-from astrometricslib import InvalidArgumentError
+from astrometricslib.exceptions import InvalidArgumentError
 from astrometricslib.pipelines.spectroscopy.pre_processing import spectrum_extractor as se
 
 _REQUIRE_C_EXTENSION = os.environ.get("ASTROMETRICS_REQUIRE_C_EXTENSION") == "1"

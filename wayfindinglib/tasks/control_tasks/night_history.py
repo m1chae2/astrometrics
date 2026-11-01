@@ -24,7 +24,7 @@ import json
 from datetime import date
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib import ConfigurationError, ConflictError, InvalidArgumentError, NotFoundError
+from astrometricslib.exceptions import ConfigurationError, ConflictError, InvalidArgumentError, NotFoundError
 from wayfindinglib.analytics import capture_history
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
 from wayfindinglib.models.session.night_list import NightListEntry

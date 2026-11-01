@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from astrometricslib import InvalidArgumentError
+from astrometricslib.exceptions import InvalidArgumentError
 from wayfindinglib.tasks.control_tasks import live_session_status_task as task
 
 _ANALYZE = """\

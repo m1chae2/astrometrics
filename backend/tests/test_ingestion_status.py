@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from astrometricslib import ConfigurationError, NotFoundError
+from astrometricslib.exceptions import ConfigurationError, NotFoundError
 from backend.services.processing.ingestion_service import IngestionService
 
 

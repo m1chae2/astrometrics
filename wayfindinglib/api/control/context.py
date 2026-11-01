@@ -468,7 +468,7 @@ class ControlContext:
         ConfigurationError
             If the protocol has no guiding driver.
         """
-        from astrometricslib import ConfigurationError
+        from astrometricslib.exceptions import ConfigurationError
         from wayfindinglib.drivers.indi.guiding_driver import IndiGuidingDriver
         from wayfindinglib.drivers.interfaces.registry import build_guiding_driver_registry
 

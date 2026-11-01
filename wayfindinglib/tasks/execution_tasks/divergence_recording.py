@@ -19,7 +19,7 @@ state at all (`Wayfinding_Library_Architecture.md` Section 2.3, "Safety
 is never shadowed").
 """
 
-from astrometricslib import InvalidArgumentError
+from astrometricslib.exceptions import InvalidArgumentError
 from wayfindinglib.models.policy.delegation import ObservatoryCapability
 from wayfindinglib.models.session.divergence import DivergenceRecord
 

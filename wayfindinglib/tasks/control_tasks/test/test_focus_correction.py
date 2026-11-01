@@ -9,7 +9,7 @@ position is approached from one direction -- the behavior
 
 import pytest
 
-from astrometricslib import InvalidArgumentError
+from astrometricslib.exceptions import InvalidArgumentError
 from wayfindinglib.models.equipment_and_site.focus_model import ApproachDirection
 from wayfindinglib.models.session.correction_config import CorrectionConfig
 from wayfindinglib.models.session.correction_result import FocusCurvePoint

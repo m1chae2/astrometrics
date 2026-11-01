@@ -14,7 +14,8 @@ from typing import Any
 
 import pytest
 
-from astrometricslib import AppConfiguration, CaptureSetting, FrameRecord, Target
+from astrometricslib import AppConfiguration, FrameRecord, Target
+from astrometricslib.reports import CaptureSetting
 from wayfindinglib.analytics.result_quality import library_inputs
 from wayfindinglib.analytics.result_quality.efficiency import FrameObservation, baseline_key
 from wayfindinglib.analytics.result_quality.library_inputs import (

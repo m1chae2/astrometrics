@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any
 from astropy.time import Time
 from pydantic import ValidationError
 
-from astrometricslib import (
+from astrometricslib.exceptions import (
     AstrometricsError,
     ConfigurationError,
     ConflictError,

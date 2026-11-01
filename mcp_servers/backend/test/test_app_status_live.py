@@ -11,7 +11,7 @@ import asyncio
 
 import pytest
 
-from astrometricslib import HardwareError, InvalidArgumentError
+from astrometricslib.exceptions import HardwareError, InvalidArgumentError
 from mcp_servers.backend import definition
 from mcp_servers.backend.definition import _unwrap, tool_app_controls, tool_app_status
 

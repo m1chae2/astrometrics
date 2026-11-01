@@ -20,20 +20,17 @@ from astropy.io import fits
 from astropy.table import Table
 from astropy.wcs import WCS
 
-from astrometricslib import (
-    Astrometrics,
-    FilterType,
-    FrameRecord,
-    InvalidArgumentError,
+from astrometricslib import Astrometrics, FilterType, FrameRecord, Target
+from astrometricslib._internal.drivers import (
     PlateSolveDriver,
     SimbadDriver,
     StackingDriver,
     StackRunResult,
     StackSettings,
-    Target,
 )
 from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.drivers.interfaces import PipelineSteps
+from astrometricslib.exceptions import InvalidArgumentError
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.quality.quality_summary import StackingPipelineQualityMetrics, StackQualitySummary
 from astrometricslib.test.synthetic import SyntheticStar, make_photometry_fits
@@ -397,7 +394,7 @@ def test_processing_several_targets_refuses_injected_drivers(driver_name: str) -
 
 def test_open_in_siril_uses_the_stacking_driver_and_refuses_one_without_a_window() -> None:
     """`open_in_siril` hands the path to the stacking driver's window."""
-    from astrometricslib import ProcessingError
+    from astrometricslib.exceptions import ProcessingError
 
     class WindowedStacker(FakeStacker):
         """A fake stacking program that records the files it shows."""

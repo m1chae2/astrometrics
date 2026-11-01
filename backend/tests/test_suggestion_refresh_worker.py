@@ -21,7 +21,8 @@ from backend.services.infrastructure.sync_service import SyncService
 from backend.services.observatory.equipment_service import EquipmentService
 from backend.services.observatory.suggestion_refresh_worker import SuggestionRefreshWorker
 from backend.services.processing.quality_measurement_service import QualityMeasurementService
-from wayfindinglib import ObservationPlanning, PackageChange
+from wayfindinglib import ObservationPlanning
+from wayfindinglib._internal.planning import PackageChange
 
 
 class _Sockets:

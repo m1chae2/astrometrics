@@ -18,7 +18,8 @@ import threading
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib import AppConfiguration, Astrometrics, ConfigurationError, NotFoundError
+from astrometricslib import AppConfiguration, Astrometrics
+from astrometricslib.exceptions import ConfigurationError, NotFoundError
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.policy.device_state import DeviceSummaryState
 from wayfindinglib.models.policy.recovery import FaultRecord, RecoveryPolicy
@@ -169,7 +170,7 @@ class ObservationExecution:
         from wayfindinglib.tasks.execution_tasks.queue_runner import run_queue
 
         if deps is None:
-            from astrometricslib import ConfigurationError
+            from astrometricslib.exceptions import ConfigurationError
             from wayfindinglib.tasks.execution_tasks.imaging_queue import imaging_dependencies
 
             if self._control is None:

@@ -28,7 +28,7 @@ night's, when the guide signal was poor, or when the statement rests on a
 proxy.
 """
 
-from astrometricslib import QualityLimit
+from astrometricslib.reports import QualityLimit
 from wayfindinglib.analytics.performance_envelope import MINIMUM_SAMPLES_PER_SESSION
 from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
 from wayfindinglib.models.quality.statements import Confidence, ProposedAction, TargetStatement

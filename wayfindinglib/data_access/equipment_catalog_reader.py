@@ -35,7 +35,8 @@ back to constructing exactly one `Telescope` from the flat
 import logging
 from typing import Any
 
-from astrometricslib import AppConfiguration, ConfigurationError
+from astrometricslib import AppConfiguration
+from astrometricslib.exceptions import ConfigurationError
 from wayfindinglib.models.equipment_and_site.driver_protocols import (
     CAMERA_PROTOCOLS,
     FILTER_WHEEL_PROTOCOLS,

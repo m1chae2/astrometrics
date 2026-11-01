@@ -17,7 +17,7 @@ from typing import Any
 
 from mcp.types import Resource
 
-from astrometricslib import (
+from astrometricslib.exceptions import (
     AstrometricsError,
     ErrorInfo,
     ExternalServiceError,
@@ -25,9 +25,9 @@ from astrometricslib import (
     NotFoundError,
     PermissionDeniedError,
     error_from_info,
-    new_request_id,
     to_error_info,
 )
+from astrometricslib.jobs import new_request_id
 from backend.services.infrastructure.agent_code_policy import check_agent_code
 from backend.services.infrastructure.destructive_guard import destructive_rpc_reason
 from mcp_servers.backend.mcp_http import post_to_backend

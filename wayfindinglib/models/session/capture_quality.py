@@ -24,7 +24,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from astrometricslib import MeasurementReference
+from astrometricslib.reports import MeasurementReference
 from wayfindinglib.models.quality.statements import TargetStatement
 
 CAPTURE_ANALYSIS_VERSION = "1.0.0"

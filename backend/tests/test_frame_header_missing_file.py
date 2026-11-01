@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from astrometricslib import NotFoundError
+from astrometricslib.exceptions import NotFoundError
 from backend.services.data.target_service import TargetService
 
 

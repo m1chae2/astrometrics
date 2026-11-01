@@ -9,7 +9,7 @@ or filter change needs `CAPTURE_ORCHESTRATION` to be `AUTHORITATIVE`; a
 focuser move needs `AUTOFOCUS`.
 """
 
-from astrometricslib import background_job, get_current_job, registered_job
+from astrometricslib.jobs import background_job, get_current_job, registered_job
 from wayfindinglib.api.control.context import ControlChild
 from wayfindinglib.models.control_status import ImagingStatus
 from wayfindinglib.models.equipment_and_site.focus_model import FocusModel

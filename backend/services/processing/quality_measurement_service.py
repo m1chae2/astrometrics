@@ -35,7 +35,8 @@ import threading
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any, Protocol
 
-from astrometricslib import AstrometricsError, QualityMeasurement
+from astrometricslib.exceptions import AstrometricsError
+from astrometricslib.reports import QualityMeasurement
 
 logger = logging.getLogger(__name__)
 

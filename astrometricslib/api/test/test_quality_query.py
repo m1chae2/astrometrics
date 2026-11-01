@@ -321,7 +321,7 @@ def test_the_aperture_set_identity_row_is_read_back_through_the_public_query(
     quality: QualityRecords, tmp_path: Path
 ) -> None:
     """A stored identity row is read back and turned into its text."""
-    from astrometricslib import aperture_identity_from_number, aperture_identity_to_number
+    from astrometricslib._internal.stacking import aperture_identity_from_number, aperture_identity_to_number
 
     store = QualityStore(str(tmp_path / "astrometrics.db"))
     subject = QualitySubject(level=SubjectLevel.STACK, subject_id="M13/M13_Stacked.fits", target_id="M13")

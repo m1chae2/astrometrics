@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from astrometricslib import LimitTier, MeasurementReference, QualityLimit
+from astrometricslib.reports import LimitTier, MeasurementReference, QualityLimit
 from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
 from wayfindinglib.models.quality.statements import Confidence, Severity
 from wayfindinglib.models.session.capture_quality import (

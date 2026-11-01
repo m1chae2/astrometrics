@@ -10,7 +10,7 @@ from datetime import date
 
 import pytest
 
-from astrometricslib import NotFoundError
+from astrometricslib.exceptions import NotFoundError
 from backend.services.observatory.execution_service import ExecutionService
 
 

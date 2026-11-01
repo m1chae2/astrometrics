@@ -12,7 +12,8 @@ import math
 
 import pytest
 
-from wayfindinglib import AlignmentAttempt, group_alignment_attempts
+from wayfindinglib import group_alignment_attempts
+from wayfindinglib._internal.review import AlignmentAttempt
 from wayfindinglib.analytics.alignment_sessions import mean_position_deg, pooled_jitter_arcsec
 
 

@@ -19,22 +19,18 @@ from typing import Any
 
 import pytest
 
-from astrometricslib import (
-    AppConfiguration,
-    Astrometrics,
-    CaptureSetting,
-    MeasurementOrigin,
-    MeasurementStatus,
-    QualityMeasurement,
-    QualityQueryResult,
-    QualitySubject,
-    SetAsideFrame,
-    SubjectLevel,
-    Target,
-    frame_subject_id,
-)
+from astrometricslib import AppConfiguration, Astrometrics, Target
+from astrometricslib._internal.frames import frame_subject_id
+from astrometricslib._internal.quality import MeasurementOrigin, QualityQueryResult, QualitySubject
 from astrometricslib.models.catalog_queries import CalibrationQueryResult
 from astrometricslib.models.target import FrameRecord
+from astrometricslib.reports import (
+    CaptureSetting,
+    MeasurementStatus,
+    QualityMeasurement,
+    SetAsideFrame,
+    SubjectLevel,
+)
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.planning.target_report import (
     ForecastBasis,

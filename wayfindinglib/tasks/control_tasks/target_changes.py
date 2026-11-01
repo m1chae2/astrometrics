@@ -34,7 +34,8 @@ import astropy.units as u
 from astropy.coordinates import AltAz, SkyCoord
 from astropy.time import Time
 
-from astrometricslib import InvalidArgumentError, parse_coordinate_string
+from astrometricslib import parse_coordinate_string
+from astrometricslib.exceptions import InvalidArgumentError
 from wayfindinglib.astronomy.coordinate_transforms import angular_separation_arcsec, earth_location
 from wayfindinglib.models.session.night_list import TargetChange
 

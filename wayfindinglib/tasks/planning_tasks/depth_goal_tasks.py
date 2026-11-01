@@ -15,7 +15,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from astrometricslib import AstrometricsError, InvalidArgumentError, SubjectLevel
+from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError
+from astrometricslib.reports import SubjectLevel
 from wayfindinglib.analytics.depth_goal import (
     DEFAULT_DEPTH_LEVEL,
     DEPTH_METRICS,

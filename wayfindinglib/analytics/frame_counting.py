@@ -42,16 +42,9 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from astrometricslib import (
-    Astrometrics,
-    AstrometricsError,
-    FilterType,
-    FrameRecord,
-    NotFoundError,
-    QualityMeasurement,
-    SubjectLevel,
-    frame_subject_id,
-)
+from astrometricslib import Astrometrics, FilterType, FrameRecord, frame_subject_id
+from astrometricslib.exceptions import AstrometricsError, NotFoundError
+from astrometricslib.reports import QualityMeasurement, SubjectLevel
 from wayfindinglib.analytics.result_quality.capture_overheads import EXPOSURE_MATCH_SECONDS
 from wayfindinglib.models.planning.observation_package import ExposureRequest, FrameType
 

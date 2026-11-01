@@ -25,7 +25,8 @@ from unittest.mock import patch
 import pytest
 
 from astrometricslib import AppConfiguration
-from wayfindinglib import ObservatoryControl, SkyPosition
+from wayfindinglib import ObservatoryControl
+from wayfindinglib._internal.control import SkyPosition
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.drivers.control_record_store import ControlRecordStore
 from wayfindinglib.drivers.indi_interface import IndiInterface

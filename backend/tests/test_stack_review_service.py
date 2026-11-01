@@ -15,7 +15,9 @@ from typing import Any
 
 import pytest
 
-from astrometricslib import InvalidArgumentError, PreviewRemakeResult, SetAsideFrameRecord
+from astrometricslib._internal.results import PreviewRemakeResult
+from astrometricslib.exceptions import InvalidArgumentError
+from astrometricslib.reports import SetAsideFrameRecord
 from backend.container import container
 from backend.public_interface import RPC_METHODS
 from backend.routers.rpc_router import rpc_registry
@@ -171,7 +173,7 @@ def test_the_set_aside_reply_keeps_the_stored_kind_and_the_missing_reason(
 
 def test_the_comparison_asks_for_the_previous_stack_only() -> None:
     """The comparison is with the previous stack, run as a job."""
-    from astrometricslib import StackQualityReport
+    from astrometricslib.reports import StackQualityReport
 
     assert "quality:measure_stack" in RPC_METHODS
     assert rpc_registry._handlers["quality:measure_stack"] == (

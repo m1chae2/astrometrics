@@ -173,7 +173,7 @@ def test_a_run_the_library_skipped_sends_no_event() -> None:
 
 def test_a_failed_run_is_logged_and_the_target_can_be_started_again() -> None:
     """A library error does not stop a later start."""
-    from astrometricslib import StorageError
+    from astrometricslib.exceptions import StorageError
 
     processing, sockets = _Processing(), _Sockets()
 
@@ -488,7 +488,7 @@ def test_the_series_counts_the_odd_even_difference_rows_by_default() -> None:
 
 def test_a_failed_subset_job_is_logged_and_sends_no_event() -> None:
     """A library error on the thread is caught and nothing is announced."""
-    from astrometricslib import NotFoundError
+    from astrometricslib.exceptions import NotFoundError
 
     processing, sockets = _SubsetProcessing(), _Sockets()
 

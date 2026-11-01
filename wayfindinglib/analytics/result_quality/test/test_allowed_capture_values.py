@@ -106,7 +106,7 @@ def test_camera_names_match_through_every_spelling() -> None:
 
 def test_the_filters_for_a_camera_come_from_that_cameras_library_settings() -> None:
     """Only settings of the named camera give filters."""
-    from astrometricslib import CaptureSetting
+    from astrometricslib.reports import CaptureSetting
     from wayfindinglib.analytics.result_quality.allowed_capture_values import (
         allowed_capture_values_for_camera,
     )

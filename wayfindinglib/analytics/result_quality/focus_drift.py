@@ -57,7 +57,7 @@ from enum import StrEnum
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 
-from astrometricslib import CaptureSetting, MeasurementReference
+from astrometricslib.reports import CaptureSetting, MeasurementReference
 from wayfindinglib.analytics.result_quality.plain_text import format_plain, plain_missing_data
 from wayfindinglib.analytics.result_quality.rules import rule_by_name
 from wayfindinglib.models.quality.statements import (

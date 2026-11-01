@@ -7,7 +7,8 @@ an earlier server left open, and serves one client over stdin and stdout.
 
 import logging
 
-from astrometricslib import close_interrupted_jobs, configure_logging, get_configuration
+from astrometricslib import configure_logging, get_configuration
+from astrometricslib.jobs import close_interrupted_jobs
 from mcp_servers.astrometrics_core.definition import MANIFEST_PATH, build_registry
 from mcp_servers.common.profile import GAP_REPORT_GUIDANCE
 from mcp_servers.common.server import run_server

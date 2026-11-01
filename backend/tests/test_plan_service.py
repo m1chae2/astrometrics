@@ -25,12 +25,9 @@ from backend.routers import rpc_router
 from backend.routers.rpc_router import rpc_registry
 from backend.services.observatory.plan_service import PlanService
 from backend.services.rpc_protocol import RPCRequest
-from wayfindinglib import (
-    ObservationSession,
-    PlanChange,
-    PlanChangeItem,
-    PlanRevisionConflictError,
-)
+from wayfindinglib import ObservationSession
+from wayfindinglib._internal.planning import PlanChange, PlanChangeItem
+from wayfindinglib.exceptions import PlanRevisionConflictError
 
 
 class _Sockets:

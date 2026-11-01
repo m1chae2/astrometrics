@@ -10,19 +10,15 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
-from astrometricslib import (
-    FilterType,
-    FrameRecord,
+from astrometricslib import FilterType, FrameRecord, Target
+from astrometricslib._internal.frames import frame_subject_id
+from astrometricslib._internal.quality import MeasurementOrigin, QualityQueryResult, QualitySubject
+from astrometricslib.reports import (
     LimitTier,
-    MeasurementOrigin,
     MeasurementStatus,
     QualityLimit,
     QualityMeasurement,
-    QualityQueryResult,
-    QualitySubject,
     SubjectLevel,
-    Target,
-    frame_subject_id,
 )
 from wayfindinglib.analytics.frame_counting import EquipmentNames
 

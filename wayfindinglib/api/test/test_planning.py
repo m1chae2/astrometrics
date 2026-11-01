@@ -14,14 +14,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib import (
-    AppConfiguration,
-    InvalidArgumentError,
-    NotFoundError,
-    QualityQueryResult,
-    RestoreReport,
-    Target,
-)
+from astrometricslib import AppConfiguration, Target
+from astrometricslib._internal.quality import QualityQueryResult
+from astrometricslib._internal.results import RestoreReport
+from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
 from astrometricslib.models.catalog_queries import CalibrationQueryResult
 from wayfindinglib.api.planning import ObservationPlanning
 from wayfindinglib.drivers.butler import DiskButler
@@ -613,7 +609,7 @@ def test_an_empty_session_defaults_to_the_site_and_active_equipment(
     """With no equipment given, the site and the active rig are used."""
     from types import SimpleNamespace
 
-    from astrometricslib import ConfigurationError
+    from astrometricslib.exceptions import ConfigurationError
     from wayfindinglib.data_access import equipment_catalog_reader
 
     planning = _planning(isolated_butler)

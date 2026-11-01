@@ -23,7 +23,8 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
-from astrometricslib import ConfigurationError, HardwareError, InvalidArgumentError, get_current_job
+from astrometricslib.exceptions import ConfigurationError, HardwareError, InvalidArgumentError
+from astrometricslib.jobs import get_current_job
 from wayfindinglib.analytics.guide_pulses import arcsec_to_pulse_ms
 from wayfindinglib.models.planning.observation_package import DitherConfig
 from wayfindinglib.models.session.capture_result import CaptureResult

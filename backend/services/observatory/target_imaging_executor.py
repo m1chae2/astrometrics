@@ -23,7 +23,7 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
-from astrometricslib import observing_night_id
+from astrometricslib.reports import observing_night_id
 from backend.services.observatory.plan_service import PlanService
 from wayfindinglib import ObservationSession, QueueRequest, StartTimeMode, Wayfinder
 

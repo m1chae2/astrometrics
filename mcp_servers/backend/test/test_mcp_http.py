@@ -6,7 +6,7 @@ instead of returning an error dictionary.
 
 import pytest
 
-from astrometricslib import ExternalServiceError, PermissionDeniedError
+from astrometricslib.exceptions import ExternalServiceError, PermissionDeniedError
 from mcp_servers.backend import mcp_http
 
 

@@ -10,7 +10,7 @@ exposure is sent. The real guide camera is not used.
 import numpy as np
 import pytest
 
-from astrometricslib import ExternalServiceError
+from astrometricslib.exceptions import ExternalServiceError
 from wayfindinglib import ObservatoryControl
 from wayfindinglib.analytics.performance_envelope import SensorLimits
 from wayfindinglib.api.test.capture_night_helpers import Library, add_frames

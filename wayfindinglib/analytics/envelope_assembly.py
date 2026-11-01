@@ -24,12 +24,8 @@ from typing import Any
 
 import numpy as np
 
-from astrometricslib import (
-    FITS_READ_ERRORS,
-    AstrometricsError,
-    ConfigurationError,
-    resolve_camera_profile,
-)
+from astrometricslib import resolve_camera_profile
+from astrometricslib.exceptions import FITS_READ_ERRORS, AstrometricsError, ConfigurationError
 from wayfindinglib.analytics.capture_history import (
     collect_capture_baseline_values,
     collect_capture_frames,

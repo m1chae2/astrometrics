@@ -24,19 +24,14 @@ from unittest.mock import create_autospec
 
 import pytest
 
-from astrometricslib import InvalidArgumentError
+from astrometricslib.exceptions import InvalidArgumentError
 from backend.public_interface import RPC_METHODS, UI_EVENTS
 from backend.routers.rpc_router import rpc_registry
 from backend.services.observatory.plan_service import PlanService
-from wayfindinglib import (
-    ObservationPackage,
-    ObservationPlanning,
-    ObservationSession,
-    PackageStatus,
-    PlanChange,
-    PlanChangeItem,
-    PlanRevisionConflictError,
-)
+from wayfindinglib import ObservationPackage, ObservationPlanning, ObservationSession
+from wayfindinglib._internal.planning import PlanChange, PlanChangeItem
+from wayfindinglib.exceptions import PlanRevisionConflictError
+from wayfindinglib.reports import PackageStatus
 
 
 class _Sockets:

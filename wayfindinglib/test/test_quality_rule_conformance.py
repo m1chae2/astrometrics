@@ -37,7 +37,8 @@ from pathlib import Path
 
 import pytest
 
-from astrometricslib import Astrometrics, MetricPurpose, MetricSpec
+from astrometricslib import Astrometrics
+from astrometricslib._internal.quality import MetricPurpose, MetricSpec
 from wayfindinglib.analytics.result_quality.all_rules import ALL_RULES
 from wayfindinglib.analytics.result_quality.judge_results import PLAIN_RULE_NAMES
 from wayfindinglib.analytics.result_quality.rules import DEFERRED_RULES, RESULT_QUALITY_RULES

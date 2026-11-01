@@ -10,7 +10,7 @@ from typing import Any
 
 import httpx
 
-from astrometricslib import ExternalServiceError, PermissionDeniedError
+from astrometricslib.exceptions import ExternalServiceError, PermissionDeniedError
 
 API_BASE = os.getenv("ASTROMETRICS_API_BASE", "http://127.0.0.1:5000")
 

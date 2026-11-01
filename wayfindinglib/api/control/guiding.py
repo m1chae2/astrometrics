@@ -15,7 +15,7 @@ need `AUTOGUIDING` to be `AUTHORITATIVE`.
 import threading
 from typing import Any
 
-from astrometricslib import ConfigurationError, ExternalServiceError
+from astrometricslib.exceptions import ConfigurationError, ExternalServiceError
 from wayfindinglib.api.control.context import ControlChild
 from wayfindinglib.models.control_status import GuidingStatus
 from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCalibration
@@ -469,7 +469,7 @@ class GuidingControl(ControlChild):
         InvalidArgumentError
             If an argument is given that the chosen source does not use.
         """
-        from astrometricslib import InvalidArgumentError
+        from astrometricslib.exceptions import InvalidArgumentError
         from wayfindinglib.tasks.control_tasks import guiding_log_ingestion
 
         context = self._context

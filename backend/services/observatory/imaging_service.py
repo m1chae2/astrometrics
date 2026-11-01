@@ -11,7 +11,7 @@ import logging
 import threading
 from typing import Any
 
-from astrometricslib import registered_job
+from astrometricslib.jobs import registered_job
 from backend.services.processing.job_service import JobService
 from wayfindinglib import ObservatoryControl
 

@@ -15,7 +15,8 @@ from typing import Any
 
 import pytest
 
-from astrometricslib import AppConfiguration, FrameRecord, NotFoundError
+from astrometricslib import AppConfiguration, FrameRecord
+from astrometricslib.exceptions import NotFoundError
 from wayfindinglib.analytics.result_quality.efficiency import STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC
 from wayfindinglib.analytics.result_quality.judge_results import needs_attention
 from wayfindinglib.analytics.result_quality.science_goal import science_goal_for_setting
@@ -244,7 +245,7 @@ def test_a_night_with_only_guiding_still_answers(monkeypatch: pytest.MonkeyPatch
 
 def test_the_night_review_fits_focus_drift_and_estimates_polar_alignment() -> None:
     """Focus drift and polar alignment are worked out for the night."""
-    from astrometricslib import frame_subject_id
+    from astrometricslib._internal.frames import frame_subject_id
     from wayfindinglib.models.session.ekos_session import EkosAutofocusRun, EkosSessionContext
     from wayfindinglib.models.session.guiding_run import GuidingRunSummary
 
@@ -303,7 +304,8 @@ def test_a_night_without_rotation_or_focus_rows_says_so() -> None:
 
 def test_a_target_with_two_goals_states_each_setting_goal() -> None:
     """Decision U2: a grating and an imaging setting are judged apart."""
-    from astrometricslib import CaptureSetting, Target
+    from astrometricslib import Target
+    from astrometricslib.reports import CaptureSetting
     from wayfindinglib.analytics.result_quality.efficiency import FrameObservation
     from wayfindinglib.models.quality.efficiency import ScienceGoal
 

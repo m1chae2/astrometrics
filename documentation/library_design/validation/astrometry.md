@@ -118,7 +118,7 @@ print("scatter:", np.median(np.hypot(d_ra - np.median(d_ra), d_dec - np.median(d
 - **Data you need:** Solved stacks with `DATE-OBS`, a few hundred or more detected stars that Gaia lists, and if possible one stack with few frames (a short stack is where the solver tends to be furthest off).
 - **Procedure:**
   1. Run astrometry on each stack through the public API. The refit runs inside it.
-  2. Read the refit's results from the quality summary: `gaia_fit_rms_before_arcsec`, `gaia_fit_rms_arcsec`, `gaia_fit_star_count` and `wcs_refinement_shift_arcsec`, and the flags. <!-- impl: astrometricslib.AstrometryPipelineQualityMetrics -->
+  2. Read the refit's results from the quality summary: `gaia_fit_rms_before_arcsec`, `gaia_fit_rms_arcsec`, `gaia_fit_star_count` and `wcs_refinement_shift_arcsec`, and the flags. <!-- impl: astrometricslib.reports.AstrometryPipelineQualityMetrics -->
   3. For an independent view, repeat the Gaia check of [AST-01](#ast-01) (2-D Gaussian centers, Gaia stars brighter than G = 16 moved to the image date) with the solver's solution and with the refined one, and compare the constant shift and the scatter.
   4. To look at the refit alone, call it directly on your own centroids and Gaia stars (internal function, not part of the public API; may change). <!-- impl: astrometricslib.pipelines.astrometry.processing.wcs_refinement.refine_wcs_with_gaia -->
 
@@ -213,8 +213,8 @@ print(refinement.applied, refinement.star_count, np.median(errors), errors.max()
 - **Data you need:** A library of solved stacks with quality summaries that carry a plate scale and a star width. Include at least one known bad solve if you have one.
 - **Procedure:**
   1. Run astrometry on each stack (public API).
-  2. For each, divide the residual by the star width in arcseconds: residual / (`plate_scale_arcsec_per_pixel` × `star_fwhm_px`). Do this for each of the three residuals the gate can use. <!-- impl: astrometricslib.AstrometryPipelineQualityMetrics -->
-  3. Read the gate itself with `gate("astrometric_residual")` on the quality summary. <!-- impl: astrometricslib.AstrometryQualitySummary.gate -->
+  2. For each, divide the residual by the star width in arcseconds: residual / (`plate_scale_arcsec_per_pixel` × `star_fwhm_px`). Do this for each of the three residuals the gate can use. <!-- impl: astrometricslib.reports.AstrometryPipelineQualityMetrics -->
+  3. Read the gate itself with `gate("astrometric_residual")` on the quality summary. <!-- impl: astrometricslib.reports.AstrometryQualitySummary.gate -->
 
 ```python
 from astrometricslib import Astrometrics
@@ -618,7 +618,8 @@ import time
 import numpy as np
 from astropy.io import fits
 
-from astrometricslib import Astrometrics, PlateSolveFailedError
+from astrometricslib import Astrometrics
+from astrometricslib.exceptions import PlateSolveFailedError
 
 astrometrics = Astrometrics()
 for path in ["/path/to/frame1.fits", "/path/to/frame2.fits"]:
@@ -632,7 +633,6 @@ for path in ["/path/to/frame1.fits", "/path/to/frame2.fits"]:
         solved = False
     print(path, count, "stars,", "solved" if solved else "not solved", round(time.monotonic() - start), "s")
 ```
-
 - **Acceptance criterion:** Not recorded (set after the result).
 - **What to look at:** The detection count against whether the local solve succeeded and how long it took, in seconds.
 - **Our result:** A real underexposed M 13 reference frame (date not recorded): a hinted and a blind local solve each ran for their full 300 s time limit with too few detected sources, and neither solved.

@@ -10,7 +10,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib import FrameRecord, FrameSelection, NotFoundError, Target
+from astrometricslib import FrameRecord, Target
+from astrometricslib._internal.frames import FrameSelection
+from astrometricslib.exceptions import NotFoundError
 from wayfindinglib.tasks.control_tasks.frame_guiding import link_frames_to_guiding
 
 

@@ -22,7 +22,8 @@ import statistics
 from collections import defaultdict
 from collections.abc import Sequence
 
-from astrometricslib import SATURATED_BLOB_MINIMUM_PIXELS, SATURATED_FRAME_FRACTION, MeasurementReference
+from astrometricslib import SATURATED_BLOB_MINIMUM_PIXELS, SATURATED_FRAME_FRACTION
+from astrometricslib.reports import MeasurementReference
 from wayfindinglib.analytics.capture_history import (
     SATURATED_FRACTION_METRIC,
     STAR_ELONGATION_METRIC,

@@ -10,15 +10,8 @@ import sqlite3
 from collections.abc import Callable
 from typing import Any
 
-from astrometricslib import (
-    AstrometricsError,
-    FilterType,
-    InvalidArgumentError,
-    NotFoundError,
-    ReindexReport,
-    Target,
-    preview_path_for,
-)
+from astrometricslib import FilterType, ReindexReport, Target, preview_path_for
+from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError, NotFoundError
 from backend.services.data.deletion_archive import archive_record_before_delete
 from backend.services.data.image_service import ImageService
 from backend.services.infrastructure.phone_share import send_file_to_phone

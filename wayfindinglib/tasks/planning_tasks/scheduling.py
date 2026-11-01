@@ -72,7 +72,8 @@ def _target_coordinates(astrometrics: Any, target_id: str) -> tuple[float, float
     NotFoundError
         Raised if `target_id` does not resolve to an existing target.
     """
-    from astrometricslib import NotFoundError, parse_coordinate_string
+    from astrometricslib import parse_coordinate_string
+    from astrometricslib.exceptions import NotFoundError
 
     target = astrometrics.targets.get(target_id)
     if not target:

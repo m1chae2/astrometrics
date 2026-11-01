@@ -23,12 +23,8 @@ import threading
 import time
 from typing import Any
 
-from astrometricslib import (
-    ConfigurationError,
-    ExternalServiceError,
-    require_mounted_storage,
-    scratch_directory,
-)
+from astrometricslib.drivers import require_mounted_storage, scratch_directory
+from astrometricslib.exceptions import ConfigurationError, ExternalServiceError
 from wayfindinglib.drivers.interfaces.remote_transfer_driver import RemoteTransferDriver
 
 logger = logging.getLogger(__name__)

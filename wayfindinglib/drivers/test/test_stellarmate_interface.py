@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from astrometricslib import ExternalServiceError
+from astrometricslib.exceptions import ExternalServiceError
 from wayfindinglib.drivers.stellarmate_interface import StellarMateInterface
 
 
@@ -362,7 +362,7 @@ def test_download_refuses_and_creates_nothing_when_the_frames_drive_is_missing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify a download below an unmounted mount point makes no folders."""
-    from astrometricslib import StorageNotMountedError
+    from astrometricslib.exceptions import StorageNotMountedError
 
     mount_point = tmp_path / "nas"
 

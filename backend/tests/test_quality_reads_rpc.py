@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, create_autospec
 
 import pytest
 
-from astrometricslib import InvalidArgumentError
+from astrometricslib.exceptions import InvalidArgumentError
 from backend.public_interface import RPC_METHODS
 from backend.routers.rpc_router import rpc_registry
 from backend.services.data.stellar_service import StellarService

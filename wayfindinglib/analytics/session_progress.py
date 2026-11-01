@@ -17,7 +17,7 @@ Register row WAY-D84 holds the window.
 
 from datetime import UTC, date, datetime
 
-from astrometricslib import observing_night_id
+from astrometricslib.reports import observing_night_id
 from wayfindinglib.analytics.frame_counting import (
     EquipmentNames,
     RequestCount,

@@ -8,14 +8,8 @@ from collections.abc import Iterator
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib import (
-    FITS_READ_ERRORS,
-    AppConfiguration,
-    Astrometrics,
-    AstrometricsError,
-    FilterType,
-    InvalidArgumentError,
-)
+from astrometricslib import AppConfiguration, Astrometrics, FilterType
+from astrometricslib.exceptions import FITS_READ_ERRORS, AstrometricsError, InvalidArgumentError
 from backend.services.infrastructure.base_service import BaseBackgroundService
 
 if TYPE_CHECKING:
@@ -237,7 +231,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
         # and the shared "astrometricslib" logger that every module deeper
         # in the pipeline logs through, then removes and closes them again
         # when the work finishes. See astrometricslib.foundation.jobs.runner.
-        from astrometricslib import capture_job_logs
+        from astrometricslib.jobs import capture_job_logs
 
         job = self._job_service.get_job(job_id) if self._job_service else None
 

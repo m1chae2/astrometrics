@@ -7,7 +7,7 @@ from simulated sequences -- the behavior
 
 import pytest
 
-from astrometricslib import ProcessingError
+from astrometricslib.exceptions import ProcessingError
 from wayfindinglib.tasks.control_tasks.guider_calibration_tasks import compute_guider_calibration
 
 

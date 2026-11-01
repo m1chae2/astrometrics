@@ -21,12 +21,11 @@ from astrometricslib import (
     DATA_ERRORS,
     ONLINE_QUERY_ERRORS,
     Astrometrics,
-    AstrometricsError,
-    InvalidArgumentError,
     StellarObject,
     Target,
     parse_coordinate_string,
 )
+from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError
 from wayfindinglib.drivers.catalog import (
     CatalogDriver,
     DeepStarCatalogDriver,

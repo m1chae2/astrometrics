@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from astrometricslib import NotFoundError
+from astrometricslib.exceptions import NotFoundError
 from backend.services.data import target_service
 from backend.services.data.target_service import TargetService
 

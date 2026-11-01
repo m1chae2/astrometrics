@@ -24,7 +24,8 @@ from typing import Any
 
 import pytest
 
-from astrometricslib import AppConfiguration, ConflictError
+from astrometricslib import AppConfiguration
+from astrometricslib.exceptions import ConflictError
 from wayfindinglib.drivers.indi.mount_controller import MountController
 
 

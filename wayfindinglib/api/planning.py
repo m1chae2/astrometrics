@@ -37,20 +37,16 @@ from pydantic import ValidationError
 from astrometricslib import (
     AppConfiguration,
     Astrometrics,
-    AstrometricsError,
     FilterType,
-    InvalidArgumentError,
-    NotFoundError,
     StellarObject,
     Target,
-    background_job,
     check_choice,
     check_include,
-    get_current_job,
-    registered_job,
     reject_unused_arguments,
     resolve_target,
 )
+from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError, NotFoundError
+from astrometricslib.jobs import background_job, get_current_job, registered_job
 from wayfindinglib.analytics.frame_counting import (
     EquipmentNames,
     TargetFrameReader,
@@ -396,7 +392,7 @@ class ObservationPlanning:
         ConfigurationError
             If no telescope or camera is given and none is active.
         """
-        from astrometricslib import ConfigurationError
+        from astrometricslib.exceptions import ConfigurationError
         from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
         from wayfindinglib.data_access.site_profile_reader import get_or_seed_default_site_profile
 
@@ -1272,7 +1268,7 @@ class ObservationPlanning:
         PlanRevisionConflictError
             If the session changed while this was running.
         """
-        from astrometricslib import ConflictError
+        from astrometricslib.exceptions import ConflictError
 
         started = [entry.id for entry in existing.queue if entry.status != QueueEntryStatus.PENDING]
         if started:
@@ -1699,7 +1695,7 @@ class ObservationPlanning:
             return merged
 
         if remove:
-            from astrometricslib import ConflictError
+            from astrometricslib.exceptions import ConflictError
 
             entries_by_id = {entry.id: entry for entry in session.queue}
             missing = [entry_id for entry_id in remove if entry_id not in entries_by_id]
@@ -1757,7 +1753,7 @@ class ObservationPlanning:
             if entry is None:
                 raise NotFoundError("That entry is not in the queue.", details={"set_exposures": entry_id})
             if entry.status != QueueEntryStatus.PENDING:
-                from astrometricslib import ConflictError
+                from astrometricslib.exceptions import ConflictError
 
                 raise ConflictError(
                     "Only an entry that has not started can change its exposures.",
@@ -2152,7 +2148,7 @@ class ObservationPlanning:
             If the stored revision is not `expected_revision`. Its details
             hold the current revision.
         """
-        from astrometricslib import ConflictError
+        from astrometricslib.exceptions import ConflictError
 
         changes = {
             "exposure_requests": exposure_requests,
@@ -2965,7 +2961,7 @@ class ObservationPlanning:
         """
         import sqlite3
 
-        from astrometricslib import observing_night_id
+        from astrometricslib.reports import observing_night_id
         from wayfindinglib.analytics.package_suggestions import (
             RANKING_SUGGESTIONS_PER_USE,
             read_target_noise,

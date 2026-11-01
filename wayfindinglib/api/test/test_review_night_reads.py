@@ -10,7 +10,7 @@ test knows which right ascension and declination must come back.
 import pytest
 from astropy.time import Time
 
-from astrometricslib import InvalidArgumentError
+from astrometricslib.exceptions import InvalidArgumentError
 from wayfindinglib import ObservatoryControl
 from wayfindinglib.api.review import ObservationReview
 from wayfindinglib.api.test.capture_night_helpers import Library, add_frames, record_ekos_captures

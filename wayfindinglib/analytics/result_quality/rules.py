@@ -34,7 +34,7 @@ measure them on your own data.
 
 from pydantic import BaseModel, ConfigDict
 
-from astrometricslib import LimitTier, QualityLimit
+from astrometricslib.reports import LimitTier, QualityLimit
 from wayfindinglib.models.quality.rule import MetricRequirement, QualityRule
 from wayfindinglib.models.quality.statements import ActionClass, Confidence, Severity, StatementKind
 

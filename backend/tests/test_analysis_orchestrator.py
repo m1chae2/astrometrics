@@ -17,7 +17,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from astrometricslib import BatchRunSummary, FrameRecord, InvalidArgumentError, Target
+from astrometricslib import FrameRecord, Target
+from astrometricslib._internal.results import BatchRunSummary
+from astrometricslib.exceptions import InvalidArgumentError
 from backend.services.analysis.analysis_orchestrator import AnalysisOrchestrator
 
 

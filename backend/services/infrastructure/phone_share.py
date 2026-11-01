@@ -12,7 +12,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from astrometricslib import ConfigurationError, ExternalServiceError
+from astrometricslib.exceptions import ConfigurationError, ExternalServiceError
 
 __all__ = ["connected_gsconnect_devices", "send_file_to_phone"]
 

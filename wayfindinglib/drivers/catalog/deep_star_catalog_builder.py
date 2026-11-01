@@ -33,7 +33,8 @@ from typing import Any
 
 import numpy as np
 
-from astrometricslib import ONLINE_QUERY_ERRORS, AstrometricsError, ExternalServiceError, InvalidArgumentError
+from astrometricslib import ONLINE_QUERY_ERRORS
+from astrometricslib.exceptions import AstrometricsError, ExternalServiceError, InvalidArgumentError
 from wayfindinglib.drivers.catalog import deep_star_store
 
 logger = logging.getLogger(__name__)

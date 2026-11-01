@@ -13,7 +13,7 @@ from collections import Counter
 
 import pytest
 
-from astrometricslib import CaptureSetting, MeasurementReference
+from astrometricslib.reports import CaptureSetting, MeasurementReference
 from wayfindinglib.analytics.result_quality import report_rules as rr
 from wayfindinglib.analytics.result_quality.capture_overheads import CaptureOverheads
 from wayfindinglib.analytics.result_quality.efficiency import (

@@ -17,7 +17,7 @@ that rests on a frame can cite the exact measurement.
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from astrometricslib import MeasurementReference
+from astrometricslib.reports import MeasurementReference
 
 
 class CaptureFrame(BaseModel):

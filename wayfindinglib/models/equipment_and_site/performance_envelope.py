@@ -22,7 +22,7 @@ configuration and from measurements, never persisted.
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from astrometricslib import QualityLimit
+from astrometricslib.reports import QualityLimit
 
 
 class TrackingRiskMap(BaseModel):

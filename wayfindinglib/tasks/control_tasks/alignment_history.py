@@ -24,7 +24,7 @@ from __future__ import annotations
 import sqlite3
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib import AstrometricsError, NotFoundError
+from astrometricslib.exceptions import AstrometricsError, NotFoundError
 from wayfindinglib.analytics.alignment_sessions import (
     group_alignment_attempts,
     mean_position_deg,

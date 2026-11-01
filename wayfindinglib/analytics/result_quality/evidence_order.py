@@ -29,7 +29,7 @@ from __future__ import annotations
 import statistics
 from collections.abc import Iterable, Mapping, Sequence
 
-from astrometricslib import MeasurementReference, QualityLimit, QualityMeasurement
+from astrometricslib.reports import MeasurementReference, QualityLimit, QualityMeasurement
 from wayfindinglib.models.quality.statements import TargetStatement
 
 

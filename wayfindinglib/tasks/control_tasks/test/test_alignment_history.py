@@ -12,7 +12,8 @@ from typing import Any
 
 import pytest
 
-from astrometricslib import NotFoundError, TargetQueryResult
+from astrometricslib._internal.catalog import TargetQueryResult
+from astrometricslib.exceptions import NotFoundError
 from wayfindinglib.tasks.control_tasks import night_history
 
 

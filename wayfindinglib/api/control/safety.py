@@ -66,7 +66,7 @@ class SafetyControl(ControlChild):
             If ``divergence`` is asked for without `capability`, or
             `capability` is given without ``divergence``.
         """
-        from astrometricslib import InvalidArgumentError
+        from astrometricslib.exceptions import InvalidArgumentError
         from wayfindinglib.data_access.safety_policy_reader import get_safety_rule_set
         from wayfindinglib.tasks.control_tasks import hardware_operations
         from wayfindinglib.tasks.control_tasks.capability_promotion import summarize_divergence_evidence

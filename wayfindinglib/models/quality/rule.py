@@ -17,7 +17,7 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from astrometricslib import QualityLimit
+from astrometricslib.reports import QualityLimit
 from wayfindinglib.models.quality.statements import ActionClass, Confidence, Severity, StatementKind
 
 

@@ -16,7 +16,7 @@ import pytest
 import requests
 from astropy.table import MaskedColumn, Table
 
-from astrometricslib import ConflictError, ExternalServiceError, InvalidArgumentError
+from astrometricslib.exceptions import ConflictError, ExternalServiceError, InvalidArgumentError
 from wayfindinglib.drivers.catalog import deep_star_catalog_builder, deep_star_store
 from wayfindinglib.drivers.catalog.deep_star_catalog_builder import (
     build_deep_star_catalog,

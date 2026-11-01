@@ -37,7 +37,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from astrometricslib import CaptureSetting, ConflictError
+from astrometricslib.exceptions import ConflictError
+from astrometricslib.reports import CaptureSetting
 from wayfindinglib.models.planning.framing import Framing
 from wayfindinglib.models.planning.observation_package import DitherConfig, ExposureRequest
 from wayfindinglib.models.policy.recovery import FaultRecord

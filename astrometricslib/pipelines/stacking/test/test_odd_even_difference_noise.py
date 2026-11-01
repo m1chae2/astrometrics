@@ -28,7 +28,7 @@ import pytest
 from astropy.io import fits
 from scipy.ndimage import gaussian_filter
 
-from astrometricslib import aperture_identity_from_number
+from astrometricslib._internal.stacking import aperture_identity_from_number
 from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.drivers.interfaces.stacking_driver import StackingDriver, StackRunResult, StackSettings
 from astrometricslib.drivers.quality_store import QualityStore

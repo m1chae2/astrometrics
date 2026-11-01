@@ -26,13 +26,8 @@ from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from typing import Any
 
-from astrometricslib import (
-    MeasurementStatus,
-    frame_is_spectral,
-    frame_subject_id,
-    observing_night_id,
-    resolve_camera_profile,
-)
+from astrometricslib import frame_is_spectral, frame_subject_id, resolve_camera_profile
+from astrometricslib.reports import MeasurementStatus, observing_night_id
 from wayfindinglib.analytics.performance_envelope import (
     MINIMUM_ATTEMPTS_PER_NIGHT,
     MINIMUM_FRAMES_PER_NIGHT,

@@ -7,7 +7,7 @@ The science library is a made-up stand-in injected into the Control context.
 
 import pytest
 
-from astrometricslib import InvalidArgumentError
+from astrometricslib.exceptions import InvalidArgumentError
 from wayfindinglib import ObservatoryControl
 from wayfindinglib.analytics.test.night_quality_helpers import (
     REVIEWED,

@@ -22,7 +22,7 @@ from typing import Any
 import numpy as np
 from astropy.io import fits
 
-from astrometricslib import HardwareError
+from astrometricslib.exceptions import HardwareError
 
 FRAME_WAIT_MARGIN_SECONDS = 10.0
 """How long past the exposure to wait for a new frame before giving up."""

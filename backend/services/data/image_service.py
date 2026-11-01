@@ -8,7 +8,8 @@ computer and shapes each picture the way the viewer reads it.
 import logging
 from typing import Any
 
-from astrometricslib import RenderedImage, resolve_mounted_path
+from astrometricslib import RenderedImage
+from astrometricslib.drivers import resolve_mounted_path
 
 logger = logging.getLogger(__name__)
 

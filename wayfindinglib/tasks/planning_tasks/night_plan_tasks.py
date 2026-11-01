@@ -18,7 +18,7 @@ nothing and keeps the revision. A write that names an old revision raises
 from collections.abc import Iterable
 from datetime import UTC, datetime
 
-from astrometricslib import InvalidArgumentError
+from astrometricslib.exceptions import InvalidArgumentError
 from wayfindinglib.analytics.result_quality.allowed_capture_values import AllowedCaptureValues
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.planning.observation_package import ExposureRequest

@@ -15,12 +15,8 @@ import threading
 import time
 from typing import Any
 
-from astrometricslib import (
-    InvalidArgumentError,
-    StorageError,
-    TargetCatalog,
-    parse_coordinate_string,
-)
+from astrometricslib import TargetCatalog, parse_coordinate_string
+from astrometricslib.exceptions import InvalidArgumentError, StorageError
 from wayfindinglib import (
     ControlRecordStore,
     ObservatoryControl,

@@ -14,7 +14,7 @@ import pytest
 from astropy.coordinates import EarthLocation
 from astropy.time import Time
 
-from astrometricslib import InvalidArgumentError
+from astrometricslib.exceptions import InvalidArgumentError
 from wayfindinglib.models.planning.visibility import HorizonZone, VisibilityReport
 from wayfindinglib.tasks.planning_tasks.visibility_report import build_visibility_report
 

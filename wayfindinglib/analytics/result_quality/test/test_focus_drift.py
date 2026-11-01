@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 import numpy as np
 import pytest
 
-from astrometricslib import MeasurementReference
+from astrometricslib.reports import MeasurementReference
 from wayfindinglib.analytics.result_quality.focus_drift import (
     ALLOWED_WIDTH_RATIO,
     FocusDriftStatus,

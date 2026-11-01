@@ -16,7 +16,7 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib import AstrometricsError
+from astrometricslib.exceptions import AstrometricsError
 from wayfindinglib.tasks.control_tasks import remote_transfer_tasks
 
 if TYPE_CHECKING:

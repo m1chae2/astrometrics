@@ -16,7 +16,9 @@ from unittest.mock import ANY, Mock, patch
 
 import pytest
 
-from astrometricslib import ExternalServiceError, FrameMeasurementSummary, FrameRecord, NotFoundError
+from astrometricslib import FrameRecord
+from astrometricslib._internal.quality import FrameMeasurementSummary
+from astrometricslib.exceptions import ExternalServiceError, NotFoundError
 from wayfindinglib.tasks.control_tasks import remote_transfer_tasks as remote_operations
 
 
@@ -585,7 +587,7 @@ def _our_log_handlers(logger_name: str) -> list:
     """
     import logging
 
-    from astrometricslib import DbLogHandler
+    from astrometricslib.jobs import DbLogHandler
 
     return [
         handler
@@ -610,7 +612,8 @@ def test_sync_all_remote_folders_records_a_job_and_cleans_up_its_log_handlers(
     than the sync itself.
     """
     import astrometricslib
-    from astrometricslib import AppConfiguration, JobStore
+    from astrometricslib import AppConfiguration
+    from astrometricslib.jobs import JobStore
 
     library_path = tmp_path / "library"
     library_path.mkdir()
@@ -828,7 +831,7 @@ def test_real_run_with_nothing_new_does_nothing(tmp_path: Path) -> None:
 
 def test_real_run_refuses_when_the_drive_is_not_mounted(tmp_path: Path) -> None:
     """With the frames drive missing, nothing is written."""
-    from astrometricslib import StorageNotMountedError
+    from astrometricslib.exceptions import StorageNotMountedError
 
     observatory, driver = _sync_observatory(["M_13"], "M_13", [("Light/b.fits", 20)])
     with (

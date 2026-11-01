@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from astrometricslib import MeasurementReference
+from astrometricslib.reports import MeasurementReference
 from wayfindinglib.models.quality.capture_summary import CaptureSettingSummary
 from wayfindinglib.models.quality.efficiency import LossAccount, ScienceGoal
 from wayfindinglib.models.quality.statements import NeedsAttention, TargetStatement

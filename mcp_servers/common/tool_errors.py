@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 from mcp.types import CallToolResult, TextContent
 
 if TYPE_CHECKING:
-    from astrometricslib import ErrorInfo
+    from astrometricslib.exceptions import ErrorInfo
 
 
 class ToolErrorContent(list):

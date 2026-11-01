@@ -13,7 +13,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib import InvalidArgumentError, NotFoundError, ProcessingError, ProcessingPipelines, Target
+from astrometricslib import ProcessingPipelines, Target
+from astrometricslib.exceptions import InvalidArgumentError, NotFoundError, ProcessingError
 from astrometricslib.pipelines.shared.stack_preview_path import (
     preview_path_for,
     preview_settings_path_for,

@@ -20,7 +20,7 @@ from typing import Any
 
 import pytest
 
-from astrometricslib import HardwareError
+from astrometricslib.exceptions import HardwareError
 from wayfindinglib.drivers.indi_worker import (
     IndiWorkerClient,
     IndiWorkerProxy,

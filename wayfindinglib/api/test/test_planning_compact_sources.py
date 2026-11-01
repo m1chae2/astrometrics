@@ -8,7 +8,8 @@ with a position.
 
 import pytest
 
-from astrometricslib import InvalidArgumentError, StellarObject, Target
+from astrometricslib import StellarObject, Target
+from astrometricslib.exceptions import InvalidArgumentError
 from wayfindinglib.api.planning import ObservationPlanning
 from wayfindinglib.models.planning.sky_source import SkySource
 from wayfindinglib.tasks.planning_tasks import sky_sources

@@ -36,13 +36,10 @@ from collections.abc import Iterable
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib import (
-    InvalidArgumentError,
-    StorageError,
-    connect_db,
-    observing_night_id,
-    parse_coordinate_string,
-)
+from astrometricslib import parse_coordinate_string
+from astrometricslib.drivers import connect_db
+from astrometricslib.exceptions import InvalidArgumentError, StorageError
+from astrometricslib.reports import observing_night_id
 
 if TYPE_CHECKING:
     from astrometricslib import AppConfiguration, Target

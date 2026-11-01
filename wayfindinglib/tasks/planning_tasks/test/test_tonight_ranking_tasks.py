@@ -14,20 +14,11 @@ from typing import Any
 
 import pytest
 
-from astrometricslib import (
-    CaptureSetting,
-    ConfigurationError,
-    FrameRecord,
-    MeasurementOrigin,
-    MeasurementStatus,
-    QualityMeasurement,
-    QualityQueryResult,
-    QualitySubject,
-    SubjectLevel,
-    Target,
-    frame_is_spectral,
-    frame_subject_id,
-)
+from astrometricslib import FrameRecord, Target
+from astrometricslib._internal.frames import frame_is_spectral, frame_subject_id
+from astrometricslib._internal.quality import MeasurementOrigin, QualityQueryResult, QualitySubject
+from astrometricslib.exceptions import ConfigurationError
+from astrometricslib.reports import CaptureSetting, MeasurementStatus, QualityMeasurement, SubjectLevel
 from wayfindinglib.analytics.result_quality import forecast as fc
 from wayfindinglib.analytics.result_quality.capture_overheads import CaptureOverheads
 from wayfindinglib.analytics.result_quality.efficiency import (

@@ -13,7 +13,7 @@ import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib import AstrometricsError
+from astrometricslib.exceptions import AstrometricsError
 from backend.services.infrastructure import thread_management
 from wayfindinglib import ObservatoryControl
 

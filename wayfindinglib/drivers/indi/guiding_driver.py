@@ -21,7 +21,7 @@ import asyncio
 import time
 from typing import Any
 
-from astrometricslib import ConfigurationError
+from astrometricslib.exceptions import ConfigurationError
 from wayfindinglib.analytics.guide_pulses import merge_close_pulses, pulse_ms_to_arcsec, signed_pulses_ms
 from wayfindinglib.drivers.interfaces.guiding_driver import GuideCommands, GuidingDriver, GuidingReading
 from wayfindinglib.models.session.telemetry import GuidingSample, GuidingSampleSource

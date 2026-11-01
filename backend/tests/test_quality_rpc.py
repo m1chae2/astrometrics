@@ -13,14 +13,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib import (
-    MeasurementOrigin,
-    MeasurementStatus,
-    QualityMeasurement,
-    QualityQueryResult,
-    QualitySubject,
-    SubjectLevel,
-)
+from astrometricslib._internal.quality import MeasurementOrigin, QualityQueryResult, QualitySubject
+from astrometricslib.reports import MeasurementStatus, QualityMeasurement, SubjectLevel
 from backend.container import container
 from backend.public_interface import RPC_METHODS
 from backend.routers.rpc_router import rpc_registry
@@ -107,7 +101,7 @@ def test_resolve_rows_passes_the_ids_to_the_library_and_returns_json(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The route passes the ids to `resolve_rows`; the reply is plain JSON."""
-    from astrometricslib import QualityRowFile, QualityRowResolution
+    from astrometricslib._internal.quality import QualityRowFile, QualityRowResolution
 
     asked: dict[str, object] = {}
 

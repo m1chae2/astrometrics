@@ -25,7 +25,8 @@ from typing import Any
 import astropy.units as u
 from astropy.coordinates import SkyCoord
 
-from astrometricslib import InvalidArgumentError, Target
+from astrometricslib import Target
+from astrometricslib.exceptions import InvalidArgumentError
 from wayfindinglib.models.equipment_and_site.equipment import EquipmentConfiguration
 from wayfindinglib.models.planning.framing import SkyCorner
 from wayfindinglib.models.planning.mosaic import MosaicPanel, MosaicPlan

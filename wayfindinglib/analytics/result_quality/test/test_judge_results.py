@@ -12,13 +12,8 @@ from typing import Any
 
 import pytest
 
-from astrometricslib import (
-    CaptureSetting,
-    LimitTier,
-    QualityLimit,
-    QualityMeasurement,
-    QualitySubject,
-)
+from astrometricslib._internal.quality import QualitySubject
+from astrometricslib.reports import CaptureSetting, LimitTier, QualityLimit, QualityMeasurement
 from wayfindinglib.analytics.result_quality.judge_results import (
     PLAIN_RULE_NAMES,
     judge_results,

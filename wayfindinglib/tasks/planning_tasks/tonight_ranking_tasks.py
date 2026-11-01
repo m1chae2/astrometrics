@@ -51,11 +51,8 @@ from typing import Any
 import numpy as np
 from astropy.time import Time
 
-from astrometricslib import (
-    CaptureSetting,
-    MeasurementReference,
-    Target,
-)
+from astrometricslib import Target
+from astrometricslib.reports import CaptureSetting, MeasurementReference
 from wayfindinglib.analytics.result_quality.capture_overheads import (
     AUTOFOCUS_RUNS_PER_HOUR,
     DITHER_EVERY_FRAMES,
@@ -753,7 +750,7 @@ def rank_tonight(
     ConfigurationError
         If no site is given and none can be read.
     """
-    from astrometricslib import ConfigurationError
+    from astrometricslib.exceptions import ConfigurationError
 
     when = _aware_utc(at, now)
     epoch_seconds = when.timestamp()

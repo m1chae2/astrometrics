@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from astrometricslib import ConfigurationError, ExternalServiceError, NotFoundError
+from astrometricslib.exceptions import ConfigurationError, ExternalServiceError, NotFoundError
 from backend.services.infrastructure.handoff_service import HandoffService
 
 

@@ -38,7 +38,8 @@ def main() -> None:
         size = _DEFAULT_SIZE
     size = max(_MINIMUM_SIZE, min(_MAXIMUM_SIZE, size))
 
-    from astrometricslib import DATA_ERRORS, Astrometrics, AstrometricsError
+    from astrometricslib import DATA_ERRORS, Astrometrics
+    from astrometricslib.exceptions import AstrometricsError
 
     try:
         picture = Astrometrics().visualization.render_fits(

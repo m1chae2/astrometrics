@@ -70,7 +70,7 @@ class EquipmentControl(ControlChild):
             If ``indi_properties`` is asked for without `device_name`, or
             `device_name` is given without ``indi_properties``.
         """
-        from astrometricslib import InvalidArgumentError
+        from astrometricslib.exceptions import InvalidArgumentError
         from wayfindinglib.tasks.control_tasks import equipment_activation, hardware_operations
 
         if include is None:

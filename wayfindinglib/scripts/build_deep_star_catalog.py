@@ -41,13 +41,8 @@ import logging
 import sys
 import time
 
-from astrometricslib import (
-    Astrometrics,
-    ConflictError,
-    ExternalServiceError,
-    InvalidArgumentError,
-    configure_logging,
-)
+from astrometricslib import Astrometrics, configure_logging
+from astrometricslib.exceptions import ConflictError, ExternalServiceError, InvalidArgumentError
 from wayfindinglib import Wayfinder
 from wayfindinglib.drivers.catalog import deep_star_store
 from wayfindinglib.drivers.catalog.deep_star_catalog_builder import (

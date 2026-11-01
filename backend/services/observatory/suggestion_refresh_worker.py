@@ -31,7 +31,7 @@ import time
 from collections.abc import Iterable
 from typing import Any
 
-from astrometricslib import observing_night_id
+from astrometricslib.reports import observing_night_id
 
 logger = logging.getLogger(__name__)
 

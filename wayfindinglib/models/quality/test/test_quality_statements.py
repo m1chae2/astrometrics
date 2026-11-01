@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from astrometricslib import CaptureSetting, LimitTier, MeasurementReference, QualityLimit
+from astrometricslib.reports import CaptureSetting, LimitTier, MeasurementReference, QualityLimit
 from wayfindinglib.models.quality.rule import MetricRequirement, QualityRule
 from wayfindinglib.models.quality.statements import (
     ActionClass,

@@ -16,7 +16,7 @@ import logging
 import os
 from datetime import UTC, datetime, timedelta, timezone
 
-from astrometricslib import observing_night_id
+from astrometricslib.reports import observing_night_id
 from wayfindinglib.models.session.ekos_session import (
     EkosAbortedCapture,
     EkosAutofocusRun,

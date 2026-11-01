@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib import observing_night_id
+from astrometricslib.reports import observing_night_id
 from wayfindinglib.analytics.guiding_spectrum import analyze_guiding_telemetry
 from wayfindinglib.drivers.phd2.guide_log_parser import parse_phd2_guide_log
 from wayfindinglib.models.session.telemetry import MEASURED_GUIDING_SAMPLE_SOURCES, GuidingSpectrumAnalysis

@@ -8,7 +8,7 @@ summaries count frames, nights and settings.
 
 import pytest
 
-from astrometricslib import CaptureSetting
+from astrometricslib.reports import CaptureSetting
 from wayfindinglib.analytics.result_quality import aggregates as agg
 from wayfindinglib.analytics.result_quality.efficiency import (
     BaselineNight,

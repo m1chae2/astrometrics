@@ -11,7 +11,8 @@ from unittest.mock import MagicMock
 
 from pytest_mock import MockerFixture
 
-from astrometricslib import AbstractCatalogAccess, Astrometrics, CatalogAccess, StellarObject, Target
+from astrometricslib import Astrometrics, StellarObject, Target
+from astrometricslib._internal.drivers import AbstractCatalogAccess, CatalogAccess
 
 
 class MockCatalogAccess(AbstractCatalogAccess):

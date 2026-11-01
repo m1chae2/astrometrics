@@ -8,7 +8,7 @@ its effective time appear together, and JSON round trips.
 import pytest
 from pydantic import ValidationError
 
-from astrometricslib import CaptureSetting
+from astrometricslib.reports import CaptureSetting
 from wayfindinglib.models.quality.capture_summary import CaptureSettingSummary
 from wayfindinglib.models.quality.efficiency import (
     EfficiencyFactor,

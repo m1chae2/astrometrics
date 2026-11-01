@@ -6,7 +6,8 @@ import sqlite3
 import time
 from typing import Any
 
-from astrometricslib import AstrometricsError, NotFoundError, run_as_background_job
+from astrometricslib.exceptions import AstrometricsError, NotFoundError
+from astrometricslib.jobs import run_as_background_job
 from backend.services.infrastructure.base_service import BaseBackgroundService
 
 logger = logging.getLogger(__name__)
@@ -344,7 +345,7 @@ def start_siril_processing_task(
     NotFoundError
         If the target is not in the library.
     """
-    from astrometricslib import capture_job_logs
+    from astrometricslib.jobs import capture_job_logs
 
     if log_file_path:
         # Clear old logs for this target at the start of a new job. The
@@ -376,7 +377,9 @@ def start_siril_processing_task(
         # summary and provenance, makes the preview picture the viewer shows,
         # and saves the target. This job is already in the job list, so the
         # stack records its provenance against it instead of a new job.
-        from astrometricslib import ProcessingError, frame_is_spectral, log_context
+        from astrometricslib import frame_is_spectral
+        from astrometricslib.exceptions import ProcessingError
+        from astrometricslib.jobs import log_context
 
         kind = "spectral" if frames_to_stack and all(map(frame_is_spectral, frames_to_stack)) else "imaging"
         try:

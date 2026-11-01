@@ -16,7 +16,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from astrometricslib import OverlayStar, StarQueryResult
+from astrometricslib._internal.catalog import OverlayStar, StarQueryResult
 from backend.services.data.stellar_service import StellarService
 
 

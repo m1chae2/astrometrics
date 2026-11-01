@@ -42,15 +42,9 @@ from typing import Any
 
 import numpy as np
 
-from astrometricslib import (
-    EARLIER_NIGHTS_VARIANT,
-    AstrometricsError,
-    CaptureSetting,
-    QualityMeasurement,
-    SubjectLevel,
-    Target,
-    frame_subject_id,
-)
+from astrometricslib import Target, frame_subject_id
+from astrometricslib.exceptions import AstrometricsError
+from astrometricslib.reports import EARLIER_NIGHTS_VARIANT, CaptureSetting, QualityMeasurement, SubjectLevel
 from wayfindinglib.analytics.result_quality.capture_overheads import EXPOSURE_MATCH_SECONDS
 from wayfindinglib.analytics.result_quality.forecast import (
     NoiseHistory,

@@ -9,7 +9,8 @@ library's target catalog.
 
 import pytest
 
-from astrometricslib import InvalidArgumentError, Target
+from astrometricslib import Target
+from astrometricslib.exceptions import InvalidArgumentError
 from wayfindinglib.models.equipment_and_site.equipment import Camera, EquipmentConfiguration, Telescope
 from wayfindinglib.models.planning.observation_package import ExposureRequest, FrameType
 from wayfindinglib.tasks.planning_tasks.mosaic_tasks import calculate_panels, create_mosaic

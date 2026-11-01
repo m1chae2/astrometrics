@@ -23,7 +23,7 @@ queue entry carries.
 
 from typing import Any
 
-from astrometricslib import ConflictError
+from astrometricslib.exceptions import ConflictError
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.equipment_and_site.calibration import CalibrationEntry, CalibrationStats
 from wayfindinglib.models.planning.observation_package import FrameType

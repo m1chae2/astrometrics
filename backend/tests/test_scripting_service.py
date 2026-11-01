@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from astrometricslib import InvalidArgumentError
+from astrometricslib.exceptions import InvalidArgumentError
 from backend.services.infrastructure.scripting_service import ScriptingService, inspect_api
 
 

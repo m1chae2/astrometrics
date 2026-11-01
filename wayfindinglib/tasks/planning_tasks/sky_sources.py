@@ -25,7 +25,8 @@ a large library.
 import logging
 from typing import Any
 
-from astrometricslib import InvalidArgumentError, StellarObject, Target, parse_coordinate_string
+from astrometricslib import StellarObject, Target, parse_coordinate_string
+from astrometricslib.exceptions import InvalidArgumentError
 from wayfindinglib.models.planning.sky_source import SkySource
 
 logger = logging.getLogger(__name__)

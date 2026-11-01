@@ -16,10 +16,12 @@ from unittest.mock import create_autospec
 
 import pytest
 
-from astrometricslib import AppConfiguration, QualityQueryResult, Target
+from astrometricslib import AppConfiguration, Target
+from astrometricslib._internal.quality import QualityQueryResult
 from backend.services.observatory.plan_service import PlanService
 from backend.services.observatory.target_imaging_executor import TargetImagingExecutor
-from wayfindinglib import ObservationPackage, ObservationPlanning, Telescope
+from wayfindinglib import ObservationPackage, ObservationPlanning
+from wayfindinglib._internal.control import Telescope
 
 
 @pytest.fixture

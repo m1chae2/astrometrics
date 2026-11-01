@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from astrometricslib import NotFoundError
+from astrometricslib.exceptions import NotFoundError
 from mcp_servers.devtools.contract_validator import LIBRARY_ROOT, typegen_contract_validator
 
 

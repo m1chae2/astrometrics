@@ -129,7 +129,7 @@ class MountControl(ControlChild):
             If `tolerance_arcsec` or `max_iterations` is given without
             ``center=True``.
         """
-        from astrometricslib import InvalidArgumentError
+        from astrometricslib.exceptions import InvalidArgumentError
         from wayfindinglib.tasks.control_tasks import centering, hardware_operations
 
         position = hardware_operations.resolve_destination(self._context, destination)

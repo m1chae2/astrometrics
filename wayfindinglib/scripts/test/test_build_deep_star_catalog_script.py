@@ -16,7 +16,7 @@ import pytest
 import requests
 from astropy.table import Table
 
-from astrometricslib import FieldCenter, ImagedFieldCenters
+from astrometricslib._internal.catalog import FieldCenter, ImagedFieldCenters
 from wayfindinglib.api.planning import ObservationPlanning
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.drivers.catalog import deep_star_catalog_builder

@@ -15,7 +15,7 @@ import pytest
 from astropy.time import Time
 from pytest_mock import MockerFixture
 
-from astrometricslib import (
+from astrometricslib.exceptions import (
     ConfigurationError,
     ConflictError,
     HardwareError,
@@ -258,7 +258,7 @@ def test_mount_status_reports_the_mount_position_in_icrs(mocker: MockerFixture) 
 
     status = ops.mount_status(manager)
 
-    from astrometricslib import parse_coordinate_string
+    from astrometricslib._internal.frames import parse_coordinate_string
 
     assert parse_coordinate_string(status.ra, is_ra=True) == pytest.approx(catalog_ra_deg, abs=2e-4)
     assert parse_coordinate_string(status.dec, is_ra=False) == pytest.approx(catalog_dec_deg, abs=2e-4)

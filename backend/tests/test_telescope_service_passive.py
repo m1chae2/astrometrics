@@ -21,7 +21,7 @@ def _imaging_status() -> SimpleNamespace:
 
 def test_infer_target_at_coordinates() -> None:
     """Match the mount position to the nearest target within 1 degree."""
-    from astrometricslib import TargetQueryResult
+    from astrometricslib._internal.catalog import TargetQueryResult
     from backend.services.observatory.telescope_service import TelescopeService
 
     target_service_mock = MagicMock()

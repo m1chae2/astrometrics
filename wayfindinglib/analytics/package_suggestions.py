@@ -22,7 +22,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from astrometricslib import Astrometrics, AstrometricsError, CaptureSetting, SubjectLevel
+from astrometricslib import Astrometrics
+from astrometricslib.exceptions import AstrometricsError
+from astrometricslib.reports import CaptureSetting, SubjectLevel
 from wayfindinglib.analytics.result_quality.forecast import NORMALIZED_NOISE_METRIC, PINNED_STACK_METRICS
 from wayfindinglib.models.quality.rule import QualityRule
 from wayfindinglib.models.quality.statements import ProposedAction

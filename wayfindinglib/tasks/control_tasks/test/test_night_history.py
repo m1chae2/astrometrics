@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-from astrometricslib import ConfigurationError, ConflictError, InvalidArgumentError, NotFoundError
+from astrometricslib.exceptions import ConfigurationError, ConflictError, InvalidArgumentError, NotFoundError
 from wayfindinglib.api.review import ObservationReview
 from wayfindinglib.tasks.control_tasks import night_analysis, night_history, pointing_log_ingestion
 from wayfindinglib.tasks.control_tasks.night_history import (

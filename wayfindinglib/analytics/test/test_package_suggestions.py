@@ -11,14 +11,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from astrometricslib import (
-    CaptureSetting,
-    MeasurementOrigin,
-    MeasurementStatus,
-    QualityMeasurement,
-    QualitySubject,
-    SubjectLevel,
-)
+from astrometricslib._internal.quality import MeasurementOrigin, QualitySubject
+from astrometricslib.reports import CaptureSetting, MeasurementStatus, QualityMeasurement, SubjectLevel
 from wayfindinglib.analytics.package_suggestions import (
     DEFAULT_NOISE_GOAL,
     RANKING_SUGGESTIONS_PER_USE,

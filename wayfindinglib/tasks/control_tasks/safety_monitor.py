@@ -26,7 +26,7 @@ Three properties are architectural rather than incidental
 
 from datetime import datetime
 
-from astrometricslib import ConfigurationError
+from astrometricslib.exceptions import ConfigurationError
 from wayfindinglib.models.policy.safety import (
     SafetyAssessment,
     SafetyRule,

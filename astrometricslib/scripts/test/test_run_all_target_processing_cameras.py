@@ -13,7 +13,6 @@ from typing import Any
 
 import pytest
 
-from astrometricslib import EARLIER_NIGHTS_VARIANT
 from astrometricslib.foundation.config import _TomlSectionedConfig
 from astrometricslib.foundation.observatory_setups import ObservatorySetups, OpticConfig, SetupConfig
 from astrometricslib.pipelines.stacking.metrics import (
@@ -23,6 +22,7 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_MEASURED_TO_PREDICTED_NOISE_RATIO,
     STACKING_ODD_EVEN_DIFFERENCE_NOISE_STACK_UNIT,
 )
+from astrometricslib.reports import EARLIER_NIGHTS_VARIANT
 
 _EXAMPLE_CONFIG_PATH = Path(__file__).resolve().parents[2] / "astrometrics.config.example.toml"
 

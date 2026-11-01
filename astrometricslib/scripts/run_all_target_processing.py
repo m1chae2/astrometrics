@@ -40,14 +40,15 @@ import sys
 from datetime import UTC, datetime
 from typing import Any
 
-from astrometricslib import FITS_READ_ERRORS, AstrometricsError
+from astrometricslib.exceptions import FITS_READ_ERRORS, AstrometricsError
 
 # Disable opening Siril GUI when stacking completes -- must be set
 # before astrometricslib is imported, since a batch run across every
 # target should never pop open a GUI window mid-run.
 os.environ["HEADLESS"] = "1"
 
-from astrometricslib import EARLIER_NIGHTS_VARIANT, Astrometrics, configure_logging, frame_subject_id
+from astrometricslib import Astrometrics, configure_logging
+from astrometricslib._internal.frames import frame_subject_id
 from astrometricslib.drivers.camera_profile_store import camera_identity, resolve_camera_profile
 from astrometricslib.foundation.paths import siril_work_directory as siril_work_directory_path
 from astrometricslib.models.quality.measurement import MeasurementStatus
@@ -71,6 +72,7 @@ from astrometricslib.pipelines.stacking.odd_even_difference_run import (
     ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF,
 )
 from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import parse_set_aside_action
+from astrometricslib.reports import EARLIER_NIGHTS_VARIANT
 from astrometricslib.utilities.parallel_batch import BatchRunSummary
 
 # What a Nikon D5300 target needs in its camera profile before a restack:

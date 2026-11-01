@@ -6,7 +6,7 @@ that end in a question mark, solar-system names, and codes that fit no kind.
 
 import pytest
 
-from astrometricslib import target_object_category
+from astrometricslib._internal.frames import target_object_category
 
 
 @pytest.mark.parametrize(

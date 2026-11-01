@@ -24,7 +24,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
-from astrometricslib import CaptureSetting
+from astrometricslib.reports import CaptureSetting
 from wayfindinglib.analytics.result_quality.efficiency import (
     CAUSE_UNKNOWN,
     TRANSPARENCY_NOT_INCLUDED_REASON,

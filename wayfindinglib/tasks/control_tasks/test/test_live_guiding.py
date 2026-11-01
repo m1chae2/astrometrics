@@ -26,7 +26,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from astrometricslib import ConfigurationError, ConflictError
+from astrometricslib.exceptions import ConfigurationError, ConflictError
 from wayfindinglib.drivers.indi.guiding_driver import IndiGuidingDriver, samples_from_pulses
 from wayfindinglib.drivers.interfaces.guiding_driver import GuideCommands
 from wayfindinglib.drivers.interfaces.registry import build_guiding_driver_registry

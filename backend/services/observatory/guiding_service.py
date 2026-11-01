@@ -14,7 +14,7 @@ import threading
 import time
 from typing import Any
 
-from astrometricslib import AstrometricsError
+from astrometricslib.exceptions import AstrometricsError
 from wayfindinglib import ObservatoryControl
 
 logger = logging.getLogger(__name__)

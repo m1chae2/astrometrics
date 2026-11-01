@@ -18,7 +18,8 @@ import statistics
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib import FrameSelection, NotFoundError, select_library_frames
+from astrometricslib import FrameSelection, select_library_frames
+from astrometricslib.exceptions import NotFoundError
 from wayfindinglib.analytics.result_quality.guiding_join import (
     FrameWindow,
     guiding_read_range,
@@ -94,7 +95,7 @@ def _add_image_quality(
         What was done, including any frames left unmeasured.
     """
     wanted = [row["file"] for row in frames][:MAXIMUM_QUALITY_FRAMES]
-    from astrometricslib import InvalidArgumentError, NotFoundError
+    from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
 
     try:
         report = astrometrics.quality.measure_frames(

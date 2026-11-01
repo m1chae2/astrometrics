@@ -16,17 +16,14 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from astrometricslib import (
-    AppConfiguration,
+from astrometricslib import AppConfiguration, FilterType
+from astrometricslib._internal.quality import MeasurementOrigin, QualitySubject
+from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
+from astrometricslib.reports import (
     CaptureSetting,
-    FilterType,
-    InvalidArgumentError,
-    MeasurementOrigin,
     MeasurementReference,
     MeasurementStatus,
-    NotFoundError,
     QualityMeasurement,
-    QualitySubject,
     SubjectLevel,
 )
 from wayfindinglib.analytics.frame_counting import TargetFrames, judgments_by_path
@@ -775,7 +772,7 @@ def test_one_row_can_be_dismissed_and_restored(fixture: Fixture) -> None:
 
 def test_dismiss_is_refused_for_a_planned_package(fixture: Fixture) -> None:
     """Only a suggestion can be dismissed."""
-    from astrometricslib import ConflictError
+    from astrometricslib.exceptions import ConflictError
 
     package = fixture.planning.create_package(target="M 81")
     with pytest.raises(ConflictError):

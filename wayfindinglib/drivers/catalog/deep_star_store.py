@@ -36,7 +36,8 @@ from typing import Any
 
 import numpy as np
 
-from astrometricslib import ConflictError, InvalidArgumentError, connect_db
+from astrometricslib.drivers import connect_db
+from astrometricslib.exceptions import ConflictError, InvalidArgumentError
 
 logger = logging.getLogger(__name__)
 

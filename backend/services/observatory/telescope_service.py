@@ -9,7 +9,7 @@ import logging
 import sqlite3
 from typing import Any
 
-from astrometricslib import AstrometricsError, InvalidArgumentError
+from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError
 
 logger = logging.getLogger(__name__)
 

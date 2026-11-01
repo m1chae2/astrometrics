@@ -11,7 +11,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from astrometricslib import NotFoundError, StackSummary
+from astrometricslib.exceptions import NotFoundError
+from astrometricslib.reports import StackSummary
 from backend.container import container
 from backend.public_interface import RPC_METHODS
 from backend.routers import rpc_router

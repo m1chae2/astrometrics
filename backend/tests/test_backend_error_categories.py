@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from astrometricslib import ConfigurationError, ConflictError, InvalidArgumentError, NotFoundError
+from astrometricslib.exceptions import ConfigurationError, ConflictError, InvalidArgumentError, NotFoundError
 from backend.routers import rpc_router
 from backend.services.data.stellar_service import StellarService
 from backend.services.data.target_service import TargetService

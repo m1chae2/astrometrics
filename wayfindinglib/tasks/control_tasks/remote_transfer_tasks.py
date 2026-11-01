@@ -24,7 +24,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Literal
 
-from astrometricslib import AstrometricsError, InvalidArgumentError
+from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError
 
 if TYPE_CHECKING:
     from astrometricslib import Target
@@ -371,7 +371,7 @@ def record_new_frame_measurements(
     summary : `FrameMeasurementSummary` or `None`
         What the measurement run did, or `None` if it failed.
     """
-    from astrometricslib import get_current_job
+    from astrometricslib.jobs import get_current_job
 
     added = {os.path.normpath(path) for path in added_paths}
     added_frames = [frame for frame in target.frames if os.path.normpath(frame.path) in added]
@@ -452,7 +452,8 @@ def plan_target_download(context: ControlContext, target_id: str) -> dict[str, A
     NotFoundError
         If no remote target folder matches `target_id`.
     """
-    from astrometricslib import NotFoundError, get_configuration
+    from astrometricslib import get_configuration
+    from astrometricslib.exceptions import NotFoundError
 
     driver = context.remote_transfer_driver
     folders = list_remote_target_folders(context)
@@ -514,7 +515,7 @@ def report_download_progress(folder: str, expected: int) -> Generator[None]:
     None
         Control, while the progress thread runs.
     """
-    from astrometricslib import get_current_job
+    from astrometricslib.jobs import get_current_job
 
     job = get_current_job()
     if job is None or expected <= 0:
@@ -593,7 +594,8 @@ def sync_target_frames(context: ControlContext, target_id: str, dry_run: bool = 
     folder matches `target_id`, and a real run raises
     `StorageNotMountedError` when the frames drive is not mounted.
     """
-    from astrometricslib import get_configuration, require_mounted_storage
+    from astrometricslib import get_configuration
+    from astrometricslib.drivers import require_mounted_storage
 
     plan = plan_target_download(context, target_id)
     result: dict[str, Any] = {"dry_run": dry_run, **plan}
@@ -608,7 +610,7 @@ def sync_target_frames(context: ControlContext, target_id: str, dry_run: bool = 
             "message": "Nothing new to transfer.",
         }
     require_mounted_storage(os.path.join(str(get_configuration().get_frames_path()), "lights"))
-    from astrometricslib import get_current_job
+    from astrometricslib.jobs import get_current_job
 
     job = get_current_job()
     if job is not None:
@@ -713,7 +715,7 @@ def sync_remote_logs(
     ExternalServiceError
         If the telescope computer cannot be reached.
     """
-    from astrometricslib import ExternalServiceError
+    from astrometricslib.exceptions import ExternalServiceError
     from wayfindinglib.tasks.control_tasks import ekos_log_ingestion
 
     destination_dir = destination_dir or context.ekos_log_directory()
@@ -1061,7 +1063,7 @@ def sync_all_remote_folders(
 
     if register_job:
         try:
-            from astrometricslib import JobStore, ProcessingJob, capture_job_logs
+            from astrometricslib.jobs import JobStore, ProcessingJob, capture_job_logs
 
             config = get_configuration()
             job_store = JobStore(str(config.get_logs_db_path()))

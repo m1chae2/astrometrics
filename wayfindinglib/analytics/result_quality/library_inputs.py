@@ -45,15 +45,9 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from astrometricslib import (
-    AstrometricsError,
-    CaptureSetting,
-    QualityMeasurement,
-    SubjectLevel,
-    Target,
-    frame_subject_id,
-    parse_coordinate_string,
-)
+from astrometricslib import Target, frame_subject_id, parse_coordinate_string
+from astrometricslib.exceptions import AstrometricsError
+from astrometricslib.reports import CaptureSetting, QualityMeasurement, SubjectLevel
 from wayfindinglib.analytics.capture_history import normalize_name
 from wayfindinglib.analytics.result_quality.efficiency import (
     READ_NOISE_METRIC,

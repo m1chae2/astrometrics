@@ -40,7 +40,7 @@ from multiprocessing import Queue
 from multiprocessing.process import BaseProcess
 from typing import Any
 
-from astrometricslib import HardwareError
+from astrometricslib.exceptions import HardwareError
 
 logger = logging.getLogger(__name__)
 

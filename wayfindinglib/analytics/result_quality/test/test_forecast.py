@@ -19,22 +19,19 @@ from datetime import UTC, datetime, timedelta
 import numpy as np
 import pytest
 
-from astrometricslib import (
-    EARLIER_NIGHTS_VARIANT,
-    Astrometrics,
-    CaptureSetting,
-    MeasurementOrigin,
-    MeasurementStatus,
-    QualityMeasurement,
-    QualityQueryResult,
-    QualitySubject,
-    SubjectLevel,
-    aperture_identity_to_number,
-    fold_exposure_lengths,
-)
+from astrometricslib import Astrometrics
+from astrometricslib._internal.quality import MeasurementOrigin, QualityQueryResult, QualitySubject
+from astrometricslib._internal.stacking import aperture_identity_to_number, fold_exposure_lengths
 from astrometricslib.models.quality.calibration_identities import (
     CalibrationFileIdentity,
     CalibrationIdentities,
+)
+from astrometricslib.reports import (
+    EARLIER_NIGHTS_VARIANT,
+    CaptureSetting,
+    MeasurementStatus,
+    QualityMeasurement,
+    SubjectLevel,
 )
 from wayfindinglib.analytics.result_quality import forecast as fc
 from wayfindinglib.analytics.result_quality.efficiency import FrameObservation

@@ -11,7 +11,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib import FrameRecord, InvalidArgumentError, NotFoundError, ProcessingPipelines, Target
+from astrometricslib import FrameRecord, ProcessingPipelines, Target
+from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.pipelines.stacking import stage as stacking_stage
 

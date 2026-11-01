@@ -12,7 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from astrometricslib import AppConfiguration, observing_night_id
+from astrometricslib import AppConfiguration
+from astrometricslib.reports import observing_night_id
 from wayfindinglib.analytics.capture_history import STAR_WIDTH_METRIC
 from wayfindinglib.analytics.envelope_assembly import (
     collect_baseline_values,

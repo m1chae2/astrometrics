@@ -31,7 +31,7 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from astrometricslib import CaptureSetting, MeasurementReference, QualityLimit
+from astrometricslib.reports import CaptureSetting, MeasurementReference, QualityLimit
 
 
 class ActionClass(StrEnum):

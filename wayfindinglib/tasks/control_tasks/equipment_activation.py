@@ -19,7 +19,8 @@ frontend's `observatory:list_cameras` and
 import logging
 from typing import Any
 
-from astrometricslib import AppConfiguration, ConfigurationError, resolve_camera_profile
+from astrometricslib import AppConfiguration, resolve_camera_profile
+from astrometricslib.exceptions import ConfigurationError
 from wayfindinglib.data_access.equipment_catalog_reader import (
     ACTIVE_CAMERA_KEY,
     ACTIVE_TELESCOPE_KEY,

@@ -33,7 +33,9 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from astrometricslib import CaptureSetting, ConfigurationError, FilterType, resolve_camera_profile
+from astrometricslib import FilterType, resolve_camera_profile
+from astrometricslib.exceptions import ConfigurationError
+from astrometricslib.reports import CaptureSetting
 from wayfindinglib.analytics.capture_history import normalize_name
 
 NOT_MEASURED_NOTE = "setting not measured"

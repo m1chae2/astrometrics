@@ -15,14 +15,8 @@ from typing import Any
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from astrometricslib import (
-    ConfigurationError,
-    ErrorInfo,
-    InvalidArgumentError,
-    log_context,
-    new_request_id,
-    to_error_info,
-)
+from astrometricslib.exceptions import ConfigurationError, ErrorInfo, InvalidArgumentError, to_error_info
+from astrometricslib.jobs import log_context, new_request_id
 from backend.container import container
 from backend.public_interface import RPC_METHODS
 from backend.services.infrastructure.frontend_log import log_frontend_message

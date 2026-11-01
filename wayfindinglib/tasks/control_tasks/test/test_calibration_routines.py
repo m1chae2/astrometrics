@@ -8,7 +8,7 @@ is a thin, correctly-parameterized wrapper over `fit_pointing_model`.
 
 import pytest
 
-from astrometricslib import HardwareError, ProcessingError
+from astrometricslib.exceptions import HardwareError, ProcessingError
 from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCalibration
 from wayfindinglib.tasks.control_tasks.calibration_routines import (
     BacklashCalibrationSteps,

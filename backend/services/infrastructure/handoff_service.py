@@ -13,7 +13,12 @@ import time
 from datetime import datetime
 from typing import Any
 
-from astrometricslib import ConfigurationError, ExternalServiceError, InvalidArgumentError, NotFoundError
+from astrometricslib.exceptions import (
+    ConfigurationError,
+    ExternalServiceError,
+    InvalidArgumentError,
+    NotFoundError,
+)
 from backend.services.infrastructure.socket_manager import SocketManager
 
 logger = logging.getLogger(__name__)

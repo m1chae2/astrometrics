@@ -10,13 +10,10 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
-from astrometricslib import (
-    MeasurementStatus,
-    QualityMeasurement,
-    QualityQueryResult,
-    frame_subject_id,
-)
+from astrometricslib._internal.frames import frame_subject_id
+from astrometricslib._internal.quality import QualityQueryResult
 from astrometricslib.models.quality.measurement import MeasurementOrigin, QualitySubject, SubjectLevel
+from astrometricslib.reports import MeasurementStatus, QualityMeasurement
 
 
 def stored_measurement(

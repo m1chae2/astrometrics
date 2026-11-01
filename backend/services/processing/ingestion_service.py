@@ -10,9 +10,9 @@ import os
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib import (
+from astrometricslib import AppConfiguration
+from astrometricslib.exceptions import (
     FITS_READ_ERRORS,
-    AppConfiguration,
     AstrometricsError,
     ConfigurationError,
     ExternalServiceError,
@@ -308,7 +308,7 @@ class IngestionService(BaseBackgroundService):
         success : `bool`
             `True` once re-indexing completes.
         """
-        from astrometricslib import capture_job_logs
+        from astrometricslib.jobs import capture_job_logs
 
         with capture_job_logs(
             job_id=job_id,
@@ -446,7 +446,7 @@ class IngestionService(BaseBackgroundService):
         success : `bool`
             `True` once ingestion completes.
         """
-        from astrometricslib import capture_job_logs
+        from astrometricslib.jobs import capture_job_logs
 
         # Flip the job out of its initial "started" row the moment work
         # actually begins -- without this the status the UI polls never

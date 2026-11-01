@@ -38,7 +38,7 @@ spectrum = star.spectroscopy  # a SpectroscopyResult
 <!-- impl: astrometricslib.pipelines.spectroscopy.pipeline.SpectroscopyPipeline.process_image -->
 <!-- impl: astrometricslib.pipelines.spectroscopy.pipeline.SpectroscopyPipeline.process -->
 <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.standard_star_selection.select_standard_star -->
-<!-- impl: astrometricslib.SpectroscopyResult -->
+<!-- impl: astrometricslib._internal.results.SpectroscopyResult -->
 
 Call (a) is called "the raw extraction" below and call (b) "the calibrated result". `(x0, y0)` is the star's zero-order pixel position (its undispersed point image).
 
@@ -1097,7 +1097,7 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
       comparison.wavelength_shift_angstrom,
   )
   ```
-  <!-- impl: astrometricslib.GaiaXpDriver -->
+  <!-- impl: astrometricslib._internal.drivers.GaiaXpDriver -->
   <!-- impl: astrometricslib.drivers.driver_set.Drivers.gaia_xp_or_default -->
   <!-- impl: astrometricslib.pipelines.shared.catalog_star_identity.gaia_dr3_source_id_of -->
   <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp.compare_to_gaia_xp -->

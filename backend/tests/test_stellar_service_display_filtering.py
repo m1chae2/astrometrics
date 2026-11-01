@@ -17,10 +17,11 @@ from unittest.mock import MagicMock
 import pytest
 from pytest_mock import MockerFixture
 
-from astrometricslib import StarQueryResult, StellarObject, TargetStarCount
+from astrometricslib import StellarObject
+from astrometricslib._internal.catalog import StarQueryResult, TargetStarCount
 from backend.services.data import stellar_service as stellar_service_module
 from backend.services.data.stellar_service import DEEP_CATALOG_INSTALL_COMMAND, StellarService
-from wayfindinglib import DeepCatalogStatus, SkySource
+from wayfindinglib._internal.planning import DeepCatalogStatus, SkySource
 
 
 def _service() -> StellarService:
@@ -340,7 +341,7 @@ def test_deep_catalog_status_adds_the_install_command() -> None:
 
 def test_star_records_serialize_their_data_flags_for_the_app() -> None:
     """The data flags of a star record reach the RPC reply."""
-    from astrometricslib import SpectroscopyResult
+    from astrometricslib._internal.results import SpectroscopyResult
     from backend.services.rpc_protocol import serialize_rpc_result
 
     star = StellarObject(

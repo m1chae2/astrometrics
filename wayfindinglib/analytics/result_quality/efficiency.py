@@ -50,13 +50,8 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
-from astrometricslib import (
-    PIXEL_BLUR_FWHM_SQUARED_FACTOR,
-    UNKNOWN_CAPTURE_SETTING_CAMERA,
-    CaptureSetting,
-    MeasurementStatus,
-    QualityMeasurement,
-)
+from astrometricslib import PIXEL_BLUR_FWHM_SQUARED_FACTOR, UNKNOWN_CAPTURE_SETTING_CAMERA
+from astrometricslib.reports import CaptureSetting, MeasurementStatus, QualityMeasurement
 from wayfindinglib.models.equipment_and_site.equipment import Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
 from wayfindinglib.models.quality.efficiency import (

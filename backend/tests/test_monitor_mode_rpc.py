@@ -355,7 +355,7 @@ async def test_every_service_command_rpc_is_refused_in_monitor_mode(
     """RPC methods that go through a backend service are refused too."""
     from sys import modules
 
-    from wayfindinglib import SkyPosition
+    from wayfindinglib._internal.control import SkyPosition
 
     monkeypatch.setattr(
         modules["wayfindinglib.tasks.control_tasks.hardware_operations"],

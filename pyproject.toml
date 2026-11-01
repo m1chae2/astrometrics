@@ -246,7 +246,7 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "**/conftest.py" = ["assert"] # S101, same reasoning
 "**/scripts/**" = ["print"] # T201: a script is a program; its output is for the person who ran it
 "build/**" = ["print"] # T201: build tools are programs
-"backend/services/observatory/guiding_service.py" = ["suspicious-non-cryptographic-random-usage", "banned-api"] # S311: simulated guide-star telemetry jitter for the mock/simulator, not security-sensitive
+"backend/services/observatory/guiding_service.py" = ["suspicious-non-cryptographic-random-usage"] # S311: simulated guide-star telemetry jitter for the mock/simulator, not security-sensitive
 # S404/S603/S607: this app is a telescope-control/imaging tool that
 # legitimately shells out to external CLIs (Siril, astrometry.net,
 # ssh/rsync/scp to remote StellarMate boxes). Reviewed: every call site uses
@@ -300,7 +300,7 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "build/codegen/generate_types.py" = ["banned-api"] # TS codegen introspects the full model surface, not just the public API
 "astrometricslib/conftest.py" = ["module-import-not-at-top-of-file"] # sys.modules mocking/config patching must precede import
 "backend/tests/conftest.py" = ["module-import-not-at-top-of-file"] # sys.modules mocking/config patching must precede import
-"backend/main_backend.py" = ["module-import-not-at-top-of-file", "banned-api"] # warnings.filterwarnings() must precede import
+"backend/main_backend.py" = ["module-import-not-at-top-of-file"] # warnings.filterwarnings() must precede import
 "wayfindinglib/drivers/indi_interface.py" = ["invalid-function-name"] # overrides PyIndi's C++ client interface (camelCase required)
 "wayfindinglib/drivers/indi/pyindi_compatibility.py" = ["invalid-function-name"] # stub mocks the same PyIndi camelCase interface
 "wayfindinglib/drivers/simulators/indi_simulator.py" = ["invalid-function-name"] # mocks the same PyIndi camelCase interface
@@ -335,7 +335,6 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "documentation/notebooks/wayfinding/execution/observation_execution.ipynb" = ["print"]
 "documentation/notebooks/wayfinding/planning/mosaic_sequence_authoring.ipynb" = ["print"]
 "documentation/notebooks/wayfinding/planning/observation_planning.ipynb" = ["print"]
-"mcp_servers/gaps/__main__.py" = ["banned-api"]
 "mcp_servers/gaps/review.py" = ["print"]
 "mcp_servers/inventory/tool_inventory.py" = ["print"]
 

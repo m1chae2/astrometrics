@@ -187,8 +187,9 @@ class GapTools:
 
 def main() -> None:
     """Serve the gap tools to one client over stdin and stdout."""
-    # Log to stderr so the MCP messages on stdout stay clean.
-    logging.basicConfig(level=logging.INFO, stream=sys.stderr)
+    # Log to stderr so the MCP messages on stdout stay clean. This server
+    # imports neither library, so it cannot use their shared logging setup.
+    logging.basicConfig(level=logging.INFO, stream=sys.stderr)  # ruff: ignore[banned-api]
     run_server(SERVER_NAME, INSTRUCTIONS, GapTools())
 
 

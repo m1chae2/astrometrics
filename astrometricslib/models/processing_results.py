@@ -12,6 +12,8 @@ guessing at the keys of a dictionary.
   steps made it.
 - `ProcessTargetResult` holds one target's result from each analysis stage
   that ran, and the target's quality summaries afterwards.
+- `StackWeightPrediction` says how the stacker would weight a set of frames:
+  the mode, each frame's exposure group and each frame's weight.
 """
 
 from typing import Any, Literal
@@ -27,6 +29,7 @@ __all__ = [
     "PreviewSettingsUsed",
     "ProcessTargetResult",
     "StackResult",
+    "StackWeightPrediction",
 ]
 
 
@@ -118,3 +121,21 @@ class ProcessTargetResult(BaseModel):
     # The target's astrometry, photometry and spectroscopy quality
     # summaries after the stages ran.
     quality: TargetQualitySummaries | None = None
+
+
+class StackWeightPrediction(BaseModel):
+    """How the stacker would weight a set of frames."""
+
+    # The weighting mode: "equal", "noise", "wfwhm" (star width), "group" (the
+    # frames fall in more than one exposure group), or the configured mode's
+    # own text for a mode the forecast does not know.
+    mode: str
+    # For each frame, the length of the exposure group it would land in, in
+    # seconds. Every entry is None when the frames stay in one group because
+    # a length cannot be read or no length has enough frames.
+    folded_exposure_lengths: list[float | None] = Field(default_factory=list)
+    # For each frame, the weight it would carry (the star-width weights have
+    # mean 1; the others are not scaled). None when they are unknown.
+    weights: list[float] | None = None
+    # Why the weights are unknown. Empty when they are known.
+    reasons: list[str] = Field(default_factory=list)

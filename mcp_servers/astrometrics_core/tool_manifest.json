@@ -86,6 +86,13 @@
       "interim_block": "",
       "note": "Returns an astropy WCS, which MCP cannot send. Return the solved center and pixel scale."
     },
+    "processing_predict_stack_weights": {
+      "tool_class": "unclassified",
+      "category": "image-processing",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Takes lists of per-frame facts that only forecast code holds. An AI client has no way to supply them."
+    },
     "processing_process_target": {
       "tool_class": "change-data",
       "category": "image-processing",

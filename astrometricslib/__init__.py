@@ -107,7 +107,12 @@ from astrometricslib.models.job_queries import JobLogLine, JobQueryResult, JobSu
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate
 from astrometricslib.models.moving_object_config import MovingObjectConfig
 from astrometricslib.models.point_sources import PointSource, PointSourceDetection
-from astrometricslib.models.processing_results import PreviewRemakeResult, ProcessTargetResult, StackResult
+from astrometricslib.models.processing_results import (
+    PreviewRemakeResult,
+    ProcessTargetResult,
+    StackResult,
+    StackWeightPrediction,
+)
 from astrometricslib.models.provenance import (
     Activity,
     ActivityDescription,
@@ -567,6 +572,7 @@ __all__ = [
     "StackRunResult",
     "StackSettings",
     "StackSummary",
+    "StackWeightPrediction",
     "StackingDriver",
     "StarQueryResult",
     "StarResultReference",

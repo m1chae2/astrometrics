@@ -515,6 +515,10 @@ DECISIONS = {
         "Returns whole frame records, which can overflow the reply. Scripts and wayfindinglib use it. "
         "observatory_history_frame_guiding already serves an AI client.",
     ),
+    "processing_predict_stack_weights": ToolDecision(
+        "drop",
+        "Takes per-frame lists that only forecast code holds. An AI client has no way to supply them.",
+    ),
     "target_resolve": ToolDecision(
         "drop",
         "Returns the whole target record, frames and all, which overflows the reply. Use target_query.",

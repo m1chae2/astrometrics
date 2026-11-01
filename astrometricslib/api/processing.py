@@ -17,7 +17,7 @@ cannot be met, and return a typed result otherwise.
 import logging
 import math
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
@@ -35,7 +35,12 @@ from astrometricslib.models.calibration_ingest import (
 )
 from astrometricslib.models.catalog_queries import CalibrationQueryResult
 from astrometricslib.models.point_sources import PointSource, PointSourceDetection
-from astrometricslib.models.processing_results import PreviewRemakeResult, ProcessTargetResult, StackResult
+from astrometricslib.models.processing_results import (
+    PreviewRemakeResult,
+    ProcessTargetResult,
+    StackResult,
+    StackWeightPrediction,
+)
 from astrometricslib.models.quality.excluded_frames import RestoreReport
 from astrometricslib.models.quality.measurement import SubjectLevel
 from astrometricslib.models.quality.quality_reports import (
@@ -1909,6 +1914,60 @@ class ProcessingPipelines:
 
         check_choice("kind", kind, STACK_KINDS)
         return summarize_stack(self._resolve(target), kind)
+
+    def predict_stack_weights(
+        self,
+        exposure_seconds: Sequence[float | None],
+        configured_weight: str | None = None,
+        *,
+        is_spectral: bool = False,
+        star_width_px: Sequence[float | None] | None = None,
+        rate_variance: Sequence[float | None] | None = None,
+        group_frame_noise_adu: Mapping[float, float | None] | None = None,
+    ) -> StackWeightPrediction:
+        """Predict how the stacker would weight a set of frames.
+
+        This runs the stacker's own rules on the frame facts you give, so a
+        forecast made before stacking agrees with the stack made later.
+        Nothing is read from disk or saved.
+
+        Parameters
+        ----------
+        exposure_seconds : `Sequence` [`float` or `None`]
+            The exposure length of each frame, in seconds. `None` marks a
+            frame whose length cannot be read.
+        configured_weight : `str`, optional
+            The ``Processing.Siril.stack_weight`` setting. A configured mode
+            wins over the stacker's own choice.
+        is_spectral : `bool`, optional
+            Whether the stack is spectral. Those keep their configured weight.
+        star_width_px : `Sequence` [`float` or `None`], optional
+            The weighted star width of each frame, in pixels. Needed for the
+            ``wfwhm`` weights and the weights inside each exposure group.
+        rate_variance : `Sequence` [`float` or `None`], optional
+            The variance of each frame in rate units. Needed for the
+            ``noise`` weights.
+        group_frame_noise_adu : `dict` [`float`, `float` or `None`], optional
+            The noise of one raw frame of each exposure group, in counts,
+            keyed by the group's length (``folded_exposure_lengths`` of the
+            result). Needed for the weights of an exposure-group stack.
+
+        Returns
+        -------
+        prediction : `StackWeightPrediction`
+            The weighting mode, the exposure group of each frame, and the
+            weight of each frame (or the reasons they are unknown).
+        """
+        from astrometricslib.pipelines.stacking.stack_weight_prediction import predict_stack_weights
+
+        return predict_stack_weights(
+            exposure_seconds,
+            configured_weight,
+            is_spectral=is_spectral,
+            star_width_px=star_width_px,
+            rate_variance=rate_variance,
+            group_frame_noise_adu=group_frame_noise_adu,
+        )
 
     def open_in_siril(self, file_path: str) -> None:
         """Open a stack in the Siril program's window, for a person to inspect.

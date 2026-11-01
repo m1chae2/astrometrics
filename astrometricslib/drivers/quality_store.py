@@ -81,7 +81,7 @@ from astrometricslib.models.quality.measurement import (
 logger = logging.getLogger(__name__)
 
 #: The schema version this code writes and expects.
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 _MEASUREMENT_COLUMNS = (
     "metric",
@@ -213,7 +213,9 @@ _CREATE_SCHEMA_STATEMENTS = (
 # Version 3 adds this table. One row per (run, stack subject). Each master
 # column holds a JSON list of ``[path, size_bytes, modified_ns]`` file
 # identities, because a stack can use several masters and the list is only
-# ever compared as a whole, never filtered on.
+# ever compared as a whole, never filtered on. Version 6 adds the nullable
+# column ``flat_bias_masters`` by ALTER TABLE: NULL means "not recorded" (a row
+# from before version 6), which is different from ``[]`` ("no flat bias used").
 _CREATE_CALIBRATION_IDENTITY_STATEMENTS = (
     """
     CREATE TABLE IF NOT EXISTS quality_calibration_identity (
@@ -241,7 +243,8 @@ _CREATE_CALIBRATION_IDENTITY_STATEMENTS = (
 _INSERT_CALIBRATION_IDENTITY_SQL = (
     "INSERT INTO quality_calibration_identity (run_id, subject_id, target_id, camera, optic, "
     "focal_length_mm, flat_masters, bias_masters, dark_masters, siril_version, "
-    "stacking_algorithm_version, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+    "stacking_algorithm_version, recorded_at, flat_bias_masters) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
     "ON CONFLICT (run_id, subject_id) DO NOTHING"
 )
 
@@ -669,6 +672,16 @@ class QualityStore:
             # statements above did not include it, so it is created here too.
             for statement in _CREATE_CALIBRATION_IDENTITY_STATEMENTS:
                 connection.execute(statement)
+        if version < 6:
+            # Version 6 adds the flat-bias column. Old rows keep NULL, which
+            # means "not recorded", so they are never read as "no flat bias".
+            columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(quality_calibration_identity)")
+            }
+            if "flat_bias_masters" not in columns:
+                connection.execute(
+                    "ALTER TABLE quality_calibration_identity ADD COLUMN flat_bias_masters TEXT"
+                )
         if 1 <= version < 4:
             # A new file (version 0) has no rows to merge.
             QualityStore._migrate_from_version_3(connection)
@@ -933,6 +946,7 @@ class QualityStore:
             identities.siril_version,
             identities.stacking_algorithm_version,
             _format_time(datetime.now(UTC)),
+            None if identities.flat_bias_masters is None else encode(identities.flat_bias_masters),
         )
         with self._write_transaction() as connection:
             cursor = connection.execute(_INSERT_CALIBRATION_IDENTITY_SQL, values)
@@ -989,6 +1003,11 @@ class QualityStore:
                 flat_masters=_decode_masters(row["flat_masters"]),
                 bias_masters=_decode_masters(row["bias_masters"]),
                 dark_masters=_decode_masters(row["dark_masters"]),
+                flat_bias_masters=(
+                    _decode_masters(row["flat_bias_masters"])
+                    if "flat_bias_masters" in row.keys() and row["flat_bias_masters"] is not None
+                    else None
+                ),
                 siril_version=row["siril_version"],
                 stacking_algorithm_version=row["stacking_algorithm_version"],
                 recorded_at=row["recorded_at"],

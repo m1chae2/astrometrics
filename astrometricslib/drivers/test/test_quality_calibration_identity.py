@@ -98,3 +98,32 @@ def test_read_by_run_id_and_target(tmp_path: Path) -> None:
     assert [r.target_id for r in store.get_calibration_identities(target_id="M31")] == ["M31"]
     assert store.get_calibration_identities([]) == []
     assert len(store.get_calibration_identities(["run-1", "run-2"], "M13")) == 1
+
+
+def test_flat_bias_masters_round_trip_and_old_rows_read_as_not_recorded(tmp_path: Path) -> None:
+    """The flat-bias list comes back; an unset field reads as `None`."""
+    path = tmp_path / "astrometrics.db"
+    store = QualityStore(str(path))
+    flat_bias = [CalibrationFileIdentity(path="/cal/flat_bias.fits", size_bytes=5, modified_ns=6)]
+    store.write_calibration_identities(make_identities("run-new", flat_bias_masters=flat_bias))
+    store.write_calibration_identities(make_identities("run-empty", flat_bias_masters=[]))
+    store.write_calibration_identities(make_identities("run-old"))  # a record that never set the field
+    records = {record.run_id: record for record in store.get_calibration_identities()}
+    assert records["run-new"].flat_bias_masters == flat_bias
+    assert records["run-empty"].flat_bias_masters == []
+    assert records["run-old"].flat_bias_masters is None
+
+
+def test_migration_from_version_5_adds_the_flat_bias_column(tmp_path: Path) -> None:
+    """A version-5 file keeps its rows (not recorded) and gains the column."""
+    path = tmp_path / "astrometrics.db"
+    store = QualityStore(str(path))
+    store.write_calibration_identities(make_identities("run-1"))
+    with sqlite3.connect(path) as connection:
+        connection.execute("ALTER TABLE quality_calibration_identity DROP COLUMN flat_bias_masters")
+        connection.execute("UPDATE quality_schema_version SET version = 5")
+    assert store.get_calibration_identities()[0].flat_bias_masters is None  # a read never migrates
+    store.write_calibration_identities(make_identities("run-2", flat_bias_masters=[]))
+    records = {record.run_id: record for record in store.get_calibration_identities()}
+    assert records["run-1"].flat_bias_masters is None
+    assert records["run-2"].flat_bias_masters == []

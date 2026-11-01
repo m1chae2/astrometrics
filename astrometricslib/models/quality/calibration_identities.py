@@ -59,6 +59,10 @@ class CalibrationIdentities(BaseModel):
         The bias masters the members used.
     dark_masters : `list` [`CalibrationFileIdentity`]
         The dark masters the members used (needed for the uncooled Nikon).
+    flat_bias_masters : `list` [`CalibrationFileIdentity`] or `None`
+        The bias files removed from the flats (at the flats' own gain and
+        offset). `None` for a record made before this field existed, which
+        means "not recorded"; an empty list means none were used.
     siril_version : `str` or `None`
         The Siril version that combined the frames.
     stacking_algorithm_version : `int` or `None`
@@ -78,6 +82,7 @@ class CalibrationIdentities(BaseModel):
     flat_masters: list[CalibrationFileIdentity] = Field(default_factory=list, alias="flatMasters")
     bias_masters: list[CalibrationFileIdentity] = Field(default_factory=list, alias="biasMasters")
     dark_masters: list[CalibrationFileIdentity] = Field(default_factory=list, alias="darkMasters")
+    flat_bias_masters: list[CalibrationFileIdentity] | None = Field(default=None, alias="flatBiasMasters")
     siril_version: str | None = Field(default=None, alias="sirilVersion")
     stacking_algorithm_version: int | None = Field(default=None, alias="stackingAlgorithmVersion")
     recorded_at: str | None = Field(default=None, alias="recordedAt")

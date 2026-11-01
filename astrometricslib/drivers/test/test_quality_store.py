@@ -693,7 +693,7 @@ def test_a_new_database_is_at_the_current_version_and_has_no_settings(tmp_path: 
             (SCHEMA_VERSION,)
         ]
         assert connection.execute("SELECT COUNT(*) FROM quality_capture_setting").fetchone()[0] == 0
-    assert SCHEMA_VERSION == 5
+    assert SCHEMA_VERSION == 6
 
 
 #: The start of the metric names the odd-even difference had before version 5.

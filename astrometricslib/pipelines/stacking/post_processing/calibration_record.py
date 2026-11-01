@@ -4,15 +4,18 @@ Description: A forecast check compares two stacks of a target and asks
 whether the later stack's noise fell as the earlier one predicted. A new flat
 or bias set lowers the noise by itself, so a pair whose calibration changed is
 not a fair check. To let wayfindinglib tell, each library stacking run stores
-one calibration record beside its quality rows: the flat, bias and dark files
-it applied (path, size and change time), the camera, the optic and its focal
-length, the Siril version and the stacking algorithm version.
+one calibration record beside its quality rows: the flat, bias, flat-bias
+and dark files it applied (path, size and change time), the camera, the optic
+and its focal length, the Siril version and the stacking algorithm version.
+The flat-bias files are the bias frames removed from the flats, at the flats'
+own gain and offset.
 
 The files are the ones the run actually staged for Siril, which the stacking
 interface lists in the run's diagnostics (`FLAT_FRAME_PATHS_KEY`,
-`BIAS_FRAME_PATHS_KEY`, `DARK_FRAME_PATHS_KEY`), joined across exposure groups.
-They are not every calibration slot the frames could use, so a new dark set
-for another exposure length does not change a record.
+`BIAS_FRAME_PATHS_KEY`, `FLAT_BIAS_FRAME_PATHS_KEY`, `DARK_FRAME_PATHS_KEY`),
+joined across exposure groups. They are not every calibration slot the frames
+could use, so a new dark set for another exposure length does not change a
+record.
 
 The record goes in the quality store's calibration table
 (`QualityStore.write_calibration_identities`); the public reader is
@@ -28,6 +31,7 @@ from typing import Any
 from astrometricslib.drivers.calibration_library import (
     BIAS_FRAME_PATHS_KEY,
     DARK_FRAME_PATHS_KEY,
+    FLAT_BIAS_FRAME_PATHS_KEY,
     FLAT_FRAME_PATHS_KEY,
 )
 from astrometricslib.drivers.quality_store import QualityStore
@@ -136,6 +140,7 @@ def build_calibration_identities(
         flatMasters=files(FLAT_FRAME_PATHS_KEY),
         biasMasters=files(BIAS_FRAME_PATHS_KEY),
         darkMasters=files(DARK_FRAME_PATHS_KEY),
+        flatBiasMasters=files(FLAT_BIAS_FRAME_PATHS_KEY),
         sirilVersion=siril_version,
         stackingAlgorithmVersion=STACKING_ALGORITHM_VERSION,
     )

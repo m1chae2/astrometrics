@@ -334,6 +334,9 @@ class CalibrationSummary(BaseModel):
         The focal length.
     flat_masters, bias_masters, dark_masters : `tuple` [`FileIdentity`, ...]
         The master files, sorted.
+    flat_bias_masters : `tuple` [`FileIdentity`, ...] or `None`
+        The bias files removed from the flats, sorted. `None` when the record
+        is older than the field, so the check skips it for that pair.
     siril_version : `str` or `None`
         The Siril version that combined the frames.
     stacking_algorithm_version : `int` or `None`
@@ -348,6 +351,7 @@ class CalibrationSummary(BaseModel):
     flat_masters: tuple[FileIdentity, ...] = ()
     bias_masters: tuple[FileIdentity, ...] = ()
     dark_masters: tuple[FileIdentity, ...] = ()
+    flat_bias_masters: tuple[FileIdentity, ...] | None = None
     siril_version: str | None = None
     stacking_algorithm_version: int | None = None
 
@@ -382,7 +386,8 @@ def calibration_summary_from_record(record: Any) -> CalibrationSummary:
     record : `Any`
         A calibration record (`CalibrationIdentities`): ``camera``,
         ``optic``, ``focal_length_mm``, ``flat_masters``, ``bias_masters``,
-        ``dark_masters``, ``siril_version`` and ``stacking_algorithm_version``.
+        ``dark_masters``, optionally ``flat_bias_masters``, ``siril_version``
+        and ``stacking_algorithm_version``.
 
     Returns
     -------
@@ -396,6 +401,11 @@ def calibration_summary_from_record(record: Any) -> CalibrationSummary:
         flat_masters=_file_identities(record.flat_masters),
         bias_masters=_file_identities(record.bias_masters),
         dark_masters=_file_identities(record.dark_masters),
+        flat_bias_masters=(
+            None
+            if getattr(record, "flat_bias_masters", None) is None
+            else _file_identities(record.flat_bias_masters)
+        ),
         siril_version=record.siril_version,
         stacking_algorithm_version=record.stacking_algorithm_version,
     )
@@ -2155,6 +2165,13 @@ def _confound_reason(previous: StackRunRecord, current: StackRunRecord) -> str |
         return "The flat master changed between the two stacks."
     if before.bias_masters != after.bias_masters:
         return "The bias master changed between the two stacks."
+    if (
+        before.flat_bias_masters is not None
+        and after.flat_bias_masters is not None
+        and before.flat_bias_masters != after.flat_bias_masters
+    ):
+        # A record from before the field cannot say, so it is no difference.
+        return "The bias removed from the flats changed between the two stacks."
     if before.dark_masters != after.dark_masters and not _camera_is_cooled(after.camera):
         return "The dark master changed between the two stacks."
     for name, first, second in (

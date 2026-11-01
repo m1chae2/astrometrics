@@ -18,6 +18,7 @@ import pytest
 from astrometricslib.drivers.calibration_library import (
     BIAS_FRAME_PATHS_KEY,
     DARK_FRAME_PATHS_KEY,
+    FLAT_BIAS_FRAME_PATHS_KEY,
     FLAT_FRAME_PATHS_KEY,
 )
 from astrometricslib.drivers.quality_store import QualityStore
@@ -73,6 +74,7 @@ def test_the_record_lists_the_applied_files_and_the_equipment(tmp_path: Path) ->
         FLAT_FRAME_PATHS_KEY: [str(flat), str(flat)],
         BIAS_FRAME_PATHS_KEY: [],
         DARK_FRAME_PATHS_KEY: [missing_dark],
+        FLAT_BIAS_FRAME_PATHS_KEY: ["flat_bias_a", "flat_bias_a"],
     }
     identities = build_calibration_identities(
         make_context(), "M_57_L_Stacked.fits", make_frames(), diagnostics, "1.4.4"
@@ -88,6 +90,7 @@ def test_the_record_lists_the_applied_files_and_the_equipment(tmp_path: Path) ->
     assert identities.bias_masters == []
     assert identities.dark_masters[0].path == missing_dark
     assert identities.dark_masters[0].size_bytes is None
+    assert [item.path for item in identities.flat_bias_masters or []] == ["flat_bias_a"]
     assert identities.siril_version == "1.4.4"
     assert identities.stacking_algorithm_version == STACKING_ALGORITHM_VERSION
 
@@ -128,3 +131,9 @@ def test_a_group_stack_joins_the_calibration_files_of_every_group() -> None:
     ])
     assert merged[FLAT_FRAME_PATHS_KEY] == ["flat"]
     assert merged[DARK_FRAME_PATHS_KEY] == ["dark30", "dark60"]
+
+
+def test_a_run_with_no_flat_bias_records_an_empty_list_not_unknown() -> None:
+    """No flat-bias files gives an empty list ("none used"), not `None`."""
+    identities = build_calibration_identities(make_context(), "s.fits", make_frames(), {}, None)
+    assert identities.flat_bias_masters == []

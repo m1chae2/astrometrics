@@ -266,6 +266,7 @@ def _calibration(
     flat: str = "flat_1.fits",
     bias: str = "bias_1.fits",
     dark: str = "dark_1.fits",
+    flat_bias: str | None = None,
     camera: str = "CamA",
     optic: str = "Scope",
     siril: str | None = "1.4.0",
@@ -279,6 +280,9 @@ def _calibration(
         The run.
     flat, bias, dark : `str`, optional
         The master file names (size and time are fixed).
+    flat_bias : `str` or `None`, optional
+        The file name of the bias removed from the flats. `None` leaves the
+        field unrecorded, as in a record made before it existed.
     camera, optic : `str`, optional
         The equipment names.
     siril : `str` or `None`, optional
@@ -301,6 +305,11 @@ def _calibration(
         flatMasters=[CalibrationFileIdentity(path=flat, sizeBytes=10, modifiedNs=1)],
         biasMasters=[CalibrationFileIdentity(path=bias, sizeBytes=10, modifiedNs=1)],
         darkMasters=[CalibrationFileIdentity(path=dark, sizeBytes=10, modifiedNs=1)],
+        flatBiasMasters=(
+            None
+            if flat_bias is None
+            else [CalibrationFileIdentity(path=flat_bias, sizeBytes=10, modifiedNs=1)]
+        ),
         sirilVersion=siril,
         stackingAlgorithmVersion=algorithm,
     )
@@ -762,6 +771,10 @@ def test_a_run_with_no_calibration_record_is_confounded() -> None:
     [
         ({"flat": "flat_2.fits"}, "The flat master changed"),
         ({"bias": "bias_2.fits"}, "The bias master changed"),
+        (
+            {"flat_bias": "flat_bias_2.fits"},
+            "The bias removed from the flats changed",
+        ),
         ({"optic": "Other scope"}, "The telescope or lens changed"),
         ({"camera": "CamB"}, "The camera changed from CamA to CamB"),
         ({"siril": "1.5.0"}, "The Siril version changed from 1.4.0 to 1.5.0"),
@@ -772,12 +785,23 @@ def test_a_run_with_no_calibration_record_is_confounded() -> None:
 )
 def test_a_calibration_change_is_not_checkable(changes: dict[str, object], expected_text: str) -> None:
     """Each change in the stored calibration confounds the pair."""
-    runs, observations = _plain_pair(calibration_changes={"run2": changes})
+    # The earlier run needs a flat-bias record, or it counts as unknown.
+    earlier = {"flat_bias": "flat_bias_1.fits"} if "flat_bias" in changes else {}
+    runs, observations = _plain_pair(calibration_changes={"run1": earlier, "run2": changes})
 
     (check,) = fc.forecast_check(runs, observations)
 
     assert check.outcome == ForecastOutcome.NOT_CHECKABLE
     assert expected_text in check.reason
+
+
+def test_an_old_record_without_the_flat_bias_field_is_not_read_as_different() -> None:
+    """A record from before the field cannot say, so it is not a difference."""
+    runs, observations = _plain_pair(calibration_changes={"run2": {"flat_bias": "flat_bias_1.fits"}})
+
+    (check,) = fc.forecast_check(runs, observations)
+
+    assert check.outcome == ForecastOutcome.AS_FORECAST
 
 
 def test_a_new_dark_set_does_not_confound_a_cooled_camera() -> None:

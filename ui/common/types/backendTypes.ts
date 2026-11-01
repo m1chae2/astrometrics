@@ -5942,6 +5942,8 @@ export const RPC_METHODS = [
   "sequencer:remove",
   "sequencer:reorder",
   "sequencer:begin",
+  "sequencer:pause",
+  "sequencer:abort",
   "sequencer:modify",
 ] as const;
 

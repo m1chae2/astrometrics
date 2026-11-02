@@ -137,6 +137,15 @@ def test_frames_lost_reports_frames_no_measurement_could_place() -> None:
     assert "Measure the target's frames again" in statements[0].reason
 
 
+def test_frames_lost_gives_no_total_when_no_frame_was_measured() -> None:
+    """With no measured frames, the statement must not read "29 of 29"."""
+    statements = rr.frames_lost_statements([], {}, {}, Counter({"trailed": 29}), 0)
+    assert len(statements) == 1
+    assert statements[0].message == "29 frames were set aside (trailed 29)."
+    assert " of 29" not in statements[0].plain_message
+    assert statements[0].plain_message.startswith("29 of your frames were left out")
+
+
 # -- sky cost ----------------------------------------------------------------
 
 

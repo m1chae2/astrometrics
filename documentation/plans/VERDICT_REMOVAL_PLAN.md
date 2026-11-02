@@ -107,6 +107,32 @@ Measured: below an SNR of about 7 per resolution element no realistic feature is
 
 #83, #85, #92 and #133 are fixed here, so #135 closes them along with #93, #97 and #134. #85: wire safety limits and guiding, add session stop if the backend has a call, pass alignment exposure if accepted, remove custom stacking parameters and the timing point dropdown, and label dither settings as mosaic-only. #92: items 1 to 3 are fixed here, and items 4 and 5 go to a small follow-up issue. #133 runs last. The hardware-facing controls join the user's hardware check.
 
+### Sorted record of the comparison differences (2026-11-01)
+
+The first report (phase 1b, 09:01) listed 699 differences. It came before two later commits. The rerun on the data copy with the current code lists 609, on 56 targets and 1147 stars with a spectrum. The report is `shadow_report_verdict_record.md` in the validation scratch folder.
+
+| Difference class | Count | Mark | Basis |
+| :--- | ---: | :--- | :--- |
+| Star flag with no rule (`is_ambiguous`) | 83 (first report), 0 now | Bug fixed | Rule `spectral_subtype_ambiguous` (88328eea) compares the gap the old property read with the same limit. It fires on all 256 of the 1147 stars below the limit, and on 82 of the 83 listed stars; the other star's gap is now above the limit. |
+| Rule fired, gate did not fail (stacking, M 81) | 6 (first report), 0 now | Bug fixed | The comparison script faulted `retake_bad_calibration_set` for the six gates that passed or were not checked. The rule fired on the two that failed (dark and bias frames cut off at zero) and names only those. The rule is right; the script is corrected. |
+| Rule fired, no pipeline flag: `frames_lost` | 14 | Bug fixed | Carries the old quarantine note. On 7 targets with no measured frames it said "29 of 29 frames", as if the whole target were lost (M 106 has 51 frames in its stack). It now gives no total. |
+| Rule fired, no pipeline flag: `calibration_gap` | 23 | Needs user decision | New advice, no old flag. The rule is correct on the sampled rows (offset 0 lights, offset 10 flats). It repeats for each exposure: its 55 statements hold 27 distinct messages. |
+| Rule fired, no pipeline flag: `underexposed_setting` | 7 | Needs user decision | New advice, no old flag. All 7 targets are bright stars or the Moon, where short exposures are deliberate. On 3 settings it advises longer exposures while `overexposed_setting` advises shorter ones. |
+| Rule fired, no pipeline flag: `trailed_stars` | 6 | Needs user decision | New advice, no old flag. The numbers are right (ratio 1.24 to 1.74 against 1.2). Three of its 9 statements rest on one frame. |
+| Rule fired, no pipeline flag: `sky_cost` | 2 | Needs user decision | Wrong on Polaris: "lost about 100%" from one frame of 32 microseconds, whose sky rate is not meaningful. Arcturus rests on one 30 s frame. Both reasons read "0 min of 0 min". |
+| Rule fired, no pipeline flag: `sharpness_tradeoff` | 2 | Needs user decision | New advice, no old flag. A choice given to the user, with a forecast. |
+| Pipeline rule fired, pipeline not flagged | 3 | Needs user decision | New advice on M 52 and NGC 7331 (`overexposed_setting`, `more_frames_will_not_help`). Outside the classes the user approved. |
+| Gate failed, no rule reads it | 232 | Change approved 2026-11-01 by the user | Jobs list these gates as warnings. |
+| Rule has insufficient data, gate decided | 78 | Change approved 2026-11-01 by the user | The gate row stays a warning. |
+| Pipeline flagged, no rule of the pipeline fired | 83 | Change approved 2026-11-01 by the user | Each one checked: 69 have a failed gate no rule reads, and 14 have only a flag reason from older rows. None is unexplained. |
+| Flag reason with no failed gate | 60 | Change approved 2026-11-01 by the user | All 60 also appear in the class below. |
+| Flag reason, rows predate the warning rows | 98 | Change approved 2026-11-01 by the user | Older rows. All 18 sentences behind them are still written by current code. |
+| Gate failed, rule did not fire (NGC 6823) | 1 | Change approved 2026-11-01 by the user | A backfilled row at definition version 0, so the rule lacks data. The row is still a failed row. |
+
+**No warning was found lost.** Every change in the classes above either keeps the warning as a row or adds advice. Stars ambiguous only at the subtype level were never a failed gate; the `spectral_classification` gate still leaves them out by design, and they appear in the star's result advice and as a count in that gate's reason text.
+
+**Still not proved on real rows.** The script's "recent rows" line reads 0, but that proves nothing yet: its date (`NEW_ROWS_SINCE`, 2026-11-02) is later than almost every row on the copy, so nearly every unmatched reason counts as old data. The copy holds no stacking notice rows except the preview one. Also, 179 matched reasons belong to pipelines with failed rows that have no job id, so no job can list those until a restack fills it. A one-target restack on the copy before phase 5 should confirm that a job lists its notices.
+
 ## 3. Phases
 
 Each phase is one or more commits. Sonnet agents make the edits and scripts handle mechanical ones. CI runs the full suites. A pipeline's inventory goes in `documentation/plans/` and you approve it before that pipeline's code changes.

@@ -124,6 +124,20 @@ def test_rule_fired_while_gate_passed_and_unattributed_rule() -> None:
     assert (script.UNATTRIBUTED, script.RULE_NO_FLAG_COUNTERPART, "free_rule") in kinds
 
 
+def test_a_rule_reading_several_gates_is_not_faulted_for_its_passed_gates() -> None:
+    """A rule that fired on a failed gate is not faulted for its others."""
+    index = script.build_rule_index([
+        _rule("calibration_set", "stacking.gate_dark_level", "stacking.gate_dark_noise")
+    ])
+    states = {
+        "stacking": script.old_state_from_summary(
+            _summary({"dark_level": "failed", "dark_noise": "passed"}), _stored(True, ["level"])
+        )
+    }
+    found = script.compare_target_pipelines("T", states, [_statement("calibration_set")], index)
+    assert script.RULE_FIRED_GATE_OK not in {item.kind for item in found}
+
+
 def test_agreement_gives_no_difference_and_insufficient_data_is_noted() -> None:
     """Agreement is silent; missing data against a decided gate shows."""
     states = {

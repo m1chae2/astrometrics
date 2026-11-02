@@ -434,6 +434,14 @@ def compare_target_pipelines(
         pipeline_rules = {name for name, prefixes in index.pipelines_by_rule.items() if prefix in prefixes}
         accounted |= pipeline_rules
         failed_gate_details = set()
+        # A rule that reads several gates fires on the ones that failed, and
+        # its statement names only those. Its other gates are no disagreement.
+        rules_with_failed_gate = {
+            rule
+            for name, (status, _detail) in state.gates.items()
+            if status == "failed"
+            for rule in index.rules_by_metric.get(f"{prefix}.gate_{name}", set())
+        }
         for gate_name, (status, detail) in sorted(state.gates.items()):
             readers = index.rules_by_metric.get(f"{prefix}.gate_{gate_name}", set())
             if status == "failed":
@@ -453,7 +461,7 @@ def compare_target_pipelines(
                         )
                     )
             else:
-                for rule_name in sorted(readers & fired):
+                for rule_name in sorted((readers & fired) - rules_with_failed_gate):
                     differences.append(
                         Difference(
                             target_id,

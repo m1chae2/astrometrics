@@ -309,7 +309,8 @@ def frames_lost_statements(
         Frames set aside that no stored measurement could place in a setting,
         by reason.
     unassigned_frame_count : `int`
-        Frames taken whose setting is unknown, for the share.
+        Frames with stored measurements, for the share. Zero means the total
+        is unknown, so the statement gives no total.
 
     Returns
     -------
@@ -348,22 +349,36 @@ def frames_lost_statements(
         )
     if unassigned_reasons and sum(unassigned_reasons.values()) > 0:
         count = sum(unassigned_reasons.values())
-        total = unassigned_frame_count + count
+        reason_text = _reason_text(unassigned_reasons)
         unassigned_fields = {
             "lost_count": count,
-            "frame_count": total,
-            "reason_text": _reason_text(unassigned_reasons),
+            "frame_count": unassigned_frame_count + count,
+            "reason_text": reason_text,
         }
+        # With no measured frame at all, the count of frames taken is unknown.
+        # "29 of 29" would say the whole target was lost, so no total is given.
+        total_known = unassigned_frame_count > 0
         statements.append(
             _from_rule(
                 "frames_lost",
-                rule.wording.format_map(unassigned_fields),
+                (
+                    rule.wording.format_map(unassigned_fields)
+                    if total_known
+                    else f"{count} frames were set aside ({reason_text})."
+                ),
                 (
                     "No stored measurement of these frames names their capture setting, so the loss is "
                     "not in any setting's summary. Measure the target's frames again to place them."
                 ),
                 capture_setting=None,
-                plain_message=format_plain(rule, unassigned_fields),
+                plain_message=(
+                    format_plain(rule, unassigned_fields)
+                    if total_known
+                    else (
+                        f"{count} of your frames were left out of the final picture ({reason_text}). "
+                        "We expect clearer skies or better guiding to save more of them."
+                    )
+                ),
             )
         )
     return statements

@@ -431,15 +431,17 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
         reference_stellar_objects = _registration_reference_candidates(target, catalog_access, field_center)
         if reference_stellar_objects:
             from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_star_registration import (
-                identify_spectral_stars_via_registration,
+                identify_spectral_stars_via_registered_sky_map,
                 identify_spectral_stars_via_solution,
+                set_sky_positions_of_unnamed_detections,
+                solution_shifted_onto_spectral_image,
             )
 
             # Prefer the plate solution of the target's solved standard
             # stack: it places every catalog star, saturated ones included,
-            # by sky position. Matching stored pixel positions by geometry
-            # is the fallback, for a target with no solved stack or whose
-            # star fields do not agree on one shift.
+            # by sky position. The fallback, for a target with no solved stack
+            # or whose star fields do not agree on one shift, matches stored
+            # pixel positions by geometry and fits a sky map from those stars.
             reference_wcs = resolve_solved_stack_wcs(target, request.path)
             matched_from_solution = (
                 identify_spectral_stars_via_solution(
@@ -448,8 +450,18 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
                 if reference_wcs is not None
                 else None
             )
-            if not matched_from_solution:
-                identify_spectral_stars_via_registration(context.stellar_objects, reference_stellar_objects)
+            if matched_from_solution:
+                spectral_image_wcs = solution_shifted_onto_spectral_image(
+                    context.stellar_objects, reference_stellar_objects, reference_wcs
+                )
+            else:
+                _, spectral_image_wcs = identify_spectral_stars_via_registered_sky_map(
+                    context.stellar_objects, reference_stellar_objects
+                )
+            # A sky position lets a strong spectrum with no catalog name be
+            # stored under a position-based id. Without a map none can be.
+            if spectral_image_wcs is not None:
+                set_sky_positions_of_unnamed_detections(context.stellar_objects, spectral_image_wcs)
             _recover_extended_source_hint(
                 astrometry, context, target, request.path, reference_stellar_objects, hint_ra, hint_dec
             )

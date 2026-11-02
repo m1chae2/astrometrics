@@ -50,6 +50,7 @@ from astrometricslib.pipelines.shared.catalog_star_identity import (
     gaia_dr3_source_id_from_names,
 )
 from astrometricslib.pipelines.shared.simbad_object_types import read_simbad_object_types
+from astrometricslib.pipelines.shared.star_kinds import position_only_star_id
 from astrometricslib.utilities.exceptions import DATA_ERRORS, ONLINE_QUERY_ERRORS, PlateSolveFailedError
 from astrometricslib.utilities.solar_system_targets import is_solar_system_target
 
@@ -2354,7 +2355,7 @@ class StarIdentifier:
         for stellar_object in still_unmatched:
             ra, dec = sky_positions.get(id(stellar_object), (None, None))
             if ra is not None:
-                field_id = f"FIELD_J{ra:.4f}{dec:+.4f}"
+                field_id = position_only_star_id(ra, dec)
                 stellar_object.id = field_id
                 stellar_object.name = field_id
                 stellar_object.right_ascension = ra

@@ -33,6 +33,7 @@ from astrometricslib.pipelines.shared.quality.saturation import (
     compute_stack_saturated_pixel_fraction,
     is_normalised_stack_scale,
 )
+from astrometricslib.pipelines.shared.star_kinds import position_only_star_id
 from astrometricslib.pipelines.shared.star_recording import is_unresolved_star
 from astrometricslib.pipelines.spectroscopy.post_processing.assess_output_quality import (
     output_quality_checkpoint,
@@ -775,7 +776,9 @@ class SpectrumStarSelection:
         holds every star that gets a spectrum and every neighbor-only star.
     neighbor_only_stars : `list`
         The stars in `stars` that are extracted only so that their light can
-        be taken out of their neighbors' spectra. They get no analysis and are
+        be taken out of their neighbors' spectra. One with a sky position and
+        a strong enough spectrum is kept after all (see
+        `SpectroscopyPipeline._keep_strong_unidentified_star`); the others are
         not returned as results.
     skipped_no_trail_count : `int`
         How many candidates had no part of their trail on the image.
@@ -789,6 +792,12 @@ class SpectrumStarSelection:
     neighbor_only_stars: list[Any]
     skipped_no_trail_count: int
     skipped_unidentified_count: int
+
+
+# The `neighbor_wing_status` of a star stored with no catalog identity. Such a
+# star is read as a neighbor only, so neighbors' light is neither looked for
+# nor removed from its spectrum.
+_NEIGHBORS_NOT_CHECKED_STATUS = "skipped: read as a neighbor only; neighbors' light not checked or removed"
 
 
 def _frame_airmass(image: Any) -> float | None:
@@ -946,6 +955,7 @@ class SpectroscopyPipeline:
         # Read by the runner for the run's quality metrics.
         self.last_run_skipped_no_trail_count = 0
         self.last_run_skipped_unidentified_count = 0
+        self.last_run_stored_unidentified_count = 0
         self.last_run_below_feature_limit_count = 0
         self.last_run_gaia_xp_download_failed_count = 0
 
@@ -1058,6 +1068,7 @@ class SpectroscopyPipeline:
         selection = self.select_stars_for_spectra(context.image, candidate_stars, limit)
         self.last_run_skipped_no_trail_count = selection.skipped_no_trail_count
         self.last_run_skipped_unidentified_count = selection.skipped_unidentified_count
+        self.last_run_stored_unidentified_count = 0
         if selection.skipped_no_trail_count or selection.skipped_unidentified_count:
             logger.info(
                 "Left out %d star(s) with no trail on the image and %d star(s) with no catalog identity "
@@ -1068,8 +1079,8 @@ class SpectroscopyPipeline:
             )
         if candidate_stars and len(selection.stars) == len(selection.neighbor_only_stars):
             logger.warning(
-                "No star of this run has a catalog identity and a trail on the image, so no spectrum is "
-                "extracted and nothing is saved."
+                "No star of this run has a catalog identity and a trail on the image, so only a strong "
+                "spectrum with a known sky position can be saved."
             )
         results = self.process_image(
             context.image,
@@ -1077,6 +1088,7 @@ class SpectroscopyPipeline:
             auto_detect_angle=auto_detect_angle,
             neighbor_only_stars=selection.neighbor_only_stars,
         )
+        self.last_run_skipped_unidentified_count -= self.last_run_stored_unidentified_count
         self.last_run_zero_order_saturation_fractions = [
             res["zero_order_saturated_pixel_fraction"]
             for res in results
@@ -1101,8 +1113,10 @@ class SpectroscopyPipeline:
           once the angle is measured. (Not applied with the flare-mask
           extraction, which reads a different region.)
         * A star with no catalog identity (still named ``Star_<number>``).
-          `record_pipeline_stars` drops such a star when the run is saved, so
-          its spectrum and analysis would be thrown away. The extended target
+          `record_pipeline_stars` drops such a star when the run is saved. It
+          gets no spectrum of its own unless its neighbor reading turns out
+          strong enough to keep (see `_keep_strong_unidentified_star`). The
+          extended target
           (a nebula or cluster) and a plain ``(x, y)`` position are never
           dropped for this reason.
 
@@ -1442,7 +1456,10 @@ class SpectroscopyPipeline:
         results = []
         for star, is_stellar_obj, result in extracted:
             if result.get("is_neighbor_only"):
-                # Read for its neighbors' sake only; it has no analysis.
+                # Read for its neighbors' sake. Its reading is reused, not
+                # repeated, if it can be stored under its sky position.
+                if is_stellar_obj and self._keep_strong_unidentified_star(star, result, image):
+                    results.append(result)
                 continue
             # If it's a StellarObject, enrich it with results
             if is_stellar_obj:
@@ -1450,6 +1467,62 @@ class SpectroscopyPipeline:
             results.append(result)
 
         return results
+
+    def _keep_strong_unidentified_star(
+        self, star: StellarObject, result: dict[str, Any], image: AstrometricsImage
+    ) -> bool:
+        """Keep a star no catalog names if its spectrum is strong enough.
+
+        A star at `MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE` or above gets a
+        position-based id, which `record_pipeline_stars` saves. The signal to
+        noise is known only after the star's corrections, so the star goes
+        through the same steps as any other, using the reading already made for
+        it as a neighbor. A weaker star, or one with no sky position, is left
+        exactly as it was and is not saved.
+
+        A kept star has no catalog data, so the catalog comparison and the Gaia
+        lookups have nothing to read. The stored record says what is not known:
+        `is_catalog_identified` is `False`, `possible_neighbor_contamination`
+        is `None` (never checked), and `neighbor_wing_status` says the
+        neighbors' light was not taken out.
+
+        Parameters
+        ----------
+        star : `StellarObject`
+            The neighbor-only star.
+        result : `dict`
+            Its extraction result.
+        image : `AstrometricsImage`
+            The picture it was read from.
+
+        Returns
+        -------
+        is_kept : `bool`
+            `True` when the star now has a position-based id and a spectrum.
+        """
+        if (
+            not is_unresolved_star(star)
+            or star.right_ascension is None
+            or star.declination is None
+            or getattr(star, "stellar_spectral_type", None) == EXTENDED_TARGET_SPECTRAL_TYPE
+        ):
+            return False
+        earlier_spectroscopy = star.spectroscopy
+        earlier_star_data = dict(star.star_data) if isinstance(star.star_data, dict) else star.star_data
+        earlier_below_limit_count = self.last_run_below_feature_limit_count
+        result["neighbor_wing_status"] = _NEIGHBORS_NOT_CHECKED_STATUS
+        self._apply_result_to_stellar_object(star, result, image)
+        signal_to_noise = star.spectroscopy.input_quality.signal_to_noise
+        if signal_to_noise is None or signal_to_noise < MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE:
+            star.spectroscopy = earlier_spectroscopy
+            star.star_data = earlier_star_data
+            self.last_run_below_feature_limit_count = earlier_below_limit_count
+            return False
+        star.id = position_only_star_id(float(star.right_ascension), float(star.declination))
+        star.name = star.id
+        star.is_catalog_identified = False
+        self.last_run_stored_unidentified_count += 1
+        return True
 
     def _subtract_neighbor_wings(self, image: AstrometricsImage, results: list[dict[str, Any]]) -> None:
         """Take each star's neighbours' blurred light out of its spectrum.

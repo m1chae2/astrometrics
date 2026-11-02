@@ -15,15 +15,22 @@ import numpy as np
 import pytest
 
 from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObject
+from astrometricslib.pipelines.shared.catalog_star_identity import gaia_dr3_source_id_of
+from astrometricslib.pipelines.shared.star_recording import is_unresolved_star
 from astrometricslib.pipelines.spectroscopy.pipeline import (
     SpectroscopyPipeline,
     count_trail_samples_on_frame,
 )
+from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_catalog import compare_to_catalog
+from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp import gaia_xp_precheck
 from astrometricslib.pipelines.spectroscopy.pre_processing.neighbor_wing_correction import (
     STATUS_NOT_NEEDED,
     correct_neighbor_wings,
 )
 from astrometricslib.pipelines.spectroscopy.processing.spectrum_analysis import EXTENDED_TARGET_SPECTRAL_TYPE
+from astrometricslib.pipelines.spectroscopy.processing.spectrum_signal import (
+    MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE,
+)
 from astrometricslib.utilities import CameraConfig, SpectroscopyConfig
 
 IMAGE_SIZE = 900
@@ -277,3 +284,110 @@ def test_the_wing_step_corrects_no_neighbor_only_star() -> None:
 
     assert outcomes[0].status == STATUS_NOT_NEEDED
     assert outcomes[1].status.startswith("skipped")
+
+
+def _run_with_neighbor(
+    monkeypatch: pytest.MonkeyPatch,
+    neighbor: StellarObject,
+    signal_to_noise: float | None,
+) -> list[dict]:
+    """Process one identified star and one neighbor-only star.
+
+    Parameters
+    ----------
+    monkeypatch : `pytest.MonkeyPatch`
+        Replaces the extraction and the analysis.
+    neighbor : `StellarObject`
+        The neighbor-only star.
+    signal_to_noise : `float` or `None`
+        What the fake analysis measures.
+
+    Returns
+    -------
+    results : `list` [`dict`]
+        What `process_image` returned.
+    """
+    pipeline = _build_pipeline()
+    pipeline.config.subtract_neighbor_wings = False
+    extractions: list[Any] = []
+
+    def fake_single_star(self: SpectroscopyPipeline, image: Any, pos: Any, **keywords: Any) -> dict:
+        """Count the extractions.
+
+        Returns
+        -------
+        result : `dict`
+            A minimal result.
+        """
+        extractions.append(pos)
+        return {"zero_order_saturated_pixel_fraction": 0.0, "target_pos": pos}
+
+    def fake_apply(self: SpectroscopyPipeline, star: Any, result: Any, image: Any) -> None:
+        """Give the star a spectrum with the chosen signal to noise."""
+        star.spectroscopy = SpectroscopyResult(wavelengths_angstrom=[5000.0], intensities=[1.0])
+        star.spectroscopy.input_quality = SimpleNamespace(signal_to_noise=signal_to_noise)
+        star.star_data["xcentroid"] = -1.0
+
+    monkeypatch.setattr(SpectroscopyPipeline, "_process_single_star", fake_single_star)
+    monkeypatch.setattr(SpectroscopyPipeline, "_apply_result_to_stellar_object", fake_apply)
+    analyzed = _star("GAIA_A", 100, 100)
+    results = pipeline.process_image(
+        IMAGE, target_stars=[analyzed, neighbor], auto_detect_angle=False, neighbor_only_stars=[neighbor]
+    )
+    assert len(extractions) == 2
+    return results
+
+
+def test_a_strong_unidentified_star_is_kept_under_a_position_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    """At the limit it is stored and marked, with no second extraction."""
+    neighbor = _star("Star_1", 105, 100)
+    neighbor.right_ascension, neighbor.declination = 299.7668, 22.6288
+
+    results = _run_with_neighbor(monkeypatch, neighbor, MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE)
+
+    assert [result["star_source"].id for result in results] == ["GAIA_A", "FIELD_J299.7668+22.6288"]
+    assert neighbor.name == neighbor.id
+    assert neighbor.is_catalog_identified is False
+    assert results[1].get("possible_neighbor_contamination") is None
+    assert results[1]["neighbor_wing_status"].startswith("skipped:")
+    assert not is_unresolved_star(neighbor)
+
+
+@pytest.mark.parametrize("signal_to_noise", [MINIMUM_FEATURE_ANALYSIS_SIGNAL_TO_NOISE - 0.01, None])
+def test_a_weak_unidentified_star_is_left_as_it_was(
+    monkeypatch: pytest.MonkeyPatch, signal_to_noise: float | None
+) -> None:
+    """Below the limit, or unmeasured, stays a placeholder to be dropped."""
+    neighbor = _star("Star_1", 105, 100)
+    neighbor.right_ascension, neighbor.declination = 299.7668, 22.6288
+    earlier_spectroscopy = neighbor.spectroscopy
+
+    results = _run_with_neighbor(monkeypatch, neighbor, signal_to_noise)
+
+    assert [result["star_source"].id for result in results] == ["GAIA_A"]
+    assert neighbor.id == "Star_1"
+    assert neighbor.spectroscopy is earlier_spectroscopy
+    assert neighbor.star_data["xcentroid"] == 105
+    assert is_unresolved_star(neighbor)
+
+
+def test_a_strong_star_with_no_sky_position_is_not_stored(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A placeholder id is never stored, however strong the spectrum."""
+    neighbor = _star("Star_1", 105, 100)
+
+    results = _run_with_neighbor(monkeypatch, neighbor, 50.0)
+
+    assert [result["star_source"].id for result in results] == ["GAIA_A"]
+    assert neighbor.id == "Star_1"
+
+
+def test_a_position_only_star_uses_nothing_that_needs_a_catalog_identity() -> None:
+    """It gives no Gaia id, and the catalog comparison has nothing to say."""
+    star = StellarObject(id="FIELD_J299.7668+22.6288", name="FIELD_J299.7668+22.6288")
+
+    assert gaia_dr3_source_id_of(star) is None
+    assert gaia_xp_precheck(None, np.ones(5)) is not None
+    comparison = compare_to_catalog(star.spectral_type, "G2V", None, star.b_minus_v, 0.6)
+    assert comparison.spectral_type_note == ""
+    assert comparison.b_minus_v_difference_mag is None
+    assert comparison.colour_note == ""

@@ -18,9 +18,12 @@ from astrometricslib.models.stellar_source import PhotometryResult, Spectroscopy
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_star_registration import (
     _copy_identity,
     estimate_registration_offset,
+    identify_spectral_stars_via_registered_sky_map,
     identify_spectral_stars_via_registration,
     identify_spectral_stars_via_solution,
+    set_sky_positions_of_unnamed_detections,
     shift_wcs_to_frame,
+    solution_shifted_onto_spectral_image,
 )
 
 
@@ -465,3 +468,124 @@ def test_a_companion_closer_than_a_zero_order_stays_one_star() -> None:
 
     assert len(spectral_stars) == before
     assert [star.id for star in spectral_stars].count("Companion") == 0
+
+
+def _field_on_two_grids(
+    fresh_count: int = 30, stale_count: int = 40
+) -> tuple[WCS, list[StellarObject], list[StellarObject]]:
+    """Build catalog rows whose stored pixels lie on two different grids.
+
+    Parameters
+    ----------
+    fresh_count : `int`, optional
+        How many rows store a position on the spectral image's own grid (plus
+        a small shift).
+    stale_count : `int`, optional
+        How many rows store a position from another camera's image, far from
+        where the star falls now.
+
+    Returns
+    -------
+    true_wcs : `astropy.wcs.WCS`
+        The spectral image's true map, which the code is not given.
+    reference_stars : `list` [`StellarObject`]
+        The catalog rows, fresh ones first.
+    detections : `list` [`StellarObject`]
+        One unnamed detection per row, plus one with no catalog star, last.
+    """
+    true_wcs = WCS(naxis=2)
+    true_wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    true_wcs.wcs.crpix = [1500.0, 1500.0]
+    true_wcs.wcs.crval = [300.0, 22.0]
+    true_wcs.wcs.cd = [[-5.3e-4, 0.0], [0.0, 5.3e-4]]
+    rng = np.random.default_rng(144)
+    reference_stars = []
+    detections = []
+    for index in range(fresh_count + stale_count):
+        x, y = rng.uniform(50.0, 2950.0, 2)
+        right_ascension, declination = (float(v) for v in true_wcs.wcs_pix2world(x, y, 0))
+        stored = (x + 40.0, y - 25.0) if index < fresh_count else tuple(rng.uniform(3100.0, 6000.0, 2))
+        star = _reference_star(f"HD{index}", float(stored[0]), float(stored[1]))
+        star.right_ascension = right_ascension
+        star.declination = declination
+        reference_stars.append(star)
+        detections.append(_spectral_star(f"Star_{index}", x + 0.1, y - 0.1))
+    detections.append(_spectral_star("Star_9999", 1500.0, 1520.5))
+    return true_wcs, reference_stars, detections
+
+
+def test_the_sky_map_names_stars_whose_stored_pixels_are_on_another_grid() -> None:
+    """Regression for M 27: rows on an old camera's grid were never matched."""
+    _, reference_stars, detections = _field_on_two_grids()
+
+    matched_count, sky_map = identify_spectral_stars_via_registered_sky_map(detections, reference_stars)
+
+    assert sky_map is not None
+    assert matched_count >= 69
+    assert [star.id for star in detections[:70]] == [f"HD{index}" for index in range(70)]
+
+
+def test_the_sky_map_removes_a_chance_name_from_registration() -> None:
+    """A detection registration named by chance does not keep that name."""
+    _, reference_stars, detections = _field_on_two_grids()
+    wrong_place = reference_stars[-1]
+    decoy = detections[-1]
+    # A stale row whose stored pixel lands on the decoy after the shift.
+    wrong_place.star_data = {"xcentroid": 1540.0 + 3.0, "ycentroid": 1520.5 - 25.0}
+
+    identify_spectral_stars_via_registered_sky_map(detections, reference_stars)
+
+    assert decoy.id == "Star_9999"
+    assert detections[69].id == wrong_place.id
+
+
+def test_registered_names_stay_when_too_few_stars_set_a_map() -> None:
+    """With too few registered stars no map is fitted, and nothing is lost."""
+    _, reference_stars, detections = _field_on_two_grids(fresh_count=8, stale_count=40)
+
+    matched_count, sky_map = identify_spectral_stars_via_registered_sky_map(detections, reference_stars)
+
+    assert sky_map is None
+    assert matched_count >= 8
+    assert [star.id for star in detections[:8]] == [f"HD{index}" for index in range(8)]
+    assert not any(star.id == "HD60" for star in detections[60:])
+
+
+def test_registered_names_stay_when_the_stars_cover_too_little_of_the_field() -> None:
+    """A map is not extended far past the stars that set it."""
+    _, reference_stars, detections = _field_on_two_grids(fresh_count=0, stale_count=30)
+    for index, (star, detection) in enumerate(zip(reference_stars, detections, strict=False)):
+        x, y = 100.0 + index * 3.0, 100.0 + (index % 5) * 9.0
+        detection.star_data = {"xcentroid": x, "ycentroid": y}
+        star.star_data = {"xcentroid": x + 40.0, "ycentroid": y - 25.0}
+    detections[-1].star_data = {"xcentroid": 2900.0, "ycentroid": 2900.0}
+
+    _, sky_map = identify_spectral_stars_via_registered_sky_map(detections, reference_stars)
+
+    assert sky_map is None
+
+
+def test_a_detection_with_no_catalog_star_gets_a_true_sky_position_and_stays_unnamed() -> None:
+    """Named stars keep their catalog position; the other gets a mapped one."""
+    true_wcs, reference_stars, detections = _field_on_two_grids()
+    _, sky_map = identify_spectral_stars_via_registered_sky_map(detections, reference_stars)
+    assert sky_map is not None
+
+    assert set_sky_positions_of_unnamed_detections(detections, sky_map) == 1
+
+    unnamed = detections[-1]
+    assert unnamed.id == "Star_9999"
+    expected_ra, expected_dec = true_wcs.wcs_pix2world(1500.0, 1520.5, 0)
+    assert unnamed.right_ascension == pytest.approx(float(expected_ra), abs=1e-4)
+    assert unnamed.declination == pytest.approx(float(expected_dec), abs=1e-4)
+    assert detections[0].right_ascension == reference_stars[0].right_ascension
+
+
+def test_a_solved_stack_map_is_moved_onto_the_spectral_image() -> None:
+    """The solved route also gives a map for unnamed detections."""
+    wcs, reference_stars, spectral_stars = _solution_field(shift=(120.0, -60.0))
+
+    moved = solution_shifted_onto_spectral_image(spectral_stars, reference_stars, wcs)
+
+    assert moved is not None
+    assert (moved.wcs.crpix - wcs.wcs.crpix) == pytest.approx(np.array([120.0, -60.0]), abs=1.0)

@@ -69,3 +69,24 @@ def stored_position_degrees(star: StellarObject) -> tuple[float, float] | None:
     if right_ascension != right_ascension or declination != declination:  # NaN
         return None
     return right_ascension, declination
+
+
+def position_only_star_id(right_ascension: float, declination: float) -> str:
+    """Write the id of a star known only by its sky position.
+
+    The same position always gives the same id, so a later run finds the same
+    star, and the prefix shows that no catalog names it.
+
+    Parameters
+    ----------
+    right_ascension : `float`
+        The star's right ascension in decimal degrees.
+    declination : `float`
+        The star's declination in decimal degrees.
+
+    Returns
+    -------
+    star_id : `str`
+        The id, such as ``FIELD_J299.7668+22.6288``.
+    """
+    return f"{_POSITION_ONLY_PREFIX}{right_ascension:.4f}{declination:+.4f}"

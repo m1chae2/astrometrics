@@ -1217,6 +1217,32 @@ python -m astrometricslib.scripts.calibrate_class_gap_against_snr
 - **Guarded by tests:** `astrometricslib/pipelines/spectroscopy/test/test_spectrum_signal_gate.py` (a spectrum between 1.5 and 7 with a strong injected emission line reports it and gets no features or type; below 1.5 nothing is tested) and `astrometricslib/pipelines/spectroscopy/test/processing/test_emission_line_detector.py`.
 - **Raw record:** None kept.
 
+### SPE-33
+
+**Naming spectral stars with a sky map fitted from registered stars, and keeping strong unnamed stars**
+
+- **Claim:** With no solved stack, a tangent-plane map fitted from registered detections names detections by catalog sky position, with few chance names, even when stored pixel positions lie on several pixel grids. A star that stays unnamed keeps its spectrum at the feature-analysis signal-to-noise or above, under a position-based id.
+- **Settings it supports:**
+  - code constant `_SKY_MAP_MINIMUM_STARS` = 12. Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectral_star_registration._SKY_MAP_MINIMUM_STARS -->
+  - code constant `_SKY_MAP_MATCH_RADIUS_PX` = 3.0. Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectral_star_registration._SKY_MAP_MATCH_RADIUS_PX -->
+  - code constant `_SKY_MAP_CLIP_FLOOR_PX` = 1.0. Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectral_star_registration._SKY_MAP_CLIP_FLOOR_PX -->
+  - code constants `_SKY_MAP_MAXIMUM_MEDIAN_ERROR_PX` = 1.0, `_SKY_MAP_MINIMUM_KEPT_FRACTION` = 0.5 and `_SKY_MAP_MINIMUM_SPAN_FRACTION` = 0.5. Relation: sanity check only; these are design limits. <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectral_star_registration._SKY_MAP_MAXIMUM_MEDIAN_ERROR_PX --> <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectral_star_registration._SKY_MAP_MINIMUM_KEPT_FRACTION --> <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectral_star_registration._SKY_MAP_MINIMUM_SPAN_FRACTION -->
+- **Status:** Partly measured. Two star fields and one camera, checked against catalog positions and not a plate solution.
+- **Data you need:** A spectral stack with no plate solution, of a target whose catalog rows came from more than one camera or stack, and a second target where they did not.
+- **Procedure:**
+  1. Run `process_target(target, stages=["spectroscopy"])` and count named detections, stored stars and stars at a signal-to-noise of 7 or above.
+  2. Refit the map with 5-fold hold-out and with random subsets of 6 to 24 stars, and record the largest held-out error.
+  3. Repeat the naming with detections shifted by 8 fixed offsets, to count chance names.
+- **Acceptance criterion:** Set after the result: matches flat across the radius, chance names far below real names, no temporary star ids stored, and stored position-only stars carry no catalog-derived values.
+- **What to look at:** Named detections against shifted-control names, held-out map error, and which stored names changed.
+- **Our result:** 2026-11-01, a scratch copy of the library, code version d5725944 plus this change, one run per target. Cause of the original loss: a catalog row keeps the pixels of the first pass that found the star, so one target's rows sit on several grids (M 27: 6768 rows on the Nikon grid and about 1466 on 7 ZWO grids). Held-out map error, median and largest: M 27 0.10 and 0.92 px; Mirach 0.65 and 1.25 px. Named detections: M 27 67 to 400, against a mean of 1.25 with shifted positions; Mirach 92 to 92, against at most 1. Stored stars at a signal-to-noise of 7 or above and named: M 27 13 to 108; Mirach 3 to 3. Position-only stars stored: 6 on each target. Of M 27's 102 strong unnamed stars, 96 are now named and 6 are position-only. An independent affine check agreed on 73 of the 96 names, could not confirm 22 and differed on 1, a close pair (HD 345343A and B). No uncertainty was estimated on the counts. These are in-sample results: the limits were set on these two fields.
+- **Verdict:** Not judged.
+- **Limits:** Registration had also given some chance names: 15 M 27 names changed, and rows named wrongly by earlier runs keep those names until overwritten. The route through a solved stack is covered only by a unit test on real-data terms. Stored position-only spectra have no neighbor correction or contamination check. The span limit was changed after these runs to measure against all detections; both fields span 93 percent or more by the earlier measure, but the runs did not exercise that code. Run time on M 27 rose from 779 s to 3539 s on a shared, uncontrolled machine, because many more stars are analyzed; the cause per star was not measured.
+- **To tune for your setup:** Repeat the hold-out and shifted-control checks on your own field and set the radius where matches stop rising and chance names stay low.
+- **Regenerate with:** There is no script in the repository. The study scripts are `issue144_gridcheck.py`, `issue144_skyfit_design.py`, `issue144_skyfit_run.py` and `issue144_skyfit_compare.py` in the scratch folder of the 134 validation.
+- **Guarded by tests:** `astrometricslib/pipelines/spectroscopy/test/pre_processing/test_spectral_star_registration.py` and `astrometricslib/pipelines/spectroscopy/test/test_star_selection.py`.
+- **Raw record:** None kept.
+
 ## Design estimates
 
 These tuned values have not been measured. Each is a reasoned choice.

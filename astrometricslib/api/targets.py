@@ -22,6 +22,7 @@ from astrometricslib.foundation.jobs.runner import background_job, registered_jo
 from astrometricslib.models.catalog_queries import ReindexReport, TargetQueryResult, TargetReindexChange
 from astrometricslib.models.field_centers import FieldCenter, ImagedFieldCenters
 from astrometricslib.models.image_deletion import FailedDeletion, ImageDeletionResult
+from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import FrameRecord, Target, TargetObjectType
 from astrometricslib.pipelines.shared.api_arguments import (
     check_choice,
@@ -552,6 +553,33 @@ class TargetCatalog:
         `InvalidArgumentError` if ``target`` is neither text nor a `Target`.
         """
         return resolve_target(self, target)
+
+    def get_stars(self, target: str | Target) -> builtins.list[StellarObject]:
+        """Read every star the library holds for a target.
+
+        This is the short form of ``StellarCatalog.query`` with the target
+        selected, the full records asked for and no cap on the count. Use
+        ``StellarCatalog.query`` when you need a filter, an order or a
+        smaller answer. Single-frame detections are left out, as they are
+        in that query.
+
+        Parameters
+        ----------
+        target : `str` or `Target`
+            A target id or a `Target`.
+
+        Returns
+        -------
+        stars : `list` [`StellarObject`]
+            The target's stars, in id order. Empty if the target has none.
+        """
+        from astrometricslib.pipelines.shared.star_catalog_queries import StarQuery, run_star_query
+
+        resolved = self.resolve(target)
+        answer = run_star_query(
+            self._catalog_access, StarQuery(target_id=resolved.id), "objects", None, 0, None
+        )
+        return answer.objects or []
 
     def add_frames(self, paths: Sequence[str], target: str | Target, *, telescope: str) -> builtins.list[str]:
         """Move new image files into the library, under a target.

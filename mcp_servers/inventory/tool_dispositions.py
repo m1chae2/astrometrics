@@ -135,6 +135,12 @@ DECISIONS = {
     ),
     # ---- Fix first ----
     "target_save": ToolDecision("withhold", "Writes the database. The AI is read-only."),
+    "star_get_spectrum": ToolDecision(
+        "withhold", "A script convenience. The AI reads a star's spectrum through star_get and star_query."
+    ),
+    "target_get_stars": ToolDecision(
+        "withhold", "A script convenience, uncapped. The AI reads a target's stars through star_query."
+    ),
     "star_analyze_periodicity": ToolDecision(
         "fix", "Writes the result into the live star catalog. Needs a save=false option.", "change-data"
     ),

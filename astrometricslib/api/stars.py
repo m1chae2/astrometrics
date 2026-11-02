@@ -18,7 +18,7 @@ from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAcce
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.catalog_queries import StarQueryResult
-from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObject
 from astrometricslib.pipelines.shared.api_arguments import check_choice
 
 __all__ = ["StellarCatalog"]
@@ -83,6 +83,36 @@ class StellarCatalog:
         from astrometricslib.pipelines.shared.star_catalog_queries import find_star
 
         return find_star(self._catalog_access, star_id)
+
+    def get_spectrum(self, star_id: str) -> SpectroscopyResult | None:
+        """Read a star's spectrum from the star itself.
+
+        The spectrum lives on the star's own record, so this needs only the
+        star's id. Older libraries also hold a separate copy of the star
+        whose id ends in ``::spectroscopy``. When the star's own record has
+        no spectrum, that copy is read instead, so a script does not need
+        to know the copy exists. An id that ends in ``::spectroscopy`` is
+        accepted and read the same way.
+
+        Parameters
+        ----------
+        star_id : `str`
+            The star's id. Spaces, underscores and capital letters may
+            differ from the stored id.
+
+        Returns
+        -------
+        spectrum : `SpectroscopyResult` or `None`
+            The star's spectrum, or `None` if there is no such star or it
+            has no spectrum.
+        """
+        suffix = "::spectroscopy"
+        base_id = star_id[: -len(suffix)] if star_id.endswith(suffix) else star_id
+        for candidate_id in (base_id, base_id + suffix):
+            star = self.get(candidate_id)
+            if star is not None and star.has_spectra:
+                return star.spectroscopy
+        return None
 
     def query(
         self,

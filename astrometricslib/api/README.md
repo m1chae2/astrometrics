@@ -44,6 +44,7 @@ Each sub-API checks its arguments and hands the work to `pipelines/`. Three rule
 
 - `get` returns a `Target` for code to work with.
 - `query` returns short records for people and AI clients. `detail="cameras"` adds the cameras used. `detail="camera_index"` adds each target's frames per configured camera, built by `pipelines/shared/target_camera_index.py`.
+- `get_stars(target)` returns every star the library holds for a target, as full `StellarObject` records in id order. It is the short form of `stars.query(target_id=..., detail="objects", limit=None)`; use `stars.query` for a filter, an order or a smaller answer.
 - `get_header` returns a target's file header as text cards. `read_frame_header` reads the first header of any FITS file by path and returns it with typed values. It reads no pixels. The backend and wayfindinglib use it instead of opening FITS files themselves.
 - `select_frames` picks a target's timed light frames by filter, file name range, start time (ISO 8601 text) and count, oldest first. With a range or time bound `limit` keeps the first frames in it; otherwise it keeps the newest. `resolve` turns an id into its `Target` and raises `NotFoundError` for an unknown id.
 - `add_frames(paths, target, telescope=...)` moves new FITS files (folders to search, or single files) into the library and returns the new path of each file that was not there before. Light frames go under the target; dark, bias and flat frames go to the calibration folders. It does not update the frame records: call `reindex_frames` with the returned paths. `processing.calibration.add_frames(paths, telescope=...)` does the same for calibration files only and leaves light frames where they are.
@@ -58,6 +59,7 @@ Each sub-API checks its arguments and hands the work to `pipelines/`. Three rule
 `StellarCatalog` reads and changes the star records.
 
 - `get` returns one star's full record.
+- `get_spectrum(star_id)` returns a star's `SpectroscopyResult` from the star itself, or `None`. Older libraries also hold a copy of the star under an id ending in `::spectroscopy`. `get_spectrum` reads that copy when the star has no spectrum of its own, and accepts that id, so scripts never need to build or test for it.
 - `query` answers every read about many stars. It selects by ids, name, target, sky region or position, with a cap on the size of the answer.
   - `detail` picks what comes back: ids, summaries, analysis records, full records, class counts, per-target counts, library statistics, or the stars placed in pixels on a target's stacked image (`detail="overlay"`, built by `pipelines/shared/star_overlay.py`).
   - Filters cover magnitude (the astronomer's brightness scale, where larger numbers are fainter), whether a star has a spectrum or photometry, spectral class, and a search text. The spectral class is the letter of the star's type in the O, B, A, F, G, K, M sequence, hottest to coolest. A full type such as `G2V` counts as `G`.

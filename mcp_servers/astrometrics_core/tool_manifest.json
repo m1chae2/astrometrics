@@ -247,6 +247,13 @@
       "interim_block": "",
       "note": "Reads one star's full record by id. Writes nothing."
     },
+    "star_get_spectrum": {
+      "tool_class": "observe",
+      "category": "stars",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "A script convenience. The AI reads a star's spectrum through star_get and star_query."
+    },
     "star_query": {
       "tool_class": "observe",
       "category": "stars",
@@ -302,6 +309,13 @@
       "disposition": "keep",
       "interim_block": "",
       "note": "Reads one FITS header."
+    },
+    "target_get_stars": {
+      "tool_class": "observe",
+      "category": "targets",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "A script convenience, uncapped. The AI reads a target's stars through star_query."
     },
     "target_imaged_field_centers": {
       "tool_class": "observe",
